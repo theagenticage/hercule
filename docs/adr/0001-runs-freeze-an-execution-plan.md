@@ -1,0 +1,3 @@
+# Runs freeze an execution plan instead of versioning workflows
+
+A run must not change behavior when its workflow is edited mid-flight. We considered versioned workflow definitions (runs pin a version; edits create new versions) but chose snapshotting: at run start, the workflow's content is frozen into the run's immutable **execution plan**. This avoids accumulating never-used versions on every edit, makes run history self-explanatory (the run carries exactly what it executed), and gives dynamic workflows for free: an agent can generate an execution plan ad-hoc and run it without a stored, managed workflow existing at all. Accepted cost: duplicated plan content per run (small text blobs; dedup by content hash only if it ever hurts).
