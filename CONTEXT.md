@@ -65,6 +65,16 @@ A daemon on a machine that executes sessions on the controller's behalf.
 **Fleet**:
 All runners enrolled with a controller, viewed as a collective.
 
+**Promotion**:
+Moving the controller to another machine by migrating its state bundle. A migration, never a live handoff; the old controller ends up sealed.
+_Avoid_: failover, handoff
+
+**Sealed**:
+The end state of a controller that has been promoted away: it refuses to serve and answers callers with a signed pointer to the controller's new address.
+
+**Data Root**:
+The single directory holding everything the controller durably owns (database, packed secrets, future blobs). The unit that promotion moves; nothing in it references its own absolute location.
+
 **Provider**:
 An adapter wrapping an interactive coding harness (Claude Code, Codex, pi). Only this; integrations like GitHub are event sources, not providers.
 _Avoid_: harness (for the adapter itself), integration
