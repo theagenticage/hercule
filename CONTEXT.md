@@ -65,6 +65,10 @@ A daemon on a machine that executes sessions on the controller's behalf.
 **Fleet**:
 All runners enrolled with a controller, viewed as a collective.
 
+**Runner Capability**:
+A fact about a runner used for placement: a probed toolchain or a user-applied label.
+_Avoid_: bare "capability" where the kind isn't obvious
+
 **Promotion**:
 Moving the controller to another machine by migrating its state bundle. A migration, never a live handoff; the old controller ends up sealed.
 _Avoid_: failover, handoff
@@ -85,7 +89,25 @@ A chat surface Hydra speaks through (Discord, Slack).
 ### Extension
 
 **Plugin**:
-A self-contained unit of functionality that extends Hydra through its APIs. The structuring principle of v1: internal features are built as plugins. Whether providers and channels are themselves plugins is a design question, not settled by this glossary.
+A self-contained unit of functionality that extends Hydra by requesting plugin capabilities and registering contributions. The structuring principle of v1: channels, event sources, providers, and workflow actions are all built as plugins.
+_Avoid_: extension, addon, integration
+
+**Extension Point**:
+A typed slot plugins contribute into. The v1 set is fixed: provider, channel, event source, workflow action. Plugins cannot define new extension points.
+_Avoid_: hook
+
+**Contribution**:
+A named thing a plugin provides into an extension point, referenced by id across the system: a workflow step names an action contribution, an assistant binds to a channel contribution. Registered in code, never listed in the manifest.
+
+**Plugin Capability**:
+A named slice of the host API a plugin requests in its manifest and is granted at load, scope-style. What a plugin may *call*, as opposed to a contribution, which is what it *provides*.
+_Avoid_: bare "capability" where the kind isn't obvious; scope, permission
+
+**Host API**:
+The surface a plugin programs against: capability-sliced services handed to the plugin at load. A plugin never reaches controller internals directly.
+
+**Manifest**:
+A plugin's static self-description: identity, host API version, requested plugin capabilities, config schema. Deliberately coarse; contributions are not in it.
 
 ### Automation
 
