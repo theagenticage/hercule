@@ -48,7 +48,7 @@ A durable external thing a project works with: a git repo, a folder, a mailbox. 
 _Avoid_: source, asset, material
 
 **Workspace**:
-A provisioned working copy on a runner, created from a checkout-able resource, in which sessions do their work.
+A provisioned working copy on a runner, created from a checkout-able resource, in which sessions do their work. Two kinds: a **primary** workspace (at most one per resource per runner; long-lived and shared, the resource's main checkout) and **ephemeral** workspaces (provisioned for one job, disposed after). A session may also run with no workspace at all.
 _Avoid_: worktree (reserved for the git mechanism), playground
 
 ### Infrastructure
@@ -58,6 +58,9 @@ The always-on brain: holds all state, receives events, schedules work. The singl
 
 **Runner**:
 A daemon on a machine that executes sessions on the controller's behalf.
+
+**Fleet**:
+All runners enrolled with a controller, viewed as a collective.
 
 **Provider**:
 An adapter wrapping an interactive coding harness (Claude Code, Codex, pi). Only this; integrations like GitHub are event sources, not providers.
