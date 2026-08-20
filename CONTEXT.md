@@ -48,8 +48,11 @@ A durable external thing a project works with: a git repo, a folder, a mailbox. 
 _Avoid_: source, asset, material
 
 **Workspace**:
-A provisioned working copy on a runner, created from a checkout-able resource, in which sessions do their work. Two kinds: a **primary** workspace (at most one per resource per runner; long-lived and shared, the resource's main checkout) and **ephemeral** workspaces (provisioned for one job, disposed after). A session may also run with no workspace at all.
+A provisioned working area on a runner in which sessions do their work, containing zero or more checkouts. Two kinds: a **primary** workspace (exactly one checkout; at most one per resource per runner; long-lived and shared, the resource's main checkout) and **ephemeral** workspaces (provisioned for one job, disposed after; zero checkouts makes a scratch workspace, several makes a multi-repo workspace). A session may also run with no workspace at all.
 _Avoid_: worktree (reserved for the git mechanism), playground
+
+**Checkout**:
+One working copy of a single resource inside a workspace. In v1 only git repos are checkout-able.
 
 ### Infrastructure
 
