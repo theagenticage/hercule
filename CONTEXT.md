@@ -149,6 +149,10 @@ _Avoid_: recipe
 A workflow's rule for when events enter it. Two kinds: a start trigger (static condition, spawns a new run) and a signal trigger (condition shape plus correlation key, resumes the live run that registered it). Lives inside the workflow, not as a standalone routing entity.
 _Avoid_: rule, hook
 
+**Step**:
+One node of an execution plan's graph. Two kinds in v1: an action step (invokes a plugin-contributed workflow action) and an agent step (drives a session and may declare an output schema for the graph to route on).
+_Avoid_: stage, job
+
 **Subscription**:
 A live, correlated claim on future events, held by a run or a session ("deliver events about PR #87 to me"). The runtime instantiation of a signal trigger, or registered directly by a session. Dies with its holder.
 _Avoid_: watch, listener
