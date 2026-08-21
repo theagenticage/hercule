@@ -28,6 +28,18 @@ _Avoid_: job, execution, workflow instance
 The executable content a run executes: triggers, graph, actions. Frozen at run start; immutable thereafter. Usually stamped from a workflow, but may be generated ad-hoc by an agent and never stored.
 _Avoid_: recipe, definition (for this), workflow instance
 
+**Turn**:
+One user-visible episode of a session: from a user input until the agent goes idle. Contains any number of model calls and tool executions; ends by stopping (completed, failed, interrupted), never by replying once.
+_Avoid_: exchange, round, iteration
+
+**Steering**:
+Delivering user input into a session's running turn, folding it into that turn instead of opening a new one.
+_Avoid_: interrupt (that's stopping a turn), inject
+
+**Queued Input**:
+User input held by the controller for delivery when the session's running turn completes. Editable and cancelable until delivered.
+_Avoid_: follow-up (provider-native term), pending message
+
 ### Actors
 
 **Agent**:
@@ -82,6 +94,17 @@ The single directory holding everything the controller durably owns (database, p
 **Provider**:
 An adapter wrapping an interactive coding harness (Claude Code, Codex, pi). Only this; integrations like GitHub are event sources, not providers.
 _Avoid_: harness (for the adapter itself), integration
+
+**Provider Definition**:
+A provider's static self-description: identity, config schema, declared capabilities. What a provider plugin registers; distinct from the running adapter.
+
+**Access Mode**:
+The session-level permission axis a provider adapter enforces: approval-required, auto-accept-edits, auto, or full-access. A fixed vocabulary; per-provider support is declared, and an unsupported mode degrades to asking, never to more permission.
+_Avoid_: permission mode (vendor term), runtime mode
+
+**Capability Snapshot**:
+The merged declared-plus-probed facts about a provider instance on a specific runner: auth state, harness version, model catalog. What UI affordances derive from; never obtained by creating or mutating a provider conversation.
+_Avoid_: provider status
 
 **Channel**:
 A chat surface Hydra speaks through (Discord, Slack).
