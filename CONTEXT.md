@@ -134,9 +134,17 @@ A plugin's static self-description: identity, host API version, requested plugin
 
 ### Automation
 
+**Connection**:
+A core-owned, named link to one external account: a plugin-defined type plus label, credentials, and status (e.g. `gmail`/"work"). Event ingest runs per connection, every event is stamped with its connection, and outbound actions name the connection they act as.
+_Avoid_: account (reserved for a future Hydra user concept), instance
+
 **Event Source**:
-An origin of external events: GitHub, Gmail, cron, manual.
+An origin of external events. GitHub and Gmail are event-source plugins in v1; cron, manual, and platform events are emitted by the core into the same pipeline.
 _Avoid_: integration, provider
+
+**Platform Event**:
+An event emitted by the controller itself rather than an external source (`run.completed`, `run.failed`). Flows through the same pipeline as external events.
+_Avoid_: internal event, system event
 
 **Event**:
 A fact that happened, emitted by an event source ("issue #42 was labelled ready-for-agent").
