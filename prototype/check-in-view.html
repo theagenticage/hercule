@@ -1,0 +1,529 @@
+<!--
+  PROTOTYPE - throwaway. Ticket: https://github.com/rogierpennink/hydra/issues/1 -> #20
+  Three variants of the Hydra check-in view (backward-looking monitoring of delegated
+  work), switchable via ?variant=A|B|C or the floating bar / arrow keys.
+  Single self-contained HTML file because no app exists yet (spec-stage repo).
+  All data is fake but coherent; one shared dataset, three structurally different layouts.
+-->
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hydra Check-in</title>
+<style>
+  :root {
+    --bg: #f7f6f4;
+    --surface: #ffffff;
+    --ink: #221e1a;
+    --muted: #7a736c;
+    --faint: #a39b93;
+    --line: #e6e2dd;
+    --line-soft: #efece8;
+    --accent: #0e7466;
+    --accent-soft: #e3f0ed;
+    --danger: #b3352c;
+    --danger-soft: #faecea;
+    --warn: #a16207;
+    --warn-soft: #faf3e2;
+    --ok: #2e7d4f;
+    --ok-soft: #eaf3ec;
+    --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .app { display: flex; min-height: 100vh; }
+
+  /* ---------- chrome (shared, not part of the design under evaluation) ---------- */
+  .side {
+    width: 208px; flex: none;
+    background: var(--surface);
+    border-right: 1px solid var(--line);
+    display: flex; flex-direction: column;
+    padding: 16px 10px;
+    position: sticky; top: 0; height: 100vh;
+  }
+  .logo {
+    display: flex; align-items: baseline; gap: 8px;
+    padding: 4px 10px 16px;
+  }
+  .logo b { font-size: 16px; letter-spacing: 0.02em; }
+  .logo span { font-family: var(--mono); font-size: 10px; color: var(--faint); }
+  .nav { display: flex; flex-direction: column; gap: 1px; }
+  .nav a {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 6px 10px; border-radius: 7px;
+    color: var(--muted); text-decoration: none; font-size: 13px;
+  }
+  .nav a.on { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+  .nav a:not(.on):hover { background: var(--line-soft); }
+  .nav .count {
+    font-family: var(--mono); font-size: 11px; color: var(--faint);
+  }
+  .nav a.on .count { color: var(--accent); }
+  .nav .sep { height: 1px; background: var(--line-soft); margin: 8px 10px; }
+  .proto-badge {
+    margin-top: auto;
+    border: 1px dashed var(--warn);
+    color: var(--warn); background: var(--warn-soft);
+    border-radius: 8px; padding: 8px 10px;
+    font-family: var(--mono); font-size: 10px; line-height: 1.5;
+  }
+  .main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  .topbar {
+    display: flex; align-items: baseline; gap: 14px;
+    padding: 20px 28px 0;
+  }
+  .topbar h1 { font-size: 19px; margin: 0; letter-spacing: -0.01em; }
+  .topbar .when { color: var(--muted); font-size: 13px; }
+  .topbar .when b { color: var(--ink); font-weight: 600; }
+  #stage { padding: 18px 28px 96px; }
+
+  /* ---------- shared atoms ---------- */
+  .lane-label {
+    text-transform: uppercase; letter-spacing: 0.09em;
+    font-size: 11px; font-weight: 700; color: var(--muted);
+    display: flex; align-items: center; gap: 8px;
+  }
+  .lane-label .n {
+    font-family: var(--mono); font-weight: 500; color: var(--faint);
+    letter-spacing: 0;
+  }
+  .pill {
+    display: inline-flex; align-items: center; gap: 5px;
+    border-radius: 999px; padding: 1px 8px;
+    font-size: 11px; font-weight: 600; white-space: nowrap;
+  }
+  .pill.warn { background: var(--warn-soft); color: var(--warn); }
+  .pill.danger { background: var(--danger-soft); color: var(--danger); }
+  .pill.ok { background: var(--ok-soft); color: var(--ok); }
+  .pill.live { background: var(--accent-soft); color: var(--accent); }
+  .dot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+  .dot.live { background: var(--accent); animation: pulse 2s ease-in-out infinite; }
+  .dot.warn { background: var(--warn); }
+  .dot.danger { background: var(--danger); }
+  .dot.ok { background: var(--ok); }
+  @keyframes pulse { 50% { opacity: 0.35; } }
+  @media (prefers-reduced-motion: reduce) { .dot.live { animation: none; } }
+  .mono { font-family: var(--mono); font-size: 12px; }
+  .btn {
+    font: 600 12px/1 inherit; font-family: inherit;
+    border: 1px solid var(--line); background: var(--surface); color: var(--ink);
+    border-radius: 7px; padding: 6px 11px; cursor: pointer;
+  }
+  .btn:hover { border-color: var(--faint); }
+  .btn.primary { background: var(--ink); border-color: var(--ink); color: #fff; }
+  .btn.primary:hover { background: #3a342e; }
+  .btn:focus-visible, .nav a:focus-visible, .sw button:focus-visible {
+    outline: 2px solid var(--accent); outline-offset: 2px;
+  }
+  .meta { color: var(--muted); font-size: 12.5px; }
+  .meta .sep { color: var(--faint); margin: 0 5px; }
+  .age { font-family: var(--mono); font-size: 11.5px; color: var(--faint); white-space: nowrap; }
+
+  /* ---------- Variant A: attention stack ---------- */
+  .va { display: flex; flex-direction: column; gap: 26px; max-width: 860px; }
+  .va .lane { display: flex; flex-direction: column; gap: 10px; }
+  .card {
+    background: var(--surface); border: 1px solid var(--line); border-radius: 10px;
+    padding: 13px 16px;
+    display: flex; gap: 12px; align-items: flex-start;
+  }
+  .card .stripe { width: 3px; align-self: stretch; border-radius: 2px; flex: none; }
+  .card .body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+  .card .title { font-weight: 600; font-size: 14px; }
+  .card .title code {
+    font-family: var(--mono); font-size: 12px; background: var(--line-soft);
+    padding: 1px 5px; border-radius: 4px;
+  }
+  .card .actions { display: flex; gap: 8px; margin-top: 8px; }
+  .row-line {
+    background: var(--surface); border: 1px solid var(--line); border-radius: 10px;
+    padding: 10px 16px;
+    display: flex; align-items: center; gap: 12px;
+  }
+  .row-line .body { flex: 1; min-width: 0; }
+  .row-line .name { font-weight: 600; }
+  .va .digest { display: flex; flex-direction: column; }
+  .va .digest .item {
+    display: flex; gap: 14px; align-items: baseline;
+    padding: 8px 4px; border-bottom: 1px solid var(--line-soft);
+  }
+  .va .digest .item:last-child { border-bottom: 0; }
+  .va .digest .when { font-family: var(--mono); font-size: 11.5px; color: var(--faint); width: 92px; flex: none; text-align: right; }
+  .va .digest .txt { flex: 1; }
+  .va .digest .txt .ref { color: var(--faint); font-size: 12px; margin-left: 6px; }
+
+  /* ---------- Variant B: delegation ledger ---------- */
+  .vb { display: flex; flex-direction: column; gap: 18px; }
+  .vb .stats { display: flex; gap: 10px; }
+  .stat {
+    background: var(--surface); border: 1px solid var(--line); border-radius: 10px;
+    padding: 10px 16px; display: flex; flex-direction: column; gap: 1px; min-width: 128px;
+  }
+  .stat .v { font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums; display: flex; align-items: center; gap: 8px; }
+  .stat .k { font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); font-weight: 600; }
+  .vb .group { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+  .vb .group > h2 {
+    margin: 0; font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em;
+    color: var(--muted); padding: 10px 16px; border-bottom: 1px solid var(--line-soft);
+    background: var(--bg);
+    display: flex; gap: 8px; align-items: baseline;
+  }
+  .vb .group > h2 .n { font-family: var(--mono); color: var(--faint); letter-spacing: 0; }
+  .vb .tablewrap { overflow-x: auto; }
+  .vb table { border-collapse: collapse; width: 100%; min-width: 720px; }
+  .vb td { padding: 9px 16px; border-top: 1px solid var(--line-soft); vertical-align: top; font-size: 13px; }
+  .vb tr:first-child td { border-top: 0; }
+  .vb td.what { width: 34%; }
+  .vb td.what .name { font-weight: 600; }
+  .vb td.what .sub { color: var(--muted); font-size: 12px; }
+  .vb td.state { width: 14%; white-space: nowrap; }
+  .vb td.now { width: 32%; color: var(--muted); font-size: 12.5px; }
+  .vb td.now b { color: var(--ink); font-weight: 600; }
+  .vb td.act { text-align: right; white-space: nowrap; }
+  .vb tr.hot { background: #fdf8ef; }
+
+  /* ---------- Variant C: catch-up feed ---------- */
+  .vc { display: grid; grid-template-columns: 280px 1fr; gap: 24px; align-items: start; max-width: 1040px; }
+  .vc .rail { display: flex; flex-direction: column; gap: 10px; position: sticky; top: 18px; }
+  .vc .railcard {
+    background: var(--surface); border: 1px solid var(--line); border-radius: 10px;
+    padding: 10px 13px; display: flex; flex-direction: column; gap: 2px;
+  }
+  .vc .railcard .name { font-weight: 600; font-size: 13px; display: flex; gap: 8px; align-items: center; }
+  .vc .railcard .sub { color: var(--muted); font-size: 12px; }
+  .vc .railcard .act { color: var(--faint); font-size: 11.5px; font-family: var(--mono); }
+  .vc .feed { display: flex; flex-direction: column; }
+  .vc .fitem {
+    display: flex; gap: 14px; position: relative;
+    padding: 0 0 18px 26px;
+  }
+  .vc .fitem::before {
+    content: ""; position: absolute; left: 7px; top: 8px; bottom: -8px;
+    width: 2px; background: var(--line-soft);
+  }
+  .vc .fitem:last-child::before { display: none; }
+  .vc .fitem .node {
+    position: absolute; left: 2px; top: 4px;
+    width: 12px; height: 12px; border-radius: 50%;
+    border: 3px solid var(--bg); background: var(--faint);
+  }
+  .vc .fitem .node.ok { background: var(--ok); }
+  .vc .fitem .node.danger { background: var(--danger); }
+  .vc .fitem .node.warn { background: var(--warn); }
+  .vc .fitem .body { flex: 1; min-width: 0; }
+  .vc .fitem .whenline { font-family: var(--mono); font-size: 11px; color: var(--faint); margin-bottom: 1px; }
+  .vc .needs {
+    background: var(--surface); border: 1px solid var(--warn); border-radius: 10px;
+    padding: 11px 14px; margin: 2px 0 6px;
+    display: flex; flex-direction: column; gap: 6px;
+  }
+  .vc .needs .actions { display: flex; gap: 8px; }
+  .vc .divider {
+    display: flex; align-items: center; gap: 12px;
+    color: var(--faint); font-size: 11px; text-transform: uppercase; letter-spacing: 0.09em;
+    padding: 6px 0 18px 0;
+  }
+  .vc .divider::before, .vc .divider::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+
+  /* ---------- switcher (not part of the design) ---------- */
+  .sw {
+    position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%);
+    background: var(--ink); color: #fff;
+    border-radius: 999px; padding: 6px 8px;
+    display: flex; align-items: center; gap: 4px;
+    box-shadow: 0 6px 24px rgba(20, 16, 12, 0.28);
+    z-index: 50;
+  }
+  .sw button {
+    background: none; border: 0; color: #fff; cursor: pointer;
+    font-size: 14px; padding: 4px 10px; border-radius: 999px;
+  }
+  .sw button:hover { background: rgba(255, 255, 255, 0.14); }
+  .sw .label {
+    font: 600 12px/1 var(--mono);
+    padding: 0 6px; min-width: 170px; text-align: center;
+  }
+</style>
+
+<div class="app">
+  <aside class="side">
+    <div class="logo"><b>Hydra</b><span>v1 · rogier</span></div>
+    <nav class="nav">
+      <a href="#">Intake <span class="count">7</span></a>
+      <a href="#" class="on">Check-in <span class="count">4</span></a>
+      <a href="#">Tasks</a>
+      <a href="#">Sessions <span class="count">2</span></a>
+      <a href="#">Runs</a>
+      <a href="#">Workflows</a>
+      <div class="sep"></div>
+      <a href="#">Fleet</a>
+      <a href="#">Connections</a>
+      <a href="#">Notifications <span class="count">5</span></a>
+      <a href="#">Settings</a>
+    </nav>
+    <div class="proto-badge">PROTOTYPE · throwaway<br>ticket hydra#20<br>&larr; &rarr; switch variants</div>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <h1>Check-in</h1>
+      <span class="when">Sunday 14:32 &middot; last check-in <b>yesterday 18:40</b></span>
+    </div>
+    <div id="stage"></div>
+  </main>
+</div>
+
+<div class="sw">
+  <button id="prev" aria-label="Previous variant">&larr;</button>
+  <span class="label" id="swlabel"></span>
+  <button id="next" aria-label="Next variant">&rarr;</button>
+</div>
+
+<script>
+/* One shared fake dataset; each variant lays it out differently. */
+const data = {
+  needsYou: [
+    { sev: "warn", kind: "Approval", age: "6m",
+      title: 'Session wants to run <code>git push origin fix/webhook-retries</code>',
+      context: "Fix flaky webhook tests · hydra · Claude Code on hetzner-01 · approval-required",
+      actions: ["Approve", "Deny", "Open session"] },
+    { sev: "warn", kind: "Breaker", age: "41m",
+      title: "&ldquo;Email triage&rdquo; trigger paused &ndash; spawn bound tripped",
+      context: "gmail/personal · 12 runs in 10 min (bound 10) · 14 matched events held",
+      actions: ["Review held events", "Resume trigger"] },
+    { sev: "danger", kind: "Run failed", age: "7h",
+      title: "&ldquo;Nightly digest&rdquo; run failed &ndash; iteration-limit",
+      context: "cron · step summarize exhausted its capped edge (3 traversals)",
+      actions: ["View run", "Re-run"] },
+    { sev: "warn", kind: "Permission", age: "18m",
+      title: "Permission request: <code>infra</code> grant",
+      context: "Refactor event pipeline · profile worker lacks infra (wants to drain runner)",
+      actions: ["Grant for session", "Add to profile", "Deny"] },
+  ],
+  running: [
+    { kind: "Run", name: "PR review · PR #87 &ldquo;runner outbox replay&rdquo;",
+      sub: "hydra · hetzner-01", state: "step 2/4 · review-code (agent)",
+      activity: "turn 3 · reading packages/contract", age: "12m" },
+    { kind: "Run", name: "Issue triage",
+      sub: "hydra · controller", state: "step 1/2 · judge (agent)",
+      activity: "3 events in batch", age: "2m" },
+    { kind: "Session", name: "Refactor event pipeline",
+      sub: "hydra · macbook-pro", state: "turn 7 · auto-accept-edits",
+      activity: "editing src/ingress/pipeline.ts", age: "34m" },
+    { kind: "Assistant", name: "Hera · #ops on Discord",
+      sub: "controller", state: "conversation active",
+      activity: "answering &ldquo;what shipped yesterday?&rdquo;", age: "3m" },
+  ],
+  landed: [
+    { when: "13:58", tone: "ok",
+      text: "&ldquo;PR review&rdquo; completed on PR #85 &ndash; verdict approve-with-nits, 2 comments posted", ref: "run 482" },
+    { when: "13:12", tone: "ok",
+      text: "Task &ldquo;Add runner drain command&rdquo; moved in-progress &rarr; done", ref: "session ended · 41 turns" },
+    { when: "11:47", tone: "ok",
+      text: "&ldquo;Issue triage&rdquo; completed 6&times; &ndash; 4 issues labelled, 2 tasks created", ref: "grouped" },
+    { when: "09:03", tone: "ok",
+      text: "Session &ldquo;Write promotion runbook&rdquo; ended &ndash; output committed to docs/", ref: "session 3182" },
+    { when: "yest 22:15", tone: "danger",
+      text: "&ldquo;Nightly digest&rdquo; failed &ndash; iteration-limit (waiting for you, above)", ref: "run 479" },
+    { when: "yest 19:30", tone: "ok",
+      text: "2 tasks created from Intake &ndash; &ldquo;Rotate tailnet certs&rdquo;, &ldquo;Reply to security advisory&rdquo;", ref: "" },
+  ],
+};
+
+const btns = (arr) =>
+  arr.map((a, i) => `<button class="btn ${i === 0 ? "primary" : ""}">${a}</button>`).join("");
+
+/* ---------- Variant A: attention stack ---------- */
+/* One column, ordered by urgency. The page IS a priority queue: clear the top,
+   glance at the middle, skim the bottom. */
+function variantA() {
+  const needs = data.needsYou.map((n) => `
+    <div class="card">
+      <div class="stripe" style="background:var(--${n.sev})"></div>
+      <div class="body">
+        <div class="title">${n.title}</div>
+        <div class="meta">${n.context}</div>
+        <div class="actions">${btns(n.actions)}</div>
+      </div>
+      <span class="age">${n.age}</span>
+    </div>`).join("");
+  const running = data.running.map((r) => `
+    <div class="row-line">
+      <span class="dot live"></span>
+      <div class="body">
+        <span class="name">${r.name}</span>
+        <span class="meta"><span class="sep">·</span>${r.sub}</span>
+        <div class="meta">${r.state}<span class="sep">·</span>${r.activity}</div>
+      </div>
+      <span class="pill live">${r.kind}</span>
+      <span class="age">${r.age}</span>
+    </div>`).join("");
+  const landed = data.landed.map((l) => `
+    <div class="item">
+      <span class="when">${l.when}</span>
+      <span class="dot ${l.tone}" style="margin-top:6px"></span>
+      <span class="txt">${l.text}<span class="ref">${l.ref}</span></span>
+    </div>`).join("");
+  return `<div class="va">
+    <section class="lane">
+      <div class="lane-label">Needs you <span class="n">${data.needsYou.length}</span></div>
+      ${needs}
+    </section>
+    <section class="lane">
+      <div class="lane-label">Running now <span class="n">${data.running.length}</span></div>
+      ${running}
+    </section>
+    <section class="lane">
+      <div class="lane-label">Since you last checked <span class="n">${data.landed.length}</span></div>
+      <div class="digest">${landed}</div>
+    </section>
+  </div>`;
+}
+
+/* ---------- Variant B: delegation ledger ---------- */
+/* Everything you've delegated as one book, grouped by project. Each row is a
+   strand of work; attention/live state is inline, not in a separate lane. */
+function variantB() {
+  const stat = (v, k, dot) => `
+    <div class="stat"><span class="v">${dot ? `<span class="dot ${dot}"></span>` : ""}${v}</span><span class="k">${k}</span></div>`;
+  const row = (o) => `
+    <tr class="${o.hot ? "hot" : ""}">
+      <td class="what"><div class="name">${o.name}</div><div class="sub">${o.sub}</div></td>
+      <td class="state">${o.state}</td>
+      <td class="now">${o.now}</td>
+      <td class="act">${o.act || ""}</td>
+    </tr>`;
+  const hydra = [
+    { hot: true, name: "Fix flaky webhook tests", sub: "task · session on hetzner-01",
+      state: '<span class="pill warn">needs approval</span>',
+      now: "wants <b>git push origin fix/webhook-retries</b> · parked 6m",
+      act: btns(["Approve", "Deny"]) },
+    { name: "PR review · PR #87", sub: "run 484 · workflow PR review",
+      state: '<span class="pill live">running 12m</span>',
+      now: "step 2/4 review-code · turn 3, reading packages/contract" },
+    { name: "Refactor event pipeline", sub: "task · chat session on macbook-pro",
+      state: '<span class="pill live">running 34m</span>',
+      now: 'turn 7 · editing src/ingress/pipeline.ts · <b>asked for infra grant 18m ago</b>',
+      act: btns(["Review request"]) },
+    { name: "Issue triage", sub: "run 485 · workflow Issue triage",
+      state: '<span class="pill live">running 2m</span>',
+      now: "step 1/2 judge · 3 events in batch" },
+    { name: "Add runner drain command", sub: "task · done 13:12",
+      state: '<span class="pill ok">done</span>',
+      now: "session ended after 41 turns" },
+    { name: "PR review · PR #85", sub: "run 482 · completed 13:58",
+      state: '<span class="pill ok">completed</span>',
+      now: "approve-with-nits · 2 comments posted" },
+  ];
+  const ops = [
+    { hot: true, name: "Email triage", sub: "workflow · gmail/personal",
+      state: '<span class="pill warn">trigger paused</span>',
+      now: "spawn bound tripped 41m ago · 12 runs in 10 min (bound 10) · <b>14 events held</b>",
+      act: btns(["Review held", "Resume"]) },
+    { hot: true, name: "Nightly digest", sub: "run 479 · cron, failed 22:15",
+      state: '<span class="pill danger">failed</span>',
+      now: "iteration-limit · step summarize exhausted its capped edge",
+      act: btns(["Re-run", "View run"]) },
+    { name: "Write promotion runbook", sub: "session · ended 09:03",
+      state: '<span class="pill ok">ended</span>',
+      now: "output committed to docs/" },
+    { name: "Hera", sub: "assistant · #ops on Discord",
+      state: '<span class="pill live">in conversation</span>',
+      now: "answering &ldquo;what shipped yesterday?&rdquo;" },
+  ];
+  const group = (title, rows) => `
+    <div class="group">
+      <h2>${title} <span class="n">${rows.length}</span></h2>
+      <div class="tablewrap"><table>${rows.map(row).join("")}</table></div>
+    </div>`;
+  return `<div class="vb">
+    <div class="stats">
+      ${stat(4, "need you", "warn")}
+      ${stat(4, "running", "live")}
+      ${stat(9, "landed since check-in", "ok")}
+      ${stat(2, "runners online")}
+    </div>
+    ${group("hydra", hydra)}
+    ${group("Operations &amp; assistants", ops)}
+  </div>`;
+}
+
+/* ---------- Variant C: catch-up feed ---------- */
+/* Read the room like a log: live rail pinned left, reverse-chron feed right,
+   needs-you items sit in the stream as interruptions, divider marks last visit. */
+function variantC() {
+  const rail = data.running.map((r) => `
+    <div class="railcard">
+      <div class="name"><span class="dot live"></span>${r.name}</div>
+      <div class="sub">${r.kind} · ${r.sub} · ${r.state}</div>
+      <div class="act">${r.activity}</div>
+    </div>`).join("");
+  const needs = data.needsYou.map((n) => `
+    <div class="fitem">
+      <span class="node ${n.sev}"></span>
+      <div class="body">
+        <div class="whenline">${n.age} ago · ${n.kind.toLowerCase()}</div>
+        <div class="needs" style="border-color:var(--${n.sev})">
+          <div><b>${n.title}</b></div>
+          <div class="meta">${n.context}</div>
+          <div class="actions">${btns(n.actions)}</div>
+        </div>
+      </div>
+    </div>`).join("");
+  const seen = data.landed.filter((l) => l.when.startsWith("yest"));
+  const fresh = data.landed.filter((l) => !l.when.startsWith("yest"));
+  const feedItem = (l) => `
+    <div class="fitem">
+      <span class="node ${l.tone}"></span>
+      <div class="body">
+        <div class="whenline">${l.when}</div>
+        <div>${l.text} <span class="meta">${l.ref}</span></div>
+      </div>
+    </div>`;
+  return `<div class="vc">
+    <aside class="rail">
+      <div class="lane-label">Happening now <span class="n">${data.running.length}</span></div>
+      ${rail}
+    </aside>
+    <div class="feed">
+      <div class="lane-label" style="padding-bottom:14px">Waiting on you <span class="n">${data.needsYou.length}</span></div>
+      ${needs}
+      <div class="lane-label" style="padding:6px 0 14px">Landed <span class="n">${data.landed.length}</span></div>
+      ${fresh.map(feedItem).join("")}
+      <div class="divider">last check-in · yesterday 18:40</div>
+      ${seen.map(feedItem).join("")}
+    </div>
+  </div>`;
+}
+
+/* ---------- switcher ---------- */
+const variants = [
+  { key: "A", name: "Attention stack", render: variantA },
+  { key: "B", name: "Delegation ledger", render: variantB },
+  { key: "C", name: "Catch-up feed", render: variantC },
+];
+function current() {
+  const k = new URLSearchParams(location.search).get("variant") || "A";
+  const i = variants.findIndex((v) => v.key === k.toUpperCase());
+  return i === -1 ? 0 : i;
+}
+function show(i) {
+  const v = variants[(i + variants.length) % variants.length];
+  try { history.replaceState(null, "", "?variant=" + v.key); } catch (e) { /* file:// etc. */ }
+  document.getElementById("stage").innerHTML = v.render();
+  document.getElementById("swlabel").textContent = v.key + " · " + v.name;
+}
+document.getElementById("prev").addEventListener("click", () => show(current() - 1));
+document.getElementById("next").addEventListener("click", () => show(current() + 1));
+document.addEventListener("keydown", (e) => {
+  const t = e.target;
+  if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
+  if (e.key === "ArrowLeft") show(current() - 1);
+  if (e.key === "ArrowRight") show(current() + 1);
+});
+show(current());
+</script>
