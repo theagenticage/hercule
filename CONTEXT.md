@@ -47,7 +47,8 @@ A configured identity that does work: prompt, provider, capabilities. Owned by t
 _Avoid_: persona, worker (as a noun)
 
 **Assistant**:
-An agent bound to a channel with persistent memory, oriented toward delegating work rather than doing it. A specialization of agent, not a separate concept.
+An agent with persistent memory, oriented toward delegating work rather than doing it. Reachable through channel bindings and directly in the web app; a specialization of agent, not a separate concept. Different personas are different assistants, never one assistant with per-channel variants.
+_Avoid_: persona
 
 **Actor**:
 Who performed an operation against the API: the user, or a session. Stamped on every mutation; widened, never restructured, when multi-user arrives.
@@ -60,6 +61,28 @@ _Avoid_: role, scope set
 **Session Token**:
 The credential minted per session whose subject is that Session: injected into the session's environment by the runner, carrying the agent's permission profile, dead when the session ends.
 _Avoid_: API key (reserved for user credentials), auth session
+
+### Assistants
+
+**Channel Binding**:
+A rule mapping part of a channel connection (its DMs, a named channel or thread scope) to exactly one assistant; the most specific binding wins. How channels reach an assistant, not what makes it one.
+_Avoid_: registration, route (bare)
+
+**Conversation**:
+One continuous exchange with an assistant inside one platform container: a Discord channel or DM, a Slack thread, a web chat. Each conversation has its own session lineage and is never merged with another; continuity across conversations comes from memory and recall.
+_Avoid_: chat, thread (reserved for provider-native objects)
+
+**Rotation**:
+Retiring a conversation's live session by distilling what matters into memory and continuing the conversation in a fresh session. Triggered by context size or a timer; distillation is part of the contract, not an optional step.
+_Avoid_: reset, compaction (reserved for provider-native context handling)
+
+**Memory**:
+An assistant's durable notes: assistant-scoped, maintained by the assistant itself, visible and editable by the user, bounded in size, never shared between assistants.
+_Avoid_: knowledge base, brain
+
+**Heartbeat**:
+A scheduled wake of an assistant with a standing prompt, letting it check on things and act unprompted. On by default; the main mechanism of true proactivity.
+_Avoid_: poll
 
 ### Organization
 
