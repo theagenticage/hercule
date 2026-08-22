@@ -143,7 +143,7 @@ An origin of external events. GitHub and Gmail are event-source plugins in v1; c
 _Avoid_: integration, provider
 
 **Platform Event**:
-An event emitted by the controller itself rather than an external source (`run.completed`, `run.failed`). Flows through the same pipeline as external events.
+An event emitted by the controller itself rather than an external source (`run.completed`, `run.failed`, `task.created`, `task.updated`). Flows through the same pipeline as external events.
 _Avoid_: internal event, system event
 
 **Event**:
@@ -164,3 +164,15 @@ _Avoid_: stage, job
 **Subscription**:
 A live, correlated claim on future events, held by a run or a session ("deliver events about PR #87 to me"). The runtime instantiation of a signal trigger, or registered directly by a session. Dies with its holder.
 _Avoid_: watch, listener
+
+**Spawn Bound**:
+A trigger's limit on how many runs it may spawn per window. Exceeding it trips the trigger into a paused state with its matched events held visibly for user review; never a silent drop.
+_Avoid_: rate limit (bare), throttle
+
+**Notification**:
+A persisted message from Hydra to its user ("run failed", "trigger paused", "agent needs a decision"). Produced by the core, by workflow notify steps, or by plugins; always recorded centrally, with delivery through channels decided by the core, never claimed by plugins.
+_Avoid_: alert, ping
+
+**Intake**:
+The formation boundary where external signals become work: signals are triaged, grouped, and enriched by agents before they spawn tasks or reach the user, so decisions are made on prepared, high-value material rather than raw input. Working name, still under review.
+_Avoid_: command center, inbox, dashboard
