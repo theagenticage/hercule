@@ -160,6 +160,10 @@ _Avoid_: provider status
 **Channel**:
 A chat surface Hydra speaks through (Discord, Slack).
 
+**Live Topic**:
+A named stream a connected client watches over its live connection: a session transcript, the event feed, notifications. A client viewing concern only; not a Subscription, which is a domain claim on events held by a run or session.
+_Avoid_: subscription (reserved for the domain concept)
+
 ### Extension
 
 **Plugin**:
