@@ -49,6 +49,18 @@ _Avoid_: persona, worker (as a noun)
 **Assistant**:
 An agent bound to a channel with persistent memory, oriented toward delegating work rather than doing it. A specialization of agent, not a separate concept.
 
+**Actor**:
+Who performed an operation against the API: the user, or a session. Stamped on every mutation; widened, never restructured, when multi-user arrives.
+_Avoid_: principal, subject
+
+**Permission Profile**:
+The named bundle of operation grants attached to an agent, bounding what its sessions may do through the API. Parity with the user is the ceiling, not the default.
+_Avoid_: role, scope set
+
+**Session Token**:
+The credential minted per session whose subject is that Session: injected into the session's environment by the runner, carrying the agent's permission profile, dead when the session ends.
+_Avoid_: API key (reserved for user credentials), auth session
+
 ### Organization
 
 **Project**:
