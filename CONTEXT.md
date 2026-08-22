@@ -62,6 +62,22 @@ _Avoid_: role, scope set
 The credential minted per session whose subject is that Session: injected into the session's environment by the runner, carrying the agent's permission profile, dead when the session ends.
 _Avoid_: API key (reserved for user credentials), auth session
 
+**API Key**:
+A long-lived user credential: an opaque revocable token minted via login, used by the ops CLI and scripts. Always the user's identity, never an agent's.
+_Avoid_: personal access token, service token
+
+**Grant**:
+One operation-family permission inside a permission profile (e.g. `tasks`, `infra`), the unit a 403 names and an escalation asks for.
+_Avoid_: scope, right
+
+**Permission Request**:
+An agent's ask for a grant its profile lacks, surfaced as a notification the user approves for the session or bakes into the profile.
+_Avoid_: escalation (as a noun for the record), override
+
+**Master Key**:
+The per-machine key that encrypts secret values in the controller database; held in the OS keychain and never leaves its machine, even during promotion.
+_Avoid_: root key, database key
+
 ### Assistants
 
 **Channel Binding**:
