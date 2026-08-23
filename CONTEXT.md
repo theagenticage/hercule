@@ -16,6 +16,14 @@ _Avoid_: agentick, agentick-next
 A unit of human intent: a described piece of work someone wants done. Work-type-agnostic; a task is not itself an execution.
 _Avoid_: ticket, issue (reserved for external trackers)
 
+**Provenance**:
+A task's append-only record of what created or touched it: entries pointing at events, runs, and external refs. What lets a duplicate signal find its existing task.
+_Avoid_: history, audit trail (reserved for the event log)
+
+**External Ref**:
+A fully-qualified canonical identifier for a thing outside Hydra (`github:issue:owner/repo#42`, `gmail:thread:<id>`). The plugin defining the type owns canonicalization; the connection an event arrived through is not part of the identity. Not unique across tasks.
+_Avoid_: link, URL (a ref is an identity, not a location)
+
 **Session**:
 One conversation with a provider-backed agent, resumable and forkable. Maps onto a Claude Code session or Codex thread. A session can drive work directly (chat-first) and is not required to belong to a task or workspace.
 _Avoid_: execution, thread (reserved for provider-native objects)
