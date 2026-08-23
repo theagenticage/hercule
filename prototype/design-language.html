@@ -1,0 +1,614 @@
+<!--
+  PROTOTYPE - throwaway. Ticket: https://github.com/rogierpennink/hydra/issues/1 -> #33
+  Three DESIGN LANGUAGES over one identical slice of monitoring content (the #20
+  check-in dataset, enriched with the #29 Task nouns: priority + project lineage).
+  Same DOM structure in every sample; only the visual language changes.
+    1 Graphite  - silence is the signal: monochrome ink, color only for exceptions
+    2 Signal    - systematic hues: every semantic axis has a fixed color
+    3 Limelight - hierarchy by light: prominence = luminance + scale, color whispers
+  Switch samples with the floating bar / arrow keys / ?s=1|2|3.
+  Toggle theme with the bar / "t" / ?theme=light|dark. Both themes per sample.
+-->
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hydra Design Language</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&family=Schibsted+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  /* ================= tokens =================
+     Six sets: 3 samples x 2 themes, stamped as body[data-s="1|2|3"][data-t="light|dark"].
+     Components only ever read the vars. No-JS fallback: bare body = sample 1 light. */
+
+  body, body[data-s="1"][data-t="light"] {
+    --bg: #fafaf9; --surface: #ffffff; --raised: #ffffff;
+    --ink: #1b1a19; --muted: #6f6c68; --faint: #a3a09b;
+    --line: #e9e7e4; --line-soft: #f1efec;
+    --attn: #9a6700; --attn-soft: #fbf3e0;
+    --fail: #b0362c; --fail-soft: #faecea;
+    --ok: #6f6c68; --ok-soft: #f1efec;          /* graphite: success is quiet gray */
+    --live: #1b1a19; --live-soft: #f1efec;      /* graphite: live is ink + motion */
+    --sans: "Instrument Sans", -apple-system, system-ui, sans-serif;
+    --shadow: none;
+  }
+  body[data-s="1"][data-t="dark"] {
+    --bg: #131313; --surface: #1b1b1b; --raised: #1b1b1b;
+    --ink: #eceae7; --muted: #98948f; --faint: #6b6863;
+    --line: #2a2928; --line-soft: #232221;
+    --attn: #e3b341; --attn-soft: #2e2717;
+    --fail: #e06c62; --fail-soft: #321d1b;
+    --ok: #98948f; --ok-soft: #232221;
+    --live: #eceae7; --live-soft: #232221;
+    --shadow: none;
+  }
+  body[data-s="2"][data-t="light"] {
+    --bg: #f6f8fa; --surface: #ffffff; --raised: #ffffff;
+    --ink: #14181f; --muted: #5d6673; --faint: #8b94a3;
+    --line: #e2e7ee; --line-soft: #edf0f5;
+    --attn: #96660a; --attn-soft: #fbf1dc;
+    --fail: #b92d25; --fail-soft: #fbeae8;
+    --ok: #16794c; --ok-soft: #e4f3ea;
+    --live: #0e7490; --live-soft: #e0f2f7;
+    --proj-hydra: #6e56cf; --proj-ops: #b5477b;
+    --pri-urgent: #c03d11; --pri-high: #b45309; --pri-medium: #64748b; --pri-low: #94a3b8;
+    --sans: "IBM Plex Sans", -apple-system, system-ui, sans-serif;
+    --shadow: none;
+  }
+  body[data-s="2"][data-t="dark"] {
+    --bg: #0e1116; --surface: #161b22; --raised: #161b22;
+    --ink: #e6eaf0; --muted: #8f98a6; --faint: #5d6673;
+    --line: #262d37; --line-soft: #1d232c;
+    --attn: #e3b341; --attn-soft: #2d2513;
+    --fail: #f0625a; --fail-soft: #351b19;
+    --ok: #3fb970; --ok-soft: #14291d;
+    --live: #22b8cf; --live-soft: #0e2a30;
+    --proj-hydra: #9b8afb; --proj-ops: #e17bb0;
+    --pri-urgent: #f26f4a; --pri-high: #e0a144; --pri-medium: #8f98a6; --pri-low: #5d6673;
+    --shadow: none;
+  }
+  body[data-s="3"][data-t="light"] {
+    --bg: #efefed; --surface: #f6f6f4; --raised: #ffffff;
+    --ink: #17171a; --muted: #71716f; --faint: #a5a5a2;
+    --line: #e2e2df; --line-soft: #e9e9e6;
+    --attn: #8a6d1f; --attn-soft: #f4ecd8;
+    --fail: #9e4a42; --fail-soft: #f2e4e2;
+    --ok: #55755f; --ok-soft: #e7ede8;
+    --live: #4e7d8a; --live-soft: #e3edef;
+    --sans: "Schibsted Grotesk", -apple-system, system-ui, sans-serif;
+    --shadow: 0 1px 2px rgba(23,23,26,0.05), 0 8px 24px rgba(23,23,26,0.07);
+  }
+  body[data-s="3"][data-t="dark"] {
+    --bg: #101012; --surface: #151517; --raised: #202024;
+    --ink: #e9e9ea; --muted: #929293; --faint: #5c5c5e;
+    --line: #232326; --line-soft: #1c1c1f;
+    --attn: #cfa84f; --attn-soft: #2a2415;
+    --fail: #cc7a70; --fail-soft: #2e1d1b;
+    --ok: #7fa38b; --ok-soft: #1a231d;
+    --live: #7aa7b3; --live-soft: #172226;
+    --shadow: 0 1px 2px rgba(0,0,0,0.5), 0 10px 32px rgba(0,0,0,0.45);
+  }
+
+  /* per-sample typeface, independent of theme */
+  body[data-s="1"] { --sans: "Instrument Sans", -apple-system, system-ui, sans-serif; }
+  body[data-s="2"] { --sans: "IBM Plex Sans", -apple-system, system-ui, sans-serif; }
+  body[data-s="3"] { --sans: "Schibsted Grotesk", -apple-system, system-ui, sans-serif; }
+
+  /* ================= base ================= */
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--bg); color: var(--ink);
+    font: 14px/1.5 var(--sans);
+    -webkit-font-smoothing: antialiased;
+    transition: background 0.2s, color 0.2s;
+  }
+  .mono { font-family: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace; }
+  .app { display: flex; min-height: 100vh; }
+
+  /* ---------- chrome (styled by tokens, part of the language) ---------- */
+  .side {
+    width: 204px; flex: none;
+    background: var(--surface);
+    border-right: 1px solid var(--line);
+    display: flex; flex-direction: column;
+    padding: 16px 10px;
+    position: sticky; top: 0; height: 100vh;
+  }
+  .logo { display: flex; align-items: baseline; gap: 8px; padding: 4px 10px 16px; }
+  .logo b { font-size: 16px; letter-spacing: 0.01em; }
+  .logo span { font-family: "IBM Plex Mono", monospace; font-size: 10px; color: var(--faint); }
+  .nav { display: flex; flex-direction: column; gap: 1px; }
+  .nav a {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 6px 10px; border-radius: 7px;
+    color: var(--muted); text-decoration: none; font-size: 13px;
+  }
+  .nav a.on { background: var(--line-soft); color: var(--ink); font-weight: 600; }
+  .nav a:not(.on):hover { background: var(--line-soft); }
+  .nav .count { font-family: "IBM Plex Mono", monospace; font-size: 11px; color: var(--faint); }
+  .nav .sep { height: 1px; background: var(--line-soft); margin: 8px 10px; }
+  .proto-badge {
+    margin-top: auto;
+    border: 1px dashed var(--attn); color: var(--attn); background: var(--attn-soft);
+    border-radius: 8px; padding: 8px 10px;
+    font-family: "IBM Plex Mono", monospace; font-size: 10px; line-height: 1.5;
+  }
+  .main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  .topbar { display: flex; align-items: baseline; gap: 14px; padding: 22px 30px 0; }
+  .topbar h1 { font-size: 19px; margin: 0; letter-spacing: -0.01em; }
+  .topbar .when { color: var(--muted); font-size: 13px; }
+  .topbar .when b { color: var(--ink); font-weight: 600; }
+  #stage { padding: 20px 30px 130px; max-width: 1060px; }
+
+  /* ================= shared structure ================= */
+  .lane { margin-bottom: 30px; }
+  .lane-label {
+    text-transform: uppercase; letter-spacing: 0.09em;
+    font-size: 11px; font-weight: 700; color: var(--muted);
+    display: flex; align-items: center; gap: 8px; margin-bottom: 10px;
+  }
+  .lane-label .n { font-family: "IBM Plex Mono", monospace; font-weight: 500; color: var(--faint); letter-spacing: 0; }
+
+  /* ---- needs-you cards ---- */
+  .needs-list { display: flex; flex-direction: column; gap: 10px; }
+  .need {
+    background: var(--raised); border: 1px solid var(--line); border-radius: 10px;
+    padding: 12px 16px; display: flex; gap: 12px; align-items: flex-start;
+    box-shadow: var(--shadow);
+  }
+  .need .edge { width: 3px; align-self: stretch; border-radius: 2px; flex: none; background: var(--line); }
+  .need[data-tone="warn"] .edge { background: var(--attn); }
+  .need[data-tone="fail"] .edge { background: var(--fail); }
+  .need .body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+  .need .head { display: flex; align-items: baseline; gap: 10px; font-size: 12px; }
+  .need .kind { font-weight: 700; text-transform: uppercase; letter-spacing: 0.07em; font-size: 10.5px; color: var(--muted); }
+  .need[data-tone="warn"] .kind { color: var(--attn); }
+  .need[data-tone="fail"] .kind { color: var(--fail); }
+  .need .title { font-weight: 600; font-size: 14px; }
+  .need .title code {
+    font-family: "IBM Plex Mono", monospace; font-size: 12px;
+    background: var(--line-soft); padding: 1px 5px; border-radius: 4px;
+  }
+  .need .ctx { color: var(--muted); font-size: 12.5px; }
+  .need .acts { display: flex; gap: 4px; margin-top: 8px; }
+
+  /* quiet decision affordances - pinned principle from #20 */
+  .qbtn {
+    font: 600 12px/1 var(--sans);
+    border: 0; background: none; color: var(--muted);
+    padding: 6px 9px; border-radius: 6px; cursor: pointer;
+  }
+  .qbtn:hover { background: var(--line-soft); color: var(--ink); }
+  .qbtn.first { color: var(--ink); box-shadow: inset 0 0 0 1px var(--line); }
+  .qbtn.first:hover { box-shadow: inset 0 0 0 1px var(--faint); }
+  .qbtn:focus-visible { outline: 2px solid var(--live); outline-offset: 1px; }
+
+  /* ---- lineage ---- */
+  .proj { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; }
+  .proj .pdot { width: 8px; height: 8px; border-radius: 3px; flex: none; display: none; }
+  .proj[data-proj="hydra"] .pdot { background: var(--proj-hydra, var(--faint)); }
+  .proj[data-proj="ops"] .pdot { background: var(--proj-ops, var(--faint)); }
+
+  /* ---- priority encoders ---- */
+  .pri { display: inline-flex; align-items: center; gap: 5px; flex: none; }
+  .pri .bars { display: inline-flex; align-items: flex-end; gap: 1.5px; height: 10px; }
+  .pri .bars i { width: 3px; border-radius: 1px; background: var(--line); }
+  .pri .bars i:nth-child(1) { height: 4px; }
+  .pri .bars i:nth-child(2) { height: 7px; }
+  .pri .bars i:nth-child(3) { height: 10px; }
+  .pri[data-pri="low"]    .bars i:nth-child(1) { background: var(--faint); }
+  .pri[data-pri="medium"] .bars i:nth-child(-n+2) { background: var(--muted); }
+  .pri[data-pri="high"]   .bars i { background: var(--muted); }
+  .pri[data-pri="urgent"] .bars i { background: var(--ink); }
+  .pri .pri-label {
+    font-size: 10.5px; font-weight: 600; letter-spacing: 0.03em;
+    padding: 1px 7px; border-radius: 999px; display: none;
+  }
+
+  /* ---- state ---- */
+  .state { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; font-size: 12px; font-weight: 600; }
+  .state .dot { width: 7px; height: 7px; border-radius: 50%; flex: none; background: var(--faint); }
+  .state[data-tone="live"] .dot { background: var(--live); animation: pulse 2s ease-in-out infinite; }
+  .state[data-tone="ok"]   .dot { background: var(--ok); }
+  .state[data-tone="warn"] .dot { background: var(--attn); }
+  .state[data-tone="fail"] .dot { background: var(--fail); }
+  .state[data-tone="warn"] { color: var(--attn); }
+  .state[data-tone="fail"] { color: var(--fail); }
+  .state[data-tone="ok"], .state[data-tone="idle"] { color: var(--muted); }
+  .state[data-tone="live"] { color: var(--ink); }
+  @keyframes pulse { 50% { opacity: 0.3; } }
+  @media (prefers-reduced-motion: reduce) { .state .dot { animation: none !important; } }
+
+  /* ---- waiting-time / age ---- */
+  .age {
+    font-family: "IBM Plex Mono", monospace; font-size: 11.5px; white-space: nowrap;
+    color: var(--faint); flex: none;
+  }
+  .age[data-age="recent"] { color: var(--muted); }
+  .age[data-age="stale"]  { color: var(--ink); }
+  .age[data-age="old"]    { color: var(--ink); font-weight: 500; }
+
+  /* ---- ledger ---- */
+  .group { background: var(--raised); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; margin-bottom: 14px; box-shadow: var(--shadow); }
+  .group > h2 {
+    margin: 0; font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em;
+    color: var(--muted); padding: 9px 16px; border-bottom: 1px solid var(--line-soft);
+    background: var(--surface);
+    display: flex; gap: 8px; align-items: center;
+  }
+  .group > h2 .n { font-family: "IBM Plex Mono", monospace; color: var(--faint); letter-spacing: 0; }
+  .group > h2 .pdot { width: 8px; height: 8px; border-radius: 3px; display: none; }
+  .group[data-proj="hydra"] > h2 .pdot { background: var(--proj-hydra, var(--faint)); }
+  .group[data-proj="ops"] > h2 .pdot { background: var(--proj-ops, var(--faint)); }
+  .rowwrap { overflow-x: auto; }
+  .lrow {
+    display: grid;
+    grid-template-columns: minmax(220px, 1.1fr) 74px 132px minmax(230px, 1.4fr) 52px;
+    gap: 14px; align-items: center;
+    padding: 9px 16px; border-top: 1px solid var(--line-soft);
+    min-width: 780px;
+  }
+  .lrow:first-child { border-top: 0; }
+  .lrow .what .name { font-weight: 600; font-size: 13.5px; }
+  .lrow .what .sub { color: var(--muted); font-size: 12px; display: flex; gap: 6px; align-items: center; }
+  .lrow .now { color: var(--muted); font-size: 12.5px; }
+  .lrow .now b { color: var(--ink); font-weight: 600; }
+  .lrow .age { text-align: right; }
+
+  /* ---- digest ---- */
+  .digest { display: flex; flex-direction: column; }
+  .ditem {
+    display: flex; gap: 14px; align-items: baseline;
+    padding: 7px 4px; border-bottom: 1px solid var(--line-soft);
+  }
+  .ditem:last-child { border-bottom: 0; }
+  .ditem .when { font-family: "IBM Plex Mono", monospace; font-size: 11px; color: var(--faint); width: 88px; flex: none; text-align: right; }
+  .ditem .glyph { flex: none; width: 14px; text-align: center; font-size: 12px; color: var(--muted); position: relative; top: 1px; }
+  .ditem[data-tone="fail"] .glyph { color: var(--fail); }
+  .ditem .txt { flex: 1; font-size: 13px; }
+  .ditem .ref { color: var(--faint); font-size: 12px; margin-left: 6px; font-family: "IBM Plex Mono", monospace; }
+  .divider {
+    display: flex; align-items: center; gap: 12px;
+    color: var(--faint); font-size: 11px; text-transform: uppercase; letter-spacing: 0.09em;
+    padding: 10px 0;
+  }
+  .divider::before, .divider::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+
+  /* ================= sample 1 · Graphite =================
+     Color is an event. Amber = waiting on you, red = failed; everything else ink.
+     Live = pulsing ring, not hue. Importance = ink strength + bars. */
+  body[data-s="1"] .state[data-tone="live"] .dot {
+    background: none; border: 2px solid var(--ink); width: 5px; height: 5px;
+  }
+  body[data-s="1"] .state[data-tone="ok"] .dot { display: none; }
+  body[data-s="1"] .state[data-tone="ok"]::before { content: "✓"; font-size: 12px; color: var(--muted); }
+  body[data-s="1"] .lrow[data-pri="urgent"] .what .name { font-weight: 700; }
+  body[data-s="1"] .lrow[data-pri="low"] .what .name { font-weight: 500; color: var(--muted); }
+
+  /* ================= sample 2 · Signal =================
+     Every axis has a hue: pills for state, identity dots for projects,
+     priority chips on a hot->gray ramp, amber deepens as waiting grows. */
+  body[data-s="2"] .proj .pdot,
+  body[data-s="2"] .group > h2 .pdot { display: inline-block; }
+  body[data-s="2"] .pri .bars { display: none; }
+  body[data-s="2"] .pri .pri-label { display: inline-block; }
+  body[data-s="2"] .pri[data-pri="urgent"] .pri-label { color: var(--pri-urgent); box-shadow: inset 0 0 0 1px var(--pri-urgent); }
+  body[data-s="2"] .pri[data-pri="high"]   .pri-label { color: var(--pri-high); box-shadow: inset 0 0 0 1px var(--pri-high); }
+  body[data-s="2"] .pri[data-pri="medium"] .pri-label { color: var(--pri-medium); box-shadow: inset 0 0 0 1px var(--pri-medium); }
+  body[data-s="2"] .pri[data-pri="low"]    .pri-label { color: var(--pri-low); box-shadow: inset 0 0 0 1px var(--pri-low); }
+  body[data-s="2"] .state {
+    border-radius: 999px; padding: 2px 9px; font-size: 11px;
+  }
+  body[data-s="2"] .state[data-tone="live"] { background: var(--live-soft); color: var(--live); }
+  body[data-s="2"] .state[data-tone="ok"]   { background: var(--ok-soft); color: var(--ok); }
+  body[data-s="2"] .state[data-tone="warn"] { background: var(--attn-soft); color: var(--attn); }
+  body[data-s="2"] .state[data-tone="fail"] { background: var(--fail-soft); color: var(--fail); }
+  body[data-s="2"] .state[data-tone="idle"] { background: var(--line-soft); color: var(--muted); }
+  body[data-s="2"] .ditem[data-tone="ok"] .glyph { color: var(--ok); }
+  body[data-s="2"] .age { border-radius: 5px; padding: 1px 5px; }
+  body[data-s="2"] .age[data-age="stale"] { background: var(--attn-soft); color: var(--attn); }
+  body[data-s="2"] .age[data-age="old"]   { background: var(--attn-soft); color: var(--attn); font-weight: 500; }
+  body[data-s="2"] .need[data-tone="warn"] { border-color: color-mix(in srgb, var(--attn) 35%, var(--line)); }
+  body[data-s="2"] .need[data-tone="fail"] { border-color: color-mix(in srgb, var(--fail) 35%, var(--line)); }
+
+  /* ================= sample 3 · Limelight =================
+     The page is a dim field; what matters is lit. Prominence = luminance + scale.
+     No chips, no stripes: priority is size and brightness, color tints words. */
+  body[data-s="3"] .need .pri { display: none; }
+  body[data-s="3"] .lrow .pri { visibility: hidden; }   /* keep the grid column */
+  body[data-s="3"] .need .edge { display: none; }
+  body[data-s="3"] .need { border: 0; padding: 14px 18px; }
+  body[data-s="3"] .group { border: 0; }
+  body[data-s="3"] .group > h2 { background: none; border-bottom-color: var(--line-soft); }
+  /* needs-you: the lit stage; urgency scales the light */
+  body[data-s="3"] .need[data-pri="urgent"] .title { font-size: 15px; }
+  body[data-s="3"] .need[data-pri="medium"], body[data-s="3"] .need[data-pri="low"] { opacity: 0.86; }
+  body[data-s="3"] .need[data-tone="warn"] .kind, body[data-s="3"] .need[data-tone="fail"] .kind { font-weight: 700; }
+  /* ledger: priority = presence */
+  body[data-s="3"] .lrow[data-pri="urgent"] .what .name { font-size: 14.5px; font-weight: 700; }
+  body[data-s="3"] .lrow[data-pri="high"] .what .name { font-size: 14px; }
+  body[data-s="3"] .lrow[data-pri="low"] { opacity: 0.62; }
+  body[data-s="3"] .lrow[data-pri="low"] .what .name { font-weight: 400; }
+  body[data-s="3"] .lrow[data-done="1"] { opacity: 0.55; }
+  /* the digest recedes */
+  body[data-s="3"] .digest { opacity: 0.75; }
+  body[data-s="3"] .ditem .txt { font-size: 12.5px; }
+  /* waiting: the spotlight warms as waiting grows */
+  body[data-s="3"] .need[data-age="stale"], body[data-s="3"] .need[data-age="old"] {
+    background: linear-gradient(90deg, var(--attn-soft), var(--raised) 45%);
+  }
+  body[data-s="3"] .state { font-weight: 500; }
+
+  /* ================= legend + switcher (not part of the language) ================= */
+  .legend {
+    position: fixed; bottom: 64px; left: 50%; transform: translateX(-50%);
+    max-width: 860px; width: calc(100% - 48px);
+    background: var(--raised); border: 1px solid var(--line); border-radius: 10px;
+    box-shadow: 0 8px 30px rgba(0,0,0,0.18);
+    padding: 10px 16px; font-size: 12px; color: var(--muted); line-height: 1.55;
+    z-index: 40;
+  }
+  .legend b { color: var(--ink); }
+  .legend .close { float: right; cursor: pointer; border: 0; background: none; color: var(--faint); font-size: 14px; padding: 0 2px; }
+  .sw {
+    position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%);
+    background: #17161a; color: #fff;
+    border-radius: 999px; padding: 6px 8px;
+    display: flex; align-items: center; gap: 4px;
+    box-shadow: 0 6px 24px rgba(0,0,0,0.35);
+    z-index: 50; font-family: "IBM Plex Mono", monospace;
+  }
+  .sw button {
+    background: none; border: 0; color: #fff; cursor: pointer;
+    font: inherit; font-size: 13px; padding: 4px 10px; border-radius: 999px;
+  }
+  .sw button:hover { background: rgba(255,255,255,0.14); }
+  .sw button:focus-visible { outline: 2px solid #7aa7b3; outline-offset: 1px; }
+  .sw .label { font-size: 12px; font-weight: 600; padding: 0 4px; min-width: 148px; text-align: center; }
+  .sw .div { width: 1px; height: 16px; background: rgba(255,255,255,0.22); margin: 0 2px; }
+</style>
+
+<div class="app">
+  <aside class="side">
+    <div class="logo"><b>Hydra</b><span>v1 · rogier</span></div>
+    <nav class="nav">
+      <a href="#">Intake <span class="count">7</span></a>
+      <a href="#" class="on">Check-in <span class="count">4</span></a>
+      <a href="#">Tasks</a>
+      <a href="#">Sessions <span class="count">2</span></a>
+      <a href="#">Runs</a>
+      <a href="#">Workflows</a>
+      <div class="sep"></div>
+      <a href="#">Fleet</a>
+      <a href="#">Connections</a>
+      <a href="#">Notifications <span class="count">5</span></a>
+      <a href="#">Settings</a>
+    </nav>
+    <div class="proto-badge">PROTOTYPE · throwaway<br>ticket hydra#33<br>&larr; &rarr; sample · t theme</div>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <h1>Check-in</h1>
+      <span class="when">Sunday 14:32 &middot; last check-in <b>yesterday 18:40</b></span>
+    </div>
+    <div id="stage"></div>
+  </main>
+</div>
+
+<div class="legend" id="legend" hidden>
+  <button class="close" id="legendclose" aria-label="Hide legend">&times;</button>
+  <span id="legendtext"></span>
+</div>
+
+<div class="sw">
+  <button id="prev" aria-label="Previous sample">&larr;</button>
+  <span class="label" id="swlabel"></span>
+  <button id="next" aria-label="Next sample">&rarr;</button>
+  <span class="div"></span>
+  <button id="theme" aria-label="Toggle theme">◐</button>
+  <button id="legendbtn" aria-label="Toggle legend">?</button>
+</div>
+
+<script>
+/* One dataset (the #20 slice + #29 nouns), ONE render. Samples restyle it via CSS only. */
+const data = {
+  needsYou: [
+    { tone: "warn", kind: "Approval", age: "6m", ageBucket: "fresh", pri: "urgent", proj: "hydra",
+      lineage: "hydra · Fix flaky webhook tests",
+      title: 'Session wants to run <code>git push origin fix/webhook-retries</code>',
+      ctx: "Claude Code on hetzner-01 · approval-required",
+      actions: ["Approve", "Deny", "Open session"] },
+    { tone: "warn", kind: "Permission", age: "18m", ageBucket: "recent", pri: "high", proj: "hydra",
+      lineage: "hydra · Refactor event pipeline",
+      title: 'Permission request: <code>infra</code> grant',
+      ctx: "profile worker lacks infra (wants to drain runner)",
+      actions: ["Grant for session", "Add to profile", "Deny"] },
+    { tone: "warn", kind: "Breaker", age: "41m", ageBucket: "stale", pri: "high", proj: "ops",
+      lineage: "Operations · Email triage",
+      title: "&ldquo;Email triage&rdquo; trigger paused &ndash; spawn bound tripped",
+      ctx: "gmail/personal · 12 runs in 10 min (bound 10) · 14 matched events held",
+      actions: ["Review held events", "Resume trigger"] },
+    { tone: "fail", kind: "Run failed", age: "7h", ageBucket: "old", pri: "medium", proj: "ops",
+      lineage: "Operations · Nightly digest",
+      title: "&ldquo;Nightly digest&rdquo; run failed &ndash; iteration-limit",
+      ctx: "cron · step summarize exhausted its capped edge (3 traversals)",
+      actions: ["View run", "Re-run"] },
+  ],
+  groups: [
+    { proj: "hydra", name: "hydra", rows: [
+      { pri: "urgent", name: "Fix flaky webhook tests", sub: "task · session on hetzner-01",
+        tone: "warn", state: "needs approval",
+        now: "wants <b>git push</b> · parked 6m", age: "6m", ageBucket: "fresh" },
+      { pri: "high", name: "Refactor event pipeline", sub: "task · chat session on macbook-pro",
+        tone: "live", state: "running 34m",
+        now: "turn 7 · editing src/ingress/pipeline.ts · <b>asked for infra grant 18m ago</b>", age: "34m", ageBucket: "recent" },
+      { pri: "medium", name: "PR review · PR #87", sub: "run 484 · workflow PR review",
+        tone: "live", state: "running 12m",
+        now: "step 2/4 review-code · turn 3, reading packages/contract", age: "12m", ageBucket: "fresh" },
+      { pri: "low", name: "Issue triage", sub: "run 485 · workflow Issue triage",
+        tone: "live", state: "running 2m",
+        now: "step 1/2 judge · 3 events in batch", age: "2m", ageBucket: "fresh" },
+      { pri: "medium", done: true, name: "Add runner drain command", sub: "task · done 13:12",
+        tone: "ok", state: "done",
+        now: "session ended after 41 turns", age: "1h", ageBucket: "" },
+      { pri: "low", done: true, name: "PR review · PR #85", sub: "run 482 · completed 13:58",
+        tone: "ok", state: "completed",
+        now: "approve-with-nits · 2 comments posted", age: "34m", ageBucket: "" },
+    ]},
+    { proj: "ops", name: "Operations & assistants", rows: [
+      { pri: "high", name: "Email triage", sub: "workflow · gmail/personal",
+        tone: "warn", state: "trigger paused",
+        now: "spawn bound tripped 41m ago · <b>14 events held</b>", age: "41m", ageBucket: "stale" },
+      { pri: "medium", name: "Nightly digest", sub: "run 479 · cron, failed 22:15",
+        tone: "fail", state: "failed",
+        now: "iteration-limit · step summarize exhausted its capped edge", age: "7h", ageBucket: "old" },
+      { pri: "low", done: true, name: "Write promotion runbook", sub: "session · ended 09:03",
+        tone: "ok", state: "ended",
+        now: "output committed to docs/", age: "5h", ageBucket: "" },
+      { pri: "medium", name: "Hera", sub: "assistant · #ops on Discord",
+        tone: "live", state: "in conversation",
+        now: "answering &ldquo;what shipped yesterday?&rdquo;", age: "3m", ageBucket: "fresh" },
+    ]},
+  ],
+  landed: [
+    { when: "13:58", tone: "ok", glyph: "✓",
+      text: "&ldquo;PR review&rdquo; completed on PR #85 &ndash; verdict approve-with-nits, 2 comments posted", ref: "run 482" },
+    { when: "13:12", tone: "ok", glyph: "✓",
+      text: "Task &ldquo;Add runner drain command&rdquo; moved in-progress &rarr; done", ref: "41 turns" },
+    { when: "11:47", tone: "ok", glyph: "✓",
+      text: "&ldquo;Issue triage&rdquo; completed 6&times; &ndash; 4 issues labelled, 2 tasks created", ref: "grouped" },
+    { when: "09:03", tone: "ok", glyph: "✓",
+      text: "Session &ldquo;Write promotion runbook&rdquo; ended &ndash; output committed to docs/", ref: "session 3182" },
+    { when: "yest 22:15", tone: "fail", glyph: "✕",
+      text: "&ldquo;Nightly digest&rdquo; failed &ndash; iteration-limit (waiting for you, above)", ref: "run 479" },
+    { when: "yest 19:30", tone: "ok", glyph: "✓",
+      text: "2 tasks created from Intake &ndash; &ldquo;Rotate tailnet certs&rdquo;, &ldquo;Reply to security advisory&rdquo;", ref: "" },
+  ],
+};
+
+const priEl = (pri) => `
+  <span class="pri" data-pri="${pri}" title="priority: ${pri}">
+    <span class="bars"><i></i><i></i><i></i></span>
+    <span class="pri-label">${pri[0].toUpperCase() + pri.slice(1)}</span>
+  </span>`;
+const stateEl = (tone, label) => `
+  <span class="state" data-tone="${tone}"><span class="dot"></span><span>${label}</span></span>`;
+const qbtns = (arr) =>
+  arr.map((a, i) => `<button class="qbtn ${i === 0 ? "first" : ""}">${a}</button>`).join("");
+
+function render() {
+  const needs = data.needsYou.map((n) => `
+    <div class="need" data-tone="${n.tone}" data-pri="${n.pri}" data-age="${n.ageBucket}">
+      <span class="edge"></span>
+      <div class="body">
+        <div class="head">
+          <span class="kind">${n.kind}</span>
+          <span class="proj" data-proj="${n.proj}"><i class="pdot"></i>${n.lineage}</span>
+          ${priEl(n.pri)}
+          <span class="age" data-age="${n.ageBucket}" style="margin-left:auto">waiting ${n.age}</span>
+        </div>
+        <div class="title">${n.title}</div>
+        <div class="ctx">${n.ctx}</div>
+        <div class="acts">${qbtns(n.actions)}</div>
+      </div>
+    </div>`).join("");
+  const groups = data.groups.map((g) => `
+    <div class="group" data-proj="${g.proj}">
+      <h2><span class="pdot"></span>${g.name} <span class="n">${g.rows.length}</span></h2>
+      <div class="rowwrap">
+        ${g.rows.map((r) => `
+        <div class="lrow" data-pri="${r.pri}" ${r.done ? 'data-done="1"' : ""}>
+          <div class="what">
+            <div class="name">${r.name}</div>
+            <div class="sub">${r.sub}</div>
+          </div>
+          ${priEl(r.pri)}
+          ${stateEl(r.tone, r.state)}
+          <div class="now">${r.now}</div>
+          <span class="age" data-age="${r.ageBucket}">${r.age}</span>
+        </div>`).join("")}
+      </div>
+    </div>`).join("");
+  const fresh = data.landed.filter((l) => !l.when.startsWith("yest"));
+  const seen = data.landed.filter((l) => l.when.startsWith("yest"));
+  const ditem = (l) => `
+    <div class="ditem" data-tone="${l.tone}">
+      <span class="when">${l.when}</span>
+      <span class="glyph">${l.glyph}</span>
+      <span class="txt">${l.text}<span class="ref">${l.ref}</span></span>
+    </div>`;
+  document.getElementById("stage").innerHTML = `
+    <section class="lane">
+      <div class="lane-label">Needs you <span class="n">${data.needsYou.length}</span></div>
+      <div class="needs-list">${needs}</div>
+    </section>
+    <section class="lane">
+      <div class="lane-label">Delegated <span class="n">10</span></div>
+      ${groups}
+    </section>
+    <section class="lane">
+      <div class="lane-label">Since you last checked <span class="n">${data.landed.length}</span></div>
+      <div class="digest">
+        ${fresh.map(ditem).join("")}
+        <div class="divider">last check-in · yesterday 18:40</div>
+        ${seen.map(ditem).join("")}
+      </div>
+    </section>`;
+}
+
+/* ---------- samples / themes ---------- */
+const samples = [
+  { key: "1", name: "Graphite",
+    legend: "<b>Graphite — silence is the signal.</b> The page is ink; color is an event: <b>amber</b> means waiting on you, <b>red</b> means failed, nothing else gets a hue. Live = a pulsing ring, success = a quiet ✓. Importance = ink weight + gray bars. Waiting-time = the age label darkens as it grows. Lineage = plain-text breadcrumbs." },
+  { key: "2", name: "Signal",
+    legend: "<b>Signal — every axis has a hue.</b> One fixed status palette everywhere: <b>cyan</b> live, <b>green</b> done, <b>amber</b> needs-you, <b>red</b> failed. Projects carry identity dots, priority chips run a hot→gray ramp, and the age chip fills amber as waiting grows." },
+  { key: "3", name: "Limelight",
+    legend: "<b>Limelight — hierarchy by light.</b> The page is a dim field; what matters is lit and larger, the rest recedes. No chips or stripes: priority = scale + brightness, finished work fades, the digest steps back. Color only tints words, and a card warms amber as it waits." },
+];
+function params() { return new URLSearchParams(location.search); }
+function curSample() {
+  const i = samples.findIndex((s) => s.key === (params().get("s") || "1"));
+  return i === -1 ? 0 : i;
+}
+function apply() {
+  const p = params();
+  const s = samples[curSample()];
+  document.body.dataset.s = s.key;
+  document.body.dataset.t = p.get("theme") === "dark" ? "dark" : "light";
+  document.getElementById("swlabel").textContent = s.key + " · " + s.name;
+  document.getElementById("legendtext").innerHTML = s.legend;
+}
+function setParam(k, v) {
+  const p = params(); p.set(k, v);
+  try { history.replaceState(null, "", "?" + p.toString()); } catch (e) { /* file:// */ }
+  apply();
+}
+function shift(d) { setParam("s", samples[(curSample() + d + samples.length) % samples.length].key); }
+function toggleTheme() { setParam("theme", document.body.dataset.t === "dark" ? "light" : "dark"); }
+document.getElementById("prev").addEventListener("click", () => shift(-1));
+document.getElementById("next").addEventListener("click", () => shift(1));
+document.getElementById("theme").addEventListener("click", toggleTheme);
+const legend = document.getElementById("legend");
+document.getElementById("legendbtn").addEventListener("click", () => { legend.hidden = !legend.hidden; });
+document.getElementById("legendclose").addEventListener("click", () => { legend.hidden = true; });
+document.addEventListener("keydown", (e) => {
+  const t = e.target;
+  if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
+  if (e.key === "ArrowLeft") shift(-1);
+  if (e.key === "ArrowRight") shift(1);
+  if (e.key === "t") toggleTheme();
+});
+
+/* initial theme: URL param > host stamp > OS preference */
+(function () {
+  if (!params().get("theme")) {
+    const host = document.documentElement.dataset.theme;
+    const os = window.matchMedia && matchMedia("(prefers-color-scheme: dark)").matches;
+    if (host === "dark" || (!host && os)) {
+      try { const p = params(); p.set("theme", "dark"); history.replaceState(null, "", "?" + p.toString()); } catch (e) {}
+    }
+  }
+  render();
+  apply();
+  legend.hidden = false;
+})();
+</script>
