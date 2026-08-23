@@ -142,6 +142,10 @@ The end state of a controller that has been promoted away: it refuses to serve a
 **Data Root**:
 The single directory holding everything the controller durably owns (database, packed secrets, future blobs). The unit that promotion moves; nothing in it references its own absolute location.
 
+**Hydra Home**:
+The one directory holding everything Hydra keeps on a machine: the Data Root, runner material state, logs, backups, and bootstrap config. `~/.hydra` by default. The Data Root moves with promotion; the rest of the home is machine-bound.
+_Avoid_: install dir, config dir
+
 **Provider**:
 An adapter wrapping an interactive coding harness (Claude Code, Codex, pi). Only this; integrations like GitHub are event sources, not providers.
 _Avoid_: harness (for the adapter itself), integration
