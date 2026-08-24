@@ -1,96 +1,100 @@
 <!--
   PROTOTYPE - throwaway. Ticket: https://github.com/rogierpennink/hydra/issues/1 -> #33
-  Three DESIGN LANGUAGES over one identical slice of monitoring content (the #20
-  check-in dataset, enriched with the #29 Task nouns: priority + project lineage).
-  Same DOM structure in every sample; only the visual language changes.
-    1 Graphite  - silence is the signal: monochrome ink, color only for exceptions
-    2 Signal    - systematic hues: every semantic axis has a fixed color
-    3 Limelight - hierarchy by light: prominence = luminance + scale, color whispers
+  ROUND 2. Round 1 (Graphite/Signal/Limelight) verdict: color in small precise
+  doses - never a traffic light; keep Limelight's restraint + light-play but
+  subtler, never yellowish; no colored accent bars; surfaces unsettled; more
+  refinement. Round 1 lives in git history on this branch.
+
+  Round 2 converges the language (quiet color at word/dot scale, priority via
+  weight + gray bars, receding finished work, quiet buttons) and argues about
+  SURFACES + DEPTH:
+    1 Slate - cool neutrals, hairline borders + crisp shadows
+    2 Umber - warm neutrals, borderless, shadow-only depth
+    3 Iris  - pure neutrals + one muted identity accent, flat
   Switch samples with the floating bar / arrow keys / ?s=1|2|3.
-  Toggle theme with the bar / "t" / ?theme=light|dark. Both themes per sample.
+  Toggle theme with the bar / "t" / ?theme=light|dark.
 -->
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Hydra Design Language</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&family=Schibsted+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Schibsted+Grotesk:wght@400;500;600;700&family=Hanken+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
 <style>
   /* ================= tokens =================
      Six sets: 3 samples x 2 themes, stamped as body[data-s="1|2|3"][data-t="light|dark"].
-     Components only ever read the vars. No-JS fallback: bare body = sample 1 light. */
+     Components only read the vars. No-JS fallback: bare body = sample 1 light. */
 
   body, body[data-s="1"][data-t="light"] {
-    --bg: #fafaf9; --surface: #ffffff; --raised: #ffffff;
-    --ink: #1b1a19; --muted: #6f6c68; --faint: #a3a09b;
-    --line: #e9e7e4; --line-soft: #f1efec;
-    --attn: #9a6700; --attn-soft: #fbf3e0;
-    --fail: #b0362c; --fail-soft: #faecea;
-    --ok: #6f6c68; --ok-soft: #f1efec;          /* graphite: success is quiet gray */
-    --live: #1b1a19; --live-soft: #f1efec;      /* graphite: live is ink + motion */
-    --sans: "Instrument Sans", -apple-system, system-ui, sans-serif;
-    --shadow: none;
+    --bg: #eef0f2; --surface: #f8f9fa; --raised: #ffffff;
+    --ink: #1b1e24; --muted: #5f6672; --faint: #9aa1ad;
+    --line: rgba(27,30,36,0.10); --line-soft: rgba(27,30,36,0.055);
+    --attn: #8a6116; --fail: #a34e46; --ok: #48745a; --live: #48717f;
+    --attn-soft: rgba(138,97,22,0.09);
+    --proj-hydra: #7d7ab0; --proj-ops: #a67f92;
+    --card-border: 1px solid var(--line);
+    --card-shadow: 0 1px 2px rgba(23,26,33,0.05);
+    --lift-shadow: 0 1px 2px rgba(23,26,33,0.06), 0 4px 14px rgba(23,26,33,0.06);
   }
   body[data-s="1"][data-t="dark"] {
-    --bg: #131313; --surface: #1b1b1b; --raised: #1b1b1b;
-    --ink: #eceae7; --muted: #98948f; --faint: #6b6863;
-    --line: #2a2928; --line-soft: #232221;
-    --attn: #e3b341; --attn-soft: #2e2717;
-    --fail: #e06c62; --fail-soft: #321d1b;
-    --ok: #98948f; --ok-soft: #232221;
-    --live: #eceae7; --live-soft: #232221;
-    --shadow: none;
+    --bg: #14161b; --surface: #191c22; --raised: #20242c;
+    --ink: #dfe2e8; --muted: #9aa1ad; --faint: #5f6672;
+    --line: rgba(223,226,232,0.10); --line-soft: rgba(223,226,232,0.06);
+    --attn: #d0a147; --fail: #cf7b71; --ok: #7fae8e; --live: #7fa8b8;
+    --attn-soft: rgba(208,161,71,0.12);
+    --proj-hydra: #9490c9; --proj-ops: #bd93a8;
+    --card-border: 1px solid var(--line);
+    --card-shadow: 0 1px 2px rgba(0,0,0,0.35);
+    --lift-shadow: inset 0 1px 0 rgba(255,255,255,0.05), 0 1px 2px rgba(0,0,0,0.4), 0 6px 18px rgba(0,0,0,0.3);
   }
   body[data-s="2"][data-t="light"] {
-    --bg: #f6f8fa; --surface: #ffffff; --raised: #ffffff;
-    --ink: #14181f; --muted: #5d6673; --faint: #8b94a3;
-    --line: #e2e7ee; --line-soft: #edf0f5;
-    --attn: #96660a; --attn-soft: #fbf1dc;
-    --fail: #b92d25; --fail-soft: #fbeae8;
-    --ok: #16794c; --ok-soft: #e4f3ea;
-    --live: #0e7490; --live-soft: #e0f2f7;
-    --proj-hydra: #6e56cf; --proj-ops: #b5477b;
-    --pri-urgent: #c03d11; --pri-high: #b45309; --pri-medium: #64748b; --pri-low: #94a3b8;
-    --sans: "IBM Plex Sans", -apple-system, system-ui, sans-serif;
-    --shadow: none;
+    --bg: #f1efeb; --surface: #f8f7f4; --raised: #fffefb;
+    --ink: #211e1a; --muted: #6d6660; --faint: #a09890;
+    --line: rgba(33,30,26,0.09); --line-soft: rgba(33,30,26,0.05);
+    --attn: #8f6a1d; --fail: #a3564a; --ok: #5c7a5e; --live: #4e7a82;
+    --attn-soft: rgba(143,106,29,0.09);
+    --proj-hydra: #8a80a8; --proj-ops: #a8867e;
+    --card-border: 1px solid transparent;
+    --card-shadow: 0 1px 2px rgba(40,32,24,0.05), 0 5px 16px rgba(40,32,24,0.05);
+    --lift-shadow: 0 1px 2px rgba(40,32,24,0.06), 0 8px 24px rgba(40,32,24,0.08);
   }
   body[data-s="2"][data-t="dark"] {
-    --bg: #0e1116; --surface: #161b22; --raised: #161b22;
-    --ink: #e6eaf0; --muted: #8f98a6; --faint: #5d6673;
-    --line: #262d37; --line-soft: #1d232c;
-    --attn: #e3b341; --attn-soft: #2d2513;
-    --fail: #f0625a; --fail-soft: #351b19;
-    --ok: #3fb970; --ok-soft: #14291d;
-    --live: #22b8cf; --live-soft: #0e2a30;
-    --proj-hydra: #9b8afb; --proj-ops: #e17bb0;
-    --pri-urgent: #f26f4a; --pri-high: #e0a144; --pri-medium: #8f98a6; --pri-low: #5d6673;
-    --shadow: none;
+    --bg: #161411; --surface: #1b1916; --raised: #22201c;
+    --ink: #e8e4de; --muted: #a09890; --faint: #6d6660;
+    --line: rgba(232,228,222,0.09); --line-soft: rgba(232,228,222,0.055);
+    --attn: #d3a556; --fail: #d08579; --ok: #93ac89; --live: #86a9ac;
+    --attn-soft: rgba(211,165,86,0.11);
+    --proj-hydra: #a49ac2; --proj-ops: #bf9c93;
+    --card-border: 1px solid transparent;
+    --card-shadow: 0 1px 2px rgba(0,0,0,0.35), 0 5px 16px rgba(0,0,0,0.25);
+    --lift-shadow: inset 0 1px 0 rgba(255,255,255,0.045), 0 2px 4px rgba(0,0,0,0.4), 0 10px 28px rgba(0,0,0,0.35);
   }
   body[data-s="3"][data-t="light"] {
-    --bg: #efefed; --surface: #f6f6f4; --raised: #ffffff;
-    --ink: #17171a; --muted: #71716f; --faint: #a5a5a2;
-    --line: #e2e2df; --line-soft: #e9e9e6;
-    --attn: #8a6d1f; --attn-soft: #f4ecd8;
-    --fail: #9e4a42; --fail-soft: #f2e4e2;
-    --ok: #55755f; --ok-soft: #e7ede8;
-    --live: #4e7d8a; --live-soft: #e3edef;
-    --sans: "Schibsted Grotesk", -apple-system, system-ui, sans-serif;
-    --shadow: 0 1px 2px rgba(23,23,26,0.05), 0 8px 24px rgba(23,23,26,0.07);
+    --bg: #f3f3f5; --surface: #f9f9fb; --raised: #ffffff;
+    --ink: #1c1c21; --muted: #64646d; --faint: #9c9ca6;
+    --line: rgba(28,28,33,0.11); --line-soft: rgba(28,28,33,0.06);
+    --attn: #8a6116; --fail: #a34e46; --ok: #64646d; --live: #5b55c4;
+    --attn-soft: rgba(138,97,22,0.09);
+    --proj-hydra: #8e8e99; --proj-ops: #8e8e99;
+    --card-border: 1px solid var(--line);
+    --card-shadow: none;
+    --lift-shadow: none;
   }
   body[data-s="3"][data-t="dark"] {
-    --bg: #101012; --surface: #151517; --raised: #202024;
-    --ink: #e9e9ea; --muted: #929293; --faint: #5c5c5e;
-    --line: #232326; --line-soft: #1c1c1f;
-    --attn: #cfa84f; --attn-soft: #2a2415;
-    --fail: #cc7a70; --fail-soft: #2e1d1b;
-    --ok: #7fa38b; --ok-soft: #1a231d;
-    --live: #7aa7b3; --live-soft: #172226;
-    --shadow: 0 1px 2px rgba(0,0,0,0.5), 0 10px 32px rgba(0,0,0,0.45);
+    --bg: #131316; --surface: #18181c; --raised: #1f1f25;
+    --ink: #e4e4e9; --muted: #9c9ca6; --faint: #61616b;
+    --line: rgba(228,228,233,0.11); --line-soft: rgba(228,228,233,0.06);
+    --attn: #d0a147; --fail: #cf7b71; --ok: #9c9ca6; --live: #928cf2;
+    --attn-soft: rgba(208,161,71,0.12);
+    --proj-hydra: #77777f; --proj-ops: #77777f;
+    --card-border: 1px solid var(--line);
+    --card-shadow: none;
+    --lift-shadow: inset 0 1px 0 rgba(255,255,255,0.04);
   }
 
   /* per-sample typeface, independent of theme */
-  body[data-s="1"] { --sans: "Instrument Sans", -apple-system, system-ui, sans-serif; }
-  body[data-s="2"] { --sans: "IBM Plex Sans", -apple-system, system-ui, sans-serif; }
-  body[data-s="3"] { --sans: "Schibsted Grotesk", -apple-system, system-ui, sans-serif; }
+  body[data-s="1"] { --sans: "Geist", -apple-system, system-ui, sans-serif; }
+  body[data-s="2"] { --sans: "Schibsted Grotesk", -apple-system, system-ui, sans-serif; }
+  body[data-s="3"] { --sans: "Hanken Grotesk", -apple-system, system-ui, sans-serif; }
 
   /* ================= base ================= */
   * { box-sizing: border-box; }
@@ -108,24 +112,25 @@
   .side {
     width: 204px; flex: none;
     background: var(--surface);
-    border-right: 1px solid var(--line);
+    border-right: 1px solid var(--line-soft);
     display: flex; flex-direction: column;
     padding: 16px 10px;
     position: sticky; top: 0; height: 100vh;
   }
   .logo { display: flex; align-items: baseline; gap: 8px; padding: 4px 10px 16px; }
-  .logo b { font-size: 16px; letter-spacing: 0.01em; }
+  .logo b { font-size: 15px; letter-spacing: 0.01em; }
   .logo span { font-family: "IBM Plex Mono", monospace; font-size: 10px; color: var(--faint); }
   .nav { display: flex; flex-direction: column; gap: 1px; }
   .nav a {
     display: flex; align-items: center; justify-content: space-between;
-    padding: 6px 10px; border-radius: 7px;
+    padding: 5px 10px; border-radius: 6px;
     color: var(--muted); text-decoration: none; font-size: 13px;
   }
   .nav a.on { background: var(--line-soft); color: var(--ink); font-weight: 600; }
   .nav a:not(.on):hover { background: var(--line-soft); }
-  .nav .count { font-family: "IBM Plex Mono", monospace; font-size: 11px; color: var(--faint); }
+  .nav .count { font-family: "IBM Plex Mono", monospace; font-size: 11px; color: var(--faint); font-variant-numeric: tabular-nums; }
   .nav .sep { height: 1px; background: var(--line-soft); margin: 8px 10px; }
+  body[data-s="3"] .nav a.on { background: none; color: var(--live); }
   .proto-badge {
     margin-top: auto;
     border: 1px dashed var(--attn); color: var(--attn); background: var(--attn-soft);
@@ -133,43 +138,45 @@
     font-family: "IBM Plex Mono", monospace; font-size: 10px; line-height: 1.5;
   }
   .main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
-  .topbar { display: flex; align-items: baseline; gap: 14px; padding: 22px 30px 0; }
-  .topbar h1 { font-size: 19px; margin: 0; letter-spacing: -0.01em; }
+  .topbar { display: flex; align-items: baseline; gap: 14px; padding: 24px 32px 0; }
+  .topbar h1 { font-size: 18px; margin: 0; letter-spacing: -0.015em; font-weight: 650; }
   .topbar .when { color: var(--muted); font-size: 13px; }
   .topbar .when b { color: var(--ink); font-weight: 600; }
-  #stage { padding: 20px 30px 130px; max-width: 1060px; }
+  #stage { padding: 22px 32px 130px; max-width: 1060px; }
 
   /* ================= shared structure ================= */
-  .lane { margin-bottom: 30px; }
+  .lane { margin-bottom: 34px; }
   .lane-label {
-    text-transform: uppercase; letter-spacing: 0.09em;
-    font-size: 11px; font-weight: 700; color: var(--muted);
+    text-transform: uppercase; letter-spacing: 0.1em;
+    font-size: 10.5px; font-weight: 650; color: var(--faint);
     display: flex; align-items: center; gap: 8px; margin-bottom: 10px;
   }
-  .lane-label .n { font-family: "IBM Plex Mono", monospace; font-weight: 500; color: var(--faint); letter-spacing: 0; }
+  .lane-label .n { font-family: "IBM Plex Mono", monospace; font-weight: 500; color: var(--faint); letter-spacing: 0; font-variant-numeric: tabular-nums; }
 
-  /* ---- needs-you cards ---- */
+  /* ---- needs-you: the lit stage ---- */
   .needs-list { display: flex; flex-direction: column; gap: 10px; }
   .need {
-    background: var(--raised); border: 1px solid var(--line); border-radius: 10px;
-    padding: 12px 16px; display: flex; gap: 12px; align-items: flex-start;
-    box-shadow: var(--shadow);
+    background: var(--raised); border: var(--card-border); border-radius: 10px;
+    padding: 13px 18px;
+    box-shadow: var(--lift-shadow);
+    display: flex; flex-direction: column; gap: 3px;
   }
-  .need .edge { width: 3px; align-self: stretch; border-radius: 2px; flex: none; background: var(--line); }
-  .need[data-tone="warn"] .edge { background: var(--attn); }
-  .need[data-tone="fail"] .edge { background: var(--fail); }
-  .need .body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
   .need .head { display: flex; align-items: baseline; gap: 10px; font-size: 12px; }
-  .need .kind { font-weight: 700; text-transform: uppercase; letter-spacing: 0.07em; font-size: 10.5px; color: var(--muted); }
+  .need .kind {
+    font-weight: 650; text-transform: uppercase; letter-spacing: 0.08em;
+    font-size: 10.5px; color: var(--muted);
+  }
   .need[data-tone="warn"] .kind { color: var(--attn); }
   .need[data-tone="fail"] .kind { color: var(--fail); }
-  .need .title { font-weight: 600; font-size: 14px; }
+  .need .title { font-weight: 600; font-size: 14px; letter-spacing: -0.006em; }
+  .need[data-pri="urgent"] .title { font-size: 15px; }
+  .need[data-pri="medium"], .need[data-pri="low"] { opacity: 0.94; }
   .need .title code {
     font-family: "IBM Plex Mono", monospace; font-size: 12px;
     background: var(--line-soft); padding: 1px 5px; border-radius: 4px;
   }
   .need .ctx { color: var(--muted); font-size: 12.5px; }
-  .need .acts { display: flex; gap: 4px; margin-top: 8px; }
+  .need .acts { display: flex; gap: 4px; margin-top: 9px; margin-left: -9px; }
 
   /* quiet decision affordances - pinned principle from #20 */
   .qbtn {
@@ -178,165 +185,98 @@
     padding: 6px 9px; border-radius: 6px; cursor: pointer;
   }
   .qbtn:hover { background: var(--line-soft); color: var(--ink); }
-  .qbtn.first { color: var(--ink); box-shadow: inset 0 0 0 1px var(--line); }
-  .qbtn.first:hover { box-shadow: inset 0 0 0 1px var(--faint); }
+  .qbtn.first { color: var(--ink); }
   .qbtn:focus-visible { outline: 2px solid var(--live); outline-offset: 1px; }
 
   /* ---- lineage ---- */
   .proj { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; }
-  .proj .pdot { width: 8px; height: 8px; border-radius: 3px; flex: none; display: none; }
-  .proj[data-proj="hydra"] .pdot { background: var(--proj-hydra, var(--faint)); }
-  .proj[data-proj="ops"] .pdot { background: var(--proj-ops, var(--faint)); }
 
-  /* ---- priority encoders ---- */
-  .pri { display: inline-flex; align-items: center; gap: 5px; flex: none; }
-  .pri .bars { display: inline-flex; align-items: flex-end; gap: 1.5px; height: 10px; }
-  .pri .bars i { width: 3px; border-radius: 1px; background: var(--line); }
-  .pri .bars i:nth-child(1) { height: 4px; }
-  .pri .bars i:nth-child(2) { height: 7px; }
-  .pri .bars i:nth-child(3) { height: 10px; }
+  /* ---- priority: shape, not color ---- */
+  .pri { display: inline-flex; align-items: center; flex: none; }
+  .pri .bars { display: inline-flex; align-items: flex-end; gap: 1.5px; height: 9px; }
+  .pri .bars i { width: 2.5px; border-radius: 1px; background: var(--line); }
+  .pri .bars i:nth-child(1) { height: 3.5px; }
+  .pri .bars i:nth-child(2) { height: 6px; }
+  .pri .bars i:nth-child(3) { height: 9px; }
   .pri[data-pri="low"]    .bars i:nth-child(1) { background: var(--faint); }
   .pri[data-pri="medium"] .bars i:nth-child(-n+2) { background: var(--muted); }
   .pri[data-pri="high"]   .bars i { background: var(--muted); }
   .pri[data-pri="urgent"] .bars i { background: var(--ink); }
-  .pri .pri-label {
-    font-size: 10.5px; font-weight: 600; letter-spacing: 0.03em;
-    padding: 1px 7px; border-radius: 999px; display: none;
-  }
 
-  /* ---- state ---- */
-  .state { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; font-size: 12px; font-weight: 600; }
-  .state .dot { width: 7px; height: 7px; border-radius: 50%; flex: none; background: var(--faint); }
-  .state[data-tone="live"] .dot { background: var(--live); animation: pulse 2s ease-in-out infinite; }
-  .state[data-tone="ok"]   .dot { background: var(--ok); }
+  /* ---- state: a small dot + a tinted word ---- */
+  .state { display: inline-flex; align-items: center; gap: 7px; white-space: nowrap; font-size: 12px; font-weight: 550; }
+  .state .dot { width: 6px; height: 6px; border-radius: 50%; flex: none; background: var(--faint); }
+  .state[data-tone="live"] .dot { background: var(--live); animation: pulse 2.4s ease-in-out infinite; }
+  .state[data-tone="ok"]   .dot { display: none; }
+  .state[data-tone="ok"]::before { content: "✓"; font-size: 11.5px; color: var(--ok); }
   .state[data-tone="warn"] .dot { background: var(--attn); }
   .state[data-tone="fail"] .dot { background: var(--fail); }
+  .state[data-tone="live"] { color: var(--live); }
+  .state[data-tone="ok"]   { color: var(--muted); }
   .state[data-tone="warn"] { color: var(--attn); }
   .state[data-tone="fail"] { color: var(--fail); }
-  .state[data-tone="ok"], .state[data-tone="idle"] { color: var(--muted); }
-  .state[data-tone="live"] { color: var(--ink); }
   @keyframes pulse { 50% { opacity: 0.3; } }
   @media (prefers-reduced-motion: reduce) { .state .dot { animation: none !important; } }
 
-  /* ---- waiting-time / age ---- */
+  /* ---- waiting-time: the age label darkens, then warms ---- */
   .age {
     font-family: "IBM Plex Mono", monospace; font-size: 11.5px; white-space: nowrap;
-    color: var(--faint); flex: none;
+    color: var(--faint); flex: none; font-variant-numeric: tabular-nums;
   }
   .age[data-age="recent"] { color: var(--muted); }
   .age[data-age="stale"]  { color: var(--ink); }
-  .age[data-age="old"]    { color: var(--ink); font-weight: 500; }
+  .age[data-age="old"]    { color: var(--attn); font-weight: 500; }
 
   /* ---- ledger ---- */
-  .group { background: var(--raised); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; margin-bottom: 14px; box-shadow: var(--shadow); }
-  .group > h2 {
-    margin: 0; font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em;
-    color: var(--muted); padding: 9px 16px; border-bottom: 1px solid var(--line-soft);
-    background: var(--surface);
-    display: flex; gap: 8px; align-items: center;
+  .group {
+    background: var(--surface); border: var(--card-border); border-radius: 10px;
+    overflow: hidden; margin-bottom: 14px; box-shadow: var(--card-shadow);
   }
-  .group > h2 .n { font-family: "IBM Plex Mono", monospace; color: var(--faint); letter-spacing: 0; }
-  .group > h2 .pdot { width: 8px; height: 8px; border-radius: 3px; display: none; }
-  .group[data-proj="hydra"] > h2 .pdot { background: var(--proj-hydra, var(--faint)); }
-  .group[data-proj="ops"] > h2 .pdot { background: var(--proj-ops, var(--faint)); }
+  .group > h2 {
+    margin: 0; font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.1em;
+    color: var(--muted); padding: 10px 18px 8px; border-bottom: 1px solid var(--line-soft);
+    display: flex; gap: 9px; align-items: center; font-weight: 650;
+  }
+  .group > h2 .n { font-family: "IBM Plex Mono", monospace; color: var(--faint); letter-spacing: 0; font-variant-numeric: tabular-nums; }
+  .group > h2 .pdot { width: 7px; height: 7px; border-radius: 2.5px; flex: none; }
+  .group[data-proj="hydra"] > h2 .pdot { background: var(--proj-hydra); }
+  .group[data-proj="ops"] > h2 .pdot { background: var(--proj-ops); }
   .rowwrap { overflow-x: auto; }
   .lrow {
     display: grid;
-    grid-template-columns: minmax(220px, 1.1fr) 74px 132px minmax(230px, 1.4fr) 52px;
+    grid-template-columns: minmax(220px, 1.1fr) 40px 132px minmax(230px, 1.4fr) 52px;
     gap: 14px; align-items: center;
-    padding: 9px 16px; border-top: 1px solid var(--line-soft);
+    padding: 10px 18px; border-top: 1px solid var(--line-soft);
     min-width: 780px;
   }
   .lrow:first-child { border-top: 0; }
-  .lrow .what .name { font-weight: 600; font-size: 13.5px; }
-  .lrow .what .sub { color: var(--muted); font-size: 12px; display: flex; gap: 6px; align-items: center; }
+  .lrow .what .name { font-weight: 600; font-size: 13.5px; letter-spacing: -0.004em; }
+  .lrow[data-pri="urgent"] .what .name { font-weight: 700; }
+  .lrow[data-pri="low"] .what .name { font-weight: 500; }
+  .lrow[data-pri="low"], .lrow[data-done="1"] { opacity: 0.66; }
+  .lrow .what .sub { color: var(--muted); font-size: 12px; }
   .lrow .now { color: var(--muted); font-size: 12.5px; }
   .lrow .now b { color: var(--ink); font-weight: 600; }
   .lrow .age { text-align: right; }
 
-  /* ---- digest ---- */
-  .digest { display: flex; flex-direction: column; }
+  /* ---- digest: steps back ---- */
+  .digest { display: flex; flex-direction: column; opacity: 0.82; }
   .ditem {
     display: flex; gap: 14px; align-items: baseline;
     padding: 7px 4px; border-bottom: 1px solid var(--line-soft);
   }
   .ditem:last-child { border-bottom: 0; }
-  .ditem .when { font-family: "IBM Plex Mono", monospace; font-size: 11px; color: var(--faint); width: 88px; flex: none; text-align: right; }
-  .ditem .glyph { flex: none; width: 14px; text-align: center; font-size: 12px; color: var(--muted); position: relative; top: 1px; }
+  .ditem .when { font-family: "IBM Plex Mono", monospace; font-size: 11px; color: var(--faint); width: 88px; flex: none; text-align: right; font-variant-numeric: tabular-nums; }
+  .ditem .glyph { flex: none; width: 14px; text-align: center; font-size: 11.5px; color: var(--faint); position: relative; top: 1px; }
   .ditem[data-tone="fail"] .glyph { color: var(--fail); }
-  .ditem .txt { flex: 1; font-size: 13px; }
-  .ditem .ref { color: var(--faint); font-size: 12px; margin-left: 6px; font-family: "IBM Plex Mono", monospace; }
+  .ditem .txt { flex: 1; font-size: 12.5px; }
+  .ditem .ref { color: var(--faint); font-size: 11.5px; margin-left: 6px; font-family: "IBM Plex Mono", monospace; }
   .divider {
     display: flex; align-items: center; gap: 12px;
-    color: var(--faint); font-size: 11px; text-transform: uppercase; letter-spacing: 0.09em;
+    color: var(--faint); font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.1em;
     padding: 10px 0;
   }
-  .divider::before, .divider::after { content: ""; flex: 1; height: 1px; background: var(--line); }
-
-  /* ================= sample 1 · Graphite =================
-     Color is an event. Amber = waiting on you, red = failed; everything else ink.
-     Live = pulsing ring, not hue. Importance = ink strength + bars. */
-  body[data-s="1"] .state[data-tone="live"] .dot {
-    background: none; border: 2px solid var(--ink); width: 5px; height: 5px;
-  }
-  body[data-s="1"] .state[data-tone="ok"] .dot { display: none; }
-  body[data-s="1"] .state[data-tone="ok"]::before { content: "✓"; font-size: 12px; color: var(--muted); }
-  body[data-s="1"] .lrow[data-pri="urgent"] .what .name { font-weight: 700; }
-  body[data-s="1"] .lrow[data-pri="low"] .what .name { font-weight: 500; color: var(--muted); }
-
-  /* ================= sample 2 · Signal =================
-     Every axis has a hue: pills for state, identity dots for projects,
-     priority chips on a hot->gray ramp, amber deepens as waiting grows. */
-  body[data-s="2"] .proj .pdot,
-  body[data-s="2"] .group > h2 .pdot { display: inline-block; }
-  body[data-s="2"] .pri .bars { display: none; }
-  body[data-s="2"] .pri .pri-label { display: inline-block; }
-  body[data-s="2"] .pri[data-pri="urgent"] .pri-label { color: var(--pri-urgent); box-shadow: inset 0 0 0 1px var(--pri-urgent); }
-  body[data-s="2"] .pri[data-pri="high"]   .pri-label { color: var(--pri-high); box-shadow: inset 0 0 0 1px var(--pri-high); }
-  body[data-s="2"] .pri[data-pri="medium"] .pri-label { color: var(--pri-medium); box-shadow: inset 0 0 0 1px var(--pri-medium); }
-  body[data-s="2"] .pri[data-pri="low"]    .pri-label { color: var(--pri-low); box-shadow: inset 0 0 0 1px var(--pri-low); }
-  body[data-s="2"] .state {
-    border-radius: 999px; padding: 2px 9px; font-size: 11px;
-  }
-  body[data-s="2"] .state[data-tone="live"] { background: var(--live-soft); color: var(--live); }
-  body[data-s="2"] .state[data-tone="ok"]   { background: var(--ok-soft); color: var(--ok); }
-  body[data-s="2"] .state[data-tone="warn"] { background: var(--attn-soft); color: var(--attn); }
-  body[data-s="2"] .state[data-tone="fail"] { background: var(--fail-soft); color: var(--fail); }
-  body[data-s="2"] .state[data-tone="idle"] { background: var(--line-soft); color: var(--muted); }
-  body[data-s="2"] .ditem[data-tone="ok"] .glyph { color: var(--ok); }
-  body[data-s="2"] .age { border-radius: 5px; padding: 1px 5px; }
-  body[data-s="2"] .age[data-age="stale"] { background: var(--attn-soft); color: var(--attn); }
-  body[data-s="2"] .age[data-age="old"]   { background: var(--attn-soft); color: var(--attn); font-weight: 500; }
-  body[data-s="2"] .need[data-tone="warn"] { border-color: color-mix(in srgb, var(--attn) 35%, var(--line)); }
-  body[data-s="2"] .need[data-tone="fail"] { border-color: color-mix(in srgb, var(--fail) 35%, var(--line)); }
-
-  /* ================= sample 3 · Limelight =================
-     The page is a dim field; what matters is lit. Prominence = luminance + scale.
-     No chips, no stripes: priority is size and brightness, color tints words. */
-  body[data-s="3"] .need .pri { display: none; }
-  body[data-s="3"] .lrow .pri { visibility: hidden; }   /* keep the grid column */
-  body[data-s="3"] .need .edge { display: none; }
-  body[data-s="3"] .need { border: 0; padding: 14px 18px; }
-  body[data-s="3"] .group { border: 0; }
-  body[data-s="3"] .group > h2 { background: none; border-bottom-color: var(--line-soft); }
-  /* needs-you: the lit stage; urgency scales the light */
-  body[data-s="3"] .need[data-pri="urgent"] .title { font-size: 15px; }
-  body[data-s="3"] .need[data-pri="medium"], body[data-s="3"] .need[data-pri="low"] { opacity: 0.86; }
-  body[data-s="3"] .need[data-tone="warn"] .kind, body[data-s="3"] .need[data-tone="fail"] .kind { font-weight: 700; }
-  /* ledger: priority = presence */
-  body[data-s="3"] .lrow[data-pri="urgent"] .what .name { font-size: 14.5px; font-weight: 700; }
-  body[data-s="3"] .lrow[data-pri="high"] .what .name { font-size: 14px; }
-  body[data-s="3"] .lrow[data-pri="low"] { opacity: 0.62; }
-  body[data-s="3"] .lrow[data-pri="low"] .what .name { font-weight: 400; }
-  body[data-s="3"] .lrow[data-done="1"] { opacity: 0.55; }
-  /* the digest recedes */
-  body[data-s="3"] .digest { opacity: 0.75; }
-  body[data-s="3"] .ditem .txt { font-size: 12.5px; }
-  /* waiting: the spotlight warms as waiting grows */
-  body[data-s="3"] .need[data-age="stale"], body[data-s="3"] .need[data-age="old"] {
-    background: linear-gradient(90deg, var(--attn-soft), var(--raised) 45%);
-  }
-  body[data-s="3"] .state { font-weight: 500; }
+  .divider::before, .divider::after { content: ""; flex: 1; height: 1px; background: var(--line-soft); }
 
   /* ================= legend + switcher (not part of the language) ================= */
   .legend {
@@ -383,7 +323,7 @@
       <a href="#">Notifications <span class="count">5</span></a>
       <a href="#">Settings</a>
     </nav>
-    <div class="proto-badge">PROTOTYPE · throwaway<br>ticket hydra#33<br>&larr; &rarr; sample · t theme</div>
+    <div class="proto-badge">PROTOTYPE · throwaway<br>ticket hydra#33 · round 2<br>&larr; &rarr; sample · t theme</div>
   </aside>
   <main class="main">
     <div class="topbar">
@@ -409,7 +349,7 @@
 </div>
 
 <script>
-/* One dataset (the #20 slice + #29 nouns), ONE render. Samples restyle it via CSS only. */
+/* One dataset (the #20 slice + #29 nouns), ONE render. Samples restyle it via tokens. */
 const data = {
   needsYou: [
     { tone: "warn", kind: "Approval", age: "6m", ageBucket: "fresh", pri: "urgent", proj: "hydra",
@@ -488,7 +428,6 @@ const data = {
 const priEl = (pri) => `
   <span class="pri" data-pri="${pri}" title="priority: ${pri}">
     <span class="bars"><i></i><i></i><i></i></span>
-    <span class="pri-label">${pri[0].toUpperCase() + pri.slice(1)}</span>
   </span>`;
 const stateEl = (tone, label) => `
   <span class="state" data-tone="${tone}"><span class="dot"></span><span>${label}</span></span>`;
@@ -498,18 +437,15 @@ const qbtns = (arr) =>
 function render() {
   const needs = data.needsYou.map((n) => `
     <div class="need" data-tone="${n.tone}" data-pri="${n.pri}" data-age="${n.ageBucket}">
-      <span class="edge"></span>
-      <div class="body">
-        <div class="head">
-          <span class="kind">${n.kind}</span>
-          <span class="proj" data-proj="${n.proj}"><i class="pdot"></i>${n.lineage}</span>
-          ${priEl(n.pri)}
-          <span class="age" data-age="${n.ageBucket}" style="margin-left:auto">waiting ${n.age}</span>
-        </div>
-        <div class="title">${n.title}</div>
-        <div class="ctx">${n.ctx}</div>
-        <div class="acts">${qbtns(n.actions)}</div>
+      <div class="head">
+        <span class="kind">${n.kind}</span>
+        <span class="proj">${n.lineage}</span>
+        ${priEl(n.pri)}
+        <span class="age" data-age="${n.ageBucket}" style="margin-left:auto">waiting ${n.age}</span>
       </div>
+      <div class="title">${n.title}</div>
+      <div class="ctx">${n.ctx}</div>
+      <div class="acts">${qbtns(n.actions)}</div>
     </div>`).join("");
   const groups = data.groups.map((g) => `
     <div class="group" data-proj="${g.proj}">
@@ -557,12 +493,12 @@ function render() {
 
 /* ---------- samples / themes ---------- */
 const samples = [
-  { key: "1", name: "Graphite",
-    legend: "<b>Graphite — silence is the signal.</b> The page is ink; color is an event: <b>amber</b> means waiting on you, <b>red</b> means failed, nothing else gets a hue. Live = a pulsing ring, success = a quiet ✓. Importance = ink weight + gray bars. Waiting-time = the age label darkens as it grows. Lineage = plain-text breadcrumbs." },
-  { key: "2", name: "Signal",
-    legend: "<b>Signal — every axis has a hue.</b> One fixed status palette everywhere: <b>cyan</b> live, <b>green</b> done, <b>amber</b> needs-you, <b>red</b> failed. Projects carry identity dots, priority chips run a hot→gray ramp, and the age chip fills amber as waiting grows." },
-  { key: "3", name: "Limelight",
-    legend: "<b>Limelight — hierarchy by light.</b> The page is a dim field; what matters is lit and larger, the rest recedes. No chips or stripes: priority = scale + brightness, finished work fades, the digest steps back. Color only tints words, and a card warms amber as it waits." },
+  { key: "1", name: "Slate",
+    legend: "<b>Slate — cool neutrals, drawn lines.</b> Blue-gray surfaces, hairline borders, crisp shallow shadows. Needs-you cards are the lit layer: a raised surface with a faint top highlight in dark, never a color wash. Color only at word scale: tinted state words, dots, and an age label that darkens, then warms when something has waited too long." },
+  { key: "2", name: "Umber",
+    legend: "<b>Umber — warm neutrals, soft depth.</b> No borders anywhere: surfaces separate by shadow alone, like paper layers. Warm charcoal in dark, warm porcelain in light. Same quiet color system — desaturated petrol for live, olive for done, ochre for waiting, clay for failed — all at word and dot scale." },
+  { key: "3", name: "Iris",
+    legend: "<b>Iris — pure neutrals, one identity accent, flat.</b> No shadows at all: hairlines and typography do the work. A single muted iris marks what is alive right now (live dots, running state, active nav) — everything else is grayscale, with amber and clay reserved for waiting-on-you and failed. Done is a neutral ✓." },
 ];
 function params() { return new URLSearchParams(location.search); }
 function curSample() {
