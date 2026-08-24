@@ -3,7 +3,8 @@
   ROUND 3. Slate won round 2 (hairline borders + crisp shallow shadows, quiet
   color at word/dot scale). Open axes are now live controls instead of samples:
     - typeface (8 justified candidates)
-    - surface tint: hue + strength (strength 0 = Iris's pure neutral grays)
+    - surface theme (designed presets; free hue slider was imperceptible) +
+      color strength (0 = pure neutral grays). Semantic colors stay fixed.
     - ground lightness per theme
     - emphasis weight (round-2 bolds caused squinting)
   Settings persist in the URL - copy it to report the winning combination.
@@ -310,8 +311,9 @@
   <h3>Slate playground</h3>
   <select id="face" aria-label="Typeface"></select>
   <p class="why" id="why"></p>
-  <div class="row"><label for="hue">tint hue</label><input type="range" id="hue" min="0" max="360" step="5"><span class="val" id="huev"></span></div>
-  <div class="row"><label for="tint">tint strength</label><input type="range" id="tint" min="0" max="15" step="1"><span class="val" id="tintv"></span></div>
+  <select id="th" aria-label="Surface theme"></select>
+  <p class="why" id="thwhy" style="min-height:2em"></p>
+  <div class="row"><label for="cs">color strength</label><input type="range" id="cs" min="0" max="10" step="1"><span class="val" id="csv"></span></div>
   <div class="row"><label for="ground" id="groundlabel">ground</label><input type="range" id="ground" step="0.5"><span class="val" id="groundv"></span></div>
   <div class="row"><label>emphasis</label><span class="wbtns" id="wbtns"><button data-w="500">500</button><button data-w="600">600</button><button data-w="700">700</button></span></div>
   <div class="foot">
@@ -489,8 +491,27 @@ const faces = [
     why: "<b>IBM Plex Sans</b> - engineered corporate workhorse, strong at data density, and kin to the IBM Plex Mono already used for ages and refs." },
 ];
 
+/* ---------- surface themes ----------
+   Designed presets for the surface family only; semantic colors (amber, clay,
+   sage, petrol, project dots) are fixed and must work on all of them.
+   h = hue; cl/cd = chroma in light/dark at strength 5; strength scales 0..2x. */
+const themes = [
+  { name: "Slate", h: 250, cl: 0.013, cd: 0.015,
+    why: "cool blue-gray - the round-2/3 default; technical, Linear-adjacent." },
+  { name: "Neutral", h: 0, cl: 0, cd: 0,
+    why: "pure achromatic grays (Iris's ground); strength has nothing to amplify." },
+  { name: "Porcelain", h: 85, cl: 0.014, cd: 0.012,
+    why: "warm paper white / warm charcoal - Umber's temperature on Slate's structure." },
+  { name: "Sage", h: 150, cl: 0.014, cd: 0.014,
+    why: "green-gray, botanical calm; the most restful hue family for long staring." },
+  { name: "Midnight", h: 265, cl: 0.013, cd: 0.024,
+    why: "blue-violet leaning rich in dark - a deep navy night mode, quiet in light." },
+  { name: "Mauve", h: 320, cl: 0.011, cd: 0.016,
+    why: "purple-gray; soft and slightly plush, kin to the iris accent world." },
+];
+
 /* ---------- controls ---------- */
-const DEF = { face: "Geist", hue: 250, tint: 8, ll: 94.5, dl: 17, w: 600 };
+const DEF = { face: "Geist", th: "Slate", cs: 5, ll: 94.5, dl: 17, w: 600 };
 function params() { return new URLSearchParams(location.search); }
 function get(k) { const p = params(); return p.has(k) ? p.get(k) : String(DEF[k]); }
 function setParams(obj) {
@@ -504,7 +525,9 @@ const $ = (id) => document.getElementById(id);
 
 function apply() {
   const dark = get("theme") === "dark";
-  const hue = +get("hue"), c = +get("tint") / 1000;
+  const th = themes.find((t) => t.name === get("th")) || themes[0];
+  const cs = +get("cs");
+  const hue = th.h, c = (dark ? th.cd : th.cl) * (cs / 5);
   const ll = +get("ll"), dl = +get("dl"), w = +get("w");
   const face = get("face");
   const b = document.body.style;
@@ -537,8 +560,9 @@ function apply() {
   /* sync panel widgets */
   $("face").value = face;
   $("why").innerHTML = (faces.find((f) => f.name === face) || faces[0]).why;
-  $("hue").value = hue; $("huev").textContent = hue + "°";
-  $("tint").value = +get("tint"); $("tintv").textContent = get("tint");
+  $("th").value = th.name;
+  $("thwhy").innerHTML = "<b>" + th.name + "</b> - " + th.why;
+  $("cs").value = cs; $("csv").textContent = String(cs);
   const g = $("ground");
   g.min = dark ? 10 : 88; g.max = dark ? 26 : 97;
   g.value = bgL; $("groundv").textContent = bgL + "%";
@@ -548,15 +572,16 @@ function apply() {
 
 $("face").innerHTML = faces.map((f) => `<option>${f.name}</option>`).join("");
 $("face").addEventListener("change", (e) => setParams({ face: e.target.value }));
-$("hue").addEventListener("input", (e) => setParams({ hue: e.target.value }));
-$("tint").addEventListener("input", (e) => setParams({ tint: e.target.value }));
+$("th").innerHTML = themes.map((t) => `<option>${t.name}</option>`).join("");
+$("th").addEventListener("change", (e) => setParams({ th: e.target.value }));
+$("cs").addEventListener("input", (e) => setParams({ cs: e.target.value }));
 $("ground").addEventListener("input", (e) =>
   setParams(document.body.dataset.t === "dark" ? { dl: e.target.value } : { ll: e.target.value }));
 $("wbtns").addEventListener("click", (e) => {
   if (e.target.dataset.w) setParams({ w: e.target.dataset.w });
 });
 $("copy").addEventListener("click", () => {
-  const s = ["face", "hue", "tint", "ll", "dl", "w"].map((k) => k + "=" + get(k)).join(" ");
+  const s = ["face", "th", "cs", "ll", "dl", "w"].map((k) => k + "=" + get(k)).join(" ");
   if (navigator.clipboard) navigator.clipboard.writeText(s);
   $("copy").textContent = s.length > 24 ? "copied ✓" : s;
   setTimeout(() => { $("copy").textContent = "copy settings"; }, 1600);
