@@ -1,100 +1,51 @@
 <!--
   PROTOTYPE - throwaway. Ticket: https://github.com/rogierpennink/hydra/issues/1 -> #33
-  ROUND 2. Round 1 (Graphite/Signal/Limelight) verdict: color in small precise
-  doses - never a traffic light; keep Limelight's restraint + light-play but
-  subtler, never yellowish; no colored accent bars; surfaces unsettled; more
-  refinement. Round 1 lives in git history on this branch.
-
-  Round 2 converges the language (quiet color at word/dot scale, priority via
-  weight + gray bars, receding finished work, quiet buttons) and argues about
-  SURFACES + DEPTH:
-    1 Slate - cool neutrals, hairline borders + crisp shadows
-    2 Umber - warm neutrals, borderless, shadow-only depth
-    3 Iris  - pure neutrals + one muted identity accent, flat
-  Switch samples with the floating bar / arrow keys / ?s=1|2|3.
-  Toggle theme with the bar / "t" / ?theme=light|dark.
+  ROUND 3. Slate won round 2 (hairline borders + crisp shallow shadows, quiet
+  color at word/dot scale). Open axes are now live controls instead of samples:
+    - typeface (8 justified candidates)
+    - surface tint: hue + strength (strength 0 = Iris's pure neutral grays)
+    - ground lightness per theme
+    - emphasis weight (round-2 bolds caused squinting)
+  Settings persist in the URL - copy it to report the winning combination.
+  Rounds 1-2 live in git history on this branch (78ab468, b18c9bb).
 -->
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Hydra Design Language</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Schibsted+Grotesk:wght@400;500;600;700&family=Hanken+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Inter:wght@400;500;600;700&family=Schibsted+Grotesk:wght@400;500;600;700&family=Hanken+Grotesk:wght@400;500;600;700&family=Instrument+Sans:wght@400;500;600;700&family=Figtree:wght@400;500;600;700&family=Onest:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
 <style>
   /* ================= tokens =================
-     Six sets: 3 samples x 2 themes, stamped as body[data-s="1|2|3"][data-t="light|dark"].
-     Components only read the vars. No-JS fallback: bare body = sample 1 light. */
+     Surface family (bg/surface/raised/ink/muted/faint/line) is computed by JS
+     from the controls and set inline on body. The static values below are the
+     Slate defaults, doubling as the no-JS fallback. Semantic colors are static
+     per theme. */
 
-  body, body[data-s="1"][data-t="light"] {
+  body, body[data-t="light"] {
     --bg: #eef0f2; --surface: #f8f9fa; --raised: #ffffff;
     --ink: #1b1e24; --muted: #5f6672; --faint: #9aa1ad;
     --line: rgba(27,30,36,0.10); --line-soft: rgba(27,30,36,0.055);
     --attn: #8a6116; --fail: #a34e46; --ok: #48745a; --live: #48717f;
     --attn-soft: rgba(138,97,22,0.09);
     --proj-hydra: #7d7ab0; --proj-ops: #a67f92;
-    --card-border: 1px solid var(--line);
     --card-shadow: 0 1px 2px rgba(23,26,33,0.05);
     --lift-shadow: 0 1px 2px rgba(23,26,33,0.06), 0 4px 14px rgba(23,26,33,0.06);
   }
-  body[data-s="1"][data-t="dark"] {
+  body[data-t="dark"] {
     --bg: #14161b; --surface: #191c22; --raised: #20242c;
     --ink: #dfe2e8; --muted: #9aa1ad; --faint: #5f6672;
     --line: rgba(223,226,232,0.10); --line-soft: rgba(223,226,232,0.06);
     --attn: #d0a147; --fail: #cf7b71; --ok: #7fae8e; --live: #7fa8b8;
     --attn-soft: rgba(208,161,71,0.12);
     --proj-hydra: #9490c9; --proj-ops: #bd93a8;
-    --card-border: 1px solid var(--line);
     --card-shadow: 0 1px 2px rgba(0,0,0,0.35);
     --lift-shadow: inset 0 1px 0 rgba(255,255,255,0.05), 0 1px 2px rgba(0,0,0,0.4), 0 6px 18px rgba(0,0,0,0.3);
   }
-  body[data-s="2"][data-t="light"] {
-    --bg: #f1efeb; --surface: #f8f7f4; --raised: #fffefb;
-    --ink: #211e1a; --muted: #6d6660; --faint: #a09890;
-    --line: rgba(33,30,26,0.09); --line-soft: rgba(33,30,26,0.05);
-    --attn: #8f6a1d; --fail: #a3564a; --ok: #5c7a5e; --live: #4e7a82;
-    --attn-soft: rgba(143,106,29,0.09);
-    --proj-hydra: #8a80a8; --proj-ops: #a8867e;
-    --card-border: 1px solid transparent;
-    --card-shadow: 0 1px 2px rgba(40,32,24,0.05), 0 5px 16px rgba(40,32,24,0.05);
-    --lift-shadow: 0 1px 2px rgba(40,32,24,0.06), 0 8px 24px rgba(40,32,24,0.08);
+  body {
+    --sans: "Geist", -apple-system, system-ui, sans-serif;
+    --w-emph: 600;      /* emphasis weight, control-adjustable */
+    --w-urgent: 700;    /* w-emph + 100 */
   }
-  body[data-s="2"][data-t="dark"] {
-    --bg: #161411; --surface: #1b1916; --raised: #22201c;
-    --ink: #e8e4de; --muted: #a09890; --faint: #6d6660;
-    --line: rgba(232,228,222,0.09); --line-soft: rgba(232,228,222,0.055);
-    --attn: #d3a556; --fail: #d08579; --ok: #93ac89; --live: #86a9ac;
-    --attn-soft: rgba(211,165,86,0.11);
-    --proj-hydra: #a49ac2; --proj-ops: #bf9c93;
-    --card-border: 1px solid transparent;
-    --card-shadow: 0 1px 2px rgba(0,0,0,0.35), 0 5px 16px rgba(0,0,0,0.25);
-    --lift-shadow: inset 0 1px 0 rgba(255,255,255,0.045), 0 2px 4px rgba(0,0,0,0.4), 0 10px 28px rgba(0,0,0,0.35);
-  }
-  body[data-s="3"][data-t="light"] {
-    --bg: #f3f3f5; --surface: #f9f9fb; --raised: #ffffff;
-    --ink: #1c1c21; --muted: #64646d; --faint: #9c9ca6;
-    --line: rgba(28,28,33,0.11); --line-soft: rgba(28,28,33,0.06);
-    --attn: #8a6116; --fail: #a34e46; --ok: #64646d; --live: #5b55c4;
-    --attn-soft: rgba(138,97,22,0.09);
-    --proj-hydra: #8e8e99; --proj-ops: #8e8e99;
-    --card-border: 1px solid var(--line);
-    --card-shadow: none;
-    --lift-shadow: none;
-  }
-  body[data-s="3"][data-t="dark"] {
-    --bg: #131316; --surface: #18181c; --raised: #1f1f25;
-    --ink: #e4e4e9; --muted: #9c9ca6; --faint: #61616b;
-    --line: rgba(228,228,233,0.11); --line-soft: rgba(228,228,233,0.06);
-    --attn: #d0a147; --fail: #cf7b71; --ok: #9c9ca6; --live: #928cf2;
-    --attn-soft: rgba(208,161,71,0.12);
-    --proj-hydra: #77777f; --proj-ops: #77777f;
-    --card-border: 1px solid var(--line);
-    --card-shadow: none;
-    --lift-shadow: inset 0 1px 0 rgba(255,255,255,0.04);
-  }
-
-  /* per-sample typeface, independent of theme */
-  body[data-s="1"] { --sans: "Geist", -apple-system, system-ui, sans-serif; }
-  body[data-s="2"] { --sans: "Schibsted Grotesk", -apple-system, system-ui, sans-serif; }
-  body[data-s="3"] { --sans: "Hanken Grotesk", -apple-system, system-ui, sans-serif; }
 
   /* ================= base ================= */
   * { box-sizing: border-box; }
@@ -108,7 +59,7 @@
   .mono { font-family: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace; }
   .app { display: flex; min-height: 100vh; }
 
-  /* ---------- chrome (styled by tokens, part of the language) ---------- */
+  /* ---------- chrome ---------- */
   .side {
     width: 204px; flex: none;
     background: var(--surface);
@@ -118,7 +69,7 @@
     position: sticky; top: 0; height: 100vh;
   }
   .logo { display: flex; align-items: baseline; gap: 8px; padding: 4px 10px 16px; }
-  .logo b { font-size: 15px; letter-spacing: 0.01em; }
+  .logo b { font-size: 15px; letter-spacing: 0.01em; font-weight: var(--w-emph); }
   .logo span { font-family: "IBM Plex Mono", monospace; font-size: 10px; color: var(--faint); }
   .nav { display: flex; flex-direction: column; gap: 1px; }
   .nav a {
@@ -126,11 +77,10 @@
     padding: 5px 10px; border-radius: 6px;
     color: var(--muted); text-decoration: none; font-size: 13px;
   }
-  .nav a.on { background: var(--line-soft); color: var(--ink); font-weight: 600; }
+  .nav a.on { background: var(--line-soft); color: var(--ink); font-weight: var(--w-emph); }
   .nav a:not(.on):hover { background: var(--line-soft); }
   .nav .count { font-family: "IBM Plex Mono", monospace; font-size: 11px; color: var(--faint); font-variant-numeric: tabular-nums; }
   .nav .sep { height: 1px; background: var(--line-soft); margin: 8px 10px; }
-  body[data-s="3"] .nav a.on { background: none; color: var(--live); }
   .proto-badge {
     margin-top: auto;
     border: 1px dashed var(--attn); color: var(--attn); background: var(--attn-soft);
@@ -139,16 +89,16 @@
   }
   .main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
   .topbar { display: flex; align-items: baseline; gap: 14px; padding: 24px 32px 0; }
-  .topbar h1 { font-size: 18px; margin: 0; letter-spacing: -0.015em; font-weight: 650; }
+  .topbar h1 { font-size: 18px; margin: 0; letter-spacing: -0.015em; font-weight: var(--w-emph); }
   .topbar .when { color: var(--muted); font-size: 13px; }
-  .topbar .when b { color: var(--ink); font-weight: 600; }
+  .topbar .when b { color: var(--ink); font-weight: var(--w-emph); }
   #stage { padding: 22px 32px 130px; max-width: 1060px; }
 
-  /* ================= shared structure ================= */
+  /* ================= structure ================= */
   .lane { margin-bottom: 34px; }
   .lane-label {
     text-transform: uppercase; letter-spacing: 0.1em;
-    font-size: 10.5px; font-weight: 650; color: var(--faint);
+    font-size: 10.5px; font-weight: var(--w-emph); color: var(--faint);
     display: flex; align-items: center; gap: 8px; margin-bottom: 10px;
   }
   .lane-label .n { font-family: "IBM Plex Mono", monospace; font-weight: 500; color: var(--faint); letter-spacing: 0; font-variant-numeric: tabular-nums; }
@@ -156,31 +106,31 @@
   /* ---- needs-you: the lit stage ---- */
   .needs-list { display: flex; flex-direction: column; gap: 10px; }
   .need {
-    background: var(--raised); border: var(--card-border); border-radius: 10px;
+    background: var(--raised); border: 1px solid var(--line); border-radius: 10px;
     padding: 13px 18px;
     box-shadow: var(--lift-shadow);
     display: flex; flex-direction: column; gap: 3px;
   }
   .need .head { display: flex; align-items: baseline; gap: 10px; font-size: 12px; }
   .need .kind {
-    font-weight: 650; text-transform: uppercase; letter-spacing: 0.08em;
+    font-weight: var(--w-emph); text-transform: uppercase; letter-spacing: 0.08em;
     font-size: 10.5px; color: var(--muted);
   }
   .need[data-tone="warn"] .kind { color: var(--attn); }
   .need[data-tone="fail"] .kind { color: var(--fail); }
-  .need .title { font-weight: 600; font-size: 14px; letter-spacing: -0.006em; }
+  .need .title { font-weight: var(--w-emph); font-size: 14px; letter-spacing: -0.006em; }
   .need[data-pri="urgent"] .title { font-size: 15px; }
   .need[data-pri="medium"], .need[data-pri="low"] { opacity: 0.94; }
   .need .title code {
     font-family: "IBM Plex Mono", monospace; font-size: 12px;
-    background: var(--line-soft); padding: 1px 5px; border-radius: 4px;
+    background: var(--line-soft); padding: 1px 5px; border-radius: 4px; font-weight: 400;
   }
   .need .ctx { color: var(--muted); font-size: 12.5px; }
   .need .acts { display: flex; gap: 4px; margin-top: 9px; margin-left: -9px; }
 
   /* quiet decision affordances - pinned principle from #20 */
   .qbtn {
-    font: 600 12px/1 var(--sans);
+    font-family: var(--sans); font-size: 12px; line-height: 1; font-weight: var(--w-emph);
     border: 0; background: none; color: var(--muted);
     padding: 6px 9px; border-radius: 6px; cursor: pointer;
   }
@@ -204,7 +154,7 @@
   .pri[data-pri="urgent"] .bars i { background: var(--ink); }
 
   /* ---- state: a small dot + a tinted word ---- */
-  .state { display: inline-flex; align-items: center; gap: 7px; white-space: nowrap; font-size: 12px; font-weight: 550; }
+  .state { display: inline-flex; align-items: center; gap: 7px; white-space: nowrap; font-size: 12px; font-weight: 500; }
   .state .dot { width: 6px; height: 6px; border-radius: 50%; flex: none; background: var(--faint); }
   .state[data-tone="live"] .dot { background: var(--live); animation: pulse 2.4s ease-in-out infinite; }
   .state[data-tone="ok"]   .dot { display: none; }
@@ -229,13 +179,13 @@
 
   /* ---- ledger ---- */
   .group {
-    background: var(--surface); border: var(--card-border); border-radius: 10px;
+    background: var(--surface); border: 1px solid var(--line); border-radius: 10px;
     overflow: hidden; margin-bottom: 14px; box-shadow: var(--card-shadow);
   }
   .group > h2 {
     margin: 0; font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.1em;
     color: var(--muted); padding: 10px 18px 8px; border-bottom: 1px solid var(--line-soft);
-    display: flex; gap: 9px; align-items: center; font-weight: 650;
+    display: flex; gap: 9px; align-items: center; font-weight: var(--w-emph);
   }
   .group > h2 .n { font-family: "IBM Plex Mono", monospace; color: var(--faint); letter-spacing: 0; font-variant-numeric: tabular-nums; }
   .group > h2 .pdot { width: 7px; height: 7px; border-radius: 2.5px; flex: none; }
@@ -250,13 +200,13 @@
     min-width: 780px;
   }
   .lrow:first-child { border-top: 0; }
-  .lrow .what .name { font-weight: 600; font-size: 13.5px; letter-spacing: -0.004em; }
-  .lrow[data-pri="urgent"] .what .name { font-weight: 700; }
+  .lrow .what .name { font-weight: var(--w-emph); font-size: 13.5px; letter-spacing: -0.004em; }
+  .lrow[data-pri="urgent"] .what .name { font-weight: var(--w-urgent); }
   .lrow[data-pri="low"] .what .name { font-weight: 500; }
   .lrow[data-pri="low"], .lrow[data-done="1"] { opacity: 0.66; }
   .lrow .what .sub { color: var(--muted); font-size: 12px; }
   .lrow .now { color: var(--muted); font-size: 12.5px; }
-  .lrow .now b { color: var(--ink); font-weight: 600; }
+  .lrow .now b { color: var(--ink); font-weight: var(--w-emph); }
   .lrow .age { text-align: right; }
 
   /* ---- digest: steps back ---- */
@@ -278,33 +228,55 @@
   }
   .divider::before, .divider::after { content: ""; flex: 1; height: 1px; background: var(--line-soft); }
 
-  /* ================= legend + switcher (not part of the language) ================= */
-  .legend {
-    position: fixed; bottom: 64px; left: 50%; transform: translateX(-50%);
-    max-width: 860px; width: calc(100% - 48px);
-    background: var(--raised); border: 1px solid var(--line); border-radius: 10px;
-    box-shadow: 0 8px 30px rgba(0,0,0,0.18);
-    padding: 10px 16px; font-size: 12px; color: var(--muted); line-height: 1.55;
-    z-index: 40;
+  /* ================= controls / switcher (not part of the language) ================= */
+  .panel {
+    position: fixed; bottom: 64px; right: 16px; width: 264px;
+    background: #17161a; color: #d8d6dc;
+    border-radius: 12px; padding: 14px 16px 12px;
+    box-shadow: 0 8px 30px rgba(0,0,0,0.35);
+    z-index: 45; font-family: "IBM Plex Mono", monospace; font-size: 11px;
   }
-  .legend b { color: var(--ink); }
-  .legend .close { float: right; cursor: pointer; border: 0; background: none; color: var(--faint); font-size: 14px; padding: 0 2px; }
+  .panel h3 {
+    margin: 0 0 10px; font-size: 10px; text-transform: uppercase; letter-spacing: 0.12em;
+    color: #8d8a94; font-weight: 500;
+  }
+  .panel .row { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 9px; }
+  .panel label { color: #8d8a94; flex: none; }
+  .panel .val { color: #fff; min-width: 34px; text-align: right; font-variant-numeric: tabular-nums; }
+  .panel select {
+    width: 100%; background: #232128; color: #fff; border: 1px solid #35323c;
+    border-radius: 6px; padding: 5px 7px; font: inherit; margin-bottom: 6px;
+  }
+  .panel input[type="range"] { flex: 1; accent-color: #9a94e8; min-width: 0; }
+  .panel .why { color: #8d8a94; line-height: 1.5; margin: 0 0 12px; min-height: 3em; }
+  .panel .why b { color: #c9c6d0; font-weight: 500; }
+  .panel .wbtns { display: flex; gap: 4px; }
+  .panel .wbtns button {
+    flex: 1; background: #232128; color: #c9c6d0; border: 1px solid #35323c;
+    border-radius: 6px; padding: 4px 0; font: inherit; cursor: pointer;
+  }
+  .panel .wbtns button.on { background: #9a94e8; color: #17161a; border-color: #9a94e8; }
+  .panel .foot { display: flex; justify-content: space-between; align-items: center; margin-top: 12px; }
+  .panel .foot button {
+    background: none; border: 1px solid #35323c; color: #c9c6d0;
+    border-radius: 6px; padding: 4px 10px; font: inherit; cursor: pointer;
+  }
+  .panel .foot button:hover { border-color: #8d8a94; }
   .sw {
-    position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%);
+    position: fixed; bottom: 16px; right: 16px;
     background: #17161a; color: #fff;
     border-radius: 999px; padding: 6px 8px;
     display: flex; align-items: center; gap: 4px;
     box-shadow: 0 6px 24px rgba(0,0,0,0.35);
     z-index: 50; font-family: "IBM Plex Mono", monospace;
   }
+  .sw .label { font-size: 12px; font-weight: 600; padding: 0 8px; }
   .sw button {
     background: none; border: 0; color: #fff; cursor: pointer;
     font: inherit; font-size: 13px; padding: 4px 10px; border-radius: 999px;
   }
   .sw button:hover { background: rgba(255,255,255,0.14); }
-  .sw button:focus-visible { outline: 2px solid #7aa7b3; outline-offset: 1px; }
-  .sw .label { font-size: 12px; font-weight: 600; padding: 0 4px; min-width: 148px; text-align: center; }
-  .sw .div { width: 1px; height: 16px; background: rgba(255,255,255,0.22); margin: 0 2px; }
+  .sw button:focus-visible { outline: 2px solid #9a94e8; outline-offset: 1px; }
 </style>
 
 <div class="app">
@@ -323,7 +295,7 @@
       <a href="#">Notifications <span class="count">5</span></a>
       <a href="#">Settings</a>
     </nav>
-    <div class="proto-badge">PROTOTYPE · throwaway<br>ticket hydra#33 · round 2<br>&larr; &rarr; sample · t theme</div>
+    <div class="proto-badge">PROTOTYPE · throwaway<br>ticket hydra#33 · round 3<br>t theme · c controls</div>
   </aside>
   <main class="main">
     <div class="topbar">
@@ -334,22 +306,28 @@
   </main>
 </div>
 
-<div class="legend" id="legend" hidden>
-  <button class="close" id="legendclose" aria-label="Hide legend">&times;</button>
-  <span id="legendtext"></span>
+<div class="panel" id="panel">
+  <h3>Slate playground</h3>
+  <select id="face" aria-label="Typeface"></select>
+  <p class="why" id="why"></p>
+  <div class="row"><label for="hue">tint hue</label><input type="range" id="hue" min="0" max="360" step="5"><span class="val" id="huev"></span></div>
+  <div class="row"><label for="tint">tint strength</label><input type="range" id="tint" min="0" max="15" step="1"><span class="val" id="tintv"></span></div>
+  <div class="row"><label for="ground" id="groundlabel">ground</label><input type="range" id="ground" step="0.5"><span class="val" id="groundv"></span></div>
+  <div class="row"><label>emphasis</label><span class="wbtns" id="wbtns"><button data-w="500">500</button><button data-w="600">600</button><button data-w="700">700</button></span></div>
+  <div class="foot">
+    <button id="copy">copy settings</button>
+    <button id="reset">reset</button>
+  </div>
 </div>
 
 <div class="sw">
-  <button id="prev" aria-label="Previous sample">&larr;</button>
-  <span class="label" id="swlabel"></span>
-  <button id="next" aria-label="Next sample">&rarr;</button>
-  <span class="div"></span>
+  <span class="label">Slate · round 3</span>
   <button id="theme" aria-label="Toggle theme">◐</button>
-  <button id="legendbtn" aria-label="Toggle legend">?</button>
+  <button id="panelbtn" aria-label="Toggle controls">⚙</button>
 </div>
 
 <script>
-/* One dataset (the #20 slice + #29 nouns), ONE render. Samples restyle it via tokens. */
+/* One dataset (the #20 slice + #29 nouns), one render; controls restyle via tokens. */
 const data = {
   needsYou: [
     { tone: "warn", kind: "Approval", age: "6m", ageBucket: "fresh", pri: "urgent", proj: "hydra",
@@ -491,47 +469,107 @@ function render() {
     </section>`;
 }
 
-/* ---------- samples / themes ---------- */
-const samples = [
-  { key: "1", name: "Slate",
-    legend: "<b>Slate — cool neutrals, drawn lines.</b> Blue-gray surfaces, hairline borders, crisp shallow shadows. Needs-you cards are the lit layer: a raised surface with a faint top highlight in dark, never a color wash. Color only at word scale: tinted state words, dots, and an age label that darkens, then warms when something has waited too long." },
-  { key: "2", name: "Umber",
-    legend: "<b>Umber — warm neutrals, soft depth.</b> No borders anywhere: surfaces separate by shadow alone, like paper layers. Warm charcoal in dark, warm porcelain in light. Same quiet color system — desaturated petrol for live, olive for done, ochre for waiting, clay for failed — all at word and dot scale." },
-  { key: "3", name: "Iris",
-    legend: "<b>Iris — pure neutrals, one identity accent, flat.</b> No shadows at all: hairlines and typography do the work. A single muted iris marks what is alive right now (live dots, running state, active nav) — everything else is grayscale, with amber and clay reserved for waiting-on-you and failed. Done is a neutral ✓." },
+/* ---------- typeface candidates ---------- */
+const faces = [
+  { name: "Geist",
+    why: "<b>Geist</b> - Vercel's dashboard face, engineered for dense dev-tool UI: crisp digits, tight rhythm at 12-14px. Slate's round-2 default." },
+  { name: "Inter",
+    why: "<b>Inter</b> - the industry baseline (Linear, GitHub run on it): tall x-height, maximum neutrality. Here as the control group." },
+  { name: "Schibsted Grotesk",
+    why: "<b>Schibsted Grotesk</b> - commissioned for a news group; grotesk bones with humanist warmth. The regular weight you liked in Umber." },
+  { name: "Hanken Grotesk",
+    why: "<b>Hanken Grotesk</b> - geometric-humanist hybrid with gentle, open bolds - the emphasis weight you found easiest in Iris." },
+  { name: "Instrument Sans",
+    why: "<b>Instrument Sans</b> - contemporary grotesk, slightly pragmatic and narrow; quiet personality without leaning corporate." },
+  { name: "Onest",
+    why: "<b>Onest</b> - drawn for long on-screen reading; calm rhythm, slightly narrow letterforms that ease dense monitoring rows." },
+  { name: "Figtree",
+    why: "<b>Figtree</b> - friendly geometric with airy counters; the softest candidate, testing how far warmth can go before authority is lost." },
+  { name: "IBM Plex Sans",
+    why: "<b>IBM Plex Sans</b> - engineered corporate workhorse, strong at data density, and kin to the IBM Plex Mono already used for ages and refs." },
 ];
+
+/* ---------- controls ---------- */
+const DEF = { face: "Geist", hue: 250, tint: 8, ll: 94.5, dl: 17, w: 600 };
 function params() { return new URLSearchParams(location.search); }
-function curSample() {
-  const i = samples.findIndex((s) => s.key === (params().get("s") || "1"));
-  return i === -1 ? 0 : i;
-}
-function apply() {
+function get(k) { const p = params(); return p.has(k) ? p.get(k) : String(DEF[k]); }
+function setParams(obj) {
   const p = params();
-  const s = samples[curSample()];
-  document.body.dataset.s = s.key;
-  document.body.dataset.t = p.get("theme") === "dark" ? "dark" : "light";
-  document.getElementById("swlabel").textContent = s.key + " · " + s.name;
-  document.getElementById("legendtext").innerHTML = s.legend;
-}
-function setParam(k, v) {
-  const p = params(); p.set(k, v);
+  for (const [k, v] of Object.entries(obj)) p.set(k, String(v));
   try { history.replaceState(null, "", "?" + p.toString()); } catch (e) { /* file:// */ }
   apply();
 }
-function shift(d) { setParam("s", samples[(curSample() + d + samples.length) % samples.length].key); }
-function toggleTheme() { setParam("theme", document.body.dataset.t === "dark" ? "light" : "dark"); }
-document.getElementById("prev").addEventListener("click", () => shift(-1));
-document.getElementById("next").addEventListener("click", () => shift(1));
-document.getElementById("theme").addEventListener("click", toggleTheme);
-const legend = document.getElementById("legend");
-document.getElementById("legendbtn").addEventListener("click", () => { legend.hidden = !legend.hidden; });
-document.getElementById("legendclose").addEventListener("click", () => { legend.hidden = true; });
+
+const $ = (id) => document.getElementById(id);
+
+function apply() {
+  const dark = get("theme") === "dark";
+  const hue = +get("hue"), c = +get("tint") / 1000;
+  const ll = +get("ll"), dl = +get("dl"), w = +get("w");
+  const face = get("face");
+  const b = document.body.style;
+  document.body.dataset.t = dark ? "dark" : "light";
+  const bgL = dark ? dl : ll;
+  const ok = (L, ch, alpha) => `oklch(${L}% ${ch.toFixed(4)} ${hue}${alpha ? " / " + alpha : ""})`;
+  if (dark) {
+    b.setProperty("--bg", ok(bgL, c));
+    b.setProperty("--surface", ok(bgL + 2.2, c));
+    b.setProperty("--raised", ok(bgL + 5.5, c * 0.9));
+    b.setProperty("--ink", ok(90, Math.min(c * 0.7, 0.008)));
+    b.setProperty("--muted", ok(68, c));
+    b.setProperty("--faint", ok(50, c));
+    b.setProperty("--line", ok(90, c, 0.10));
+    b.setProperty("--line-soft", ok(90, c, 0.06));
+  } else {
+    b.setProperty("--bg", ok(bgL, c));
+    b.setProperty("--surface", ok(Math.min(bgL + 2.2, 98.5), c * 0.8));
+    b.setProperty("--raised", ok(Math.min(bgL + 5.5, 100), c * 0.5));
+    b.setProperty("--ink", ok(23, Math.min(c, 0.01)));
+    b.setProperty("--muted", ok(48, c));
+    b.setProperty("--faint", ok(66, c));
+    b.setProperty("--line", ok(23, Math.min(c, 0.01), 0.10));
+    b.setProperty("--line-soft", ok(23, Math.min(c, 0.01), 0.055));
+  }
+  b.setProperty("--sans", `"${face}", -apple-system, system-ui, sans-serif`);
+  b.setProperty("--w-emph", String(w));
+  b.setProperty("--w-urgent", String(Math.min(w + 100, 800)));
+
+  /* sync panel widgets */
+  $("face").value = face;
+  $("why").innerHTML = (faces.find((f) => f.name === face) || faces[0]).why;
+  $("hue").value = hue; $("huev").textContent = hue + "°";
+  $("tint").value = +get("tint"); $("tintv").textContent = get("tint");
+  const g = $("ground");
+  g.min = dark ? 10 : 88; g.max = dark ? 26 : 97;
+  g.value = bgL; $("groundv").textContent = bgL + "%";
+  $("groundlabel").textContent = "ground · " + (dark ? "dark" : "light");
+  for (const btn of $("wbtns").children) btn.classList.toggle("on", +btn.dataset.w === w);
+}
+
+$("face").innerHTML = faces.map((f) => `<option>${f.name}</option>`).join("");
+$("face").addEventListener("change", (e) => setParams({ face: e.target.value }));
+$("hue").addEventListener("input", (e) => setParams({ hue: e.target.value }));
+$("tint").addEventListener("input", (e) => setParams({ tint: e.target.value }));
+$("ground").addEventListener("input", (e) =>
+  setParams(document.body.dataset.t === "dark" ? { dl: e.target.value } : { ll: e.target.value }));
+$("wbtns").addEventListener("click", (e) => {
+  if (e.target.dataset.w) setParams({ w: e.target.dataset.w });
+});
+$("copy").addEventListener("click", () => {
+  const s = ["face", "hue", "tint", "ll", "dl", "w"].map((k) => k + "=" + get(k)).join(" ");
+  if (navigator.clipboard) navigator.clipboard.writeText(s);
+  $("copy").textContent = s.length > 24 ? "copied ✓" : s;
+  setTimeout(() => { $("copy").textContent = "copy settings"; }, 1600);
+});
+$("reset").addEventListener("click", () => setParams(DEF));
+function toggleTheme() { setParams({ theme: document.body.dataset.t === "dark" ? "light" : "dark" }); }
+$("theme").addEventListener("click", toggleTheme);
+$("panelbtn").addEventListener("click", () => { $("panel").hidden = !$("panel").hidden; });
 document.addEventListener("keydown", (e) => {
   const t = e.target;
-  if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
-  if (e.key === "ArrowLeft") shift(-1);
-  if (e.key === "ArrowRight") shift(1);
+  if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable)) return;
   if (e.key === "t") toggleTheme();
+  if (e.key === "c") $("panel").hidden = !$("panel").hidden;
 });
 
 /* initial theme: URL param > host stamp > OS preference */
@@ -545,6 +583,5 @@ document.addEventListener("keydown", (e) => {
   }
   render();
   apply();
-  legend.hidden = false;
 })();
 </script>
