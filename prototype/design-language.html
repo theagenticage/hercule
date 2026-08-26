@@ -511,7 +511,8 @@ const themes = [
 ];
 
 /* ---------- controls ---------- */
-const DEF = { face: "Geist", th: "Slate", cs: 5, ll: 94.5, dl: 17, w: 600 };
+/* Pinned by Rogier's reaction, 2026-08-26 - see docs/design-language.md on main */
+const DEF = { face: "Onest", th: "Midnight", cs: 6, ll: 94.5, dl: 20, w: 500 };
 function params() { return new URLSearchParams(location.search); }
 function get(k) { const p = params(); return p.has(k) ? p.get(k) : String(DEF[k]); }
 function setParams(obj) {
