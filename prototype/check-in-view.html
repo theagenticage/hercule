@@ -1,13 +1,22 @@
 <!--
   PROTOTYPE - throwaway. Ticket: https://github.com/rogierpennink/hydra/issues/1 -> #20
-  ROUND 2. Round 1 was deferred: no design language, no Task nouns. Both now exist
-  (#33 -> docs/design-language.md, #29 -> ADR 0019), so this re-runs the same three
-  structural variants rebuilt in the pinned Midnight language with settled Task fields
-  (priority urgent/high/normal/low, status open/in-progress/done/cancelled, labels,
-  provenance refs, one optional project).
-  Switch variants with the floating bar, arrow keys, or ?variant=A|B|C. Theme: ◐ or "t".
-  Single self-contained HTML file because no app exists yet (spec-stage repo).
-  Round 1 lives in git history on this branch (71c0dff).
+  ROUND 3. Round 2 verdict: right language, wrong level. This round is intent-level:
+  the unit is the strand of delegated work (task / standing workflow / one-off ask),
+  execution detail (runs, sessions, steps) only behind progressive disclosure.
+  Shared principles across all variants:
+    - provenance-first ranking: you asked > standing > routine schedule
+    - aggregate by default (routine workflows collapse to one row per workflow)
+    - decisions are questions: phrased as a question, answers are the buttons
+    - mark system: [equalizer] agent working · [diamond] decision wanted · [circular arrow] routine · glyph outcomes
+    - outcomes live on strands + one rolled-up digest line; no event feed
+    - assistants/fleet/intake = ambient pulse, never stat cards
+    - calm/busy dataset toggle to prove the shape survives a 6-runner fleet
+  The variants differ on WHERE DECISIONS LIVE:
+    A Briefing - focus queue, one decision at a time, work below
+    B Ledger   - all decisions visible as a pinned lane above the book
+    C Strands  - decisions attach to the strand that raised them; ranked list, pulse rail
+  Switch: floating bar, arrow keys, ?variant=A|B|C · dataset: "d" or the calm/busy
+  button · theme: "t" or the half-circle button. Rounds 1-2 in git history (71c0dff, fd86bea).
 -->
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -83,7 +92,7 @@
   .mono { font-family: var(--mono); }
   .app { display: flex; min-height: 100vh; }
 
-  /* ---------- chrome (shared shell, same across variants) ---------- */
+  /* ---------- chrome (shared shell) ---------- */
   .side {
     width: 204px; flex: none;
     background: var(--surface);
@@ -116,10 +125,9 @@
   .topbar { display: flex; align-items: baseline; gap: 14px; padding: 24px 32px 0; }
   .topbar h1 { font-size: 18px; margin: 0; letter-spacing: -0.015em; font-weight: var(--w-emph); }
   .topbar .when { color: var(--muted); font-size: 13px; }
-  .topbar .when b { color: var(--ink); font-weight: var(--w-emph); }
-  #stage { padding: 22px 32px 130px; }
+  #stage { padding: 16px 32px 130px; }
 
-  /* ============ shared atoms (the pinned encodings) ============ */
+  /* ============ shared atoms ============ */
   .lane-label {
     text-transform: uppercase; letter-spacing: 0.1em;
     font-size: 10.5px; font-weight: var(--w-emph); color: var(--faint);
@@ -127,7 +135,51 @@
   }
   .lane-label .n { font-family: var(--mono); font-weight: 500; letter-spacing: 0; font-variant-numeric: tabular-nums; }
 
-  /* priority: shape and ink, never color (urgent 3 ink / high 3 muted / normal 2 muted / low 1 faint) */
+  /* the headline: one calm sentence, never stat cards */
+  .headline { font-size: 13.5px; color: var(--muted); padding-bottom: 20px; }
+  .headline b { color: var(--ink); font-weight: var(--w-emph); font-variant-numeric: tabular-nums; }
+  .headline .warm { color: var(--attn); font-weight: var(--w-emph); }
+
+  /* the pulse: ambient system state as quiet text lines */
+  .pulseline {
+    display: flex; flex-wrap: wrap; gap: 4px 18px; align-items: baseline;
+    color: var(--faint); font-size: 12px; padding-top: 26px;
+  }
+  .pulseline .k { text-transform: uppercase; letter-spacing: 0.1em; font-size: 10px; font-weight: var(--w-emph); margin-right: 2px; }
+  .pulseline b { color: var(--muted); font-weight: var(--w-emph); }
+  .pulseline .warm { color: var(--attn); }
+
+  /* ---- mark system (proposed design-language extension) ---- */
+  /* agent working: tiny equalizer in the live hue */
+  .eq { display: inline-flex; align-items: flex-end; gap: 1.5px; height: 10px; width: 11px; flex: none; }
+  .eq i { width: 2.5px; border-radius: 1px; background: var(--live); height: 4px; animation: eqb 1.15s ease-in-out infinite; }
+  .eq i:nth-child(2) { animation-delay: 0.22s; }
+  .eq i:nth-child(3) { animation-delay: 0.44s; }
+  @keyframes eqb { 0%, 100% { height: 3px; } 50% { height: 9px; } }
+  @media (prefers-reduced-motion: reduce) {
+    .eq i { animation: none !important; }
+    .eq i:nth-child(1) { height: 4px; } .eq i:nth-child(2) { height: 8px; } .eq i:nth-child(3) { height: 5px; }
+    .dot, .prog i { animation: none !important; }
+  }
+  /* decision wanted: a small diamond in the attention hue */
+  .dmark { color: var(--attn); font-size: 9px; flex: none; position: relative; top: -1px; }
+  /* routine / scheduled */
+  .rmark { color: var(--faint); font-size: 12px; flex: none; }
+  /* outcome glyphs */
+  .okg { color: var(--ok); } .failg { color: var(--fail); } .cang { color: var(--faint); }
+  /* queued / idle */
+  .qmark { width: 6px; height: 6px; border-radius: 50%; border: 1.5px solid var(--faint); flex: none; display: inline-block; }
+  .markcell { width: 16px; flex: none; display: inline-flex; justify-content: center; align-items: center; font-size: 12px; }
+
+  /* multi-step progress: segments, shape not color */
+  .prog { display: inline-flex; align-items: center; gap: 2px; flex: none; }
+  .prog i { width: 8px; height: 3px; border-radius: 2px; background: var(--line); }
+  .prog i.d { background: var(--muted); }
+  .prog i.c { background: var(--live); animation: pulse 2.4s ease-in-out infinite; }
+  .prog .t { font-family: var(--mono); font-size: 10.5px; color: var(--faint); margin-left: 5px; font-variant-numeric: tabular-nums; }
+  @keyframes pulse { 50% { opacity: 0.3; } }
+
+  /* priority bars (pinned) */
   .pri { display: inline-flex; align-items: center; flex: none; }
   .pri .bars { display: inline-flex; align-items: flex-end; gap: 1.5px; height: 9px; }
   .pri .bars i { width: 2.5px; border-radius: 1px; background: var(--line); }
@@ -139,24 +191,7 @@
   .pri[data-pri="high"]   .bars i { background: var(--muted); }
   .pri[data-pri="urgent"] .bars i { background: var(--ink); }
 
-  /* state: 6px dot + tinted word; done/ok collapses to the ✓ glyph */
-  .state { display: inline-flex; align-items: center; gap: 7px; white-space: nowrap; font-size: 12px; font-weight: 500; }
-  .state .dot { width: 6px; height: 6px; border-radius: 50%; flex: none; background: var(--faint); }
-  .state[data-tone="live"] .dot { background: var(--live); animation: pulse 2.4s ease-in-out infinite; }
-  .state[data-tone="ok"]   .dot { display: none; }
-  .state[data-tone="ok"]::before { content: "✓"; font-size: 11.5px; color: var(--ok); }
-  .state[data-tone="cancelled"] .dot { display: none; }
-  .state[data-tone="cancelled"]::before { content: "–"; color: var(--faint); }
-  .state[data-tone="warn"] .dot { background: var(--attn); }
-  .state[data-tone="fail"] .dot { background: var(--fail); }
-  .state[data-tone="live"] { color: var(--live); }
-  .state[data-tone="ok"], .state[data-tone="cancelled"] { color: var(--muted); }
-  .state[data-tone="warn"] { color: var(--attn); }
-  .state[data-tone="fail"] { color: var(--fail); }
-  @keyframes pulse { 50% { opacity: 0.3; } }
-  @media (prefers-reduced-motion: reduce) { .state .dot { animation: none !important; } }
-
-  /* waiting-time: the age label darkens, then warms */
+  /* waiting-time (pinned): darkens, then warms */
   .age {
     font-family: var(--mono); font-size: 11.5px; white-space: nowrap;
     color: var(--faint); flex: none; font-variant-numeric: tabular-nums;
@@ -165,168 +200,152 @@
   .age[data-age="stale"]  { color: var(--ink); }
   .age[data-age="old"]    { color: var(--attn); font-weight: 500; }
 
-  /* quiet decision affordances - pinned principle from #20 round 1 */
+  /* quiet decision affordances (pinned) */
   .qbtn {
     font-family: var(--sans); font-size: 12px; line-height: 1; font-weight: var(--w-emph);
     border: 0; background: none; color: var(--muted);
-    padding: 6px 9px; border-radius: 6px; cursor: pointer;
+    padding: 6px 9px; border-radius: 6px; cursor: pointer; white-space: nowrap;
   }
   .qbtn:hover { background: var(--line-soft); color: var(--ink); }
   .qbtn.first { color: var(--ink); }
   .qbtn:focus-visible { outline: 2px solid var(--live); outline-offset: 1px; }
 
-  /* lineage: plain-text breadcrumbs; project dots on group headers only */
-  .proj { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; }
-  .pdot { width: 7px; height: 7px; border-radius: 2.5px; flex: none; }
-  .pdot[data-proj="hydra"] { background: var(--proj-hydra); }
-  .pdot[data-proj="ops"] { background: var(--proj-ops); }
-
-  .ref { font-family: var(--mono); font-size: 11px; color: var(--faint); }
   code {
     font-family: var(--mono); font-size: 12px;
     background: var(--line-soft); padding: 1px 5px; border-radius: 4px; font-weight: 400;
   }
-  .divider {
-    display: flex; align-items: center; gap: 12px;
-    color: var(--faint); font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.1em;
-    padding: 10px 0;
-  }
-  .divider::before, .divider::after { content: ""; flex: 1; height: 1px; background: var(--line-soft); }
 
-  /* needs-you card: the lit stage (--raised + hairline + lift) */
-  .need {
+  /* ---- strand row: one line of intent, detail behind a click ---- */
+  .strand {
+    border-top: 1px solid var(--line-soft);
+    padding: 9px 2px;
+  }
+  .strand:first-of-type { border-top: 0; }
+  .strand .row { display: flex; align-items: center; gap: 10px; cursor: pointer; }
+  .strand .name { font-weight: var(--w-emph); font-size: 13.5px; letter-spacing: -0.004em; white-space: nowrap; }
+  .strand[data-pri="urgent"] .name { font-weight: var(--w-urgent); }
+  .strand[data-done="1"] { opacity: 0.66; }
+  .strand .sub { color: var(--faint); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .strand .note { color: var(--muted); font-size: 12.5px; margin-left: auto; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .strand .note[data-tone="warn"] { color: var(--attn); }
+  .strand .note[data-tone="fail"] { color: var(--fail); }
+  .strand .detail { display: none; }
+  .strand.open .detail {
+    display: flex; flex-direction: column; gap: 6px;
+    margin: 8px 0 4px 26px; padding: 10px 14px;
+    background: var(--surface); border: 1px solid var(--line-soft); border-radius: 8px;
+    font-size: 12.5px; color: var(--muted);
+  }
+  .strand .detail .dl { display: flex; align-items: center; gap: 9px; }
+  .strand .detail .dl .mono { font-size: 11px; color: var(--faint); }
+  .strand .detail .acts { display: flex; gap: 2px; margin-left: -9px; }
+
+  /* ---- decision item: always a question; answers are the buttons ---- */
+  .dcard {
     background: var(--raised); border: 1px solid var(--line); border-radius: 10px;
-    padding: 13px 18px;
     box-shadow: var(--lift-shadow);
-    display: flex; flex-direction: column; gap: 3px;
+    padding: 14px 18px 11px;
+    display: flex; flex-direction: column; gap: 4px;
   }
-  .need .head { display: flex; align-items: baseline; gap: 10px; font-size: 12px; }
-  .need .kind {
-    font-weight: var(--w-emph); text-transform: uppercase; letter-spacing: 0.08em;
-    font-size: 10.5px; color: var(--muted);
-  }
-  .need[data-tone="warn"] .kind { color: var(--attn); }
-  .need[data-tone="fail"] .kind { color: var(--fail); }
-  .need .title { font-weight: var(--w-emph); font-size: 14px; letter-spacing: -0.006em; }
-  .need[data-pri="urgent"] .title { font-size: 15px; font-weight: var(--w-urgent); }
-  .need .ctx { color: var(--muted); font-size: 12.5px; }
-  .need .acts { display: flex; gap: 4px; margin-top: 9px; margin-left: -9px; }
+  .dcard .over { display: flex; align-items: baseline; gap: 10px; font-size: 12px; color: var(--muted); }
+  .dcard .over .prov { text-transform: uppercase; letter-spacing: 0.08em; font-size: 10px; color: var(--faint); font-weight: var(--w-emph); }
+  .dcard .q { font-size: 15px; font-weight: var(--w-emph); letter-spacing: -0.008em; display: flex; align-items: baseline; gap: 9px; }
+  .dcard[data-pri="urgent"] .q { font-size: 16px; font-weight: var(--w-urgent); }
+  .dcard .why { color: var(--muted); font-size: 12.5px; }
+  .dcard .acts { display: flex; gap: 4px; margin-top: 8px; margin-left: -9px; align-items: center; }
 
-  /* digest item: history steps back */
-  .digest { display: flex; flex-direction: column; opacity: 0.82; }
-  .ditem {
-    display: flex; gap: 14px; align-items: baseline;
-    padding: 7px 4px; border-bottom: 1px solid var(--line-soft);
-  }
-  .ditem:last-child { border-bottom: 0; }
-  .ditem .when { font-family: var(--mono); font-size: 11px; color: var(--faint); width: 88px; flex: none; text-align: right; font-variant-numeric: tabular-nums; }
-  .ditem .glyph { flex: none; width: 14px; text-align: center; font-size: 11.5px; color: var(--faint); position: relative; top: 1px; }
-  .ditem[data-tone="fail"] .glyph { color: var(--fail); }
-  .ditem[data-tone="ok"] .glyph { color: var(--ok); }
-  .ditem .txt { flex: 1; font-size: 12.5px; }
-  .ditem .txt b { font-weight: var(--w-emph); }
-  .ditem .ref { margin-left: 6px; }
-
-  /* ============ Variant A: attention stack ============ */
-  /* One column ordered by urgency: needs-you (lit) -> running -> landed digest.
-     The page IS a priority queue; clearing the top is the primary affordance. */
-  .va { display: flex; flex-direction: column; gap: 34px; max-width: 860px; }
-  .va .lane { display: flex; flex-direction: column; gap: 10px; }
-  .va .lane > .lane-label { margin-bottom: 2px; }
-  .va .runrow {
-    background: var(--surface); border: 1px solid var(--line); border-radius: 10px;
+  .drow {
+    display: flex; align-items: center; gap: 10px;
+    padding: 9px 14px;
+    background: var(--raised); border: 1px solid var(--line); border-radius: 10px;
     box-shadow: var(--card-shadow);
-    padding: 10px 16px;
-    display: flex; align-items: center; gap: 14px;
   }
-  .va .runrow .body { flex: 1; min-width: 0; }
-  .va .runrow .name { font-weight: var(--w-emph); font-size: 13.5px; letter-spacing: -0.004em; }
-  .va .runrow .sub { color: var(--muted); font-size: 12px; }
-  .va .runrow .now { color: var(--muted); font-size: 12.5px; }
+  .drow .q { font-weight: var(--w-emph); font-size: 13.5px; white-space: nowrap; }
+  .drow[data-pri="urgent"] .q { font-weight: var(--w-urgent); }
+  .drow .why { color: var(--faint); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .drow .acts { display: flex; gap: 2px; margin-left: auto; }
 
-  /* ============ Variant B: delegation ledger ============ */
-  /* Everything delegated as one book, grouped by project; state inline per strand.
-     Scanning is the primary affordance; attention rows sit on the raised layer. */
-  .vb { display: flex; flex-direction: column; gap: 16px; max-width: 1060px; }
-  .vb .stats { display: flex; gap: 26px; padding: 2px 2px 0; }
-  .vb .stat { display: flex; align-items: baseline; gap: 8px; }
-  .vb .stat .v { font-family: var(--mono); font-size: 16px; font-weight: 500; font-variant-numeric: tabular-nums; }
-  .vb .stat .k { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--faint); font-weight: var(--w-emph); }
-  .vb .stat .v[data-tone="warn"] { color: var(--attn); }
-  .vb .stat .v[data-tone="live"] { color: var(--live); }
-  .vb .group {
-    background: var(--surface); border: 1px solid var(--line); border-radius: 10px;
-    overflow: hidden; box-shadow: var(--card-shadow);
+  /* ---- landed digest: one line, expandable ---- */
+  .digestline {
+    display: flex; align-items: center; gap: 10px; cursor: pointer;
+    color: var(--muted); font-size: 12.5px; padding: 2px 2px;
   }
-  .vb .group > h2 {
+  .digestline b { font-weight: var(--w-emph); color: var(--ink); font-variant-numeric: tabular-nums; }
+  .digestline .chev { color: var(--faint); font-size: 10px; }
+  .digest { display: none; flex-direction: column; opacity: 0.82; padding-top: 6px; }
+  .digest.open { display: flex; }
+  .ditem { display: flex; gap: 12px; align-items: baseline; padding: 5px 2px; font-size: 12.5px; }
+  .ditem .when { font-family: var(--mono); font-size: 11px; color: var(--faint); width: 44px; flex: none; text-align: right; font-variant-numeric: tabular-nums; }
+  .ditem .glyph { flex: none; width: 14px; text-align: center; font-size: 11.5px; }
+  .ditem .more { color: var(--faint); }
+
+  /* ============ Variant A: briefing ============ */
+  .va { max-width: 760px; display: flex; flex-direction: column; }
+  .va .lane { margin-bottom: 30px; }
+  .va .lane > .lane-label { margin-bottom: 10px; }
+  .va .focuswrap { display: flex; flex-direction: column; gap: 8px; }
+  .va .focusnav {
+    display: flex; align-items: center; gap: 8px;
+    color: var(--faint); font-size: 12px;
+  }
+  .va .focusnav .ct { font-family: var(--mono); font-size: 11px; font-variant-numeric: tabular-nums; }
+  .va .focusnav .qbtn { padding: 4px 8px; }
+  .va .nextpeek { color: var(--faint); font-size: 12px; padding: 2px 4px; }
+  .va .nextpeek b { color: var(--muted); font-weight: var(--w-emph); }
+  .va .alldone {
+    border: 1px solid var(--line-soft); border-radius: 10px; padding: 14px 18px;
+    color: var(--muted); font-size: 13px; background: var(--surface);
+  }
+  .va .tier { margin-top: 14px; }
+  .va .tier:first-of-type { margin-top: 0; }
+  .va .tier > .lane-label { margin-bottom: 2px; }
+
+  /* ============ Variant B: ledger ============ */
+  .vb { max-width: 1000px; display: flex; flex-direction: column; gap: 26px; }
+  .vb .decisions { display: flex; flex-direction: column; gap: 6px; }
+  .vb .decisions > .lane-label { margin-bottom: 4px; }
+  .vb .book {
+    background: var(--surface); border: 1px solid var(--line); border-radius: 10px;
+    box-shadow: var(--card-shadow); overflow: hidden;
+  }
+  .vb .book h2 {
     margin: 0; font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.1em;
-    color: var(--muted); padding: 10px 18px 8px; border-bottom: 1px solid var(--line-soft);
+    color: var(--muted); padding: 9px 16px 7px; border-bottom: 1px solid var(--line-soft);
     display: flex; gap: 9px; align-items: center; font-weight: var(--w-emph);
   }
-  .vb .group > h2 .n { font-family: var(--mono); color: var(--faint); letter-spacing: 0; font-variant-numeric: tabular-nums; }
-  .vb .rowwrap { overflow-x: auto; }
-  .vb .lrow {
-    display: grid;
-    grid-template-columns: minmax(230px, 1.1fr) 40px 138px minmax(240px, 1.4fr) minmax(120px, auto) 52px;
-    gap: 14px; align-items: center;
-    padding: 10px 18px; border-top: 1px solid var(--line-soft);
-    min-width: 900px;
-  }
-  .vb .lrow:first-child { border-top: 0; }
-  .vb .lrow[data-hot="1"] { background: var(--raised); }
-  .vb .lrow .what .name { font-weight: var(--w-emph); font-size: 13.5px; letter-spacing: -0.004em; }
-  .vb .lrow[data-pri="urgent"] .what .name { font-weight: var(--w-urgent); }
-  .vb .lrow[data-pri="low"] .what .name { font-weight: 500; font-size: 13px; }
-  .vb .lrow[data-pri="low"], .vb .lrow[data-done="1"] { opacity: 0.66; }
-  .vb .lrow .what .sub { color: var(--muted); font-size: 12px; }
-  .vb .lrow .now { color: var(--muted); font-size: 12.5px; }
-  .vb .lrow .now b { color: var(--ink); font-weight: var(--w-emph); }
-  .vb .lrow .acts { display: flex; gap: 2px; justify-content: flex-end; margin: -4px 0; }
-  .vb .lrow .age { text-align: right; }
+  .vb .book h2 .n { font-family: var(--mono); color: var(--faint); letter-spacing: 0; font-variant-numeric: tabular-nums; }
+  .vb .book .strand { padding: 9px 16px; }
+  .vb .book .strand.open .detail { margin-left: 26px; background: var(--bg); }
+  .vb .landedlane { padding: 4px 2px 0; }
 
-  /* ============ Variant C: catch-up feed ============ */
-  /* Live rail pinned left; reverse-chron feed right. Needs-you items are lit
-     interruptions in the stream; a divider marks the last check-in.
-     Catch-up reading is the primary affordance. */
-  .vc { display: grid; grid-template-columns: 288px minmax(0, 1fr); gap: 28px; align-items: start; max-width: 1080px; }
-  .vc .rail { display: flex; flex-direction: column; gap: 10px; position: sticky; top: 18px; }
-  .vc .rail > .lane-label { margin-bottom: 2px; }
-  .vc .railcard {
-    background: var(--surface); border: 1px solid var(--line); border-radius: 10px;
-    box-shadow: var(--card-shadow);
-    padding: 10px 13px; display: flex; flex-direction: column; gap: 2px;
+  /* ============ Variant C: strands + pulse rail ============ */
+  .vc { display: grid; grid-template-columns: minmax(0, 1fr) 240px; gap: 40px; align-items: start; max-width: 1080px; }
+  .vc .maincol { display: flex; flex-direction: column; }
+  .vc .maincol .lane { margin-bottom: 28px; }
+  .vc .maincol .lane > .lane-label { margin-bottom: 10px; }
+  .vc .needstrand { display: flex; flex-direction: column; gap: 8px; }
+  .vc .cstrand {
+    background: var(--raised); border: 1px solid var(--line); border-radius: 10px;
+    box-shadow: var(--lift-shadow);
+    padding: 11px 16px;
+    display: flex; flex-direction: column; gap: 2px;
   }
-  .vc .railcard .name { font-weight: var(--w-emph); font-size: 13px; letter-spacing: -0.004em; }
-  .vc .railcard .sub { color: var(--muted); font-size: 12px; }
-  .vc .railcard .act { color: var(--faint); font-size: 11.5px; font-family: var(--mono); }
-  .vc .feed { display: flex; flex-direction: column; }
-  .vc .feed > .lane-label { padding-bottom: 14px; }
-  .vc .fitem { display: flex; gap: 0; position: relative; padding: 0 0 16px 30px; }
-  .vc .fitem::before {
-    content: ""; position: absolute; left: 7px; top: 20px; bottom: -4px;
-    width: 1px; background: var(--line-soft);
-  }
-  .vc .fitem:last-child::before, .vc .fitem[data-last="1"]::before { display: none; }
-  .vc .fitem .node {
-    position: absolute; left: 0; top: 2px;
-    width: 15px; text-align: center;
-    font-size: 11.5px; color: var(--faint);
-  }
-  .vc .fitem .node .dot {
-    display: inline-block; width: 6px; height: 6px; border-radius: 50%;
-    background: var(--faint); position: relative; top: -1px;
-  }
-  .vc .fitem[data-tone="ok"] .node { color: var(--ok); }
-  .vc .fitem[data-tone="fail"] .node { color: var(--fail); }
-  .vc .fitem[data-tone="warn"] .node .dot { background: var(--attn); }
-  .vc .fitem[data-tone="fail"] .node .dot { background: var(--fail); }
-  .vc .fitem .body { flex: 1; min-width: 0; }
-  .vc .fitem .whenline { font-family: var(--mono); font-size: 11px; color: var(--faint); margin-bottom: 1px; font-variant-numeric: tabular-nums; }
-  .vc .fitem .txt { font-size: 13px; }
-  .vc .fitem .txt b { font-weight: var(--w-emph); }
-  .vc .fitem.seen { opacity: 0.82; }
-  .vc .fneed { margin: 3px 0 4px; }
-  .vc .divider { padding: 2px 0 18px; }
+  .vc .cstrand .top { display: flex; align-items: center; gap: 10px; }
+  .vc .cstrand .name { font-weight: var(--w-emph); font-size: 13.5px; }
+  .vc .cstrand[data-pri="urgent"] .name { font-weight: var(--w-urgent); }
+  .vc .cstrand .sub { color: var(--faint); font-size: 12px; }
+  .vc .cstrand .ask { display: flex; align-items: center; gap: 9px; margin-top: 5px; }
+  .vc .cstrand .ask .q { font-weight: var(--w-emph); font-size: 13.5px; color: var(--ink); }
+  .vc .cstrand .ask .acts { display: flex; gap: 2px; margin-left: auto; }
+  .vc .rail { position: sticky; top: 20px; display: flex; flex-direction: column; gap: 22px; }
+  .vc .pblock { display: flex; flex-direction: column; gap: 5px; }
+  .vc .pblock > .lane-label { margin-bottom: 3px; }
+  .vc .pline { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--muted); }
+  .vc .pline .mono { font-size: 11px; color: var(--faint); }
+  .vc .pline b { font-weight: var(--w-emph); color: var(--ink); }
+  .vc .pline .warm { color: var(--attn); }
+  .vc .pline .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--live); flex: none; animation: pulse 2.4s ease-in-out infinite; }
+  .vc .pline .idledot { width: 6px; height: 6px; border-radius: 50%; border: 1.5px solid var(--faint); flex: none; }
 
   /* ============ switcher (not part of the design) ============ */
   .sw {
@@ -337,13 +356,14 @@
     box-shadow: 0 6px 24px rgba(0,0,0,0.35);
     z-index: 50; font-family: var(--mono);
   }
-  .sw .label { font-size: 12px; font-weight: 500; padding: 0 8px; min-width: 176px; text-align: center; }
+  .sw .label { font-size: 12px; font-weight: 500; padding: 0 8px; min-width: 130px; text-align: center; }
   .sw button {
     background: none; border: 0; color: #fff; cursor: pointer;
     font: inherit; font-size: 13px; padding: 4px 10px; border-radius: 999px;
   }
   .sw button:hover { background: rgba(255,255,255,0.14); }
   .sw button:focus-visible { outline: 2px solid #9a94e8; outline-offset: 1px; }
+  .sw .ds { font-size: 11px; color: #c9c6d0; }
 </style>
 
 <div class="app">
@@ -351,9 +371,9 @@
     <div class="logo"><b>Hydra</b><span>v1 · rogier</span></div>
     <nav class="nav">
       <a href="#">Intake <span class="count">7</span></a>
-      <a href="#" class="on">Check-in <span class="count">4</span></a>
+      <a href="#" class="on">Check-in <span class="count" id="navcount"></span></a>
       <a href="#">Tasks</a>
-      <a href="#">Sessions <span class="count">2</span></a>
+      <a href="#">Sessions</a>
       <a href="#">Runs</a>
       <a href="#">Workflows</a>
       <div class="sep"></div>
@@ -362,12 +382,12 @@
       <a href="#">Notifications <span class="count">5</span></a>
       <a href="#">Settings</a>
     </nav>
-    <div class="proto-badge">PROTOTYPE · throwaway<br>ticket hydra#20 · round 2<br>&larr; &rarr; variants · t theme</div>
+    <div class="proto-badge">PROTOTYPE · throwaway<br>ticket hydra#20 · round 3<br>&larr; &rarr; variants · d data · t theme</div>
   </aside>
   <main class="main">
     <div class="topbar">
       <h1>Check-in</h1>
-      <span class="when">Sunday 14:32 &middot; last check-in <b>yesterday 18:40</b></span>
+      <span class="when">Sunday 14:32</span>
     </div>
     <div id="stage"></div>
   </main>
@@ -377,271 +397,471 @@
   <button id="prev" aria-label="Previous variant">&larr;</button>
   <span class="label" id="swlabel"></span>
   <button id="next" aria-label="Next variant">&rarr;</button>
+  <button id="dsbtn" class="ds" aria-label="Toggle dataset"></button>
   <button id="theme" aria-label="Toggle theme">◐</button>
 </div>
 
 <script>
-/* One shared fake dataset (Task nouns per ADR 0019); three structural layouts.
-   priority: urgent | high | normal | low. status: open | in-progress | done | cancelled. */
-const data = {
-  needsYou: [
-    { tone: "warn", kind: "Approval", age: "6m", ageBucket: "fresh", pri: "urgent",
-      lineage: "hydra · Fix flaky webhook tests",
-      title: 'Session wants to run <code>git push origin fix/webhook-retries</code>',
-      ctx: 'Claude Code on hetzner-01 · approval-required · <span class="ref">github:issue:rogierpennink/hydra#112</span>',
-      actions: ["Approve", "Deny", "Open session"] },
-    { tone: "warn", kind: "Permission", age: "18m", ageBucket: "recent", pri: "high",
-      lineage: "hydra · Refactor event pipeline",
-      title: 'Permission request: <code>infra</code> grant',
-      ctx: "profile worker lacks infra (wants to drain runner hetzner-01)",
-      actions: ["Grant for session", "Add to profile", "Deny"] },
-    { tone: "warn", kind: "Breaker", age: "41m", ageBucket: "stale", pri: "high",
-      lineage: "Operations · Email triage",
-      title: "&ldquo;Email triage&rdquo; trigger paused &ndash; spawn bound tripped",
-      ctx: "gmail/personal · 12 runs in 10 min (bound 10) · 14 matched events held",
-      actions: ["Review held events", "Resume trigger"] },
-    { tone: "fail", kind: "Run failed", age: "7h", ageBucket: "old", pri: "normal",
-      lineage: "Operations · Nightly digest",
-      title: "&ldquo;Nightly digest&rdquo; run failed &ndash; iteration-limit",
-      ctx: "cron · step summarize exhausted its capped edge (3 traversals)",
-      actions: ["View run", "Re-run"] },
-  ],
-  running: [
-    { name: "PR review · PR #87", sub: "run 484 · workflow PR review · hydra",
-      state: "running 12m", now: "step 2/4 review-code · turn 3, reading packages/contract", age: "12m", ageBucket: "fresh" },
-    { name: "Issue triage", sub: "run 485 · workflow Issue triage · hydra",
-      state: "running 2m", now: "step 1/2 judge · 3 events in batch", age: "2m", ageBucket: "fresh" },
-    { name: "Refactor event pipeline", sub: "task · chat session on macbook-pro · hydra",
-      state: "running 34m", now: "turn 7 · editing src/ingress/pipeline.ts", age: "34m", ageBucket: "recent" },
-    { name: "Hera", sub: "assistant · #ops on Discord",
-      state: "in conversation", now: "answering &ldquo;what shipped yesterday?&rdquo;", age: "3m", ageBucket: "fresh" },
-  ],
-  /* ledger strands for B: per-project, task fields shown where the strand is a task */
-  groups: [
-    { proj: "hydra", name: "hydra", rows: [
-      { pri: "urgent", hot: true, name: "Fix flaky webhook tests",
-        sub: 'task · in-progress · flaky, ci · <span class="ref">github:issue:rogierpennink/hydra#112</span>',
-        tone: "warn", state: "needs approval",
-        now: "wants <b>git push</b> · parked 6m", age: "6m", ageBucket: "fresh",
-        actions: ["Approve", "Deny"] },
-      { pri: "high", hot: true, name: "Refactor event pipeline",
-        sub: "task · in-progress · session on macbook-pro",
-        tone: "live", state: "running 34m",
-        now: "turn 7 · editing src/ingress/pipeline.ts · <b>asked for infra grant 18m ago</b>", age: "34m", ageBucket: "recent",
-        actions: ["Review request"] },
-      { pri: "normal", name: "PR review · PR #87",
-        sub: 'run 484 · workflow PR review · <span class="ref">github:pr:rogierpennink/hydra#87</span>',
-        tone: "live", state: "running 12m",
-        now: "step 2/4 review-code · turn 3, reading packages/contract", age: "12m", ageBucket: "fresh" },
-      { pri: "low", name: "Issue triage",
-        sub: "run 485 · workflow Issue triage",
-        tone: "live", state: "running 2m",
-        now: "step 1/2 judge · 3 events in batch", age: "2m", ageBucket: "fresh" },
-      { pri: "normal", done: true, name: "Add runner drain command",
-        sub: "task · done 13:12 · cli",
-        tone: "ok", state: "done",
-        now: "session ended after 41 turns", age: "1h", ageBucket: "" },
-      { pri: "low", done: true, name: "PR review · PR #85",
-        sub: "run 482 · completed 13:58",
-        tone: "ok", state: "completed",
-        now: "approve-with-nits · 2 comments posted", age: "34m", ageBucket: "" },
-    ]},
-    { proj: "ops", name: "Operations & assistants", rows: [
-      { pri: "high", hot: true, name: "Email triage",
-        sub: "workflow · gmail/personal",
-        tone: "warn", state: "trigger paused",
-        now: "spawn bound tripped 41m ago · <b>14 events held</b>", age: "41m", ageBucket: "stale",
-        actions: ["Review held", "Resume"] },
-      { pri: "normal", hot: true, name: "Nightly digest",
-        sub: "run 479 · cron, failed 22:15",
-        tone: "fail", state: "failed",
-        now: "iteration-limit · step summarize exhausted its capped edge", age: "7h", ageBucket: "old",
-        actions: ["Re-run", "View run"] },
-      { pri: "normal", name: "Hera",
-        sub: "assistant · #ops on Discord",
-        tone: "live", state: "in conversation",
-        now: "answering &ldquo;what shipped yesterday?&rdquo;", age: "3m", ageBucket: "fresh" },
-      { pri: "low", done: true, name: "Write promotion runbook",
-        sub: "session · ended 09:03",
-        tone: "ok", state: "ended",
-        now: "output committed to docs/", age: "5h", ageBucket: "" },
-      { pri: "normal", done: true, name: "Upgrade Discord.js",
-        sub: "task · cancelled 10:20",
-        tone: "cancelled", state: "cancelled",
-        now: "superseded by &ldquo;Migrate channel plugin API&rdquo;", age: "4h", ageBucket: "" },
-    ]},
-  ],
-  landed: [
-    { when: "13:58", tone: "ok", glyph: "✓",
-      text: "&ldquo;PR review&rdquo; completed on PR #85 &ndash; verdict approve-with-nits, 2 comments posted", ref: "run 482" },
-    { when: "13:12", tone: "ok", glyph: "✓",
-      text: "Task <b>Add runner drain command</b> moved in-progress &rarr; done", ref: "41 turns" },
-    { when: "11:47", tone: "ok", glyph: "✓",
-      text: "&ldquo;Issue triage&rdquo; completed 6&times; &ndash; 4 issues labelled, 2 tasks created", ref: "grouped" },
-    { when: "10:20", tone: "", glyph: "–",
-      text: "Task <b>Upgrade Discord.js</b> cancelled &ndash; superseded by &ldquo;Migrate channel plugin API&rdquo;", ref: "" },
-    { when: "09:03", tone: "ok", glyph: "✓",
-      text: "Session &ldquo;Write promotion runbook&rdquo; ended &ndash; output committed to docs/", ref: "session 3182" },
-    { when: "yest 22:15", tone: "fail", glyph: "✕",
-      text: "&ldquo;Nightly digest&rdquo; failed &ndash; iteration-limit (waiting for you, above)", ref: "run 479" },
-    { when: "yest 19:30", tone: "ok", glyph: "✓",
-      text: "2 tasks created from Intake &ndash; <b>Rotate tailnet certs</b> (normal), <b>Reply to security advisory</b> (high)", ref: "" },
-  ],
+/* Two datasets: calm (1 runner day) and busy (6-runner fleet). Same structure,
+   so the page shape must survive both - that is the scale test.
+   Decisions are ranked provenance-first: you > standing > routine.
+   prov: you | standing | routine. act: working | queued | paused | failed | ok. */
+const DATASETS = {
+  calm: {
+    decisions: [
+      { prov: "you", pri: "urgent", strand: "Fix flaky webhook tests",
+        q: 'Allow <code>git push</code> to fix/webhook-retries?',
+        why: "Fix flaky webhook tests · session on hetzner-01, approval-required",
+        age: "6m", bucket: "fresh", actions: ["Allow", "Deny", "Open session"] },
+      { prov: "you", pri: "high", strand: "Refactor event pipeline",
+        q: 'Grant <code>infra</code> to Refactor event pipeline?',
+        why: "worker profile lacks infra · wants to drain runner hetzner-01",
+        age: "18m", bucket: "recent", actions: ["Grant for session", "Add to profile", "Deny"] },
+      { prov: "standing", pri: "high", strand: "Email triage",
+        q: "Resume Email triage?",
+        why: "spawn bound tripped: 12 runs in 10 min · 14 events held",
+        age: "41m", bucket: "stale", actions: ["Resume", "Review held events"] },
+      { prov: "routine", pri: "normal", strand: "Nightly digest",
+        q: "Re-run Nightly digest?",
+        why: "failed 22:15 · iteration-limit in step summarize",
+        age: "7h", bucket: "old", actions: ["Re-run", "View run", "Dismiss"] },
+    ],
+    youAsked: [
+      { name: "Fix flaky webhook tests", sub: "task · in-progress", pri: "urgent", act: "working",
+        note: "turn 12", ask: 0, age: "41m", bucket: "recent",
+        detail: [
+          { m: "eq", t: 'session on hetzner-01 · Claude Code · turn 12 · last: editing <code>tests/webhooks/retry.spec.ts</code>' },
+          { m: "dmark", t: 'Allow <code>git push</code> to fix/webhook-retries? · waiting 6m', acts: ["Allow", "Deny"] },
+          { m: "ok", t: "run 481 investigate · this morning" },
+          { m: "ref", t: "github:issue:rogierpennink/hydra#112" },
+        ], dacts: ["Open session", "View task"] },
+      { name: "Refactor event pipeline", sub: "task · in-progress", pri: "high", act: "working",
+        note: "turn 7", ask: 1, age: "34m", bucket: "recent",
+        detail: [
+          { m: "eq", t: 'chat session on macbook-pro · turn 7 · last: editing <code>src/ingress/pipeline.ts</code>' },
+          { m: "dmark", t: 'Grant <code>infra</code>? · waiting 18m', acts: ["Grant", "Deny"] },
+        ], dacts: ["Open session", "View task"] },
+      { name: "Review PR #87", sub: "one-off ask · workflow PR review", pri: "normal", act: "working",
+        prog: { done: 1, total: 4 }, age: "12m", bucket: "fresh",
+        detail: [
+          { m: "eq", t: "run 484 · step 2/4 review-code · turn 3, reading packages/contract" },
+          { m: "ref", t: "github:pr:rogierpennink/hydra#87" },
+        ], dacts: ["View run"] },
+    ],
+    routine: [
+      { name: "Email triage", sub: "gmail/personal", act: "paused", tone: "warn",
+        note: "paused · 14 events held", ask: 2, age: "41m", bucket: "stale",
+        detail: [ { m: "dmark", t: "Resume Email triage? · tripped its spawn bound 41m ago", acts: ["Resume", "Review held"] } ], dacts: ["View workflow"] },
+      { name: "Nightly digest", sub: "cron 06:00", act: "failed", tone: "fail",
+        note: "failed 22:15", ask: 3, age: "7h", bucket: "old",
+        detail: [ { m: "fail", t: "run 479 ✕ iteration-limit · step summarize exhausted its capped edge" } ], dacts: ["Re-run", "View run"] },
+      { name: "Issue triage", sub: "github/hydra", act: "ok",
+        note: "6 runs today · all ✓ · 2 tasks created", age: "1h", bucket: "",
+        detail: [ { m: "ok", t: "latest run 485 ✓ 13:47 · 4 issues labelled across the day" } ], dacts: ["View runs"] },
+      { name: "PR review (auto)", sub: "github/hydra", act: "ok",
+        note: "2 runs today · all ✓", age: "34m", bucket: "",
+        detail: [ { m: "ok", t: "PR #85 approve-with-nits · 2 comments posted 13:58" } ], dacts: ["View runs"] },
+    ],
+    landed: { counts: { ok: 4, fail: 1, cancelled: 1 },
+      items: [
+        { when: "13:58", g: "✓", tone: "ok", t: "Review PR #85 · approve-with-nits, 2 comments posted" },
+        { when: "13:12", g: "✓", tone: "ok", t: "Add runner drain command · done" },
+        { when: "10:20", g: "–", tone: "can", t: "Upgrade Discord.js · cancelled, superseded" },
+        { when: "09:03", g: "✓", tone: "ok", t: "Write promotion runbook · done, committed to docs/" },
+        { when: "y'day", g: "✕", tone: "fail", t: "Nightly digest · failed (question above)" },
+        { when: "y'day", g: "✓", tone: "ok", t: "Rotate tailnet certs · created from Intake, done" },
+      ] },
+    pulse: {
+      fleet: [ { live: true, t: "<b>hetzner-01</b> · 3/4 sessions", warm: "near cap" },
+               { live: false, t: "<b>macbook-pro</b> · 1 session" } ],
+      assistants: [ { live: true, t: "<b>Hera</b> active in #ops" } ],
+      intake: [ { t: "23 events today &rarr; <b>4 tasks</b>, 2 notifications" } ],
+    },
+  },
+
+  busy: {
+    decisions: [
+      { prov: "you", pri: "urgent", strand: "Fix flaky webhook tests",
+        q: 'Allow <code>git push</code> to fix/webhook-retries?',
+        why: "Fix flaky webhook tests · session on hetzner-01, approval-required",
+        age: "6m", bucket: "fresh", actions: ["Allow", "Deny", "Open session"] },
+      { prov: "you", pri: "urgent", strand: "Hotfix billing webhook",
+        q: "Merge hotfix/billing-retry?",
+        why: "Hotfix billing webhook · CI green, agent recommends merge",
+        age: "11m", bucket: "fresh", actions: ["Merge", "Hold", "Open PR"] },
+      { prov: "you", pri: "high", strand: "Refactor event pipeline",
+        q: 'Grant <code>infra</code> to Refactor event pipeline?',
+        why: "worker profile lacks infra · wants to drain runner hetzner-01",
+        age: "18m", bucket: "recent", actions: ["Grant for session", "Add to profile", "Deny"] },
+      { prov: "you", pri: "high", strand: "Migrate channel plugin API",
+        q: "Delete legacy channel tables?",
+        why: "Migrate channel plugin API · destructive step, wants confirmation",
+        age: "26m", bucket: "recent", actions: ["Confirm", "Deny", "Open session"] },
+      { prov: "standing", pri: "high", strand: "Email triage",
+        q: "Resume Email triage?",
+        why: "spawn bound tripped: 12 runs in 10 min · 14 events held",
+        age: "41m", bucket: "stale", actions: ["Resume", "Review held events"] },
+      { prov: "standing", pri: "normal", strand: "Issue triage",
+        q: "Resume Issue triage?",
+        why: "spawn bound tripped: 11 runs in 10 min · 6 events held",
+        age: "1h", bucket: "stale", actions: ["Resume", "Review held events"] },
+      { prov: "routine", pri: "normal", strand: "Nightly digest",
+        q: "Re-run Nightly digest?",
+        why: "failed 22:15 · iteration-limit in step summarize",
+        age: "7h", bucket: "old", actions: ["Re-run", "View run", "Dismiss"] },
+      { prov: "routine", pri: "normal", strand: "Dependency bumps",
+        q: "Re-run Dependency bumps?",
+        why: "1 of 3 runs failed · lockfile conflict in agentick-web",
+        age: "3h", bucket: "old", actions: ["Re-run", "View run", "Dismiss"] },
+      { prov: "routine", pri: "low", strand: "Receipts filing",
+        q: "Re-connect gmail/business?",
+        why: "token expired · 2 runs skipped",
+        age: "5h", bucket: "old", actions: ["Re-connect", "Dismiss"] },
+    ],
+    youAsked: [
+      { name: "Fix flaky webhook tests", sub: "task · in-progress", pri: "urgent", act: "working",
+        note: "turn 12", ask: 0, age: "41m", bucket: "recent",
+        detail: [ { m: "eq", t: "session on hetzner-01 · turn 12" } ], dacts: ["Open session"] },
+      { name: "Hotfix billing webhook", sub: "task · in-progress", pri: "urgent", act: "working",
+        note: "CI green", ask: 1, age: "1h", bucket: "stale",
+        detail: [ { m: "dmark", t: "Merge hotfix/billing-retry?", acts: ["Merge", "Hold"] } ], dacts: ["Open PR"] },
+      { name: "Refactor event pipeline", sub: "task · in-progress", pri: "high", act: "working",
+        note: "turn 7", ask: 2, age: "34m", bucket: "recent",
+        detail: [ { m: "eq", t: "chat session on macbook-pro · turn 7" } ], dacts: ["Open session"] },
+      { name: "Migrate channel plugin API", sub: "task · in-progress", pri: "high", act: "working",
+        note: "turn 21", ask: 3, age: "2h", bucket: "stale",
+        detail: [ { m: "eq", t: "session on macstudio-02 · turn 21" } ], dacts: ["Open session"] },
+      { name: "Review PR #92", sub: "one-off ask · workflow PR review", pri: "normal", act: "queued",
+        note: "queued on hetzner-01 · position 2", age: "9m", bucket: "fresh",
+        detail: [ { m: "q", t: "waiting for a session slot · runner at cap" } ], dacts: ["View queue"] },
+    ],
+    routine: [
+      { name: "Email triage", sub: "gmail/personal", act: "paused", tone: "warn",
+        note: "paused · 14 events held", ask: 4, age: "41m", bucket: "stale",
+        detail: [], dacts: ["View workflow"] },
+      { name: "Issue triage", sub: "github/hydra", act: "paused", tone: "warn",
+        note: "paused · 6 events held", ask: 5, age: "1h", bucket: "stale",
+        detail: [], dacts: ["View workflow"] },
+      { name: "Nightly digest", sub: "cron 06:00", act: "failed", tone: "fail",
+        note: "failed 22:15", ask: 6, age: "7h", bucket: "old", detail: [], dacts: ["Re-run"] },
+      { name: "Dependency bumps", sub: "cron weekly", act: "failed", tone: "fail",
+        note: "2 of 3 runs ✓ · 1 ✕", ask: 7, age: "3h", bucket: "old", detail: [], dacts: ["View runs"] },
+      { name: "Receipts filing", sub: "gmail/business", act: "paused", tone: "warn",
+        note: "token expired · 2 runs skipped", ask: 8, age: "5h", bucket: "old", detail: [], dacts: ["Re-connect"] },
+      { name: "PR review (auto)", sub: "github, 3 repos", act: "working",
+        note: "2 running · 9 runs today, all ✓", age: "4m", bucket: "fresh",
+        detail: [ { m: "eq", t: "PR #94 step 2/4 · PR #96 step 1/4" } ], dacts: ["View runs"] },
+      { name: "Standup summary", sub: "cron 08:30", act: "ok",
+        note: "ran 08:30 · ✓ posted to #ops", age: "6h", bucket: "", detail: [], dacts: ["View run"] },
+      { name: "Gmail triage (work)", sub: "gmail/work", act: "ok",
+        note: "22 runs today · all ✓ · 3 tasks created", age: "12m", bucket: "", detail: [], dacts: ["View runs"] },
+    ],
+    landed: { counts: { ok: 27, fail: 3, cancelled: 1 },
+      items: [
+        { when: "14:18", g: "✓", tone: "ok", t: "Review PR #90 · approved" },
+        { when: "13:58", g: "✓", tone: "ok", t: "Review PR #85 · approve-with-nits" },
+        { when: "13:12", g: "✓", tone: "ok", t: "Add runner drain command · done" },
+        { when: "12:40", g: "✕", tone: "fail", t: "Dependency bumps (agentick-web) · lockfile conflict" },
+        { when: "", g: "", tone: "", t: "…and 27 more", more: true },
+      ] },
+    pulse: {
+      fleet: [ { live: true, t: "<b>6 runners</b> · 11 sessions" },
+               { live: false, t: "<b>hetzner-01</b> at cap", warm: "queue 2" },
+               { live: false, t: "<b>macstudio-02</b> draining", warm: "retiring" } ],
+      assistants: [ { live: true, t: "<b>Hera</b> active in #ops" },
+                    { live: false, t: "<b>Iris</b> idle · Slack DM", idle: true } ],
+      intake: [ { t: "212 events today &rarr; <b>18 tasks</b>, 7 notifications" } ],
+    },
+  },
 };
 
+/* ---------- atom helpers ---------- */
+const eqEl = '<span class="eq" title="agent working"><i></i><i></i><i></i></span>';
+const dmarkEl = '<span class="dmark" title="decision wanted">◆</span>';
+const rmarkEl = '<span class="rmark" title="routine">↻</span>';
 const priEl = (pri) => `
   <span class="pri" data-pri="${pri}" title="priority: ${pri}">
     <span class="bars"><i></i><i></i><i></i></span>
   </span>`;
-const stateEl = (tone, label) => `
-  <span class="state" data-tone="${tone}"><span class="dot"></span><span>${label}</span></span>`;
+const progEl = (p) => `
+  <span class="prog" title="step ${p.done + 1} of ${p.total}">
+    ${Array.from({ length: p.total }, (_, i) =>
+      `<i class="${i < p.done ? "d" : i === p.done ? "c" : ""}"></i>`).join("")}
+    <span class="t">${p.done + 1}/${p.total}</span>
+  </span>`;
 const qbtns = (arr) =>
   arr.map((a, i) => `<button class="qbtn ${i === 0 ? "first" : ""}">${a}</button>`).join("");
-/* compact: kind + age live in the surrounding timeline line (variant C) */
-const needCard = (n, compact) => `
-  <div class="need" data-tone="${n.tone}" data-pri="${n.pri}">
-    <div class="head">
-      ${compact ? "" : `<span class="kind">${n.kind}</span>`}
-      <span class="proj">${n.lineage}</span>
-      ${priEl(n.pri)}
-      ${compact ? "" : `<span class="age" data-age="${n.ageBucket}" style="margin-left:auto">waiting ${n.age}</span>`}
+const markFor = (s) => {
+  if (s.act === "working") return eqEl;
+  if (s.act === "queued") return '<span class="qmark" title="queued"></span>';
+  if (s.act === "paused") return '<span class="rmark" style="color:var(--attn)" title="paused">↻</span>';
+  if (s.act === "failed") return '<span class="failg">✕</span>';
+  return '<span class="okg">✓</span>';
+};
+const detailMark = (m) => ({
+  eq: eqEl, dmark: dmarkEl, ok: '<span class="okg">✓</span>',
+  fail: '<span class="failg">✕</span>', q: '<span class="qmark"></span>',
+  ref: '<span class="rmark" style="font-size:10px">#</span>',
+}[m] || "");
+const provWord = { you: "you asked", standing: "standing", routine: "routine" };
+
+function data() { return DATASETS[get("data") === "busy" ? "busy" : "calm"]; }
+
+/* one calm sentence, never stat cards */
+function headline(d) {
+  const working = d.youAsked.filter((s) => s.act === "working").length +
+    d.routine.filter((s) => s.act === "working").length;
+  const landed = d.landed.counts.ok + d.landed.counts.fail + d.landed.counts.cancelled;
+  const n = d.decisions.length;
+  return `<div class="headline">
+    ${n ? `<span class="warm">${n} decision${n > 1 ? "s" : ""} wait</span>` : "Nothing needs you"}
+    · <b>${working}</b> strands in motion · <b>${landed}</b> outcomes today</div>`;
+}
+
+function pulseline(d) {
+  const line = (arr) => arr.map((p) =>
+    `${p.t}${p.warm ? ` <span class="warm">· ${p.warm}</span>` : ""}`).join(" · ");
+  return `<div class="pulseline">
+    <span><span class="k">Fleet</span> ${line(d.pulse.fleet)}</span>
+    <span><span class="k">Assistants</span> ${line(d.pulse.assistants)}</span>
+    <span><span class="k">Intake</span> ${line(d.pulse.intake)}</span>
+  </div>`;
+}
+
+/* strand row: one line; click expands execution detail */
+function strandEl(s, i, tier) {
+  const noteQ = (s.ask !== undefined ? dmarkEl + " " : "") + (s.note || "");
+  const mid = s.prog ? progEl(s.prog) : "";
+  const detail = (s.detail || []).map((dl) => `
+    <div class="dl">${detailMark(dl.m)}<span${dl.m === "ref" ? ' class="mono"' : ""}>${dl.t}</span>
+      ${dl.acts ? `<span class="acts" style="margin-left:auto">${qbtns(dl.acts)}</span>` : ""}</div>`).join("");
+  const dacts = s.dacts ? `<div class="dl"><span class="acts">${qbtns(s.dacts)}</span></div>` : "";
+  return `
+  <div class="strand" data-pri="${s.pri || "normal"}" data-k="${tier}${i}">
+    <div class="row" data-toggle="1">
+      <span class="markcell">${markFor(s)}</span>
+      <span class="name">${s.name}</span>
+      ${s.pri ? priEl(s.pri) : ""}
+      <span class="sub">${s.sub}</span>
+      ${mid}
+      <span class="note"${s.tone ? ` data-tone="${s.tone}"` : ""}>${noteQ}</span>
+      <span class="age" data-age="${s.bucket}">${s.age}</span>
     </div>
-    <div class="title">${n.title}</div>
-    <div class="ctx">${n.ctx}</div>
-    <div class="acts">${qbtns(n.actions)}</div>
+    <div class="detail">${detail}${dacts}</div>
+  </div>`;
+}
+
+function landedEl(d) {
+  const c = d.landed.counts;
+  const items = d.landed.items.map((l) => l.more
+    ? `<div class="ditem"><span class="when"></span><span class="glyph"></span><span class="more">${l.t}</span></div>`
+    : `<div class="ditem">
+        <span class="when">${l.when}</span>
+        <span class="glyph ${l.tone === "ok" ? "okg" : l.tone === "fail" ? "failg" : "cang"}">${l.g}</span>
+        <span>${l.t}</span>
+      </div>`).join("");
+  return `
+    <div class="digestline" data-digest="1">
+      <span class="chev">▸</span>
+      <span><b>${c.ok + c.fail + c.cancelled}</b> outcomes today ·
+        <span class="okg">✓</span> ${c.ok}${c.fail ? ` · <span class="failg">✕</span> ${c.fail}` : ""}${c.cancelled ? ` · – ${c.cancelled}` : ""}</span>
+    </div>
+    <div class="digest">${items}</div>`;
+}
+
+const dcardEl = (dec) => `
+  <div class="dcard" data-pri="${dec.pri}">
+    <div class="over">
+      <span class="prov">${provWord[dec.prov]}</span>
+      <span>${dec.strand}</span>
+      ${priEl(dec.pri)}
+      <span class="age" data-age="${dec.bucket}" style="margin-left:auto">waiting ${dec.age}</span>
+    </div>
+    <div class="q">${dmarkEl}<span>${dec.q}</span></div>
+    <div class="why">${dec.why}</div>
+    <div class="acts">${qbtns(dec.actions)}</div>
   </div>`;
 
-/* ---------- Variant A: attention stack ---------- */
+const drowEl = (dec) => `
+  <div class="drow" data-pri="${dec.pri}">
+    ${dmarkEl}
+    <span class="q">${dec.q}</span>
+    <span class="why">${provWord[dec.prov]} · ${dec.why}</span>
+    <span class="age" data-age="${dec.bucket}">${dec.age}</span>
+    <span class="acts">${qbtns(dec.actions.slice(0, 2))}</span>
+  </div>`;
+
+/* ---------- Variant A: briefing (decisions one at a time) ---------- */
+let focusIdx = 0;
 function variantA() {
-  const running = data.running.map((r) => `
-    <div class="runrow">
-      ${stateEl("live", r.state)}
-      <div class="body">
-        <span class="name">${r.name}</span>
-        <span class="sub" style="margin-left:8px">${r.sub}</span>
-        <div class="now">${r.now}</div>
-      </div>
-      <span class="age" data-age="${r.ageBucket}">${r.age}</span>
-    </div>`).join("");
-  const fresh = data.landed.filter((l) => !l.when.startsWith("yest"));
-  const seen = data.landed.filter((l) => l.when.startsWith("yest"));
-  const ditem = (l) => `
-    <div class="ditem" data-tone="${l.tone}">
-      <span class="when">${l.when}</span>
-      <span class="glyph">${l.glyph}</span>
-      <span class="txt">${l.text}<span class="ref">${l.ref}</span></span>
-    </div>`;
+  const d = data();
+  const n = d.decisions.length;
+  focusIdx = Math.min(focusIdx, Math.max(0, n - 1));
+  const dec = d.decisions[focusIdx];
+  const next = d.decisions[focusIdx + 1];
+  const focus = n === 0
+    ? `<div class="alldone">Nothing needs you.</div>`
+    : `<div class="focuswrap">
+        ${dcardEl(dec)}
+        <div class="focusnav">
+          <button class="qbtn" data-fnav="-1" ${focusIdx === 0 ? "disabled" : ""}>&larr;</button>
+          <span class="ct">${focusIdx + 1} of ${n}</span>
+          <button class="qbtn" data-fnav="1" ${focusIdx === n - 1 ? "disabled" : ""}>&rarr;</button>
+          ${next ? `<span class="nextpeek">next: <b>${next.q.replace(/<[^>]+>/g, "")}</b> · ${next.age}</span>` : ""}
+        </div>
+      </div>`;
   return `<div class="va">
+    ${headline(d)}
     <section class="lane">
-      <div class="lane-label">Needs you <span class="n">${data.needsYou.length}</span></div>
-      ${data.needsYou.map(needCard).join("")}
+      <div class="lane-label">Needs you <span class="n">${n}</span></div>
+      ${focus}
     </section>
     <section class="lane">
-      <div class="lane-label">Running now <span class="n">${data.running.length}</span></div>
-      ${running}
-    </section>
-    <section class="lane">
-      <div class="lane-label">Since you last checked <span class="n">${data.landed.length}</span></div>
-      <div class="digest">
-        ${fresh.map(ditem).join("")}
-        <div class="divider">last check-in · yesterday 18:40</div>
-        ${seen.map(ditem).join("")}
+      <div class="lane-label" style="margin-bottom:10px">In motion</div>
+      <div class="tier">
+        <div class="lane-label">You asked <span class="n">${d.youAsked.length}</span></div>
+        ${d.youAsked.map((s, i) => strandEl(s, i, "y")).join("")}
+      </div>
+      <div class="tier">
+        <div class="lane-label">Routine <span class="n">${d.routine.length}</span></div>
+        ${d.routine.map((s, i) => strandEl(s, i, "r")).join("")}
       </div>
     </section>
+    <section class="lane">${landedEl(d)}</section>
+    ${pulseline(d)}
   </div>`;
 }
 
-/* ---------- Variant B: delegation ledger ---------- */
+/* ---------- Variant B: ledger (all decisions visible) ---------- */
 function variantB() {
-  const stat = (v, k, tone) => `
-    <div class="stat"><span class="v"${tone ? ` data-tone="${tone}"` : ""}>${v}</span><span class="k">${k}</span></div>`;
-  const row = (r) => `
-    <div class="lrow" data-pri="${r.pri}"${r.hot ? ' data-hot="1"' : ""}${r.done ? ' data-done="1"' : ""}>
-      <div class="what">
-        <div class="name">${r.name}</div>
-        <div class="sub">${r.sub}</div>
-      </div>
-      ${priEl(r.pri)}
-      ${stateEl(r.tone, r.state)}
-      <div class="now">${r.now}</div>
-      <div class="acts">${r.actions ? qbtns(r.actions) : ""}</div>
-      <span class="age" data-age="${r.ageBucket}">${r.age}</span>
-    </div>`;
-  const group = (g) => `
-    <div class="group">
-      <h2><span class="pdot" data-proj="${g.proj}"></span>${g.name} <span class="n">${g.rows.length}</span></h2>
-      <div class="rowwrap">${g.rows.map(row).join("")}</div>
-    </div>`;
+  const d = data();
   return `<div class="vb">
-    <div class="stats">
-      ${stat(4, "need you", "warn")}
-      ${stat(4, "running", "live")}
-      ${stat(7, "landed since check-in")}
-      ${stat(2, "runners online")}
+    <div>
+      ${headline(d)}
+      <div class="decisions">
+        <div class="lane-label">Needs you <span class="n">${d.decisions.length}</span></div>
+        ${d.decisions.map(drowEl).join("")}
+      </div>
     </div>
-    ${data.groups.map(group).join("")}
+    <div>
+      <div class="lane-label" style="margin-bottom:10px">In motion</div>
+      <div class="book" style="margin-bottom:12px">
+        <h2>You asked <span class="n">${d.youAsked.length}</span></h2>
+        ${d.youAsked.map((s, i) => strandEl(s, i, "y")).join("")}
+      </div>
+      <div class="book">
+        <h2>Routine <span class="n">${d.routine.length}</span></h2>
+        ${d.routine.map((s, i) => strandEl(s, i, "r")).join("")}
+      </div>
+    </div>
+    <div class="landedlane">${landedEl(d)}</div>
+    ${pulseline(d)}
   </div>`;
 }
 
-/* ---------- Variant C: catch-up feed ---------- */
+/* ---------- Variant C: strands own their decisions + pulse rail ---------- */
 function variantC() {
-  const rail = data.running.map((r) => `
-    <div class="railcard">
-      <div class="name">${r.name}</div>
-      <div class="sub">${r.sub}</div>
-      ${stateEl("live", r.state)}
-      <div class="act">${r.now.replace(/<[^>]+>/g, "")}</div>
-    </div>`).join("");
-  const needs = data.needsYou.map((n, i) => `
-    <div class="fitem" data-tone="${n.tone}"${i === data.needsYou.length - 1 ? ' data-last="1"' : ""}>
-      <span class="node"><span class="dot"></span></span>
-      <div class="body">
-        <div class="whenline age" data-age="${n.ageBucket}" style="width:auto;text-align:left">waiting ${n.age} · ${n.kind.toLowerCase()}</div>
-        <div class="fneed">${needCard(n, true)}</div>
+  const d = data();
+  /* strands that raised a question surface it inline, ranked first */
+  const asking = [];
+  const quiet = [];
+  for (const tier of [["y", d.youAsked], ["r", d.routine]]) {
+    tier[1].forEach((s, i) => (s.ask !== undefined ? asking : quiet).push([s, i, tier[0]]));
+  }
+  const askCard = ([s, i, t]) => {
+    const dec = d.decisions[s.ask];
+    return `
+    <div class="cstrand" data-pri="${s.pri || "normal"}">
+      <div class="top">
+        <span class="markcell">${markFor(s)}</span>
+        <span class="name">${s.name}</span>
+        ${s.pri ? priEl(s.pri) : ""}
+        <span class="sub">${s.sub}</span>
+        <span class="age" data-age="${dec.bucket}" style="margin-left:auto">waiting ${dec.age}</span>
       </div>
-    </div>`).join("");
-  const fresh = data.landed.filter((l) => !l.when.startsWith("yest"));
-  const seen = data.landed.filter((l) => l.when.startsWith("yest"));
-  const feedItem = (l, extra) => `
-    <div class="fitem${extra ? " " + extra : ""}" data-tone="${l.tone}">
-      <span class="node">${l.glyph === "" ? '<span class="dot"></span>' : l.glyph}</span>
-      <div class="body">
-        <div class="whenline">${l.when}</div>
-        <div class="txt">${l.text} <span class="ref">${l.ref}</span></div>
+      <div class="ask">
+        ${dmarkEl}
+        <span class="q">${dec.q}</span>
+        <span class="acts">${qbtns(dec.actions.slice(0, 2))}</span>
       </div>
     </div>`;
+  };
   return `<div class="vc">
-    <aside class="rail">
-      <div class="lane-label">Happening now <span class="n">${data.running.length}</span></div>
-      ${rail}
-    </aside>
-    <div class="feed">
-      <div class="lane-label">Waiting on you <span class="n">${data.needsYou.length}</span></div>
-      ${needs}
-      <div class="lane-label" style="padding:4px 0 14px">Landed <span class="n">${data.landed.length}</span></div>
-      ${fresh.map((l) => feedItem(l)).join("")}
-      <div class="divider">last check-in · yesterday 18:40</div>
-      ${seen.map((l) => feedItem(l, "seen")).join("")}
+    <div class="maincol">
+      ${headline(d)}
+      <section class="lane">
+        <div class="lane-label">Needs you <span class="n">${asking.length}</span></div>
+        <div class="needstrand">${asking.map(askCard).join("")}</div>
+      </section>
+      <section class="lane">
+        <div class="lane-label">In motion</div>
+        ${quiet.map(([s, i, t]) => strandEl(s, i, t)).join("")}
+      </section>
+      <section class="lane">${landedEl(d)}</section>
     </div>
+    <aside class="rail">
+      <div class="pblock">
+        <div class="lane-label">Fleet</div>
+        ${d.pulse.fleet.map((p) => `
+          <div class="pline">${p.live ? '<span class="dot"></span>' : '<span class="idledot"></span>'}
+            <span>${p.t}${p.warm ? ` <span class="warm">· ${p.warm}</span>` : ""}</span></div>`).join("")}
+      </div>
+      <div class="pblock">
+        <div class="lane-label">Assistants</div>
+        ${d.pulse.assistants.map((p) => `
+          <div class="pline">${p.idle ? '<span class="idledot"></span>' : '<span class="dot"></span>'}
+            <span>${p.t}</span></div>`).join("")}
+      </div>
+      <div class="pblock">
+        <div class="lane-label">Intake</div>
+        ${d.pulse.intake.map((p) => `<div class="pline"><span>${p.t}</span></div>`).join("")}
+      </div>
+    </aside>
   </div>`;
 }
 
-/* ---------- switcher + theme (not part of the design) ---------- */
+/* ---------- switcher, dataset, theme, interactions ---------- */
 const variants = [
-  { key: "A", name: "Attention stack", render: variantA },
-  { key: "B", name: "Delegation ledger", render: variantB },
-  { key: "C", name: "Catch-up feed", render: variantC },
+  { key: "A", name: "Briefing", render: variantA },
+  { key: "B", name: "Ledger", render: variantB },
+  { key: "C", name: "Strands", render: variantC },
 ];
+function params() { return new URLSearchParams(location.search); }
+function get(k) { return params().get(k); }
+function setParam(k, v) {
+  const p = params(); p.set(k, v);
+  try { history.replaceState(null, "", "?" + p.toString()); } catch (e) { /* file:// */ }
+}
 function current() {
-  const k = new URLSearchParams(location.search).get("variant") || "A";
+  const k = get("variant") || "A";
   const i = variants.findIndex((v) => v.key === k.toUpperCase());
   return i === -1 ? 0 : i;
 }
 function show(i) {
   const v = variants[(i + variants.length) % variants.length];
-  try { history.replaceState(null, "", "?variant=" + v.key); } catch (e) { /* file:// */ }
+  setParam("variant", v.key);
+  render();
+}
+function render() {
+  const v = variants[current()];
   document.getElementById("stage").innerHTML = v.render();
   document.getElementById("swlabel").textContent = v.key + " · " + v.name;
+  document.getElementById("dsbtn").textContent = get("data") === "busy" ? "busy" : "calm";
+  document.getElementById("navcount").textContent = data().decisions.length;
+}
+document.getElementById("stage").addEventListener("click", (e) => {
+  const fnav = e.target.closest("[data-fnav]");
+  if (fnav && !fnav.disabled) { focusIdx += +fnav.dataset.fnav; render(); return; }
+  if (e.target.closest(".qbtn")) return; /* fake actions do nothing */
+  const dg = e.target.closest("[data-digest]");
+  if (dg) { dg.nextElementSibling.classList.toggle("open"); return; }
+  const row = e.target.closest('[data-toggle="1"]');
+  if (row) row.parentElement.classList.toggle("open");
+});
+function toggleData() {
+  setParam("data", get("data") === "busy" ? "calm" : "busy");
+  focusIdx = 0;
+  render();
 }
 function toggleTheme() {
   const root = document.documentElement;
@@ -651,13 +871,15 @@ function toggleTheme() {
 }
 document.getElementById("prev").addEventListener("click", () => show(current() - 1));
 document.getElementById("next").addEventListener("click", () => show(current() + 1));
+document.getElementById("dsbtn").addEventListener("click", toggleData);
 document.getElementById("theme").addEventListener("click", toggleTheme);
 document.addEventListener("keydown", (e) => {
   const t = e.target;
   if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
   if (e.key === "ArrowLeft") show(current() - 1);
   if (e.key === "ArrowRight") show(current() + 1);
+  if (e.key === "d") toggleData();
   if (e.key === "t") toggleTheme();
 });
-show(current());
+render();
 </script>
