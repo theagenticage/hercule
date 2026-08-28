@@ -101,8 +101,8 @@ Retiring a conversation's live session by distilling what matters into memory an
 _Avoid_: reset, compaction (reserved for provider-native context handling)
 
 **Memory**:
-An assistant's durable notes: assistant-scoped, maintained by the assistant itself, visible and editable by the user, bounded in size, never shared between assistants.
-_Avoid_: knowledge base, brain
+An assistant's durable notes: assistant-scoped, maintained by the assistant itself, visible and editable by the user, bounded in size, never shared between assistants. Two tiers: a single **core** note (always present in every session) and named **topic** notes (listed by name and gist, opened on demand).
+_Avoid_: knowledge base, brain, journal
 
 **Heartbeat**:
 A scheduled wake of an assistant with a standing prompt, letting it check on things and act unprompted. On by default; the main mechanism of true proactivity.
