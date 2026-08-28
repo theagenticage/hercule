@@ -1,0 +1,873 @@
+<!--
+  PROTOTYPE - throwaway. Ticket: https://github.com/rogierpennink/hydra/issues/1 -> #30
+  ROUND 1. Three variants of the Intake surface, switchable via ?variant=A|B|C,
+  built in the pinned design language (docs/design-language.md) with the check-in
+  prototype's chrome (branch prototype/check-in-view) so the two can be compared honestly.
+  The question this round must earn: is Intake a second view, or a lane of the check-in spine?
+    A Desk   - Intake is its own page: proposals as dossier cards, ranked by priority,
+               FYI and "handled without you" beneath, sources + triage in the rail.
+    B Spine  - one page ("Today"): the check-in page with a Proposed lane inserted;
+               urgent proposals break into Needs-you as ordinary decisions.
+    C Ledger - Intake is its own page, but time-first: a stream of what came in and what
+               the agents made of it (proposed / FYI / routed / attached / ignored),
+               raw signals folded under each entry.
+  Everything shown maps onto primitives: a proposal = a Task (label "proposed") + its
+  pending decision Notification; enrichment = the task description; grouping = provenance
+  refs; the receipt = triage run records. If something on screen has no primitive, that is
+  the design smell the ticket asks us to catch - see the notes under the switcher.
+  Keys: ← → variant · d dataset (calm/busy) · t theme · n cycle the working name.
+-->
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hydra Intake</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Onest:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  /* ============ tokens: pinned Midnight (docs/design-language.md) ============ */
+  :root {
+    --bg:      oklch(94.5% 0.0156 265);
+    --surface: oklch(96.7% 0.0125 265);
+    --raised:  oklch(100% 0.0078 265);
+    --ink:     oklch(23% 0.0100 265);
+    --muted:   oklch(48% 0.0156 265);
+    --faint:   oklch(66% 0.0156 265);
+    --line:      oklch(23% 0.0100 265 / 0.10);
+    --line-soft: oklch(23% 0.0100 265 / 0.055);
+    --card-shadow: 0 1px 2px rgba(23,26,33,0.05);
+    --lift-shadow: 0 1px 2px rgba(23,26,33,0.06), 0 4px 14px rgba(23,26,33,0.06);
+    --attn: #8a6116; --fail: #a34e46; --ok: #48745a; --live: #48717f;
+    --attn-soft: rgba(138,97,22,0.09);
+    --proj-hydra: #7d7ab0; --proj-ops: #a67f92;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg:      oklch(20%   0.0288 265);
+      --surface: oklch(22.2% 0.0288 265);
+      --raised:  oklch(25.5% 0.0259 265);
+      --ink:     oklch(90% 0.0080 265);
+      --muted:   oklch(68% 0.0288 265);
+      --faint:   oklch(50% 0.0288 265);
+      --line:      oklch(90% 0.0288 265 / 0.10);
+      --line-soft: oklch(90% 0.0288 265 / 0.06);
+      --card-shadow: 0 1px 2px rgba(0,0,0,0.35);
+      --lift-shadow: inset 0 1px 0 rgba(255,255,255,0.05),
+                     0 1px 2px rgba(0,0,0,0.4), 0 6px 18px rgba(0,0,0,0.3);
+      --attn: #d0a147; --fail: #cf7b71; --ok: #7fae8e; --live: #7fa8b8;
+      --attn-soft: rgba(208,161,71,0.12);
+      --proj-hydra: #9490c9; --proj-ops: #bd93a8;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg:      oklch(20%   0.0288 265);
+    --surface: oklch(22.2% 0.0288 265);
+    --raised:  oklch(25.5% 0.0259 265);
+    --ink:     oklch(90% 0.0080 265);
+    --muted:   oklch(68% 0.0288 265);
+    --faint:   oklch(50% 0.0288 265);
+    --line:      oklch(90% 0.0288 265 / 0.10);
+    --line-soft: oklch(90% 0.0288 265 / 0.06);
+    --card-shadow: 0 1px 2px rgba(0,0,0,0.35);
+    --lift-shadow: inset 0 1px 0 rgba(255,255,255,0.05),
+                   0 1px 2px rgba(0,0,0,0.4), 0 6px 18px rgba(0,0,0,0.3);
+    --attn: #d0a147; --fail: #cf7b71; --ok: #7fae8e; --live: #7fa8b8;
+    --attn-soft: rgba(208,161,71,0.12);
+    --proj-hydra: #9490c9; --proj-ops: #bd93a8;
+  }
+  :root {
+    --sans: "Onest", -apple-system, system-ui, sans-serif;
+    --mono: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
+    --w-emph: 500;
+    --w-urgent: 600;
+  }
+
+  /* ============ base ============ */
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--ink); font: 14px/1.5 var(--sans); -webkit-font-smoothing: antialiased; }
+  .mono { font-family: var(--mono); }
+  .app { display: flex; min-height: 100vh; }
+  code { font-family: var(--mono); font-size: 12px; background: var(--line-soft); padding: 1px 5px; border-radius: 4px; font-weight: 400; }
+
+  /* ---------- chrome (shared shell, identical to check-in) ---------- */
+  .side { width: 204px; flex: none; background: var(--surface); border-right: 1px solid var(--line-soft);
+    display: flex; flex-direction: column; padding: 16px 10px; position: sticky; top: 0; height: 100vh; }
+  .logo { display: flex; align-items: baseline; gap: 8px; padding: 4px 10px 16px; }
+  .logo b { font-size: 15px; letter-spacing: 0.01em; font-weight: var(--w-emph); }
+  .logo span { font-family: var(--mono); font-size: 10px; color: var(--faint); }
+  .nav { display: flex; flex-direction: column; gap: 1px; }
+  .nav a { display: flex; align-items: center; justify-content: space-between; padding: 5px 10px; border-radius: 6px;
+    color: var(--muted); text-decoration: none; font-size: 13px; }
+  .nav a.on { background: var(--line-soft); color: var(--ink); font-weight: var(--w-emph); }
+  .nav a:not(.on):hover { background: var(--line-soft); }
+  .nav a:focus-visible { outline: 2px solid var(--live); outline-offset: 1px; }
+  .nav .count { font-family: var(--mono); font-size: 11px; color: var(--faint); font-variant-numeric: tabular-nums; }
+  .nav .sep { height: 1px; background: var(--line-soft); margin: 8px 10px; }
+  .chrome-foot { margin-top: auto; display: flex; flex-direction: column; gap: 8px; }
+  .chrome-foot .qbtn { align-self: flex-start; font-size: 11.5px; color: var(--faint); }
+  .proto-badge { border: 1px dashed var(--attn); color: var(--attn); background: var(--attn-soft);
+    border-radius: 8px; padding: 8px 10px; font-family: var(--mono); font-size: 10px; line-height: 1.5; }
+  .main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  .topbar { display: flex; align-items: baseline; gap: 14px; padding: 24px 32px 0; }
+  .topbar h1 { font-size: 18px; margin: 0; letter-spacing: -0.015em; font-weight: var(--w-emph); }
+  .topbar .when { color: var(--muted); font-size: 13px; }
+  #stage { padding: 16px 32px 150px; }
+
+  /* ============ layout: main + rail ============ */
+  .layout { display: grid; grid-template-columns: minmax(0, 1fr) 236px; gap: 44px; align-items: start; max-width: 1100px; }
+  .maincol { display: flex; flex-direction: column; }
+  .maincol .lane { margin-bottom: 30px; }
+  .maincol .lane > .lane-label { margin-bottom: 10px; }
+  .rail { position: sticky; top: 20px; display: flex; flex-direction: column; gap: 22px; }
+
+  /* ============ shared atoms (from check-in) ============ */
+  .lane-label { text-transform: uppercase; letter-spacing: 0.1em; font-size: 10.5px; font-weight: var(--w-emph); color: var(--faint);
+    display: flex; align-items: center; gap: 8px; }
+  .lane-label .n { font-family: var(--mono); font-weight: 500; letter-spacing: 0; font-variant-numeric: tabular-nums; }
+  .lane-label .pdot { width: 7px; height: 7px; border-radius: 2px; flex: none; }
+  .headline { font-size: 13.5px; color: var(--muted); padding-bottom: 20px; }
+  .headline b { color: var(--ink); font-weight: var(--w-emph); font-variant-numeric: tabular-nums; }
+  .headline .warm { color: var(--attn); font-weight: var(--w-emph); }
+
+  .eq { display: inline-flex; align-items: flex-end; gap: 1.5px; height: 10px; width: 11px; flex: none; }
+  .eq i { width: 2.5px; border-radius: 1px; background: var(--live); height: 4px; animation: eqb 1.15s ease-in-out infinite; }
+  .eq i:nth-child(2) { animation-delay: 0.22s; } .eq i:nth-child(3) { animation-delay: 0.44s; }
+  @keyframes eqb { 0%, 100% { height: 3px; } 50% { height: 9px; } }
+  @keyframes pulse { 50% { opacity: 0.3; } }
+  @media (prefers-reduced-motion: reduce) {
+    .eq i { animation: none !important; }
+    .eq i:nth-child(1) { height: 4px; } .eq i:nth-child(2) { height: 8px; } .eq i:nth-child(3) { height: 5px; }
+    .dot, .prog i { animation: none !important; }
+  }
+  .dmark { color: var(--attn); font-size: 9px; flex: none; position: relative; top: -1px; }
+  .pmark { color: var(--faint); font-size: 10px; flex: none; position: relative; top: -1px; } /* ◇ proposed (placeholder glyph) */
+  .okg { color: var(--ok); } .failg { color: var(--fail); } .cang { color: var(--faint); }
+  .qmark { width: 6px; height: 6px; border-radius: 50%; border: 1.5px solid var(--faint); flex: none; display: inline-block; }
+  .pausemark { color: var(--attn); font-size: 12px; flex: none; }
+  .markcell { width: 16px; flex: none; display: inline-flex; justify-content: center; align-items: center; font-size: 12px; }
+  .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--live); flex: none; animation: pulse 2.4s ease-in-out infinite; display: inline-block; }
+  .idledot { width: 6px; height: 6px; border-radius: 50%; border: 1.5px solid var(--faint); flex: none; display: inline-block; }
+
+  .prog { display: inline-flex; align-items: center; gap: 2px; flex: none; }
+  .prog i { width: 8px; height: 3px; border-radius: 2px; background: var(--line); }
+  .prog i.d { background: var(--muted); }
+  .prog i.c { background: var(--live); animation: pulse 2.4s ease-in-out infinite; }
+  .prog .t { font-family: var(--mono); font-size: 10.5px; color: var(--faint); margin-left: 5px; font-variant-numeric: tabular-nums; }
+
+  .pri { display: inline-flex; align-items: center; flex: none; }
+  .pri .bars { display: inline-flex; align-items: flex-end; gap: 1.5px; height: 9px; }
+  .pri .bars i { width: 2.5px; border-radius: 1px; background: var(--line); }
+  .pri .bars i:nth-child(1) { height: 3.5px; } .pri .bars i:nth-child(2) { height: 6px; } .pri .bars i:nth-child(3) { height: 9px; }
+  .pri[data-pri="low"]    .bars i:nth-child(1) { background: var(--faint); }
+  .pri[data-pri="normal"] .bars i:nth-child(-n+2) { background: var(--muted); }
+  .pri[data-pri="high"]   .bars i { background: var(--muted); }
+  .pri[data-pri="urgent"] .bars i { background: var(--ink); }
+
+  .age { font-family: var(--mono); font-size: 11.5px; white-space: nowrap; color: var(--faint); flex: none; font-variant-numeric: tabular-nums; }
+  .age[data-age="recent"] { color: var(--muted); }
+  .age[data-age="stale"]  { color: var(--ink); }
+  .age[data-age="old"]    { color: var(--attn); font-weight: 500; }
+
+  .qbtn { font-family: var(--sans); font-size: 12px; line-height: 1; font-weight: var(--w-emph); border: 0; background: none; color: var(--muted);
+    padding: 6px 9px; border-radius: 6px; cursor: pointer; white-space: nowrap; }
+  .qbtn:hover { background: var(--line-soft); color: var(--ink); }
+  .qbtn.first { color: var(--ink); }
+  .qbtn:focus-visible { outline: 2px solid var(--live); outline-offset: 1px; }
+  .qbtn[disabled] { opacity: 0.4; cursor: default; }
+  .acts { display: flex; gap: 4px; align-items: center; margin-left: -9px; }
+
+  .ent { display: inline-flex; width: 13px; justify-content: center; align-items: center; flex: none; vertical-align: -1px; }
+  .ent-task i { width: 8px; height: 8px; border: 1.5px solid var(--faint); border-radius: 2.5px; display: block; }
+  .ent-run i { width: 0; height: 0; display: block; border-left: 7px solid var(--faint); border-top: 4.5px solid transparent; border-bottom: 4.5px solid transparent; }
+  .ent-sess i { width: 9px; height: 7px; display: block;
+    background: linear-gradient(var(--faint), var(--faint)) 0 0 / 9px 1.5px no-repeat, linear-gradient(var(--faint), var(--faint)) 0 4px / 6px 1.5px no-repeat; }
+
+  /* ---- decision card (check-in Focus, reused verbatim) ---- */
+  .dcard { background: var(--raised); border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--lift-shadow);
+    padding: 14px 18px 11px; display: flex; flex-direction: column; gap: 10px; min-height: 170px; }
+  .dcard .qline { display: flex; align-items: baseline; gap: 10px; }
+  .dcard .q { font-size: 15px; font-weight: var(--w-emph); letter-spacing: -0.008em; }
+  .dcard[data-pri="urgent"] .q { font-size: 16px; font-weight: var(--w-urgent); }
+  .dcard .qline .age { margin-left: auto; }
+  .dcard .fields { display: grid; grid-template-columns: 52px minmax(0, 1fr); grid-template-rows: repeat(3, 21px); gap: 4px 14px; font-size: 12.5px; }
+  .dcard .fields .fv { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; }
+  .fl { text-transform: uppercase; letter-spacing: 0.09em; font-size: 10px; color: var(--faint); font-weight: var(--w-emph); padding-top: 2px; }
+  .fv { color: var(--muted); }
+  .fv b { color: var(--ink); font-weight: var(--w-emph); }
+  .fv .none { color: var(--faint); }
+  .focusnav { display: flex; align-items: center; gap: 8px; color: var(--faint); font-size: 12px; padding-top: 8px; }
+  .focusnav .ct { font-family: var(--mono); font-size: 11px; font-variant-numeric: tabular-nums; }
+  .focusnav .qbtn { padding: 4px 8px; }
+  .nextpeek { color: var(--faint); font-size: 12px; }
+  .nextpeek b { color: var(--muted); font-weight: var(--w-emph); }
+  .alldone { border: 1px solid var(--line-soft); border-radius: 10px; padding: 14px 18px; color: var(--muted); font-size: 13px; background: var(--surface); }
+
+  /* ---- A: proposal dossier card ---- */
+  .pcard { background: var(--raised); border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--lift-shadow);
+    padding: 14px 18px 11px; display: flex; flex-direction: column; gap: 9px; }
+  .pcard .tline { display: flex; align-items: baseline; gap: 10px; }
+  .pcard .crumb { color: var(--faint); font-size: 12px; white-space: nowrap; }
+  .pcard .t { font-size: 15px; font-weight: var(--w-emph); letter-spacing: -0.008em; }
+  .pcard[data-pri="urgent"] .t { font-size: 16px; font-weight: var(--w-urgent); }
+  .pcard[data-pri="low"] { opacity: 0.8; }
+  .pcard .tline .age { margin-left: auto; }
+  .pcard .fields { display: grid; grid-template-columns: 72px minmax(0, 1fr); gap: 5px 14px; font-size: 12.5px; }
+  .pcard .fv { line-height: 1.45; }
+  .pcard .fv.next b { color: var(--ink); }
+  .pcard .foot { display: flex; align-items: center; gap: 10px; border-top: 1px solid var(--line-soft); padding-top: 8px; margin-top: 2px; }
+  .pcard .foot .by { margin-left: auto; color: var(--faint); font-size: 11.5px; white-space: nowrap; }
+  .pstack { display: flex; flex-direction: column; gap: 10px; }
+
+  /* condensed proposal row (A's lower tier, expands into a card in place) */
+  .prow { display: flex; align-items: center; gap: 10px; padding: 9px 14px; background: var(--raised); border: 1px solid var(--line);
+    border-radius: 10px; box-shadow: var(--card-shadow); cursor: pointer; }
+  .prow .t { font-weight: var(--w-emph); font-size: 13.5px; white-space: nowrap; }
+  .prow[data-pri="low"] { opacity: 0.72; }
+  .prow .sub { color: var(--faint); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .prow .next { margin-left: auto; color: var(--muted); font-size: 12.5px; white-space: nowrap; }
+  .prow .next b { color: var(--ink); font-weight: var(--w-emph); }
+
+  /* questions (unsure verdicts, tripped breakers): condensed decision rows */
+  .drow { display: flex; align-items: center; gap: 10px; padding: 9px 14px; background: var(--raised); border: 1px solid var(--line);
+    border-radius: 10px; box-shadow: var(--card-shadow); }
+  .drow .q { font-weight: var(--w-emph); font-size: 13.5px; white-space: nowrap; }
+  .drow .from { color: var(--faint); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .drow .acts { margin-left: auto; gap: 2px; }
+  .dstack { display: flex; flex-direction: column; gap: 6px; }
+
+  /* FYI lines + receipt digest */
+  .fyi { display: flex; gap: 12px; align-items: baseline; padding: 5px 2px; font-size: 12.5px; color: var(--muted); border-top: 1px solid var(--line-soft); }
+  .fyi:first-of-type { border-top: 0; }
+  .fyi .when { font-family: var(--mono); font-size: 11px; color: var(--faint); width: 44px; flex: none; text-align: right; font-variant-numeric: tabular-nums; }
+  .fyi .by { margin-left: auto; color: var(--faint); font-size: 11.5px; white-space: nowrap; }
+  .digestline { display: flex; align-items: center; gap: 10px; cursor: pointer; color: var(--muted); font-size: 12.5px; padding: 2px 2px; }
+  .digestline b { font-weight: var(--w-emph); color: var(--ink); font-variant-numeric: tabular-nums; }
+  .digestline .chev { color: var(--faint); font-size: 10px; }
+  .digest { display: none; flex-direction: column; opacity: 0.82; padding-top: 6px; }
+  .digest.open { display: flex; }
+  .ditem { display: flex; gap: 12px; align-items: baseline; padding: 5px 2px; font-size: 12.5px; }
+  .ditem .when { font-family: var(--mono); font-size: 11px; color: var(--faint); width: 84px; flex: none; text-align: right; font-variant-numeric: tabular-nums; }
+  .ditem .glyph { flex: none; width: 14px; text-align: center; font-size: 11.5px; }
+  .ditem .vw { color: var(--faint); }
+
+  /* ---- B: strands (check-in rows, reused) ---- */
+  .tier { margin-top: 14px; }
+  .tier:first-of-type { margin-top: 0; }
+  .tier > .lane-label { margin-bottom: 2px; }
+  .strand { border-top: 1px solid var(--line-soft); padding: 9px 2px; }
+  .strand:first-of-type { border-top: 0; }
+  .strand .row { display: flex; align-items: center; gap: 10px; cursor: pointer; }
+  .strand .name { font-weight: var(--w-emph); font-size: 13.5px; letter-spacing: -0.004em; white-space: nowrap; }
+  .strand[data-pri="urgent"] .name { font-weight: var(--w-urgent); }
+  .strand[data-pri="low"] { opacity: 0.72; }
+  .strand .sub { color: var(--faint); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .strand .note { color: var(--muted); font-size: 12.5px; margin-left: auto; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .strand .note b { color: var(--ink); font-weight: var(--w-emph); }
+  .strand .note[data-tone="warn"] { color: var(--attn); }
+  .strand .note[data-tone="fail"] { color: var(--fail); }
+  .strand .detail { display: none; }
+  .strand.open .detail { display: flex; flex-direction: column; gap: 6px; margin: 8px 0 4px 26px; padding: 10px 14px;
+    background: var(--surface); border: 1px solid var(--line-soft); border-radius: 8px; font-size: 12.5px; color: var(--muted); }
+  .strand .detail .dl { display: flex; align-items: baseline; gap: 9px; }
+  .strand .detail .dl .fl { width: 44px; flex: none; }
+
+  /* ---- C: ledger ---- */
+  .ledger { display: flex; flex-direction: column; }
+  .lday { margin-bottom: 18px; }
+  .lday > .lane-label { margin-bottom: 6px; }
+  .lrow { display: grid; grid-template-columns: 44px 16px minmax(0, 1fr) auto; gap: 0 12px; align-items: baseline;
+    padding: 6px 2px; border-top: 1px solid var(--line-soft); font-size: 12.5px; color: var(--muted); }
+  .lrow:first-of-type { border-top: 0; }
+  .lrow .when { font-family: var(--mono); font-size: 11px; color: var(--faint); text-align: right; font-variant-numeric: tabular-nums; }
+  .lrow .glyph { text-align: center; font-size: 11.5px; }
+  .lrow .vw { color: var(--faint); font-size: 11.5px; white-space: nowrap; }
+  .lrow .vw b { color: var(--muted); font-weight: var(--w-emph); }
+  .lrow.quiet { opacity: 0.66; }
+  .lrow.quiet .body { color: var(--faint); }
+  /* a proposal in the ledger lifts onto the raised layer, in-stream */
+  .lprop { margin: 6px 0; padding: 12px 16px 9px; background: var(--raised); border: 1px solid var(--line); border-radius: 10px;
+    box-shadow: var(--card-shadow); display: grid; grid-template-columns: 44px minmax(0, 1fr); gap: 2px 12px; }
+  .lprop .when { font-family: var(--mono); font-size: 11px; color: var(--faint); text-align: right; font-variant-numeric: tabular-nums; padding-top: 3px; }
+  .lprop .body { display: flex; flex-direction: column; gap: 5px; }
+  .lprop .tline { display: flex; align-items: baseline; gap: 10px; }
+  .lprop .t { font-size: 14px; font-weight: var(--w-emph); color: var(--ink); }
+  .lprop[data-pri="urgent"] .t { font-weight: var(--w-urgent); font-size: 15px; }
+  .lprop[data-pri="low"] { opacity: 0.8; }
+  .lprop .tline .vw { margin-left: auto; color: var(--faint); font-size: 11.5px; white-space: nowrap; }
+  .lprop .why { font-size: 12.5px; color: var(--muted); line-height: 1.45; }
+  .lprop .link { font-size: 12.5px; color: var(--muted); }
+  .lprop .sigline { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--faint); cursor: pointer; }
+  .lprop .sigline .chev { font-size: 10px; }
+  .sigs { display: none; flex-direction: column; gap: 3px; padding: 6px 0 2px 14px; border-left: 1px solid var(--line-soft); margin-left: 4px; }
+  .sigs.open { display: flex; }
+  .sig { display: flex; gap: 10px; align-items: baseline; font-size: 12px; color: var(--muted); }
+  .sig .kind { font-family: var(--mono); font-size: 10.5px; color: var(--faint); width: 42px; flex: none; }
+  .sig .src { margin-left: auto; font-family: var(--mono); font-size: 10.5px; color: var(--faint); white-space: nowrap; }
+  .lprop .acts { padding-top: 2px; }
+
+  /* ---- rail blocks ---- */
+  .pblock { display: flex; flex-direction: column; gap: 5px; }
+  .pblock > .lane-label { margin-bottom: 3px; }
+  .pline { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--muted); }
+  .pline b { font-weight: var(--w-emph); color: var(--ink); }
+  .pline .warm { color: var(--attn); }
+  .pline.sub { padding-left: 14px; margin-top: -3px; font-size: 12px; }
+  .pline .n { margin-left: auto; font-family: var(--mono); font-size: 11px; color: var(--faint); font-variant-numeric: tabular-nums; }
+  .legend { border-top: 1px solid var(--line-soft); padding-top: 16px; }
+  .legend .lg { display: flex; align-items: center; gap: 10px; font-size: 11.5px; color: var(--faint); padding: 2.5px 0; }
+  .legend .lg .markcell { justify-content: flex-start; }
+
+  /* ============ switcher + notes (not part of the design) ============ */
+  .sw { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); background: #17161a; color: #fff; border-radius: 999px;
+    padding: 6px 8px; display: flex; align-items: center; gap: 4px; box-shadow: 0 6px 24px rgba(0,0,0,0.35); z-index: 50; font-family: var(--mono); }
+  .sw .label { font-size: 12px; font-weight: 500; padding: 0 8px; min-width: 150px; text-align: center; }
+  .sw button { background: none; border: 0; color: #fff; cursor: pointer; font: inherit; font-size: 13px; padding: 4px 10px; border-radius: 999px; }
+  .sw button:hover { background: rgba(255,255,255,0.14); }
+  .sw button:focus-visible { outline: 2px solid #9a94e8; outline-offset: 1px; }
+  .sw .ds { font-size: 11px; color: #c9c6d0; }
+  .vnote { position: fixed; bottom: 62px; left: 50%; transform: translateX(-50%); max-width: 640px; text-align: center;
+    font-family: var(--mono); font-size: 10.5px; color: #c9c6d0; background: rgba(23,22,26,0.92); border-radius: 8px; padding: 6px 12px; z-index: 50; }
+</style>
+
+<div class="app">
+  <aside class="side">
+    <div class="logo"><b>Hydra</b><span>v1 · rogier</span></div>
+    <nav class="nav" id="nav"></nav>
+    <div class="chrome-foot">
+      <button class="qbtn" id="legendbtn">Marks legend</button>
+      <div class="proto-badge">PROTOTYPE · throwaway<br>ticket hydra#30 · round 1<br>&larr; &rarr; variant · d data · t theme · n name</div>
+    </div>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <h1 id="h1"></h1>
+      <span class="when">Sunday 14:32</span>
+    </div>
+    <div id="stage"></div>
+  </main>
+</div>
+
+<div class="vnote" id="vnote"></div>
+<div class="sw">
+  <button id="prev" aria-label="Previous variant">&larr;</button>
+  <span class="label" id="swlabel"></span>
+  <button id="next" aria-label="Next variant">&rarr;</button>
+  <button id="dsbtn" class="ds" aria-label="Toggle dataset"></button>
+  <button id="theme" aria-label="Toggle theme">◐</button>
+</div>
+
+<script>
+/* ============================================================================
+   DATA. Now = Sunday 14:32. Every proposal is a Task (label "proposed") plus its
+   pending decision Notification; `made` = provenance summary, `sigs` = the raw
+   signals behind it, `why` = the enrichment (task description), `link` = the
+   proactive connection the agent made, `next` = the suggested step (first action).
+   ============================================================================ */
+const P = {
+  login: { id: "p1", pri: "urgent", proj: "hydra", at: "14:20", age: "12m", bucket: "fresh",
+    t: "Login failures on Safari after 2.3.1",
+    made: "3 emails to support@ · issue #118 · Sentry digest",
+    sigs: [
+      { k: "email", t: "Anna Kowalczyk · \"Can't log in since this morning\"", src: "gmail/business 09:12" },
+      { k: "email", t: "Piet de Vries · \"Login loop on iPhone\"", src: "gmail/business 10:04" },
+      { k: "email", t: "Sentry · 2 new alerts in agentick-web (TokenRefresh 401)", src: "gmail/business 10:30" },
+      { k: "issue", t: "#118 · Safari login redirects forever", src: "github/agentick-web 11:15" },
+    ],
+    why: "All four describe the same failure: <code>TokenRefresh</code> returns 401 on Safari 17 since 2.3.1 shipped last night. The only auth change in 2.3.1 is PR #109 (SameSite cookie tightening).",
+    link: "<b>Hotfix billing webhook</b> (in progress, turn 9) is editing the same auth module - a fix here will conflict unless it branches from that work.",
+    next: "Start the Bugfix workflow from PR #109",
+    actions: ["Start Bugfix", "Later", "Dismiss", "Open task"],
+    by: "Email triage · run 512" },
+  certs: { id: "p2", pri: "high", proj: "ops", at: "13:05", age: "1h", bucket: "recent",
+    t: "Renew tailnet certs before Sep 3",
+    made: "1 email (Tailscale expiry notice)",
+    sigs: [ { k: "email", t: "Tailscale · \"Certificate for hydra.tail42.ts.net expires in 6 days\"", src: "gmail/personal 13:01" } ],
+    why: "The cert on <code>hydra.tail42.ts.net</code> expires in 6 days. Gmail OAuth redirects go through that host, so an expired cert also breaks both Gmail connections.",
+    link: "Same job as <b>Rotate tailnet certs</b> (done Aug 12); the runbook it produced is in <code>ops/runbooks/certs.md</code>.",
+    next: "Re-run the Rotate tailnet certs workflow",
+    actions: ["Re-run Rotate certs", "Later", "Dismiss", "Open task"],
+    by: "Email triage · run 507" },
+  flaky: { id: "p3", pri: "high", proj: "hydra", at: "12:40", age: "2h", bucket: "stale",
+    t: "Flaky test rate doubled this week",
+    made: "6 CI failure notifications · weekly CI stats (cron)",
+    sigs: [
+      { k: "cron", t: "Weekly CI stats · 40 runs, 9 retry-only failures", src: "cron 12:00" },
+      { k: "email", t: "GitHub · 6 × \"CI failed on main\" (all passed on retry)", src: "gmail/personal Mon–Sat" },
+    ],
+    why: "9 of 40 CI runs this week failed on retry-only flakes, up from 4 last week. All nine are in <code>tests/webhooks</code>.",
+    link: "That is the area <b>Fix flaky webhook tests</b> (in progress, turn 12) is working in - probably one task, not two.",
+    next: "Attach to Fix flaky webhook tests instead of starting new work",
+    actions: ["Attach to task", "Start separately", "Dismiss"],
+    by: "Issue triage · run 509" },
+  marta: { id: "p4", pri: "normal", proj: "hydra", at: "11:58", age: "2h", bucket: "stale",
+    t: "Answer Marta's SDK licence question",
+    made: "1 email (Marta Ruiz, Fabrik)",
+    sigs: [ { k: "email", t: "Marta Ruiz · \"Re: pi adapter - commercial use?\"", src: "gmail/business 11:41" } ],
+    why: "She asks whether the pi adapter's licence allows commercial use. It is MIT (<code>docs/legal/licences.md</code>); a reply is drafted in the task.",
+    link: "Fabrik also sent the June enquiry you parked (<b>Fabrik pilot terms</b>, open).",
+    next: "Send the drafted reply",
+    actions: ["Send reply", "Edit reply", "Later", "Dismiss"],
+    by: "Email triage · run 503" },
+  bumps: { id: "p5", pri: "normal", proj: "hydra", at: "13:44", age: "48m", bucket: "recent",
+    t: "Four dependency bumps in agentick-web",
+    made: "4 PRs (dependabot)",
+    sigs: [
+      { k: "PR", t: "#113 · bump vitest 2.1 → 2.2", src: "github/agentick-web 13:30" },
+      { k: "PR", t: "#114 · bump typescript-eslint", src: "github/agentick-web 13:30" },
+      { k: "PR", t: "#115 · bump playwright", src: "github/agentick-web 13:31" },
+      { k: "PR", t: "#116 · bump undici (security, moderate)", src: "github/agentick-web 13:31" },
+    ],
+    why: "Three are dev-only; <code>undici</code> is runtime (moderate: SSRF via redirect). CI is green on all four.",
+    link: null,
+    next: "Merge the three dev bumps, review undici by hand",
+    actions: ["Merge dev bumps", "Merge all 4", "Later", "Dismiss"],
+    by: "PR review (auto) · run 511" },
+  talk: { id: "p6", pri: "low", proj: null, at: "09:40", age: "5h", bucket: "old",
+    t: "Talk invitation: NL DevOps Days, Nov 12",
+    made: "1 email (programme committee)",
+    sigs: [ { k: "email", t: "NL DevOps Days · \"Invitation to speak\"", src: "gmail/personal 09:31" } ],
+    why: "CFP closes Sep 15. You declined the same event last year; your calendar is free that week.",
+    link: null,
+    next: "Draft a reply either way",
+    actions: ["Draft reply", "Later", "Dismiss"],
+    by: "Email triage · run 498" },
+  /* busy-only */
+  codex: { id: "p7", pri: "high", proj: "hydra", at: "14:02", age: "30m", bucket: "recent",
+    t: "Codex app-server renamed outputSchema in 0.42",
+    made: "1 release note · 2 failed nightly runs",
+    sigs: [
+      { k: "email", t: "GitHub · openai/codex release 0.42.0", src: "gmail/personal 06:10" },
+      { k: "run", t: "Nightly adapter matrix · run 480 ✕, run 486 ✕", src: "platform 06:30, 13:30" },
+    ],
+    why: "<code>turn/start</code> now takes <code>output_schema</code>; the Codex adapter's nightly matrix has failed twice since.",
+    link: "The provider spec pins the CLI release - bumping it means re-running the validation matrix.",
+    next: "Start the Bugfix workflow on the Codex adapter",
+    actions: ["Start Bugfix", "Later", "Dismiss", "Open task"],
+    by: "Issue triage · run 514" },
+  disk: { id: "p8", pri: "normal", proj: "ops", at: "13:20", age: "1h", bucket: "recent",
+    t: "hetzner-01 disk at 88%",
+    made: "1 email (Hetzner alert) · runner disk-watermark event",
+    sigs: [
+      { k: "email", t: "Hetzner · \"Disk usage warning: hetzner-01\"", src: "gmail/business 13:02" },
+      { k: "event", t: "runner.disk_watermark · hetzner-01 88%", src: "platform 13:10" },
+    ],
+    why: "Ephemeral workspaces from 23 PR-review runs were never reaped - the TTL reaper has been stalled since Aug 24.",
+    link: "<b>hetzner-01</b> is also the runner at session cap in check-in.",
+    next: "Run the Reap workspaces workflow",
+    actions: ["Reap now", "Later", "Dismiss"],
+    by: "Email triage · run 508" },
+  docs: { id: "p9", pri: "normal", proj: "hydra", at: "12:10", age: "2h", bucket: "stale",
+    t: "Issue #123 asks how runner join works",
+    made: "1 issue",
+    sigs: [ { k: "issue", t: "#123 · \"How do I add a second machine?\"", src: "github/hydra 12:02" } ],
+    why: "The answer exists (ADR 0002 + packaging spec) but there is no docs page for it.",
+    link: null,
+    next: "Start the Docs workflow",
+    actions: ["Start Docs", "Later", "Dismiss"],
+    by: "Issue triage · run 506" },
+  cursor: { id: "p10", pri: "low", proj: null, at: "08:15", age: "6h", bucket: "old",
+    t: "Newsletter: Cursor announces multi-runner \"Fleet\"",
+    made: "1 email (newsletter)",
+    sigs: [ { k: "email", t: "TLDR Dev · \"Cursor Fleet: agents across machines\"", src: "gmail/personal 08:02" } ],
+    why: "Overlaps hydra's controller/runner story; worth a note, not a task.",
+    link: null,
+    next: "Save a note",
+    actions: ["Create note task", "Dismiss"],
+    by: "Email triage · run 495" },
+};
+
+const DATASETS = {
+  calm: {
+    proposals: [P.login, P.certs, P.flaky, P.marta, P.bumps, P.talk],
+    questions: [
+      { q: "Is \"Invoice overdue - ACME Billing\" legitimate?", from: "Email triage · run 505 · unsure",
+        why: "acme-billing-pay.com is not in your contacts and Receipts filing has no ACME invoices", actions: ["It's spam", "It's real"], age: "1h", bucket: "recent", at: "13:30" },
+      { q: "Resume Email triage?", from: "spawn bound tripped · 14 events held",
+        why: "12 runs in 10 min (bound 10)", actions: ["Resume", "Review held"], age: "41m", bucket: "stale", at: "13:51" },
+    ],
+    fyi: [
+      { at: "12:00", t: "GitHub Actions minutes at 70% of the monthly quota", by: "Issue triage" },
+      { at: "09:03", t: "Hetzner invoice €48.20 paid and filed", by: "Receipts filing" },
+      { at: "07:50", t: "Tailscale 1.90 released - nothing to do", by: "Email triage" },
+    ],
+    receipt: { events: 212, ignored: 198,
+      routed: [ { at: "14:10", t: "PR #96 → PR review (auto)" }, { at: "13:47", t: "PR #94 → PR review (auto)" } ],
+      attached: [ { at: "12:55", t: "issue #121 → Fix flaky webhook tests (duplicate of #112)" } ],
+      ignoredGroups: [
+        { at: "14:30", span: "12:00–14:30", n: 61, t: "38 CI successes · 17 newsletters · 6 bot comments" },
+        { at: "12:00", span: "09:00–12:00", n: 92, t: "58 CI successes · 21 newsletters · 13 bot comments" },
+        { at: "09:00", span: "00:00–09:00", n: 45, t: "25 CI successes · 6 newsletters · 8 bot comments · 6 calendar bounces" },
+      ] },
+    sources: [
+      { c: "gmail/personal", n: 41, polled: "2m", live: true, warm: "triage paused · 14 held" },
+      { c: "gmail/business", n: 12, polled: "3m", live: true },
+      { c: "github/hydra", n: 26, polled: "1m", live: true },
+      { c: "github/agentick-web", n: 130, polled: "1m", live: true },
+      { c: "cron", n: 3, polled: "", live: false },
+    ],
+    triage: [
+      { name: "Email triage", act: "paused", note: "paused · 14 events held", tone: "warn" },
+      { name: "Issue triage", act: "ok", note: "6 runs · all ✓" },
+      { name: "PR review (auto)", act: "working", note: "2 running" },
+    ],
+    /* check-in spine data (trimmed copy of the check-in calm set) for variant B */
+    checkin: {
+      decisions: [
+        { prov: "you", pri: "urgent", q: 'Allow <code>git push</code> to fix/webhook-retries?', from: "Fix flaky webhook tests", kind: "task",
+          why: "the fix is done and the session wants to push the branch", agent: "Claude Code session on hetzner-01 · approval-required mode",
+          age: "6m", bucket: "fresh", actions: ["Allow", "Deny", "Open session"] },
+        { prov: "you", pri: "high", q: 'Grant <code>infra</code> to the session?', from: "Refactor event pipeline", kind: "task",
+          why: "wants to drain runner hetzner-01; the worker profile lacks infra", agent: "chat session on macbook-pro · turn 7",
+          age: "18m", bucket: "recent", actions: ["Grant for session", "Add to profile", "Deny"] },
+        { prov: "standing", pri: "high", q: "Resume Email triage?", from: "Email triage", kind: "standing workflow",
+          why: "spawn bound tripped: 12 runs in 10 min (bound 10) · 14 events held", age: "41m", bucket: "stale", actions: ["Resume", "Review held events"] },
+        { prov: "routine", pri: "normal", q: "Re-run Nightly digest?", from: "Nightly digest", kind: "cron workflow",
+          why: "run 479 failed at 22:15 · iteration-limit in step summarize", age: "7h", bucket: "old", actions: ["Re-run", "View run", "Dismiss"] },
+      ],
+      youAsked: [
+        { name: "Fix flaky webhook tests", sub: "task · in-progress", pri: "urgent", act: "working", note: "turn 12", age: "41m", bucket: "recent" },
+        { name: "Refactor event pipeline", sub: "task · in-progress", pri: "high", act: "working", note: "turn 7", age: "34m", bucket: "recent" },
+        { name: "Review PR #87", sub: "run · workflow PR review", pri: "normal", act: "working", prog: { done: 1, total: 4 }, age: "12m", bucket: "fresh" },
+      ],
+      routine: [
+        { name: "Email triage", sub: "gmail/personal", act: "paused", tone: "warn", note: "paused · 14 events held", age: "41m", bucket: "stale" },
+        { name: "Nightly digest", sub: "cron 06:00", act: "failed", tone: "fail", note: "failed 22:15", age: "7h", bucket: "old" },
+        { name: "Issue triage", sub: "github/hydra", act: "ok", note: "6 runs today · all ✓ · 2 tasks created", age: "1h", bucket: "" },
+        { name: "PR review (auto)", sub: "github/hydra", act: "ok", note: "2 runs today · all ✓", age: "34m", bucket: "" },
+      ],
+      landed: { ok: 4, fail: 1, cancelled: 1 },
+      fleet: [ { live: true, t: "<b>hetzner-01</b> · 3/4 sessions", warm: "near cap" }, { live: false, t: "<b>macbook-pro</b> · 1 session" } ],
+      assistants: [ { live: true, t: "<b>Hera</b> active in #ops" } ],
+    },
+  },
+};
+/* busy = calm + four more proposals, more FYI, bigger receipt */
+DATASETS.busy = JSON.parse(JSON.stringify(DATASETS.calm));
+DATASETS.busy.proposals = [P.login, P.codex, P.certs, P.flaky, P.disk, P.marta, P.bumps, P.docs, P.talk, P.cursor];
+DATASETS.busy.fyi.unshift(
+  { at: "14:18", t: "PR #90 approved and merged", by: "PR review (auto)" },
+  { at: "13:12", t: "12 non-security dependabot PRs snoozed until Monday", by: "PR review (auto)" },
+  { at: "12:31", t: "3 calendar invites accepted automatically", by: "Email triage" });
+DATASETS.busy.receipt = { events: 614, ignored: 583,
+  routed: [ { at: "14:10", t: "PR #96 → PR review (auto)" }, { at: "13:47", t: "PR #94 → PR review (auto)" },
+            { at: "11:20", t: "PR #91 → PR review (auto)" }, { at: "10:05", t: "issue #120 → Issue triage → Bugfix (auto-started)" } ],
+  attached: [ { at: "12:55", t: "issue #121 → Fix flaky webhook tests (duplicate of #112)" }, { at: "10:40", t: "2 emails → Fabrik pilot terms" } ],
+  ignoredGroups: [
+    { at: "14:30", span: "12:00–14:30", n: 190, t: "141 CI successes · 31 newsletters · 18 bot comments" },
+    { at: "12:00", span: "09:00–12:00", n: 251, t: "188 CI successes · 40 newsletters · 23 bot comments" },
+    { at: "09:00", span: "00:00–09:00", n: 142, t: "96 CI successes · 22 newsletters · 18 bot comments · 6 calendar bounces" },
+  ] };
+DATASETS.busy.sources = [
+  { c: "gmail/personal", n: 88, polled: "2m", live: true, warm: "triage paused · 14 held" },
+  { c: "gmail/business", n: 31, polled: "3m", live: true },
+  { c: "github/hydra", n: 64, polled: "1m", live: true },
+  { c: "github/agentick-web", n: 402, polled: "1m", live: true },
+  { c: "github/agentick-docs", n: 26, polled: "1m", live: true },
+  { c: "cron", n: 3, polled: "", live: false },
+];
+
+/* ============ helpers ============ */
+const NAMES = ["Intake", "Incoming", "Proposed", "Desk", "Triage"];
+const eqEl = '<span class="eq" title="agent working"><i></i><i></i><i></i></span>';
+const dmarkEl = '<span class="dmark" title="decision wanted">◆</span>';
+const pmarkEl = '<span class="pmark" title="proposed (placeholder glyph)">◇</span>';
+const priEl = (pri) => `<span class="pri" data-pri="${pri}" title="priority: ${pri}"><span class="bars"><i></i><i></i><i></i></span></span>`;
+const progEl = (p) => `<span class="prog">${Array.from({ length: p.total }, (_, i) => `<i class="${i < p.done ? "d" : i === p.done ? "c" : ""}"></i>`).join("")}<span class="t">${p.done + 1}/${p.total}</span></span>`;
+const qbtns = (arr) => arr.map((a, i) => `<button class="qbtn ${i === 0 ? "first" : ""}">${a}</button>`).join("");
+const entEl = (k) => `<span class="ent ent-${k}" title="${k === "sess" ? "session" : k}"><i></i></span>`;
+const crumb = (p) => p.proj ? `${p.proj} · ` : "";
+const projDot = (proj) => proj ? `<span class="pdot" style="background:var(--proj-${proj})"></span>` : "";
+const markFor = (s) => s.act === "working" ? eqEl : s.act === "queued" ? '<span class="qmark"></span>'
+  : s.act === "paused" ? '<span class="pausemark">↻</span>' : s.act === "failed" ? '<span class="failg">✕</span>' : '<span class="okg">✓</span>';
+const stripTags = (s) => s.replace(/<[^>]+>/g, "");
+const data = () => DATASETS[get("data") === "busy" ? "busy" : "calm"];
+const pageName = () => NAMES[(+get("name") || 0) % NAMES.length];
+let openSet = new Set();  /* expanded rows, by id */
+let focusIdx = 0;
+
+/* ============ shared blocks ============ */
+function questionsEl(qs) {
+  if (!qs.length) return "";
+  return `<section class="lane">
+    <div class="lane-label">Needs a call <span class="n">${qs.length}</span></div>
+    <div class="dstack">${qs.map((q) => `
+      <div class="drow">${dmarkEl}<span class="q">${q.q}</span><span class="from">${q.from}</span>
+        <span class="age" data-age="${q.bucket}">${q.age}</span><span class="acts">${qbtns(q.actions.slice(0, 2))}</span></div>`).join("")}
+    </div></section>`;
+}
+function fyiEl(fyi) {
+  return `<section class="lane">
+    <div class="lane-label">For your information <span class="n">${fyi.length}</span></div>
+    ${fyi.map((f) => `<div class="fyi"><span class="when">${f.at}</span><span>${f.t}</span><span class="by">${f.by}</span></div>`).join("")}
+  </section>`;
+}
+function receiptEl(d) {
+  const r = d.receipt;
+  const items = [
+    ...r.routed.map((x) => ({ ...x, g: "→", vw: "routed" })),
+    ...r.attached.map((x) => ({ ...x, g: "+", vw: "attached" })),
+    ...r.ignoredGroups.map((x) => ({ at: x.span, t: x.t, g: "·", vw: `ignored ${x.n}` })),
+  ];
+  return `<section class="lane">
+    <div class="digestline" data-digest="1"><span class="chev">▸</span>
+      <span><b>${r.events}</b> events today → <b>${d.proposals.length}</b> proposals · ${r.routed.length} routed to workflows · ${r.attached.length} attached to existing tasks · ${d.fyi.length} FYI · ${r.ignored} ignored</span></div>
+    <div class="digest">${items.map((i) => `<div class="ditem"><span class="when">${i.at}</span><span class="glyph cang">${i.g}</span><span>${i.t}</span><span class="vw" style="margin-left:auto">${i.vw}</span></div>`).join("")}</div>
+  </section>`;
+}
+function sourcesRail(d, opts = {}) {
+  const t = d.triage;
+  return `
+    <div class="pblock">
+      <div class="lane-label">Sources</div>
+      ${d.sources.map((s) => `<div class="pline">${s.live ? '<span class="dot"></span>' : '<span class="idledot"></span>'}
+        <span><b>${s.c}</b></span><span class="n">${s.n}${s.polled ? ` · ${s.polled}` : ""}</span></div>${s.warm ? `<div class="pline sub"><span class="warm">${s.warm}</span></div>` : ""}`).join("")}
+    </div>
+    <div class="pblock">
+      <div class="lane-label">Triage</div>
+      ${t.map((w) => `<div class="pline"><span class="markcell" style="width:auto">${markFor(w)}</span><span><b>${w.name}</b> · <span${w.tone === "warn" ? ' class="warm"' : ""}>${w.note}</span></span></div>`).join("")}
+    </div>
+    ${opts.checkin ? `<div class="pblock"><div class="lane-label">Check-in</div>
+      <div class="pline"><span>${opts.checkin.decisions.length} decisions wait · ${opts.checkin.youAsked.length} strands in motion</span></div></div>` : ""}
+    ${legendEl()}`;
+}
+function legendEl() {
+  if (!legendOn) return "";
+  return `<div class="pblock legend">
+    <div class="lane-label">Marks <span class="n" style="text-transform:none;letter-spacing:0">· iconography TBD (#35)</span></div>
+    <div class="lg"><span class="markcell">${pmarkEl}</span><span>proposed, wants a go/no-go</span></div>
+    <div class="lg"><span class="markcell">${dmarkEl}</span><span>decision wanted</span></div>
+    <div class="lg"><span class="markcell">${eqEl}</span><span>agent working</span></div>
+    <div class="lg"><span class="markcell"><span class="pausemark">↻</span></span><span>paused</span></div>
+    <div class="lg"><span class="markcell"><span class="okg">✓</span></span><span>done</span></div>
+    <div class="lg"><span class="markcell"><span class="failg">✕</span></span><span>failed</span></div>
+    <div class="lg"><span class="markcell"><span class="cang">→</span></span><span>routed to a workflow</span></div>
+    <div class="lg"><span class="markcell"><span class="cang">+</span></span><span>attached to a task</span></div>
+    <div class="lg"><span class="markcell">${entEl("task")}</span><span>task</span></div>
+    <div class="lg"><span class="markcell">${priEl("high")}</span><span>priority (bars fill up)</span></div>
+    <div class="lg"><span class="markcell"><span class="age" data-age="old">5h</span></span><span>waiting: darkens, then warms</span></div>
+  </div>`;
+}
+
+/* ============ A · Desk ============ */
+function pcardEl(p) {
+  return `<div class="pcard" data-pri="${p.pri}" data-id="${p.id}">
+    <div class="tline">${pmarkEl}<span class="crumb">${crumb(p)}</span><span class="t">${p.t}</span>${priEl(p.pri)}<span class="age" data-age="${p.bucket}">${p.age}</span></div>
+    <div class="fields">
+      <span class="fl">made from</span><span class="fv">${p.made}</span>
+      <span class="fl">why</span><span class="fv">${p.why}</span>
+      <span class="fl">links</span><span class="fv">${p.link || '<span class="none">–</span>'}</span>
+      <span class="fl">next</span><span class="fv next"><b>${p.next}</b></span>
+    </div>
+    <div class="foot"><span class="acts">${qbtns(p.actions)}</span><span class="by">${entEl("task")} task · proposed by ${p.by}</span></div>
+  </div>`;
+}
+function prowEl(p) {
+  return `<div class="prow" data-pri="${p.pri}" data-open="${p.id}">${pmarkEl}<span class="t">${p.t}</span>${priEl(p.pri)}
+    <span class="sub">${crumb(p)}from ${p.made}</span><span class="next">→ <b>${p.actions[0]}</b></span><span class="age" data-age="${p.bucket}">${p.age}</span></div>`;
+}
+function renderDesk(d) {
+  const top = d.proposals.filter((p) => p.pri === "urgent" || p.pri === "high");
+  const rest = d.proposals.filter((p) => !(p.pri === "urgent" || p.pri === "high"));
+  const n = d.proposals.length;
+  return `<div class="layout"><div class="maincol">
+    <div class="headline"><b>${n}</b> proposals formed from <b>${d.receipt.events}</b> events${d.questions.length ? ` · <span class="warm">${d.questions.length} need a call</span>` : ""} · ${d.fyi.length} FYI · ${d.receipt.ignored} handled quietly</div>
+    ${questionsEl(d.questions)}
+    <section class="lane">
+      <div class="lane-label">Proposed <span class="n">${n}</span></div>
+      <div class="pstack">
+        ${top.map(pcardEl).join("")}
+        ${rest.map((p) => openSet.has(p.id) ? pcardEl(p) : prowEl(p)).join("")}
+      </div>
+    </section>
+    ${fyiEl(d.fyi)}
+    ${receiptEl(d)}
+  </div><aside class="rail">${sourcesRail(d, { checkin: d.checkin })}</aside></div>`;
+}
+
+/* ============ B · Spine (check-in page + Proposed lane) ============ */
+function dcardEl(dec) {
+  return `<div class="dcard" data-pri="${dec.pri}">
+    <div class="qline">${dmarkEl}<span class="q">${dec.q}</span><span class="age" data-age="${dec.bucket}">waiting ${dec.age}</span></div>
+    <div class="fields">
+      <span class="fl">from</span><span class="fv"><b>${dec.from}</b> ${entEl(dec.kind.startsWith("task") ? "task" : dec.kind.startsWith("run") ? "run" : "task")}${dec.kind} ${priEl(dec.pri)}</span>
+      <span class="fl">why</span><span class="fv">${dec.why}</span>
+      <span class="fl">agent</span><span class="fv">${dec.agent ? entEl("sess") + dec.agent : '<span class="none">–</span>'}</span>
+    </div>
+    <div class="acts">${qbtns(dec.actions)}</div></div>`;
+}
+function focusEl(decs) {
+  const n = decs.length;
+  if (!n) return `<div class="alldone">Nothing needs you.</div>`;
+  focusIdx = Math.min(focusIdx, n - 1);
+  const next = decs[focusIdx + 1];
+  return `${dcardEl(decs[focusIdx])}
+    <div class="focusnav">
+      <button class="qbtn" data-fnav="-1" ${focusIdx === 0 ? "disabled" : ""}>&larr;</button>
+      <span class="ct">${focusIdx + 1} of ${n}</span>
+      <button class="qbtn" data-fnav="1" ${focusIdx === n - 1 ? "disabled" : ""}>&rarr;</button>
+      ${next ? `<span class="nextpeek">next: <b>${stripTags(next.q)}</b> · ${next.age}</span>` : ""}
+    </div>`;
+}
+function strandEl(s, id) {
+  return `<div class="strand" data-pri="${s.pri || "normal"}" data-id="${id}">
+    <div class="row" data-toggle="${id}">
+      <span class="markcell">${markFor(s)}</span><span class="name">${s.name}</span>${s.pri ? priEl(s.pri) : ""}
+      <span class="sub">${s.sub}</span>${s.prog ? progEl(s.prog) : ""}
+      <span class="note"${s.tone ? ` data-tone="${s.tone}"` : ""}>${s.note || ""}</span><span class="age" data-age="${s.bucket}">${s.age}</span>
+    </div></div>`;
+}
+function proposalStrandEl(p) {
+  return `<div class="strand ${openSet.has(p.id) ? "open" : ""}" data-pri="${p.pri}" data-id="${p.id}">
+    <div class="row" data-toggle="${p.id}">
+      <span class="markcell">${pmarkEl}</span><span class="name">${p.t}</span>${priEl(p.pri)}
+      <span class="sub">${crumb(p)}task · from ${p.made}</span>
+      <span class="note">→ <b>${p.actions[0]}</b></span><span class="age" data-age="${p.bucket}">${p.age}</span>
+    </div>
+    <div class="detail">
+      <div class="dl"><span class="fl">why</span><span>${p.why}</span></div>
+      ${p.link ? `<div class="dl"><span class="fl">links</span><span>${p.link}</span></div>` : ""}
+      <div class="dl"><span class="fl">by</span><span>${p.by}</span></div>
+      <div class="dl"><span class="acts">${qbtns(p.actions)}</span></div>
+    </div></div>`;
+}
+function renderSpine(d) {
+  const c = d.checkin;
+  /* urgent proposals become ordinary decisions in Needs-you; the rest stay a lane */
+  const promoted = d.proposals.filter((p) => p.pri === "urgent").map((p) => ({
+    prov: "intake", pri: p.pri, q: `${p.actions[0]} for ${p.t}?`, from: p.t, kind: "task · proposed",
+    why: stripTags(p.why), agent: `${p.by} (triage)`, age: p.age, bucket: p.bucket, actions: p.actions }));
+  const decisions = [...c.decisions.filter((x) => x.prov === "you"), ...promoted, ...c.decisions.filter((x) => x.prov !== "you")];
+  const lane = d.proposals.filter((p) => p.pri !== "urgent");
+  const working = c.youAsked.filter((s) => s.act === "working").length + c.routine.filter((s) => s.act === "working").length;
+  const landed = c.landed.ok + c.landed.fail + c.landed.cancelled;
+  return `<div class="layout"><div class="maincol">
+    <div class="headline"><span class="warm">${decisions.length} decisions wait</span> · <b>${lane.length}</b> proposals · <b>${working}</b> strands in motion · <b>${landed}</b> outcomes today</div>
+    <section class="lane"><div class="lane-label">Needs you <span class="n">${decisions.length}</span></div>${focusEl(decisions)}</section>
+    <section class="lane"><div class="lane-label">Proposed <span class="n">${lane.length}</span></div>
+      <div class="tier">${lane.map(proposalStrandEl).join("")}</div></section>
+    <section class="lane"><div class="lane-label" style="margin-bottom:10px">In motion</div>
+      <div class="tier"><div class="lane-label">Started by you <span class="n">${c.youAsked.length}</span></div>${c.youAsked.map((s, i) => strandEl(s, "y" + i)).join("")}</div>
+      <div class="tier"><div class="lane-label">Routine <span class="n">${c.routine.length}</span></div>${c.routine.map((s, i) => strandEl(s, "r" + i)).join("")}</div>
+    </section>
+    <section class="lane"><div class="digestline"><span class="chev">▸</span><span><b>${landed}</b> outcomes today · <span class="okg">✓</span> ${c.landed.ok} · <span class="failg">✕</span> ${c.landed.fail} · – ${c.landed.cancelled}</span></div></section>
+  </div><aside class="rail">
+    <div class="pblock"><div class="lane-label">Fleet</div>${c.fleet.map((p) => `<div class="pline">${p.live ? '<span class="dot"></span>' : '<span class="idledot"></span>'}<span>${p.t}${p.warm ? ` <span class="warm">· ${p.warm}</span>` : ""}</span></div>`).join("")}</div>
+    <div class="pblock"><div class="lane-label">Assistants</div>${c.assistants.map((p) => `<div class="pline"><span class="dot"></span><span>${p.t}</span></div>`).join("")}</div>
+    <div class="pblock"><div class="lane-label">Intake</div>
+      <div class="pline"><span>${d.receipt.events} events → <b>${d.proposals.length} proposals</b> · ${d.fyi.length} FYI</span></div>
+      <div class="pline"><span>${d.receipt.routed.length} routed · ${d.receipt.attached.length} attached · ${d.receipt.ignored} ignored</span></div>
+      ${d.sources.filter((s) => s.warm).map((s) => `<div class="pline"><span class="pausemark">↻</span><span><b>${s.c}</b></span></div><div class="pline sub"><span class="warm">${s.warm}</span></div>`).join("")}
+    </div>
+    ${legendEl()}
+  </aside></div>`;
+}
+
+/* ============ C · Ledger ============ */
+function ledgerEntries(d) {
+  const r = d.receipt;
+  const e = [
+    ...d.proposals.map((p) => ({ kind: "prop", at: p.at, p })),
+    ...d.questions.map((q) => ({ kind: "q", at: q.at, q })),
+    ...d.fyi.map((f) => ({ kind: "fyi", at: f.at, t: f.t, by: f.by })),
+    ...r.routed.map((x) => ({ kind: "routed", at: x.at, t: x.t })),
+    ...r.attached.map((x) => ({ kind: "attached", at: x.at, t: x.t })),
+    ...r.ignoredGroups.map((x) => ({ kind: "ignored", at: x.at, span: x.span, t: x.t, n: x.n })),
+  ];
+  const key = (s) => { const m = s.at.match(/(\d\d):(\d\d)/g); const last = m[m.length - 1]; return +last.replace(":", ""); };
+  return e.sort((a, b) => key(b) - key(a));
+}
+function lpropEl(p) {
+  const open = openSet.has(p.id);
+  return `<div class="lprop" data-pri="${p.pri}">
+    <span class="when">${p.at}</span>
+    <div class="body">
+      <div class="tline">${pmarkEl}<span class="t">${crumb(p)}${p.t}</span>${priEl(p.pri)}<span class="vw">proposed by ${p.by}</span></div>
+      <div class="why">${p.why}</div>
+      ${p.link ? `<div class="link">${p.link}</div>` : ""}
+      <div class="sigline" data-open="${p.id}"><span class="chev">${open ? "▾" : "▸"}</span><span>made from ${p.made}</span></div>
+      <div class="sigs ${open ? "open" : ""}">${p.sigs.map((s) => `<div class="sig"><span class="kind">${s.k}</span><span>${s.t}</span><span class="src">${s.src}</span></div>`).join("")}</div>
+      <div class="acts">${qbtns(p.actions)}</div>
+    </div></div>`;
+}
+function renderLedger(d) {
+  const rows = ledgerEntries(d).map((e) => {
+    if (e.kind === "prop") return lpropEl(e.p);
+    if (e.kind === "q") return `<div class="lrow"><span class="when">${e.at}</span><span class="glyph">${dmarkEl}</span>
+      <span class="body"><b style="color:var(--ink);font-weight:var(--w-emph)">${e.q.q}</b> · ${e.q.why}</span><span class="acts" style="margin-left:0">${qbtns(e.q.actions)}</span></div>`;
+    if (e.kind === "fyi") return `<div class="lrow"><span class="when">${e.at}</span><span class="glyph cang">i</span><span class="body">${e.t}</span><span class="vw">FYI · ${e.by}</span></div>`;
+    if (e.kind === "routed") return `<div class="lrow quiet"><span class="when">${e.at}</span><span class="glyph cang">→</span><span class="body">${e.t}</span><span class="vw">routed</span></div>`;
+    if (e.kind === "attached") return `<div class="lrow quiet"><span class="when">${e.at}</span><span class="glyph cang">+</span><span class="body">${e.t}</span><span class="vw">attached</span></div>`;
+    return `<div class="lrow quiet"><span class="when">${e.at}</span><span class="glyph cang">·</span><span class="body">${e.span} · ${e.t}</span><span class="vw">ignored <b>${e.n}</b></span></div>`;
+  }).join("");
+  const r = d.receipt;
+  return `<div class="layout"><div class="maincol">
+    <div class="headline"><b>${r.events}</b> events today · <b>${d.proposals.length}</b> became proposals${d.questions.length ? ` · <span class="warm">${d.questions.length} need a call</span>` : ""} · ${d.fyi.length} FYI · ${r.routed.length + r.attached.length} handed on · ${r.ignored} ignored</div>
+    <div class="lday"><div class="lane-label">Today <span class="n">newest first</span></div><div class="ledger">${rows}</div></div>
+  </div><aside class="rail">${sourcesRail(d, { checkin: d.checkin })}</aside></div>`;
+}
+
+/* ============ page ============ */
+const variants = [
+  { key: "A", name: "Desk", render: renderDesk, own: true,
+    note: "A · Intake is its own page. Proposals as dossier cards ranked by priority (lower tiers condense, click to open); check-in stays separate." },
+  { key: "B", name: "Spine", render: renderSpine, own: false,
+    note: "B · One page (\"Today\"): the check-in with a Proposed lane; urgent proposals break into Needs-you as ordinary decisions." },
+  { key: "C", name: "Ledger", render: renderLedger, own: true,
+    note: "C · Intake is its own page, time-first: what came in and what the agents made of it, raw signals folded under each proposal." },
+];
+let legendOn = false;
+function params() { return new URLSearchParams(location.search); }
+function get(k) { return params().get(k); }
+function setParam(k, v) { const p = params(); p.set(k, v); try { history.replaceState(null, "", "?" + p.toString()); } catch (e) {} }
+function current() { const k = (get("variant") || "A").toUpperCase(); const i = variants.findIndex((v) => v.key === k); return i === -1 ? 0 : i; }
+function show(i) { focusIdx = 0; setParam("variant", variants[(i + variants.length) % variants.length].key); render(); }
+function navEl(v, d) {
+  const name = pageName();
+  const items = v.own
+    ? [[name, d.proposals.length + d.questions.length, true], ["Check-in", d.checkin.decisions.length, false]]
+    : [["Today", d.checkin.decisions.length + d.proposals.filter((p) => p.pri === "urgent").length, true]];
+  const rest = [["Tasks"], ["Sessions"], ["Runs"], ["Workflows"], null, ["Fleet"], ["Connections"], ["Notifications", 5], ["Settings"]];
+  return [...items, ...rest].map((it) => it === null ? '<div class="sep"></div>'
+    : `<a href="#" class="${it[2] ? "on" : ""}">${it[0]}${it[1] !== undefined ? ` <span class="count">${it[1]}</span>` : ""}</a>`).join("");
+}
+function render() {
+  const v = variants[current()];
+  const d = data();
+  document.getElementById("nav").innerHTML = navEl(v, d);
+  document.getElementById("h1").textContent = v.own ? pageName() : "Today";
+  document.getElementById("stage").innerHTML = v.render(d);
+  document.getElementById("swlabel").textContent = v.key + " · " + v.name;
+  document.getElementById("vnote").textContent = v.note;
+  document.getElementById("dsbtn").textContent = get("data") === "busy" ? "busy" : "calm";
+}
+document.getElementById("stage").addEventListener("click", (e) => {
+  const fnav = e.target.closest("[data-fnav]");
+  if (fnav && !fnav.disabled) { focusIdx += +fnav.dataset.fnav; render(); return; }
+  if (e.target.closest(".qbtn")) return; /* fake actions do nothing */
+  const dg = e.target.closest("[data-digest]");
+  if (dg) { dg.nextElementSibling.classList.toggle("open"); return; }
+  const o = e.target.closest("[data-open], [data-toggle]");
+  if (o) { const id = o.dataset.open || o.dataset.toggle; openSet.has(id) ? openSet.delete(id) : openSet.add(id); render(); }
+});
+function toggleData() { setParam("data", get("data") === "busy" ? "calm" : "busy"); focusIdx = 0; openSet = new Set(); render(); }
+function toggleTheme() {
+  const root = document.documentElement;
+  const dark = root.dataset.theme === "dark" || (!root.dataset.theme && matchMedia("(prefers-color-scheme: dark)").matches);
+  root.dataset.theme = dark ? "light" : "dark";
+}
+function cycleName() { setParam("name", ((+get("name") || 0) + 1) % NAMES.length); render(); }
+document.getElementById("prev").addEventListener("click", () => show(current() - 1));
+document.getElementById("next").addEventListener("click", () => show(current() + 1));
+document.getElementById("dsbtn").addEventListener("click", toggleData);
+document.getElementById("theme").addEventListener("click", toggleTheme);
+document.getElementById("legendbtn").addEventListener("click", () => { legendOn = !legendOn; render(); });
+document.addEventListener("keydown", (e) => {
+  const t = e.target;
+  if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
+  if (e.key === "ArrowLeft") show(current() - 1);
+  if (e.key === "ArrowRight") show(current() + 1);
+  if (e.key === "d") toggleData();
+  if (e.key === "t") toggleTheme();
+  if (e.key === "n") cycleName();
+});
+render();
+</script>
