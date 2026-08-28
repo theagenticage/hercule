@@ -1,0 +1,3 @@
+{"t":"2026-08-28T10:35:22.820Z","op":"read","name":"hydra-project","ok":true}
+{"t":"2026-08-28T10:35:34.317Z","op":"list","ok":true}
+{"t":"2026-08-28T10:35:45.345Z","op":"write","name":"hydra-project","ok":true,"chars":2621,"created":false}

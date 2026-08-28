@@ -1,22 +1,31 @@
 // PROTOTYPE (ticket #31) - runs the memory-interface experiment: conditions x scenarios x runs on headless Claude Code. Throwaway.
 //
-//   bun harness.ts --conditions files,hybrid,cli --scenarios all --runs 3 --concurrency 3 [--journal 1] [--model claude-sonnet-5] [--out results/<name>]
+//   bun harness.ts --provider claude|codex|pi --conditions files,hybrid,cli --scenarios all --runs 3 --concurrency 3 [--journal 1] [--model <id>] [--out results/<name>]
 //
-import { appendFileSync, cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
+import { appendFileSync, copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
+import { homedir } from "os";
 import { join, resolve } from "path";
 import { buildIndex, lockAll, readDoc, snapshot, writeIndexFile, CAPS } from "./lib";
 import { scenarios, type Checkpoint, type Op, type Response, type RunData, type Scenario } from "./scenarios";
 
 const HERE = import.meta.dir;
 const args = Object.fromEntries(process.argv.slice(2).map((a, i, all) => (a.startsWith("--") ? [a.slice(2), all[i + 1] ?? ""] : [])).filter((p) => p.length));
-const MODEL = args.model || "claude-sonnet-5";
+type Provider = "claude" | "codex" | "pi";
+const PROVIDER = (args.provider || "claude") as Provider;
+const DEFAULT_MODEL: Record<Provider, string> = { claude: "claude-sonnet-5", codex: "gpt-5.6-luna", pi: "zai/glm-5.3" };
+const MODEL = args.model || DEFAULT_MODEL[PROVIDER];
 const JOURNAL = args.journal === "1";
 const RUNS = Number(args.runs || 1);
 const CONC = Number(args.concurrency || 3);
 const CONDS = (args.conditions || "files,hybrid,cli").split(",");
 const SCEN = args.scenarios && args.scenarios !== "all" ? scenarios.filter((s) => args.scenarios.split(",").includes(s.id)) : scenarios;
-const OUT = resolve(HERE, args.out || `results/${new Date().toISOString().slice(0, 16).replace(/[:T]/g, "-")}${JOURNAL ? "-journal" : ""}`);
+const OUT = resolve(HERE, args.out || `results/${PROVIDER}-${new Date().toISOString().slice(0, 16).replace(/[:T]/g, "-")}${JOURNAL ? "-journal" : ""}`);
 mkdirSync(OUT, { recursive: true });
+// isolated homes so the user's global AGENTS.md / skills / packages do not leak into the experiment
+const CODEX_HOME = join(OUT, "codex-home");
+const PI_HOME = join(OUT, "pi-home");
+if (PROVIDER === "codex" && !existsSync(CODEX_HOME)) { mkdirSync(CODEX_HOME); copyFileSync(join(homedir(), ".codex/auth.json"), join(CODEX_HOME, "auth.json")); }
+if (PROVIDER === "pi" && !existsSync(PI_HOME)) { mkdirSync(PI_HOME); for (const f of ["auth.json", "models.json", "models-store.json"]) if (existsSync(join(homedir(), ".pi/agent", f))) copyFileSync(join(homedir(), ".pi/agent", f), join(PI_HOME, f)); }
 
 type Mode = "files" | "hybrid" | "cli";
 
@@ -57,7 +66,7 @@ const DREAM = (mode: Mode) =>
 
 type TurnResult = { sessionId: string; text: string; tools: string[]; cost: number; error?: string };
 
-async function claudeTurn(opts: { cwd: string; env: Record<string, string>; prompt: string; system: string; resume?: string; raw: string }): Promise<TurnResult> {
+async function claudeTurn(opts: TurnOpts): Promise<TurnResult> {
   const argv = ["claude", "-p", opts.prompt, "--output-format", "stream-json", "--verbose", "--model", MODEL, "--setting-sources", "project", "--dangerously-skip-permissions", "--max-turns", "40", "--append-system-prompt", opts.system];
   if (opts.resume) argv.push("--resume", opts.resume);
   const proc = Bun.spawn(argv, { cwd: opts.cwd, env: { ...process.env, ...opts.env, CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1" }, stdout: "pipe", stderr: "pipe" });
@@ -82,8 +91,70 @@ async function claudeTurn(opts: { cwd: string; env: Record<string, string>; prom
   return res;
 }
 
+type TurnOpts = { cwd: string; env: Record<string, string>; prompt: string; system: string; resume?: string; raw: string; rdir: string };
+
+function parseJsonl(out: string): any[] {
+  const ms: any[] = [];
+  for (const line of out.split("\n")) { if (!line.trim()) continue; try { ms.push(JSON.parse(line)); } catch {} }
+  return ms;
+}
+
+async function spawnCapture(argv: string[], opts: TurnOpts, extraEnv: Record<string, string>): Promise<{ out: string; err: string }> {
+  const proc = Bun.spawn(argv, { cwd: opts.cwd, env: { ...process.env, ...opts.env, ...extraEnv }, stdout: "pipe", stderr: "pipe", stdin: "ignore" });
+  const timer = setTimeout(() => proc.kill(), 6 * 60 * 1000);
+  const out = await new Response(proc.stdout).text();
+  const err = await new Response(proc.stderr).text();
+  clearTimeout(timer);
+  appendFileSync(opts.raw, out + (err ? `\n[stderr] ${err}\n` : ""));
+  return { out, err };
+}
+
+// codex: system prompt travels as AGENTS.md in the cwd (the only instruction channel `codex exec` offers)
+async function codexTurn(opts: TurnOpts): Promise<TurnResult> {
+  writeFileSync(join(opts.cwd, "AGENTS.md"), opts.system);
+  const common = ["--json", "-m", MODEL, "--dangerously-bypass-approvals-and-sandbox", "--skip-git-repo-check"];
+  const argv = opts.resume ? ["codex", "exec", "resume", ...common, opts.resume, opts.prompt] : ["codex", "exec", ...common, opts.prompt];
+  const { out, err } = await spawnCapture(argv, opts, { CODEX_HOME });
+  const res: TurnResult = { sessionId: opts.resume ?? "", text: "", tools: [], cost: 0 };
+  for (const m of parseJsonl(out)) {
+    if (m.type === "thread.started") res.sessionId = m.thread_id;
+    if (m.type === "item.completed") {
+      const it = m.item;
+      if (it.type === "agent_message") res.text += (res.text ? "\n" : "") + it.text;
+      if (it.type === "command_execution") res.tools.push(`Bash(${JSON.stringify(it.command).slice(0, 120)})`);
+      if (it.type === "file_change") res.tools.push(`FileChange(${(it.changes ?? []).map((c: any) => `${c.kind} ${c.path.split("/").slice(-2).join("/")}`).join(", ").slice(0, 120)})`);
+    }
+    if (m.type === "error") res.error = String(m.message ?? JSON.stringify(m)).slice(0, 300);
+  }
+  if (!res.text && !res.error) res.error = `no assistant text; stderr: ${err.slice(0, 300)}`;
+  return res;
+}
+
+async function piTurn(opts: TurnOpts): Promise<TurnResult> {
+  const argv = ["pi", "-p", "--mode", "json", "--model", MODEL, "--no-approve", "--session-dir", join(opts.rdir, "pi-sessions"), "--append-system-prompt", opts.system];
+  if (opts.resume) argv.push("--session", opts.resume);
+  argv.push(opts.prompt);
+  const { out, err } = await spawnCapture(argv, opts, { PI_CODING_AGENT_DIR: PI_HOME });
+  const res: TurnResult = { sessionId: opts.resume ?? "", text: "", tools: [], cost: 0 };
+  for (const m of parseJsonl(out)) {
+    if (m.type === "session") res.sessionId = m.id;
+    if (m.type === "message_end" && m.message?.role === "assistant") {
+      for (const c of m.message.content ?? []) {
+        if (c.type === "text") res.text += c.text;
+        if (c.type === "toolCall") res.tools.push(`${c.name}(${JSON.stringify(c.arguments).slice(0, 120)})`);
+      }
+      res.cost += m.message.usage?.cost?.total ?? 0;
+    }
+    if (m.type === "error") res.error = String(m.message ?? JSON.stringify(m)).slice(0, 300);
+  }
+  if (!res.text && !res.error) res.error = `no assistant text; stderr: ${err.slice(0, 300)}`;
+  return res;
+}
+
+const turn = (opts: TurnOpts) => (PROVIDER === "codex" ? codexTurn(opts) : PROVIDER === "pi" ? piTurn(opts) : claudeTurn(opts));
+
 async function runChain(mode: Mode, sc: Scenario, run: number) {
-  const tag = `${mode}${JOURNAL ? "+journal" : ""}/${sc.id}/run${run}`;
+  const tag = `${PROVIDER}/${mode}${JOURNAL ? "+journal" : ""}/${sc.id}/run${run}`;
   const rdir = join(OUT, mode, sc.id, `run${run}`);
   const cwd = join(rdir, "cwd");
   const memDir = mode === "cli" ? join(rdir, "memory") : join(cwd, "memory");
@@ -111,7 +182,7 @@ async function runChain(mode: Mode, sc: Scenario, run: number) {
     const lines: string[] = [];
     for (let t = 0; t < sc.sessions[s].length; t++) {
       const prompt = sc.sessions[s][t];
-      const r = await claudeTurn({ cwd, env, prompt, system: sys, resume: sid, raw });
+      const r = await turn({ cwd, env, prompt, system: sys, resume: sid, raw, rdir });
       sid = r.sessionId || sid;
       cost += r.cost;
       if (r.error) errors.push(`s${s + 1}t${t + 1}: ${r.error}`);
@@ -122,7 +193,7 @@ async function runChain(mode: Mode, sc: Scenario, run: number) {
       console.log(`  ${tag} s${s + 1}t${t + 1} done ($${cost.toFixed(3)})`);
     }
     // rotation: flush turn on the dying session, then (journal) dream pass
-    const f = await claudeTurn({ cwd, env, prompt: FLUSH, system: sys, resume: sid, raw });
+    const f = await turn({ cwd, env, prompt: FLUSH, system: sys, resume: sid, raw, rdir });
     cost += f.cost;
     if (f.error) errors.push(`s${s + 1} flush: ${f.error}`);
     responses.push({ session: s, turn: -1, text: f.text, tools: f.tools });
@@ -130,7 +201,7 @@ async function runChain(mode: Mode, sc: Scenario, run: number) {
     check(`s${s + 1}flush`);
     writeFileSync(join(transcripts, `session-${s + 1}.txt`), lines.join("\n") + "\n");
     if (JOURNAL) {
-      const dr = await claudeTurn({ cwd, env, prompt: DREAM(mode), system: systemPrompt(mode, memDir), raw });
+      const dr = await turn({ cwd, env, prompt: DREAM(mode), system: systemPrompt(mode, memDir), raw, rdir });
       cost += dr.cost;
       if (dr.error) errors.push(`s${s + 1} dream: ${dr.error}`);
       responses.push({ session: s, turn: -2, text: dr.text, tools: dr.tools });
@@ -143,7 +214,7 @@ async function runChain(mode: Mode, sc: Scenario, run: number) {
   const data: RunData = { seed, checkpoints, responses, ops, final: snapshot(memDir) };
   let verdict;
   try { verdict = sc.score(data); } catch (e) { verdict = { pass: false, notes: `scorer threw: ${e}` }; }
-  const result = { condition: mode, journal: JOURNAL, scenario: sc.id, run, ...verdict, cost: Number(cost.toFixed(3)), errors, model: MODEL, dir: rdir };
+  const result = { provider: PROVIDER, condition: mode, journal: JOURNAL, scenario: sc.id, run, ...verdict, cost: Number(cost.toFixed(3)), errors, model: MODEL, dir: rdir };
   appendFileSync(join(OUT, "results.jsonl"), JSON.stringify(result) + "\n");
   writeFileSync(join(rdir, "run.json"), JSON.stringify({ result, checkpoints, responses, ops }, null, 2));
   writeFileSync(join(rdir, "log.md"), log.join("\n") + `\n## verdict\n${JSON.stringify(verdict)}\n`);
@@ -153,7 +224,7 @@ async function runChain(mode: Mode, sc: Scenario, run: number) {
 
 const jobs: (() => Promise<unknown>)[] = [];
 for (const mode of CONDS as Mode[]) for (const sc of SCEN) for (let r = 1; r <= RUNS; r++) jobs.push(() => runChain(mode, sc, r));
-console.log(`${jobs.length} chains -> ${OUT} (model ${MODEL}, journal ${JOURNAL})`);
+console.log(`${jobs.length} chains -> ${OUT} (${PROVIDER} ${MODEL}, journal ${JOURNAL})`);
 const results: any[] = [];
 await Promise.all(Array.from({ length: CONC }, async () => { while (jobs.length) results.push(await jobs.shift()!()); }));
 

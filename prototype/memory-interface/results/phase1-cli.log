@@ -1,0 +1,42 @@
+8 chains -> /private/tmp/claude-501/-Users-rogier-Dev-agentick-agentick-next/839a9e95-785c-4927-a4ab-7bacbf8fbd71/scratchpad/hydra-memory/prototype/memory-interface/results/phase1 (model claude-sonnet-5, journal false)
+  cli/recall-topic-body/run1 s1t1 done ($0.043)
+PASS cli/recall-topic-body/run1  - drilled via: Bash({"command":"hydra memory read discord-setup"}) ($0.079)
+  cli/record-unprompted/run1 s1t1 done ($0.054)
+  cli/recall-preference/run1 s1t1 done ($0.049)
+PASS cli/record-unprompted/run1  - recorded at s1t1 in topics/hydra-project ($0.094)
+  cli/recall-preference/run1 s2t1 done ($0.123)
+  cli/recall-preference/run1 s3t1 done ($0.153)
+  cli/rotation-distill/run1 s1t1 done ($0.063)
+PASS cli/recall-preference/run1  - recorded at s1t1 in core ($0.159)
+  cli/noise/run1 s1t1 done ($0.035)
+  cli/cap-full/run1 s1t1 done ($0.108)
+  cli/rotation-distill/run1 s1t2 done ($0.078)
+  cli/noise/run1 s1t2 done ($0.041)
+PASS cli/cap-full/run1  - facts 3/3; hydra-project 2531 chars (was 11824); stub rejects 0; new topics none ($0.119)
+  cli/noise/run1 s1t3 done ($0.047)
+PASS cli/noise/run1  - curated untouched, nothing journaled ($0.054)
+  cli/rotation-distill/run1 s1t3 done ($0.110)
+  cli/fragmentation/run1 s1t1 done ($0.066)
+  cli/rotation-distill/run1 s1t4 done ($0.118)
+  cli/rotation-distill/run1 s1t5 done ($0.146)
+  cli/fragmentation/run1 s2t1 done ($0.119)
+  cli/rotation-distill/run1 s1t6 done ($0.157)
+PASS cli/fragmentation/run1  - both in hydra-project, no new topics ($0.125)
+  cli/rotation-distill/run1 s1t7 done ($0.165)
+  cli/rotation-distill/run1 s2t1 done ($0.239)
+PASS cli/rotation-distill/run1  - 3/3 recalled; in memory: token,jelle,dentist; at token@s1t1 jelle@s1t3 dentist@s1t5 ($0.246)
+  cli/update-supersede/run1 s1t1 done ($0.064)
+PASS cli/update-supersede/run1  - recorded at s1t1 in topics/hydra-project; old url removed ($0.108)
+
+| scenario | cli |
+|---|---|
+| recall-topic-body | 1/1 |
+| record-unprompted | 1/1 |
+| recall-preference | 1/1 |
+| cap-full | 1/1 |
+| noise | 1/1 |
+| fragmentation | 1/1 |
+| rotation-distill | 1/1 |
+| update-supersede | 1/1 |
+
+total cost $0.98
