@@ -241,5 +241,13 @@ A persisted message from Hydra to its user ("run failed", "trigger paused", "age
 _Avoid_: alert, ping
 
 **Intake**:
-The formation boundary where external signals become work: signals are triaged, grouped, and enriched by agents before they spawn tasks or reach the user, so decisions are made on prepared, high-value material rather than raw input. Working name, still under review.
+The formation boundary where external signals become work: signals are triaged, grouped, and enriched by agents before they spawn tasks or reach the user, so decisions are made on prepared, high-value material rather than raw input. Also the name of the view that presents it (confirmed by ticket #30).
 _Avoid_: command center, inbox, dashboard
+
+**Proposal**:
+A task the agents prepared and are asking the user to accept, park, or dismiss: a Task labelled `proposed` together with its pending go/no-go Notification. The unit Intake presents; a vocabulary term, not a separate entity.
+_Avoid_: suggestion, recommendation, candidate
+
+**Topic**:
+A label that groups Intake: each Connection files its events into one default topic, and triage labels a proposal with a topic (the connection's, unless the content says otherwise). User-defined and ordered; a label, never a domain state.
+_Avoid_: category, area, folder

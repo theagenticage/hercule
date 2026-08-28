@@ -139,6 +139,44 @@ above:
   glyphs (task, run, session) sketched in the prototype are placeholders pending their
   own focused ticket; do not treat the specific glyph shapes as pinned.
 
+## Intake semantics (pinned by ticket #30, 2026-08-28)
+
+The Intake prototype (four rounds) settled how prepared work is presented. Intake and
+check-in are **separate views** for now; merging is a post-dogfooding question.
+
+- **Intake is a morning brief.** The page is framed around "since you last checked": one
+  calm headline sentence leads with what burns ("1 burning · 6 proposals from 212 events ·
+  2 need a call · 3 FYI · 198 handled quietly").
+- **Topic tabs** group the page (All / Code / Business / Personal / Ops). A topic is a
+  label: each Connection files into one default topic chosen at setup; triage agents label
+  a proposal with the connection's topic unless the content says otherwise. Tabs show every
+  topic in use, user-ordered; a "Manage topics" affordance sits at the tabs' right edge.
+- **Needs a call** is verdict-based, never priority-based: it holds what triage could not
+  decide (an unsure verdict, a tripped spawn bound). Its label says so.
+- **Priority tiers make urgency legible**: proposals sit under Now / Today / When you can.
+  The Now tier carries a pulsing attention-hue dot on its label, on the burning card, and on
+  the topic tab that contains it - the one place a colored dot marks urgency.
+- **Lead card + condensed rows.** The burning proposal is one lead card (title, made-from
+  marks, gist, the proactive link, actions, "Open the full picture"); every other proposal
+  is a condensed row: title · priority bars · system marks · "→ suggested action" · age.
+- **Made from** is mandatory on every proposal: one entry per source system with the
+  system's monochrome mark. Marks show the *system* (GitHub, Gmail, Sentry, Tailscale,
+  Hetzner, Dependabot, cron, Hydra itself); the connection that carried it is a mono
+  suffix. Brand marks are 12px monochrome `currentColor` paths - never brand colours.
+- **Detail lives in a drawer**, never a page or a permanent split: proposal detail (Next +
+  actions · Why + links · Made from as signal cards with the source excerpt and "Open in
+  <system>" · the triage verdict block · History), connection events, and the Topics sheet
+  all open in the same right-hand drawer over the rail. Esc closes.
+- **The events view is the context.** A connection opens to every event since the last
+  check, each stamped with what triage made of it (→ proposal, unsure, FYI, ignored, filed,
+  held), filterable by that verdict. Held events from a tripped breaker are listed there.
+- **What came in** rows (one per connection: mark, name, summary, event count, "Events →")
+  and a one-line receipt ("212 events → 6 proposals · 2 routed · 1 attached · 3 FYI ·
+  198 ignored") close the page. Anything that opens says so with "Open →" / "Events →".
+- **Rejected on the record**: narrative brief prose at the top of the page (round 2), a
+  time-first ledger as the page (round 1), master/detail split (round 3: too little room for
+  the overview), a full detail page (round 3: the light card reads better).
+
 ## Provenance
 
 Three reaction rounds on the identical #20 check-in slice (enriched with #29 Task nouns).
@@ -148,3 +186,7 @@ borderless shadow depth and flat). Round 3's playground settled surfaces (Midnig
 Slate/Neutral/Porcelain/Sage/Mauve), typeface (Onest over Geist/Inter/Schibsted/Hanken/
 Instrument/Figtree/Plex), and emphasis weight (500). All rounds preserved in git history
 on `prototype/design-language`.
+Intake: four reaction rounds on `prototype/intake-view` (ticket #30) - round 1 settled
+two-views-not-one-spine and the Desk skeleton; round 2 settled topic tabs, the morning-brief
+framing and system marks; round 3 settled the drawer, priority tiers and the events view;
+round 4 is the converged single design.
