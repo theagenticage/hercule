@@ -113,6 +113,32 @@ The five monitoring axes (from #20's reaction) and their pinned encodings:
 - Radii: 10px cards/groups, 6px controls.
 - A "last check-in" divider marks what the user has already seen.
 
+## Monitoring semantics (pinned by ticket #20, 2026-08-28)
+
+The check-in prototype rounds 3-4 added system-wide semantics on top of the encodings
+above:
+
+- **Intent-level first.** Monitoring rows are strands of intent (a task, a standing
+  workflow, a one-off run); execution detail (runs, sessions, steps, turns) appears only
+  behind progressive disclosure. Entities always carry their domain noun (task, run,
+  session, workflow) - never invented vocabulary.
+- **Aggregate by default.** Routine work collapses to one row per workflow ("6 runs
+  today · all ✓"); the page keeps its shape from one runner to a fleet.
+- **Provenance-first attention.** Started-by-you outranks standing workflows, which
+  outrank routine schedules; task priority breaks ties; waiting-time warming stops
+  anything hiding forever.
+- **Decisions are questions.** Every needs-you item is phrased as a question whose
+  answers are its (quiet) buttons, marked by a small attention-hue diamond. The decision
+  card is uniform-height with labeled fields (FROM / WHY / AGENT) so cycling never moves
+  the controls; one decision at a time ("Focus") is the pinned treatment.
+- **One calm headline sentence** ("2 decisions wait · 3 strands in motion · 6 outcomes
+  today") and a **pulse rail** (fleet / assistants / intake as quiet text lines) replace
+  stat-card rows, which are banned. Assistants are ambient presence, never work strands.
+- **Marks legend** lives behind a toggle in the app chrome, never permanently on a page.
+- **Iconography is TBD**: the mark set (equalizer, diamond, queued, paused) and entity
+  glyphs (task, run, session) sketched in the prototype are placeholders pending their
+  own focused ticket; do not treat the specific glyph shapes as pinned.
+
 ## Provenance
 
 Three reaction rounds on the identical #20 check-in slice (enriched with #29 Task nouns).
