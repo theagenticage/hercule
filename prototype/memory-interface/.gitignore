@@ -1,0 +1,5 @@
+results/**/raw.jsonl
+results/**/cwd/
+results/**/memory/
+results/**/transcripts/
+results/smoke/

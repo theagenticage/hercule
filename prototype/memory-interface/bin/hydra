@@ -1,0 +1,142 @@
+#!/usr/bin/env bun
+// PROTOTYPE (ticket #31) - stub of the `hydra` CLI: memory ops + transcript recall. Throwaway.
+import { appendFileSync, existsSync, readdirSync, readFileSync } from "fs";
+import { join } from "path";
+import { buildIndex, checkWrite, deleteDoc, docPath, journalAppend, journalMarkRead, journalUnread, listTopics, readDoc, searchMemory, writeDoc, CAPS, gistOf } from "../lib";
+
+const DIR = process.env.HYDRA_MEMORY_DIR!;
+const MODE = process.env.HYDRA_MEMORY_MODE ?? "cli"; // cli | hybrid | files
+const JOURNAL = process.env.HYDRA_MEMORY_JOURNAL === "1";
+const LOCKED = MODE === "hybrid";
+const OPS = process.env.HYDRA_OPS_LOG;
+
+function log(op: string, name: string | undefined, ok: boolean, extra: Record<string, unknown> = {}) {
+  if (OPS) appendFileSync(OPS, JSON.stringify({ t: new Date().toISOString(), op, name, ok, ...extra }) + "\n");
+}
+function fail(msg: string, op = "?", name?: string): never {
+  log(op, name, false, { error: msg });
+  console.error(`error: ${msg}`);
+  process.exit(1);
+}
+async function body(args: string[]): Promise<string> {
+  const i = args.indexOf("--content");
+  if (i >= 0) return args[i + 1] ?? "";
+  return await new Response(Bun.stdin.stream()).text();
+}
+
+const help = `hydra - operate Hydra from a session (prototype stub)
+
+  hydra memory <op> ...     durable assistant memory (see 'hydra memory --help')
+  hydra recall <query>      full-text search over your own past conversation transcripts (slow, raw; prefer memory)
+`;
+const memHelp = `hydra memory - your durable notes. core = always loaded (max ${CAPS.core} chars); topics = named documents (max ${CAPS.topic} chars each, max ${CAPS.topics}), only their index is loaded.
+A document starts with '# <name>' then '> <one-line gist>' (the gist is what the index shows).
+
+  hydra memory list                      index of topics with gists and sizes
+  hydra memory read <core|topic>         print a document
+  hydra memory search <words>            lines matching all words, across all memory
+  hydra memory write <core|topic>        replace the whole document; content from stdin (heredoc) or --content "<text>"
+  hydra memory append <core|topic>       append content (stdin or --content); creates the topic if new
+  hydra memory delete <topic>            remove a topic${JOURNAL ? `
+  hydra memory journal                   append a dated note to the journal (stdin or --content); cheap, curated later by the dream pass
+  hydra memory journal-unread            journal entries not yet curated (dream pass)
+  hydra memory journal-mark-read         mark all journal entries curated (dream pass)` : ""}
+
+Writes past a cap fail with the current size; consolidate and retry. When a fact changes, replace it - never keep old and new.`;
+
+const [cmd, sub, ...rest] = process.argv.slice(2);
+
+if (!cmd || cmd === "--help" || cmd === "-h") { console.log(help); process.exit(0); }
+
+if (cmd === "recall") {
+  const q = [sub, ...rest].filter(Boolean).join(" ");
+  if (!q) fail("usage: hydra recall <query>", "recall");
+  const tdir = process.env.HYDRA_TRANSCRIPTS_DIR;
+  const words = q.toLowerCase().split(/\s+/);
+  const hits: string[] = [];
+  if (tdir && existsSync(tdir)) {
+    for (const f of readdirSync(tdir).filter((f) => f.endsWith(".txt")).sort()) {
+      readFileSync(join(tdir, f), "utf8").split("\n").forEach((line) => {
+        if (words.every((w) => line.toLowerCase().includes(w))) hits.push(`[${f.replace(".txt", "")}] ${line.trim()}`);
+      });
+    }
+  }
+  log("recall", q, true, { hits: hits.length });
+  console.log(hits.length ? hits.slice(0, 30).join("\n") : "(no matching lines in past transcripts)");
+  process.exit(0);
+}
+
+if (cmd !== "memory") fail(`unknown command "${cmd}"\n${help}`);
+if (!sub || sub === "--help" || sub === "-h") { console.log(memHelp); process.exit(0); }
+if (MODE === "files" && !sub.startsWith("journal-")) fail("in this deployment memory is the ./memory directory - read and edit the files directly", sub);
+
+const name = rest[0];
+switch (sub) {
+  case "list": {
+    log("list", undefined, true);
+    console.log(`core: ${readDoc(DIR, "core")?.length ?? 0} chars\n\n${buildIndex(DIR)}`);
+    break;
+  }
+  case "read": {
+    if (!name) fail("usage: hydra memory read <core|topic>", "read");
+    const c = readDoc(DIR, name);
+    if (c === null) fail(`no such document "${name}". Topics: ${listTopics(DIR).join(", ") || "(none)"}`, "read", name);
+    log("read", name, true);
+    console.log(c);
+    break;
+  }
+  case "search": {
+    const q = rest.join(" ");
+    if (!q) fail("usage: hydra memory search <words>", "search");
+    log("search", q, true);
+    console.log(searchMemory(DIR, q));
+    break;
+  }
+  case "write":
+  case "append": {
+    if (!name) fail(`usage: hydra memory ${sub} <core|topic> [--content "<text>"]  (or content on stdin)`, sub);
+    const incoming = (await body(rest.slice(1))).trim();
+    if (!incoming) fail("no content given (use stdin or --content)", sub, name);
+    const existing = readDoc(DIR, name);
+    const content = sub === "append" && existing ? existing.trimEnd() + "\n" + incoming + "\n" : incoming + "\n";
+    const err = checkWrite(DIR, name, content);
+    if (err) fail(err, sub, name);
+    writeDoc(DIR, name, content, LOCKED);
+    const warn = name !== "core" && gistOf(content) === "(no gist line)" ? "\nwarning: no '> gist' line on line 2; the index will show '(no gist line)'" : "";
+    log(sub, name, true, { chars: content.length, created: existing === null });
+    console.log(`ok: ${name} is now ${content.length}/${name === "core" ? CAPS.core : CAPS.topic} chars${warn}`);
+    break;
+  }
+  case "delete": {
+    if (!name || name === "core") fail("usage: hydra memory delete <topic>", "delete");
+    if (!existsSync(docPath(DIR, name))) fail(`no such topic "${name}"`, "delete", name);
+    deleteDoc(DIR, name, LOCKED);
+    log("delete", name, true);
+    console.log(`ok: deleted ${name}`);
+    break;
+  }
+  case "journal": {
+    if (!JOURNAL) fail("no journal in this deployment; write to core or a topic", "journal");
+    const incoming = (await body(rest)).trim();
+    if (!incoming) fail("no content given (use stdin or --content)", "journal");
+    journalAppend(DIR, incoming, LOCKED);
+    log("journal", undefined, true, { chars: incoming.length });
+    console.log("ok: journaled");
+    break;
+  }
+  case "journal-unread": {
+    if (!JOURNAL) fail("no journal in this deployment", sub);
+    log(sub, undefined, true);
+    console.log(journalUnread(DIR));
+    break;
+  }
+  case "journal-mark-read": {
+    if (!JOURNAL) fail("no journal in this deployment", sub);
+    journalMarkRead(DIR, LOCKED);
+    log(sub, undefined, true);
+    console.log("ok: journal marked read");
+    break;
+  }
+  default:
+    fail(`unknown memory op "${sub}"\n${memHelp}`, sub);
+}
