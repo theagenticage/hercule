@@ -1,21 +1,22 @@
 <!--
   PROTOTYPE - throwaway. Ticket: https://github.com/rogierpennink/hydra/issues/1 -> #30
-  ROUND 2. Round 1 reaction: Intake and check-in stay SEPARATE views for now (merging is a
-  post-dogfooding question); Desk (A) won; the Ledger's folded source signals touched
-  something real. This round keeps the Desk skeleton and re-frames it around the most likely
-  use-case, the MORNING BRIEF (now = Monday 08:30, last checked Sunday 18:10), then tries three
-  treatments of what Rogier asked for: the source events behind each proposal, a picture of
-  "what's out there" across the connected systems, and recognisable system marks.
-    A Brief    - narrative-first: an agent-written brief opens the page and links into the
-                 proposals; signals fold under each proposal; sources live in the rail.
-    B Topics   - topic-first: tabs (All / Code / Business / Personal) group connections and
-                 proposals; each tab shows "what came in" per connection in the main column.
-    C Systems  - verdict-first: proposals, then an "Across your systems" lane, one block per
-                 connection with its notable raw signals stamped with what triage made of them.
-  Marks: monochrome simple-icons brand paths (github, gmail, sentry, tailscale, hetzner,
-  dependabot) + a clock for cron + a hex for Hydra itself. Colour doctrine unchanged.
-  Keys: ← → variant · d dataset (calm/busy) · t theme · n cycle the working name.
-  Round 1 (three structural variants) is in git history (e0f5f7c).
+  ROUND 3. Round 2 reaction: Topics (tabs) won; "made from" stays. Asks: a real DETAIL VIEW for
+  proposed work (dive into details + source events) and for "what came in" (an events view);
+  expandable things must look expandable; urgency must be legible in a second ("Needs a call"
+  read as priority - it is not: it is what triage could NOT decide); with a detail view the
+  cards can carry less text; and: how are tabs curated?
+  This round keeps the Topics skeleton and varies the DETAIL-VIEW PATTERN, the structural call:
+    A Drawer - list page with priority tiers (Now / Today / When you can); any card, connection
+               or "manage topics" opens a right-hand drawer over the rail. Stay in place.
+    B Page   - list page with one LEAD card for the burning item, condensed rows for the rest;
+               detail is a full page with a breadcrumb back (Intake › Login failures…).
+    C Split  - master/detail: compact tiered list on the left, detail always open on the right
+               (replaces the rail); arrow keys move the selection.
+  Shared this round: lighter cards (title · made-from marks · gist · next), explicit "open"
+  affordances, an events view per connection (every event, stamped with its verdict, held
+  events included), a Topics sheet answering curation (see the note under the switcher).
+  Keys: ← → variant · ↑ ↓ selection (C) · Esc close · d dataset · t theme · n name.
+  Rounds 1-2 in git history (e0f5f7c, 3d6a81f).
 -->
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -23,57 +24,33 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Onest:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
 <style>
-  /* ============ tokens: pinned Midnight (docs/design-language.md) ============ */
   :root {
-    --bg:      oklch(94.5% 0.0156 265);
-    --surface: oklch(96.7% 0.0125 265);
-    --raised:  oklch(100% 0.0078 265);
-    --ink:     oklch(23% 0.0100 265);
-    --muted:   oklch(48% 0.0156 265);
-    --faint:   oklch(66% 0.0156 265);
-    --line:      oklch(23% 0.0100 265 / 0.10);
-    --line-soft: oklch(23% 0.0100 265 / 0.055);
-    --card-shadow: 0 1px 2px rgba(23,26,33,0.05);
-    --lift-shadow: 0 1px 2px rgba(23,26,33,0.06), 0 4px 14px rgba(23,26,33,0.06);
-    --attn: #8a6116; --fail: #a34e46; --ok: #48745a; --live: #48717f;
-    --attn-soft: rgba(138,97,22,0.09);
+    --bg: oklch(94.5% 0.0156 265); --surface: oklch(96.7% 0.0125 265); --raised: oklch(100% 0.0078 265);
+    --ink: oklch(23% 0.0100 265); --muted: oklch(48% 0.0156 265); --faint: oklch(66% 0.0156 265);
+    --line: oklch(23% 0.0100 265 / 0.10); --line-soft: oklch(23% 0.0100 265 / 0.055);
+    --card-shadow: 0 1px 2px rgba(23,26,33,0.05); --lift-shadow: 0 1px 2px rgba(23,26,33,0.06), 0 4px 14px rgba(23,26,33,0.06);
+    --drawer-shadow: -8px 0 40px rgba(23,26,33,0.12); --scrim: rgba(23,26,33,0.18);
+    --attn: #8a6116; --fail: #a34e46; --ok: #48745a; --live: #48717f; --attn-soft: rgba(138,97,22,0.09);
     --proj-hydra: #7d7ab0; --proj-ops: #a67f92;
   }
-  @media (prefers-color-scheme: dark) {
-    :root:not([data-theme="light"]) {
-      --bg:      oklch(20%   0.0288 265);
-      --surface: oklch(22.2% 0.0288 265);
-      --raised:  oklch(25.5% 0.0259 265);
-      --ink:     oklch(90% 0.0080 265);
-      --muted:   oklch(68% 0.0288 265);
-      --faint:   oklch(50% 0.0288 265);
-      --line:      oklch(90% 0.0288 265 / 0.10);
-      --line-soft: oklch(90% 0.0288 265 / 0.06);
-      --card-shadow: 0 1px 2px rgba(0,0,0,0.35);
-      --lift-shadow: inset 0 1px 0 rgba(255,255,255,0.05), 0 1px 2px rgba(0,0,0,0.4), 0 6px 18px rgba(0,0,0,0.3);
-      --attn: #d0a147; --fail: #cf7b71; --ok: #7fae8e; --live: #7fa8b8;
-      --attn-soft: rgba(208,161,71,0.12);
-      --proj-hydra: #9490c9; --proj-ops: #bd93a8;
-    }
-  }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+    --bg: oklch(20% 0.0288 265); --surface: oklch(22.2% 0.0288 265); --raised: oklch(25.5% 0.0259 265);
+    --ink: oklch(90% 0.0080 265); --muted: oklch(68% 0.0288 265); --faint: oklch(50% 0.0288 265);
+    --line: oklch(90% 0.0288 265 / 0.10); --line-soft: oklch(90% 0.0288 265 / 0.06);
+    --card-shadow: 0 1px 2px rgba(0,0,0,0.35); --lift-shadow: inset 0 1px 0 rgba(255,255,255,0.05), 0 1px 2px rgba(0,0,0,0.4), 0 6px 18px rgba(0,0,0,0.3);
+    --drawer-shadow: -8px 0 40px rgba(0,0,0,0.5); --scrim: rgba(0,0,0,0.4);
+    --attn: #d0a147; --fail: #cf7b71; --ok: #7fae8e; --live: #7fa8b8; --attn-soft: rgba(208,161,71,0.12);
+    --proj-hydra: #9490c9; --proj-ops: #bd93a8; } }
   :root[data-theme="dark"] {
-    --bg:      oklch(20%   0.0288 265);
-    --surface: oklch(22.2% 0.0288 265);
-    --raised:  oklch(25.5% 0.0259 265);
-    --ink:     oklch(90% 0.0080 265);
-    --muted:   oklch(68% 0.0288 265);
-    --faint:   oklch(50% 0.0288 265);
-    --line:      oklch(90% 0.0288 265 / 0.10);
-    --line-soft: oklch(90% 0.0288 265 / 0.06);
-    --card-shadow: 0 1px 2px rgba(0,0,0,0.35);
-    --lift-shadow: inset 0 1px 0 rgba(255,255,255,0.05), 0 1px 2px rgba(0,0,0,0.4), 0 6px 18px rgba(0,0,0,0.3);
-    --attn: #d0a147; --fail: #cf7b71; --ok: #7fae8e; --live: #7fa8b8;
-    --attn-soft: rgba(208,161,71,0.12);
-    --proj-hydra: #9490c9; --proj-ops: #bd93a8;
-  }
+    --bg: oklch(20% 0.0288 265); --surface: oklch(22.2% 0.0288 265); --raised: oklch(25.5% 0.0259 265);
+    --ink: oklch(90% 0.0080 265); --muted: oklch(68% 0.0288 265); --faint: oklch(50% 0.0288 265);
+    --line: oklch(90% 0.0288 265 / 0.10); --line-soft: oklch(90% 0.0288 265 / 0.06);
+    --card-shadow: 0 1px 2px rgba(0,0,0,0.35); --lift-shadow: inset 0 1px 0 rgba(255,255,255,0.05), 0 1px 2px rgba(0,0,0,0.4), 0 6px 18px rgba(0,0,0,0.3);
+    --drawer-shadow: -8px 0 40px rgba(0,0,0,0.5); --scrim: rgba(0,0,0,0.4);
+    --attn: #d0a147; --fail: #cf7b71; --ok: #7fae8e; --live: #7fa8b8; --attn-soft: rgba(208,161,71,0.12);
+    --proj-hydra: #9490c9; --proj-ops: #bd93a8; }
   :root { --sans: "Onest", -apple-system, system-ui, sans-serif; --mono: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace; --w-emph: 500; --w-urgent: 600; }
 
-  /* ============ base ============ */
   * { box-sizing: border-box; }
   html, body { margin: 0; padding: 0; }
   body { background: var(--bg); color: var(--ink); font: 14px/1.5 var(--sans); -webkit-font-smoothing: antialiased; }
@@ -81,9 +58,8 @@
   .app { display: flex; min-height: 100vh; }
   code { font-family: var(--mono); font-size: 12px; background: var(--line-soft); padding: 1px 5px; border-radius: 4px; font-weight: 400; }
   a.ref { color: var(--ink); text-decoration: none; font-weight: var(--w-emph); border-bottom: 1px solid var(--line); }
-  a.ref:hover { border-bottom-color: var(--muted); }
 
-  /* ---------- chrome (shared shell, identical to check-in) ---------- */
+  /* chrome */
   .side { width: 204px; flex: none; background: var(--surface); border-right: 1px solid var(--line-soft); display: flex; flex-direction: column; padding: 16px 10px; position: sticky; top: 0; height: 100vh; }
   .logo { display: flex; align-items: baseline; gap: 8px; padding: 4px 10px 16px; }
   .logo b { font-size: 15px; letter-spacing: 0.01em; font-weight: var(--w-emph); }
@@ -92,47 +68,52 @@
   .nav a { display: flex; align-items: center; justify-content: space-between; padding: 5px 10px; border-radius: 6px; color: var(--muted); text-decoration: none; font-size: 13px; }
   .nav a.on { background: var(--line-soft); color: var(--ink); font-weight: var(--w-emph); }
   .nav a:not(.on):hover { background: var(--line-soft); }
-  .nav a:focus-visible { outline: 2px solid var(--live); outline-offset: 1px; }
   .nav .count { font-family: var(--mono); font-size: 11px; color: var(--faint); font-variant-numeric: tabular-nums; }
   .nav .sep { height: 1px; background: var(--line-soft); margin: 8px 10px; }
   .chrome-foot { margin-top: auto; display: flex; flex-direction: column; gap: 8px; }
-  .chrome-foot .qbtn { align-self: flex-start; font-size: 11.5px; color: var(--faint); }
   .proto-badge { border: 1px dashed var(--attn); color: var(--attn); background: var(--attn-soft); border-radius: 8px; padding: 8px 10px; font-family: var(--mono); font-size: 10px; line-height: 1.5; }
   .main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
   .topbar { display: flex; align-items: baseline; gap: 14px; padding: 24px 32px 0; }
   .topbar h1 { font-size: 18px; margin: 0; letter-spacing: -0.015em; font-weight: var(--w-emph); }
   .topbar .when { color: var(--muted); font-size: 13px; }
   .topbar .since { color: var(--faint); font-size: 12.5px; margin-left: auto; }
+  .topbar .crumbs { font-size: 18px; font-weight: var(--w-emph); letter-spacing: -0.015em; display: flex; gap: 8px; align-items: baseline; min-width: 0; }
+  .topbar .crumbs a { color: var(--faint); text-decoration: none; font-weight: 400; font-size: 14px; }
+  .topbar .crumbs a:hover { color: var(--ink); }
+  .topbar .crumbs .sepc { color: var(--faint); font-weight: 400; }
   #stage { padding: 16px 32px 150px; }
 
-  /* ============ layout ============ */
   .layout { display: grid; grid-template-columns: minmax(0, 1fr) 236px; gap: 44px; align-items: start; max-width: 1100px; }
+  .layout.split { grid-template-columns: 470px minmax(0, 1fr); gap: 28px; max-width: 1220px; }
+  .split .drow .from, .split .prow .next, .split .crow .sum, .split .crow .n, .split .headline br { display: none; }
+  .split .tabs { flex-wrap: wrap; }
+  .split .prow .t { flex: 1; }
   .maincol { display: flex; flex-direction: column; min-width: 0; }
-  .maincol .lane { margin-bottom: 30px; }
+  .maincol .lane { margin-bottom: 28px; }
   .maincol .lane > .lane-label { margin-bottom: 10px; }
   .rail { position: sticky; top: 20px; display: flex; flex-direction: column; gap: 22px; }
 
-  /* ============ atoms ============ */
+  /* atoms */
   .lane-label { text-transform: uppercase; letter-spacing: 0.1em; font-size: 10.5px; font-weight: var(--w-emph); color: var(--faint); display: flex; align-items: center; gap: 8px; }
   .lane-label .n { font-family: var(--mono); font-weight: 500; letter-spacing: 0; font-variant-numeric: tabular-nums; }
+  .lane-label .why { text-transform: none; letter-spacing: 0; font-weight: 400; color: var(--faint); }
+  .lane-label.now { color: var(--attn); }
   .headline { font-size: 13.5px; color: var(--muted); padding-bottom: 20px; }
   .headline b { color: var(--ink); font-weight: var(--w-emph); font-variant-numeric: tabular-nums; }
   .headline .warm { color: var(--attn); font-weight: var(--w-emph); }
-
-  /* system marks: monochrome, word-scale */
   .sys { width: 12px; height: 12px; flex: none; fill: currentColor; color: var(--muted); vertical-align: -2px; display: inline-block; }
   .sys.lg { width: 14px; height: 14px; }
   .sys.faint { color: var(--faint); }
   .syst { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
-
   .eq { display: inline-flex; align-items: flex-end; gap: 1.5px; height: 10px; width: 11px; flex: none; }
   .eq i { width: 2.5px; border-radius: 1px; background: var(--live); height: 4px; animation: eqb 1.15s ease-in-out infinite; }
   .eq i:nth-child(2) { animation-delay: 0.22s; } .eq i:nth-child(3) { animation-delay: 0.44s; }
   @keyframes eqb { 0%, 100% { height: 3px; } 50% { height: 9px; } }
   @keyframes pulse { 50% { opacity: 0.3; } }
-  @media (prefers-reduced-motion: reduce) { .eq i, .dot { animation: none !important; } .eq i:nth-child(1) { height: 4px; } .eq i:nth-child(2) { height: 8px; } .eq i:nth-child(3) { height: 5px; } }
+  @media (prefers-reduced-motion: reduce) { .eq i, .dot, .burn { animation: none !important; } }
   .dmark { color: var(--attn); font-size: 9px; flex: none; position: relative; top: -1px; }
   .pmark { color: var(--faint); font-size: 10px; flex: none; position: relative; top: -1px; }
+  .burn { width: 7px; height: 7px; border-radius: 50%; background: var(--attn); flex: none; display: inline-block; animation: pulse 1.6s ease-in-out infinite; }
   .okg { color: var(--ok); } .failg { color: var(--fail); } .cang { color: var(--faint); }
   .pausemark { color: var(--attn); font-size: 12px; flex: none; }
   .markcell { width: 16px; flex: none; display: inline-flex; justify-content: center; align-items: center; font-size: 12px; }
@@ -142,9 +123,9 @@
   .pri .bars { display: inline-flex; align-items: flex-end; gap: 1.5px; height: 9px; }
   .pri .bars i { width: 2.5px; border-radius: 1px; background: var(--line); }
   .pri .bars i:nth-child(1) { height: 3.5px; } .pri .bars i:nth-child(2) { height: 6px; } .pri .bars i:nth-child(3) { height: 9px; }
-  .pri[data-pri="low"]    .bars i:nth-child(1) { background: var(--faint); }
+  .pri[data-pri="low"] .bars i:nth-child(1) { background: var(--faint); }
   .pri[data-pri="normal"] .bars i:nth-child(-n+2) { background: var(--muted); }
-  .pri[data-pri="high"]   .bars i { background: var(--muted); }
+  .pri[data-pri="high"] .bars i { background: var(--muted); }
   .pri[data-pri="urgent"] .bars i { background: var(--ink); }
   .age { font-family: var(--mono); font-size: 11.5px; white-space: nowrap; color: var(--faint); flex: none; font-variant-numeric: tabular-nums; }
   .age[data-age="recent"] { color: var(--muted); } .age[data-age="stale"] { color: var(--ink); } .age[data-age="old"] { color: var(--attn); font-weight: 500; }
@@ -159,109 +140,152 @@
   .fv { color: var(--muted); }
   .fv b { color: var(--ink); font-weight: var(--w-emph); }
   .fv .none { color: var(--faint); }
+  .openlink { color: var(--faint); font-size: 12px; white-space: nowrap; display: inline-flex; align-items: center; gap: 4px; }
+  .openlink:hover { color: var(--ink); }
+  .chev { color: var(--faint); font-size: 10px; }
 
-  /* ---- the brief (A) ---- */
-  .brief { background: var(--surface); border: 1px solid var(--line-soft); border-radius: 10px; padding: 16px 20px 12px; margin-bottom: 30px; }
-  .brief p { margin: 0 0 8px; font-size: 14px; line-height: 1.6; color: var(--ink); max-width: 68ch; }
-  .brief p:last-of-type { margin-bottom: 0; }
-  .brief .by { display: flex; align-items: center; gap: 8px; color: var(--faint); font-size: 11.5px; margin-top: 10px; }
-
-  /* ---- topic tabs (B) ---- */
-  .tabs { display: flex; gap: 2px; margin-bottom: 22px; border-bottom: 1px solid var(--line-soft); }
+  /* tabs */
+  .tabs { display: flex; gap: 2px; margin-bottom: 22px; border-bottom: 1px solid var(--line-soft); align-items: baseline; }
   .tab { font: inherit; font-size: 13px; color: var(--muted); background: none; border: 0; padding: 6px 10px 8px; cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px; display: flex; gap: 7px; align-items: baseline; }
   .tab .n { font-family: var(--mono); font-size: 11px; color: var(--faint); font-variant-numeric: tabular-nums; }
   .tab.on { color: var(--ink); font-weight: var(--w-emph); border-bottom-color: var(--ink); }
   .tab:hover:not(.on) { color: var(--ink); }
-  .tab:focus-visible { outline: 2px solid var(--live); outline-offset: -2px; border-radius: 4px; }
+  .tab .burn { margin-left: -2px; }
+  .tabs .manage { margin-left: auto; padding-bottom: 8px; }
 
-  /* ---- proposal dossier card ---- */
-  .pcard { background: var(--raised); border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--lift-shadow); padding: 14px 18px 11px; display: flex; flex-direction: column; gap: 9px; scroll-margin-top: 20px; }
+  /* light proposal card */
+  .pcard { background: var(--raised); border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--card-shadow); padding: 11px 16px 9px; display: flex; flex-direction: column; gap: 6px; cursor: pointer; scroll-margin-top: 20px; }
+  .pcard:hover { box-shadow: var(--lift-shadow); }
+  .pcard.sel { border-color: var(--muted); }
   .pcard .tline { display: flex; align-items: baseline; gap: 10px; }
   .pcard .crumb { color: var(--faint); font-size: 12px; white-space: nowrap; }
-  .pcard .t { font-size: 15px; font-weight: var(--w-emph); letter-spacing: -0.008em; }
-  .pcard[data-pri="urgent"] .t { font-size: 16px; font-weight: var(--w-urgent); }
+  .pcard .t { font-size: 14.5px; font-weight: var(--w-emph); letter-spacing: -0.008em; }
+  .pcard[data-pri="urgent"] .t { font-size: 15.5px; font-weight: var(--w-urgent); }
   .pcard[data-pri="low"] { opacity: 0.8; }
   .pcard .tline .age { margin-left: auto; }
-  .pcard .fields { display: grid; grid-template-columns: 72px minmax(0, 1fr); gap: 5px 14px; font-size: 12.5px; }
-  .pcard .fv { line-height: 1.45; }
-  .pcard .fv.made { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: center; cursor: pointer; }
-  .pcard .fv.made .chev { color: var(--faint); font-size: 10px; }
-  .pcard .fv.next b { color: var(--ink); }
-  .pcard .foot { display: flex; align-items: center; gap: 10px; border-top: 1px solid var(--line-soft); padding-top: 8px; margin-top: 2px; }
-  .pcard .foot .by { margin-left: auto; color: var(--faint); font-size: 11.5px; white-space: nowrap; }
-  .pstack { display: flex; flex-direction: column; gap: 10px; }
-  /* signals folded under a proposal */
-  .sigs { display: none; grid-column: 2; flex-direction: column; gap: 3px; padding: 4px 0 2px 10px; border-left: 1px solid var(--line-soft); margin: -2px 0 2px 2px; }
-  .sigs.open { display: flex; }
-  .sig { display: flex; gap: 8px; align-items: baseline; font-size: 12px; color: var(--muted); }
-  .sig .sys { vertical-align: -1px; align-self: center; }
-  .sig .kind { font-family: var(--mono); font-size: 10.5px; color: var(--faint); width: 40px; flex: none; }
-  .sig .src { margin-left: auto; font-family: var(--mono); font-size: 10.5px; color: var(--faint); white-space: nowrap; }
-  .sig .vw { margin-left: auto; color: var(--faint); font-size: 11.5px; white-space: nowrap; }
-  .sig .vw b { color: var(--muted); font-weight: var(--w-emph); }
-  .sig.quiet { opacity: 0.66; }
-  /* condensed proposal row */
-  .prow { display: flex; align-items: center; gap: 10px; padding: 9px 14px; background: var(--raised); border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--card-shadow); cursor: pointer; }
-  .prow .t { font-weight: var(--w-emph); font-size: 13.5px; white-space: nowrap; }
+  .pcard .made { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: center; font-size: 12.5px; color: var(--muted); }
+  .pcard .gist { font-size: 12.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .pcard .foot { display: flex; align-items: center; gap: 10px; }
+  .pcard .foot .openlink { margin-left: auto; }
+  .pcard.lead { padding: 16px 20px 12px; box-shadow: var(--lift-shadow); gap: 9px; }
+  .pcard.lead .t { font-size: 17px; }
+  .pcard.lead .gist { white-space: normal; font-size: 13px; color: var(--ink); }
+  .pcard.lead .link { font-size: 12.5px; color: var(--muted); }
+  .pstack { display: flex; flex-direction: column; gap: 8px; }
+  .tier { margin-bottom: 16px; }
+  .tier > .lane-label { margin-bottom: 8px; }
+  /* compact proposal row (split list, B's condensed) */
+  .prow { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-radius: 8px; cursor: pointer; border-top: 1px solid var(--line-soft); }
+  .prow:first-child { border-top: 0; }
+  .prow:hover { background: var(--line-soft); }
+  .prow.sel { background: var(--raised); border-color: transparent; box-shadow: var(--card-shadow); outline: 1px solid var(--line); }
+  .prow .t { font-weight: var(--w-emph); font-size: 13.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .prow[data-pri="urgent"] .t { font-weight: var(--w-urgent); }
   .prow[data-pri="low"] { opacity: 0.72; }
-  .prow .sub { color: var(--faint); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: flex; gap: 8px; align-items: center; }
-  .prow .next { margin-left: auto; color: var(--muted); font-size: 12.5px; white-space: nowrap; }
+  .prow .marks { display: inline-flex; gap: 4px; align-items: center; flex: none; }
+  .prow .next { margin-left: auto; color: var(--muted); font-size: 12px; white-space: nowrap; }
   .prow .next b { color: var(--ink); font-weight: var(--w-emph); }
+  .prow .openlink { flex: none; }
+  .rows { display: flex; flex-direction: column; }
+
   /* questions */
   .drow { display: flex; align-items: center; gap: 10px; padding: 9px 14px; background: var(--raised); border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--card-shadow); }
   .drow .q { font-weight: var(--w-emph); font-size: 13.5px; white-space: nowrap; }
   .drow .from { color: var(--faint); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: flex; gap: 6px; align-items: center; }
   .drow .acts { margin-left: auto; gap: 2px; }
   .dstack { display: flex; flex-direction: column; gap: 6px; }
-  /* FYI + receipt */
+
+  /* what came in: connection rows with explicit open affordance */
+  .crow { display: flex; align-items: center; gap: 10px; padding: 9px 12px; border-top: 1px solid var(--line-soft); cursor: pointer; border-radius: 8px; }
+  .crow:first-child { border-top: 0; }
+  .crow:hover { background: var(--line-soft); }
+  .crow.sel { background: var(--raised); box-shadow: var(--card-shadow); outline: 1px solid var(--line); }
+  .crow b { font-weight: var(--w-emph); font-size: 13px; white-space: nowrap; }
+  .crow .sum { color: var(--muted); font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .crow .warm { color: var(--attn); }
+  .crow .n { margin-left: auto; font-family: var(--mono); font-size: 11px; color: var(--faint); font-variant-numeric: tabular-nums; white-space: nowrap; }
+
   .fyi { display: flex; gap: 12px; align-items: baseline; padding: 5px 2px; font-size: 12.5px; color: var(--muted); border-top: 1px solid var(--line-soft); }
   .fyi:first-of-type { border-top: 0; }
-  .fyi .when { font-family: var(--mono); font-size: 11px; color: var(--faint); width: 44px; flex: none; text-align: right; font-variant-numeric: tabular-nums; }
+  .fyi .when { font-family: var(--mono); font-size: 11px; color: var(--faint); width: 60px; flex: none; text-align: right; font-variant-numeric: tabular-nums; }
   .fyi .sys { align-self: center; }
   .fyi .by { margin-left: auto; color: var(--faint); font-size: 11.5px; white-space: nowrap; }
-  .digestline { display: flex; align-items: center; gap: 10px; cursor: pointer; color: var(--muted); font-size: 12.5px; padding: 2px 2px; }
-  .digestline b { font-weight: var(--w-emph); color: var(--ink); font-variant-numeric: tabular-nums; }
-  .digestline .chev { color: var(--faint); font-size: 10px; }
-  .digest { display: none; flex-direction: column; opacity: 0.82; padding-top: 6px; }
-  .digest.open { display: flex; }
-  .ditem { display: flex; gap: 12px; align-items: baseline; padding: 5px 2px; font-size: 12.5px; }
-  .ditem .when { font-family: var(--mono); font-size: 11px; color: var(--faint); width: 84px; flex: none; text-align: right; font-variant-numeric: tabular-nums; }
-  .ditem .glyph { flex: none; width: 14px; text-align: center; font-size: 11.5px; }
-  .ditem .vw { color: var(--faint); margin-left: auto; }
+  .digestline { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 12.5px; padding: 2px 2px; }
+  .digestline b { font-weight: var(--w-emph); color: var(--ink); }
 
-  /* ---- connection blocks ("what came in" / "across your systems") ---- */
-  .cstack { display: flex; flex-direction: column; gap: 8px; }
-  .cblock { background: var(--surface); border: 1px solid var(--line-soft); border-radius: 10px; padding: 10px 14px 8px; }
-  .cblock .chead { display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer; }
-  .cblock .chead b { font-weight: var(--w-emph); }
-  .cblock .chead .sum { color: var(--muted); font-size: 12.5px; }
-  .cblock .chead .warm { color: var(--attn); }
-  .cblock .chead .n { margin-left: auto; font-family: var(--mono); font-size: 11px; color: var(--faint); font-variant-numeric: tabular-nums; white-space: nowrap; }
-  .cblock .chead .chev { color: var(--faint); font-size: 10px; }
-  .cblock .csigs { display: none; flex-direction: column; gap: 2px; padding: 8px 0 2px 22px; }
-  .cblock.open .csigs { display: flex; }
-  .cblock .more { color: var(--faint); font-size: 11.5px; padding-top: 3px; }
+  /* ---- detail (shared content; placed in drawer / page / split pane) ---- */
+  .detail { display: flex; flex-direction: column; gap: 18px; min-width: 0; }
+  .detail .dhead { display: flex; flex-direction: column; gap: 6px; }
+  .detail .dhead .crumb { color: var(--faint); font-size: 12px; display: flex; gap: 8px; align-items: center; }
+  .detail h2 { margin: 0; font-size: 18px; font-weight: var(--w-emph); letter-spacing: -0.012em; display: flex; gap: 10px; align-items: baseline; }
+  .detail h2 .age { font-size: 12px; }
+  .detail .dsec { display: flex; flex-direction: column; gap: 6px; }
+  .detail .dsec > .lane-label { margin-bottom: 2px; }
+  .detail p { margin: 0; font-size: 13.5px; line-height: 1.55; color: var(--ink); max-width: 68ch; }
+  .detail p.m { color: var(--muted); }
+  .detail .kv { display: grid; grid-template-columns: 84px minmax(0, 1fr); gap: 5px 14px; font-size: 12.5px; }
+  .detail .acts { padding: 4px 0; }
+  .detail .acts .qbtn { font-size: 13px; padding: 7px 10px; }
+  .sigcard { background: var(--surface); border: 1px solid var(--line-soft); border-radius: 8px; padding: 9px 12px; display: flex; flex-direction: column; gap: 3px; }
+  .sigcard .l1 { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+  .sigcard .l1 b { font-weight: var(--w-emph); }
+  .sigcard .l1 .kind { font-family: var(--mono); font-size: 10.5px; color: var(--faint); }
+  .sigcard .l1 .src { margin-left: auto; font-family: var(--mono); font-size: 10.5px; color: var(--faint); white-space: nowrap; }
+  .sigcard .snip { font-size: 12.5px; color: var(--muted); line-height: 1.45; }
+  .sigcard .l3 { display: flex; gap: 4px; margin-left: -9px; }
+  .sigcard .l3 .qbtn { font-size: 11.5px; padding: 4px 9px; }
+  .hist { display: flex; flex-direction: column; gap: 3px; font-size: 12.5px; color: var(--muted); }
+  .hist div { display: flex; gap: 10px; align-items: baseline; }
+  .hist .when { font-family: var(--mono); font-size: 11px; color: var(--faint); width: 60px; flex: none; text-align: right; }
+  .verdict { background: var(--surface); border: 1px solid var(--line-soft); border-radius: 8px; padding: 9px 12px; font-family: var(--mono); font-size: 11.5px; color: var(--muted); line-height: 1.6; white-space: pre-wrap; }
+  .verdict b { color: var(--ink); font-weight: 500; }
+  /* events list */
+  .efilters { display: flex; gap: 2px; border-bottom: 1px solid var(--line-soft); margin-bottom: 4px; }
+  .efilters .tab { font-size: 12.5px; padding: 4px 8px 6px; }
+  .erow { display: grid; grid-template-columns: 62px 14px 44px minmax(0, 1fr) auto; gap: 0 10px; align-items: baseline; padding: 5px 2px; border-top: 1px solid var(--line-soft); font-size: 12.5px; color: var(--muted); cursor: pointer; }
+  .erow:first-of-type { border-top: 0; }
+  .erow:hover { background: var(--line-soft); }
+  .erow .when { font-family: var(--mono); font-size: 11px; color: var(--faint); text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .erow .kind { font-family: var(--mono); font-size: 10.5px; color: var(--faint); }
+  .erow .sys { align-self: center; }
+  .erow .t { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--ink); }
+  .erow.quiet .t { color: var(--faint); }
+  .erow .vw { color: var(--faint); font-size: 11.5px; white-space: nowrap; }
+  .erow .vw.held { color: var(--attn); }
+  .erow .vw a { color: var(--muted); text-decoration: none; border-bottom: 1px solid var(--line); }
+  /* topics sheet */
+  .topic { display: grid; grid-template-columns: 96px minmax(0, 1fr) auto; gap: 8px 14px; align-items: baseline; padding: 8px 0; border-top: 1px solid var(--line-soft); font-size: 13px; }
+  .topic:first-of-type { border-top: 0; }
+  .topic b { font-weight: var(--w-emph); }
+  .topic .conns { display: flex; flex-wrap: wrap; gap: 4px 14px; color: var(--muted); font-size: 12.5px; }
+  .topic .conns .syst .sys { color: var(--faint); }
+  .topic .conns .none { color: var(--faint); }
 
-  /* ---- rail ---- */
+  /* ---- A: drawer ---- */
+  .scrim { position: fixed; inset: 0; background: var(--scrim); z-index: 40; }
+  .drawer { position: fixed; top: 0; right: 0; bottom: 0; width: min(600px, 92vw); background: var(--raised); border-left: 1px solid var(--line); box-shadow: var(--drawer-shadow); z-index: 41; overflow: auto; padding: 24px 28px 60px; }
+  .drawer .close { position: absolute; top: 14px; right: 14px; }
+  /* ---- C: split pane ---- */
+  .pane { position: sticky; top: 20px; background: var(--raised); border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--card-shadow); padding: 20px 24px 24px; max-height: calc(100vh - 40px); overflow: auto; }
+  .listcol .lane { margin-bottom: 20px; }
+
+  /* rail */
   .pblock { display: flex; flex-direction: column; gap: 5px; }
   .pblock > .lane-label { margin-bottom: 3px; }
   .pline { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--muted); }
   .pline b { font-weight: var(--w-emph); color: var(--ink); }
   .pline .warm { color: var(--attn); }
-  .pline.sub { padding-left: 20px; margin-top: -3px; font-size: 11.5px; color: var(--faint); }
-  .pline .n { margin-left: auto; font-family: var(--mono); font-size: 11px; color: var(--faint); font-variant-numeric: tabular-nums; }
   .legend { border-top: 1px solid var(--line-soft); padding-top: 16px; }
   .legend .lg { display: flex; align-items: center; gap: 10px; font-size: 11.5px; color: var(--faint); padding: 2.5px 0; }
   .legend .lg .markcell { justify-content: flex-start; }
 
-  /* ============ switcher + notes (not part of the design) ============ */
-  .sw { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); background: #17161a; color: #fff; border-radius: 999px; padding: 6px 8px; display: flex; align-items: center; gap: 4px; box-shadow: 0 6px 24px rgba(0,0,0,0.35); z-index: 50; font-family: var(--mono); }
+  /* switcher (not part of the design) */
+  .sw { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); background: #17161a; color: #fff; border-radius: 999px; padding: 6px 8px; display: flex; align-items: center; gap: 4px; box-shadow: 0 6px 24px rgba(0,0,0,0.35); z-index: 60; font-family: var(--mono); }
   .sw .label { font-size: 12px; font-weight: 500; padding: 0 8px; min-width: 150px; text-align: center; }
   .sw button { background: none; border: 0; color: #fff; cursor: pointer; font: inherit; font-size: 13px; padding: 4px 10px; border-radius: 999px; }
   .sw button:hover { background: rgba(255,255,255,0.14); }
-  .sw button:focus-visible { outline: 2px solid #9a94e8; outline-offset: 1px; }
   .sw .ds { font-size: 11px; color: #c9c6d0; }
-  .vnote { position: fixed; bottom: 62px; left: 50%; transform: translateX(-50%); max-width: 640px; text-align: center; font-family: var(--mono); font-size: 10.5px; color: #c9c6d0; background: rgba(23,22,26,0.92); border-radius: 8px; padding: 6px 12px; z-index: 50; }
+  .vnote { position: fixed; bottom: 62px; left: 50%; transform: translateX(-50%); max-width: 640px; text-align: center; font-family: var(--mono); font-size: 10.5px; color: #c9c6d0; background: rgba(23,22,26,0.92); border-radius: 8px; padding: 6px 12px; z-index: 60; }
 </style>
 
 <div class="app">
@@ -269,19 +293,16 @@
     <div class="logo"><b>Hydra</b><span>v1 · rogier</span></div>
     <nav class="nav" id="nav"></nav>
     <div class="chrome-foot">
-      <button class="qbtn" id="legendbtn">Marks legend</button>
-      <div class="proto-badge">PROTOTYPE · throwaway<br>ticket hydra#30 · round 2<br>&larr; &rarr; variant · d data · t theme · n name</div>
+      <button class="qbtn" id="legendbtn" style="align-self:flex-start;font-size:11.5px;color:var(--faint)">Marks legend</button>
+      <div class="proto-badge">PROTOTYPE · throwaway<br>ticket hydra#30 · round 3<br>&larr; &rarr; variant · ↑ ↓ select · Esc close<br>d data · t theme · n name</div>
     </div>
   </aside>
   <main class="main">
-    <div class="topbar">
-      <h1 id="h1"></h1>
-      <span class="when">Monday 08:30</span>
-      <span class="since">since you last checked · Sunday 18:10</span>
-    </div>
+    <div class="topbar" id="topbar"></div>
     <div id="stage"></div>
   </main>
 </div>
+<div id="overlay"></div>
 
 <div class="vnote" id="vnote"></div>
 <div class="sw">
@@ -293,7 +314,6 @@
 </div>
 
 <script>
-/* system marks: simple-icons paths (CC0), monochrome */
 const ICONS = {
   github: "M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12",
   gmail: "M24 5.457v13.909c0 .904-.732 1.636-1.636 1.636h-3.819V11.73L12 16.64l-6.545-4.91v9.273H1.636A1.636 1.636 0 0 1 0 19.366V5.457c0-2.023 2.309-3.178 3.927-1.964L5.455 4.64 12 9.548l6.545-4.91 1.528-1.145C21.69 2.28 24 3.434 24 5.457z",
@@ -307,153 +327,190 @@ const ICONS = {
 const sysEl = (k, cls = "") => ICONS[k] ? `<svg class="sys ${cls}" viewBox="0 0 24 24" aria-label="${k}"><path d="${ICONS[k]}"/></svg>` : "";
 
 /* ============================================================================
-   DATA. Now = Monday 08:30; last checked Sunday 18:10. A proposal = Task (label
-   "proposed") + its pending decision Notification. `made` = provenance summary,
-   one entry per system; `sigs` = the raw signals, each with the system it came
-   from (sys) and the Connection that carried it (conn) - these differ when e.g.
-   Sentry arrives by email. `topic` on a proposal = an agent-set task label; the
-   topic on a Connection = a user-set label. Both are just labels (primitive test).
+   DATA. Now = Monday 08:30; last checked Sunday 18:10.
+   Proposal = Task (label "proposed" + topic label) + pending decision Notification.
+   `gist` is the one-line card text; `why`/`link`/`verdict` live in the detail view.
    ============================================================================ */
 const P = {
   login: { id: "p1", pri: "urgent", proj: "hydra", topic: "code", at: "07:20", age: "1h", bucket: "recent",
     t: "Login failures on Safari after 2.3.1",
+    gist: "Two customers, Sentry and issue #118 all point at PR #109; will collide with the billing hotfix.",
     made: [ { sys: "gmail", t: "3 emails to support@" }, { sys: "sentry", t: "2 alerts" }, { sys: "github", t: "issue #118" } ],
     sigs: [
-      { sys: "gmail", conn: "gmail/business", k: "email", t: "Anna Kowalczyk · \"Can't log in since this morning\"", at: "Sun 22:40" },
-      { sys: "gmail", conn: "gmail/business", k: "email", t: "Piet de Vries · \"Login loop on iPhone\"", at: "06:12" },
-      { sys: "sentry", conn: "gmail/business", k: "alert", t: "Sentry · TokenRefresh 401 · 2 alerts, 41 users", at: "06:30" },
-      { sys: "github", conn: "github/agentick-web", k: "issue", t: "#118 · Safari login redirects forever", at: "07:15" },
+      { sys: "gmail", conn: "gmail/business", k: "email", t: "Anna Kowalczyk · \"Can't log in since this morning\"", at: "Sun 22:40",
+        snip: "Hi, since this morning the app keeps sending me back to the login page on my Mac. Chrome works, Safari doesn't. Anything I can do?", open: "Open in Gmail" },
+      { sys: "gmail", conn: "gmail/business", k: "email", t: "Piet de Vries · \"Login loop on iPhone\"", at: "06:12",
+        snip: "Logging in on my iPhone just loops. Started after the update yesterday I think.", open: "Open in Gmail" },
+      { sys: "sentry", conn: "gmail/business", k: "alert", t: "Sentry · TokenRefresh 401 · 2 alerts, 41 users", at: "06:30",
+        snip: "AUTH-2291 TokenRefresh: 401 Unauthorized (agentick-web@2.3.1) · 41 users affected · first seen Sun 21:58 · browser Safari 17.x 100%", open: "Open in Sentry" },
+      { sys: "github", conn: "github/agentick-web", k: "issue", t: "#118 · Safari login redirects forever", at: "07:15",
+        snip: "Opened by @mvdberg: After 2.3.1, logging in on Safari 17.4 redirects to /login endlessly. Cleared cookies, no change.", open: "Open on GitHub" },
     ],
-    why: "All four describe the same failure: <code>TokenRefresh</code> returns 401 on Safari 17 since 2.3.1 shipped Sunday night. The only auth change in 2.3.1 is PR #109 (SameSite cookie tightening).",
+    why: "All four describe the same failure: <code>TokenRefresh</code> returns 401 on Safari 17 since 2.3.1 shipped Sunday night. The only auth change in 2.3.1 is PR #109 (SameSite cookie tightening). Safari treats the new <code>SameSite=None</code> cookie without <code>Secure</code> on the refresh path as cross-site and drops it.",
     link: "<b>Hotfix billing webhook</b> (in progress, turn 9) is editing the same auth module - a fix here will conflict unless it branches from that work.",
-    next: "Start the Bugfix workflow from PR #109", actions: ["Start Bugfix", "Later", "Dismiss", "Open task"], by: "Email triage · run 512" },
+    next: "Start the Bugfix workflow from PR #109", actions: ["Start Bugfix", "Later", "Dismiss", "Open task"], by: "Email triage", run: 512,
+    verdict: 'verdict: <b>propose</b> · priority: <b>urgent</b> · confidence: 0.92\ngroup: [evt 8812, 8830, 8834, 8851] same failure signature\nrelated_tasks: [t-204 Hotfix billing webhook] shared module src/auth/refresh.ts\nsuggest: workflow bugfix, inputs { base: "pr-109", scope: "auth/refresh" }' },
   certs: { id: "p2", pri: "high", proj: "ops", topic: "ops", at: "05:05", age: "3h", bucket: "stale",
     t: "Renew tailnet certs before Sep 3",
+    gist: "Expires in 6 days; Gmail OAuth rides this host. Same job as Rotate tailnet certs (Aug 12).",
     made: [ { sys: "tailscale", t: "expiry notice" } ],
-    sigs: [ { sys: "tailscale", conn: "gmail/personal", k: "email", t: "Tailscale · \"Certificate for hydra.tail42.ts.net expires in 6 days\"", at: "05:01" } ],
+    sigs: [ { sys: "tailscale", conn: "gmail/personal", k: "email", t: "Tailscale · \"Certificate for hydra.tail42.ts.net expires in 6 days\"", at: "05:01",
+      snip: "The TLS certificate for hydra.tail42.ts.net will expire on Sep 3. Run `tailscale cert` to renew.", open: "Open in Gmail" } ],
     why: "The cert on <code>hydra.tail42.ts.net</code> expires in 6 days. Gmail OAuth redirects go through that host, so an expired cert also breaks both Gmail connections.",
     link: "Same job as <b>Rotate tailnet certs</b> (done Aug 12); the runbook it produced is in <code>ops/runbooks/certs.md</code>.",
-    next: "Re-run the Rotate tailnet certs workflow", actions: ["Re-run Rotate certs", "Later", "Dismiss", "Open task"], by: "Email triage · run 507" },
+    next: "Re-run the Rotate tailnet certs workflow", actions: ["Re-run Rotate certs", "Later", "Dismiss", "Open task"], by: "Email triage", run: 507,
+    verdict: 'verdict: <b>propose</b> · priority: <b>high</b> · confidence: 0.97\nrelated_tasks: [t-188 Rotate tailnet certs (done)] same subject\nsuggest: workflow rotate-certs (re-run t-188)' },
   flaky: { id: "p3", pri: "high", proj: "hydra", topic: "code", at: "06:08", age: "2h", bucket: "stale",
     t: "Flaky test rate doubled this week",
+    gist: "9 of 40 CI runs flaked, all in tests/webhooks - the area Fix flaky webhook tests is already in.",
     made: [ { sys: "cron", t: "weekly CI stats" }, { sys: "github", t: "6 CI failure mails" } ],
-    sigs: [
-      { sys: "cron", conn: "cron", k: "cron", t: "Weekly CI stats · 40 runs, 9 retry-only failures", at: "06:00" },
-      { sys: "github", conn: "gmail/personal", k: "email", t: "GitHub · 6 × \"CI failed on main\" (all passed on retry)", at: "Mon–Sat" },
-    ],
+    sigs: [ { sys: "cron", conn: "cron", k: "cron", t: "Weekly CI stats · 40 runs, 9 retry-only failures", at: "06:00", snip: "flaky: 9/40 (22%) · last week 4/38 (11%) · all in tests/webhooks/*.spec.ts" },
+            { sys: "github", conn: "gmail/personal", k: "email", t: "GitHub · 6 × \"CI failed on main\" (all passed on retry)", at: "Mon–Sat", open: "Open in Gmail" } ],
     why: "9 of 40 CI runs this week failed on retry-only flakes, up from 4 last week. All nine are in <code>tests/webhooks</code>.",
     link: "That is the area <b>Fix flaky webhook tests</b> (in progress, turn 12) is working in - probably one task, not two.",
-    next: "Attach to Fix flaky webhook tests instead of starting new work", actions: ["Attach to task", "Start separately", "Dismiss"], by: "Issue triage · run 509" },
+    next: "Attach to Fix flaky webhook tests instead of starting new work", actions: ["Attach to task", "Start separately", "Dismiss"], by: "Issue triage", run: 509,
+    verdict: 'verdict: <b>propose</b> · priority: <b>high</b> · confidence: 0.81\nrelated_tasks: [t-201 Fix flaky webhook tests (in-progress)] same files\nsuggest: attach provenance to t-201 (alternative: new task)' },
   marta: { id: "p4", pri: "normal", proj: "hydra", topic: "business", at: "Sun 19:50", age: "13h", bucket: "old",
     t: "Answer Marta's SDK licence question",
+    gist: "Asks if the pi adapter allows commercial use - it's MIT; reply drafted. Fabrik also sent the parked June enquiry.",
     made: [ { sys: "gmail", t: "1 email (Marta Ruiz, Fabrik)" } ],
-    sigs: [ { sys: "gmail", conn: "gmail/business", k: "email", t: "Marta Ruiz · \"Re: pi adapter - commercial use?\"", at: "Sun 19:41" } ],
+    sigs: [ { sys: "gmail", conn: "gmail/business", k: "email", t: "Marta Ruiz · \"Re: pi adapter - commercial use?\"", at: "Sun 19:41",
+      snip: "Quick one before our legal signs off: is the pi adapter code usable in a commercial product? Which licence applies?", open: "Open in Gmail" } ],
     why: "She asks whether the pi adapter's licence allows commercial use. It is MIT (<code>docs/legal/licences.md</code>); a reply is drafted in the task.",
     link: "Fabrik also sent the June enquiry you parked (<b>Fabrik pilot terms</b>, open).",
-    next: "Send the drafted reply", actions: ["Send reply", "Edit reply", "Later", "Dismiss"], by: "Email triage · run 503" },
+    next: "Send the drafted reply", actions: ["Send reply", "Edit reply", "Later", "Dismiss"], by: "Email triage", run: 503,
+    verdict: 'verdict: <b>propose</b> · priority: <b>normal</b> · confidence: 0.9\nrelated_tasks: [t-152 Fabrik pilot terms (open)] same sender org\nsuggest: action gmail.send (draft attached)' },
   bumps: { id: "p5", pri: "normal", proj: "hydra", topic: "code", at: "03:44", age: "5h", bucket: "old",
     t: "Four dependency bumps in agentick-web",
+    gist: "Three dev-only, undici is runtime (moderate SSRF). CI green on all four.",
     made: [ { sys: "dependabot", t: "4 PRs" } ],
-    sigs: [
-      { sys: "dependabot", conn: "github/agentick-web", k: "PR", t: "#113 · bump vitest 2.1 → 2.2", at: "03:30" },
-      { sys: "dependabot", conn: "github/agentick-web", k: "PR", t: "#114 · bump typescript-eslint", at: "03:30" },
-      { sys: "dependabot", conn: "github/agentick-web", k: "PR", t: "#115 · bump playwright", at: "03:31" },
-      { sys: "dependabot", conn: "github/agentick-web", k: "PR", t: "#116 · bump undici (security, moderate)", at: "03:31" },
-    ],
+    sigs: [ { sys: "dependabot", conn: "github/agentick-web", k: "PR", t: "#113 · bump vitest 2.1 → 2.2", at: "03:30", open: "Open on GitHub" },
+            { sys: "dependabot", conn: "github/agentick-web", k: "PR", t: "#114 · bump typescript-eslint", at: "03:30", open: "Open on GitHub" },
+            { sys: "dependabot", conn: "github/agentick-web", k: "PR", t: "#115 · bump playwright", at: "03:31", open: "Open on GitHub" },
+            { sys: "dependabot", conn: "github/agentick-web", k: "PR", t: "#116 · bump undici (security, moderate)", at: "03:31", snip: "GHSA-c76h: SSRF via redirect handling in undici < 6.19. Affects runtime fetch in server routes.", open: "Open on GitHub" } ],
     why: "Three are dev-only; <code>undici</code> is runtime (moderate: SSRF via redirect). CI is green on all four.",
-    link: null, next: "Merge the three dev bumps, review undici by hand", actions: ["Merge dev bumps", "Merge all 4", "Later", "Dismiss"], by: "PR review (auto) · run 511" },
+    link: null, next: "Merge the three dev bumps, review undici by hand", actions: ["Merge dev bumps", "Merge all 4", "Later", "Dismiss"], by: "PR review (auto)", run: 511,
+    verdict: 'verdict: <b>propose</b> · priority: <b>normal</b> · confidence: 0.88\ngroup: [PR 113, 114, 115, 116] same author dependabot\nsuggest: action github.merge [113,114,115]; review 116' },
   talk: { id: "p6", pri: "low", proj: null, topic: "personal", at: "Sun 21:40", age: "11h", bucket: "old",
     t: "Talk invitation: NL DevOps Days, Nov 12",
+    gist: "CFP closes Sep 15; you declined last year; calendar is free.",
     made: [ { sys: "gmail", t: "1 email (programme committee)" } ],
-    sigs: [ { sys: "gmail", conn: "gmail/personal", k: "email", t: "NL DevOps Days · \"Invitation to speak\"", at: "Sun 21:31" } ],
+    sigs: [ { sys: "gmail", conn: "gmail/personal", k: "email", t: "NL DevOps Days · \"Invitation to speak\"", at: "Sun 21:31", snip: "We'd love to have you speak about agent orchestration at NL DevOps Days on Nov 12 in Utrecht. CFP closes Sep 15.", open: "Open in Gmail" } ],
     why: "CFP closes Sep 15. You declined the same event last year; your calendar is free that week.",
-    link: null, next: "Draft a reply either way", actions: ["Draft reply", "Later", "Dismiss"], by: "Email triage · run 498" },
-  /* busy-only */
+    link: null, next: "Draft a reply either way", actions: ["Draft reply", "Later", "Dismiss"], by: "Email triage", run: 498,
+    verdict: 'verdict: <b>propose</b> · priority: <b>low</b> · confidence: 0.7\nsuggest: action gmail.draft' },
   codex: { id: "p7", pri: "high", proj: "hydra", topic: "code", at: "06:45", age: "2h", bucket: "stale",
     t: "Codex app-server renamed outputSchema in 0.42",
+    gist: "turn/start now takes output_schema; the nightly adapter matrix has failed twice.",
     made: [ { sys: "github", t: "release note" }, { sys: "hydra", t: "2 failed nightly runs" } ],
-    sigs: [ { sys: "github", conn: "gmail/personal", k: "email", t: "GitHub · openai/codex release 0.42.0", at: "06:10" },
-            { sys: "hydra", conn: "platform", k: "run", t: "Nightly adapter matrix · run 480 ✕, run 486 ✕", at: "06:30" } ],
+    sigs: [ { sys: "github", conn: "gmail/personal", k: "email", t: "GitHub · openai/codex release 0.42.0", at: "06:10", open: "Open in Gmail" },
+            { sys: "hydra", conn: "platform", k: "run", t: "Nightly adapter matrix · run 480 ✕, run 486 ✕", at: "06:30", open: "Open run" } ],
     why: "<code>turn/start</code> now takes <code>output_schema</code>; the Codex adapter's nightly matrix has failed twice since.",
     link: "The provider spec pins the CLI release - bumping it means re-running the validation matrix.",
-    next: "Start the Bugfix workflow on the Codex adapter", actions: ["Start Bugfix", "Later", "Dismiss", "Open task"], by: "Issue triage · run 514" },
+    next: "Start the Bugfix workflow on the Codex adapter", actions: ["Start Bugfix", "Later", "Dismiss", "Open task"], by: "Issue triage", run: 514,
+    verdict: 'verdict: <b>propose</b> · priority: <b>high</b> · confidence: 0.86' },
   disk: { id: "p8", pri: "normal", proj: "ops", topic: "ops", at: "02:20", age: "6h", bucket: "old",
     t: "hetzner-01 disk at 88%",
+    gist: "23 PR-review workspaces never reaped; TTL reaper stalled since Aug 24.",
     made: [ { sys: "hetzner", t: "disk alert" }, { sys: "hydra", t: "runner watermark" } ],
-    sigs: [ { sys: "hetzner", conn: "gmail/business", k: "email", t: "Hetzner · \"Disk usage warning: hetzner-01\"", at: "02:02" },
+    sigs: [ { sys: "hetzner", conn: "gmail/business", k: "email", t: "Hetzner · \"Disk usage warning: hetzner-01\"", at: "02:02", open: "Open in Gmail" },
             { sys: "hydra", conn: "platform", k: "event", t: "runner.disk_watermark · hetzner-01 88%", at: "02:10" } ],
     why: "Ephemeral workspaces from 23 PR-review runs were never reaped - the TTL reaper has been stalled since Aug 24.",
     link: "<b>hetzner-01</b> is also the runner at session cap in check-in.",
-    next: "Run the Reap workspaces workflow", actions: ["Reap now", "Later", "Dismiss"], by: "Email triage · run 508" },
+    next: "Run the Reap workspaces workflow", actions: ["Reap now", "Later", "Dismiss"], by: "Email triage", run: 508, verdict: 'verdict: <b>propose</b> · priority: <b>normal</b> · confidence: 0.93' },
   docs: { id: "p9", pri: "normal", proj: "hydra", topic: "code", at: "08:10", age: "20m", bucket: "fresh",
     t: "Issue #123 asks how runner join works",
+    gist: "The answer exists (ADR 0002 + packaging spec) but no docs page.",
     made: [ { sys: "github", t: "1 issue" } ],
-    sigs: [ { sys: "github", conn: "github/hydra", k: "issue", t: "#123 · \"How do I add a second machine?\"", at: "08:02" } ],
-    why: "The answer exists (ADR 0002 + packaging spec) but there is no docs page for it.",
-    link: null, next: "Start the Docs workflow", actions: ["Start Docs", "Later", "Dismiss"], by: "Issue triage · run 506" },
+    sigs: [ { sys: "github", conn: "github/agentick-docs", k: "issue", t: "#123 · \"How do I add a second machine?\"", at: "08:02", open: "Open on GitHub" } ],
+    why: "The answer exists (ADR 0002 + packaging spec) but there is no docs page for it.", link: null,
+    next: "Start the Docs workflow", actions: ["Start Docs", "Later", "Dismiss"], by: "Issue triage", run: 506, verdict: 'verdict: <b>propose</b> · priority: <b>normal</b> · confidence: 0.84' },
   cursor: { id: "p10", pri: "low", proj: null, topic: "personal", at: "07:15", age: "1h", bucket: "recent",
     t: "Newsletter: Cursor announces multi-runner \"Fleet\"",
+    gist: "Overlaps hydra's controller/runner story; a note, not a task.",
     made: [ { sys: "gmail", t: "1 newsletter" } ],
-    sigs: [ { sys: "gmail", conn: "gmail/personal", k: "email", t: "TLDR Dev · \"Cursor Fleet: agents across machines\"", at: "07:02" } ],
-    why: "Overlaps hydra's controller/runner story; worth a note, not a task.",
-    link: null, next: "Save a note", actions: ["Create note task", "Dismiss"], by: "Email triage · run 495" },
+    sigs: [ { sys: "gmail", conn: "gmail/personal", k: "email", t: "TLDR Dev · \"Cursor Fleet: agents across machines\"", at: "07:02", open: "Open in Gmail" } ],
+    why: "Overlaps hydra's controller/runner story; worth a note, not a task.", link: null,
+    next: "Save a note", actions: ["Create note task", "Dismiss"], by: "Email triage", run: 495, verdict: 'verdict: <b>propose</b> · priority: <b>low</b> · confidence: 0.6' },
 };
 
-/* Connections: what came in on each, with notable raw signals stamped with what
-   triage made of them (vw). Everything else folds into `quiet`. */
+/* Connections with their FULL event lists (events view). vw = what triage made of it. */
+const NL = ["Stripe · Your August summary", "SaaStr · Weekly", "Product Hunt · Daily", "Indie Hackers · Digest", "TLDR Dev", "Hacker Newsletter", "Bytes · JS newsletter", "The Pragmatic Engineer", "Console · dev tools", "Changelog Weekly", "Node Weekly", "Frontend Focus"];
+const times = (n, start = 8 * 60 + 10, step = 23) => Array.from({ length: n }, (_, i) => { const m = start - i * step; const mm = ((m % 1440) + 1440) % 1440; const h = Math.floor(mm / 60), mi = mm % 60; return (m < 0 ? "Sun " : "") + String(h).padStart(2, "0") + ":" + String(mi).padStart(2, "0"); });
+const gen = (n, mk) => times(n).map((at, i) => mk(at, i));
 const CONN = {
-  ghHydra: { c: "github/hydra", sys: "github", topic: "code", n: 26, polled: "1m", live: true,
-    sum: "3 issues · 4 PRs · 2 merges",
-    sigs: [
-      { k: "issue", t: "#121 · webhook retry test fails on CI", at: "Sun 20:15", vw: "attached → Fix flaky webhook tests" },
-      { k: "PR", t: "#94 · Add runner drain command", at: "Sun 19:47", vw: "routed → PR review (auto)" },
-      { k: "PR", t: "#96 · Coalesce stream deltas", at: "07:10", vw: "routed → PR review (auto)" },
-      { k: "merge", t: "#90 · Session token resolution · merged", at: "Sun 18:40", vw: "FYI" },
-    ], quiet: "17 CI runs · bot comments" },
-  ghWeb: { c: "github/agentick-web", sys: "github", topic: "code", n: 130, polled: "1m", live: true,
-    sum: "1 issue · 4 PRs · 125 CI runs",
-    sigs: [
-      { k: "issue", t: "#118 · Safari login redirects forever", at: "07:15", vw: "→ Login failures on Safari", ref: "p1" },
-      { k: "PR", t: "#113–#116 · dependabot bumps (4)", at: "03:30", vw: "→ Four dependency bumps", ref: "p5" },
-    ], quiet: "125 CI successes" },
-  gmBiz: { c: "gmail/business", sys: "gmail", topic: "business", n: 12, polled: "3m", live: true,
-    sum: "5 people wrote · 3 systems · 4 newsletters",
-    sigs: [
-      { sys: "gmail", k: "email", t: "Anna Kowalczyk, Piet de Vries · login problems (2)", at: "06:12", vw: "→ Login failures on Safari", ref: "p1" },
-      { sys: "sentry", k: "alert", t: "Sentry · TokenRefresh 401 · 2 alerts", at: "06:30", vw: "→ Login failures on Safari", ref: "p1" },
-      { sys: "gmail", k: "email", t: "Marta Ruiz · \"Re: pi adapter - commercial use?\"", at: "Sun 19:41", vw: "→ Answer Marta's question", ref: "p4" },
-      { sys: "gmail", k: "email", t: "ACME Billing · \"Invoice overdue\"", at: "07:28", vw: "unsure · needs a call" },
-      { sys: "hetzner", k: "email", t: "Hetzner · invoice August €48.20", at: "06:01", vw: "filed → FYI" },
-    ], quiet: "4 newsletters · 2 receipts" },
-  gmPers: { c: "gmail/personal", sys: "gmail", topic: "personal", n: 41, polled: "2m", live: true, warm: "triage paused · 14 held",
-    sum: "2 people wrote · 8 systems · 31 newsletters",
-    sigs: [
-      { sys: "tailscale", k: "email", t: "Tailscale · certificate expires in 6 days", at: "05:01", vw: "→ Renew tailnet certs", ref: "p2" },
-      { sys: "github", k: "email", t: "GitHub · 6 × \"CI failed on main\"", at: "Mon–Sat", vw: "→ Flaky test rate doubled", ref: "p3" },
-      { sys: "gmail", k: "email", t: "NL DevOps Days · \"Invitation to speak\"", at: "Sun 21:31", vw: "→ Talk invitation", ref: "p6" },
-      { sys: "tailscale", k: "email", t: "Tailscale · 1.90 released", at: "Sun 19:50", vw: "FYI" },
-    ], quiet: "31 newsletters · 14 held since 07:51" },
-  cron: { c: "cron", sys: "cron", topic: "code", n: 3, polled: "", live: false,
-    sum: "3 ticks",
-    sigs: [
-      { k: "cron", t: "Weekly CI stats · 06:00", at: "06:00", vw: "→ Flaky test rate doubled", ref: "p3" },
-      { k: "cron", t: "Nightly digest · 06:00", at: "06:00", vw: "run 479 ✕ · in check-in" },
-      { k: "cron", t: "Standup summary · 08:30", at: "08:30", vw: "✓ posted to #ops" },
-    ], quiet: "" },
-  ghDocs: { c: "github/agentick-docs", sys: "github", topic: "code", n: 26, polled: "1m", live: true,
-    sum: "2 issues · 1 PR · 23 CI runs",
-    sigs: [ { k: "issue", t: "#123 · \"How do I add a second machine?\"", at: "08:02", vw: "→ Issue #123 asks how runner join works", ref: "p9" } ], quiet: "23 CI successes · 1 PR (docs typo, auto-merged)" },
+  gmBiz: { c: "gmail/business", sys: "gmail", topic: "business", n: 12, polled: "3m", live: true, sum: "5 people wrote · 3 systems · 4 newsletters",
+    events: [
+      { at: "08:12", sys: "gmail", k: "email", t: "Indie Hackers · Digest", vw: "ignored · newsletter", quiet: true },
+      { at: "08:05", sys: "gmail", k: "email", t: "Notion · invoice August", vw: "filed → Receipts", quiet: true },
+      { at: "07:55", sys: "gmail", k: "email", t: "Product Hunt · Daily", vw: "ignored · newsletter", quiet: true },
+      { at: "07:40", sys: "gmail", k: "email", t: "Vercel · receipt", vw: "filed → Receipts", quiet: true },
+      { at: "07:28", sys: "gmail", k: "email", t: "ACME Billing · \"Invoice overdue\"", vw: "unsure · needs a call" },
+      { at: "07:02", sys: "gmail", k: "email", t: "SaaStr · Weekly", vw: "ignored · newsletter", quiet: true },
+      { at: "06:30", sys: "sentry", k: "alert", t: "Sentry · TokenRefresh 401 · 2 alerts", vw: "→ Login failures on Safari", ref: "p1" },
+      { at: "06:12", sys: "gmail", k: "email", t: "Piet de Vries · \"Login loop on iPhone\"", vw: "→ Login failures on Safari", ref: "p1" },
+      { at: "06:01", sys: "hetzner", k: "email", t: "Hetzner · invoice August €48.20", vw: "filed → FYI" },
+      { at: "Sun 22:40", sys: "gmail", k: "email", t: "Anna Kowalczyk · \"Can't log in since this morning\"", vw: "→ Login failures on Safari", ref: "p1" },
+      { at: "Sun 20:10", sys: "gmail", k: "email", t: "Stripe · Your August summary", vw: "ignored · newsletter", quiet: true },
+      { at: "Sun 19:41", sys: "gmail", k: "email", t: "Marta Ruiz · \"Re: pi adapter - commercial use?\"", vw: "→ Answer Marta's question", ref: "p4" },
+    ] },
+  gmPers: { c: "gmail/personal", sys: "gmail", topic: "personal", n: 41, polled: "2m", live: true, warm: "triage paused · 14 held", sum: "2 people wrote · 7 became work · 18 ignored · 14 held",
+    events: [
+      ...Array.from({ length: 14 }, (_, i) => ({ at: "0" + (8 - (i > 10 ? 1 : 0)) + ":" + String((10 - i + 60) % 60).padStart(2, "0"), sys: "gmail", k: "email", t: NL[i % NL.length], vw: "held · triage paused", held: true, quiet: true })),
+      { at: "07:02", sys: "gmail", k: "email", t: "TLDR Dev · \"Cursor Fleet: agents across machines\"", vw: "ignored · newsletter", quiet: true },
+      { at: "06:10", sys: "github", k: "email", t: "GitHub · openai/codex release 0.42.0", vw: "ignored · release note", quiet: true },
+      { at: "05:01", sys: "tailscale", k: "email", t: "Tailscale · certificate expires in 6 days", vw: "→ Renew tailnet certs", ref: "p2" },
+      { at: "04:20", sys: "gmail", k: "email", t: "Google · security alert: new sign-in", vw: "ignored · own device", quiet: true },
+      ...gen(6, (at, i) => ({ at: ["Sat 23:10", "Fri 18:02", "Thu 14:40", "Wed 09:12", "Tue 16:55", "Mon 11:30"][i], sys: "github", k: "email", t: "GitHub · \"CI failed on main\" · run #" + (5120 - i * 7), vw: "→ Flaky test rate doubled", ref: "p3" })),
+      { at: "Sun 21:31", sys: "gmail", k: "email", t: "NL DevOps Days · \"Invitation to speak\"", vw: "→ Talk invitation", ref: "p6" },
+      { at: "Sun 19:50", sys: "tailscale", k: "email", t: "Tailscale · 1.90 released", vw: "FYI" },
+      ...gen(15, (at, i) => ({ at: "Sun " + ["18:4", "18:3", "18:2"][i % 3] + (i % 9), sys: "gmail", k: "email", t: NL[(i + 5) % NL.length], vw: "ignored · newsletter", quiet: true })),
+    ] },
+  ghHydra: { c: "github/hydra", sys: "github", topic: "code", n: 26, polled: "1m", live: true, sum: "3 issues · 4 PRs · 2 merges",
+    events: [
+      { at: "07:10", sys: "github", k: "PR", t: "#96 · Coalesce stream deltas", vw: "routed → PR review (auto)" },
+      { at: "06:48", sys: "github", k: "issue", t: "#125 · Feature request: dark mode in the CLI", vw: "ignored · labelled later" , quiet: true },
+      { at: "Sun 20:15", sys: "github", k: "issue", t: "#121 · webhook retry test fails on CI", vw: "attached → Fix flaky webhook tests" },
+      { at: "Sun 19:47", sys: "github", k: "PR", t: "#94 · Add runner drain command", vw: "routed → PR review (auto)" },
+      { at: "Sun 19:30", sys: "github", k: "PR", t: "#95 · WIP: session fork (draft)", vw: "ignored · draft", quiet: true },
+      { at: "Sun 19:02", sys: "github", k: "issue", t: "#122 · Typo in README", vw: "ignored · good-first-issue", quiet: true },
+      { at: "Sun 18:40", sys: "github", k: "merge", t: "#90 · Session token resolution · merged", vw: "FYI" },
+      { at: "Sun 18:25", sys: "github", k: "PR", t: "#93 · Closed without merge", vw: "ignored", quiet: true },
+      { at: "Sun 18:15", sys: "github", k: "merge", t: "#89 · Runner outbox replay · merged", vw: "ignored · routine", quiet: true },
+      ...gen(17, (at, i) => ({ at, sys: "github", k: "ci", t: "CI · main · ✓ passed (#" + (5180 - i) + ")", vw: "ignored · CI success", quiet: true })),
+    ] },
+  ghWeb: { c: "github/agentick-web", sys: "github", topic: "code", n: 130, polled: "1m", live: true, sum: "1 issue · 4 PRs · 125 CI runs",
+    events: [
+      { at: "07:15", sys: "github", k: "issue", t: "#118 · Safari login redirects forever", vw: "→ Login failures on Safari", ref: "p1" },
+      { at: "03:31", sys: "dependabot", k: "PR", t: "#116 · bump undici (security, moderate)", vw: "→ Four dependency bumps", ref: "p5" },
+      { at: "03:31", sys: "dependabot", k: "PR", t: "#115 · bump playwright", vw: "→ Four dependency bumps", ref: "p5" },
+      { at: "03:30", sys: "dependabot", k: "PR", t: "#114 · bump typescript-eslint", vw: "→ Four dependency bumps", ref: "p5" },
+      { at: "03:30", sys: "dependabot", k: "PR", t: "#113 · bump vitest 2.1 → 2.2", vw: "→ Four dependency bumps", ref: "p5" },
+      ...gen(125, (at, i) => ({ at, sys: "github", k: "ci", t: "CI · " + (i % 3 ? "main" : "preview") + " · ✓ passed (#" + (9410 - i) + ")", vw: "ignored · CI success", quiet: true })),
+    ] },
+  cron: { c: "cron", sys: "cron", topic: "code", n: 3, polled: "", live: false, sum: "3 ticks",
+    events: [
+      { at: "08:30", sys: "cron", k: "cron", t: "Standup summary", vw: "✓ posted to #ops" },
+      { at: "06:00", sys: "cron", k: "cron", t: "Weekly CI stats", vw: "→ Flaky test rate doubled", ref: "p3" },
+      { at: "06:00", sys: "cron", k: "cron", t: "Nightly digest", vw: "run 479 ✕ · in check-in" },
+    ] },
+  ghDocs: { c: "github/agentick-docs", sys: "github", topic: "code", n: 26, polled: "1m", live: true, sum: "2 issues · 1 PR · 23 CI runs",
+    events: [ { at: "08:02", sys: "github", k: "issue", t: "#123 · \"How do I add a second machine?\"", vw: "→ Issue #123 asks how runner join works", ref: "p9" },
+      { at: "07:30", sys: "github", k: "PR", t: "#41 · Fix typo in install page", vw: "auto-merged", quiet: true },
+      { at: "Sun 19:20", sys: "github", k: "issue", t: "#124 · Broken link on /runners", vw: "ignored · labelled later", quiet: true },
+      ...gen(23, (at, i) => ({ at, sys: "github", k: "ci", t: "CI · docs build ✓ (#" + (770 - i) + ")", vw: "ignored · CI success", quiet: true })) ] },
 };
+
+const TOPICS = { code: { label: "Code", conns: ["github/hydra", "github/agentick-web", "github/agentick-docs", "cron"] }, business: { label: "Business", conns: ["gmail/business"] },
+  personal: { label: "Personal", conns: ["gmail/personal"] }, ops: { label: "Ops", conns: [] } };
 
 const DATASETS = {
   calm: {
     proposals: [P.login, P.certs, P.flaky, P.marta, P.bumps, P.talk],
     conns: [CONN.gmBiz, CONN.gmPers, CONN.ghHydra, CONN.ghWeb, CONN.cron],
     questions: [
-      { q: "Is \"Invoice overdue - ACME Billing\" legitimate?", sys: "gmail", from: "gmail/business · Email triage unsure", topic: "business",
-        actions: ["It's spam", "It's real"], age: "1h", bucket: "recent" },
-      { q: "Resume Email triage?", sys: "hydra", from: "spawn bound tripped 07:51 · 14 events held", topic: "personal",
-        actions: ["Resume", "Review held"], age: "39m", bucket: "stale" },
+      { q: "Is \"Invoice overdue - ACME Billing\" legitimate?", sys: "gmail", from: "gmail/business · Email triage was unsure", topic: "business", actions: ["It's spam", "It's real"], age: "1h", bucket: "recent" },
+      { q: "Resume Email triage?", sys: "hydra", from: "spawn bound tripped 07:51 · 14 events held", topic: "personal", actions: ["Resume", "Review held"], age: "39m", bucket: "stale" },
     ],
     fyi: [
       { at: "08:00", sys: "github", t: "GitHub Actions minutes at 70% of the monthly quota", by: "Issue triage", topic: "code" },
@@ -461,37 +518,24 @@ const DATASETS = {
       { at: "Sun 19:50", sys: "tailscale", t: "Tailscale 1.90 released - nothing to do", by: "Email triage", topic: "personal" },
     ],
     receipt: { events: 212, ignored: 198, routed: 2, attached: 1 },
-    triage: [
-      { name: "Email triage", act: "paused", note: "paused · 14 events held", tone: "warn" },
-      { name: "Issue triage", act: "ok", note: "6 runs · all ✓" },
-      { name: "PR review (auto)", act: "working", note: "2 running" },
-    ],
+    triage: [ { name: "Email triage", act: "paused", note: "paused · 14 events held", tone: "warn" }, { name: "Issue triage", act: "ok", note: "6 runs · all ✓" }, { name: "PR review (auto)", act: "working", note: "2 running" } ],
     checkin: { decisions: 4, working: 3 },
-    brief: [
-      "Since Sunday evening <b>212 events</b> came in over five connections. The one that matters is <a class=\"ref\" href=\"#p1\">Login failures on Safari after 2.3.1</a>: two customers, Sentry and a GitHub issue all point at PR #109, and a fix will collide with the billing hotfix unless it starts from that branch.",
-      "Two things need a call from you: an ACME invoice that looks like phishing, and Email triage tripped its bound at 07:51 with 14 emails waiting. The rest can wait for coffee: <a class=\"ref\" href=\"#p2\">certs to renew by Sep 3</a>, <a class=\"ref\" href=\"#p5\">four dependabot bumps</a>, and <a class=\"ref\" href=\"#p4\">two replies to send</a>. I filed the Hetzner invoice and sent two PRs to review.",
-    ],
   },
 };
 DATASETS.busy = JSON.parse(JSON.stringify(DATASETS.calm));
 DATASETS.busy.proposals = [P.login, P.codex, P.certs, P.flaky, P.disk, P.marta, P.bumps, P.docs, P.talk, P.cursor];
 DATASETS.busy.conns = [CONN.gmBiz, CONN.gmPers, CONN.ghHydra, CONN.ghWeb, CONN.ghDocs, CONN.cron];
-DATASETS.busy.fyi.unshift(
-  { at: "08:18", sys: "github", t: "PR #90 approved and merged", by: "PR review (auto)", topic: "code" },
-  { at: "07:12", sys: "dependabot", t: "12 non-security dependabot PRs snoozed until Monday", by: "PR review (auto)", topic: "code" },
-  { at: "06:31", sys: "gmail", t: "3 calendar invites accepted automatically", by: "Email triage", topic: "personal" });
+DATASETS.busy.fyi.unshift({ at: "08:18", sys: "github", t: "PR #90 approved and merged", by: "PR review (auto)", topic: "code" },
+  { at: "07:12", sys: "dependabot", t: "12 non-security dependabot PRs snoozed until Monday", by: "PR review (auto)", topic: "code" });
 DATASETS.busy.receipt = { events: 614, ignored: 583, routed: 4, attached: 2 };
-DATASETS.busy.brief = [
-  "A heavy night: <b>614 events</b> over six connections. Two things matter: <a class=\"ref\" href=\"#p1\">Login failures on Safari after 2.3.1</a> (customers, Sentry and a GitHub issue all pointing at PR #109) and <a class=\"ref\" href=\"#p7\">Codex renamed outputSchema in 0.42</a>, which has already failed the nightly matrix twice.",
-  "Two calls from you: an ACME invoice that looks like phishing, and Email triage tripped its bound at 07:51 with 14 emails waiting. Then <a class=\"ref\" href=\"#p2\">certs by Sep 3</a>, <a class=\"ref\" href=\"#p8\">hetzner-01 at 88% disk</a>, and five smaller proposals. I filed the Hetzner invoice, merged PR #90, snoozed 12 dependabot PRs, and sent four PRs to review.",
-];
 
 /* ============ helpers ============ */
 const NAMES = ["Intake", "Incoming", "Proposed", "Desk", "Triage"];
-const TOPICS = [["all", "All"], ["code", "Code"], ["business", "Business"], ["personal", "Personal"], ["ops", "Ops"]];
-const eqEl = '<span class="eq" title="agent working"><i></i><i></i><i></i></span>';
+const TIERS = [["now", "Now", (p) => p.pri === "urgent", "burning - drop what you're doing"], ["today", "Today", (p) => p.pri === "high", ""], ["later", "When you can", (p) => p.pri === "normal" || p.pri === "low", ""]];
+const eqEl = '<span class="eq"><i></i><i></i><i></i></span>';
 const dmarkEl = '<span class="dmark" title="decision wanted">◆</span>';
-const pmarkEl = '<span class="pmark" title="proposed (placeholder glyph)">◇</span>';
+const pmarkEl = '<span class="pmark" title="proposed">◇</span>';
+const burnEl = '<span class="burn" title="urgent"></span>';
 const priEl = (pri) => `<span class="pri" data-pri="${pri}" title="priority: ${pri}"><span class="bars"><i></i><i></i><i></i></span></span>`;
 const qbtns = (arr) => arr.map((a, i) => `<button class="qbtn ${i === 0 ? "first" : ""}">${a}</button>`).join("");
 const entEl = (k) => `<span class="ent ent-${k}" title="${k}"><i></i></span>`;
@@ -499,182 +543,228 @@ const crumb = (p) => p.proj ? `${p.proj} · ` : "";
 const markFor = (s) => s.act === "working" ? eqEl : s.act === "paused" ? '<span class="pausemark">↻</span>' : s.act === "failed" ? '<span class="failg">✕</span>' : '<span class="okg">✓</span>';
 const data = () => DATASETS[get("data") === "busy" ? "busy" : "calm"];
 const pageName = () => NAMES[(+get("name") || 0) % NAMES.length];
-let openSet = new Set();
-let legendOn = false;
-
-/* ============ shared blocks ============ */
 const madeEl = (p) => p.made.map((m) => `<span class="syst">${sysEl(m.sys)}${m.t}</span>`).join("");
-const sigEl = (s, withConn) => `<div class="sig">${sysEl(s.sys || "github", "faint")}<span class="kind">${s.k}</span><span>${s.t}</span>
-  <span class="src">${withConn && s.conn ? s.conn + " · " : ""}${s.at}</span></div>`;
+const marksEl = (p) => [...new Set(p.made.map((m) => m.sys))].map((s) => sysEl(s)).join("");
+const openEl = (t = "Open") => `<span class="openlink">${t} <span class="chev">→</span></span>`;
+const findP = (id) => Object.values(P).find((p) => p.id === id);
+const findC = (c) => Object.values(CONN).find((x) => x.c === c);
+let legendOn = false, efilter = "all";
 
-function pcardEl(p) {
-  const open = openSet.has(p.id);
-  return `<div class="pcard" data-pri="${p.pri}" id="${p.id}">
-    <div class="tline">${pmarkEl}<span class="crumb">${crumb(p)}</span><span class="t">${p.t}</span>${priEl(p.pri)}<span class="age" data-age="${p.bucket}">${p.age}</span></div>
-    <div class="fields">
-      <span class="fl">made from</span><span class="fv made" data-open="${p.id}">${madeEl(p)}<span class="chev">${open ? "▾" : "▸"} ${p.sigs.length} signal${p.sigs.length > 1 ? "s" : ""}</span></span>
-      <div class="sigs ${open ? "open" : ""}">${p.sigs.map((s) => sigEl(s, true)).join("")}</div>
-      <span class="fl">why</span><span class="fv">${p.why}</span>
-      <span class="fl">links</span><span class="fv">${p.link || '<span class="none">–</span>'}</span>
-      <span class="fl">next</span><span class="fv next"><b>${p.next}</b></span>
-    </div>
-    <div class="foot"><span class="acts">${qbtns(p.actions)}</span><span class="by">${entEl("task")} task · proposed by ${p.by}</span></div>
+/* selection lives in the URL: open=p1 | open=conn:gmail/business | open=topics */
+const sel = () => { const o = get("open"); if (!o) return null; if (o === "topics") return { kind: "topics" }; if (o.startsWith("conn:")) return { kind: "conn", c: o.slice(5) }; return { kind: "prop", id: o }; };
+const selKey = () => get("open") || "";
+
+/* ============ list blocks ============ */
+function pcardEl(p, lead = false) {
+  const on = selKey() === p.id;
+  return `<div class="pcard ${lead ? "lead" : ""} ${on ? "sel" : ""}" data-pri="${p.pri}" data-sel="${p.id}" id="${p.id}">
+    <div class="tline">${p.pri === "urgent" ? burnEl : pmarkEl}<span class="crumb">${crumb(p)}</span><span class="t">${p.t}</span>${priEl(p.pri)}<span class="age" data-age="${p.bucket}">${p.age}</span></div>
+    <div class="made">${madeEl(p)}</div>
+    <div class="gist">${p.gist}</div>
+    ${lead && p.link ? `<div class="link">${p.link}</div>` : ""}
+    <div class="foot"><span class="acts">${qbtns(p.actions.slice(0, 3))}</span>${openEl(lead ? "Open the full picture" : "Open")}</div>
   </div>`;
 }
 function prowEl(p) {
-  return `<div class="prow" data-pri="${p.pri}" data-open="${p.id}" id="${p.id}">${pmarkEl}<span class="t">${p.t}</span>${priEl(p.pri)}
-    <span class="sub">${crumb(p)}${madeEl(p)}</span><span class="next">→ <b>${p.actions[0]}</b></span><span class="age" data-age="${p.bucket}">${p.age}</span></div>`;
+  const on = selKey() === p.id;
+  return `<div class="prow ${on ? "sel" : ""}" data-pri="${p.pri}" data-sel="${p.id}" id="${p.id}">${p.pri === "urgent" ? burnEl : pmarkEl}
+    <span class="t">${p.t}</span>${priEl(p.pri)}<span class="marks">${marksEl(p)}</span><span class="next">→ <b>${p.actions[0]}</b></span><span class="age" data-age="${p.bucket}">${p.age}</span>${openEl("")}</div>`;
 }
-function proposalsEl(list, label = "Proposed") {
-  const top = list.filter((p) => p.pri === "urgent" || p.pri === "high");
-  const rest = list.filter((p) => !(p.pri === "urgent" || p.pri === "high"));
-  return `<section class="lane"><div class="lane-label">${label} <span class="n">${list.length}</span></div>
-    <div class="pstack">${top.map(pcardEl).join("")}${rest.map((p) => openSet.has(p.id) ? pcardEl(p) : prowEl(p)).join("")}</div></section>`;
+function tiersEl(list, item) {
+  return TIERS.map(([k, label, f, why]) => { const xs = list.filter(f); if (!xs.length) return "";
+    return `<div class="tier"><div class="lane-label ${k === "now" ? "now" : ""}">${k === "now" ? burnEl : ""}${label} <span class="n">${xs.length}</span>${why ? `<span class="why">· ${why}</span>` : ""}</div>
+      <div class="${item === prowEl ? "rows" : "pstack"}">${xs.map((p) => item(p)).join("")}</div></div>`; }).join("");
 }
 function questionsEl(qs) {
   if (!qs.length) return "";
-  return `<section class="lane"><div class="lane-label">Needs a call <span class="n">${qs.length}</span></div>
-    <div class="dstack">${qs.map((q) => `<div class="drow">${dmarkEl}<span class="q">${q.q}</span><span class="from">${sysEl(q.sys, "faint")}${q.from}</span>
-      <span class="age" data-age="${q.bucket}">${q.age}</span><span class="acts">${qbtns(q.actions)}</span></div>`).join("")}</div></section>`;
+  return `<section class="lane"><div class="lane-label">Needs a call <span class="n">${qs.length}</span><span class="why">· triage could not decide these</span></div>
+    <div class="dstack">${qs.map((q) => `<div class="drow">${dmarkEl}<span class="q">${q.q}</span><span class="from">${sysEl(q.sys, "faint")}${q.from}</span><span class="age" data-age="${q.bucket}">${q.age}</span><span class="acts">${qbtns(q.actions)}</span></div>`).join("")}</div></section>`;
 }
 function fyiEl(fyi) {
   if (!fyi.length) return "";
   return `<section class="lane"><div class="lane-label">For your information <span class="n">${fyi.length}</span></div>
     ${fyi.map((f) => `<div class="fyi"><span class="when">${f.at}</span>${sysEl(f.sys, "faint")}<span>${f.t}</span><span class="by">${f.by}</span></div>`).join("")}</section>`;
 }
+function connsEl(conns) {
+  return `<section class="lane"><div class="lane-label">What came in <span class="n">${conns.length}</span><span class="why">· open a connection for every event</span></div>
+    <div class="rows">${conns.map((c) => `<div class="crow ${selKey() === "conn:" + c.c ? "sel" : ""}" data-sel="conn:${c.c}">${sysEl(c.sys, "lg")}<b>${c.c}</b><span class="sum">${c.sum}${c.warm ? ` · <span class="warm">${c.warm}</span>` : ""}</span>
+      <span class="n">${c.n} events${c.polled ? ` · ${c.polled} ago` : ""}</span>${openEl("Events")}</div>`).join("")}</div></section>`;
+}
 function receiptLine(d) {
   const r = d.receipt;
-  return `<section class="lane"><div class="digestline"><span class="chev">·</span>
-    <span><b>${r.events}</b> events → <b>${d.proposals.length}</b> proposals · ${r.routed} routed to workflows · ${r.attached} attached to existing tasks · ${d.fyi.length} FYI · ${r.ignored} ignored</span></div></section>`;
+  return `<section class="lane"><div class="digestline"><span><b>${r.events}</b> events → <b>${d.proposals.length}</b> proposals · ${r.routed} routed · ${r.attached} attached · ${d.fyi.length} FYI · ${r.ignored} ignored</span></div></section>`;
 }
-function cblockEl(c) {
-  const open = openSet.has(c.c);
-  return `<div class="cblock ${open ? "open" : ""}">
-    <div class="chead" data-open="${c.c}">${sysEl(c.sys, "lg")}<b>${c.c}</b><span class="sum">${c.sum}${c.warm ? ` · <span class="warm">${c.warm}</span>` : ""}</span>
-      <span class="n">${c.n} events${c.polled ? ` · polled ${c.polled} ago` : ""}</span><span class="chev">${open ? "▾" : "▸"}</span></div>
-    <div class="csigs">
-      ${c.sigs.map((s) => `<div class="sig">${sysEl(s.sys || c.sys, "faint")}<span class="kind">${s.k}</span><span>${s.t}</span>
-        <span class="vw">${s.ref ? `<a class="ref" href="#${s.ref}" style="font-weight:400;color:var(--muted)">${s.vw}</a>` : s.vw}</span></div>`).join("")}
-      ${c.quiet ? `<div class="more">and quietly: ${c.quiet}</div>` : ""}
-    </div></div>`;
+function tabsEl(d, cur) {
+  const counts = (k) => d.proposals.filter((p) => k === "all" || p.topic === k);
+  const keys = ["all", ...Object.keys(TOPICS).filter((k) => counts(k).length || TOPICS[k].conns.some((c) => d.conns.find((x) => x.c === c)))];
+  return `<div class="tabs">${keys.map((k) => { const xs = counts(k); const burning = xs.some((p) => p.pri === "urgent");
+    return `<button class="tab ${k === cur ? "on" : ""}" data-topic="${k}">${burning && k !== "all" ? burnEl : ""}${k === "all" ? "All" : TOPICS[k].label}<span class="n">${xs.length}</span></button>`; }).join("")}
+    <button class="qbtn manage" data-sel="topics">Manage topics</button></div>`;
 }
-function connsEl(conns, label) {
-  return `<section class="lane"><div class="lane-label">${label} <span class="n">${conns.length}</span></div>
-    <div class="cstack">${conns.map(cblockEl).join("")}</div></section>`;
-}
-function sourcesRail(d) {
-  return `<div class="pblock"><div class="lane-label">Sources</div>
-    ${d.conns.map((c) => `<div class="pline">${sysEl(c.sys)}<span><b>${c.c}</b></span><span class="n">${c.n}${c.polled ? ` · ${c.polled}` : ""}</span></div>
-      <div class="pline sub">${c.warm ? `<span class="warm">${c.warm}</span>` : c.sum}</div>`).join("")}</div>`;
+function headline(d) {
+  const burning = d.proposals.filter((p) => p.pri === "urgent");
+  return `<div class="headline">${burning.length ? `<span class="warm">${burning.length} burning</span> · ` : ""}<b>${d.proposals.length}</b> proposals from <b>${d.receipt.events}</b> events${d.questions.length ? ` · <span class="warm">${d.questions.length} need a call</span>` : ""} · ${d.fyi.length} FYI · ${d.receipt.ignored} handled quietly</div>`;
 }
 function triageRail(d) {
-  return `<div class="pblock"><div class="lane-label">Triage</div>
-    ${d.triage.map((w) => `<div class="pline"><span class="markcell" style="width:auto">${markFor(w)}</span><span><b>${w.name}</b> · <span${w.tone === "warn" ? ' class="warm"' : ""}>${w.note}</span></span></div>`).join("")}</div>
+  return `<div class="pblock"><div class="lane-label">Triage</div>${d.triage.map((w) => `<div class="pline"><span class="markcell" style="width:auto">${markFor(w)}</span><span><b>${w.name}</b> · <span${w.tone === "warn" ? ' class="warm"' : ""}>${w.note}</span></span></div>`).join("")}</div>
     <div class="pblock"><div class="lane-label">Check-in</div><div class="pline"><span>${d.checkin.decisions} decisions wait · ${d.checkin.working} strands in motion</span></div></div>`;
 }
 function legendEl() {
   if (!legendOn) return "";
   return `<div class="pblock legend"><div class="lane-label">Marks <span class="n" style="text-transform:none;letter-spacing:0">· iconography TBD (#35)</span></div>
+    <div class="lg"><span class="markcell">${burnEl}</span><span>burning - urgent proposal</span></div>
     <div class="lg"><span class="markcell">${pmarkEl}</span><span>proposed, wants a go/no-go</span></div>
     <div class="lg"><span class="markcell">${dmarkEl}</span><span>decision wanted</span></div>
-    <div class="lg"><span class="markcell">${eqEl}</span><span>agent working</span></div>
     <div class="lg"><span class="markcell"><span class="pausemark">↻</span></span><span>paused</span></div>
-    <div class="lg"><span class="markcell"><span class="okg">✓</span></span><span>done</span></div>
-    <div class="lg"><span class="markcell"><span class="failg">✕</span></span><span>failed</span></div>
-    ${["github", "gmail", "sentry", "tailscale", "hetzner", "dependabot", "cron", "hydra"].map((k) => `<div class="lg"><span class="markcell">${sysEl(k)}</span><span>${k === "hydra" ? "Hydra itself (platform events)" : k}</span></div>`).join("")}
+    ${["github", "gmail", "sentry", "tailscale", "hetzner", "dependabot", "cron", "hydra"].map((k) => `<div class="lg"><span class="markcell">${sysEl(k)}</span><span>${k === "hydra" ? "Hydra itself" : k}</span></div>`).join("")}
     <div class="lg"><span class="markcell">${priEl("high")}</span><span>priority (bars fill up)</span></div>
     <div class="lg"><span class="markcell"><span class="age" data-age="old">5h</span></span><span>waiting: darkens, then warms</span></div></div>`;
 }
-function headline(d) {
-  return `<div class="headline"><b>${d.proposals.length}</b> proposals formed from <b>${d.receipt.events}</b> events${d.questions.length ? ` · <span class="warm">${d.questions.length} need a call</span>` : ""} · ${d.fyi.length} FYI · ${d.receipt.ignored} handled quietly</div>`;
-}
 
-/* ============ A · Brief ============ */
-function renderBrief(d) {
-  return `<div class="layout"><div class="maincol">
-    <div class="brief">${d.brief.map((p) => `<p>${p}</p>`).join("")}
-      <div class="by">${sysEl("hydra", "faint")}<span>Morning brief · run 516 · 08:00 · written by Hera</span></div></div>
-    ${questionsEl(d.questions)}
-    ${proposalsEl(d.proposals)}
-    ${fyiEl(d.fyi)}
-    ${receiptLine(d)}
-  </div><aside class="rail">${sourcesRail(d)}${triageRail(d)}${legendEl()}</aside></div>`;
+/* ============ detail content (shared) ============ */
+function detailProp(p, closeBtn) {
+  return `<div class="detail">
+    <div class="dhead">
+      <div class="crumb">${p.pri === "urgent" ? burnEl : pmarkEl}<span>${crumb(p)}task · proposed ${p.at} by ${p.by} · run ${p.run}</span>${closeBtn}</div>
+      <h2>${p.t} ${priEl(p.pri)}<span class="age" data-age="${p.bucket}">${p.age}</span></h2>
+    </div>
+    <div class="dsec"><div class="lane-label">Next</div><p><b>${p.next}</b></p><div class="acts">${qbtns(p.actions)}</div></div>
+    <div class="dsec"><div class="lane-label">Why</div><p>${p.why}</p>${p.link ? `<p class="m">${p.link}</p>` : ""}</div>
+    <div class="dsec"><div class="lane-label">Made from <span class="n">${p.sigs.length}</span></div>
+      ${p.sigs.map((s) => `<div class="sigcard"><div class="l1">${sysEl(s.sys)}<span class="kind">${s.k}</span><b>${s.t}</b><span class="src">${s.conn} · ${s.at}</span></div>
+        ${s.snip ? `<div class="snip">${s.snip}</div>` : ""}<div class="l3">${s.open ? `<button class="qbtn">${s.open}</button>` : ""}<button class="qbtn">Detach</button></div></div>`).join("")}</div>
+    <div class="dsec"><div class="lane-label">Triage verdict <span class="why">· ${p.by} · run ${p.run}</span></div><div class="verdict">${p.verdict}</div></div>
+    <div class="dsec"><div class="lane-label">History</div><div class="hist">
+      <div><span class="when">${p.at}</span><span>proposed by ${p.by} run ${p.run} · labels <code>proposed</code> <code>${p.topic}</code></span></div>
+      ${p.sigs.slice().reverse().map((s) => `<div><span class="when">${s.at}</span><span>${s.k} arrived on ${s.conn}</span></div>`).join("")}</div></div>
+  </div>`;
 }
+function detailConn(c, closeBtn) {
+  const filters = [["all", "All"], ["work", "Became work"], ["call", "Needs a call"], ["fyi", "FYI"], ["quiet", "Ignored / filed"], ["held", "Held"]];
+  const f = (e) => efilter === "all" || (efilter === "work" && e.ref) || (efilter === "call" && /unsure/.test(e.vw)) || (efilter === "fyi" && /FYI/.test(e.vw)) || (efilter === "quiet" && e.quiet && !e.held) || (efilter === "held" && e.held);
+  const ev = c.events.filter(f);
+  const cnt = (k) => { const keep = efilter; efilter = k; const n = c.events.filter(f).length; efilter = keep; return n; };
+  return `<div class="detail">
+    <div class="dhead"><div class="crumb">${sysEl(c.sys)}<span>connection · ${c.n} events since Sunday 18:10${c.polled ? ` · polled ${c.polled} ago` : ""}</span>${closeBtn}</div>
+      <h2>${c.c}</h2>${c.warm ? `<p class="m"><span style="color:var(--attn)">${c.warm}</span> - Email triage tripped its spawn bound at 07:51; held events are listed below and resume with the trigger.</p>` : ""}</div>
+    <div class="dsec"><div class="efilters">${filters.filter(([k]) => k === "all" || cnt(k)).map(([k, l]) => `<button class="tab ${efilter === k ? "on" : ""}" data-efilter="${k}">${l}<span class="n">${cnt(k)}</span></button>`).join("")}</div>
+      ${ev.slice(0, 60).map((e) => `<div class="erow ${e.quiet ? "quiet" : ""}"><span class="when">${e.at}</span>${sysEl(e.sys, "faint")}<span class="kind">${e.k}</span><span class="t">${e.t}</span>
+        <span class="vw ${e.held ? "held" : ""}">${e.ref ? `<a href="#" data-sel="${e.ref}">${e.vw}</a>` : e.vw}</span></div>`).join("")}
+      ${ev.length > 60 ? `<div class="erow quiet"><span class="when"></span><span></span><span></span><span class="t">… ${ev.length - 60} more</span><span></span></div>` : ""}</div>
+  </div>`;
+}
+function detailTopics(d, closeBtn) {
+  return `<div class="detail">
+    <div class="dhead"><div class="crumb"><span>settings · topics</span>${closeBtn}</div><h2>Topics</h2>
+      <p class="m">A topic is a label. Each connection files its events into one default topic; triage agents label a proposal with the connection's topic unless the content says otherwise (a Tailscale notice on your personal mailbox is <b>ops</b>, not personal). Tabs show every topic in use, in this order.</p></div>
+    <div class="dsec">${Object.entries(TOPICS).map(([k, t]) => `<div class="topic"><b>${t.label}</b><span class="conns">${t.conns.filter((c) => d.conns.find((x) => x.c === c)).map((c) => `<span class="syst">${sysEl(findC(c).sys)}${c}</span>`).join("") || '<span class="none">no connection defaults here - agent-assigned only</span>'}</span><span class="acts"><button class="qbtn">Rename</button><button class="qbtn">Move up</button></span></div>`).join("")}
+      <div class="acts" style="padding-top:8px"><button class="qbtn first">Add topic</button></div></div>
+    <div class="dsec"><div class="lane-label">Connections without a topic</div><p class="m">None. A new connection asks for its topic during setup and can be moved here later.</p></div>
+  </div>`;
+}
+function detailEl(d, s, closeBtn = "") {
+  if (!s) return "";
+  if (s.kind === "topics") return detailTopics(d, closeBtn);
+  if (s.kind === "conn") { const c = findC(s.c); return c ? detailConn(c, closeBtn) : ""; }
+  const p = findP(s.id); return p ? detailProp(p, closeBtn) : "";
+}
+const closeBtn = '<button class="qbtn close" data-close="1" aria-label="Close" style="margin-left:auto">Close ✕</button>';
 
-/* ============ B · Topics ============ */
-function renderTopics(d) {
+/* ============ list page (shared by A and B) ============ */
+function listPage(d, { lead = false } = {}) {
   const cur = get("topic") || "all";
   const inT = (x) => cur === "all" || x.topic === cur;
-  const counts = Object.fromEntries(TOPICS.map(([k]) => [k, d.proposals.filter((p) => k === "all" || p.topic === k).length]));
-  const tabs = TOPICS.filter(([k]) => k === "all" || counts[k] || d.conns.some((c) => c.topic === k))
-    .map(([k, l]) => `<button class="tab ${k === cur ? "on" : ""}" data-topic="${k}">${l}<span class="n">${counts[k]}</span></button>`).join("");
-  const conns = d.conns.filter(inT);
-  return `<div class="layout"><div class="maincol">
-    ${headline(d)}
-    <div class="tabs">${tabs}</div>
-    ${questionsEl(d.questions.filter(inT))}
-    ${proposalsEl(d.proposals.filter(inT))}
-    ${conns.length ? connsEl(conns, "What came in") : ""}
-    ${fyiEl(d.fyi.filter(inT))}
-    ${cur === "all" ? receiptLine(d) : ""}
-  </div><aside class="rail">${triageRail(d)}${legendEl()}</aside></div>`;
+  const props = d.proposals.filter(inT);
+  const conns = d.conns.filter((c) => cur === "all" || c.topic === cur);
+  let proposals;
+  if (lead) {
+    const first = props.find((p) => p.pri === "urgent") || props[0];
+    const rest = props.filter((p) => p !== first);
+    proposals = `<section class="lane">${first ? `<div class="tier"><div class="lane-label ${first.pri === "urgent" ? "now" : ""}">${first.pri === "urgent" ? burnEl + "Now" : "First"} <span class="n">1</span></div>${pcardEl(first, true)}</div>` : ""}
+      ${tiersEl(rest, prowEl)}</section>`;
+  } else proposals = `<section class="lane">${tiersEl(props, pcardEl)}</section>`;
+  return `${headline(d)}${tabsEl(d, cur)}${questionsEl(d.questions.filter(inT))}${proposals}${connsEl(conns)}${fyiEl(d.fyi.filter(inT))}${cur === "all" ? receiptLine(d) : ""}`;
 }
 
-/* ============ C · Systems ============ */
-function renderSystems(d) {
-  return `<div class="layout"><div class="maincol">
-    ${headline(d)}
-    ${questionsEl(d.questions)}
-    ${proposalsEl(d.proposals)}
-    ${connsEl(d.conns, "Across your systems")}
-    ${fyiEl(d.fyi)}
-    ${receiptLine(d)}
-  </div><aside class="rail">${triageRail(d)}${legendEl()}</aside></div>`;
+/* A · Drawer */
+function renderDrawer(d) {
+  const s = sel();
+  document.getElementById("overlay").innerHTML = s ? `<div class="scrim" data-close="1"></div><div class="drawer">${detailEl(d, s, closeBtn)}</div>` : "";
+  return `<div class="layout"><div class="maincol">${listPage(d)}</div><aside class="rail">${triageRail(d)}${legendEl()}</aside></div>`;
+}
+/* B · Page */
+function renderPage(d) {
+  document.getElementById("overlay").innerHTML = "";
+  const s = sel();
+  if (s) return `<div class="layout"><div class="maincol" style="max-width:760px">${detailEl(d, s)}</div><aside class="rail">${triageRail(d)}${legendEl()}</aside></div>`;
+  return `<div class="layout"><div class="maincol">${listPage(d, { lead: true })}</div><aside class="rail">${triageRail(d)}${legendEl()}</aside></div>`;
+}
+/* C · Split */
+function renderSplit(d) {
+  document.getElementById("overlay").innerHTML = "";
+  const cur = get("topic") || "all";
+  const inT = (x) => cur === "all" || x.topic === cur;
+  const props = d.proposals.filter(inT);
+  if (!sel() && props[0]) setParam("open", props[0].id);
+  return `<div class="layout split"><div class="maincol listcol">
+      ${headline(d)}${tabsEl(d, cur)}${questionsEl(d.questions.filter(inT))}
+      <section class="lane">${tiersEl(props, prowEl)}</section>
+      ${connsEl(d.conns.filter((c) => cur === "all" || c.topic === cur))}${fyiEl(d.fyi.filter(inT))}
+    </div><div class="pane">${detailEl(d, sel())}</div></div>`;
 }
 
 /* ============ page ============ */
 const variants = [
-  { key: "A", name: "Brief", render: renderBrief, note: "A · Narrative-first: the morning brief opens the page and links into the proposals; signals fold under each card; sources in the rail." },
-  { key: "B", name: "Topics", render: renderTopics, note: "B · Topic-first: tabs group connections and proposals (Code / Business / Personal / Ops); each tab shows what came in per connection." },
-  { key: "C", name: "Systems", render: renderSystems, note: "C · Verdict-first: proposals, then \"Across your systems\" - one block per connection, notable signals stamped with what triage made of them." },
+  { key: "A", name: "Drawer", render: renderDrawer, note: "A · Tiers Now / Today / When you can; any card, connection or 'Manage topics' opens a drawer over the rail. You never leave the page." },
+  { key: "B", name: "Page", render: renderPage, note: "B · One lead card for the burning item, condensed rows for the rest; detail is a full page with a breadcrumb back." },
+  { key: "C", name: "Split", render: renderSplit, note: "C · Master/detail: compact tiered list left, detail always open right (replaces the rail). ↑ ↓ move the selection." },
 ];
 function params() { return new URLSearchParams(location.search); }
 function get(k) { return params().get(k); }
-function setParam(k, v) { const p = params(); p.set(k, v); try { history.replaceState(null, "", "?" + p.toString()); } catch (e) {} }
+function setParam(k, v) { const p = params(); if (v === null) p.delete(k); else p.set(k, v); try { history.replaceState(null, "", "?" + p.toString()); } catch (e) {} }
 function current() { const k = (get("variant") || "A").toUpperCase(); const i = variants.findIndex((v) => v.key === k); return i === -1 ? 0 : i; }
-function show(i) { setParam("variant", variants[(i + variants.length) % variants.length].key); render(); }
+function show(i) { setParam("variant", variants[(i + variants.length) % variants.length].key); setParam("open", null); render(); }
 function navEl(d) {
-  const items = [[pageName(), d.proposals.length + d.questions.length, true], ["Check-in", d.checkin.decisions, false],
-    ["Tasks"], ["Sessions"], ["Runs"], ["Workflows"], null, ["Fleet"], ["Connections"], ["Notifications", 5], ["Settings"]];
+  const items = [[pageName(), d.proposals.length + d.questions.length, true], ["Check-in", d.checkin.decisions, false], ["Tasks"], ["Sessions"], ["Runs"], ["Workflows"], null, ["Fleet"], ["Connections"], ["Notifications", 5], ["Settings"]];
   return items.map((it) => it === null ? '<div class="sep"></div>' : `<a href="#" class="${it[2] ? "on" : ""}">${it[0]}${it[1] !== undefined ? ` <span class="count">${it[1]}</span>` : ""}</a>`).join("");
+}
+function topbarEl(v) {
+  const s = sel();
+  if (v.key === "B" && s) {
+    const t = s.kind === "topics" ? "Topics" : s.kind === "conn" ? s.c : (findP(s.id) || {}).t;
+    return `<div class="crumbs"><a href="#" data-close="1">${pageName()}</a><span class="sepc">›</span><span>${t}</span></div>`;
+  }
+  return `<h1>${pageName()}</h1><span class="when">Monday 08:30</span><span class="since">since you last checked · Sunday 18:10</span>`;
 }
 function render() {
   const v = variants[current()];
   const d = data();
   document.getElementById("nav").innerHTML = navEl(d);
-  document.getElementById("h1").textContent = pageName();
   document.getElementById("stage").innerHTML = v.render(d);
+  document.getElementById("topbar").innerHTML = topbarEl(v);
   document.getElementById("swlabel").textContent = v.key + " · " + v.name;
   document.getElementById("vnote").textContent = v.note;
   document.getElementById("dsbtn").textContent = get("data") === "busy" ? "busy" : "calm";
 }
-document.getElementById("stage").addEventListener("click", (e) => {
-  const ref = e.target.closest("a.ref");
-  if (ref) { e.preventDefault(); const id = ref.getAttribute("href").slice(1); openSet.add(id); render();
-    const el = document.getElementById(id); if (el) el.scrollIntoView({ behavior: "smooth", block: "start" }); return; }
-  if (e.target.closest(".qbtn")) return; /* fake actions do nothing */
+document.addEventListener("click", (e) => {
+  if (e.target.closest(".sw")) return;
+  const close = e.target.closest("[data-close]");
+  if (close) { e.preventDefault(); setParam("open", null); render(); return; }
+  const ef = e.target.closest("[data-efilter]");
+  if (ef) { efilter = ef.dataset.efilter; render(); return; }
   const tab = e.target.closest("[data-topic]");
-  if (tab) { setParam("topic", tab.dataset.topic); render(); return; }
-  const o = e.target.closest("[data-open]");
-  if (o) { const id = o.dataset.open; openSet.has(id) ? openSet.delete(id) : openSet.add(id); render(); }
+  if (tab) { setParam("topic", tab.dataset.topic); if (variants[current()].key === "C") setParam("open", null); render(); return; }
+  const s = e.target.closest("[data-sel]");
+  if (s) { e.preventDefault(); efilter = "all"; setParam("open", s.dataset.sel); render(); if (variants[current()].key === "B") window.scrollTo(0, 0); return; }
 });
-function toggleData() { setParam("data", get("data") === "busy" ? "calm" : "busy"); openSet = new Set(); render(); }
-function toggleTheme() {
-  const root = document.documentElement;
-  const dark = root.dataset.theme === "dark" || (!root.dataset.theme && matchMedia("(prefers-color-scheme: dark)").matches);
-  root.dataset.theme = dark ? "light" : "dark";
-}
+function toggleData() { setParam("data", get("data") === "busy" ? "calm" : "busy"); setParam("open", null); render(); }
+function toggleTheme() { const root = document.documentElement; const dark = root.dataset.theme === "dark" || (!root.dataset.theme && matchMedia("(prefers-color-scheme: dark)").matches); root.dataset.theme = dark ? "light" : "dark"; }
 function cycleName() { setParam("name", ((+get("name") || 0) + 1) % NAMES.length); render(); }
+function move(dir) {
+  const d = data(); const cur = get("topic") || "all"; const props = d.proposals.filter((p) => cur === "all" || p.topic === cur);
+  const order = TIERS.flatMap(([, , f]) => props.filter(f)); const i = order.findIndex((p) => p.id === selKey());
+  const n = order[Math.max(0, Math.min(order.length - 1, i + dir))]; if (n) { setParam("open", n.id); render(); }
+}
 document.getElementById("prev").addEventListener("click", () => show(current() - 1));
 document.getElementById("next").addEventListener("click", () => show(current() + 1));
 document.getElementById("dsbtn").addEventListener("click", toggleData);
@@ -685,6 +775,9 @@ document.addEventListener("keydown", (e) => {
   if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
   if (e.key === "ArrowLeft") show(current() - 1);
   if (e.key === "ArrowRight") show(current() + 1);
+  if (e.key === "ArrowDown") { e.preventDefault(); move(1); }
+  if (e.key === "ArrowUp") { e.preventDefault(); move(-1); }
+  if (e.key === "Escape") { setParam("open", null); render(); }
   if (e.key === "d") toggleData();
   if (e.key === "t") toggleTheme();
   if (e.key === "n") cycleName();
