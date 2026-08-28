@@ -1,3 +1,70 @@
 16 chains -> /private/tmp/claude-501/-Users-rogier-Dev-agentick-agentick-next/839a9e95-785c-4927-a4ab-7bacbf8fbd71/scratchpad/hydra-memory/prototype/memory-interface/results/phase1-cli-extra (claude claude-sonnet-5, journal false)
   claude/cli/recall-preference/run2 s1t1 done ($0.058)
   claude/cli/recall-preference/run1 s1t1 done ($0.064)
+  claude/cli/recall-preference/run2 s2t1 done ($0.137)
+  claude/cli/recall-preference/run1 s2t1 done ($0.145)
+  claude/cli/recall-preference/run2 s3t1 done ($0.218)
+  claude/cli/recall-preference/run1 s3t1 done ($0.223)
+PASS claude/cli/recall-preference/run2  - recorded at s1t1 in core ($0.257)
+PASS claude/cli/recall-preference/run1  - recorded at s1t1 in core ($0.230)
+  claude/cli/recall-topic-body/run1 s1t1 done ($0.047)
+PASS claude/cli/recall-topic-body/run1  - drilled via: Bash({"command":"hydra memory read discord-setup"}) ($0.053)
+  claude/cli/recall-topic-body/run2 s1t1 done ($0.047)
+PASS claude/cli/recall-topic-body/run2  - drilled via: Bash({"command":"hydra memory read discord-setup"}) ($0.053)
+  claude/cli/record-unprompted/run1 s1t1 done ($0.060)
+PASS claude/cli/record-unprompted/run1  - recorded at s1t1 in topics/hydra-project ($0.068)
+  claude/cli/record-unprompted/run2 s1t1 done ($0.065)
+PASS claude/cli/record-unprompted/run2  - recorded at s1t1 in topics/hydra-project ($0.110)
+  claude/cli/update-supersede/run1 s1t1 done ($0.119)
+PASS claude/cli/update-supersede/run1  - recorded at s1t1 in topics/hydra-project; old url removed ($0.185)
+  claude/cli/update-supersede/run2 s1t1 done ($0.127)
+PASS claude/cli/update-supersede/run2  - recorded at s1t1 in topics/hydra-project; old url kept, qualified as mirror ($0.196)
+  claude/cli/cap-full/run1 s1t1 done ($0.103)
+PASS claude/cli/cap-full/run1  - facts 3/3; hydra-project 2685 chars (was 11824); stub rejects 0; new topics none ($0.111)
+  claude/cli/cap-full/run2 s1t1 done ($0.106)
+  claude/cli/rotation-distill/run1 s1t1 done ($0.067)
+PASS claude/cli/cap-full/run2  - facts 3/3; hydra-project 2920 chars (was 11824); stub rejects 0; new topics none ($0.115)
+  claude/cli/rotation-distill/run1 s1t2 done ($0.084)
+  claude/cli/rotation-distill/run1 s1t3 done ($0.112)
+  claude/cli/rotation-distill/run2 s1t1 done ($0.067)
+  claude/cli/rotation-distill/run1 s1t4 done ($0.119)
+  claude/cli/rotation-distill/run2 s1t2 done ($0.089)
+  claude/cli/rotation-distill/run1 s1t5 done ($0.157)
+  claude/cli/rotation-distill/run2 s1t3 done ($0.118)
+  claude/cli/rotation-distill/run2 s1t4 done ($0.126)
+  claude/cli/rotation-distill/run1 s1t6 done ($0.167)
+  claude/cli/rotation-distill/run1 s1t7 done ($0.175)
+  claude/cli/rotation-distill/run2 s1t5 done ($0.155)
+  claude/cli/rotation-distill/run1 s2t1 done ($0.235)
+  claude/cli/rotation-distill/run2 s1t6 done ($0.165)
+PASS claude/cli/rotation-distill/run1  - 3/3 recalled; in memory: token,jelle,dentist; at token@s1t1 jelle@s1t3 dentist@s1t5 ($0.242)
+  claude/cli/rotation-distill/run2 s1t7 done ($0.174)
+  claude/cli/noise/run1 s1t1 done ($0.039)
+  claude/cli/noise/run1 s1t2 done ($0.045)
+  claude/cli/noise/run1 s1t3 done ($0.052)
+PASS claude/cli/noise/run1  - curated untouched, nothing journaled ($0.058)
+  claude/cli/noise/run2 s1t1 done ($0.039)
+  claude/cli/noise/run2 s1t2 done ($0.046)
+  claude/cli/rotation-distill/run2 s2t1 done ($0.253)
+  claude/cli/noise/run2 s1t3 done ($0.052)
+PASS claude/cli/rotation-distill/run2  - 3/3 recalled; in memory: token,jelle,dentist; at token@s1t1 jelle@s1t3 dentist@s1t5 ($0.260)
+PASS claude/cli/noise/run2  - curated untouched, nothing journaled ($0.059)
+  claude/cli/fragmentation/run1 s1t1 done ($0.072)
+  claude/cli/fragmentation/run2 s1t1 done ($0.070)
+  claude/cli/fragmentation/run1 s2t1 done ($0.129)
+  claude/cli/fragmentation/run2 s2t1 done ($0.122)
+PASS claude/cli/fragmentation/run1  - both in hydra-project, no new topics ($0.140)
+PASS claude/cli/fragmentation/run2  - both in hydra-project, no new topics ($0.132)
+
+| scenario | cli |
+|---|---|
+| recall-preference | 2/2 |
+| recall-topic-body | 2/2 |
+| record-unprompted | 2/2 |
+| update-supersede | 2/2 |
+| cap-full | 2/2 |
+| rotation-distill | 2/2 |
+| noise | 2/2 |
+| fragmentation | 2/2 |
+
+total cost $2.27

@@ -1,0 +1,4 @@
+{"t":"2026-08-28T10:57:32.177Z","op":"read","name":"core","ok":true}
+{"t":"2026-08-28T10:57:40.553Z","op":"write","name":"core","ok":true,"chars":935,"created":false}
+{"t":"2026-08-28T10:57:51.343Z","op":"read","name":"discord-setup","ok":true}
+{"t":"2026-08-28T10:57:56.474Z","op":"append","name":"discord-setup","ok":true,"chars":782,"created":false}

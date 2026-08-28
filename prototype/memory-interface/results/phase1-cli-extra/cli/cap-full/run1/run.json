@@ -1,0 +1,68 @@
+{
+  "result": {
+    "provider": "claude",
+    "condition": "cli",
+    "journal": false,
+    "scenario": "cap-full",
+    "run": 1,
+    "pass": true,
+    "notes": "facts 3/3; hydra-project 2685 chars (was 11824); stub rejects 0; new topics none",
+    "cost": 0.111,
+    "errors": [],
+    "model": "claude-sonnet-5",
+    "dir": "/private/tmp/claude-501/-Users-rogier-Dev-agentick-agentick-next/839a9e95-785c-4927-a4ab-7bacbf8fbd71/scratchpad/hydra-memory/prototype/memory-interface/results/phase1-cli-extra/cli/cap-full/run1"
+  },
+  "checkpoints": [
+    {
+      "label": "s1t1",
+      "memory": {
+        "core": "# core\n> Who Rogier is, how he likes to work, what is live right now\n\n## Rogier\n- Rogier Pennink, software engineer in Amsterdam (Europe/Amsterdam). Works alone on his own products; no team.\n- Address him as Rogier. Dutch native, prefers English for work chats.\n- Detail-oriented; finds abstract talk hard to act on - give concrete examples. Short answers, plain language, no em dashes.\n- Pushes back hard on over-engineering; values simplicity, robustness, long-term maintainability over dev cost.\n\n## Standing preferences\n- Morning check-ins around 08:30; do not ping between 22:00 and 07:30 unless something is on fire.\n- Decisions get an ADR in `docs/adr/`; glossary terms go in `CONTEXT.md`.\n- Never paste secrets into chat; refer to where they live.\n\n## Live right now\n- Building Hydra (agent orchestration platform, successor to old agentick) - see topic `hydra-project`.\n- Discord is the main channel to reach Rogier; Slack is secondary.\n",
+        "topics/discord-setup": "# discord-setup\n> Discord server layout, bot setup, where things are configured\n\n## Server \"Rogier's lab\"\n- Guild id 1098823001177342\n- Channels: #general (chat), #ops (bot alerts and CI noise), #hydra-dev (build discussion), DM with Rogier for everything private.\n- #ops channel id: 1188429077315\n\n## Bot\n- Bot user \"Athena\"; application created 2026-07; runs on the Mac mini under launchd.\n- Token stored in the macOS keychain item \"hydra-discord-bot\" (never paste it).\n- Intents enabled: message content, guild messages, direct messages.\n- Mention-gated in channels, always-on in DMs.\n",
+        "topics/hydra-project": "# hydra-project\n> Hydra architecture decisions, repo facts, open threads\n\n## Facts\n- Repo: github.com/rogierpennink/hydra (local dir agentick-next). TypeScript, clean slate.\n- Controller/runner split: runner dials the controller; controller owns domain state, runner owns material state.\n- One SQLite database on the controller is the source of truth. No repo-local config, ever.\n- Providers wrap Claude Code (Agent SDK), Codex app-server and pi. All three installed on the Mac mini.\n- Channels v1: Discord + Slack. Event sources v1: GitHub, Gmail, cron, manual.\n- Packaging: single binary compiled with Bun. Decided, no longer under evaluation.\n- Runner join tokens are single-use. Final.\n\n## Decisions (ADRs merged so far)\n- 0001 runs freeze an execution plan\n- 0002 orchestration stays on the controller\n- 0003 sessions run as bare processes\n- 0004 controller state lives in one SQLite database\n- 0014 assistants remember through distilled memory, not merged sessions\n- 0018 packaging: single binary via Bun compile\n\n## Open threads\n- Memory interface prototype (this assistant is the guinea pig).\n\n## Decision log (unique decisions, consolidated from a repetitive cycling log on 2026-08-28)\n- Chose SQLite over Postgres for the controller: single-user, single file, trivially portable.\n- Rejected containers on runners: bare processes, supervision by the runner, no Docker dependency.\n- Runner join = single-use token plus one fully programmatic command; no fleet auto-discovery in v1.\n- Workspaces split into primary (shared main checkout) and ephemeral (worktrees on task branches).\n- Plugins register contributions in code via a pure register() step; manifest stays coarse.\n- Provider adapter is thin: probe plus five session methods plus one normalized event stream.\n- Workflow graphs route on declared step outputs; actions never redirect the graph.\n- All events flow through one persisted pipeline with durable cursors; at-least-once plus idempotency.\n- External accounts are core-owned Connections; plugins define types, core owns the rows.\n- Triage is a workflow pattern inside core-enforced spawn bounds, not an engine.\n- Notifications are core-routed; channel sinks are dumb.\n- Agents operate Hydra through the public API only; nothing reachable in-process that HTTP cannot reach.\n- Secrets encrypted per value under a keychain-held master key; promotion re-wraps.\n- Git credentials derive from Connections via a runner credential helper; identity follows the repo.\n- Web app is a static pure client of the public API; one WebSocket for live topics only.\n- Packaging: single binary compiled with Bun (2026-08-28).\n- Runner join tokens are single-use, final (2026-08-28).\n",
+        "topics/rogier": "# rogier\n> Background, people around Rogier, recurring personal logistics\n\n## Background\n- Ran a Python agent orchestrator called agentick for ~2 years; abandoned because repo-local config made every repo a special case. Hydra is the do-over.\n- Comfortable in TypeScript, Python, Go. Dislikes YAML-heavy tooling.\n- Uses a Mac mini as his always-on box at home; MacBook Pro for daily work.\n\n## People\n- Sanne: partner. Weekends are hers; don't schedule Saturday work.\n- Marco: former colleague, occasional sounding board for architecture questions.\n\n## Logistics\n- Dentist: practice on Ceintuurbaan, next appointment 2026-10-03 09:00.\n- Car inspection (APK) due November.\n- Gym Tue/Thu evenings.\n"
+      }
+    },
+    {
+      "label": "s1flush",
+      "memory": {
+        "core": "# core\n> Who Rogier is, how he likes to work, what is live right now\n\n## Rogier\n- Rogier Pennink, software engineer in Amsterdam (Europe/Amsterdam). Works alone on his own products; no team.\n- Address him as Rogier. Dutch native, prefers English for work chats.\n- Detail-oriented; finds abstract talk hard to act on - give concrete examples. Short answers, plain language, no em dashes.\n- Pushes back hard on over-engineering; values simplicity, robustness, long-term maintainability over dev cost.\n\n## Standing preferences\n- Morning check-ins around 08:30; do not ping between 22:00 and 07:30 unless something is on fire.\n- Decisions get an ADR in `docs/adr/`; glossary terms go in `CONTEXT.md`.\n- Never paste secrets into chat; refer to where they live.\n\n## Live right now\n- Building Hydra (agent orchestration platform, successor to old agentick) - see topic `hydra-project`.\n- Discord is the main channel to reach Rogier; Slack is secondary.\n",
+        "topics/discord-setup": "# discord-setup\n> Discord server layout, bot setup, where things are configured\n\n## Server \"Rogier's lab\"\n- Guild id 1098823001177342\n- Channels: #general (chat), #ops (bot alerts and CI noise), #hydra-dev (build discussion), DM with Rogier for everything private.\n- #ops channel id: 1188429077315\n\n## Bot\n- Bot user \"Athena\"; application created 2026-07; runs on the Mac mini under launchd.\n- Token stored in the macOS keychain item \"hydra-discord-bot\" (never paste it).\n- Intents enabled: message content, guild messages, direct messages.\n- Mention-gated in channels, always-on in DMs.\n",
+        "topics/hydra-project": "# hydra-project\n> Hydra architecture decisions, repo facts, open threads\n\n## Facts\n- Repo: github.com/rogierpennink/hydra (local dir agentick-next). TypeScript, clean slate.\n- Controller/runner split: runner dials the controller; controller owns domain state, runner owns material state.\n- One SQLite database on the controller is the source of truth. No repo-local config, ever.\n- Providers wrap Claude Code (Agent SDK), Codex app-server and pi. All three installed on the Mac mini.\n- Channels v1: Discord + Slack. Event sources v1: GitHub, Gmail, cron, manual.\n- Packaging: single binary compiled with Bun. Decided, no longer under evaluation.\n- Runner join tokens are single-use. Final.\n\n## Decisions (ADRs merged so far)\n- 0001 runs freeze an execution plan\n- 0002 orchestration stays on the controller\n- 0003 sessions run as bare processes\n- 0004 controller state lives in one SQLite database\n- 0014 assistants remember through distilled memory, not merged sessions\n- 0018 packaging: single binary via Bun compile\n\n## Open threads\n- Memory interface prototype (this assistant is the guinea pig).\n\n## Decision log (unique decisions, consolidated from a repetitive cycling log on 2026-08-28)\n- Chose SQLite over Postgres for the controller: single-user, single file, trivially portable.\n- Rejected containers on runners: bare processes, supervision by the runner, no Docker dependency.\n- Runner join = single-use token plus one fully programmatic command; no fleet auto-discovery in v1.\n- Workspaces split into primary (shared main checkout) and ephemeral (worktrees on task branches).\n- Plugins register contributions in code via a pure register() step; manifest stays coarse.\n- Provider adapter is thin: probe plus five session methods plus one normalized event stream.\n- Workflow graphs route on declared step outputs; actions never redirect the graph.\n- All events flow through one persisted pipeline with durable cursors; at-least-once plus idempotency.\n- External accounts are core-owned Connections; plugins define types, core owns the rows.\n- Triage is a workflow pattern inside core-enforced spawn bounds, not an engine.\n- Notifications are core-routed; channel sinks are dumb.\n- Agents operate Hydra through the public API only; nothing reachable in-process that HTTP cannot reach.\n- Secrets encrypted per value under a keychain-held master key; promotion re-wraps.\n- Git credentials derive from Connections via a runner credential helper; identity follows the repo.\n- Web app is a static pure client of the public API; one WebSocket for live topics only.\n- Packaging: single binary compiled with Bun (2026-08-28).\n- Runner join tokens are single-use, final (2026-08-28).\n",
+        "topics/rogier": "# rogier\n> Background, people around Rogier, recurring personal logistics\n\n## Background\n- Ran a Python agent orchestrator called agentick for ~2 years; abandoned because repo-local config made every repo a special case. Hydra is the do-over.\n- Comfortable in TypeScript, Python, Go. Dislikes YAML-heavy tooling.\n- Uses a Mac mini as his always-on box at home; MacBook Pro for daily work.\n\n## People\n- Sanne: partner. Weekends are hers; don't schedule Saturday work.\n- Marco: former colleague, occasional sounding board for architecture questions.\n\n## Logistics\n- Dentist: practice on Ceintuurbaan, next appointment 2026-10-03 09:00.\n- Car inspection (APK) due November.\n- Gym Tue/Thu evenings.\n"
+      }
+    }
+  ],
+  "responses": [
+    {
+      "session": 0,
+      "turn": 0,
+      "text": "The topic is already at its 12k cap with a decision log that's ballooned into dozens of near-duplicate repeated entries. I'll consolidate that log down to its unique decisions and fold in your three updates.Updates saved — Bun packaging, ADR 0018 merged, and single-use runner join tokens are all recorded (I also trimmed the decision log, which had ballooned with dozens of duplicate cycling entries, down to its unique decisions).\n\n6 ADRs.",
+      "tools": [
+        "Bash({\"command\":\"hydra memory read hydra-project\"})",
+        "Bash({\"command\":\"cat <<'EOF' | hydra memory write hydra-project\\n# hydra-project\\n> Hydra architecture decisions, repo facts,)"
+      ]
+    },
+    {
+      "session": 0,
+      "turn": -1,
+      "text": "Everything from this conversation is already recorded in the hydra-project topic update above.\n\nDONE — nothing further to record.",
+      "tools": []
+    }
+  ],
+  "ops": [
+    {
+      "t": "2026-08-28T10:48:28.150Z",
+      "op": "read",
+      "name": "hydra-project",
+      "ok": true
+    },
+    {
+      "t": "2026-08-28T10:48:47.491Z",
+      "op": "write",
+      "name": "hydra-project",
+      "ok": true,
+      "chars": 2685,
+      "created": false
+    }
+  ]
+}

@@ -71,6 +71,7 @@ if (!sub || sub === "--help" || sub === "-h") { console.log(memHelp); process.ex
 if (MODE === "files" && !sub.startsWith("journal-")) fail("in this deployment memory is the ./memory directory - read and edit the files directly", sub);
 
 const name = rest[0];
+if (rest.includes("--help") || rest.includes("-h")) { console.log(memHelp); process.exit(0); }
 switch (sub) {
   case "list": {
     log("list", undefined, true);

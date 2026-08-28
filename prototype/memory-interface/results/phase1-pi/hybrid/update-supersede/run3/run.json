@@ -1,0 +1,67 @@
+{
+  "result": {
+    "provider": "pi",
+    "condition": "hybrid",
+    "journal": false,
+    "scenario": "update-supersede",
+    "run": 3,
+    "pass": true,
+    "notes": "recorded at s1t1 in topics/hydra-project; old url kept, qualified as mirror",
+    "cost": 0.03,
+    "errors": [],
+    "model": "zai/glm-5.3",
+    "dir": "/private/tmp/claude-501/-Users-rogier-Dev-agentick-agentick-next/839a9e95-785c-4927-a4ab-7bacbf8fbd71/scratchpad/hydra-memory/prototype/memory-interface/results/phase1-pi/hybrid/update-supersede/run3"
+  },
+  "checkpoints": [
+    {
+      "label": "s1t1",
+      "memory": {
+        "core": "# core\n> Who Rogier is, how he likes to work, what is live right now\n\n## Rogier\n- Rogier Pennink, software engineer in Amsterdam (Europe/Amsterdam). Works alone on his own products; no team.\n- Address him as Rogier. Dutch native, prefers English for work chats.\n- Detail-oriented; finds abstract talk hard to act on - give concrete examples. Short answers, plain language, no em dashes.\n- Pushes back hard on over-engineering; values simplicity, robustness, long-term maintainability over dev cost.\n\n## Standing preferences\n- Morning check-ins around 08:30; do not ping between 22:00 and 07:30 unless something is on fire.\n- Decisions get an ADR in `docs/adr/`; glossary terms go in `CONTEXT.md`.\n- Never paste secrets into chat; refer to where they live.\n\n## Live right now\n- Building Hydra (agent orchestration platform, successor to old agentick) - see topic `hydra-project`.\n- Discord is the main channel to reach Rogier; Slack is secondary.\n",
+        "topics/discord-setup": "# discord-setup\n> Discord server layout, bot setup, where things are configured\n\n## Server \"Rogier's lab\"\n- Guild id 1098823001177342\n- Channels: #general (chat), #ops (bot alerts and CI noise), #hydra-dev (build discussion), DM with Rogier for everything private.\n- #ops channel id: 1188429077315\n\n## Bot\n- Bot user \"Athena\"; application created 2026-07; runs on the Mac mini under launchd.\n- Token stored in the macOS keychain item \"hydra-discord-bot\" (never paste it).\n- Intents enabled: message content, guild messages, direct messages.\n- Mention-gated in channels, always-on in DMs.\n",
+        "topics/hydra-project": "# hydra-project\n> Hydra architecture decisions, repo facts, open threads\n\n## Facts\n- Repo: gitlab.com/rogier/hydra (moved off GitHub 2026-08-28; github.com/rogierpennink/hydra is now a read-only mirror). Local dir agentick-next. TypeScript, clean slate.\n- Controller/runner split: runner dials the controller; controller owns domain state, runner owns material state.\n- One SQLite database on the controller is the source of truth. No repo-local config, ever.\n- Providers wrap Claude Code (Agent SDK), Codex app-server and pi. All three installed on the Mac mini.\n- Channels v1: Discord + Slack. Event sources v1: GitHub, Gmail, cron, manual.\n- ADRs: 0001-0019 all merged (no gaps). Canonical list is docs/adr/ in the repo; 0018 settled packaging (single self-contained binary).\n\n## Open threads\n- Runner join ceremony: token format not settled.\n- Memory interface prototype (this assistant is the guinea pig).\n",
+        "topics/rogier": "# rogier\n> Background, people around Rogier, recurring personal logistics\n\n## Background\n- Ran a Python agent orchestrator called agentick for ~2 years; abandoned because repo-local config made every repo a special case. Hydra is the do-over.\n- Comfortable in TypeScript, Python, Go. Dislikes YAML-heavy tooling.\n- Uses a Mac mini as his always-on box at home; MacBook Pro for daily work.\n\n## People\n- Sanne: partner. Weekends are hers; don't schedule Saturday work.\n- Marco: former colleague, occasional sounding board for architecture questions.\n\n## Logistics\n- Dentist: practice on Ceintuurbaan, next appointment 2026-10-03 09:00.\n- Car inspection (APK) due November.\n- Gym Tue/Thu evenings.\n"
+      }
+    },
+    {
+      "label": "s1flush",
+      "memory": {
+        "core": "# core\n> Who Rogier is, how he likes to work, what is live right now\n\n## Rogier\n- Rogier Pennink, software engineer in Amsterdam (Europe/Amsterdam). Works alone on his own products; no team.\n- Address him as Rogier. Dutch native, prefers English for work chats.\n- Detail-oriented; finds abstract talk hard to act on - give concrete examples. Short answers, plain language, no em dashes.\n- Pushes back hard on over-engineering; values simplicity, robustness, long-term maintainability over dev cost.\n\n## Standing preferences\n- Morning check-ins around 08:30; do not ping between 22:00 and 07:30 unless something is on fire.\n- Decisions get an ADR in `docs/adr/`; glossary terms go in `CONTEXT.md`.\n- Never paste secrets into chat; refer to where they live.\n\n## Live right now\n- Building Hydra (agent orchestration platform, successor to old agentick) - see topic `hydra-project`.\n- Discord is the main channel to reach Rogier; Slack is secondary.\n",
+        "topics/discord-setup": "# discord-setup\n> Discord server layout, bot setup, where things are configured\n\n## Server \"Rogier's lab\"\n- Guild id 1098823001177342\n- Channels: #general (chat), #ops (bot alerts and CI noise), #hydra-dev (build discussion), DM with Rogier for everything private.\n- #ops channel id: 1188429077315\n\n## Bot\n- Bot user \"Athena\"; application created 2026-07; runs on the Mac mini under launchd.\n- Token stored in the macOS keychain item \"hydra-discord-bot\" (never paste it).\n- Intents enabled: message content, guild messages, direct messages.\n- Mention-gated in channels, always-on in DMs.\n",
+        "topics/hydra-project": "# hydra-project\n> Hydra architecture decisions, repo facts, open threads\n\n## Facts\n- Repo: gitlab.com/rogier/hydra (moved off GitHub 2026-08-28; github.com/rogierpennink/hydra is now a read-only mirror). Local dir agentick-next. TypeScript, clean slate.\n- Controller/runner split: runner dials the controller; controller owns domain state, runner owns material state.\n- One SQLite database on the controller is the source of truth. No repo-local config, ever.\n- Providers wrap Claude Code (Agent SDK), Codex app-server and pi. All three installed on the Mac mini.\n- Channels v1: Discord + Slack. Event sources v1: GitHub, Gmail, cron, manual.\n- ADRs: 0001-0019 all merged (no gaps). Canonical list is docs/adr/ in the repo; 0018 settled packaging (single self-contained binary).\n\n## Open threads\n- Runner join ceremony: token format not settled.\n- Memory interface prototype (this assistant is the guinea pig).\n",
+        "topics/rogier": "# rogier\n> Background, people around Rogier, recurring personal logistics\n\n## Background\n- Ran a Python agent orchestrator called agentick for ~2 years; abandoned because repo-local config made every repo a special case. Hydra is the do-over.\n- Comfortable in TypeScript, Python, Go. Dislikes YAML-heavy tooling.\n- Uses a Mac mini as his always-on box at home; MacBook Pro for daily work.\n\n## People\n- Sanne: partner. Weekends are hers; don't schedule Saturday work.\n- Marco: former colleague, occasional sounding board for architecture questions.\n\n## Logistics\n- Dentist: practice on Ceintuurbaan, next appointment 2026-10-03 09:00.\n- Car inspection (APK) due November.\n- Gym Tue/Thu evenings.\n"
+      }
+    }
+  ],
+  "responses": [
+    {
+      "session": 0,
+      "turn": 0,
+      "text": "All 19 ADR files (0001-0019) are committed in `docs/adr/` with no gaps, and my memory's list was stale. Updating the topic with the repo move and the corrected ADR state:Noted the GitLab move in memory (GitHub noted as read-only mirror).\n\nADRs merged: **0001 through 0019**, all of them, no gaps.\n\nOne side effect: ADR 0018 (single self-contained binary) had already settled the packaging question, so I dropped that stale open thread from memory too.",
+      "tools": [
+        "read({\"path\":\"memory/topics/hydra-project.md\"})",
+        "bash({\"command\":\"ls docs/adr/ 2>/dev/null || find . -maxdepth 3 -name 'adr' -type d 2>/dev/null\"})",
+        "bash({\"command\":\"ls ~/Dev/agentick/agentick-next/docs/adr/ 2>/dev/null && head -6 ~/Dev/agentick/agentick-next/docs/adr/*.md )",
+        "bash({\"command\":\"ls ~/Dev/agentick/agentick-next/docs/adr/ 2>/dev/null; grep -i '^## *status\\\\|^status' ~/Dev/agentick/agenti)",
+        "bash({\"command\":\"cd ~/Dev/agentick/agentick-next/docs/adr && grep -ril 'status' . | head; echo ---; head -8 0001-*.md; echo -)",
+        "bash({\"command\":\"cd ~/Dev/agentick/agentick-next && git status --short docs/adr/ && git log --oneline -1 -- docs/adr/\"})",
+        "bash({\"command\":\"hydra memory write hydra-project <<EOF\\n# hydra-project\\n> Hydra architecture decisions, repo facts, open th)"
+      ]
+    },
+    {
+      "session": 0,
+      "turn": -1,
+      "text": "DONE — nothing new to record; the GitLab repo move, the full ADR 0001-0019 list, and the cleared packaging thread were all written to `hydra-project` during the conversation.",
+      "tools": []
+    }
+  ],
+  "ops": [
+    {
+      "t": "2026-08-28T10:53:58.385Z",
+      "op": "write",
+      "name": "hydra-project",
+      "ok": true,
+      "chars": 911,
+      "created": false
+    }
+  ]
+}

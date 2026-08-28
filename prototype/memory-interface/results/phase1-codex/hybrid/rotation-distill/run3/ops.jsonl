@@ -1,0 +1,4 @@
+{"t":"2026-08-28T10:54:54.306Z","op":"write","name":"discord-setup","ok":true,"chars":618,"created":false}
+{"t":"2026-08-28T10:54:54.321Z","op":"read","name":"discord-setup","ok":true}
+{"t":"2026-08-28T10:55:26.404Z","op":"append","name":"rogier","ok":true,"chars":796,"created":false}
+{"t":"2026-08-28T10:55:43.993Z","op":"write","name":"rogier","ok":true,"chars":796,"created":false}

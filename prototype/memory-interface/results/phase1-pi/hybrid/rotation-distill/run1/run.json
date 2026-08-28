@@ -1,0 +1,219 @@
+{
+  "result": {
+    "provider": "pi",
+    "condition": "hybrid",
+    "journal": false,
+    "scenario": "rotation-distill",
+    "run": 1,
+    "pass": true,
+    "notes": "3/3 recalled; in memory: token,jelle,dentist; at token@s1t1 jelle@s1t3 dentist@s1t5",
+    "cost": 0.051,
+    "errors": [],
+    "model": "zai/glm-5.3",
+    "dir": "/private/tmp/claude-501/-Users-rogier-Dev-agentick-agentick-next/839a9e95-785c-4927-a4ab-7bacbf8fbd71/scratchpad/hydra-memory/prototype/memory-interface/results/phase1-pi/hybrid/rotation-distill/run1"
+  },
+  "checkpoints": [
+    {
+      "label": "s1t1",
+      "memory": {
+        "core": "# core\n> Who Rogier is, how he likes to work, what is live right now\n\n## Rogier\n- Rogier Pennink, software engineer in Amsterdam (Europe/Amsterdam). Works alone on his own products; no team.\n- Address him as Rogier. Dutch native, prefers English for work chats.\n- Detail-oriented; finds abstract talk hard to act on - give concrete examples. Short answers, plain language, no em dashes.\n- Pushes back hard on over-engineering; values simplicity, robustness, long-term maintainability over dev cost.\n\n## Standing preferences\n- Morning check-ins around 08:30; do not ping between 22:00 and 07:30 unless something is on fire.\n- Decisions get an ADR in `docs/adr/`; glossary terms go in `CONTEXT.md`.\n- Never paste secrets into chat; refer to where they live.\n\n## Live right now\n- Building Hydra (agent orchestration platform, successor to old agentick) - see topic `hydra-project`.\n- Discord is the main channel to reach Rogier; Slack is secondary.\n",
+        "topics/discord-setup": "# discord-setup\n> Discord server layout, bot setup, where things are configured\n\n## Server \"Rogier's lab\"\n- Guild id 1098823001177342\n- Channels: #general (chat), #ops (bot alerts and CI noise), #hydra-dev (build discussion), DM with Rogier for everything private.\n- #ops channel id: 1188429077315\n\n## Bot\n- Bot user \"Athena\"; application created 2026-07; runs on the Mac mini under launchd.\n- Token lives in the 1Password vault \"hydra-ops\" (moved out of the macOS keychain, 2026-08). Never paste it.\n- Intents enabled: message content, guild messages, direct messages.\n- Mention-gated in channels, always-on in DMs.\n",
+        "topics/hydra-project": "# hydra-project\n> Hydra architecture decisions, repo facts, open threads\n\n## Facts\n- Repo: github.com/rogierpennink/hydra (local dir agentick-next). TypeScript, clean slate.\n- Controller/runner split: runner dials the controller; controller owns domain state, runner owns material state.\n- One SQLite database on the controller is the source of truth. No repo-local config, ever.\n- Providers wrap Claude Code (Agent SDK), Codex app-server and pi. All three installed on the Mac mini.\n- Channels v1: Discord + Slack. Event sources v1: GitHub, Gmail, cron, manual.\n\n## Decisions (ADRs merged so far)\n- 0001 runs freeze an execution plan\n- 0002 orchestration stays on the controller\n- 0003 sessions run as bare processes\n- 0004 controller state lives in one SQLite database\n- 0014 assistants remember through distilled memory, not merged sessions\n\n## Open threads\n- Packaging: single binary vs npm install still undecided; Bun compile under evaluation.\n- Runner join ceremony: token format not settled.\n- Memory interface prototype (this assistant is the guinea pig).\n",
+        "topics/rogier": "# rogier\n> Background, people around Rogier, recurring personal logistics\n\n## Background\n- Ran a Python agent orchestrator called agentick for ~2 years; abandoned because repo-local config made every repo a special case. Hydra is the do-over.\n- Comfortable in TypeScript, Python, Go. Dislikes YAML-heavy tooling.\n- Uses a Mac mini as his always-on box at home; MacBook Pro for daily work.\n\n## People\n- Sanne: partner. Weekends are hers; don't schedule Saturday work.\n- Marco: former colleague, occasional sounding board for architecture questions.\n\n## Logistics\n- Dentist: practice on Ceintuurbaan, next appointment 2026-10-03 09:00.\n- Car inspection (APK) due November.\n- Gym Tue/Thu evenings.\n"
+      }
+    },
+    {
+      "label": "s1t2",
+      "memory": {
+        "core": "# core\n> Who Rogier is, how he likes to work, what is live right now\n\n## Rogier\n- Rogier Pennink, software engineer in Amsterdam (Europe/Amsterdam). Works alone on his own products; no team.\n- Address him as Rogier. Dutch native, prefers English for work chats.\n- Detail-oriented; finds abstract talk hard to act on - give concrete examples. Short answers, plain language, no em dashes.\n- Pushes back hard on over-engineering; values simplicity, robustness, long-term maintainability over dev cost.\n\n## Standing preferences\n- Morning check-ins around 08:30; do not ping between 22:00 and 07:30 unless something is on fire.\n- Decisions get an ADR in `docs/adr/`; glossary terms go in `CONTEXT.md`.\n- Never paste secrets into chat; refer to where they live.\n\n## Live right now\n- Building Hydra (agent orchestration platform, successor to old agentick) - see topic `hydra-project`.\n- Discord is the main channel to reach Rogier; Slack is secondary.\n",
+        "topics/discord-setup": "# discord-setup\n> Discord server layout, bot setup, where things are configured\n\n## Server \"Rogier's lab\"\n- Guild id 1098823001177342\n- Channels: #general (chat), #ops (bot alerts and CI noise), #hydra-dev (build discussion), DM with Rogier for everything private.\n- #ops channel id: 1188429077315\n\n## Bot\n- Bot user \"Athena\"; application created 2026-07; runs on the Mac mini under launchd.\n- Token lives in the 1Password vault \"hydra-ops\" (moved out of the macOS keychain, 2026-08). Never paste it.\n- Intents enabled: message content, guild messages, direct messages.\n- Mention-gated in channels, always-on in DMs.\n",
+        "topics/hydra-project": "# hydra-project\n> Hydra architecture decisions, repo facts, open threads\n\n## Facts\n- Repo: github.com/rogierpennink/hydra (local dir agentick-next). TypeScript, clean slate.\n- Controller/runner split: runner dials the controller; controller owns domain state, runner owns material state.\n- One SQLite database on the controller is the source of truth. No repo-local config, ever.\n- Providers wrap Claude Code (Agent SDK), Codex app-server and pi. All three installed on the Mac mini.\n- Channels v1: Discord + Slack. Event sources v1: GitHub, Gmail, cron, manual.\n\n## Decisions (ADRs merged so far)\n- 0001 runs freeze an execution plan\n- 0002 orchestration stays on the controller\n- 0003 sessions run as bare processes\n- 0004 controller state lives in one SQLite database\n- 0014 assistants remember through distilled memory, not merged sessions\n\n## Open threads\n- Packaging: single binary vs npm install still undecided; Bun compile under evaluation.\n- Runner join ceremony: token format not settled.\n- Memory interface prototype (this assistant is the guinea pig).\n",
+        "topics/rogier": "# rogier\n> Background, people around Rogier, recurring personal logistics\n\n## Background\n- Ran a Python agent orchestrator called agentick for ~2 years; abandoned because repo-local config made every repo a special case. Hydra is the do-over.\n- Comfortable in TypeScript, Python, Go. Dislikes YAML-heavy tooling.\n- Uses a Mac mini as his always-on box at home; MacBook Pro for daily work.\n\n## People\n- Sanne: partner. Weekends are hers; don't schedule Saturday work.\n- Marco: former colleague, occasional sounding board for architecture questions.\n\n## Logistics\n- Dentist: practice on Ceintuurbaan, next appointment 2026-10-03 09:00.\n- Car inspection (APK) due November.\n- Gym Tue/Thu evenings.\n"
+      }
+    },
+    {
+      "label": "s1t3",
+      "memory": {
+        "core": "# core\n> Who Rogier is, how he likes to work, what is live right now\n\n## Rogier\n- Rogier Pennink, software engineer in Amsterdam (Europe/Amsterdam). Works alone on his own products; no team.\n- Address him as Rogier. Dutch native, prefers English for work chats.\n- Detail-oriented; finds abstract talk hard to act on - give concrete examples. Short answers, plain language, no em dashes.\n- Pushes back hard on over-engineering; values simplicity, robustness, long-term maintainability over dev cost.\n\n## Standing preferences\n- Morning check-ins around 08:30; do not ping between 22:00 and 07:30 unless something is on fire.\n- Decisions get an ADR in `docs/adr/`; glossary terms go in `CONTEXT.md`.\n- Never paste secrets into chat; refer to where they live.\n\n## Live right now\n- Building Hydra (agent orchestration platform, successor to old agentick) - see topic `hydra-project`.\n- Discord is the main channel to reach Rogier; Slack is secondary.\n",
+        "topics/discord-setup": "# discord-setup\n> Discord server layout, bot setup, where things are configured\n\n## Server \"Rogier's lab\"\n- Guild id 1098823001177342\n- Channels: #general (chat), #ops (bot alerts and CI noise), #hydra-dev (build discussion), DM with Rogier for everything private.\n- #ops channel id: 1188429077315\n\n## Bot\n- Bot user \"Athena\"; application created 2026-07; runs on the Mac mini under launchd.\n- Token lives in the 1Password vault \"hydra-ops\" (moved out of the macOS keychain, 2026-08). Never paste it.\n- Intents enabled: message content, guild messages, direct messages.\n- Mention-gated in channels, always-on in DMs.\n",
+        "topics/hydra-project": "# hydra-project\n> Hydra architecture decisions, repo facts, open threads\n\n## Facts\n- Repo: github.com/rogierpennink/hydra (local dir agentick-next). TypeScript, clean slate.\n- Controller/runner split: runner dials the controller; controller owns domain state, runner owns material state.\n- One SQLite database on the controller is the source of truth. No repo-local config, ever.\n- Providers wrap Claude Code (Agent SDK), Codex app-server and pi. All three installed on the Mac mini.\n- Channels v1: Discord + Slack. Event sources v1: GitHub, Gmail, cron, manual.\n\n## Decisions (ADRs merged so far)\n- 0001 runs freeze an execution plan\n- 0002 orchestration stays on the controller\n- 0003 sessions run as bare processes\n- 0004 controller state lives in one SQLite database\n- 0014 assistants remember through distilled memory, not merged sessions\n\n## Open threads\n- Packaging: single binary vs npm install still undecided; Bun compile under evaluation.\n- Runner join ceremony: token format not settled.\n- Memory interface prototype (this assistant is the guinea pig).\n",
+        "topics/rogier": "# rogier\n> Background, people around Rogier, recurring personal logistics\n\n## Background\n- Ran a Python agent orchestrator called agentick for ~2 years; abandoned because repo-local config made every repo a special case. Hydra is the do-over.\n- Comfortable in TypeScript, Python, Go. Dislikes YAML-heavy tooling.\n- Uses a Mac mini as his always-on box at home; MacBook Pro for daily work.\n\n## People\n- Sanne: partner. Weekends are hers; don't schedule Saturday work.\n- Marco: former colleague, occasional sounding board for architecture questions.\n\n## Logistics\n- Dentist: practice on Ceintuurbaan, next appointment 2026-10-03 09:00.\n- Car inspection (APK) due November.\n- Gym Tue/Thu evenings.\n- Jelle Bakker: contact at hosting provider TransIP, handles the VPS and DNS. \"Jelle\" always means him.\n"
+      }
+    },
+    {
+      "label": "s1t4",
+      "memory": {
+        "core": "# core\n> Who Rogier is, how he likes to work, what is live right now\n\n## Rogier\n- Rogier Pennink, software engineer in Amsterdam (Europe/Amsterdam). Works alone on his own products; no team.\n- Address him as Rogier. Dutch native, prefers English for work chats.\n- Detail-oriented; finds abstract talk hard to act on - give concrete examples. Short answers, plain language, no em dashes.\n- Pushes back hard on over-engineering; values simplicity, robustness, long-term maintainability over dev cost.\n\n## Standing preferences\n- Morning check-ins around 08:30; do not ping between 22:00 and 07:30 unless something is on fire.\n- Decisions get an ADR in `docs/adr/`; glossary terms go in `CONTEXT.md`.\n- Never paste secrets into chat; refer to where they live.\n\n## Live right now\n- Building Hydra (agent orchestration platform, successor to old agentick) - see topic `hydra-project`.\n- Discord is the main channel to reach Rogier; Slack is secondary.\n",
+        "topics/discord-setup": "# discord-setup\n> Discord server layout, bot setup, where things are configured\n\n## Server \"Rogier's lab\"\n- Guild id 1098823001177342\n- Channels: #general (chat), #ops (bot alerts and CI noise), #hydra-dev (build discussion), DM with Rogier for everything private.\n- #ops channel id: 1188429077315\n\n## Bot\n- Bot user \"Athena\"; application created 2026-07; runs on the Mac mini under launchd.\n- Token lives in the 1Password vault \"hydra-ops\" (moved out of the macOS keychain, 2026-08). Never paste it.\n- Intents enabled: message content, guild messages, direct messages.\n- Mention-gated in channels, always-on in DMs.\n",
+        "topics/hydra-project": "# hydra-project\n> Hydra architecture decisions, repo facts, open threads\n\n## Facts\n- Repo: github.com/rogierpennink/hydra (local dir agentick-next). TypeScript, clean slate.\n- Controller/runner split: runner dials the controller; controller owns domain state, runner owns material state.\n- One SQLite database on the controller is the source of truth. No repo-local config, ever.\n- Providers wrap Claude Code (Agent SDK), Codex app-server and pi. All three installed on the Mac mini.\n- Channels v1: Discord + Slack. Event sources v1: GitHub, Gmail, cron, manual.\n\n## Decisions (ADRs merged so far)\n- 0001 runs freeze an execution plan\n- 0002 orchestration stays on the controller\n- 0003 sessions run as bare processes\n- 0004 controller state lives in one SQLite database\n- 0014 assistants remember through distilled memory, not merged sessions\n\n## Open threads\n- Packaging: single binary vs npm install still undecided; Bun compile under evaluation.\n- Runner join ceremony: token format not settled.\n- Memory interface prototype (this assistant is the guinea pig).\n",
+        "topics/rogier": "# rogier\n> Background, people around Rogier, recurring personal logistics\n\n## Background\n- Ran a Python agent orchestrator called agentick for ~2 years; abandoned because repo-local config made every repo a special case. Hydra is the do-over.\n- Comfortable in TypeScript, Python, Go. Dislikes YAML-heavy tooling.\n- Uses a Mac mini as his always-on box at home; MacBook Pro for daily work.\n\n## People\n- Sanne: partner. Weekends are hers; don't schedule Saturday work.\n- Marco: former colleague, occasional sounding board for architecture questions.\n\n## Logistics\n- Dentist: practice on Ceintuurbaan, next appointment 2026-10-03 09:00.\n- Car inspection (APK) due November.\n- Gym Tue/Thu evenings.\n- Jelle Bakker: contact at hosting provider TransIP, handles the VPS and DNS. \"Jelle\" always means him.\n"
+      }
+    },
+    {
+      "label": "s1t5",
+      "memory": {
+        "core": "# core\n> Who Rogier is, how he likes to work, what is live right now\n\n## Rogier\n- Rogier Pennink, software engineer in Amsterdam (Europe/Amsterdam). Works alone on his own products; no team.\n- Address him as Rogier. Dutch native, prefers English for work chats.\n- Detail-oriented; finds abstract talk hard to act on - give concrete examples. Short answers, plain language, no em dashes.\n- Pushes back hard on over-engineering; values simplicity, robustness, long-term maintainability over dev cost.\n\n## Standing preferences\n- Morning check-ins around 08:30; do not ping between 22:00 and 07:30 unless something is on fire.\n- Decisions get an ADR in `docs/adr/`; glossary terms go in `CONTEXT.md`.\n- Never paste secrets into chat; refer to where they live.\n\n## Live right now\n- Building Hydra (agent orchestration platform, successor to old agentick) - see topic `hydra-project`.\n- Discord is the main channel to reach Rogier; Slack is secondary.\n",
+        "topics/discord-setup": "# discord-setup\n> Discord server layout, bot setup, where things are configured\n\n## Server \"Rogier's lab\"\n- Guild id 1098823001177342\n- Channels: #general (chat), #ops (bot alerts and CI noise), #hydra-dev (build discussion), DM with Rogier for everything private.\n- #ops channel id: 1188429077315\n\n## Bot\n- Bot user \"Athena\"; application created 2026-07; runs on the Mac mini under launchd.\n- Token lives in the 1Password vault \"hydra-ops\" (moved out of the macOS keychain, 2026-08). Never paste it.\n- Intents enabled: message content, guild messages, direct messages.\n- Mention-gated in channels, always-on in DMs.\n",
+        "topics/hydra-project": "# hydra-project\n> Hydra architecture decisions, repo facts, open threads\n\n## Facts\n- Repo: github.com/rogierpennink/hydra (local dir agentick-next). TypeScript, clean slate.\n- Controller/runner split: runner dials the controller; controller owns domain state, runner owns material state.\n- One SQLite database on the controller is the source of truth. No repo-local config, ever.\n- Providers wrap Claude Code (Agent SDK), Codex app-server and pi. All three installed on the Mac mini.\n- Channels v1: Discord + Slack. Event sources v1: GitHub, Gmail, cron, manual.\n\n## Decisions (ADRs merged so far)\n- 0001 runs freeze an execution plan\n- 0002 orchestration stays on the controller\n- 0003 sessions run as bare processes\n- 0004 controller state lives in one SQLite database\n- 0014 assistants remember through distilled memory, not merged sessions\n\n## Open threads\n- Packaging: single binary vs npm install still undecided; Bun compile under evaluation.\n- Runner join ceremony: token format not settled.\n- Memory interface prototype (this assistant is the guinea pig).\n",
+        "topics/rogier": "# rogier\n> Background, people around Rogier, recurring personal logistics\n\n## Background\n- Ran a Python agent orchestrator called agentick for ~2 years; abandoned because repo-local config made every repo a special case. Hydra is the do-over.\n- Comfortable in TypeScript, Python, Go. Dislikes YAML-heavy tooling.\n- Uses a Mac mini as his always-on box at home; MacBook Pro for daily work.\n\n## People\n- Sanne: partner. Weekends are hers; don't schedule Saturday work.\n- Marco: former colleague, occasional sounding board for architecture questions.\n- Jelle Bakker: contact at hosting provider TransIP, handles the VPS and DNS. \"Jelle\" always means him.\n\n## Logistics\n- Dentist: practice on Ceintuurbaan, next appointment 2026-09-12 10:30.\n- Car inspection (APK) due November.\n- Gym Tue/Thu evenings.\n"
+      }
+    },
+    {
+      "label": "s1t6",
+      "memory": {
+        "core": "# core\n> Who Rogier is, how he likes to work, what is live right now\n\n## Rogier\n- Rogier Pennink, software engineer in Amsterdam (Europe/Amsterdam). Works alone on his own products; no team.\n- Address him as Rogier. Dutch native, prefers English for work chats.\n- Detail-oriented; finds abstract talk hard to act on - give concrete examples. Short answers, plain language, no em dashes.\n- Pushes back hard on over-engineering; values simplicity, robustness, long-term maintainability over dev cost.\n\n## Standing preferences\n- Morning check-ins around 08:30; do not ping between 22:00 and 07:30 unless something is on fire.\n- Decisions get an ADR in `docs/adr/`; glossary terms go in `CONTEXT.md`.\n- Never paste secrets into chat; refer to where they live.\n\n## Live right now\n- Building Hydra (agent orchestration platform, successor to old agentick) - see topic `hydra-project`.\n- Discord is the main channel to reach Rogier; Slack is secondary.\n",
+        "topics/discord-setup": "# discord-setup\n> Discord server layout, bot setup, where things are configured\n\n## Server \"Rogier's lab\"\n- Guild id 1098823001177342\n- Channels: #general (chat), #ops (bot alerts and CI noise), #hydra-dev (build discussion), DM with Rogier for everything private.\n- #ops channel id: 1188429077315\n\n## Bot\n- Bot user \"Athena\"; application created 2026-07; runs on the Mac mini under launchd.\n- Token lives in the 1Password vault \"hydra-ops\" (moved out of the macOS keychain, 2026-08). Never paste it.\n- Intents enabled: message content, guild messages, direct messages.\n- Mention-gated in channels, always-on in DMs.\n",
+        "topics/hydra-project": "# hydra-project\n> Hydra architecture decisions, repo facts, open threads\n\n## Facts\n- Repo: github.com/rogierpennink/hydra (local dir agentick-next). TypeScript, clean slate.\n- Controller/runner split: runner dials the controller; controller owns domain state, runner owns material state.\n- One SQLite database on the controller is the source of truth. No repo-local config, ever.\n- Providers wrap Claude Code (Agent SDK), Codex app-server and pi. All three installed on the Mac mini.\n- Channels v1: Discord + Slack. Event sources v1: GitHub, Gmail, cron, manual.\n\n## Decisions (ADRs merged so far)\n- 0001 runs freeze an execution plan\n- 0002 orchestration stays on the controller\n- 0003 sessions run as bare processes\n- 0004 controller state lives in one SQLite database\n- 0014 assistants remember through distilled memory, not merged sessions\n\n## Open threads\n- Packaging: single binary vs npm install still undecided; Bun compile under evaluation.\n- Runner join ceremony: token format not settled.\n- Memory interface prototype (this assistant is the guinea pig).\n",
+        "topics/rogier": "# rogier\n> Background, people around Rogier, recurring personal logistics\n\n## Background\n- Ran a Python agent orchestrator called agentick for ~2 years; abandoned because repo-local config made every repo a special case. Hydra is the do-over.\n- Comfortable in TypeScript, Python, Go. Dislikes YAML-heavy tooling.\n- Uses a Mac mini as his always-on box at home; MacBook Pro for daily work.\n\n## People\n- Sanne: partner. Weekends are hers; don't schedule Saturday work.\n- Marco: former colleague, occasional sounding board for architecture questions.\n- Jelle Bakker: contact at hosting provider TransIP, handles the VPS and DNS. \"Jelle\" always means him.\n\n## Logistics\n- Dentist: practice on Ceintuurbaan, next appointment 2026-09-12 10:30.\n- Car inspection (APK) due November.\n- Gym Tue/Thu evenings.\n"
+      }
+    },
+    {
+      "label": "s1t7",
+      "memory": {
+        "core": "# core\n> Who Rogier is, how he likes to work, what is live right now\n\n## Rogier\n- Rogier Pennink, software engineer in Amsterdam (Europe/Amsterdam). Works alone on his own products; no team.\n- Address him as Rogier. Dutch native, prefers English for work chats.\n- Detail-oriented; finds abstract talk hard to act on - give concrete examples. Short answers, plain language, no em dashes.\n- Pushes back hard on over-engineering; values simplicity, robustness, long-term maintainability over dev cost.\n\n## Standing preferences\n- Morning check-ins around 08:30; do not ping between 22:00 and 07:30 unless something is on fire.\n- Decisions get an ADR in `docs/adr/`; glossary terms go in `CONTEXT.md`.\n- Never paste secrets into chat; refer to where they live.\n\n## Live right now\n- Building Hydra (agent orchestration platform, successor to old agentick) - see topic `hydra-project`.\n- Discord is the main channel to reach Rogier; Slack is secondary.\n",
+        "topics/discord-setup": "# discord-setup\n> Discord server layout, bot setup, where things are configured\n\n## Server \"Rogier's lab\"\n- Guild id 1098823001177342\n- Channels: #general (chat), #ops (bot alerts and CI noise), #hydra-dev (build discussion), DM with Rogier for everything private.\n- #ops channel id: 1188429077315\n\n## Bot\n- Bot user \"Athena\"; application created 2026-07; runs on the Mac mini under launchd.\n- Token lives in the 1Password vault \"hydra-ops\" (moved out of the macOS keychain, 2026-08). Never paste it.\n- Intents enabled: message content, guild messages, direct messages.\n- Mention-gated in channels, always-on in DMs.\n",
+        "topics/hydra-project": "# hydra-project\n> Hydra architecture decisions, repo facts, open threads\n\n## Facts\n- Repo: github.com/rogierpennink/hydra (local dir agentick-next). TypeScript, clean slate.\n- Controller/runner split: runner dials the controller; controller owns domain state, runner owns material state.\n- One SQLite database on the controller is the source of truth. No repo-local config, ever.\n- Providers wrap Claude Code (Agent SDK), Codex app-server and pi. All three installed on the Mac mini.\n- Channels v1: Discord + Slack. Event sources v1: GitHub, Gmail, cron, manual.\n\n## Decisions (ADRs merged so far)\n- 0001 runs freeze an execution plan\n- 0002 orchestration stays on the controller\n- 0003 sessions run as bare processes\n- 0004 controller state lives in one SQLite database\n- 0014 assistants remember through distilled memory, not merged sessions\n\n## Open threads\n- Packaging: single binary vs npm install still undecided; Bun compile under evaluation.\n- Runner join ceremony: token format not settled.\n- Memory interface prototype (this assistant is the guinea pig).\n",
+        "topics/rogier": "# rogier\n> Background, people around Rogier, recurring personal logistics\n\n## Background\n- Ran a Python agent orchestrator called agentick for ~2 years; abandoned because repo-local config made every repo a special case. Hydra is the do-over.\n- Comfortable in TypeScript, Python, Go. Dislikes YAML-heavy tooling.\n- Uses a Mac mini as his always-on box at home; MacBook Pro for daily work.\n\n## People\n- Sanne: partner. Weekends are hers; don't schedule Saturday work.\n- Marco: former colleague, occasional sounding board for architecture questions.\n- Jelle Bakker: contact at hosting provider TransIP, handles the VPS and DNS. \"Jelle\" always means him.\n\n## Logistics\n- Dentist: practice on Ceintuurbaan, next appointment 2026-09-12 10:30.\n- Car inspection (APK) due November.\n- Gym Tue/Thu evenings.\n"
+      }
+    },
+    {
+      "label": "s1flush",
+      "memory": {
+        "core": "# core\n> Who Rogier is, how he likes to work, what is live right now\n\n## Rogier\n- Rogier Pennink, software engineer in Amsterdam (Europe/Amsterdam). Works alone on his own products; no team.\n- Address him as Rogier. Dutch native, prefers English for work chats.\n- Detail-oriented; finds abstract talk hard to act on - give concrete examples. Short answers, plain language, no em dashes.\n- Pushes back hard on over-engineering; values simplicity, robustness, long-term maintainability over dev cost.\n\n## Standing preferences\n- Morning check-ins around 08:30; do not ping between 22:00 and 07:30 unless something is on fire.\n- Decisions get an ADR in `docs/adr/`; glossary terms go in `CONTEXT.md`.\n- Never paste secrets into chat; refer to where they live.\n\n## Live right now\n- Building Hydra (agent orchestration platform, successor to old agentick) - see topic `hydra-project`.\n- Discord is the main channel to reach Rogier; Slack is secondary.\n",
+        "topics/discord-setup": "# discord-setup\n> Discord server layout, bot setup, where things are configured\n\n## Server \"Rogier's lab\"\n- Guild id 1098823001177342\n- Channels: #general (chat), #ops (bot alerts and CI noise), #hydra-dev (build discussion), DM with Rogier for everything private.\n- #ops channel id: 1188429077315\n\n## Bot\n- Bot user \"Athena\"; application created 2026-07; runs on the Mac mini under launchd.\n- Token lives in the 1Password vault \"hydra-ops\" (moved out of the macOS keychain, 2026-08). Never paste it.\n- Intents enabled: message content, guild messages, direct messages.\n- Mention-gated in channels, always-on in DMs.\n",
+        "topics/hydra-project": "# hydra-project\n> Hydra architecture decisions, repo facts, open threads\n\n## Facts\n- Repo: github.com/rogierpennink/hydra (local dir agentick-next). TypeScript, clean slate.\n- Controller/runner split: runner dials the controller; controller owns domain state, runner owns material state.\n- One SQLite database on the controller is the source of truth. No repo-local config, ever.\n- Providers wrap Claude Code (Agent SDK), Codex app-server and pi. All three installed on the Mac mini.\n- Channels v1: Discord + Slack. Event sources v1: GitHub, Gmail, cron, manual.\n\n## Decisions (ADRs merged so far)\n- 0001 runs freeze an execution plan\n- 0002 orchestration stays on the controller\n- 0003 sessions run as bare processes\n- 0004 controller state lives in one SQLite database\n- 0014 assistants remember through distilled memory, not merged sessions\n\n## Open threads\n- Packaging: single binary vs npm install still undecided; Bun compile under evaluation.\n- Runner join ceremony: token format not settled.\n- Memory interface prototype (this assistant is the guinea pig).\n- Workspace teardown leaning (2026-08, recommended, no ADR yet): controller owns the teardown timer as domain policy and sends a reap instruction; runner executes and acks. Runner only self-sweeps on stale controller heartbeat as a defensive fallback.\n",
+        "topics/rogier": "# rogier\n> Background, people around Rogier, recurring personal logistics\n\n## Background\n- Ran a Python agent orchestrator called agentick for ~2 years; abandoned because repo-local config made every repo a special case. Hydra is the do-over.\n- Comfortable in TypeScript, Python, Go. Dislikes YAML-heavy tooling.\n- Uses a Mac mini as his always-on box at home; MacBook Pro for daily work.\n\n## People\n- Sanne: partner. Weekends are hers; don't schedule Saturday work.\n- Marco: former colleague, occasional sounding board for architecture questions.\n- Jelle Bakker: contact at hosting provider TransIP, handles the VPS and DNS. \"Jelle\" always means him.\n\n## Logistics\n- Dentist: practice on Ceintuurbaan, next appointment 2026-09-12 10:30.\n- Car inspection (APK) due November.\n- Gym Tue/Thu evenings.\n"
+      }
+    },
+    {
+      "label": "s2t1",
+      "memory": {
+        "core": "# core\n> Who Rogier is, how he likes to work, what is live right now\n\n## Rogier\n- Rogier Pennink, software engineer in Amsterdam (Europe/Amsterdam). Works alone on his own products; no team.\n- Address him as Rogier. Dutch native, prefers English for work chats.\n- Detail-oriented; finds abstract talk hard to act on - give concrete examples. Short answers, plain language, no em dashes.\n- Pushes back hard on over-engineering; values simplicity, robustness, long-term maintainability over dev cost.\n\n## Standing preferences\n- Morning check-ins around 08:30; do not ping between 22:00 and 07:30 unless something is on fire.\n- Decisions get an ADR in `docs/adr/`; glossary terms go in `CONTEXT.md`.\n- Never paste secrets into chat; refer to where they live.\n\n## Live right now\n- Building Hydra (agent orchestration platform, successor to old agentick) - see topic `hydra-project`.\n- Discord is the main channel to reach Rogier; Slack is secondary.\n",
+        "topics/discord-setup": "# discord-setup\n> Discord server layout, bot setup, where things are configured\n\n## Server \"Rogier's lab\"\n- Guild id 1098823001177342\n- Channels: #general (chat), #ops (bot alerts and CI noise), #hydra-dev (build discussion), DM with Rogier for everything private.\n- #ops channel id: 1188429077315\n\n## Bot\n- Bot user \"Athena\"; application created 2026-07; runs on the Mac mini under launchd.\n- Token lives in the 1Password vault \"hydra-ops\" (moved out of the macOS keychain, 2026-08). Never paste it.\n- Intents enabled: message content, guild messages, direct messages.\n- Mention-gated in channels, always-on in DMs.\n",
+        "topics/hydra-project": "# hydra-project\n> Hydra architecture decisions, repo facts, open threads\n\n## Facts\n- Repo: github.com/rogierpennink/hydra (local dir agentick-next). TypeScript, clean slate.\n- Controller/runner split: runner dials the controller; controller owns domain state, runner owns material state.\n- One SQLite database on the controller is the source of truth. No repo-local config, ever.\n- Providers wrap Claude Code (Agent SDK), Codex app-server and pi. All three installed on the Mac mini.\n- Channels v1: Discord + Slack. Event sources v1: GitHub, Gmail, cron, manual.\n\n## Decisions (ADRs merged so far)\n- 0001 runs freeze an execution plan\n- 0002 orchestration stays on the controller\n- 0003 sessions run as bare processes\n- 0004 controller state lives in one SQLite database\n- 0014 assistants remember through distilled memory, not merged sessions\n\n## Open threads\n- Packaging: single binary vs npm install still undecided; Bun compile under evaluation.\n- Runner join ceremony: token format not settled.\n- Memory interface prototype (this assistant is the guinea pig).\n- Workspace teardown leaning (2026-08, recommended, no ADR yet): controller owns the teardown timer as domain policy and sends a reap instruction; runner executes and acks. Runner only self-sweeps on stale controller heartbeat as a defensive fallback.\n",
+        "topics/rogier": "# rogier\n> Background, people around Rogier, recurring personal logistics\n\n## Background\n- Ran a Python agent orchestrator called agentick for ~2 years; abandoned because repo-local config made every repo a special case. Hydra is the do-over.\n- Comfortable in TypeScript, Python, Go. Dislikes YAML-heavy tooling.\n- Uses a Mac mini as his always-on box at home; MacBook Pro for daily work.\n\n## People\n- Sanne: partner. Weekends are hers; don't schedule Saturday work.\n- Marco: former colleague, occasional sounding board for architecture questions.\n- Jelle Bakker: contact at hosting provider TransIP, handles the VPS and DNS. \"Jelle\" always means him.\n\n## Logistics\n- Dentist: practice on Ceintuurbaan, next appointment 2026-09-12 10:30.\n- Car inspection (APK) due November.\n- Gym Tue/Thu evenings.\n"
+      }
+    },
+    {
+      "label": "s2flush",
+      "memory": {
+        "core": "# core\n> Who Rogier is, how he likes to work, what is live right now\n\n## Rogier\n- Rogier Pennink, software engineer in Amsterdam (Europe/Amsterdam). Works alone on his own products; no team.\n- Address him as Rogier. Dutch native, prefers English for work chats.\n- Detail-oriented; finds abstract talk hard to act on - give concrete examples. Short answers, plain language, no em dashes.\n- Pushes back hard on over-engineering; values simplicity, robustness, long-term maintainability over dev cost.\n\n## Standing preferences\n- Morning check-ins around 08:30; do not ping between 22:00 and 07:30 unless something is on fire.\n- Decisions get an ADR in `docs/adr/`; glossary terms go in `CONTEXT.md`.\n- Never paste secrets into chat; refer to where they live.\n\n## Live right now\n- Building Hydra (agent orchestration platform, successor to old agentick) - see topic `hydra-project`.\n- Discord is the main channel to reach Rogier; Slack is secondary.\n",
+        "topics/discord-setup": "# discord-setup\n> Discord server layout, bot setup, where things are configured\n\n## Server \"Rogier's lab\"\n- Guild id 1098823001177342\n- Channels: #general (chat), #ops (bot alerts and CI noise), #hydra-dev (build discussion), DM with Rogier for everything private.\n- #ops channel id: 1188429077315\n\n## Bot\n- Bot user \"Athena\"; application created 2026-07; runs on the Mac mini under launchd.\n- Token lives in the 1Password vault \"hydra-ops\" (moved out of the macOS keychain, 2026-08). Never paste it.\n- Intents enabled: message content, guild messages, direct messages.\n- Mention-gated in channels, always-on in DMs.\n",
+        "topics/hydra-project": "# hydra-project\n> Hydra architecture decisions, repo facts, open threads\n\n## Facts\n- Repo: github.com/rogierpennink/hydra (local dir agentick-next). TypeScript, clean slate.\n- Controller/runner split: runner dials the controller; controller owns domain state, runner owns material state.\n- One SQLite database on the controller is the source of truth. No repo-local config, ever.\n- Providers wrap Claude Code (Agent SDK), Codex app-server and pi. All three installed on the Mac mini.\n- Channels v1: Discord + Slack. Event sources v1: GitHub, Gmail, cron, manual.\n\n## Decisions (ADRs merged so far)\n- 0001 runs freeze an execution plan\n- 0002 orchestration stays on the controller\n- 0003 sessions run as bare processes\n- 0004 controller state lives in one SQLite database\n- 0014 assistants remember through distilled memory, not merged sessions\n\n## Open threads\n- Packaging: single binary vs npm install still undecided; Bun compile under evaluation.\n- Runner join ceremony: token format not settled.\n- Memory interface prototype (this assistant is the guinea pig).\n- Workspace teardown leaning (2026-08, recommended, no ADR yet): controller owns the teardown timer as domain policy and sends a reap instruction; runner executes and acks. Runner only self-sweeps on stale controller heartbeat as a defensive fallback.\n",
+        "topics/rogier": "# rogier\n> Background, people around Rogier, recurring personal logistics\n\n## Background\n- Ran a Python agent orchestrator called agentick for ~2 years; abandoned because repo-local config made every repo a special case. Hydra is the do-over.\n- Comfortable in TypeScript, Python, Go. Dislikes YAML-heavy tooling.\n- Uses a Mac mini as his always-on box at home; MacBook Pro for daily work.\n\n## People\n- Sanne: partner. Weekends are hers; don't schedule Saturday work.\n- Marco: former colleague, occasional sounding board for architecture questions.\n- Jelle Bakker: contact at hosting provider TransIP, handles the VPS and DNS. \"Jelle\" always means him.\n\n## Logistics\n- Dentist: practice on Ceintuurbaan, next appointment 2026-09-12 10:30.\n- Car inspection (APK) due November.\n- Gym Tue/Thu evenings.\n"
+      }
+    }
+  ],
+  "responses": [
+    {
+      "session": 0,
+      "turn": 0,
+      "text": "Morning, Rogier. Noted - let me check what I had on file and update it.Noted and updated in `discord-setup`: the token now lives in the 1Password vault **hydra-ops**, keychain reference removed (I dated the move 2026-08; correct me if that's off).\n\nOne small thing: is there a specific item name in that vault worth recording, or is it the only secret in there so the vault name is enough?\n\nWhat's next on the planning agenda?",
+      "tools": [
+        "read({\"path\":\"memory/topics/discord-setup.md\"})",
+        "bash({\"command\":\"hydra memory write discord-setup << 'EOF'\\n# discord-setup\\n> Discord server layout, bot setup, where things)"
+      ]
+    },
+    {
+      "session": 0,
+      "turn": 1,
+      "text": "Couldn't reach the tracker from here, so going on the open threads I have on file:\n\n1. **Memory interface prototype** - it's live (I'm the guinea pig), so close it out first and fold findings into the 0014 follow-through.\n2. **Runner join ceremony / token format** - unblocks real multi-machine runs, and packaging can't be validated sensibly before runners can actually join.\n3. **Packaging (Bun compile vs npm)** - deliberately last: easiest to defer, and the decision gets cheaper once the join flow is settled.\n\nWant me to pull the actual issue list and re-rank against it?",
+      "tools": [
+        "read({\"path\":\"memory/topics/hydra-project.md\"})",
+        "bash({\"command\":\"cd ~/Dev/agentick/agentick-next && gh issue list --state open --limit 20 2>/dev/null || echo \\\"no-gh\\\"\"})"
+      ]
+    },
+    {
+      "session": 0,
+      "turn": 2,
+      "text": "Noted - Jelle Bakker at TransIP, your VPS/DNS contact, is now in my notes under people. I'll know who you mean.",
+      "tools": [
+        "read({\"path\":\"memory/topics/rogier.md\"})",
+        "bash({\"command\":\"hydra memory append rogier << 'EOF'\\n- Jelle Bakker: contact at hosting provider TransIP, handles the VPS an)"
+      ]
+    },
+    {
+      "session": 0,
+      "turn": 3,
+      "text": "Paste-ready for #hydra-dev:\n\n> Planning day. The memory interface prototype is live and running its first guinea-pig session, so the next ticket is folding what it teaches us into the ADR 0014 follow-up.\n> After that: settle the runner join token format, then the packaging call (Bun compile vs npm), since packaging gets cheaper to decide once runners can actually join.\n\nWant it more technical or more casual?",
+      "tools": []
+    },
+    {
+      "session": 0,
+      "turn": 4,
+      "text": "Updated: dentist is now September 12 at 10:30, same practice on Ceintuurbaan. (I also moved Jelle's note into the People section where it belonged.)",
+      "tools": [
+        "read({\"path\":\"memory/topics/rogier.md\"})",
+        "bash({\"command\":\"hydra memory write rogier << 'EOF'\\n# rogier\\n> Background, people around Rogier, recurring personal logisti)"
+      ]
+    },
+    {
+      "session": 0,
+      "turn": 5,
+      "text": "**Controller.** The teardown decision is domain state: whether a run is finished, abandoned, or idle depends on the run lifecycle, and that only the controller can see (its SQLite is the source of truth, and orchestration stays central by ADR 0002). The runner merely *executes* the teardown, as with any other material state it owns. Concretely: the controller ticks the timer and sends a \"reap workspace W\" instruction; the runner deletes the directory and acks. If the timer lived on the runner you'd leak workspaces every time a runner crashed or got replaced mid-countdown, since join ceremony makes runners interchangeable and disposable; the only thing a runner should do on its own clock is a defensive sweep of workspaces whose controller heartbeat went stale, so an unreachable controller can't pin disk forever.",
+      "tools": []
+    },
+    {
+      "session": 0,
+      "turn": 6,
+      "text": "Good session - I've got the token move, Jelle, and the dentist swap on file. Shout when you want the issue list re-ranked or the prototype findings written up. 👋",
+      "tools": []
+    },
+    {
+      "session": 0,
+      "turn": -1,
+      "text": "DONE - recorded the workspace-teardown leaning (controller owns the timer, runner executes) in `hydra-project`; everything else from this session was already on file.",
+      "tools": [
+        "bash({\"command\":\"hydra memory append hydra-project << 'EOF'\\n- Workspace teardown leaning (2026-08, recommended, no ADR yet):)"
+      ]
+    },
+    {
+      "session": 1,
+      "turn": 0,
+      "text": "- Discord bot token: 1Password vault \"hydra-ops\" (moved out of the macOS keychain in 2026-08).\n- Hosting contact: Jelle Bakker at TransIP (VPS and DNS).\n- Dentist: 2026-09-12 at 10:30, practice on Ceintuurbaan.",
+      "tools": [
+        "bash({\"command\":\"grep -ri -e \\\"token\\\" -e \\\"hosting\\\" -e \\\"dentist\\\" memory/ | head -30\"})"
+      ]
+    },
+    {
+      "session": 1,
+      "turn": -1,
+      "text": "DONE — nothing to record; this session was only memory lookups with no new durable facts.",
+      "tools": []
+    }
+  ],
+  "ops": [
+    {
+      "t": "2026-08-28T10:55:21.608Z",
+      "op": "write",
+      "name": "discord-setup",
+      "ok": true,
+      "chars": 617,
+      "created": false
+    },
+    {
+      "t": "2026-08-28T10:55:47.228Z",
+      "op": "append",
+      "name": "rogier",
+      "ok": true,
+      "chars": 799,
+      "created": false
+    },
+    {
+      "t": "2026-08-28T10:56:04.775Z",
+      "op": "write",
+      "name": "rogier",
+      "ok": true,
+      "chars": 799,
+      "created": false
+    },
+    {
+      "t": "2026-08-28T10:56:28.606Z",
+      "op": "append",
+      "name": "hydra-project",
+      "ok": true,
+      "chars": 1317,
+      "created": false
+    }
+  ]
+}

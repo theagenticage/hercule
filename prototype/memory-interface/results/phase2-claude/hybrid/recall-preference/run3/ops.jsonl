@@ -1,1 +1,5 @@
 {"t":"2026-08-28T10:47:14.282Z","op":"write","name":"core","ok":true,"chars":971,"created":false}
+{"t":"2026-08-28T10:47:25.886Z","op":"journal-unread","ok":true}
+{"t":"2026-08-28T10:47:38.912Z","op":"journal-unread","ok":true}
+{"t":"2026-08-28T10:47:50.811Z","op":"journal-unread","ok":true}
+{"t":"2026-08-28T10:47:52.230Z","op":"journal-mark-read","ok":true}

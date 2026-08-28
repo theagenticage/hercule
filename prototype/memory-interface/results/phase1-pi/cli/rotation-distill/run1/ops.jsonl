@@ -1,0 +1,13 @@
+{"t":"2026-08-28T11:02:09.268Z","op":"read","name":"discord-setup","ok":true}
+{"t":"2026-08-28T11:02:14.322Z","op":"write","name":"discord-setup","ok":false,"error":"no content given (use stdin or --content)"}
+{"t":"2026-08-28T11:02:17.831Z","op":"write","name":"discord-setup","ok":true,"chars":639,"created":false}
+{"t":"2026-08-28T11:02:25.145Z","op":"read","name":"hydra-project","ok":true}
+{"t":"2026-08-28T11:02:35.809Z","op":"read","name":"rogier","ok":true}
+{"t":"2026-08-28T11:02:41.011Z","op":"write","name":"rogier","ok":true,"chars":769,"created":false}
+{"t":"2026-08-28T11:02:53.819Z","op":"write","name":"rogier","ok":true,"chars":793,"created":false}
+{"t":"2026-08-28T11:02:58.554Z","op":"write","name":"rogier","ok":true,"chars":769,"created":false}
+{"t":"2026-08-28T11:03:25.078Z","op":"append","name":"hydra-project","ok":true,"chars":1288,"created":false}
+{"t":"2026-08-28T11:03:38.196Z","op":"read","name":"discord-setup","ok":true}
+{"t":"2026-08-28T11:03:38.218Z","op":"read","name":"rogier","ok":true}
+{"t":"2026-08-28T11:03:38.236Z","op":"search","name":"dentist","ok":true}
+{"t":"2026-08-28T11:03:38.251Z","op":"search","name":"hosting","ok":true}

@@ -1,0 +1,13 @@
+{"t":"2026-08-28T11:02:36.096Z","op":"read","name":"discord-setup","ok":true}
+{"t":"2026-08-28T11:02:40.676Z","op":"write","name":"discord-setup","ok":false,"error":"no content given (use stdin or --content)"}
+{"t":"2026-08-28T11:02:45.149Z","op":"write","name":"discord-setup","ok":true,"chars":629,"created":false}
+{"t":"2026-08-28T11:02:51.076Z","op":"read","name":"hydra-project","ok":true}
+{"t":"2026-08-28T11:03:17.546Z","op":"append","name":"hydra-project","ok":true,"chars":1225,"created":false}
+{"t":"2026-08-28T11:03:27.839Z","op":"read","name":"rogier","ok":true}
+{"t":"2026-08-28T11:03:32.001Z","op":"write","name":"rogier","ok":true,"chars":780,"created":false}
+{"t":"2026-08-28T11:03:46.943Z","op":"write","name":"rogier","ok":true,"chars":824,"created":false}
+{"t":"2026-08-28T11:03:50.752Z","op":"write","name":"rogier","ok":true,"chars":780,"created":false}
+{"t":"2026-08-28T11:04:31.855Z","op":"append","name":"hydra-project","ok":true,"chars":1636,"created":false}
+{"t":"2026-08-28T11:04:37.619Z","op":"read","name":"discord-setup","ok":true}
+{"t":"2026-08-28T11:04:37.619Z","op":"read","name":"rogier","ok":true}
+{"t":"2026-08-28T11:04:37.619Z","op":"read","name":"hydra-project","ok":true}

@@ -1,1 +1,6 @@
 {"t":"2026-08-28T10:47:14.026Z","op":"write","name":"core","ok":true,"chars":951,"created":false}
+{"t":"2026-08-28T10:47:19.593Z","op":"journal","ok":true,"chars":79}
+{"t":"2026-08-28T10:47:24.750Z","op":"journal-unread","ok":true}
+{"t":"2026-08-28T10:47:26.291Z","op":"journal-mark-read","ok":true}
+{"t":"2026-08-28T10:47:39.433Z","op":"journal-unread","ok":true}
+{"t":"2026-08-28T10:47:51.406Z","op":"journal-unread","ok":true}

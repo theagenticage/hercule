@@ -1,0 +1,2 @@
+{"t":"2026-08-28T10:53:51.156Z","op":"write","name":"hydra-project","ok":false,"error":"hydra-project would be 12009 chars; cap is 12000. Consolidate: merge or drop entries, then write again."}
+{"t":"2026-08-28T10:54:11.214Z","op":"write","name":"hydra-project","ok":true,"chars":1146,"created":false}

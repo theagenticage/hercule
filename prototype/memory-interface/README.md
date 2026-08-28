@@ -48,6 +48,31 @@ Each chain writes `results/<out>/<condition>/<scenario>/run<N>/log.md` (human-re
 
 Isolation: `--setting-sources project` keeps the user's global CLAUDE.md out, `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` disables Claude Code's own memory, `--dangerously-skip-permissions` inside a throwaway cwd.
 
-## Results
+## Results (2026-08-28)
 
-See `results/phase1/summary.md`, `results/phase2/summary.md` and the resolution on the ticket.
+Phase 1: three providers x three conditions x eight scenarios x three runs = **216 chains, 216 passes**. Phase 2 (journal + dream, Claude hybrid): 24/24.
+
+| scenario | claude/files | claude/hybrid | claude/cli | codex/files | codex/hybrid | codex/cli | pi/files | pi/hybrid | pi/cli |
+|---|---|---|---|---|---|---|---|---|---|
+| recall-preference | 3/3 | 3/3 | 3/3 | 3/3 | 3/3 | 3/3 | 3/3 | 3/3 | 3/3 |
+| recall-topic-body | 3/3 | 3/3 | 3/3 | 3/3 | 3/3 | 3/3 | 3/3 | 3/3 | 3/3 |
+| record-unprompted | 3/3 | 3/3 | 3/3 | 3/3 | 3/3 | 3/3 | 3/3 | 3/3 | 3/3 |
+| update-supersede | 3/3 | 3/3 | 3/3 | 3/3 | 3/3 | 3/3 | 3/3 | 3/3 | 3/3 |
+| cap-full | 3/3 | 3/3 | 3/3 | 3/3 | 3/3 | 3/3 | 3/3 | 3/3 | 3/3 |
+| rotation-distill | 3/3 | 3/3 | 3/3 | 3/3 | 3/3 | 3/3 | 3/3 | 3/3 | 3/3 |
+| noise | 3/3 | 3/3 | 3/3 | 3/3 | 3/3 | 3/3 | 3/3 | 3/3 | 3/3 |
+| fragmentation | 3/3 | 3/3 | 3/3 | 3/3 | 3/3 | 3/3 | 3/3 | 3/3 | 3/3 |
+
+Models: `claude-sonnet-5`, `gpt-5.6-luna` (codex), `zai/glm-5.3` (pi). Cost per chain: Claude ~$0.13, pi ~$0.02, codex unreported (subscription).
+
+What the traces show (the score table does not discriminate; these do):
+
+- **Recording is in-turn everywhere.** Every fact in every chain was written in the turn it was mentioned. The rotation flush never rescued anything; it is a safety net, and a cheap one (mostly "nothing to record").
+- **The file-tool pull exists but recovers.** Claude in hybrid tried a direct `Edit` on a read-only memory file in 4/24 chains, hit EACCES, then used `hydra memory`. Codex and pi never tried. Nothing was lost, only because the files were read-only.
+- **CLI content-passing is the one real ergonomic cost.** pi (glm-5.3) mixed `--content` with a heredoc in 4 chains before retrying correctly; codex probed `--help` first in 3. Lesson: one unambiguous content channel, not two.
+- **Cap behaviour differs by model, not by interface.** Claude and pi consolidated the 11.8k-char topic to ~2.6-3.5k proactively in every condition (dedup of a repetitive decision log, nothing unique lost). Codex made minimal edits and landed at 11,900 (under the cap by luck) in files; in hybrid it was the only run to hit a stub rejection (12,009 chars) and then over-pruned to 1,146 chars, dropping fifteen unique decisions. Enforcement at the write seam is what turned a silent overflow into a visible event; the over-pruning is why memory version history matters.
+- **Placement is model-dependent.** pi scattered the Tailscale fact over `rogier`, `core` and `hydra-project` across runs; Claude and codex always chose `hydra-project`. No interface changes this.
+- **Journal tier adds nothing measurable.** With the journal available, agents still wrote straight into topics in-turn; journal entries were duplicates ("already applied to core"), sessions polled `journal-unread` unprompted, and every dream pass cost a run. Two-tier stays.
+- **Provider isolation is a real adapter constraint.** Codex picked up `~/.codex/AGENTS.md` and pi discovered `~/.claude/skills` until each ran with an isolated home (`CODEX_HOME`, `PI_CODING_AGENT_DIR`; `--setting-sources project` for Claude Code). Codex `exec` also has no system-prompt flag: instructions travel as `AGENTS.md` in the cwd.
+
+Per-run detail: `results/phase1*/<condition>/<scenario>/run<N>/log.md`; aggregate: `results/*/summary.md`.

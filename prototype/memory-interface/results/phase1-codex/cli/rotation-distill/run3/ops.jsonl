@@ -1,0 +1,9 @@
+{"t":"2026-08-28T11:00:25.064Z","op":"read","name":"discord-setup","ok":true}
+{"t":"2026-08-28T11:00:32.822Z","op":"write","name":"discord-setup","ok":true,"chars":615,"created":false}
+{"t":"2026-08-28T11:00:43.262Z","op":"read","name":"hydra-project","ok":true}
+{"t":"2026-08-28T11:00:55.878Z","op":"list","ok":true}
+{"t":"2026-08-28T11:01:08.015Z","op":"read","name":"rogier","ok":true}
+{"t":"2026-08-28T11:01:15.471Z","op":"write","name":"rogier","ok":true,"chars":796,"created":false}
+{"t":"2026-08-28T11:01:33.490Z","op":"write","name":"rogier","ok":true,"chars":796,"created":false}
+{"t":"2026-08-28T11:01:58.859Z","op":"read","name":"discord-setup","ok":true}
+{"t":"2026-08-28T11:01:58.873Z","op":"read","name":"rogier","ok":true}

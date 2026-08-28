@@ -1,0 +1,4 @@
+{"t":"2026-08-28T10:48:20.836Z","op":"journal","ok":true,"chars":89}
+{"t":"2026-08-28T10:48:30.739Z","op":"journal-unread","ok":true}
+{"t":"2026-08-28T10:48:43.467Z","op":"write","name":"rogier","ok":true,"chars":770,"created":false}
+{"t":"2026-08-28T10:48:44.781Z","op":"journal-mark-read","ok":true}

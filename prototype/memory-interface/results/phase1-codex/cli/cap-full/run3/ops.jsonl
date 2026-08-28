@@ -1,0 +1,7 @@
+{"t":"2026-08-28T10:59:36.817Z","op":"read","name":"hydra-project","ok":true}
+{"t":"2026-08-28T10:59:45.499Z","op":"write","name":"--help","ok":false,"error":"no content given (use stdin or --content)"}
+{"t":"2026-08-28T10:59:53.819Z","op":"read","name":"hydra-project","ok":true}
+{"t":"2026-08-28T11:00:03.203Z","op":"read","name":"hydra-project","ok":true}
+{"t":"2026-08-28T11:00:03.206Z","op":"write","name":"hydra-project","ok":true,"chars":11884,"created":false}
+{"t":"2026-08-28T11:00:09.499Z","op":"read","name":"hydra-project","ok":true}
+{"t":"2026-08-28T11:00:09.515Z","op":"read","name":"hydra-project","ok":true}

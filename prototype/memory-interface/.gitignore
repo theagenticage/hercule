@@ -3,3 +3,7 @@ results/**/cwd/
 results/**/memory/
 results/**/transcripts/
 results/smoke/
+results/**/codex-home/
+results/**/pi-home/
+results/**/pi-sessions/
+results/smoke-*/

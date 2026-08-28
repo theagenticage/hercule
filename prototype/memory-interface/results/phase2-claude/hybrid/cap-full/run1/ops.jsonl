@@ -1,0 +1,3 @@
+{"t":"2026-08-28T10:49:30.381Z","op":"write","name":"hydra-project","ok":true,"chars":2681,"created":false}
+{"t":"2026-08-28T10:49:37.902Z","op":"journal","ok":false,"error":"no content given (use stdin or --content)"}
+{"t":"2026-08-28T10:49:43.760Z","op":"journal-unread","ok":true}
