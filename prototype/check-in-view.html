@@ -201,18 +201,39 @@
     box-shadow: var(--lift-shadow);
     padding: 14px 18px 11px;
     display: flex; flex-direction: column; gap: 10px;
+    min-height: 170px; /* uniform card so the focus-nav arrows never move */
   }
   .dcard .qline { display: flex; align-items: baseline; gap: 10px; }
   .dcard .q { font-size: 15px; font-weight: var(--w-emph); letter-spacing: -0.008em; }
   .dcard[data-pri="urgent"] .q { font-size: 16px; font-weight: var(--w-urgent); }
   .dcard .qline .age { margin-left: auto; }
-  .dcard .fields { display: grid; grid-template-columns: 52px minmax(0, 1fr); gap: 4px 14px; font-size: 12.5px; }
+  /* fixed three-row field grid so every card is the same height and the
+     focus-nav arrows never jump under the cursor while cycling */
+  .dcard .fields { display: grid; grid-template-columns: 52px minmax(0, 1fr); grid-template-rows: repeat(3, 21px); gap: 4px 14px; font-size: 12.5px; }
+  .dcard .fields .fv { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; }
+  .dcard .fields .fv > * { vertical-align: baseline; }
   .dcard .fl {
     text-transform: uppercase; letter-spacing: 0.09em; font-size: 10px;
     color: var(--faint); font-weight: var(--w-emph); padding-top: 2px;
   }
-  .dcard .fv { color: var(--muted); display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+  .dcard .fv { color: var(--muted); }
   .dcard .fv b { color: var(--ink); font-weight: var(--w-emph); }
+  .dcard .fv .none { color: var(--faint); }
+
+  /* ---- entity glyphs (experiment): what KIND of thing is this ---- */
+  .ent { display: inline-flex; width: 13px; justify-content: center; align-items: center; flex: none; vertical-align: -1px; }
+  .ent-task i { width: 8px; height: 8px; border: 1.5px solid var(--faint); border-radius: 2.5px; display: block; }
+  .ent-run i {
+    width: 0; height: 0; display: block;
+    border-left: 7px solid var(--faint);
+    border-top: 4.5px solid transparent; border-bottom: 4.5px solid transparent;
+  }
+  .ent-sess i {
+    width: 9px; height: 7px; display: block;
+    background:
+      linear-gradient(var(--faint), var(--faint)) 0 0 / 9px 1.5px no-repeat,
+      linear-gradient(var(--faint), var(--faint)) 0 4px / 6px 1.5px no-repeat;
+  }
   .dcard .acts { display: flex; gap: 4px; margin-left: -9px; align-items: center; }
 
   /* condensed decision row */
@@ -561,6 +582,11 @@ const detailMark = (m) => ({
   ref: '<span class="rmark mono" style="font-size:10px;color:var(--faint)">#</span>',
 }[m] || "");
 const provWord = { you: "started by you", standing: "standing", routine: "routine" };
+const entEl = (kind) => {
+  const k = kind.startsWith("task") ? "task" : kind.startsWith("run") ? "run"
+    : kind.startsWith("session") || kind.startsWith("chat") ? "sess" : null;
+  return k ? `<span class="ent ent-${k}" title="${k === "sess" ? "session" : k}"><i></i></span>` : "";
+};
 
 function data() { return DATASETS[get("data") === "busy" ? "busy" : "calm"]; }
 
@@ -584,10 +610,11 @@ const dcardEl = (dec) => `
     </div>
     <div class="fields">
       <span class="fl">from</span>
-      <span class="fv"><b>${dec.from}</b> ${dec.kind} ${priEl(dec.pri)} <span style="color:var(--faint)">· ${provWord[dec.prov]}</span></span>
+      <span class="fv"><b>${dec.from}</b> ${entEl(dec.kind)}${dec.kind} ${priEl(dec.pri)}${dec.kind.includes(dec.prov) ? "" : ` <span style="color:var(--faint)">· ${provWord[dec.prov]}</span>`}</span>
       <span class="fl">why</span>
       <span class="fv">${dec.why}</span>
-      ${dec.agent ? `<span class="fl">agent</span><span class="fv">${dec.agent}</span>` : ""}
+      <span class="fl">agent</span>
+      <span class="fv">${dec.agent ? entEl("session") + dec.agent : '<span class="none">–</span>'}</span>
     </div>
     <div class="acts">${qbtns(dec.actions)}</div>
   </div>`;
@@ -651,7 +678,7 @@ function strandEl(s, i, tier) {
       <span class="markcell">${markFor(s)}</span>
       <span class="name">${s.name}</span>
       ${s.pri ? priEl(s.pri) : ""}
-      <span class="sub">${s.sub}</span>
+      <span class="sub">${entEl(s.sub)}${s.sub}</span>
       ${mid}
       <span class="note"${s.tone ? ` data-tone="${s.tone}"` : ""}>${noteQ}</span>
       <span class="age" data-age="${s.bucket}">${s.age}</span>
@@ -705,6 +732,9 @@ function railEl(d) {
       <div class="lrow"><span class="markcell"><span class="okg">✓</span></span><span>done</span></div>
       <div class="lrow"><span class="markcell"><span class="failg">✕</span></span><span>failed</span></div>
       <div class="lrow"><span class="markcell"><span class="cang">–</span></span><span>cancelled</span></div>
+      <div class="lrow"><span class="markcell">${entEl("task")}</span><span>task</span></div>
+      <div class="lrow"><span class="markcell">${entEl("run")}</span><span>run</span></div>
+      <div class="lrow"><span class="markcell">${entEl("session")}</span><span>session</span></div>
       <div class="lrow"><span class="markcell">${priEl("high")}</span><span>priority (bars fill up)</span></div>
       <div class="lrow"><span class="markcell">${progEl({ done: 1, total: 4 }).replace(/<span class="t">.*?<\/span>/, "")}</span><span>workflow progress</span></div>
       <div class="lrow"><span class="markcell"><span class="age" data-age="old">7h</span></span><span>waiting: darkens, then warms</span></div>
