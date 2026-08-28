@@ -1,6 +1,11 @@
 <!--
   PROTOTYPE - throwaway. Ticket: https://github.com/rogierpennink/hydra/issues/1 -> #30
-  ROUND 3. Round 2 reaction: Topics (tabs) won; "made from" stays. Asks: a real DETAIL VIEW for
+  ROUND 4 (converged). Round 3 reaction: Page's list (lead card + condensed tiered rows) won,
+  with the Drawer for detail (master/detail left too little room for the overview; the detail
+  is not needed constantly; the drawer's light card look beat the dedicated page); the
+  connection events view is "amazing - gives me the context I need". This file is the
+  converged single design. Rounds 1-3 (e0f5f7c, 3d6a81f, f4a452a) hold the variants.
+  ROUND 3 was: Round 2 reaction: Topics (tabs) won; "made from" stays. Asks: a real DETAIL VIEW for
   proposed work (dive into details + source events) and for "what came in" (an events view);
   expandable things must look expandable; urgency must be legible in a second ("Needs a call"
   read as priority - it is not: it is what triage could NOT decide); with a detail view the
@@ -294,7 +299,7 @@
     <nav class="nav" id="nav"></nav>
     <div class="chrome-foot">
       <button class="qbtn" id="legendbtn" style="align-self:flex-start;font-size:11.5px;color:var(--faint)">Marks legend</button>
-      <div class="proto-badge">PROTOTYPE · throwaway<br>ticket hydra#30 · round 3<br>&larr; &rarr; variant · ↑ ↓ select · Esc close<br>d data · t theme · n name</div>
+      <div class="proto-badge">PROTOTYPE · throwaway<br>ticket hydra#30 · round 4 (converged)<br>↑ ↓ select · Esc close<br>d data · t theme · n name</div>
     </div>
   </aside>
   <main class="main">
@@ -306,9 +311,9 @@
 
 <div class="vnote" id="vnote"></div>
 <div class="sw">
-  <button id="prev" aria-label="Previous variant">&larr;</button>
+  
   <span class="label" id="swlabel"></span>
-  <button id="next" aria-label="Next variant">&rarr;</button>
+  
   <button id="dsbtn" class="ds" aria-label="Toggle dataset"></button>
   <button id="theme" aria-label="Toggle theme">◐</button>
 </div>
@@ -686,38 +691,16 @@ function listPage(d, { lead = false } = {}) {
   return `${headline(d)}${tabsEl(d, cur)}${questionsEl(d.questions.filter(inT))}${proposals}${connsEl(conns)}${fyiEl(d.fyi.filter(inT))}${cur === "all" ? receiptLine(d) : ""}`;
 }
 
-/* A · Drawer */
-function renderDrawer(d) {
+/* converged: Page's list + the Drawer for detail */
+function renderIntake(d) {
   const s = sel();
   document.getElementById("overlay").innerHTML = s ? `<div class="scrim" data-close="1"></div><div class="drawer">${detailEl(d, s, closeBtn)}</div>` : "";
-  return `<div class="layout"><div class="maincol">${listPage(d)}</div><aside class="rail">${triageRail(d)}${legendEl()}</aside></div>`;
-}
-/* B · Page */
-function renderPage(d) {
-  document.getElementById("overlay").innerHTML = "";
-  const s = sel();
-  if (s) return `<div class="layout"><div class="maincol" style="max-width:760px">${detailEl(d, s)}</div><aside class="rail">${triageRail(d)}${legendEl()}</aside></div>`;
   return `<div class="layout"><div class="maincol">${listPage(d, { lead: true })}</div><aside class="rail">${triageRail(d)}${legendEl()}</aside></div>`;
-}
-/* C · Split */
-function renderSplit(d) {
-  document.getElementById("overlay").innerHTML = "";
-  const cur = get("topic") || "all";
-  const inT = (x) => cur === "all" || x.topic === cur;
-  const props = d.proposals.filter(inT);
-  if (!sel() && props[0]) setParam("open", props[0].id);
-  return `<div class="layout split"><div class="maincol listcol">
-      ${headline(d)}${tabsEl(d, cur)}${questionsEl(d.questions.filter(inT))}
-      <section class="lane">${tiersEl(props, prowEl)}</section>
-      ${connsEl(d.conns.filter((c) => cur === "all" || c.topic === cur))}${fyiEl(d.fyi.filter(inT))}
-    </div><div class="pane">${detailEl(d, sel())}</div></div>`;
 }
 
 /* ============ page ============ */
 const variants = [
-  { key: "A", name: "Drawer", render: renderDrawer, note: "A · Tiers Now / Today / When you can; any card, connection or 'Manage topics' opens a drawer over the rail. You never leave the page." },
-  { key: "B", name: "Page", render: renderPage, note: "B · One lead card for the burning item, condensed rows for the rest; detail is a full page with a breadcrumb back." },
-  { key: "C", name: "Split", render: renderSplit, note: "C · Master/detail: compact tiered list left, detail always open right (replaces the rail). ↑ ↓ move the selection." },
+  { key: "R4", name: "Intake", render: renderIntake, note: "Round 4 · converged: lead card + tiered rows (Page) with the Drawer for proposal, connection and topic detail." },
 ];
 function params() { return new URLSearchParams(location.search); }
 function get(k) { return params().get(k); }
@@ -730,10 +713,6 @@ function navEl(d) {
 }
 function topbarEl(v) {
   const s = sel();
-  if (v.key === "B" && s) {
-    const t = s.kind === "topics" ? "Topics" : s.kind === "conn" ? s.c : (findP(s.id) || {}).t;
-    return `<div class="crumbs"><a href="#" data-close="1">${pageName()}</a><span class="sepc">›</span><span>${t}</span></div>`;
-  }
   return `<h1>${pageName()}</h1><span class="when">Monday 08:30</span><span class="since">since you last checked · Sunday 18:10</span>`;
 }
 function render() {
@@ -753,9 +732,9 @@ document.addEventListener("click", (e) => {
   const ef = e.target.closest("[data-efilter]");
   if (ef) { efilter = ef.dataset.efilter; render(); return; }
   const tab = e.target.closest("[data-topic]");
-  if (tab) { setParam("topic", tab.dataset.topic); if (variants[current()].key === "C") setParam("open", null); render(); return; }
+  if (tab) { setParam("topic", tab.dataset.topic); render(); return; }
   const s = e.target.closest("[data-sel]");
-  if (s) { e.preventDefault(); efilter = "all"; setParam("open", s.dataset.sel); render(); if (variants[current()].key === "B") window.scrollTo(0, 0); return; }
+  if (s) { e.preventDefault(); efilter = "all"; setParam("open", s.dataset.sel); render(); return; }
 });
 function toggleData() { setParam("data", get("data") === "busy" ? "calm" : "busy"); setParam("open", null); render(); }
 function toggleTheme() { const root = document.documentElement; const dark = root.dataset.theme === "dark" || (!root.dataset.theme && matchMedia("(prefers-color-scheme: dark)").matches); root.dataset.theme = dark ? "light" : "dark"; }
@@ -765,16 +744,12 @@ function move(dir) {
   const order = TIERS.flatMap(([, , f]) => props.filter(f)); const i = order.findIndex((p) => p.id === selKey());
   const n = order[Math.max(0, Math.min(order.length - 1, i + dir))]; if (n) { setParam("open", n.id); render(); }
 }
-document.getElementById("prev").addEventListener("click", () => show(current() - 1));
-document.getElementById("next").addEventListener("click", () => show(current() + 1));
 document.getElementById("dsbtn").addEventListener("click", toggleData);
 document.getElementById("theme").addEventListener("click", toggleTheme);
 document.getElementById("legendbtn").addEventListener("click", () => { legendOn = !legendOn; render(); });
 document.addEventListener("keydown", (e) => {
   const t = e.target;
   if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
-  if (e.key === "ArrowLeft") show(current() - 1);
-  if (e.key === "ArrowRight") show(current() + 1);
   if (e.key === "ArrowDown") { e.preventDefault(); move(1); }
   if (e.key === "ArrowUp") { e.preventDefault(); move(-1); }
   if (e.key === "Escape") { setParam("open", null); render(); }
