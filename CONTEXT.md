@@ -162,7 +162,7 @@ _Avoid_: harness (for the adapter itself), integration
 A provider's static self-description: identity, config schema, declared capabilities. What a provider plugin registers; distinct from the running adapter.
 
 **Access Mode**:
-The session-level permission axis a provider adapter enforces: approval-required, auto-accept-edits, auto, or full-access. A fixed vocabulary; per-provider support is declared, and a mode a provider lacks is substituted with a configured fallback mode before the session starts, never silently.
+The session-level permission axis a provider adapter enforces: approval-required, auto-accept-edits, auto, or full-access. A fixed vocabulary; per-provider support is declared, and a mode a provider lacks is substituted before the session starts by a hardcoded fallback chain that only ever moves to a less permissive mode, never silently.
 _Avoid_: permission mode (vendor term), runtime mode
 
 **Capability Snapshot**:
