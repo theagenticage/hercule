@@ -1,22 +1,16 @@
 <!--
   PROTOTYPE - throwaway. Ticket: https://github.com/rogierpennink/hydra/issues/1 -> #20
-  ROUND 3. Round 2 verdict: right language, wrong level. This round is intent-level:
-  the unit is the strand of delegated work (task / standing workflow / one-off ask),
-  execution detail (runs, sessions, steps) only behind progressive disclosure.
-  Shared principles across all variants:
-    - provenance-first ranking: you asked > standing > routine schedule
-    - aggregate by default (routine workflows collapse to one row per workflow)
-    - decisions are questions: phrased as a question, answers are the buttons
-    - mark system: [equalizer] agent working · [diamond] decision wanted · [circular arrow] routine · glyph outcomes
-    - outcomes live on strands + one rolled-up digest line; no event feed
-    - assistants/fleet/intake = ambient pulse, never stat cards
-    - calm/busy dataset toggle to prove the shape survives a 6-runner fleet
-  The variants differ on WHERE DECISIONS LIVE:
-    A Briefing - focus queue, one decision at a time, work below
-    B Ledger   - all decisions visible as a pinned lane above the book
-    C Strands  - decisions attach to the strand that raised them; ranked list, pulse rail
+  ROUND 4. Round 3 reaction converged: pulse sidebar (from C) stays, plain strand
+  rows (A/C) beat boxed tables (B), decisions stay ranked provenance-first. Fixed
+  per reaction: focus card now labels every piece of data (from / why / agent),
+  a marks legend sits in the rail, and the "ask" noun is gone - things are named
+  by their domain noun (task, run, session, workflow).
+  ONE page now; the variants only change the NEEDS-YOU module:
+    A Focus - one decision at a time, arrow navigation, next-peek
+    B List  - all decisions as condensed question rows
+    C Queue - hybrid: condensed rows, the active one expands in place, arrows move
   Switch: floating bar, arrow keys, ?variant=A|B|C · dataset: "d" or the calm/busy
-  button · theme: "t" or the half-circle button. Rounds 1-2 in git history (71c0dff, fd86bea).
+  button · theme: "t". Rounds 1-3 in git history (71c0dff, fd86bea, dbb830a).
 -->
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -38,7 +32,6 @@
     --lift-shadow: 0 1px 2px rgba(23,26,33,0.06), 0 4px 14px rgba(23,26,33,0.06);
     --attn: #8a6116; --fail: #a34e46; --ok: #48745a; --live: #48717f;
     --attn-soft: rgba(138,97,22,0.09);
-    --proj-hydra: #7d7ab0; --proj-ops: #a67f92;
   }
   @media (prefers-color-scheme: dark) {
     :root:not([data-theme="light"]) {
@@ -55,7 +48,6 @@
                      0 1px 2px rgba(0,0,0,0.4), 0 6px 18px rgba(0,0,0,0.3);
       --attn: #d0a147; --fail: #cf7b71; --ok: #7fae8e; --live: #7fa8b8;
       --attn-soft: rgba(208,161,71,0.12);
-      --proj-hydra: #9490c9; --proj-ops: #bd93a8;
     }
   }
   :root[data-theme="dark"] {
@@ -72,7 +64,6 @@
                    0 1px 2px rgba(0,0,0,0.4), 0 6px 18px rgba(0,0,0,0.3);
     --attn: #d0a147; --fail: #cf7b71; --ok: #7fae8e; --live: #7fa8b8;
     --attn-soft: rgba(208,161,71,0.12);
-    --proj-hydra: #9490c9; --proj-ops: #bd93a8;
   }
   :root {
     --sans: "Onest", -apple-system, system-ui, sans-serif;
@@ -127,6 +118,13 @@
   .topbar .when { color: var(--muted); font-size: 13px; }
   #stage { padding: 16px 32px 130px; }
 
+  /* ============ layout: main + pulse rail ============ */
+  .layout { display: grid; grid-template-columns: minmax(0, 1fr) 236px; gap: 44px; align-items: start; max-width: 1100px; }
+  .maincol { display: flex; flex-direction: column; }
+  .maincol .lane { margin-bottom: 30px; }
+  .maincol .lane > .lane-label { margin-bottom: 10px; }
+  .rail { position: sticky; top: 20px; display: flex; flex-direction: column; gap: 22px; }
+
   /* ============ shared atoms ============ */
   .lane-label {
     text-transform: uppercase; letter-spacing: 0.1em;
@@ -135,22 +133,11 @@
   }
   .lane-label .n { font-family: var(--mono); font-weight: 500; letter-spacing: 0; font-variant-numeric: tabular-nums; }
 
-  /* the headline: one calm sentence, never stat cards */
   .headline { font-size: 13.5px; color: var(--muted); padding-bottom: 20px; }
   .headline b { color: var(--ink); font-weight: var(--w-emph); font-variant-numeric: tabular-nums; }
   .headline .warm { color: var(--attn); font-weight: var(--w-emph); }
 
-  /* the pulse: ambient system state as quiet text lines */
-  .pulseline {
-    display: flex; flex-wrap: wrap; gap: 4px 18px; align-items: baseline;
-    color: var(--faint); font-size: 12px; padding-top: 26px;
-  }
-  .pulseline .k { text-transform: uppercase; letter-spacing: 0.1em; font-size: 10px; font-weight: var(--w-emph); margin-right: 2px; }
-  .pulseline b { color: var(--muted); font-weight: var(--w-emph); }
-  .pulseline .warm { color: var(--attn); }
-
-  /* ---- mark system (proposed design-language extension) ---- */
-  /* agent working: tiny equalizer in the live hue */
+  /* ---- mark system ---- */
   .eq { display: inline-flex; align-items: flex-end; gap: 1.5px; height: 10px; width: 11px; flex: none; }
   .eq i { width: 2.5px; border-radius: 1px; background: var(--live); height: 4px; animation: eqb 1.15s ease-in-out infinite; }
   .eq i:nth-child(2) { animation-delay: 0.22s; }
@@ -159,19 +146,14 @@
   @media (prefers-reduced-motion: reduce) {
     .eq i { animation: none !important; }
     .eq i:nth-child(1) { height: 4px; } .eq i:nth-child(2) { height: 8px; } .eq i:nth-child(3) { height: 5px; }
-    .dot, .prog i { animation: none !important; }
+    .prog i, .pline .dot { animation: none !important; }
   }
-  /* decision wanted: a small diamond in the attention hue */
   .dmark { color: var(--attn); font-size: 9px; flex: none; position: relative; top: -1px; }
-  /* routine / scheduled */
-  .rmark { color: var(--faint); font-size: 12px; flex: none; }
-  /* outcome glyphs */
   .okg { color: var(--ok); } .failg { color: var(--fail); } .cang { color: var(--faint); }
-  /* queued / idle */
   .qmark { width: 6px; height: 6px; border-radius: 50%; border: 1.5px solid var(--faint); flex: none; display: inline-block; }
+  .pmark { color: var(--attn); font-size: 12px; flex: none; }
   .markcell { width: 16px; flex: none; display: inline-flex; justify-content: center; align-items: center; font-size: 12px; }
 
-  /* multi-step progress: segments, shape not color */
   .prog { display: inline-flex; align-items: center; gap: 2px; flex: none; }
   .prog i { width: 8px; height: 3px; border-radius: 2px; background: var(--line); }
   .prog i.d { background: var(--muted); }
@@ -179,7 +161,6 @@
   .prog .t { font-family: var(--mono); font-size: 10.5px; color: var(--faint); margin-left: 5px; font-variant-numeric: tabular-nums; }
   @keyframes pulse { 50% { opacity: 0.3; } }
 
-  /* priority bars (pinned) */
   .pri { display: inline-flex; align-items: center; flex: none; }
   .pri .bars { display: inline-flex; align-items: flex-end; gap: 1.5px; height: 9px; }
   .pri .bars i { width: 2.5px; border-radius: 1px; background: var(--line); }
@@ -191,7 +172,6 @@
   .pri[data-pri="high"]   .bars i { background: var(--muted); }
   .pri[data-pri="urgent"] .bars i { background: var(--ink); }
 
-  /* waiting-time (pinned): darkens, then warms */
   .age {
     font-family: var(--mono); font-size: 11.5px; white-space: nowrap;
     color: var(--faint); flex: none; font-variant-numeric: tabular-nums;
@@ -200,7 +180,6 @@
   .age[data-age="stale"]  { color: var(--ink); }
   .age[data-age="old"]    { color: var(--attn); font-weight: 500; }
 
-  /* quiet decision affordances (pinned) */
   .qbtn {
     font-family: var(--sans); font-size: 12px; line-height: 1; font-weight: var(--w-emph);
     border: 0; background: none; color: var(--muted);
@@ -209,22 +188,65 @@
   .qbtn:hover { background: var(--line-soft); color: var(--ink); }
   .qbtn.first { color: var(--ink); }
   .qbtn:focus-visible { outline: 2px solid var(--live); outline-offset: 1px; }
+  .qbtn[disabled] { opacity: 0.4; cursor: default; }
 
   code {
     font-family: var(--mono); font-size: 12px;
     background: var(--line-soft); padding: 1px 5px; border-radius: 4px; font-weight: 400;
   }
 
-  /* ---- strand row: one line of intent, detail behind a click ---- */
-  .strand {
-    border-top: 1px solid var(--line-soft);
-    padding: 9px 2px;
+  /* ---- decision: expanded card with labeled fields ---- */
+  .dcard {
+    background: var(--raised); border: 1px solid var(--line); border-radius: 10px;
+    box-shadow: var(--lift-shadow);
+    padding: 14px 18px 11px;
+    display: flex; flex-direction: column; gap: 10px;
   }
+  .dcard .qline { display: flex; align-items: baseline; gap: 10px; }
+  .dcard .q { font-size: 15px; font-weight: var(--w-emph); letter-spacing: -0.008em; }
+  .dcard[data-pri="urgent"] .q { font-size: 16px; font-weight: var(--w-urgent); }
+  .dcard .qline .age { margin-left: auto; }
+  .dcard .fields { display: grid; grid-template-columns: 52px minmax(0, 1fr); gap: 4px 14px; font-size: 12.5px; }
+  .dcard .fl {
+    text-transform: uppercase; letter-spacing: 0.09em; font-size: 10px;
+    color: var(--faint); font-weight: var(--w-emph); padding-top: 2px;
+  }
+  .dcard .fv { color: var(--muted); display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+  .dcard .fv b { color: var(--ink); font-weight: var(--w-emph); }
+  .dcard .acts { display: flex; gap: 4px; margin-left: -9px; align-items: center; }
+
+  /* condensed decision row */
+  .drow {
+    display: flex; align-items: center; gap: 10px;
+    padding: 9px 14px;
+    background: var(--raised); border: 1px solid var(--line); border-radius: 10px;
+    box-shadow: var(--card-shadow); cursor: default;
+  }
+  .drow .q { font-weight: var(--w-emph); font-size: 13.5px; white-space: nowrap; }
+  .drow[data-pri="urgent"] .q { font-weight: var(--w-urgent); }
+  .drow .from { color: var(--faint); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .drow .acts { display: flex; gap: 2px; margin-left: auto; }
+  .dstack { display: flex; flex-direction: column; gap: 6px; }
+  .dstack .drow[data-active] { cursor: pointer; }
+  .focusnav { display: flex; align-items: center; gap: 8px; color: var(--faint); font-size: 12px; padding-top: 8px; }
+  .focusnav .ct { font-family: var(--mono); font-size: 11px; font-variant-numeric: tabular-nums; }
+  .focusnav .qbtn { padding: 4px 8px; }
+  .nextpeek { color: var(--faint); font-size: 12px; }
+  .nextpeek b { color: var(--muted); font-weight: var(--w-emph); }
+  .alldone {
+    border: 1px solid var(--line-soft); border-radius: 10px; padding: 14px 18px;
+    color: var(--muted); font-size: 13px; background: var(--surface);
+  }
+
+  /* ---- strand rows (plain, no boxes) ---- */
+  .tier { margin-top: 14px; }
+  .tier:first-of-type { margin-top: 0; }
+  .tier > .lane-label { margin-bottom: 2px; }
+  .strand { border-top: 1px solid var(--line-soft); padding: 9px 2px; }
   .strand:first-of-type { border-top: 0; }
   .strand .row { display: flex; align-items: center; gap: 10px; cursor: pointer; }
   .strand .name { font-weight: var(--w-emph); font-size: 13.5px; letter-spacing: -0.004em; white-space: nowrap; }
   .strand[data-pri="urgent"] .name { font-weight: var(--w-urgent); }
-  .strand[data-done="1"] { opacity: 0.66; }
   .strand .sub { color: var(--faint); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .strand .note { color: var(--muted); font-size: 12.5px; margin-left: auto; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .strand .note[data-tone="warn"] { color: var(--attn); }
@@ -240,32 +262,7 @@
   .strand .detail .dl .mono { font-size: 11px; color: var(--faint); }
   .strand .detail .acts { display: flex; gap: 2px; margin-left: -9px; }
 
-  /* ---- decision item: always a question; answers are the buttons ---- */
-  .dcard {
-    background: var(--raised); border: 1px solid var(--line); border-radius: 10px;
-    box-shadow: var(--lift-shadow);
-    padding: 14px 18px 11px;
-    display: flex; flex-direction: column; gap: 4px;
-  }
-  .dcard .over { display: flex; align-items: baseline; gap: 10px; font-size: 12px; color: var(--muted); }
-  .dcard .over .prov { text-transform: uppercase; letter-spacing: 0.08em; font-size: 10px; color: var(--faint); font-weight: var(--w-emph); }
-  .dcard .q { font-size: 15px; font-weight: var(--w-emph); letter-spacing: -0.008em; display: flex; align-items: baseline; gap: 9px; }
-  .dcard[data-pri="urgent"] .q { font-size: 16px; font-weight: var(--w-urgent); }
-  .dcard .why { color: var(--muted); font-size: 12.5px; }
-  .dcard .acts { display: flex; gap: 4px; margin-top: 8px; margin-left: -9px; align-items: center; }
-
-  .drow {
-    display: flex; align-items: center; gap: 10px;
-    padding: 9px 14px;
-    background: var(--raised); border: 1px solid var(--line); border-radius: 10px;
-    box-shadow: var(--card-shadow);
-  }
-  .drow .q { font-weight: var(--w-emph); font-size: 13.5px; white-space: nowrap; }
-  .drow[data-pri="urgent"] .q { font-weight: var(--w-urgent); }
-  .drow .why { color: var(--faint); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .drow .acts { display: flex; gap: 2px; margin-left: auto; }
-
-  /* ---- landed digest: one line, expandable ---- */
+  /* ---- landed digest ---- */
   .digestline {
     display: flex; align-items: center; gap: 10px; cursor: pointer;
     color: var(--muted); font-size: 12.5px; padding: 2px 2px;
@@ -279,73 +276,17 @@
   .ditem .glyph { flex: none; width: 14px; text-align: center; font-size: 11.5px; }
   .ditem .more { color: var(--faint); }
 
-  /* ============ Variant A: briefing ============ */
-  .va { max-width: 760px; display: flex; flex-direction: column; }
-  .va .lane { margin-bottom: 30px; }
-  .va .lane > .lane-label { margin-bottom: 10px; }
-  .va .focuswrap { display: flex; flex-direction: column; gap: 8px; }
-  .va .focusnav {
-    display: flex; align-items: center; gap: 8px;
-    color: var(--faint); font-size: 12px;
-  }
-  .va .focusnav .ct { font-family: var(--mono); font-size: 11px; font-variant-numeric: tabular-nums; }
-  .va .focusnav .qbtn { padding: 4px 8px; }
-  .va .nextpeek { color: var(--faint); font-size: 12px; padding: 2px 4px; }
-  .va .nextpeek b { color: var(--muted); font-weight: var(--w-emph); }
-  .va .alldone {
-    border: 1px solid var(--line-soft); border-radius: 10px; padding: 14px 18px;
-    color: var(--muted); font-size: 13px; background: var(--surface);
-  }
-  .va .tier { margin-top: 14px; }
-  .va .tier:first-of-type { margin-top: 0; }
-  .va .tier > .lane-label { margin-bottom: 2px; }
-
-  /* ============ Variant B: ledger ============ */
-  .vb { max-width: 1000px; display: flex; flex-direction: column; gap: 26px; }
-  .vb .decisions { display: flex; flex-direction: column; gap: 6px; }
-  .vb .decisions > .lane-label { margin-bottom: 4px; }
-  .vb .book {
-    background: var(--surface); border: 1px solid var(--line); border-radius: 10px;
-    box-shadow: var(--card-shadow); overflow: hidden;
-  }
-  .vb .book h2 {
-    margin: 0; font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.1em;
-    color: var(--muted); padding: 9px 16px 7px; border-bottom: 1px solid var(--line-soft);
-    display: flex; gap: 9px; align-items: center; font-weight: var(--w-emph);
-  }
-  .vb .book h2 .n { font-family: var(--mono); color: var(--faint); letter-spacing: 0; font-variant-numeric: tabular-nums; }
-  .vb .book .strand { padding: 9px 16px; }
-  .vb .book .strand.open .detail { margin-left: 26px; background: var(--bg); }
-  .vb .landedlane { padding: 4px 2px 0; }
-
-  /* ============ Variant C: strands + pulse rail ============ */
-  .vc { display: grid; grid-template-columns: minmax(0, 1fr) 240px; gap: 40px; align-items: start; max-width: 1080px; }
-  .vc .maincol { display: flex; flex-direction: column; }
-  .vc .maincol .lane { margin-bottom: 28px; }
-  .vc .maincol .lane > .lane-label { margin-bottom: 10px; }
-  .vc .needstrand { display: flex; flex-direction: column; gap: 8px; }
-  .vc .cstrand {
-    background: var(--raised); border: 1px solid var(--line); border-radius: 10px;
-    box-shadow: var(--lift-shadow);
-    padding: 11px 16px;
-    display: flex; flex-direction: column; gap: 2px;
-  }
-  .vc .cstrand .top { display: flex; align-items: center; gap: 10px; }
-  .vc .cstrand .name { font-weight: var(--w-emph); font-size: 13.5px; }
-  .vc .cstrand[data-pri="urgent"] .name { font-weight: var(--w-urgent); }
-  .vc .cstrand .sub { color: var(--faint); font-size: 12px; }
-  .vc .cstrand .ask { display: flex; align-items: center; gap: 9px; margin-top: 5px; }
-  .vc .cstrand .ask .q { font-weight: var(--w-emph); font-size: 13.5px; color: var(--ink); }
-  .vc .cstrand .ask .acts { display: flex; gap: 2px; margin-left: auto; }
-  .vc .rail { position: sticky; top: 20px; display: flex; flex-direction: column; gap: 22px; }
-  .vc .pblock { display: flex; flex-direction: column; gap: 5px; }
-  .vc .pblock > .lane-label { margin-bottom: 3px; }
-  .vc .pline { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--muted); }
-  .vc .pline .mono { font-size: 11px; color: var(--faint); }
-  .vc .pline b { font-weight: var(--w-emph); color: var(--ink); }
-  .vc .pline .warm { color: var(--attn); }
-  .vc .pline .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--live); flex: none; animation: pulse 2.4s ease-in-out infinite; }
-  .vc .pline .idledot { width: 6px; height: 6px; border-radius: 50%; border: 1.5px solid var(--faint); flex: none; }
+  /* ---- pulse rail blocks + legend ---- */
+  .pblock { display: flex; flex-direction: column; gap: 5px; }
+  .pblock > .lane-label { margin-bottom: 3px; }
+  .pline { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--muted); }
+  .pline b { font-weight: var(--w-emph); color: var(--ink); }
+  .pline .warm { color: var(--attn); }
+  .pline .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--live); flex: none; animation: pulse 2.4s ease-in-out infinite; }
+  .pline .idledot { width: 6px; height: 6px; border-radius: 50%; border: 1.5px solid var(--faint); flex: none; }
+  .legend { border-top: 1px solid var(--line-soft); padding-top: 16px; }
+  .legend .lrow { display: flex; align-items: center; gap: 10px; font-size: 11.5px; color: var(--faint); padding: 2.5px 0; }
+  .legend .lrow .markcell { justify-content: flex-start; }
 
   /* ============ switcher (not part of the design) ============ */
   .sw {
@@ -356,7 +297,7 @@
     box-shadow: 0 6px 24px rgba(0,0,0,0.35);
     z-index: 50; font-family: var(--mono);
   }
-  .sw .label { font-size: 12px; font-weight: 500; padding: 0 8px; min-width: 130px; text-align: center; }
+  .sw .label { font-size: 12px; font-weight: 500; padding: 0 8px; min-width: 150px; text-align: center; }
   .sw button {
     background: none; border: 0; color: #fff; cursor: pointer;
     font: inherit; font-size: 13px; padding: 4px 10px; border-radius: 999px;
@@ -382,7 +323,7 @@
       <a href="#">Notifications <span class="count">5</span></a>
       <a href="#">Settings</a>
     </nav>
-    <div class="proto-badge">PROTOTYPE · throwaway<br>ticket hydra#20 · round 3<br>&larr; &rarr; variants · d data · t theme</div>
+    <div class="proto-badge">PROTOTYPE · throwaway<br>ticket hydra#20 · round 4<br>&larr; &rarr; decisions UI · d data · t theme</div>
   </aside>
   <main class="main">
     <div class="topbar">
@@ -394,36 +335,41 @@
 </div>
 
 <div class="sw">
-  <button id="prev" aria-label="Previous variant">&larr;</button>
+  <button id="prev" aria-label="Previous decisions treatment">&larr;</button>
   <span class="label" id="swlabel"></span>
-  <button id="next" aria-label="Next variant">&rarr;</button>
+  <button id="next" aria-label="Next decisions treatment">&rarr;</button>
   <button id="dsbtn" class="ds" aria-label="Toggle dataset"></button>
   <button id="theme" aria-label="Toggle theme">◐</button>
 </div>
 
 <script>
-/* Two datasets: calm (1 runner day) and busy (6-runner fleet). Same structure,
-   so the page shape must survive both - that is the scale test.
-   Decisions are ranked provenance-first: you > standing > routine.
-   prov: you | standing | routine. act: working | queued | paused | failed | ok. */
+/* Two datasets: calm (2 runners) and busy (6-runner fleet). Decisions ranked
+   provenance-first: you > standing > routine. Entities carry their domain noun
+   (task / run / session / workflow) - no "ask" vocabulary. */
 const DATASETS = {
   calm: {
     decisions: [
-      { prov: "you", pri: "urgent", strand: "Fix flaky webhook tests",
+      { prov: "you", pri: "urgent",
         q: 'Allow <code>git push</code> to fix/webhook-retries?',
-        why: "Fix flaky webhook tests · session on hetzner-01, approval-required",
+        from: "Fix flaky webhook tests", kind: "task",
+        why: "the fix is done and the session wants to push the branch",
+        agent: "Claude Code session on hetzner-01 · approval-required mode",
         age: "6m", bucket: "fresh", actions: ["Allow", "Deny", "Open session"] },
-      { prov: "you", pri: "high", strand: "Refactor event pipeline",
-        q: 'Grant <code>infra</code> to Refactor event pipeline?',
-        why: "worker profile lacks infra · wants to drain runner hetzner-01",
+      { prov: "you", pri: "high",
+        q: 'Grant <code>infra</code> to the session?',
+        from: "Refactor event pipeline", kind: "task",
+        why: "wants to drain runner hetzner-01; the worker profile lacks infra",
+        agent: "chat session on macbook-pro · turn 7",
         age: "18m", bucket: "recent", actions: ["Grant for session", "Add to profile", "Deny"] },
-      { prov: "standing", pri: "high", strand: "Email triage",
+      { prov: "standing", pri: "high",
         q: "Resume Email triage?",
-        why: "spawn bound tripped: 12 runs in 10 min · 14 events held",
+        from: "Email triage", kind: "standing workflow",
+        why: "spawn bound tripped: 12 runs in 10 min (bound 10) · 14 events held",
         age: "41m", bucket: "stale", actions: ["Resume", "Review held events"] },
-      { prov: "routine", pri: "normal", strand: "Nightly digest",
+      { prov: "routine", pri: "normal",
         q: "Re-run Nightly digest?",
-        why: "failed 22:15 · iteration-limit in step summarize",
+        from: "Nightly digest", kind: "cron workflow",
+        why: "run 479 failed at 22:15 · iteration-limit in step summarize",
         age: "7h", bucket: "old", actions: ["Re-run", "View run", "Dismiss"] },
     ],
     youAsked: [
@@ -441,7 +387,7 @@ const DATASETS = {
           { m: "eq", t: 'chat session on macbook-pro · turn 7 · last: editing <code>src/ingress/pipeline.ts</code>' },
           { m: "dmark", t: 'Grant <code>infra</code>? · waiting 18m', acts: ["Grant", "Deny"] },
         ], dacts: ["Open session", "View task"] },
-      { name: "Review PR #87", sub: "one-off ask · workflow PR review", pri: "normal", act: "working",
+      { name: "Review PR #87", sub: "run · workflow PR review", pri: "normal", act: "working",
         prog: { done: 1, total: 4 }, age: "12m", bucket: "fresh",
         detail: [
           { m: "eq", t: "run 484 · step 2/4 review-code · turn 3, reading packages/contract" },
@@ -481,41 +427,53 @@ const DATASETS = {
 
   busy: {
     decisions: [
-      { prov: "you", pri: "urgent", strand: "Fix flaky webhook tests",
+      { prov: "you", pri: "urgent",
         q: 'Allow <code>git push</code> to fix/webhook-retries?',
-        why: "Fix flaky webhook tests · session on hetzner-01, approval-required",
+        from: "Fix flaky webhook tests", kind: "task",
+        why: "the fix is done and the session wants to push the branch",
+        agent: "Claude Code session on hetzner-01 · approval-required mode",
         age: "6m", bucket: "fresh", actions: ["Allow", "Deny", "Open session"] },
-      { prov: "you", pri: "urgent", strand: "Hotfix billing webhook",
+      { prov: "you", pri: "urgent",
         q: "Merge hotfix/billing-retry?",
-        why: "Hotfix billing webhook · CI green, agent recommends merge",
+        from: "Hotfix billing webhook", kind: "task",
+        why: "CI is green and the agent recommends merging",
         age: "11m", bucket: "fresh", actions: ["Merge", "Hold", "Open PR"] },
-      { prov: "you", pri: "high", strand: "Refactor event pipeline",
-        q: 'Grant <code>infra</code> to Refactor event pipeline?',
-        why: "worker profile lacks infra · wants to drain runner hetzner-01",
+      { prov: "you", pri: "high",
+        q: 'Grant <code>infra</code> to the session?',
+        from: "Refactor event pipeline", kind: "task",
+        why: "wants to drain runner hetzner-01; the worker profile lacks infra",
+        agent: "chat session on macbook-pro · turn 7",
         age: "18m", bucket: "recent", actions: ["Grant for session", "Add to profile", "Deny"] },
-      { prov: "you", pri: "high", strand: "Migrate channel plugin API",
+      { prov: "you", pri: "high",
         q: "Delete legacy channel tables?",
-        why: "Migrate channel plugin API · destructive step, wants confirmation",
+        from: "Migrate channel plugin API", kind: "task",
+        why: "destructive migration step; the session wants explicit confirmation",
+        agent: "session on macstudio-02 · turn 21",
         age: "26m", bucket: "recent", actions: ["Confirm", "Deny", "Open session"] },
-      { prov: "standing", pri: "high", strand: "Email triage",
+      { prov: "standing", pri: "high",
         q: "Resume Email triage?",
-        why: "spawn bound tripped: 12 runs in 10 min · 14 events held",
+        from: "Email triage", kind: "standing workflow",
+        why: "spawn bound tripped: 12 runs in 10 min (bound 10) · 14 events held",
         age: "41m", bucket: "stale", actions: ["Resume", "Review held events"] },
-      { prov: "standing", pri: "normal", strand: "Issue triage",
+      { prov: "standing", pri: "normal",
         q: "Resume Issue triage?",
+        from: "Issue triage", kind: "standing workflow",
         why: "spawn bound tripped: 11 runs in 10 min · 6 events held",
         age: "1h", bucket: "stale", actions: ["Resume", "Review held events"] },
-      { prov: "routine", pri: "normal", strand: "Nightly digest",
+      { prov: "routine", pri: "normal",
         q: "Re-run Nightly digest?",
-        why: "failed 22:15 · iteration-limit in step summarize",
+        from: "Nightly digest", kind: "cron workflow",
+        why: "run 479 failed at 22:15 · iteration-limit in step summarize",
         age: "7h", bucket: "old", actions: ["Re-run", "View run", "Dismiss"] },
-      { prov: "routine", pri: "normal", strand: "Dependency bumps",
+      { prov: "routine", pri: "normal",
         q: "Re-run Dependency bumps?",
+        from: "Dependency bumps", kind: "cron workflow",
         why: "1 of 3 runs failed · lockfile conflict in agentick-web",
         age: "3h", bucket: "old", actions: ["Re-run", "View run", "Dismiss"] },
-      { prov: "routine", pri: "low", strand: "Receipts filing",
+      { prov: "routine", pri: "low",
         q: "Re-connect gmail/business?",
-        why: "token expired · 2 runs skipped",
+        from: "Receipts filing", kind: "standing workflow",
+        why: "the connection's token expired · 2 runs skipped",
         age: "5h", bucket: "old", actions: ["Re-connect", "Dismiss"] },
     ],
     youAsked: [
@@ -531,7 +489,7 @@ const DATASETS = {
       { name: "Migrate channel plugin API", sub: "task · in-progress", pri: "high", act: "working",
         note: "turn 21", ask: 3, age: "2h", bucket: "stale",
         detail: [ { m: "eq", t: "session on macstudio-02 · turn 21" } ], dacts: ["Open session"] },
-      { name: "Review PR #92", sub: "one-off ask · workflow PR review", pri: "normal", act: "queued",
+      { name: "Review PR #92", sub: "run · workflow PR review", pri: "normal", act: "queued",
         note: "queued on hetzner-01 · position 2", age: "9m", bucket: "fresh",
         detail: [ { m: "q", t: "waiting for a session slot · runner at cap" } ], dacts: ["View queue"] },
     ],
@@ -578,7 +536,6 @@ const DATASETS = {
 /* ---------- atom helpers ---------- */
 const eqEl = '<span class="eq" title="agent working"><i></i><i></i><i></i></span>';
 const dmarkEl = '<span class="dmark" title="decision wanted">◆</span>';
-const rmarkEl = '<span class="rmark" title="routine">↻</span>';
 const priEl = (pri) => `
   <span class="pri" data-pri="${pri}" title="priority: ${pri}">
     <span class="bars"><i></i><i></i><i></i></span>
@@ -594,20 +551,19 @@ const qbtns = (arr) =>
 const markFor = (s) => {
   if (s.act === "working") return eqEl;
   if (s.act === "queued") return '<span class="qmark" title="queued"></span>';
-  if (s.act === "paused") return '<span class="rmark" style="color:var(--attn)" title="paused">↻</span>';
+  if (s.act === "paused") return '<span class="pmark" title="paused">↻</span>';
   if (s.act === "failed") return '<span class="failg">✕</span>';
   return '<span class="okg">✓</span>';
 };
 const detailMark = (m) => ({
   eq: eqEl, dmark: dmarkEl, ok: '<span class="okg">✓</span>',
   fail: '<span class="failg">✕</span>', q: '<span class="qmark"></span>',
-  ref: '<span class="rmark" style="font-size:10px">#</span>',
+  ref: '<span class="rmark mono" style="font-size:10px;color:var(--faint)">#</span>',
 }[m] || "");
-const provWord = { you: "you asked", standing: "standing", routine: "routine" };
+const provWord = { you: "started by you", standing: "standing", routine: "routine" };
 
 function data() { return DATASETS[get("data") === "busy" ? "busy" : "calm"]; }
 
-/* one calm sentence, never stat cards */
 function headline(d) {
   const working = d.youAsked.filter((s) => s.act === "working").length +
     d.routine.filter((s) => s.act === "working").length;
@@ -618,17 +574,70 @@ function headline(d) {
     · <b>${working}</b> strands in motion · <b>${landed}</b> outcomes today</div>`;
 }
 
-function pulseline(d) {
-  const line = (arr) => arr.map((p) =>
-    `${p.t}${p.warm ? ` <span class="warm">· ${p.warm}</span>` : ""}`).join(" · ");
-  return `<div class="pulseline">
-    <span><span class="k">Fleet</span> ${line(d.pulse.fleet)}</span>
-    <span><span class="k">Assistants</span> ${line(d.pulse.assistants)}</span>
-    <span><span class="k">Intake</span> ${line(d.pulse.intake)}</span>
+/* ---------- decisions: expanded card with labeled fields ---------- */
+const dcardEl = (dec) => `
+  <div class="dcard" data-pri="${dec.pri}">
+    <div class="qline">
+      ${dmarkEl}
+      <span class="q">${dec.q}</span>
+      <span class="age" data-age="${dec.bucket}">waiting ${dec.age}</span>
+    </div>
+    <div class="fields">
+      <span class="fl">from</span>
+      <span class="fv"><b>${dec.from}</b> ${dec.kind} ${priEl(dec.pri)} <span style="color:var(--faint)">· ${provWord[dec.prov]}</span></span>
+      <span class="fl">why</span>
+      <span class="fv">${dec.why}</span>
+      ${dec.agent ? `<span class="fl">agent</span><span class="fv">${dec.agent}</span>` : ""}
+    </div>
+    <div class="acts">${qbtns(dec.actions)}</div>
   </div>`;
+
+const drowEl = (dec, i, active) => `
+  <div class="drow" data-pri="${dec.pri}"${active !== undefined ? ` data-active="${i}"` : ""}>
+    ${dmarkEl}
+    <span class="q">${dec.q}</span>
+    <span class="from">${dec.from} · ${provWord[dec.prov]}</span>
+    <span class="age" data-age="${dec.bucket}">${dec.age}</span>
+    <span class="acts">${qbtns(dec.actions.slice(0, 2))}</span>
+  </div>`;
+
+let focusIdx = 0;
+
+function decisionsFocus(d) {
+  const n = d.decisions.length;
+  if (!n) return `<div class="alldone">Nothing needs you.</div>`;
+  focusIdx = Math.min(focusIdx, n - 1);
+  const next = d.decisions[focusIdx + 1];
+  return `
+    ${dcardEl(d.decisions[focusIdx])}
+    <div class="focusnav">
+      <button class="qbtn" data-fnav="-1" ${focusIdx === 0 ? "disabled" : ""}>&larr;</button>
+      <span class="ct">${focusIdx + 1} of ${n}</span>
+      <button class="qbtn" data-fnav="1" ${focusIdx === n - 1 ? "disabled" : ""}>&rarr;</button>
+      ${next ? `<span class="nextpeek">next: <b>${next.q.replace(/<[^>]+>/g, "")}</b> · ${next.age}</span>` : ""}
+    </div>`;
 }
 
-/* strand row: one line; click expands execution detail */
+function decisionsList(d) {
+  if (!d.decisions.length) return `<div class="alldone">Nothing needs you.</div>`;
+  return `<div class="dstack">${d.decisions.map((dec, i) => drowEl(dec, i)).join("")}</div>`;
+}
+
+function decisionsQueue(d) {
+  const n = d.decisions.length;
+  if (!n) return `<div class="alldone">Nothing needs you.</div>`;
+  focusIdx = Math.min(focusIdx, n - 1);
+  const rows = d.decisions.map((dec, i) =>
+    i === focusIdx ? dcardEl(dec) : drowEl(dec, i, true)).join("");
+  return `<div class="dstack">${rows}</div>
+    <div class="focusnav">
+      <button class="qbtn" data-fnav="-1" ${focusIdx === 0 ? "disabled" : ""}>&larr;</button>
+      <span class="ct">${focusIdx + 1} of ${n}</span>
+      <button class="qbtn" data-fnav="1" ${focusIdx === n - 1 ? "disabled" : ""}>&rarr;</button>
+    </div>`;
+}
+
+/* ---------- strands ---------- */
 function strandEl(s, i, tier) {
   const noteQ = (s.ask !== undefined ? dmarkEl + " " : "") + (s.note || "");
   const mid = s.prog ? progEl(s.prog) : "";
@@ -669,162 +678,44 @@ function landedEl(d) {
     <div class="digest">${items}</div>`;
 }
 
-const dcardEl = (dec) => `
-  <div class="dcard" data-pri="${dec.pri}">
-    <div class="over">
-      <span class="prov">${provWord[dec.prov]}</span>
-      <span>${dec.strand}</span>
-      ${priEl(dec.pri)}
-      <span class="age" data-age="${dec.bucket}" style="margin-left:auto">waiting ${dec.age}</span>
+/* ---------- pulse rail + legend ---------- */
+function railEl(d) {
+  const plines = (arr) => arr.map((p) => `
+    <div class="pline">${p.idle ? '<span class="idledot"></span>' : p.live ? '<span class="dot"></span>' : '<span class="idledot"></span>'}
+      <span>${p.t}${p.warm ? ` <span class="warm">· ${p.warm}</span>` : ""}</span></div>`).join("");
+  return `
+    <div class="pblock">
+      <div class="lane-label">Fleet</div>
+      ${plines(d.pulse.fleet)}
     </div>
-    <div class="q">${dmarkEl}<span>${dec.q}</span></div>
-    <div class="why">${dec.why}</div>
-    <div class="acts">${qbtns(dec.actions)}</div>
-  </div>`;
-
-const drowEl = (dec) => `
-  <div class="drow" data-pri="${dec.pri}">
-    ${dmarkEl}
-    <span class="q">${dec.q}</span>
-    <span class="why">${provWord[dec.prov]} · ${dec.why}</span>
-    <span class="age" data-age="${dec.bucket}">${dec.age}</span>
-    <span class="acts">${qbtns(dec.actions.slice(0, 2))}</span>
-  </div>`;
-
-/* ---------- Variant A: briefing (decisions one at a time) ---------- */
-let focusIdx = 0;
-function variantA() {
-  const d = data();
-  const n = d.decisions.length;
-  focusIdx = Math.min(focusIdx, Math.max(0, n - 1));
-  const dec = d.decisions[focusIdx];
-  const next = d.decisions[focusIdx + 1];
-  const focus = n === 0
-    ? `<div class="alldone">Nothing needs you.</div>`
-    : `<div class="focuswrap">
-        ${dcardEl(dec)}
-        <div class="focusnav">
-          <button class="qbtn" data-fnav="-1" ${focusIdx === 0 ? "disabled" : ""}>&larr;</button>
-          <span class="ct">${focusIdx + 1} of ${n}</span>
-          <button class="qbtn" data-fnav="1" ${focusIdx === n - 1 ? "disabled" : ""}>&rarr;</button>
-          ${next ? `<span class="nextpeek">next: <b>${next.q.replace(/<[^>]+>/g, "")}</b> · ${next.age}</span>` : ""}
-        </div>
-      </div>`;
-  return `<div class="va">
-    ${headline(d)}
-    <section class="lane">
-      <div class="lane-label">Needs you <span class="n">${n}</span></div>
-      ${focus}
-    </section>
-    <section class="lane">
-      <div class="lane-label" style="margin-bottom:10px">In motion</div>
-      <div class="tier">
-        <div class="lane-label">You asked <span class="n">${d.youAsked.length}</span></div>
-        ${d.youAsked.map((s, i) => strandEl(s, i, "y")).join("")}
-      </div>
-      <div class="tier">
-        <div class="lane-label">Routine <span class="n">${d.routine.length}</span></div>
-        ${d.routine.map((s, i) => strandEl(s, i, "r")).join("")}
-      </div>
-    </section>
-    <section class="lane">${landedEl(d)}</section>
-    ${pulseline(d)}
-  </div>`;
-}
-
-/* ---------- Variant B: ledger (all decisions visible) ---------- */
-function variantB() {
-  const d = data();
-  return `<div class="vb">
-    <div>
-      ${headline(d)}
-      <div class="decisions">
-        <div class="lane-label">Needs you <span class="n">${d.decisions.length}</span></div>
-        ${d.decisions.map(drowEl).join("")}
-      </div>
+    <div class="pblock">
+      <div class="lane-label">Assistants</div>
+      ${plines(d.pulse.assistants)}
     </div>
-    <div>
-      <div class="lane-label" style="margin-bottom:10px">In motion</div>
-      <div class="book" style="margin-bottom:12px">
-        <h2>You asked <span class="n">${d.youAsked.length}</span></h2>
-        ${d.youAsked.map((s, i) => strandEl(s, i, "y")).join("")}
-      </div>
-      <div class="book">
-        <h2>Routine <span class="n">${d.routine.length}</span></h2>
-        ${d.routine.map((s, i) => strandEl(s, i, "r")).join("")}
-      </div>
+    <div class="pblock">
+      <div class="lane-label">Intake</div>
+      ${d.pulse.intake.map((p) => `<div class="pline"><span>${p.t}</span></div>`).join("")}
     </div>
-    <div class="landedlane">${landedEl(d)}</div>
-    ${pulseline(d)}
-  </div>`;
-}
-
-/* ---------- Variant C: strands own their decisions + pulse rail ---------- */
-function variantC() {
-  const d = data();
-  /* strands that raised a question surface it inline, ranked first */
-  const asking = [];
-  const quiet = [];
-  for (const tier of [["y", d.youAsked], ["r", d.routine]]) {
-    tier[1].forEach((s, i) => (s.ask !== undefined ? asking : quiet).push([s, i, tier[0]]));
-  }
-  const askCard = ([s, i, t]) => {
-    const dec = d.decisions[s.ask];
-    return `
-    <div class="cstrand" data-pri="${s.pri || "normal"}">
-      <div class="top">
-        <span class="markcell">${markFor(s)}</span>
-        <span class="name">${s.name}</span>
-        ${s.pri ? priEl(s.pri) : ""}
-        <span class="sub">${s.sub}</span>
-        <span class="age" data-age="${dec.bucket}" style="margin-left:auto">waiting ${dec.age}</span>
-      </div>
-      <div class="ask">
-        ${dmarkEl}
-        <span class="q">${dec.q}</span>
-        <span class="acts">${qbtns(dec.actions.slice(0, 2))}</span>
-      </div>
+    <div class="pblock legend">
+      <div class="lane-label">Marks</div>
+      <div class="lrow"><span class="markcell">${eqEl}</span><span>agent working</span></div>
+      <div class="lrow"><span class="markcell">${dmarkEl}</span><span>decision wanted</span></div>
+      <div class="lrow"><span class="markcell"><span class="qmark"></span></span><span>queued</span></div>
+      <div class="lrow"><span class="markcell"><span class="pmark">↻</span></span><span>paused</span></div>
+      <div class="lrow"><span class="markcell"><span class="okg">✓</span></span><span>done</span></div>
+      <div class="lrow"><span class="markcell"><span class="failg">✕</span></span><span>failed</span></div>
+      <div class="lrow"><span class="markcell"><span class="cang">–</span></span><span>cancelled</span></div>
+      <div class="lrow"><span class="markcell">${priEl("high")}</span><span>priority (bars fill up)</span></div>
+      <div class="lrow"><span class="markcell">${progEl({ done: 1, total: 4 }).replace(/<span class="t">.*?<\/span>/, "")}</span><span>workflow progress</span></div>
+      <div class="lrow"><span class="markcell"><span class="age" data-age="old">7h</span></span><span>waiting: darkens, then warms</span></div>
     </div>`;
-  };
-  return `<div class="vc">
-    <div class="maincol">
-      ${headline(d)}
-      <section class="lane">
-        <div class="lane-label">Needs you <span class="n">${asking.length}</span></div>
-        <div class="needstrand">${asking.map(askCard).join("")}</div>
-      </section>
-      <section class="lane">
-        <div class="lane-label">In motion</div>
-        ${quiet.map(([s, i, t]) => strandEl(s, i, t)).join("")}
-      </section>
-      <section class="lane">${landedEl(d)}</section>
-    </div>
-    <aside class="rail">
-      <div class="pblock">
-        <div class="lane-label">Fleet</div>
-        ${d.pulse.fleet.map((p) => `
-          <div class="pline">${p.live ? '<span class="dot"></span>' : '<span class="idledot"></span>'}
-            <span>${p.t}${p.warm ? ` <span class="warm">· ${p.warm}</span>` : ""}</span></div>`).join("")}
-      </div>
-      <div class="pblock">
-        <div class="lane-label">Assistants</div>
-        ${d.pulse.assistants.map((p) => `
-          <div class="pline">${p.idle ? '<span class="idledot"></span>' : '<span class="dot"></span>'}
-            <span>${p.t}</span></div>`).join("")}
-      </div>
-      <div class="pblock">
-        <div class="lane-label">Intake</div>
-        ${d.pulse.intake.map((p) => `<div class="pline"><span>${p.t}</span></div>`).join("")}
-      </div>
-    </aside>
-  </div>`;
 }
 
-/* ---------- switcher, dataset, theme, interactions ---------- */
+/* ---------- page ---------- */
 const variants = [
-  { key: "A", name: "Briefing", render: variantA },
-  { key: "B", name: "Ledger", render: variantB },
-  { key: "C", name: "Strands", render: variantC },
+  { key: "A", name: "Focus", decisions: decisionsFocus },
+  { key: "B", name: "List", decisions: decisionsList },
+  { key: "C", name: "Queue", decisions: decisionsQueue },
 ];
 function params() { return new URLSearchParams(location.search); }
 function get(k) { return params().get(k); }
@@ -844,15 +735,40 @@ function show(i) {
 }
 function render() {
   const v = variants[current()];
-  document.getElementById("stage").innerHTML = v.render();
+  const d = data();
+  document.getElementById("stage").innerHTML = `
+  <div class="layout">
+    <div class="maincol">
+      ${headline(d)}
+      <section class="lane">
+        <div class="lane-label">Needs you <span class="n">${d.decisions.length}</span></div>
+        ${v.decisions(d)}
+      </section>
+      <section class="lane">
+        <div class="lane-label" style="margin-bottom:10px">In motion</div>
+        <div class="tier">
+          <div class="lane-label">Started by you <span class="n">${d.youAsked.length}</span></div>
+          ${d.youAsked.map((s, i) => strandEl(s, i, "y")).join("")}
+        </div>
+        <div class="tier">
+          <div class="lane-label">Routine <span class="n">${d.routine.length}</span></div>
+          ${d.routine.map((s, i) => strandEl(s, i, "r")).join("")}
+        </div>
+      </section>
+      <section class="lane">${landedEl(d)}</section>
+    </div>
+    <aside class="rail">${railEl(d)}</aside>
+  </div>`;
   document.getElementById("swlabel").textContent = v.key + " · " + v.name;
   document.getElementById("dsbtn").textContent = get("data") === "busy" ? "busy" : "calm";
-  document.getElementById("navcount").textContent = data().decisions.length;
+  document.getElementById("navcount").textContent = d.decisions.length;
 }
 document.getElementById("stage").addEventListener("click", (e) => {
   const fnav = e.target.closest("[data-fnav]");
   if (fnav && !fnav.disabled) { focusIdx += +fnav.dataset.fnav; render(); return; }
   if (e.target.closest(".qbtn")) return; /* fake actions do nothing */
+  const act = e.target.closest("[data-active]");
+  if (act) { focusIdx = +act.dataset.active; render(); return; }
   const dg = e.target.closest("[data-digest]");
   if (dg) { dg.nextElementSibling.classList.toggle("open"); return; }
   const row = e.target.closest('[data-toggle="1"]');
