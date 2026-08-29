@@ -119,7 +119,7 @@ hydra memory delete <name>
 - Nothing is materialized on runner disk. No memory file exists anywhere an agent could `grep` or `Edit`; `search` is the substitute for grep (ADR 0020).
 - The web app edits the same documents through the same operations; there is no second write path ([./14-web-app.md](./14-web-app.md)).
 - The CLI offers **one content channel** for `write` and `append`: stdin only. There is no `--content` flag and no `--file` flag (ticket 21 asked for one unambiguous channel and left the pick to the spec; the spec picks stdin). `--help` works at any position on every subcommand and is agent-addressed. Both are CLI rules owned by [./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md).
-- Memory operations require the provisional `memory` grant family (see [./13-security.md](./13-security.md#61-grant-families)); the shipped `assistant` profile carries it.
+- Memory operations require the `memory` grant family (see [./13-security.md](./13-security.md#61-grant-families)); the shipped `assistant` profile carries it.
 - Memory operations are ordinary actor-stamped mutations in the event log ([./04-state-store.md](./04-state-store.md)).
 
 ### 6.2 Format: two tiers
@@ -157,10 +157,8 @@ Every assistant session starts with `core` in full and the topic index injected.
 ### 6.5 Recall
 
 - `hydra memory search <words>` searches the assistant's own memory documents.
-- Transcript recall is full-text search over the assistant's own conversations (all its sessions, all its conversations), exposed as `hydra` operations. No vectors, no embeddings, no LLM summarization in the retrieval path (Hermes ships FTS-only recall; Letta migrated away from vector archival memory: `research/assistant-systems.md`, sections 5 and 6).
-- An assistant never reads another assistant's memory or transcripts.
-
-**Open:** the CLI operation for transcript search (name, scope arguments, result shape) is not pinned; [./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md) owns the CLI.
+- Transcript recall is `transcript.query { text, assistantId: "me" }` (`hydra transcript query --text "..." --assistant me`): full-text search over the assistant's own conversations (all its sessions, all its conversations), returning passages ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md) section 2). It is the same operation any agent with `session.read` uses over any session; `assistantId: "me"` is a filter, not a boundary. No vectors, no embeddings, no LLM summarization in the retrieval path (Hermes ships FTS-only recall; Letta migrated away from vector archival memory: `research/assistant-systems.md`, sections 5 and 6).
+- An assistant never reads another assistant's memory (the one scoped grant family in v1, [./13-security.md](./13-security.md) section 6.1). Transcripts are ordinary session history: any session granted `session.read`, the assistant profile included, can read any session's transcript.
 
 ### 6.6 Visibility, editing, deletion
 
@@ -184,11 +182,11 @@ Sessions the assistant delegates to (agent steps of runs it starts, sessions it 
 
 ## 7. Acting: delegation via the orchestration surface
 
-Assistants act on the system through the public API like any agent ([ADR 0013](../adr/0013-agents-operate-hydra-through-the-public-api.md)), bounded by the shipped `assistant` permission profile. [./13-security.md](./13-security.md#62-shipped-profiles) is the only normative statement of the profile; in one line: the orchestration surface is granted (tasks, `workflows.run`, `sessions.spawn` plus steering and reading the sessions it spawned, subscriptions, notifications, status reads, `permissions.request`, and the provisional `memory` family for its own memory), while `infra`, `connections.manage`, `secrets`, `credentials`, bulk-destructive operations, Workspaces and direct work tools are withheld.
+Assistants act on the system through the public API like any agent ([ADR 0013](../adr/0013-agents-operate-hydra-through-the-public-api.md)), bounded by the shipped `assistant` permission profile. [./13-security.md](./13-security.md#62-shipped-profiles) is the only normative statement of the profile; in one line: the orchestration surface is granted (tasks, `workflow.run` and `workflow.submit`, `session.spawn` plus steering and reading sessions, subscriptions, notifications, `event.emit`, read on everything that is not a secret, `permission.request`, and the `memory` family for its own memory), while `workflow.write`, `connection.manage`, `infra.write`, the other `write` families, `secret`, `credential`, bulk-destructive operations, Workspaces and direct work tools are withheld. "The sessions it spawned" is the `actor: "me"` filter on `session.query`, a convenience rather than a permission.
 
 - "Delegate, don't do" is enforced by configuration, not by caste: the profile is loosenable per assistant, up to the `unrestricted` profile.
-- The assistant writes its own memory through `hydra memory` under the provisional `memory` grant family (see [./13-security.md](./13-security.md#61-grant-families) for the Open on that family).
-- A denied operation returns a 403 naming the missing grant; the assistant may raise a Permission Request via `permissions.request` and learns the outcome through its subscription ([./13-security.md](./13-security.md#64-escalation-permission-request)).
+- The assistant writes its own memory through `hydra memory` under the `memory` grant family; a session token's memory operations are pinned to its own assistant ([./13-security.md](./13-security.md#61-grant-families)).
+- A denied operation returns a 403 naming the missing grant; the assistant may raise a Permission Request via `permission.request` and learns the outcome through the subscription that operation registers for it ([./13-security.md](./13-security.md#64-escalation-permission-request)).
 - Assistant sessions get no Workspace. Workspace-less sessions get `GH_TOKEN` from the user-designated default Connection or no token ([./13-security.md](./13-security.md)).
 
 **Open:** "direct work tools" are denied by the profile at the API layer, but the harness's own tools (shell, file edit) in a workspace-less session are governed by the session's access mode, not by grants. Which access mode assistant sessions run under, and whether harness work tools are additionally disabled for them, is not pinned; [./06-providers.md](./06-providers.md) owns access modes.
@@ -248,7 +246,7 @@ Channels are contributions into the `channel` extension point ([./05-plugins.md]
 ## Post-v1
 
 - **Binding-preserving paused state** - deferred, not rejected: re-establishing bindings is real work (Discord bot setup). V1 keeps pausing = remove bindings; a later paused flag adds a state without changing bindings.
-- **Cross-assistant recall** - arrives as agent-to-agent communication ("go ask the triage assistant what we discussed"), never shared memory or transcripts. V1 keeps memory strictly assistant-scoped so this stays additive.
+- **Cross-assistant recall** as a feature - arrives as agent-to-agent communication ("go ask the triage assistant what we discussed"), never shared memory. V1 keeps memory strictly assistant-scoped so this stays additive; transcripts are already readable by any `session.read` holder, which is a permission fact, not a recall feature.
 - **Memory version history** - retrofit is additive (a history table beside the live document); see the reconsideration flag in section 6.4.
 - **Journal tier + dream pass** - tested and not adopted (journal entries duplicated in-turn writes, every dream pass cost a run, on 1-7 turn conversations). Standing assumption: in-turn recording degrades in long conversations; if dogfooding shows facts going unrecorded, the design and harness (`prototype/memory-interface`, `--journal 1`) restart from evidence.
 - **Read-only memory materialization on runners** - a pure read convenience for native grep, addable later without touching the write path; v1 keeps the API as the only write seam.

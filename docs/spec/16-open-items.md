@@ -25,30 +25,16 @@ Owning document: [07-workflows.md](./07-workflows.md) (enums mirrored in [02](./
 - 07 §1: whether a disabled workflow may still be run manually; behaviour of a stored workflow that stops validating after the fact.
 - 07 §3: whether a Connection reference is a first-class input type.
 - 07 §5: template delimiter syntax for CEL in prompts and parameters.
-- 07 §10: which grant covers submitting an ad-hoc plan.
 - 06 §7: whether `outputSchema` must also ride `TurnInput` per graph iteration (it sits on `SessionSpec` today).
 
 ### [Actors and authorisation beyond sessions: runs, plugins, bound Notification actions](https://github.com/rogierpennink/hydra/issues/37)
 
 Owning documents: [11 §3](./11-public-api-and-agent-surface.md), [10 §7.4](./10-triage-intake-and-notifications.md), [13 §6](./13-security.md).
 
-- 11 §3.1 (owner), echoed in 07 §4.1, 10 §6, 05 §5: the actor value and the grants that bound mutations made by built-in action steps inside a run and by plugins holding the public-API client.
+- (Items 1 and 2 of the ticket, the actor value and gating of run action steps and plugins, were pinned by [Public API operation catalogue](https://github.com/rogierpennink/hydra/issues/38): `run:<id>` and `plugin:<id>`, ungated; 11 §3.1.)
 - 11 §3.2, 10 §7.4, 13 §6.4, 02 §Notification: whether an agent-authored bound operation must have been within the authoring session's permission profile (or only the user's parity at click time).
 - 10 §7.4: how the concrete operation is rendered so the click is informed.
 - 10 §7.4: whether a bound operation can be executed from a channel sink and how that click is authenticated as the user.
-
-### [Public API operation catalogue: naming, route style, grant families](https://github.com/rogierpennink/hydra/issues/38)
-
-Owning documents: [11](./11-public-api-and-agent-surface.md), [13 §6](./13-security.md).
-
-- 11 §1: one operation-id convention across grant families, built-in action ids and CLI nouns; HTTP route style and error envelope.
-- 13 §6.1, 11 §5: exact verb set per grant family; which operations count as bulk-destructive.
-- 13 §6.1, 11 §2, 12 §7, 02 §Grant: the provisional `memory` grant family.
-- 11 §2: grant family and operation set for agent/assistant management, workspaces, projects/resources.
-- 11 §2, 12 §6.6: where transcript recall lives (a `sessions` search op with an assistant filter, or an assistant-family op).
-- 11 §2/§7, 08 §7: session-subscription registration input shape, plus list and cancel.
-- 09 §Search: structured filter semantics shared by `task.query` and `hydra task search`.
-- 11 §5: whether `permissions.request` teaches a follow-up subscribe like spawn operations do.
 
 ### [Channel contribution interface and conversation ingress (Discord, Slack)](https://github.com/rogierpennink/hydra/issues/39)
 

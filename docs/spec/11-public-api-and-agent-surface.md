@@ -1,6 +1,6 @@
 # Public API and agent surface
 
-Hydra has one public API. The web app, the `hydra` CLI, agents inside sessions, built-in workflow actions and plugins all operate the system through the same set of operations, defined once in a framework-free service layer and described once in a shared Zod contract package. HTTP is a thin proxy over that layer; the `hydra` CLI is a thin client over HTTP. Agents reach the API with a per-session token that carries their agent's permission profile; the user reaches it with an API key. Every mutation is stamped with its actor in the event log. No endpoint blocks: long waits are expressed as subscriptions whose matches arrive as queued input. This document pins the contract structure, the transports, the operation inventory at family level, the credential and attribution rules, the `hydra` CLI (including `hydra memory`), session subscriptions and the no-blocking rule. Rationale lives in [ADR 0013](../adr/0013-agents-operate-hydra-through-the-public-api.md) and [ADR 0020](../adr/0020-assistant-memory-is-reached-only-through-the-api.md).
+Hydra has one public API. The web app, the `hydra` CLI, agents inside sessions, built-in workflow actions and plugins all operate the system through the same set of operations, defined once in a framework-free service layer and described once in a shared Zod contract package. HTTP is a thin proxy over that layer; the `hydra` CLI is a thin client over HTTP. Agents reach the API with a per-session token that carries their agent's permission profile; the user reaches it with an API key. Every mutation is stamped with its actor in the event log. No endpoint blocks: long waits are expressed as subscriptions whose matches arrive as queued input. This document pins the contract structure, the operation vocabulary, the transports and route style, the error envelope, the operation catalogue, the credential and attribution rules, the `hydra` CLI (including `hydra memory`), session subscriptions and the no-blocking rule. Rationale lives in [ADR 0013](../adr/0013-agents-operate-hydra-through-the-public-api.md), [ADR 0020](../adr/0020-assistant-memory-is-reached-only-through-the-api.md) and [ADR 0021](../adr/0021-one-operation-vocabulary-coarse-grants-explicit-routes.md).
 
 ## 1. Contract structure
 
@@ -13,7 +13,7 @@ A framework-free TypeScript service layer defines every operation. "Framework-fr
 | HTTP routes | proxy: validate input schema, call service, serialize output schema |
 | `hydra` CLI (agent and ops) | over HTTP |
 | Web app | over HTTP (plus one WebSocket for live topics, see [./14-web-app.md](./14-web-app.md)) |
-| Built-in workflow actions (`workflow.run`, `notify`, `task.create`, `task.update`, `task.query`) | in-process, same service layer |
+| Built-in workflow actions (`workflow.run`, `notification.create`, `task.create`, `task.update`, `task.query`) | in-process, same service layer |
 | Plugins holding the public-API client capability | in-process, same service layer ([./05-plugins.md](./05-plugins.md)) |
 
 Permission enforcement (section 5) and actor stamping (section 3) sit inside the service layer, so they bind every consumer identically.
@@ -22,17 +22,35 @@ Permission enforcement (section 5) and actor stamping (section 3) sit inside the
 
 ### 1.2 Contract package
 
-`packages/contract` holds a Zod input schema and output schema per operation. It is the pinned, expensive-to-retrofit asset. Consumers of the package: server-side validation, the `hydra` CLI, the web app (`client-core`, [./14-web-app.md](./14-web-app.md)), the plugin public-API client, and the workflow editor's schema-driven autocomplete.
+`packages/contract` holds, per operation: its id, a Zod input schema, a Zod output schema, the grant it requires (section 5), and its HTTP route (section 1.4). It is the pinned, expensive-to-retrofit asset. Consumers of the package: server-side validation, the `hydra` CLI, the web app (`client-core`, [./14-web-app.md](./14-web-app.md)), the plugin public-API client, and the workflow editor's schema-driven autocomplete.
 
-OpenAPI is generated from the schemas with zod-openapi-style tooling. No framework derives routes; HTTP routes are hand-written proxies.
+OpenAPI is generated from the schemas with zod-openapi-style tooling. No framework derives routes; HTTP routes are hand-written proxies that read the contract's route table.
 
 RPC-framework adoption (tRPC, oRPC, Effect RPC) is deliberately deferred post-v1 ([ADR 0013](../adr/0013-agents-operate-hydra-through-the-public-api.md)).
 
-**Open:** the HTTP route style (resource paths with methods vs one RPC-style path per operation) and the error envelope shape beyond the 403 rule in section 5 are not pinned. The contract package's schemas are the source of truth either way.
+### 1.3 Operation vocabulary
 
-**Open:** operation naming. Sources use three styles for the same nouns: grant families are plural (`tasks`, `sessions`), built-in action ids are singular dotted (`task.create`, `workflow.run`), CLI nouns are singular (`hydra task search`), and two ops are named in profile text as `sessions.spawn` / `workflows.run`. One canonical operation-id convention must be chosen and mapped onto all three surfaces.
+One identifier names an operation on every surface ([ADR 0021](../adr/0021-one-operation-vocabulary-coarse-grants-explicit-routes.md)):
 
-### 1.3 Transports
+- **Operation id** = `<entity>.<verb>`, entity singular: `task.create`, `session.spawn`, `workflow.submit`, `runner.drain`. Every entity is its own operation family.
+- **Built-in workflow action id** = the operation id, unchanged. The built-in actions *are* the operations ([./07-workflows.md](./07-workflows.md) section 8).
+- **CLI** = the id split on the dot: `hydra task create`, `hydra session spawn`, `hydra runner drain`. No aliases, no second spelling.
+- **Grant** = `<family>.<verb>` in the coarse grant vocabulary of [./13-security.md](./13-security.md) section 6.1. Grant families are *not* one-to-one with operation families: `infra.write` covers `runner.*`, `plugin.*`, `provider.*` and `controller.*`. The operation-to-grant mapping is an explicit table in the contract package; a 403 and the CLI's `--help` both name the grant, so an agent never has to guess it.
+
+Standard verbs, used with the same meaning on every entity that has them:
+
+| Verb | Meaning |
+|---|---|
+| `query` | the one list operation of an entity: filters (including `text` where full-text search exists) plus pagination; no filters lists everything; returns `items: <Entity>[]`. There is no `list` and no `search` anywhere in the catalogue. |
+| `read` | one entity by id |
+| `create` / `update` / `delete` | the obvious; `update` is a partial patch |
+| custom verbs | `spawn`, `steer`, `run`, `submit`, `emit`, `cancel`, `rerun`, `drain`, ...: named per entity in section 2 |
+
+**Rule:** `<entity>.query` returns `<Entity>[]`. Something that returns another type is another entity's operation (transcript passages are `transcript.query`, not `session.query { text }`).
+
+**Named exception:** `memory` keeps the verbs `list`, `read`, `search`, `write`, `append`, `delete` pinned by [ADR 0020](../adr/0020-assistant-memory-is-reached-only-through-the-api.md) and tested with real agents in [Prototype: assistant memory interface](https://github.com/rogierpennink/hydra/issues/31). `list` returns the index and `search` returns matches, so they could not be one `query` under the rule above anyway.
+
+### 1.4 Transports and route style
 
 Two transports, one contract:
 
@@ -43,83 +61,256 @@ The web app additionally holds one WebSocket for live topics (subscriptions only
 
 A Hydra MCP server is not a v1 transport (section 10).
 
-## 2. Operation inventory
+**Routes are resource paths with HTTP methods**, under `/api/v1/`. Every operation's `{ method, path }` is written explicitly in the contract's route table; the conventions below are what the table follows, and any exception (an irregular plural, a nested resource) is simply written in the table. One CI test asserts that operations and routes are one-to-one.
 
-The inventory is listed at family level. Families match the grant families of the permission model ([./13-security.md](./13-security.md)) where one exists. "Pinned" means a ticket named the operation; entity semantics belong to the linked document. Items marked **Open:** are operations an implementer clearly needs that no ticket pinned.
+| Operation shape | Route | Example |
+|---|---|---|
+| `X.query` | `GET /api/v1/<xs>` + query string | `GET /api/v1/tasks?label=bug&label=ui&status=open&text=crash` |
+| `X.read` | `GET /api/v1/<xs>/{id}` | `GET /api/v1/sessions/s_12` |
+| `X.create` | `POST /api/v1/<xs>` | `POST /api/v1/tasks` |
+| `X.update` | `PATCH /api/v1/<xs>/{id}` | `PATCH /api/v1/tasks/t_9` |
+| `X.delete` | `DELETE /api/v1/<xs>/{id}` | `DELETE /api/v1/tasks/t_9` |
+| custom verb on one entity | `POST /api/v1/<xs>/{id}/<verb>` | `POST /api/v1/sessions/s_12/interrupt`, `POST /api/v1/runs/r_3/rerun` |
+| custom verb without an entity | `POST /api/v1/<xs>/<verb>` | `POST /api/v1/workflows/submit`, `POST /api/v1/events/emit` |
+| owned sub-resource | `.../{id}/<sub>...` | `GET /api/v1/sessions/s_12/transcript`, `PUT /api/v1/assistants/a_1/memory/core` |
 
-### tasks
+Path nouns are plural (`/tasks`) although operation ids are singular; that is the one place the two spellings differ. Query strings repeat the key for list-valued filters (`label=a&label=b`); the generic client in `client-core` serializes from the Zod input schema, so neither the CLI nor the web app hand-builds URLs. `me` is accepted wherever an id names the caller's own session or assistant (`/api/v1/assistants/me/memory`): a session token resolves it, a user credential gets 400 `validation`.
 
-Pinned: `search` (SQLite FTS over title + description, combined with structured filters over refs, labels, status, project), `read`, `create`, `update` (any field including status, priority, labels; provenance is append-only), `delete` (hard delete is allowed by the Task model; which grant verb covers it is settled in [./13-security.md](./13-security.md), the `worker` profile has read/create/update only). The built-in `task.query` action is exact-identity matching over refs/labels/status/project and is the structured-filter subset of `search`, reachable over HTTP by the parity rule. Semantics: [./09-tasks.md](./09-tasks.md).
+### 1.5 Success and error shapes
 
-### runs
+**Success** bodies are the operation's output schema, bare: no `{ data: ... }` wrapper.
 
-Pinned: create a run directly (manual run of a workflow, supplying declared inputs, no event), read the run record (frozen plan, inputs, trigger event, per-step records, failure reason, stored triage verdict), re-run (mode `replay` or `re-stamp`, default `re-stamp`), cancel (a forever-waiting run is visible and cancelable). Semantics: [./07-workflows.md](./07-workflows.md).
+**Errors** use one envelope; the HTTP status is derived from the code:
 
-### workflows
+```json
+{ "error": { "code": "forbidden", "message": "missing grant session.spawn", "details": { "grant": "session.spawn" } } }
+```
 
-Pinned: create/read/update/delete workflow definitions (declarative data; editing never affects in-flight runs), `workflows.run` (start a run, the same operation the built-in `workflow.run` action calls), trigger pause/resume for a tripped spawn bound (resume optionally discards the held backlog), list the held events of a paused trigger. Semantics: [./07-workflows.md](./07-workflows.md), breaker semantics in [./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md).
+- `code` is a closed enum in the contract, extended additively: `unauthenticated` (401), `forbidden` (403), `validation` (400), `not_found` (404), `conflict` (409), `invalid_state` (409), `cap_exceeded` (422), `internal` (500).
+- `details` is typed per code: `forbidden` carries `{ grant }`; `cap_exceeded` carries `{ size, cap }` or `{ count, cap }`; `validation` carries `{ issues: ZodIssue[] }`.
+- `message` is for people and is never parsed.
+- **One error per response.** The service layer runs its checks in a fixed order and the first failing check is the response: `unauthenticated`, then the static grant check (`forbidden`, before any entity is touched), then `validation`, then `not_found`, then entity-dependent `forbidden` (the `memory` scope rule, section 6.4), then business rules (`conflict`, `invalid_state`, `cap_exceeded`), then `internal`. A caller lacking a grant learns that before learning whether the entity exists. `validation` is the one code that reports everything wrong at once, so a caller fixes every field in one retry.
 
-### sessions
+The `hydra` CLI prints `message` (and, for `forbidden`, the grant on its own line); `--json` prints the envelope verbatim.
 
-Pinned: `sessions.spawn` (start a session: agent, prompt, provider instance, model selection, access mode, workspace spec or none), send input (opens a turn on an idle session, steers a busy one; result reports `opened | steered`), queued input edit/cancel (controller-owned queue), interrupt, stop, respond to an approval request (`allow | allow_always | deny | cancel`), read the normalized transcript, list sessions, continue a session (`resume | fork`). Assistants additionally recall their own past conversations through FTS over their own transcripts (pinned by [Assistant design](https://github.com/rogierpennink/hydra/issues/17)). Session semantics: [./06-providers.md](./06-providers.md), [./12-assistants.md](./12-assistants.md).
+### 1.6 Pagination and sorting
 
-**Open:** whether transcript recall is a `sessions` search operation with an assistant-scoped filter or a separate assistant-family operation.
+Every `query` operation takes `{ limit?, cursor?, sort? }` and returns `{ items, nextCursor? }`. Cursors are opaque strings; the default `limit` is 50 and the hard maximum 500. `sort` is `{ field, direction }` over an enum of allowed fields declared per operation. Inside the cursor the controller uses keyset pagination for stable sorts and an offset for relevance-sorted full-text results; callers never see the difference. There are no page numbers and no total counts in v1: the web app pages forward ("load more"), and jumping to a range is done with filters (`run.query { since, until }`), not pagination.
 
-### subscriptions
+## 2. Operation catalogue
 
-Pinned: register a session-held subscription (section 7). Runs' subscriptions are instantiated by the controller from signal triggers and have no API surface.
+The catalogue below is normative for operation ids, the grant each requires and the route family. Input and output shapes are the contract package's; entity semantics belong to the linked document. Every `query` takes the pagination parameters of section 1.6 in addition to the filters listed.
 
-**Open:** list and cancel for session-held subscriptions, and the shape of the registration input (the one pinned example is the target form `run:1234`; whether external refs, event kinds, or CEL correlation expressions are accepted is not pinned).
+### task
 
-### notifications
+Semantics: [./09-tasks.md](./09-tasks.md).
 
-Pinned: create (`notify`, the built-in action and the op behind it), list/read (the in-app center and the check-in needs-you list are the same record stream), `notifications.act` (decide a decision notification; a decision may carry a bound operation, see section 3.2). Record and router: [./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md).
+| Operation | Input | Grant | Route |
+|---|---|---|---|
+| `task.query` | `TaskFilter` (below) | `task.read` | `GET /tasks` |
+| `task.read` | `{ taskId }` | `task.read` | `GET /tasks/{id}` |
+| `task.create` | `{ title, description, priority?, labels?, projectId?, provenance? }` | `task.create` | `POST /tasks` |
+| `task.update` | `{ taskId, ...changes }` | `task.update` | `PATCH /tasks/{id}` |
+| `task.delete` | `{ taskId }` | `task.delete` | `DELETE /tasks/{id}` |
 
-### events
+```ts
+interface TaskFilter {
+  refs?: string[]        // provenance External Refs, canonical form, exact match
+  labels?: string[]
+  status?: TaskStatus[]
+  projectId?: string
+  text?: string          // SQLite FTS over title + description
+}
+```
 
-Pinned: emit a synthetic event that flows the persisted pipeline (the `manual` source; used to test triggers and for agents to poke subscriptions), read the event log filtered by connection joined to its effect rows (the Intake per-connection events view, verdict-stamped, held events included). Pipeline: [./08-events-and-connections.md](./08-events-and-connections.md).
+Within one field the values are **any-of**; across fields the filter is **and**. No `or` across fields and no negation in v1. `TaskFilter` is defined once in the contract and used by the `task.query` operation and the identically named built-in action; the guard-before-agent pattern in [./07-workflows.md](./07-workflows.md) is `task.query` with `refs` set and `text` absent.
 
-### connections
+### workflow, trigger, run
 
-Two grants: `connections.manage` (create, edit, delete, set credentials, set labels including the default topic, read status) and `connections.use` (act via a connection: plugin-contributed actions such as `github.merge` name the connection they act as). Semantics: [./08-events-and-connections.md](./08-events-and-connections.md).
+Semantics: [./07-workflows.md](./07-workflows.md); breaker semantics in [./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md).
 
-### runners (grant family `infra`)
+| Operation | Input | Grant | Route |
+|---|---|---|---|
+| `workflow.query` | `{ enabled?, text? }` | `workflow.read` | `GET /workflows` |
+| `workflow.read` | `{ workflowId }` | `workflow.read` | `GET /workflows/{id}` |
+| `workflow.create` / `update` / `delete` | definition ([./07](./07-workflows.md) section 1) | `workflow.write` | `POST` / `PATCH` / `DELETE /workflows[/{id}]` |
+| `workflow.run` | `{ workflowId, inputs }` -> `{ runId }` | `workflow.run` | `POST /workflows/{id}/run` |
+| `workflow.submit` | `{ definition, inputs }` -> `{ runId }` | `workflow.submit` | `POST /workflows/submit` |
+| `trigger.query` | `{ workflowId?, kind?, status? }` | `workflow.read` | `GET /triggers` |
+| `trigger.read` | `{ triggerId }` (includes the held-event count) | `workflow.read` | `GET /triggers/{id}` |
+| `trigger.pause` | `{ triggerId }` | `workflow.write` | `POST /triggers/{id}/pause` |
+| `trigger.resume` | `{ triggerId, discardHeld?: boolean }` | `workflow.write` | `POST /triggers/{id}/resume` |
+| `run.query` | `{ workflowId?, status?, since?, until?, actor? }` | `run.read` | `GET /runs` |
+| `run.read` | `{ runId }` (frozen plan, inputs, trigger event, step records, failure reason, triage verdict, live subscriptions) | `run.read` | `GET /runs/{id}` |
+| `run.cancel` | `{ runId }` | `run.write` | `POST /runs/{id}/cancel` |
+| `run.rerun` | `{ runId, mode?: "re-stamp" \| "replay" }` -> `{ runId }` | `workflow.run` | `POST /runs/{id}/rerun` |
 
-Pinned: mint a single-use join token, list runners with state and capabilities, set user labels, override `maxConcurrentSessions`, drain, retire, force-retire an unreachable runner (explicit confirmation), trigger a remote runner upgrade over the runner WebSocket, on-demand capability probe of a runner for a provider instance. Semantics: [./03-controller-and-runners.md](./03-controller-and-runners.md), [./06-providers.md](./06-providers.md).
+`workflow.submit` starts a run from a workflow definition that is not stored: the same `Workflow` shape minus `id` and timestamps, validated exactly as a stored one. `workflow.run` loads the stored definition and takes the same internal path. The outside world, agents included, only ever writes *workflows*; the frozen execution plan on a run is internal vocabulary. A run's held events are read with `event.query { triggerId }`.
 
-### workspaces
+### session, input, transcript
 
-No ticket pinned workspace operations. Workspaces are provisioned as a side effect of session and run placement.
+Semantics: [./06-providers.md](./06-providers.md), [./12-assistants.md](./12-assistants.md).
 
-**Open:** which direct workspace operations exist (list, read, provision a primary workspace, delete/teardown, mark lost) and which grant family covers them (the assistant profile "denies workspaces", which implies a grant exists).
+| Operation | Input | Grant | Route |
+|---|---|---|---|
+| `session.query` | `{ status?, agentId?, assistantId?, runnerId?, runId?, actor?, since?, until? }` | `session.read` | `GET /sessions` |
+| `session.read` | `{ sessionId }` (the record: status, agent, runner, workspace, usage) | `session.read` | `GET /sessions/{id}` |
+| `session.spawn` | `{ agentId, prompt, instanceId?, model?, accessMode?, workspace? }` -> `{ sessionId }` | `session.spawn` | `POST /sessions` |
+| `session.continue` | `{ sessionId, mode: "resume" \| "fork", prompt }` -> `{ sessionId }` | `session.spawn` | `POST /sessions/{id}/continue` |
+| `session.input` | `{ sessionId, content }` -> `{ inputId, result: "opened" \| "steered" }` | `session.steer` | `POST /sessions/{id}/input` |
+| `session.interrupt` / `session.stop` | `{ sessionId }` | `session.steer` | `POST /sessions/{id}/interrupt` / `.../stop` |
+| `session.respond` | `{ sessionId, requestId, decision: "allow" \| "allow_always" \| "deny" \| "cancel" }` | `session.steer` | `POST /sessions/{id}/respond` |
+| `input.query` | `{ sessionId }` (the controller-owned queue) | `session.read` | `GET /sessions/{id}/inputs` |
+| `input.update` / `input.cancel` | `{ inputId, content }` / `{ inputId }` | `session.steer` | `PATCH` / `DELETE /sessions/{id}/inputs/{inputId}` |
+| `transcript.read` | `{ sessionId, cursor? }` -> the normalized transcript | `session.read` | `GET /sessions/{id}/transcript` |
+| `transcript.query` | `{ text, sessionId?, agentId?, assistantId?, actor?, since?, until? }` -> `items: Passage[]` | `session.read` | `GET /transcripts` |
 
-### agents and assistants
+```ts
+interface Passage { sessionId: string; turnId: string; at: string; excerpt: string }
+```
 
-Pinned: create/read/update/delete agents (prompt, provider, capabilities, permission profile), create/read/update/delete assistants (an agent plus channel bindings plus memory), manage channel bindings, edit the heartbeat standing prompt and enable state, delete an assistant (confirmed action; memory dies with it). Semantics: [./12-assistants.md](./12-assistants.md).
+`transcript.query` is full-text search over normalized transcripts and is the transcript-recall operation of [./12-assistants.md](./12-assistants.md): an assistant recalls its own conversations with `assistantId: "me"`, and any agent granted `session.read` searches any session (a learning workflow reading past sessions uses the same operation). `actor: "me"` on `session.query` and `transcript.query` is the shortcut for "sessions this session spawned"; it is a filter on the actor stamp, not a permission.
 
-**Open:** the grant family for agent and assistant management (not among the ten named families).
+### subscription
+
+Semantics: [./08-events-and-connections.md](./08-events-and-connections.md) section 7; the session-side behaviour is section 7 of this document.
+
+| Operation | Input | Grant | Route |
+|---|---|---|---|
+| `subscription.create` | `{ target: SubscriptionTarget }` -> `{ subscriptionId }` | `subscription.write` | `POST /subscriptions` |
+| `subscription.query` | `{ holder?: { kind: "session" \| "run", id }, target?: SubscriptionTarget }` | `subscription.read` | `GET /subscriptions` |
+| `subscription.cancel` | `{ subscriptionId }` | `subscription.write` | `DELETE /subscriptions/{id}` |
+
+```ts
+type SubscriptionTarget =
+  | { kind: "run";     runId: string }       // run.* events for that run
+  | { kind: "session"; sessionId: string }   // session.* events for that session (ended, needs approval)
+  | { kind: "ref";     ref: string }         // any event whose refs include this External Ref (a PR's checks, reviews, merge)
+  | { kind: "request"; requestId: string }   // the decision on a Permission Request
+```
+
+The controller expands a target into the pipeline's matching condition and stores both, so the web app shows "waiting on run r_3" without parsing anything. A session token with no `holder` lists its own subscriptions; a user credential must name a holder. `subscription.cancel` accepts session-held subscriptions only; a run-held one (instantiated from a signal trigger) ends with its run, and cancelling it directly is 409 `invalid_state`. No free-form CEL target in v1: the four kinds already compose into everything the tickets asked for, and CEL is the escape hatch if dogfooding proves them short.
+
+### notification
+
+Record and router: [./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md).
+
+| Operation | Input | Grant | Route |
+|---|---|---|---|
+| `notification.query` | `{ kind?, unresolved?, unread?, since? }` | `notification.read` | `GET /notifications` |
+| `notification.read` | `{ notificationId }` | `notification.read` | `GET /notifications/{id}` |
+| `notification.create` | producer input `{ kind, title, body?, actions?, subject? }` -> `{ notificationId }` | `notification.write` | `POST /notifications` |
+| `notification.update` | `{ notificationId, read?: boolean }` | `notification.write` | `PATCH /notifications/{id}` |
+| `notification.act` | `{ notificationId, actionId }` | `notification.write` | `POST /notifications/{id}/act` |
+
+`notification.create` is the operation the tickets called `notify`; the built-in action carries the operation's name. `notification.act` decides a decision notification and executes its bound operation (section 3.2).
+
+### event
+
+Pipeline: [./08-events-and-connections.md](./08-events-and-connections.md).
+
+| Operation | Input | Grant | Route |
+|---|---|---|---|
+| `event.query` | `{ connectionId?, kind?, triggerId?, runId?, since?, until? }` (joined to effect rows; `triggerId` lists a paused trigger's held events) | `event.read` | `GET /events` |
+| `event.read` | `{ eventId }` | `event.read` | `GET /events/{id}` |
+| `event.emit` | `{ kind, payload, connectionId? }` -> `{ eventId }` (the `manual` source) | `event.emit` | `POST /events/emit` |
+
+### connection
+
+Semantics: [./08-events-and-connections.md](./08-events-and-connections.md).
+
+| Operation | Input | Grant | Route |
+|---|---|---|---|
+| `connection.query` / `connection.read` | `{ type?, status? }` / `{ connectionId }` (status, labels, credential *references*) | `connection.read` | `GET /connections[/{id}]` |
+| `connection.create` / `update` / `delete` | record fields incl. labels and default topic | `connection.manage` | `POST` / `PATCH` / `DELETE /connections[/{id}]` |
+| `connection.setCredentials` | `{ connectionId, ... }` (values in, references out) | `connection.manage` | `POST /connections/{id}/credentials` |
+
+`connection.use` is a grant, not an operation: it is what a plugin-contributed action (`github.merge`) requires when it names the Connection it acts as. In v1 nothing a session token calls directly requires it (sessions cannot invoke plugin actions outside a run), so it is dormant until the Hydra MCP server or the agent-tools extension point lands.
+
+### runner, plugin, provider, controller (grant family `infra`)
+
+Semantics: [./03-controller-and-runners.md](./03-controller-and-runners.md), [./05-plugins.md](./05-plugins.md), [./06-providers.md](./06-providers.md), [./15-packaging-and-operations.md](./15-packaging-and-operations.md).
+
+| Operation | Input | Grant | Route |
+|---|---|---|---|
+| `runner.query` / `runner.read` | `{ state?, label? }` / `{ runnerId }` (state, probed facts, capabilities) | `infra.read` | `GET /runners[/{id}]` |
+| `runner.update` | `{ runnerId, name?, labels?, maxConcurrentSessions? }` | `infra.write` | `PATCH /runners/{id}` |
+| `runner.drain` / `runner.retire` / `runner.upgrade` | `{ runnerId }`; `retire` takes `force?: boolean` for an unreachable runner | `infra.write` | `POST /runners/{id}/drain` etc. |
+| `runner.probe` | `{ runnerId, instanceId }` -> capability snapshot | `infra.write` | `POST /runners/{id}/probe` |
+| `runner.mintJoinToken` | `{}` -> single-use join token | `infra.write` | `POST /runners/join-tokens` |
+| `plugin.query` / `plugin.read` | `{}` / `{ pluginId }` (state, config, contributions) | `infra.read` | `GET /plugins[/{id}]` |
+| `plugin.enable` / `plugin.disable` | `{ pluginId }` | `infra.write` | `POST /plugins/{id}/enable` etc. |
+| `plugin.configure` | `{ pluginId, config }` (deactivate + reactivate) | `infra.write` | `PUT /plugins/{id}/config` |
+| `provider.query` / `provider.read` | provider instances and their capability snapshots | `infra.read` | `GET /providers[/{id}]` |
+| `provider.create` / `update` / `delete` | instance config ([./06](./06-providers.md)) | `infra.write` | `POST` / `PATCH` / `DELETE /providers[/{id}]` |
+| `controller.read` | `{}` -> identity, version, update availability, default runner | `infra.read` | `GET /controller` |
+| `controller.update` | `{ defaultRunnerId? }` | `infra.write` | `PATCH /controller` |
+| `controller.mintPromotionToken` / `controller.export` / `controller.import` | promotion ([./15](./15-packaging-and-operations.md)) | `infra.write` | `POST /controller/promotion-tokens`, `.../export`, `.../import` |
+
+### workspace
+
+Semantics: [./03-controller-and-runners.md](./03-controller-and-runners.md).
+
+| Operation | Input | Grant | Route |
+|---|---|---|---|
+| `workspace.query` / `workspace.read` | `{ runnerId?, resourceId?, kind?, status? }` / `{ workspaceId }` | `workspace.read` | `GET /workspaces[/{id}]` |
+| `workspace.provision` | `{ resourceId, runnerId }` -> a primary workspace (adopts an existing local checkout in place) | `workspace.write` | `POST /workspaces` |
+| `workspace.dispose` | `{ workspaceId }` (an ephemeral, including one `kept-on-failure`; a primary is never torn down by Hydra: 409 `invalid_state`) | `workspace.write` | `DELETE /workspaces/{id}` |
+
+Workspaces otherwise appear as side effects of session and run placement; `lost` is set by runner retirement, never by an operation.
+
+### agent, assistant, binding, conversation
+
+Semantics: [./12-assistants.md](./12-assistants.md).
+
+| Operation | Input | Grant | Route |
+|---|---|---|---|
+| `agent.query` / `agent.read` | | `agent.read` | `GET /agents[/{id}]` |
+| `agent.create` / `update` / `delete` | prompt, provider instance, capabilities, `profileId` (assigning a permission profile is an `agent.update`) | `agent.write` | `POST` / `PATCH` / `DELETE /agents[/{id}]` |
+| `assistant.query` / `assistant.read` | | `agent.read` | `GET /assistants[/{id}]` |
+| `assistant.create` / `update` / `delete` | an agent plus heartbeat (standing prompt, enabled); `delete` is the confirmed action that deletes memory and bindings | `agent.write` | `POST` / `PATCH` / `DELETE /assistants[/{id}]` |
+| `binding.query` / `create` / `update` / `delete` | channel bindings of an assistant | `agent.read` / `agent.write` | `GET` / `POST /assistants/{id}/bindings`, `PATCH` / `DELETE /assistants/{id}/bindings/{bindingId}` |
+| `conversation.query` / `conversation.read` | `{ assistantId, ... }` (lineage of sessions) | `agent.read` | `GET /assistants/{id}/conversations[/{conversationId}]` |
 
 ### memory (assistant-scoped)
 
-Pinned: `list`, `read`, `search`, `write`, `append`, `delete`. Section 6.4 specifies them. The web app edits the same documents through the same operations.
+Section 6.4 specifies the operations. Grant family `memory` (`read`: `list`, `read`, `search`; `write`: `write`, `append`, `delete`). Routes: `GET /assistants/{id}/memory` (list), `GET .../memory/search?text=`, `GET` / `PUT` / `DELETE .../memory/{name}`, `POST .../memory/{name}/append`. `{id}` is `me` for a session token (section 6.4 pins the scope rule).
 
-Grant: the provisional `memory` family, see [./13-security.md](./13-security.md) (ticket 18 names ten families without it; ADR 0020 makes memory an API surface: an assistant session writes its own memory, a session under the `worker` profile never reaches it, the user reaches every assistant's memory).
+### permission, profile
 
-**Open:** the `memory` grant family is provisional; its verbs and its place in the shipped profiles are settled in [./13-security.md](./13-security.md).
+Content: [./13-security.md](./13-security.md).
 
-### permissions
+| Operation | Input | Grant | Route |
+|---|---|---|---|
+| `permission.request` | `{ grant, reason, operation?: { op, input } }` -> `{ requestId, subscriptionId? }` | none (granted to every profile) | `POST /permissions/request` |
+| `permission.decide` | `{ requestId, outcome: "session" \| "profile" \| "deny" }` | `permission.write` | `POST /permissions/requests/{id}/decide` |
+| `profile.query` / `profile.read` | | `permission.read` | `GET /profiles[/{id}]` |
+| `profile.create` / `update` / `delete` | `{ name, grants[] }`; the three shipped profiles can be edited, not deleted | `permission.write` | `POST` / `PATCH` / `DELETE /profiles[/{id}]` |
 
-Pinned: `permissions.request` (granted to every profile; creates a Permission Request notification), decide a request (`this session only` or `add to profile`), create/read/update/delete permission profiles, assign a profile to an agent. Content: [./13-security.md](./13-security.md).
+Permission Requests are Notifications; pending ones are listed with `notification.query { kind: "permission-request" }`, and the user's decision in the web app is `notification.act` over a bound `permission.decide`. Section 5 covers the request flow.
 
-### admin
+### secret, credential
 
-Pinned: plugin enable/disable and config (config forms generated from manifest schemas; change = deactivate + reactivate), secrets (owner-scoped, references only in responses, grant `secrets`), user credentials (login, API key mint/revoke, WebSocket ticket, grant `credentials`), first-run setup (the one-time setup URL drives onboarding wholly through web app + API), promotion (mint promotion token, export/import bundle), update notifications, provider instances and their capability snapshots. Semantics: [./05-plugins.md](./05-plugins.md), [./13-security.md](./13-security.md), [./15-packaging-and-operations.md](./15-packaging-and-operations.md).
+Semantics: [./13-security.md](./13-security.md), [./15-packaging-and-operations.md](./15-packaging-and-operations.md).
 
-### projects and resources
+| Operation | Input | Grant | Route |
+|---|---|---|---|
+| `secret.query` | `{ owner? }` -> references only, never values | `secret.read` | `GET /secrets` |
+| `secret.set` / `secret.delete` | `{ owner, name, value }` / `{ owner, name }` | `secret.write` | `PUT` / `DELETE /secrets/{owner}/{name}` |
+| `apiKey.query` / `apiKey.create` / `apiKey.revoke` | user API keys (mint returns the token once) | `credential.read` / `credential.write` | `GET` / `POST /api-keys`, `DELETE /api-keys/{id}` |
+| `user.setPassword` | `{ current, next }` | `credential.write` | `POST /user/password` |
+| `auth.login` | `{ username, password }` -> bearer token | none (pre-auth) | `POST /auth/login` |
+| `auth.wsTicket` | `{}` -> short-lived WebSocket ticket | any authenticated caller | `POST /auth/ws-ticket` |
+| `setup.*` | first-run setup, reachable only with the one-time setup token ([./15](./15-packaging-and-operations.md)) | none (pre-auth) | `POST /setup/...` |
 
-No ticket pinned operations for Project or Resource management (create, link resources and their Connection, per-resource setup command, `.workspaceinclude`).
+### project, resource
 
-**Open:** the project/resource operation set and its grant family.
+Semantics: [./02-domain-model.md](./02-domain-model.md).
+
+| Operation | Input | Grant | Route |
+|---|---|---|---|
+| `project.query` / `read` / `create` / `update` / `delete` | `{ name, description? }` | `project.read` / `project.write` | `/projects[/{id}]` |
+| `resource.query` / `read` / `create` / `update` / `delete` | kind, remote, `connectionId`, setup command, `.workspaceinclude` convention, project link | `resource.read` / `resource.write` | `/resources[/{id}]` |
 
 ## 3. Actor stamping
 
@@ -128,20 +319,23 @@ No ticket pinned operations for Project or Resource management (create, link res
 Every mutation through the service layer is stamped with an actor in the append-only event log ([./04-state-store.md](./04-state-store.md)):
 
 ```
-actor: "user" | "session:<sessionId>"
+actor: "user" | "session:<sessionId>" | "run:<runId>" | "plugin:<pluginId>"
 ```
 
-The event log is the audit log; there is no separate audit subsystem. Multi-user later widens the actor field (a user id instead of the constant `user`) and never restructures it. Security events and actor-stamped mutations keep 90-day retention ([./13-security.md](./13-security.md)).
+- `user`: an API key or the web app's login token. Full parity; no profile applies.
+- `session:<id>`: a session token. Bounded by the agent's permission profile (section 5).
+- `run:<id>`: a built-in action step executing inside a run (`task.create` on a cron tick). **Ungated**: the workflow was authored by the user, and its action steps run with the user's parity. Agent steps are sessions and act as `session:<id>` under their own profile, which is what keeps a `worker` session from fanning out.
+- `plugin:<id>`: a plugin calling the service layer in-process through the public-API client capability. **Ungated**: the user enabled the plugin and granted the capability ([./05-plugins.md](./05-plugins.md)).
+
+The event log is the audit log; there is no separate audit subsystem. Multi-user later widens the `user` value to a user id and never restructures the field. Security events and actor-stamped mutations keep 90-day retention ([./13-security.md](./13-security.md)).
 
 The actor also appears wherever the domain records who did something: task provenance entries (`{ref?, eventId?, runId?, at, actor}`), the `actor` field of the event envelope (platform events such as `task.created` carry it there, never duplicated in the payload; [./08-events-and-connections.md](./08-events-and-connections.md)), permission requests, memory writes (a provenance line on writes distilled from tainted conversations).
 
-The actor is derived from the credential, never supplied by the caller: an API key resolves to `user`, a session token resolves to `session:<id>` (section 4).
-
-**Open:** (owned here) the actor value for mutations made in-process by workflow action steps (`task.create` on a cron tick, with no session and no user present) and by plugins holding the public-API client, and which grants bound them. The two-value set above does not cover them; the run id is the obvious candidate but nothing pins it. Widening the enum is allowed, restructuring is not.
+The actor is derived from the credential or the in-process caller, never supplied by the caller: an API key resolves to `user`, a session token resolves to `session:<id>` (section 4), the run engine and the plugin host supply theirs.
 
 ### 3.2 Bound Notification actions
 
-A decision Notification may bind an operation (for example "Start Bugfix" = `workflows.run` with workflow X and task Y; "Merge dev bumps" = `github.merge` over three PRs). The operation executes through `notifications.act` when the user decides, so the actor is `user`. The operation was authored by an agent. Declaration, validation and execution of bound actions are the spec's consolidated proposal in [./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md), not a pinned decision.
+A decision Notification may bind an operation (for example "Start Bugfix" = `workflow.run` with workflow X and task Y; "Merge dev bumps" = `github.merge` over three PRs). The operation executes through `notification.act` when the user decides, so the actor is `user`. The operation was authored by an agent. Declaration, validation and execution of bound actions are the spec's consolidated proposal in [./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md), not a pinned decision.
 
 **Open:** authorisation of agent-authored bound operations: whether the bound operation must have been within the authoring session's permission profile at authoring time, or only within the user's (unrestricted) parity at click time. The Intake handoff to [Assemble the v1 spec](https://github.com/rogierpennink/hydra/issues/21) names this as needing an answer.
 
@@ -163,15 +357,15 @@ Long-lived, opaque, revocable, minted in the web app or via `hydra login` (passw
 
 ## 5. Permission enforcement
 
-Every agent carries a permission profile; its session tokens inherit it. Enforcement happens in the service layer, so it binds HTTP callers and in-process callers alike. Parity with the user is the ceiling, not the default.
+Every agent carries a permission profile; its session tokens inherit it. Enforcement happens in the service layer, so it binds HTTP callers and in-process session callers alike (run and plugin actors are ungated, section 3.1). Parity with the user is the ceiling, not the default.
 
-Grant families (verbs per family are read/write/run-style): the ten pinned by ticket 18 (`tasks`, `workflows`, `sessions`, `notifications`, `subscriptions`, `connections.use`, `connections.manage`, `infra`, `secrets`, `credentials`) plus the provisional `memory` family. Finer grants may land inside a family later without breaking existing profiles. The family table, verbs, and the three shipped profiles (`assistant`, `worker`, `unrestricted`) are specified in [./13-security.md](./13-security.md); this document does not restate them.
+Grant families and verbs, the operation-to-grant table's vocabulary, and the three shipped profiles (`assistant`, `worker`, `unrestricted`) are specified in [./13-security.md](./13-security.md) section 6; this document does not restate them. Section 2 names the grant beside every operation.
 
-**403 rule (hard rule):** a denied operation returns 403 and the response names the missing grant. The CLI surfaces that name verbatim so the agent can ask for exactly it.
+**Grants are unscoped in v1 (hard rule):** a grant on a family covers every entity in that family. `session.read` reads every session's transcript, including other assistants' conversations; "the sessions I spawned" is a filter (`actor: "me"`), not a boundary. Scoped grants are the post-v1 "finer grants inside a family" that [./13-security.md](./13-security.md) reserves room for. The sole v1 exception is `memory` (section 6.4): a session token's memory operations are pinned to that session's assistant.
 
-**Escalation:** `permissions.request <grant>` is granted to every profile. It creates a Permission Request notification. The user approves for this session only or bakes the grant into the profile. The agent learns the outcome through a subscription and retries; the request never blocks. Escalation UX: [./13-security.md](./13-security.md).
+**403 rule (hard rule):** a denied operation returns 403 and the response names the missing grant (section 1.5). The CLI surfaces that name verbatim so the agent can ask for exactly it.
 
-**Open:** whether `permissions.request` responses teach the follow-up subscription the way spawn-type operations do (section 8), and what the subscription target for a permission request is.
+**Escalation:** `permission.request { grant, reason, operation? }` is granted to every profile. It creates a Permission Request notification, and, when the caller is a session, registers a `{ kind: "request" }` subscription for that session as part of the same operation: nobody asks for a grant without wanting the answer, so the response carries `subscriptionId` and the CLI has nothing to teach. `operation` is optional and informational in v1: it lets the notification say "wants to run `connection.create` with {...}" instead of only naming a grant. The user decides `session` (overlay that dies with the session), `profile` (edit the agent's profile) or `deny`; the decision arrives as queued input and the agent retries the original call itself, so the actor stays `session:<id>`. A one-call outcome (`once`) is post-v1 (section 10). Escalation UX: [./13-security.md](./13-security.md) section 6.4.
 
 ## 6. The `hydra` CLI
 
@@ -198,20 +392,25 @@ Inside a session the `hydra` CLI is the whole of hydra-as-a-tool in v1. It ships
 
 Rules the CLI follows on every subcommand:
 
+- **Command = operation id.** `hydra <entity> <verb>` is `<entity>.<verb>` (section 1.3); `--help` on a command names the grant it requires. Filters and fields are flags (`--label bug --label ui --text crash`); ids are positional.
 - **Agent-addressed help.** `--help` works at any position on every subcommand. Help text is written for an agent reading it mid-task, pi-style: what the command does, its arguments, what to do next. Static help plus 403s that name the missing grant are the two teaching channels.
-- **Output.** Human-readable by default; `--json` on every command emits the contract's output schema.
+- **Output.** Human-readable by default; `--json` on every command emits the contract's output schema (or error envelope) verbatim. Teaching lines ("subscribe with ...") exist only in the human rendering.
 - **Progressive disclosure.** The skill is a minimal skeleton pointing at the CLI's own help; the CLI self-documents deeper levels.
 - **One content channel (hard rule).** Where a command takes document content (`memory write`, `memory append`, task descriptions), content arrives on stdin and nowhere else. There is no inline content flag and no `--file` flag. [Assemble the v1 spec](https://github.com/rogierpennink/hydra/issues/21) delegated the pick between stdin-only and `--file` to the spec; the spec picks stdin-only. Rationale: a model mixed `--content` with a heredoc in the memory experiment ([Prototype: assistant memory interface](https://github.com/rogierpennink/hydra/issues/31)).
 - **Never blocks.** No `--wait` on any command (section 8).
+- **Pagination.** `query` commands page with `--limit` and `--cursor`; `--all` follows `nextCursor` to the end.
 
 **The skill.** One provider-agnostic skill source describes the CLI; each provider adapter materializes it in that provider's native instruction format (Codex takes instructions only as `AGENTS.md` in the cwd, so a Codex session needs a cwd even when workspace-less). Materialization and provider-home isolation are specified in [./06-providers.md](./06-providers.md).
 
-**Pinned command families** (the verbs the tickets named; the full set follows the inventory in section 2):
+**Commands an agent uses most** (the full set is section 2):
 
-- `hydra task search | read | create | update`
-- `hydra events subscribe <target>` (section 7)
+- `hydra task query | read | create | update | delete`
+- `hydra workflow run <id> | submit` (definition on stdin), `hydra run read | cancel`
+- `hydra session spawn | input | read`, `hydra transcript query --text "..." [--assistant me]`
+- `hydra subscription create <target>` (section 7), `hydra subscription query | cancel`
+- `hydra notification create`
 - `hydra memory list | read | search | write | append | delete` (section 6.4)
-- `hydra permissions request <grant>`
+- `hydra permission request <grant> --reason "..."`
 
 ### 6.4 `hydra memory`
 
@@ -228,11 +427,11 @@ Assistant memory is reached only through these operations ([ADR 0020](../adr/002
 
 Enforcement at the write seam (hard rules):
 
-- A `write` or `append` whose resulting size exceeds the document's cap fails. The error names the current size and the cap so the agent can consolidate. The over-cap write is a visible event, never a silent truncation.
-- A `write` that would exceed the topic count cap fails, naming the topic count and its cap.
+- A `write` or `append` whose resulting size exceeds the document's cap fails with `cap_exceeded`, naming the current size and the cap so the agent can consolidate. The over-cap write is a visible event, never a silent truncation.
+- A `write` that would exceed the topic count cap fails with `cap_exceeded`, naming the topic count and its cap.
 - Every write is actor-stamped (section 3). Writes distilled from tainted conversation content carry a one-line provenance marker inside the document ([./13-security.md](./13-security.md)).
 
-Scope: operations act on the memory of the assistant whose session holds the token. The user reaches every assistant's memory through the same operations by naming the assistant (the parameter is the spec's naming, not pinned); the web app's memory view is a client of them.
+**Scope (hard rule, the one scoped family in v1):** memory operations from a session token act on the memory of that session's assistant and on nothing else; `assistantId` (`/assistants/{id}/memory`) is honoured for user credentials only, and a session token naming another assistant gets 403 `forbidden`. A session under a profile without `memory` (the `worker` profile) reaches no memory at all. The user reaches every assistant's memory through the same operations; the web app's memory view is a client of them.
 
 **Open:** whether `delete core` is refused (core is seeded and always injected; the tickets say nothing about deleting it).
 
@@ -246,33 +445,36 @@ Scope: operations act on the memory of the assistant whose session holds the tok
 
 A session may hold Subscriptions directly, without a run. Two use cases justify it: mid-session artifacts (an agent opens PR #87 and subscribes to its CI) and assistants (long-lived, no run to hold claims).
 
-- **Registration** is an ordinary API operation, invoked from the session via `hydra events subscribe <target>` (pinned example: `hydra events subscribe run:1234`).
+- **Registration** is the ordinary `subscription.create` operation (section 2), invoked from the session as `hydra subscription create <target>`, where `<target>` is `<kind>:<id>` (`run:r_3`, `session:s_12`, `request:pr_7`) or a bare External Ref (`github:pr:owner/repo#87`, taken as `ref:`).
 - **Matching** runs in the single persisted pipeline like every subscription ([./08-events-and-connections.md](./08-events-and-connections.md)).
 - **Delivery** is queued input on a turn boundary: rendered text plus the structured payload. Never steering by default. The agent's next turn opens with the match.
-- **Lifetime:** dies with its holder session. On assistant rotation the subscriptions migrate to the successor session. No timeouts.
-- **No polling surface** in v1: there is no "check my subscriptions" operation. The event wakes the session.
+- **Lifetime:** dies with its holder session, or with `subscription.cancel`. On assistant rotation the subscriptions migrate to the successor session. No timeouts.
+- **No polling surface for matches** in v1: there is no "any news?" operation; the event wakes the session. Listing *registrations* (`subscription.query`) exists for cancellation and for the session view.
 
 Platform-auto detection ("this session opened PR #87, subscribe it") is not specified; explicit registration is the primitive.
-
-**Open:** see the subscriptions row in section 2 for the unpinned target vocabulary and list/cancel operations.
 
 ## 8. The no-blocking rule
 
 Every endpoint returns fast. No operation waits for a run, session, approval or permission decision to finish. Consequences:
 
-- Spawn-type operations (`workflows.run`, `sessions.spawn`) return a handle immediately, and the response text teaches the follow-up: `subscribe for updates: hydra events subscribe run:1234`.
+- Spawn-type operations (`workflow.run`, `workflow.submit`, `session.spawn`) return a handle immediately, and the CLI's human rendering teaches the follow-up: `subscribe for updates: hydra subscription create run:r_3`.
 - There is no `--wait` flag anywhere in the CLI.
 - The canonical long-wait pattern for an agent is: start the thing, subscribe to it, end the turn. The matching event arrives as queued input and wakes the session.
-- The same pattern covers permission escalation (section 5) and the assistant heartbeat (a cron trigger delivering queued input, [./12-assistants.md](./12-assistants.md)).
+- Permission escalation (section 5) subscribes the caller automatically; the assistant heartbeat is a cron trigger delivering queued input ([./12-assistants.md](./12-assistants.md)).
 
 ## 9. The ops CLI
 
 The ops CLI is the same `hydra` binary under a user credential: `hydra login` writes the API key to the CLI credential file, after which every API verb runs as actor `user` with unrestricted parity. Commands are identical to what a session sees; only the credential and therefore the profile differ. Role subcommands are specified in [./15-packaging-and-operations.md](./15-packaging-and-operations.md); runner join in [./03-controller-and-runners.md](./03-controller-and-runners.md).
 
-## Post-v1
+## 10. Post-v1
 
-- **Hydra MCP server** - the public API exposed to sessions as typed MCP tools (t3-code-style self-injection). High on the revisit list. V1 keeps the `SessionSpec.mcpServers` passthrough ([./06-providers.md](./06-providers.md)) so it lands without redesign.
+- **Hydra MCP server** - the public API exposed to sessions as typed MCP tools (t3-code-style self-injection). High on the revisit list. V1 keeps the `SessionSpec.mcpServers` passthrough ([./06-providers.md](./06-providers.md)) so it lands without redesign; the operation catalogue maps one-to-one onto tools.
 - **RPC-framework adoption** (tRPC, oRPC, Effect RPC) - deriving routes and clients from the contract. V1 keeps the contract package as the pinned asset so derivation can be added later with evidence.
+- **Scoped grants** ("the sessions you spawned", "this project's tasks") - finer grants inside a family; v1 grants are unscoped except `memory`.
+- **One-call permission outcome (`once`)** - a fourth decision on a Permission Request that carries an `operation`: an overlay row on the session with `remainingUses: 1`, consumed by the first successful call of the named operation, so "may I do X once?" is answerable without a session-wide grant. `permission.request` already carries the `operation` field this needs. Its CLI sugar (`hydra <failed command> --request "<reason>"`, packing the failed call into the request) lands with it.
+- **Bulk operations** (delete-many, cancel-all) - none exist in v1; when they do, they are tagged in the contract and withheld from every profile but `unrestricted` by default, per [./13-security.md](./13-security.md).
+- **Offset pagination and totals** - bolted on beside cursors if usage shows a real need for random access.
+- **CEL subscription targets** - a fifth `SubscriptionTarget` kind carrying a filter over `event`, if the four shorthand kinds prove short.
 - **Read-only memory materialization on runners** (memory as files for native grep, writes still via API) - a pure read convenience addable without touching the write path.
 - **Memory version history** - ruled post-v1; the retrofit is additive (history table beside the live document). The write seam already makes every rewrite a visible actor-stamped event.
 - **Platform-auto subscription detection** - the controller subscribing a session to artifacts it created; explicit registration stays the primitive.
@@ -283,6 +485,7 @@ The ops CLI is the same `hydra` binary under a user credential: `hydra login` wr
 
 Tickets:
 
+- [Public API operation catalogue: naming, route style, grant families](https://github.com/rogierpennink/hydra/issues/38)
 - [Agent-operates-system surface](https://github.com/rogierpennink/hydra/issues/16)
 - [Security & secrets model](https://github.com/rogierpennink/hydra/issues/18)
 - [Prototype: assistant memory interface](https://github.com/rogierpennink/hydra/issues/31)
@@ -302,6 +505,7 @@ Tickets:
 
 ADRs:
 
+- [ADR 0021 - One operation vocabulary, coarse grants, explicit routes](../adr/0021-one-operation-vocabulary-coarse-grants-explicit-routes.md)
 - [ADR 0013 - Agents operate Hydra through the public API, behind one contract with two transports](../adr/0013-agents-operate-hydra-through-the-public-api.md)
 - [ADR 0020 - Assistant memory is reached only through the API](../adr/0020-assistant-memory-is-reached-only-through-the-api.md)
 - [ADR 0017 - The web app is a static pure client of the public API](../adr/0017-the-web-app-is-a-static-pure-client-of-the-public-api.md)

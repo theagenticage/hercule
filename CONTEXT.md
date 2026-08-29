@@ -10,6 +10,14 @@ Ubiquitous language for Hydra, a self-hosted agent orchestration platform. This 
 The product. A controller-plus-runners platform that orchestrates agents doing work on the user's behalf.
 _Avoid_: agentick, agentick-next
 
+**Operation**:
+One named thing the public API can do (`task.create`, `session.spawn`), the same name on every surface: the contract, the HTTP route table, the CLI command, and the built-in workflow action.
+_Avoid_: endpoint, command (bare), method
+
+**Subscription Target**:
+What a session-held subscription waits on: a run, a session, an External Ref, or a Permission Request. The shorthand an agent types (`run:r_3`).
+_Avoid_: filter, topic
+
 ### Work
 
 **Task**:
@@ -59,7 +67,7 @@ An agent with persistent memory, oriented toward delegating work rather than doi
 _Avoid_: persona
 
 **Actor**:
-Who performed an operation against the API: the user, or a session. Stamped on every mutation; widened, never restructured, when multi-user arrives.
+Who performed an operation against the API: the user, a session, a run's built-in action step, or a plugin. Stamped on every mutation; widened, never restructured, when multi-user arrives.
 _Avoid_: principal, subject
 
 **Permission Profile**:
@@ -75,11 +83,11 @@ A long-lived user credential: an opaque revocable token minted via login, used b
 _Avoid_: personal access token, service token
 
 **Grant**:
-One operation-family permission inside a permission profile (e.g. `tasks`, `infra`), the unit a 403 names and an escalation asks for.
+One operation-family permission inside a permission profile, written family-dot-verb (`task.delete`, `infra.write`); the unit a 403 names and an escalation asks for. Families are coarser than the operations they cover.
 _Avoid_: scope, right
 
 **Permission Request**:
-An agent's ask for a grant its profile lacks, surfaced as a notification the user approves for the session or bakes into the profile.
+An agent's ask for a grant its profile lacks, optionally naming the operation it wanted to make, surfaced as a notification the user approves for the session, bakes into the profile, or denies.
 _Avoid_: escalation (as a noun for the record), override
 
 **Master Key**:

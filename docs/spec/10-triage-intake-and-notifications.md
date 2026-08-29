@@ -38,7 +38,7 @@ external events ──▶ triage workflow(s) ──▶ Tasks ──▶ work work
 
 ### 2.1 Task interaction - three mechanisms
 
-1. **Agent-driven (the general case).** The triage agent searches, reads, creates and updates Tasks in-session through the `hydra` CLI (`hydra task search | read | create | update`, [./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md)), deciding its own queries. Semantic grouping across heterogeneous signals cannot be pre-authored; the agent iterates FTS queries over title and description plus structured filters. No vectors.
+1. **Agent-driven (the general case).** The triage agent searches, reads, creates and updates Tasks in-session through the `hydra` CLI (`hydra task query | read | create | update`, [./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md)), deciding its own queries. Semantic grouping across heterogeneous signals cannot be pre-authored; the agent iterates FTS queries over title and description plus structured filters. No vectors.
 2. **Built-in actions `task.create` / `task.update`** for agent-less graphs ("every cron tick, file a task").
 3. **Built-in action `task.query`** - declarative, exact-identity matching only: provenance external refs (`github:issue:owner/repo#42`, `gmail:thread:<id>`), labels, status, project. Never content matching.
 
@@ -145,7 +145,7 @@ Five built-in actions ship in the core: `workflow.run`, `notify`, `task.create`,
 
 An action failing fails the run; actions never redirect ([./07-workflows.md](./07-workflows.md)).
 
-**Open:** the actor stamped on mutations performed by built-in actions (a run has no session and no user present; the actor enum is `user | session:<id>`). Owned by the Open in [./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md) §3.1; nothing pins a run-scoped actor.
+Mutations performed by built-in actions are stamped `run:<runId>` and are ungated ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md) §3.1).
 
 ## 7. Notifications
 
@@ -188,9 +188,9 @@ interface Notification {
 | Core internals | direct service call | breaker tripped, run failed, runner unreachable, update available ([./15-packaging-and-operations.md](./15-packaging-and-operations.md)), permission request (Section 7.6) |
 | Workflow `notify` step | built-in action (Section 6) | triage decisions, FYI lines, "needs a call" |
 | Plugins | requestable `notifications` plugin capability ([./05-plugins.md](./05-plugins.md)) | Gmail OAuth token expiring |
-| Sessions | `hydra notify` public-API op under the `notifications` grant | an assistant, or an agent step's session, raising something for the user |
+| Sessions | `notification.create` (`hydra notification create`) under the `notification` grant | an assistant, or an agent step's session, raising something for the user |
 
-The first three producers are ticket 15's list. The fourth follows from the `notifications` grant in the shipped assistant profile and the `notify` verb in the shipped worker profile ([./13-security.md](./13-security.md)): a session holding that grant produces through the same op as the built-in action. All four land in the same record through the same service-layer operation. Producer-side muting - silencing a chatty plugin or workflow - is distinct from sink-side delivery toggles (ticket 15); the consolidated reading is a filter keyed on `producer`, which is why `producer` is on the record.
+The first three producers are ticket 15's list. The fourth follows from the `notification` grant in the shipped assistant profile and the `notification.create` verb in the shipped worker profile ([./13-security.md](./13-security.md)): a session holding that grant produces through the same op as the built-in action. All four land in the same record through the same service-layer operation. Producer-side muting - silencing a chatty plugin or workflow - is distinct from sink-side delivery toggles (ticket 15); the consolidated reading is a filter keyed on `producer`, which is why `producer` is on the record.
 
 **Open:** the muting mechanism: whether muted notifications are still recorded (and merely not delivered) or dropped at the producer. "Silence" in the tickets reads as not-delivered; the record is cheap, so recording-but-not-delivering keeps the audit intact - not pinned.
 
@@ -234,19 +234,19 @@ interface BoundAction {
 }
 
 interface BoundOperation {
-  op: string;                          // a public-API contract operation name: "workflows.run", "tasks.update",
-                                       // "sessions.respondToRequest", "triggers.resume", "github.merge" (plugin action)
+  op: string;                          // a public-API contract operation id: "workflow.run", "task.update",
+                                       // "session.respond", "trigger.resume", "github.merge" (plugin action)
   input: unknown;                      // validated against the op's Zod input schema at notification creation
 }
 ```
 
 - **Declared** at notification creation as a contract operation plus its input, frozen with the record. The input is validated against the op's input schema when the notification is created, so a malformed action fails the producer, never the user's click. Only operations in the public contract (including plugin-contributed workflow actions invoked through it) can be bound; there is no free-form code.
-- **Executed** when the user decides: the web app calls one op, `notifications.act { notificationId, actionId }` (the "decide" op in [./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md) §2), and the service layer executes the frozen operation. The mutation is stamped `actor: user`; the resulting event log entry carries the notification id and its `producer`, so audit shows both who decided and who authored. Executing an action resolves the notification; a resolved notification's actions are inert (one-shot).
+- **Executed** when the user decides: the web app calls one op, `notification.act { notificationId, actionId }` (the "decide" op in [./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md) §2), and the service layer executes the frozen operation. The mutation is stamped `actor: user`; the resulting event log entry carries the notification id and its `producer`, so audit shows both who decided and who authored. Executing an action resolves the notification; a resolved notification's actions are inert (one-shot).
 - **Authorised** as the user at execution time: the user has full parity, so no grant check fails at click time. Whether the authoring side is also bounded is the Open below.
 
-**Open:** whether authoring is also bounded - that is, whether the operation must have been within the authoring agent's permission profile at creation time (a session on the worker profile, which lacks `workflows.run`, could otherwise route around its profile by proposing "Start workflow X" for the user to click). The trust model in [./13-security.md](./13-security.md) is written for the agent as actor; the delegated-click case is not settled. The conservative reading is that creation validates the operation against the producer's profile as if the producer were executing it; the permissive reading is that the click is the user's informed decision.
+**Open:** whether authoring is also bounded - that is, whether the operation must have been within the authoring agent's permission profile at creation time (a session on the worker profile, which lacks `workflow.run`, could otherwise route around its profile by proposing "Start workflow X" for the user to click). The trust model in [./13-security.md](./13-security.md) is written for the agent as actor; the delegated-click case is not settled. The conservative reading is that creation validates the operation against the producer's profile as if the producer were executing it; the permissive reading is that the click is the user's informed decision.
 
-**Open:** how the operation is rendered so the click is informed. The Intake detail shows the suggested step's label and the verdict; whether the web app also shows the concrete op and input ("workflows.run bugfix with task #118") before execution is a [./14-web-app.md](./14-web-app.md) question with a security consequence.
+**Open:** how the operation is rendered so the click is informed. The Intake detail shows the suggested step's label and the verdict; whether the web app also shows the concrete op and input ("workflow.run bugfix with task #118") before execution is a [./14-web-app.md](./14-web-app.md) question with a security consequence.
 
 **Open:** whether a bound operation can be executed from a channel sink (Section 7.3), and if so how the click is authenticated as the user (the owner's configured platform identity, as for assistant commands in [./12-assistants.md](./12-assistants.md)).
 
@@ -260,7 +260,7 @@ That rule is pinned; the mechanism is not. The consolidated proposal is that the
 
 ### 7.6 Permission requests
 
-The `permissions.request` op (granted to every profile) creates a **Permission Request** notification: a decision whose bound actions are *this session only*, *add to profile*, and deny, each bound to the corresponding grant operation. The agent learns the outcome through its subscription and retries; there is no blocking wait. Session tool-approval requests in `approval-required` access mode (`request.opened` in the normalized event taxonomy) surface the same way: a decision notification whose actions are the four values of `ApprovalDecision` - `allow` (this call only), `allow_always` (for the session), `deny` (refuse with a reason the model sees), `cancel` (refuse and end the turn) - each bound to `sessions.respondToRequest` ([./06-providers.md](./06-providers.md) owns the decision type). Grant semantics, profiles and the audit event kinds are in [./13-security.md](./13-security.md).
+The `permission.request` op (granted to every profile) creates a **Permission Request** notification: a decision whose bound actions are *this session only*, *add to profile*, and deny, each bound to `permission.decide` with the corresponding outcome (`session`, `profile`, `deny`). The notification names the grant, the reason and, when given, the operation the agent wanted to make. The agent learns the outcome through the subscription `permission.request` registers for it and retries; there is no blocking wait. Session tool-approval requests in `approval-required` access mode (`request.opened` in the normalized event taxonomy) surface the same way: a decision notification whose actions are the four values of `ApprovalDecision` - `allow` (this call only), `allow_always` (for the session), `deny` (refuse with a reason the model sees), `cancel` (refuse and end the turn) - each bound to `session.respond` ([./06-providers.md](./06-providers.md) owns the decision type). Grant semantics, profiles and the audit event kinds are in [./13-security.md](./13-security.md).
 
 **Open:** whether an approval request answered directly in the session view (rather than through the notification) resolves the notification automatically. The notification's operation has already executed by another path; the record must not stay pending.
 

@@ -251,15 +251,15 @@ Two tiers per assistant: one `core` document and named topic documents; format, 
 
 Purpose: who performed an operation, stamped on every mutation in the event log.
 
-Values: `user` or `session:<sessionId>`. A single user record (username, password hash) exists in v1 for login; there is no user entity in the API model beyond that record, and the actor value `user` is the only user identity. Multi-user widens this field; it is never restructured ([ADR 0013](../adr/0013-agents-operate-hydra-through-the-public-api.md)). The actor stamped on mutations made by built-in actions and plugins is Open in [11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md).
+Values: `user`, `session:<sessionId>`, `run:<runId>` (a built-in action step inside a run) or `plugin:<pluginId>` (a plugin calling in-process). Session actors are bounded by their agent's profile; the other three are ungated ([11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md) section 3.1). A single user record (username, password hash) exists in v1 for login; there is no user entity in the API model beyond that record, and the actor value `user` is the only user identity. Multi-user widens this field; it is never restructured ([ADR 0013](../adr/0013-agents-operate-hydra-through-the-public-api.md)).
 
 ### Permission Profile, Grant, Permission Request
 
 **Permission Profile**: `id`, `name`, `grants[]`. Attached to every Agent; inherited by every session token of that agent. Three shipped profiles (`assistant`, `worker`, `unrestricted`); their contents are the table in [13-security.md](./13-security.md).
 
-**Grant**: one operation-family permission `{family, verbs}`. Families (pinned by ticket 18): `tasks`, `workflows`, `sessions`, `notifications`, `subscriptions`, `connections.use`, `connections.manage`, `infra`, `secrets`, `credentials`, plus a provisional `memory` family (see the Open in [13-security.md](./13-security.md)). Verbs are per family; finer grants can be added inside a family later without breaking profiles. A grant is the unit a 403 names and an escalation asks for. A grant approved "this session only" attaches to the Session, not the profile; "add to profile" appends it to the profile.
+**Grant**: one operation-family permission `{family, verbs}`, written `<family>.<verb>` (`task.delete`, `session.spawn`, `infra.write`). Families: `task`, `workflow`, `run`, `session`, `subscription`, `notification`, `event`, `connection`, `infra`, `workspace`, `agent`, `memory`, `permission`, `project`, `resource`, `secret`, `credential`; the table with verbs is in [13-security.md](./13-security.md) section 6.1. Grant families are coarser than operation families (`infra` covers runners, plugins, providers and the controller); the contract's operation-to-grant table joins them. Grants are unscoped in v1 (`memory` excepted); finer grants can be added inside a family later without breaking profiles. A grant is the unit a 403 names and an escalation asks for. A grant approved "this session only" attaches to the Session, not the profile; "add to profile" appends it to the profile.
 
-**Permission Request**: an agent's ask for a grant, persisted as a Notification with bound actions (session-only / add to profile / deny); the agent learns the outcome through its subscription. No blocking waits.
+**Permission Request**: an agent's ask for a grant (`permission.request { grant, reason, operation? }`), persisted as a Notification with bound actions (`session` / `profile` / `deny` outcomes of `permission.decide`); the request registers a subscription for the asking session, through which it learns the outcome. No blocking waits.
 
 ### Session Token
 
@@ -405,11 +405,11 @@ Status axis: none (events are immutable except the enrichment-writable `system`)
 
 Purpose: a live, correlated claim on future events held by a run or a session.
 
-Fields: `id`, holder (`runId` or `sessionId`, exactly one), origin (the signal trigger in the run's plan that instantiated it, or session-registered through the API), the correlation (event-side expression and run-state expression, evaluated lazily at match time against current run state; unresolved references are no-match), explicit connection selection, `createdAt`, `endedAt?`.
+Fields: `id`, holder (`runId` or `sessionId`, exactly one), origin (the signal trigger in the run's plan that instantiated it, or session-registered through the API), for session-held ones the registered **target** (`run` / `session` / `ref` / `request`, [11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md) section 2), the correlation (event-side expression and run-state expression, evaluated lazily at match time against current run state; unresolved references are no-match), explicit connection selection, `createdAt`, `endedAt?`.
 
 Status axis (spec-consolidated): `live` -> `ended`. A subscription ends only when its holder reaches a terminal state or exits; there are no timeouts in v1. On assistant rotation the dying session's subscriptions move to the successor session (holder changes, subscription survives).
 
-Delivery is non-exclusive: one event may start new runs and signal any number of subscribers. Delivery to a run is a signal; delivery to a session is Queued Input (rendered text plus structured payload), never steering by default. Registration surface: [11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md).
+Delivery is non-exclusive: one event may start new runs and signal any number of subscribers. Delivery to a run is a signal; delivery to a session is Queued Input (rendered text plus structured payload), never steering by default. Registration, listing and cancellation: [11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md).
 
 ### Trigger
 
@@ -445,7 +445,7 @@ Purpose: one persisted message from Hydra to its user ([ADR 0012](../adr/0012-no
 
 Fields: owned by [10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md) (section 7.1): `id`, `kind`, `title`, markdown `body`, `producer` (core / run step / plugin / session), `subject` entity refs, `eventId`, `actions` (empty for informational, non-empty makes it a decision), `createdAt`, `readAt`, `resolvedAt`, `resolution`. Kinds evidenced by the tickets: run failed, trigger paused (breaker), runner unreachable, permission request, decision on a Proposal, update available, plugin-raised (e.g. an expiring OAuth token).
 
-**Bound action**: `{ id, label, operation: { op, input }, style? }`, declared at creation as a public-API contract operation plus validated input and executed by the user's click through `notifications.act` as actor `user`; the shape is 10's consolidated proposal (section 7.4).
+**Bound action**: `{ id, label, operation: { op, input }, style? }`, declared at creation as a public-API contract operation plus validated input and executed by the user's click through `notification.act` as actor `user`; the shape is 10's consolidated proposal (section 7.4).
 
 **Open:** whether an agent-authored bound operation must have been within the authoring agent's permission profile at creation time (otherwise a `worker`-profile agent can route around its profile by proposing an operation for the user to click) is not settled; [10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md) and [13-security.md](./13-security.md) share it.
 

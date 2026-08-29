@@ -177,6 +177,7 @@ Rationale lives in the ADRs, not in the spec documents. All twenty:
 - [ADR 0018 - Hydra ships as one self-contained binary, supervised by the OS, living in one home directory](../adr/0018-hydra-ships-as-one-self-contained-binary.md)
 - [ADR 0019 - The task model is thin; workflows own task semantics](../adr/0019-the-task-model-is-thin-workflows-own-task-semantics.md)
 - [ADR 0020 - Assistant memory is reached only through the API](../adr/0020-assistant-memory-is-reached-only-through-the-api.md)
+- [ADR 0021 - One operation vocabulary, coarse grants, explicit routes](../adr/0021-one-operation-vocabulary-coarse-grants-explicit-routes.md)
 
 Research findings (facts about third-party systems) live on `research/*` branches under `research/` and are cited from the subsystem documents that use them.
 
@@ -218,4 +219,4 @@ Tickets:
 - [Prototype: assistant memory interface](https://github.com/rogierpennink/hydra/issues/31)
 - The wayfinder map, issue #1 (Destination, Notes, Decisions so far, Out of scope): https://github.com/rogierpennink/hydra/issues/1
 
-ADRs: 0001 through 0020, listed above.
+ADRs: 0001 through 0021, listed above.

@@ -164,7 +164,7 @@ Rules:
 
 A plugin that needs to act on the wider system (create a Task, start a Run, query Sessions) requests `public-api` and receives a client that calls the **same service layer** as HTTP, bound to the same shared Zod contract ([ADR 0013](../adr/0013-agents-operate-hydra-through-the-public-api.md); [./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md)). Parity holds: nothing is reachable in-process that is not reachable over HTTP. Plugins do not get a wider surface than any other API consumer.
 
-**Open:** the actor stamp and permission profile of plugin-originated mutations (the event log defines `actor: user | session:<id>` only). Owned by the Open in [./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md), which also covers built-in actions.
+Plugin-originated mutations are stamped `plugin:<pluginId>` and are ungated: the user enabled the plugin and granted the capability ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md) section 3.1).
 
 ## 6. Plugin state: namespaced KV
 

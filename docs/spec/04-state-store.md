@@ -10,7 +10,7 @@ The controller keeps everything it durably owns in one SQLite database file insi
 - The controller is the **only writer process** ([ADR 0002](../adr/0002-orchestration-stays-on-the-controller.md): one brain). Runners never open the file; the runner entrypoint must not even import the DB engine ([ADR 0018](../adr/0018-hydra-ships-as-one-self-contained-binary.md) mode isolation).
 - Repository SQL uses SQLite features freely: JSON functions, upserts, partial indexes, FTS5 (task search, see below). There is no lowest-common-denominator constraint.
 
-**Verify at build time:** the pinned Bun version's bundled SQLite (Linux) and the minimum macOS system SQLite both ship FTS5 enabled; Hydra needs FTS5 for `hydra task search` and cannot load it as an extension on macOS.
+**Verify at build time:** the pinned Bun version's bundled SQLite (Linux) and the minimum macOS system SQLite both ship FTS5 enabled; Hydra needs FTS5 for `hydra task query` and cannot load it as an extension on macOS.
 
 ## Repository interfaces
 
@@ -87,7 +87,7 @@ Actively watched sessions still see tokens live: the web app's live topic passes
 
 Rule: **if it is durable and domain-relevant, it is a row in the one file.** In the store:
 
-- All domain entities: Tasks (with provenance entries as child rows and an FTS5 index over title and description for `hydra task search`, [./09-tasks.md](./09-tasks.md)), Projects, Resources, Workspaces and Checkouts as records, Agents, Assistants, Conversations and session lineages, Sessions as records with their SessionBinding to a provider-native id, Runs with frozen plans and step records, Workflows and their triggers, Connections, Notifications, runner records (identity, labels, probed facts, state, and the hash of the runner's credential: an opaque random token stored hashed like every other token, ticket 18).
+- All domain entities: Tasks (with provenance entries as child rows and an FTS5 index over title and description for `hydra task query`, [./09-tasks.md](./09-tasks.md)), Projects, Resources, Workspaces and Checkouts as records, Agents, Assistants, Conversations and session lineages, Sessions as records with their SessionBinding to a provider-native id, Runs with frozen plans and step records, Workflows and their triggers, Connections, Notifications, runner records (identity, labels, probed facts, state, and the hash of the runner's credential: an opaque random token stored hashed like every other token, ticket 18).
 - The event log and per-session streams.
 - Queues, schedules, subscriptions, held events, outbox rows and cursors (above).
 - Workflow definitions. A Workflow is a stored, editable record; there is no repo-local config and no workflow file on disk ([./01-overview-and-scope.md](./01-overview-and-scope.md)).

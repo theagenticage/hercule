@@ -26,7 +26,7 @@ A thin dispatcher reads `argv` and hands off to one of three entrypoints: contro
 | `hydra upgrade` | ops | Self-update: fetch, verify, atomic swap, supervisor restart (section 9). |
 | `hydra promote --from <addr> --token <t>` | ops | Runs on the new machine; pulls the Data Root from the old controller. `export` / `import` of a bundle file is the offline fallback. Ceremony in [./03](./03-controller-and-runners.md#8-promotion-and-portability). |
 | `hydra login` | ops | Password in, API key out, stored 0600 ([./13](./13-security.md)). |
-| `hydra task ...`, `hydra memory ...`, `hydra events subscribe ...`, `hydra permissions request`, and every other API-facing verb | CLI | The public API over HTTP. The same commands serve the user (API key) and sessions (session token). Full command set, `--json`, agent-addressed `--help` at any position: [./11](./11-public-api-and-agent-surface.md). |
+| `hydra task ...`, `hydra memory ...`, `hydra subscription create ...`, `hydra permission request`, and every other API-facing verb | CLI | The public API over HTTP. The same commands serve the user (API key) and sessions (session token). Full command set, `--json`, agent-addressed `--help` at any position: [./11](./11-public-api-and-agent-surface.md). |
 
 Global options: `--home <dir>` (the only real flag, it locates the config file; `HYDRA_HOME` is its env form) and `-c key=value` (generic override of any config key, section 6).
 

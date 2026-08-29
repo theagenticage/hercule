@@ -165,12 +165,11 @@ A Subscription is a live, correlated claim on future events held by a run or a s
 
 ### 7.2 Session-held subscriptions
 
-- **Registered by the session itself** through an ordinary public API operation (`subscriptions` grant), via the `hydra` CLI: the response to a spawn-type op teaches the follow-up (`subscribe for updates: hydra events subscribe run:1234`). The canonical long-wait pattern is start, subscribe, end turn; the event wakes the session. No polling surface and no blocking waits ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md)).
-- A registration names a condition: a CEL filter over `event`, or a target shorthand the CLI expands to one (`run:<id>` becomes a filter on `run.*` kinds for that run; an External Ref becomes a filter on `event.refs`).
+- **Registered by the session itself** through the ordinary `subscription.create` operation (`subscription` grant), via the `hydra` CLI: the response to a spawn-type op teaches the follow-up (`subscribe for updates: hydra subscription create run:r_3`). The canonical long-wait pattern is start, subscribe, end turn; the event wakes the session. No polling surface and no blocking waits ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md)).
+- A registration names a **target**, one of four kinds ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md) section 2): `run` (the `run.*` kinds for that run), `session` (the `session.*` kinds for that session), `ref` (any event whose `refs` include that External Ref), `request` (the decision on a Permission Request). The controller expands the target into the pipeline's matching condition and stores both. No free-form CEL target in v1.
 - **Delivered as queued input**: the matched event is rendered as text plus its structured payload and queued for the session's next turn boundary. It never steers a running turn by default.
 - **Two load-bearing uses:** mid-session artifacts (an agent opens PR #87 mid-task and subscribes to its checks and reviews) and assistants (long-lived, no run to hold claims). An assistant conversation's subscriptions migrate to the successor session at rotation ([./12-assistants.md](./12-assistants.md)); a workflow agent step's session subscriptions die with that session.
 
-**Open:** the exact registration parameters of the subscribe op (filter string vs shorthand set vs both). Ticket 16 pins the op as ordinary and the CLI example; the schema belongs to [./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md).
 
 ## 8. Connections
 

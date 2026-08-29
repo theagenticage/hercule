@@ -143,65 +143,67 @@ Passkeys and 2FA are post-v1. Nothing in v1 forecloses them: the login op is the
 
 ## 6. Permission profiles
 
-Mechanism: every agent carries a **permission profile**; the session token inherits it; enforcement sits at the service layer so it binds HTTP and in-process callers alike ([ADR 0013](../adr/0013-agents-operate-hydra-through-the-public-api.md)). This section pins the content.
+Mechanism: every agent carries a **permission profile**; the session token inherits it; enforcement sits at the service layer so it binds HTTP and in-process session callers alike ([ADR 0013](../adr/0013-agents-operate-hydra-through-the-public-api.md)). Run and plugin actors are ungated ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md) section 3.1). This section pins the content.
 
 ### 6.1 Grant families
 
-A profile is a set of grants. Grants are coarse: one family per operation area, with read/write/run-style verbs inside the family. Finer grants can land inside a family later without breaking existing profiles. `tasks` is split into `create`, `update`, `delete` rather than one `write` because ticket #18 gives the worker profile "tasks read/create/update" and no delete.
+A profile is a set of grants. Grants are coarse: one family per operation area, with read/write-style verbs inside the family, plus a few custom verbs where a shipped profile needs the distinction. Finer grants can land inside a family later without breaking existing profiles. `task` is split into `create`, `update`, `delete` rather than one `write` because the worker profile gets "read/create/update" and no delete. Family names are singular, matching the operation vocabulary ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md) section 1.3, [ADR 0021](../adr/0021-one-operation-vocabulary-coarse-grants-explicit-routes.md)); ticket #18 pinned them plural and the rename is this spec's, by decision of [Public API operation catalogue](https://github.com/rogierpennink/hydra/issues/38).
 
-| Family | Covers | Verbs |
+| Family | Covers (operation families) | Verbs |
 |---|---|---|
-| `tasks` | Task search/read/create/update/delete | `read`, `create`, `update`, `delete` |
-| `workflows` | Workflow definitions and starting runs | `read`, `write`, `run` |
-| `sessions` | Spawning, steering, reading sessions | `read`, `spawn`, `steer` |
-| `notifications` | Creating Notifications, reading the notification center | `read`, `write` |
-| `subscriptions` | Registering session subscriptions | `read`, `write` |
-| `connections.use` | Acting via a Connection (outbound actions naming a connection) | `use` |
-| `connections.manage` | Creating, editing, deleting Connections and their credentials | `write` |
-| `infra` | Runners, plugins, promotion, service operations | `read`, `write` |
-| `secrets` | The secrets table (set/rotate/delete references) | `write` |
-| `credentials` | User credential management (password, API keys) | `write` |
-| `memory` (provisional) | Assistant memory ops (`hydra memory ...`) | `read`, `write` |
+| `task` | `task.*` | `read`, `create`, `update`, `delete` |
+| `workflow` | `workflow.*`, `trigger.*`; `run.rerun` | `read`, `write`, `run` (start a stored workflow, rerun), `submit` (start an unstored definition) |
+| `run` | `run.*` (read, cancel) | `read`, `write` |
+| `session` | `session.*`, `input.*`, `transcript.*` | `read` (records and transcripts), `spawn` (spawn, continue), `steer` (input, interrupt, stop, respond, queue edits) |
+| `subscription` | `subscription.*` | `read`, `write` |
+| `notification` | `notification.*` | `read`, `write` (create, act, mark read) |
+| `event` | `event.*` | `read`, `emit` |
+| `connection` | `connection.*` and plugin actions that act via a Connection | `read`, `manage` (create, edit, delete, credentials), `use` (act via a Connection; dormant in v1, see 11 section 2) |
+| `infra` | `runner.*`, `plugin.*`, `provider.*`, `controller.*` | `read`, `write` |
+| `workspace` | `workspace.*` | `read`, `write` (provision, dispose) |
+| `agent` | `agent.*`, `assistant.*`, `binding.*`, `conversation.*` | `read`, `write` |
+| `memory` | `memory.*` (`list`, `read`, `search` / `write`, `append`, `delete`) | `read`, `write` |
+| `permission` | `profile.*`, `permission.decide` | `read`, `write` |
+| `project` | `project.*` | `read`, `write` |
+| `resource` | `resource.*` | `read`, `write` |
+| `secret` | `secret.*` (references only on read) | `read`, `write` |
+| `credential` | `apiKey.*`, `user.setPassword` | `read`, `write` |
 
-Ticket #18 pins the family names `tasks`, `workflows`, `sessions`, `notifications`, `subscriptions`, `connections.use`, `connections.manage`, `infra`, `secrets`, `credentials` and "read/write/run-style verbs per family".
+The operation-to-grant mapping is an explicit table in the contract package; [./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md) section 2 names the grant beside every operation. `permission.request` is granted to every profile and is not itself a grant; `auth.login`, `auth.wsTicket` and `setup.*` are outside the grant model.
 
-**Open:** the exact verb set per family is not pinned beyond "read/write/run-style"; the table above is the minimum the shipped profiles need. The operation catalogue in [./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md) maps operations to these verbs.
+**Grants are unscoped in v1 (hard rule).** A grant on a family covers every entity in that family: `session.read` reads any session, `task.update` updates any task. Scoped grants ("the sessions you spawned", "this project's tasks") are the post-v1 finer grants. The one exception is `memory`: a session token's memory operations are pinned to its own assistant ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md) section 6.4), because [ADR 0020](../adr/0020-assistant-memory-is-reached-only-through-the-api.md) and [./12-assistants.md](./12-assistants.md) promise that memory is never shared between assistants.
 
-**Open:** `memory` is provisional: it is not in #18's family list, but [ADR 0020](../adr/0020-assistant-memory-is-reached-only-through-the-api.md) makes memory an API surface an agent must be granted. Confirm `memory` as a family or fold it into the assistant profile by another name; 02, 11 and 12 point here.
-
-A `permissions.request` operation (§6.4) is granted to every profile and is not itself a grant.
-
-"Bulk-destructive ops" (delete-many, cancel-all and the like) are withheld from the shipped non-unrestricted profiles regardless of family.
-
-**Open:** which operations count as bulk-destructive is not enumerated; the service layer must tag them.
+**Bulk-destructive operations** (delete-many, cancel-all and the like) are withheld from every profile but `unrestricted` regardless of family. The v1 catalogue contains none: every delete, cancel and stop takes one id. The rule stands for future operations; how they are tagged is an implementation choice made when the first one lands.
 
 ### 6.2 Shipped profiles
 
 | Profile | Default for | Grants | Withholds |
 |---|---|---|---|
-| **assistant** | assistants | `tasks` (read, create, update, delete), `workflows` (read, run), `sessions` (read, spawn, steer), `notifications`, `subscriptions`, `memory` (provisional), status reads | `infra`, `connections.manage`, `secrets`, `credentials`, `workflows.write` (consolidated: #18 grants `workflows.run` only), direct work tools (workspaces), bulk-destructive ops |
-| **worker** | agent steps in workflows | `tasks` (read, create, update), `notifications` (write), `subscriptions` (write) | `tasks.delete`, `sessions.spawn`, `workflows.run` (so a workflow cannot fan out recursively unless granted), `memory`, everything the assistant profile withholds |
+| **assistant** | assistants | `task` (read, create, update, delete), `workflow` (read, run, submit), `run` (read, write), `session` (read, spawn, steer), `subscription` (read, write), `notification` (read, write), `event` (read, emit), `memory` (read, write), and `read` on `connection`, `infra`, `workspace`, `agent`, `permission`, `project`, `resource` | `workflow.write`, `connection.manage`, `connection.use`, `infra.write`, `workspace.write`, `agent.write`, `permission.write`, `project.write`, `resource.write`, `secret`, `credential`, direct work tools (no Workspace), bulk-destructive operations |
+| **worker** | agent steps in workflows | `task` (read, create, update), `notification` (write), `subscription` (read, write), `run` (read), `event` (read) | `task.delete`, `session.spawn`, `workflow.run`, `workflow.submit` (so a workflow cannot fan out recursively unless granted), `session.read`, `memory`, everything the assistant profile withholds |
 | **unrestricted** | nobody by default | user parity: everything the user can do | nothing; assigned only explicitly |
 
-- The assistant profile encodes "delegate, don't do": orchestration surface only, no workspace, no direct work tools. It is hard by configuration, not by caste, and loosenable per assistant ([./12-assistants.md](./12-assistants.md)).
-- The worker profile is the trust floor for workflow agent steps. A workflow that needs a step to spawn sessions or start runs assigns a profile that grants it.
-- Profiles are named records the user edits in Settings > Permission profiles ([./14-web-app.md](./14-web-app.md)); the three shipped ones are seeded at first run. The agent -> profile assignment is a field on the Agent ([./02-domain-model.md](./02-domain-model.md)).
+- The assistant profile encodes "delegate, don't do": the orchestration surface plus read on everything that is not a secret, so it can answer "what is going on" about anything in the system, including any session's transcript. It is hard by configuration, not by caste, and loosenable per assistant ([./12-assistants.md](./12-assistants.md)).
+- The worker profile is the trust floor for workflow agent steps. A workflow that needs a step to spawn sessions, start runs or read transcripts assigns a profile that grants it.
+- Profiles are named records the user edits in Settings > Permission profiles ([./14-web-app.md](./14-web-app.md)); the three shipped ones are seeded at first run and can be edited but not deleted. The agent -> profile assignment is a field on the Agent ([./02-domain-model.md](./02-domain-model.md)), set with `agent.update`.
 - This table is the single normative statement of the shipped profiles; [./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md) and [./12-assistants.md](./12-assistants.md) link here.
 
 ### 6.3 Enforcement and 403s
 
-- The service layer checks the actor's grants before executing an operation. The user actor (password login or API key) has full parity: no profile applies.
-- A denied call returns HTTP 403 whose body names the missing grant (`tasks.delete`, `sessions.spawn`). The `hydra` CLI surfaces that name verbatim so the agent can ask for it.
-- Resolution is one indexed lookup from token hash to session to agent to profile, cached per session and invalidated on session end or profile edit.
+- The service layer checks the actor's grants before executing an operation, before any entity is loaded. The user actor (password login or API key) has full parity: no profile applies.
+- A denied call returns HTTP 403 whose body names the missing grant (`{ error: { code: "forbidden", details: { grant: "session.spawn" } } }`, envelope in [./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md) section 1.5). The `hydra` CLI surfaces that name verbatim so the agent can ask for it, and `hydra <entity> <verb> --help` names the grant up front.
+- Resolution is one indexed lookup from token hash to session to agent to profile, cached per session and invalidated on session end, profile edit, or a decided Permission Request.
 
 ### 6.4 Escalation: Permission Request
 
-1. The agent calls `permissions.request {grant, reason}` (granted to everyone; via `hydra permissions request ...`).
-2. The controller creates a **Permission Request** Notification ([./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md)) naming the session, the agent, the grant, and the reason.
-3. The user decides in the web app (whether a channel sink can carry the decision is Open in [./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md)). Approval offers two scopes: **this session only** (a session-scoped grant overlay that dies with the session) or **add to profile** (edits the agent's profile; every future session of every agent on that profile gains it). Denial is the third outcome.
-4. The agent learns the outcome through its session subscription (queued input on a turn boundary) and retries the original operation. There is no blocking wait, consistent with the no-blocking rule in [./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md).
+1. The agent calls `permission.request { grant, reason, operation? }` (granted to everyone; `hydra permission request <grant> --reason "..."`). `operation` optionally names the call it wanted to make (`{ op: "connection.create", input }`), so the user sees what the agent is trying to do, not only which family it lacks.
+2. The controller creates a **Permission Request** Notification ([./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md)) naming the session, the agent, the grant, the reason and the operation, and, when the caller is a session, registers a `{ kind: "request" }` subscription for that session in the same call. The response carries `requestId` and `subscriptionId`.
+3. The user decides in the web app (whether a channel sink can carry the decision is Open in [./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md)) through the bound `permission.decide` with one of three outcomes: **`session`** (a session-scoped grant overlay that dies with the session), **`profile`** (edits the agent's profile; every future session of every agent on that profile gains it), or **`deny`**.
+4. The decision arrives as queued input on a turn boundary and the agent retries the original operation itself, so the actor stays `session:<id>`. There is no blocking wait, consistent with the no-blocking rule in [./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md).
 
-Raising and deciding a Permission Request are audited (§11).
+A fourth outcome, **`once`** (a one-use overlay consumed by the first successful call of the named operation), is post-v1; `operation` on the request is the field it needs ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md) section 10).
+
+Raising and deciding a Permission Request are audited (section 11).
 
 ### 6.5 Decision Notification actions
 
@@ -333,5 +335,6 @@ ADRs:
 - [ADR 0005 - Promotion is migration behind a stable controller identity](../adr/0005-promotion-is-migration-behind-a-stable-controller-identity.md)
 - [ADR 0017 - The web app is a static pure client of the public API](../adr/0017-the-web-app-is-a-static-pure-client-of-the-public-api.md)
 - [ADR 0020 - Assistant memory is reached only through the API](../adr/0020-assistant-memory-is-reached-only-through-the-api.md)
+- [ADR 0021 - One operation vocabulary, coarse grants, explicit routes](../adr/0021-one-operation-vocabulary-coarse-grants-explicit-routes.md)
 
 Research: `research/provider-portability.md` (branch `research/provider-portability`), `research/connection-setup-ux.md` (branch `research/connection-setup-ux`), `research/assistant-systems.md` (branch `research/assistant-systems`).

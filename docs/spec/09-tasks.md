@@ -161,21 +161,18 @@ There are no finer-grained kinds (`task.done`, `task.labelled`); CEL over `chang
 
 ## Search
 
-Two mechanisms, one filter vocabulary:
+One operation, `task.query`, serves every caller: the built-in action in agent-less graphs (the guard-before-agent step), agents deciding their own queries through `hydra task query`, and the web app. Its input is the contract's `TaskFilter` ([./11](./11-public-api-and-agent-surface.md) section 2):
 
-| | `task.query` (built-in action, [./07](./07-workflows.md)) | `hydra task search` (API operation, [./11](./11-public-api-and-agent-surface.md)) |
-|---|---|---|
-| Structured filters: provenance `refs`, `labels`, `status`, `projectId` | yes, exact identity | yes, exact identity |
-| Full text over `title` + `description` | no | yes, SQLite FTS |
-| Who uses it | agent-less graphs, the guard-before-agent step | agents deciding their own queries, the web app |
+| Field | Matching |
+|---|---|
+| `refs`, `labels`, `status`, `projectId` | exact identity; `refs` against the canonical External Ref form |
+| `text` | SQLite FTS over `title` + `description` only; labels and refs are never reached through FTS |
+
+Within one field the listed values are **any-of**; across fields the filter is **and**; no filters lists every task. No `or` across fields and no negation in v1. Pagination and sorting follow [./11](./11-public-api-and-agent-surface.md) section 1.6.
 
 No vector search and no embeddings. The semantic part of triage - grouping heterogeneous signals, spotting connections - is the agent iterating its own queries and reading results; that is why agent task search is a hard v1 requirement (ticket #16 handoff).
 
-Full-text search runs over `title` and `description` only; labels and provenance refs are reached through the structured filters, not FTS.
-
 **Verify at build time:** the FTS5 tokenizer and whether the raw `MATCH` syntax is exposed to callers or wrapped in a plain-words form; the store document ([./04](./04-state-store.md)) owns the FTS table.
-
-**Open:** the structured filter semantics (single value vs list per field, and-only vs or across fields) are not pinned; the parameter names (`refs`, `labels`, `status`, `projectId`) are owned by [./07](./07-workflows.md) for `task.query` and by [./11](./11-public-api-and-agent-surface.md) for `search`, and the same shape must serve both so the Zod contract defines it once.
 
 ## Delete
 
@@ -187,17 +184,17 @@ Delete is a public-API operation ([./11](./11-public-api-and-agent-surface.md)).
 
 ## API operations an agent uses
 
-Task operations are ordinary public-API operations defined in the service layer and Zod contract, reachable over HTTP and through the `hydra` CLI ([./11](./11-public-api-and-agent-surface.md), [ADR 0013](../adr/0013-agents-operate-hydra-through-the-public-api.md)). Available to any permission profile granting the `tasks` family; the shipped profiles and their verbs are in [./13](./13-security.md) (both `assistant` and `worker` grant task read/create/update).
+Task operations are ordinary public-API operations defined in the service layer and Zod contract, reachable over HTTP and through the `hydra` CLI ([./11](./11-public-api-and-agent-surface.md), [ADR 0013](../adr/0013-agents-operate-hydra-through-the-public-api.md)). Available to any permission profile granting the `task` family; the shipped profiles and their verbs are in [./13](./13-security.md) (both `assistant` and `worker` grant task read/create/update).
 
 | CLI | Operation |
 |---|---|
-| `hydra task search` | structured filters + FTS, returns matching tasks |
+| `hydra task query` | structured filters + FTS, returns matching tasks; no filters lists all |
 | `hydra task read <id>` | one task, full row including provenance |
 | `hydra task create` | creates a task; emits `task.created` |
 | `hydra task update <id>` | changes any writable field, adds/removes labels, appends provenance; emits one `task.updated` |
-| delete | hard delete ([Delete](#delete)); an API operation, CLI exposure per [./11](./11-public-api-and-agent-surface.md) |
+| `hydra task delete <id>` | hard delete ([Delete](#delete)); grant `task.delete` |
 
-Every mutation is stamped with the calling actor (`user` or `session:<id>`) on the event envelope; a provenance entry appended by the call carries the same actor. All operations return fast; nothing blocks.
+Every mutation is stamped with the calling actor (`user`, `session:<id>`, `run:<id>` or `plugin:<id>`) on the event envelope; a provenance entry appended by the call carries the same actor. All operations return fast; nothing blocks.
 
 Notification actions that bind a task operation ("Start Bugfix" = start workflow X with task Y) are owned by [./10](./10-triage-intake-and-notifications.md).
 
@@ -205,7 +202,7 @@ Notification actions that bind a task operation ("Start Bugfix" = start workflow
 
 Three of the five built-in actions act on tasks: `task.create` (agent-less graphs, "every cron tick, file a task"), `task.update` (the closing step of the done-means-merged convention), and `task.query` (exact identity matching; the guard-before-agent pattern that routes duplicate signals to `task.update` without spawning an agent, [./10](./10-triage-intake-and-notifications.md)). Their parameters and outputs are defined once in [./07](./07-workflows.md#8-built-in-actions). They call the same service layer as the API and so emit the same platform events.
 
-The actor stamped on mutations made by an in-run action step (no session, no user present) is not pinned; the Open line is owned by [./11](./11-public-api-and-agent-surface.md).
+An in-run action step stamps `run:<runId>` and is ungated: the recipe is the user's ([./11](./11-public-api-and-agent-surface.md) section 3.1).
 
 ## Presentation over the status axis
 

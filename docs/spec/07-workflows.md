@@ -167,7 +167,7 @@ interface Edge {
 
 An action step invokes a plugin-contributed workflow action by contribution id (a tool call is just this). The contribution declares an input schema and an output schema; `params` are literals or expressions and are validated at save time. Built-in actions (section 8) have the same shape and are invoked the same way. The action's return value becomes `steps.<id>.output`. An action that fails fails the run; failure is not redirection, and actions never steer the graph ([ADR 0008](../adr/0008-workflow-graphs-route-on-declared-outputs.md)).
 
-**Open:** the actor and permission context of a built-in action executing inside a run. Mutations are stamped `user | session:<id>` and enforcement sits at the service layer, but an action step has no session; the material does not say what actor a run stamps or which grants bound its actions. [./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md) owns the answer. Note that sessions under the `worker` profile are denied `workflows.run` "so workflows cannot fan out recursively unless granted" (ticket #18), while the `workflow.run` action step is not restricted by any ticket.
+Actor and permission context: a built-in action executing inside a run is stamped `run:<runId>` and is **ungated**: the workflow was authored by the user and its action steps run with the user's parity. Agent steps are sessions and act as `session:<id>` under their own profile ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md) section 3.1). That is why the `worker` profile withholds `workflow.run` and `workflow.submit` (a session cannot fan out) while a `workflow.run` *action step* needs no grant (the user wrote it into the recipe).
 
 ### 4.2 Agent steps
 
@@ -256,7 +256,7 @@ A Run is one execution of an execution plan. Orchestration happens only on the c
 
 ### 7.1 Starting a run
 
-A run is created by: a start-trigger match (the matcher's pending-run effect row), direct manual creation, a `workflow.run` action step in another run, an API call by an actor holding the `workflows.run` grant (assistants do by default), or an ad-hoc plan submitted through the API (section 9). At start the controller:
+A run is created by: a start-trigger match (the matcher's pending-run effect row), direct manual creation, a `workflow.run` action step in another run, an API call by an actor holding the `workflow.run` grant (assistants do by default), or an unstored definition submitted through `workflow.submit` (section 9). At start the controller:
 
 1. Freezes the plan: copies the workflow's inputs declaration, steps, edges and triggers into the run as an immutable execution plan ([ADR 0001](../adr/0001-runs-freeze-an-execution-plan.md)). Start triggers in the plan are inert record; signal triggers are live.
 2. Re-validates the plan (section 1); a plan that no longer validates fails the run at start with the validation error as reason.
@@ -272,14 +272,14 @@ Concurrent runs of one workflow are unlimited in v1; the per-runner session cap 
 ```ts
 interface Run {
   id: string
-  workflowId: string | null            // null for ad-hoc plans
+  workflowId: string | null            // null for submitted (unstored) workflows, section 9
   plan: ExecutionPlan                  // frozen: inputs declaration, steps, edges, triggers
   inputs: Record<string, unknown>      // resolved
   origin:
     | { kind: "trigger"; triggerId: string; eventId: string }
     | { kind: "manual"; actor: Actor }
     | { kind: "action"; parentRunId: string; stepId: string }
-    | { kind: "api"; actor: Actor }    // incl. ad-hoc plans
+    | { kind: "api"; actor: Actor }    // workflow.run or workflow.submit over the API
   triggerEvent?: Event                 // copy of the triggering event
   rerunOf?: string                     // run id this run was re-run from (field name provisional)
   status: "pending" | "running" | "completed" | "failed" | "cancelled"
@@ -320,7 +320,7 @@ Re-run is whole-run only; there is no "re-run failed steps only". Two modes:
 - **Re-stamp** (default): create a new run from the current workflow definition with the same resolved inputs. Picks up edits made since.
 - **Replay**: create a new run from the original run's frozen plan with the same inputs. Reproduces exactly what ran before.
 
-Both create a new Run that references the original. Re-runs provision fresh ephemeral workspaces; the failed run's kept workspace stays until dismissed. Ad-hoc plan runs can only replay (there is no workflow to re-stamp from).
+Both create a new Run that references the original. Re-runs provision fresh ephemeral workspaces; the failed run's kept workspace stays until dismissed. Submitted runs (section 9) can only replay (there is no stored workflow to re-stamp from). Both are the `run.rerun` operation ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md)).
 
 ### 7.5 Cleanup and supervision
 
@@ -328,23 +328,23 @@ There is no cleanup machinery beyond the substrate's: ephemeral workspaces are d
 
 ## 8. Built-in actions
 
-Five built-in actions ship in the core, registered into the workflow-action extension point like any plugin contribution but owned by the core. Each is a thin call into the same service layer the public API exposes ([ADR 0013](../adr/0013-agents-operate-hydra-through-the-public-api.md)); its input and output are the corresponding contract schemas, so nothing is reachable through an action that is not reachable over HTTP. This table is the single owner of the catalogue; Task semantics are in [./09-tasks.md](./09-tasks.md), the Notification record and triage-specific usage in [./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md).
+Five built-in actions ship in the core, registered into the workflow-action extension point like any plugin contribution but owned by the core. Each is a thin call into the same service layer the public API exposes ([ADR 0013](../adr/0013-agents-operate-hydra-through-the-public-api.md)) and carries the **same id as the operation** it calls ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md) section 1.3); its input and output are that operation's contract schemas, so nothing is reachable through an action that is not reachable over HTTP. The tickets called the notification action `notify`; its id is `notification.create`. This table is the single owner of the catalogue; Task semantics are in [./09-tasks.md](./09-tasks.md), the Notification record and triage-specific usage in [./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md).
 
 | Action | Input (contract op) | Output | Notes |
 |---|---|---|---|
 | `workflow.run` | `{ workflowId, inputs }` | `{ runId }` | Fire-and-forget: starts a run of another workflow and returns immediately; does not wait or route on the child's output (that is the post-v1 sub-workflow step). The scheduled-tasks one-step shortcut uses it. |
-| `notify` | Notification producer input: `{ kind, title, body?, actions?, subject? }` (record and bound-action shape per [./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md)) | `{ notificationId }` | Creates one core-owned Notification with producer = the run and step; delivery is decided by the core router, never by the step. |
+| `notification.create` | Notification producer input: `{ kind, title, body?, actions?, subject? }` (record and bound-action shape per [./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md)) | `{ notificationId }` | Creates one core-owned Notification with producer = the run and step; delivery is decided by the core router, never by the step. |
 | `task.create` | Task create input: `{ title, description, priority?, labels?, projectId?, provenance? }` | the created Task | Provenance may carry the triggering event id (`inputs.eventId`), the run id and external refs. |
 | `task.update` | `{ taskId, ...changes }` | the updated Task | One call, one `task.updated` event with per-field diffs. Appending provenance is an update. |
-| `task.query` | `{ refs?, labels?, status?, projectId? }` | `{ tasks: Task[] }` | Exact identity matching only: a provenance ref is matched by canonical external ref (`github:issue:owner/repo#42`), never by content. The guard-before-agent pattern: `task.query` on the event's refs, an edge on `size(steps.guard.output.tasks) > 0` to `task.update`, otherwise the agent step. |
+| `task.query` | `TaskFilter`: `{ refs?, labels?, status?, projectId?, text? }` (any-of within a field, and across fields; [./11](./11-public-api-and-agent-surface.md) section 2) | `{ items: Task[] }` | The same operation agents use. Structured fields match by exact identity: a provenance ref is matched by canonical external ref (`github:issue:owner/repo#42`), never by content; `text` is SQLite FTS over title and description and is normally absent in graphs. The guard-before-agent pattern: `task.query` on the event's refs, an edge on `size(steps.guard.output.items) > 0` to `task.update`, otherwise the agent step. |
 
-GitHub and Gmail actions (for example creating a PR, commenting, fetching a mail body on demand, merging) are plugin contributions of the `github` and `gmail` plugins, invoked as ordinary action steps naming the Connection they act as (`connections.use` grant, [./13-security.md](./13-security.md)). Their exact roster is Open in [./05-plugins.md](./05-plugins.md). Mid-session mailbox access from an agent step is covered in v1 by gmail action steps around it and the session spec's MCP passthrough.
+GitHub and Gmail actions (for example creating a PR, commenting, fetching a mail body on demand, merging) are plugin contributions of the `github` and `gmail` plugins, invoked as ordinary action steps naming the Connection they act as (`connection.use` grant, [./13-security.md](./13-security.md)). Their exact roster is Open in [./05-plugins.md](./05-plugins.md). Mid-session mailbox access from an agent step is covered in v1 by gmail action steps around it and the session spec's MCP passthrough.
 
-## 9. Ad-hoc execution plans
+## 9. Ad-hoc workflows
 
-An agent (or the user) may submit an execution plan directly to the API instead of a workflow id: the same plan shape a frozen run carries (inputs declaration, steps, edges, signal triggers) plus explicit input values. The controller validates it exactly as a stored workflow (section 1), creates a run with `workflowId: null` and `origin.kind: "api"`, and executes it. The plan lives only on that run; it is never stored as a workflow and nothing else references it. This is how "something weird once" is expressed without user code, and how an agent that needs a route no shipped workflow has gets one ([ADR 0001](../adr/0001-runs-freeze-an-execution-plan.md), [ADR 0008](../adr/0008-workflow-graphs-route-on-declared-outputs.md)). Graduating an ad-hoc plan into a stored workflow ("save as workflow") is post-v1.
+An agent (or the user) may start a run from a workflow definition that is not stored: `workflow.submit { definition, inputs }` ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md)), where `definition` is the `Workflow` shape of section 1 minus `id` and timestamps. The controller validates it exactly as a stored workflow (section 1), freezes it into a run with `workflowId: null` and `origin.kind: "api"`, and executes it; `workflow.run` loads a stored definition and takes the same path. The definition lives only on that run; it is never stored as a workflow and nothing else references it. This is how "something weird once" is expressed without user code, and how an agent that needs a route no shipped workflow has gets one ([ADR 0001](../adr/0001-runs-freeze-an-execution-plan.md), [ADR 0008](../adr/0008-workflow-graphs-route-on-declared-outputs.md)). The outside world only ever writes workflows; "execution plan" names the frozen copy on a run and appears in no contract. Graduating a submitted definition into a stored workflow ("save as workflow") is post-v1.
 
-**Open:** which grant covers submitting an ad-hoc plan. The material pins `workflows.run` for starting stored workflows; an ad-hoc plan can name any action and agent, which is closer to authoring a workflow than to running one.
+Grant: `workflow.submit`, its own verb, held by the shipped `assistant` profile and withheld from `worker` ([./13-security.md](./13-security.md)).
 
 ## 10. The human moment
 
@@ -360,7 +360,7 @@ Whether a gate step earns a return is a post-dogfooding question: it needs a kno
 
 - Human-gate step; returns post-dogfooding once the question shape is known. Kept possible: steps are a closed tagged union that can grow a third kind.
 - Sub-workflow steps that wait and route on the child's output; v1 has fire-and-forget `workflow.run` only.
-- Graduation ("save as workflow") of an ad-hoc plan; kept possible because the ad-hoc plan already has the stored-workflow shape.
+- Graduation ("save as workflow") of a submitted workflow; kept possible because a submitted definition already has the stored-workflow shape.
 - Per-workflow concurrency controls; automatic retries; partial re-run ("failed steps only").
 - Execution-plan snapshot dedup by content hash, only if per-run plan copies ever hurt.
 - Typed CEL environments (schema-typed `inputs`/`steps` instead of `dyn`) for stronger save-time checks.
