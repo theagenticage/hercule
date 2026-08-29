@@ -197,7 +197,7 @@ Non-repo resources get no workspaces in v1: folder resources need a versioning s
 
 ### 6.4 Checkouts, cache and provisioning
 
-- **Bare cache.** Each runner keeps one bare git cache per resource, under its storage directory. Ephemeral checkouts are git worktrees off that cache, on task branches. No worktree pooling.
+- **Bare cache.** Each runner keeps one bare git cache per resource, under its storage directory. Ephemeral checkouts are git worktrees off that cache, on the branch the run names (default `hydra/run-<runId>`, a template on the workflow's workspace policy; [07-workflows.md](./07-workflows.md) section 4.4). No worktree pooling.
 - **Primary.** Always a standalone clone with `origin` pointing at the real remote. Two ways to come into being, one resulting shape:
   - *Adopt in place*: an existing local checkout the user points at becomes the primary, untouched, and seeds the runner's bare cache locally.
   - *Clone fresh*: on a runner with no existing checkout the primary is cloned once from the remote, with hardlink object sharing against the cache.
@@ -205,7 +205,7 @@ Non-repo resources get no workspaces in v1: folder resources need a versioning s
 - Git's one-branch-one-worktree guard applies uniformly across a runner's ephemerals; primaries are standalone clones, so the guard never spans the two kinds.
 - Git credentials for clone, fetch and push derive from the checkout's Connection and are delivered on demand, never written to runner disk; mechanics in [13-security](./13-security.md) ([ADR 0016](../adr/0016-git-credentials-derive-from-connections.md)).
 
-**Open:** the task-branch naming scheme for ephemeral checkouts is not pinned.
+Branch naming is pinned in [07-workflows.md](./07-workflows.md) section 4.4: default `hydra/run-<runId>`, overridable per workflow, renamable by the agent; "task branch" is a shipped-workflow convention.
 
 ### 6.5 Setup command and `.workspaceinclude`
 

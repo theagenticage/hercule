@@ -13,20 +13,6 @@ To find the exact line for any entry: `grep -n '^\*\*Open:\*\*' docs/spec/<doc>.
 
 ## A. Decisions handed to tickets
 
-### [Workflow execution semantics: joins, signals, errors, run states](https://github.com/rogierpennink/hydra/issues/36)
-
-Owning document: [07-workflows.md](./07-workflows.md) (enums mirrored in [02](./02-domain-model.md)).
-
-- 07 §4.3: join semantics for a step with several incoming edges; what a skipped step's outgoing edges do and what `steps.<id>.output` evaluates to.
-- 07 §2.4: how a signal trigger attaches to the graph (held or discarded if early; fire once or many; whether downstream steps may read the matched event).
-- 07 §4.4: effect of a CEL evaluation error at a step or edge site mid-run.
-- 07 §6: whether `schema-failure` is routable or always run-failing.
-- 07 §7.3: whether a cancelled run emits `run.failed`, nothing, or a distinct platform event.
-- 07 §1: whether a disabled workflow may still be run manually; behaviour of a stored workflow that stops validating after the fact.
-- 07 §3: whether a Connection reference is a first-class input type.
-- 07 §5: template delimiter syntax for CEL in prompts and parameters.
-- 06 §7: whether `outputSchema` must also ride `TurnInput` per graph iteration (it sits on `SessionSpec` today).
-
 ### [Actors and authorisation beyond sessions: runs, plugins, bound Notification actions](https://github.com/rogierpennink/hydra/issues/37)
 
 Owning documents: [11 §3](./11-public-api-and-agent-surface.md), [10 §7.4](./10-triage-intake-and-notifications.md), [13 §6](./13-security.md).
@@ -95,7 +81,7 @@ Owning documents: [03](./03-controller-and-runners.md), [06 §2, §4](./06-provi
 - 15 §2, 06 §9.3: how a session reaches the `hydra` binary.
 - 15 §12: which Claude Code binary drives sessions (embedded vs runner-installed); how pi's package lands on a runner without Node; Hydra-pinned vs vendor-latest CLI versions at join; coupling of `hydra service install` and join.
 - 15 §4, §5: local runner crash-restart policy and auto-join token handoff; where a runner persists its credential and controller URL; whether a runner upgrade drains or interrupts sessions.
-- 03 §5, §6: probe cadence for toolchain facts and the probed toolchain list; session timeout and disk watermark defaults; reaper TTL; task-branch naming for ephemeral checkouts (also 07 §4.2); `.workspaceinclude` source when no primary workspace exists.
+- 03 §5, §6: probe cadence for toolchain facts and the probed toolchain list; session timeout and disk watermark defaults; reaper TTL; `.workspaceinclude` source when no primary workspace exists.
 
 ### [Operations details: bootstrap config, first run, login, upgrade, backups, key file](https://github.com/rogierpennink/hydra/issues/44)
 
@@ -125,7 +111,7 @@ Owning document: [02](./02-domain-model.md), with [04](./04-state-store.md), [08
 - 04 §Truth model, 02 §Rules, 08 §2, 09 §Row: the id format for Hydra-owned entities; whether the event table's primary key is the log position or a Hydra id plus position.
 - 02 §Session, §Workspace, §Connection: confirm the consolidated status enums (owned by 06 §4.1, 03 §6.3, 08 §8.1).
 - 02 §Task, 09 §Delete: whether hard delete emits `task.deleted`; 02 §Provenance: whether an entry must carry at least one of `ref` / `eventId` / `runId`.
-- 02 §Agent, 07 §4: which session defaults an Agent carries; whether placement inputs live on the Agent or the agent step; whether a chat-first session can exist without an Agent row.
+- 02 §Agent, 07 §4: which session defaults an Agent carries; whether a chat-first session can exist without an Agent row.
 - 02 §Project, §Resource: Project-Resource cardinality and further Project fields; whether a repo Resource is identified by its remote URL.
 
 ### [Old agentick: is anything worth importing?](https://github.com/rogierpennink/hydra/issues/47)

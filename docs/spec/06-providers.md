@@ -323,7 +323,7 @@ type StructuredResult =
 
 The runner re-validates `value` against the declared schema before routing, on every provider (cheap, catches harness regressions, one uniform error surface). Schemas are linted at workflow validation ([./07-workflows.md](./07-workflows.md)) against the common strict subset, regardless of which provider the step runs on: OpenAI's strict subset is the binding constraint (`additionalProperties: false`, all properties required), within JSON Schema draft-07 (Claude) and pi-ai's strict-transform subset (no `$ref`, `oneOf`, `patternProperties`). pi string enums compile to `StringEnum`, not unions of literals.
 
-**Open:** `outputSchema` is placed on `SessionSpec` here. Agent steps resume their session across graph iterations and want a result per iteration; Codex applies the schema per turn, Claude per `query()` call. Whether v1 also needs the schema on `TurnInput` (re-sent per iteration) is not pinned.
+`outputSchema` lives on `SessionSpec` only, and the adapter applies it to **every turn** of that session by the provider's mechanism (Codex re-sends it on each `turn/start`, Claude on each `query()`, pi registered the tool at session creation). `TurnInput` never carries it. This works because a session belongs to exactly one agent step and the schema is that step's: iterations re-enter the same session and each yields its own `structuredResult` ([Workflow execution semantics](https://github.com/rogierpennink/hydra/issues/36)).
 
 ## 8. Access modes
 

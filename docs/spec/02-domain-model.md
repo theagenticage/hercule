@@ -124,31 +124,31 @@ Relationships: `eventId` points into the event log (the referenced event may be 
 
 Purpose: one execution of a frozen Execution Plan, the only thing called a run ([ADR 0001](../adr/0001-runs-freeze-an-execution-plan.md)).
 
-Fields: the run record is owned by [07-workflows.md](./07-workflows.md) (section 7.2): `id`, `workflowId | null`, frozen `plan`, resolved `inputs`, `origin` (trigger / manual / action / api), `triggerEvent` (a copy of the triggering event, surviving event-log pruning), `rerunOf`, `status`, `failureReason`, `failedStepId`, `steps[]` (step records), `createdAt`, `startedAt`, `finishedAt`. Ticket 13 pins the content (frozen plan, resolved inputs, triggering event, per-step records, failure reason); the names are 07's consolidation. This document adds one optional link: `taskId` (the all-links-optional work triangle; the task's run list is derived from it).
+Fields: the run record is owned by [07-workflows.md](./07-workflows.md) (section 7.2): `id`, `workflowId | null`, frozen `plan`, resolved `inputs`, `workspaceId?` and `runnerId?` (the run's one workspace and runner, once pinned), `origin` (trigger / manual / action / api), `triggerEvent` (a copy of the triggering event, surviving event-log pruning), `rerunOf`, `status`, `failureReason` (closed set: `validation-error`, `expression-error`, `iteration-limit`, `schema-failure`, `step-failed`, `session-failed`), `failedStepId`, `steps[]` (step records), `createdAt`, `startedAt`, `finishedAt`. Ticket 13 pins the content (frozen plan, resolved inputs, triggering event, per-step records, failure reason); the names are 07's consolidation; the execution semantics are [Workflow execution semantics](https://github.com/rogierpennink/hydra/issues/36)'s. This document adds one optional link: `taskId` (the all-links-optional work triangle; the task's run list is derived from it).
 
 How a run was started is `origin` plus `triggerEvent`; the check-in view's provenance-first ranking (started by you > standing workflow > routine schedule) needs no further field ([14-web-app.md](./14-web-app.md)).
 
-Status axis (consolidated from pinned lifecycle facts, mirrored from 07): `pending` -> `running` -> terminal `completed` | `failed` | `cancelled`. `pending` is the effect row the event matcher inserts before the run is scheduled ([ADR 0009](../adr/0009-all-events-flow-through-one-persisted-pipeline.md)). A run blocked on a signal is `running` with no active step records; "waiting" is a derived view. The user may cancel at any time; a run's Subscriptions live exactly until it reaches a terminal state.
+Status axis (mirrored from 07): `pending` -> `running` -> terminal `completed` | `failed` | `cancelled`. `pending` is the effect row the event matcher inserts before the run is scheduled ([ADR 0009](../adr/0009-all-events-flow-through-one-persisted-pipeline.md)). A run blocked on a signal is `running` with nothing running and a live Subscription; "waiting" is a derived view. `failed` is terminal (recovery is re-run). The user may cancel at any time; a run's Subscriptions live exactly until it reaches a terminal state. A run takes place in one workspace on one runner ([07-workflows.md](./07-workflows.md) section 4.4).
 
 Re-run: whole-run only, two modes (replay the frozen plan, or re-stamp from the current workflow with the same inputs; the latter is the default). Both create a new Run referencing the original through `rerunOf`.
 
-Relationships: `workflowId` optional; `taskId` optional; agent steps link to Sessions from their step record; holds zero or more Subscriptions.
+Relationships: `workflowId` optional; `taskId` optional; `workspaceId` and `runnerId` optional (set when the first agent step starts); agent steps link to Sessions from their step record; holds zero or more Subscriptions.
 
 Identity: Hydra id.
 
-Platform events: `run.completed`, `run.failed`; payload owned by [08-events-and-connections.md](./08-events-and-connections.md). These are the only run kinds in v1; kinds grow additively.
+Platform events: `run.completed`, `run.failed`, `run.cancelled`; payloads owned by [08-events-and-connections.md](./08-events-and-connections.md). Cancellation is not a failure and has its own kind. These are the only run kinds in v1; kinds grow additively.
 
 #### Execution Plan
 
-Purpose: the executable content a run executes, frozen at run start. Contents: input declarations, the step graph (steps, edges with conditions and `maxTraversals`), the signal triggers the run will instantiate as Subscriptions, and the action references. Stored inline on the Run; never shared between runs and never edited. Editing a workflow never affects an existing plan. Shape and validation rules: [07-workflows.md](./07-workflows.md).
+Purpose: the executable content a run executes, frozen at run start. Contents: input declarations, the step graph (steps with their `join` and `terminal` flags, edges with conditions and `maxTraversals`), the signal triggers the run will instantiate as Subscriptions (source nodes of the graph), the workspace policy and placement inputs, and the action references. Stored inline on the Run; never shared between runs and never edited. Editing a workflow never affects an existing plan. Shape and validation rules: [07-workflows.md](./07-workflows.md).
 
 #### Step record
 
-Purpose: what one step did in one iteration of one run.
+Purpose: what one node (step or signal trigger) did in one iteration of one run.
 
-Fields: owned by [07-workflows.md](./07-workflows.md) (`StepRecord`): `stepId`, `iteration`, `status`, `startedAt`, `finishedAt`, `output`, `sessionId` (agent steps), `error`. The triage agent's stored structured verdict that Intake surfaces is the `output` of the triage agent step ([10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md)).
+Fields: owned by [07-workflows.md](./07-workflows.md) (`StepRecord`): `stepId` (a step id or a signal trigger id), `iteration`, `status`, `startedAt`, `finishedAt`, `output`, `sessionId` (agent steps), `error`. The triage agent's stored structured verdict that Intake surfaces is the `output` of the triage agent step ([10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md)). A signal node gets one `completed` record per firing, holding its mapped event.
 
-Status axis (mirrored from 07): `pending` | `running` | `completed` | `failed` | `skipped` | `cancelled`.
+Status axis (mirrored from 07), monotonic per record: `pending` (a queued iteration behind a busy step) -> `running` -> `completed` | `failed` | `cancelled`; `skipped` is set at creation and final. A re-entered step never leaves `completed`: the next iteration is a new record.
 
 ### Session
 
@@ -209,7 +209,7 @@ Purpose: the controller-owned identity that does work; one concept covering work
 
 Fields (pinned): `id`, `name`, `systemPrompt`, `instanceId` (provider instance), `permissionProfileId` (required; shipped defaults: `worker` profile for agents used in workflow agent steps, `assistant` profile for assistants). A session started for an agent takes its prompt, provider instance and profile from the agent; the agent step or the user supplies the rest of the `SessionSpec` (the agent step carries `accessMode` and an optional model override, [07-workflows.md](./07-workflows.md)).
 
-**Open:** which session defaults an Agent carries beyond prompt, provider instance and profile (default `modelSelection`, default `accessMode`, standing `mcpServers`, placement requirements) versus what is supplied per session or per step is not pinned. [#6](https://github.com/rogierpennink/hydra/issues/6) lists "prompt, provider, capabilities" without expanding "capabilities".
+**Open:** which session defaults an Agent carries beyond prompt, provider instance and profile (default `modelSelection`, default `accessMode`, standing `mcpServers`) versus what is supplied per session or per step is not pinned. [#6](https://github.com/rogierpennink/hydra/issues/6) lists "prompt, provider, capabilities" without expanding "capabilities". Placement requirements are settled: they live on the Workflow, per run, never on the Agent or the step ([07-workflows.md](./07-workflows.md) section 4.4).
 
 Status axis: none.
 
@@ -305,7 +305,7 @@ Purpose: a provisioned working area on one runner in which sessions do their wor
 
 Fields (pinned): `id`, `runnerId` (pinned to the runner it was provisioned on; never migrates), `kind: primary | ephemeral`, `checkouts[]` (0..N; a primary has exactly one; zero makes a scratch workspace; several make a multi-repo workspace with one checkout subdirectory per resource), `designatedConnectionId` (the GitHub Connection whose token becomes the session's `GH_TOKEN`; workspace-less sessions use a user-designated default Connection or none), `status`, timestamps (provisioned, last used, disposed). The on-disk path is runner-owned and is not stored on the controller. The runner-provisioned scratch directory a Codex workspace-less session needs is not a Workspace ([03-controller-and-runners.md](./03-controller-and-runners.md), [06-providers.md](./06-providers.md)).
 
-Invariants: at most one primary workspace per (resource, runner). Primaries are standalone clones with origin at the real remote (an existing local checkout is adopted in place); ephemerals are git worktrees off the per-resource bare cache on task branches. Concurrent sessions in a primary are allowed and surfaced, not locked.
+Invariants: at most one primary workspace per (resource, runner). Primaries are standalone clones with origin at the real remote (an existing local checkout is adopted in place); ephemerals are git worktrees off the per-resource bare cache, on a branch named by the run (default `hydra/run-<runId>`; [07-workflows.md](./07-workflows.md) section 4.4). A run has exactly one workspace, shared by all its agent steps. Concurrent sessions in a workspace are allowed and surfaced, not locked.
 
 Status axis (consolidated from the lifecycle in [03-controller-and-runners.md](./03-controller-and-runners.md), which owns the names): `provisioning` -> `ready`, and from there `unusable` (setup command failed), `kept-on-failure` (ephemeral kept until the user dismisses the failed run), `deleted` (clean completion, dismissal, or TTL reaping), `lost` (the runner was retired). Primaries are never torn down by Hydra and only ever become `lost`.
 
@@ -415,7 +415,7 @@ Delivery is non-exclusive: one event may start new runs and signal any number of
 
 Purpose: a workflow's rule for when events enter it. Triggers are queryable rows in their own table, owned by their workflow; a workflow may carry several of each kind.
 
-Fields: owned by [07-workflows.md](./07-workflows.md) (section 2): `StartTrigger` (`source` event selector, explicit `connection` or `"any"`, `filter`, `inputs` mapping, `spawnBound { maxRuns, windowSeconds }` defaulting to about 30 per hour, `state`, and for cron `schedule` / `timezone`) and `SignalTrigger` (`source`, `connection`, `filter` as the condition shape, `correlation { event, run }`). The raw event is visible to a start trigger's filter, never to the plan. A signal trigger is frozen into the plan at run start and instantiated as a Subscription.
+Fields: owned by [07-workflows.md](./07-workflows.md) (section 2): `StartTrigger` (`source` event selector, explicit `connection` or `"any"`, `filter`, `inputs` mapping, `spawnBound { maxRuns, windowSeconds }` defaulting to about 30 per hour, `state`, and for cron `schedule` / `timezone`) and `SignalTrigger` (`source`, `connection`, `filter` as the condition shape, `correlation { event, run }`, optional `outputs` mapping). The raw event is visible to a trigger's filter and mappings, never to the plan; a signal trigger's default output is the envelope minus `raw`. A signal trigger is a source node of the graph (outgoing edges only), frozen into the plan at run start and instantiated as a Subscription; each match fires its outgoing edges and writes a step record.
 
 Status axis (start triggers, mirrored from 07): `active` | `paused`. `paused` is set by the user or by a tripped spawn bound (breaker): matched-but-unspawned events are held visibly until the user resumes, optionally discarding the backlog. Enable/disable lives on the Workflow. Signal triggers have no status of their own; their runtime state is the Subscription.
 
@@ -425,9 +425,9 @@ Status axis (start triggers, mirrored from 07): `active` | `paused`. `paused` is
 
 Purpose: a stored, editable source of execution plans ([ADR 0008](../adr/0008-workflow-graphs-route-on-declared-outputs.md)).
 
-Fields (pinned): `id`, `name`, `inputs` (typed declarations), `triggers[]`, `steps[]`, `edges[]` (`from`, `to`, optional CEL condition, optional `maxTraversals >= 1`), `enabled`. Declarative data only; no user code; no versioning (runs freeze plans instead). Validation: every cycle contains at least one capped edge; every referenced action contribution exists in the persisted contribution catalog (a disabled plugin fails validation loudly); agent-step output schemas lint against the common strict subset ([07-workflows.md](./07-workflows.md)).
+Fields (pinned): `id`, `name`, `inputs` (typed declarations, including first-class Connection inputs), `triggers[]`, `steps[]`, `edges[]` (`from`, `to`, optional CEL condition, optional `maxTraversals >= 1`), `workspace` (the run's one workspace policy), `runner` (placement inputs), `enabled`. Declarative data only; no user code; no versioning (runs freeze plans instead). Validation: every cycle contains at least one capped edge; no `all`-join inside a cycle; no edge into a signal trigger; every referenced action contribution exists in the persisted contribution catalog (a disabled plugin fails validation loudly); agent-step output schemas lint against the common strict subset ([07-workflows.md](./07-workflows.md)).
 
-Status axis: `enabled` / `disabled`. Pausing a workflow (quiet hours, maintenance) is disabling it. Concurrent runs per workflow are unlimited in v1.
+Status axis: `enabled` / `disabled`, plus a derived **invalid** mark when a stored workflow stops validating after the fact (plugin disabled, agent deleted): its start triggers do not match while invalid, one Notification is raised, and the mark clears on the next successful validation. Pausing a workflow (quiet hours, maintenance) is disabling it; a disabled workflow may still be run manually. Concurrent runs per workflow are unlimited in v1.
 
 Relationships: owns Triggers and Steps; Runs reference it optionally.
 
@@ -435,7 +435,7 @@ Relationships: owns Triggers and Steps; Runs reference it optionally.
 
 Purpose: one node of a workflow graph.
 
-Fields: owned by [07-workflows.md](./07-workflows.md) (section 4). Both kinds carry `id` and an optional skip `condition`. An action step names the workflow-action contribution (`action`) and its `params`; built-in actions in v1 are `workflow.run`, `notify`, `task.create`, `task.update`, `task.query`. An agent step names the `agent`, carries the `prompt`, a required `accessMode` (fallback-resolved before session start), an optional `model` override, a `workspace` policy (none / primary / ephemeral), `freshSession` (opt-out of resuming the same session across iterations) and an optional `outputSchema` (the full agent-to-graph contract; without it output is final message text plus exit status). Where placement requirements are declared (step or Agent) is Open in 07.
+Fields: owned by [07-workflows.md](./07-workflows.md) (section 4). Both kinds carry `id`, an optional skip `condition` (a skipped step passes through: its outgoing edges are evaluated, it has no output), `join` (`any`, the default: every firing incoming edge runs a new iteration; `all`: run once when every incoming edge has fired or is dead) and `terminal` (completing it completes the run). An action step names the workflow-action contribution (`action`) and its `params`; built-in actions in v1 are `workflow.run`, `notify`, `task.create`, `task.update`, `task.query`. An agent step names the `agent`, carries the `prompt` (a `{{ }}` template), a required `accessMode` (fallback-resolved before session start), an optional `model` override, `freshSession` (opt-out of resuming the same session across iterations) and an optional `outputSchema` (the full agent-to-graph contract; without it output is final message text plus exit status). Workspace and placement are per run, on the Workflow, not per step.
 
 Status axis: none on the definition; runtime status lives on the Step record.
 
@@ -509,7 +509,7 @@ Fields: `id`, `owner {kind: connection | plugin | runner | core, id}`, `name`, c
 |---|---|---|
 | Task | `task.created` | full snapshot (actor on the envelope) |
 | Task | `task.updated` | `{taskId, changes}`; `{old, new}` per scalar, `{added, removed}` per array; one event per update op |
-| Run | `run.completed`, `run.failed` | owned by [08-events-and-connections.md](./08-events-and-connections.md) |
+| Run | `run.completed`, `run.failed`, `run.cancelled` | owned by [08-events-and-connections.md](./08-events-and-connections.md) |
 | Cron trigger (core emitter) | `cron.tick` | `{workflowId, triggerId, scheduledFor}` |
 | Security (audit kinds) | login success/failure, token minted/revoked, permission request raised/decided, secret created/rotated | [13-security.md](./13-security.md) |
 

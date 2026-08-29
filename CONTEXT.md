@@ -127,7 +127,7 @@ A durable external thing a project works with: a git repo, a folder, a mailbox. 
 _Avoid_: source, asset, material
 
 **Workspace**:
-A provisioned working area on a runner in which sessions do their work, containing zero or more checkouts. Two kinds: a **primary** workspace (exactly one checkout; at most one per resource per runner; long-lived and shared, the resource's main checkout) and **ephemeral** workspaces (provisioned for one job, disposed after; zero checkouts makes a scratch workspace, several makes a multi-repo workspace). A session may also run with no workspace at all.
+A provisioned working area on a runner in which sessions do their work, containing zero or more checkouts. Two kinds: a **primary** workspace (exactly one checkout; at most one per resource per runner; long-lived and shared, the resource's main checkout) and **ephemeral** workspaces (provisioned for one run, disposed after; zero checkouts makes a scratch workspace, several makes a multi-repo workspace). A run has exactly one workspace, shared by all its agent steps. A session may also run with no workspace at all.
 _Avoid_: worktree (reserved for the git mechanism), playground
 
 **Checkout**:
@@ -229,12 +229,24 @@ A named, stored, editable source of execution plans. Owns its triggers; can be a
 _Avoid_: recipe
 
 **Trigger**:
-A workflow's rule for when events enter it. Two kinds: a start trigger (static condition, spawns a new run) and a signal trigger (condition shape plus correlation key, resumes the live run that registered it). Lives inside the workflow, not as a standalone routing entity.
+A workflow's rule for when events enter it. Two kinds: a start trigger (static condition, spawns a new run) and a signal trigger (condition shape plus correlation key; a source node of the graph that fires its outgoing edges each time a matching event reaches the live run). Lives inside the workflow, not as a standalone routing entity.
 _Avoid_: rule, hook
 
 **Step**:
-One node of an execution plan's graph. Two kinds in v1: an action step (invokes a plugin-contributed workflow action) and an agent step (drives a session and may declare an output schema for the graph to route on).
+One node of an execution plan's graph. Two kinds in v1: an action step (invokes a plugin-contributed workflow action) and an agent step (drives a session and may declare an output schema for the graph to route on). A step may be re-entered; each entry is an **iteration**.
 _Avoid_: stage, job
+
+**Join**:
+How a step with several incoming edges behaves: an *any* join runs a new iteration for every incoming edge that fires (the default); an *all* join runs once, when every incoming edge has fired or can no longer fire.
+_Avoid_: gateway, barrier (for the any case)
+
+**Skip**:
+A step not run because its author-written condition was false. A skipped step has no output; the steps after it are written to expect that.
+_Avoid_: bypass
+
+**Terminal Step**:
+A step whose completion completes the run, ending whatever else is still running or waiting.
+_Avoid_: end node, exit
 
 **Subscription**:
 A live, correlated claim on future events, held by a run or a session ("deliver events about PR #87 to me"). The runtime instantiation of a signal trigger, or registered directly by a session. Dies with its holder.

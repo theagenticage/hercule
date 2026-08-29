@@ -134,12 +134,15 @@ The controller emits events about its own state, connection-less, through the sa
 |---|---|---|
 | `run.completed` | `{runId, workflowId?, triggerId?, origin, inputs, triggerEventId?, startedAt, finishedAt}` | a run reaches `completed` |
 | `run.failed` | the `run.completed` fields plus `failureReason` and `failedStepId?` | a run reaches `failed` |
+| `run.cancelled` | the `run.completed` fields | a run reaches `cancelled` (not a failure: a failure-notification workflow must not fire on a deliberate cancel) |
 | `task.created` | full Task snapshot | a Task is created |
 | `task.updated` | `{taskId, changes}`; `changes` carries `{old, new}` per scalar field and `{added, removed}` per array field; one update op = one event; provenance-only appends fire it too | a Task is updated |
 
 CEL routes on them like any event: `event.changes.status.new == "done"`, `has(event.changes.status)`. Kinds grow additively (e.g. learning workflows over run outcomes); no finer-grained task kinds exist. Task event shapes are owned by [./09-tasks.md](./09-tasks.md).
 
-**Open:** the exact `run.completed` / `run.failed` payload fields. The set above is this spec's consolidation from the run record in [./07-workflows.md](./07-workflows.md); ticket 13 pins the record, not the event subset.
+**Open:** the exact `run.completed` / `run.failed` / `run.cancelled` payload fields. The set above is this spec's consolidation from the run record in [./07-workflows.md](./07-workflows.md); ticket 13 pins the record, not the event subset.
+
+Batching is the emitter's job: a workflow that reacts to CI results or reviews subscribes to a per-suite or per-review kind, not per-check or per-comment ones, because a run processes one signal firing per iteration ([./07-workflows.md](./07-workflows.md) section 4.3). The v1 GitHub kind roster ([./05-plugins.md](./05-plugins.md)) must offer those coarse kinds.
 
 ## 6. Start triggers versus subscriptions
 
@@ -161,7 +164,8 @@ A Subscription is a live, correlated claim on future events held by a run or a s
 - **Instantiated at run start**, one per signal trigger in the frozen plan ([./07-workflows.md](./07-workflows.md)). Editing the workflow never affects them.
 - **Correlate lazily.** A signal trigger declares two expressions: an event-side expression over `event` and a holder-side expression over run state (`inputs.*`, `steps.<id>.output.*`). Both evaluate at match time against the run's *current* state; they match when the values are equal. There is no resolvability analysis at run start: an unresolved reference (the step that produces the PR number has not run yet) is simply a no-match for that event.
 - **Alive until the run reaches a terminal state** (completed, failed, cancelled). No timeouts in v1. A run waiting forever is visible in the run view and cancelable by the user. Consequence for workflow authors: design runs to end at the right moment (correlate on PR-merged, not PR-created).
-- Delivery is a signal-delivery effect row; the run's graph decides what the signal does ([./07-workflows.md](./07-workflows.md)).
+- Delivery is a signal-delivery effect row; consuming it, the run fires the signal node's outgoing edges and records the firing as a step record ([./07-workflows.md](./07-workflows.md) section 2.4). A subscription may match any number of times over the run's life.
+- **Not held before the key exists.** An event that arrives before the run-side correlation value resolves is a no-match and is never revisited; the matcher does not replay past events against later run state (Post-v1). The window is negligible in practice because the key appears in the same step that creates the thing the event is about.
 
 ### 7.2 Session-held subscriptions
 
