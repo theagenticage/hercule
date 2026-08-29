@@ -1,0 +1,237 @@
+# Tasks
+
+A Task is a unit of human intent: a described piece of work someone wants done. It is a thin row - title, markdown description, one fixed status axis, a priority, bare-string labels, an optional project, and an append-only provenance list. The core stores tasks, emits `task.created` / `task.updated` platform events, and answers exact-identity and full-text queries. It never decides when a task is in progress or done; every task semantic beyond the row (what "done" means, when to close, what a label signifies) belongs to workflows and their shipped defaults ([ADR 0019](../adr/0019-the-task-model-is-thin-workflows-own-task-semantics.md)). Tasks are the buffer between triage and work: triage workflows create and update them, work workflows trigger on their platform events ([ADR 0011](../adr/0011-triage-is-a-workflow-pattern-inside-core-enforced-bounds.md), [./10](./10-triage-intake-and-notifications.md)).
+
+## The Task row
+
+```ts
+type TaskStatus = 'open' | 'in-progress' | 'done' | 'cancelled';
+type TaskPriority = 'urgent' | 'high' | 'normal' | 'low';
+
+interface ProvenanceEntry {
+  ref?: string;      // External Ref in canonical form, e.g. "github:issue:owner/repo#42"
+  eventId?: string;  // id of an event in the event log (./08)
+  runId?: string;    // id of a Run (./07)
+  at: string;        // timestamp of the append
+  actor: Actor;      // "user" | "session:<id>" (./11)
+}
+
+interface Task {
+  id: string;
+  title: string;
+  description: string;        // markdown
+  status: TaskStatus;
+  priority: TaskPriority;     // default "normal"
+  labels: string[];
+  projectId?: string;         // at most one Project (./02)
+  provenance: ProvenanceEntry[];  // append-only
+  createdAt: string;
+  updatedAt: string;
+  statusChangedAt: string;
+}
+```
+
+| Field | Type | Notes |
+|---|---|---|
+| `id` | id | Assigned by the core. |
+| `title` | string | Required. |
+| `description` | string | Markdown. Enrichment (by triage agents or the user) edits this field; there is no comment thread. |
+| `status` | enum | `open`, `in-progress`, `done`, `cancelled`. See [Status axis](#status-axis-and-lifecycle). |
+| `priority` | enum | `urgent`, `high`, `normal`, `low`. Defaults to `normal`. |
+| `labels` | string[] | Bare strings, flat namespace. See [Labels](#labels). |
+| `projectId` | id? | Optional link to one Project. |
+| `provenance` | ProvenanceEntry[] | Append-only. See [Provenance](#provenance-and-external-refs). |
+| `createdAt`, `updatedAt` | timestamp | Maintained by the core. |
+| `statusChangedAt` | timestamp | Maintained by the core. Consolidated reading (ticket 29 names the field only): set on create and updated only when `status` changes. |
+
+There is no assignee, no subtask, no task-to-task dependency, and no comment thread (see [Not in v1](#not-in-v1)).
+
+**Open:** the id format (ULID, UUID, integer) is not pinned anywhere in the decisions and [./04](./04-state-store.md) does not record one either; it is a store-wide choice that must be applied uniformly to tasks.
+
+## Status axis and lifecycle
+
+The status axis is fixed: `open -> in-progress -> done`, plus `cancelled`. There are no user-definable domain states. Triage-ish states ("proposed", "needs a call") are labels or notification verdicts, never statuses.
+
+Rules:
+
+- **Any-to-any transitions.** The core enforces no state machine. `done -> open`, `cancelled -> in-progress`, and every other pair are legal.
+- **No core auto-transitions.** The core never changes a task's status on its own. A run starting, succeeding, or failing does not move the task. Status changes only through an explicit `task.update` (API operation or built-in action).
+- **No completion gating.** The core never refuses a status change because some condition (open PR, running session) is unmet.
+- `cancelled` means "decided not to do". Deleting means "should never have existed" (see [Delete](#delete)).
+
+Rationale: a run-to-task link is optional under the all-links-optional work triangle ([./02](./02-domain-model.md)), so core auto-transitions would make that optional link load-bearing; and every semantic a richer task engine would hard-code is already expressible as an editable workflow ([ADR 0019](../adr/0019-the-task-model-is-thin-workflows-own-task-semantics.md)).
+
+### "Done means the PR is merged" is a workflow convention
+
+The shipped coding workflows implement it; the core knows nothing about PRs. The mechanics, using primitives owned by [./07](./07-workflows.md) and [./08](./08-events-and-connections.md):
+
+1. A work workflow starts on a task platform event (for example `task.updated` with `event.changes.status.new == "in-progress"`, or `task.created` carrying a conventional label).
+2. Its agent step does the work and opens the PR.
+3. The same run holds a **signal trigger** correlated to the PR-merged event (the runtime instantiation of that trigger is a Subscription held by the run). The run waits for it; the controller keeps no waiting-for-human machinery, only the subscription.
+4. The run's final step is the built-in action `task.update` with `status = done`.
+
+One run represents the work start to finish. Because v1 GitHub ingress polls, the merge signal lands with roughly one poll interval of latency, which is acceptable.
+
+Accepted cost: nothing marks a task done when its run succeeds unless a workflow says so. Shipped defaults MUST demonstrate the pattern.
+
+## Priority
+
+One field, fixed enum `urgent` / `high` / `normal` / `low`, default `normal`. Consolidated reading of "optional, default normal": the field may be omitted on create, and a stored task always holds one of the four values.
+
+The user and agents write the same field through the same `task.update` operation. There is no separate "suggested priority" field: because every mutation is stamped with its actor on the event envelope ([./08](./08-events-and-connections.md), [./11](./11-public-api-and-agent-surface.md)), the log already tells who set which priority when. Priority is not a status and does not affect transitions.
+
+Rendering (bars and weight, never color) is pinned in [../design-language.md](../design-language.md) ("Importance"); the Intake tiers Now / Today / When you can are a presentation of this field ([./14](./14-web-app.md)).
+
+## Labels
+
+- Labels are bare strings in one flat namespace. A label exists from the moment a task carries it; there is no label registry entity and no create-label operation.
+- The core blesses no label. Shipped workflows may rely on conventional ones.
+- Colors, descriptions, and orderings for labels are presentation-layer concerns of the web app ([./14](./14-web-app.md)); the core stores none of them.
+- `labels` is an array field: `task.update` may add and remove labels, and `task.updated` reports `{added, removed}` for it.
+
+Two conventional labels are load-bearing for Intake ([./10](./10-triage-intake-and-notifications.md)):
+
+- **`proposed`** - a Task carrying `proposed` together with its pending go/no-go Notification is a Proposal, the unit Intake presents. Proposal is vocabulary, not an entity.
+- **Topic labels** - a Topic is a label that groups Intake (for example `code`, `business`, `personal`, `ops`). Each Connection files its events into one default topic chosen at setup ([./08](./08-events-and-connections.md)); triage labels a proposal with the connection's topic unless the content says otherwise. Topics are user-defined and user-ordered; the ordering is presentation state, not a task field.
+
+Which labels a triage workflow sets, and when `proposed` is removed, is owned by [./10](./10-triage-intake-and-notifications.md).
+
+## Provenance and External Refs
+
+Provenance is a task's append-only record of what created or touched it. Each entry is `{ref?, eventId?, runId?, at, actor}`; every field except `at` and `actor` is optional, and an entry may carry any combination (an event that was the trigger, the run that enriched the task, a ref the triage agent recognised inside an email). Entries are never edited or removed; a hard delete of the task removes them with it.
+
+Provenance is what lets a duplicate signal find its existing task, and what the Intake "made from" line and the proactive "related to task X" link are rendered from.
+
+### External Ref canonical form
+
+An External Ref is a fully-qualified canonical identifier for a thing outside Hydra. Examples: `github:issue:owner/repo#42`, `gmail:thread:<id>`, `sentry:issue:123`.
+
+- The plugin that defines the ref type owns canonicalization. Two events about the same external thing MUST produce byte-identical refs.
+- The Connection an event arrived through is **not** part of the identity. The same GitHub issue seen through two connections yields one ref.
+- Refs are **not unique across tasks.** Several tasks may carry the same ref. The `task.query` guard convention treats "any *open* task with this ref" as the duplicate signal, so a closed task does not block a new one for a recurring signal.
+- A ref is an identity, not a location. The URL used for "Open in <system>" is the event envelope's `url` field ([./08](./08-events-and-connections.md)), not part of provenance.
+
+**Open:** who canonicalizes refs for systems that have no plugin in v1 (Sentry, Tailscale, Hetzner notices arriving through Gmail). Recognising the system is enrichment by a sender rule or the triage agent; the ref format those writers must emit is not pinned beyond the `<system>:<kind>:<identity>` pattern of the examples.
+
+### What `task.query` matches
+
+`task.query` performs exact identity matching only: a provenance ref (string equality on the canonical form), labels, status, and `projectId`. It never matches content. An agent's `hydra task search` adds full text on top of the same filters (see [Search](#search)).
+
+## Relations: project, runs, sessions
+
+- **Project:** at most one per task, via `projectId`. Optional. Project is defined in [./02](./02-domain-model.md).
+- **Runs and sessions:** a task holds no run or session ids. The links live on the run and session side (all links optional, per the work triangle in [./02](./02-domain-model.md)); a task's run list is derived by querying runs that reference it. Provenance may additionally record a `runId` for a run that created or touched the task, but that is a history entry, not the link.
+
+## Platform events
+
+Task mutations emit platform events into the one persisted event pipeline ([./08](./08-events-and-connections.md)). They are the trigger surface for work workflows. The actor of the mutation is carried once, on the event envelope's `actor` field ([./08](./08-events-and-connections.md)); the payloads below do not duplicate it.
+
+**`task.created`** carries a full snapshot:
+
+```ts
+interface TaskCreatedPayload {
+  task: Task;
+}
+```
+
+**`task.updated`** carries per-field diffs, so a CEL filter routes without fetch-and-compare:
+
+```ts
+interface TaskUpdatedPayload {
+  taskId: string;
+  changes: {
+    // scalar fields: title, description, status, priority, projectId
+    [field: string]: { old: unknown; new: unknown };
+  } & {
+    // array fields: labels, provenance
+    labels?: { added: string[]; removed: string[] };
+    provenance?: { added: ProvenanceEntry[]; removed: [] };
+  };
+}
+```
+
+Rules:
+
+- One update operation produces exactly one `task.updated` event, however many fields it changed. `changes` contains only fields that changed.
+- Scalar fields report `{old, new}`; array fields report `{added, removed}`. Provenance is append-only, so its `removed` is always empty.
+- A provenance-only append fires `task.updated` too. Shipped workflow defaults MUST filter on the fields they care about (for example `has(event.changes.status)`) rather than on the bare event kind, and thereby demonstrate field-filtering.
+- Example CEL filters: `event.changes.status.new == "done"`, `has(event.changes.status)`, `"proposed" in event.changes.labels.removed`. Whether payload fields sit under `event.payload` or are flattened onto `event` follows the envelope rules in [./08](./08-events-and-connections.md) and the CEL context in [./07](./07-workflows.md).
+
+There are no finer-grained kinds (`task.done`, `task.labelled`); CEL over `changes` covers them.
+
+## Search
+
+Two mechanisms, one filter vocabulary:
+
+| | `task.query` (built-in action, [./07](./07-workflows.md)) | `hydra task search` (API operation, [./11](./11-public-api-and-agent-surface.md)) |
+|---|---|---|
+| Structured filters: provenance `refs`, `labels`, `status`, `projectId` | yes, exact identity | yes, exact identity |
+| Full text over `title` + `description` | no | yes, SQLite FTS |
+| Who uses it | agent-less graphs, the guard-before-agent step | agents deciding their own queries, the web app |
+
+No vector search and no embeddings. The semantic part of triage - grouping heterogeneous signals, spotting connections - is the agent iterating its own queries and reading results; that is why agent task search is a hard v1 requirement (ticket #16 handoff).
+
+Full-text search runs over `title` and `description` only; labels and provenance refs are reached through the structured filters, not FTS.
+
+**Verify at build time:** the FTS5 tokenizer and whether the raw `MATCH` syntax is exposed to callers or wrapped in a plain-words form; the store document ([./04](./04-state-store.md)) owns the FTS table.
+
+**Open:** the structured filter semantics (single value vs list per field, and-only vs or across fields) are not pinned; the parameter names (`refs`, `labels`, `status`, `projectId`) are owned by [./07](./07-workflows.md) for `task.query` and by [./11](./11-public-api-and-agent-surface.md) for `search`, and the same shape must serve both so the Zod contract defines it once.
+
+## Delete
+
+Hard delete is allowed (ticket 29). It removes the task row and its provenance. The event log keeps the audit trail of everything that happened to the task before deletion (the event log is the audit log, [./13](./13-security.md)). Use `cancelled` for work that was decided against; delete only what should never have existed.
+
+Delete is a public-API operation ([./11](./11-public-api-and-agent-surface.md)). The shipped `worker` profile grants task read/create/update and not delete (ticket 18; verb split in [./13](./13-security.md)).
+
+**Open:** whether hard delete emits a platform event (`task.deleted`); the decisions list only `task.created` and `task.updated`.
+
+## API operations an agent uses
+
+Task operations are ordinary public-API operations defined in the service layer and Zod contract, reachable over HTTP and through the `hydra` CLI ([./11](./11-public-api-and-agent-surface.md), [ADR 0013](../adr/0013-agents-operate-hydra-through-the-public-api.md)). Available to any permission profile granting the `tasks` family; the shipped profiles and their verbs are in [./13](./13-security.md) (both `assistant` and `worker` grant task read/create/update).
+
+| CLI | Operation |
+|---|---|
+| `hydra task search` | structured filters + FTS, returns matching tasks |
+| `hydra task read <id>` | one task, full row including provenance |
+| `hydra task create` | creates a task; emits `task.created` |
+| `hydra task update <id>` | changes any writable field, adds/removes labels, appends provenance; emits one `task.updated` |
+| delete | hard delete ([Delete](#delete)); an API operation, CLI exposure per [./11](./11-public-api-and-agent-surface.md) |
+
+Every mutation is stamped with the calling actor (`user` or `session:<id>`) on the event envelope; a provenance entry appended by the call carries the same actor. All operations return fast; nothing blocks.
+
+Notification actions that bind a task operation ("Start Bugfix" = start workflow X with task Y) are owned by [./10](./10-triage-intake-and-notifications.md).
+
+## Built-in workflow actions on tasks
+
+Three of the five built-in actions act on tasks: `task.create` (agent-less graphs, "every cron tick, file a task"), `task.update` (the closing step of the done-means-merged convention), and `task.query` (exact identity matching; the guard-before-agent pattern that routes duplicate signals to `task.update` without spawning an agent, [./10](./10-triage-intake-and-notifications.md)). Their parameters and outputs are defined once in [./07](./07-workflows.md#8-built-in-actions). They call the same service layer as the API and so emit the same platform events.
+
+The actor stamped on mutations made by an in-run action step (no session, no user present) is not pinned; the Open line is owned by [./11](./11-public-api-and-agent-surface.md).
+
+## Presentation over the status axis
+
+Kanban-style groupings, columns, swimlanes, and the Intake tiers are presentation-layer constructs over the fixed axis, priority, and labels. They are explicitly not domain states: the core stores no grouping, and no grouping may introduce a status. Where such groupings live and how they are configured is the web app's concern ([./14](./14-web-app.md)); the domain model provides only `status`, `priority`, `labels`, and `projectId` to group by.
+
+## Not in v1
+
+- **Subtasks** and **task-to-task dependencies** - grouping is expressed by shared labels, a shared project, or provenance refs pointing at another task's signals.
+- **Comments** - enrichment edits the description or appends provenance.
+- **Assignee** - who works a task is visible from the runs and sessions that reference it and from the actor stamps; there is no assignment field.
+- **Suggested-priority shadow field** - the actor-stamped event log covers it.
+
+## Post-v1
+
+- Subtasks / dependencies / comments / assignee: additive fields or side tables; nothing in v1 assumes their absence beyond the thin row.
+- Webhook event sources make `task.query` guards earn their keep at volume; v1 polling sources are modest-volume ([./08](./08-events-and-connections.md)).
+- Multi-user widens `actor` on provenance entries; the field is a string from day one so it widens without restructuring.
+
+## Sources
+
+- [Task model: shape, status axis, lifecycle, provenance](https://github.com/rogierpennink/hydra/issues/29)
+- [Triage engine & user-set bounds](https://github.com/rogierpennink/hydra/issues/15)
+- [Agent-operates-system surface](https://github.com/rogierpennink/hydra/issues/16)
+- [Prototype: the Intake view](https://github.com/rogierpennink/hydra/issues/30)
+- [Prototype: the check-in view](https://github.com/rogierpennink/hydra/issues/20) (priority requirement)
+- [Security & secrets model](https://github.com/rogierpennink/hydra/issues/18) (task grant family, shipped profiles)
+- [ADR 0019 - The task model is thin; workflows own task semantics](../adr/0019-the-task-model-is-thin-workflows-own-task-semantics.md)
+- [ADR 0011 - Triage is a workflow pattern inside core-enforced bounds](../adr/0011-triage-is-a-workflow-pattern-inside-core-enforced-bounds.md)
+- [ADR 0013 - Agents operate Hydra through the public API](../adr/0013-agents-operate-hydra-through-the-public-api.md)
