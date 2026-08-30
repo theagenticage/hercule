@@ -109,16 +109,24 @@ One continuous exchange with an assistant inside one platform container: a Disco
 _Avoid_: chat, thread (reserved for provider-native objects)
 
 **Rotation**:
-Retiring a conversation's live session by distilling what matters into memory and continuing the conversation in a fresh session. Triggered by context size or a timer; distillation is part of the contract, not an optional step.
+Retiring a conversation's live session by distilling what matters into memory and continuing the conversation in a fresh session. Triggered by context size, a daily timer, or the user asking to start fresh; never mid-turn; distillation is part of the contract, not an optional step. Distinct from a session's process merely stopping while idle and resuming later, which changes nothing the assistant remembers.
 _Avoid_: reset, compaction (reserved for provider-native context handling)
 
 **Memory**:
-An assistant's durable notes: assistant-scoped, maintained by the assistant itself, visible and editable by the user, bounded in size, never shared between assistants. Two tiers: a single **core** note (always present in every session) and named **topic** notes (listed by name and gist, opened on demand).
+An assistant's durable notes: assistant-scoped, maintained by the assistant itself, visible and editable by the user, bounded in size, never shared between assistants. Two tiers: a single **core** note (always present in every session; what the assistant knows about the user, as opposed to the persona the user wrote for it) and named **topic** notes (each with a one-line gist, listed by name and gist, opened on demand). A note written while the assistant could see third-party messages carries a provenance mark the user can review.
 _Avoid_: knowledge base, brain, journal
 
 **Heartbeat**:
-A scheduled wake of an assistant with a standing prompt, letting it check on things and act unprompted. On by default; the main mechanism of true proactivity.
+An assistant's standing recurring scheduled wake with a user-editable prompt, letting it check on things and act unprompted. On by default; the main mechanism of true proactivity. A heartbeat that finds nothing to say stays silent.
 _Avoid_: poll
+
+**Scheduled Wake**:
+Waking an assistant at a time rather than on an event: a prompt delivered into one of its conversations by the scheduler. Two kinds: the recurring heartbeat and one-shot reminders. Never a run, never an event.
+_Avoid_: cron job (reserved for workflow triggers), scheduled task
+
+**Reminder**:
+A one-shot scheduled wake an assistant sets on itself (or the user sets for it), delivered back into the conversation that created it, so the assistant can act or speak at that time.
+_Avoid_: timer, alarm
 
 ### Organization
 

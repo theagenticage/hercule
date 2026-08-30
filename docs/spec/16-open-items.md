@@ -7,24 +7,11 @@ The register of everything the spec assembly (2026-08-28) could not settle from 
 - **C. Verify at build time.** Facts about third-party systems to confirm against the pinned version before relying on them.
 - **D. Standing risks.** Accepted knowingly; on record so nobody rediscovers them.
 
-Beyond these, the map's **Not yet specified** section holds fog that is in scope but not yet sharp enough to ticket (see the end of this document), and one prototype ticket is still open.
+Beyond these, the map's **Not yet specified** section holds fog that is in scope but not yet sharp enough to ticket (see the end of this document), and one prototype ticket is still open. Resolved 2026-08-30: [Assistant runtime](https://github.com/rogierpennink/hydra/issues/40) (12, 11 §6.4, 06 §9, 10 §7.5, 13 §10, ADR 0024).
 
 To find the exact line for any entry: `grep -n '^\*\*Open:\*\*' docs/spec/<doc>.md`.
 
 ## A. Decisions handed to tickets
-
-### [Assistant runtime: rotation, heartbeat, injection, memory op edge cases](https://github.com/rogierpennink/hydra/issues/40)
-
-Owning documents: [12](./12-assistants.md), [11 §6.4](./11-public-api-and-agent-surface.md), [06 §9.2](./06-providers.md).
-
-- 12 §8.2: the heartbeat mechanism (a cron trigger has no way to deliver queued input as specified) and its defaults: cadence, standing prompt, target conversation, whether it counts toward the rotation timer.
-- 12 §5: rotation ceiling and daily timer values; rotation while a turn is in flight; whether unaddressed group context carries to the successor.
-- 12 §6.3, 06 §9.2: where injected memory lands per harness (`systemPrompt` vs first user turn).
-- 12 §7: which access mode assistant sessions run under and whether harness work tools are disabled for workspace-less assistant sessions.
-- 12 §6.4, 11 §6.4: memory op edge cases - header validation on `write`, `delete core`, `memory search` semantics, a v1 shrink guard (the on-record alternative to post-v1 version history).
-- 12 §6.5: how the write op learns a write is distilled from a tainted conversation; the provenance line format.
-- 12 §8.1, 10 §7.5: the no-double-fire mechanism (what "holding" means, which producers, record-or-not).
-- 12 §1, §9: Assistant record fields beyond agent + bindings + memory + heartbeat; one or several web-chat conversations per assistant.
 
 ### [Plugin contribution interfaces and v1 event kinds (event source, workflow action, setup flow)](https://github.com/rogierpennink/hydra/issues/41)
 
@@ -43,7 +30,7 @@ Owning documents: [05](./05-plugins.md), [08](./08-events-and-connections.md).
 
 Owning document: [10](./10-triage-intake-and-notifications.md) (status axis mirrored in [02](./02-domain-model.md)).
 
-- 10 §7.1: the Notification's one fixed status axis; whether a producer can withdraw or update a notification; whether muted notifications are recorded-but-not-delivered.
+- 10 §7.1: the Notification's one fixed status axis, now including the value for "recorded, handled by an assistant, pushed to no sink" pinned by [Assistant runtime](https://github.com/rogierpennink/hydra/issues/40) (10 §7.5); whether a producer can withdraw or update a notification; whether muted notifications are recorded-but-not-delivered.
 - 10 §7.6: whether an approval answered in the session view auto-resolves its notification.
 - 10 §3, §4: the roster of shipped default workflows; which step's output on a run is the verdict for Intake detail; what accept / park / dismiss do to the Task; where topic ordering is stored.
 - 10 §8 (Conflict): the events-view stamp vocabulary ("filed"/"held" vs "routed"/"attached"); 08 §10: how the "ignored" stamp is derived.
@@ -80,7 +67,7 @@ Owning documents: [15](./15-packaging-and-operations.md), [04](./04-state-store.
 Owning document: [14](./14-web-app.md).
 
 - 14 §Workflow editing: the text format the editor edits (JSON, YAML, other).
-- 14 §Onboarding: the onboarding steps beyond password and default assistant.
+- 14 §Onboarding: the onboarding steps beyond password, timezone confirmation (the user's timezone setting pinned by [Assistant runtime](https://github.com/rogierpennink/hydra/issues/40), 12 §5.2) and default assistant.
 - 14 §Screens: what Settings > Bounds shows; which tier standing workflows render under in check-in.
 - 14 §Live model: the WebSocket wire format; 14 §Auth: bearer token storage between page loads; 14 §Local alias: the loopback port for `GET /identity`.
 
@@ -107,7 +94,8 @@ Not design questions. The constraint is stated where one exists.
 - 06 §4.3: whether `TurnInput` carries more than text in v1 - start with text; attachments are additive.
 - 06 §6.4: the exact field set of `session.usage.updated` beyond tokens plus context usage.
 - 13 §2.1: secrets-table column names and cipher (see also the AEAD verification below).
-- 13 §10: the exact taint marker syntax (in-context wrapper and memory provenance line) - stable and greppable.
+- 13 §10: the exact in-context taint wrapper syntax - stable and greppable (the memory provenance line is pinned).
+- 12 §5.1: the runner's idle timeout for assistant session processes - one controller-wide default, 15 minutes as the starting value.
 - 08 §3: whether security audit entries become matchable platform events - not in v1, additive later.
 
 ## C. Verify at build time
@@ -116,7 +104,7 @@ Not design questions. The constraint is stated where one exists.
 - 09 §Search: the FTS5 tokenizer and whether raw `MATCH` syntax is exposed or wrapped.
 - 03 §6.1, 06 §9.1: whether the Codex app-server offers a system-prompt channel better than `AGENTS.md` in a scratch cwd.
 - 06 §2: pi `modelSwitch` in the SDK; pi `mcpPassthrough` in the pinned version.
-- 06 §9.1: the exact compaction / isolation knob names per pinned harness version.
+- 06 §9.1: the exact compaction / isolation knob names per pinned harness version, including `settingSources: []` (Claude) and `DefaultResourceLoader({ noContextFiles: true })` (pi) for context-file discovery being off in workspace-less sessions.
 - 06 §10.3: pi's SDK under the Bun host; how the pinned pi package reaches the host on a runner.
 - 07 §5: CEL parse-time limits; a CI corpus of representative expressions against the wrapper.
 - 08 §5.2: Gmail's stale-`historyId` error path re-baselines at now.

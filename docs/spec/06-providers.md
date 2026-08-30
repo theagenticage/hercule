@@ -377,7 +377,7 @@ Every provider instance has its own isolated provider home (one instance = one l
 
 The instance's config dir is also where the vendor login lives, which is why the home is per instance on every provider.
 
-**Codex needs a cwd even when workspace-less.** Claude and pi take `cwd: null` for a workspace-less session. Codex has no system-prompt parameter in `codex exec`; instructions travel as `AGENTS.md` in the cwd. For a workspace-less Codex session the runner provisions a scratch directory (not a Workspace) and the adapter materializes `systemPrompt` into `AGENTS.md` there.
+**Every workspace-less session gets an empty scratch cwd, and context-file loading is off.** "`cwd: null`" would mean `process.cwd()` on every harness (Claude Agent SDK and pi both default to it), and both read instruction files from there: pi loads `AGENTS.md` / `CLAUDE.md` from the cwd, every parent directory and `~/.pi/agent/`; the Claude SDK loads the cwd's `CLAUDE.md` whenever `settingSources` includes `project`. So a workspace-less session could silently pick up a file from the runner's install directory. Rule ([Assistant runtime](https://github.com/rogierpennink/hydra/issues/40)): the runner provisions an **empty scratch directory** (not a Workspace) as cwd for every workspace-less session on every harness, and the adapter disables context-file discovery - Claude `settingSources: []`, pi `resourceLoader: new DefaultResourceLoader({ cwd, noContextFiles: true })` (the SDK has no direct flag). Codex has no system-prompt parameter and takes instructions only as `AGENTS.md` in the cwd, so the Codex adapter materializes `systemPrompt` into `AGENTS.md` in *its* scratch directory; no other harness can see that directory, so nothing is duplicated. `RunnerContext.cwd` is therefore never `null` in practice; the type keeps `null` for "no workspace" semantics at the controller.
 
 **Verify at build time:** whether the Codex app-server protocol (`thread/start` `personality`, per-turn params, or a developer-instructions field) offers a proper system-prompt channel; if it does, prefer it and keep the scratch cwd only because `thread/start` requires one.
 
@@ -391,9 +391,17 @@ For assistant sessions ([./12-assistants.md](./12-assistants.md)) provider-nativ
 | Codex | `model_auto_compact_token_limit` set out of reach via the instance's `config.toml` in `CODEX_HOME` |
 | pi | `compaction.enabled = false` in session settings |
 
-The adapter reports context usage through `session.usage.updated`; the controller compares it against the rotation threshold. Rotation itself (one flush turn on the dying session, then a fresh session with core memory and topic index injected) is the assistant subsystem's contract ([./12-assistants.md](./12-assistants.md)). Sessions of agents that are not assistants keep native compaction on; `context_compaction` items make it visible.
+The adapter reports context usage through `session.usage.updated`; the controller compares it against the rotation threshold (`min(0.7 x window, 200k tokens)` by default, checked after every `turn.completed`). Rotation itself (one flush turn on the dying session, then a fresh session with core memory and topic index injected) is the assistant subsystem's contract ([./12-assistants.md](./12-assistants.md)). Sessions of agents that are not assistants keep native compaction on; `context_compaction` items make it visible.
 
-**Open:** where the injected memory (core note plus topic index) lands per harness - in `SessionSpec.systemPrompt` or as the first user turn - is not pinned; the per-harness mapping belongs here once decided.
+**Memory injection mapping (pinned).** The controller composes `SessionSpec.systemPrompt` for an assistant session as: the agent's `systemPrompt` (persona), the hydra-as-a-tool skill (section 9.3), then a `## Memory (core)` section and a `## Memory topics` index, volatile content last. It lands in the harness's system-prompt channel on every provider:
+
+| Provider | Channel |
+|---|---|
+| Claude Code | the SDK's `systemPrompt` option (a plain string, not the preset-plus-append form, so nothing of the CLI's default prompt leaks in) |
+| Codex | `AGENTS.md` in the session's scratch cwd (section 9.1), Codex's only instruction channel |
+| pi | the session's system prompt parameter |
+
+Never the first user turn: memory is standing context, and a synthetic first message would show in the conversation view as a message nobody sent.
 
 **Verify at build time:** the exact knob names above are as observed in the prototype; confirm each against the pinned harness version.
 

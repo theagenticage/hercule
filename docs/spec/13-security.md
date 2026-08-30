@@ -273,12 +273,12 @@ Resolves the handoff from [./12-assistants.md](./12-assistants.md). Prior art: O
 
 - Third-party text in a shared channel (anything not from an owner or trusted platform identity, and every bot line) is **context, never instructions**. It enters the session wrapped in explicit data-not-instructions markers.
 - The markers survive through rotation and distillation: the distiller sees the same wrapping, and its prompt is hardened against treating quoted content as directives.
-- A memory write distilled from a conversation containing tainted content carries a **one-line provenance marker** in the memory document (e.g. `> distilled from #general on 2026-08-27; includes third-party content`). The user can already read and edit memory, so this is auditable and correctable.
+- **Session taint is set by the core**: a session is tainted from the moment the core delivers it any wrapped line, for the rest of that incarnation; the agent passes nothing. Every memory write from a tainted session carries **provenance metadata on the document** (one entry per source conversation, latest date), set by the write op, shown beside the document in the memory view and rendered by `read` as a trailing line: `> provenance: session s_12, Discord #general, 2026-08-30, includes third-party content`. Metadata rather than an in-body line so the next `write` cannot silently erase it and it never eats cap. The user clears an entry after review; the session stays tainted until rotation ([./12-assistants.md](./12-assistants.md) section 6.7).
 - Hard-excluding third-party content from distillation is rejected: it discards the signal shared-channel assistants exist to keep.
 - Only **owner** and **trusted** platform identities can command an assistant ([./12-assistants.md](./12-assistants.md) section 4.1); only owner identities decide bound actions. Identities are claimed by a one-time pairing code DMed to the bot; unknown DM senders are ignored, never answered.
 - **Stated limit:** a trusted identity's DM is its own conversation with the same assistant and therefore the same memory, which holds facts about the owner. Granting trusted grants that; there is no per-identity memory partition in v1 (single user). Bots can never be paired, so no bot can command.
 
-**Open:** the exact marker syntax (both the in-context wrapper and the memory provenance line) is not pinned; keep it stable and greppable.
+The provenance line's shape is pinned above; the in-context wrapper syntax stays an implementer's choice ([./16-open-items.md](./16-open-items.md) B), stable and greppable.
 
 ## 11. Audit
 

@@ -52,8 +52,9 @@ There is no Redis, no broker, no in-process-only queue. Every piece of "what hap
 |---|---|---|
 | Pending runs | runs created by the matcher or by direct creation, waiting for placement | [./07-workflows.md](./07-workflows.md) |
 | Placement queue | runs or sessions waiting for a runner that is at `maxConcurrentSessions`; visible in the UI, never spilled to another runner | [./03-controller-and-runners.md](./03-controller-and-runners.md) |
-| Queued Input | user or subscription input held for a session until its running turn completes; editable and cancelable until flushed on `turn.completed` | [./06-providers.md](./06-providers.md) |
+| Queued Input | user, subscription or scheduled-wake input held for a session until its running turn completes; editable and cancelable until flushed on `turn.completed` | [./06-providers.md](./06-providers.md) |
 | Cron triggers | each cron start trigger as a queryable row with `{schedule, timezone}` and its next fire time; missed ticks while the controller was down are skipped with a visible note | [./08-events-and-connections.md](./08-events-and-connections.md) |
+| Scheduled wakes | the Scheduler's other rows: each assistant's heartbeat (cron `schedule`, next fire time) and one-shot reminders (`at`, `conversationId`, `text`); a missed reminder fires late on boot, a missed heartbeat tick is skipped | [./12-assistants.md](./12-assistants.md) |
 | Subscriptions | live correlated claims held by runs and sessions; die with their holder | [./08-events-and-connections.md](./08-events-and-connections.md) |
 | Held events | events matched by a trigger whose spawn bound tripped; held visibly until the user resumes or discards | [./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md) |
 | Outbox rows | external side effects with attempt counts and retry state (chat posts, channel notification deliveries, plugin API calls) | this document |

@@ -194,7 +194,7 @@ Fields (from the normalized stream, [06-providers.md](./06-providers.md)): `id` 
 
 Purpose: controller-owned input waiting for the session's running turn to complete.
 
-Fields: `sessionId`, `content` (text; for subscription deliveries also the structured event payload alongside rendered text), `source` (user input, subscription delivery, heartbeat), `createdAt`, `deliveredAt?`. Editable and cancelable until the controller flushes it on `turn.completed`; delivery rides the runner protocol's seq/ack outbox. Status axis (spec-consolidated from "editable and cancelable until delivered"): `queued` -> `delivered` | `cancelled`.
+Fields: `sessionId`, `content` (text; for subscription deliveries also the structured event payload alongside rendered text), `source` (user input, subscription delivery, heartbeat, reminder), `createdAt`, `deliveredAt?`. Editable and cancelable until the controller flushes it on `turn.completed`; delivery rides the runner protocol's seq/ack outbox. Status axis (spec-consolidated from "editable and cancelable until delivered"): `queued` -> `delivered` | `cancelled`.
 
 #### Session Binding
 
@@ -220,7 +220,7 @@ Relationships: `permissionProfileId` required; `instanceId` required; sessions r
 
 Purpose: an Agent with channel bindings, conversations and memory, oriented to delegating work ([ADR 0014](../adr/0014-assistants-remember-through-distilled-memory-not-merged-sessions.md)).
 
-Fields (pinned): everything an Agent has, plus a Heartbeat (`enabled`, default true; schedule; user-editable standing prompt) and rotation thresholds (context-size ceiling, mandatory; daily timer). Default profile `assistant`, loosenable per assistant. One default assistant is created at setup ([15-packaging-and-operations.md](./15-packaging-and-operations.md)). Assistant sessions are workspace-less and run with the `hydra` CLI. The heartbeat is a scheduled wake; its mechanism and target conversation are Open in [12-assistants.md](./12-assistants.md).
+Fields (pinned, [12-assistants.md](./12-assistants.md) section 1): everything an Agent has, plus `heartbeat { enabled (default true), schedule (cron, default `0 7-23 * * *`), timezone?, prompt, target: web | dm:<connectionId> | most-recent }`, `rotation { contextFraction (0.7), maxContextTokens (200000), dailyAt (04:00), timezone? }`, `reply (turn-end | segments)`, `accessMode (default full-access)`. Timezones fall back to the user's timezone setting. Default profile `assistant`, loosenable per assistant. One default assistant is created at setup ([15-packaging-and-operations.md](./15-packaging-and-operations.md)). Assistant sessions are workspace-less and run with the `hydra` CLI. The heartbeat is the assistant's standing Scheduled Wake (below).
 
 Status axis: none. There is no paused state in v1; removing all bindings is how an assistant is paused.
 
@@ -230,11 +230,11 @@ Relationships: owns Conversations, Channel Bindings and Memory documents; memory
 
 Purpose: one continuous exchange with an assistant inside one platform container, backed by a lineage of sessions.
 
-Fields: `id`, `assistantId`, container key (`connectionId` plus `{ kind: "group" | "dm", path: string[] }` - the platform's container ids outermost first, as the channel plugin declares them; or a web-chat id with no channel), `currentSessionId`, the ordered session lineage (successive sessions after each rotation). Conversations are never merged. The messages of a container - owner, trusted and third-party lines, bot lines, the assistant's replies, notification sink posts - are **conversation messages**, child rows keyed by container that hold the conversation view and the unseen-context delivered at wake; they are not Events ([ADR 0023](../adr/0023-chat-messages-are-conversation-input-not-events.md); [12-assistants.md](./12-assistants.md) sections 2 and 4.3).
+Fields: `id`, `assistantId`, container key (`connectionId` plus `{ kind: "group" | "dm", path: string[] }` - the platform's container ids outermost first, as the channel plugin declares them; or the assistant's single web chat with no channel), `currentSessionId`, the ordered session lineage (successive sessions after each rotation), and the **last-seen watermark** (the position in the container's messages up to which the assistant has been shown lines; on the conversation, not the session, so it survives rotation). Conversations are never merged; an assistant has exactly one web-chat conversation. The messages of a container - owner, trusted and third-party lines, bot lines, the assistant's replies, notification sink posts - are **conversation messages**, child rows keyed by container that hold the conversation view and the unseen-context delivered at wake; they are not Events ([ADR 0023](../adr/0023-chat-messages-are-conversation-input-not-events.md); [12-assistants.md](./12-assistants.md) sections 2 and 4.3).
 
 Status axis: none.
 
-Relationships: `assistantId` required; container key required; sessions in the lineage reference it through `conversationId`. Subscriptions held by the live session migrate to the successor session on rotation, so "a subscription dies with its holder" holds for the conversation's current incarnation ([12-assistants.md](./12-assistants.md)).
+Relationships: `assistantId` required; container key required; sessions in the lineage reference it through `conversationId`; owns its Reminders. Subscriptions held by the live session migrate to the successor session on rotation, so "a subscription dies with its holder" holds for the conversation's current incarnation ([12-assistants.md](./12-assistants.md)). The current session's *process* is lazy: started on first wake, exited by the runner after an idle timeout, resumed on the next wake; rotation ends the incarnation and the successor starts on the next wake.
 
 #### Channel Binding
 
@@ -254,7 +254,15 @@ Status axis: none.
 
 Purpose: the assistant's durable notes, reached only through the API ([ADR 0020](../adr/0020-assistant-memory-is-reached-only-through-the-api.md)).
 
-Two tiers per assistant: one `core` document and named topic documents; format, caps, injection and the taint provenance marker are owned by [12-assistants.md](./12-assistants.md) (section 6). Each document is a row keyed by (assistant, name). Status axis: none.
+Two tiers per assistant: one `core` document and named topic documents `{ name, gist, body }`; format, caps, the shrink guard, injection and taint provenance are owned by [12-assistants.md](./12-assistants.md) (section 6). Each document is a row keyed by (assistant, name), carrying core-owned provenance metadata (one entry per source conversation) when written from a tainted session. Status axis: none.
+
+#### Scheduled Wake
+
+Purpose: waking an assistant at a time rather than on an event ([12-assistants.md](./12-assistants.md) section 8, [ADR 0024](../adr/0024-assistants-are-woken-by-the-scheduler-not-by-workflows.md)). Fired by the core Scheduler (the component that also emits `cron.tick`), delivered as Queued Input (`source: heartbeat | reminder`) on a conversation, never through the event pipeline.
+
+Two kinds: the **Heartbeat**, one per assistant, recurring, stored on the Assistant record; and the **Reminder**, one-shot, fields `id`, `conversationId`, `at`, `text`, `createdBy` (actor), set by the assistant on itself or by the user, delivered to the conversation that created it. A missed reminder fires late on boot; a missed heartbeat tick is skipped.
+
+Status axis (Reminder): `pending` -> `fired` | `cancelled`.
 
 ### Actor
 
@@ -489,6 +497,7 @@ Fields: `id`, `owner {kind: connection | plugin | runner | core, id}`, `name`, c
 | Turn | `completed`, `failed`, `interrupted` | all | 06 |
 | Queued Input | `queued`, `delivered`, `cancelled` | `delivered`, `cancelled` | this document |
 | Subscription | `live`, `ended` | `ended` | this document |
+| Reminder | `pending`, `fired`, `cancelled` | `fired`, `cancelled` | this document |
 | Trigger (start) | `active`, `paused` | none | 07 |
 | Workflow | `enabled`, `disabled` | none | this document |
 | Runner | `online`, `offline`, `unreachable`, `draining`, `retired` | `retired` | 03 |

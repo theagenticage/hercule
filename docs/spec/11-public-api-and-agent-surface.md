@@ -270,13 +270,26 @@ Semantics: [./12-assistants.md](./12-assistants.md).
 | `agent.query` / `agent.read` | | `agent.read` | `GET /agents[/{id}]` |
 | `agent.create` / `update` / `delete` | prompt, provider instance, capabilities, `profileId` (assigning a permission profile is an `agent.update`) | `agent.write` | `POST` / `PATCH` / `DELETE /agents[/{id}]` |
 | `assistant.query` / `assistant.read` | | `agent.read` | `GET /assistants[/{id}]` |
-| `assistant.create` / `update` / `delete` | an agent plus heartbeat (standing prompt, enabled); `delete` is the confirmed action that deletes memory and bindings | `agent.write` | `POST` / `PATCH` / `DELETE /assistants[/{id}]` |
+| `assistant.create` / `update` / `delete` | an agent plus `heartbeat { enabled, schedule, timezone?, prompt, target }`, `rotation { contextFraction, maxContextTokens, dailyAt, timezone? }`, `reply`, `accessMode` ([./12-assistants.md](./12-assistants.md) section 1); `delete` is the confirmed action that deletes memory and bindings | `agent.write` | `POST` / `PATCH` / `DELETE /assistants[/{id}]` |
 | `binding.query` / `create` / `update` / `delete` | channel bindings of an assistant | `agent.read` / `agent.write` | `GET` / `POST /assistants/{id}/bindings`, `PATCH` / `DELETE /assistants/{id}/bindings/{bindingId}` |
 | `conversation.query` / `conversation.read` | `{ assistantId, ... }` (lineage of sessions) | `agent.read` | `GET /assistants/{id}/conversations[/{conversationId}]` |
+| `conversation.rotate` | manual rotation ("start fresh"): distill, end the incarnation, successor on next wake ([./12-assistants.md](./12-assistants.md) section 5.2) | `agent.write` | `POST /assistants/{id}/conversations/{conversationId}/rotate` |
+
+### reminder (scheduled wakes)
+
+Semantics: [./12-assistants.md](./12-assistants.md) section 8.3. A reminder is a one-shot Scheduled Wake delivered as input to the conversation that created it; the heartbeat (the recurring wake) is edited through `assistant.update`, not here. Grant family `subscription` - a reminder is "wake me later" on a clock instead of an event.
+
+| Operation | Input | Grant | Route |
+|---|---|---|---|
+| `reminder.create` | `{ at: ISO datetime, text }` -> `{ reminderId }`; from a session token the conversation is the session's own, a user credential names `conversationId` | `subscription.write` | `POST /reminders` |
+| `reminder.query` | `{ conversationId? }`; a session token lists its own conversation's | `subscription.read` | `GET /reminders` |
+| `reminder.cancel` | `{ reminderId }` | `subscription.write` | `DELETE /reminders/{id}` |
+
+CLI: `hydra reminder create --at 2026-09-03T09:00 "Remind Rogier to chase the Acme invoice"`, `hydra reminder query | cancel`.
 
 ### memory (assistant-scoped)
 
-Section 6.4 specifies the operations. Grant family `memory` (`read`: `list`, `read`, `search`; `write`: `write`, `append`, `delete`). Routes: `GET /assistants/{id}/memory` (list), `GET .../memory/search?text=`, `GET` / `PUT` / `DELETE .../memory/{name}`, `POST .../memory/{name}/append`. `{id}` is `me` for a session token (section 6.4 pins the scope rule).
+Section 6.4 specifies the operations. Grant family `memory` (`read`: `list`, `read`, `search`; `write`: `write`, `append`, `delete`). Routes: `GET /assistants/{id}/memory` (list), `GET .../memory/search?text=`, `GET` / `PUT` / `DELETE .../memory/{name}`, `POST .../memory/{name}/append`. `PUT` takes `{ body, gist?, confirmShrink? }`. `{id}` is `me` for a session token (section 6.4 pins the scope rule).
 
 ### permission, profile
 
@@ -420,26 +433,21 @@ Assistant memory is reached only through these operations ([ADR 0020](../adr/002
 |---|---|
 | `list` | Returns the index: per document, name, size and gist. This is the same index injected at session start. |
 | `read <name>` | Returns the full body of `core` or one topic. |
-| `search <words>` | Searches across the assistant's memory documents and returns matches. The API's substitute for `grep`. |
-| `write <name>` | Replaces the whole body of `core` or a topic; creates the topic if absent. Content on stdin. |
-| `append <name>` | Appends content to an existing document. Content on stdin. |
-| `delete <name>` | Removes a topic. |
+| `search <words>` | SQLite FTS5 over `core` and every topic; returns per matching document `{ name, snippets[] }`. The API's substitute for `grep`. |
+| `write <name> [--gist "..."] [--confirm-shrink]` | Replaces the whole body of `core` or a topic; creates the topic if absent. Content on stdin; `--gist` sets the topic's one-line gist (optional, unchanged when omitted, ignored for `core`). |
+| `append <name>` | Appends content to an existing document. Content on stdin. Never touches the gist. |
+| `delete <name>` | Removes a topic. `delete core` is refused (`core` is seeded and always injected; `write core` with an empty body clears it). |
 
 Enforcement at the write seam (hard rules):
 
 - A `write` or `append` whose resulting size exceeds the document's cap fails with `cap_exceeded`, naming the current size and the cap so the agent can consolidate. The over-cap write is a visible event, never a silent truncation.
 - A `write` that would exceed the topic count cap fails with `cap_exceeded`, naming the topic count and its cap.
-- Every write is actor-stamped (section 3). Writes distilled from tainted conversation content carry a one-line provenance marker inside the document ([./13-security.md](./13-security.md)).
+- **Shrink guard.** A `write` that would shrink a document of 1,000 or more characters by more than 50% fails with `shrink_rejected`, naming old and new sizes, unless the call carries `confirmShrink: true`. The error is the teaching channel ([./12-assistants.md](./12-assistants.md) section 6.4).
+- Every write is actor-stamped (section 3). Writes from a tainted session (one that has been delivered third-party lines) get provenance metadata *on* the document, set by the core, rendered by `read` as a trailing `> provenance:` line ([./12-assistants.md](./12-assistants.md) section 6.7, [./13-security.md](./13-security.md) section 10).
 
 **Scope (hard rule, the one scoped family in v1):** memory operations from a session token act on the memory of that session's assistant and on nothing else; `assistantId` (`/assistants/{id}/memory`) is honoured for user credentials only, and a session token naming another assistant gets 403 `forbidden`. A session under a profile without `memory` (the `worker` profile) reaches no memory at all. The user reaches every assistant's memory through the same operations; the web app's memory view is a client of them.
 
-**Open:** whether `delete core` is refused (core is seeded and always injected; the tickets say nothing about deleting it).
-
-**Open:** whether `write` validates the two-line topic header (`# name`, `> gist`) and rejects a nonconforming body, or accepts any body and derives the gist leniently.
-
-**Open:** the matching semantics of `memory search` (SQLite FTS like task search, or substring) and whether it searches `core` as well as topics.
-
-**Open:** whether v1 applies a shrink guard on `write` (reject a write that shrinks a document by more than N% unless confirmed). [Prototype: assistant memory interface](https://github.com/rogierpennink/hydra/issues/31) recorded it as the cheaper v1-shaped alternative to version history after a cap rejection led a model to drop fifteen unique decisions in one rewrite; it was put on the record, not adopted.
+There is no header convention to validate: the gist is a field (`--gist`), the body is pure content ([./12-assistants.md](./12-assistants.md) section 6.2).
 
 ## 7. Session subscriptions
 
@@ -476,7 +484,7 @@ The ops CLI is the same `hydra` binary under a user credential: `hydra login` wr
 - **Offset pagination and totals** - bolted on beside cursors if usage shows a real need for random access.
 - **CEL subscription targets** - a fifth `SubscriptionTarget` kind carrying a filter over `event`, if the four shorthand kinds prove short.
 - **Read-only memory materialization on runners** (memory as files for native grep, writes still via API) - a pure read convenience addable without touching the write path.
-- **Memory version history** - ruled post-v1; the retrofit is additive (history table beside the live document). The write seam already makes every rewrite a visible actor-stamped event.
+- **Memory version history** - ruled post-v1; the retrofit is additive (history table beside the live document). V1 ships the shrink guard on the write seam instead, and every rewrite is a visible actor-stamped event.
 - **Platform-auto subscription detection** - the controller subscribing a session to artifacts it created; explicit registration stays the primitive.
 - **Multi-user** - widens the actor field to a user id; no restructuring.
 - **Per-agent git identity** - a policy addition on unchanged plumbing ([./13-security.md](./13-security.md)).

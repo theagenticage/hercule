@@ -103,7 +103,8 @@ Constraints other documents hand to specific screens (the owning document has th
 | Settings > Assistants | Channel bindings are edited as `connection + scope -> assistant`, the scope pickers generated from the channel contribution's declared levels in the catalog (Discord guild / channel / thread, Slack channel / thread, or all DMs); the assistant's `reply` mode (turn-end / segments) is a setting here. | [./12-assistants.md](./12-assistants.md) |
 | Settings > Identities | Platform identities with role owner / trusted; Add mints a one-time pairing code to DM to the bot; revoke in place. | [./12-assistants.md](./12-assistants.md) |
 | Notifications | A Permission Request notification offers "this session only" or "add to profile". | [./13-security.md](./13-security.md) |
-| Settings > Assistants | Memory documents (`core` plus topic notes) are viewed and edited through the same memory API ops the `hydra memory` CLI uses; caps are enforced at the write op and the UI shows the resulting error. | [./12-assistants.md](./12-assistants.md) |
+| Settings > Assistants | Memory documents (`core` plus topic notes, each topic's gist an editable field) are viewed and edited through the same memory API ops the `hydra memory` CLI uses; caps and the shrink guard are enforced at the write op and the UI shows the resulting error; provenance entries on a document are shown beside it and clearable. Heartbeat: enabled, target, standing prompt, and a schedule form ("every [1 h] between [07:00] and [23:00]") that compiles to the stored cron expression and parses back when the expression fits that shape, otherwise the raw expression is shown. Rotation thresholds and a "start fresh" (manual rotation) on each conversation. Reminders listed per conversation. | [./12-assistants.md](./12-assistants.md) |
+| Settings > Profile | The user's **timezone**, the one spec-wide timezone source (cron triggers, rotation, heartbeat, "since you last checked", display all fall back to it); set at onboarding from the browser. | [./12-assistants.md](./12-assistants.md) section 5.2 |
 
 **Open:** the screen inventory names "Bounds" under Settings while Spawn Bounds are per-trigger settings inside a workflow. What the Settings > Bounds screen shows beyond a fleet-wide overview of triggers and their bounds is not pinned.
 
@@ -185,7 +186,7 @@ The ringfence exists so a visual drag-and-drop editor can replace the module's i
 
 `hydra serve` auto-initializes and prints a one-time setup URL; from there onboarding is wholly a web app + public API flow, and it creates the default assistant ([./12-assistants.md](./12-assistants.md)). The CLI never prompts, so the future desktop app becomes the installer by reusing these views unchanged. Mechanics of first run and the setup URL: [./15-packaging-and-operations.md](./15-packaging-and-operations.md).
 
-**Open:** the content of the onboarding flow (which steps the setup URL walks the user through, beyond establishing the user's password and creating the default assistant) is not pinned by any ticket.
+**Open:** the content of the onboarding flow (which steps the setup URL walks the user through, beyond establishing the user's password, confirming the timezone detected from the browser, and creating the default assistant) is not pinned by any ticket.
 
 ## Connection setup
 

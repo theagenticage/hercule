@@ -254,9 +254,11 @@ interface BoundOperation {             // the same shape `permission.request` ca
 
 Assistants may speak unprompted in the conversation that holds the relevant subscription ([./12-assistants.md](./12-assistants.md)). Rule from ticket 17, keeping ADR 0012's single-path promise: **if an assistant is holding a subscription on the thing, the assistant speaks and no core notification fires; core notifications cover what no assistant is holding.**
 
-That rule is pinned; the mechanism is not. The consolidated proposal is that the core router, before creating a notification that derives from a pipeline event, checks for a live session subscription held by an assistant session whose correlation matches the same event; if one exists, the event reaches that session as queued input and the notification is not delivered. Everything below the rule is provisional.
+Mechanism, pinned by [Assistant runtime](https://github.com/rogierpennink/hydra/issues/40) and owned by [./12-assistants.md](./12-assistants.md) section 8.1:
 
-**Open:** the no-double-fire mechanism: what counts as "holding" (a live assistant-held subscription matching the event; whether a task-level subscription covers run-level events under that task); which producers the rule covers (core internals only, or also a `notify` step inside a run the assistant delegated - ticket 17 says "core notification" without defining it); and whether suppression means no record at all or a record marked read and not delivered. [./12-assistants.md](./12-assistants.md) links here rather than holding its own Open.
+- **Holding** = a live session Subscription whose typed target matches the event by the pipeline's ordinary matcher, held by a session with a `conversationId`. Exact match only (run `r_3` covers `r_3`); no task-level target exists in v1.
+- **Covered producers**: only core notifications derived from a pipeline event (v1: the `run.failed` notification). `notification.create` steps are the workflow's own message and are never suppressed; breaker trips, permission requests and update notices derive from nothing an assistant can hold.
+- **Suppressed = recorded, not pushed.** The router creates the record, marks it handled by the assistant (linking the conversation), lists it in the notification center as already handled, and delivers it to no sink. ADR 0012's "the inbox always records it" holds; single path means one push. The status value for "handled by assistant" is part of the Notification status axis (section 7.1, [Notification lifecycle](https://github.com/rogierpennink/hydra/issues/42)).
 
 ### 7.6 Permission requests
 

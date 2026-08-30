@@ -112,7 +112,7 @@ GitHub and Gmail are event-source plugins. Cron, manual, and platform events are
 
 ### 5.3 Cron (core)
 
-Cron is core, not a plugin. There is no standalone schedule entity: the schedule lives in a workflow's cron start trigger, `{schedule, timezone}`, timezone per trigger with the controller's timezone as default. Triggers are queryable rows in their own table ([./07-workflows.md](./07-workflows.md)), so "all schedules" is one query. A workflow may carry several start triggers, cron or otherwise.
+Cron is core, not a plugin. There is no standalone schedule entity: the schedule lives in a workflow's cron start trigger, `{schedule, timezone}`, timezone per trigger with the user's timezone setting as default ([./12-assistants.md](./12-assistants.md) section 5.2). Assistant heartbeats and reminders are Scheduled Wakes fired by the same Scheduler but outside the pipeline ([./12-assistants.md](./12-assistants.md) section 8). Triggers are queryable rows in their own table ([./07-workflows.md](./07-workflows.md)), so "all schedules" is one query. A workflow may carry several start triggers, cron or otherwise.
 
 - A core scheduler keeps next-fire state as rows in the database (reloaded on boot, [./04-state-store.md](./04-state-store.md)) and emits `cron.tick {workflowId, triggerId, scheduledFor}` through the pipeline; the matcher routes by `triggerId`.
 - Ticks missed while the controller was down are skipped, with a visible note on the trigger. No catch-up runs.
