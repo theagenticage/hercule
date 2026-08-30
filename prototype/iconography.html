@@ -20,6 +20,9 @@
   (?work=soft|dot|eq), and a placement rule - one mark per slot, never two side by
   side; entity glyphs only where they are the sole mark (nav, decision card FROM).
   Nav icons: ?nav=entities|all|none.
+
+  PINNED (2026-08-30): D with sess=bubble, legend=side, work=soft, nav=entities.
+  Defaults now equal the pinned settings; docs/design-language.md records them.
 -->
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -594,7 +597,7 @@ function get(k) { return params().get(k); }
 function setParam(k, v) { const p = params(); if (v === null) p.delete(k); else p.set(k, v); try { history.replaceState(null, "", "?" + p.toString()); } catch (e) {} }
 function current() { const k = (get("variant") || "D").toUpperCase(); const i = SYSTEMS.findIndex((v) => v.key === k); return i === -1 ? 0 : i; }
 function sessKey() { const s = get("sess"); return SESS_KEYS.includes(s) ? s : "bubble"; }
-function legendPlace() { return get("legend") === "side" ? "side" : "top"; }
+function legendPlace() { return get("legend") === "top" ? "top" : "side"; }
 function data() { return DATASETS[get("data") === "busy" ? "busy" : "calm"]; }
 let S = SYSTEMS[current()];
 
