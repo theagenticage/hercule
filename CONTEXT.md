@@ -260,6 +260,10 @@ _Avoid_: rate limit (bare), throttle
 A persisted message from Hydra to its user ("run failed", "trigger paused", "agent needs a decision"). Produced by the core, by workflow notify steps, or by plugins; always recorded centrally, with delivery through channels decided by the core, never claimed by plugins.
 _Avoid_: alert, ping
 
+**Bound Action**:
+One answer on a decision Notification, carrying the single frozen operation that runs as the user when chosen. Proposed by whoever produced the notification (an agent, a run, a plugin, the core); authorised only by the user's informed choice, never by the proposer's own permissions.
+_Avoid_: button (as the domain term), callback, quick action
+
 **Intake**:
 The formation boundary where external signals become work: signals are triaged, grouped, and enriched by agents before they spawn tasks or reach the user, so decisions are made on prepared, high-value material rather than raw input. Also the name of the view that presents it (confirmed by ticket #30).
 _Avoid_: command center, inbox, dashboard

@@ -198,7 +198,7 @@ The operation-to-grant mapping is an explicit table in the contract package; [./
 
 1. The agent calls `permission.request { grant, reason, operation? }` (granted to everyone; `hydra permission request <grant> --reason "..."`). `operation` optionally names the call it wanted to make (`{ op: "connection.create", input }`), so the user sees what the agent is trying to do, not only which family it lacks.
 2. The controller creates a **Permission Request** Notification ([./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md)) naming the session, the agent, the grant, the reason and the operation, and, when the caller is a session, registers a `{ kind: "request" }` subscription for that session in the same call. The response carries `requestId` and `subscriptionId`.
-3. The user decides in the web app (whether a channel sink can carry the decision is Open in [./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md)) through the bound `permission.decide` with one of three outcomes: **`session`** (a session-scoped grant overlay that dies with the session), **`profile`** (edits the agent's profile; every future session of every agent on that profile gains it), or **`deny`**.
+3. The user decides in the web app, or from an interactive channel sink where the click must come from an owner platform identity ([./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md) section 7.4), through the bound `permission.decide` with one of three outcomes: **`session`** (a session-scoped grant overlay that dies with the session), **`profile`** (edits the agent's profile; every future session of every agent on that profile gains it), or **`deny`**.
 4. The decision arrives as queued input on a turn boundary and the agent retries the original operation itself, so the actor stays `session:<id>`. There is no blocking wait, consistent with the no-blocking rule in [./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md).
 
 A fourth outcome, **`once`** (a one-use overlay consumed by the first successful call of the named operation), is post-v1; `operation` on the request is the field it needs ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md) section 10).
@@ -207,9 +207,9 @@ Raising and deciding a Permission Request are audited (section 11).
 
 ### 6.5 Decision Notification actions
 
-Decision Notifications carry actions that bind an operation authored by an agent (e.g. "Start Bugfix" = start workflow X with task Y) and executed when the user clicks ([./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md)). The actor of the executed operation is the user who clicked; the operation runs under user parity.
+Decision Notifications carry bound actions: answers that bind an operation proposed by an agent, a run, a plugin or the core, executed when the user chooses one ([./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md) section 7.4). The actor of the executed operation is the user who clicked; it runs under user parity.
 
-**Open:** whether the controller must additionally check that the authoring session's profile could have performed the bound operation (the ticket #21 handoff asks "how ... authorised" and the material does not answer).
+**Authoring is not profile-checked** ([ADR 0022](../adr/0022-proposing-is-not-doing.md)): a session may propose an operation its own profile forbids; the user's informed click is the authorisation. The guardrails are: a per-operation `bindable` flag that withholds the `credential`, `secret`, `infra` and `permission` families, `connection.manage` and bulk-destructive operations from non-core producers; a core-rendered `describe(input)` line on every answer that the producer can neither write nor suppress; and an audit entry naming decider, proposer and (for channel clicks) the channel connection. Channel clicks execute only from owner platform identities ([./12-assistants.md](./12-assistants.md) section 4); any other sender is refused.
 
 ## 7. Access-mode fallback guardrail
 

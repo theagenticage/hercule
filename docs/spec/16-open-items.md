@@ -13,15 +13,6 @@ To find the exact line for any entry: `grep -n '^\*\*Open:\*\*' docs/spec/<doc>.
 
 ## A. Decisions handed to tickets
 
-### [Actors and authorisation beyond sessions: runs, plugins, bound Notification actions](https://github.com/rogierpennink/hydra/issues/37)
-
-Owning documents: [11 §3](./11-public-api-and-agent-surface.md), [10 §7.4](./10-triage-intake-and-notifications.md), [13 §6](./13-security.md).
-
-- (Items 1 and 2 of the ticket, the actor value and gating of run action steps and plugins, were pinned by [Public API operation catalogue](https://github.com/rogierpennink/hydra/issues/38): `run:<id>` and `plugin:<id>`, ungated; 11 §3.1.)
-- 11 §3.2, 10 §7.4, 13 §6.4, 02 §Notification: whether an agent-authored bound operation must have been within the authoring session's permission profile (or only the user's parity at click time).
-- 10 §7.4: how the concrete operation is rendered so the click is informed.
-- 10 §7.4: whether a bound operation can be executed from a channel sink and how that click is authenticated as the user.
-
 ### [Channel contribution interface and conversation ingress (Discord, Slack)](https://github.com/rogierpennink/hydra/issues/39)
 
 Owning documents: [12 §11](./12-assistants.md), [05 §4](./05-plugins.md), [10 §7.3](./10-triage-intake-and-notifications.md).

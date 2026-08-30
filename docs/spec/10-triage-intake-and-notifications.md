@@ -208,6 +208,7 @@ The sink contract:
 
 ```ts
 interface NotificationSink {
+  interactive: boolean;   // true = renders bound actions as native buttons and reports clicks to the core
   deliver(notification: Notification, connection: ConnectionRef): Promise<void>;  // throws = retry via outbox
   // Additive growth reserved (post-v1): deviceClass, presence(), receipts. A sink reporting nothing
   // is treated as always-available.
@@ -216,39 +217,37 @@ interface NotificationSink {
 
 Because routing lives only in the core, presence-aware routing ("desktop idle, send to phone") lands post-v1 as a router upgrade touching no plugin.
 
-**Open:** what a channel sink renders for a decision notification. Bound actions execute in the web app (Section 7.4); whether a Discord/Slack delivery carries a deep link to the in-app notification only, or also native buttons wired back to the same operation, is not pinned. The minimum is the link.
+**Decision delivery is a sink capability** (pinned by ticket 37). A sink declares `interactive`. A non-interactive sink delivers title, body and a deep link to the in-app record; the decision is taken in the web app. An interactive sink also renders every bound action as a native button - its label plus the core-rendered describe line of Section 7.4 - and reports a click to the core as `{ notificationId, actionId, connection, senderIdentity }`; the core, never the plugin, authenticates and executes it (Section 7.4). Discord (gateway interactions) and Slack (Socket Mode) both deliver clicks outbound-only, so the no-public-endpoint stance of [./08-events-and-connections.md](./08-events-and-connections.md) holds. Payload shapes and channel-side mechanics belong to the channel contribution interface ([./05-plugins.md](./05-plugins.md) section 11).
 
 **Open:** whether the assistant's own conversation on a bound channel is a valid sink target (the notification appears as the assistant speaking) or whether channel sinks post as the Hydra bot outside any conversation. Ticket 17's double-fire rule (Section 7.5) suggests the two must stay distinguishable.
 
 ### 7.4 Bound actions
 
-A decision Notification's actions carry a **bound operation**: "Start Bugfix" = run workflow X with task Y; "Merge dev bumps" = `github.merge` on PRs 113, 114, 115; "Allow" = answer approval request R in session S; "Resume" = un-pause trigger T. Pinned by ticket 21 (requirement 3): actions bind an operation; the actor is the user clicking; the operation was authored by an agent (or by the core); the spec must say how an action's operation is declared, executed and authorised. Nothing beyond that is pinned. What follows is the spec's consolidated proposal for declaration and execution, built on ADR 0013's one-contract rule; authorisation stays Open.
+A decision Notification's actions are **bound actions**: each is one answer carrying the single contract operation that runs when the user chooses it. "Start Bugfix" = `workflow.run` with workflow X and task Y; "Merge dev bumps" = `github.merge` on PRs 113, 114, 115; "Allow" = `session.respond` for request R in session S; "Resume" = `trigger.resume` on trigger T; "Event-sourced" = `session.input` replying to the session that asked. Pinned by ticket 37 ([ADR 0022](../adr/0022-proposing-is-not-doing.md)). The rule in one line: **proposing is not doing - the producer proposes, the user's informed click authorises.**
 
 ```ts
-// Consolidated proposal (ticket 21 handoff), not pinned by a ticket.
 interface BoundAction {
   id: string;
-  label: string;                       // the answer text: "Start Bugfix", "Allow", "Resume and discard"
+  label: string;                       // the answer text: "Start Bugfix", "Allow", "Event-sourced"
+  description?: string;                // producer-authored markdown: what choosing this answer means
   operation: BoundOperation;
-  primary?: boolean;                   // at most one per notification; rendered as the quiet primary answer (design language)
+  primary?: boolean;                   // at most one per notification; the quiet primary answer (design language)
 }
 
-interface BoundOperation {
-  op: string;                          // a public-API contract operation id: "workflow.run", "task.update",
-                                       // "session.respond", "trigger.resume", "github.merge" (plugin action)
-  input: unknown;                      // validated against the op's Zod input schema at notification creation
+interface BoundOperation {             // the same shape `permission.request` carries in `operation`
+  op: string;                          // a contract operation id: "workflow.run", "session.input", "github.merge"
+  input: unknown;                      // validated against the op's input schema at creation, then frozen
 }
 ```
 
-- **Declared** at notification creation as a contract operation plus its input, frozen with the record. The input is validated against the op's input schema when the notification is created, so a malformed action fails the producer, never the user's click. Only operations in the public contract (including plugin-contributed workflow actions invoked through it) can be bound; there is no free-form code.
-- **Executed** when the user decides: the web app calls one op, `notification.act { notificationId, actionId }` (the "decide" op in [./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md) §2), and the service layer executes the frozen operation. The mutation is stamped `actor: user`; the resulting event log entry carries the notification id and its `producer`, so audit shows both who decided and who authored. Executing an action resolves the notification; a resolved notification's actions are inert (one-shot).
-- **Authorised** as the user at execution time: the user has full parity, so no grant check fails at click time. Whether the authoring side is also bounded is the Open below.
-
-**Open:** whether authoring is also bounded - that is, whether the operation must have been within the authoring agent's permission profile at creation time (a session on the worker profile, which lacks `workflow.run`, could otherwise route around its profile by proposing "Start workflow X" for the user to click). The trust model in [./13-security.md](./13-security.md) is written for the agent as actor; the delegated-click case is not settled. The conservative reading is that creation validates the operation against the producer's profile as if the producer were executing it; the permissive reading is that the click is the user's informed decision.
-
-**Open:** how the operation is rendered so the click is informed. The Intake detail shows the suggested step's label and the verdict; whether the web app also shows the concrete op and input ("workflow.run bugfix with task #118") before execution is a [./14-web-app.md](./14-web-app.md) question with a security consequence.
-
-**Open:** whether a bound operation can be executed from a channel sink (Section 7.3), and if so how the click is authenticated as the user (the owner's configured platform identity, as for assistant commands in [./12-assistants.md](./12-assistants.md)).
+- **Declared** at creation as a contract operation plus its input, frozen with the record. The input is validated against the op's input schema when the notification is created, so a malformed action fails the producer, never the user's click. Only contract operations (including plugin actions invoked through the contract) can be bound; there is no free-form code.
+- **Bindable operations.** The core may bind any operation. For the other producers (`session`, `run`, `plugin`) the operations of the `credential`, `secret`, `infra` and `permission` grant families, `connection.manage` operations, and operations tagged bulk-destructive ([./13-security.md](./13-security.md) section 6.1) are **not bindable**: a one-line rendering cannot make "rotate this secret" or "retire runner X" an informed click, and nothing in Intake or check-in needs them. The contract's operation table carries a `bindable` flag, default true ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md) section 2); binding a non-bindable op fails `notification.create`. The Permission Request's "add to profile" answer is a core-bound `permission.decide`, which is why the core keeps them.
+- **Not bounded by the producer's profile.** Authoring is *not* checked against the producer's permission profile: a `worker` session that lacks `workflow.run` may still propose "Start Bugfix"; only the click runs it, under the user's parity. The conservative reading (validate the operation against the producer's profile at creation) was rejected: in the shipped triage topology the notification is created by the `notify` action step as `run:<id>`, which is ungated, so a profile check on session producers would fence a path with no gate in it - while blocking the one thing Intake exists for, agents proposing work they may not do themselves.
+- **Informed click: two lines, two authors.** Each answer renders with its `label`, the producer's `description` when present (what the choice *means* - only the producer knows), and a **core-rendered describe line** (what the click *does* to the system). Every contract operation declares `describe(input) -> string` ("Run workflow *Bugfix* with task *#118 Fix login timeout*", "Reply *Event-sourced* to session *Design ordering module*"); the core renders it from the frozen input with live names, the producer never supplies or suppresses it, and it is present on every surface that can execute the action (web app, interactive channel sink). The notification's `body` frames the question. A producer cannot mislabel its way past the describe line. Rendering label, description and describe line calmly is Open in [./14-web-app.md](./14-web-app.md).
+- **Executed** when the user decides: `notification.act { notificationId, actionId }` from the web app or from an interactive channel sink (Section 7.3). The service layer executes the frozen operation as actor `user`, full parity, no grant check. The event log entry carries the notification id, its `producer` and, for a channel click, the channel connection, so audit shows who decided, who proposed and where. Success resolves the notification (`resolution = { actionId, actor }`); a resolved notification's actions are inert (one-shot).
+- **Failure at click.** The frozen input is not revalidated ahead of the click; the operation runs its own checks when executed (task #118 cancelled since the proposal -> `workflow.run` rejects). A failed execution returns the op's error to the clicker, the notification stays **unresolved** with the error shown inline, and the user may retry or choose another answer. Resolution means the user decided *and it happened*.
+- **Channel clicks** are authenticated by the owner platform identities of [./12-assistants.md](./12-assistants.md) section 4: an owner's click executes as `user`; a non-owner's click is refused with an ephemeral reply and executes nothing; a click on an already-resolved notification gets an ephemeral "already decided".
+- **Agent questions use the same machinery.** An agent asking the user something ("which architecture?") creates a decision notification: it authors title, body, answer labels and descriptions, and each answer binds `session.input { sessionId: <its own>, content: <the answer> }`. The click delivers the answer as queued input, picked up on the agent's next turn boundary exactly like a Permission Request outcome; no blocking wait. This works only because proposing is not profile-bounded: the `worker` profile lacks `session.steer`, so the session could not send itself input, but it may propose that the user does. Free-text answers are not a button: the user opens the session and types. There is no separate question record.
 
 ### 7.5 Assistants and double-firing
 

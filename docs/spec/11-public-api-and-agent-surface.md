@@ -205,6 +205,8 @@ Record and router: [./10-triage-intake-and-notifications.md](./10-triage-intake-
 
 `notification.create` is the operation the tickets called `notify`; the built-in action carries the operation's name. `notification.act` decides a decision notification and executes its bound operation (section 3.2).
 
+Two per-operation facts in the contract's operation table serve bound actions ([./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md) section 7.4): a **`bindable`** flag, default true, `false` for the `credential`, `secret`, `infra` and `permission` families, `connection.manage` and bulk-destructive-tagged operations (the core may still bind those; other producers may not), and a **`describe(input) -> string`** renderer, the core-rendered line shown on every bound action so the click is informed.
+
 ### event
 
 Pipeline: [./08-events-and-connections.md](./08-events-and-connections.md).
@@ -335,9 +337,7 @@ The actor is derived from the credential or the in-process caller, never supplie
 
 ### 3.2 Bound Notification actions
 
-A decision Notification may bind an operation (for example "Start Bugfix" = `workflow.run` with workflow X and task Y; "Merge dev bumps" = `github.merge` over three PRs). The operation executes through `notification.act` when the user decides, so the actor is `user`. The operation was authored by an agent. Declaration, validation and execution of bound actions are the spec's consolidated proposal in [./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md), not a pinned decision.
-
-**Open:** authorisation of agent-authored bound operations: whether the bound operation must have been within the authoring session's permission profile at authoring time, or only within the user's (unrestricted) parity at click time. The Intake handoff to [Assemble the v1 spec](https://github.com/rogierpennink/hydra/issues/21) names this as needing an answer.
+A decision Notification may bind an operation (for example "Start Bugfix" = `workflow.run` with workflow X and task Y; "Merge dev bumps" = `github.merge` over three PRs; "Event-sourced" = `session.input` replying to the session that asked). Pinned by ticket 37 ([ADR 0022](../adr/0022-proposing-is-not-doing.md)): **proposing is not doing.** The producer - a session, a run's `notify` step, a plugin or the core - declares the operation, and it is not checked against the producer's permission profile. The operation executes through `notification.act` when the user decides, as actor `user` under full parity; the event log entry records the notification id, its producer and, for a channel click, the connection it came through. Two guardrails replace the profile check: the `bindable` flag withholds the credential/secret/infra/permission families, `connection.manage` and bulk-destructive operations from non-core producers, and every operation's `describe(input)` line is rendered by the core on every answer. Record shape, execution, failure and channel-click rules: [./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md) section 7.4.
 
 ## 4. Credentials
 

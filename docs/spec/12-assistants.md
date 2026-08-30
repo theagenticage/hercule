@@ -59,7 +59,7 @@ Who may command, and when the assistant wakes:
 - **Shared channels are mention-gated.** In a group container the assistant wakes only when mentioned. Implicit mentions count as mentions: a reply to one of the assistant's messages, and activity in a thread the assistant is already active in.
 - **Unaddressed group messages are stored as bounded context**, not delivered as turns. When the assistant next wakes in that container it sees the recent unaddressed messages as context.
 - **Third-party lines are context, never instructions.** Messages from anyone other than the owner are delivered wrapped in explicit data-not-instructions markers (the taint markers of [./13-security.md](./13-security.md)).
-- **Only owner identities command.** Single-user v1: the user configures which platform identities are theirs; only messages from those identities are instructions. Everything else is context.
+- **Only owner identities command.** Single-user v1: the user configures which platform identities are theirs; only messages from those identities are instructions. Everything else is context. The same identities authenticate a click on a bound action delivered to a channel ([./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md) section 7.4).
 
 **Open:** the bound on stored unaddressed context (message count or age) is not pinned; OpenClaw uses the last 50 skipped messages (`research/assistant-systems.md`, section 4).
 **Open:** where the owner's platform identities are configured (per channel Connection at setup, or one identity list per user) is not pinned. OpenClaw's `identityLinks` (one human's ids across channels -> one canonical peer) is the field-research shape.

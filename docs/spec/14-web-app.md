@@ -119,6 +119,8 @@ Backward-looking monitoring of delegated work: what is running, what happened to
 4. **Decisions are questions.** Every needs-you item is phrased as a question; its answers are the quiet buttons; the `?` decision mark (see [Iconography](#iconography)) marks it. **Focus** is the pinned treatment: one uniform-height labeled card at a time with fields FROM (strand, domain noun, priority, provenance), WHY, and AGENT (faint dash when no Session is attached), "1 of N" with next-peek and arrow navigation. Because the card height is fixed, the controls never move while cycling. Queue (in-place expansion) and List (condensed rows) were rejected and remain in git history.
 5. **Needs-you and the notification center are one record stream on two surfaces.** Decisions and notifications are the same core-owned Notification records ([ADR 0012](../adr/0012-notifications-are-core-routed-sinks-are-dumb.md)); check-in shows the actionable subset, the notification center shows everything. No double bookkeeping.
 
+**Open:** the bound-action rule of [./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md) section 7.4 puts up to three texts on one answer: the label, the producer's description of what the choice means, and the core's describe line of what the click does. Doing that inside a Focus card while keeping it calm and low-load is unsolved; the check-in and Intake prototypes predate the rule. Candidate: label as the button, describe line as fine print, description behind hover or expand. To be prototyped.
+
 ### Anatomy
 
 Top to bottom:
