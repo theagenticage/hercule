@@ -12,6 +12,14 @@
   Session glyph candidates (the one Rogier disliked): ?sess=bubble|prompt|dots|lines
   Legend placement: ?legend=top|side  ·  Glyph lab strip: ?lab=1
   Switch: floating bar, arrow keys · d data · t theme · s session glyph · l legend · g lab
+
+  ROUND 2 (reaction 2026-08-30): A's weight beat B's, B's shapes beat A's (except
+  the circled pause), C's ? beat the diamond for decision, and C's restraint beat
+  both - too many marks side by side. Added D Synthesis (default): B's family at
+  A's optical weight, ? for decision, bare pause bars, softer equalizer
+  (?work=soft|dot|eq), and a placement rule - one mark per slot, never two side by
+  side; entity glyphs only where they are the sole mark (nav, decision card FROM).
+  Nav icons: ?nav=entities|all|none.
 -->
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -170,6 +178,14 @@
   svg.bs { width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; flex: none; display: block; }
   svg.bs.f { fill: currentColor; stroke: none; }
   .nav svg.bs { width: 13px; height: 13px; }
+  /* Synthesis (D): the bespoke family at Lucide's optical weight (~1.1px at size) */
+  svg.bs.lt { stroke-width: 1.15; }
+  svg.bs.lt.q { stroke-width: 1.35; }
+  /* soft equalizer: lower amplitude, slower, thinner bars */
+  .eq.soft { height: 9px; }
+  .eq.soft i { width: 2px; animation-duration: 1.9s; animation-name: eqs; }
+  @keyframes eqs { 0%, 100% { height: 3px; } 50% { height: 7px; } }
+  .eq.soft i:nth-child(2) { animation-delay: 0.35s; } .eq.soft i:nth-child(3) { animation-delay: 0.7s; }
   /* equalizer (bespoke working mark, kept from #20) */
   .eq { display: inline-flex; align-items: flex-end; gap: 1.5px; height: 10px; width: 11px; flex: none; }
   .eq i { width: 2.5px; border-radius: 1px; background: var(--live); height: 4px; animation: eqb 1.15s ease-in-out infinite; }
@@ -303,7 +319,7 @@
   .sw button { background: none; border: 0; color: #fff; cursor: pointer; font: inherit; font-size: 13px; padding: 4px 10px; border-radius: 999px; }
   .sw button:hover { background: rgba(255,255,255,0.14); }
   .sw button:focus-visible { outline: 2px solid #9a94e8; outline-offset: 1px; }
-  .sw .ds { font-size: 11px; color: #c9c6d0; }
+  .sw .ds { font-size: 11px; color: #c9c6d0; white-space: nowrap; }
 </style>
 
 <div class="app">
@@ -312,7 +328,7 @@
     <nav class="nav" id="nav"></nav>
     <div class="sidefoot">
       <div id="legend-side-slot"></div>
-      <div class="proto-badge">PROTOTYPE · throwaway<br>ticket hydra#35<br>&larr; &rarr; mark system · d data · t theme<br>s session glyph · l legend place · g lab · ? legend</div>
+      <div class="proto-badge">PROTOTYPE · throwaway<br>ticket hydra#35 · round 2<br>&larr; &rarr; mark system · d data · t theme<br>s session glyph · l legend place · g lab · ? legend<br>D only: w working mark · n nav icons</div>
     </div>
   </aside>
   <main class="main">
@@ -334,6 +350,8 @@
   <button id="sessbtn" class="ds" aria-label="Cycle session glyph"></button>
   <button id="legbtn" class="ds" aria-label="Cycle legend placement"></button>
   <button id="dsbtn" class="ds" aria-label="Toggle dataset"></button>
+  <button id="workbtn" class="ds" aria-label="Cycle working mark"></button>
+  <button id="navbtn" class="ds" aria-label="Cycle nav icons"></button>
   <button id="labbtn" class="ds" aria-label="Toggle glyph lab">lab</button>
   <button id="theme" aria-label="Toggle theme">◐</button>
 </div>
@@ -482,6 +500,8 @@ const BS = {
   },
   decision:  '<path d="M6 1.4 10.6 6 6 10.6 1.4 6z"/>',
   paused:    '<rect x="2.75" y="2.25" width="2.2" height="7.5" rx=".8"/><rect x="7.05" y="2.25" width="2.2" height="7.5" rx=".8"/>',
+  pausedLt:  '<path d="M4 2.5v7M8 2.5v7"/>',
+  question:  '<path d="M3.9 4.3a2.1 2.1 0 1 1 3 1.9c-.6.35-.9.75-.9 1.4v.2"/><path d="M6 10.2h.01"/>',
   queued:    '<circle cx="6" cy="6" r="3.4"/>',
   done:      '<path d="m2.4 6.4 2.5 2.5 4.8-5.3"/>',
   failed:    '<path d="m3 3 6 6M9 3l-6 6"/>',
@@ -538,13 +558,41 @@ const SYSTEMS = [
     nav: {},
     legendIcon: () => "",
   },
+  { key: "D", name: "Synthesis", blurb: "B's family at A's weight, ? for decision, one mark per slot",
+    act: {
+      working:   () => workKey() === "dot" ? '<span class="livedot" title="agent working"></span>'
+                     : workKey() === "eq" ? EQ : '<span class="eq soft" title="agent working"><i></i><i></i><i></i></span>',
+      decision:  () => `<span class="attn" title="decision wanted">${bs(BS.question, "lt q")}</span>`,
+      queued:    () => `<span class="cang" title="queued">${bs(BS.queued, "lt")}</span>`,
+      paused:    () => `<span class="attn" title="paused">${bs(BS.pausedLt, "lt")}</span>`,
+      done:      () => `<span class="okg" title="done">${bs(BS.done, "lt")}</span>`,
+      failed:    () => `<span class="failg" title="failed">${bs(BS.failed, "lt")}</span>`,
+      cancelled: () => `<span class="cang" title="cancelled">${bs(BS.cancelled, "lt")}</span>`,
+      ref:       () => '<span class="mono" style="font-size:10px;color:var(--faint)">#</span>',
+    },
+    ent: { task: () => bs(BS.task, "lt"), run: () => bs(BS.run, "lt"), session: () => bs(BS.sess[sessKey()], "lt"), workflow: () => bs(BS.workflow, "lt") },
+    get nav() {
+      const k = navKey();
+      if (k === "none") return {};
+      const ents = { Tasks: "@task", Sessions: "@session", Runs: "@run", Workflows: "@workflow" };
+      return k === "all" ? { Intake: "inbox", "Check-in": "sunrise", ...ents, Fleet: "server", Connections: "plug", Notifications: "bell", Settings: "settings" } : ents;
+    },
+    /* placement rule: one mark per slot, never two side by side. Entity glyphs only
+       where they are the sole mark: the nav and the decision card's FROM field. */
+    restrained: true,
+    legendIcon: () => bs(BS.queued, "lt"),
+  },
 ];
+const WORK_KEYS = ["soft", "dot", "eq"];
+const NAV_KEYS = ["entities", "all", "none"];
+function workKey() { const w = get("work"); return WORK_KEYS.includes(w) ? w : "soft"; }
+function navKey() { const n = get("nav"); return NAV_KEYS.includes(n) ? n : "entities"; }
 
 /* ============ url state ============ */
 function params() { return new URLSearchParams(location.search); }
 function get(k) { return params().get(k); }
 function setParam(k, v) { const p = params(); if (v === null) p.delete(k); else p.set(k, v); try { history.replaceState(null, "", "?" + p.toString()); } catch (e) {} }
-function current() { const k = (get("variant") || "A").toUpperCase(); const i = SYSTEMS.findIndex((v) => v.key === k); return i === -1 ? 0 : i; }
+function current() { const k = (get("variant") || "D").toUpperCase(); const i = SYSTEMS.findIndex((v) => v.key === k); return i === -1 ? 0 : i; }
 function sessKey() { const s = get("sess"); return SESS_KEYS.includes(s) ? s : "bubble"; }
 function legendPlace() { return get("legend") === "side" ? "side" : "top"; }
 function data() { return DATASETS[get("data") === "busy" ? "busy" : "calm"]; }
@@ -552,8 +600,12 @@ let S = SYSTEMS[current()];
 
 /* ============ atoms ============ */
 const M = (k) => S.act[k] ? S.act[k]() : "";
-const entEl = (kind) => {
+/* entEl(kind, slot): slot tells the placement rule where the glyph would land.
+   "card" = the decision card's FROM/AGENT field (sole mark there); anything else
+   sits next to a state mark and is dropped under the restrained rule. */
+const entEl = (kind, slot = "inline") => {
   if (!kind) return "";
+  if (S.restrained && slot !== "card") return "";
   const k = kind.startsWith("task") ? "task" : kind.startsWith("run") ? "run"
     : (kind.startsWith("session") || kind.startsWith("chat")) ? "session" : kind.includes("workflow") ? "workflow" : null;
   if (!k) return "";
@@ -579,9 +631,9 @@ const dcardEl = (dec) => `
     <div class="qline"><span class="markcell">${M("decision")}</span><span class="q">${dec.q}</span><span class="age" data-age="${dec.bucket}">waiting ${dec.age}</span></div>
     <div class="fields">
       <span class="fl">from</span>
-      <span class="fv">${entEl(dec.kind)}<b>${dec.from}</b> · ${dec.kind} ${priEl(dec.pri)}${dec.kind.includes(dec.prov) ? "" : ` <span style="color:var(--faint)">· ${provWord[dec.prov]}</span>`}</span>
+      <span class="fv">${entEl(dec.kind, "card")}<b>${dec.from}</b> · ${dec.kind} ${priEl(dec.pri)}${dec.kind.includes(dec.prov) ? "" : ` <span style="color:var(--faint)">· ${provWord[dec.prov]}</span>`}</span>
       <span class="fl">why</span><span class="fv">${dec.why}</span>
-      <span class="fl">agent</span><span class="fv">${dec.agent ? entEl("session") + dec.agent : '<span class="none">–</span>'}</span>
+      <span class="fl">agent</span><span class="fv">${dec.agent ? entEl("session", "card") + dec.agent : '<span class="none">–</span>'}</span>
     </div>
     <div class="acts">${qbtns(dec.actions)}</div>
   </div>`;
@@ -660,7 +712,7 @@ function labHtml() {
   let sess = "";
   if (S.key !== "C") {
     sess = `<div class="lane-label" style="margin-top:14px">Session glyph candidates <span class="n" style="text-transform:none;letter-spacing:0">· s cycles · ?sess=</span></div>
-      <div class="sessrow">${SESS_KEYS.map((k) => { const g = S.key === "A" ? lu(SESS_LU[k]) : bs(BS.sess[k]); return cell(`<span class="ent" style="margin:0">${g}</span>`, k, k === sessKey()); }).join("")}</div>`;
+      <div class="sessrow">${SESS_KEYS.map((k) => { const g = S.key === "A" ? lu(SESS_LU[k]) : bs(BS.sess[k], S.key === "D" ? "lt" : ""); return cell(`<span class="ent" style="margin:0">${g}</span>`, k, k === sessKey()); }).join("")}</div>`;
   }
   return `<div class="lab">
     <div class="lane-label">Glyph lab <span class="n" style="text-transform:none;letter-spacing:0">· ${S.name} · ${S.blurb} · 3x above, at size below</span></div>
@@ -714,6 +766,8 @@ function render() {
   document.getElementById("dsbtn").textContent = get("data") === "busy" ? "busy" : "calm";
   document.getElementById("sessbtn").textContent = S.key === "C" ? "–" : `sess: ${sessKey()}`;
   document.getElementById("legbtn").textContent = `legend: ${legendPlace()}`;
+  document.getElementById("workbtn").textContent = S.key === "D" ? `work: ${workKey()}` : "–";
+  document.getElementById("navbtn").textContent = S.key === "D" ? `nav: ${navKey()}` : "–";
   document.getElementById("labbtn").style.opacity = get("lab") === "1" ? 1 : 0.6;
   document.getElementById("navcount") && (document.getElementById("navcount").textContent = d.decisions.length);
   // keep open strands open across re-renders
@@ -746,6 +800,8 @@ document.getElementById("dsbtn").onclick = () => { setParam("data", get("data") 
 document.getElementById("sessbtn").onclick = () => { setParam("sess", SESS_KEYS[(SESS_KEYS.indexOf(sessKey()) + 1) % SESS_KEYS.length]); render(); };
 document.getElementById("legbtn").onclick = () => { setParam("legend", legendPlace() === "top" ? "side" : "top"); render(); };
 document.getElementById("labbtn").onclick = () => { setParam("lab", get("lab") === "1" ? null : "1"); render(); };
+document.getElementById("workbtn").onclick = () => { setParam("work", WORK_KEYS[(WORK_KEYS.indexOf(workKey()) + 1) % WORK_KEYS.length]); render(); };
+document.getElementById("navbtn").onclick = () => { setParam("nav", NAV_KEYS[(NAV_KEYS.indexOf(navKey()) + 1) % NAV_KEYS.length]); render(); };
 document.getElementById("theme").onclick = () => {
   const r = document.documentElement;
   const dark = r.dataset.theme ? r.dataset.theme === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
@@ -760,6 +816,8 @@ document.addEventListener("keydown", (e) => {
   else if (e.key === "s") document.getElementById("sessbtn").click();
   else if (e.key === "l") document.getElementById("legbtn").click();
   else if (e.key === "g") document.getElementById("labbtn").click();
+  else if (e.key === "w") document.getElementById("workbtn").click();
+  else if (e.key === "n") document.getElementById("navbtn").click();
   else if (e.key === "?") toggleLegend();
   else if (e.key === "Escape") toggleLegend(false);
 });
