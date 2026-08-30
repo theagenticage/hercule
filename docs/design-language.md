@@ -128,16 +128,55 @@ above:
   outrank routine schedules; task priority breaks ties; waiting-time warming stops
   anything hiding forever.
 - **Decisions are questions.** Every needs-you item is phrased as a question whose
-  answers are its (quiet) buttons, marked by a small attention-hue diamond. The decision
+  answers are its (quiet) buttons, marked by the `?` decision mark (see Marks). The decision
   card is uniform-height with labeled fields (FROM / WHY / AGENT) so cycling never moves
   the controls; one decision at a time ("Focus") is the pinned treatment.
 - **One calm headline sentence** ("2 decisions wait · 3 strands in motion · 6 outcomes
   today") and a **pulse rail** (fleet / assistants / intake as quiet text lines) replace
   stat-card rows, which are banned. Assistants are ambient presence, never work strands.
-- **Marks legend** lives behind a toggle in the app chrome, never permanently on a page.
-- **Iconography is TBD**: the mark set (equalizer, diamond, queued, paused) and entity
-  glyphs (task, run, session) sketched in the prototype are placeholders pending their
-  own focused ticket; do not treat the specific glyph shapes as pinned.
+- **Marks legend** lives behind a toggle in the app chrome, never permanently on a page
+  (placement pinned in Marks below).
+- **Iconography** is pinned in the Marks section below (ticket #35); the shapes sketched
+  in the check-in prototype were placeholders.
+
+## Marks (pinned by ticket #35, 2026-08-30)
+
+One bespoke family, drawn on a 12px grid at Lucide's optical weight (stroke ~1.15px at
+size, round caps and joins, `currentColor`) - not a third-party icon set. Reference
+drawing: variant D of `prototype/iconography.html` on branch `prototype/iconography`.
+
+**State marks** (what is happening; hue per the color doctrine):
+
+| Mark | Meaning | Ink |
+| --- | --- | --- |
+| soft equalizer: three 2px bars, 3-7px amplitude, 1.9s cycle; static under `prefers-reduced-motion` | agent working | live |
+| `?`, drawn in the family a hair heavier (1.35px) | decision wanted | attention |
+| hollow circle | queued | faint |
+| two bare bars, never circled | paused | attention |
+| ✓ | done | done |
+| ✕ | failed | failed |
+| – | cancelled | faint |
+
+**Entity glyphs** (what kind of thing; ink family only, never a semantic hue):
+rounded square = task, outline triangle = run, speech bubble = session, three-node fork
+= workflow.
+
+**Placement rule: one mark per slot, never two side by side.** A row's leading cell
+holds its state mark and nothing else. Entity glyphs appear only where they are the sole
+mark: the sidebar nav (the four entity items only - Intake, Check-in, Fleet, Connections,
+Notifications and Settings carry no icon) and the decision card's FROM / AGENT fields.
+Strand rows, detail lines and the outcomes digest carry no entity glyph; the domain noun
+in text ("task · in-progress") says it. Priority bars and progress segments count as
+marks under this rule.
+
+**Marks legend**: a "Marks" toggle at the foot of the sidebar opens a fly-out popover
+(`?` opens, Esc closes); never permanently on a page.
+
+**Rejected on the record**: Lucide as the set (right weight, wrong shapes - circled
+pause, heartbeat for working); the amber diamond for decisions (`?` is more universally
+"answer me"); the round-1 bespoke weight (1.5px, too bold); the chat-lines session glyph;
+entity glyphs beside state marks (round 1's A and B: too much to read); a words-only page
+(variant C: quiet, but the glyphs earn their place under the rule).
 
 ## Intake semantics (pinned by ticket #30, 2026-08-28)
 
@@ -186,6 +225,9 @@ borderless shadow depth and flat). Round 3's playground settled surfaces (Midnig
 Slate/Neutral/Porcelain/Sage/Mauve), typeface (Onest over Geist/Inter/Schibsted/Hanken/
 Instrument/Figtree/Plex), and emphasis weight (500). All rounds preserved in git history
 on `prototype/design-language`.
+Marks: two reaction rounds on `prototype/iconography` (ticket #35) - round 1 compared
+Lucide, a bespoke family and a words-only page; round 2 synthesised variant D, pinned
+2026-08-30.
 Intake: four reaction rounds on `prototype/intake-view` (ticket #30) - round 1 settled
 two-views-not-one-spine and the Desk skeleton; round 2 settled topic tabs, the morning-brief
 framing and system marks; round 3 settled the drawer, priority tiers and the events view;
