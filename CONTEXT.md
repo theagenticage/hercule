@@ -236,6 +236,14 @@ _Avoid_: internal event, system event
 **Event**:
 A fact that happened, emitted by an event source ("issue #42 was labelled ready-for-agent").
 
+**Feed**:
+A named poll cadence an event-source contribution declares (`notifications`, `repos`, `checks`): the plugin declares the numbers, the core runs one timer per connection per feed. A push-driven source declares none.
+_Avoid_: poller, loop
+
+**Enrichment**:
+Post-ingest amendment of an event's `system`, `url`, or `refs` (append-only) by a sender rule or the triage agent. Gives the matcher one more idempotent look at that event; never re-delivers to consumers that already fired.
+_Avoid_: editing events, reprocessing
+
 **Workflow**:
 A named, stored, editable source of execution plans. Owns its triggers; can be as small as one trigger plus one action. Editing a workflow never affects in-flight runs.
 _Avoid_: recipe

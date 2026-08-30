@@ -13,19 +13,6 @@ To find the exact line for any entry: `grep -n '^\*\*Open:\*\*' docs/spec/<doc>.
 
 ## A. Decisions handed to tickets
 
-### [Plugin contribution interfaces and v1 event kinds (event source, workflow action, setup flow)](https://github.com/rogierpennink/hydra/issues/41)
-
-Owning documents: [05](./05-plugins.md), [08](./08-events-and-connections.md).
-
-- 05 §4: TypeScript signatures of the event-source and workflow-action contributions (the channel one is in the ticket above).
-- 08 §5.1, §5.2: the v1 GitHub kind names and payload schemas; the Gmail default poll interval and whether it is per-Connection.
-- 08 §2: whether `url` and `refs` are enrichable after ingest like `system`.
-- 09 §Provenance: who canonicalizes External Refs for systems that have no plugin (Sentry, Tailscale, Hetzner via Gmail).
-- 08 §5.5: the exact `run.completed` / `run.failed` payload fields.
-- 05 §4.4: the v1 `github.*` / `gmail.*` action roster; whether built-in actions sit in the same contribution catalog under a core namespace.
-- 05 §7, §8: the setup-flow contribution shape and OAuth callback routing; where a BYO OAuth client id and secret live.
-- 05 §9, §10: whether a disabled plugin's KV namespace is retained; behaviour when `activate()` throws or deactivate fails.
-
 ### [Notification lifecycle and shipped triage conventions](https://github.com/rogierpennink/hydra/issues/42)
 
 Owning document: [10](./10-triage-intake-and-notifications.md) (status axis mirrored in [02](./02-domain-model.md)).

@@ -426,7 +426,7 @@ Slack:
 ### 11.5 Connections and setup
 
 - Discord: one pasted bot token, validated with `GET /users/@me`. Slack: bot token plus app-level token, validated with `auth.test` and `apps.connections.open`. The Slack connection type's credential therefore has two fields; "paste a token" in [./08-events-and-connections.md](./08-events-and-connections.md) reads "paste the tokens" for Slack.
-- The plugin's setup flow shows the checklist the platform side needs (Discord: the four intents to enable, the invite URL with `bot` scope and send/read/thread permissions; Slack: Socket Mode on, the event subscriptions and scopes above, install to workspace) and ends with the pairing step of section 4.1 for the owner's identity. The setup-flow contribution shape is owned by [Plugin contribution interfaces](https://github.com/rogierpennink/hydra/issues/41).
+- The plugin's setup flow shows the checklist the platform side needs (Discord: the four intents to enable, the invite URL with `bot` scope and send/read/thread permissions; Slack: Socket Mode on, the event subscriptions and scopes above, install to workspace) and ends with the pairing step of section 4.1 for the owner's identity. The setup-flow contribution shape is pinned in [./05-plugins.md](./05-plugins.md) section 10.1.
 - A Discord Connection may be in several guilds; a Slack Connection is one workspace. Both surface `status()` into the Connection's status axis ([./08-events-and-connections.md](./08-events-and-connections.md)).
 
 ### 11.6 Notification sinks

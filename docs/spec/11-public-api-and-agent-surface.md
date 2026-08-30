@@ -216,6 +216,7 @@ Pipeline: [./08-events-and-connections.md](./08-events-and-connections.md).
 | `event.query` | `{ connectionId?, kind?, triggerId?, runId?, since?, until? }` (joined to effect rows; `triggerId` lists a paused trigger's held events) | `event.read` | `GET /events` |
 | `event.read` | `{ eventId }` | `event.read` | `GET /events/{id}` |
 | `event.emit` | `{ kind, payload, connectionId? }` -> `{ eventId }` (the `manual` source) | `event.emit` | `POST /events/emit` |
+| `event.enrich` | `{ eventId, system?, url?, refs? }`; `system`/`url` overwrite, `refs` append-only; re-matches the event idempotently ([./08-events-and-connections.md](./08-events-and-connections.md) section 4.2) | `event.emit` | `POST /events/{id}/enrich` |
 
 ### connection
 
@@ -339,7 +340,7 @@ actor: "user" | "session:<sessionId>" | "run:<runId>" | "plugin:<pluginId>"
 
 - `user`: an API key or the web app's login token. Full parity; no profile applies.
 - `session:<id>`: a session token. Bounded by the agent's permission profile (section 5).
-- `run:<id>`: a built-in action step executing inside a run (`task.create` on a cron tick). **Ungated**: the workflow was authored by the user, and its action steps run with the user's parity. Agent steps are sessions and act as `session:<id>` under their own profile, which is what keeps a `worker` session from fanning out.
+- `run:<id>`: an action step executing inside a run (`task.create` on a cron tick). **Ungated**: the workflow was authored by the user, and its action steps run with the user's parity. A plugin action's `ctx.api` mutations are also `run:<id>`, with the `stepId` carried in the audit entry ([ADR 0026](../adr/0026-workflow-actions-may-call-the-public-api-as-the-run.md)). Agent steps are sessions and act as `session:<id>` under their own profile, which is what keeps a `worker` session from fanning out.
 - `plugin:<id>`: a plugin calling the service layer in-process through the public-API client capability. **Ungated**: the user enabled the plugin and granted the capability ([./05-plugins.md](./05-plugins.md)).
 
 The event log is the audit log; there is no separate audit subsystem. Multi-user later widens the `user` value to a user id and never restructures the field. Security events and actor-stamped mutations keep 90-day retention ([./13-security.md](./13-security.md)).

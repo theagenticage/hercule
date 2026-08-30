@@ -157,7 +157,7 @@ One persisted, core-owned Notification record. No plugin, channel, or workflow k
 interface Notification {
   id: string;
   kind: string;                 // dotted producer-namespaced kind: "core.breaker-tripped", "core.run-failed",
-                                // "core.permission-request", "core.update-available", "workflow.notify",
+                                // "core.permission-request", "core.update-available", "core.plugin-error", "workflow.notify",
                                 // "plugin.gmail.token-expiring", ...
   title: string;
   body?: string;                // markdown; may link Tasks, Runs, Sessions by id

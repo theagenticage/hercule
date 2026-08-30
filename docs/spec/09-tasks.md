@@ -111,7 +111,7 @@ An External Ref is a fully-qualified canonical identifier for a thing outside Hy
 - Refs are **not unique across tasks.** Several tasks may carry the same ref. The `task.query` guard convention treats "any *open* task with this ref" as the duplicate signal, so a closed task does not block a new one for a recurring signal.
 - A ref is an identity, not a location. The URL used for "Open in <system>" is the event envelope's `url` field ([./08](./08-events-and-connections.md)), not part of provenance.
 
-**Open:** who canonicalizes refs for systems that have no plugin in v1 (Sentry, Tailscale, Hetzner notices arriving through Gmail). Recognising the system is enrichment by a sender rule or the triage agent; the ref format those writers must emit is not pinned beyond the `<system>:<kind>:<identity>` pattern of the examples.
+For systems with no plugin in v1 (Sentry, Tailscale, Hetzner notices arriving through Gmail), the core pins only the **grammar** - `<system>:<kind>:<identity>`, lowercase system, no whitespace - and validates it at write. The gmail plugin's sender rules stamp `system` only ([./08-events-and-connections.md](./08-events-and-connections.md) section 5.2); the **triage agent owns identity extraction**, guided by worked per-system examples in the triage skill and by checking existing refs (`task.query`) before minting one. When a real plugin for such a system lands post-v1, it takes ownership of its prefix; the grammar keeps old refs valid.
 
 ### What `task.query` matches
 

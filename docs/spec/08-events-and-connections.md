@@ -28,8 +28,8 @@ One envelope for every event, regardless of source.
 | `occurredAt` | timestamp | emitter | When it happened at the source. |
 | `receivedAt` | timestamp | core | When the controller persisted it. |
 | `dedupKey` | string | emitter | Plugin-supplied idempotency key, unique per Connection. A second emit with the same `(connectionId, dedupKey)` is a no-op returning the existing event id. Core emitters supply their own keys (e.g. `cron.tick` = `triggerId + scheduledFor`). |
-| `refs` | ExternalRef[] | emitter | This spec's addition. Canonical identities of the things the event is about (`github:issue:owner/repo#42`, `gmail:thread:<id>`). The plugin defining the ref type owns canonicalization; the Connection is not part of the identity. Copied into Task provenance by triage and matched by the `task.query` guard ([./09-tasks.md](./09-tasks.md), [./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md)). |
-| `url` | string or null | emitter | Source URL: where a human opens this event in its system ("Open in GitHub"). |
+| `refs` | ExternalRef[] | emitter, then enrichment (append-only) | This spec's addition. Canonical identities of the things the event is about (`github:issue:owner/repo#42`, `gmail:thread:<id>`). The plugin defining the ref type owns canonicalization; the Connection is not part of the identity. Copied into Task provenance by triage and matched by the `task.query` guard ([./09-tasks.md](./09-tasks.md), [./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md)). |
+| `url` | string or null | emitter, then enrichment | Source URL: where a human opens this event in its system ("Open in GitHub"). |
 | `payload` | object | emitter | Per-kind payload conforming to the declared schema. This is what CEL filters and trigger input mappings read. |
 | `raw` | object or null | emitter | Vendor payload passthrough for debugging and future kinds. Never read by filters or mappings. |
 | `actor` | Actor or null | core | This spec's addition. Set on manual synthetic events and platform events caused by an API mutation (`user` or `session:<id>`); null for ingested and cron events. The envelope is the only place `actor` lives; platform-event payloads do not repeat it. |
@@ -38,11 +38,9 @@ Field names are pinned here; earlier tickets called them provisional. The envelo
 
 **Open:** whether the event table's primary key is the position itself or a Hydra id plus a position column; [./04-state-store.md](./04-state-store.md) owns id format and the answer.
 
-**Immutability and enrichment.** An event is immutable after persist, with one exception: `system` is writable after ingest. Sentry, Tailscale, Hetzner, and GitHub notifications arrive *through* Gmail; recognising the system inside an email is enrichment, done either by a plugin sender-rule at emit time or by the triage agent afterwards through the public API ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md)). The UI marks the system and suffixes the Connection.
+**Immutability and enrichment.** An event is immutable after persist, except for enrichment: `system` and `url` may be overwritten and `refs` appended to after ingest, through one operation, `event.enrich` ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md)); `payload` and `raw` never change. Sentry, Tailscale, Hetzner and GitHub notices arrive *through* Gmail; recognising the system inside an email is enrichment, done either by a plugin sender rule at emit time or by the triage agent afterwards ("Open in Sentry" needs the URL from the mail body; the `task.query` guard needs the `sentry:issue:123` ref). An enrich gives the matcher one more look at that event, idempotently (section 4.2, [ADR 0025](../adr/0025-enrichment-re-matches-one-event-idempotently.md)). The UI marks the system and suffixes the Connection.
 
-**Open:** whether `url` and `refs` are also enrichable after ingest. "Open in Sentry" on an event that arrived through Gmail needs the Sentry URL from the mail body, and the `task.query` guard on `sentry:issue:123` needs the Sentry ref; the ticket 30 handoff names only `system` as writable.
-
-**Payload schemas.** A plugin registers each kind's payload schema in `register()` ([./05-plugins.md](./05-plugins.md)). The core validates the payload at emit (this spec's rule; ADR 0009 pins only that each kind declares a schema); a non-conforming emit is rejected with an error to the plugin and a health warning, never persisted. Kinds grow additively; a plugin never removes or reshapes a kind within one host API version.
+**Payload schemas.** A plugin registers each kind's payload schema in `register()` ([./05-plugins.md](./05-plugins.md)). The core validates the payload at emit (this spec's rule; ADR 0009 pins only that each kind declares a schema); a non-conforming emit is rejected with an error to the plugin and a health warning, never persisted. Kinds grow additively; a plugin never removes or reshapes a kind within one host API version. Schemas are authored in Zod and persisted as JSON Schema in the catalog ([./05-plugins.md](./05-plugins.md) section 5).
 
 ## 3. Persistence and retention
 
@@ -80,6 +78,10 @@ Because effect rows are unique per (trigger or subscription, event), a crash bet
 
 Spawn bounds live on start triggers: `{ maxRuns, windowSeconds }` per trigger, default ~30 runs per hour. Exceeding it trips the trigger into a paused state; the matcher then writes held-event rows instead of pending runs, so matched events are kept visibly, a Notification fires, and the user resumes with one click (optionally discarding the backlog). The full breaker semantics, the resume operation, and the "Needs a call" surface belong to [./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md).
 
+### 4.2 Enrichment re-match
+
+`event.enrich` gives the matcher one more look at that single event, in the same transaction as the enrichment write ([ADR 0025](../adr/0025-enrichment-re-matches-one-event-idempotently.md)). Re-match is not re-delivery: consumers consume effect rows, never events, and effect rows are unique per (trigger or subscription, event), so everything that matched before hits the uniqueness constraint and is a no-op - the earlier consumer never sees the event again. Only *newly* matching triggers and live subscriptions produce rows, delivered normally, for the first time, reading the enriched envelope. A subscription whose holder has ended is not live and is not evaluated; the cursor never rewinds. Loop bound: the enriching run's own trigger cannot re-fire for the event (uniqueness), refs only grow, and spawn bounds cover pathology. Consequence for authors: a trigger may filter on enriched fields (`event.system == "sentry"`), understanding that it fires when the enricher writes, not when the event arrives.
+
 ## 5. Event sources
 
 GitHub and Gmail are event-source plugins. Cron, manual, and platform events are core emitters into the same pipeline. Each source is described by what it emits, how, and what v1 deliberately does not cover.
@@ -87,28 +89,34 @@ GitHub and Gmail are event-source plugins. Cron, manual, and platform events are
 ### 5.1 GitHub (plugin)
 
 - **Auth and Connection type:** `github`, credential = a personal access token (section 9.3).
-- **Ingest:** one polling loop per Connection, two feeds:
-  - the **Notifications API** (`GET /notifications`, `If-Modified-Since`, honouring `X-Poll-Interval`, default 60 s; 304s cost no quota) - covers what notifies the user: mentions, assignments, review requests, state changes on subscribed threads;
-  - **watched-repo polling** for issue and PR lifecycle on the Connection's watch list, using conditional requests (ETags), diffed against the plugin's per-Connection state in plugin KV.
-- **Watch list:** per-Connection plugin config, seeded from the repo Resources that reference this Connection (read through a requested plugin capability), user-editable and visible in the Connection's settings.
-- **Coverage v1:** issue/PR lifecycle plus notifications (pinned). Illustrative kinds: issue lifecycle (opened, edited, labelled, closed, reopened, commented), PR lifecycle (opened, updated, review submitted, merged, closed), notification events (mentioned, assigned, review requested). The PR-merged event is what the shipped "done means merged" workflow convention correlates on ([./09-tasks.md](./09-tasks.md)); it lands with poll-interval latency, which is acceptable.
+- **Ingest:** three declared feeds per Connection ([./05-plugins.md](./05-plugins.md) section 4.3):
+  - **`notifications`** (default 60 s; `poll()` floors the interval with `X-Poll-Interval`): the Notifications API (`GET /notifications`, `If-Modified-Since`; 304s cost no quota) - what notifies the user: mentions, assignments, review requests, state changes on subscribed threads.
+  - **`repos`** (default 120 s): watched-repo polling for issue and PR lifecycle on the Connection's watch list, conditional requests (ETags), diffed against Connection-scoped state.
+  - **`checks`** (default 60 s): check-suite polling for open PRs in watched repos updated in the last 7 days (window per-Connection config), one conditional request per PR head SHA.
+- **Watch list:** per-Connection plugin config, seeded from the repo Resources that reference this Connection (read through the `resources` capability), user-editable and visible in the Connection's settings.
+- **V1 kinds**, each with a declared payload schema; every payload carries a common `subject` block `{repo, number?, title?, author?, state?, url}` so refs and `url` derive uniformly:
+  - `github.notification` - **one kind for the whole Notifications feed**; the payload carries the API's `reason` (`mention`, `assign`, `review_requested`, `state_change`, `comment`, `subscribed`, `ci_activity`, `security_alert`, ...) plus the subject. Filters select reasons in CEL (`event.payload.reason == "mention"`); reasons GitHub adds later cost nothing.
+  - Issues: `github.issue.opened`, `github.issue.closed`, `github.issue.reopened`, `github.issue.labeled` (`{added, removed}` in one event), `github.issue.assigned`, `github.issue.commented`.
+  - PRs: `github.pr.opened`, `github.pr.synchronized` (new head commit), `github.pr.review-submitted` (one per submitted review: `{reviewer, verdict: approved | changes-requested | commented}`), `github.pr.commented`, `github.pr.merged`, `github.pr.closed` (unmerged), `github.pr.labeled`.
+  - CI: `github.pr.checks-completed` - **one event when every check suite on the head SHA is done**, payload `{conclusion, suites[]}` rolled up. This is the coarse kind the one-signal-per-iteration rule demands ([./07-workflows.md](./07-workflows.md) section 4.3): a PR-monitoring workflow processes one green/red verdict, not thirty check runs.
+  - Deliberately absent: `edited` kinds (title/body edits are noise; payloads carry current titles), per-check-run kinds, `github.release.*`, `github.push.*` (webhook territory, Post-v1). The PR-merged event is what the shipped "done means merged" convention correlates on ([./09-tasks.md](./09-tasks.md)); it lands at poll latency, which is acceptable.
+- **Refs:** `github:issue:owner/repo#42`, `github:pr:owner/repo#87`, `github:repo:owner/repo`; `url` = the GitHub web URL of the subject.
 - **Not covered in v1:** push and commit events, and Actions results. "On push to main" is not a v1 trigger. These need the webhook ingress core service (Post-v1).
-- **Quota:** PAT limit 5,000 requests/hour; 60 s polling of a handful of endpoints uses a few hundred per hour, and conditional 304s are free. Adequate for one user.
+- **Quota:** PAT limit 5,000 requests/hour; 60 s polling of a handful of endpoints uses a few hundred per hour, and conditional 304s are free. The checks feed adds roughly one conditional request per open PR per tick (20 open PRs is about 1,200/hour worst case, mostly 304s); the 7-day window and per-Connection intervals keep it bounded. This polling cost is what raises the webhook ingress service's post-v1 priority.
 
-**Open:** the exact v1 kind names and payload schemas for the GitHub plugin. The pipeline requires only that each kind declares a schema; the coverage classes above are the contract. The plugin's workflow action roster is likewise Open in [./05-plugins.md](./05-plugins.md).
+The workflow-action roster is pinned in [./05-plugins.md](./05-plugins.md) section 4.4.
 
 ### 5.2 Gmail (plugin)
 
 - **Auth and Connection type:** `gmail`, credential = OAuth refresh token from a BYO Google client (section 9.2).
-- **Ingest:** one `users.history.list` polling loop per Connection from the stored `historyId`. Quota is negligible (2 units per `history.list`, 20 per `messages.get`, against 6,000 units/min/user).
-- **Payload:** message headers, subject, snippet, and ids (message id, thread id, label ids). Bodies are never ingested; a workflow fetches them on demand through the plugin's action contributions (`gmail.*` actions). Mid-session mailbox queries by an agent use these actions plus the session's MCP passthrough; this is the first named consumer of the post-v1 agent-tools extension point.
+- **Ingest:** one declared feed, `messages`, default 30 s with the standard per-Connection per-feed override ([./05-plugins.md](./05-plugins.md) section 4.3), polling `users.history.list` from the stored `historyId`. Quota is negligible (2 units per `history.list`, 20 per `messages.get`, against 6,000 units/min/user).
+- **V1 kind:** exactly one, `gmail.message.received`, payload `{messageId, threadId, labelIds, from, to, subject, snippet, isFirstInThread}`. No kinds for label changes, archiving or sent mail: everything else is a filter over this kind, or an action. Bodies are never ingested; a workflow fetches them on demand through `gmail.message.read` / `gmail.thread.read` ([./05-plugins.md](./05-plugins.md) section 4.4). Mid-session mailbox queries by an agent use the gmail actions plus the session's MCP passthrough; this is the first named consumer of the post-v1 agent-tools extension point.
 - **Refs:** `gmail:thread:<id>` and `gmail:message:<id>`; `url` = the Gmail web URL of the message.
+- **Sender rules** stamp `system` at emit: a shipped sender-domain map (`*@sentry.io -> sentry`, `*@tailscale.com -> tailscale`, `*@hetzner.com -> hetzner`, `*@github.com -> github`), user-extendable per Connection. Sender rules stamp `system` only; extracting refs and URLs from a mail body is the triage agent's job (section 2; ref ownership in [./09-tasks.md](./09-tasks.md)).
 - **Push-agnostic interface:** the plugin's emit path does not depend on polling, so the Pub/Sub pull upgrade (Post-v1) changes the loop, not the contract.
 - **Token lifetime:** a Google OAuth app left in "Testing" status issues 7-day refresh tokens with Gmail scopes. The setup flow (section 9.2) requires publishing; the setup docs state the trap.
 
 **Verify at build time:** Gmail returns an error when the stored `historyId` is too old to resume from; the loop must then re-baseline at now and record a visible note rather than fail permanently.
-
-**Open:** the default polling interval for Gmail and whether it is per-Connection config. Research shows 30-60 s realistic; ticket 14 pins none.
 
 ### 5.3 Cron (core)
 
@@ -132,7 +140,7 @@ The controller emits events about its own state, connection-less, through the sa
 
 | Kind | Payload | Emitted when |
 |---|---|---|
-| `run.completed` | `{runId, workflowId?, triggerId?, origin, inputs, triggerEventId?, startedAt, finishedAt}` | a run reaches `completed` |
+| `run.completed` | `{runId, workflowId?, triggerId?, origin, inputs, outputs, taskId?, triggerEventId?, startedAt, finishedAt}`; `outputs` = the terminal step's output, `taskId` = the run's Task link | a run reaches `completed` |
 | `run.failed` | the `run.completed` fields plus `failureReason` and `failedStepId?` | a run reaches `failed` |
 | `run.cancelled` | the `run.completed` fields | a run reaches `cancelled` (not a failure: a failure-notification workflow must not fire on a deliberate cancel) |
 | `task.created` | full Task snapshot | a Task is created |
@@ -140,7 +148,7 @@ The controller emits events about its own state, connection-less, through the sa
 
 CEL routes on them like any event: `event.changes.status.new == "done"`, `has(event.changes.status)`. Kinds grow additively (e.g. learning workflows over run outcomes); no finer-grained task kinds exist. Task event shapes are owned by [./09-tasks.md](./09-tasks.md).
 
-**Open:** the exact `run.completed` / `run.failed` / `run.cancelled` payload fields. The set above is this spec's consolidation from the run record in [./07-workflows.md](./07-workflows.md); ticket 13 pins the record, not the event subset.
+The payload set is pinned by [Plugin contribution interfaces](https://github.com/rogierpennink/hydra/issues/41): the run-record subset above plus `outputs` and `taskId?`, so "done means merged" and check-in workflows route without a lookup.
 
 Batching is the emitter's job: a workflow that reacts to CI results or reviews subscribes to a per-suite or per-review kind, not per-check or per-comment ones, because a run processes one signal firing per iteration ([./07-workflows.md](./07-workflows.md) section 4.3). The v1 GitHub kind roster ([./05-plugins.md](./05-plugins.md)) must offer those coarse kinds.
 
@@ -206,7 +214,7 @@ An event-source plugin runs one ingest loop per Connection of its type, started 
 
 ### 8.4 Health
 
-A plugin reports credential trouble (refresh failure, revoked token) by setting the Connection's status to `needs-reauth` or `error` and emitting a Notification through the `notifications` plugin capability. The Connections screen shows status per Connection and offers reconnect, which re-runs the setup flow and (consolidated rule) keeps the Connection id, so triggers and Resources stay attached.
+A plugin reports credential trouble (refresh failure, revoked token) by setting the Connection's status to `needs-reauth` or `error` and emitting a Notification through the `notifications` plugin capability. The Connections screen shows status per Connection and offers reconnect, which re-runs the setup flow and (consolidated rule) keeps the Connection id, so triggers and Resources stay attached. A channel handle's `status()` maps into the same axis: `disconnected` becomes `error` (with detail), `degraded` stays `connected` with a warning line; `needs-reauth` always means credential failure.
 
 ## 9. Connection setup flows
 
@@ -214,7 +222,7 @@ Policy (from [./13-security.md](./13-security.md)): bring-your-own OAuth client 
 
 ### 9.1 Two flow shapes
 
-The plugin drives its setup flow through a host API capability; the core renders it in the Connections screen and stores the result.
+The plugin declares its setup flow through the `connections` capability; the core renders it in the Connections screen and stores the result. The declaration shape (setup step list, `validate`, the core OAuth2 client, pending-setup rows and `state` routing) is pinned in [./05-plugins.md](./05-plugins.md) section 10.1.
 
 1. **Token paste** (universal): the user pastes a token, the plugin validates it against the provider (e.g. `GET /user`), the core stores it and sets `connected`. Primary path for GitHub, Slack, Discord.
 2. **OAuth redirect** to the controller's own origin: the core serves `/oauth/callback` on whatever origin the user's browser already uses to reach Hydra, and **displays the exact redirect URI to register**, derived from that request origin. The flow carries a state parameter bound to the pending Connection; the callback exchanges the code, stores the refresh token, and sets `connected`. Primary path for Google.
@@ -252,7 +260,7 @@ The Intake and check-in screens read per-Connection events straight from the pip
 
 ## Post-v1
 
-- **Webhook ingress core service**: a capability plugins request; unlocks GitHub push/commit and Actions triggers. Strongly desired and non-negotiable post-v1. V1 keeps the emit path push-agnostic and the kind namespace open so webhook-fed kinds land additively.
+- **Webhook ingress core service**: a capability plugins request; unlocks GitHub push/commit and Actions triggers. Strongly desired and non-negotiable post-v1; priority raised again by the checks-polling cost (section 5.1). V1 keeps the emit path push-agnostic and the kind namespace open so webhook-fed kinds land additively.
 - **Gmail Pub/Sub pull ingress**: second-level latency upgrade; the plugin interface stays push-agnostic in v1, and polling remains the fallback Google itself recommends.
 - **Platform-auto subscription detection** (the controller noticing "this session opened PR #87" and subscribing it): explicit session subscription (section 7.2) is the v1 primitive it builds on.
 - **Subscription timeouts**: none in v1; a forever-waiting run is visible and cancelable.
@@ -278,6 +286,7 @@ Tickets:
 - Controller state store - https://github.com/rogierpennink/hydra/issues/9
 - Assistant design - https://github.com/rogierpennink/hydra/issues/17
 - Assemble the v1 spec (ticket 30 handoff comment) - https://github.com/rogierpennink/hydra/issues/21
+- Plugin contribution interfaces and v1 event kinds - https://github.com/rogierpennink/hydra/issues/41
 
 ADRs:
 
@@ -285,6 +294,7 @@ ADRs:
 - [ADR 0010 - External accounts are core-owned Connections](../adr/0010-external-accounts-are-core-owned-connections.md)
 - [ADR 0011 - Triage is a workflow pattern inside core-enforced bounds](../adr/0011-triage-is-a-workflow-pattern-inside-core-enforced-bounds.md)
 - [ADR 0016 - Git credentials derive from Connections](../adr/0016-git-credentials-derive-from-connections.md)
+- [ADR 0025 - Enrichment re-matches one event, idempotently](../adr/0025-enrichment-re-matches-one-event-idempotently.md)
 - [ADR 0004 - Controller state lives in one SQLite database](../adr/0004-controller-state-lives-in-one-sqlite-database.md)
 
 Research: research/event-ingress.md (branch `research/event-ingress`), research/connection-setup-ux.md (branch `research/connection-setup-ux`), research/expression-language.md (branch `research/expression-language`).
