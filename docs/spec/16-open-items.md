@@ -191,4 +191,4 @@ In scope, not yet sharp enough to ticket; listed on the map under **Not yet spec
 
 ## Pending prototype
 
-- [Prototype: mark & entity-glyph iconography](https://github.com/rogierpennink/hydra/issues/35): the marks and entity glyphs in 14 §Iconography are placeholders; the legend toggle's placement is part of the same ticket. Not blocking implementation of anything but the final icon set.
+- ~~[Prototype: mark & entity-glyph iconography](https://github.com/rogierpennink/hydra/issues/35)~~ - resolved 2026-08-30: 14 §Iconography and [design-language.md](../design-language.md) §Marks are pinned (bespoke family at Lucide's weight, `?` for decisions, one-mark-per-slot rule, legend at the sidebar foot).

@@ -116,7 +116,7 @@ Backward-looking monitoring of delegated work: what is running, what happened to
 1. **Intent-level, not execution-level.** Rows are **strands**: a Task, a standing Workflow, or a one-off Run, named by their domain noun. Runs, Sessions, steps and Turns appear only behind progressive disclosure (click a strand to expand). There is no "ask" vocabulary.
 2. **Provenance-first attention.** Ranking is started-by-you > standing workflows > routine schedules; Task priority breaks ties; the darkens-then-warms age label stops routine failures hiding forever. All of this is derivable from the Run record's trigger and the Task's fields; no new domain fields.
 3. **Aggregate by default.** Routine workflows collapse to one row each ("6 runs today · all ✓"). Verified against a calm dataset (2 runners) and a busy one (6 runners, 31 outcomes, 9 decisions): the page keeps its shape.
-4. **Decisions are questions.** Every needs-you item is phrased as a question; its answers are the quiet buttons; a small attention-hue diamond (placeholder mark, see [Iconography](#iconography)) marks it. **Focus** is the pinned treatment: one uniform-height labeled card at a time with fields FROM (strand, domain noun, priority, provenance), WHY, and AGENT (faint dash when no Session is attached), "1 of N" with next-peek and arrow navigation. Because the card height is fixed, the controls never move while cycling. Queue (in-place expansion) and List (condensed rows) were rejected and remain in git history.
+4. **Decisions are questions.** Every needs-you item is phrased as a question; its answers are the quiet buttons; the `?` decision mark (see [Iconography](#iconography)) marks it. **Focus** is the pinned treatment: one uniform-height labeled card at a time with fields FROM (strand, domain noun, priority, provenance), WHY, and AGENT (faint dash when no Session is attached), "1 of N" with next-peek and arrow navigation. Because the card height is fixed, the controls never move while cycling. Queue (in-place expansion) and List (condensed rows) were rejected and remain in git history.
 5. **Needs-you and the notification center are one record stream on two surfaces.** Decisions and notifications are the same core-owned Notification records ([ADR 0012](../adr/0012-notifications-are-core-routed-sinks-are-dumb.md)); check-in shows the actionable subset, the notification center shows everything. No double bookkeeping.
 
 ### Anatomy
@@ -219,9 +219,11 @@ All screens are built in the pinned language in [../design-language.md](../desig
 
 ## Iconography
 
-**Open:** the mark set (equalizer = agent working, amber diamond = decision wanted, hollow circle = queued, ↻ = paused routine, segmented micro-progress for multi-step runs, ◇ = proposed, attention dot = burning) and the entity glyphs (outlined square = task, play-triangle = run, chat-lines = session) sketched in the prototypes are placeholders pending [Prototype: mark & entity-glyph iconography](https://github.com/rogierpennink/hydra/issues/35). Do not treat the specific shapes as pinned; the session glyph in particular was disliked. Established sets (Lucide etc.) versus bespoke CSS/SVG marks is part of that ticket. The system brand marks (simple-icons paths, monochrome) are not in question.
+Pinned by [Prototype: mark & entity-glyph iconography](https://github.com/rogierpennink/hydra/issues/35) (2026-08-30); the full table is in [../design-language.md](../design-language.md) §Marks. One bespoke family on a 12px grid at Lucide's optical weight (~1.15px stroke, `currentColor`), not a third-party icon set. State marks: soft equalizer = agent working (live hue), `?` = decision wanted (attention hue), hollow circle = queued, bare pause bars = paused (attention hue), ✓ / ✕ / – = done / failed / cancelled. Entity glyphs, ink family only: rounded square = task, outline triangle = run, speech bubble = session, three-node fork = workflow. Segmented micro-progress for multi-step runs, priority bars, ◇ = proposed and the attention dot = burning stay as the check-in and Intake prototypes pinned them. The system brand marks (simple-icons paths, monochrome) are unchanged.
 
-**Open:** where the marks legend toggle lives in the app chrome is owned by the same ticket. Pinned already: the legend sits behind a toggle (help popover or similar), never permanently on a page.
+**Placement rule: one mark per slot, never two side by side.** A row's leading cell holds its state mark only; entity glyphs appear only where they are the sole mark - the sidebar nav (the four entity items) and the decision card's FROM / AGENT fields. Rows, detail lines and digests name the kind in text instead.
+
+The marks legend lives behind a "Marks" toggle at the foot of the sidebar, a fly-out popover (`?` opens, Esc closes), never permanently on a page.
 
 ## Prototype assets (reference implementations)
 
@@ -232,6 +234,7 @@ Throwaway single-file HTML prototypes, not app code. They are the visual referen
 | `prototype/design-language` | `prototype/design-language.html` - the Slate/Midnight playground; defaults are the pinned settings `face=Onest th=Midnight cs=6 ll=94.5 dl=20 w=500`; rounds 1-3 in history (78ab468, b18c9bb, 8331fea) | ec83ff9 | https://claude.ai/code/artifact/8a365dff-abc0-474f-9489-65251a93fa47 |
 | `prototype/check-in-view` | `prototype/check-in-view.html` - converged check-in with calm/busy dataset toggle (`d`), theme toggle (`t`); rejected Queue/List treatments and rounds 1-3 in history | 28cf40f | https://claude.ai/code/artifact/a6eeca13-073a-4709-bc9a-d666ae169204 |
 | `prototype/intake-view` | `prototype/intake-view.html` - converged Intake; rounds 1-3 at e0f5f7c, 3d6a81f, f4a452a | f1a1e15 | https://claude.ai/code/artifact/2e2b81a8-181c-44df-a7b6-d55b42263ee5 |
+| `prototype/iconography` | `prototype/iconography.html` - the marks playground; defaults are the pinned settings (variant D, `sess=bubble`, `legend=side`, `work=soft`, `nav=entities`); rounds 1-2 at ba8da6c, b88feea; `?lab=1` shows every mark at 3x | 4822f19 | https://claude.ai/code/artifact/557a450d-ce45-4336-8d58-3c29301b6b32 |
 
 ## Post-v1
 
@@ -253,7 +256,7 @@ Tickets:
 - [Design language: visual semantics & aesthetic direction](https://github.com/rogierpennink/hydra/issues/33)
 - [Prototype: the check-in view](https://github.com/rogierpennink/hydra/issues/20)
 - [Prototype: the Intake view](https://github.com/rogierpennink/hydra/issues/30)
-- [Prototype: mark & entity-glyph iconography](https://github.com/rogierpennink/hydra/issues/35) (open)
+- [Prototype: mark & entity-glyph iconography](https://github.com/rogierpennink/hydra/issues/35)
 - [Controller packaging & install story](https://github.com/rogierpennink/hydra/issues/24)
 - [Research: smoothest Connection-setup path](https://github.com/rogierpennink/hydra/issues/32)
 - [Controller promotion & portability](https://github.com/rogierpennink/hydra/issues/10) (the "local" alias handoff)
