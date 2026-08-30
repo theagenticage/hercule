@@ -90,6 +90,10 @@ _Avoid_: scope, right
 An agent's ask for a grant its profile lacks, optionally naming the operation it wanted to make, surfaced as a notification the user approves for the session, bakes into the profile, or denies.
 _Avoid_: escalation (as a noun for the record), override
 
+**Platform Identity**:
+One person's account on one chat platform, recorded with a role: an owner (the user; may command an assistant and decide bound actions) or a trusted person (may command, never decides). Claimed by a pairing code; anyone without one is context in groups and ignored in DMs.
+_Avoid_: allowlist entry, member, user (reserved for the future Hydra user concept)
+
 **Master Key**:
 The per-machine key that encrypts secret values in the controller database; held in the OS keychain and never leaves its machine, even during promotion.
 _Avoid_: root key, database key
@@ -97,11 +101,11 @@ _Avoid_: root key, database key
 ### Assistants
 
 **Channel Binding**:
-A rule mapping part of a channel connection (its DMs, a named channel or thread scope) to exactly one assistant; the most specific binding wins. How channels reach an assistant, not what makes it one.
+A rule mapping part of a channel connection (all its DMs, or a nested place: a server, a channel, a thread) to exactly one assistant; the most specific binding wins. How channels reach an assistant, not what makes it one.
 _Avoid_: registration, route (bare)
 
 **Conversation**:
-One continuous exchange with an assistant inside one platform container: a Discord channel or DM, a Slack thread, a web chat. Each conversation has its own session lineage and is never merged with another; continuity across conversations comes from memory and recall.
+One continuous exchange with an assistant inside one platform container: a Discord channel, thread or DM, a Slack thread or DM, a web chat. Each conversation has its own session lineage and is never merged with another; continuity across conversations comes from memory and recall. Its messages are conversation input, never events.
 _Avoid_: chat, thread (reserved for provider-native objects)
 
 **Rotation**:

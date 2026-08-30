@@ -209,7 +209,8 @@ The sink contract:
 ```ts
 interface NotificationSink {
   interactive: boolean;   // true = renders bound actions as native buttons and reports clicks to the core
-  deliver(notification: Notification, connection: ConnectionRef): Promise<void>;  // throws = retry via outbox
+  deliver(notification: Notification, target: ContainerRef): Promise<DeliveryRef>;   // throws = retry via outbox
+  resolved(notification: Notification, target: ContainerRef, ref: DeliveryRef): Promise<void>;  // decided anywhere: edit in place
   // Additive growth reserved (post-v1): deviceClass, presence(), receipts. A sink reporting nothing
   // is treated as always-available.
 }
@@ -217,9 +218,9 @@ interface NotificationSink {
 
 Because routing lives only in the core, presence-aware routing ("desktop idle, send to phone") lands post-v1 as a router upgrade touching no plugin.
 
-**Decision delivery is a sink capability** (pinned by ticket 37). A sink declares `interactive`. A non-interactive sink delivers title, body and a deep link to the in-app record; the decision is taken in the web app. An interactive sink also renders every bound action as a native button - its label plus the core-rendered describe line of Section 7.4 - and reports a click to the core as `{ notificationId, actionId, connection, senderIdentity }`; the core, never the plugin, authenticates and executes it (Section 7.4). Discord (gateway interactions) and Slack (Socket Mode) both deliver clicks outbound-only, so the no-public-endpoint stance of [./08-events-and-connections.md](./08-events-and-connections.md) holds. Payload shapes and channel-side mechanics belong to the channel contribution interface ([./05-plugins.md](./05-plugins.md) section 11).
+**Decision delivery is a sink capability** (pinned by ticket 37). A sink declares `interactive`. A non-interactive sink delivers title, body and a deep link to the in-app record; the decision is taken in the web app. An interactive sink also renders every bound action as a native button - its label plus the core-rendered describe line of Section 7.4 - and reports a click to the core as `{ notificationId, actionId, connection, senderIdentity }`; the core, never the plugin, authenticates and executes it (Section 7.4). Discord (gateway interactions) and Slack (Socket Mode) both deliver clicks outbound-only, so the no-public-endpoint stance of [./08-events-and-connections.md](./08-events-and-connections.md) holds. Payload shapes, click acknowledgement and the message edit on resolution are pinned in [./12-assistants.md](./12-assistants.md) section 11.6; both v1 sinks are interactive.
 
-**Open:** whether the assistant's own conversation on a bound channel is a valid sink target (the notification appears as the assistant speaking) or whether channel sinks post as the Hydra bot outside any conversation. Ticket 17's double-fire rule (Section 7.5) suggests the two must stay distinguishable.
+**Target and resolution** (pinned by [Channel contribution interface](https://github.com/rogierpennink/hydra/issues/39)): each channel Connection with delivery enabled names one **notification container** (a channel or the owner's DM; default the owner's DM). That container may coincide with a bound conversation's, but the post is the sink's, never the assistant speaking: it is stored as a conversation message with `origin: notification`, delivered to the assistant as a data line at its next wake, and never wakes anything - so the double-fire rule (Section 7.5) can always tell the two apart. The core stores every sink's `DeliveryRef` and, when the decision is taken anywhere (web app, another channel), calls `resolved()` on each sink that delivered so stale buttons are removed and the outcome shown.
 
 ### 7.4 Bound actions
 

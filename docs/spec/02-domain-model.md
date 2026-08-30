@@ -59,6 +59,7 @@ erDiagram
   ASSISTANT ||--o{ CHANNEL_BINDING : "reached through"
   ASSISTANT ||--o{ MEMORY_DOCUMENT : "core + topics"
   CONVERSATION ||--o{ SESSION : "lineage"
+  CONVERSATION ||--o{ CONVERSATION_MESSAGE : "stores"
   CONNECTION ||--o{ CHANNEL_BINDING : "scope of"
   CONNECTION ||--o{ EVENT : "stamped on"
   PLUGIN ||--o{ CONNECTION : "defines type"
@@ -72,7 +73,7 @@ In prose, the model has five clusters:
 
 - **Work triangle**: Task (intent), Run (execution of a plan), Session (agent conversation). Any two are linked only when the link is meaningful; links live on the Run and Session side, and a Task's runs and sessions are derived by query.
 - **Automation**: Workflow owns Triggers and Steps; a Run freezes an Execution Plan and holds Subscriptions; Events flow through one pipeline stamped with their Connection; Notifications are the output to the user.
-- **Actors and access**: Agent (with a Permission Profile), Assistant (an Agent plus Conversations, Channel Bindings and Memory), Actor stamps, Session Tokens, API Keys, Grants and Permission Requests.
+- **Actors and access**: Agent (with a Permission Profile), Assistant (an Agent plus Conversations, Channel Bindings and Memory), Platform Identities (owner / trusted), Actor stamps, Session Tokens, API Keys, Grants and Permission Requests.
 - **Organization**: Project spans Resources; Resources are checked out into Workspaces on Runners as Checkouts; Resources may reference the Connection that reaches them.
 - **Infrastructure and extension**: Controller identity, Runners (with states and capabilities), Provider instances with Capability Snapshots, Plugins with their state, Connections, Secrets.
 
@@ -229,7 +230,7 @@ Relationships: owns Conversations, Channel Bindings and Memory documents; memory
 
 Purpose: one continuous exchange with an assistant inside one platform container, backed by a lineage of sessions.
 
-Fields: `id`, `assistantId`, container key (the channel Connection plus the platform's container facts: guild/channel/thread id, DM id; or a web-chat id with no channel), `currentSessionId`, the ordered session lineage (successive sessions after each rotation), bounded stored context of unaddressed group messages (third-party lines, marked as data, never instructions). Conversations are never merged.
+Fields: `id`, `assistantId`, container key (`connectionId` plus `{ kind: "group" | "dm", path: string[] }` - the platform's container ids outermost first, as the channel plugin declares them; or a web-chat id with no channel), `currentSessionId`, the ordered session lineage (successive sessions after each rotation). Conversations are never merged. The messages of a container - owner, trusted and third-party lines, bot lines, the assistant's replies, notification sink posts - are **conversation messages**, child rows keyed by container that hold the conversation view and the unseen-context delivered at wake; they are not Events ([ADR 0023](../adr/0023-chat-messages-are-conversation-input-not-events.md); [12-assistants.md](./12-assistants.md) sections 2 and 4.3).
 
 Status axis: none.
 
@@ -239,7 +240,15 @@ Relationships: `assistantId` required; container key required; sessions in the l
 
 Purpose: the routing rule from part of a channel connection to exactly one assistant.
 
-Fields: `id`, `connectionId` (a channel-type Connection: Discord, Slack), `scope` (DMs, a named channel, a thread), `assistantId`. Matching is most-specific-wins over the route facts of an incoming message. A binding is how a channel reaches an assistant; the web app reaches the same assistant without one.
+Fields: `id`, `connectionId` (a channel-type Connection: Discord, Slack), `scope` (`{ kind: "group" | "dm", path: string[] }`, a prefix of a container key; the empty path is everything of that kind), `assistantId`. Matching is longest-prefix-wins over the container key of an incoming message, in the core, against the levels the channel plugin declared (Discord `guild > channel > thread`, Slack `channel > thread`); one binding per `(connection, kind, path)`. A binding is how a channel reaches an assistant; the web app reaches the same assistant without one ([12-assistants.md](./12-assistants.md) section 3).
+
+#### Platform Identity
+
+Purpose: one person's account on one chat platform, with the role that decides whether its messages command an assistant ([12-assistants.md](./12-assistants.md) section 4.1).
+
+Fields: `channel` (channel contribution id), `identityKey` (plugin-formatted: Discord user id, Slack `<teamId>:<userId>`), `label`, `role` (`owner` | `trusted`), `pairedAt`. Global across Connections of that channel; claimed by a one-time pairing code sent to the bot as a DM. Owner identities authenticate bound-action clicks on channels; trusted identities may command but not decide. Recorded on the user; when multi-user arrives the record gains a user link rather than a new shape.
+
+Status axis: none.
 
 #### Memory documents
 
@@ -487,7 +496,7 @@ Fields: `id`, `owner {kind: connection | plugin | runner | core, id}`, `name`, c
 | Connection | `connected`, `needs-reauth`, `error`, `disabled` | none | 08 |
 | Notification | Open in 10 (timestamps `readAt` / `resolvedAt`) | | 10 |
 | Plugin | `enabled`, `disabled` | none | this document |
-| Agent, Assistant, Conversation, Project, Resource, Checkout, Provider instance, Event, Memory document, Permission Profile | no status axis | | |
+| Agent, Assistant, Conversation, Conversation message, Platform Identity, Project, Resource, Checkout, Provider instance, Event, Memory document, Permission Profile | no status axis | | |
 
 ## Identity rules at a glance
 

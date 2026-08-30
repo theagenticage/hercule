@@ -242,7 +242,7 @@ Device flow is a dead end: Google's limited-input device flow excludes Gmail sco
 
 ### 9.4 Slack and Discord
 
-Bot-token paste. Unchanged from [./12-assistants.md](./12-assistants.md).
+Token paste. Discord: one bot token, validated with `GET /users/@me`. Slack: **two** tokens - the bot token (`xoxb-`) and the app-level token (`xapp-`, scope `connections:write`) that Socket Mode needs - validated with `auth.test` and `apps.connections.open`. The plugin's setup flow shows the platform-side checklist (Discord intents and invite URL; Slack Socket Mode, event subscriptions and scopes) and ends with pairing the owner's platform identity by DMing the bot a one-time code ([./12-assistants.md](./12-assistants.md) sections 4.1 and 11.5). Enabling notification delivery on the connection asks for a notification container (a channel or the owner's DM).
 
 ## 10. The events view
 

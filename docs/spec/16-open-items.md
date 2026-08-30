@@ -13,17 +13,6 @@ To find the exact line for any entry: `grep -n '^\*\*Open:\*\*' docs/spec/<doc>.
 
 ## A. Decisions handed to tickets
 
-### [Channel contribution interface and conversation ingress (Discord, Slack)](https://github.com/rogierpennink/hydra/issues/39)
-
-Owning documents: [12 §11](./12-assistants.md), [05 §4](./05-plugins.md), [10 §7.3](./10-triage-intake-and-notifications.md).
-
-- 12 §11, 05 §4.2: the channel contribution's TypeScript interface (inbound message shape, outbound send, scope model announcement).
-- 12 §11: whether inbound chat messages flow through the persisted event pipeline as Events.
-- 12 §2, §3: Slack and Discord container keys; the binding scope schema and specificity order.
-- 12 §4: where the owner's platform identities are configured; the bound on stored unaddressed group context; whether the assistant's own and other bots' messages are excluded.
-- 12 §11: message formatting, long-reply splitting, typing indicators; Discord intents and Slack OAuth scopes.
-- 10 §7.3: what a channel sink renders for a decision Notification; whether an assistant's own conversation is a valid sink target.
-
 ### [Assistant runtime: rotation, heartbeat, injection, memory op edge cases](https://github.com/rogierpennink/hydra/issues/40)
 
 Owning documents: [12](./12-assistants.md), [11 §6.4](./11-public-api-and-agent-surface.md), [06 §9.2](./06-providers.md).

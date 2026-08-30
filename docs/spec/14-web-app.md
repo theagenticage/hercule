@@ -82,7 +82,7 @@ t3-code validates the family (React Compiler, virtualized transcript, rAF, memoi
 
 ## V1 screen inventory
 
-The v1 screens are: **Intake, Check-in, Tasks, Sessions (including assistant chat), Runs, Workflows, Fleet, Connections, Notifications, Settings (Plugins, Permission profiles, Secrets, Bounds, Assistants).**
+The v1 screens are: **Intake, Check-in, Tasks, Sessions (including assistant chat), Runs, Workflows, Fleet, Connections, Notifications, Settings (Plugins, Permission profiles, Secrets, Bounds, Assistants, Identities).**
 
 - Event sources get no screen; they surface through Connections and workflow triggers.
 - Plugin configuration forms are generated from the manifest config schema ([./05-plugins.md](./05-plugins.md)). UI pickers (action ids, provider ids, channel ids) read the persisted contribution catalog, never the live plugin.
@@ -99,7 +99,9 @@ Constraints other documents hand to specific screens (the owning document has th
 | Workflows | A tripped Spawn Bound shows the paused trigger with its held events and offers one-click resume, optionally discarding the backlog. | [./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md) |
 | Fleet | A reserved "Add machine" spot shows the join command with a minted single-use token. Queued placements on a full runner are visible. Concurrent sessions in a primary Workspace are surfaced, not locked. Legacy workspace folders from a previous runner life may surface very discreetly for manual recovery. | [./03-controller-and-runners.md](./03-controller-and-runners.md) |
 | Tasks | Fixed status axis, any-to-any transitions. Label colours and descriptions are presentation-layer only. Search is structured filters plus full-text. | [./09-tasks.md](./09-tasks.md) |
-| Connections | Per-channel-connection toggle for Notification delivery. Default Topic chosen at setup. | [./08-events-and-connections.md](./08-events-and-connections.md) |
+| Connections | Per-channel-connection toggle for Notification delivery, which asks for the notification container (a channel or the owner's DM). Default Topic chosen at setup. Channel setup ends with the owner's pairing code. | [./08-events-and-connections.md](./08-events-and-connections.md) |
+| Settings > Assistants | Channel bindings are edited as `connection + scope -> assistant`, the scope pickers generated from the channel contribution's declared levels in the catalog (Discord guild / channel / thread, Slack channel / thread, or all DMs); the assistant's `reply` mode (turn-end / segments) is a setting here. | [./12-assistants.md](./12-assistants.md) |
+| Settings > Identities | Platform identities with role owner / trusted; Add mints a one-time pairing code to DM to the bot; revoke in place. | [./12-assistants.md](./12-assistants.md) |
 | Notifications | A Permission Request notification offers "this session only" or "add to profile". | [./13-security.md](./13-security.md) |
 | Settings > Assistants | Memory documents (`core` plus topic notes) are viewed and edited through the same memory API ops the `hydra memory` CLI uses; caps are enforced at the write op and the UI shows the resulting error. | [./12-assistants.md](./12-assistants.md) |
 

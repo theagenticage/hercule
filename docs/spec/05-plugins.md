@@ -101,13 +101,13 @@ The contribution is the act of registering a `ProviderDefinition`: the provider'
 
 ### 4.2 Channel
 
-A channel contribution makes one chat platform reachable. Its obligations at the boundary:
+A channel contribution makes one chat platform reachable. The TypeScript interface (`ChannelContribution`, `ChannelHost`, `ChannelHandle`, the inbound and outbound message shapes, the sink facet) is pinned in [./12-assistants.md](./12-assistants.md) section 11.1; the obligations at the boundary:
 
-- **Identity**: contribution id and the connection type(s) it services (a Discord bot token connection, a Slack bot token connection). Channel connections are established by paste-a-token ([./08-events-and-connections.md](./08-events-and-connections.md)).
-- **Inbound**: for each live connection, deliver every observed message to the core with the route facts bindings match on (connection, guild/workspace, channel, thread, DM flag), the platform sender identity, message text, and mention facts (explicit mention, reply-to-assistant, assistant-active-in-thread). The core, not the plugin, evaluates wake rules, which assistant the binding resolves to, and whether third-party text is context or instruction ([./12-assistants.md](./12-assistants.md)). This placement is the spec's, consistent with the dumb-sink posture; ticket 17 pins the rules, not where they are evaluated. Inbound chat messages are not pipeline Events ([./08-events-and-connections.md](./08-events-and-connections.md)); whether they should be is Open in [./12-assistants.md](./12-assistants.md).
-- **Outbound**: send a message into a named conversation container on a named connection, on the core's request. Outbound sends leave the core through outbox rows with retry ([./04-state-store.md](./04-state-store.md)).
-- **Conversation container**: the plugin defines how its platform's containers map to Hydra Conversations (Discord channel or DM, Slack thread). One container = one Conversation, never merged ([ADR 0014](../adr/0014-assistants-remember-through-distilled-memory-not-merged-sessions.md)).
-- **Notification sink (optional)**: deliver a Notification rendered by the core to a connection. See section 11.
+- **Identity**: contribution id, the connection type it services (a Discord bot-token connection; a Slack connection holding a bot token and an app-level token), and its **scope model** - the container levels, outermost first, for group containers and DMs (Discord `guild > channel > thread` / `user`; Slack `channel > thread` / `user`). The scope model is catalog data: the binding editor and the core's binding matcher read it, so bindings validate while the plugin is disabled.
+- **Inbound**: for each live connection, deliver every observed message to the core through `host.message()` with its container key (`{ kind, path }` of platform ids), the platform sender identity (plugin-formatted identity key, display name, bot and self flags), the text normalized to markdown, attachment links, and the mention facts it can see (explicit platform mention, reply-to-self). The core, not the plugin, resolves bindings, evaluates wake rules and roles, stores conversation messages and decides what is context and what is instruction ([./12-assistants.md](./12-assistants.md) section 4). Inbound chat messages are not pipeline Events ([ADR 0023](../adr/0023-chat-messages-are-conversation-input-not-events.md)).
+- **Outbound**: `send` a markdown message into a named container on the core's request, converting markup and splitting at the platform limit; `activity` renders a working indicator (Discord typing, Slack reaction). Outbound sends leave the core through outbox rows with retry ([./04-state-store.md](./04-state-store.md)).
+- **Conversation container**: the plugin defines how its platform's containers map to Hydra Conversations (Discord channel, thread or DM; Slack thread, DM or group DM - a top-level Slack mention opens a thread). One container = one Conversation, never merged ([ADR 0014](../adr/0014-assistants-remember-through-distilled-memory-not-merged-sessions.md)).
+- **Notification sink (optional)**: deliver a Notification rendered by the core to a container on a connection, render its bound actions as native buttons, report clicks through `host.click()` and edit the message on `resolved()`. See section 11 and [./12-assistants.md](./12-assistants.md) section 11.6.
 
 ### 4.3 Event source
 
@@ -129,7 +129,7 @@ A workflow action is what an action step invokes ([ADR 0008](../adr/0008-workflo
 - **Execution**: `execute(input, ctx)` runs on the controller, in-process, and returns the output or throws. Actions never redirect the graph; a thrown error fails the step and the run.
 - **No blocking waits**: an action that would wait for something external is instead expressed as a subscription-holding run, not an action that sleeps ([./07-workflows.md](./07-workflows.md)). This generalises ticket 16's no-blocking rule, which is stated for API endpoints, to action contributions.
 
-**Open:** the TypeScript signatures of the channel, event-source and workflow-action contribution interfaces are not pinned by any ticket; the obligations above are the pinned contract. The provider contribution (`ProviderDefinition`) is the only pinned interface. Fix the three signatures at build time against the obligations here and the event envelope in [./08-events-and-connections.md](./08-events-and-connections.md).
+**Open:** the TypeScript signatures of the event-source and workflow-action contribution interfaces are not pinned by any ticket; the obligations above are the pinned contract ([Plugin contribution interfaces](https://github.com/rogierpennink/hydra/issues/41)). The provider contribution (`ProviderDefinition`, [./06-providers.md](./06-providers.md)) and the channel contribution ([./12-assistants.md](./12-assistants.md) section 11.1) are pinned.
 
 **Open:** the per-plugin v1 workflow-action roster (which `github.*` and `gmail.*` actions ship) is not pinned. Pinned facts: Gmail bodies are fetched on demand through Gmail actions; the Intake prototype used `github.merge` as an example of an agent-authored bound action.
 
@@ -142,7 +142,7 @@ V1 plugin capabilities:
 | Capability | Phase | Grants |
 |---|---|---|
 | `providers` | register | register a `ProviderDefinition` |
-| `channels` | register + activate | register a channel contribution; at runtime deliver inbound messages and receive outbound send and notification-delivery requests |
+| `channels` | register + activate | register a channel contribution (scope model included); at runtime deliver inbound messages and clicks, report connection status, and receive outbound send, activity and notification-delivery requests ([./12-assistants.md](./12-assistants.md) section 11.1) |
 | `event-sources` | register + activate | register an event-source contribution (kinds + schemas, per-connection config schema) |
 | `workflow-actions` | register | register workflow actions |
 | `connections` | register + activate | declare the connection types the plugin services and their setup flow; at runtime list the plugin's own connections, read their decoded credentials and per-connection config, report connection status |
@@ -231,7 +231,7 @@ Rationale and the full Notification model: [ADR 0012](../adr/0012-notifications-
 - **Producing.** A plugin with the `notifications` capability emits a Notification (for example Gmail warning that its OAuth token is expiring). It becomes one persisted core-owned Notification record like every other producer's. The plugin decides nothing about delivery.
 - **Delivering.** Delivery is core-push, never plugin-claim. The core router alone decides fan-out. A **sink** is a channel contribution that optionally implements notification delivery; it rides the channel extension point, so the fixed set of four stays intact. The web app's notification center always records the notification regardless of sinks.
 - **User control.** The user toggles delivery per channel connection. V1 routing policy is deliver-to-all-enabled. **Producer-side muting** (silence a chatty plugin's notifications) is a separate control from sink-side toggles.
-- **Sink contract grows additively.** Post-v1 fields (device class, presence, receipts) are optional; a sink that reports nothing is treated as always available. Presence-aware routing lands as a router upgrade touching no plugin.
+- **Sink contract grows additively.** V1 sinks implement `deliver` (returning a delivery ref) and `resolved` (edit the delivered message when the decision is taken anywhere), and report clicks to the core, which authenticates and executes them ([./12-assistants.md](./12-assistants.md) section 11.6). Post-v1 fields (device class, presence, receipts) are optional; a sink that reports nothing is treated as always available. Presence-aware routing lands as a router upgrade touching no plugin.
 - **No second path.** A plugin MUST NOT deliver a user-facing notification by any route other than the `notifications` capability, even when it has a channel connection in hand. Assistants speaking unprompted in a conversation are not notifications; the no-double-fire rule and its router mechanism are in [./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md) section 7.5.
 
 ## 12. V1 inventory
