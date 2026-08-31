@@ -7,24 +7,11 @@ The register of everything the spec assembly (2026-08-28) could not settle from 
 - **C. Verify at build time.** Facts about third-party systems to confirm against the pinned version before relying on them.
 - **D. Standing risks.** Accepted knowingly; on record so nobody rediscovers them.
 
-Beyond these, the map's **Not yet specified** section holds fog that is in scope but not yet sharp enough to ticket (see the end of this document), and one prototype ticket is still open. Resolved 2026-08-30: [Assistant runtime](https://github.com/rogierpennink/hydra/issues/40) (12, 11 §6.4, 06 §9, 10 §7.5, 13 §10, ADR 0024). Resolved 2026-08-31: [Notification lifecycle and shipped triage conventions](https://github.com/rogierpennink/hydra/issues/42) (10 rewritten for batch triage, 02 §Notification/§Trigger, 08 §4/§5.3/§10, 11 `notification`/`settings`, 13 §6.1, 14 Intake/check-in/center, ADR 0027, dated note on ADR 0011).
+Beyond these, the map's **Not yet specified** section holds fog that is in scope but not yet sharp enough to ticket (see the end of this document), and one prototype ticket is still open. Resolved 2026-08-30: [Assistant runtime](https://github.com/rogierpennink/hydra/issues/40) (12, 11 §6.4, 06 §9, 10 §7.5, 13 §10, ADR 0024). Resolved 2026-08-31: [Notification lifecycle and shipped triage conventions](https://github.com/rogierpennink/hydra/issues/42) (10 rewritten for batch triage, 02 §Notification/§Trigger, 08 §4/§5.3/§10, 11 `notification`/`settings`, 13 §6.1, 14 Intake/check-in/center, ADR 0027, dated note on ADR 0011); [Runner substrate details](https://github.com/rogierpennink/hydra/issues/43) (03 throughout, 06 §2/§3/§4/§7/§9/§10/§11, 15 §1/§2/§4/§5/§9/§11/§12/§13, 13 §2.1, `ProviderRunnerContext` rename, reserved runners, ADR 0028, dated note on ADR 0018).
 
 To find the exact line for any entry: `grep -n '^\*\*Open:\*\*' docs/spec/<doc>.md`.
 
 ## A. Decisions handed to tickets
-
-### [Runner substrate details: protocol guarantees, defaults, provider CLI delivery](https://github.com/rogierpennink/hydra/issues/43)
-
-Owning documents: [03](./03-controller-and-runners.md), [06 §2, §4](./06-providers.md), [15 §12, §13](./15-packaging-and-operations.md).
-
-- 03 §2.3: delivery guarantees for controller-to-runner commands across a disconnect; the `online -> unreachable` silence threshold; join token lifetime; the runner-side re-point command after promotion.
-- 03 §3.3: whether provider login runs inside `hydra runner join` or as a post-join step.
-- 06 §2.1 (Conflict): provider-instance config (binary path, config dir) versus the no-runner-paths rule; the secrets owner kind for provider-instance secrets and how the runner obtains them.
-- 06 §4.2: the field through which the runner hands the adapter the session environment (`env` on `RunnerContext`).
-- 15 §2, 06 §9.3: how a session reaches the `hydra` binary.
-- 15 §12: which Claude Code binary drives sessions (embedded vs runner-installed); how pi's package lands on a runner without Node; Hydra-pinned vs vendor-latest CLI versions at join; coupling of `hydra service install` and join.
-- 15 §4, §5: local runner crash-restart policy and auto-join token handoff; where a runner persists its credential and controller URL; whether a runner upgrade drains or interrupts sessions.
-- 03 §5, §6: probe cadence for toolchain facts and the probed toolchain list; session timeout and disk watermark defaults; reaper TTL; `.workspaceinclude` source when no primary workspace exists.
 
 ### [Operations details: bootstrap config, first run, login, upgrade, backups, key file](https://github.com/rogierpennink/hydra/issues/44)
 
@@ -79,9 +66,9 @@ Not design questions. The constraint is stated where one exists.
 - 04 §Engine: FTS5 is enabled in the pinned Bun's bundled SQLite and the minimum macOS system SQLite.
 - 09 §Search: the FTS5 tokenizer and whether raw `MATCH` syntax is exposed or wrapped.
 - 03 §6.1, 06 §9.1: whether the Codex app-server offers a system-prompt channel better than `AGENTS.md` in a scratch cwd.
-- 06 §2: pi `modelSwitch` in the SDK; pi `mcpPassthrough` in the pinned version.
-- 06 §9.1: the exact compaction / isolation knob names per pinned harness version, including `settingSources: []` (Claude) and `DefaultResourceLoader({ noContextFiles: true })` (pi) for context-file discovery being off in workspace-less sessions.
-- 06 §10.3: pi's SDK under the Bun host; how the pinned pi package reaches the host on a runner.
+- 06 §2: pi `mcpPassthrough` in the pinned version.
+- 06 §9.1: the exact compaction / isolation knob names per pinned harness version, including `settingSources: []` (Claude) and the pi launch flags (`--no-context-files` and friends) for discovery being off in workspace-less sessions.
+- 06 §10.3: the Hydra pi extension file against the pinned pi version (`tool_call` hook and `registerTool` API churn); the strict LF JSONL RPC framing.
 - 07 §5: CEL parse-time limits; a CI corpus of representative expressions against the wrapper.
 - 08 §5.2: Gmail's stale-`historyId` error path re-baselines at now.
 - 13 §1: what counts as a tailnet address for the bind warning.
@@ -90,7 +77,6 @@ Not design questions. The constraint is stated where one exists.
 - 13 §4.2: the password hash function (argon2id expected).
 - 13 §9: the runner daemon's local channel for the git credential helper and how the helper authenticates.
 - 15 §11: macOS notarization of a Bun-compiled binary - prototype notarize + staple first.
-- 15 §11: where `extractFromBunfs` places the extracted Claude binary and whether it re-extracts per boot.
 
 ## D. Standing risks
 

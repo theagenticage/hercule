@@ -153,6 +153,10 @@ The always-on brain: holds all state, receives events, schedules work. The singl
 **Runner**:
 A daemon on a machine that executes sessions on the controller's behalf.
 
+**Reserved**:
+A runner flag: a reserved runner hosts only work explicitly placed on it (named by the user or a workflow, resolved by the "local" alias, or following a workspace already there); placement fallback never chooses it. For personal machines that should never catch scheduled work.
+_Avoid_: unreliable, personal (as a state name)
+
 **Fleet**:
 All runners enrolled with a controller, viewed as a collective.
 

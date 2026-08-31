@@ -24,8 +24,8 @@ One owner-scoped secrets table in the controller SQLite database ([./04-state-st
 
 | Field | Meaning |
 |---|---|
-| `ownerKind` | `connection` \| `plugin` \| `runner` \| `core` |
-| `ownerId` | the owning Connection, plugin, or runner id; a fixed name for `core` |
+| `ownerKind` | `connection` \| `plugin` \| `runner` \| `provider-instance` \| `core` |
+| `ownerId` | the owning Connection, plugin, runner, or provider-instance id; a fixed name for `core` |
 | `name` | key within the owner's namespace (e.g. `oauth.refreshToken`, `pat`, `clientSecret`) |
 | `ciphertext` | the value encrypted under the master key |
 | `createdAt`, `rotatedAt` | timestamps; rotation replaces the ciphertext in place |
@@ -35,9 +35,10 @@ What lives here:
 - **Connection credentials**: pasted tokens (GitHub PAT, Slack and Discord bot tokens), OAuth client id/secret the user registered (BYO client), and OAuth refresh tokens obtained through a Connection's setup flow. Access tokens refreshed from a refresh token are also stored here when the plugin persists them.
 - **Plugin secrets**: whatever a plugin writes through the plugin secrets API (§2.4).
 - **Runner-scoped secrets**: the `runner` owner kind is reserved for secrets scoped to one runner. The runner's own credential is not stored here: it is an opaque token stored hashed like every other token (§4.5).
+- **Provider-instance secrets**: secret-valued instance settings (API keys such as `ANTHROPIC_API_KEY` or `ZAI_API_KEY`, base-URL credentials) under the `provider-instance` owner kind. The controller decrypts them and sends them inline with each probe or session request over the runner WebSocket; they are held in memory for the operation and never land on runner disk ([./06-providers.md](./06-providers.md) §2.1; resolved 2026-08-31, [#43](https://github.com/rogierpennink/hydra/issues/43)).
 - **Core**: the controller's own key material (its persistent identity from [ADR 0005](../adr/0005-promotion-is-migration-behind-a-stable-controller-identity.md)) and any other core-owned secret.
 
-What does not live here: provider (Claude Code, Codex, pi) login credentials. Those stay with the vendor CLI on each runner (§8). Secret-valued provider-instance settings (an API key for an API-billed instance) go through this table; their owner kind is Open in [./06-providers.md](./06-providers.md).
+What does not live here: provider (Claude Code, Codex, pi) login credentials. Those stay with the vendor CLI on each runner (§8).
 
 ADR 0015 originally listed "runner credentials" among the encrypted rows; it is amended (2026-08-28): the runner credential is a token and is stored hashed (§4.5), and the `runner` owner kind stays reserved for runner-scoped secrets.
 
