@@ -6,7 +6,7 @@ Hydra v1 is a single-user system whose supported perimeter is a home LAN or a ta
 
 - **Supported perimeter: LAN or tailnet.** The controller serves plain HTTP by default. A tailnet is already encrypted; a home LAN is a proportionate trust boundary for one user.
 - **Bind warning.** When the controller binds to an address that is neither loopback nor a tailnet address, it prints a warning at startup. It does not refuse.
-- **Optional TLS.** The user may supply their own certificate and key (BYO TLS). On a tailnet, `tailscale cert` provides a real Let's Encrypt certificate for `<node>.<tailnet>.ts.net` with no public exposure; this is the documented way to give the controller an HTTPS origin, which Google OAuth redirects require (see §3.3). Tailscale Funnel is not needed for anything in this document: the user's browser already reaches the controller.
+- **Optional HTTPS, tailscale-managed.** *(Amended 2026-09-01, [#44](https://github.com/rogierpennink/hydra/issues/44); tickets #18/#32 pinned BYO cert/key paths, replaced here.)* HTTPS is a controller feature, not a config concern: v1's only HTTPS consumer is the Google OAuth redirect origin (§3.3), and the documented cert source was already `tailscale cert` - so the controller runs it itself. When the user enables HTTPS (a Settings toggle, or prompted as a step in the Google Connection's declarative setup flow, [./08-events-and-connections.md](./08-events-and-connections.md)), the controller shells out to `tailscale cert`, stores the material under `<home>/tls/`, opens an HTTPS listener on a second port (controller state, default 4938), and re-mints before expiry - renewal is automatic, which BYO paths never gave. Runner WS and LAN HTTP traffic stay on the plain listener, untouched. There are no cert-path keys anywhere; cert material is machine-owned and never travels (a cert is bound to this machine's tailnet node name; a promoted controller mints its own). BYO cert paths return post-v1 only with a real non-tailscale need. Tailscale Funnel is not needed for anything in this document: the user's browser already reaches the controller.
 - **No hostile-internet hardening in v1.** Rate limiting of login attempts, brute-force lockout, CSRF machinery, and similar public-exposure defences are out of scope. Revisited if multi-tenant hosting arrives.
 - **Disk theft is in scope.** Any copy of the database, a backup, or a promotion bundle is useless without the master key (§2).
 - **Shared-machine limit, stated honestly.** Sessions run as bare processes under the same OS user as the runner ([ADR 0003](../adr/0003-sessions-run-as-bare-processes.md)). Agent/user credential separation (§5) defends against accident and drift, not against a malicious process on the same machine. Real isolation (OS sandboxing, containers) is post-v1.
@@ -53,7 +53,7 @@ ADR 0015 originally listed "runner credentials" among the encrypted rows; it is 
 - The controller runs as a user-level service precisely so it can read the login keychain without a prompt.
 - **The master key never leaves its machine.** It is not in the database, not in backups, not in a promotion bundle. Backups (`VACUUM INTO` snapshots) therefore contain inert ciphertext; copying the backups directory offsite is safe.
 
-**Open:** the tickets say "plain key file fallback on headless Linux" without pinning its path; place it under Hydra Home but outside `data/` so promotion never moves it.
+The plain key file is **`~/.hydra/master.key`**, mode 0600 (resolved 2026-09-01, [#44](https://github.com/rogierpennink/hydra/issues/44)): at the Hydra Home root, outside `data/` and `backups/`, so promotion never moves it and backups stay inert.
 
 ### 2.3 Promotion re-wrapping
 
@@ -95,6 +95,7 @@ Google = redirect flow to the controller's own HTTPS origin (BYO client); GitHub
 
 - The controller derives the exact redirect URI from the origin the user's browser is already using and displays it for the user to register. No Hydra-hosted relay is involved.
 - On a tailnet, `tailscale cert` gives the controller a real certificate for `https://<node>.<tailnet>.ts.net`, which Google accepts as a redirect host; raw private IPs and `.local`/`.internal` names are rejected. `http://localhost` is a same-machine fallback only.
+- The controller runs `tailscale cert` itself when HTTPS is enabled (§1): the Google Connection setup flow can surface "Enable HTTPS via Tailscale" as one of its declarative steps, which is where the cert finally lives next to the feature that needs it. Prerequisite surfaced in the same step: MagicDNS and the tailnet's HTTPS toggle must be on.
 
 ## 4. User authentication
 
@@ -113,12 +114,12 @@ Resolves the credential side of [ADR 0013](../adr/0013-agents-operate-hydra-thro
 
 **Verify at build time:** the password hash function (no source names one; argon2id is the expected choice).
 
-**Open:** the lifetime of the login-issued bearer token. Ticket #18 pinned 30 days rolling for the (superseded) cookie; nothing pins it for the bearer token.
+The bearer token's lifetime is **30 days rolling** (resolved 2026-09-01, [#44](https://github.com/rogierpennink/hydra/issues/44)): carried over from ticket #18's cookie number - each authenticated use extends it, and logout revokes it server-side. Where the web app stores it between page loads is [./14-web-app.md](./14-web-app.md)'s.
 
 ### 4.3 API keys
 
 - Long-lived, opaque, revocable. Always the user's identity, never an agent's.
-- Minted in the web app (Settings) or via `hydra login` (password in, token out). The CLI stores it in a credential file with mode 0600 inside Hydra Home; location in [./15-packaging-and-operations.md](./15-packaging-and-operations.md).
+- Minted in the web app (Settings) or via `hydra login` (password in, token out; `--password-stdin` scripted, echo-off TTY prompt as the one exception to the never-prompts rule, [./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md) §6.1). The CLI stores it in `~/.hydra/credentials.json`, mode 0600 ([./15-packaging-and-operations.md](./15-packaging-and-operations.md)).
 - Revocable individually; a revoked key fails on its next use.
 - Used by the ops CLI and scripts. The ops CLI and the runner-shipped `hydra` CLI are the same binary; the difference is the credential ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md)).
 
@@ -310,6 +311,7 @@ Stated explicitly by the tickets:
 - Finer grants inside families; v1 keeps families coarse so profiles do not break.
 - Short-lived git tokens (e.g. GitHub App installation tokens) as a drop-in behind the same on-demand helper.
 - MCP-based hydra-as-a-tool, which would carry the same session token.
+- BYO TLS cert/key paths (a non-tailscale CA), and TLS between fleet machines - the latter a genuine bootstrap-config concern when it lands ([#44](https://github.com/rogierpennink/hydra/issues/44)).
 
 ## Sources
 
@@ -328,6 +330,7 @@ Tickets:
 - Runner execution substrate (git credential handoff) - https://github.com/rogierpennink/hydra/issues/8
 - Controller packaging & install story (keychain, backups) - https://github.com/rogierpennink/hydra/issues/24
 - Assemble the v1 spec (bound-action authorisation, provider-home isolation) - https://github.com/rogierpennink/hydra/issues/21
+- Operations details: bootstrap config, first run, login, upgrade, backups, key file - https://github.com/rogierpennink/hydra/issues/44
 
 ADRs:
 

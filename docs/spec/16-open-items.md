@@ -7,23 +7,11 @@ The register of everything the spec assembly (2026-08-28) could not settle from 
 - **C. Verify at build time.** Facts about third-party systems to confirm against the pinned version before relying on them.
 - **D. Standing risks.** Accepted knowingly; on record so nobody rediscovers them.
 
-Beyond these, the map's **Not yet specified** section holds fog that is in scope but not yet sharp enough to ticket (see the end of this document), and one prototype ticket is still open. Resolved 2026-08-30: [Assistant runtime](https://github.com/rogierpennink/hydra/issues/40) (12, 11 §6.4, 06 §9, 10 §7.5, 13 §10, ADR 0024). Resolved 2026-08-31: [Notification lifecycle and shipped triage conventions](https://github.com/rogierpennink/hydra/issues/42) (10 rewritten for batch triage, 02 §Notification/§Trigger, 08 §4/§5.3/§10, 11 `notification`/`settings`, 13 §6.1, 14 Intake/check-in/center, ADR 0027, dated note on ADR 0011); [Runner substrate details](https://github.com/rogierpennink/hydra/issues/43) (03 throughout, 06 §2/§3/§4/§7/§9/§10/§11, 15 §1/§2/§4/§5/§9/§11/§12/§13, 13 §2.1, `ProviderRunnerContext` rename, reserved runners, ADR 0028, dated note on ADR 0018).
+Beyond these, the map's **Not yet specified** section holds fog that is in scope but not yet sharp enough to ticket (see the end of this document), and one prototype ticket is still open. Resolved 2026-08-30: [Assistant runtime](https://github.com/rogierpennink/hydra/issues/40) (12, 11 §6.4, 06 §9, 10 §7.5, 13 §10, ADR 0024). Resolved 2026-08-31: [Notification lifecycle and shipped triage conventions](https://github.com/rogierpennink/hydra/issues/42) (10 rewritten for batch triage, 02 §Notification/§Trigger, 08 §4/§5.3/§10, 11 `notification`/`settings`, 13 §6.1, 14 Intake/check-in/center, ADR 0027, dated note on ADR 0011); [Runner substrate details](https://github.com/rogierpennink/hydra/issues/43) (03 throughout, 06 §2/§3/§4/§7/§9/§10/§11, 15 §1/§2/§4/§5/§9/§11/§12/§13, 13 §2.1, `ProviderRunnerContext` rename, reserved runners, ADR 0028, dated note on ADR 0018). Resolved 2026-09-01: [Operations details](https://github.com/rogierpennink/hydra/issues/44) (15 §1/§2/§5/§6/§7/§8/§9/§10, 04 §Secrets/§Retention/§Backups, 13 §1/§2.2/§3.3/§4.2/§4.3, 11 §2 `setup`/renames/§6.1; BYO TLS replaced by tailscale-managed HTTPS, `mint*Token` ops renamed `create*Token`).
 
 To find the exact line for any entry: `grep -n '^\*\*Open:\*\*' docs/spec/<doc>.md`.
 
 ## A. Decisions handed to tickets
-
-### [Operations details: bootstrap config, first run, login, upgrade, backups, key file](https://github.com/rogierpennink/hydra/issues/44)
-
-Owning documents: [15](./15-packaging-and-operations.md), [04](./04-state-store.md), [13](./13-security.md).
-
-- 15 §6: the complete bootstrap key list, TOML names and `HYDRA_*` mapping; whether BYO TLS paths are bootstrap or controller state.
-- 15 §1, §2: the installer's binary path and PATH handling; `hydra service` verbs beyond `install`; the ops command that mints a runner join token.
-- 15 §7: how the user retrieves the one-time setup URL under a service unit; setup token lifetime; what the API and web app allow before the password exists.
-- 11 §6.1: how `hydra login` takes the password under the never-prompts rule; 13 §4.2: the lifetime of the login-issued bearer token.
-- 15 §5, 04 §Secrets, 13 §2.2: the location of the plain-file master key on headless Linux; the CLI credential file's location and name.
-- 15 §8, §9, §10, 04 §Backups: pre-migration copy method; release signing scheme; update-check cadence; backup time, retention and restore procedure.
-- 04 §Retention, 15 §6: concrete defaults for `retention.events` and `retention.security`.
 
 ### [Web app details: workflow text format, onboarding steps, Settings > Bounds, WS envelope](https://github.com/rogierpennink/hydra/issues/45)
 
@@ -33,6 +21,7 @@ Owning document: [14](./14-web-app.md).
 - 14 §Onboarding: the onboarding steps beyond password, timezone confirmation (the user's timezone setting pinned by [Assistant runtime](https://github.com/rogierpennink/hydra/issues/40), 12 §5.2) and default assistant.
 - 14 §Screens: what Settings > Bounds shows; which tier standing workflows render under in check-in.
 - 14 §Live model: the WebSocket wire format; 14 §Auth: bearer token storage between page loads; 14 §Local alias: the loopback port for `GET /identity`.
+- Handoff from [Operations details](https://github.com/rogierpennink/hydra/issues/44): the fields `setup.complete` carries beyond the password (11 §2); every events surface must communicate the retention horizon ("showing events from the last 90 days") - and the UX/UI implications of event pruning want research here (04 §Retention).
 
 ### [Domain model residue: id format, remaining status axes, identity rules](https://github.com/rogierpennink/hydra/issues/46)
 

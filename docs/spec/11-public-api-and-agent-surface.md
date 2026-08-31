@@ -240,7 +240,7 @@ Semantics: [./03-controller-and-runners.md](./03-controller-and-runners.md), [./
 | `runner.update` | `{ runnerId, name?, labels?, maxConcurrentSessions? }` | `infra.write` | `PATCH /runners/{id}` |
 | `runner.drain` / `runner.retire` / `runner.upgrade` | `{ runnerId }`; `retire` takes `force?: boolean` for an unreachable runner | `infra.write` | `POST /runners/{id}/drain` etc. |
 | `runner.probe` | `{ runnerId, instanceId }` -> capability snapshot | `infra.write` | `POST /runners/{id}/probe` |
-| `runner.mintJoinToken` | `{}` -> single-use join token | `infra.write` | `POST /runners/join-tokens` |
+| `runner.createJoinToken` | `{}` -> single-use join token (renamed from `mintJoinToken` 2026-09-01, [#44](https://github.com/rogierpennink/hydra/issues/44): `create` over `mint`, consistently) | `infra.write` | `POST /runners/join-tokens` |
 | `plugin.query` / `plugin.read` | `{}` / `{ pluginId }` (state, config, contributions) | `infra.read` | `GET /plugins[/{id}]` |
 | `plugin.enable` / `plugin.disable` | `{ pluginId }` | `infra.write` | `POST /plugins/{id}/enable` etc. |
 | `plugin.configure` | `{ pluginId, config }` (deactivate + reactivate) | `infra.write` | `PUT /plugins/{id}/config` |
@@ -248,7 +248,7 @@ Semantics: [./03-controller-and-runners.md](./03-controller-and-runners.md), [./
 | `provider.create` / `update` / `delete` | instance config ([./06](./06-providers.md)) | `infra.write` | `POST` / `PATCH` / `DELETE /providers[/{id}]` |
 | `controller.read` | `{}` -> identity, version, update availability, default runner | `infra.read` | `GET /controller` |
 | `controller.update` | `{ defaultRunnerId? }` | `infra.write` | `PATCH /controller` |
-| `controller.mintPromotionToken` / `controller.export` / `controller.import` | promotion ([./15](./15-packaging-and-operations.md)) | `infra.write` | `POST /controller/promotion-tokens`, `.../export`, `.../import` |
+| `controller.createPromotionToken` / `controller.export` / `controller.import` | promotion ([./15](./15-packaging-and-operations.md)); renamed from `mintPromotionToken` with `runner.createJoinToken` ([#44](https://github.com/rogierpennink/hydra/issues/44)) | `infra.write` | `POST /controller/promotion-tokens`, `.../export`, `.../import` |
 
 ### workspace
 
@@ -317,7 +317,8 @@ Semantics: [./13-security.md](./13-security.md), [./15-packaging-and-operations.
 | `user.setPassword` | `{ current, next }` | `credential.write` | `POST /user/password` |
 | `auth.login` | `{ username, password }` -> bearer token | none (pre-auth) | `POST /auth/login` |
 | `auth.wsTicket` | `{}` -> short-lived WebSocket ticket | any authenticated caller | `POST /auth/ws-ticket` |
-| `setup.*` | first-run setup, reachable only with the one-time setup token ([./15](./15-packaging-and-operations.md)) | none (pre-auth) | `POST /setup/...` |
+| `setup.read` | `{}` -> `{ complete: boolean }`; unauthenticated, so the web app knows to route to `/setup` (resolved 2026-09-01, [#44](https://github.com/rogierpennink/hydra/issues/44)) | none (pre-auth) | `GET /setup` |
+| `setup.complete` | onboarding fields ([./14](./14-web-app.md)); requires the one-time setup token ([./15](./15-packaging-and-operations.md)); atomically sets the password and returns a logged-in bearer token. Before setup completes, these two ops and the static bundle are all that is reachable; everything else is 401 | none (setup token) | `POST /setup/complete` |
 
 ### settings
 
@@ -398,14 +399,14 @@ Grant families and verbs, the operation-to-grant table's vocabulary, and the thr
 
 The CLI never prompts interactively: onboarding lives wholly in the web app + API, and the runner join exchange is fully programmatic.
 
-**Open:** how `hydra login` receives the password under the never-prompts rule (flag, stdin, or an explicit exception for this one command).
+`hydra login` takes the password docker-style (resolved 2026-09-01, [#44](https://github.com/rogierpennink/hydra/issues/44)): `--password-stdin` is the canonical scripted form; on a TTY with no flag it prompts with echo off, **the one documented exception** to the never-prompts rule. The rule's purpose is that automation and the future desktop installer never wedge on a hidden prompt - `--password-stdin` preserves programmatic drivability, and the desktop app never runs `hydra login`. A bare `--password` flag does not exist (it would leak into `ps` and shell history).
 
 ### 6.2 Credential resolution
 
 The CLI resolves its credential in this order:
 
 1. `HYDRA_TOKEN` from the environment (with `HYDRA_API_URL`).
-2. The CLI credential file (written by `hydra login`; location **Open** in [./15-packaging-and-operations.md](./15-packaging-and-operations.md)).
+2. The CLI credential file, `~/.hydra/credentials.json` (written by `hydra login`; [./15-packaging-and-operations.md](./15-packaging-and-operations.md)).
 
 When `HYDRA_SESSION=1` is set, step 2 is skipped: the CLI refuses file credentials outright. This is what makes the ops CLI and hydra-as-a-tool the same binary: identical commands, different credential.
 

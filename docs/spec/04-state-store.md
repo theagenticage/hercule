@@ -121,7 +121,7 @@ The Data Root is the unit promotion moves ([ADR 0005](../adr/0005-promotion-is-m
 
 All secret values (Connection credentials, plugin secrets, runner-scoped secrets, core secrets) are rows in **one owner-scoped secrets table** with owners `connection | plugin | runner | core`. The `runner` owner kind is reserved for runner-scoped secrets; the per-runner credential itself is not in this table, it is a token stored hashed on the runner record (above). Each value is encrypted per value under the Master Key; the SQLite file itself stays plain, so any copy of the file, backup or bundle is inert without the key. Secret values never appear in the event log, in API responses or in process logs; other rows hold references to secret rows, never values. The plugin secrets service is a scoped view over this table (owner `plugin`, namespaced by plugin id). Promotion export enumerates and re-encrypts these rows under a token-derived key and the new controller re-wraps them under its own Master Key. Everything else about secrets, keys and credentials is in [./13-security.md](./13-security.md) and [ADR 0015](../adr/0015-secrets-are-encrypted-per-value-under-a-keychain-held-master-key.md).
 
-**Open:** the location of the plain-key-file fallback (headless Linux) is unspecified. It must sit outside the Data Root and outside `backups/`, otherwise the bundle and offsite backups stop being inert; the packaging layout in ticket 24 names no directory for it.
+The plain-key-file fallback (headless Linux) is **`~/.hydra/master.key`**, mode 0600 (resolved 2026-09-01, [#44](https://github.com/rogierpennink/hydra/issues/44)): at the Hydra Home root, outside the Data Root and outside `backups/`, so the promotion bundle and offsite backups stay inert.
 
 ## Plugin namespaced KV
 
@@ -140,19 +140,15 @@ Retention (this document owns the final statement; other documents link here):
 - **The event log and the per-session streams are TTL-pruned, default 90 days** ([ADR 0009](../adr/0009-all-events-flow-through-one-persisted-pipeline.md); [ADR 0004](../adr/0004-controller-state-lives-in-one-sqlite-database.md) as amended 2026-08-28, which withdraws its original "keep everything in v1"). Events are persisted whether or not they match; the prune runs periodically on the controller.
 - **Security events and actor-stamped mutations are kept at least 90 days** (ticket 18), independently of the event TTL.
 - **Domain rows are never pruned.** Tasks, Runs, Sessions, Workflows, Connections, Notifications and the rest stay until the user deletes them. Run records copy their triggering event, so pruning the log never leaves a run without its cause.
-- The two windows are the controller-state settings `retention.events` and `retention.security` ([./15-packaging-and-operations.md](./15-packaging-and-operations.md)).
-
-**Open:** the concrete defaults for `retention.events` and `retention.security` are not pinned beyond "~90 days" (ADR 0009) and "90 days" (ticket 18); ticket 18 also calls the event TTL "short" relative to the security window, so the two defaults may be meant to differ.
+- The windows are the controller-state settings `retention.events`, `retention.security`, and `retention.conversations` (conversation messages, [./12-assistants.md](./12-assistants.md) section 2). Defaults (resolved 2026-09-01, [#44](https://github.com/rogierpennink/hydra/issues/44)): **90 days each**, one setting per window, not per event kind - per-kind knobs are additive later if anything motivates them.
+- **Live work keeps its context** (same resolution): an event referenced by the provenance of a non-terminal Task, or by an unresolved Notification, survives the TTL; it becomes prunable when its referrer reaches `done`/`cancelled`/resolved. One indexed anti-join in the prune query. Runs never need the exemption - they copy their triggering event. Events surfaces in the web app must communicate the retention horizon ("showing events from the last 90 days"); the UX implications of pruning are on [Web app details](https://github.com/rogierpennink/hydra/issues/45)'s list.
 
 ## Backups
 
-- **Daily online backup**: `VACUUM INTO` from the running controller to `backups/<timestamp>.db` under Hydra Home (`~/.hydra/backups/`), with short retention. `VACUUM INTO` produces a consistent single-file snapshot without stopping writers and works under WAL. Secrets inside the snapshot stay encrypted; offsite backup is the user copying that directory, which is honest because the snapshot is inert without the Master Key.
-- **Backup before migrations**: a timestamped copy of the database file is taken before any boot-time migration runs (next section).
-- Restore is a file replacement while the controller is stopped; there is no in-app restore in v1. (This spec's reading of ticket 24, which pins backups only; restore mechanics are not pinned.)
-
-**Open:** "short retention" for daily backups has no number (count or days) in ticket 24 or ADR 0018.
-
-**Open:** the time of day for the daily backup and whether it is user-configurable are unspecified.
+- **Daily online backup**: `VACUUM INTO` from the running controller to `backups/<timestamp>.db` under Hydra Home (`~/.hydra/backups/`). `VACUUM INTO` produces a consistent single-file snapshot without stopping writers and works under WAL. Secrets inside the snapshot stay encrypted; offsite backup is the user copying that directory, which is honest because the snapshot is inert without the Master Key.
+- **Backup before migrations**: a `VACUUM INTO` copy (`backups/<timestamp>-premigration.db`, same code path) is taken before any boot-time migration runs (next section; resolved 2026-09-01, [#44](https://github.com/rogierpennink/hydra/issues/44) - a plain file copy would miss unmerged `-wal` writes after an unclean shutdown).
+- Schedule and retention (same resolution): daily at **03:30 in the user timezone setting**; keep the last **14 daily snapshots** and, separately, the last **3 pre-migration copies**. Controller-state settings `backup.time` and `backup.keep` carry the defaults.
+- Restore is a file replacement while the controller is stopped; there is no in-app restore in v1. Runbook in [./15-packaging-and-operations.md](./15-packaging-and-operations.md) section 10: stop the unit, replace `data/hydra.db` with the snapshot, delete `-wal`/`-shm`, start the unit. Same machine only - moving is promotion.
 
 ## Migrations on boot
 
