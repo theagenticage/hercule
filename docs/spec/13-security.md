@@ -156,7 +156,8 @@ A profile is a set of grants. Grants are coarse: one family per operation area, 
 | `run` | `run.*` (read, cancel) | `read`, `write` |
 | `session` | `session.*`, `input.*`, `transcript.*` | `read` (records and transcripts), `spawn` (spawn, continue), `steer` (input, interrupt, stop, respond, queue edits) |
 | `subscription` | `subscription.*` | `read`, `write` |
-| `notification` | `notification.*` | `read`, `write` (create, act, mark read) |
+| `notification` | `notification.*` | `read`, `write` (create, act, withdraw own) |
+| `settings` | `settings.*` (the user settings store: timezone, topic order, mutes, last-checked markers) | `read`, `write` |
 | `event` | `event.*` | `read`, `emit` |
 | `connection` | `connection.*` and plugin actions that act via a Connection | `read`, `manage` (create, edit, delete, credentials), `use` (act via a Connection; dormant in v1, see 11 section 2) |
 | `infra` | `runner.*`, `plugin.*`, `provider.*`, `controller.*` | `read`, `write` |
@@ -179,7 +180,7 @@ The operation-to-grant mapping is an explicit table in the contract package; [./
 
 | Profile | Default for | Grants | Withholds |
 |---|---|---|---|
-| **assistant** | assistants | `task` (read, create, update, delete), `workflow` (read, run, submit), `run` (read, write), `session` (read, spawn, steer), `subscription` (read, write), `notification` (read, write), `event` (read, emit), `memory` (read, write), and `read` on `connection`, `infra`, `workspace`, `agent`, `permission`, `project`, `resource` | `workflow.write`, `connection.manage`, `connection.use`, `infra.write`, `workspace.write`, `agent.write`, `permission.write`, `project.write`, `resource.write`, `secret`, `credential`, direct work tools (no Workspace), bulk-destructive operations |
+| **assistant** | assistants | `task` (read, create, update, delete), `workflow` (read, run, submit), `run` (read, write), `session` (read, spawn, steer), `subscription` (read, write), `notification` (read, write), `event` (read, emit), `memory` (read, write), `settings` (read), and `read` on `connection`, `infra`, `workspace`, `agent`, `permission`, `project`, `resource` | `workflow.write`, `connection.manage`, `connection.use`, `infra.write`, `workspace.write`, `agent.write`, `permission.write`, `project.write`, `resource.write`, `secret`, `credential`, direct work tools (no Workspace), bulk-destructive operations |
 | **worker** | agent steps in workflows | `task` (read, create, update), `notification` (write), `subscription` (read, write), `run` (read), `event` (read) | `task.delete`, `session.spawn`, `workflow.run`, `workflow.submit` (so a workflow cannot fan out recursively unless granted), `session.read`, `memory`, everything the assistant profile withholds |
 | **unrestricted** | nobody by default | user parity: everything the user can do | nothing; assigned only explicitly |
 

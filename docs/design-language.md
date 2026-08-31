@@ -216,6 +216,16 @@ check-in are **separate views** for now; merging is a post-dogfooding question.
   time-first ledger as the page (round 1), master/detail split (round 3: too little room for
   the overview), a full detail page (round 3: the light card reads better).
 
+Amended 2026-08-31 by ticket #42 (Notification lifecycle and shipped triage conventions):
+proposal answers are **Accept / Start *X* / Dismiss** - park is dropped for v1 ("not now" is
+Accept: the task waits in the backlog); the dossier has no separate verdict block, the
+notification body carries the agent's reasoning; **offers** (an immediate action with no task)
+sit beside proposals with their own answers; the events-view stamp vocabulary is → *task*
+(proposal / attached), offer, FYI, unsure, known, held, pending triage, no action - "filed",
+"routed", "ignored" and "filtered" are retired; the receipt line reads "212 events →
+6 proposals · 1 attached · 2 offers · 3 FYI · 2 unsure · 198 no action" and a "last triage"
+line (time + summary) closes the page. Owner: spec 10 §2-3.
+
 ## Provenance
 
 Three reaction rounds on the identical #20 check-in slice (enriched with #29 Task nouns).

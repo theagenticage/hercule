@@ -104,7 +104,7 @@ Constraints other documents hand to specific screens (the owning document has th
 | Settings > Identities | Platform identities with role owner / trusted; Add mints a one-time pairing code to DM to the bot; revoke in place. | [./12-assistants.md](./12-assistants.md) |
 | Notifications | A Permission Request notification offers "this session only" or "add to profile". | [./13-security.md](./13-security.md) |
 | Settings > Assistants | Memory documents (`core` plus topic notes, each topic's gist an editable field) are viewed and edited through the same memory API ops the `hydra memory` CLI uses; caps and the shrink guard are enforced at the write op and the UI shows the resulting error; provenance entries on a document are shown beside it and clearable. Heartbeat: enabled, target, standing prompt, and a schedule form ("every [1 h] between [07:00] and [23:00]") that compiles to the stored cron expression and parses back when the expression fits that shape, otherwise the raw expression is shown. Rotation thresholds and a "start fresh" (manual rotation) on each conversation. Reminders listed per conversation. | [./12-assistants.md](./12-assistants.md) |
-| Settings > Profile | The user's **timezone**, the one spec-wide timezone source (cron triggers, rotation, heartbeat, "since you last checked", display all fall back to it); set at onboarding from the browser. | [./12-assistants.md](./12-assistants.md) section 5.2 |
+| Settings > Profile | The user's **timezone**, the one spec-wide timezone source (cron triggers, rotation, heartbeat, "since you last checked", display all fall back to it); set at onboarding from the browser. Stored in the user settings store (`settings.read` / `settings.update`), which also holds topic order, mutes and the last-checked markers. | [./12-assistants.md](./12-assistants.md) section 5.2, [./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md) section 2 |
 
 **Open:** the screen inventory names "Bounds" under Settings while Spawn Bounds are per-trigger settings inside a workflow. What the Settings > Bounds screen shows beyond a fleet-wide overview of triggers and their bounds is not pinned.
 
@@ -134,7 +134,7 @@ Top to bottom:
 4. **Outcomes digest** - one line, expandable. "Since you last checked" as a feed is dead; outcomes live on their strands.
 5. **Pulse rail** - fleet, assistants and intake as quiet text lines. Stat-card rows are banned. Assistants are ambient presence in the rail, never work strands.
 
-A "last check-in" divider marks what the user has already seen.
+A "last check-in" divider marks what the user has already seen: the `lastChecked.checkin` marker, advanced on opening the view by the same rule as Intake's ([./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md) section 8).
 
 **Open:** the ranking has three provenance levels (you > standing > routine) but the prototype shows two tier labels ("Started by you", "Routine"). Which tier standing workflows render under is not pinned.
 
@@ -148,28 +148,28 @@ Forward-looking decision-making over prepared work: signals already triaged, gro
 2. **Topic tabs** organise the page (for example All / Code / Business / Personal / Ops). A Topic is a label: each Connection files into one default topic chosen at setup; triage labels a Proposal with the connection's topic unless the content says otherwise. Tabs show every topic in use, user-ordered; "Manage topics" sits at the tabs' right edge and opens the Topics sheet.
 3. **Urgency is legible through tiers**: Proposals sit under **Now / Today / When you can**. The Now tier carries a pulsing attention-hue dot on its label, on the burning card, and on the topic tab containing it - the one place a coloured dot marks urgency.
 4. **Lead card + condensed rows.** The burning Proposal is one lead card (title, made-from marks, one-line gist, the proactive link, actions, "Open the full picture"). Every other Proposal is a condensed row: title · priority bars · system marks · "→ suggested action" · age.
-5. **"Needs a call" is verdict-based**, never priority-based: it holds what triage could not decide (an `unsure` verdict, a tripped Spawn Bound). Its label says so ("triage could not decide these").
+5. **"Needs a call" is verdict-based**, never priority-based: it holds what triage could not decide (an open `triage.unsure` notification, a tripped Spawn Bound). Its label says so ("triage could not decide these"). **Offers** (`triage.offer`: an immediate action with no Task, e.g. "Merge dev bumps") render beside proposals with their own answers.
 6. **Made from** is mandatory on every Proposal: one entry per source system with the system's monochrome mark (GitHub, Gmail, Sentry, Tailscale, Hetzner, Dependabot, cron, Hydra itself). The mark shows the *system*; the Connection that carried it is a mono suffix. Marks are 12px monochrome `currentColor` paths, never brand colours.
 7. **Detail lives in a drawer** over the rail, never a full page nor a permanent split. Esc closes. Three things open in it:
-   - **Proposal dossier**: Next + actions · Why + links · Made from as signal cards with the source excerpt and "Open in <system>" · the **triage verdict block** (the agent's structured output: verdict, priority, confidence, grouping, related tasks, suggested step - the trust surface) · History.
-   - **Per-connection events view**: every event on that Connection since the last check, each stamped with what triage made of it (→ proposal / unsure / FYI / ignored / filed / held), filterable by verdict. Held events from a tripped breaker are listed here.
+   - **Proposal dossier**: Next + answers (Accept · Start *X* when a fitting workflow exists · Dismiss - no park in v1) · Why + links (the notification body is the agent's reasoning; there is no separate verdict block) · Made from as signal cards with the source excerpt and "Open in <system>" · History.
+   - **Per-connection events view**: every event on that Connection since the last check, each stamped with what triage made of it (→ *task* as proposal or attached / offer / FYI / unsure / known / held / pending triage / no action - [./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md) section 3), filterable by stamp. Held events from a tripped breaker are listed here.
    - **Topics sheet**: curate and order topics.
 8. Anything that opens says so ("Open →", "Events →").
 
 ### Anatomy
 
-Headline · topic tabs · Needs a call · Now / Today / When you can · What came in (one row per Connection: mark, name, summary, event count, "Events →") · FYI · one-line receipt ("212 events → 6 proposals · 2 routed · 1 attached · 3 FYI · 198 ignored").
+Headline · topic tabs · Needs a call · Now / Today / When you can · What came in (one row per Connection: mark, name, summary, event count, "Events →") · FYI · one-line receipt ("212 events → 6 proposals · 1 attached · 2 offers · 3 FYI · 2 unsure · 198 no action") · "last triage" (the most recent completed Triage run's time and summary line). The "since you last checked" timestamp in the top bar is the `lastChecked.intake` marker; opening the view advances it, the visit keeps its `since` in the URL state, and a "since ..." control widens the window without touching the marker ([./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md) section 8).
 
 ### Primitive mapping
 
-No new core concept. A **Proposal** = a Task labelled `proposed` plus its topic label, together with its pending go/no-go Notification. Enrichment = the Task description. Grouping and "made from" = Provenance refs. The proactive link = a provenance ref to an existing Task. The receipt = triage Run records. The events view = the event log filtered by Connection, joined to the effect rows each event produced ([ADR 0009](../adr/0009-all-events-flow-through-one-persisted-pipeline.md)). The suggested next step = the first bound action of the decision Notification.
+No new core concept. A **Proposal** = a Task labelled `proposed` plus its topic label, together with its open `triage.proposal` Notification. Enrichment = the Task description. Grouping and "made from" = Provenance refs. The proactive link = a provenance ref to an existing Task. The receipt and stamps = joins over events, effect rows, Task provenance and Notification subjects ([ADR 0009](../adr/0009-all-events-flow-through-one-persisted-pipeline.md)); Intake reads Tasks, Notifications and Events, never run outputs. The suggested next step = the Start answer of the decision Notification.
 
 Four model requirements the view depends on, owned elsewhere:
 
 - Events carry a `system` beside their Connection stamp, writable after ingest, plus a `url` (for the mark and "Open in <system>"). [./08-events-and-connections.md](./08-events-and-connections.md)
 - Connections are labelable, at minimum with a default Topic. [./08-events-and-connections.md](./08-events-and-connections.md)
 - Decision Notification actions bind an operation ("Start Bugfix" = start workflow X with task Y). The actor is the user clicking; the operation was authored by an agent. [./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md)
-- The triage agent's structured verdict is stored on the Run and surfaced in the dossier. [./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md)
+- What triage decided is carried by the entities it wrote (the Task, its Notification with the reasoning in its body, enrichments), not by a run field; the dossier renders those. [./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md)
 
 ## Workflow editing
 
@@ -210,7 +210,7 @@ On record as upgrades if the probe under-delivers: server-side IP correlation (a
 
 ## Notification center
 
-The Notifications screen is an in-app sink under [ADR 0012](../adr/0012-notifications-are-core-routed-sinks-are-dumb.md): it records everything the core routes, subscribed through a live topic, and executes a Notification's bound actions through ordinary API operations. It is dumb: routing decisions stay in the core. It shows every Notification; the check-in view's needs-you module shows the actionable subset of the same records. There is no Web Push in v1 (the browser's Service Worker API needs a secure context the plain-HTTP LAN default does not give); push beyond the browser is what channels are for.
+The Notifications screen is an in-app sink under [ADR 0012](../adr/0012-notifications-are-core-routed-sinks-are-dumb.md): it records everything the core routes, subscribed through a live topic, and executes a Notification's bound actions through ordinary API operations. It is dumb: routing decisions stay in the core. It shows every Notification; the check-in view's needs-you module shows the actionable subset of the same records. There is no per-record read state: a "new" divider at the `lastChecked.notifications` marker (advanced on opening the screen) separates what arrived since the last visit. Resolved decisions show their outcome line from the `Resolution` ("decided in Discord", "handled by *Ada* in #ops", "withdrawn: token refreshed"); the per-producer mute toggles (`notifications.muted` in the settings store) live here. There is no Web Push in v1 (the browser's Service Worker API needs a secure context the plain-HTTP LAN default does not give); push beyond the browser is what channels are for.
 
 ## Design language
 

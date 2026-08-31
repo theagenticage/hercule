@@ -277,7 +277,7 @@ A trigger's limit on how many runs it may spawn per window. Exceeding it trips t
 _Avoid_: rate limit (bare), throttle
 
 **Notification**:
-A persisted message from Hydra to its user ("run failed", "trigger paused", "agent needs a decision"). Produced by the core, by workflow notify steps, or by plugins; always recorded centrally, with delivery through channels decided by the core, never claimed by plugins.
+A persisted message from Hydra to its user ("run failed", "trigger paused", "agent needs a decision"). Produced by the core, by workflow notify steps, by sessions, or by plugins; always recorded centrally, with delivery through channels decided by the core, never claimed by plugins. A decision stays open until its question is answered, wherever that happens, and is withdrawn when the question stops existing; nothing else about it ever changes.
 _Avoid_: alert, ping
 
 **Bound Action**:
@@ -289,8 +289,12 @@ The formation boundary where external signals become work: signals are triaged, 
 _Avoid_: command center, inbox, dashboard
 
 **Proposal**:
-A task the agents prepared and are asking the user to accept, park, or dismiss: a Task labelled `proposed` together with its pending go/no-go Notification. The unit Intake presents; a vocabulary term, not a separate entity.
+A task the agents prepared and are asking the user to accept or dismiss: a Task labelled `proposed` together with its open go/no-go Notification. Accepting means "this is work" and leaves the task in the backlog; starting it is a separate act. The unit Intake presents; a vocabulary term, not a separate entity.
 _Avoid_: suggestion, recommendation, candidate
+
+**Offer**:
+An immediate action triage proposes with no task behind it ("merge these three dependency bumps"): a decision Notification whose answers carry the action and a dismiss. Decided by its answers alone; leaves nothing when dismissed.
+_Avoid_: quick fix, shortcut, suggestion
 
 **Topic**:
 A label that groups Intake: each Connection files its events into one default topic, and triage labels a proposal with a topic (the connection's, unless the content says otherwise). User-defined and ordered; a label, never a domain state.

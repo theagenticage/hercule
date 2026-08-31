@@ -436,7 +436,7 @@ Fields: owned by [07-workflows.md](./07-workflows.md) (section 2): `StartTrigger
 
 Status axis (start triggers, mirrored from 07): `active` | `paused`. `paused` is set by the user or by a tripped spawn bound (breaker): matched-but-unspawned events are held visibly until the user resumes, optionally discarding the backlog. Enable/disable lives on the Workflow. Signal triggers have no status of their own; their runtime state is the Subscription.
 
-**Open:** whether the breaker's held events are rows on the trigger or a separate held-events table is not pinned; either way `UNIQUE(triggerId, eventId)` holds.
+Held events are rows of the one trigger-effects table (`state: held`, `UNIQUE(triggerId, eventId)`), the same rows that become pending runs; resumed held rows are not exempt from the bound and do not re-trip it ([10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md) section 5).
 
 ### Workflow
 
@@ -460,11 +460,11 @@ Status axis: none on the definition; runtime status lives on the Step record.
 
 Purpose: one persisted message from Hydra to its user ([ADR 0012](../adr/0012-notifications-are-core-routed-sinks-are-dumb.md)).
 
-Fields: owned by [10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md) (section 7.1): `id`, `kind`, `title`, markdown `body`, `producer` (core / run step / plugin / session), `subject` entity refs, `eventId`, `actions` (empty for informational, non-empty makes it a decision), `createdAt`, `readAt`, `resolvedAt`, `resolution`. Kinds evidenced by the tickets: run failed, trigger paused (breaker), runner unreachable, permission request, decision on a Proposal, update available, plugin-raised (e.g. an expiring OAuth token).
+Fields: owned by [10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md) (section 7.1): `id`, `kind`, `title`, markdown `body`, `producer` (core / run step / plugin / session), `subject` entity refs, `eventId`, `actions` (empty for informational, non-empty makes it a decision), `status`, `resolution`, `createdAt`. No read state. Kinds evidenced by the tickets: run failed, trigger paused (breaker), trigger filter error, runner unreachable, permission request, the `triage.*` kinds (proposal, offer, FYI, unsure), update available, plugin error, plugin-raised (e.g. an expiring OAuth token).
 
 **Bound action**: `{ id, label, description?, operation: { op, input }, primary? }`, declared at creation as a public-API contract operation plus validated input, frozen, and executed by the user's click through `notification.act` as actor `user`. Proposing is not doing ([ADR 0022](../adr/0022-proposing-is-not-doing.md)): the producer's permission profile is never checked; the informed click is the authorisation. Shape and rules: [10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md) section 7.4.
 
-Status axis: not pinned; the record uses `readAt` / `resolvedAt` timestamps and the enum is Open in [10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md). "Needs you" in check-in and "Needs a call" in Intake are the unresolved decisions of the same records; the notification center shows everything. No second store.
+Status axis: `open` | `resolved` ([ADR 0027](../adr/0027-a-decision-resolves-when-its-question-is-answered-wherever.md)). A decision is born `open` and resolves exactly once, as `decided` (an answer taken, on the notification or wherever else the question is answered), `handled` (an assistant holding a subscription covered it) or `withdrawn` (the question stopped existing; producers may withdraw only their own); an informational notification is born `resolved` and never changes. The record is immutable apart from resolution. "Needs you" in check-in and "Needs a call" in Intake are the `open` decisions of the same records; the notification center shows everything. No second store.
 
 Delivery: the notification center always records; per-sink deliveries are outbox rows to enabled channel Connections (deliver-to-all-enabled in v1). Delivery attempts are not notification fields.
 
@@ -503,7 +503,7 @@ Fields: `id`, `owner {kind: connection | plugin | runner | core, id}`, `name`, c
 | Runner | `online`, `offline`, `unreachable`, `draining`, `retired` | `retired` | 03 |
 | Workspace | `provisioning`, `ready`, `unusable`, `kept-on-failure`, `deleted`, `lost` | `deleted`, `lost` | 03 |
 | Connection | `connected`, `needs-reauth`, `error`, `disabled` | none | 08 |
-| Notification | Open in 10 (timestamps `readAt` / `resolvedAt`) | | 10 |
+| Notification | `open`, `resolved` (resolution kind `decided` / `handled` / `withdrawn`; informational born `resolved`) | `resolved` | 10 |
 | Plugin | `enabled`, `disabled` | none | this document |
 | Agent, Assistant, Conversation, Conversation message, Platform Identity, Project, Resource, Checkout, Provider instance, Event, Memory document, Permission Profile | no status axis | | |
 
@@ -586,6 +586,7 @@ ADRs:
 - [ADR 0010 External accounts are core-owned Connections](../adr/0010-external-accounts-are-core-owned-connections.md)
 - [ADR 0011 Triage is a workflow pattern inside core-enforced bounds](../adr/0011-triage-is-a-workflow-pattern-inside-core-enforced-bounds.md)
 - [ADR 0012 Notifications are core-routed; sinks are dumb](../adr/0012-notifications-are-core-routed-sinks-are-dumb.md)
+- [ADR 0027 A decision resolves when its question is answered, wherever](../adr/0027-a-decision-resolves-when-its-question-is-answered-wherever.md)
 - [ADR 0013 Agents operate Hydra through the public API](../adr/0013-agents-operate-hydra-through-the-public-api.md)
 - [ADR 0014 Assistants remember through distilled memory, not merged sessions](../adr/0014-assistants-remember-through-distilled-memory-not-merged-sessions.md)
 - [ADR 0015 Secrets are encrypted per-value under a keychain-held master key](../adr/0015-secrets-are-encrypted-per-value-under-a-keychain-held-master-key.md)

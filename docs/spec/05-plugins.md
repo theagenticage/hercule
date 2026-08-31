@@ -204,7 +204,7 @@ V1 plugin capabilities:
 | `workflow-actions` | register | register workflow actions |
 | `connections` | register + activate | declare the connection types the plugin services and their setup flow; at runtime list the plugin's own connections, read their decoded credentials and per-connection config, report connection status |
 | `events` | activate | emit events into the pipeline ([ADR 0009](../adr/0009-all-events-flow-through-one-persisted-pipeline.md)) |
-| `notifications` | activate | emit a Notification ([ADR 0012](../adr/0012-notifications-are-core-routed-sinks-are-dumb.md)) |
+| `notifications` | activate | emit a Notification, withdraw one of its own ([ADR 0012](../adr/0012-notifications-are-core-routed-sinks-are-dumb.md)) |
 | `resources` | activate | read Resources (repos, mailboxes) relevant to the plugin's connection types, e.g. to seed a watch list |
 | `secrets` | activate | plugin-scoped secrets service (section 7) |
 | `kv` | activate | plugin-scoped state (section 6) |
@@ -323,7 +323,7 @@ interface OAuthDeclaration {
 
 Rationale and the full Notification model: [ADR 0012](../adr/0012-notifications-are-core-routed-sinks-are-dumb.md), [./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md). At the plugin boundary:
 
-- **Producing.** A plugin with the `notifications` capability emits a Notification (for example Gmail warning that its OAuth token is expiring). It becomes one persisted core-owned Notification record like every other producer's. The plugin decides nothing about delivery.
+- **Producing.** A plugin with the `notifications` capability emits a Notification (for example Gmail warning that its OAuth token is expiring). It becomes one persisted core-owned Notification record like every other producer's. The plugin decides nothing about delivery. The same capability offers `withdraw(notificationId, reason)` for a decision the plugin raised whose question has stopped existing ("token refreshed"); it works only on the plugin's own notifications, and it is the only mutation a producer has - records are otherwise immutable ([./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md) section 7.7).
 - **Delivering.** Delivery is core-push, never plugin-claim. The core router alone decides fan-out. A **sink** is a channel contribution that optionally implements notification delivery; it rides the channel extension point, so the fixed set of four stays intact. The web app's notification center always records the notification regardless of sinks.
 - **User control.** The user toggles delivery per channel connection. V1 routing policy is deliver-to-all-enabled. **Producer-side muting** (silence a chatty plugin's notifications) is a separate control from sink-side toggles.
 - **Sink contract grows additively.** V1 sinks implement `deliver` (returning a delivery ref) and `resolved` (edit the delivered message when the decision is taken anywhere), and report clicks to the core, which authenticates and executes them ([./12-assistants.md](./12-assistants.md) section 11.6). Post-v1 fields (device class, presence, receipts) are optional; a sink that reports nothing is treated as always available. Presence-aware routing lands as a router upgrade touching no plugin.

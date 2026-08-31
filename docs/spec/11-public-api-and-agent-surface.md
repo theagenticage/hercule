@@ -141,7 +141,7 @@ Semantics: [./07-workflows.md](./07-workflows.md); breaker semantics in [./10-tr
 | `trigger.pause` | `{ triggerId }` | `workflow.write` | `POST /triggers/{id}/pause` |
 | `trigger.resume` | `{ triggerId, discardHeld?: boolean }` | `workflow.write` | `POST /triggers/{id}/resume` |
 | `run.query` | `{ workflowId?, status?, since?, until?, actor? }` | `run.read` | `GET /runs` |
-| `run.read` | `{ runId }` (frozen plan, inputs, trigger event, step records, failure reason, triage verdict, live subscriptions) | `run.read` | `GET /runs/{id}` |
+| `run.read` | `{ runId }` (frozen plan, inputs, trigger event, step records, failure reason, final output, live subscriptions) | `run.read` | `GET /runs/{id}` |
 | `run.cancel` | `{ runId }` | `run.write` | `POST /runs/{id}/cancel` |
 | `run.rerun` | `{ runId, mode?: "re-stamp" \| "replay" }` -> `{ runId }` | `workflow.run` | `POST /runs/{id}/rerun` |
 
@@ -197,13 +197,13 @@ Record and router: [./10-triage-intake-and-notifications.md](./10-triage-intake-
 
 | Operation | Input | Grant | Route |
 |---|---|---|---|
-| `notification.query` | `{ kind?, unresolved?, unread?, since? }` | `notification.read` | `GET /notifications` |
+| `notification.query` | `{ kind?, status?, since? }` | `notification.read` | `GET /notifications` |
 | `notification.read` | `{ notificationId }` | `notification.read` | `GET /notifications/{id}` |
 | `notification.create` | producer input `{ kind, title, body?, actions?, subject? }` -> `{ notificationId }` | `notification.write` | `POST /notifications` |
-| `notification.update` | `{ notificationId, read?: boolean }` | `notification.write` | `PATCH /notifications/{id}` |
+| `notification.withdraw` | `{ notificationId, reason }` - own notifications only (`producer` match) | `notification.write` | `POST /notifications/{id}/withdraw` |
 | `notification.act` | `{ notificationId, actionId }` | `notification.write` | `POST /notifications/{id}/act` |
 
-`notification.create` is the operation the tickets called `notify`; the built-in action carries the operation's name. `notification.act` decides a decision notification and executes its bound operation (section 3.2).
+`notification.create` is the operation the tickets called `notify`; the built-in action carries the operation's name. `notification.act` decides a decision notification and executes its bound operation (section 3.2). `notification.withdraw` resolves a decision as `withdrawn` when its question has stopped existing; a producer may withdraw only what it produced, and there is no other mutation - records are immutable apart from resolution, and there is no per-record read state ([./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md) sections 7.1, 7.7).
 
 Two per-operation facts in the contract's operation table serve bound actions ([./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md) section 7.4): a **`bindable`** flag, default true, `false` for the `credential`, `secret`, `infra` and `permission` families, `connection.manage` and bulk-destructive-tagged operations (the core may still bind those; other producers may not), and a **`describe(input) -> string`** renderer, the core-rendered line shown on every bound action so the click is informed.
 
@@ -319,6 +319,15 @@ Semantics: [./13-security.md](./13-security.md), [./15-packaging-and-operations.
 | `auth.wsTicket` | `{}` -> short-lived WebSocket ticket | any authenticated caller | `POST /auth/ws-ticket` |
 | `setup.*` | first-run setup, reachable only with the one-time setup token ([./15](./15-packaging-and-operations.md)) | none (pre-auth) | `POST /setup/...` |
 
+### settings
+
+The user settings store: per-user preference and presentation state with a closed, schema-validated key set - `timezone`, `topics.order: string[]`, `notifications.muted: string[]` (`workflow:<id>` | `plugin:<id>` | `assistant:<id>`), `lastChecked.intake`, `lastChecked.checkin`, `lastChecked.notifications`. Keyed by user id from day one so a later user concept is a `WHERE` clause. Not a domain entity ([./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md) sections 4, 7.2, 8; [./12-assistants.md](./12-assistants.md) section 5.2).
+
+| Operation | Input | Grant | Route |
+|---|---|---|---|
+| `settings.read` | `{}` -> the settings object | `settings.read` | `GET /settings` |
+| `settings.update` | a partial settings object; unknown keys rejected | `settings.write` | `PATCH /settings` |
+
 ### project, resource
 
 Semantics: [./02-domain-model.md](./02-domain-model.md).
@@ -351,7 +360,7 @@ The actor is derived from the credential or the in-process caller, never supplie
 
 ### 3.2 Bound Notification actions
 
-A decision Notification may bind an operation (for example "Start Bugfix" = `workflow.run` with workflow X and task Y; "Merge dev bumps" = `github.merge` over three PRs; "Event-sourced" = `session.input` replying to the session that asked). Pinned by ticket 37 ([ADR 0022](../adr/0022-proposing-is-not-doing.md)): **proposing is not doing.** The producer - a session, a run's `notify` step, a plugin or the core - declares the operation, and it is not checked against the producer's permission profile. The operation executes through `notification.act` when the user decides, as actor `user` under full parity; the event log entry records the notification id, its producer and, for a channel click, the connection it came through. Two guardrails replace the profile check: the `bindable` flag withholds the credential/secret/infra/permission families, `connection.manage` and bulk-destructive operations from non-core producers, and every operation's `describe(input)` line is rendered by the core on every answer. Record shape, execution, failure and channel-click rules: [./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md) section 7.4.
+A decision Notification may bind an operation (for example "Start Bugfix" = `workflow.run` with workflow X and task Y; "Merge dev bumps" = `github.merge` over three PRs; "Event-sourced" = `session.input` replying to the session that asked). Pinned by ticket 37 ([ADR 0022](../adr/0022-proposing-is-not-doing.md)): **proposing is not doing.** The producer - a session, a run's `notify` step, a plugin or the core - declares the operation, and it is not checked against the producer's permission profile. The operation executes through `notification.act` when the user decides, as actor `user` under full parity; the event log entry records the notification id, its producer and, for a channel click, the connection it came through. Two guardrails replace the profile check: the `bindable` flag withholds the credential/secret/infra/permission families, `connection.manage` and bulk-destructive operations from non-core producers, and every operation's `describe(input)` line is rendered by the core on every answer. An answer may carry `operation: null` - decide and do nothing ("Dismiss" on an offer, "Neither" on an agent question). Record shape, execution, failure and channel-click rules: [./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md) section 7.4.
 
 ## 4. Credentials
 

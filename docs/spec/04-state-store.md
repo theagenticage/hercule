@@ -56,7 +56,7 @@ There is no Redis, no broker, no in-process-only queue. Every piece of "what hap
 | Cron triggers | each cron start trigger as a queryable row with `{schedule, timezone}` and its next fire time; missed ticks while the controller was down are skipped with a visible note | [./08-events-and-connections.md](./08-events-and-connections.md) |
 | Scheduled wakes | the Scheduler's other rows: each assistant's heartbeat (cron `schedule`, next fire time) and one-shot reminders (`at`, `conversationId`, `text`); a missed reminder fires late on boot, a missed heartbeat tick is skipped | [./12-assistants.md](./12-assistants.md) |
 | Subscriptions | live correlated claims held by runs and sessions; die with their holder | [./08-events-and-connections.md](./08-events-and-connections.md) |
-| Held events | events matched by a trigger whose spawn bound tripped; held visibly until the user resumes or discards | [./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md) |
+| Trigger effects | one row per start-trigger match, `UNIQUE(triggerId, eventId)`, `state: pending | spawned | held | discarded`; the pending-run queue and the breaker's held events are the same rows, and the sliding spawn-bound count reads the `spawned` rows | [./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md) |
 | Outbox rows | external side effects with attempt counts and retry state (chat posts, channel notification deliveries, plugin API calls) | this document |
 | Consumer cursors | the durable position of every core consumer of committed events (matcher, notification router, channel deliverers); plugins only emit and never consume the log | this document |
 

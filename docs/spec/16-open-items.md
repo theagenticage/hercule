@@ -7,22 +7,11 @@ The register of everything the spec assembly (2026-08-28) could not settle from 
 - **C. Verify at build time.** Facts about third-party systems to confirm against the pinned version before relying on them.
 - **D. Standing risks.** Accepted knowingly; on record so nobody rediscovers them.
 
-Beyond these, the map's **Not yet specified** section holds fog that is in scope but not yet sharp enough to ticket (see the end of this document), and one prototype ticket is still open. Resolved 2026-08-30: [Assistant runtime](https://github.com/rogierpennink/hydra/issues/40) (12, 11 §6.4, 06 §9, 10 §7.5, 13 §10, ADR 0024).
+Beyond these, the map's **Not yet specified** section holds fog that is in scope but not yet sharp enough to ticket (see the end of this document), and one prototype ticket is still open. Resolved 2026-08-30: [Assistant runtime](https://github.com/rogierpennink/hydra/issues/40) (12, 11 §6.4, 06 §9, 10 §7.5, 13 §10, ADR 0024). Resolved 2026-08-31: [Notification lifecycle and shipped triage conventions](https://github.com/rogierpennink/hydra/issues/42) (10 rewritten for batch triage, 02 §Notification/§Trigger, 08 §4/§5.3/§10, 11 `notification`/`settings`, 13 §6.1, 14 Intake/check-in/center, ADR 0027, dated note on ADR 0011).
 
 To find the exact line for any entry: `grep -n '^\*\*Open:\*\*' docs/spec/<doc>.md`.
 
 ## A. Decisions handed to tickets
-
-### [Notification lifecycle and shipped triage conventions](https://github.com/rogierpennink/hydra/issues/42)
-
-Owning document: [10](./10-triage-intake-and-notifications.md) (status axis mirrored in [02](./02-domain-model.md)).
-
-- 10 §7.1: the Notification's one fixed status axis, now including the value for "recorded, handled by an assistant, pushed to no sink" pinned by [Assistant runtime](https://github.com/rogierpennink/hydra/issues/40) (10 §7.5); whether a producer can withdraw or update a notification; whether muted notifications are recorded-but-not-delivered.
-- 10 §7.6: whether an approval answered in the session view auto-resolves its notification.
-- 10 §3, §4: the roster of shipped default workflows; which step's output on a run is the verdict for Intake detail; what accept / park / dismiss do to the Task; where topic ordering is stored.
-- 10 §8 (Conflict): the events-view stamp vocabulary ("filed"/"held" vs "routed"/"attached"); 08 §10: how the "ignored" stamp is derived.
-- 10 §5, 02 §Trigger: spawn-bound window shape; where held events are stored; whether a repeated filter error raises a Notification (08 §4.2).
-- 10 §8: where the per-user "since you last checked" marker lives and what advances it.
 
 ### [Runner substrate details: protocol guarantees, defaults, provider CLI delivery](https://github.com/rogierpennink/hydra/issues/43)
 
@@ -95,7 +84,6 @@ Not design questions. The constraint is stated where one exists.
 - 06 §10.3: pi's SDK under the Bun host; how the pinned pi package reaches the host on a runner.
 - 07 §5: CEL parse-time limits; a CI corpus of representative expressions against the wrapper.
 - 08 §5.2: Gmail's stale-`historyId` error path re-baselines at now.
-- 10 §5: whether Resume's held backlog counts against the spawn bound again.
 - 13 §1: what counts as a tailnet address for the bind warning.
 - 13 §2.1: AEAD cipher choice with per-row nonce and owner/name as associated data.
 - 13 §2.3: the KDF from the promotion token.
