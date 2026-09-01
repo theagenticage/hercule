@@ -136,7 +136,7 @@ No load balancing, no migration, no failover.
 
 ### 5.4 The "local" alias
 
-"Local" is a client-resolved placement alias meaning "the runner on the machine the user is operating". It is distinct from the default runner, is a UI convenience only, and is not offered when that machine has no runner. Resolution: the runner serves `GET /identity` on a fixed loopback-only port and the client matches the returned id against online fleet runners; placement correctness never depends on this detection ([14-web-app](./14-web-app.md)).
+"Local" is a client-resolved placement alias meaning "the runner on the machine the user is operating". It is distinct from the default runner, is a UI convenience only, and is not offered when that machine has no runner. Resolution: the runner serves `GET /identity` on a loopback-only port it owns and reports as a probed fact (`identity.port`, default 4939; resolved 2026-09-01, [#45](https://github.com/rogierpennink/hydra/issues/45)) and the client matches the returned id against online fleet runners; placement correctness never depends on this detection ([14-web-app](./14-web-app.md)).
 
 When the operating machine has a runner, **interactive sessions default to "local"**: sessions the user opens from the client ("just open X", chat-first sessions) are placed on that machine's runner unless the user picks another, so working from a laptop feels like working locally. Workflow placements ignore this and use the default runner. Resolving the "local" alias counts as explicit choice for a reserved runner (section 5.5). (Resolved 2026-08-31, [#43](https://github.com/rogierpennink/hydra/issues/43).)
 

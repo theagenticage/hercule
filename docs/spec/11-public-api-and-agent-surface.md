@@ -131,11 +131,11 @@ Semantics: [./07-workflows.md](./07-workflows.md); breaker semantics in [./10-tr
 
 | Operation | Input | Grant | Route |
 |---|---|---|---|
-| `workflow.query` | `{ enabled?, text? }` | `workflow.read` | `GET /workflows` |
-| `workflow.read` | `{ workflowId }` | `workflow.read` | `GET /workflows/{id}` |
-| `workflow.create` / `update` / `delete` | definition ([./07](./07-workflows.md) section 1) | `workflow.write` | `POST` / `PATCH` / `DELETE /workflows[/{id}]` |
+| `workflow.query` | `{ enabled?, text? }` -> `{ items: { id, name, description, enabled, updatedAt }[] }` (parse-time denormalized columns) | `workflow.read` | `GET /workflows` |
+| `workflow.read` | `{ workflowId }` -> `{ id, enabled, source, createdAt, updatedAt }`; `source` is the stored YAML text, and no parsed object is returned - clients parse it themselves with the contract schema ([./07](./07-workflows.md) section 1; resolved 2026-09-01, [#45](https://github.com/rogierpennink/hydra/issues/45)) | `workflow.read` | `GET /workflows/{id}` |
+| `workflow.create` / `update` / `delete` | `{ source: string }` (YAML) or `{ definition: object }` (rendered to canonical YAML by the controller; the object form is the agents' convenience); `enabled` is a separate field on update ([./07](./07-workflows.md) section 1) | `workflow.write` | `POST` / `PATCH` / `DELETE /workflows[/{id}]` |
 | `workflow.run` | `{ workflowId, inputs }` -> `{ runId }` | `workflow.run` | `POST /workflows/{id}/run` |
-| `workflow.submit` | `{ definition, inputs }` -> `{ runId }` | `workflow.submit` | `POST /workflows/submit` |
+| `workflow.submit` | `{ source | definition, inputs }` -> `{ runId }` (same input union as `workflow.create`) | `workflow.submit` | `POST /workflows/submit` |
 | `trigger.query` | `{ workflowId?, kind?, status? }` | `workflow.read` | `GET /triggers` |
 | `trigger.read` | `{ triggerId }` (includes the held-event count) | `workflow.read` | `GET /triggers/{id}` |
 | `trigger.pause` | `{ triggerId }` | `workflow.write` | `POST /triggers/{id}/pause` |
@@ -318,11 +318,11 @@ Semantics: [./13-security.md](./13-security.md), [./15-packaging-and-operations.
 | `auth.login` | `{ username, password }` -> bearer token | none (pre-auth) | `POST /auth/login` |
 | `auth.wsTicket` | `{}` -> short-lived WebSocket ticket | any authenticated caller | `POST /auth/ws-ticket` |
 | `setup.read` | `{}` -> `{ complete: boolean }`; unauthenticated, so the web app knows to route to `/setup` (resolved 2026-09-01, [#44](https://github.com/rogierpennink/hydra/issues/44)) | none (pre-auth) | `GET /setup` |
-| `setup.complete` | onboarding fields ([./14](./14-web-app.md)); requires the one-time setup token ([./15](./15-packaging-and-operations.md)); atomically sets the password and returns a logged-in bearer token. Before setup completes, these two ops and the static bundle are all that is reachable; everything else is 401 | none (setup token) | `POST /setup/complete` |
+| `setup.complete` | `{ username, password, timezone }` - the thin gate; every later onboarding step is an ordinary authenticated call ([./14](./14-web-app.md) §Onboarding, resolved 2026-09-01, [#45](https://github.com/rogierpennink/hydra/issues/45)); requires the one-time setup token ([./15](./15-packaging-and-operations.md)); atomically sets the password and returns a logged-in bearer token. Before setup completes, these two ops and the static bundle are all that is reachable; everything else is 401 | none (setup token) | `POST /setup/complete` |
 
 ### settings
 
-The user settings store: per-user preference and presentation state with a closed, schema-validated key set - `timezone`, `topics.order: string[]`, `notifications.muted: string[]` (`workflow:<id>` | `plugin:<id>` | `assistant:<id>`), `lastChecked.intake`, `lastChecked.checkin`, `lastChecked.notifications`. Keyed by user id from day one so a later user concept is a `WHERE` clause. Not a domain entity ([./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md) sections 4, 7.2, 8; [./12-assistants.md](./12-assistants.md) section 5.2).
+The user settings store: per-user preference and presentation state with a closed, schema-validated key set - `timezone`, `topics.order: string[]`, `notifications.muted: string[]` (`workflow:<id>` | `plugin:<id>` | `assistant:<id>`), `lastChecked.intake`, `lastChecked.checkin`, `lastChecked.notifications`, `onboarding.completedSteps: string[]` (the post-gate onboarding steps, [./14](./14-web-app.md) §Onboarding). Keyed by user id from day one so a later user concept is a `WHERE` clause. Not a domain entity ([./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md) sections 4, 7.2, 8; [./12-assistants.md](./12-assistants.md) section 5.2).
 
 | Operation | Input | Grant | Route |
 |---|---|---|---|

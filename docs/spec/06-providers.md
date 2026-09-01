@@ -11,6 +11,8 @@ A provider wraps one interactive coding harness (Claude Code via the Agent SDK, 
 
 A **provider instance** is a definition plus decoded config (t3-code's driver/instance split). The instance id, not the provider id, is the routing key everywhere: snapshots, session specs, placement. `supportsMultipleInstances` providers get multi-account by config-dir isolation (one login per instance).
 
+**Default instances exist from first run** (resolved 2026-09-01, [Web app details](https://github.com/rogierpennink/hydra/issues/45)): the controller creates one provider instance per shipped provider plugin (Claude Code, Codex, pi) with default config - subscription auth, no overrides - named after the provider, so the first-session onboarding ([./14-web-app.md](./14-web-app.md) §Onboarding) can offer "Log in to Claude Code" without the user ever meeting the instance concept; a second instance appears only when they want a second account.
+
 The runner never sees Hydra domain state and the controller never sees runner paths ([./03-controller-and-runners.md](./03-controller-and-runners.md), ADR 0002). Provider-native session state (transcripts, thread rollouts, session trees) lives on the runner's disk; the controller's normalized per-session stream ([./04-state-store.md](./04-state-store.md)) is the observable record.
 
 ## 2. ProviderDefinition and declared capabilities
@@ -369,6 +371,8 @@ Sandboxing is enforced by Codex (Seatbelt on macOS, bubblewrap on Linux; WSL1 un
 
 Every provider instance has its own isolated provider home (one instance = one login = one home; never per session), and every session runs inside its instance's home, so user-global instructions, skills, packages and memory never leak into Hydra sessions (constraint from the [memory-interface prototype](https://github.com/rogierpennink/hydra/issues/31): Codex picked up `~/.codex/AGENTS.md` and pi discovered `~/.claude/skills` until isolated). The handed knobs are the config-dir variables, `--setting-sources project`, `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`; the rest of the table are spec additions supported by the research:
 
+**Open:** isolation also keeps the user's own skills, subagents and instructions (`~/.claude/{skills,agents,CLAUDE.md}`, `~/.codex/AGENTS.md`, pi's skill directories) out of every session, which is right for assistant sessions and wrong for the interactive session the user starts by hand expecting exactly that material. Which session kinds see it, and whether v1 links the user's directories per runner or Hydra owns that knowledge per Agent, is [User knowledge in Hydra sessions](https://github.com/rogierpennink/hydra/issues/52)'s.
+
 | Provider | Isolation |
 |---|---|
 | Claude Code | `CLAUDE_CONFIG_DIR` per instance (never `HOME`: relocating `HOME` breaks the macOS Keychain lookup and the CLI reports "Not logged in"); `settingSources: ["project"]` (the SDK equivalent of `--setting-sources project`) so only the workspace's own `.claude/` loads, plus `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` (auto memory loads regardless of setting sources); `strictMcpConfig: true` so only `SessionSpec.mcpServers` apply. The `env` option replaces the subprocess environment: spread the runner's base env, then session env. |
@@ -462,6 +466,7 @@ v1 records, per session, every `session.usage.updated` snapshot and, per turn, `
 - Additional stream kinds (`reasoning_summary_text`, tool-argument streaming) and item kinds (review mode, image generation) as open-enum additions.
 - Hydra-level OS sandboxing as a probed runner capability (ADR 0003).
 - ACP-based adapters (Cursor and similar) need an extension-method seam beyond `sessionUpdate` mapping.
+- **Reusing the user's existing local login, and moving logins between runners** - strongly wanted (noted 2026-09-01 by [Web app details](https://github.com/rogierpennink/hydra/issues/45)): adopting the `claude` / `codex` / `pi` login already on the user's laptop instead of a fresh paste-a-code per instance, `claude setup-token` (one year, no rotation to race) as the Claude path, and Hydra shuffling tokens so a new runner needs no login at all; together with the instance-level "use my own binary and my own login" opt-in that skips home isolation (section 2.1 lists the binary half). The blocker to reopen is the refresh-token rotation fact from ticket #23; `setup-token` is why it may be solvable for Claude specifically.
 
 ## Sources
 

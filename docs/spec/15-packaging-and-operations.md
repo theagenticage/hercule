@@ -60,7 +60,7 @@ The compiled artifact still contains all three graphs. Isolation is a property o
 
 The controller hosts its local runner as a supervised child process: it spawns `process.execPath` with `["runner", "--local"]` (spawn, never `fork()`, section 11). The child dials the controller over a loopback WebSocket and joins as an ordinary fleet member. There is no embedded or special-cased runner code path; the local runner is pinned by the same protocol, states, and capabilities as a remote one ([./03](./03-controller-and-runners.md)). It survives promotion as itself: same identity, name, and workspaces, re-pointed to the new controller ([ADR 0005](../adr/0005-promotion-is-migration-behind-a-stable-controller-identity.md)).
 
-The runner also serves `GET /identity` on a fixed loopback-only port for the web app's "local" placement alias ([./14](./14-web-app.md)). This is the only listener a runner opens; a runner accepts no inbound connections from the controller or from other machines ([./03](./03-controller-and-runners.md)).
+The runner also serves `GET /identity` on a loopback-only port for the web app's "local" placement alias - runner-local setting `identity.port`, default 4939, reported as a probed fact ([./14](./14-web-app.md) §The "local" runner alias; resolved 2026-09-01, [#45](https://github.com/rogierpennink/hydra/issues/45)). This is the only listener a runner opens; a runner accepts no inbound connections from the controller or from other machines ([./03](./03-controller-and-runners.md)).
 
 Crash-restart and join handoff (resolved 2026-08-31, [#43](https://github.com/rogierpennink/hydra/issues/43)): the controller respawns a crashed local runner child with exponential backoff (1 s doubling to 30 s), retrying indefinitely; three crashes inside five minutes raise a Notification, and the runner shows as `unreachable` meanwhile. At **first boot only**, the controller mints the single-use join token itself and writes it to the child's stdin - never argv (visible in `ps`) or env (inherited by grandchildren); the child completes the ordinary join exchange over loopback and persists `runner.json` (section 5) like any runner. Every later spawn reads that file; no token.
 
@@ -134,7 +134,7 @@ There are **no TLS keys** (same resolution): v1 has no BYO TLS. HTTPS is a contr
 `hydra serve` on an empty home auto-initializes, with no flags and no prompts:
 
 1. Create the Hydra Home directories.
-2. Create the database and run all migrations.
+2. Create the database and run all migrations, and create one provider instance per shipped provider plugin ([./06](./06-providers.md) section 2; resolved 2026-09-01, [#45](https://github.com/rogierpennink/hydra/issues/45)).
 3. Mint the master key into the OS keychain (plain key file on headless Linux) and create the controller identity.
 4. Start the local runner (section 4).
 5. Bind, and if the bind is non-loopback and non-tailnet, print the perimeter warning ([./13](./13-security.md)).

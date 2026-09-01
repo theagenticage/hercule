@@ -7,21 +7,23 @@ The register of everything the spec assembly (2026-08-28) could not settle from 
 - **C. Verify at build time.** Facts about third-party systems to confirm against the pinned version before relying on them.
 - **D. Standing risks.** Accepted knowingly; on record so nobody rediscovers them.
 
-Beyond these, the map's **Not yet specified** section holds fog that is in scope but not yet sharp enough to ticket (see the end of this document), and one prototype ticket is still open. Resolved 2026-08-30: [Assistant runtime](https://github.com/rogierpennink/hydra/issues/40) (12, 11 §6.4, 06 §9, 10 §7.5, 13 §10, ADR 0024). Resolved 2026-08-31: [Notification lifecycle and shipped triage conventions](https://github.com/rogierpennink/hydra/issues/42) (10 rewritten for batch triage, 02 §Notification/§Trigger, 08 §4/§5.3/§10, 11 `notification`/`settings`, 13 §6.1, 14 Intake/check-in/center, ADR 0027, dated note on ADR 0011); [Runner substrate details](https://github.com/rogierpennink/hydra/issues/43) (03 throughout, 06 §2/§3/§4/§7/§9/§10/§11, 15 §1/§2/§4/§5/§9/§11/§12/§13, 13 §2.1, `ProviderRunnerContext` rename, reserved runners, ADR 0028, dated note on ADR 0018). Resolved 2026-09-01: [Operations details](https://github.com/rogierpennink/hydra/issues/44) (15 §1/§2/§5/§6/§7/§8/§9/§10, 04 §Secrets/§Retention/§Backups, 13 §1/§2.2/§3.3/§4.2/§4.3, 11 §2 `setup`/renames/§6.1; BYO TLS replaced by tailscale-managed HTTPS, `mint*Token` ops renamed `create*Token`).
+Beyond these, the map's **Not yet specified** section holds fog that is in scope but not yet sharp enough to ticket (see the end of this document), and two prototype tickets are still open (Pending prototypes, below). Resolved 2026-08-30: [Assistant runtime](https://github.com/rogierpennink/hydra/issues/40) (12, 11 §6.4, 06 §9, 10 §7.5, 13 §10, ADR 0024). Resolved 2026-08-31: [Notification lifecycle and shipped triage conventions](https://github.com/rogierpennink/hydra/issues/42) (10 rewritten for batch triage, 02 §Notification/§Trigger, 08 §4/§5.3/§10, 11 `notification`/`settings`, 13 §6.1, 14 Intake/check-in/center, ADR 0027, dated note on ADR 0011); [Runner substrate details](https://github.com/rogierpennink/hydra/issues/43) (03 throughout, 06 §2/§3/§4/§7/§9/§10/§11, 15 §1/§2/§4/§5/§9/§11/§12/§13, 13 §2.1, `ProviderRunnerContext` rename, reserved runners, ADR 0028, dated note on ADR 0018). Resolved 2026-09-01: [Operations details](https://github.com/rogierpennink/hydra/issues/44) (15 §1/§2/§5/§6/§7/§8/§9/§10, 04 §Secrets/§Retention/§Backups, 13 §1/§2.2/§3.3/§4.2/§4.3, 11 §2 `setup`/renames/§6.1; BYO TLS replaced by tailscale-managed HTTPS, `mint*Token` ops renamed `create*Token`); [Web app details](https://github.com/rogierpennink/hydra/issues/45) (14 §Wire format/§Auth/§Screens/§Check-in/§Workflow editing/§Onboarding/§Local alias/§Retention horizon, 07 §1 source-as-truth, 11 §2 `workflow.*`/`setup.complete`/`settings`, 04 §Retention, 06 §2/§9.1/Post-v1, 15 §4/§7, 12 §1, 03 §5, ADR 0029; graduated two tickets, below).
 
 To find the exact line for any entry: `grep -n '^\*\*Open:\*\*' docs/spec/<doc>.md`.
 
 ## A. Decisions handed to tickets
 
-### [Web app details: workflow text format, onboarding steps, Settings > Bounds, WS envelope](https://github.com/rogierpennink/hydra/issues/45)
+### [Prototype: the app shell and navigation](https://github.com/rogierpennink/hydra/issues/51)
 
-Owning document: [14](./14-web-app.md).
+Owning document: [14](./14-web-app.md). Graduated 2026-09-01 from [Web app details](https://github.com/rogierpennink/hydra/issues/45).
 
-- 14 §Workflow editing: the text format the editor edits (JSON, YAML, other).
-- 14 §Onboarding: the onboarding steps beyond password, timezone confirmation (the user's timezone setting pinned by [Assistant runtime](https://github.com/rogierpennink/hydra/issues/40), 12 §5.2) and default assistant.
-- 14 §Screens: what Settings > Bounds shows; which tier standing workflows render under in check-in.
-- 14 §Live model: the WebSocket wire format; 14 §Auth: bearer token storage between page loads; 14 §Local alias: the loopback port for `GET /identity`.
-- Handoff from [Operations details](https://github.com/rogierpennink/hydra/issues/44): the fields `setup.complete` carries beyond the password (11 §2); every events surface must communicate the retention horizon ("showing events from the last 90 days") - and the UX/UI implications of event pruning want research here (04 §Retention).
+- 14 §V1 screen inventory: the app shell - the sidebar in the t3-code-like sessions mode versus the orchestration nav, when each shows, where the marks legend sits, and how the Sessions / Intake / Notifications empty states carry first-run guidance.
+
+### [User knowledge in Hydra sessions: skills, subagents, instructions per session kind](https://github.com/rogierpennink/hydra/issues/52)
+
+Owning document: [06](./06-providers.md) §9.1 (and [02](./02-domain-model.md) if a concept is added). Graduated 2026-09-01 from [Web app details](https://github.com/rogierpennink/hydra/issues/45).
+
+- 06 §9.1: which session kinds see the user's own skills, subagents and instructions; whether v1 links the user's directories per runner or Hydra owns that knowledge per Agent, and what seeds it.
 
 ### [Domain model residue: id format, remaining status axes, identity rules](https://github.com/rogierpennink/hydra/issues/46)
 
@@ -78,7 +80,11 @@ In scope, not yet sharp enough to ticket; listed on the map under **Not yet spec
 - A presentation layer over task status (kanban-style user-defined groupings above the fixed axis); the Tasks screen ships without it (14 §Screens).
 - Platform-auto subscription detection ("this session opened PR #87" subscribes it automatically); explicit subscription is the v1 primitive.
 - Execution-plan snapshot dedup/GC; content-hash dedup is the known escape hatch if per-run copies ever hurt.
+- Task pruning: events now live as long as a Task refers to them (04 §Retention), so the log's real bound becomes task retention; a full history of every completed task is probably not wanted. Sharpens with dogfooding.
 
-## Pending prototype
+## Pending prototypes
+
+- [Prototype: rendering bound actions (label, description, describe line) in the Focus card](https://github.com/rogierpennink/hydra/issues/50) - 14 §The check-in view (the bound-action Open line).
+- [Prototype: the app shell and navigation](https://github.com/rogierpennink/hydra/issues/51) - 14 §V1 screen inventory (the app shell Open line).
 
 - ~~[Prototype: mark & entity-glyph iconography](https://github.com/rogierpennink/hydra/issues/35)~~ - resolved 2026-08-30: 14 §Iconography and [design-language.md](../design-language.md) §Marks are pinned (bespoke family at Lucide's weight, `?` for decisions, one-mark-per-slot rule, legend at the sidebar foot).

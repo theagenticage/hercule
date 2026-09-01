@@ -53,7 +53,37 @@ Two push modes, chosen by data shape:
 
 **Watched sessions.** A session the user is actively viewing additionally gets **ephemeral token-delta passthrough**: a live tap beside the durable path. The store keeps coalescing at message/turn boundaries ([./04-state-store.md](./04-state-store.md)); deltas stream only to subscribed watchers and are never persisted per token. On reconnect the client falls back to the coalesced records and resumes the tap from there.
 
-**Open:** the WebSocket wire format (message envelope, topic naming scheme, cursor encoding, hello payload) is not pinned by any ticket. Constraints it must satisfy: versioned, subscribe/unsubscribe/delta/invalidate/hello message kinds, cursor replay for append-only topics, server version in hello.
+### Wire format
+
+Pinned by [Web app details](https://github.com/rogierpennink/hydra/issues/45) (2026-09-01). The envelope is client-facing contract, defined as Zod schemas in `packages/contract` (not in `packages/protocol`, which is the runner's). Flat JSON objects with a `type` discriminator; the protocol version `v` travels in `hello` only; `sub` is a client-chosen subscription id.
+
+```
+client -> server
+  hello       { v: 1, ticket }                 // the auth.wsTicket value, in the first frame, never in the URL
+  subscribe   { sub, topic, cursor? }
+  unsubscribe { sub }
+  ping        { }                              // app-level, every 30 s; browsers cannot send WS ping frames
+server -> client
+  hello       { v: 1, serverVersion }
+  subscribed  { sub, cursor? }                 // cursor = replay start for append-only topics
+  delta       { sub, cursor, items: [...] }    // append-only topics only
+  invalidate  { sub, ids: string[], kind: "created" | "updated" | "deleted" }
+  error       { sub?, code, message }          // codes from the HTTP error envelope
+  pong        { }
+```
+
+**Topics** are flat strings named like operation entities (singular), in two families. Prior art is the accepted pattern of coarse channels carrying fine-grained payloads (Phoenix Channels, Centrifugo, Ably): the *topic* is the collection, the *message* names the records, and the client decides what to refetch.
+
+| Family | Topics | Message |
+|---|---|---|
+| Mutable records (invalidation nudges) | `task`, `run`, `session`, `workflow`, `connection`, `notification`, `runner`, `plugin` | `invalidate` naming the changed record ids; the client maps ids to TanStack Query keys and refetches over HTTP. The controller coalesces ids per topic for about 50 ms so a burst is one nudge. |
+| Append-only streams (payload deltas) | `event` (the event log), `session:<id>:stream` (the durable coalesced transcript), `session:<id>:tap` (ephemeral token deltas, watched sessions only) | `delta` carrying the items and the new cursor |
+
+There are no per-record topics. A changed task never travels over the socket: the record has one shape, the HTTP one, and permissions are checked once, on the HTTP path; the cost is one LAN round trip per coalesced nudge.
+
+**Cursors** are opaque strings on the wire (today the decimal of the store's integer position, [./04-state-store.md](./04-state-store.md)); the client stores and echoes them and never parses them.
+
+**The ticket** is the value of `auth.wsTicket` ([./13-security.md](./13-security.md) section 4): a 5-minute single-use random string fetched over authenticated HTTP, because a browser cannot set headers on the WebSocket handshake and the 30-day bearer token must never ride in a URL.
 
 ## Auth in the client
 
@@ -65,7 +95,7 @@ Two push modes, chosen by data shape:
 
 Ticket #18 pinned a 30-day rolling session cookie; the later ticket #19 and ADR 0017 pin bearer token + WS ticket, no cookies. ADR 0017 governs.
 
-**Open:** where the client stores the bearer token between page loads (memory only, `localStorage`, or another mechanism) and the token's lifetime and rolling-renewal rule are not pinned. The 30-day rolling lifetime from ticket #18 is the only stated number and applied to the superseded cookie.
+**Storage between page loads** (resolved 2026-09-01, [Web app details](https://github.com/rogierpennink/hydra/issues/45)): the bearer token lives in `localStorage`, keyed by controller origin, removed on logout and on the first 401. Memory-only would demand a login on every page load, unacceptable for a LAN tool; `sessionStorage` dies with the tab; cookies are ruled out by ADR 0017, and a desktop shell has no better option than local storage either. Because agent-authored text is rendered everywhere and any script that runs can read the token, the served bundle carries a strict Content-Security-Policy: no inline scripts, `connect-src 'self'`. The token's lifetime and rolling renewal are [./13-security.md](./13-security.md)'s (30 days rolling, revoked on logout).
 
 ## Performance guardrails
 
@@ -82,7 +112,11 @@ t3-code validates the family (React Compiler, virtualized transcript, rAF, memoi
 
 ## V1 screen inventory
 
-The v1 screens are: **Intake, Check-in, Tasks, Sessions (including assistant chat), Runs, Workflows, Fleet, Connections, Notifications, Settings (Plugins, Permission profiles, Secrets, Bounds, Assistants, Identities).**
+The v1 screens are: **Intake, Check-in, Tasks, Sessions (including assistant chat), Runs, Workflows, Fleet, Connections, Notifications, Settings (Plugins, Permission profiles, Secrets, Bounds, System, Profile, Assistants, Identities).**
+
+**Home is Sessions** (resolved 2026-09-01, [Web app details](https://github.com/rogierpennink/hydra/issues/45)): the default route after login is the Sessions screen, not Intake. Nothing has been triaged on a fresh install, and the first minute is meant to feel like t3-code - start a session on this machine - with Intake and check-in discovered from there ([Onboarding and first run](#onboarding-and-first-run)). The frame the screens sit in is not pinned:
+
+**Open:** the app shell - what the sidebar is (a sessions/projects list in the t3-code-like mode versus the orchestration nav), when each shows, where the marks legend sits, and how the Sessions / Intake / Notifications empty states carry first-run guidance - is [Prototype: the app shell and navigation](https://github.com/rogierpennink/hydra/issues/51)'s.
 
 - Event sources get no screen; they surface through Connections and workflow triggers.
 - Plugin configuration forms are generated from the manifest config schema ([./05-plugins.md](./05-plugins.md)). UI pickers (action ids, provider ids, channel ids) read the persisted contribution catalog, never the live plugin.
@@ -104,9 +138,9 @@ Constraints other documents hand to specific screens (the owning document has th
 | Settings > Identities | Platform identities with role owner / trusted; Add mints a one-time pairing code to DM to the bot; revoke in place. | [./12-assistants.md](./12-assistants.md) |
 | Notifications | A Permission Request notification offers "this session only" or "add to profile". | [./13-security.md](./13-security.md) |
 | Settings > Assistants | Memory documents (`core` plus topic notes, each topic's gist an editable field) are viewed and edited through the same memory API ops the `hydra memory` CLI uses; caps and the shrink guard are enforced at the write op and the UI shows the resulting error; provenance entries on a document are shown beside it and clearable. Heartbeat: enabled, target, standing prompt, and a schedule form ("every [1 h] between [07:00] and [23:00]") that compiles to the stored cron expression and parses back when the expression fits that shape, otherwise the raw expression is shown. Rotation thresholds and a "start fresh" (manual rotation) on each conversation. Reminders listed per conversation. | [./12-assistants.md](./12-assistants.md) |
+| Settings > Bounds | The default Spawn Bound (30 runs per 3600 s, [./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md) section 5) is edited here, and one table lists every start trigger across all workflows: workflow · trigger · effective bound (default or override) · runs spawned in the current sliding window · status (active / paused by breaker / paused by you) · held count · Resume (optionally discarding the backlog). Per-trigger overrides are edited in the workflow's source, not here. It is the one fleet-wide place to see which trigger is near its limit (resolved 2026-09-01, [Web app details](https://github.com/rogierpennink/hydra/issues/45)). | [./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md) |
+| Settings > System | The controller's operational settings, which had no home in the inventory before (resolved 2026-09-01, [Web app details](https://github.com/rogierpennink/hydra/issues/45); the screen is called *System*, the settings are the `controller` settings in code): `retention.events` / `retention.security` / `retention.conversations`, `backup.time` / `backup.keep`, the HTTPS toggle and its port, the access-mode fallback policy, and the update nudge. Retention is shown with the same sentence the events surfaces use ([Events surfaces and the retention horizon](#events-surfaces-and-the-retention-horizon)). | [./15-packaging-and-operations.md](./15-packaging-and-operations.md), [./04-state-store.md](./04-state-store.md), [./06-providers.md](./06-providers.md) |
 | Settings > Profile | The user's **timezone**, the one spec-wide timezone source (cron triggers, rotation, heartbeat, "since you last checked", display all fall back to it); set at onboarding from the browser. Stored in the user settings store (`settings.read` / `settings.update`), which also holds topic order, mutes and the last-checked markers. | [./12-assistants.md](./12-assistants.md) section 5.2, [./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md) section 2 |
-
-**Open:** the screen inventory names "Bounds" under Settings while Spawn Bounds are per-trigger settings inside a workflow. What the Settings > Bounds screen shows beyond a fleet-wide overview of triggers and their bounds is not pinned.
 
 **Open:** a presentation layer over task status (kanban-style user-defined groupings above the fixed axis) is on the map as "not yet specified"; the Tasks screen ships without it.
 
@@ -130,13 +164,11 @@ Top to bottom:
 
 1. **One calm headline sentence** ("2 decisions wait · 3 strands in motion · 6 outcomes today").
 2. **Needs you** - the Focus card.
-3. **In motion** - plain strand rows in provenance tiers; the prototype labels them "Started by you" and "Routine".
+3. **In motion** - plain strand rows in three provenance tiers, headed **Started by you** / **Triggered by events** / **On a schedule**, empty tiers hidden. The tiers are the derivation rule of [./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md) section 8 made visible: manual run = started by you; event start trigger = triggered by events (a standing workflow reacting, e.g. a PR review); cron start trigger = on a schedule. Both automatic tiers keep the aggregate-one-row-per-workflow rule. The prototype's two labels ("Started by you", "Routine") predate this; standing workflows are neither routine nor started by the user, and either label would lie.
 4. **Outcomes digest** - one line, expandable. "Since you last checked" as a feed is dead; outcomes live on their strands.
 5. **Pulse rail** - fleet, assistants and intake as quiet text lines. Stat-card rows are banned. Assistants are ambient presence in the rail, never work strands.
 
 A "last check-in" divider marks what the user has already seen: the `lastChecked.checkin` marker, advanced on opening the view by the same rule as Intake's ([./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md) section 8).
-
-**Open:** the ranking has three provenance levels (you > standing > routine) but the prototype shows two tier labels ("Started by you", "Routine"). Which tier standing workflows render under is not pinned.
 
 ## The Intake view
 
@@ -175,18 +207,24 @@ Four model requirements the view depends on, owned elsewhere:
 
 A ringfenced `workflow-editor` feature module exporting one component. Inside it:
 
-- **CodeMirror 6 structured text** of the workflow definition (steps, edges, triggers, inputs; [./07-workflows.md](./07-workflows.md)) with schema-driven autocomplete and validation derived from the workflow contract in `packages/contract`. Validation surfaces the same errors the API returns (unknown action ids, uncapped cycles, invalid CEL).
+- **CodeMirror 6 editing the workflow's YAML source** (steps, edges, triggers, inputs; [./07-workflows.md](./07-workflows.md)) with schema-driven autocomplete and validation derived from the workflow contract in `packages/contract`. Validation surfaces the same errors the API returns (unknown action ids, uncapped cycles, invalid CEL). Autocomplete inserts a block scalar (`|`) for `prompt` and quotes for conditions, the two places YAML bites (`{{` opens a flow mapping in a plain scalar; CEL's `? :` and `: ` need quoting - the same traps GitHub Actions users already know).
 - **Read-only DAG preview** rendered with React Flow, auto-laid-out with elk or dagre, updating live as the text changes.
 
 The ringfence exists so a visual drag-and-drop editor can replace the module's internals later without touching the rest of the app.
 
-**Open:** the concrete text format the editor edits (JSON, YAML, or another serialization of the declarative workflow definition) is not pinned by any ticket.
+**Format: YAML 1.2, and the text is the truth** (resolved 2026-09-01, [Web app details](https://github.com/rogierpennink/hydra/issues/45), [ADR 0029](../adr/0029-workflow-definitions-are-stored-as-their-yaml-source.md)). The controller stores the YAML source the user wrote, byte for byte, and parses it into the `Workflow` shape for validation, stamping and the preview; comments, key order and formatting survive every save, and a later git-versioned workflow story round-trips exactly. `workflow.read` returns the source and never a parsed object ([./07-workflows.md](./07-workflows.md) section 1, [./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md) section 2); the DAG preview parses the text in the client with the same `yaml` package and contract schema `client-core` validates with. JSON was rejected because a multi-line prompt as one escaped string is unreadable and un-diffable; a regenerated-YAML projection was rejected because it strips comments (Home Assistant's UI editor is the cautionary tale); JSON5, TOML, HCL and the newer configuration languages lose on multi-line strings, graph shape or familiarity. Enabling a workflow and pausing a trigger are row state outside the text, so neither reformats the user's file.
 
 ## Onboarding and first run
 
 `hydra serve` auto-initializes and prints a one-time setup URL; from there onboarding is wholly a web app + public API flow, and it creates the default assistant ([./12-assistants.md](./12-assistants.md)). The CLI never prompts, so the future desktop app becomes the installer by reusing these views unchanged. Mechanics of first run and the setup URL: [./15-packaging-and-operations.md](./15-packaging-and-operations.md).
 
-**Open:** the content of the onboarding flow (which steps the setup URL walks the user through, beyond establishing the user's password, confirming the timezone detected from the browser, and creating the default assistant) is not pinned by any ticket.
+Resolved 2026-09-01 ([Web app details](https://github.com/rogierpennink/hydra/issues/45)); the design goal is that onboarding can grow (plugin setup hooks, a richer assistant setup) without touching the gate:
+
+1. **A thin gate.** `/setup?token=...` collects username and password on one screen and calls `setup.complete { username, password, timezone }`: the timezone is sent silently, detected from the browser, because the controller needs one immediately (backup time, cron) and it costs the user nothing. Setup creates the default assistant named `Hydra` and returns a logged-in bearer token. Nothing that needs a Connection, a runner or a provider login sits inside the gate: it completes in thirty seconds on a fresh install.
+2. **An ordered step list after the gate**, each step an ordinary authenticated call so a future step is client-side work only. V1 ships two: *confirm your timezone* (`settings.update`) and *name your assistant* (`assistant.update`, prefilled `Hydra`). Progress is `onboarding.completedSteps: string[]` in the user settings store ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md) section 2), so a refresh resumes where it left off.
+3. **The first-session moment is the rest of onboarding.** There is no "get started" checklist page. The home screen, Sessions, opens empty and *is* the guidance: the local runner has probed which harnesses are installed on this machine (a read-only presence check of `~/.claude`, `~/.codex` and pi's directory; it never reads credentials), so the empty state says "Claude Code and Codex were found on this machine. Log in to use them in Hydra" with one button per detected provider that runs the fleet UI's login action for that instance x the local runner ([./03-controller-and-runners.md](./03-controller-and-runners.md) section 3.3). After one login the same screen offers **New session** with a workspace picker defaulting to no workspace or adopting a folder on this machine. GitHub, Gmail and chat Connections are offered as empty states on Intake and Notifications, not as a checklist; nothing is stored, every step's state is derived. The provider instances the buttons act on exist from first run ([./06-providers.md](./06-providers.md) section 2: one per shipped provider plugin).
+
+The cost that remains, on the record: the user's existing `claude` / `codex` / `pi` login is invisible to Hydra by design (per-instance isolated provider homes, [./06-providers.md](./06-providers.md) section 9.1), so one paste-a-code per provider per machine is unavoidable in v1 - about twenty seconds each. Reusing that login is on the map as strongly wanted post-v1. The user's skills, subagents and instructions are equally invisible, which is a model gap, not a friction detail: [User knowledge in Hydra sessions](https://github.com/rogierpennink/hydra/issues/52).
 
 ## Connection setup
 
@@ -198,15 +236,23 @@ Connection setup is a web app + API flow per Connection type. Two flow shapes ex
 
 Mechanism, single-function territory:
 
-- The runner serves `GET /identity` on a fixed loopback-only port, returning its runner id, with CORS allowing the controller origin (runner side: [./03-controller-and-runners.md](./03-controller-and-runners.md)).
-- `client-core` exposes one `detectLocalRunner()`: one fetch with a short timeout, returning the id or `null`.
+- The runner serves `GET /identity` on a loopback-only port, returning its runner id, with CORS allowing the controller origin (runner side: [./03-controller-and-runners.md](./03-controller-and-runners.md)). The port is the **runner's** (resolved 2026-09-01, [Web app details](https://github.com/rogierpennink/hydra/issues/45)): a runner-local setting `identity.port`, default **4939** (the next number in the controller's 4937/4938 family, not a rule), falling back to a free port when the default is taken. The runner reports it as a probed fact in its hello ([./03-controller-and-runners.md](./03-controller-and-runners.md) section 4); there is no controller config key, because the probe answers "which runner is on the machine *my browser* is on", which only a process on that machine can answer.
+- `client-core` exposes one `detectLocalRunner()`: one short-timeout fetch to `127.0.0.1:<port>` for each online runner's reported port (a handful of loopback fetches, all but one failing instantly), returning the id or `null`.
 - The UI offers "local" only when the returned id matches an online fleet runner. If the probe cannot run, "local" is not offered and the user picks a runner by name.
 
 Platform facts (2025-26): Chrome's Local Network Access permission gates public→local only, and local→loopback is ungated (tailnet `100.x` counts as local); Firefox 149+ may one-time-prompt, and the probe degrades silently; Safari blocks loopback fetches from HTTPS origins (open WebKit bug since 2017) - the one hard failure case, where the user picks by name.
 
 On record as upgrades if the probe under-delivers: server-side IP correlation (authoritative on a tailnet, heuristic on LAN), and a manual `localStorage` pin via a runner-initiated token URL.
 
-**Open:** the fixed loopback port number for `GET /identity` is not pinned.
+## Events surfaces and the retention horizon
+
+The event log is TTL-pruned (`retention.events`, default 90 days) except for events that an existing Task's provenance or an existing Notification refers to, which live as long as that referrer does ([./04-state-store.md](./04-state-store.md), amended 2026-09-01 by [Web app details](https://github.com/rogierpennink/hydra/issues/45)); a run copies its triggering event and every signal it received into its own records and needs nothing from the log. The rule for every surface that shows events - the Intake per-connection events view, the receipt and headline counts, the Notifications screen - is **never silently truncate**:
+
+1. Every events list states its horizon in its header ("events from the last 90 days"), the same sentence Settings > System shows beside the retention setting.
+2. The "since ..." control caps at the horizon and says so.
+3. Counts are computed over surviving events and are labelled "since <marker>", so they never claim completeness across the horizon.
+
+A Task's provenance never points at a pruned event while the Task exists, so the dossier's "Made from" excerpts and "Open in <system>" links keep working for the life of the task; there is no degraded rendering to design. Pruning Tasks themselves is on the map as not yet specified.
 
 ## Notification center
 
@@ -271,6 +317,7 @@ Tickets:
 - [Security & secrets model](https://github.com/rogierpennink/hydra/issues/18) (user auth, escalation UX)
 - [Assistant design](https://github.com/rogierpennink/hydra/issues/17) and [Prototype: assistant memory interface](https://github.com/rogierpennink/hydra/issues/31) (web chat, memory editing)
 - [Assemble the v1 spec](https://github.com/rogierpennink/hydra/issues/21) (Intake model requirements)
+- [Web app details: workflow text format, onboarding steps, Settings > Bounds, WS envelope](https://github.com/rogierpennink/hydra/issues/45) (YAML source, thin gate and first-session onboarding, Settings > Bounds and > System, check-in tiers, wire format, `localStorage` + CSP, runner-owned identity port, retention horizon, Sessions as home)
 
 ADRs:
 
@@ -280,3 +327,4 @@ ADRs:
 - [ADR 0009 - All events flow through one persisted pipeline](../adr/0009-all-events-flow-through-one-persisted-pipeline.md)
 - [ADR 0004 - Controller state lives in one SQLite database](../adr/0004-controller-state-lives-in-one-sqlite-database.md)
 - [ADR 0018 - Hydra ships as one self-contained binary](../adr/0018-hydra-ships-as-one-self-contained-binary.md)
+- [ADR 0029 - Workflow definitions are stored as their YAML source](../adr/0029-workflow-definitions-are-stored-as-their-yaml-source.md)

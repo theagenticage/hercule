@@ -13,7 +13,7 @@ An Assistant is a specialization of Agent, not a separate concept ([../../CONTEX
 
 Rules:
 
-- Several assistants may exist. One default assistant is created at first-run setup ([./15-packaging-and-operations.md](./15-packaging-and-operations.md)).
+- Several assistants may exist. One default assistant, named `Hydra` until the onboarding step renames it ([./14-web-app.md](./14-web-app.md) §Onboarding), is created at first-run setup ([./15-packaging-and-operations.md](./15-packaging-and-operations.md)).
 - There is no persona machinery. A different persona is a different assistant with its own memory. Memory is never shared between assistants (two writers corrupt one memory; rationale in ADR 0014).
 - **Persona versus memory.** Who the assistant *is* (tone, standing job, how it addresses the user) is the Agent's `systemPrompt`, written by the user. What the assistant *knows* about the user and the world is Memory (section 6), written by the assistant. There is no "soul" document in memory; OpenClaw's `SOUL.md` maps to `systemPrompt`, its `USER.md` and durable `MEMORY.md` to `core`.
 - An assistant's default permission profile is the shipped `assistant` profile (section 7). It is loosenable per assistant.

@@ -6,6 +6,8 @@ A Workflow is a stored, editable, declarative source of execution plans: typed i
 
 A workflow is data in the controller database, created and edited through the public API and the web app ([./14-web-app.md](./14-web-app.md) owns the editor: schema-validated structured text plus a read-only DAG preview). There is no user-authored code in a workflow and no repo-local definition; expressiveness comes from agent steps and plugin-contributed actions ([ADR 0008](../adr/0008-workflow-graphs-route-on-declared-outputs.md)). Editing a workflow never affects in-flight runs, because every run executes its own frozen copy ([ADR 0001](../adr/0001-runs-freeze-an-execution-plan.md)); there is no workflow versioning.
 
+**The stored form of a workflow is its YAML source** (resolved 2026-09-01, [Web app details](https://github.com/rogierpennink/hydra/issues/45), [ADR 0029](../adr/0029-workflow-definitions-are-stored-as-their-yaml-source.md)): the text the user wrote, kept byte for byte, so comments, key order and formatting survive every save and a git-versioned future round-trips exactly. The `Workflow` shape below is what the controller *parses* the source into - a derived column recomputed on every write and never written on its own - for validation, the editor's preview and stamping; a run's frozen plan holds the parsed form only. The public API accepts either the source or a definition object and always stores source: an object is rendered to canonical YAML by one deterministic rule (contract key order, a block scalar for any string containing a newline, double quotes for anything else that needs quoting, two-space indent) so two controllers render identically. `workflow.read` returns the source, never a parsed object ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md) section 2). Three fields of the shape are **row state outside the text** - `id`, `enabled` and the timestamps - and so is each start trigger's `status`, keyed by `(workflowId, triggerId)`: a breaker trip or an enable toggle must never rewrite the user's file.
+
 Names pinned by the tickets are used verbatim (`maxTraversals`, `freshSession`, `iteration-limit`, cron `schedule`/`timezone`, action ids). Other field names below are this document's consolidation and are normative for the implementation; the concepts behind them are the tickets'. The execution semantics (joins, skips, signal nodes, terminal steps, errors, run and step states, one workspace per run) were pinned by [Workflow execution semantics](https://github.com/rogierpennink/hydra/issues/36).
 
 ```ts
@@ -13,7 +15,7 @@ interface Workflow {
   id: string
   name: string
   description?: string
-  enabled: boolean                     // false = no trigger of this workflow matches (pausing a workflow covers quiet hours)
+  enabled: boolean                     // row state, not in the source; false = no trigger of this workflow matches (pausing a workflow covers quiet hours)
   inputs: InputDeclaration[]
   triggers: Trigger[]                  // >= 0 start triggers, >= 0 signal triggers
   steps: Step[]
@@ -69,7 +71,7 @@ interface StartTrigger {
   source: EventSelector
   inputs: Record<string, CelExpression> // input name -> expression over `event`
   spawnBound: { maxRuns: number; windowSeconds: number }   // default ~30 per hour
-  status: "active" | "paused"          // paused by the user or by a tripped breaker; enable/disable lives on the Workflow
+  status: "active" | "paused"          // row state keyed by (workflowId, triggerId), not in the source; paused by the user or by a tripped breaker; enable/disable lives on the Workflow
   schedule?: string                    // cron triggers only (source.kind == "cron.tick"): cron expression
   timezone?: string                    // cron triggers only; the user's timezone setting when omitted
 }
