@@ -11,8 +11,8 @@
   converged check-in page (prototype/check-in-view.html, round 4):
     A Peek   - quiet button row; ONE fine-print describe line below it tracks the hovered /
                focused answer (default: the primary); description in a hover card.
-    B Ledger - every answer is a full row: label · description · describe. Nothing hidden,
-               the card grows with the answer count.
+    B Ledger - every answer is a full row: label · describe · description (round 3: the describe
+               line leads, the description is the fine print). Nothing hidden, the card grows.
     C Commit - quiet button row; choosing an answer opens a commit step showing that
                answer's description + describe line with Confirm / Back. Two clicks.
   Every variant also renders the same decision as a Discord sink message (spec 12 §11.6)
@@ -20,6 +20,8 @@
   Round 2 (reaction): the '→' prefix on describe lines is gone everywhere; ?nav=top|bottom (key n)
   moves the focus-nav arrows above the card so a growing card never moves them; Discord renders
   the describe line as -# subtext.
+  Round 3 (reaction): nav=top sits in the Needs-you label row, right-aligned; Ledger rows lead with
+  the describe line, the description under it as fine print (the compact-Discord hierarchy).
   Keys: ← → variant · n nav position · c channel rewrite · t theme. Marks are the pinned family (#35).
 -->
 <meta charset="utf-8">
@@ -254,7 +256,9 @@
   .arow .alabel { font-size: 12.5px; font-weight: var(--w-emph); color: var(--muted); }
   .arow.primary .alabel, .arow:hover .alabel { color: var(--ink); }
   .arow .atext { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
-  .arow .doline { min-height: 0; }
+  .arow .doline { min-height: 0; font-size: 12.5px; color: var(--muted); }
+  .arow .doline b { color: var(--ink); }
+  .arow .desc { font-size: 11.5px; color: var(--faint); }
 
   /* ---- C · Commit: two-step ---- */
   .commit { display: flex; flex-direction: column; gap: 4px; padding: 8px 10px 6px; margin: 0 -10px; border-radius: 8px; background: var(--surface); border: 1px solid var(--line-soft); }
@@ -263,7 +267,8 @@
   .commit .desc { color: var(--muted); }
 
   .focusnav { display: flex; align-items: center; gap: 8px; color: var(--faint); font-size: 12px; padding-top: 8px; }
-  .focusnav.top { padding: 0 0 8px; }
+  .focusnav.top { margin-left: auto; padding: 0; text-transform: none; letter-spacing: 0; font-weight: 400; gap: 6px; }
+  .focusnav.top .nextpeek { margin-right: 6px; }
   .focusnav .ct { font-family: var(--mono); font-size: 11px; font-variant-numeric: tabular-nums; }
   .focusnav .qbtn { padding: 4px 8px; }
   .nextpeek { color: var(--faint); font-size: 12px; }
@@ -549,7 +554,7 @@ function answersLedger(dec) {
       <div class="alist">${dec.answers.map((a, i) => `
         <button class="arow ${a.primary ? "primary" : ""}" data-ans="${i}">
           <span class="alabel">${a.label}</span>
-          <span class="atext">${descEl(a)}${doLine(a)}</span>
+          <span class="atext">${doLine(a)}${descEl(a)}</span>
         </button>`).join("")}
       </div>
     </div>`;
@@ -580,7 +585,7 @@ const VARIANTS = [
   { key: "A", name: "Peek", answers: answersPeek,
     note: "Quiet button row as pinned. One fine-print <b>describe line</b> under it, always visible, showing the <i>primary</i> answer until you hover or focus another - the line tracks the pointer, so what you read is what the click does. A producer <b>description</b>, when there is one, opens as a hover card over the button (delay 220ms). Card height fixed." },
   { key: "B", name: "Ledger", answers: answersLedger,
-    note: "Every answer is a full row and the row is the button: label · description · describe. Nothing behind a hover; the whole decision reads top to bottom. The card grows with the answer count and the description length; with <b>nav: top</b> the arrows sit above the card and never move." },
+    note: "Every answer is a full row and the row is the button: label · describe line · description as fine print. Nothing behind a hover; the whole decision reads top to bottom. The card grows with the answer count and the description length; with <b>nav: top</b> the arrows sit above the card and never move." },
   { key: "C", name: "Commit", answers: answersCommit,
     note: "Quiet button row as pinned, no fine print. Choosing an answer does not execute: the answer row turns into a commit step showing that answer's description and describe line with <b>Confirm</b> / <b>Back</b>. Two clicks per decision, the describe line is unmissable. Card height fixed." },
 ];
@@ -667,12 +672,11 @@ function navPos() { return get("nav") === "top" ? "top" : "bottom"; }
 function show(i) { commitIdx = null; setParam("variant", VARIANTS[(i + VARIANTS.length) % VARIANTS.length].key); render(); }
 
 function focusNav(n, next) {
-  return `<div class="focusnav ${navPos()}">
-      <button class="qbtn" data-fnav="-1" ${focusIdx === 0 ? "disabled" : ""}>&larr;</button>
+  const peek = next ? `<span class="nextpeek">next: <b>${plain(next.q)}</b> · ${next.age}</span>` : "";
+  const arrows = `<button class="qbtn" data-fnav="-1" ${focusIdx === 0 ? "disabled" : ""}>&larr;</button>
       <span class="ct">${focusIdx + 1} of ${n}</span>
-      <button class="qbtn" data-fnav="1" ${focusIdx === n - 1 ? "disabled" : ""}>&rarr;</button>
-      ${next ? `<span class="nextpeek">next: <b>${plain(next.q)}</b> · ${next.age}</span>` : ""}
-    </div>`;
+      <button class="qbtn" data-fnav="1" ${focusIdx === n - 1 ? "disabled" : ""}>&rarr;</button>`;
+  return `<div class="focusnav ${navPos()}">${navPos() === "top" ? peek + arrows : arrows + peek}</div>`;
 }
 function render() {
   const v = VARIANTS[current()];
@@ -686,8 +690,7 @@ function render() {
     <div class="maincol">
       <div class="headline"><b>${n}</b> decisions wait · <b>${working}</b> strands in motion · <b>6</b> outcomes today</div>
       <section class="lane">
-        <div class="lane-label">Needs you <span class="n">${n}</span></div>
-        ${navPos() === "top" ? focusNav(n, next) : ""}
+        <div class="lane-label">Needs you <span class="n">${n}</span>${navPos() === "top" ? focusNav(n, next) : ""}</div>
         ${focusCard(dec, v)}
         ${navPos() === "bottom" ? focusNav(n, next) : ""}
         <div class="chanlane">
