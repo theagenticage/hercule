@@ -22,6 +22,8 @@
   the describe line as -# subtext.
   Round 3 (reaction): nav=top sits in the Needs-you label row, right-aligned; Ledger rows lead with
   the describe line, the description under it as fine print (the compact-Discord hierarchy).
+  VERDICT (2026-09-01): B Ledger, nav below the card, Discord/Slack compact. Defaults below are
+  the pinned settings; A and C stay switchable as the rejected record.
   Keys: ← → variant · n nav position · c channel rewrite · t theme. Marks are the pinned family (#35).
 -->
 <meta charset="utf-8">
@@ -666,8 +668,8 @@ let focusIdx = 0;
 function params() { return new URLSearchParams(location.search); }
 function get(k) { return params().get(k); }
 function setParam(k, v) { const p = params(); p.set(k, v); try { history.replaceState(null, "", "?" + p.toString()); } catch (e) {} }
-function current() { const k = (get("variant") || "A").toUpperCase(); const i = VARIANTS.findIndex((v) => v.key === k); return i === -1 ? 0 : i; }
-function chanMode() { return get("chan") === "compact" ? "compact" : "full"; }
+function current() { const k = (get("variant") || "B").toUpperCase(); const i = VARIANTS.findIndex((v) => v.key === k); return i === -1 ? 0 : i; }
+function chanMode() { return get("chan") === "full" ? "full" : "compact"; }
 function navPos() { return get("nav") === "top" ? "top" : "bottom"; }
 function show(i) { commitIdx = null; setParam("variant", VARIANTS[(i + VARIANTS.length) % VARIANTS.length].key); render(); }
 
