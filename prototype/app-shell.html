@@ -51,8 +51,8 @@
       or a segmented row inside the model menu (the Codex shape), the model label then carrying it.
       Context window and fast mode sit in the model menu's options block either way; pi shows thinking
       off/on instead of effort - the well-known option ids of spec 06 differ per provider.
-    - picks live in memory: new-thread picks start the thread with them; on a started thread runner and
-      profile are locked, model / reasoning / access mode stay live.
+    - picks live in memory: new-thread picks start the thread with them; on a started thread runner,
+      profile and (since the resolution) access mode are locked, model / reasoning stay live.
   Round 5 (reaction to round 4):
     - t3 input variant: the model selector is a clone of t3-code's - a rail (favorites star, one logo per
       provider), a search field, rows with the display name and a provider line, ⌘n badges, stars to
@@ -1071,7 +1071,7 @@ function composer(t, placeholder = "Reply…", dock = "") {
   const ta = `<textarea id="compose" placeholder="${placeholder}" rows="2">${esc(DRAFTS[t ? t.id : "new"] || "")}</textarea>`;
   const modelSel = sel("", modelLabel(c), false, "model");
   const rs = reasoningSel(c); const rsSep = rs ? `${SEPV}${rs}` : "";
-  const accessSel = sel("", c.access, false, "access");
+  const accessSel = sel("", c.access, !!t, "access");  // access mode locks at start: the adapter has no mode switch (spec 06)
   const sendc = `<button class="sendc" data-send="${send}" aria-label="${sendLabel}">↑</button>`;
   let body;
   if (kind === "t3") {
@@ -1079,7 +1079,7 @@ function composer(t, placeholder = "Reply…", dock = "") {
     const i = inst(c.instance); const r = reasoningOf(c);
     const pill = `<button class="sel pill" data-pop="model"><span class="${i.provider === "Claude Code" ? "claude" : ""}">${PMARK[i.provider]}</span><span class="v">${displayName(c.model)}</span></button>`;
     const eff = r ? sel("", `${r[0] === "thinking" ? "Thinking " : ""}${cap(r[1])}${modelOf(c).ctx ? ` · ${c.ctx}` : ""}`, false, "effort") : "";
-    const acc = `<button class="sel" data-pop="access"><span class="v">${SPARK}${c.access}</span></button>`;
+    const acc = t ? `<button class="sel ro" title="fixed once the thread has started"><span class="v">${SPARK}${c.access}</span></button>` : `<button class="sel" data-pop="access"><span class="v">${SPARK}${c.access}</span></button>`;
     body = `<div class="c-t3">${ta}
       <div class="row3">${pill}${SEPV}${eff}${eff ? SEPV : ""}${acc}
         <span class="right"><button class="qbtn" style="padding:4px 6px">Attach</button>${sendc}</span></div></div>
