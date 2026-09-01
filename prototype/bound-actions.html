@@ -1,0 +1,782 @@
+<!--
+  PROTOTYPE - throwaway. Ticket: https://github.com/rogierpennink/hydra/issues/1 -> #50
+  Question: a decision Notification's answers carry up to three texts (spec 10 §7.4):
+    label        - the button ("Start Bugfix")                        producer-authored
+    description  - what choosing it MEANS (only the producer knows)  producer-authored, optional
+    describe     - what the click DOES to the system                 core-rendered, never suppressed
+  How do they fit the check-in Focus card (spec 14, uniform-height, calm), and how does an
+  interactive channel sink (Discord/Slack buttons, no hover) show the describe line?
+
+  Three variants of the Focus card's answer area, switchable via ?variant=A|B|C on the
+  converged check-in page (prototype/check-in-view.html, round 4):
+    A Peek   - quiet button row; ONE fine-print describe line below it tracks the hovered /
+               focused answer (default: the primary); description in a hover card.
+    B Ledger - every answer is a full row: label · description · describe. Nothing hidden,
+               the card grows with the answer count.
+    C Commit - quiet button row; choosing an answer opens a commit step showing that
+               answer's description + describe line with Confirm / Back. Two clicks.
+  Every variant also renders the same decision as a Discord sink message (spec 12 §11.6)
+  in two rewrites: full (the pinned text-then-buttons) and compact.
+  Keys: ← → variant · c channel rewrite · t theme. Marks are the pinned family (#35).
+-->
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hydra Check-in · bound actions</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Onest:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  /* ============ tokens: pinned Midnight (docs/design-language.md) ============ */
+  :root {
+    --bg:      oklch(94.5% 0.0156 265);
+    --surface: oklch(96.7% 0.0125 265);
+    --raised:  oklch(100% 0.0078 265);
+    --ink:     oklch(23% 0.0100 265);
+    --muted:   oklch(48% 0.0156 265);
+    --faint:   oklch(66% 0.0156 265);
+    --line:      oklch(23% 0.0100 265 / 0.10);
+    --line-soft: oklch(23% 0.0100 265 / 0.055);
+    --card-shadow: 0 1px 2px rgba(23,26,33,0.05);
+    --lift-shadow: 0 1px 2px rgba(23,26,33,0.06), 0 4px 14px rgba(23,26,33,0.06);
+    --attn: #8a6116; --fail: #a34e46; --ok: #48745a; --live: #48717f;
+    --attn-soft: rgba(138,97,22,0.09);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg:      oklch(20%   0.0288 265);
+      --surface: oklch(22.2% 0.0288 265);
+      --raised:  oklch(25.5% 0.0259 265);
+      --ink:     oklch(90% 0.0080 265);
+      --muted:   oklch(68% 0.0288 265);
+      --faint:   oklch(50% 0.0288 265);
+      --line:      oklch(90% 0.0288 265 / 0.10);
+      --line-soft: oklch(90% 0.0288 265 / 0.06);
+      --card-shadow: 0 1px 2px rgba(0,0,0,0.35);
+      --lift-shadow: inset 0 1px 0 rgba(255,255,255,0.05),
+                     0 1px 2px rgba(0,0,0,0.4), 0 6px 18px rgba(0,0,0,0.3);
+      --attn: #d0a147; --fail: #cf7b71; --ok: #7fae8e; --live: #7fa8b8;
+      --attn-soft: rgba(208,161,71,0.12);
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg:      oklch(20%   0.0288 265);
+    --surface: oklch(22.2% 0.0288 265);
+    --raised:  oklch(25.5% 0.0259 265);
+    --ink:     oklch(90% 0.0080 265);
+    --muted:   oklch(68% 0.0288 265);
+    --faint:   oklch(50% 0.0288 265);
+    --line:      oklch(90% 0.0288 265 / 0.10);
+    --line-soft: oklch(90% 0.0288 265 / 0.06);
+    --card-shadow: 0 1px 2px rgba(0,0,0,0.35);
+    --lift-shadow: inset 0 1px 0 rgba(255,255,255,0.05),
+                   0 1px 2px rgba(0,0,0,0.4), 0 6px 18px rgba(0,0,0,0.3);
+    --attn: #d0a147; --fail: #cf7b71; --ok: #7fae8e; --live: #7fa8b8;
+    --attn-soft: rgba(208,161,71,0.12);
+  }
+  :root {
+    --sans: "Onest", -apple-system, system-ui, sans-serif;
+    --mono: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
+    --w-emph: 500;
+    --w-urgent: 600;
+  }
+
+  /* ============ base ============ */
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--ink); font: 14px/1.5 var(--sans); -webkit-font-smoothing: antialiased; }
+  .mono { font-family: var(--mono); }
+  .app { display: flex; min-height: 100vh; }
+  code { font-family: var(--mono); font-size: 12px; background: var(--line-soft); padding: 1px 5px; border-radius: 4px; font-weight: 400; }
+
+  /* ---------- chrome (shared shell) ---------- */
+  .side {
+    width: 204px; flex: none; background: var(--surface); border-right: 1px solid var(--line-soft);
+    display: flex; flex-direction: column; padding: 16px 10px; position: sticky; top: 0; height: 100vh;
+  }
+  .logo { display: flex; align-items: baseline; gap: 8px; padding: 4px 10px 16px; }
+  .logo b { font-size: 15px; letter-spacing: 0.01em; font-weight: var(--w-emph); }
+  .logo span { font-family: var(--mono); font-size: 10px; color: var(--faint); }
+  .nav { display: flex; flex-direction: column; gap: 1px; }
+  .nav a {
+    display: flex; align-items: center; gap: 8px; padding: 5px 10px; border-radius: 6px;
+    color: var(--muted); text-decoration: none; font-size: 13px;
+  }
+  .nav a .ent { margin: 0; }
+  .nav a .count { margin-left: auto; }
+  .nav a.on { background: var(--line-soft); color: var(--ink); font-weight: var(--w-emph); }
+  .nav a:not(.on):hover { background: var(--line-soft); }
+  .nav a:focus-visible { outline: 2px solid var(--live); outline-offset: 1px; }
+  .nav .count { font-family: var(--mono); font-size: 11px; color: var(--faint); font-variant-numeric: tabular-nums; }
+  .nav .sep { height: 1px; background: var(--line-soft); margin: 8px 10px; }
+  .sidefoot { margin-top: auto; display: flex; flex-direction: column; gap: 10px; }
+  .marksbtn {
+    display: flex; align-items: center; gap: 8px; padding: 5px 10px; border-radius: 6px; border: 0; background: none;
+    color: var(--faint); font: 12.5px var(--sans); cursor: pointer; text-align: left; position: relative;
+  }
+  .marksbtn:hover { background: var(--line-soft); color: var(--muted); }
+  .marksbtn .ent { margin: 0; }
+  .legendpop {
+    position: absolute; left: 100%; bottom: 0; margin-left: 8px; width: 220px; z-index: 40;
+    background: var(--raised); border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--lift-shadow);
+    padding: 12px 14px; display: none; flex-direction: column; gap: 3px;
+  }
+  .legendpop.open { display: flex; }
+  .legendpop .lane-label { margin-bottom: 4px; }
+  .legendpop .lrow { display: flex; align-items: center; gap: 10px; font-size: 11.5px; color: var(--muted); padding: 2px 0; }
+  .proto-badge {
+    border: 1px dashed var(--attn); color: var(--attn); background: var(--attn-soft);
+    border-radius: 8px; padding: 8px 10px; font-family: var(--mono); font-size: 10px; line-height: 1.5;
+  }
+  .main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  .topbar { display: flex; align-items: baseline; gap: 14px; padding: 24px 32px 0; }
+  .topbar h1 { font-size: 18px; margin: 0; letter-spacing: -0.015em; font-weight: var(--w-emph); }
+  .topbar .when { color: var(--muted); font-size: 13px; }
+  #stage { padding: 16px 32px 130px; }
+
+  /* ============ layout: main + pulse rail ============ */
+  .layout { display: grid; grid-template-columns: minmax(0, 1fr) 236px; gap: 44px; align-items: start; max-width: 1100px; }
+  .maincol { display: flex; flex-direction: column; }
+  .maincol .lane { margin-bottom: 30px; }
+  .maincol .lane > .lane-label { margin-bottom: 10px; }
+  .rail { position: sticky; top: 20px; display: flex; flex-direction: column; gap: 22px; }
+
+  /* ============ shared atoms ============ */
+  .lane-label {
+    text-transform: uppercase; letter-spacing: 0.1em; font-size: 10.5px; font-weight: var(--w-emph); color: var(--faint);
+    display: flex; align-items: center; gap: 8px;
+  }
+  .lane-label .n { font-family: var(--mono); font-weight: 500; letter-spacing: 0; font-variant-numeric: tabular-nums; }
+  .headline { font-size: 13.5px; color: var(--muted); padding-bottom: 20px; }
+  .headline b { color: var(--ink); font-weight: var(--w-emph); font-variant-numeric: tabular-nums; }
+
+  /* ---- marks: the pinned family (#35, variant D) ---- */
+  svg.bs { width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 1.15; stroke-linecap: round; stroke-linejoin: round; flex: none; display: block; }
+  svg.bs.q { stroke-width: 1.35; }
+  .nav svg.bs { width: 13px; height: 13px; }
+  .ent { display: inline-flex; width: 14px; justify-content: center; align-items: center; flex: none; vertical-align: -2px; margin-right: 3px; color: var(--faint); }
+  .okg { color: var(--ok); } .failg { color: var(--fail); } .cang { color: var(--faint); } .attn { color: var(--attn); }
+  .eq { display: inline-flex; align-items: flex-end; gap: 1.5px; height: 9px; width: 11px; flex: none; }
+  .eq i { width: 2px; border-radius: 1px; background: var(--live); height: 4px; animation: eqs 1.9s ease-in-out infinite; }
+  .eq i:nth-child(2) { animation-delay: 0.35s; } .eq i:nth-child(3) { animation-delay: 0.7s; }
+  @keyframes eqs { 0%, 100% { height: 3px; } 50% { height: 7px; } }
+  @keyframes pulse { 50% { opacity: 0.3; } }
+  @media (prefers-reduced-motion: reduce) {
+    .eq i, .prog i, .pline .dot { animation: none !important; }
+    .eq i:nth-child(1) { height: 4px; } .eq i:nth-child(2) { height: 7px; } .eq i:nth-child(3) { height: 5px; }
+  }
+  .markcell { width: 16px; flex: none; display: inline-flex; justify-content: center; align-items: center; font-size: 12px; }
+  .prog { display: inline-flex; align-items: center; gap: 2px; flex: none; }
+  .prog i { width: 8px; height: 3px; border-radius: 2px; background: var(--line); }
+  .prog i.d { background: var(--muted); }
+  .prog i.c { background: var(--live); animation: pulse 2.4s ease-in-out infinite; }
+  .prog .t { font-family: var(--mono); font-size: 10.5px; color: var(--faint); margin-left: 5px; font-variant-numeric: tabular-nums; }
+  .pri { display: inline-flex; align-items: center; flex: none; }
+  .pri .bars { display: inline-flex; align-items: flex-end; gap: 1.5px; height: 9px; }
+  .pri .bars i { width: 2.5px; border-radius: 1px; background: var(--line); }
+  .pri .bars i:nth-child(1) { height: 3.5px; } .pri .bars i:nth-child(2) { height: 6px; } .pri .bars i:nth-child(3) { height: 9px; }
+  .pri[data-pri="low"]    .bars i:nth-child(1) { background: var(--faint); }
+  .pri[data-pri="normal"] .bars i:nth-child(-n+2) { background: var(--muted); }
+  .pri[data-pri="high"]   .bars i { background: var(--muted); }
+  .pri[data-pri="urgent"] .bars i { background: var(--ink); }
+  .age { font-family: var(--mono); font-size: 11.5px; white-space: nowrap; color: var(--faint); flex: none; font-variant-numeric: tabular-nums; }
+  .age[data-age="recent"] { color: var(--muted); }
+  .age[data-age="stale"]  { color: var(--ink); }
+  .age[data-age="old"]    { color: var(--attn); font-weight: 500; }
+
+  .qbtn {
+    font-family: var(--sans); font-size: 12px; line-height: 1; font-weight: var(--w-emph);
+    border: 0; background: none; color: var(--muted); padding: 6px 9px; border-radius: 6px; cursor: pointer; white-space: nowrap;
+  }
+  .qbtn:hover { background: var(--line-soft); color: var(--ink); }
+  .qbtn.first { color: var(--ink); }
+  .qbtn:focus-visible { outline: 2px solid var(--live); outline-offset: 1px; }
+  .qbtn[disabled] { opacity: 0.4; cursor: default; }
+  .qbtn.nav { font-weight: 400; color: var(--faint); }
+  .qbtn.nav:hover { color: var(--muted); }
+
+  /* ---- decision: the Focus card ---- */
+  .dcard {
+    background: var(--raised); border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--lift-shadow);
+    padding: 14px 18px 11px; display: flex; flex-direction: column; gap: 10px;
+    min-height: 196px; /* uniform card so the focus-nav arrows never move (A and C) */
+  }
+  .dcard .qline { display: flex; align-items: baseline; gap: 10px; }
+  .dcard .qline .attn { position: relative; top: 1px; }
+  .dcard .q { font-size: 15px; font-weight: var(--w-emph); letter-spacing: -0.008em; }
+  .dcard[data-pri="urgent"] .q { font-size: 16px; font-weight: var(--w-urgent); }
+  .dcard .qline .kind { color: var(--faint); font-size: 12px; white-space: nowrap; }
+  .dcard .qline .age { margin-left: auto; }
+  .dcard .fields { display: grid; grid-template-columns: 52px minmax(0, 1fr); grid-template-rows: repeat(3, 21px); gap: 4px 14px; font-size: 12.5px; }
+  .dcard .fields .fv { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; }
+  .dcard .fields .fv > * { vertical-align: baseline; }
+  .dcard .fl { text-transform: uppercase; letter-spacing: 0.09em; font-size: 10px; color: var(--faint); font-weight: var(--w-emph); padding-top: 2px; }
+  .dcard .fv { color: var(--muted); }
+  .dcard .fv b { color: var(--ink); font-weight: var(--w-emph); }
+  .dcard .fv .none { color: var(--faint); }
+  .dcard .fv .open { color: var(--faint); margin-left: 6px; text-decoration: none; }
+  .dcard .fv .open:hover { color: var(--muted); }
+  .dcard .answers { margin-top: auto; display: flex; flex-direction: column; gap: 2px; }
+  .dcard .acts { display: flex; gap: 4px; margin-left: -9px; align-items: center; flex-wrap: wrap; }
+  .acts .split { width: 1px; height: 14px; background: var(--line); margin: 0 4px; }
+
+  /* the core-rendered describe line: "what the click does". One voice everywhere. */
+  .doline { font-size: 11.5px; color: var(--faint); line-height: 1.45; min-height: 17px; display: flex; gap: 6px; align-items: baseline; }
+  .doline .arrow { font-family: var(--mono); flex: none; }
+  .doline b { color: var(--muted); font-weight: var(--w-emph); }
+  .doline .lbl { font-weight: var(--w-emph); color: var(--muted); }
+  .doline.nullop { font-style: italic; }
+  /* the producer's description: "what the choice means" */
+  .desc { font-size: 12.5px; color: var(--muted); line-height: 1.45; }
+
+  /* ---- A · Peek: fine print tracks hover/focus; description in a hover card ---- */
+  .peek { position: relative; }
+  .peek .qbtn.hot { background: var(--line-soft); color: var(--ink); }
+  .hovercard {
+    position: absolute; left: 0; top: calc(100% + 6px); z-index: 30; max-width: 380px; /* below the answers, never over the question */
+    background: var(--raised); border: 1px solid var(--line); border-radius: 8px; box-shadow: var(--lift-shadow);
+    padding: 9px 12px; display: none; flex-direction: column; gap: 4px;
+  }
+  .hovercard.show { display: flex; }
+  .hovercard .hl { font-size: 12px; font-weight: var(--w-emph); color: var(--ink); }
+
+  /* ---- B · Ledger: every answer is a row ---- */
+  .dcard.ledger { min-height: 0; }
+  .alist { display: flex; flex-direction: column; margin: 2px -8px -2px; }
+  .arow {
+    display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: 2px 12px; align-items: baseline;
+    padding: 7px 8px; border: 0; background: none; border-radius: 6px; cursor: pointer; text-align: left; font: inherit; color: inherit;
+    border-top: 1px solid var(--line-soft);
+  }
+  .arow:first-child { border-top: 0; }
+  .arow:hover { background: var(--line-soft); }
+  .arow:focus-visible { outline: 2px solid var(--live); outline-offset: -2px; }
+  .arow .alabel { font-size: 12.5px; font-weight: var(--w-emph); color: var(--muted); }
+  .arow.primary .alabel, .arow:hover .alabel { color: var(--ink); }
+  .arow .atext { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+  .arow .doline { min-height: 0; }
+
+  /* ---- C · Commit: two-step ---- */
+  .commit { display: flex; flex-direction: column; gap: 4px; padding: 8px 10px 6px; margin: 0 -10px; border-radius: 8px; background: var(--surface); border: 1px solid var(--line-soft); }
+  .commit .cl { font-size: 13px; color: var(--ink); font-weight: var(--w-emph); }
+  .commit .acts { margin-left: -9px; margin-top: 2px; }
+  .commit .desc { color: var(--muted); }
+
+  .focusnav { display: flex; align-items: center; gap: 8px; color: var(--faint); font-size: 12px; padding-top: 8px; }
+  .focusnav .ct { font-family: var(--mono); font-size: 11px; font-variant-numeric: tabular-nums; }
+  .focusnav .qbtn { padding: 4px 8px; }
+  .nextpeek { color: var(--faint); font-size: 12px; }
+  .nextpeek b { color: var(--muted); font-weight: var(--w-emph); }
+
+  /* ---- the same decision in Discord (sink rendering, spec 12 §11.6) ---- */
+  .chanlane { margin-top: 26px; }
+  .chanlane > .lane-label { margin-bottom: 10px; }
+  .chanlane .lane-label .sw2 { margin-left: auto; text-transform: none; letter-spacing: 0; display: flex; gap: 2px; }
+  .chanlane .lane-label .sw2 button { font: 11px var(--mono); border: 0; background: none; color: var(--faint); cursor: pointer; padding: 2px 6px; border-radius: 4px; }
+  .chanlane .lane-label .sw2 button.on { color: var(--ink); background: var(--line-soft); }
+  .discord {
+    background: #313338; color: #dbdee1; border-radius: 8px; padding: 14px 16px 14px 14px; max-width: 640px;
+    font: 14px/1.375 "gg sans", "Noto Sans", "Helvetica Neue", Helvetica, Arial, sans-serif;
+    display: grid; grid-template-columns: 40px minmax(0, 1fr); gap: 0 14px;
+  }
+  .discord .av { width: 40px; height: 40px; border-radius: 50%; background: #5865f2; display: flex; align-items: center; justify-content: center; color: #fff; font-weight: 600; font-size: 15px; }
+  .discord .who { display: flex; align-items: baseline; gap: 6px; }
+  .discord .who b { color: #f2f3f5; font-weight: 500; }
+  .discord .who .tag { background: #5865f2; color: #fff; font-size: 10px; font-weight: 600; padding: 1px 4px; border-radius: 3px; letter-spacing: 0.02em; }
+  .discord .who .time { color: #949ba4; font-size: 12px; }
+  .discord .msg { display: flex; flex-direction: column; gap: 2px; margin-top: 2px; }
+  .discord .msg b { color: #f2f3f5; font-weight: 600; }
+  .discord .msg em { color: #f2f3f5; font-style: italic; }
+  .discord .msg .line { min-height: 20px; }
+  .discord .msg .sub { color: #b5bac1; }
+  .discord .msg .quote { border-left: 4px solid #4e5058; padding-left: 10px; color: #b5bac1; }
+  .discord .msg .link { color: #00a8fc; }
+  .discord .btns { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+  .discord .btn { background: #4e5058; color: #fff; font-weight: 500; font-size: 14px; padding: 7px 16px; border-radius: 3px; border: 0; cursor: pointer; }
+  .discord .btn:hover { background: #6d6f78; }
+  .discord .btn.primary { background: #5865f2; }
+  .discord .btn.primary:hover { background: #4752c4; }
+  .discord .btn.danger { background: #da373c; }
+  .discord .btn.danger:hover { background: #a12828; }
+  .discord code { background: #2b2d31; color: #dbdee1; font-size: 13px; padding: 1px 4px; }
+  .channote { font-size: 12px; color: var(--faint); margin-top: 8px; max-width: 640px; }
+
+  /* ---- strand rows (plain, no boxes) ---- */
+  .tier { margin-top: 14px; }
+  .tier:first-of-type { margin-top: 0; }
+  .tier > .lane-label { margin-bottom: 2px; }
+  .strand { border-top: 1px solid var(--line-soft); padding: 9px 2px; }
+  .strand:first-of-type { border-top: 0; }
+  .strand .row { display: flex; align-items: center; gap: 10px; }
+  .strand .name { font-weight: var(--w-emph); font-size: 13.5px; letter-spacing: -0.004em; white-space: nowrap; }
+  .strand[data-pri="urgent"] .name { font-weight: var(--w-urgent); }
+  .strand .sub { color: var(--faint); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .strand .note { color: var(--muted); font-size: 12.5px; margin-left: auto; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: inline-flex; align-items: center; gap: 6px; }
+  .strand .note[data-tone="warn"] { color: var(--attn); }
+  .strand .note[data-tone="fail"] { color: var(--fail); }
+
+  /* ---- landed digest ---- */
+  .digestline { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 12.5px; padding: 2px 2px; }
+  .digestline b { font-weight: var(--w-emph); color: var(--ink); font-variant-numeric: tabular-nums; }
+  .digestline .chev { color: var(--faint); font-size: 10px; }
+
+  /* ---- pulse rail ---- */
+  .pblock { display: flex; flex-direction: column; gap: 5px; }
+  .pblock > .lane-label { margin-bottom: 3px; }
+  .pline { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--muted); }
+  .pline b { font-weight: var(--w-emph); color: var(--ink); }
+  .pline .warm { color: var(--attn); }
+  .pline .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--live); flex: none; animation: pulse 2.4s ease-in-out infinite; }
+  .pline .idledot { width: 6px; height: 6px; border-radius: 50%; border: 1.5px solid var(--faint); flex: none; }
+
+  /* ---- reading notes for the reviewer (not part of the design) ---- */
+  .notes { border: 1px dashed var(--line); border-radius: 8px; padding: 10px 12px; font-size: 12px; color: var(--muted); line-height: 1.5; }
+  .notes b { color: var(--ink); font-weight: var(--w-emph); }
+  .notes .mono { font-size: 11px; color: var(--faint); }
+
+  /* ============ switcher (not part of the design) ============ */
+  .sw {
+    position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); background: #17161a; color: #fff; border-radius: 999px; padding: 6px 8px;
+    display: flex; align-items: center; gap: 4px; box-shadow: 0 6px 24px rgba(0,0,0,0.35); z-index: 50; font-family: var(--mono);
+  }
+  .sw .label { font-size: 12px; font-weight: 500; padding: 0 8px; min-width: 150px; text-align: center; }
+  .sw button { background: none; border: 0; color: #fff; cursor: pointer; font: inherit; font-size: 13px; padding: 4px 10px; border-radius: 999px; }
+  .sw button:hover { background: rgba(255,255,255,0.14); }
+  .sw button:focus-visible { outline: 2px solid #9a94e8; outline-offset: 1px; }
+</style>
+
+<div class="app">
+  <aside class="side">
+    <div class="logo"><b>Hydra</b><span>v1 · rogier</span></div>
+    <nav class="nav" id="nav"></nav>
+    <div class="sidefoot">
+      <button class="marksbtn" id="marksbtn" aria-haspopup="true" aria-expanded="false">
+        <span class="ent" id="marksicon"></span>Marks
+        <div class="legendpop" id="legendpop" role="dialog" aria-label="Marks legend"></div>
+      </button>
+      <div class="proto-badge">PROTOTYPE · throwaway<br>ticket hydra#50<br>&larr; &rarr; answers UI · c channel · t theme</div>
+    </div>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <h1>Check-in</h1>
+      <span class="when">Sunday 14:32</span>
+    </div>
+    <div id="stage"></div>
+  </main>
+</div>
+
+<div class="sw">
+  <button id="prev" aria-label="Previous treatment">&larr;</button>
+  <span class="label" id="swlabel"></span>
+  <button id="next" aria-label="Next treatment">&rarr;</button>
+  <button id="theme" aria-label="Toggle theme">◐</button>
+</div>
+
+<script>
+/* ============ the five decisions from the ticket ============
+   Every answer: label (producer) · description? (producer) · describe (core, from the frozen op).
+   `*name*` in a describe line is a live entity name the core resolves at render time. */
+const DECISIONS = [
+  { prov: "you", pri: "urgent", kind: "tool approval",
+    q: 'Allow <code>git push</code> to fix/webhook-retries?',
+    from: { name: "Fix flaky webhook tests", ent: "task", noun: "task", pri: "urgent" },
+    why: 'the fix is done and the session wants to push the branch · <code>git push origin fix/webhook-retries</code>',
+    agent: { name: "Claude Code session on hetzner-01", note: "turn 12 · approval-required" },
+    age: "6m", bucket: "fresh",
+    title: "Allow git push to fix/webhook-retries?",
+    body: "Session *Fix flaky webhook tests* wants to run `git push origin fix/webhook-retries`. The fix is done and the tests pass locally.",
+    answers: [
+      { id: "allow", label: "Allow", primary: true, describe: "Allow this call in session *Fix flaky webhook tests*" },
+      { id: "allow_always", label: "Allow always", describe: "Allow *git push* for the rest of session *Fix flaky webhook tests*" },
+      { id: "deny", label: "Deny", describe: "Refuse this call; the agent is told and carries on" },
+      { id: "cancel", label: "Cancel turn", describe: "Refuse this call and end the agent's turn" },
+    ] },
+  { prov: "you", pri: "high", kind: "permission request",
+    q: 'Grant <code>infra</code> to the session?',
+    from: { name: "Refactor event pipeline", ent: "task", noun: "task", pri: "high" },
+    why: "wants to drain runner hetzner-01 before migrating the pipeline; the worker profile lacks infra",
+    agent: { name: "chat session on macbook-pro", note: "turn 7 · profile worker" },
+    age: "18m", bucket: "recent",
+    title: "Grant infra to the session?",
+    body: "Session *Refactor event pipeline* asked for the *infra* grant: \"I want to drain runner hetzner-01 before migrating the pipeline.\" It intends to call `runner.drain`.",
+    answers: [
+      { id: "session", label: "This session only", primary: true, describe: "Grant *infra* to session *Refactor event pipeline* until it ends" },
+      { id: "profile", label: "Add to profile", describe: "Add *infra* to profile *worker* - every worker session, from now on" },
+      { id: "deny", label: "Deny", describe: "Refuse *infra*; the session is told and carries on without it" },
+    ] },
+  { prov: "you", pri: "high", kind: "agent question",
+    q: "Which persistence model for the ordering module?",
+    from: { name: "Design ordering module", ent: "task", noun: "task", pri: "high" },
+    why: "the session reached the one design fork it does not want to pick alone",
+    agent: { name: "Codex session on macstudio-02", note: "turn 19" },
+    age: "32m", bucket: "recent",
+    title: "Which persistence model for the ordering module?",
+    body: "I have the domain types and the API in place. Before I write the store I need a call on the persistence model; both fit the tests as written.",
+    answers: [
+      { id: "es", label: "Event-sourced",
+        description: "Append-only order events with projections. Fits the audit requirement and the replay we already do for pipeline events; adds a projection layer and makes ad-hoc queries harder.",
+        describe: "Reply *Event-sourced* to session *Design ordering module*" },
+      { id: "crud", label: "CRUD + audit table",
+        description: "Plain rows with an append-only audit table beside them. Simpler to query and migrate; the audit is best-effort rather than the source of truth.",
+        describe: "Reply *CRUD + audit table* to session *Design ordering module*" },
+      { id: "neither", label: "Neither, I'll come and type", nullop: true, describe: "Does nothing" },
+    ] },
+  { prov: "intake", pri: "high", kind: "triage proposal",
+    q: "Start Bugfix on Fix login timeout?",
+    from: { name: "#118 Fix login timeout", ent: "task", noun: "task · proposed", pri: "high" },
+    why: "3 Sentry alerts and a support email point at the same session-store TTL; a Bugfix run can reproduce it with the failing login test",
+    agent: null, producer: "Triage · run 512",
+    age: "1h", bucket: "stale",
+    title: "Start Bugfix on #118 Fix login timeout?",
+    body: "Three Sentry alerts since 09:10 and one support email point at the same session-store TTL. The failing login test in `auth.spec.ts` reproduces it. A Bugfix run on hydra-web can take it from here.",
+    answers: [
+      { id: "accept", label: "Accept", description: "Keep it as a task in the backlog; nothing runs.",
+        describe: "Remove the *proposed* label from task *#118 Fix login timeout*" },
+      { id: "start", label: "Start Bugfix", primary: true, description: "A Bugfix run on hydra-web with the Sentry traces and the failing test as its brief.",
+        describe: "Run workflow *Bugfix* with task *#118 Fix login timeout*" },
+      { id: "dismiss", label: "Dismiss", description: "Not worth a task; the signals stay in the events view.",
+        describe: "Cancel task *#118 Fix login timeout*" },
+    ] },
+  { prov: "standing", pri: "normal", kind: "breaker tripped",
+    q: "Resume Email triage?",
+    from: { name: "Email triage", ent: "workflow", noun: "standing workflow", pri: null },
+    why: "spawn bound tripped: 12 runs in 10 min (bound 10) · 14 events held",
+    agent: null, producer: "core",
+    age: "41m", bucket: "stale",
+    title: "Resume Email triage?",
+    body: "The *gmail message* trigger of *Email triage* tripped its spawn bound: 12 runs in 10 minutes, bound 10. 14 events are held.",
+    answers: [
+      { id: "resume", label: "Resume", primary: true, describe: "Resume the *gmail message* trigger of *Email triage*; the 14 held events spawn as the window frees up" },
+      { id: "later", label: "Keep paused", nullop: true, describe: "Does nothing" },
+    ] },
+];
+
+const STRANDS = {
+  you: [
+    { name: "Fix flaky webhook tests", sub: "task · in-progress", pri: "urgent", act: "working", note: "turn 12", ask: true, age: "41m", bucket: "recent" },
+    { name: "Refactor event pipeline", sub: "task · in-progress", pri: "high", act: "working", note: "turn 7", ask: true, age: "34m", bucket: "recent" },
+    { name: "Design ordering module", sub: "task · in-progress", pri: "high", act: "working", note: "turn 19", ask: true, age: "2h", bucket: "stale" },
+    { name: "Review PR #87", sub: "run · workflow PR review", pri: "normal", act: "working", prog: { done: 1, total: 4 }, age: "12m", bucket: "fresh" },
+  ],
+  events: [
+    { name: "Email triage", sub: "gmail/personal", act: "paused", tone: "warn", note: "paused · 14 events held", ask: true, age: "41m", bucket: "stale" },
+    { name: "PR review", sub: "github/hydra", act: "ok", note: "2 runs today · all ✓", age: "34m", bucket: "" },
+  ],
+  schedule: [
+    { name: "Triage", sub: "cron every 2h", act: "ok", note: "ran 13:00 · 212 events → 6 proposals", age: "1h", bucket: "" },
+    { name: "Nightly digest", sub: "cron 06:00", act: "ok", note: "ran 06:00 · ✓", age: "8h", bucket: "" },
+  ],
+};
+const PULSE = {
+  fleet: [ { live: true, t: "<b>hetzner-01</b> · 3/4 sessions", warm: "near cap" }, { live: false, t: "<b>macbook-pro</b> · 1 session" }, { live: true, t: "<b>macstudio-02</b> · 1 session" } ],
+  assistants: [ { live: true, t: "<b>Hera</b> active in #ops" } ],
+  intake: [ { t: "212 events today &rarr; <b>6 proposals</b>, 2 offers" } ],
+};
+
+/* ============ marks: the pinned family (#35, variant D) ============ */
+const BS = {
+  task: '<rect x="1.75" y="1.75" width="8.5" height="8.5" rx="2.25"/>',
+  run: '<path d="M3.25 2.4v7.2a.55.55 0 0 0 .83.47l5.9-3.6a.55.55 0 0 0 0-.94l-5.9-3.6a.55.55 0 0 0-.83.47z"/>',
+  workflow: '<circle cx="2.6" cy="6" r="1.35"/><circle cx="9.4" cy="2.6" r="1.35"/><circle cx="9.4" cy="9.4" r="1.35"/><path d="M3.9 6h2.4l2.1-2.5M6.3 6l2.1 2.5"/>',
+  session: '<path d="M3.25 1.75h5.5A1.75 1.75 0 0 1 10.5 3.5v2.75A1.75 1.75 0 0 1 8.75 8H5.6L3.4 10.2V8h-.15A1.75 1.75 0 0 1 1.5 6.25V3.5a1.75 1.75 0 0 1 1.75-1.75z"/>',
+  question: '<path d="M3.9 4.3a2.1 2.1 0 1 1 3 1.9c-.6.35-.9.75-.9 1.4v.2"/><path d="M6 10.2h.01"/>',
+  paused: '<path d="M4 2.5v7M8 2.5v7"/>',
+  queued: '<circle cx="6" cy="6" r="3.4"/>',
+  done: '<path d="m2.4 6.4 2.5 2.5 4.8-5.3"/>',
+  failed: '<path d="m3 3 6 6M9 3l-6 6"/>',
+  cancelled: '<path d="M2.75 6h6.5"/>',
+};
+const bs = (m, cls = "") => `<svg class="bs ${cls}" viewBox="0 0 12 12" aria-hidden="true">${m}</svg>`;
+const eqEl = '<span class="eq" title="agent working"><i></i><i></i><i></i></span>';
+const dmarkEl = `<span class="attn" title="decision wanted">${bs(BS.question, "q")}</span>`;
+const entEl = (k) => BS[k] ? `<span class="ent" title="${k}">${bs(BS[k])}</span>` : "";
+const priEl = (pri) => pri ? `<span class="pri" data-pri="${pri}" title="priority: ${pri}"><span class="bars"><i></i><i></i><i></i></span></span>` : "";
+const progEl = (p) => `<span class="prog" title="step ${p.done + 1} of ${p.total}">${Array.from({ length: p.total }, (_, i) => `<i class="${i < p.done ? "d" : i === p.done ? "c" : ""}"></i>`).join("")}<span class="t">${p.done + 1}/${p.total}</span></span>`;
+const markFor = (s) => s.act === "working" ? eqEl
+  : s.act === "queued" ? `<span class="cang">${bs(BS.queued)}</span>`
+  : s.act === "paused" ? `<span class="attn" title="paused">${bs(BS.paused)}</span>`
+  : s.act === "failed" ? `<span class="failg">${bs(BS.failed)}</span>`
+  : `<span class="okg">${bs(BS.done)}</span>`;
+const provWord = { you: "started by you", standing: "standing", intake: "from Intake" };
+
+/* ============ text helpers ============ */
+/* `*name*` -> live entity name; `code` -> code */
+const md = (s) => s.replace(/\*([^*]+)\*/g, "<b>$1</b>").replace(/`([^`]+)`/g, "<code>$1</code>");
+const plain = (s) => s.replace(/<[^>]+>/g, "").replace(/[*`]/g, "");
+const doLine = (a, withLabel = false) =>
+  `<span class="doline${a.nullop ? " nullop" : ""}"><span class="arrow">&rarr;</span><span>${withLabel ? `<span class="lbl">${a.label}</span> · ` : ""}${md(a.describe)}</span></span>`;
+const descEl = (a) => a.description ? `<span class="desc">${md(a.description)}</span>` : "";
+
+/* ============ the Focus card: head + fields shared, the answers area per variant ============ */
+function cardHead(dec) {
+  return `
+    <div class="qline">
+      ${dmarkEl}
+      <span class="q">${dec.q}</span>
+      <span class="kind">${dec.kind}</span>
+      <span class="age" data-age="${dec.bucket}">waiting ${dec.age}</span>
+    </div>
+    <div class="fields">
+      <span class="fl">from</span>
+      <span class="fv"><b>${dec.from.name}</b> ${entEl(dec.from.ent)}${dec.from.noun} ${priEl(dec.from.pri)}<span style="color:var(--faint)"> · ${provWord[dec.prov]}</span>${dec.producer ? `<span style="color:var(--faint)"> · proposed by ${dec.producer}</span>` : ""}</span>
+      <span class="fl">why</span>
+      <span class="fv">${dec.why}</span>
+      <span class="fl">agent</span>
+      <span class="fv">${dec.agent ? `${entEl("session")}${dec.agent.name} <span style="color:var(--faint)">· ${dec.agent.note}</span><a class="open" href="#">Open &rarr;</a>` : '<span class="none">–</span>'}</span>
+    </div>`;
+}
+const answerBtn = (a, i) => `<button class="qbtn ${a.primary ? "first" : ""}" data-ans="${i}" ${a.description ? `data-hasdesc="1"` : ""}>${a.label}</button>`;
+const primaryIdx = (dec) => Math.max(0, dec.answers.findIndex((a) => a.primary));
+
+/* A · Peek */
+function answersPeek(dec) {
+  const p = dec.answers[primaryIdx(dec)];
+  return `
+    <div class="answers peek" data-peek="1">
+      <div class="acts">${dec.answers.map(answerBtn).join("")}</div>
+      <div id="peekline">${doLine(p, true)}</div>
+      <div class="hovercard" id="hovercard"></div>
+    </div>`;
+}
+/* B · Ledger */
+function answersLedger(dec) {
+  return `
+    <div class="answers">
+      <div class="alist">${dec.answers.map((a, i) => `
+        <button class="arow ${a.primary ? "primary" : ""}" data-ans="${i}">
+          <span class="alabel">${a.label}</span>
+          <span class="atext">${descEl(a)}${doLine(a)}</span>
+        </button>`).join("")}
+      </div>
+    </div>`;
+}
+/* C · Commit */
+let commitIdx = null;
+function answersCommit(dec) {
+  if (commitIdx === null) {
+    return `
+      <div class="answers">
+        <div class="acts">${dec.answers.map(answerBtn).join("")}</div>
+        <div class="doline" style="visibility:hidden">&nbsp;</div>
+      </div>`;
+  }
+  const a = dec.answers[commitIdx];
+  return `
+    <div class="answers">
+      <div class="commit">
+        <div class="cl">${a.label}</div>
+        ${descEl(a)}
+        ${doLine(a)}
+        <div class="acts"><button class="qbtn first" data-confirm="1">Confirm</button><button class="qbtn" data-back="1">Back</button></div>
+      </div>
+    </div>`;
+}
+
+const VARIANTS = [
+  { key: "A", name: "Peek", answers: answersPeek,
+    note: "Quiet button row as pinned. One fine-print <b>describe line</b> under it, always visible, showing the <i>primary</i> answer until you hover or focus another - the line tracks the pointer, so what you read is what the click does. A producer <b>description</b>, when there is one, opens as a hover card over the button (delay 220ms). Card height fixed." },
+  { key: "B", name: "Ledger", answers: answersLedger,
+    note: "Every answer is a full row and the row is the button: label · description · describe. Nothing behind a hover; the whole decision reads top to bottom. Cost: the card grows with the answer count and the description length, so the focus-nav arrows move while cycling." },
+  { key: "C", name: "Commit", answers: answersCommit,
+    note: "Quiet button row as pinned, no fine print. Choosing an answer does not execute: the answer row turns into a commit step showing that answer's description and describe line with <b>Confirm</b> / <b>Back</b>. Two clicks per decision, the describe line is unmissable. Card height fixed." },
+];
+
+function focusCard(dec, v) {
+  return `<div class="dcard ${v.key === "B" ? "ledger" : ""}" data-pri="${dec.pri}">${cardHead(dec)}${v.answers(dec)}</div>`;
+}
+
+/* ============ the same decision in Discord (spec 12 §11.6) ============ */
+const dmd = (s) => s.replace(/\*([^*]+)\*/g, "<em>$1</em>").replace(/`([^`]+)`/g, "<code>$1</code>");
+function discordEl(dec, mode) {
+  const answers = mode === "full"
+    /* pinned in 12 §11.6: for each answer its label, description and describe line, then buttons (label only) */
+    ? dec.answers.map((a) => `
+        <div class="line"><b>${a.label}</b>${a.description ? ` - ${dmd(a.description)}` : ""}</div>
+        <div class="line sub">&nbsp;&nbsp;&nbsp;&rarr; ${dmd(a.describe)}</div>`).join("")
+    /* compact: one line per answer, label · describe; description only where the producer wrote one */
+    : dec.answers.map((a) => `
+        <div class="line sub"><b>${a.label}</b> &middot; ${dmd(a.describe)}${a.description ? `<br>&nbsp;&nbsp;&nbsp;<span style="color:#949ba4">${dmd(a.description)}</span>` : ""}</div>`).join("");
+  return `
+    <div class="discord">
+      <div class="av">H</div>
+      <div>
+        <div class="who"><b>Hydra</b><span class="tag">APP</span><span class="time">Today at 14:2${dec.age.length}</span></div>
+        <div class="msg">
+          <div class="line"><b>${dec.title}</b></div>
+          <div class="line">${dmd(dec.body)}</div>
+          <div class="line">&nbsp;</div>
+          ${answers}
+          <div class="btns">${dec.answers.map((a) => `<button class="btn ${a.primary ? "primary" : ""}">${a.label}</button>`).join("")}</div>
+          <div class="line sub" style="margin-top:6px"><span class="link">Open in Hydra</span> &middot; from ${dec.producer || (dec.agent ? "session " + plain(dec.from.name) : "core")}</div>
+        </div>
+      </div>
+    </div>`;
+}
+
+/* ============ strands, digest, rail ============ */
+function strandEl(s) {
+  return `
+  <div class="strand" data-pri="${s.pri || "normal"}">
+    <div class="row">
+      <span class="markcell">${markFor(s)}</span>
+      <span class="name">${s.name}</span>
+      ${s.pri ? priEl(s.pri) : ""}
+      <span class="sub">${s.sub}</span>
+      ${s.prog ? progEl(s.prog) : ""}
+      <span class="note"${s.tone ? ` data-tone="${s.tone}"` : ""}>${s.ask ? dmarkEl : ""}${s.note || ""}</span>
+      <span class="age" data-age="${s.bucket}">${s.age}</span>
+    </div>
+  </div>`;
+}
+function railEl() {
+  const plines = (arr) => arr.map((p) => `<div class="pline">${p.live ? '<span class="dot"></span>' : '<span class="idledot"></span>'}<span>${p.t}${p.warm ? ` <span class="warm">· ${p.warm}</span>` : ""}</span></div>`).join("");
+  return `
+    <div class="pblock"><div class="lane-label">Fleet</div>${plines(PULSE.fleet)}</div>
+    <div class="pblock"><div class="lane-label">Assistants</div>${plines(PULSE.assistants)}</div>
+    <div class="pblock"><div class="lane-label">Intake</div>${PULSE.intake.map((p) => `<div class="pline"><span>${p.t}</span></div>`).join("")}</div>
+    <div class="notes" id="vnote"></div>`;
+}
+function legendHtml() {
+  const row = (m, t) => `<div class="lrow"><span class="markcell">${m}</span><span>${t}</span></div>`;
+  return `<div class="lane-label">Marks</div>
+    ${row(eqEl, "agent working")}${row(dmarkEl, "decision wanted")}
+    ${row(`<span class="cang">${bs(BS.queued)}</span>`, "queued")}${row(`<span class="attn">${bs(BS.paused)}</span>`, "paused")}
+    ${row(`<span class="okg">${bs(BS.done)}</span>`, "done")}${row(`<span class="failg">${bs(BS.failed)}</span>`, "failed")}${row(`<span class="cang">${bs(BS.cancelled)}</span>`, "cancelled")}
+    <div class="lane-label" style="margin-top:8px">Kinds</div>
+    ${row(entEl("task"), "task")}${row(entEl("run"), "run")}${row(entEl("session"), "session")}${row(entEl("workflow"), "workflow")}
+    ${row(priEl("high"), "priority (bars fill up)")}${row(`<span class="age" data-age="old">7h</span>`, "waiting: darkens, then warms")}`;
+}
+const NAV = [["Intake", 7], ["Check-in", DECISIONS.length, true], ["Tasks", null, false, "task"], ["Sessions", null, false, "session"], ["Runs", null, false, "run"], ["Workflows", null, false, "workflow"], "sep", ["Fleet"], ["Connections"], ["Notifications", 5], ["Settings"]];
+document.getElementById("nav").innerHTML = NAV.map((n) => n === "sep" ? '<div class="sep"></div>'
+  : `<a href="#" class="${n[2] ? "on" : ""}">${n[3] ? entEl(n[3]) : ""}${n[0]}${n[1] != null ? `<span class="count">${n[1]}</span>` : ""}</a>`).join("");
+document.getElementById("marksicon").innerHTML = bs(BS.queued);
+document.getElementById("legendpop").innerHTML = legendHtml();
+
+/* ============ page ============ */
+let focusIdx = 0;
+function params() { return new URLSearchParams(location.search); }
+function get(k) { return params().get(k); }
+function setParam(k, v) { const p = params(); p.set(k, v); try { history.replaceState(null, "", "?" + p.toString()); } catch (e) {} }
+function current() { const k = (get("variant") || "A").toUpperCase(); const i = VARIANTS.findIndex((v) => v.key === k); return i === -1 ? 0 : i; }
+function chanMode() { return get("chan") === "compact" ? "compact" : "full"; }
+function show(i) { commitIdx = null; setParam("variant", VARIANTS[(i + VARIANTS.length) % VARIANTS.length].key); render(); }
+
+function render() {
+  const v = VARIANTS[current()];
+  const n = DECISIONS.length;
+  focusIdx = Math.min(focusIdx, n - 1);
+  const dec = DECISIONS[focusIdx];
+  const next = DECISIONS[focusIdx + 1];
+  const working = STRANDS.you.filter((s) => s.act === "working").length;
+  document.getElementById("stage").innerHTML = `
+  <div class="layout">
+    <div class="maincol">
+      <div class="headline"><b>${n}</b> decisions wait · <b>${working}</b> strands in motion · <b>6</b> outcomes today</div>
+      <section class="lane">
+        <div class="lane-label">Needs you <span class="n">${n}</span></div>
+        ${focusCard(dec, v)}
+        <div class="focusnav">
+          <button class="qbtn" data-fnav="-1" ${focusIdx === 0 ? "disabled" : ""}>&larr;</button>
+          <span class="ct">${focusIdx + 1} of ${n}</span>
+          <button class="qbtn" data-fnav="1" ${focusIdx === n - 1 ? "disabled" : ""}>&rarr;</button>
+          ${next ? `<span class="nextpeek">next: <b>${plain(next.q)}</b> · ${next.age}</span>` : ""}
+        </div>
+        <div class="chanlane">
+          <div class="lane-label">The same decision in Discord
+            <span class="sw2"><button data-chan="full" class="${chanMode() === "full" ? "on" : ""}">full</button><button data-chan="compact" class="${chanMode() === "compact" ? "on" : ""}">compact</button></span>
+          </div>
+          ${discordEl(dec, chanMode())}
+          <div class="channote">${chanMode() === "full"
+            ? "<b>full</b> is what spec 12 §11.6 pins today: title, body, then per answer its label, description and describe line, then label-only buttons."
+            : "<b>compact</b>: one line per answer, label · describe; the description only where the producer wrote one. Buttons unchanged."}</div>
+        </div>
+      </section>
+      <section class="lane">
+        <div class="lane-label" style="margin-bottom:10px">In motion</div>
+        <div class="tier"><div class="lane-label">Started by you <span class="n">${STRANDS.you.length}</span></div>${STRANDS.you.map(strandEl).join("")}</div>
+        <div class="tier"><div class="lane-label">Triggered by events <span class="n">${STRANDS.events.length}</span></div>${STRANDS.events.map(strandEl).join("")}</div>
+        <div class="tier"><div class="lane-label">On a schedule <span class="n">${STRANDS.schedule.length}</span></div>${STRANDS.schedule.map(strandEl).join("")}</div>
+      </section>
+      <section class="lane">
+        <div class="digestline"><span class="chev">▸</span><span><b>6</b> outcomes today · <span class="okg">✓</span> 5 · – 1</span></div>
+      </section>
+    </div>
+    <aside class="rail">${railEl()}</aside>
+  </div>`;
+  document.getElementById("vnote").innerHTML = `<b>${v.key} · ${v.name}</b><br>${v.note}`;
+  document.getElementById("swlabel").textContent = v.key + " · " + v.name;
+}
+
+/* ---- A: hover / focus tracking ---- */
+let hoverTimer = null;
+function peekTo(btn) {
+  const dec = DECISIONS[focusIdx];
+  const line = document.getElementById("peekline");
+  const hc = document.getElementById("hovercard");
+  if (!line) return;
+  document.querySelectorAll(".peek .qbtn.hot").forEach((b) => b.classList.remove("hot"));
+  clearTimeout(hoverTimer);
+  if (!btn) {
+    line.innerHTML = doLine(dec.answers[primaryIdx(dec)], true);
+    hc.classList.remove("show");
+    return;
+  }
+  const a = dec.answers[+btn.dataset.ans];
+  btn.classList.add("hot");
+  line.innerHTML = doLine(a, true);
+  if (a.description) {
+    hoverTimer = setTimeout(() => {
+      hc.innerHTML = `<span class="hl">${a.label}</span>${descEl(a)}`;
+      hc.style.left = Math.max(0, btn.offsetLeft) + "px";
+      hc.classList.add("show");
+    }, 220);
+  } else hc.classList.remove("show");
+}
+const stage = document.getElementById("stage");
+stage.addEventListener("mouseover", (e) => { const b = e.target.closest(".peek .qbtn[data-ans]"); if (b) peekTo(b); });
+stage.addEventListener("mouseout", (e) => { if (e.target.closest(".peek .qbtn[data-ans]") && !e.relatedTarget?.closest?.(".peek .qbtn[data-ans]")) peekTo(null); });
+stage.addEventListener("focusin", (e) => { const b = e.target.closest(".peek .qbtn[data-ans]"); if (b) peekTo(b); });
+stage.addEventListener("focusout", (e) => { if (e.target.closest(".peek .qbtn[data-ans]")) peekTo(null); });
+
+stage.addEventListener("click", (e) => {
+  const fnav = e.target.closest("[data-fnav]");
+  if (fnav && !fnav.disabled) { focusIdx += +fnav.dataset.fnav; commitIdx = null; render(); return; }
+  const chan = e.target.closest("[data-chan]");
+  if (chan) { setParam("chan", chan.dataset.chan); render(); return; }
+  if (VARIANTS[current()].key === "C") {
+    const ans = e.target.closest("[data-ans]");
+    if (ans) { commitIdx = +ans.dataset.ans; render(); return; }
+    if (e.target.closest("[data-back]")) { commitIdx = null; render(); return; }
+    if (e.target.closest("[data-confirm]")) { commitIdx = null; return; } /* fake: nothing executes */
+  }
+  if (e.target.closest("a")) e.preventDefault();
+});
+
+/* marks legend toggle (sidebar foot, fly-out popover) */
+const marksbtn = document.getElementById("marksbtn"), legendpop = document.getElementById("legendpop");
+function toggleLegend(force) {
+  const open = force !== undefined ? force : !legendpop.classList.contains("open");
+  legendpop.classList.toggle("open", open); marksbtn.setAttribute("aria-expanded", String(open));
+}
+marksbtn.addEventListener("click", (e) => { if (!e.target.closest(".legendpop")) toggleLegend(); });
+document.addEventListener("click", (e) => { if (!e.target.closest("#marksbtn")) toggleLegend(false); });
+
+function toggleTheme() {
+  const root = document.documentElement;
+  const dark = root.dataset.theme === "dark" || (!root.dataset.theme && matchMedia("(prefers-color-scheme: dark)").matches);
+  root.dataset.theme = dark ? "light" : "dark";
+}
+document.getElementById("prev").addEventListener("click", () => show(current() - 1));
+document.getElementById("next").addEventListener("click", () => show(current() + 1));
+document.getElementById("theme").addEventListener("click", toggleTheme);
+document.addEventListener("keydown", (e) => {
+  const t = e.target;
+  if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
+  if (e.key === "ArrowLeft") show(current() - 1);
+  if (e.key === "ArrowRight") show(current() + 1);
+  if (e.key === "c") { setParam("chan", chanMode() === "full" ? "compact" : "full"); render(); }
+  if (e.key === "t") toggleTheme();
+  if (e.key === "?") toggleLegend();
+  if (e.key === "Escape") toggleLegend(false);
+});
+render();
+</script>
