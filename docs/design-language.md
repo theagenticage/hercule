@@ -235,6 +235,16 @@ card's height follows its answers ("uniform-height" above is withdrawn); the arr
 below the card. Chat sinks use the same hierarchy: "label · describe", description as
 subtext. Owner: spec 14 §The check-in view, spec 12 §11.6.
 
+Amended 2026-09-01 by ticket #51 (Prototype: the app shell and navigation): the **app shell** is one
+sidebar with two faces behind a segmented switch (Threads: the t3-code list; Hydra: the orchestration
+nav), thread rows at the **meta** density (a second faint mono line), the **pulse** as one summary line
+at the sidebar foot above Marks that expands on click, a Codex / t3-shaped thread surface with
+"Worked for" dividers and docked permission requests, and the **composer as the thread's
+configuration**: every selector opens a menu anchored above it, and whatever cannot be picked is
+**dimmed with the reason, never hidden**. The t3-code selector clone (brand orange, yellow stars, a blue
+focus rule) was built as the record and rejected under the color doctrine; provider marks, if ever
+shown, are monochrome. Owner: spec 14 §App shell.
+
 ## Provenance
 
 Three reaction rounds on the identical #20 check-in slice (enriched with #29 Task nouns).
