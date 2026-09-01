@@ -39,6 +39,20 @@
     - new-thread layout ?hero=bottom|center (key h).
     - permission requests dock onto the input (same place always), in every input variant.
     - "Worked for Xs ›" collapses the tool calls (click expands); the live one shimmers.
+  Round 4 (reaction to round 3: model, reasoning strength and runner selectors were missing):
+    - every selector on the input opens a menu (one popover, anchored above the control, the same in
+      all three input variants): runner (the placement pick: each machine's state, capacity and the
+      provider logins it holds; a machine without the current login is dimmed with the reason), model
+      (grouped per provider instance = one login, identity and plan under the heading; models not logged
+      in on the picked runner are dimmed; Custom model… at the foot; switching runner shows "probing …"
+      while that machine's snapshot refreshes), access mode (auto dimmed on pi with its fallback),
+      permission profile.
+    - reasoning strength: ?effort=own|nested (key e) - its own selector in the control row (default),
+      or a segmented row inside the model menu (the Codex shape), the model label then carrying it.
+      Context window and fast mode sit in the model menu's options block either way; pi shows thinking
+      off/on instead of effort - the well-known option ids of spec 06 differ per provider.
+    - picks live in memory: new-thread picks start the thread with them; on a started thread runner and
+      profile are locked, model / reasoning / access mode stay live.
   Ambient signals (pulse): ?pulse=top|foot|none (key p). Default: A top bar, B/C sidebar foot.
   Data: ?data=busy|fresh (key d). fresh = first run; ?li=1 = a provider login has happened (key l).
   Keys: ← → shell · s stack (C) · r rows · i input · h hero · m mode (B) · d data · l login · p pulse · t theme · ? Marks · Esc.
@@ -356,6 +370,47 @@
   .composer .ctl { display: flex; align-items: center; gap: 1px; font-size: 12px; color: var(--faint); }
   .composer .ctl .send { margin-left: auto; }
   .composer .ctl .send .qbtn { padding: 5px 10px; }
+  /* round 4: the selectors open menus - one popover, anchored above the control it belongs to */
+  .sel[aria-expanded="true"] { background: var(--line-soft); color: var(--ink); }
+  .c-cx .mpill[aria-expanded="true"] { border-color: var(--faint); }
+  .pop { position: fixed; z-index: 35; width: 320px; overflow: auto; background: var(--raised); border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--lift-shadow); padding: 6px; display: none; flex-direction: column; font-size: 12.5px; }
+  .pop.open { display: flex; }
+  .pop .ph { display: flex; align-items: baseline; gap: 8px; padding: 6px 8px 5px; }
+  .pop .ph .r { margin-left: auto; font-family: var(--mono); font-size: 10.5px; color: var(--faint); white-space: nowrap; }
+  .pop .pi { display: grid; grid-template-columns: 10px minmax(0, 1fr) auto; gap: 0 8px; align-items: center; padding: 5px 8px; border-radius: 6px; cursor: pointer; color: var(--muted); text-align: left; border: 0; background: none; font: inherit; width: 100%; }
+  .pop .pi:hover { background: var(--line-soft); color: var(--ink); }
+  .pop .pi.on { color: var(--ink); font-weight: var(--w-emph); }
+  .pop .pi .dot { width: 5px; height: 5px; border-radius: 50%; background: transparent; justify-self: center; }
+  .pop .pi.on .dot { background: var(--ink); }
+  .pop .pi .n { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .pop .pi .n .mono { font-size: 11.5px; }
+  .pop .pi .st { font-size: 11px; white-space: nowrap; font-weight: 400; }
+  .pop .pi .s { grid-column: 2 / 4; font-size: 11px; color: var(--faint); font-weight: 400; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .pop .pi.dim { opacity: 0.55; cursor: default; } .pop .pi.dim:hover { background: none; color: var(--muted); }
+  .pop .pg { margin-top: 6px; padding: 7px 8px 3px; display: flex; align-items: baseline; gap: 8px; border-top: 1px solid var(--line-soft); }
+  .pop .ph + .pg { border-top: 0; margin-top: 0; padding-top: 2px; }
+  .pop .pg b { font-size: 12px; color: var(--ink); white-space: nowrap; }
+  .pop .pg small { font-size: 11px; color: var(--faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .pop .pg .st { margin-left: auto; font-size: 11px; color: var(--faint); white-space: nowrap; }
+  .pop .pg .st a { color: var(--muted); cursor: pointer; }
+  .pop .pg.custom { align-items: center; gap: 6px; }
+  .pop .pi:has(.cust) { margin-top: 4px; border-top: 1px solid var(--line-soft); border-radius: 0 0 6px 6px; padding-top: 8px; }
+  .pop .pi.grp { margin-top: 4px; border-top: 1px solid var(--line-soft); border-radius: 0 0 6px 6px; padding-top: 8px; }
+  .pop .pi.grp b { color: var(--muted); } .pop .pi.grp:hover b { color: var(--ink); }
+  .pop .pi.grp small { font-size: 11px; color: var(--faint); font-weight: 400; }
+  .pop .pi.grp .n { display: flex; gap: 6px; align-items: baseline; min-width: 0; }
+  .pop .pi.grp .n b { flex: none; }
+  .pop .pi.grp .n small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pop .pi.grp .st a { color: var(--muted); cursor: pointer; }
+  .pop .cin { font: 12px var(--mono); border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; background: var(--surface); color: var(--ink); flex: 1; min-width: 0; }
+  .pop .opts { border-top: 1px solid var(--line-soft); margin-top: 6px; padding: 8px 8px 4px; display: grid; grid-template-columns: 68px minmax(0, 1fr); gap: 5px 10px; align-items: center; }
+  .pop .opts .ol { font-size: 10px; text-transform: uppercase; letter-spacing: 0.09em; color: var(--faint); font-weight: var(--w-emph); }
+  .segq { display: inline-flex; gap: 1px; flex-wrap: wrap; }
+  .segq button { border: 0; background: none; font: inherit; font-size: 12px; color: var(--muted); padding: 3px 8px; border-radius: 5px; cursor: pointer; }
+  .segq button:hover { background: var(--line-soft); color: var(--ink); }
+  .segq button.on { color: var(--ink); font-weight: var(--w-emph); background: var(--line-soft); }
+  .pop .foot { border-top: 1px solid var(--line-soft); margin-top: 6px; padding: 7px 8px 3px; font-size: 11.5px; color: var(--faint); line-height: 1.45; }
+  .pop .foot a { color: var(--muted); cursor: pointer; }
   /* worked-for lines with collapsible tool calls; the live one shimmers */
   .worked .wt { flex: none; }
   .worked .chev { flex: none; display: inline-block; transition: transform .15s; margin-left: -6px; }
@@ -435,7 +490,8 @@
   </main>
 </div>
 <div class="legend" id="legend" role="dialog" aria-label="Marks legend"></div>
-<div class="proto-badge">PROTOTYPE · throwaway · hydra#51 · round 3<br>&larr; &rarr; shell · s stack · r rows · i input · h hero · m mode · d data · l login · p pulse · t theme · ? marks</div>
+<div class="pop" id="pop" role="dialog"></div>
+<div class="proto-badge">PROTOTYPE · throwaway · hydra#51 · round 4<br>&larr; &rarr; shell · s stack · r rows · i input · e effort · h hero · m mode · d data · l login · p pulse · t theme · ? marks</div>
 <div class="sw">
   <button id="prev" aria-label="Previous shell">&larr;</button>
   <span class="label" id="swlabel"></span>
@@ -443,6 +499,7 @@
   <button id="sbtn" class="ds"></button>
   <button id="rbtn" class="ds"></button>
   <button id="ibtn" class="ds"></button>
+  <button id="ebtn" class="ds"></button>
   <button id="hbtn" class="ds"></button>
   <button id="mbtn" class="ds"></button>
   <button id="dbtn" class="ds"></button>
@@ -474,6 +531,7 @@ function stack() { const s = get("stack"); return STACKS.includes(s) ? s : "comp
 const INPUTS = ["hydra", "t3", "codex"];
 function input() { const i = get("input"); return INPUTS.includes(i) ? i : "hydra"; }
 function hero() { return get("hero") === "center" ? "center" : "bottom"; }
+function effortPlace() { return get("effort") === "nested" ? "nested" : "own"; }
 const ROWS = ["plain", "meta", "rich"];
 function rows() { const r = get("rows"); return ROWS.includes(r) ? r : "plain"; }
 const SCREENS = ["sessions", "intake", "checkin", "tasks", "runs", "workflows", "fleet", "connections", "notifications", "settings"];
@@ -515,13 +573,13 @@ const BUSY = {
   projects: [
     { key: "hydra", name: "hydra", threads: [
       { id: "a1f3c9e2", title: "Fix flaky webhook tests", state: "working", age: "12m", ws: "main checkout", branch: "main", provider: "Claude Code", model: "claude-sonnet-5", changes: "+48 −12", files: 3 },
-      { id: "b7d02e41", title: "Runner drain command", state: "decision", age: "4m", ws: "worktree", branch: "hydra/run-3f1", provider: "Claude Code", model: "claude-sonnet-5", changes: "+210 −8", files: 6 },
+      { id: "b7d02e41", title: "Runner drain command", state: "decision", age: "4m", ws: "worktree", branch: "hydra/run-3f1", provider: "Claude Code", model: "claude-sonnet-5", runner: "hetzner-01", changes: "+210 −8", files: 6 },
       { id: "c9e8a110", title: "Tidy the promotion runbook", state: "idle", age: "2h", ws: "no workspace", branch: "", provider: "Claude Code", model: "claude-sonnet-5" },
-      { id: "d4b1f77a", title: "Bun compile: notarization spike", state: "done", age: "yesterday", ws: "worktree", branch: "spike/bun-notarize", pr: "#98", provider: "Claude Code", model: "claude-opus-5", changes: "+48 −12", files: 3 },
+      { id: "d4b1f77a", title: "Bun compile: notarization spike", state: "done", age: "yesterday", ws: "worktree", branch: "spike/bun-notarize", pr: "#98", provider: "Claude Code", model: "claude-opus-5", runner: "macstudio-01", changes: "+48 −12", files: 3 },
     ] },
     { key: "ops", name: "ops", threads: [
-      { id: "e2c7d905", title: "Rotate the Hetzner backups key", state: "idle", age: "3d", ws: "main checkout", branch: "main", provider: "Codex", model: "gpt-5.6" },
-      { id: "f0a3b6c8", title: "Why is the tailnet cert renewal failing", state: "failed", age: "5d", ws: "no workspace", branch: "", provider: "Claude Code", model: "claude-sonnet-5" },
+      { id: "e2c7d905", title: "Rotate the Hetzner backups key", state: "idle", age: "3d", ws: "main checkout", branch: "main", provider: "Codex", model: "gpt-5.6", runner: "hetzner-02" },
+      { id: "f0a3b6c8", title: "Why is the tailnet cert renewal failing", state: "failed", age: "5d", ws: "no workspace", branch: "", provider: "Claude Code", model: "claude-sonnet-5", runner: "macstudio-02" },
     ] },
   ],
   assistants: [
@@ -557,6 +615,157 @@ function projectsWithStarted() {
 }
 function allThreads() { return projectsWithStarted().flatMap((p) => p.threads.map((t) => ({ ...t, project: p.key === "none" ? "" : p.key }))); }
 function findThread(id) { return allThreads().find((t) => t.id === id); }
+
+/* ============ round 4: what the composer's selectors choose from ============ */
+// One Capability Snapshot per (instance x runner), spec 06 §3: a runner's logins say which instances can
+// place there, the instance's catalog says which models, the model says which options. All static here.
+const CLAUDE_MODELS = [
+  { id: "claude-fable-5-1", effort: ["low", "medium", "high", "max"], ctx: ["200k", "1M"] },
+  { id: "claude-opus-5", effort: ["low", "medium", "high", "max"], ctx: ["200k", "1M"], fast: true },
+  { id: "claude-sonnet-5", effort: ["low", "medium", "high"], ctx: ["200k", "1M"] },
+  { id: "claude-haiku-4-5", effort: ["low", "medium", "high"], ctx: ["200k"] },
+];
+const CODEX_MODELS = [
+  { id: "gpt-5.6", effort: ["low", "medium", "high", "xhigh"] },
+  { id: "gpt-5.6-codex", effort: ["low", "medium", "high", "xhigh"] },
+  { id: "gpt-5.5-codex-mini", effort: ["medium", "high"] },
+];
+const INSTANCES_BUSY = [
+  { id: "cc-personal", provider: "Claude Code", name: "personal", who: "rogier@… · Max plan", models: CLAUDE_MODELS },
+  { id: "cc-work", provider: "Claude Code", name: "work", who: "rogier@acme… · Team", models: CLAUDE_MODELS },
+  { id: "codex", provider: "Codex", name: "", who: "ChatGPT Plus", models: CODEX_MODELS },
+  { id: "pi-zai", provider: "pi", name: "zai", who: "API key", noAuto: true, models: [{ id: "glm-5", thinking: ["off", "on"] }, { id: "glm-4.7", thinking: ["off", "on"] }] },
+];
+const INSTANCES_FRESH = [
+  { id: "cc-personal", provider: "Claude Code", name: "", who: "rogier@… · Max plan", models: CLAUDE_MODELS },
+  { id: "codex", provider: "Codex", name: "", who: "on this machine", models: CODEX_MODELS },
+];
+const RUNNERS_BUSY = [
+  { id: "laptop", local: true, os: "macOS", cap: "1/2", note: "this machine · reserved", st: "online", tone: "live", logins: ["cc-personal", "cc-work", "codex", "pi-zai"] },
+  { id: "macstudio-01", os: "macOS", cap: "3/4", note: "default", st: "online", tone: "live", logins: ["cc-personal", "codex"] },
+  { id: "hetzner-01", os: "linux", cap: "4/4", note: "queue 2", st: "at cap · would queue", tone: "attn", logins: ["cc-personal"] },
+  { id: "hetzner-02", os: "linux", cap: "1/6", note: "", st: "online", tone: "live", logins: ["codex", "pi-zai"] },
+  { id: "macstudio-02", os: "macOS", cap: "1/4", note: "", st: "draining", tone: "", off: "draining · takes no new sessions", logins: ["cc-personal", "codex"] },
+  { id: "pi-lab", os: "linux", cap: "0/2", note: "", st: "unreachable 2d", tone: "fail", off: "unreachable · a thread would wait for it", logins: ["pi-zai"] },
+];
+function runners() { return fresh() ? [{ id: "local", local: true, label: "this machine", os: "macOS", cap: "0/4", note: "", st: "online", tone: "live", logins: loggedIn() ? ["cc-personal"] : [] }] : RUNNERS_BUSY; }
+function instances() { return fresh() ? INSTANCES_FRESH : INSTANCES_BUSY; }
+function inst(id) { return instances().find((i) => i.id === id) || instances()[0]; }
+const instLabel = (i) => i.provider + (i.name ? ` · ${i.name}` : "");
+const instParen = (i) => i.provider + (i.name ? ` (${i.name})` : "");
+/* what the composer has picked. New-thread mode edits PICK; a started thread edits LIVE[id] (the locked
+   fields never get there). In memory only. */
+const PICK = { runner: "laptop", instance: "cc-personal", model: "claude-sonnet-5", effort: "medium", thinking: "off", ctx: "200k", fast: "off", access: "approval-required", profile: "unrestricted" };
+const LIVE = {};
+let PROBING = null;
+function cfg(t) {
+  if (!t) return PICK;
+  const i = instances().find((x) => x.provider === t.provider) || instances()[0];
+  return Object.assign({ runner: t.runner || "laptop", instance: i.id, model: t.model, effort: "medium", thinking: "off", ctx: "200k", fast: "off", access: "approval-required", profile: "unrestricted" }, LIVE[t.id] || {});
+}
+function setCfg(t, patch) { if (t) LIVE[t.id] = Object.assign({}, LIVE[t.id] || {}, patch); else Object.assign(PICK, patch); }
+function modelOf(c) { return inst(c.instance).models.find((m) => m.id === c.model) || { id: c.model, custom: true }; }
+function runnerOf(c) { return runners().find((r) => r.id === c.runner) || runners()[0]; }
+function reasoningOf(c) { const m = modelOf(c); if (m.thinking) return ["thinking", c.thinking]; if (m.effort) return ["reasoning", c.effort]; return null; }
+function runnerLabel(c) { const r = runnerOf(c); return r.local ? `local · ${r.label || r.id}` : r.id; }
+function modelLabel(c) {
+  let v = `${instLabel(inst(c.instance))} · ${c.model}`;
+  const r = reasoningOf(c);
+  if (effortPlace() === "nested" && r) v += ` · ${r[0] === "thinking" ? `thinking ${r[1]}` : r[1]}`;
+  if (PROBING) v += ` <span class="k">· probing ${PROBING}…</span>`;
+  return v;
+}
+function reasoningSel(c) { const r = reasoningOf(c); if (effortPlace() !== "own" || !r) return ""; return sel(r[0], r[1], false, "effort"); }
+
+/* the one popover behind the composer's selectors */
+let POP = null; let CUSTOM = false;
+function curThread() { const id = threadId(); return id && id !== "new" ? findThread(id) : null; }
+function popHtml(kind, t) {
+  const c = cfg(t); const r = runnerOf(c); const i = inst(c.instance); const m = modelOf(c);
+  const row = (on, dim, pick, val, name, st = "", sub = "") => `<button class="pi ${on ? "on" : ""} ${dim ? "dim" : ""}" ${dim ? "" : `data-pick="${pick}" data-val="${val}"`}><span class="dot"></span><span class="n">${name}</span><span class="st">${st}</span>${sub ? `<span class="s">${sub}</span>` : ""}</button>`;
+  if (kind === "runner") {
+    const rows = runners().map((x) => {
+      const off = x.off || (x.logins.includes(i.id) ? "" : `no ${instParen(i)} login here`);
+      const byProv = {}; x.logins.forEach((id) => { const q = inst(id); (byProv[q.provider] = byProv[q.provider] || []).push(q.name); });
+      const there = Object.entries(byProv).map(([pv, ns]) => pv + (ns.filter(Boolean).length > 1 ? ` (${ns.join(", ")})` : "")).join(" · ") || "no provider logged in";
+      return row(x.id === r.id, !!off, "runner", x.id, x.local ? `local · ${x.label || x.id}` : x.id, `<span class="state ${x.tone}">${x.st}</span> <span class="mono" style="color:var(--faint)">${x.cap}</span>`, [x.note, off || there].filter(Boolean).join(" · "));
+    }).join("");
+    return `<div class="ph"><span class="lane-label">Runner</span><span class="r">locks when the thread starts</span></div>${rows}<div class="foot">The thread runs where you say; nothing moves it later. <a data-go="fleet" style="white-space:nowrap">Add machine →</a></div>`;
+  }
+  if (kind === "model") {
+    let h = `<div class="ph"><span class="lane-label">Model</span><span class="r">${PROBING ? `probing ${PROBING}…` : `on ${r.local ? "this machine" : r.id} · probed 2h ago`}</span></div>`;
+    for (const x of instances()) {
+      const here = r.logins.includes(x.id);
+      const why = here ? "" : (fresh() ? `found, not logged in · <a data-login="${x.provider}">Log in</a>` : `not logged in on ${r.id}`);
+      if (x.id === i.id) {
+        h += `<div class="pg"><b>${instLabel(x)}</b><small>${x.who}</small>${why ? `<span class="st">${why}</span>` : ""}</div>`;
+        h += x.models.map((mm) => row(c.model === mm.id, !here, "model", `${x.id}/${mm.id}`, `<span class="mono">${mm.id}</span>`)).join("");
+      } else {
+        h += `<button class="pi grp ${here ? "" : "dim"}" ${here ? `data-pick="instance" data-val="${x.id}"` : ""}><span class="dot"></span><span class="n"><b>${instLabel(x)}</b> <small>${x.who}</small></span><span class="st"><span style="color:var(--faint)">${why || `${x.models.length} models ›`}</span></span></button>`;
+      }
+    }
+    h += CUSTOM ? `<div class="pg custom"><input id="custom" class="cin" placeholder="model slug, as the harness names it" aria-label="custom model"><button class="qbtn first" data-pick="custom-go">Use</button></div>`
+                : row(m.custom, false, "custom", "", `<span style="color:var(--faint)" class="cust">${m.custom ? `<span class="mono">${m.id}</span> · custom` : "Custom model…"}</span>`);
+    const opts = optionRows(c, m, effortPlace() === "nested");
+    if (opts) h += `<div class="opts">${opts}</div>`;
+    return h;
+  }
+  if (kind === "effort") {
+    if (!reasoningOf(c)) return "";
+    const vals = m.thinking || m.effort; const key = m.thinking ? "thinking" : "effort";
+    const desc = { minimal: "almost none", low: "quick and cheap", medium: "the default", high: "thinks longer", xhigh: "longest · hard problems", max: "everything the model has", off: "answers directly", on: "reasons before answering" };
+    return `<div class="ph"><span class="lane-label">${key === "thinking" ? "Thinking" : "Reasoning"}</span><span class="r">per model · ${m.id}</span></div>` + vals.map((v) => row(c[key] === v, false, key, v, v, `<span style="color:var(--faint)">${desc[v] || ""}</span>`)).join("");
+  }
+  if (kind === "access") {
+    const modes = [["approval-required", "asks for every side-effecting action"], ["auto-accept-edits", "edits files freely, asks for the rest"], ["auto", "a harness-side reviewer judges routine actions"], ["full-access", "allows everything"]];
+    return `<div class="ph"><span class="lane-label">Access mode</span><span class="r">applies from the next turn</span></div>` + modes.map(([v, d]) => { const un = v === "auto" && i.noAuto; return row(c.access === v, un, "access", v, v, "", un ? `unsupported on ${i.provider} · falls back to auto-accept-edits` : d); }).join("");
+  }
+  if (kind === "profile") {
+    const ps = [["unrestricted", "everything you can do"], ["worker", "acts inside its task: tasks, notifications, subscriptions"], ["assistant", "reads and proposes; spawns and steers sessions"]];
+    return `<div class="ph"><span class="lane-label">Permission profile</span><span class="r">what it may do through Hydra</span></div>` + ps.map(([v, d]) => row(c.profile === v, false, "profile", v, v, "", d)).join("");
+  }
+  return "";
+}
+function optionRows(c, m, withReasoning) {
+  const seg = (key, vals, cur) => `<span class="segq">${vals.map((v) => `<button class="${v === cur ? "on" : ""}" data-pick="${key}" data-val="${v}">${v}</button>`).join("")}</span>`;
+  let h = "";
+  if (withReasoning && m.effort) h += `<span class="ol">reasoning</span>${seg("effort", m.effort, c.effort)}`;
+  if (withReasoning && m.thinking) h += `<span class="ol">thinking</span>${seg("thinking", m.thinking, c.thinking)}`;
+  if (m.ctx && m.ctx.length > 1) h += `<span class="ol">context</span>${seg("ctx", m.ctx, c.ctx)}`;
+  if (m.fast) h += `<span class="ol">fast mode</span>${seg("fast", ["off", "on"], c.fast)}`;
+  return h;
+}
+function openPop(kind) { POP = POP && POP.kind === kind ? null : { kind }; CUSTOM = false; render(); }
+function closePop() { if (POP) { POP = null; CUSTOM = false; render(); } }
+function placePop() {
+  const pop = document.getElementById("pop");
+  const anchor = POP && document.querySelector(`[data-pop="${POP.kind}"]`);
+  if (!anchor) { pop.classList.remove("open"); POP = null; return; }
+  pop.innerHTML = popHtml(POP.kind, curThread()); pop.classList.add("open"); anchor.setAttribute("aria-expanded", "true");
+  const a = anchor.getBoundingClientRect(); pop.style.width = POP.kind === "runner" ? "400px" : "320px"; pop.style.maxHeight = `${a.top - 16}px`; const w = pop.offsetWidth;
+  pop.style.left = `${Math.max(8, Math.min(a.left, innerWidth - w - 8))}px`; pop.style.bottom = `${innerHeight - a.top + 6}px`;
+  const ci = document.getElementById("custom"); if (ci) ci.focus();
+}
+function pick(key, val) {
+  const t = curThread();
+  if (key === "runner") { setCfg(t, { runner: val }); PROBING = val; POP = null; setTimeout(() => { PROBING = null; render(); }, 1100); return render(); }
+  if (key === "model" || key === "instance") {
+    const c = cfg(t);
+    const [ins, mid] = key === "model" ? val.split("/") : [val, (inst(val).models.find((x) => x.id === c.model) || inst(val).models[0]).id];
+    const nm = inst(ins).models.find((x) => x.id === mid) || {}; const p = { instance: ins, model: mid };
+    if (nm.effort && !nm.effort.includes(c.effort)) p.effort = nm.effort.includes("medium") ? "medium" : nm.effort[0];
+    if (nm.ctx && !nm.ctx.includes(c.ctx)) p.ctx = nm.ctx[0];
+    setCfg(t, p); if (key === "model" && effortPlace() !== "nested") POP = null; return render();
+  }
+  if (key === "custom") { CUSTOM = true; return render(); }
+  if (key === "custom-go") { const v = (document.getElementById("custom") || {}).value; if (v && v.trim()) setCfg(t, { model: v.trim() }); CUSTOM = false; POP = null; return render(); }
+  setCfg(t, { [key]: val });
+  if (key === "access" || key === "profile" || (POP && POP.kind === "effort")) POP = null;
+  render();
+}
+/* what is typed survives the re-renders the menus cause */
+const DRAFTS = {};
+const esc = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;");
 
 /* ============ shell pieces ============ */
 const NAV_ALL = [["sessions", "session"], ["intake"], ["checkin"], ["tasks", "task"], ["runs", "run"], ["workflows", "workflow"], "sep", ["fleet"], ["connections"], ["notifications"], ["settings"]];
@@ -692,7 +901,7 @@ function readyGuidance() {
 }
 
 /* --- Sessions: the thread surface --- */
-function sel(k, v, ro = false) { return `<button class="sel ${ro ? "ro" : ""}" ${ro ? 'title="fixed once the thread has started"' : ""}>${k ? `<span class="k">${k}</span>` : ""}<span class="v">${v}</span></button>`; }
+function sel(k, v, ro = false, pop = "") { return `<button class="sel ${ro ? "ro" : ""}" ${ro ? 'title="fixed once the thread has started"' : (pop ? `data-pop="${pop}"` : "")}>${k ? `<span class="k">${k}</span>` : ""}<span class="v">${v}</span></button>`; }
 function strip(t) {
   // the thread's configuration, where you type. Read-only once started (t given), live in new-thread mode.
   const ro = !!t;
@@ -702,8 +911,8 @@ function strip(t) {
   const parts = [sel("workspace", ws, ro)];
   if (co) parts.push(sel("checkout", co, ro));
   if (br) parts.push(sel("", `<span class="mono" style="font-size:11px">${br}</span>`, ro));
-  parts.push(sel("runner", "local", ro));
-  parts.push(sel("profile", "unrestricted", ro));
+  parts.push(sel("runner", runnerLabel(cfg(t)), ro, "runner"));
+  parts.push(sel("profile", cfg(t).profile, ro, "profile"));
   return `<div class="strip">${parts.join('<span class="sepv"></span>')}</div>`;
 }
 function stripParts(t) {
@@ -714,25 +923,31 @@ function stripParts(t) {
   return { ro, ws, co, br: br ? `<span class="mono" style="font-size:11px">${br}</span>` : null };
 }
 function composer(t, placeholder = "Reply…", dock = "") {
-  const prov = t ? t.provider : "Claude Code"; const model = t ? t.model : "claude-sonnet-5";
+  const c = cfg(t);
   const send = t ? "reply" : "start"; const sendLabel = t ? "Send ⏎" : "Start thread ⏎";
   const { ro, ws, co, br } = stripParts(t);
   const kind = input();
+  const ta = `<textarea id="compose" placeholder="${placeholder}" rows="2">${esc(DRAFTS[t ? t.id : "new"] || "")}</textarea>`;
+  const modelSel = sel("", modelLabel(c), false, "model");
+  const rs = reasoningSel(c); const rsSep = rs ? `<span class="sepv"></span>${rs}` : "";
+  const accessSel = sel("", c.access, false, "access");
   let body;
   if (kind === "t3") {
-    const lip = [sel("", ws, ro), co ? sel("", co, ro) : "", ].filter(Boolean).join('<span class="sepv"></span>');
-    const right = [br ? sel("", br, ro) : "", sel("", "local", ro)].filter(Boolean).join('<span class="sepv"></span>');
-    body = `<div class="c-t3"><textarea id="compose" placeholder="${placeholder}" rows="2"></textarea>
-      <div class="row3">${sel("", `${prov} · ${model}`)}<span class="sepv"></span>${sel("", "medium · 200k")}<span class="sepv"></span>${sel("", "approval-required")}
+    const lip = [sel("", ws, ro), co ? sel("", co, ro) : ""].filter(Boolean).join('<span class="sepv"></span>');
+    const right = [br ? sel("", br, ro) : "", sel("", runnerLabel(c), ro, "runner")].filter(Boolean).join('<span class="sepv"></span>');
+    body = `<div class="c-t3">${ta}
+      <div class="row3">${modelSel}${rsSep}<span class="sepv"></span>${accessSel}
         <span class="right"><button class="qbtn" style="padding:4px 6px">Attach</button><button class="sendc" data-send="${send}" aria-label="${sendLabel}">↑</button></span></div></div>
       <div class="lip">${lip}<span class="right">${right}</span></div>`;
   } else if (kind === "codex") {
-    const tabs = [sel("", ws, ro), co ? sel("", co, ro) : "", br ? sel("", br, ro) : "", sel("runner", "local", ro), sel("profile", "unrestricted", ro)].filter(Boolean).join("");
-    body = `<div class="c-cx-tabs">${tabs}</div><div class="c-cx"><textarea id="compose" placeholder="${placeholder}" rows="2"></textarea>
-      <div class="row3"><button class="plusb" aria-label="Attach">+</button>${sel("", "approval-required")}<button class="mpill"><span class="k">${prov}</span>${model} · medium</button><button class="sendc" data-send="${send}" aria-label="${sendLabel}">↑</button></div></div>`;
+    const tabs = [sel("", ws, ro), co ? sel("", co, ro) : "", br ? sel("", br, ro) : "", sel("runner", runnerLabel(c), ro, "runner"), sel("profile", c.profile, ro, "profile")].filter(Boolean).join("");
+    const r = reasoningOf(c);
+    const pill = `<button class="mpill" data-pop="model"${rs ? ' style="margin-left:0"' : ""}><span class="k">${instLabel(inst(c.instance))}</span>${c.model}${effortPlace() === "nested" && r ? ` · ${r[1]}` : ""}${PROBING ? ` <span class="k">· probing…</span>` : ""}</button>`;
+    body = `<div class="c-cx-tabs">${tabs}</div><div class="c-cx">${ta}
+      <div class="row3"><button class="plusb" aria-label="Attach">+</button>${accessSel}${rs ? `<span style="margin-left:auto"></span>${rs}` : ""}${pill}<button class="sendc" data-send="${send}" aria-label="${sendLabel}">↑</button></div></div>`;
   } else {
-    body = `${strip(t)}<div class="composer"><textarea id="compose" placeholder="${placeholder}" rows="2"></textarea>
-      <div class="ctl">${sel("", `${prov} · ${model}`)}<span class="sepv"></span>${sel("effort", "medium")}<span class="sepv"></span>${sel("", "approval-required")}<span class="send"><button class="qbtn first" data-send="${send}">${sendLabel}</button></span></div></div>`;
+    body = `${strip(t)}<div class="composer">${ta}
+      <div class="ctl">${modelSel}${rsSep}<span class="sepv"></span>${accessSel}<span class="send"><button class="qbtn first" data-send="${send}">${sendLabel}</button></span></div></div>`;
   }
   return `<div class="compwrap ${dock ? "docked" : ""}">${dock}${body}</div>`;
 }
@@ -969,7 +1184,7 @@ function fleetScreen() {
     ${srow("none", "macstudio-01", "macOS · 3/4 sessions · default", "online", "live", "")}
     ${srow("none", "hetzner-01", "linux · 4/4 sessions · queue 2", "online · at cap", "attn", "")}
     ${srow("none", "macstudio-02", "macOS · 1/4 · draining", "draining", "", "")}
-    ${srow("none", "laptop", "macOS · 2/2 · this machine · reserved", "online", "live", "")}
+    ${srow("none", "laptop", "macOS · 1/2 · this machine · reserved", "online", "live", "")}
     ${srow("none", "hetzner-02", "linux · 1/6", "online", "live", "")}
     ${srow("failed", "pi-lab", "linux · 0/2", "unreachable 2d", "fail", "")}
   </div></div>${add}`;
@@ -1024,11 +1239,13 @@ function render() {
   document.getElementById("pbtn").textContent = `pulse: ${pulsePlace()}`;
   document.getElementById("rbtn").textContent = `rows: ${rows()}`;
   document.getElementById("ibtn").textContent = `input: ${input()}`;
+  document.getElementById("ebtn").textContent = `effort: ${effortPlace()}`;
   const hb = document.getElementById("hbtn"); hb.style.display = threadId() === "new" ? "" : "none"; hb.textContent = `hero: ${hero()}`;
   const sb = document.getElementById("sbtn"); sb.style.display = v.key === "C" ? "" : "none"; sb.textContent = `stack: ${stack()}`;
   const mb = document.getElementById("mbtn"); mb.style.display = v.key === "B" ? "" : "none"; mb.textContent = `mode: ${mode()}`;
   const lg = document.getElementById("legend"); const b = document.getElementById("lgtoggle"); if (b) b.setAttribute("aria-expanded", String(lg.classList.contains("open")));
   const ta = document.getElementById("compose"); if (ta && threadId() === "new") ta.focus();
+  placePop();
 }
 function go(screenKey, extra = {}) { setParams({ screen: screenKey, thread: null, login: null, mode: null, pj: null, wf: null, ...extra }); }
 function cycle(d) { const i = (vIndex() + d + VARIANTS.length) % VARIANTS.length; setParams({ variant: VARIANTS[i].key }); }
@@ -1038,17 +1255,23 @@ function cycleStack() { setParams({ stack: STACKS[(STACKS.indexOf(stack()) + 1) 
 function cycleRows() { setParams({ rows: ROWS[(ROWS.indexOf(rows()) + 1) % ROWS.length] }); }
 function cycleInput() { setParams({ input: INPUTS[(INPUTS.indexOf(input()) + 1) % INPUTS.length] }); }
 function toggleHero() { setParams({ hero: hero() === "center" ? null : "center" }); }
+function toggleEffort() { setParams({ effort: effortPlace() === "own" ? "nested" : null }); }
 function startThread() {
   const ta = document.getElementById("compose"); const text = (ta && ta.value.trim()) || "Add a --json flag to hydra runner list so scripts can read it.";
   const id = "c0ffee" + String(STARTED.length + 10);
-  STARTED.unshift({ id, title: text.length > 42 ? text.slice(0, 40).replace(/\s+\S*$/, "") + "…" : text, first: text, state: "working", age: "now", ws: fresh() ? "no workspace" : "worktree", branch: fresh() ? "" : "hydra/run-" + id.slice(-3), provider: "Claude Code", model: "claude-sonnet-5", freshData: fresh() });
+  const c = cfg(null);
+  STARTED.unshift({ id, title: text.length > 42 ? text.slice(0, 40).replace(/\s+\S*$/, "") + "…" : text, first: text, state: "working", age: "now", ws: fresh() ? "no workspace" : "worktree", branch: fresh() ? "" : "hydra/run-" + id.slice(-3), provider: inst(c.instance).provider, model: c.model, runner: runnerOf(c).id, freshData: fresh() });
+  LIVE[id] = { instance: c.instance, effort: c.effort, thinking: c.thinking, ctx: c.ctx, fast: c.fast, access: c.access, profile: c.profile };
+  delete DRAFTS.new; POP = null;
   setParams({ thread: id });
 }
 
 document.addEventListener("click", (e) => {
-  const el = e.target.closest("[data-go],[data-thread],[data-login],[data-login-done],[data-send],[data-mode],[data-pj],[data-wf],[data-toggle],#lgtoggle,[data-noop]");
-  if (!el) { if (!e.target.closest("#legend")) toggleLegend(false); return; }
+  const el = e.target.closest("[data-go],[data-thread],[data-login],[data-login-done],[data-send],[data-mode],[data-pj],[data-wf],[data-toggle],[data-pop],[data-pick],#lgtoggle,[data-noop]");
+  if (!el) { if (!e.target.closest("#legend")) toggleLegend(false); if (!e.target.closest("#pop")) closePop(); return; }
   e.preventDefault();
+  if (el.dataset.pop) return openPop(el.dataset.pop);
+  if (el.dataset.pick) return pick(el.dataset.pick, el.dataset.val);
   if (el.id === "lgtoggle") return toggleLegend();
   if (el.dataset.toggle) { const open = el.getAttribute("aria-expanded") !== "true"; el.setAttribute("aria-expanded", String(open)); el.nextElementSibling.classList.toggle("open", open); return; }
   if (el.dataset.go) return go(el.dataset.go, el.dataset.all ? { mode: V() === "B" ? "threads" : null } : {});
@@ -1056,7 +1279,7 @@ document.addEventListener("click", (e) => {
   if (el.dataset.login !== undefined) return setParams({ screen: "sessions", thread: null, login: el.dataset.login || null, mode: null });
   if (el.dataset.loginDone) return setParams({ li: "1", login: null });
   if (el.dataset.send === "start") return startThread();
-  if (el.dataset.send === "reply") { const ta = document.getElementById("compose"); if (ta) ta.value = ""; return; }
+  if (el.dataset.send === "reply") { const ta = document.getElementById("compose"); if (ta) ta.value = ""; delete DRAFTS[threadId()]; return; }
   if (el.dataset.mode) return setParams({ mode: el.dataset.mode });
   if (el.dataset.pj) return setParams({ pj: el.dataset.pj === "all" ? null : el.dataset.pj });
   if (el.dataset.wf !== undefined) return setParams({ wf: el.dataset.wf === "1" ? "1" : null });
@@ -1069,12 +1292,15 @@ document.getElementById("pbtn").onclick = cyclePulse;
 document.getElementById("sbtn").onclick = cycleStack;
 document.getElementById("rbtn").onclick = cycleRows;
 document.getElementById("ibtn").onclick = cycleInput;
+document.getElementById("ebtn").onclick = toggleEffort;
 document.getElementById("hbtn").onclick = toggleHero;
 document.getElementById("mbtn").onclick = () => setParams({ mode: mode() === "threads" ? "hydra" : "threads" });
 document.getElementById("theme").onclick = toggleTheme;
 document.addEventListener("keydown", (e) => {
   const tag = (e.target.tagName || "").toLowerCase();
-  if (tag === "textarea" && e.key === "Enter" && !e.shiftKey && e.target.id === "compose") { e.preventDefault(); if (threadId() === "new") startThread(); else e.target.value = ""; return; }
+  if (tag === "textarea" && e.key === "Enter" && !e.shiftKey && e.target.id === "compose") { e.preventDefault(); if (threadId() === "new") startThread(); else { e.target.value = ""; delete DRAFTS[threadId()]; } return; }
+  if (e.target.id === "custom" && e.key === "Enter") { e.preventDefault(); return pick("custom-go"); }
+  if (e.key === "Escape" && POP) { e.target.blur && e.target.blur(); return closePop(); }
   if (tag === "input" || tag === "textarea" || e.target.isContentEditable) return;
   if (e.key === "ArrowLeft") cycle(-1); else if (e.key === "ArrowRight") cycle(1);
   else if (e.key === "d") document.getElementById("dbtn").click();
@@ -1083,11 +1309,13 @@ document.addEventListener("keydown", (e) => {
   else if (e.key === "s" && V() === "C") cycleStack();
   else if (e.key === "r") cycleRows();
   else if (e.key === "i") cycleInput();
+  else if (e.key === "e") toggleEffort();
   else if (e.key === "h" && threadId() === "new") toggleHero();
   else if (e.key === "m" && V() === "B") document.getElementById("mbtn").click();
   else if (e.key === "t") toggleTheme();
   else if (e.key === "?") toggleLegend();
   else if (e.key === "Escape") toggleLegend(false);
 });
+document.addEventListener("input", (e) => { if (e.target.id === "compose") DRAFTS[threadId() === "new" ? "new" : threadId()] = e.target.value; });
 render();
 </script>
