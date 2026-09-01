@@ -30,9 +30,18 @@
       approval ledger inline, composer floating at the bottom.
     - All sessions is a full overview page: Active / Waiting on you / Idle / Settled with a project
       filter; workflow-started sessions behind a fold.
+  Round 3 (reaction to round 2):
+    - C Stack defaults to ?stack=compact: only Intake / Check-in / Notifications as rows above the
+      threads, the other six screens as one quiet text line at the foot. top/bottom/split stay.
+    - chat input variants ?input=hydra|t3|codex (key i): the round-2 strip+row; a t3-code lookalike
+      (one card, options inside, checkout lip under it); a Codex lookalike (config tabs above,
+      + and access mode left, model pill and round send right).
+    - new-thread layout ?hero=bottom|center (key h).
+    - permission requests dock onto the input (same place always), in every input variant.
+    - "Worked for Xs ›" collapses the tool calls (click expands); the live one shimmers.
   Ambient signals (pulse): ?pulse=top|foot|none (key p). Default: A top bar, B/C sidebar foot.
   Data: ?data=busy|fresh (key d). fresh = first run; ?li=1 = a provider login has happened (key l).
-  Keys: ← → shell · s stack (C) · r rows · m mode (B) · d data · l login · p pulse · t theme · ? Marks · Esc.
+  Keys: ← → shell · s stack (C) · r rows · i input · h hero · m mode (B) · d data · l login · p pulse · t theme · ? Marks · Esc.
   Marks are the pinned family (#35); everything in the pinned design language (#33).
 -->
 <meta charset="utf-8">
@@ -347,6 +356,61 @@
   .composer .ctl { display: flex; align-items: center; gap: 1px; font-size: 12px; color: var(--faint); }
   .composer .ctl .send { margin-left: auto; }
   .composer .ctl .send .qbtn { padding: 5px 10px; }
+  /* worked-for lines with collapsible tool calls; the live one shimmers */
+  .worked .wt { flex: none; }
+  .worked .chev { flex: none; display: inline-block; transition: transform .15s; margin-left: -6px; }
+  .worked[aria-expanded="true"] .chev { transform: rotate(90deg); }
+  .worked.live .wt { background: linear-gradient(90deg, var(--faint) 0%, var(--ink) 45%, var(--faint) 90%); background-size: 220% 100%; -webkit-background-clip: text; background-clip: text; color: transparent; animation: shimmer 2.4s linear infinite; }
+  @keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -20% 0; } }
+  @media (prefers-reduced-motion: reduce) { .worked.live .wt { animation: none; background: none; color: var(--live); } }
+  .tools { display: none; flex-direction: column; gap: 3px; padding: 4px 0 2px 14px; border-left: 1px solid var(--line); margin: -10px 0 0 5px; }
+  .tools.open { display: flex; }
+  .tools .tc { display: flex; gap: 10px; font-family: var(--mono); font-size: 11.5px; color: var(--muted); align-items: baseline; }
+  .tools .tc .verb { color: var(--faint); width: 40px; flex: none; }
+  .tools .tc .res { color: var(--faint); margin-left: auto; white-space: nowrap; }
+  .tools .tc.now .verb { color: var(--live); }
+  .tools .tc.now .res { color: var(--live); }
+  /* docked request: attached to the input, same place always */
+  .dock { border: 1px solid var(--line); border-bottom: 0; border-radius: 12px 12px 0 0; background: var(--raised); padding: 12px 16px 6px; display: flex; flex-direction: column; gap: 8px; margin: 0; }
+  .dock .qline { display: flex; align-items: center; gap: 10px; }
+  .dock .q { font-size: 14px; font-weight: var(--w-emph); }
+  .dock .qline .age { margin-left: auto; }
+  .dock .ledger { margin: 0 -10px; }
+  .dock .ledger button { padding: 5px 10px; }
+  .compwrap.docked .strip { border-radius: 0; }
+  .compwrap.docked .c-t3 { border-radius: 0 0 14px 14px; }
+  .compwrap.docked .c-cx-tabs { border-radius: 0; margin-left: 0; margin-right: 0; }
+  /* input variant: t3-code lookalike */
+  .c-t3 { border: 1px solid var(--line); border-radius: 14px; background: var(--raised); box-shadow: var(--lift-shadow); padding: 12px 14px 10px; display: flex; flex-direction: column; gap: 10px; position: relative; z-index: 1; }
+  .c-t3 textarea { font: 14px/1.5 var(--sans); border: 0; background: none; color: var(--ink); resize: none; outline: none; min-height: 48px; width: 100%; }
+  .c-t3 .row3 { display: flex; align-items: center; gap: 2px; font-size: 12.5px; }
+  .c-t3 .row3 .sel { font-size: 12.5px; color: var(--ink); }
+  .c-t3 .row3 .sel .k { color: var(--faint); }
+  .c-t3 .row3 .right { margin-left: auto; display: inline-flex; align-items: center; gap: 8px; }
+  .sendc { width: 28px; height: 28px; border-radius: 50%; border: 0; background: var(--ink); color: var(--bg); display: inline-flex; align-items: center; justify-content: center; font-size: 13px; cursor: pointer; }
+  .sendc:focus-visible { outline: 2px solid var(--live); outline-offset: 1px; }
+  .lip { margin: -8px 14px 0; padding: 13px 12px 5px; border: 1px solid var(--line-soft); border-top: 0; border-radius: 0 0 10px 10px; background: var(--surface); display: flex; gap: 2px; font-size: 12px; color: var(--muted); align-items: center; }
+  .lip .right { margin-left: auto; display: inline-flex; gap: 2px; align-items: center; }
+  /* input variant: Codex lookalike */
+  .c-cx-tabs { display: flex; gap: 2px; padding: 6px 8px; margin: 0 14px -8px; background: var(--surface); border: 1px solid var(--line-soft); border-bottom: 0; border-radius: 10px 10px 0 0; font-size: 12px; color: var(--muted); padding-bottom: 12px; flex-wrap: wrap; }
+  .c-cx { border: 1px solid var(--line); border-radius: 14px; background: var(--raised); box-shadow: var(--lift-shadow); padding: 12px 14px 10px; display: flex; flex-direction: column; gap: 10px; position: relative; z-index: 1; }
+  .c-cx textarea { font: 14px/1.5 var(--sans); border: 0; background: none; color: var(--ink); resize: none; outline: none; min-height: 48px; width: 100%; }
+  .c-cx .row3 { display: flex; align-items: center; gap: 6px; }
+  .c-cx .plusb { width: 26px; height: 26px; border-radius: 7px; border: 0; background: none; display: inline-flex; align-items: center; justify-content: center; color: var(--muted); font-size: 17px; cursor: pointer; }
+  .c-cx .plusb:hover { background: var(--line-soft); color: var(--ink); }
+  .c-cx .mpill { margin-left: auto; border: 1px solid var(--line); border-radius: 999px; padding: 4px 11px; font-size: 12px; color: var(--ink); background: var(--surface); display: inline-flex; gap: 6px; align-items: center; cursor: pointer; }
+  .c-cx .mpill .k { color: var(--faint); }
+  .c-cx .mpill::after { content: "▾"; color: var(--faint); font-size: 9px; }
+  /* new-thread layout: center */
+  .thread.center { justify-content: center; }
+  .thread.center .newhero { flex: none; padding: 0 0 22px; }
+  .thread.center .compwrap { margin: 0 auto; }
+  .thread.center .midpad { flex: 1; }
+  /* compact stack: the six other screens as one quiet line at the foot */
+  .minilinks { padding: 0 10px 8px; font-size: 12px; color: var(--faint); line-height: 1.8; display: flex; flex-wrap: wrap; gap: 0 4px; }
+  .minilinks a { cursor: pointer; text-decoration: none; color: var(--muted); }
+  .minilinks a:hover { color: var(--ink); }
+  .minilinks a.on { color: var(--ink); font-weight: var(--w-emph); }
   /* settings sub-nav */
   .subnav { display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: 13px; color: var(--muted); margin-bottom: 20px; }
   .subnav a { text-decoration: none; padding: 3px 8px; border-radius: 6px; cursor: pointer; }
@@ -371,13 +435,15 @@
   </main>
 </div>
 <div class="legend" id="legend" role="dialog" aria-label="Marks legend"></div>
-<div class="proto-badge">PROTOTYPE · throwaway · hydra#51 · round 2<br>&larr; &rarr; shell · s stack · r rows · m mode · d data · l login · p pulse · t theme · ? marks</div>
+<div class="proto-badge">PROTOTYPE · throwaway · hydra#51 · round 3<br>&larr; &rarr; shell · s stack · r rows · i input · h hero · m mode · d data · l login · p pulse · t theme · ? marks</div>
 <div class="sw">
   <button id="prev" aria-label="Previous shell">&larr;</button>
   <span class="label" id="swlabel"></span>
   <button id="next" aria-label="Next shell">&rarr;</button>
   <button id="sbtn" class="ds"></button>
   <button id="rbtn" class="ds"></button>
+  <button id="ibtn" class="ds"></button>
+  <button id="hbtn" class="ds"></button>
   <button id="mbtn" class="ds"></button>
   <button id="dbtn" class="ds"></button>
   <button id="lbtn" class="ds"></button>
@@ -403,8 +469,11 @@ function screen() { const s = get("screen") || "sessions"; return SCREENS.includ
 function threadId() { return get("thread"); }
 function pulsePlace() { const p = get("pulse"); if (["top", "foot", "none"].includes(p)) return p; return V() === "A" ? "top" : "foot"; }
 function mode() { const m = get("mode"); if (m === "threads" || m === "hydra") return m; return screen() === "sessions" ? "threads" : "hydra"; }
-const STACKS = ["bottom", "top", "split"];
-function stack() { const s = get("stack"); return STACKS.includes(s) ? s : "bottom"; }
+const STACKS = ["compact", "top", "bottom", "split"];
+function stack() { const s = get("stack"); return STACKS.includes(s) ? s : "compact"; }
+const INPUTS = ["hydra", "t3", "codex"];
+function input() { const i = get("input"); return INPUTS.includes(i) ? i : "hydra"; }
+function hero() { return get("hero") === "center" ? "center" : "bottom"; }
 const ROWS = ["plain", "meta", "rich"];
 function rows() { const r = get("rows"); return ROWS.includes(r) ? r : "plain"; }
 const SCREENS = ["sessions", "intake", "checkin", "tasks", "runs", "workflows", "fleet", "connections", "notifications", "settings"];
@@ -558,6 +627,11 @@ function sideC() {
   const sess = `${SESS_LABEL}${newThreadBtn()}<div class="scrollreg">${threadListHtml({ limit: 3, morelink: false })}</div>`;
   const sep = `<div class="nav"><div class="sep"></div></div>`;
   if (s === "top") return `${LOGO}<div class="lane-label glabel" style="margin-top:0">Hydra</div>${navHtml(NAV_ORCH)}${sep}${sess}${footHtml()}`;
+  if (s === "compact") {
+    const rest = ["tasks", "runs", "workflows", "fleet", "connections", "settings"];
+    const mini = `<div class="minilinks">${rest.map((k, i) => `${i ? "<span>·</span>" : ""}<a data-go="${k}" class="${screen() === k ? "on" : ""}">${TITLES[k]}</a>`).join("")}</div>`;
+    return `${LOGO}${navHtml([["intake"], ["checkin"], ["notifications"]])}${sep}${sess}${footHtml(mini)}`;
+  }
   if (s === "split") return `${LOGO}${navHtml(NAV_WORK)}${sep}${sess}${footHtml(navHtml(NAV_INFRA) + sep)}`;
   return `${LOGO}${sess}${sep}<div class="lane-label glabel">Hydra</div>${navHtml(NAV_ORCH)}${footHtml()}`;
 }
@@ -632,60 +706,87 @@ function strip(t) {
   parts.push(sel("profile", "unrestricted", ro));
   return `<div class="strip">${parts.join('<span class="sepv"></span>')}</div>`;
 }
-function composer(t, placeholder = "Reply…") {
+function stripParts(t) {
+  const ro = !!t;
+  const ws = t ? (t.ws === "no workspace" ? "No workspace" : `${t.project || "hydra"} · ${t.ws}`) : (fresh() ? "No workspace" : "hydra · main checkout");
+  const co = t ? (t.ws === "worktree" ? "new worktree" : t.ws === "main checkout" ? "primary checkout" : null) : (fresh() ? null : "new worktree");
+  const br = t ? t.branch : (fresh() ? null : "hydra/run-…");
+  return { ro, ws, co, br: br ? `<span class="mono" style="font-size:11px">${br}</span>` : null };
+}
+function composer(t, placeholder = "Reply…", dock = "") {
   const prov = t ? t.provider : "Claude Code"; const model = t ? t.model : "claude-sonnet-5";
-  return `<div class="compwrap">${strip(t)}<div class="composer"><textarea id="compose" placeholder="${placeholder}" rows="2"></textarea>
-    <div class="ctl">${sel("", `${prov} · ${model}`)}<span class="sepv"></span>${sel("effort", "medium")}<span class="sepv"></span>${sel("", "approval-required")}<span class="send"><button class="qbtn first" data-send="${t ? "reply" : "start"}">${t ? "Send ⏎" : "Start thread ⏎"}</button></span></div></div></div>`;
+  const send = t ? "reply" : "start"; const sendLabel = t ? "Send ⏎" : "Start thread ⏎";
+  const { ro, ws, co, br } = stripParts(t);
+  const kind = input();
+  let body;
+  if (kind === "t3") {
+    const lip = [sel("", ws, ro), co ? sel("", co, ro) : "", ].filter(Boolean).join('<span class="sepv"></span>');
+    const right = [br ? sel("", br, ro) : "", sel("", "local", ro)].filter(Boolean).join('<span class="sepv"></span>');
+    body = `<div class="c-t3"><textarea id="compose" placeholder="${placeholder}" rows="2"></textarea>
+      <div class="row3">${sel("", `${prov} · ${model}`)}<span class="sepv"></span>${sel("", "medium · 200k")}<span class="sepv"></span>${sel("", "approval-required")}
+        <span class="right"><button class="qbtn" style="padding:4px 6px">Attach</button><button class="sendc" data-send="${send}" aria-label="${sendLabel}">↑</button></span></div></div>
+      <div class="lip">${lip}<span class="right">${right}</span></div>`;
+  } else if (kind === "codex") {
+    const tabs = [sel("", ws, ro), co ? sel("", co, ro) : "", br ? sel("", br, ro) : "", sel("runner", "local", ro), sel("profile", "unrestricted", ro)].filter(Boolean).join("");
+    body = `<div class="c-cx-tabs">${tabs}</div><div class="c-cx"><textarea id="compose" placeholder="${placeholder}" rows="2"></textarea>
+      <div class="row3"><button class="plusb" aria-label="Attach">+</button>${sel("", "approval-required")}<button class="mpill"><span class="k">${prov}</span>${model} · medium</button><button class="sendc" data-send="${send}" aria-label="${sendLabel}">↑</button></div></div>`;
+  } else {
+    body = `${strip(t)}<div class="composer"><textarea id="compose" placeholder="${placeholder}" rows="2"></textarea>
+      <div class="ctl">${sel("", `${prov} · ${model}`)}<span class="sepv"></span>${sel("effort", "medium")}<span class="sepv"></span>${sel("", "approval-required")}<span class="send"><button class="qbtn first" data-send="${send}">${sendLabel}</button></span></div></div>`;
+  }
+  return `<div class="compwrap ${dock ? "docked" : ""}">${dock}${body}</div>`;
 }
 const umsg = (s) => `<div class="umsg">${s}</div>`;
-const worked = (s) => `<div class="worked">Worked for ${s} ›</div>`;
+const tc = (verb, what, res = "", now = false) => `<div class="tc ${now ? "now" : ""}"><span class="verb">${verb}</span><span>${what}</span><span class="res">${res}</span></div>`;
+const worked = (s, tools = [], live = false) => `<div class="worked ${live ? "live" : ""}" data-toggle="tools" aria-expanded="false"><span class="wt">${live ? "Working for" : "Worked for"} ${s}</span><span class="chev">›</span></div><div class="tools">${tools.join("")}</div>`;
 const amsg = (s) => `<div class="amsg">${s}</div>`;
 const chcard = (n, ch) => `<div class="chcard"><b>${n} changed files</b><span class="plus">${ch.split(" ")[0]}</span><span class="minus">${ch.split(" ")[1]}</span><span>· Show files</span><button class="qbtn">Open diff</button></div>`;
 function transcript(t) {
-  const approval = `<div class="dcard" style="max-width:none;box-shadow:var(--card-shadow)"><div class="qline">${mark("decision")}<span class="q">Run <code>pnpm test --filter runner</code>?</span>${age("4m")}</div>
-    <div class="ledger"><button class="first"><span class="lb">Allow</span><span class="ds">runs the command once in <b>worktree hydra/run-3f1</b></span></button>
-    <button><span class="lb">Allow always</span><span class="ds">adds <b>pnpm test</b> to this thread's allowed commands</span></button>
-    <button><span class="lb">Deny</span><span class="ds">the agent continues without running it</span></button></div></div>`;
   const T = {
     working: `<div class="stamp">Mon 1 Sep · 09:02</div>
       ${umsg("The webhook retry tests fail about one run in five. Find out why and fix it without loosening the assertions.")}
-      ${worked("31s")}
+      ${worked("31s", [tc("read", "src/webhooks/retry.ts", "212 lines"), tc("read", "test/webhooks/retry.test.ts", "140 lines"), tc("grep", "advanceTimers · test/", "3 hits"), tc("bash", "pnpm test --filter webhook", "2 failed, 14 passed")])}
       ${amsg(`<p>Two of the three failures are the same race: the retry scheduler fires before the fake clock advances, so the first attempt lands a tick early and the assertion on attempt count sees two.</p><p>The third failure is unrelated: <code>test/webhooks/retry.test.ts</code> reuses a port across cases. Fixing the race first; the port reuse is a one-liner after.</p>`)}
       ${chcard(3, "+48 −12")}
-      <div class="livemsg">${M.working()}<span class="state live">working 12m · editing src/webhooks/retry.ts</span></div>`,
+      ${worked("12m", [tc("edit", "src/webhooks/retry.ts", "+31 −9"), tc("edit", "src/webhooks/scheduler.ts", "+12 −3"), tc("bash", "pnpm test --filter webhook", "running", true)], true)}`,
     decision: `<div class="stamp">Mon 1 Sep · 09:10</div>
       ${umsg("Add a <code>hydra runner drain</code> command that stops new placements and waits for sessions to finish.")}
-      ${worked("1m 13s")}
+      ${worked("1m 13s", [tc("read", "src/cli/runner.ts", "88 lines"), tc("edit", "src/cli/runner.ts", "+64 −2"), tc("edit", "src/controller/placement.ts", "+38 −6"), tc("edit", "src/controller/runners.ts", "+41 −0"), tc("bash", "pnpm build", "ok · 4.1s")])}
       ${amsg(`<p>Command wired: <code>hydra runner drain &lt;name&gt;</code> flips the runner to <b>draining</b>, placement skips it, and the CLI waits on the session count with a <code>--timeout</code>.</p><p>To check it end to end I want to run the integration suite for the runner package.</p>`)}
-      ${chcard(6, "+210 −8")}
-      ${approval}`,
+      ${chcard(6, "+210 −8")}`,
     idle: `<div class="stamp">Mon 1 Sep · 07:40</div>
       ${umsg("Read docs/spec/15 and tell me where the promotion runbook is unclear.")}
-      ${worked("48s")}
+      ${worked("48s", [tc("read", "docs/spec/15-packaging-and-operations.md", "612 lines"), tc("grep", "promotion · docs/spec", "17 hits")])}
       ${amsg(`<p>Three places:</p><ul><li>the bundle-file fallback never says who verifies the signature;</li><li>§7 assumes the old controller is reachable for the freeze;</li><li>the restore runbook mixes backup and promotion vocabulary.</li></ul><p>Want me to draft the fixes?</p>`)}`,
     done: `<div class="stamp">Sun 31 Aug · 14:02</div>
       ${umsg("Spike: does a Bun-compiled hydra binary pass macOS notarization?")}
-      ${worked("11m 4s")}
+      ${worked("11m 4s", [tc("bash", "bun build --compile …", "ok · 38s"), tc("bash", "codesign --options runtime …", "ok"), tc("bash", "xcrun notarytool submit …", "Accepted · 6m"), tc("edit", "research/bun-compile.md", "+48 −12"), tc("bash", "gh pr create", "#98")])}
       ${amsg(`<p>Yes, with a stapled ticket after <code>codesign --options runtime</code>; the embedded claude binary must be signed first, or Gatekeeper rejects the bundle on first launch.</p><p>Notes in <code>research/bun-compile.md</code>, pushed as PR #98.</p>`)}
       ${chcard(3, "+48 −12")}
       <div class="livemsg">${M.done()}<span class="state">done yesterday 14:18 · PR #98 open</span></div>`,
     failed: `<div class="stamp">Wed 27 Aug · 23:10</div>
       ${umsg("The tailnet cert renewal fails nightly. Find the cause.")}
-      ${worked("2m 40s")}
+      ${worked("2m 40s", [tc("bash", "tailscale cert --help", "ok"), tc("bash", "journalctl -u tailscaled …", "interrupted")])}
       <div class="livemsg">${M.failed()}<span class="state fail">failed 5d ago · runner <b>macstudio-02</b> went offline mid-turn</span><button class="qbtn" style="margin-left:6px">Resume</button></div>`,
   };
   return T[t.state] || T.idle;
 }
 function startedTranscript(t) {
-  return `<div class="stamp">Mon 1 Sep · 09:14</div>${umsg(t.first)}${worked("4s")}<div class="livemsg">${M.working()}<span class="state live">working · reading the workspace</span></div>`;
+  return `<div class="stamp">Mon 1 Sep · 09:14</div>${umsg(t.first)}${worked("4s", [tc("read", "AGENTS.md", "ok"), tc("grep", "runner list · src/cli", "running", true)], true)}`;
 }
+const APPROVAL = () => `<div class="dock"><div class="qline">${mark("decision")}<span class="q">Run <code>pnpm test --filter runner</code>?</span>${age("4m")}</div>
+    <div class="ledger"><button class="first"><span class="lb">Allow</span><span class="ds">runs the command once in <b>worktree hydra/run-3f1</b></span></button>
+    <button><span class="lb">Allow always</span><span class="ds">adds <b>pnpm test</b> to this thread's allowed commands</span></button>
+    <button><span class="lb">Deny</span><span class="ds">the agent continues without running it</span></button></div></div>`;
 function threadPane(t) {
-  return `<div class="thread"><div class="tcol">${t.first ? startedTranscript(t) : transcript(t)}</div>${composer(t)}</div>`;
+  return `<div class="thread"><div class="tcol">${t.first ? startedTranscript(t) : transcript(t)}</div>${composer(t, "Reply…", t.state === "decision" ? APPROVAL() : "")}</div>`;
 }
 function newThreadPane() {
   const pj = fresh() ? "" : "hydra";
-  return `<div class="thread"><div class="newhero"><h2>${pj ? `What should the agent do in <span class="ws">${pj}</span>?` : "What should the agent do?"}</h2>
-    <p>${fresh() ? "No workspace yet. Adopt a folder on this machine from the strip below, or work without one." : "The strip below is the thread's setup; it locks when you send the first message."}</p></div>${composer(null, "Say what you want done…")}</div>`;
+  const heroHtml = `<div class="newhero"><h2>${pj ? `What should the agent do in <span class="ws">${pj}</span>?` : "What should the agent do?"}</h2>
+    <p>${fresh() ? "No workspace yet. Adopt a folder on this machine from the input's setup, or work without one." : "The input carries the thread's setup; it locks when you send the first message."}</p></div>`;
+  if (hero() === "center") return `<div class="thread center"><div class="midpad"></div>${heroHtml}${composer(null, "Say what you want done…")}<div class="midpad"></div></div>`;
+  return `<div class="thread">${heroHtml}${composer(null, "Say what you want done…")}</div>`;
 }
 function assistantPane(a) {
   return `<div class="thread"><div class="tcol"><div class="stamp">Mon 1 Sep · 09:12</div>
@@ -922,6 +1023,8 @@ function render() {
   document.getElementById("lbtn").textContent = loggedIn() ? "login: yes" : "login: no";
   document.getElementById("pbtn").textContent = `pulse: ${pulsePlace()}`;
   document.getElementById("rbtn").textContent = `rows: ${rows()}`;
+  document.getElementById("ibtn").textContent = `input: ${input()}`;
+  const hb = document.getElementById("hbtn"); hb.style.display = threadId() === "new" ? "" : "none"; hb.textContent = `hero: ${hero()}`;
   const sb = document.getElementById("sbtn"); sb.style.display = v.key === "C" ? "" : "none"; sb.textContent = `stack: ${stack()}`;
   const mb = document.getElementById("mbtn"); mb.style.display = v.key === "B" ? "" : "none"; mb.textContent = `mode: ${mode()}`;
   const lg = document.getElementById("legend"); const b = document.getElementById("lgtoggle"); if (b) b.setAttribute("aria-expanded", String(lg.classList.contains("open")));
@@ -933,6 +1036,8 @@ function toggleTheme() { const r = document.documentElement; const dark = r.data
 function cyclePulse() { const o = ["top", "foot", "none"]; setParams({ pulse: o[(o.indexOf(pulsePlace()) + 1) % 3] }); }
 function cycleStack() { setParams({ stack: STACKS[(STACKS.indexOf(stack()) + 1) % STACKS.length] }); }
 function cycleRows() { setParams({ rows: ROWS[(ROWS.indexOf(rows()) + 1) % ROWS.length] }); }
+function cycleInput() { setParams({ input: INPUTS[(INPUTS.indexOf(input()) + 1) % INPUTS.length] }); }
+function toggleHero() { setParams({ hero: hero() === "center" ? null : "center" }); }
 function startThread() {
   const ta = document.getElementById("compose"); const text = (ta && ta.value.trim()) || "Add a --json flag to hydra runner list so scripts can read it.";
   const id = "c0ffee" + String(STARTED.length + 10);
@@ -941,10 +1046,11 @@ function startThread() {
 }
 
 document.addEventListener("click", (e) => {
-  const el = e.target.closest("[data-go],[data-thread],[data-login],[data-login-done],[data-send],[data-mode],[data-pj],[data-wf],#lgtoggle,[data-noop]");
+  const el = e.target.closest("[data-go],[data-thread],[data-login],[data-login-done],[data-send],[data-mode],[data-pj],[data-wf],[data-toggle],#lgtoggle,[data-noop]");
   if (!el) { if (!e.target.closest("#legend")) toggleLegend(false); return; }
   e.preventDefault();
   if (el.id === "lgtoggle") return toggleLegend();
+  if (el.dataset.toggle) { const open = el.getAttribute("aria-expanded") !== "true"; el.setAttribute("aria-expanded", String(open)); el.nextElementSibling.classList.toggle("open", open); return; }
   if (el.dataset.go) return go(el.dataset.go, el.dataset.all ? { mode: V() === "B" ? "threads" : null } : {});
   if (el.dataset.thread) return setParams({ screen: "sessions", thread: el.dataset.thread, login: null, mode: null });
   if (el.dataset.login !== undefined) return setParams({ screen: "sessions", thread: null, login: el.dataset.login || null, mode: null });
@@ -962,6 +1068,8 @@ document.getElementById("lbtn").onclick = () => setParams({ li: loggedIn() ? nul
 document.getElementById("pbtn").onclick = cyclePulse;
 document.getElementById("sbtn").onclick = cycleStack;
 document.getElementById("rbtn").onclick = cycleRows;
+document.getElementById("ibtn").onclick = cycleInput;
+document.getElementById("hbtn").onclick = toggleHero;
 document.getElementById("mbtn").onclick = () => setParams({ mode: mode() === "threads" ? "hydra" : "threads" });
 document.getElementById("theme").onclick = toggleTheme;
 document.addEventListener("keydown", (e) => {
@@ -974,6 +1082,8 @@ document.addEventListener("keydown", (e) => {
   else if (e.key === "p") cyclePulse();
   else if (e.key === "s" && V() === "C") cycleStack();
   else if (e.key === "r") cycleRows();
+  else if (e.key === "i") cycleInput();
+  else if (e.key === "h" && threadId() === "new") toggleHero();
   else if (e.key === "m" && V() === "B") document.getElementById("mbtn").click();
   else if (e.key === "t") toggleTheme();
   else if (e.key === "?") toggleLegend();
