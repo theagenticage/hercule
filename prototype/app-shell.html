@@ -67,6 +67,10 @@
     - workspace, checkout and branch open menus too (repos grouped per project with whether the picked
       runner has a clone; primary checkout vs new worktree with the in-use worktrees listed; a new
       run branch or an existing one). Fresh data offers No workspace / adopt a folder / add a repo.
+  Converged (verdict of 2026-09-01, the defaults of this file): shell B Modes; rows=meta (plain stays as
+    a setting); input=codexlip; effort=nested; logos off; pulse at the sidebar foot, collapsed to one
+    summary line that expands on click. Everything else stays switchable as the record: A Nav and C Stack
+    (?variant, ?stack), rows=plain|rich, input=hydra|t3|codex, ?effort=own, ?logos=1, ?pulse=top|none.
   Ambient signals (pulse): ?pulse=top|foot|none (key p). Default: A top bar, B/C sidebar foot.
   Data: ?data=busy|fresh (key d). fresh = first run; ?li=1 = a provider login has happened (key l).
   Keys: ← → shell · s stack (C) · r rows · i input · h hero · m mode (B) · d data · l login · p pulse · t theme · ? Marks · Esc.
@@ -250,6 +254,13 @@
   .pulse .pl b { color: var(--ink); }
   .pulse .pl .w { color: var(--attn); }
   .side .pulse { padding: 0 10px 6px; }
+  .pulse.foot { gap: 3px; padding: 0 0 4px; }
+  .pulse .psum { border: 0; background: none; font: inherit; color: var(--muted); text-align: left; padding: 4px 10px; border-radius: 6px; cursor: pointer; width: 100%; }
+  .pulse .psum:hover, .pulse .psum[aria-expanded="true"] { background: var(--line-soft); color: var(--ink); }
+  .pulse .psum .txt { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .pulse .psum .chev { color: var(--faint); font-size: 12px; transition: transform .15s; }
+  .pulse .psum[aria-expanded="true"] .chev { transform: rotate(90deg); }
+  .pulse .pl.sub { padding: 1px 10px 1px 10px; }
   .topbar .pulse { flex-direction: row; gap: 16px; margin-left: auto; align-self: center; flex: none; }
   /* legend */
   .lgbtn { font-family: var(--sans); font-size: 13px; color: var(--muted); background: none; border: 0; border-radius: 6px; padding: 5px 10px; cursor: pointer; display: inline-flex; align-items: center; gap: 8px; line-height: 1; width: 100%; text-align: left; }
@@ -545,7 +556,7 @@
 </div>
 <div class="legend" id="legend" role="dialog" aria-label="Marks legend"></div>
 <div class="pop" id="pop" role="dialog"></div>
-<div class="proto-badge">PROTOTYPE · throwaway · hydra#51 · round 5<br>&larr; &rarr; shell · s stack · r rows · i input · e effort · o logos · h hero · m mode · d data · l login · p pulse · t theme · ? marks</div>
+<div class="proto-badge">PROTOTYPE · throwaway · hydra#51 · converged<br>&larr; &rarr; shell · s stack · r rows · i input · e effort · o logos · h hero · m mode · d data · l login · p pulse · t theme · ? marks</div>
 <div class="sw">
   <button id="prev" aria-label="Previous shell">&larr;</button>
   <span class="label" id="swlabel"></span>
@@ -584,12 +595,12 @@ function mode() { const m = get("mode"); if (m === "threads" || m === "hydra") r
 const STACKS = ["compact", "top", "bottom", "split"];
 function stack() { const s = get("stack"); return STACKS.includes(s) ? s : "compact"; }
 const INPUTS = ["hydra", "t3", "codex", "codexlip"];
-function input() { const i = get("input"); return INPUTS.includes(i) ? i : "hydra"; }
+function input() { const i = get("input"); return INPUTS.includes(i) ? i : "codexlip"; }
 function hero() { return get("hero") === "center" ? "center" : "bottom"; }
-function effortPlace() { return get("effort") === "nested" ? "nested" : "own"; }
+function effortPlace() { return get("effort") === "own" ? "own" : "nested"; }
 function logos() { return get("logos") === "1"; }
 const ROWS = ["plain", "meta", "rich"];
-function rows() { const r = get("rows"); return ROWS.includes(r) ? r : "plain"; }
+function rows() { const r = get("rows"); return ROWS.includes(r) ? r : "meta"; }
 const SCREENS = ["sessions", "intake", "checkin", "tasks", "runs", "workflows", "fleet", "connections", "notifications", "settings"];
 const TITLES = { sessions: "Sessions", intake: "Intake", checkin: "Check-in", tasks: "Tasks", runs: "Runs", workflows: "Workflows", fleet: "Fleet", connections: "Connections", notifications: "Notifications", settings: "Settings" };
 
@@ -648,6 +659,7 @@ const BUSY = {
     { id: "8b0d1e2f", title: "Triage · 09:00 batch", state: "done", age: "5h", project: "" },
   ],
   counts: { intake: 7, checkin: 2, notifications: 5 },
+  pulseLine: "<b>6 runners</b> · <span class='w'>1 at cap</span> · Hera active",
   pulse: [
     { dot: "live", html: "<b>6 runners</b> · 11 sessions" },
     { dot: "live", html: "<b>Hera</b> active in #ops" },
@@ -658,6 +670,7 @@ const BUSY = {
 const FRESH = {
   projects: [], assistants: [{ name: "Hydra", live: false, where: "web chat", id: "as-hydra" }], fromWorkflows: [],
   counts: { intake: 0, checkin: 0, notifications: 0 },
+  pulseLine: "<b>1 runner</b> · this machine",
   pulse: [{ dot: "live", html: "<b>1 runner</b> · this machine" }],
 };
 /* threads started in this page (in memory, no persistence - reload forgets them) */
@@ -939,7 +952,13 @@ function pulseHtml(limit = 99) {
   return `<div class="pulse">${data().pulse.slice(0, limit).map((p) => `<span class="pl">${p.dot === "live" ? '<span class="livedot"></span>' : '<span class="idledot"></span>'}<span>${p.html}</span></span>`).join("")}</div>`;
 }
 function legendBtn() { return `<button class="lgbtn" id="lgtoggle" aria-expanded="false" aria-controls="legend"><span class="markcell" style="width:auto">${bs(BS.queued)}</span>Marks <kbd>?</kbd></button>`; }
-function footHtml(extra = "") { return `<div class="sidefoot">${extra}${pulsePlace() === "foot" ? pulseHtml() : ""}${legendBtn()}</div>`; }
+/* the foot pulse: one summary line; click expands it to the full block (in memory, closed by default) */
+let PULSE_OPEN = false;
+function footPulseHtml() {
+  const d = data();
+  return `<div class="pulse foot"><button class="pl psum" data-pulse="1" aria-expanded="${PULSE_OPEN}"><span class="livedot"></span><span class="txt">${d.pulseLine}</span><span class="chev">›</span></button>${PULSE_OPEN ? d.pulse.slice(1).map((p) => `<span class="pl sub">${p.dot === "live" ? '<span class="livedot"></span>' : '<span class="idledot"></span>'}<span>${p.html}</span></span>`).join("") : ""}</div>`;
+}
+function footHtml(extra = "") { return `<div class="sidefoot">${extra}${pulsePlace() === "foot" ? footPulseHtml() : ""}${legendBtn()}</div>`; }
 const LOGO = `<div class="logo"><b>Hydra</b><span>rogier</span></div>`;
 const SESS_LABEL = `<div class="lane-label glabel">Sessions <a class="r" data-go="sessions" data-all="1">all →</a></div>`;
 
@@ -1335,7 +1354,10 @@ function settingsScreen() {
       <div class="fr"><span class="fl">Model</span><span class="fv">${sel("", "claude-sonnet-5")} ${sel("effort", "medium")}</span></div>
       <div class="fr"><span class="fl">Access</span><span class="fv">${sel("", "approval-required")}</span></div>
       <div class="fr"><span class="fl">Profile</span><span class="fv">${sel("", "unrestricted")}</span></div>
-      <div class="fine">Shown in every new thread's composer; changes made there never come back here.</div></div>`;
+      <div class="fine">Shown in every new thread's composer; changes made there never come back here.</div></div>
+    <div class="form" style="box-shadow:var(--card-shadow);margin-top:14px"><div class="lane-label">Threads · display</div>
+      <div class="fr"><span class="fl">Sidebar rows</span><span class="fv">${sel("", rows() === "plain" ? "plain · title and age" : "meta · a second line with checkout, PR and model")}</span></div>
+      <div class="fine">A display preference for this browser session; key <kbd style="font-family:var(--mono)">r</kbd> flips it here.</div></div>`;
 }
 const SCREEN_FN = { sessions: sessionsScreen, intake: intakeScreen, checkin: checkinScreen, tasks: tasksScreen, runs: runsScreen, workflows: workflowsScreen, fleet: fleetScreen, connections: connectionsScreen, notifications: notificationsScreen, settings: settingsScreen };
 
@@ -1384,7 +1406,7 @@ function cycleRows() { setParams({ rows: ROWS[(ROWS.indexOf(rows()) + 1) % ROWS.
 function cycleInput() { setParams({ input: INPUTS[(INPUTS.indexOf(input()) + 1) % INPUTS.length] }); }
 function toggleHero() { setParams({ hero: hero() === "center" ? null : "center" }); }
 function toggleLogos() { setParams({ logos: logos() ? null : "1" }); }
-function toggleEffort() { setParams({ effort: effortPlace() === "own" ? "nested" : null }); }
+function toggleEffort() { setParams({ effort: effortPlace() === "own" ? null : "own" }); }
 function startThread() {
   const ta = document.getElementById("compose"); const text = (ta && ta.value.trim()) || "Add a --json flag to hydra runner list so scripts can read it.";
   const id = "c0ffee" + String(STARTED.length + 10);
@@ -1397,9 +1419,10 @@ function startThread() {
 }
 
 document.addEventListener("click", (e) => {
-  const el = e.target.closest("[data-go],[data-thread],[data-login],[data-login-done],[data-send],[data-mode],[data-pj],[data-wf],[data-toggle],[data-pop],[data-pick],#lgtoggle,[data-noop]");
+  const el = e.target.closest("[data-go],[data-thread],[data-login],[data-login-done],[data-send],[data-mode],[data-pj],[data-wf],[data-toggle],[data-pop],[data-pick],[data-pulse],#lgtoggle,[data-noop]");
   if (!el) { if (!e.target.closest("#legend")) toggleLegend(false); if (!e.target.closest("#pop")) closePop(); return; }
   e.preventDefault();
+  if (el.dataset.pulse) { PULSE_OPEN = !PULSE_OPEN; return render(); }
   if (el.dataset.pop) return openPop(el.dataset.pop);
   if (el.dataset.pick) return pick(el.dataset.pick, el.dataset.val);
   if (el.id === "lgtoggle") return toggleLegend();
