@@ -129,8 +129,8 @@ above:
   anything hiding forever.
 - **Decisions are questions.** Every needs-you item is phrased as a question whose
   answers are its (quiet) buttons, marked by the `?` decision mark (see Marks). The decision
-  card is uniform-height with labeled fields (FROM / WHY / AGENT) so cycling never moves
-  the controls; one decision at a time ("Focus") is the pinned treatment.
+  card has labeled fields (FROM / WHY / AGENT); one decision at a time ("Focus") is the
+  pinned treatment, its answers a ledger (amendment of 2026-09-01 below).
 - **One calm headline sentence** ("2 decisions wait · 3 strands in motion · 6 outcomes
   today") and a **pulse rail** (fleet / assistants / intake as quiet text lines) replace
   stat-card rows, which are banned. Assistants are ambient presence, never work strands.
@@ -225,6 +225,15 @@ sit beside proposals with their own answers; the events-view stamp vocabulary is
 "routed", "ignored" and "filtered" are retired; the receipt line reads "212 events →
 6 proposals · 1 attached · 2 offers · 3 FYI · 2 unsure · 198 no action" and a "last triage"
 line (time + summary) closes the page. Owner: spec 10 §2-3.
+
+Amended 2026-09-01 by ticket #50 (Prototype: rendering bound actions in the Focus card): a
+decision's answers render as a **ledger** - one full-width row per answer, the row is the
+button: label in the left column (ink for the primary answer) · the core's **describe line**
+at metadata size with entity names in ink · the producer's **description** as fine print
+under it. Nothing behind hover or a confirm step; no glyph prefix on describe lines. The
+card's height follows its answers ("uniform-height" above is withdrawn); the arrow row stays
+below the card. Chat sinks use the same hierarchy: "label · describe", description as
+subtext. Owner: spec 14 §The check-in view, spec 12 §11.6.
 
 ## Provenance
 

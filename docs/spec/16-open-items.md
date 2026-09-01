@@ -70,7 +70,7 @@ In scope, not yet sharp enough to ticket; listed on the map under **Not yet spec
 
 ## Pending prototypes
 
-- [Prototype: rendering bound actions (label, description, describe line) in the Focus card](https://github.com/rogierpennink/hydra/issues/50) - 14 §The check-in view (the bound-action Open line).
 - [Prototype: the app shell and navigation](https://github.com/rogierpennink/hydra/issues/51) - 14 §V1 screen inventory (the app shell Open line).
 
+- ~~[Prototype: rendering bound actions (label, description, describe line) in the Focus card](https://github.com/rogierpennink/hydra/issues/50)~~ - resolved 2026-09-01: 14 §The check-in view pins the answers ledger (label · describe line · description as fine print, nothing behind hover), 12 §11.6 the compact chat rendering.
 - ~~[Prototype: mark & entity-glyph iconography](https://github.com/rogierpennink/hydra/issues/35)~~ - resolved 2026-08-30: 14 §Iconography and [design-language.md](../design-language.md) §Marks are pinned (bespoke family at Lucide's weight, `?` for decisions, one-mark-per-slot rule, legend at the sidebar foot).
