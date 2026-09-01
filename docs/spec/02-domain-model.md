@@ -14,8 +14,9 @@ These rules hold for every entity below.
 6. **Every mutation is actor-stamped** (`user` or `session:<id>`) in the event log; no entity carries a separate audit trail ([11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md)).
 7. **Secrets are references.** Fields marked "secret" hold a reference into the owner-scoped secrets table; the value never appears in any entity row, log line or API response ([13-security.md](./13-security.md)).
 8. **Single user, widen later.** No entity carries an owner or tenant column in v1. The `actor` field and the user record are the places a later multi-user model widens; nothing else may assume "the user".
+9. **Sessions copy, never reference.** An Agent supplies values at spawn; the Session row holds its own copy of everything that shaped it (its `spec`, its `permissionProfileId`), and no property of a running or past session is ever read through its `agentId`. `agentId` is lineage. A session with no agent at all is a Thread (below). Reassigning an agent's profile or changing its defaults affects sessions spawned afterwards; editing a profile's grants applies live, because the session points at the profile row ([ADR 0030](../adr/0030-sessions-copy-their-configuration-and-a-thread-has-no-agent.md); resolved 2026-09-01, [Domain model residue](https://github.com/rogierpennink/hydra/issues/46)).
 
-**Open:** the id format for Hydra-owned entities (UUID variant, ULID, or integer rowid) is not pinned. Tickets write typed references such as `run:1234` and `session:<id>` on the CLI and in actor stamps; [08-events-and-connections.md](./08-events-and-connections.md) pins the event `id` as the integer log position; the format for every other entity is a build-time choice for [04-state-store.md](./04-state-store.md) to record.
+**Ids** (resolved 2026-09-01, [Domain model residue](https://github.com/rogierpennink/hydra/issues/46)): every Hydra-owned entity is identified by a **UUIDv7** minted by the controller, stored as a 16-byte primary key and rendered as the canonical lowercase string on the wire, in typed references (`run:<uuid>`, `session:<uuid>`), in actor stamps and in branch names. The one exception is the Event, whose `id` is the integer log position ([08-events-and-connections.md](./08-events-and-connections.md)); per-session stream rows are keyed by (session, position). Where a human reads or types an id, the short form is the **last eight hex characters** (the random tail; the head is a timestamp shared by every id minted in the same minute), and the CLI accepts a full id or an unambiguous tail of eight or more characters (`conflict` if ambiguous). Rationale and storage rules: [04-state-store.md](./04-state-store.md).
 
 ## Entity-relationship overview
 
@@ -48,7 +49,8 @@ erDiagram
   SESSION ||--o{ QUEUED_INPUT : "controller-owned queue"
   SESSION ||--|| SESSION_BINDING : "native id"
   SESSION ||--|| SESSION_TOKEN : "minted per session"
-  AGENT ||--o{ SESSION : "identity"
+  AGENT |o--o{ SESSION : "lineage (optional; null = Thread)"
+  SESSION }o--|| PERMISSION_PROFILE : "copied at spawn"
   AGENT }o--|| PERMISSION_PROFILE : "bounded by"
   PROVIDER_INSTANCE ||--o{ AGENT : "runs on"
   PROVIDER_INSTANCE ||--o{ SESSION : "routing key"
@@ -73,7 +75,7 @@ In prose, the model has five clusters:
 
 - **Work triangle**: Task (intent), Run (execution of a plan), Session (agent conversation). Any two are linked only when the link is meaningful; links live on the Run and Session side, and a Task's runs and sessions are derived by query.
 - **Automation**: Workflow owns Triggers and Steps; a Run freezes an Execution Plan and holds Subscriptions; Events flow through one pipeline stamped with their Connection; Notifications are the output to the user.
-- **Actors and access**: Agent (with a Permission Profile), Assistant (an Agent plus Conversations, Channel Bindings and Memory), Platform Identities (owner / trusted), Actor stamps, Session Tokens, API Keys, Grants and Permission Requests.
+- **Actors and access**: Agent (with a Permission Profile), Assistant (an Agent plus Conversations, Channel Bindings and Memory), Thread (a session the user drives with no Agent), Platform Identities (owner / trusted), Actor stamps, Session Tokens, API Keys, Grants and Permission Requests.
 - **Organization**: Project spans Resources; Resources are checked out into Workspaces on Runners as Checkouts; Resources may reference the Connection that reaches them.
 - **Infrastructure and extension**: Controller identity, Runners (with states and capabilities), Provider instances with Capability Snapshots, Plugins with their state, Connections, Secrets.
 
@@ -96,18 +98,17 @@ Fields (pinned):
 | `projectId` | Hydra id, optional | At most one project |
 | `provenance` | Provenance entry[] | Append-only |
 | `createdAt`, `updatedAt`, `statusChangedAt` | timestamps | `statusChangedAt` moves only when `status` changes |
+| `deletedAt` | timestamp, optional | soft delete: set by `task.delete`, the row stays (Deletion rules, below) |
 
 Not present in v1: assignee, subtasks, task-to-task dependencies, comments, a suggested-priority shadow field (the actor-stamped event log serves that need).
 
-Status axis: `open` -> `in-progress` -> `done`, plus `cancelled`. Any-to-any transitions; no state machine enforcement; no core auto-transitions; no completion gating. Status changes only via an explicit `task.update`. "Done means the PR merged" is a shipped-workflow convention implemented by the work run's own signal trigger and a final `task.update` step ([09-tasks.md](./09-tasks.md)). `cancelled` means decided not to do; hard delete means it should never have existed, and the event log keeps the audit.
+Status axis: `open` -> `in-progress` -> `done`, plus `cancelled`. Any-to-any transitions; no state machine enforcement; no core auto-transitions; no completion gating. Status changes only via an explicit `task.update`. "Done means the PR merged" is a shipped-workflow convention implemented by the work run's own signal trigger and a final `task.update` step ([09-tasks.md](./09-tasks.md)). `cancelled` means decided not to do; delete (soft, `deletedAt`) means it should never have existed: the row stays for history, `task.read` answers `not_found`, and the event log keeps the audit (Deletion rules, below).
 
 Relationships: `projectId` optional. Run and Session links to a task live on the Run and Session rows; the task's run and session lists are derived by query. Proposal (a Task labelled `proposed` plus its pending decision Notification) and Topic (a label) are vocabulary over this row, not fields.
 
 Identity: Hydra id only. External refs live in provenance and are never unique across tasks.
 
-Platform events: `task.created` carries a full snapshot; `task.updated` carries `{taskId, changes}` where `changes` holds `{old, new}` per changed scalar field and `{added, removed}` per changed array field; one update op emits exactly one event; provenance-only appends also emit `task.updated`. The actor is the envelope's `actor` field, not repeated in the payload ([08-events-and-connections.md](./08-events-and-connections.md), [09-tasks.md](./09-tasks.md)).
-
-**Open:** whether a `task.deleted` platform event exists is not pinned; the v1 platform-event set names only `run.completed`, `run.failed`, `task.created`, `task.updated`.
+Platform events: `task.created` carries a full snapshot; `task.updated` carries `{taskId, changes}` where `changes` holds `{old, new}` per changed scalar field and `{added, removed}` per changed array field; one update op emits exactly one event; provenance-only appends also emit `task.updated`. `task.deleted` carries `{taskId, snapshot}`, the final row, because nothing can read it afterwards. The actor is the envelope's `actor` field, not repeated in the payload ([08-events-and-connections.md](./08-events-and-connections.md), [09-tasks.md](./09-tasks.md)).
 
 ### Provenance entry
 
@@ -119,13 +120,13 @@ External Ref canonical form: a fully-qualified id `<type>:<kind>:<identity>`, fo
 
 Relationships: `eventId` points into the event log (the referenced event may be TTL-pruned; the entry survives), `runId` into Runs.
 
-**Open:** whether an entry must carry at least one of `ref`, `eventId`, `runId` is not pinned; the tickets show all three as optional.
+An entry MUST carry at least one of `ref`, `eventId`, `runId` (`validation` otherwise; resolved 2026-09-01, [Domain model residue](https://github.com/rogierpennink/hydra/issues/46)): `{at, actor}` alone says nothing the actor-stamped `task.updated` event does not. A hand-made task simply has an empty provenance list.
 
 ### Run
 
 Purpose: one execution of a frozen Execution Plan, the only thing called a run ([ADR 0001](../adr/0001-runs-freeze-an-execution-plan.md)).
 
-Fields: the run record is owned by [07-workflows.md](./07-workflows.md) (section 7.2): `id`, `workflowId | null`, frozen `plan`, resolved `inputs`, `workspaceId?` and `runnerId?` (the run's one workspace and runner, once pinned), `origin` (trigger / manual / action / api), `triggerEvent` (a copy of the triggering event, surviving event-log pruning), `rerunOf`, `status`, `failureReason` (closed set: `validation-error`, `expression-error`, `iteration-limit`, `schema-failure`, `step-failed`, `session-failed`), `failedStepId`, `steps[]` (step records), `createdAt`, `startedAt`, `finishedAt`. Ticket 13 pins the content (frozen plan, resolved inputs, triggering event, per-step records, failure reason); the names are 07's consolidation; the execution semantics are [Workflow execution semantics](https://github.com/rogierpennink/hydra/issues/36)'s. This document adds one optional link: `taskId` (the all-links-optional work triangle; the task's run list is derived from it).
+Fields: the run record is owned by [07-workflows.md](./07-workflows.md) (section 7.2): `id`, `workflowId | null`, frozen `plan`, resolved `inputs`, `workspaceId?` and `runnerId?` (the run's one workspace and runner, once pinned), `origin` (trigger / manual / action / api), `triggerEvent` (a copy of the triggering event, surviving event-log pruning), `rerunOf`, `status`, `failureReason` (closed set: `validation-error`, `expression-error`, `iteration-limit`, `schema-failure`, `step-failed`, `session-failed`, `workspace-failed`), `failedStepId`, `steps[]` (step records), `createdAt`, `startedAt`, `finishedAt`. Ticket 13 pins the content (frozen plan, resolved inputs, triggering event, per-step records, failure reason); the names are 07's consolidation; the execution semantics are [Workflow execution semantics](https://github.com/rogierpennink/hydra/issues/36)'s. This document adds one optional link: `taskId` (the all-links-optional work triangle; the task's run list is derived from it).
 
 How a run was started is `origin` plus `triggerEvent`; the check-in view's provenance-first ranking (started by you > standing workflow > routine schedule) needs no further field ([14-web-app.md](./14-web-app.md)).
 
@@ -160,7 +161,8 @@ Fields (pinned across [#6](https://github.com/rogierpennink/hydra/issues/6), [#7
 | Field | Notes |
 |---|---|
 | `id` | Hydra id; distinct from any provider-native id |
-| `agentId` | the Agent identity whose profile the session token inherits |
+| `agentId` | optional; the Agent whose values were copied at spawn - lineage only, never read through afterwards (rule 9); `null` = a Thread |
+| `permissionProfileId` | required; copied at spawn from the Agent, or from the `thread.profileId` setting for a Thread; the profile the session token carries |
 | `instanceId` | provider instance; the routing key for the adapter (instance, never provider id) |
 | `runnerId` | pinned where the session starts; never migrates |
 | `workspaceId` | optional; `null` is a workspace-less session |
@@ -176,9 +178,7 @@ Session-only grants approved through a Permission Request attach to the Session 
 
 Status axis (consolidated from pinned lifecycle facts, owned by [06-providers.md](./06-providers.md)): `queued` (placement accepted but the runner is at its session cap) | `starting` | `idle` | `busy` (a turn is running; decides whether `sendInput` opens or steers) | `exited`. `resumable` is derived: `exited` and the runner still holds the provider-native state; it becomes false when that runner is retired or wiped.
 
-Relationships: requires `agentId`, `instanceId`, `runnerId`. Everything else optional. Holds zero or more Subscriptions (registered by the session itself through the API, or migrated from a rotated predecessor in the same Conversation). Owns its Turns and Queued Inputs. Exactly one Session Token while alive.
-
-**Open:** whether a user-driven chat-first session can exist without an Agent row is not pinned; token -> session -> agent -> profile resolution assumes every session has an agent.
+Relationships: requires `instanceId`, `runnerId`, `permissionProfileId`. Everything else optional, `agentId` included. Holds zero or more Subscriptions (registered by the session itself through the API, or migrated from a rotated predecessor in the same Conversation). Owns its Turns and Queued Inputs. Exactly one Session Token while alive.
 
 Identity: the Hydra session id and the provider-native id (Claude Code session id, Codex thread id, pi session) are separate concepts joined only by the Session Binding. All Hydra references (API, CLI, actor stamps, step records, subscriptions) use the Hydra id.
 
@@ -202,25 +202,46 @@ Purpose: the explicit join between a Hydra session and the provider-native objec
 
 Shape: `SessionBinding { sessionId, nativeSessionId, instanceId }`, owned by [06-providers.md](./06-providers.md). Returned by `startSession` and by `listSessions` on runner restart for reconciliation; the runner is known from the Session row, not the binding. Provider-native transcripts stay on the runner; the controller's normalized stream is the observable record.
 
+#### Thread
+
+Purpose: a session the user starts and drives by hand, with no Agent behind it - the t3-code-style "open a session on this machine" experience, and the whole product for a user who never touches workflows or Intake (resolved 2026-09-01, [Domain model residue](https://github.com/rogierpennink/hydra/issues/46); [ADR 0030](../adr/0030-sessions-copy-their-configuration-and-a-thread-has-no-agent.md)).
+
+Shape: a Session row with `agentId: null`. Nothing else distinguishes it: no thread table, no record that outlives the session, nothing named or reusable. Its spec is assembled from the user's **thread defaults** in the settings store - `thread.instanceId`, `thread.model`, `thread.accessMode`, `thread.profileId` (shipped: the first provider instance with a logged-in snapshot, that instance's default model, `approval-required`, the `unrestricted` profile; [11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md) section 2) - plus whatever the user changes in the create form for this one thread; form changes are never written back. Only actor `user` may spawn one (`session.spawn` without `agentId`; `forbidden` for session, run and plugin actors, since the thread profile would otherwise be an escalation path). Placement defaults to the "local" alias ([03-controller-and-runners.md](./03-controller-and-runners.md) section 5.4).
+
+Vocabulary: user-facing copy says "thread" ("Create new thread"). The bare word always means this concept; the provider-native "Codex thread" ([06-providers.md](./06-providers.md)) and the container level "Slack thread" ([12-assistants.md](./12-assistants.md)) are always qualified. "Chat", a non-agentic conversation surface, is a different, post-v1 concept.
+
+Status axis: the Session's.
+
 ## Actors
 
 ### Agent
 
 Purpose: the controller-owned identity that does work; one concept covering workflow agents and assistants.
 
-Fields (pinned): `id`, `name`, `systemPrompt`, `instanceId` (provider instance), `permissionProfileId` (required; shipped defaults: `worker` profile for agents used in workflow agent steps, `assistant` profile for assistants). A session started for an agent takes its prompt, provider instance and profile from the agent; the agent step or the user supplies the rest of the `SessionSpec` (the agent step carries `accessMode` and an optional model override, [07-workflows.md](./07-workflows.md)).
+Fields (pinned; defaults resolved 2026-09-01, [Domain model residue](https://github.com/rogierpennink/hydra/issues/46)):
 
-**Open:** which session defaults an Agent carries beyond prompt, provider instance and profile (default `modelSelection`, default `accessMode`, standing `mcpServers`) versus what is supplied per session or per step is not pinned. [#6](https://github.com/rogierpennink/hydra/issues/6) lists "prompt, provider, capabilities" without expanding "capabilities". Placement requirements are settled: they live on the Workflow, per run, never on the Agent or the step ([07-workflows.md](./07-workflows.md) section 4.4).
+| Field | Notes |
+|---|---|
+| `id`, `name`, `systemPrompt` | |
+| `instanceId` | provider instance, required |
+| `permissionProfileId` | required; shipped defaults: `worker` for agents used in workflow agent steps, `assistant` for assistants |
+| `accessMode` | optional, default `full-access` (agents work in the background; `approval-required` is unworkable there) |
+| `model` | optional `ModelSelection { model, options }`; effort, thinking and the other well-known option ids ride inside `options` ([06-providers.md](./06-providers.md)); absent = the instance's default model from its Capability Snapshot |
+| `mcpServers` | optional standing per-session MCP passthrough; nothing populates it in v1 |
+| `disallowedTools` | optional list of harness tool families to remove, in a small Hydra vocabulary (`edit`, `write`, `shell`, `web`, ...) each adapter maps to its harness: Claude `disallowedTools`, pi `excludeTools`; Codex declares it `unsupported` in its Capability Snapshot and the UI says so ([06-providers.md](./06-providers.md) section 3) |
+| `createdAt`, `updatedAt` | |
+
+Every value is copied into the Session at spawn (rule 9). Precedence for each default: an explicit per-step or per-spawn value, then the Agent field, then the instance default; the agent step's `accessMode` and `model` are therefore optional overrides ([07-workflows.md](./07-workflows.md) section 4.2). Placement requirements live on the Workflow, per run, never on the Agent or the step ([07-workflows.md](./07-workflows.md) section 4.4). There is no custom-tools field in v1: nothing produces a custom tool to attach (Post-v1).
 
 Status axis: none.
 
-Relationships: `permissionProfileId` required; `instanceId` required; sessions reference the agent.
+Relationships: `permissionProfileId` required; `instanceId` required; sessions reference the agent as lineage only. Deleting an agent is refused (`invalid_state`) while any non-`exited` session references it; exited sessions keep the id and render as "deleted agent"; workflows naming it go invalid (Deletion rules, below).
 
 ### Assistant
 
 Purpose: an Agent with channel bindings, conversations and memory, oriented to delegating work ([ADR 0014](../adr/0014-assistants-remember-through-distilled-memory-not-merged-sessions.md)).
 
-Fields (pinned, [12-assistants.md](./12-assistants.md) section 1): everything an Agent has, plus `heartbeat { enabled (default true), schedule (cron, default `0 7-23 * * *`), timezone?, prompt, target: web | dm:<connectionId> | most-recent }`, `rotation { contextFraction (0.7), maxContextTokens (200000), dailyAt (04:00), timezone? }`, `reply (turn-end | segments)`, `accessMode (default full-access)`. Timezones fall back to the user's timezone setting. Default profile `assistant`, loosenable per assistant. One default assistant is created at setup ([15-packaging-and-operations.md](./15-packaging-and-operations.md)). Assistant sessions are workspace-less and run with the `hydra` CLI. The heartbeat is the assistant's standing Scheduled Wake (below).
+Fields (pinned, [12-assistants.md](./12-assistants.md) section 1): everything an Agent has, plus `heartbeat { enabled (default true), schedule (cron, default `0 7-23 * * *`), timezone?, prompt, target: web | dm:<connectionId> | most-recent }`, `rotation { contextFraction (0.7), maxContextTokens (200000), dailyAt (04:00), timezone? }`, `reply (turn-end | segments)`; the Agent's `accessMode` keeps its `full-access` default and its `disallowedTools` defaults to `["edit"]` ([12-assistants.md](./12-assistants.md) section 7). Timezones fall back to the user's timezone setting. Default profile `assistant`, loosenable per assistant. One default assistant is created at setup ([15-packaging-and-operations.md](./15-packaging-and-operations.md)). Assistant sessions are workspace-less and run with the `hydra` CLI. The heartbeat is the assistant's standing Scheduled Wake (below).
 
 Status axis: none. There is no paused state in v1; removing all bindings is how an assistant is paused.
 
@@ -268,11 +289,11 @@ Status axis (Reminder): `pending` -> `fired` | `cancelled`.
 
 Purpose: who performed an operation, stamped on every mutation in the event log.
 
-Values: `user`, `session:<sessionId>`, `run:<runId>` (a built-in action step inside a run) or `plugin:<pluginId>` (a plugin calling in-process). Session actors are bounded by their agent's profile; the other three are ungated ([11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md) section 3.1). A single user record (username, password hash) exists in v1 for login; there is no user entity in the API model beyond that record, and the actor value `user` is the only user identity. Multi-user widens this field; it is never restructured ([ADR 0013](../adr/0013-agents-operate-hydra-through-the-public-api.md)).
+Values: `user`, `session:<sessionId>`, `run:<runId>` (a built-in action step inside a run) or `plugin:<pluginId>` (a plugin calling in-process). Session actors are bounded by their session's profile; the other three are ungated ([11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md) section 3.1). A single user record (username, password hash) exists in v1 for login; there is no user entity in the API model beyond that record, and the actor value `user` is the only user identity. Multi-user widens this field; it is never restructured ([ADR 0013](../adr/0013-agents-operate-hydra-through-the-public-api.md)).
 
 ### Permission Profile, Grant, Permission Request
 
-**Permission Profile**: `id`, `name`, `grants[]`. Attached to every Agent; inherited by every session token of that agent. Three shipped profiles (`assistant`, `worker`, `unrestricted`); their contents are the table in [13-security.md](./13-security.md).
+**Permission Profile**: `id`, `name`, `grants[]`. Attached to every Agent and copied onto every Session at spawn (a Thread takes the `thread.profileId` setting); the session token carries the session's profile. Three shipped profiles (`assistant`, `worker`, `unrestricted`); their contents are the table in [13-security.md](./13-security.md).
 
 **Grant**: one operation-family permission `{family, verbs}`, written `<family>.<verb>` (`task.delete`, `session.spawn`, `infra.write`). Families: `task`, `workflow`, `run`, `session`, `subscription`, `notification`, `event`, `connection`, `infra`, `workspace`, `agent`, `memory`, `permission`, `project`, `resource`, `secret`, `credential`; the table with verbs is in [13-security.md](./13-security.md) section 6.1. Grant families are coarser than operation families (`infra` covers runners, plugins, providers and the controller); the contract's operation-to-grant table joins them. Grants are unscoped in v1 (`memory` excepted); finer grants can be added inside a family later without breaking profiles. A grant is the unit a 403 names and an escalation asks for. A grant approved "this session only" attaches to the Session, not the profile; "add to profile" appends it to the profile.
 
@@ -282,7 +303,7 @@ Values: `user`, `session:<sessionId>`, `run:<runId>` (a built-in action step ins
 
 Purpose: the per-session credential whose subject is the Session.
 
-Fields: `sessionId` (subject), token (opaque random, only its hash stored), `createdAt`, `revokedAt` (set when the session ends). Carries the agent's profile by resolution (token -> session -> agent -> profile, one indexed lookup; revoked on session end). Injected by the runner as `HYDRA_TOKEN` with `HYDRA_API_URL` and `HYDRA_SESSION=1`.
+Fields: `sessionId` (subject), token (opaque random, only its hash stored), `createdAt`, `revokedAt` (set when the session ends). Carries the session's profile by resolution (token -> session -> profile, one indexed lookup; the profile id was copied onto the Session at spawn, rule 9, so a Thread resolves the same way; revoked on session end). Injected by the runner as `HYDRA_TOKEN` with `HYDRA_API_URL` and `HYDRA_SESSION=1`.
 
 ### API Key
 
@@ -296,9 +317,7 @@ Fields: `id`, `name`, token hash (opaque random; never a JWT), `createdAt`, `las
 
 Purpose: a grouping of related work and its materials; may span several resources.
 
-Fields (spec-consolidated; ticket 6 pins the concept, not fields): `id`, `name`. Tasks reference a project through `projectId`; a project spans Resources.
-
-**Open:** the Project-Resource cardinality (whether one Resource may belong to several Projects) and any further Project fields (description, default connection) are not pinned.
+Fields (resolved 2026-09-01, [Domain model residue](https://github.com/rogierpennink/hydra/issues/46)): `id`, `name`, `description?` (markdown), `createdAt`, `updatedAt`, `deletedAt?`. Tasks reference a project through `projectId`; a project spans zero or more Resources through a join table, and a Resource may belong to any number of Projects. There is no default Connection: Resources carry the Connection that reaches them and Workspaces designate the git-identity one. A Project is a way to group information inside Hydra; it carries no behaviour. Soft-deleted like a Task (Deletion rules, below); its tasks keep their `projectId`.
 
 Status axis: none.
 
@@ -306,13 +325,13 @@ Status axis: none.
 
 Purpose: a durable external thing a project works with: a git repo, a folder, a mailbox.
 
-Fields (pinned): `id`, `kind: repo | folder | mailbox`, `connectionId?` (the Connection used to reach it: the GitHub Connection that clones a repo, the gmail Connection of a mailbox), and for repo resources: the remote (origin) location, one optional setup command (stored here and never in the repo, run in fresh ephemeral checkouts; failure marks the workspace unusable), and the untracked-file copy convention (`.workspaceinclude`, configurable). "Resource" is a vocabulary term, not a common code interface: each kind has its own fields. A connected account can play two roles: Resource (the mailbox) and event source (its Connection's ingest).
+Fields (pinned): `id`, `kind: repo | folder | mailbox`, `connectionId?` (the Connection used to reach it: the GitHub Connection that clones a repo, the gmail Connection of a mailbox), and for repo resources: the remote (origin) location, one optional setup command (stored here and never in the repo, run in fresh ephemeral checkouts; failure marks the workspace `failed`), and the untracked-file copy convention (`.workspaceinclude`, configurable). "Resource" is a vocabulary term, not a common code interface: each kind has its own fields. A connected account can play two roles: Resource (the mailbox) and event source (its Connection's ingest).
 
 In v1 only repo resources are checkout-able; folder resources produce no workspaces; mailboxes never produce workspaces.
 
-Relationships: `connectionId` optional; per (resource, runner) at most one primary Workspace and one runner-owned bare cache; GitHub plugin watch lists are seeded from repo Resources.
+Relationships: `connectionId` optional; zero or more Projects; per (resource, runner) at most one primary Workspace and one runner-owned bare cache; GitHub plugin watch lists are seeded from repo Resources.
 
-**Open:** whether a repo Resource's identity is its remote URL (so two Resources cannot name the same remote) is not pinned.
+Identity: Hydra id. A repo Resource is additionally **unique on `(kind, canonical remote)`** (resolved 2026-09-01, [Domain model residue](https://github.com/rogierpennink/hydra/issues/46)), canonical = `host/owner/repo` with scheme, `.git` suffix, ssh-versus-https form and host case stripped; a second Resource on the same remote is `conflict`. The remote is a constraint, not the key: changing it is a `resource.update`.
 
 Status axis: none.
 
@@ -324,7 +343,7 @@ Fields (pinned): `id`, `runnerId` (pinned to the runner it was provisioned on; n
 
 Invariants: at most one primary workspace per (resource, runner). Primaries are standalone clones with origin at the real remote (an existing local checkout is adopted in place); ephemerals are git worktrees off the per-resource bare cache, on a branch named by the run (default `hydra/run-<runId>`; [07-workflows.md](./07-workflows.md) section 4.4). A run has exactly one workspace, shared by all its agent steps. Concurrent sessions in a workspace are allowed and surfaced, not locked.
 
-Status axis (consolidated from the lifecycle in [03-controller-and-runners.md](./03-controller-and-runners.md), which owns the names): `provisioning` -> `ready`, and from there `unusable` (setup command failed), `kept-on-failure` (ephemeral kept until the user dismisses the failed run), `deleted` (clean completion, dismissal, or TTL reaping), `lost` (the runner was retired). Primaries are never torn down by Hydra and only ever become `lost`.
+Status axis (owned by [03-controller-and-runners.md](./03-controller-and-runners.md) section 6.3; amended 2026-09-01, [Domain model residue](https://github.com/rogierpennink/hydra/issues/46): `unusable` renamed `failed`, `kept-on-failure` dropped): `provisioning` -> `ready` | `failed` (the setup command failed; the files may be on disk, it was never handed to a session); `ready` | `failed` -> `deleted` (torn down by teardown or the reaper); any non-terminal -> `lost` (the runner was retired). The status reports the material state on the runner and nothing else: whether a failed run's workspace is kept for inspection is teardown policy the controller reads off the run (03 section 6.7), never a workspace state. Primaries are never torn down by Hydra and only ever become `lost`.
 
 Relationships: `runnerId` required; Checkouts reference it; Sessions reference it optionally.
 
@@ -414,7 +433,7 @@ Effect rows the matcher derives from an event (pending run, signal delivery, que
 
 Retention: the event log and per-session streams are TTL-pruned (default 90 days); security events and actor-stamped mutations are kept at least 90 days; domain rows are never pruned; run records copy their triggering event so pruning never breaks audit. The final statement is in [04-state-store.md](./04-state-store.md).
 
-Identity: the log position; `dedupKey` is the plugin's idempotency key per Connection, not the row identity.
+Identity: the log position, which is the `id` column itself - the one integer id in the system ([04-state-store.md](./04-state-store.md)); `dedupKey` is the plugin's idempotency key per Connection, not the row identity.
 
 Status axis: none (events are immutable except the enrichment-writable `system`).
 
@@ -486,6 +505,13 @@ Purpose: one encrypted value in the owner-scoped secrets table ([ADR 0015](../ad
 
 Fields: `id`, `owner {kind: connection | plugin | runner | core, id}`, `name`, ciphertext (encrypted per value under the machine's Master Key), `createdAt`, `rotatedAt?`. Entities reference secrets by id; values never leave the secrets service except to the consumer that needs them. Enumerable and extractable by the running controller for promotion export. Runner credentials are hashed tokens, not secrets rows; the `runner` owner kind is reserved for runner-scoped secrets. The owner kind for provider-instance secrets is Open in [06-providers.md](./06-providers.md).
 
+## Deletion rules
+
+Resolved 2026-09-01, [Domain model residue](https://github.com/rogierpennink/hydra/issues/46).
+
+- **Task and Project soft-delete.** `task.delete` / `project.delete` set `deletedAt`; `read` answers `not_found`, `query` excludes the row (no include-deleted option in v1), provenance and links stay, and `task.deleted { taskId, snapshot }` is emitted. The core withdraws open Notifications whose subject is the deleted task; Runs, Sessions and Tasks keep their `taskId` / `projectId`. A soft-deleted task no longer protects its events from pruning ([04-state-store.md](./04-state-store.md) Retention). These are the two entities whose history the user reads back (Intake, provenance, "why did this exist"), hence soft. Pruning them outright, with their runs and events, after something like a year, is post-v1 fog on the map.
+- **Everything else hard-deletes**, refused with `invalid_state` while something live references the row; historical references keep the id and render as "deleted <entity>". Resource: while a Workspace referencing it is not `deleted | lost`. Workflow: while a Run is non-terminal; runs keep `workflowId`. Agent: while a Session is not `exited`. Connection: while a Resource, Channel Binding or enabled trigger names it. Assistant: the confirmed cascade of memory, bindings and conversations ([12-assistants.md](./12-assistants.md)); its sessions survive. Runner: never deleted, retired.
+
 ## Status axes at a glance
 
 | Entity | Axis | Terminal | Owner of the enum |
@@ -501,7 +527,7 @@ Fields: `id`, `owner {kind: connection | plugin | runner | core, id}`, `name`, c
 | Trigger (start) | `active`, `paused` | none | 07 |
 | Workflow | `enabled`, `disabled` | none | this document |
 | Runner | `online`, `offline`, `unreachable`, `draining`, `retired` | `retired` | 03 |
-| Workspace | `provisioning`, `ready`, `unusable`, `kept-on-failure`, `deleted`, `lost` | `deleted`, `lost` | 03 |
+| Workspace | `provisioning`, `ready`, `failed`, `deleted`, `lost` | `deleted`, `lost` | 03 |
 | Connection | `connected`, `needs-reauth`, `error`, `disabled` | none | 08 |
 | Notification | `open`, `resolved` (resolution kind `decided` / `handled` / `withdrawn`; informational born `resolved`) | `resolved` | 10 |
 | Plugin | `enabled`, `disabled` | none | this document |
@@ -509,7 +535,9 @@ Fields: `id`, `owner {kind: connection | plugin | runner | core, id}`, `name`, c
 
 ## Identity rules at a glance
 
-- **Hydra ids are the only ids used across the system.** API, CLI, actor stamps, step records, subscriptions and provenance all reference Hydra ids. The event `id` is the integer log position ([08-events-and-connections.md](./08-events-and-connections.md)).
+- **Hydra ids are the only ids used across the system.** API, CLI, actor stamps, step records, subscriptions and provenance all reference Hydra ids: UUIDv7, full on the wire, last-eight-characters tail where a human reads or types one. The event `id` is the integer log position ([08-events-and-connections.md](./08-events-and-connections.md)).
+- **A repo Resource is unique on its canonical remote** (`host/owner/repo`); the remote is a constraint, the Hydra id is the key.
+- **Sessions copy, never reference** (rule 9): a session's profile and spec are its own; `agentId` is lineage, and `null` means a Thread.
 - **Provider-native ids** (Claude Code session, Codex thread, pi session; native turn ids where they exist) appear only inside the Session Binding and as `providerRefs` on normalized session events.
 - **External Refs** are `<type>:<kind>:<identity>`, canonicalized by the plugin that owns the type, with the Connection excluded from the identity and no uniqueness across tasks.
 - **`instanceId`, not provider id,** routes sessions; a Capability Snapshot is keyed by (instance, runner).
@@ -525,6 +553,7 @@ Fields: `id`, `owner {kind: connection | plugin | runner | core, id}`, `name`, c
 |---|---|---|
 | Task | `task.created` | full snapshot (actor on the envelope) |
 | Task | `task.updated` | `{taskId, changes}`; `{old, new}` per scalar, `{added, removed}` per array; one event per update op |
+| Task | `task.deleted` | `{taskId, snapshot}`, the final row |
 | Run | `run.completed`, `run.failed`, `run.cancelled` | owned by [08-events-and-connections.md](./08-events-and-connections.md) |
 | Cron trigger (core emitter) | `cron.tick` | `{workflowId, triggerId, scheduledFor}` |
 | Security (audit kinds) | login success/failure, token minted/revoked, permission request raised/decided, secret created/rotated | [13-security.md](./13-security.md) |
@@ -546,6 +575,9 @@ No other entity emits platform events in v1; the set grows additively. Sessions 
 - Presence-aware notification routing; the sink contract grows additively (device class, presence, receipts).
 - Feedback-driven triage learning feeding assistant memory.
 - Cross-assistant recall as agent-to-agent communication, never shared memory.
+- Custom tools on the Agent: when the agent-tools extension point arrives, custom tools become an Agent field copied into the `SessionSpec` and delivered as in-process MCP on Claude, `dynamicTools` / MCP on Codex, `registerTool` on pi. No v1 writer exists, so no v1 field.
+- Chat: a non-agentic conversation surface (talk to a model, no ability to change anything), distinct from a Thread.
+- Pruning soft-deleted Tasks and Projects outright, with their runs and events, after something like a year.
 
 ## Sources
 
@@ -571,6 +603,7 @@ Tickets:
 - [Task model: shape, status axis, lifecycle, provenance](https://github.com/rogierpennink/hydra/issues/29)
 - [Prototype: the Intake view](https://github.com/rogierpennink/hydra/issues/30)
 - [Prototype: assistant memory interface](https://github.com/rogierpennink/hydra/issues/31)
+- [Domain model residue: id format, remaining status axes, identity rules](https://github.com/rogierpennink/hydra/issues/46)
 
 ADRs:
 
@@ -594,3 +627,4 @@ ADRs:
 - [ADR 0017 The web app is a static pure client of the public API](../adr/0017-the-web-app-is-a-static-pure-client-of-the-public-api.md)
 - [ADR 0019 The task model is thin; workflows own task semantics](../adr/0019-the-task-model-is-thin-workflows-own-task-semantics.md)
 - [ADR 0020 Assistant memory is reached only through the API](../adr/0020-assistant-memory-is-reached-only-through-the-api.md)
+- [ADR 0030 Sessions copy their configuration, and a Thread has no Agent](../adr/0030-sessions-copy-their-configuration-and-a-thread-has-no-agent.md)

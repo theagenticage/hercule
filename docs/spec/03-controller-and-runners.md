@@ -138,7 +138,7 @@ No load balancing, no migration, no failover.
 
 "Local" is a client-resolved placement alias meaning "the runner on the machine the user is operating". It is distinct from the default runner, is a UI convenience only, and is not offered when that machine has no runner. Resolution: the runner serves `GET /identity` on a loopback-only port it owns and reports as a probed fact (`identity.port`, default 4939; resolved 2026-09-01, [#45](https://github.com/rogierpennink/hydra/issues/45)) and the client matches the returned id against online fleet runners; placement correctness never depends on this detection ([14-web-app](./14-web-app.md)).
 
-When the operating machine has a runner, **interactive sessions default to "local"**: sessions the user opens from the client ("just open X", chat-first sessions) are placed on that machine's runner unless the user picks another, so working from a laptop feels like working locally. Workflow placements ignore this and use the default runner. Resolving the "local" alias counts as explicit choice for a reserved runner (section 5.5). (Resolved 2026-08-31, [#43](https://github.com/rogierpennink/hydra/issues/43).)
+When the operating machine has a runner, **threads default to "local"**: sessions the user opens from the client with no Agent behind them (Threads, [02-domain-model](./02-domain-model.md)) are placed on that machine's runner unless the user picks another, so working from a laptop feels like working locally. Workflow placements ignore this and use the default runner. Resolving the "local" alias counts as explicit choice for a reserved runner (section 5.5). (Resolved 2026-08-31, [#43](https://github.com/rogierpennink/hydra/issues/43).)
 
 ### 5.5 Reserved runners
 
@@ -196,12 +196,11 @@ Concurrent sessions in one primary workspace are allowed; the UI surfaces the ov
 |---|---|
 | `provisioning` | checkout(s) being created, setup command running |
 | `ready` | usable; the normal state of a primary and of an ephemeral while its job runs |
-| `unusable` | setup command failed; never handed to a session |
-| `kept-on-failure` | ephemeral whose run failed, kept until the user dismisses the failed run |
+| `failed` | setup command failed; the files may be on disk; never handed to a session |
 | `lost` | its runner was retired, or the runner reported the directory gone |
 | `deleted` | torn down by teardown or the TTL reaper; terminal, record kept |
 
-Transitions: `provisioning -> ready | unusable`; `ready -> deleted` (clean completion) or `ready -> kept-on-failure` (failure); `kept-on-failure -> deleted` on dismissal or reaping; `unusable -> deleted` by reaping; any non-terminal status `-> lost` on runner retirement. Primaries are `ready` for their whole life unless they become `lost`.
+Transitions: `provisioning -> ready | failed`; `ready | failed -> deleted` (teardown after clean completion, dismissal of the failed run, or reaping); any non-terminal status `-> lost` on runner retirement. Primaries are `ready` for their whole life unless they become `lost`. The status is the material state on the runner and nothing more: whether an ephemeral is kept for inspection is teardown policy read off its run (6.7), never a workspace state (resolved 2026-09-01, [Domain model residue](https://github.com/rogierpennink/hydra/issues/46): `unusable` renamed `failed`, `kept-on-failure` dropped).
 
 Non-repo resources get no workspaces in v1: folder resources need a versioning story for non-git materials (post-v1), and mailboxes never produce workspaces.
 
@@ -219,7 +218,7 @@ Branch naming is pinned in [07-workflows.md](./07-workflows.md) section 4.4: def
 
 ### 6.5 Setup command and `.workspaceinclude`
 
-- A repo resource MAY carry one optional setup command, stored in controller state (never in the repo). The runner runs it in every fresh ephemeral checkout of that resource. A non-zero exit marks the workspace `unusable`; that the placement which needed it then fails is this spec's consolidation (the ticket pins only the unusable marking).
+- A repo resource MAY carry one optional setup command, stored in controller state (never in the repo). The runner runs it in every fresh ephemeral checkout of that resource. A non-zero exit marks the workspace `failed` and the run fails with `workspace-failed`; that the placement which needed it then fails is this spec's consolidation (the ticket pins only the unusable marking).
 - Fresh worktrees copy untracked files listed by the repository's `.workspaceinclude` file (an existing vendor convention Hydra reads; not Hydra configuration stored in the repo). The copy is configurable.
 
 The copy source is the resource's primary workspace **on the same runner** (paths never cross runners). When that runner has no primary for the resource, nothing is copied and workspace provisioning emits a warning. "Configurable" means a per-resource disable flag only; there is no alternative file name. (Resolved 2026-08-31, [#43](https://github.com/rogierpennink/hydra/issues/43).)
@@ -242,7 +241,7 @@ Primary workspaces are never torn down by Hydra and bare caches persist for the 
 
 A retired runner's workspaces are marked `lost` in the controller (section 7); the disk itself is not touched.
 
-Reaper TTLs (resolved 2026-08-31, [#43](https://github.com/rogierpennink/hydra/issues/43)): orphaned ephemerals are reaped after **24 hours**; `kept-on-failure` workspaces are kept until the failed run is dismissed or **14 days**, whichever comes first - the run record keeps a "workspace reaped" note so a stale failed run never pretends its files still exist. Both are controller-wide settings.
+Reaper TTLs (resolved 2026-08-31, [#43](https://github.com/rogierpennink/hydra/issues/43)): orphaned ephemerals are reaped after **24 hours**; the ephemerals of failed runs are kept until the failed run is dismissed or **14 days**, whichever comes first - the run record keeps a "workspace reaped" note so a stale failed run never pretends its files still exist. Both are controller-wide settings.
 
 ## 7. Runner states
 

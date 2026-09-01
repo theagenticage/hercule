@@ -33,6 +33,7 @@ interface DeclaredCapabilities {
   modelSwitch: "in-session" | "new-session"
   accessModes: Record<AccessMode, "native" | "unsupported">
   mcpPassthrough: "native" | "unsupported"    // pi: verify at build time
+  disallowedTools: "native" | "unsupported"   // Claude disallowedTools, pi excludeTools; Codex unsupported
   structuredOutput: "supported" | "unsupported"
 }
 
@@ -146,6 +147,7 @@ interface SessionSpec {                       // controller-authored - carries i
   accessMode: AccessMode                      // always a mode the target provider declares native
   systemPrompt?: string
   mcpServers?: McpServerConfig[]              // the decided passthrough field (#11)
+  disallowedTools?: string[]                  // harness tool families to remove, Hydra vocabulary (rules below); copied from the Agent
   continue?: { nativeSessionId: string; mode: "resume" | "fork" }
   outputSchema?: JsonSchema                   // structured result contract, section 7
 }
@@ -174,6 +176,7 @@ Rules:
 - **Ids in, paths out.** The runner's session supervisor resolves `workspaceId` to a path and hands the adapter the context. The adapter never sees workspace ids; the controller never sees paths (runner paths are runner-owned opaque facts, ADR 0005).
 - `accessMode` on the spec is post-fallback (section 8.4); adapters carry no fallback logic and may reject a mode they do not declare native as a programming error.
 - `mcpServers` is the per-session MCP-config passthrough decided in [plugin architecture](https://github.com/rogierpennink/hydra/issues/11): it carries self-injection and, later, plugin-contributed MCP tools. In v1 hydra-as-a-tool is the `hydra` CLI, not MCP ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md)), so v1 core passes nothing here by default.
+- `disallowedTools` names harness tool *families* in a small Hydra vocabulary (`edit`, `write`, `shell`, `web`, ...); the adapter owns the mapping to its harness's tool names and declares `disallowedTools: native | unsupported` in its capabilities. Unsupported is honest, not silent: the controller passes the field anyway, the adapter ignores it, and the UI shows "not enforced on <provider>" from the snapshot. The value is the Agent's `disallowedTools` copied at spawn ([./02-domain-model.md](./02-domain-model.md) rule 9); assistants default to `["edit"]` ([./12-assistants.md](./12-assistants.md) section 7). Resolved 2026-09-01, [Domain model residue](https://github.com/rogierpennink/hydra/issues/46).
 - `outputSchema` carries the agent step's declared schema ([./07-workflows.md](./07-workflows.md)); the adapter applies it by the provider's mechanism (section 7).
 - **Deliberately absent:** `readThread` / `rollbackThread` (return with the checkpoint/revert feature; fork covers branching), a separate steer method, any queue surface, a mode-switch method.
 
@@ -371,7 +374,7 @@ Sandboxing is enforced by Codex (Seatbelt on macOS, bubblewrap on Linux; WSL1 un
 
 Every provider instance has its own isolated provider home (one instance = one login = one home; never per session), and every session runs inside its instance's home, so user-global instructions, skills, packages and memory never leak into Hydra sessions (constraint from the [memory-interface prototype](https://github.com/rogierpennink/hydra/issues/31): Codex picked up `~/.codex/AGENTS.md` and pi discovered `~/.claude/skills` until isolated). The handed knobs are the config-dir variables, `--setting-sources project`, `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`; the rest of the table are spec additions supported by the research:
 
-**Open:** isolation also keeps the user's own skills, subagents and instructions (`~/.claude/{skills,agents,CLAUDE.md}`, `~/.codex/AGENTS.md`, pi's skill directories) out of every session, which is right for assistant sessions and wrong for the interactive session the user starts by hand expecting exactly that material. Which session kinds see it, and whether v1 links the user's directories per runner or Hydra owns that knowledge per Agent, is [User knowledge in Hydra sessions](https://github.com/rogierpennink/hydra/issues/52)'s.
+**Open:** isolation also keeps the user's own skills, subagents and instructions (`~/.claude/{skills,agents,CLAUDE.md}`, `~/.codex/AGENTS.md`, pi's skill directories) out of every session, which is right for assistant sessions and wrong for the Thread the user starts by hand ([./02-domain-model.md](./02-domain-model.md)) expecting exactly that material. Which session kinds see it, and whether v1 links the user's directories per runner or Hydra owns that knowledge per Agent, is [User knowledge in Hydra sessions](https://github.com/rogierpennink/hydra/issues/52)'s.
 
 | Provider | Isolation |
 |---|---|

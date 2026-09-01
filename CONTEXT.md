@@ -33,8 +33,12 @@ A fully-qualified canonical identifier for a thing outside Hydra (`github:issue:
 _Avoid_: link, URL (a ref is an identity, not a location)
 
 **Session**:
-One conversation with a provider-backed agent, resumable and forkable. Maps onto a Claude Code session or Codex thread. A session can drive work directly (chat-first) and is not required to belong to a task or workspace.
-_Avoid_: execution, thread (reserved for provider-native objects)
+One conversation with a provider-backed agent, resumable and forkable. Maps onto a Claude Code session, a Codex thread or a pi session. A session copies its configuration from an Agent at spawn and never reads through it afterwards, or has no Agent at all and is a Thread. Not required to belong to a task or workspace.
+_Avoid_: execution, chat
+
+**Thread**:
+A session the user starts and drives by hand, with no Agent behind it: nothing outlives it, nothing about it is named or reusable. The bare word always means this; a Codex thread or a Slack thread is always qualified.
+_Avoid_: interactive session, chat-first session, chat (reserved for a possible non-agentic conversation surface)
 
 **Run**:
 One execution of an execution plan, usually stamped from a workflow. Nothing else in the system is called a run.
@@ -59,7 +63,7 @@ _Avoid_: follow-up (provider-native term), pending message
 ### Actors
 
 **Agent**:
-A configured identity that does work: prompt, provider, capabilities. Owned by the controller, not by any repo.
+A named, reusable configuration and identity for work: prompt, provider instance, permission profile and session defaults. Supplies values to a session at spawn; the session never reads through it afterwards. Owned by the controller, not by any repo.
 _Avoid_: persona, worker (as a noun)
 
 **Assistant**:
@@ -71,11 +75,11 @@ Who performed an operation against the API: the user, a session, a run's built-i
 _Avoid_: principal, subject
 
 **Permission Profile**:
-The named bundle of operation grants attached to an agent, bounding what its sessions may do through the API. Parity with the user is the ceiling, not the default.
+The named bundle of operation grants attached to an agent and copied onto each of its sessions (a thread takes the user's thread default), bounding what the session may do through the API. Parity with the user is the ceiling, not the default.
 _Avoid_: role, scope set
 
 **Session Token**:
-The credential minted per session whose subject is that Session: injected into the session's environment by the runner, carrying the agent's permission profile, dead when the session ends.
+The credential minted per session whose subject is that Session: injected into the session's environment by the runner, carrying the session's permission profile, dead when the session ends.
 _Avoid_: API key (reserved for user credentials), auth session
 
 **API Key**:
@@ -131,7 +135,7 @@ _Avoid_: timer, alarm
 ### Organization
 
 **Project**:
-A grouping of related work and its materials. May span multiple resources (repos, folders, mailboxes); not bound to a single git repo.
+A grouping of related work and its materials, purely a way to organise information inside Hydra: no behaviour, no defaults. May span multiple resources (repos, folders, mailboxes), and a resource may belong to several projects; not bound to a single git repo.
 _Avoid_: workspace (as a grouping term)
 
 **Resource**:

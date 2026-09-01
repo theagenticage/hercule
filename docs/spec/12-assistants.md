@@ -33,7 +33,8 @@ Rules:
 | `rotation.dailyAt` | `04:00` | 5.2 |
 | `rotation.timezone` | unset = the user's timezone setting | 5.2 |
 | `reply` | `turn-end` | 11.3 |
-| `accessMode` | `full-access` | 7 |
+| `accessMode` | `full-access` (the Agent's field, same default) | 7 |
+| `disallowedTools` | `["edit"]` (the Agent's field; agents generally default to none) | 7 |
 
 Bindings, conversations, memory documents and reminders hang off the assistant in their own tables. There is no display name: v1 mentions are platform mentions only (section 4.2), so the Agent's `name` suffices until name-pattern mentions arrive (Post-v1).
 
@@ -274,7 +275,7 @@ Assistants act on the system through the public API like any agent ([ADR 0013](.
 - A denied operation returns a 403 naming the missing grant; the assistant may raise a Permission Request via `permission.request` and learns the outcome through the subscription that operation registers for it ([./13-security.md](./13-security.md#64-escalation-permission-request)).
 - Assistant sessions get no Workspace. Workspace-less sessions get `GH_TOKEN` from the user-designated default Connection or no token ([./13-security.md](./13-security.md)).
 
-**Access mode and harness tools (pinned).** Assistant sessions run under `full-access` by default (`accessMode` on the Assistant record, per-assistant override like any agent's), with the harness's **file-edit tools removed** where the harness has an allowlist (Claude `disallowedTools`, pi `excludeTools`; Codex has none). The shell stays: the assistant reaches Hydra through the `hydra` CLI, i.e. through the shell tool, so `approval-required` would turn every `hydra` call into an approval and pi's lack of `auto` would park every call under the fallback. "Delegate, don't do" therefore rests on three stated facts: the profile withholds workspaces at the API layer, the session's cwd is an empty scratch directory, and the edit tools are gone on two of three harnesses. Accident-proof, not malice-proof - the same posture as the `HYDRA_SESSION` marker in [./13-security.md](./13-security.md). Locking this down further is on the record under Post-v1 (a hydra-only tool in place of a general shell).
+**Access mode and harness tools (pinned).** Assistant sessions run under `full-access` by default (`accessMode` on the Assistant record, per-assistant override like any agent's), with the harness's **file-edit tools removed**: the Agent's `disallowedTools` field defaults to `["edit"]` on assistants and the adapter maps it where the harness has an allowlist (Claude `disallowedTools`, pi `excludeTools`; Codex declares it unsupported; field pinned 2026-09-01, [Domain model residue](https://github.com/rogierpennink/hydra/issues/46)). The shell stays: the assistant reaches Hydra through the `hydra` CLI, i.e. through the shell tool, so `approval-required` would turn every `hydra` call into an approval and pi's lack of `auto` would park every call under the fallback. "Delegate, don't do" therefore rests on three stated facts: the profile withholds workspaces at the API layer, the session's cwd is an empty scratch directory, and the edit tools are gone on two of three harnesses. Accident-proof, not malice-proof - the same posture as the `HYDRA_SESSION` marker in [./13-security.md](./13-security.md). Locking this down further is on the record under Post-v1 (a hydra-only tool in place of a general shell).
 
 ## 8. Proactivity
 

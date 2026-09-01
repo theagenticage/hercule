@@ -28,6 +28,7 @@ interface Task {
   createdAt: string;
   updatedAt: string;
   statusChangedAt: string;
+  deletedAt?: string;         // soft delete (see Delete); read answers not_found, query excludes
 }
 ```
 
@@ -43,10 +44,11 @@ interface Task {
 | `provenance` | ProvenanceEntry[] | Append-only. See [Provenance](#provenance-and-external-refs). |
 | `createdAt`, `updatedAt` | timestamp | Maintained by the core. |
 | `statusChangedAt` | timestamp | Maintained by the core. Consolidated reading (ticket 29 names the field only): set on create and updated only when `status` changes. |
+| `deletedAt` | timestamp? | Set by `task.delete`. A deleted task answers `not_found` on `task.read` and is excluded from `task.query` and search. See [Delete](#delete). |
 
 There is no assignee, no subtask, no task-to-task dependency, and no comment thread (see [Not in v1](#not-in-v1)).
 
-**Open:** the id format (ULID, UUID, integer) is not pinned anywhere in the decisions and [./04](./04-state-store.md) does not record one either; it is a store-wide choice that must be applied uniformly to tasks.
+Ids are UUIDv7 like every Hydra-owned entity; format, storage and the short form are owned by [./04](./04-state-store.md).
 
 ## Status axis and lifecycle
 
@@ -119,7 +121,7 @@ For systems with no plugin in v1 (Sentry, Tailscale, Hetzner notices arriving th
 
 ## Relations: project, runs, sessions
 
-- **Project:** at most one per task, via `projectId`. Optional. Project is defined in [./02](./02-domain-model.md).
+- **Project:** at most one per task, via `projectId`. Optional. Project is defined in [./02](./02-domain-model.md). A task keeps its `projectId` when the project is soft-deleted.
 - **Runs and sessions:** a task holds no run or session ids. The links live on the run and session side (all links optional, per the work triangle in [./02](./02-domain-model.md)); a task's run list is derived by querying runs that reference it. Provenance may additionally record a `runId` for a run that created or touched the task, but that is a history entry, not the link.
 
 ## Platform events
@@ -157,6 +159,15 @@ Rules:
 - A provenance-only append fires `task.updated` too. Shipped workflow defaults MUST filter on the fields they care about (for example `has(event.changes.status)`) rather than on the bare event kind, and thereby demonstrate field-filtering.
 - Example CEL filters: `event.changes.status.new == "done"`, `has(event.changes.status)`, `"proposed" in event.changes.labels.removed`. Whether payload fields sit under `event.payload` or are flattened onto `event` follows the envelope rules in [./08](./08-events-and-connections.md) and the CEL context in [./07](./07-workflows.md).
 
+**`task.deleted`** carries the final snapshot, because the row is unreadable afterwards:
+
+```ts
+interface TaskDeletedPayload {
+  taskId: string;
+  snapshot: Task;
+}
+```
+
 There are no finer-grained kinds (`task.done`, `task.labelled`); CEL over `changes` covers them.
 
 ## Search
@@ -176,11 +187,9 @@ No vector search and no embeddings. The semantic part of triage - grouping heter
 
 ## Delete
 
-Hard delete is allowed (ticket 29). It removes the task row and its provenance. The event log keeps the audit trail of everything that happened to the task before deletion (the event log is the audit log, [./13](./13-security.md)). Use `cancelled` for work that was decided against; delete only what should never have existed.
+Delete is **soft** (resolved 2026-09-01, [Domain model residue](https://github.com/rogierpennink/hydra/issues/46), amending ticket 29's hard delete): `task.delete` sets `deletedAt`; the row and its provenance stay. A deleted task answers `not_found` on `task.read`, is excluded from `task.query` (no include-deleted option in v1) and from search, and emits `task.deleted { taskId, snapshot }` with the final row, since nothing can read it afterwards. The core withdraws open Notifications whose subject is the task ([./10](./10-triage-intake-and-notifications.md)); Runs and Sessions keep their `taskId`. The event log keeps the audit trail of everything that happened before deletion (the event log is the audit log, [./13](./13-security.md)); the events the task referenced stop being protected from pruning ([./04](./04-state-store.md) Retention). Use `cancelled` for work that was decided against; delete only what should never have existed. Pruning deleted tasks outright, with their runs, is post-v1.
 
 Delete is a public-API operation ([./11](./11-public-api-and-agent-surface.md)). The shipped `worker` profile grants task read/create/update and not delete (ticket 18; verb split in [./13](./13-security.md)).
-
-**Open:** whether hard delete emits a platform event (`task.deleted`); the decisions list only `task.created` and `task.updated`.
 
 ## API operations an agent uses
 

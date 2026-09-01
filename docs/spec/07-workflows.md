@@ -160,9 +160,9 @@ interface ActionStep extends StepBase {
 interface AgentStep extends StepBase {
   kind: "agent"
   agent: string                        // Agent id; supplies the provider instance and the permission profile
-  model?: { model: string; options?: Record<string, string | boolean> }  // model selection for this step; well-known option ids per ./06
+  model?: { model: string; options?: Record<string, string | boolean> }  // overrides the Agent's model; well-known option ids per ./06
   prompt: Template                     // first turn input; interpolates `inputs`, `steps`
-  accessMode: AccessMode               // approval-required | auto-accept-edits | auto | full-access
+  accessMode?: AccessMode              // overrides the Agent's accessMode (default full-access); resolved before session start
   freshSession?: boolean               // default false: iterations resume the same session
   outputSchema?: JsonSchema            // draft-07; declares steps.<id>.output
 }
@@ -188,9 +188,9 @@ Actor and permission context: a built-in action executing inside a run is stampe
 
 ### 4.2 Agent steps
 
-An agent step starts a Session for the named Agent and waits until its turn completes. The controller authors the SessionSpec (the agent's provider instance, the step's `model` selection, `accessMode`, the run's `workspaceId` (section 4.4), system prompt from the agent, the step's `outputSchema`), places it on the run's runner (section 4.4; a full runner queues the placement and the step waits), and sends the rendered `prompt` as the first turn. The session carries the agent's permission profile (shipped default for workflow agent steps: `worker`, [./13-security.md](./13-security.md)) and reaches Hydra through the `hydra` CLI with its session token. The session is linked to the run and step from the session side; the run's step record holds the session id.
+An agent step starts a Session for the named Agent and waits until its turn completes. The controller authors the SessionSpec (the agent's provider instance, the step's `model` selection, `accessMode`, the run's `workspaceId` (section 4.4), system prompt from the agent, the step's `outputSchema`), places it on the run's runner (section 4.4; a full runner queues the placement and the step waits), and sends the rendered `prompt` as the first turn. The session carries a copy of the agent's permission profile id (shipped default for workflow agent steps: `worker`, [./13-security.md](./13-security.md)) and reaches Hydra through the `hydra` CLI with its session token. The session is linked to the run and step from the session side; the run's step record holds the session id.
 
-Which of these values the Agent may carry as defaults (model selection, access mode) is Open in [./02-domain-model.md](./02-domain-model.md); this document places `accessMode` and `model` on the step as the spec's consolidation (ticket #12 pins `SessionSpec.accessMode` without saying where it is chosen).
+Defaults come from the Agent (resolved 2026-09-01, [Domain model residue](https://github.com/rogierpennink/hydra/issues/46)): the step's `model` and `accessMode` are optional overrides of the Agent's `model` and `accessMode` (default `full-access`); absent both, the instance's default model applies. Every resolved value is copied into the Session at spawn; the session never reads through its agent afterwards ([./02-domain-model.md](./02-domain-model.md) rule 9).
 
 `accessMode` names one of the four fixed modes. If the provider does not support it natively, the controller substitutes the hardcoded fallback before session start, strictly downward in permissiveness; if no equal-or-less-permissive mode exists the step fails with a clear error ([./06-providers.md](./06-providers.md), [./13-security.md](./13-security.md); [ADR 0007](../adr/0007-provider-adapter-is-a-thin-interface-behind-a-normalized-event-stream.md) as amended).
 
@@ -331,6 +331,7 @@ type FailureReason =                   // closed set, grows additively
   | "schema-failure"                   // an agent step produced no schema-valid result (section 6)
   | "step-failed"                      // an action threw; the message is in the step record's error
   | "session-failed"                   // an agent step's session ended abnormally; the session's reason is in error
+  | "workspace-failed"                 // the run's workspace never provisioned: the setup command failed (section 4.4; ./03 section 6.3)
 
 interface StepRecord {
   stepId: string                       // step id or signal trigger id

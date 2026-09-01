@@ -104,7 +104,7 @@ Resolves the credential side of [ADR 0013](../adr/0013-agents-operate-hydra-thro
 ### 4.1 Principles
 
 - No OAuth machinery for Hydra's own auth. No JWTs.
-- Every credential Hydra issues is an opaque random token. The database stores only a hash; resolution is one indexed lookup, which satisfies the constraint that token -> session -> agent -> profile resolution adds no meaningful endpoint latency.
+- Every credential Hydra issues is an opaque random token. The database stores only a hash; resolution is one indexed lookup, which satisfies the constraint that token -> session -> profile resolution adds no meaningful endpoint latency (the profile id sits on the Session row, copied at spawn).
 - Both user credential kinds and session tokens resolve to the same actor-stamped API ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md)).
 
 ### 4.2 Password login
@@ -145,7 +145,7 @@ Passkeys and 2FA are post-v1. Nothing in v1 forecloses them: the login op is the
 
 ## 6. Permission profiles
 
-Mechanism: every agent carries a **permission profile**; the session token inherits it; enforcement sits at the service layer so it binds HTTP and in-process session callers alike ([ADR 0013](../adr/0013-agents-operate-hydra-through-the-public-api.md)). Run and plugin actors are ungated ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md) section 3.1). This section pins the content.
+Mechanism: every agent carries a **permission profile**, copied onto each Session at spawn (a Thread takes the `thread.profileId` setting, [./02-domain-model.md](./02-domain-model.md)); the session token carries the session's profile; enforcement sits at the service layer so it binds HTTP and in-process session callers alike ([ADR 0013](../adr/0013-agents-operate-hydra-through-the-public-api.md)). Run and plugin actors are ungated ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md) section 3.1). This section pins the content.
 
 ### 6.1 Grant families
 

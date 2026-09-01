@@ -36,7 +36,7 @@ One envelope for every event, regardless of source.
 
 Field names are pinned here; earlier tickets called them provisional. The envelope is ADR 0009's list plus the ticket 30 handoff's `system` and `url`; `refs` and `actor` are this spec's additions, motivated by Task provenance ([./09-tasks.md](./09-tasks.md)) and actor stamping ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md)).
 
-**Open:** whether the event table's primary key is the position itself or a Hydra id plus a position column; [./04-state-store.md](./04-state-store.md) owns id format and the answer.
+The event's `id` **is** the log position (`INTEGER PRIMARY KEY`); there is no second id column, and it is the one integer id in a system of UUIDv7s (resolved 2026-09-01, [Domain model residue](https://github.com/rogierpennink/hydra/issues/46); [./04-state-store.md](./04-state-store.md) owns id formats).
 
 **Immutability and enrichment.** An event is immutable after persist, except for enrichment: `system` and `url` may be overwritten and `refs` appended to after ingest, through one operation, `event.enrich` ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md)); `payload` and `raw` never change. Sentry, Tailscale, Hetzner and GitHub notices arrive *through* Gmail; recognising the system inside an email is enrichment, done either by a plugin sender rule at emit time or by the triage agent afterwards ("Open in Sentry" needs the URL from the mail body; the `task.query` guard needs the `sentry:issue:123` ref). An enrich gives the matcher one more look at that event, idempotently (section 4.2, [ADR 0025](../adr/0025-enrichment-re-matches-one-event-idempotently.md)). The UI marks the system and suffixes the Connection.
 
@@ -145,6 +145,7 @@ The controller emits events about its own state, connection-less, through the sa
 | `run.cancelled` | the `run.completed` fields | a run reaches `cancelled` (not a failure: a failure-notification workflow must not fire on a deliberate cancel) |
 | `task.created` | full Task snapshot | a Task is created |
 | `task.updated` | `{taskId, changes}`; `changes` carries `{old, new}` per scalar field and `{added, removed}` per array field; one update op = one event; provenance-only appends fire it too | a Task is updated |
+| `task.deleted` | `{taskId, snapshot}`, the final row (the task is unreadable afterwards) | a Task is soft-deleted ([./09-tasks.md](./09-tasks.md) Delete) |
 
 CEL routes on them like any event: `event.changes.status.new == "done"`, `has(event.changes.status)`. Kinds grow additively (e.g. learning workflows over run outcomes); no finer-grained task kinds exist. Task event shapes are owned by [./09-tasks.md](./09-tasks.md).
 

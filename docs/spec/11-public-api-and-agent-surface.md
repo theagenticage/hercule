@@ -61,6 +61,8 @@ The web app additionally holds one WebSocket for live topics (subscriptions only
 
 A Hydra MCP server is not a v1 transport (section 10).
 
+**Ids on the wire** are canonical lowercase UUIDv7 strings, except event ids, which are integers ([./04-state-store.md](./04-state-store.md)). The CLI accepts a full id or an unambiguous tail of eight or more characters for any `<id>` argument (`conflict` if ambiguous) and prints tails in human output; `--json` always prints full ids.
+
 **Routes are resource paths with HTTP methods**, under `/api/v1/`. Every operation's `{ method, path }` is written explicitly in the contract's route table; the conventions below are what the table follows, and any exception (an irregular plural, a nested resource) is simply written in the table. One CI test asserts that operations and routes are one-to-one.
 
 | Operation shape | Route | Example |
@@ -111,7 +113,7 @@ Semantics: [./09-tasks.md](./09-tasks.md).
 | `task.read` | `{ taskId }` | `task.read` | `GET /tasks/{id}` |
 | `task.create` | `{ title, description, priority?, labels?, projectId?, provenance? }` | `task.create` | `POST /tasks` |
 | `task.update` | `{ taskId, ...changes }` | `task.update` | `PATCH /tasks/{id}` |
-| `task.delete` | `{ taskId }` | `task.delete` | `DELETE /tasks/{id}` |
+| `task.delete` | `{ taskId }` (soft: sets `deletedAt`, [./09-tasks.md](./09-tasks.md) Delete) | `task.delete` | `DELETE /tasks/{id}` |
 
 ```ts
 interface TaskFilter {
@@ -153,9 +155,9 @@ Semantics: [./06-providers.md](./06-providers.md), [./12-assistants.md](./12-ass
 
 | Operation | Input | Grant | Route |
 |---|---|---|---|
-| `session.query` | `{ status?, agentId?, assistantId?, runnerId?, runId?, actor?, since?, until? }` | `session.read` | `GET /sessions` |
+| `session.query` | `{ status?, agentId?, thread?, assistantId?, runnerId?, runId?, actor?, since?, until? }` (`thread: true` = sessions with no agent) | `session.read` | `GET /sessions` |
 | `session.read` | `{ sessionId }` (the record: status, agent, runner, workspace, usage) | `session.read` | `GET /sessions/{id}` |
-| `session.spawn` | `{ agentId, prompt, instanceId?, model?, accessMode?, workspace? }` -> `{ sessionId }` | `session.spawn` | `POST /sessions` |
+| `session.spawn` | `{ agentId?, prompt, instanceId?, model?, accessMode?, workspace? }` -> `{ sessionId }`; without `agentId` the session is a Thread built from the `thread.*` settings plus the overrides given, allowed for actor `user` only (`forbidden` otherwise; [./02-domain-model.md](./02-domain-model.md) Thread) | `session.spawn` | `POST /sessions` |
 | `session.continue` | `{ sessionId, mode: "resume" \| "fork", prompt }` -> `{ sessionId }` | `session.spawn` | `POST /sessions/{id}/continue` |
 | `session.input` | `{ sessionId, content }` -> `{ inputId, result: "opened" \| "steered" }` | `session.steer` | `POST /sessions/{id}/input` |
 | `session.interrupt` / `session.stop` | `{ sessionId }` | `session.steer` | `POST /sessions/{id}/interrupt` / `.../stop` |
@@ -258,7 +260,7 @@ Semantics: [./03-controller-and-runners.md](./03-controller-and-runners.md).
 |---|---|---|---|
 | `workspace.query` / `workspace.read` | `{ runnerId?, resourceId?, kind?, status? }` / `{ workspaceId }` | `workspace.read` | `GET /workspaces[/{id}]` |
 | `workspace.provision` | `{ resourceId, runnerId }` -> a primary workspace (adopts an existing local checkout in place) | `workspace.write` | `POST /workspaces` |
-| `workspace.dispose` | `{ workspaceId }` (an ephemeral, including one `kept-on-failure`; a primary is never torn down by Hydra: 409 `invalid_state`) | `workspace.write` | `DELETE /workspaces/{id}` |
+| `workspace.dispose` | `{ workspaceId }` (an ephemeral, including the kept workspace of a failed run; a primary is never torn down by Hydra: 409 `invalid_state`) | `workspace.write` | `DELETE /workspaces/{id}` |
 
 Workspaces otherwise appear as side effects of session and run placement; `lost` is set by runner retirement, never by an operation.
 
@@ -269,7 +271,7 @@ Semantics: [./12-assistants.md](./12-assistants.md).
 | Operation | Input | Grant | Route |
 |---|---|---|---|
 | `agent.query` / `agent.read` | | `agent.read` | `GET /agents[/{id}]` |
-| `agent.create` / `update` / `delete` | prompt, provider instance, capabilities, `profileId` (assigning a permission profile is an `agent.update`) | `agent.write` | `POST` / `PATCH` / `DELETE /agents[/{id}]` |
+| `agent.create` / `update` / `delete` | `name`, `systemPrompt`, `instanceId`, `permissionProfileId`, `accessMode?`, `model?`, `mcpServers?`, `disallowedTools?` ([./02-domain-model.md](./02-domain-model.md) Agent); assigning a permission profile is an `agent.update` and affects sessions spawned afterwards; `delete` is `invalid_state` while a non-exited session references the agent | `agent.write` | `POST` / `PATCH` / `DELETE /agents[/{id}]` |
 | `assistant.query` / `assistant.read` | | `agent.read` | `GET /assistants[/{id}]` |
 | `assistant.create` / `update` / `delete` | an agent plus `heartbeat { enabled, schedule, timezone?, prompt, target }`, `rotation { contextFraction, maxContextTokens, dailyAt, timezone? }`, `reply`, `accessMode` ([./12-assistants.md](./12-assistants.md) section 1); `delete` is the confirmed action that deletes memory and bindings | `agent.write` | `POST` / `PATCH` / `DELETE /assistants[/{id}]` |
 | `binding.query` / `create` / `update` / `delete` | channel bindings of an assistant | `agent.read` / `agent.write` | `GET` / `POST /assistants/{id}/bindings`, `PATCH` / `DELETE /assistants/{id}/bindings/{bindingId}` |
@@ -322,7 +324,7 @@ Semantics: [./13-security.md](./13-security.md), [./15-packaging-and-operations.
 
 ### settings
 
-The user settings store: per-user preference and presentation state with a closed, schema-validated key set - `timezone`, `topics.order: string[]`, `notifications.muted: string[]` (`workflow:<id>` | `plugin:<id>` | `assistant:<id>`), `lastChecked.intake`, `lastChecked.checkin`, `lastChecked.notifications`, `onboarding.completedSteps: string[]` (the post-gate onboarding steps, [./14](./14-web-app.md) §Onboarding). Keyed by user id from day one so a later user concept is a `WHERE` clause. Not a domain entity ([./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md) sections 4, 7.2, 8; [./12-assistants.md](./12-assistants.md) section 5.2).
+The user settings store: per-user preference and presentation state with a closed, schema-validated key set - `timezone`, `topics.order: string[]`, `notifications.muted: string[]` (`workflow:<id>` | `plugin:<id>` | `assistant:<id>`), `lastChecked.intake`, `lastChecked.checkin`, `lastChecked.notifications`, `onboarding.completedSteps: string[]` (the post-gate onboarding steps, [./14](./14-web-app.md) §Onboarding), `thread.instanceId`, `thread.model`, `thread.accessMode`, `thread.profileId` (the defaults for a new Thread, [./02-domain-model.md](./02-domain-model.md) Thread; [./14](./14-web-app.md) Settings > Threads). Keyed by user id from day one so a later user concept is a `WHERE` clause. Not a domain entity ([./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md) sections 4, 7.2, 8; [./12-assistants.md](./12-assistants.md) section 5.2).
 
 | Operation | Input | Grant | Route |
 |---|---|---|---|
@@ -335,8 +337,8 @@ Semantics: [./02-domain-model.md](./02-domain-model.md).
 
 | Operation | Input | Grant | Route |
 |---|---|---|---|
-| `project.query` / `read` / `create` / `update` / `delete` | `{ name, description? }` | `project.read` / `project.write` | `/projects[/{id}]` |
-| `resource.query` / `read` / `create` / `update` / `delete` | kind, remote, `connectionId`, setup command, `.workspaceinclude` convention, project link | `resource.read` / `resource.write` | `/resources[/{id}]` |
+| `project.query` / `read` / `create` / `update` / `delete` | `{ name, description? }`; `delete` is soft ([./02-domain-model.md](./02-domain-model.md) Deletion rules) | `project.read` / `project.write` | `/projects[/{id}]` |
+| `resource.query` / `read` / `create` / `update` / `delete` | kind, remote (repo resources are unique on the canonical remote: `conflict`), `connectionId`, setup command, `.workspaceinclude` convention, `projectIds[]`; `delete` is `invalid_state` while a workspace referencing it is not `deleted \| lost` | `resource.read` / `resource.write` | `/resources[/{id}]` |
 
 ## 3. Actor stamping
 
@@ -369,7 +371,7 @@ Two credential kinds resolve to the same actor-stamped API. Both are opaque rand
 
 ### 4.1 Session tokens
 
-- **Minting:** at session start the controller mints a session token whose subject is the Session row. The token carries no claims of its own; the agent's permission profile is reached by resolution `token -> session -> agent -> profile`.
+- **Minting:** at session start the controller mints a session token whose subject is the Session row. The token carries no claims of its own; the session's permission profile is reached by resolution `token -> session -> profile`: the profile id was copied onto the Session at spawn ([./02-domain-model.md](./02-domain-model.md) rule 9), so a Thread (no agent) resolves the same way.
 - **Injection:** the runner injects `HYDRA_API_URL`, `HYDRA_TOKEN` and `HYDRA_SESSION=1` into the provider process environment. Nothing is written to runner disk.
 - **Lifetime:** the token dies with the session. It is revoked when the session ends. A rotated assistant conversation continues in a fresh session and therefore under a fresh token; the old session's subscriptions migrate to the successor ([./12-assistants.md](./12-assistants.md)).
 - **Latency constraint (hard rule):** resolving token to profile MUST NOT meaningfully add endpoint latency. One indexed lookup on the hashed token plus a cached or joined profile read satisfies it; a per-request chain of separate queries does not.
@@ -381,7 +383,7 @@ Long-lived, opaque, revocable, minted in the web app or via `hydra login` (passw
 
 ## 5. Permission enforcement
 
-Every agent carries a permission profile; its session tokens inherit it. Enforcement happens in the service layer, so it binds HTTP callers and in-process session callers alike (run and plugin actors are ungated, section 3.1). Parity with the user is the ceiling, not the default.
+Every Session carries a permission profile, copied from its Agent at spawn or from the `thread.profileId` setting for a Thread; its session token carries it. Enforcement happens in the service layer, so it binds HTTP callers and in-process session callers alike (run and plugin actors are ungated, section 3.1). Parity with the user is the ceiling, not the default.
 
 Grant families and verbs, the operation-to-grant table's vocabulary, and the three shipped profiles (`assistant`, `worker`, `unrestricted`) are specified in [./13-security.md](./13-security.md) section 6; this document does not restate them. Section 2 names the grant beside every operation.
 
