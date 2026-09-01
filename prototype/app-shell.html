@@ -53,6 +53,20 @@
       off/on instead of effort - the well-known option ids of spec 06 differ per provider.
     - picks live in memory: new-thread picks start the thread with them; on a started thread runner and
       profile are locked, model / reasoning / access mode stay live.
+  Round 5 (reaction to round 4):
+    - t3 input variant: the model selector is a clone of t3-code's - a rail (favorites star, one logo per
+      provider), a search field, rows with the display name and a provider line, ⌘n badges, stars to
+      favorite; the bar shows a logo pill, "Medium · 200k" and a sparkle access mode. Exact on purpose;
+      it breaks the color doctrine (brand orange, yellow stars, blue focus rule) and says so.
+    - hydra / codex model menu: instance headers are rows of the same grid as the models, so the header
+      of the expanded group aligns with the collapsed ones and always shows the account; ?logos=1
+      (key o) puts monochrome provider marks on the headers and on the composer's model label.
+    - new input variant ?input=codexlip: the Codex card (+, access mode, model pill, a voice button,
+      round send) with the small setup bar tucked under it like t3 (workspace · checkout · branch left,
+      runner · profile right).
+    - workspace, checkout and branch open menus too (repos grouped per project with whether the picked
+      runner has a clone; primary checkout vs new worktree with the in-use worktrees listed; a new
+      run branch or an existing one). Fresh data offers No workspace / adopt a folder / add a repo.
   Ambient signals (pulse): ?pulse=top|foot|none (key p). Default: A top bar, B/C sidebar foot.
   Data: ?data=busy|fresh (key d). fresh = first run; ?li=1 = a provider login has happened (key l).
   Keys: ← → shell · s stack (C) · r rows · i input · h hero · m mode (B) · d data · l login · p pulse · t theme · ? Marks · Esc.
@@ -411,6 +425,46 @@
   .segq button.on { color: var(--ink); font-weight: var(--w-emph); background: var(--line-soft); }
   .pop .foot { border-top: 1px solid var(--line-soft); margin-top: 6px; padding: 7px 8px 3px; font-size: 11.5px; color: var(--faint); line-height: 1.45; }
   .pop .foot a { color: var(--muted); cursor: pointer; }
+  /* round 5: provider marks (monochrome, currentColor - the t3 clone is the one place they carry brand color) */
+  .plogo { width: 12px; height: 12px; display: inline-block; vertical-align: -2px; margin-right: 5px; flex: none; }
+  .plogo.pil { font-family: var(--mono); font-size: 12px; line-height: 12px; text-align: center; vertical-align: -1px; }
+  .pop .pi.grp.open { cursor: default; } .pop .pi.grp.open:hover { background: none; }
+  .pop .pi.grp.open b { color: var(--ink); }
+  .pop .ph + .pi.grp { border-top: 0; margin-top: 0; padding-top: 5px; }
+  /* the t3-code selector clone */
+  .pop.t3 { padding: 0; width: 420px; }
+  .t3pop { display: flex; min-height: 0; }
+  .t3rail { width: 46px; flex: none; border-right: 1px solid var(--line); display: flex; flex-direction: column; align-items: center; padding: 10px 0; gap: 6px; }
+  .t3rail button { width: 34px; height: 34px; border: 0; background: none; border-radius: 8px; display: flex; align-items: center; justify-content: center; color: var(--ink); cursor: pointer; position: relative; }
+  .t3rail button svg { width: 20px; height: 20px; }
+  .t3rail button:hover { background: var(--line-soft); }
+  .t3rail button.on::before { content: ""; position: absolute; left: -6px; top: 5px; bottom: 5px; width: 3px; border-radius: 2px; background: #2f5bea; }
+  .t3rail .sep { width: 26px; height: 1px; background: var(--line); margin: 4px 0; }
+  .claude { color: #d97757; }
+  .t3main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  .t3search { display: flex; align-items: center; gap: 8px; margin: 10px 12px 0; padding: 4px 4px 8px; border-bottom: 2px solid #2f5bea; color: var(--faint); }
+  .t3search svg { width: 18px; height: 18px; flex: none; }
+  .t3search input { border: 0; background: none; font: 14.5px var(--sans); color: var(--ink); outline: none; flex: 1; min-width: 0; }
+  .t3list { padding: 8px; overflow: auto; }
+  .t3row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; grid-template-rows: auto auto; gap: 2px 10px; padding: 9px 12px; border-radius: 9px; cursor: pointer; align-items: center; }
+  .t3row.on, .t3row:hover { background: var(--line-soft); }
+  .t3row.dim { opacity: 0.55; }
+  .t3row .nm { font-size: 14.5px; color: var(--ink); }
+  .t3row .pv { grid-row: 2; display: flex; align-items: center; gap: 7px; font-size: 13px; color: var(--muted); min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .t3row .pv .plogo { width: 14px; height: 14px; margin: 0; }
+  .t3row .kbd { grid-row: 1 / 3; font: 11.5px var(--mono); color: var(--muted); background: var(--line-soft); border-radius: 999px; padding: 3px 9px; }
+  .t3row .star { grid-row: 1 / 3; border: 0; background: none; color: var(--line); cursor: pointer; display: flex; padding: 4px; }
+  .t3row .star svg { width: 17px; height: 17px; }
+  .t3row .star.on { color: #e9b400; }
+  .t3empty { padding: 16px 12px; color: var(--faint); font-size: 13px; }
+  .c-t3 .row3 .sel.pill { background: var(--line-soft); border-radius: 8px; padding: 6px 10px; font-size: 13.5px; }
+  .c-t3 .row3 .sel.pill .plogo { width: 16px; height: 16px; }
+  .c-t3 .row3 .sel .spark { width: 15px; height: 15px; vertical-align: -3px; margin-right: 5px; color: var(--muted); }
+  /* codexlip: the codex card, the setup bar under it, a voice button */
+  .compwrap.docked .c-cx.solo { border-radius: 0 0 14px 14px; }
+  .micb { width: 28px; height: 28px; border-radius: 50%; border: 0; background: none; color: var(--muted); display: inline-flex; align-items: center; justify-content: center; cursor: pointer; }
+  .micb:hover { background: var(--line-soft); color: var(--ink); }
+  .micb svg { width: 16px; height: 16px; }
   /* worked-for lines with collapsible tool calls; the live one shimmers */
   .worked .wt { flex: none; }
   .worked .chev { flex: none; display: inline-block; transition: transform .15s; margin-left: -6px; }
@@ -491,7 +545,7 @@
 </div>
 <div class="legend" id="legend" role="dialog" aria-label="Marks legend"></div>
 <div class="pop" id="pop" role="dialog"></div>
-<div class="proto-badge">PROTOTYPE · throwaway · hydra#51 · round 4<br>&larr; &rarr; shell · s stack · r rows · i input · e effort · h hero · m mode · d data · l login · p pulse · t theme · ? marks</div>
+<div class="proto-badge">PROTOTYPE · throwaway · hydra#51 · round 5<br>&larr; &rarr; shell · s stack · r rows · i input · e effort · o logos · h hero · m mode · d data · l login · p pulse · t theme · ? marks</div>
 <div class="sw">
   <button id="prev" aria-label="Previous shell">&larr;</button>
   <span class="label" id="swlabel"></span>
@@ -500,6 +554,7 @@
   <button id="rbtn" class="ds"></button>
   <button id="ibtn" class="ds"></button>
   <button id="ebtn" class="ds"></button>
+  <button id="obtn" class="ds"></button>
   <button id="hbtn" class="ds"></button>
   <button id="mbtn" class="ds"></button>
   <button id="dbtn" class="ds"></button>
@@ -528,10 +583,11 @@ function pulsePlace() { const p = get("pulse"); if (["top", "foot", "none"].incl
 function mode() { const m = get("mode"); if (m === "threads" || m === "hydra") return m; return screen() === "sessions" ? "threads" : "hydra"; }
 const STACKS = ["compact", "top", "bottom", "split"];
 function stack() { const s = get("stack"); return STACKS.includes(s) ? s : "compact"; }
-const INPUTS = ["hydra", "t3", "codex"];
+const INPUTS = ["hydra", "t3", "codex", "codexlip"];
 function input() { const i = get("input"); return INPUTS.includes(i) ? i : "hydra"; }
 function hero() { return get("hero") === "center" ? "center" : "bottom"; }
 function effortPlace() { return get("effort") === "nested" ? "nested" : "own"; }
+function logos() { return get("logos") === "1"; }
 const ROWS = ["plain", "meta", "rich"];
 function rows() { const r = get("rows"); return ROWS.includes(r) ? r : "plain"; }
 const SCREENS = ["sessions", "intake", "checkin", "tasks", "runs", "workflows", "fleet", "connections", "notifications", "settings"];
@@ -653,9 +709,33 @@ function instances() { return fresh() ? INSTANCES_FRESH : INSTANCES_BUSY; }
 function inst(id) { return instances().find((i) => i.id === id) || instances()[0]; }
 const instLabel = (i) => i.provider + (i.name ? ` · ${i.name}` : "");
 const instParen = (i) => i.provider + (i.name ? ` (${i.name})` : "");
+const REPOS_BUSY = [
+  { id: "hydra", project: "hydra", name: "hydra", primary: "main", branches: ["main", "spec/v1"], on: ["laptop", "macstudio-01", "hetzner-01"], used: [["hydra/run-3f1", "Runner drain command"], ["spike/bun-notarize", "Bun compile: notarization spike"]] },
+  { id: "agentick-web", project: "hydra", name: "agentick-web", primary: "main", branches: ["main"], on: ["laptop", "macstudio-01"], used: [] },
+  { id: "ops-infra", project: "ops", name: "ops-infra", primary: "master", branches: ["master", "hetzner-migration"], on: ["laptop", "hetzner-02"], used: [] },
+];
+function repos() { return fresh() ? [] : REPOS_BUSY; }
+function repoOf(c) { return repos().find((r) => r.id === c.repo) || null; }
+const DISPLAY = { "claude-fable-5-1": "Claude Fable 5.1", "claude-opus-5": "Claude Opus 5", "claude-sonnet-5": "Claude Sonnet 5", "claude-haiku-4-5": "Claude Haiku 4.5", "gpt-5.6": "GPT-5.6", "gpt-5.6-codex": "GPT-5.6-Codex", "gpt-5.5-codex-mini": "GPT-5.5-Codex-Mini", "glm-5": "GLM-5", "glm-4.7": "GLM-4.7" };
+const displayName = (id) => DISPLAY[id] || id;
+/* provider marks: a starburst for Claude, the OpenAI knot, a pi glyph. Monochrome except in the t3 clone. */
+const STARBURST = (() => { let d = ""; for (let i = 0; i < 12; i++) { const a = (i * Math.PI) / 6, L = i % 2 ? 7.2 : 10.2; d += `M${(12 + Math.cos(a) * 3.2).toFixed(2)} ${(12 + Math.sin(a) * 3.2).toFixed(2)}L${(12 + Math.cos(a) * L).toFixed(2)} ${(12 + Math.sin(a) * L).toFixed(2)}`; } return d; })();
+const PMARK = {
+  "Claude Code": `<svg class="plogo" viewBox="0 0 24 24" aria-hidden="true"><path d="${STARBURST}" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg>`,
+  Codex: '<svg class="plogo" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M22.2819 9.8211a5.9847 5.9847 0 0 0-.5157-4.9108 6.0462 6.0462 0 0 0-6.5098-2.9A6.0651 6.0651 0 0 0 4.9807 4.1818a5.9847 5.9847 0 0 0-3.9977 2.9 6.0462 6.0462 0 0 0 .7427 7.0966 5.98 5.98 0 0 0 .511 4.9107 6.051 6.051 0 0 0 6.5146 2.9001A5.9847 5.9847 0 0 0 13.2599 24a6.0557 6.0557 0 0 0 5.7718-4.2058 5.9894 5.9894 0 0 0 3.9977-2.9001 6.0557 6.0557 0 0 0-.7475-7.0729zm-9.022 12.6081a4.4755 4.4755 0 0 1-2.8764-1.0408l.1419-.0804 4.7783-2.7582a.7948.7948 0 0 0 .3927-.6813v-6.7369l2.02 1.1686a.071.071 0 0 1 .038.052v5.5826a4.504 4.504 0 0 1-4.4945 4.4944zm-9.6607-4.1254a4.4708 4.4708 0 0 1-.5346-3.0137l.142.0852 4.783 2.7582a.7712.7712 0 0 0 .7806 0l5.8428-3.3685v2.3324a.0804.0804 0 0 1-.0332.0615L9.74 19.9502a4.4992 4.4992 0 0 1-6.1408-1.6464zM2.3408 7.8956a4.485 4.485 0 0 1 2.3655-1.9728V11.6a.7664.7664 0 0 0 .3879.6765l5.8144 3.3543-2.0201 1.1685a.0757.0757 0 0 1-.071 0l-4.8303-2.7865A4.504 4.504 0 0 1 2.3408 7.872zm16.5963 3.8558L13.1038 8.364 15.1192 7.2a.0757.0757 0 0 1 .071 0l4.8303 2.7913a4.4944 4.4944 0 0 1-.6765 8.1042v-5.6772a.79.79 0 0 0-.407-.667zm2.0107-3.0231l-.142-.0852-4.7735-2.7818a.7759.7759 0 0 0-.7854 0L9.409 9.2297V6.8974a.0662.0662 0 0 1 .0284-.0615l4.8303-2.7866a4.4992 4.4992 0 0 1 6.6802 4.66zM8.3065 12.863l-2.02-1.1638a.0804.0804 0 0 1-.038-.0567V6.0742a4.4992 4.4992 0 0 1 7.3757-3.4537l-.142.0805L8.704 5.459a.7948.7948 0 0 0-.3927.6813zm1.0976-2.3654l2.602-1.4998 2.6069 1.4998v2.9994l-2.5974 1.4997-2.6067-1.4997Z"/></svg>',
+  pi: '<span class="plogo pil" aria-hidden="true">π</span>',
+};
+const STAR = '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 2.6l2.9 6.1 6.7.8-4.9 4.6 1.3 6.6L12 17.4l-6 3.3 1.3-6.6L2.4 9.5l6.7-.8z"/></svg>';
+const MAG = '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.5 15.5L20 20"/></svg>';
+const SPARK = '<svg class="spark" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M10 3l1.8 5.2L17 10l-5.2 1.8L10 17l-1.8-5.2L3 10l5.2-1.8zM18 15l.9 2.1L21 18l-2.1.9L18 21l-.9-2.1L15 18l2.1-.9z"/></svg>';
+const MIC = '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21M9 21h6"/></svg>';
+const BRANCH = '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" style="width:11px;height:11px;vertical-align:-1px;margin-right:4px"><circle cx="6" cy="5" r="2.2"/><circle cx="6" cy="19" r="2.2"/><circle cx="18" cy="8" r="2.2"/><path d="M6 7.2v9.6M18 10.2c0 4-12 2.6-12 6.6"/></svg>';
+/* the t3 clone's own state: which rail item filters the list, the search text, the favorites */
+const T3 = { rail: "fav", q: "" };
+const FAV = new Set(["cc-personal/claude-fable-5-1", "cc-personal/claude-opus-5", "cc-personal/claude-sonnet-5", "codex/gpt-5.6", "codex/gpt-5.6-codex"]);
 /* what the composer has picked. New-thread mode edits PICK; a started thread edits LIVE[id] (the locked
    fields never get there). In memory only. */
-const PICK = { runner: "laptop", instance: "cc-personal", model: "claude-sonnet-5", effort: "medium", thinking: "off", ctx: "200k", fast: "off", access: "approval-required", profile: "unrestricted" };
+const PICK = { repo: "hydra", checkout: "worktree", branch: "new", runner: "laptop", instance: "cc-personal", model: "claude-sonnet-5", effort: "medium", thinking: "off", ctx: "200k", fast: "off", access: "approval-required", profile: "unrestricted" };
 const LIVE = {};
 let PROBING = null;
 function cfg(t) {
@@ -669,7 +749,8 @@ function runnerOf(c) { return runners().find((r) => r.id === c.runner) || runner
 function reasoningOf(c) { const m = modelOf(c); if (m.thinking) return ["thinking", c.thinking]; if (m.effort) return ["reasoning", c.effort]; return null; }
 function runnerLabel(c) { const r = runnerOf(c); return r.local ? `local · ${r.label || r.id}` : r.id; }
 function modelLabel(c) {
-  let v = `${instLabel(inst(c.instance))} · ${c.model}`;
+  const i = inst(c.instance);
+  let v = `${logos() ? PMARK[i.provider] : ""}${instLabel(i)} · ${c.model}`;
   const r = reasoningOf(c);
   if (effortPlace() === "nested" && r) v += ` · ${r[0] === "thinking" ? `thinking ${r[1]}` : r[1]}`;
   if (PROBING) v += ` <span class="k">· probing ${PROBING}…</span>`;
@@ -692,17 +773,41 @@ function popHtml(kind, t) {
     }).join("");
     return `<div class="ph"><span class="lane-label">Runner</span><span class="r">locks when the thread starts</span></div>${rows}<div class="foot">The thread runs where you say; nothing moves it later. <a data-go="fleet" style="white-space:nowrap">Add machine →</a></div>`;
   }
+  if (kind === "model" && input() === "t3") return t3ModelPop(c, r);
+  if (kind === "workspace") {
+    const pj = {}; repos().forEach((x) => (pj[x.project] = pj[x.project] || []).push(x));
+    let h = `<div class="ph"><span class="lane-label">Workspace</span><span class="r">locks when the thread starts</span></div>`;
+    for (const [name, list] of Object.entries(pj)) {
+      h += `<div class="pg"><span class="pdot ${name}"></span><b>${name}</b></div>`;
+      h += list.map((x) => { const cl = x.on.includes(r.id); return row(c.repo === x.id, false, "repo", x.id, x.name, "", cl ? `primary on ${x.primary}${x.used.length ? ` · ${x.used.length} worktree${x.used.length > 1 ? "s" : ""} in use` : ""}` : `not cloned on ${r.local ? "this machine" : r.id} · clones on first use`); }).join("");
+    }
+    h += row(!c.repo, false, "repo", "none", "No workspace", "", "the agent works without a checkout");
+    h += `<div class="foot"><a data-noop="1">Adopt a folder on this machine…</a> · <a data-go="connections">Add a repo →</a></div>`;
+    return h;
+  }
+  if (kind === "checkout") {
+    const rp = repoOf(c); if (!rp) return "";
+    let h = `<div class="ph"><span class="lane-label">Checkout</span><span class="r">${rp.name} on ${r.local ? "this machine" : r.id}</span></div>`;
+    h += row(c.checkout === "primary", false, "checkout", "primary", "primary checkout", `<span style="color:var(--faint)" class="mono">${rp.primary}</span>`, "the clone itself, on whatever branch it has checked out");
+    h += row(c.checkout === "worktree", false, "checkout", "worktree", "new worktree", "", `a fresh worktree of ${rp.name}, removed when the thread is deleted`);
+    h += rp.used.map(([b, who]) => row(false, true, "", "", `<span class="mono">${b}</span>`, "", `worktree in use by <b>${who}</b>`)).join("");
+    return h;
+  }
+  if (kind === "branch") {
+    const rp = repoOf(c); if (!rp) return "";
+    let h = `<div class="ph"><span class="lane-label">Branch</span><span class="r">${c.checkout === "primary" ? "the primary checkout switches to it" : "for the new worktree"}</span></div>`;
+    if (c.checkout !== "primary") h += row(c.branch === "new", false, "branch", "new", `new branch <span class="mono" style="color:var(--faint)">${rp.name}/run-…</span>`, "", `from ${rp.primary}, named after the thread's id`);
+    h += rp.branches.map((b) => row(c.branch === b, false, "branch", b, `<span class="mono">${b}</span>`, b === rp.primary ? `<span style="color:var(--faint)">default</span>` : "")).join("");
+    return h;
+  }
   if (kind === "model") {
     let h = `<div class="ph"><span class="lane-label">Model</span><span class="r">${PROBING ? `probing ${PROBING}…` : `on ${r.local ? "this machine" : r.id} · probed 2h ago`}</span></div>`;
     for (const x of instances()) {
       const here = r.logins.includes(x.id);
       const why = here ? "" : (fresh() ? `found, not logged in · <a data-login="${x.provider}">Log in</a>` : `not logged in on ${r.id}`);
-      if (x.id === i.id) {
-        h += `<div class="pg"><b>${instLabel(x)}</b><small>${x.who}</small>${why ? `<span class="st">${why}</span>` : ""}</div>`;
-        h += x.models.map((mm) => row(c.model === mm.id, !here, "model", `${x.id}/${mm.id}`, `<span class="mono">${mm.id}</span>`)).join("");
-      } else {
-        h += `<button class="pi grp ${here ? "" : "dim"}" ${here ? `data-pick="instance" data-val="${x.id}"` : ""}><span class="dot"></span><span class="n"><b>${instLabel(x)}</b> <small>${x.who}</small></span><span class="st"><span style="color:var(--faint)">${why || `${x.models.length} models ›`}</span></span></button>`;
-      }
+      const open = x.id === i.id; const mark = logos() ? PMARK[x.provider] : "";
+      h += `<button class="pi grp ${open ? "open" : ""} ${here ? "" : "dim"}" ${here && !open ? `data-pick="instance" data-val="${x.id}"` : ""}><span class="dot"></span><span class="n">${mark}<b>${instLabel(x)}</b> <small>${x.who}</small></span><span class="st"><span style="color:var(--faint)">${why || `${x.models.length} models ${open ? "⌄" : "›"}`}</span></span></button>`;
+      if (open) h += x.models.map((mm) => row(c.model === mm.id, !here, "model", `${x.id}/${mm.id}`, `<span class="mono">${mm.id}</span>`)).join("");
     }
     h += CUSTOM ? `<div class="pg custom"><input id="custom" class="cin" placeholder="model slug, as the harness names it" aria-label="custom model"><button class="qbtn first" data-pick="custom-go">Use</button></div>`
                 : row(m.custom, false, "custom", "", `<span style="color:var(--faint)" class="cust">${m.custom ? `<span class="mono">${m.id}</span> · custom` : "Custom model…"}</span>`);
@@ -714,7 +819,8 @@ function popHtml(kind, t) {
     if (!reasoningOf(c)) return "";
     const vals = m.thinking || m.effort; const key = m.thinking ? "thinking" : "effort";
     const desc = { minimal: "almost none", low: "quick and cheap", medium: "the default", high: "thinks longer", xhigh: "longest · hard problems", max: "everything the model has", off: "answers directly", on: "reasons before answering" };
-    return `<div class="ph"><span class="lane-label">${key === "thinking" ? "Thinking" : "Reasoning"}</span><span class="r">per model · ${m.id}</span></div>` + vals.map((v) => row(c[key] === v, false, key, v, v, `<span style="color:var(--faint)">${desc[v] || ""}</span>`)).join("");
+    const extra = input() === "t3" ? optionRows(c, m, false) : "";
+    return `<div class="ph"><span class="lane-label">${key === "thinking" ? "Thinking" : "Reasoning"}</span><span class="r">per model · ${m.id}</span></div>` + vals.map((v) => row(c[key] === v, false, key, v, v, `<span style="color:var(--faint)">${desc[v] || ""}</span>`)).join("") + (extra ? `<div class="opts">${extra}</div>` : "");
   }
   if (kind === "access") {
     const modes = [["approval-required", "asks for every side-effecting action"], ["auto-accept-edits", "edits files freely, asks for the rest"], ["auto", "a harness-side reviewer judges routine actions"], ["full-access", "allows everything"]];
@@ -725,6 +831,15 @@ function popHtml(kind, t) {
     return `<div class="ph"><span class="lane-label">Permission profile</span><span class="r">what it may do through Hydra</span></div>` + ps.map(([v, d]) => row(c.profile === v, false, "profile", v, v, "", d)).join("");
   }
   return "";
+}
+function t3ModelPop(c, r) {
+  const pairs = []; instances().forEach((x) => x.models.forEach((m) => pairs.push({ key: `${x.id}/${m.id}`, inst: x, m, here: r.logins.includes(x.id) })));
+  let list = T3.rail === "fav" ? [...FAV].map((k) => pairs.find((p) => p.key === k)).filter(Boolean) : pairs.filter((p) => p.inst.provider === T3.rail);
+  if (T3.q) list = list.filter((p) => `${displayName(p.m.id)} ${instLabel(p.inst)}`.toLowerCase().includes(T3.q.toLowerCase()));
+  const provs = [...new Set(instances().map((x) => x.provider))];
+  const rail = `<div class="t3rail"><button class="${T3.rail === "fav" ? "on" : ""}" data-pick="t3rail" data-val="fav" aria-label="Favorites">${STAR}</button><div class="sep"></div>${provs.map((pv) => `<button class="${T3.rail === pv ? "on" : ""} ${pv === "Claude Code" ? "claude" : ""}" data-pick="t3rail" data-val="${pv}" aria-label="${pv}">${PMARK[pv]}</button>`).join("")}</div>`;
+  const rows = list.map((p, idx) => `<div class="t3row ${c.instance === p.inst.id && c.model === p.m.id ? "on" : ""} ${p.here ? "" : "dim"}" data-pick="model" data-val="${p.key}"><span class="nm">${displayName(p.m.id)}</span><span class="pv ${p.inst.provider === "Claude Code" ? "claude" : ""}">${PMARK[p.inst.provider]}<span style="color:var(--muted)">${instLabel(p.inst)}${p.here ? "" : ` · not logged in on ${r.local ? "this machine" : r.id}`}</span></span>${idx < 9 ? `<span class="kbd">⌘${idx + 1}</span>` : "<span></span>"}<button class="star ${FAV.has(p.key) ? "on" : ""}" data-pick="fav" data-val="${p.key}" aria-label="favorite">${STAR}</button></div>`).join("");
+  return `<div class="t3pop">${rail}<div class="t3main"><div class="t3search">${MAG}<input id="t3q" placeholder="Search models..." value="${esc(T3.q)}" aria-label="Search models"></div><div class="t3list">${rows || '<div class="t3empty">No models match</div>'}</div></div></div>`;
 }
 function optionRows(c, m, withReasoning) {
   const seg = (key, vals, cur) => `<span class="segq">${vals.map((v) => `<button class="${v === cur ? "on" : ""}" data-pick="${key}" data-val="${v}">${v}</button>`).join("")}</span>`;
@@ -741,10 +856,11 @@ function placePop() {
   const pop = document.getElementById("pop");
   const anchor = POP && document.querySelector(`[data-pop="${POP.kind}"]`);
   if (!anchor) { pop.classList.remove("open"); POP = null; return; }
-  pop.innerHTML = popHtml(POP.kind, curThread()); pop.classList.add("open"); anchor.setAttribute("aria-expanded", "true");
-  const a = anchor.getBoundingClientRect(); pop.style.width = POP.kind === "runner" ? "400px" : "320px"; pop.style.maxHeight = `${a.top - 16}px`; const w = pop.offsetWidth;
+  const t3 = POP.kind === "model" && input() === "t3";
+  pop.innerHTML = popHtml(POP.kind, curThread()); pop.className = `pop open ${t3 ? "t3" : ""}`; anchor.setAttribute("aria-expanded", "true");
+  const a = anchor.getBoundingClientRect(); pop.style.width = t3 ? "" : (POP.kind === "runner" || POP.kind === "workspace" || POP.kind === "checkout" ? "400px" : POP.kind === "model" ? "360px" : "320px"); pop.style.maxHeight = `${a.top - 16}px`; const w = pop.offsetWidth;
   pop.style.left = `${Math.max(8, Math.min(a.left, innerWidth - w - 8))}px`; pop.style.bottom = `${innerHeight - a.top + 6}px`;
-  const ci = document.getElementById("custom"); if (ci) ci.focus();
+  const ci = document.getElementById("custom") || document.getElementById("t3q"); if (ci) { ci.focus(); ci.setSelectionRange(ci.value.length, ci.value.length); }
 }
 function pick(key, val) {
   const t = curThread();
@@ -755,12 +871,17 @@ function pick(key, val) {
     const nm = inst(ins).models.find((x) => x.id === mid) || {}; const p = { instance: ins, model: mid };
     if (nm.effort && !nm.effort.includes(c.effort)) p.effort = nm.effort.includes("medium") ? "medium" : nm.effort[0];
     if (nm.ctx && !nm.ctx.includes(c.ctx)) p.ctx = nm.ctx[0];
-    setCfg(t, p); if (key === "model" && effortPlace() !== "nested") POP = null; return render();
+    setCfg(t, p); if (key === "model" && (effortPlace() !== "nested" || input() === "t3")) POP = null; return render();
   }
+  if (key === "repo") { setCfg(t, { repo: val === "none" ? null : val, checkout: "worktree", branch: "new" }); POP = null; return render(); }
+  if (key === "checkout") { const rp = repoOf(cfg(t)); setCfg(t, { checkout: val, branch: val === "primary" ? rp.primary : "new" }); POP = null; return render(); }
+  if (key === "branch") { setCfg(t, { branch: val }); POP = null; return render(); }
+  if (key === "fav") { FAV.has(val) ? FAV.delete(val) : FAV.add(val); return render(); }
+  if (key === "t3rail") { T3.rail = val; T3.q = ""; return render(); }
   if (key === "custom") { CUSTOM = true; return render(); }
   if (key === "custom-go") { const v = (document.getElementById("custom") || {}).value; if (v && v.trim()) setCfg(t, { model: v.trim() }); CUSTOM = false; POP = null; return render(); }
   setCfg(t, { [key]: val });
-  if (key === "access" || key === "profile" || (POP && POP.kind === "effort")) POP = null;
+  if (key === "access" || key === "profile" || (POP && POP.kind === "effort" && input() !== "t3")) POP = null;
   render();
 }
 /* what is typed survives the re-renders the menus cause */
@@ -902,52 +1023,58 @@ function readyGuidance() {
 
 /* --- Sessions: the thread surface --- */
 function sel(k, v, ro = false, pop = "") { return `<button class="sel ${ro ? "ro" : ""}" ${ro ? 'title="fixed once the thread has started"' : (pop ? `data-pop="${pop}"` : "")}>${k ? `<span class="k">${k}</span>` : ""}<span class="v">${v}</span></button>`; }
+/* the setup selectors: workspace · checkout · branch · runner · profile. Locked (no menu) once the thread
+   has started; live in new-thread mode, reading PICK. */
+function setupSels(t, keyed = true) {
+  const ro = !!t; const c = cfg(t); const k = (x) => (keyed ? x : "");
+  let ws, co, br;
+  if (t) { ws = t.ws === "no workspace" ? "No workspace" : `${t.project || "hydra"} · ${t.ws}`; co = t.ws === "worktree" ? "new worktree" : t.ws === "main checkout" ? "primary checkout" : null; br = t.branch || null; }
+  else { const rp = repoOf(c); ws = rp ? (rp.project === rp.name ? rp.name : `${rp.project} · ${rp.name}`) : "No workspace"; co = rp ? (c.checkout === "primary" ? "primary checkout" : "new worktree") : null; br = rp ? (c.branch === "new" ? `${rp.name}/run-…` : c.branch) : null; }
+  return {
+    ro,
+    wsSel: sel(k("workspace"), ws, ro, "workspace"),
+    coSel: co ? sel(k("checkout"), co, ro, "checkout") : "",
+    brSel: br ? sel("", `<span class="mono" style="font-size:11px">${BRANCH}${br}</span>`, ro, "branch") : "",
+    runnerSel: sel(k("runner"), runnerLabel(c), ro, "runner"),
+    profileSel: sel(k("profile"), c.profile, ro, "profile"),
+  };
+}
+const SEPV = '<span class="sepv"></span>';
 function strip(t) {
-  // the thread's configuration, where you type. Read-only once started (t given), live in new-thread mode.
-  const ro = !!t;
-  const ws = t ? (t.ws === "no workspace" ? "No workspace" : `${t.project || "hydra"} · ${t.ws}`) : (fresh() ? "No workspace" : "hydra · main checkout");
-  const co = t ? (t.ws === "worktree" ? "new worktree" : t.ws === "main checkout" ? "primary checkout" : null) : (fresh() ? null : "new worktree");
-  const br = t ? t.branch : (fresh() ? null : "hydra/run-…");
-  const parts = [sel("workspace", ws, ro)];
-  if (co) parts.push(sel("checkout", co, ro));
-  if (br) parts.push(sel("", `<span class="mono" style="font-size:11px">${br}</span>`, ro));
-  parts.push(sel("runner", runnerLabel(cfg(t)), ro, "runner"));
-  parts.push(sel("profile", cfg(t).profile, ro, "profile"));
-  return `<div class="strip">${parts.join('<span class="sepv"></span>')}</div>`;
+  const p = setupSels(t);
+  return `<div class="strip">${[p.wsSel, p.coSel, p.brSel, p.runnerSel, p.profileSel].filter(Boolean).join(SEPV)}</div>`;
 }
-function stripParts(t) {
-  const ro = !!t;
-  const ws = t ? (t.ws === "no workspace" ? "No workspace" : `${t.project || "hydra"} · ${t.ws}`) : (fresh() ? "No workspace" : "hydra · main checkout");
-  const co = t ? (t.ws === "worktree" ? "new worktree" : t.ws === "main checkout" ? "primary checkout" : null) : (fresh() ? null : "new worktree");
-  const br = t ? t.branch : (fresh() ? null : "hydra/run-…");
-  return { ro, ws, co, br: br ? `<span class="mono" style="font-size:11px">${br}</span>` : null };
-}
+const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
 function composer(t, placeholder = "Reply…", dock = "") {
   const c = cfg(t);
   const send = t ? "reply" : "start"; const sendLabel = t ? "Send ⏎" : "Start thread ⏎";
-  const { ro, ws, co, br } = stripParts(t);
   const kind = input();
   const ta = `<textarea id="compose" placeholder="${placeholder}" rows="2">${esc(DRAFTS[t ? t.id : "new"] || "")}</textarea>`;
   const modelSel = sel("", modelLabel(c), false, "model");
-  const rs = reasoningSel(c); const rsSep = rs ? `<span class="sepv"></span>${rs}` : "";
+  const rs = reasoningSel(c); const rsSep = rs ? `${SEPV}${rs}` : "";
   const accessSel = sel("", c.access, false, "access");
+  const sendc = `<button class="sendc" data-send="${send}" aria-label="${sendLabel}">↑</button>`;
   let body;
   if (kind === "t3") {
-    const lip = [sel("", ws, ro), co ? sel("", co, ro) : ""].filter(Boolean).join('<span class="sepv"></span>');
-    const right = [br ? sel("", br, ro) : "", sel("", runnerLabel(c), ro, "runner")].filter(Boolean).join('<span class="sepv"></span>');
+    const p = setupSels(t, false);
+    const i = inst(c.instance); const r = reasoningOf(c);
+    const pill = `<button class="sel pill" data-pop="model"><span class="${i.provider === "Claude Code" ? "claude" : ""}">${PMARK[i.provider]}</span><span class="v">${displayName(c.model)}</span></button>`;
+    const eff = r ? sel("", `${r[0] === "thinking" ? "Thinking " : ""}${cap(r[1])}${modelOf(c).ctx ? ` · ${c.ctx}` : ""}`, false, "effort") : "";
+    const acc = `<button class="sel" data-pop="access"><span class="v">${SPARK}${c.access}</span></button>`;
     body = `<div class="c-t3">${ta}
-      <div class="row3">${modelSel}${rsSep}<span class="sepv"></span>${accessSel}
-        <span class="right"><button class="qbtn" style="padding:4px 6px">Attach</button><button class="sendc" data-send="${send}" aria-label="${sendLabel}">↑</button></span></div></div>
-      <div class="lip">${lip}<span class="right">${right}</span></div>`;
-  } else if (kind === "codex") {
-    const tabs = [sel("", ws, ro), co ? sel("", co, ro) : "", br ? sel("", br, ro) : "", sel("runner", runnerLabel(c), ro, "runner"), sel("profile", c.profile, ro, "profile")].filter(Boolean).join("");
-    const r = reasoningOf(c);
-    const pill = `<button class="mpill" data-pop="model"${rs ? ' style="margin-left:0"' : ""}><span class="k">${instLabel(inst(c.instance))}</span>${c.model}${effortPlace() === "nested" && r ? ` · ${r[1]}` : ""}${PROBING ? ` <span class="k">· probing…</span>` : ""}</button>`;
-    body = `<div class="c-cx-tabs">${tabs}</div><div class="c-cx">${ta}
-      <div class="row3"><button class="plusb" aria-label="Attach">+</button>${accessSel}${rs ? `<span style="margin-left:auto"></span>${rs}` : ""}${pill}<button class="sendc" data-send="${send}" aria-label="${sendLabel}">↑</button></div></div>`;
+      <div class="row3">${pill}${SEPV}${eff}${eff ? SEPV : ""}${acc}
+        <span class="right"><button class="qbtn" style="padding:4px 6px">Attach</button>${sendc}</span></div></div>
+      <div class="lip">${[p.wsSel, p.coSel].filter(Boolean).join(SEPV)}<span class="right">${[p.brSel, p.runnerSel].filter(Boolean).join(SEPV)}</span></div>`;
+  } else if (kind === "codex" || kind === "codexlip") {
+    const p = setupSels(t, kind === "codex");
+    const r = reasoningOf(c); const i = inst(c.instance);
+    const pill = `<button class="mpill" data-pop="model"${rs ? ' style="margin-left:0"' : ""}>${logos() ? PMARK[i.provider] : ""}<span class="k">${instLabel(i)}</span>${c.model}${effortPlace() === "nested" && r ? ` · ${r[1]}` : ""}${PROBING ? ` <span class="k">· probing…</span>` : ""}</button>`;
+    const rowHtml = `<div class="row3"><button class="plusb" aria-label="Attach">+</button>${accessSel}${rs ? `<span style="margin-left:auto"></span>${rs}` : ""}${pill}${kind === "codexlip" ? `<button class="micb" aria-label="Voice">${MIC}</button>` : ""}${sendc}</div>`;
+    if (kind === "codex") body = `<div class="c-cx-tabs">${[p.wsSel, p.coSel, p.brSel, p.runnerSel, p.profileSel].filter(Boolean).join("")}</div><div class="c-cx">${ta}${rowHtml}</div>`;
+    else body = `<div class="c-cx solo">${ta}${rowHtml}</div><div class="lip">${[p.wsSel, p.coSel, p.brSel].filter(Boolean).join(SEPV)}<span class="right">${[p.runnerSel, p.profileSel].filter(Boolean).join(SEPV)}</span></div>`;
   } else {
     body = `${strip(t)}<div class="composer">${ta}
-      <div class="ctl">${modelSel}${rsSep}<span class="sepv"></span>${accessSel}<span class="send"><button class="qbtn first" data-send="${send}">${sendLabel}</button></span></div></div>`;
+      <div class="ctl">${modelSel}${rsSep}${SEPV}${accessSel}<span class="send"><button class="qbtn first" data-send="${send}">${sendLabel}</button></span></div></div>`;
   }
   return `<div class="compwrap ${dock ? "docked" : ""}">${dock}${body}</div>`;
 }
@@ -1240,6 +1367,7 @@ function render() {
   document.getElementById("rbtn").textContent = `rows: ${rows()}`;
   document.getElementById("ibtn").textContent = `input: ${input()}`;
   document.getElementById("ebtn").textContent = `effort: ${effortPlace()}`;
+  document.getElementById("obtn").textContent = `logos: ${logos() ? "on" : "off"}`;
   const hb = document.getElementById("hbtn"); hb.style.display = threadId() === "new" ? "" : "none"; hb.textContent = `hero: ${hero()}`;
   const sb = document.getElementById("sbtn"); sb.style.display = v.key === "C" ? "" : "none"; sb.textContent = `stack: ${stack()}`;
   const mb = document.getElementById("mbtn"); mb.style.display = v.key === "B" ? "" : "none"; mb.textContent = `mode: ${mode()}`;
@@ -1255,12 +1383,14 @@ function cycleStack() { setParams({ stack: STACKS[(STACKS.indexOf(stack()) + 1) 
 function cycleRows() { setParams({ rows: ROWS[(ROWS.indexOf(rows()) + 1) % ROWS.length] }); }
 function cycleInput() { setParams({ input: INPUTS[(INPUTS.indexOf(input()) + 1) % INPUTS.length] }); }
 function toggleHero() { setParams({ hero: hero() === "center" ? null : "center" }); }
+function toggleLogos() { setParams({ logos: logos() ? null : "1" }); }
 function toggleEffort() { setParams({ effort: effortPlace() === "own" ? "nested" : null }); }
 function startThread() {
   const ta = document.getElementById("compose"); const text = (ta && ta.value.trim()) || "Add a --json flag to hydra runner list so scripts can read it.";
   const id = "c0ffee" + String(STARTED.length + 10);
   const c = cfg(null);
-  STARTED.unshift({ id, title: text.length > 42 ? text.slice(0, 40).replace(/\s+\S*$/, "") + "…" : text, first: text, state: "working", age: "now", ws: fresh() ? "no workspace" : "worktree", branch: fresh() ? "" : "hydra/run-" + id.slice(-3), provider: inst(c.instance).provider, model: c.model, runner: runnerOf(c).id, freshData: fresh() });
+  const rp = repoOf(c);
+  STARTED.unshift({ id, title: text.length > 42 ? text.slice(0, 40).replace(/\s+\S*$/, "") + "…" : text, first: text, state: "working", age: "now", ws: !rp ? "no workspace" : c.checkout === "primary" ? "main checkout" : "worktree", branch: !rp ? "" : c.branch === "new" ? `${rp.name}/run-${id.slice(-3)}` : c.branch, provider: inst(c.instance).provider, model: c.model, runner: runnerOf(c).id, freshData: fresh() });
   LIVE[id] = { instance: c.instance, effort: c.effort, thinking: c.thinking, ctx: c.ctx, fast: c.fast, access: c.access, profile: c.profile };
   delete DRAFTS.new; POP = null;
   setParams({ thread: id });
@@ -1293,6 +1423,7 @@ document.getElementById("sbtn").onclick = cycleStack;
 document.getElementById("rbtn").onclick = cycleRows;
 document.getElementById("ibtn").onclick = cycleInput;
 document.getElementById("ebtn").onclick = toggleEffort;
+document.getElementById("obtn").onclick = toggleLogos;
 document.getElementById("hbtn").onclick = toggleHero;
 document.getElementById("mbtn").onclick = () => setParams({ mode: mode() === "threads" ? "hydra" : "threads" });
 document.getElementById("theme").onclick = toggleTheme;
@@ -1310,12 +1441,16 @@ document.addEventListener("keydown", (e) => {
   else if (e.key === "r") cycleRows();
   else if (e.key === "i") cycleInput();
   else if (e.key === "e") toggleEffort();
+  else if (e.key === "o") toggleLogos();
   else if (e.key === "h" && threadId() === "new") toggleHero();
   else if (e.key === "m" && V() === "B") document.getElementById("mbtn").click();
   else if (e.key === "t") toggleTheme();
   else if (e.key === "?") toggleLegend();
   else if (e.key === "Escape") toggleLegend(false);
 });
-document.addEventListener("input", (e) => { if (e.target.id === "compose") DRAFTS[threadId() === "new" ? "new" : threadId()] = e.target.value; });
+document.addEventListener("input", (e) => {
+  if (e.target.id === "compose") DRAFTS[threadId() === "new" ? "new" : threadId()] = e.target.value;
+  if (e.target.id === "t3q") { T3.q = e.target.value; placePop(); }
+});
 render();
 </script>
