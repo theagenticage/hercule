@@ -17,7 +17,10 @@
                answer's description + describe line with Confirm / Back. Two clicks.
   Every variant also renders the same decision as a Discord sink message (spec 12 §11.6)
   in two rewrites: full (the pinned text-then-buttons) and compact.
-  Keys: ← → variant · c channel rewrite · t theme. Marks are the pinned family (#35).
+  Round 2 (reaction): the '→' prefix on describe lines is gone everywhere; ?nav=top|bottom (key n)
+  moves the focus-nav arrows above the card so a growing card never moves them; Discord renders
+  the describe line as -# subtext.
+  Keys: ← → variant · n nav position · c channel rewrite · t theme. Marks are the pinned family (#35).
 -->
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -219,8 +222,7 @@
   .acts .split { width: 1px; height: 14px; background: var(--line); margin: 0 4px; }
 
   /* the core-rendered describe line: "what the click does". One voice everywhere. */
-  .doline { font-size: 11.5px; color: var(--faint); line-height: 1.45; min-height: 17px; display: flex; gap: 6px; align-items: baseline; }
-  .doline .arrow { font-family: var(--mono); flex: none; }
+  .doline { font-size: 11.5px; color: var(--faint); line-height: 1.45; min-height: 17px; display: block; }
   .doline b { color: var(--muted); font-weight: var(--w-emph); }
   .doline .lbl { font-weight: var(--w-emph); color: var(--muted); }
   .doline.nullop { font-style: italic; }
@@ -261,6 +263,7 @@
   .commit .desc { color: var(--muted); }
 
   .focusnav { display: flex; align-items: center; gap: 8px; color: var(--faint); font-size: 12px; padding-top: 8px; }
+  .focusnav.top { padding: 0 0 8px; }
   .focusnav .ct { font-family: var(--mono); font-size: 11px; font-variant-numeric: tabular-nums; }
   .focusnav .qbtn { padding: 4px 8px; }
   .nextpeek { color: var(--faint); font-size: 12px; }
@@ -287,7 +290,7 @@
   .discord .msg em { color: #f2f3f5; font-style: italic; }
   .discord .msg .line { min-height: 20px; }
   .discord .msg .sub { color: #b5bac1; }
-  .discord .msg .quote { border-left: 4px solid #4e5058; padding-left: 10px; color: #b5bac1; }
+  .discord .msg .subtext { color: #949ba4; font-size: 12px; line-height: 1.3; margin: 1px 0 4px; } /* Discord's -# subtext markdown */
   .discord .msg .link { color: #00a8fc; }
   .discord .btns { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
   .discord .btn { background: #4e5058; color: #fff; font-weight: 500; font-size: 14px; padding: 7px 16px; border-radius: 3px; border: 0; cursor: pointer; }
@@ -341,6 +344,7 @@
   .sw button { background: none; border: 0; color: #fff; cursor: pointer; font: inherit; font-size: 13px; padding: 4px 10px; border-radius: 999px; }
   .sw button:hover { background: rgba(255,255,255,0.14); }
   .sw button:focus-visible { outline: 2px solid #9a94e8; outline-offset: 1px; }
+  .sw .ds { font-size: 11px; color: #c9c6d0; }
 </style>
 
 <div class="app">
@@ -352,7 +356,7 @@
         <span class="ent" id="marksicon"></span>Marks
         <div class="legendpop" id="legendpop" role="dialog" aria-label="Marks legend"></div>
       </button>
-      <div class="proto-badge">PROTOTYPE · throwaway<br>ticket hydra#50<br>&larr; &rarr; answers UI · c channel · t theme</div>
+      <div class="proto-badge">PROTOTYPE · throwaway<br>ticket hydra#50<br>&larr; &rarr; answers UI · n nav · c channel · t theme</div>
     </div>
   </aside>
   <main class="main">
@@ -368,6 +372,7 @@
   <button id="prev" aria-label="Previous treatment">&larr;</button>
   <span class="label" id="swlabel"></span>
   <button id="next" aria-label="Next treatment">&rarr;</button>
+  <button id="navbtn" class="ds" aria-label="Toggle focus-nav position"></button>
   <button id="theme" aria-label="Toggle theme">◐</button>
 </div>
 
@@ -503,7 +508,7 @@ const provWord = { you: "started by you", standing: "standing", intake: "from In
 const md = (s) => s.replace(/\*([^*]+)\*/g, "<b>$1</b>").replace(/`([^`]+)`/g, "<code>$1</code>");
 const plain = (s) => s.replace(/<[^>]+>/g, "").replace(/[*`]/g, "");
 const doLine = (a, withLabel = false) =>
-  `<span class="doline${a.nullop ? " nullop" : ""}"><span class="arrow">&rarr;</span><span>${withLabel ? `<span class="lbl">${a.label}</span> · ` : ""}${md(a.describe)}</span></span>`;
+  `<span class="doline${a.nullop ? " nullop" : ""}">${withLabel ? `<span class="lbl">${a.label}</span> · ` : ""}${md(a.describe)}</span>`;
 const descEl = (a) => a.description ? `<span class="desc">${md(a.description)}</span>` : "";
 
 /* ============ the Focus card: head + fields shared, the answers area per variant ============ */
@@ -575,7 +580,7 @@ const VARIANTS = [
   { key: "A", name: "Peek", answers: answersPeek,
     note: "Quiet button row as pinned. One fine-print <b>describe line</b> under it, always visible, showing the <i>primary</i> answer until you hover or focus another - the line tracks the pointer, so what you read is what the click does. A producer <b>description</b>, when there is one, opens as a hover card over the button (delay 220ms). Card height fixed." },
   { key: "B", name: "Ledger", answers: answersLedger,
-    note: "Every answer is a full row and the row is the button: label · description · describe. Nothing behind a hover; the whole decision reads top to bottom. Cost: the card grows with the answer count and the description length, so the focus-nav arrows move while cycling." },
+    note: "Every answer is a full row and the row is the button: label · description · describe. Nothing behind a hover; the whole decision reads top to bottom. The card grows with the answer count and the description length; with <b>nav: top</b> the arrows sit above the card and never move." },
   { key: "C", name: "Commit", answers: answersCommit,
     note: "Quiet button row as pinned, no fine print. Choosing an answer does not execute: the answer row turns into a commit step showing that answer's description and describe line with <b>Confirm</b> / <b>Back</b>. Two clicks per decision, the describe line is unmissable. Card height fixed." },
 ];
@@ -591,10 +596,10 @@ function discordEl(dec, mode) {
     /* pinned in 12 §11.6: for each answer its label, description and describe line, then buttons (label only) */
     ? dec.answers.map((a) => `
         <div class="line"><b>${a.label}</b>${a.description ? ` - ${dmd(a.description)}` : ""}</div>
-        <div class="line sub">&nbsp;&nbsp;&nbsp;&rarr; ${dmd(a.describe)}</div>`).join("")
+        <div class="subtext">${dmd(a.describe)}</div>`).join("")
     /* compact: one line per answer, label · describe; description only where the producer wrote one */
     : dec.answers.map((a) => `
-        <div class="line sub"><b>${a.label}</b> &middot; ${dmd(a.describe)}${a.description ? `<br>&nbsp;&nbsp;&nbsp;<span style="color:#949ba4">${dmd(a.description)}</span>` : ""}</div>`).join("");
+        <div class="line sub"><b>${a.label}</b> &middot; ${dmd(a.describe)}</div>${a.description ? `<div class="subtext">${dmd(a.description)}</div>` : ""}`).join("");
   return `
     <div class="discord">
       <div class="av">H</div>
@@ -658,8 +663,17 @@ function get(k) { return params().get(k); }
 function setParam(k, v) { const p = params(); p.set(k, v); try { history.replaceState(null, "", "?" + p.toString()); } catch (e) {} }
 function current() { const k = (get("variant") || "A").toUpperCase(); const i = VARIANTS.findIndex((v) => v.key === k); return i === -1 ? 0 : i; }
 function chanMode() { return get("chan") === "compact" ? "compact" : "full"; }
+function navPos() { return get("nav") === "top" ? "top" : "bottom"; }
 function show(i) { commitIdx = null; setParam("variant", VARIANTS[(i + VARIANTS.length) % VARIANTS.length].key); render(); }
 
+function focusNav(n, next) {
+  return `<div class="focusnav ${navPos()}">
+      <button class="qbtn" data-fnav="-1" ${focusIdx === 0 ? "disabled" : ""}>&larr;</button>
+      <span class="ct">${focusIdx + 1} of ${n}</span>
+      <button class="qbtn" data-fnav="1" ${focusIdx === n - 1 ? "disabled" : ""}>&rarr;</button>
+      ${next ? `<span class="nextpeek">next: <b>${plain(next.q)}</b> · ${next.age}</span>` : ""}
+    </div>`;
+}
 function render() {
   const v = VARIANTS[current()];
   const n = DECISIONS.length;
@@ -673,21 +687,17 @@ function render() {
       <div class="headline"><b>${n}</b> decisions wait · <b>${working}</b> strands in motion · <b>6</b> outcomes today</div>
       <section class="lane">
         <div class="lane-label">Needs you <span class="n">${n}</span></div>
+        ${navPos() === "top" ? focusNav(n, next) : ""}
         ${focusCard(dec, v)}
-        <div class="focusnav">
-          <button class="qbtn" data-fnav="-1" ${focusIdx === 0 ? "disabled" : ""}>&larr;</button>
-          <span class="ct">${focusIdx + 1} of ${n}</span>
-          <button class="qbtn" data-fnav="1" ${focusIdx === n - 1 ? "disabled" : ""}>&rarr;</button>
-          ${next ? `<span class="nextpeek">next: <b>${plain(next.q)}</b> · ${next.age}</span>` : ""}
-        </div>
+        ${navPos() === "bottom" ? focusNav(n, next) : ""}
         <div class="chanlane">
           <div class="lane-label">The same decision in Discord
             <span class="sw2"><button data-chan="full" class="${chanMode() === "full" ? "on" : ""}">full</button><button data-chan="compact" class="${chanMode() === "compact" ? "on" : ""}">compact</button></span>
           </div>
           ${discordEl(dec, chanMode())}
           <div class="channote">${chanMode() === "full"
-            ? "<b>full</b> is what spec 12 §11.6 pins today: title, body, then per answer its label, description and describe line, then label-only buttons."
-            : "<b>compact</b>: one line per answer, label · describe; the description only where the producer wrote one. Buttons unchanged."}</div>
+            ? "<b>full</b> is what spec 12 §11.6 pins today: title, body, then per answer its label and description, the describe line as Discord's <code>-#</code> subtext, then label-only buttons."
+            : "<b>compact</b>: one line per answer, label · describe; the description as subtext only where the producer wrote one. Buttons unchanged."}</div>
         </div>
       </section>
       <section class="lane">
@@ -704,6 +714,7 @@ function render() {
   </div>`;
   document.getElementById("vnote").innerHTML = `<b>${v.key} · ${v.name}</b><br>${v.note}`;
   document.getElementById("swlabel").textContent = v.key + " · " + v.name;
+  document.getElementById("navbtn").textContent = "nav: " + navPos();
 }
 
 /* ---- A: hover / focus tracking ---- */
@@ -767,6 +778,8 @@ function toggleTheme() {
 }
 document.getElementById("prev").addEventListener("click", () => show(current() - 1));
 document.getElementById("next").addEventListener("click", () => show(current() + 1));
+function toggleNav() { setParam("nav", navPos() === "top" ? "bottom" : "top"); render(); }
+document.getElementById("navbtn").addEventListener("click", toggleNav);
 document.getElementById("theme").addEventListener("click", toggleTheme);
 document.addEventListener("keydown", (e) => {
   const t = e.target;
@@ -774,6 +787,7 @@ document.addEventListener("keydown", (e) => {
   if (e.key === "ArrowLeft") show(current() - 1);
   if (e.key === "ArrowRight") show(current() + 1);
   if (e.key === "c") { setParam("chan", chanMode() === "full" ? "compact" : "full"); render(); }
+  if (e.key === "n") toggleNav();
   if (e.key === "t") toggleTheme();
   if (e.key === "?") toggleLegend();
   if (e.key === "Escape") toggleLegend(false);
