@@ -9,18 +9,30 @@
     3. how the empty states of Sessions, Intake and Notifications carry first-run guidance
        (provider login, connect GitHub / Gmail, connect a chat channel) without a checklist page.
 
-  Three shells, switchable via ?variant=A|B|C (same screens, same data, only the frame changes):
-    A Nav    - one orchestration sidebar always, Sessions is its first item. The threads list is
-               content: a list column inside the Sessions screen (master/detail), never chrome.
+  Shells, switchable via ?variant=A|B|C (same screens, same data, only the frame changes):
+    A Nav    - one orchestration sidebar always; threads are a list column inside Sessions.
+               REJECTED in round 1 (kept switchable as the record).
     B Modes  - the sidebar has two faces behind a segmented switch: Threads (t3-code list: create,
                projects, threads, assistants) and Hydra (the orchestration nav). The face follows
                the screen; the needs-you count leaks into the Hydra segment so it never hides.
-    C Stack  - one sidebar, two regions: threads on top (t3-code), the orchestration group pinned
-               below it. No mode, no list column; everything is one click away.
-  Ambient signals (pulse): ?pulse=top|foot|none (key p). Default per variant: A top bar, B/C sidebar
-  foot. The check-in page keeps its full pulse rail regardless (pinned).
+    C Stack  - one sidebar, two regions. ?stack=bottom|top|split (key s): Hydra group below the
+               threads (round 1), above them (Codex order), or split - the five work items above,
+               the four infrastructure items at the foot beside Marks.
+  Round 2 (reaction to round 1):
+    - thread rows: ?rows=plain|meta|rich (key r) - one line; a second faint mono line (checkout ·
+      model); active threads as a small card (state line, title, branch/PR, provider), settled plain.
+    - new thread is one step: Create new thread opens the thread surface in new-thread mode; the
+      first message starts it. The composer holds the whole configuration: a config strip
+      (workspace · checkout · branch · runner · profile) that turns read-only once started, and the
+      control row (model · effort · access mode) that stays live.
+    - thread surface rebuilt in the Codex / t3-code shape: centered column, timestamp, user messages
+      right-aligned bubbles, agent prose full width, "Worked for" dividers, changed-files cards, the
+      approval ledger inline, composer floating at the bottom.
+    - All sessions is a full overview page: Active / Waiting on you / Idle / Settled with a project
+      filter; workflow-started sessions behind a fold.
+  Ambient signals (pulse): ?pulse=top|foot|none (key p). Default: A top bar, B/C sidebar foot.
   Data: ?data=busy|fresh (key d). fresh = first run; ?li=1 = a provider login has happened (key l).
-  Keys: ← → variant · d data · l login · p pulse · m mode (B) · t theme · ? Marks · Esc closes.
+  Keys: ← → shell · s stack (C) · r rows · m mode (B) · d data · l login · p pulse · t theme · ? Marks · Esc.
   Marks are the pinned family (#35); everything in the pinned design language (#33).
 -->
 <meta charset="utf-8">
@@ -46,7 +58,7 @@
     --sans: "Onest", -apple-system, system-ui, sans-serif;
     --mono: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
     --w-emph: 500; --w-urgent: 600;
-    --side-w: 232px;
+    --side-w: 236px;
   }
   @media (prefers-color-scheme: dark) {
     :root:not([data-theme="light"]) {
@@ -94,7 +106,7 @@
   .lane-label .n { font-family: var(--mono); letter-spacing: 0; text-transform: none; font-weight: 400; }
   .lane-label .r { margin-left: auto; letter-spacing: 0; text-transform: none; font-weight: 400; font-family: var(--mono); font-size: 10.5px; }
   .pdot { width: 7px; height: 7px; border-radius: 2px; display: inline-block; flex: none; vertical-align: 0; }
-  .pdot.hydra { background: var(--p-hydra); } .pdot.ops { background: var(--p-ops); }
+  .pdot.hydra { background: var(--p-hydra); } .pdot.ops { background: var(--p-ops); } .pdot.none { background: var(--line); }
 
   /* ============ marks (pinned family, #35) ============ */
   .markcell { width: 16px; flex: none; display: inline-flex; justify-content: center; align-items: center; font-size: 12px; }
@@ -124,7 +136,7 @@
   .pri[data-pri="urgent"] .bars i { background: var(--ink); }
   .age { font-family: var(--mono); font-size: 11.5px; white-space: nowrap; color: var(--faint); flex: none; font-variant-numeric: tabular-nums; }
   .age[data-age="recent"] { color: var(--muted); } .age[data-age="stale"] { color: var(--ink); } .age[data-age="old"] { color: var(--attn); font-weight: 500; }
-  .state { font-size: 12px; color: var(--muted); }
+  .state { font-size: 12px; color: var(--muted); white-space: nowrap; }
   .state.live { color: var(--live); } .state.fail { color: var(--fail); } .state.attn { color: var(--attn); }
   .qbtn { font-family: var(--sans); font-size: 12.5px; line-height: 1; font-weight: var(--w-emph); border: 0; background: none; color: var(--muted); padding: 6px 9px; border-radius: 6px; cursor: pointer; white-space: nowrap; }
   .qbtn:hover { background: var(--line-soft); color: var(--ink); }
@@ -150,6 +162,8 @@
   .nav .sep { height: 1px; background: var(--line-soft); margin: 8px 10px; }
   .sidefoot { margin-top: auto; display: flex; flex-direction: column; gap: 6px; padding-top: 10px; }
   .side .glabel { padding: 0 10px; margin: 6px 0 4px; }
+  .side .glabel a { text-decoration: none; cursor: pointer; }
+  .side .glabel a:hover { color: var(--muted); }
   /* thread list (t3-code face) */
   .newbtn { display: flex; align-items: center; gap: 8px; margin: 0 0 10px; padding: 6px 10px; border-radius: 6px; border: 1px solid var(--line); background: var(--raised); color: var(--ink); font-size: 13px; font-weight: var(--w-emph); cursor: pointer; box-shadow: var(--card-shadow); text-align: left; width: 100%; }
   .newbtn:hover { box-shadow: var(--lift-shadow); }
@@ -162,6 +176,23 @@
   .trow:not(.on):hover { background: var(--line-soft); }
   .trow.dim { opacity: 0.66; }
   .trow .markcell { width: 14px; }
+  /* rows=meta: a second faint mono line */
+  .trow2 { display: flex; flex-direction: column; gap: 0; padding: 4px 10px 5px 8px; border-radius: 6px; color: var(--muted); cursor: pointer; }
+  .trow2 .l1 { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+  .trow2 .l1 .markcell { width: 14px; }
+  .trow2 .l1 .t { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .trow2 .l2 { padding-left: 22px; font-family: var(--mono); font-size: 10.5px; color: var(--faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.4; }
+  .trow2.on { background: var(--line-soft); color: var(--ink); } .trow2.on .l1 { font-weight: var(--w-emph); }
+  .trow2:not(.on):hover { background: var(--line-soft); }
+  .trow2.dim { opacity: 0.66; }
+  /* rows=rich: active threads as a small card */
+  .tcard { background: var(--raised); border: 1px solid var(--line); border-radius: 8px; box-shadow: var(--card-shadow); padding: 7px 10px 8px; margin: 2px 0 5px; display: flex; flex-direction: column; gap: 2px; cursor: pointer; }
+  .tcard:hover { box-shadow: var(--lift-shadow); }
+  .tcard.on { border-color: var(--faint); }
+  .tcard .st { font-size: 11px; display: flex; align-items: center; gap: 6px; }
+  .tcard .st .age { margin-left: auto; }
+  .tcard .tt { font-size: 13px; color: var(--ink); font-weight: var(--w-emph); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .tcard .mm { font-family: var(--mono); font-size: 10.5px; color: var(--faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .side .ghead { display: flex; align-items: center; gap: 7px; padding: 0 10px; margin: 10px 0 3px; font-size: 12px; color: var(--muted); font-weight: var(--w-emph); }
   .side .ghead:first-child { margin-top: 0; }
   .side .ghead .r { margin-left: auto; font-family: var(--mono); font-size: 10.5px; color: var(--faint); font-weight: 400; }
@@ -199,9 +230,13 @@
   .main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
   .topbar { display: flex; align-items: baseline; gap: 14px; padding: 22px 32px 0; }
   .topbar h1 { font-size: 18px; margin: 0; letter-spacing: -0.015em; font-weight: var(--w-emph); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: none; max-width: 44%; }
+  .topbar h1 .pj { color: var(--muted); font-weight: 400; }
+  .topbar h1 .sl { color: var(--faint); font-weight: 400; margin: 0 8px; }
   .topbar .when { color: var(--muted); font-size: 13px; white-space: nowrap; }
   .topbar .crumb { color: var(--faint); font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
   .topbar .crumb b { color: var(--muted); }
+  .topbar .acts { margin-left: auto; display: flex; gap: 2px; align-self: center; flex: none; }
+  .topbar .acts .plus { color: var(--ok); font-family: var(--mono); font-weight: 400; } .topbar .acts .minus { color: var(--fail); font-family: var(--mono); font-weight: 400; }
   #stage { padding: 16px 32px 110px; flex: 1; display: flex; flex-direction: column; min-height: 0; }
   .headline { font-size: 15px; color: var(--muted); margin: 0 0 22px; }
   .headline b { color: var(--ink); }
@@ -212,10 +247,12 @@
   .row:hover { background: var(--line-soft); }
   .row .t { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .row .t small { color: var(--muted); font-size: 12px; margin-left: 6px; }
+  .row .t small .mono { font-size: 11px; }
   .row .sub { color: var(--muted); font-size: 12px; white-space: nowrap; }
   .row.dim { opacity: 0.66; }
   .row .qbtn { padding: 4px 8px; margin: -2px 0; }
   .digest { color: var(--muted); font-size: 12.5px; opacity: 0.82; }
+  .digest a { color: var(--muted); cursor: pointer; }
   .divider { display: flex; align-items: center; gap: 10px; color: var(--faint); font-size: 11px; font-family: var(--mono); margin: 10px 0; }
   .divider::before, .divider::after { content: ""; flex: 1; height: 1px; background: var(--line); }
   /* decision card + ledger (pinned by #20/#50) */
@@ -243,7 +280,7 @@
   .rail { position: sticky; top: 20px; display: flex; flex-direction: column; gap: 20px; }
   .rail .pulse { gap: 4px; }
   .rail .lane-label { margin-bottom: 6px; }
-  /* intake bits */
+  /* tabs (intake topics, sessions project filter) */
   .tabs { display: flex; align-items: center; gap: 2px; border-bottom: 1px solid var(--line); margin-bottom: 18px; }
   .tabs a { padding: 6px 10px; font-size: 13px; color: var(--muted); text-decoration: none; border-bottom: 1.5px solid transparent; margin-bottom: -1px; display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
   .tabs a.on { color: var(--ink); border-bottom-color: var(--ink); font-weight: var(--w-emph); }
@@ -252,7 +289,6 @@
   .lead .tt { font-size: 15px; font-weight: var(--w-emph); display: flex; align-items: center; gap: 10px; }
   .lead .made { font-size: 12px; color: var(--muted); }
   .lead .gist { font-size: 13px; color: var(--muted); max-width: 60ch; }
-  .lead .acts { display: flex; gap: 2px; margin-left: -9px; }
   /* empty states (question 3) */
   .empty-state { max-width: 560px; margin-top: 4vh; display: flex; flex-direction: column; gap: 14px; }
   .empty-state h2 { font-size: 17px; font-weight: var(--w-emph); margin: 0; letter-spacing: -0.01em; text-wrap: balance; }
@@ -267,38 +303,50 @@
   .form .fr { display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 12px; align-items: baseline; font-size: 13px; }
   .form .fl { text-transform: uppercase; letter-spacing: 0.09em; font-size: 10px; color: var(--faint); font-weight: var(--w-emph); }
   .form .fv { color: var(--ink); }
-  .form .fv small { color: var(--faint); font-size: 12px; margin-left: 6px; }
-  .form .sel { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--line); border-radius: 6px; padding: 3px 8px; background: var(--surface); font-size: 12.5px; }
-  .form .sel::after { content: "▾"; color: var(--faint); font-size: 10px; }
   .form .acts { display: flex; gap: 2px; margin-left: -9px; padding-top: 6px; }
   .form .fine { font-size: 12px; color: var(--faint); }
   .code { display: flex; align-items: center; gap: 8px; }
   .code input { font: 13px var(--mono); border: 1px solid var(--line); border-radius: 6px; padding: 5px 9px; background: var(--surface); color: var(--ink); width: 240px; }
-  /* sessions: split (A) and thread pane */
+  /* sessions: split (A, rejected) */
   .sess-split { display: grid; grid-template-columns: 248px minmax(0, 1fr); gap: 22px; flex: 1; min-height: 0; align-items: stretch; }
   .sess-split > div:last-child { display: flex; flex-direction: column; min-height: 0; }
   .listcol { background: var(--surface); border: 1px solid var(--line-soft); border-radius: 10px; padding: 8px 6px; display: flex; flex-direction: column; gap: 2px; align-self: start; position: sticky; top: 16px; max-height: calc(100vh - 100px); overflow: auto; }
   .listcol .newbtn { margin: 0 4px 8px; width: auto; }
   .listcol .ghead { display: flex; align-items: center; gap: 7px; padding: 0 10px; margin: 8px 0 2px; font-size: 12px; color: var(--muted); font-weight: var(--w-emph); }
   .listcol .ghead .r { margin-left: auto; font-family: var(--mono); font-size: 10.5px; color: var(--faint); font-weight: 400; }
-  .pane { display: flex; flex-direction: column; gap: 14px; min-width: 0; max-width: 820px; flex: 1; width: 100%; }
-  .pane .phead { display: flex; flex-direction: column; gap: 2px; }
-  .pane .phead h2 { margin: 0; font-size: 16px; font-weight: var(--w-emph); letter-spacing: -0.01em; }
-  .pane .meta { font-size: 12px; color: var(--faint); display: flex; gap: 6px; flex-wrap: wrap; }
-  .pane .meta b { color: var(--muted); }
-  .turns { display: flex; flex-direction: column; gap: 10px; }
-  .turn { display: grid; grid-template-columns: 56px minmax(0, 1fr); gap: 12px; font-size: 13.5px; }
-  .turn .who { font-size: 10px; text-transform: uppercase; letter-spacing: 0.09em; color: var(--faint); font-weight: var(--w-emph); padding-top: 4px; }
-  .turn .body { color: var(--ink); max-width: 66ch; }
-  .turn .body.tool { font-family: var(--mono); font-size: 12px; color: var(--muted); }
-  .turn .body.agent { color: var(--muted); }
-  .turn .body .ask { margin-top: 6px; }
-  .composer { margin-top: auto; border: 1px solid var(--line); border-radius: 10px; background: var(--raised); box-shadow: var(--card-shadow); padding: 10px 12px 8px; display: flex; flex-direction: column; gap: 8px; }
-  .composer textarea { font: 13.5px/1.5 var(--sans); border: 0; background: none; color: var(--ink); resize: none; outline: none; min-height: 40px; }
-  .composer .ctl { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--faint); }
-  .composer .ctl .sel { border: 0; background: none; color: var(--muted); padding: 2px 6px; border-radius: 5px; cursor: pointer; font-size: 12px; }
-  .composer .ctl .sel:hover { background: var(--line-soft); color: var(--ink); }
+  /* ============ the thread surface (round 2: Codex / t3-code shape) ============ */
+  .thread { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+  .tcol { width: 100%; max-width: 800px; margin: 0 auto; display: flex; flex-direction: column; gap: 18px; padding: 6px 0 26px; }
+  .stamp { text-align: center; font-family: var(--mono); font-size: 11px; color: var(--faint); }
+  .umsg { align-self: flex-end; max-width: 78%; background: var(--surface); border: 1px solid var(--line-soft); border-radius: 14px 14px 4px 14px; padding: 9px 14px; font-size: 14px; color: var(--ink); }
+  .worked { display: flex; align-items: center; gap: 10px; font-size: 12px; color: var(--faint); cursor: pointer; }
+  .worked::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+  .amsg { font-size: 14px; line-height: 1.55; color: var(--ink); max-width: 70ch; }
+  .amsg p { margin: 0 0 8px; } .amsg p:last-child { margin-bottom: 0; }
+  .amsg ul { margin: 0 0 8px; padding-left: 20px; } .amsg li { margin: 2px 0; }
+  .chcard { border: 1px solid var(--line); border-radius: 10px; padding: 7px 12px; display: flex; align-items: center; gap: 10px; font-size: 12.5px; color: var(--muted); background: var(--surface); }
+  .chcard b { color: var(--ink); } .chcard .plus { color: var(--ok); font-family: var(--mono); } .chcard .minus { color: var(--fail); font-family: var(--mono); }
+  .chcard .qbtn { margin-left: auto; }
+  .livemsg { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+  .newhero { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; text-align: center; padding-bottom: 8vh; }
+  .newhero h2 { font-size: 22px; font-weight: var(--w-emph); letter-spacing: -0.015em; margin: 0; text-wrap: balance; }
+  .newhero h2 .ws { border-bottom: 1px dotted var(--faint); }
+  .newhero p { color: var(--muted); margin: 0; font-size: 13.5px; max-width: 52ch; }
+  /* composer with its config strip: the thread's configuration lives where you type */
+  .compwrap { width: 100%; max-width: 800px; margin: auto auto 0; display: flex; flex-direction: column; }
+  .strip { display: flex; align-items: center; gap: 1px; padding: 5px 8px 10px; margin-bottom: -6px; background: var(--surface); border: 1px solid var(--line-soft); border-bottom: 0; border-radius: 10px 10px 0 0; font-size: 12px; color: var(--muted); flex-wrap: wrap; }
+  .sel { border: 0; background: none; color: var(--muted); padding: 3px 7px; border-radius: 5px; cursor: pointer; font-size: 12px; display: inline-flex; align-items: center; gap: 5px; font-family: var(--sans); white-space: nowrap; }
+  .sel:hover { background: var(--line-soft); color: var(--ink); }
+  .sel .k { color: var(--faint); }
+  .sel::after { content: "▾"; color: var(--faint); font-size: 9px; }
+  .sel.ro { cursor: default; } .sel.ro::after { content: none; } .sel.ro:hover { background: none; color: var(--muted); }
+  .sel.ro .v { color: var(--muted); }
+  .sepv { width: 1px; height: 12px; background: var(--line); margin: 0 3px; flex: none; }
+  .composer { border: 1px solid var(--line); border-radius: 12px; background: var(--raised); box-shadow: var(--lift-shadow); padding: 10px 12px 8px; display: flex; flex-direction: column; gap: 8px; position: relative; }
+  .composer textarea { font: 14px/1.5 var(--sans); border: 0; background: none; color: var(--ink); resize: none; outline: none; min-height: 44px; width: 100%; }
+  .composer .ctl { display: flex; align-items: center; gap: 1px; font-size: 12px; color: var(--faint); }
   .composer .ctl .send { margin-left: auto; }
+  .composer .ctl .send .qbtn { padding: 5px 10px; }
   /* settings sub-nav */
   .subnav { display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: 13px; color: var(--muted); margin-bottom: 20px; }
   .subnav a { text-decoration: none; padding: 3px 8px; border-radius: 6px; cursor: pointer; }
@@ -323,29 +371,31 @@
   </main>
 </div>
 <div class="legend" id="legend" role="dialog" aria-label="Marks legend"></div>
-<div class="proto-badge">PROTOTYPE · throwaway · hydra#51<br>&larr; &rarr; shell · d data · l login · p pulse · m mode · t theme · ? marks</div>
+<div class="proto-badge">PROTOTYPE · throwaway · hydra#51 · round 2<br>&larr; &rarr; shell · s stack · r rows · m mode · d data · l login · p pulse · t theme · ? marks</div>
 <div class="sw">
   <button id="prev" aria-label="Previous shell">&larr;</button>
   <span class="label" id="swlabel"></span>
   <button id="next" aria-label="Next shell">&rarr;</button>
+  <button id="sbtn" class="ds"></button>
+  <button id="rbtn" class="ds"></button>
+  <button id="mbtn" class="ds"></button>
   <button id="dbtn" class="ds"></button>
   <button id="lbtn" class="ds"></button>
   <button id="pbtn" class="ds"></button>
-  <button id="mbtn" class="ds"></button>
   <button id="theme" aria-label="Toggle theme">◐</button>
 </div>
 
 <script>
 /* ============ url state ============ */
 const VARIANTS = [
-  { key: "A", name: "Nav", blurb: "one orchestration sidebar; threads are a list column inside Sessions" },
+  { key: "A", name: "Nav · rejected r1", blurb: "one orchestration sidebar; threads are a list column inside Sessions" },
   { key: "B", name: "Modes", blurb: "sidebar switches between a Threads face and a Hydra face" },
-  { key: "C", name: "Stack", blurb: "threads on top, the orchestration group pinned below, one sidebar" },
+  { key: "C", name: "Stack", blurb: "threads and the orchestration group in one sidebar" },
 ];
 function params() { return new URLSearchParams(location.search); }
 function get(k) { return params().get(k); }
 function setParams(obj) { const p = params(); for (const [k, v] of Object.entries(obj)) { if (v === null || v === undefined || v === false) p.delete(k); else p.set(k, v); } try { history.replaceState(null, "", "?" + p.toString()); } catch (e) {} render(); }
-function vIndex() { const k = (get("variant") || "A").toUpperCase(); const i = VARIANTS.findIndex((v) => v.key === k); return i === -1 ? 0 : i; }
+function vIndex() { const k = (get("variant") || "B").toUpperCase(); const i = VARIANTS.findIndex((v) => v.key === k); return i === -1 ? 1 : i; }
 function V() { return VARIANTS[vIndex()].key; }
 function fresh() { return get("data") === "fresh"; }
 function loggedIn() { return get("li") === "1"; }
@@ -353,6 +403,10 @@ function screen() { const s = get("screen") || "sessions"; return SCREENS.includ
 function threadId() { return get("thread"); }
 function pulsePlace() { const p = get("pulse"); if (["top", "foot", "none"].includes(p)) return p; return V() === "A" ? "top" : "foot"; }
 function mode() { const m = get("mode"); if (m === "threads" || m === "hydra") return m; return screen() === "sessions" ? "threads" : "hydra"; }
+const STACKS = ["bottom", "top", "split"];
+function stack() { const s = get("stack"); return STACKS.includes(s) ? s : "bottom"; }
+const ROWS = ["plain", "meta", "rich"];
+function rows() { const r = get("rows"); return ROWS.includes(r) ? r : "plain"; }
 const SCREENS = ["sessions", "intake", "checkin", "tasks", "runs", "workflows", "fleet", "connections", "notifications", "settings"];
 const TITLES = { sessions: "Sessions", intake: "Intake", checkin: "Check-in", tasks: "Tasks", runs: "Runs", workflows: "Workflows", fleet: "Fleet", connections: "Connections", notifications: "Notifications", settings: "Settings" };
 
@@ -385,19 +439,20 @@ const mark = (k) => `<span class="markcell">${(M[k] || M.none)()}</span>`;
 const ent = (k) => `<span class="ent">${bs(BS[k])}</span>`;
 const pri = (p) => `<span class="pri" data-pri="${p}" title="priority ${p}"><span class="bars"><i></i><i></i><i></i></span></span>`;
 const age = (t, b = "") => `<span class="age" data-age="${b}">${t}</span>`;
+const STATE_WORD = { working: ["working", "live"], decision: ["decision wanted", "attn"], idle: ["idle", ""], done: ["done", ""], failed: ["failed", "fail"], queued: ["queued", ""] };
 
 /* ============ data ============ */
 const BUSY = {
   projects: [
     { key: "hydra", name: "hydra", threads: [
-      { id: "a1f3c9e2", title: "Fix flaky webhook tests", state: "working", age: "12m", ws: "main checkout", model: "sonnet-5" },
-      { id: "b7d02e41", title: "Runner drain command", state: "decision", age: "4m", ws: "worktree · hydra/run-3f1", model: "sonnet-5" },
-      { id: "c9e8a110", title: "Tidy the promotion runbook", state: "idle", age: "2h", ws: "no workspace", model: "sonnet-5" },
-      { id: "d4b1f77a", title: "Bun compile: notarization spike", state: "done", age: "yesterday", ws: "main checkout", model: "opus-5" },
+      { id: "a1f3c9e2", title: "Fix flaky webhook tests", state: "working", age: "12m", ws: "main checkout", branch: "main", provider: "Claude Code", model: "claude-sonnet-5", changes: "+48 −12", files: 3 },
+      { id: "b7d02e41", title: "Runner drain command", state: "decision", age: "4m", ws: "worktree", branch: "hydra/run-3f1", provider: "Claude Code", model: "claude-sonnet-5", changes: "+210 −8", files: 6 },
+      { id: "c9e8a110", title: "Tidy the promotion runbook", state: "idle", age: "2h", ws: "no workspace", branch: "", provider: "Claude Code", model: "claude-sonnet-5" },
+      { id: "d4b1f77a", title: "Bun compile: notarization spike", state: "done", age: "yesterday", ws: "worktree", branch: "spike/bun-notarize", pr: "#98", provider: "Claude Code", model: "claude-opus-5", changes: "+48 −12", files: 3 },
     ] },
     { key: "ops", name: "ops", threads: [
-      { id: "e2c7d905", title: "Rotate the Hetzner backups key", state: "idle", age: "3d", ws: "main checkout", model: "gpt-5.6" },
-      { id: "f0a3b6c8", title: "Why is the tailnet cert renewal failing", state: "failed", age: "5d", ws: "no workspace", model: "sonnet-5" },
+      { id: "e2c7d905", title: "Rotate the Hetzner backups key", state: "idle", age: "3d", ws: "main checkout", branch: "main", provider: "Codex", model: "gpt-5.6" },
+      { id: "f0a3b6c8", title: "Why is the tailnet cert renewal failing", state: "failed", age: "5d", ws: "no workspace", branch: "", provider: "Claude Code", model: "claude-sonnet-5" },
     ] },
   ],
   assistants: [
@@ -406,8 +461,8 @@ const BUSY = {
     { name: "Iris", live: false, where: "idle · Slack DM", id: "as-iris" },
   ],
   fromWorkflows: [
-    { id: "9c1e2f30", title: "PR review (auto) · PR #94 · step 2/4", state: "working", age: "3m" },
-    { id: "8b0d1e2f", title: "Triage · 09:00 batch", state: "done", age: "5h" },
+    { id: "9c1e2f30", title: "PR review (auto) · PR #94 · step 2/4", state: "working", age: "3m", project: "hydra" },
+    { id: "8b0d1e2f", title: "Triage · 09:00 batch", state: "done", age: "5h", project: "" },
   ],
   counts: { intake: 7, checkin: 2, notifications: 5 },
   pulse: [
@@ -422,12 +477,23 @@ const FRESH = {
   counts: { intake: 0, checkin: 0, notifications: 0 },
   pulse: [{ dot: "live", html: "<b>1 runner</b> · this machine" }],
 };
+/* threads started in this page (in memory, no persistence - reload forgets them) */
+const STARTED = [];
 function data() { return fresh() ? FRESH : BUSY; }
-function allThreads() { return data().projects.flatMap((p) => p.threads.map((t) => ({ ...t, project: p.key }))); }
+function projectsWithStarted() {
+  const d = data(); const mine = STARTED.filter((t) => t.freshData === fresh());
+  if (!mine.length) return d.projects;
+  if (d.projects.length) return d.projects.map((p, i) => i === 0 ? { ...p, threads: [...mine, ...p.threads] } : p);
+  return [{ key: "none", name: "No project", threads: mine }];
+}
+function allThreads() { return projectsWithStarted().flatMap((p) => p.threads.map((t) => ({ ...t, project: p.key === "none" ? "" : p.key }))); }
 function findThread(id) { return allThreads().find((t) => t.id === id); }
 
 /* ============ shell pieces ============ */
 const NAV_ALL = [["sessions", "session"], ["intake"], ["checkin"], ["tasks", "task"], ["runs", "run"], ["workflows", "workflow"], "sep", ["fleet"], ["connections"], ["notifications"], ["settings"]];
+const NAV_ORCH = NAV_ALL.filter((n) => n === "sep" || n[0] !== "sessions");
+const NAV_WORK = [["intake"], ["checkin"], ["tasks", "task"], ["runs", "run"], ["workflows", "workflow"]];
+const NAV_INFRA = [["fleet"], ["connections"], ["notifications"], ["settings"]];
 function navHtml(items) {
   const d = data(); const s = screen();
   return `<nav class="nav">${items.map((n) => {
@@ -437,24 +503,34 @@ function navHtml(items) {
     return `<a data-go="${key}" class="${s === key ? "on" : ""}"><span class="ni">${glyph ? bs(BS[glyph]) : ""}</span>${TITLES[key]}${count}</a>`;
   }).join("")}</nav>`;
 }
-function threadRow(t, cls = "") {
-  const on = threadId() === t.id && screen() === "sessions";
-  return `<a class="trow ${cls} ${on ? "on" : ""} ${t.state === "done" ? "dim" : ""}" data-thread="${t.id}">${mark(t.state)}<span class="t">${t.title}</span>${age(t.age)}</a>`;
+function threadMeta(t) { return [t.ws === "worktree" ? t.branch : t.ws, t.pr, t.model].filter(Boolean).join(" · "); }
+function threadRow(t) {
+  const on = threadId() === t.id && screen() === "sessions"; const dim = t.state === "done" || t.state === "failed";
+  const r = rows();
+  if (r === "meta") {
+    return `<a class="trow2 ${on ? "on" : ""} ${dim ? "dim" : ""}" data-thread="${t.id}"><span class="l1">${mark(t.state)}<span class="t">${t.title}</span>${age(t.age)}</span><span class="l2">${threadMeta(t)}</span></a>`;
+  }
+  if (r === "rich" && (t.state === "working" || t.state === "decision")) {
+    const [w, tone] = STATE_WORD[t.state];
+    return `<a class="tcard ${on ? "on" : ""}" data-thread="${t.id}"><span class="st">${mark(t.state)}<span class="state ${tone}" style="font-size:11px">${w}</span>${age(t.age)}</span><span class="tt">${t.title}</span><span class="mm">${[t.ws === "worktree" ? t.branch : t.ws, t.pr, t.provider].filter(Boolean).join(" · ")}</span></a>`;
+  }
+  return `<a class="trow ${on ? "on" : ""} ${dim ? "dim" : ""}" data-thread="${t.id}">${mark(t.state)}<span class="t">${t.title}</span>${age(t.age)}</a>`;
 }
 function assistantRow(a) {
-  return `<a class="trow" data-thread="${a.id}">${a.live ? '<span class="markcell"><span class="livedot"></span></span>' : '<span class="markcell"><span class="idledot"></span></span>'}<span class="t">${a.name} <span style="color:var(--faint);font-weight:400"> · ${a.where}</span></span></a>`;
+  const on = threadId() === a.id && screen() === "sessions";
+  return `<a class="trow ${on ? "on" : ""}" data-thread="${a.id}"><span class="markcell">${a.live ? '<span class="livedot"></span>' : '<span class="idledot"></span>'}</span><span class="t">${a.name} <span style="color:var(--faint);font-weight:400"> · ${a.where}</span></span></a>`;
 }
 function newThreadBtn() {
   if (fresh() && !loggedIn()) return "";
-  return `<button class="newbtn" data-create="1"><span class="plus">+</span>Create new thread</button>`;
+  return `<button class="newbtn" data-thread="new"><span class="plus">+</span>Create new thread</button>`;
 }
 function threadListHtml({ limit = 99, morelink = true } = {}) {
-  const d = data();
+  const d = data(); const projects = projectsWithStarted();
   let h = "";
-  if (!d.projects.length) h += `<div class="empty">${fresh() && !loggedIn() ? "No threads yet · log in to a provider first" : "No threads yet"}</div>`;
-  for (const p of d.projects) {
+  if (!projects.length) h += `<div class="empty">${fresh() && !loggedIn() ? "No threads yet · log in to a provider first" : "No threads yet"}</div>`;
+  for (const p of projects) {
     h += `<div class="ghead"><span class="pdot ${p.key}"></span>${p.name}<span class="r">${p.threads.length}</span></div><div class="tlist">${p.threads.slice(0, limit).map((t) => threadRow(t)).join("")}</div>`;
-    if (p.threads.length > limit) h += `<a class="more" data-go="sessions">${p.threads.length - limit} more…</a>`;
+    if (p.threads.length > limit) h += `<a class="more" data-go="sessions" data-all="1">${p.threads.length - limit} more…</a>`;
   }
   h += `<div class="ghead">Assistants</div><div class="tlist">${d.assistants.map(assistantRow).join("")}</div>`;
   if (morelink) h += `<a class="more" data-go="sessions" data-all="1" style="margin-top:8px">All sessions →</a>`;
@@ -464,39 +540,45 @@ function pulseHtml(limit = 99) {
   return `<div class="pulse">${data().pulse.slice(0, limit).map((p) => `<span class="pl">${p.dot === "live" ? '<span class="livedot"></span>' : '<span class="idledot"></span>'}<span>${p.html}</span></span>`).join("")}</div>`;
 }
 function legendBtn() { return `<button class="lgbtn" id="lgtoggle" aria-expanded="false" aria-controls="legend"><span class="markcell" style="width:auto">${bs(BS.queued)}</span>Marks <kbd>?</kbd></button>`; }
-function footHtml() { return `<div class="sidefoot">${pulsePlace() === "foot" ? pulseHtml() : ""}${legendBtn()}</div>`; }
+function footHtml(extra = "") { return `<div class="sidefoot">${extra}${pulsePlace() === "foot" ? pulseHtml() : ""}${legendBtn()}</div>`; }
 const LOGO = `<div class="logo"><b>Hydra</b><span>rogier</span></div>`;
+const SESS_LABEL = `<div class="lane-label glabel">Sessions <a class="r" data-go="sessions" data-all="1">all →</a></div>`;
 
-function sideA() {
-  return `${LOGO}${navHtml(NAV_ALL)}${footHtml()}`;
-}
+function sideA() { return `${LOGO}${navHtml(NAV_ALL)}${footHtml()}`; }
 function sideB() {
   const m = mode(); const c = data().counts.checkin;
   const seg = `<div class="seg" role="tablist">
     <button role="tab" class="${m === "threads" ? "on" : ""}" data-mode="threads">Threads</button>
     <button role="tab" class="${m === "hydra" ? "on" : ""}" data-mode="hydra">Hydra${c ? `<span class="count attn">${c}</span>` : ""}</button></div>`;
-  const body = m === "threads" ? `${newThreadBtn()}<div class="scrollreg">${threadListHtml()}</div>` : navHtml(NAV_ALL.filter((n) => n === "sep" || n[0] !== "sessions"));
+  const body = m === "threads" ? `${newThreadBtn()}<div class="scrollreg">${threadListHtml()}</div>` : navHtml(NAV_ORCH);
   return `${LOGO}${seg}${body}${footHtml()}`;
 }
 function sideC() {
-  const d = data();
-  const orch = navHtml(NAV_ALL.filter((n) => n === "sep" || n[0] !== "sessions"));
-  return `${LOGO}<div class="lane-label glabel" style="margin-top:0">Sessions <a class="r" data-go="sessions" data-all="1" style="cursor:pointer">all →</a></div>${newThreadBtn()}<div class="scrollreg">${threadListHtml({ limit: 3, morelink: false })}</div>
-    <div class="nav"><div class="sep"></div></div>
-    <div class="lane-label glabel">Hydra</div>${orch}${footHtml()}`;
+  const s = stack();
+  const sess = `${SESS_LABEL}${newThreadBtn()}<div class="scrollreg">${threadListHtml({ limit: 3, morelink: false })}</div>`;
+  const sep = `<div class="nav"><div class="sep"></div></div>`;
+  if (s === "top") return `${LOGO}<div class="lane-label glabel" style="margin-top:0">Hydra</div>${navHtml(NAV_ORCH)}${sep}${sess}${footHtml()}`;
+  if (s === "split") return `${LOGO}${navHtml(NAV_WORK)}${sep}${sess}${footHtml(navHtml(NAV_INFRA) + sep)}`;
+  return `${LOGO}${sess}${sep}<div class="lane-label glabel">Hydra</div>${navHtml(NAV_ORCH)}${footHtml()}`;
 }
 function renderSide() {
-  document.getElementById("side").innerHTML = { A: sideA, B: sideB, C: sideC }[V()]();
+  const sideEl = document.getElementById("side");
+  sideEl.innerHTML = { A: sideA, B: sideB, C: sideC }[V()]();
+  sideEl.querySelectorAll(".glabel").forEach((g) => { if (V() === "C" && stack() === "top" && g.textContent.trim().startsWith("Sessions")) g.style.marginTop = "0"; });
 }
 
 /* ============ topbar ============ */
 function renderTop() {
-  const s = screen(); const t = threadId() && findThread(threadId());
+  const s = screen(); const id = threadId(); const t = id && findThread(id);
   let h;
-  if (s === "sessions" && t) {
-    h = `<h1>${t.title}</h1><span class="crumb"><b>${t.project}</b> · thread · Claude Code · ${t.model} · ${t.ws} · <span class="mono">${t.id}</span></span>`;
-  } else if (s === "sessions" && threadId() && threadId().startsWith("as-")) {
-    const a = data().assistants.find((x) => x.id === threadId());
+  if (s === "sessions" && id === "new") {
+    const pj = fresh() ? "" : "hydra";
+    h = `<h1>${pj ? `<span class="pj">${pj}</span><span class="sl">/</span>` : ""}New thread</h1>`;
+  } else if (s === "sessions" && t) {
+    h = `<h1>${t.project ? `<span class="pj">${t.project}</span><span class="sl">/</span>` : ""}${t.title}</h1><span class="crumb">thread · <span class="mono">${t.id}</span></span>`;
+    if (t.changes) h += `<span class="acts"><button class="qbtn">Changes <span class="plus">${t.changes.split(" ")[0]}</span> <span class="minus">${t.changes.split(" ")[1]}</span></button>${t.pr ? `<button class="qbtn">PR ${t.pr}</button>` : `<button class="qbtn">Commit</button>`}</span>`;
+  } else if (s === "sessions" && id && id.startsWith("as-")) {
+    const a = data().assistants.find((x) => x.id === id);
     h = `<h1>${a ? a.name : "Assistant"}</h1><span class="crumb">assistant · web chat · <b>${a ? a.where : ""}</b></span>`;
   } else {
     h = `<h1>${TITLES[s]}</h1><span class="when">${s === "intake" ? "since Sunday 22:10" : "Monday 09:14"}</span>`;
@@ -509,11 +591,11 @@ function renderTop() {
 function emptyState(h2, p, acts, fine) {
   return `<div class="empty-state"><h2>${h2}</h2>${p ? `<p>${p}</p>` : ""}${acts || ""}${fine ? `<div class="fine">${fine}</div>` : ""}</div>`;
 }
-function offerRows(rows) {
-  return `<div class="offer">${rows.map((r) => `<div class="row"><span class="t"><b>${r.name}</b><small>${r.sub}</small></span><button class="qbtn first" data-noop="1">${r.act}</button></div>`).join("")}</div>`;
+function offerRows(rowsList) {
+  return `<div class="offer">${rowsList.map((r) => `<div class="row"><span class="t"><b>${r.name}</b><small>${r.sub}</small></span><button class="qbtn first" data-noop="1">${r.act}</button></div>`).join("")}</div>`;
 }
 
-/* --- Sessions --- */
+/* --- Sessions: first run --- */
 function loginGuidance() {
   const step = get("login");
   if (step) {
@@ -529,69 +611,114 @@ function loginGuidance() {
     `pi was not found on this machine. Other machines join from <a data-go="fleet">Fleet</a>.`);
 }
 function readyGuidance() {
-  if (get("create") === "1") return createForm();
   return emptyState("Claude Code is ready.",
-    "Create a thread to work on this machine. The defaults come from Settings › Threads; anything you change here applies to this thread only.",
-    `<div class="acts"><button class="qbtn first" data-create="1">Create new thread</button></div>`,
+    "Create a thread to work on this machine. The defaults come from Settings › Threads; the composer shows them and anything you change there applies to that thread only.",
+    `<div class="acts"><button class="qbtn first" data-thread="new">Create new thread</button></div>`,
     `Codex was found but is not logged in · <a data-login="Codex">Log in to Codex</a>. Your assistant <b>Hydra</b> is in the Assistants list; it works through Hydra rather than in a workspace.`);
 }
-function createForm() {
-  return `<div class="form">
-    <div class="lane-label">New thread</div>
-    <div class="fr"><span class="fl">Provider</span><span class="fv"><span class="sel">Claude Code</span><small>logged in on this machine</small></span></div>
-    <div class="fr"><span class="fl">Model</span><span class="fv"><span class="sel">claude-sonnet-5</span> <span class="sel">effort · medium</span></span></div>
-    <div class="fr"><span class="fl">Access</span><span class="fv"><span class="sel">approval-required</span><small>asks before edits and commands</small></span></div>
-    <div class="fr"><span class="fl">Workspace</span><span class="fv"><span class="sel">No workspace</span><small>or adopt a folder on this machine</small></span></div>
-    <div class="fr"><span class="fl">Runner</span><span class="fv"><span class="sel">local</span><small>this machine</small></span></div>
-    <div class="acts"><button class="qbtn first" data-start="1">Start</button><button class="qbtn" data-create="">Cancel</button></div>
-    <div class="fine">Prefilled from Settings › Threads. Nothing you change here is written back.</div></div>`;
+
+/* --- Sessions: the thread surface --- */
+function sel(k, v, ro = false) { return `<button class="sel ${ro ? "ro" : ""}" ${ro ? 'title="fixed once the thread has started"' : ""}>${k ? `<span class="k">${k}</span>` : ""}<span class="v">${v}</span></button>`; }
+function strip(t) {
+  // the thread's configuration, where you type. Read-only once started (t given), live in new-thread mode.
+  const ro = !!t;
+  const ws = t ? (t.ws === "no workspace" ? "No workspace" : `${t.project || "hydra"} · ${t.ws}`) : (fresh() ? "No workspace" : "hydra · main checkout");
+  const co = t ? (t.ws === "worktree" ? "new worktree" : t.ws === "main checkout" ? "primary checkout" : null) : (fresh() ? null : "new worktree");
+  const br = t ? t.branch : (fresh() ? null : "hydra/run-…");
+  const parts = [sel("workspace", ws, ro)];
+  if (co) parts.push(sel("checkout", co, ro));
+  if (br) parts.push(sel("", `<span class="mono" style="font-size:11px">${br}</span>`, ro));
+  parts.push(sel("runner", "local", ro));
+  parts.push(sel("profile", "unrestricted", ro));
+  return `<div class="strip">${parts.join('<span class="sepv"></span>')}</div>`;
+}
+function composer(t, placeholder = "Reply…") {
+  const prov = t ? t.provider : "Claude Code"; const model = t ? t.model : "claude-sonnet-5";
+  return `<div class="compwrap">${strip(t)}<div class="composer"><textarea id="compose" placeholder="${placeholder}" rows="2"></textarea>
+    <div class="ctl">${sel("", `${prov} · ${model}`)}<span class="sepv"></span>${sel("effort", "medium")}<span class="sepv"></span>${sel("", "approval-required")}<span class="send"><button class="qbtn first" data-send="${t ? "reply" : "start"}">${t ? "Send ⏎" : "Start thread ⏎"}</button></span></div></div></div>`;
+}
+const umsg = (s) => `<div class="umsg">${s}</div>`;
+const worked = (s) => `<div class="worked">Worked for ${s} ›</div>`;
+const amsg = (s) => `<div class="amsg">${s}</div>`;
+const chcard = (n, ch) => `<div class="chcard"><b>${n} changed files</b><span class="plus">${ch.split(" ")[0]}</span><span class="minus">${ch.split(" ")[1]}</span><span>· Show files</span><button class="qbtn">Open diff</button></div>`;
+function transcript(t) {
+  const approval = `<div class="dcard" style="max-width:none;box-shadow:var(--card-shadow)"><div class="qline">${mark("decision")}<span class="q">Run <code>pnpm test --filter runner</code>?</span>${age("4m")}</div>
+    <div class="ledger"><button class="first"><span class="lb">Allow</span><span class="ds">runs the command once in <b>worktree hydra/run-3f1</b></span></button>
+    <button><span class="lb">Allow always</span><span class="ds">adds <b>pnpm test</b> to this thread's allowed commands</span></button>
+    <button><span class="lb">Deny</span><span class="ds">the agent continues without running it</span></button></div></div>`;
+  const T = {
+    working: `<div class="stamp">Mon 1 Sep · 09:02</div>
+      ${umsg("The webhook retry tests fail about one run in five. Find out why and fix it without loosening the assertions.")}
+      ${worked("31s")}
+      ${amsg(`<p>Two of the three failures are the same race: the retry scheduler fires before the fake clock advances, so the first attempt lands a tick early and the assertion on attempt count sees two.</p><p>The third failure is unrelated: <code>test/webhooks/retry.test.ts</code> reuses a port across cases. Fixing the race first; the port reuse is a one-liner after.</p>`)}
+      ${chcard(3, "+48 −12")}
+      <div class="livemsg">${M.working()}<span class="state live">working 12m · editing src/webhooks/retry.ts</span></div>`,
+    decision: `<div class="stamp">Mon 1 Sep · 09:10</div>
+      ${umsg("Add a <code>hydra runner drain</code> command that stops new placements and waits for sessions to finish.")}
+      ${worked("1m 13s")}
+      ${amsg(`<p>Command wired: <code>hydra runner drain &lt;name&gt;</code> flips the runner to <b>draining</b>, placement skips it, and the CLI waits on the session count with a <code>--timeout</code>.</p><p>To check it end to end I want to run the integration suite for the runner package.</p>`)}
+      ${chcard(6, "+210 −8")}
+      ${approval}`,
+    idle: `<div class="stamp">Mon 1 Sep · 07:40</div>
+      ${umsg("Read docs/spec/15 and tell me where the promotion runbook is unclear.")}
+      ${worked("48s")}
+      ${amsg(`<p>Three places:</p><ul><li>the bundle-file fallback never says who verifies the signature;</li><li>§7 assumes the old controller is reachable for the freeze;</li><li>the restore runbook mixes backup and promotion vocabulary.</li></ul><p>Want me to draft the fixes?</p>`)}`,
+    done: `<div class="stamp">Sun 31 Aug · 14:02</div>
+      ${umsg("Spike: does a Bun-compiled hydra binary pass macOS notarization?")}
+      ${worked("11m 4s")}
+      ${amsg(`<p>Yes, with a stapled ticket after <code>codesign --options runtime</code>; the embedded claude binary must be signed first, or Gatekeeper rejects the bundle on first launch.</p><p>Notes in <code>research/bun-compile.md</code>, pushed as PR #98.</p>`)}
+      ${chcard(3, "+48 −12")}
+      <div class="livemsg">${M.done()}<span class="state">done yesterday 14:18 · PR #98 open</span></div>`,
+    failed: `<div class="stamp">Wed 27 Aug · 23:10</div>
+      ${umsg("The tailnet cert renewal fails nightly. Find the cause.")}
+      ${worked("2m 40s")}
+      <div class="livemsg">${M.failed()}<span class="state fail">failed 5d ago · runner <b>macstudio-02</b> went offline mid-turn</span><button class="qbtn" style="margin-left:6px">Resume</button></div>`,
+  };
+  return T[t.state] || T.idle;
+}
+function startedTranscript(t) {
+  return `<div class="stamp">Mon 1 Sep · 09:14</div>${umsg(t.first)}${worked("4s")}<div class="livemsg">${M.working()}<span class="state live">working · reading the workspace</span></div>`;
 }
 function threadPane(t) {
-  const turns = {
-    working: `${turn("you", "The webhook retry tests fail about one run in five. Find out why and fix it without loosening the assertions.")}
-      ${turn("agent", "Two of the three failures are the same race: the retry scheduler fires before the fake clock advances. Reading <code>src/webhooks/retry.ts</code> and the test harness.", "agent")}
-      ${turn("tool", "read src/webhooks/retry.ts · read test/webhooks/retry.test.ts · grep advanceTimers", "tool")}
-      ${turn("agent", `<span class="state live" style="display:inline-flex;align-items:center;gap:7px">${M.working()} working 12m · editing src/webhooks/retry.ts</span>`, "agent")}`,
-    decision: `${turn("you", "Add a <code>hydra runner drain</code> command that stops new placements and waits for sessions to finish.")}
-      ${turn("agent", "Command wired. To check it end to end I want to run the integration suite for the runner package.", "agent")}
-      ${turn("agent", `<div class="dcard" style="max-width:560px;box-shadow:var(--card-shadow)"><div class="qline">${mark("decision")}<span class="q">Run <code>pnpm test --filter runner</code>?</span>${age("4m")}</div>
-        <div class="ledger"><button class="first"><span class="lb">Allow</span><span class="ds">runs the command once in <b>worktree hydra/run-3f1</b></span></button>
-        <button><span class="lb">Allow always</span><span class="ds">adds <b>pnpm test</b> to this thread's allowed commands</span></button>
-        <button><span class="lb">Deny</span><span class="ds">the agent continues without running it</span></button></div></div>`, "agent")}`,
-    idle: `${turn("you", "Read docs/spec/15 and tell me where the promotion runbook is unclear.")}
-      ${turn("agent", "Three places: the bundle-file fallback never says who verifies the signature; §7 assumes the old controller is reachable for the freeze; the restore runbook mixes backup and promotion vocabulary. Want me to draft the fixes?", "agent")}`,
-    done: `${turn("you", "Spike: does a Bun-compiled hydra binary pass macOS notarization?")}
-      ${turn("agent", "Yes, with a stapled ticket after <code>codesign --options runtime</code>; the embedded claude binary must be signed first. Notes in <code>research/bun-compile.md</code>.", "agent")}
-      ${turn("", `<span class="state" style="display:inline-flex;align-items:center;gap:7px">${M.done()} done yesterday 14:18 · 3 files changed · <span class="mono">+48 −12</span></span>`, "agent")}`,
-    failed: `${turn("you", "The tailnet cert renewal fails nightly. Find the cause.")}
-      ${turn("agent", `<span class="state fail" style="display:inline-flex;align-items:center;gap:7px">${M.failed()} failed 5d ago · runner <b>macstudio-02</b> went offline mid-turn</span>`, "agent")}`,
-  }[t.state] || "";
-  return `<div class="pane"><div class="turns">${turns}</div>${composer()}</div>`;
-}
-function turn(who, body, cls = "") { return `<div class="turn"><span class="who">${who}</span><div class="body ${cls}">${body}</div></div>`; }
-function composer(placeholder = "Reply…") {
-  return `<div class="composer"><textarea placeholder="${placeholder}" rows="2"></textarea>
-    <div class="ctl"><button class="sel">claude-sonnet-5</button><span>·</span><button class="sel">effort medium</button><span>·</span><button class="sel">approval-required</button><span class="send"><button class="qbtn first">Send ⏎</button></span></div></div>`;
-}
-function assistantPane(a) {
-  return `<div class="pane"><div class="turns">
-    ${turn("you", "What did Hera do in #ops this morning?")}
-    ${turn(a.name, "Hera answered two questions about the backup schedule and started a run for the Hetzner key rotation. Nothing is waiting on you from that.", "agent")}
-    ${turn("you", "Remind me at 16:00 to check the rotation run.")}
-    ${turn(a.name, "Set: a reminder at 16:00 today, delivered here.", "agent")}
-  </div>${composer("Message " + a.name + "…")}</div>`;
+  return `<div class="thread"><div class="tcol">${t.first ? startedTranscript(t) : transcript(t)}</div>${composer(t)}</div>`;
 }
 function newThreadPane() {
-  return `<div class="pane"><div class="phead"><h2>New thread</h2><div class="meta"><b>Claude Code</b> · claude-sonnet-5 · approval-required · no workspace · local</div></div>
-    <div class="turns"><div class="turn"><span class="who"></span><div class="body agent" style="color:var(--faint)">Say what you want done. The agent runs on this machine with no workspace; adopt a folder from the composer to work in a repo.</div></div></div>${composer("What should the agent do?")}</div>`;
+  const pj = fresh() ? "" : "hydra";
+  return `<div class="thread"><div class="newhero"><h2>${pj ? `What should the agent do in <span class="ws">${pj}</span>?` : "What should the agent do?"}</h2>
+    <p>${fresh() ? "No workspace yet. Adopt a folder on this machine from the strip below, or work without one." : "The strip below is the thread's setup; it locks when you send the first message."}</p></div>${composer(null, "Say what you want done…")}</div>`;
 }
+function assistantPane(a) {
+  return `<div class="thread"><div class="tcol"><div class="stamp">Mon 1 Sep · 09:12</div>
+    ${umsg("What did Hera do in #ops this morning?")}
+    ${amsg("Hera answered two questions about the backup schedule and started a run for the Hetzner key rotation. Nothing is waiting on you from that.")}
+    ${umsg("Remind me at 16:00 to check the rotation run.")}
+    ${amsg("Set: a reminder at 16:00 today, delivered here.")}
+  </div><div class="compwrap"><div class="composer"><textarea placeholder="Message ${a.name}…" rows="2"></textarea><div class="ctl"><span class="state" style="font-size:12px;color:var(--faint)">assistant · ${a.where}</span><span class="send"><button class="qbtn first">Send ⏎</button></span></div></div></div></div>`;
+}
+
+/* --- Sessions: the overview page (All sessions) --- */
 function sessionsListPage() {
   const d = data();
-  if (fresh() && !d.projects.length) return loggedIn() ? readyGuidance() : loginGuidance();
-  const rows = (list, kind) => list.map((t) => `<div class="row ${t.state === "done" ? "dim" : ""}" data-thread="${t.id}" style="cursor:pointer">${mark(t.state)}<span class="t">${t.title}<small>${kind}${t.project ? " · " + t.project : ""}</small></span>${age(t.age)}</div>`).join("");
-  return `<div class="lane"><div class="lane-label">Threads <span class="n">${allThreads().length}</span></div><div class="group">${rows(allThreads(), "thread")}</div></div>
+  if (fresh() && !allThreads().length) return loggedIn() ? readyGuidance() : loginGuidance();
+  const pf = get("pj") || "all";
+  const th = allThreads().filter((t) => pf === "all" || t.project === pf);
+  const by = (st) => th.filter((t) => st.includes(t.state));
+  const srowT = (t) => {
+    const [w, tone] = STATE_WORD[t.state];
+    const dim = t.state === "done" || t.state === "failed";
+    return `<div class="row ${dim ? "dim" : ""}" data-thread="${t.id}" style="cursor:pointer">${mark(t.state)}<span class="t">${t.title}<small>${[t.project, t.ws === "worktree" ? `<span class="mono">${t.branch}</span>` : t.ws, t.pr, t.provider].filter(Boolean).join(" · ")}</small></span><span class="state ${tone}">${t.state === "working" ? "running " + t.age : w}</span>${age(t.age)}</div>`;
+  };
+  const lane = (label, list, extra = "") => list.length ? `<div class="lane"><div class="lane-label">${label} <span class="n">${list.length}</span>${extra}</div><div class="group">${list.map(srowT).join("")}</div></div>` : "";
+  const active = by(["working"]), waiting = by(["decision"]), idle = by(["idle", "queued"]), settled = by(["done", "failed", "cancelled"]);
+  const projects = [["all", "All"], ...data().projects.map((p) => [p.key, p.name])];
+  const wf = get("wf") === "1";
+  return `<p class="headline"><b>${active.length} running</b> · ${waiting.length} waiting on you · ${idle.length} idle · ${settled.length} settled this week</p>
+    <div class="tabs">${projects.map(([k, n]) => `<a class="${pf === k ? "on" : ""}" data-pj="${k}">${k !== "all" ? `<span class="pdot ${k}"></span>` : ""}${n}</a>`).join("")}<a class="r" style="color:var(--faint)" data-thread="new">Create new thread</a></div>
+    ${lane("Waiting on you", waiting)}${lane("Running", active)}${lane("Idle", idle, '<span class="r">resumes on your next message</span>')}
     <div class="lane"><div class="lane-label">Assistants</div><div class="group">${d.assistants.map((a) => `<div class="row" data-thread="${a.id}" style="cursor:pointer"><span class="markcell">${a.live ? '<span class="livedot"></span>' : '<span class="idledot"></span>'}</span><span class="t">${a.name}<small>${a.where}</small></span></div>`).join("")}</div></div>
-    <div class="lane"><div class="lane-label">From workflows <span class="n">${d.fromWorkflows.length}</span></div><div class="group">${rows(d.fromWorkflows, "session")}</div></div>`;
+    ${lane("Settled", settled)}
+    <div class="digest">${d.fromWorkflows.length ? `Sessions started by workflows are not threads: <a data-wf="${wf ? "0" : "1"}">${wf ? "hide them" : `show ${d.fromWorkflows.length} (1 running · 14 today)`}</a>` : "No workflow has started a session yet."}</div>
+    ${wf ? `<div class="lane" style="margin-top:12px"><div class="lane-label">From workflows</div><div class="group">${d.fromWorkflows.map((t) => `<div class="row ${t.state === "done" ? "dim" : ""}">${mark(t.state)}<span class="t">${t.title}<small>session${t.project ? " · " + t.project : ""}</small></span>${age(t.age)}</div>`).join("")}</div></div>` : ""}`;
 }
 function sessionsScreen() {
   const id = threadId();
@@ -608,14 +735,9 @@ function sessionsScreen() {
     const listcol = `<div class="listcol">${newThreadBtn()}${threadListHtml({ morelink: false })}
       ${d.fromWorkflows.length ? `<div class="ghead">From workflows<span class="r">${d.fromWorkflows.length}</span></div><div class="tlist">${d.fromWorkflows.map((t) => threadRow(t)).join("")}</div>` : ""}</div>`;
     let pane = paneFor();
-    if (!pane) {
-      if (fresh()) pane = get("create") === "1" ? createForm() : (loggedIn() ? readyGuidance() : loginGuidance());
-      else pane = `<div class="empty-state" style="margin-top:2vh"><h2>Pick a thread, or start one.</h2><p>Everything on the left is a conversation: your threads by project, your assistants, and the sessions workflows started.</p></div>`;
-    }
+    if (!pane) pane = fresh() ? (loggedIn() ? readyGuidance() : loginGuidance()) : `<div class="empty-state" style="margin-top:2vh"><h2>Pick a thread, or start one.</h2></div>`;
     return `<div class="sess-split">${listcol}<div>${pane}</div></div>`;
   }
-  // B and C: the list lives in the sidebar; the screen is the thread, or the all-sessions page
-  if (get("create") === "1" && !id) return createForm();
   return paneFor() || sessionsListPage();
 }
 
@@ -644,7 +766,7 @@ function intakeScreen() {
       ${irow("Issue #128 might duplicate #131", "normal", "GitHub", "unsure · attach or new task?", "2h", "stale")}
       ${irow("Email triage: breaker tripped · 14 events held", "normal", "Gmail", "resume trigger?", "41m", "recent")}
     </div></div>
-    <div class="digest">212 events → 6 proposals · 1 attached · 2 offers · 3 FYI · 2 unsure · 198 no action · last triage 09:00 · <a style="color:var(--muted)">What came in →</a></div>`;
+    <div class="digest">212 events → 6 proposals · 1 attached · 2 offers · 3 FYI · 2 unsure · 198 no action · last triage 09:00 · <a>What came in →</a></div>`;
 }
 function irow(t, p, sys, next, a, b) { return `<div class="row">${pri(p)}<span class="t">${t}<small>${sys}</small></span><span class="sub">${next}</span>${age(a, b)}</div>`; }
 
@@ -712,7 +834,7 @@ function tasksScreen() {
     ${trow("normal", "Runner drain command", "in-progress · hydra", "1d", "")}
     ${trow("normal", "Reply to the Hetzner invoice question", "open · ops · business", "5h", "stale")}
     ${trow("low", "Tidy the promotion runbook", "open · hydra · docs", "3d", "")}
-  </div></div><div class="digest">…9 more · done this week 11 · <a style="color:var(--muted)">Filter</a> · <a style="color:var(--muted)">Search</a></div>`;
+  </div></div><div class="digest">…9 more · done this week 11 · <a>Filter</a> · <a>Search</a></div>`;
 }
 function trow(p, t, sub, a, b) { return `<div class="row ${p === "low" ? "dim" : ""}">${pri(p)}<span class="t">${t}<small>${sub}</small></span>${age(a, b)}</div>`; }
 function runsScreen() {
@@ -726,15 +848,15 @@ function runsScreen() {
   </div>`;
 }
 function workflowsScreen() {
-  const shipped = srow("paused", "Triage", "shipped · every 2h between 07:00 and 23:00", fresh() ? "waiting for a connection" : "active", fresh() ? "" : "", fresh() ? "" : "14m");
-  if (fresh()) return `<div class="group">${shipped}</div><div class="digest" style="margin-top:14px">Workflows are stored recipes written as YAML. <a style="color:var(--muted)">New workflow</a></div>`;
+  const shipped = srow("paused", "Triage", "shipped · every 2h between 07:00 and 23:00", fresh() ? "waiting for a connection" : "active", "", fresh() ? "" : "14m");
+  if (fresh()) return `<div class="group">${shipped}</div><div class="digest" style="margin-top:14px">Workflows are stored recipes written as YAML. <a>New workflow</a></div>`;
   return `<div class="group">
     ${srow("working", "PR review (auto)", "github · pr.opened, 3 repos", "2 running · 9 today", "live", "3m")}
     ${srow("done", "Triage", "shipped · every 2h", "active · ran 09:00", "", "14m")}
     ${srow("paused", "Email triage", "gmail/personal · message.received", "paused by breaker · 14 held", "attn", "41m", "recent")}
     ${srow("done", "Standup summary", "cron 08:30", "active · posted to #ops", "", "6h")}
     ${srow("failed", "Dependency bumps", "cron weekly", "last run failed", "fail", "3h", "stale")}
-  </div><div class="digest" style="margin-top:14px"><a style="color:var(--muted)">New workflow</a></div>`;
+  </div><div class="digest" style="margin-top:14px"><a>New workflow</a></div>`;
 }
 function fleetScreen() {
   const add = `<div class="addspot"><b>Add machine</b><span>Run this on the machine, then log in to its providers here.</span><code>curl -fsSL https://hydra.local:4937/join | sh -s -- --token hj_7Kq…c2 <span style="color:var(--faint)">· valid 1h</span></code></div>`;
@@ -760,17 +882,17 @@ function connectionsScreen() {
     ${srow("none", "gmail/work", "Gmail · Business", "polling 30s", "", "")}
     ${srow("none", "discord/agentick", "Discord · notifications → #hydra · Hera bound to #ops", "connected", "live", "")}
     ${srow("none", "slack/rogier-co", "Slack · Iris bound to DMs", "connected", "live", "")}
-  </div><div class="digest" style="margin-top:14px"><a style="color:var(--muted)">Add connection</a></div>`;
+  </div><div class="digest" style="margin-top:14px"><a>Add connection</a></div>`;
 }
 function settingsScreen() {
   const pages = ["Profile", "Threads", "Assistants", "Identities", "Permission profiles", "Secrets", "Bounds", "Plugins", "System"];
   return `<div class="subnav">${pages.map((p, i) => `<a class="${i === 1 ? "on" : ""}">${p}</a>`).join("")}</div>
     <div class="form" style="box-shadow:var(--card-shadow)"><div class="lane-label">Threads · defaults for new threads</div>
-      <div class="fr"><span class="fl">Provider</span><span class="fv"><span class="sel">Claude Code</span></span></div>
-      <div class="fr"><span class="fl">Model</span><span class="fv"><span class="sel">claude-sonnet-5</span> <span class="sel">effort · medium</span></span></div>
-      <div class="fr"><span class="fl">Access</span><span class="fv"><span class="sel">approval-required</span></span></div>
-      <div class="fr"><span class="fl">Profile</span><span class="fv"><span class="sel">unrestricted</span></span></div>
-      <div class="fine">Applied when a thread is created; changes made in the thread's form never come back here.</div></div>`;
+      <div class="fr"><span class="fl">Provider</span><span class="fv">${sel("", "Claude Code")}</span></div>
+      <div class="fr"><span class="fl">Model</span><span class="fv">${sel("", "claude-sonnet-5")} ${sel("effort", "medium")}</span></div>
+      <div class="fr"><span class="fl">Access</span><span class="fv">${sel("", "approval-required")}</span></div>
+      <div class="fr"><span class="fl">Profile</span><span class="fv">${sel("", "unrestricted")}</span></div>
+      <div class="fine">Shown in every new thread's composer; changes made there never come back here.</div></div>`;
 }
 const SCREEN_FN = { sessions: sessionsScreen, intake: intakeScreen, checkin: checkinScreen, tasks: tasksScreen, runs: runsScreen, workflows: workflowsScreen, fleet: fleetScreen, connections: connectionsScreen, notifications: notificationsScreen, settings: settingsScreen };
 
@@ -799,41 +921,59 @@ function render() {
   document.getElementById("dbtn").textContent = fresh() ? "data: fresh" : "data: busy";
   document.getElementById("lbtn").textContent = loggedIn() ? "login: yes" : "login: no";
   document.getElementById("pbtn").textContent = `pulse: ${pulsePlace()}`;
+  document.getElementById("rbtn").textContent = `rows: ${rows()}`;
+  const sb = document.getElementById("sbtn"); sb.style.display = v.key === "C" ? "" : "none"; sb.textContent = `stack: ${stack()}`;
   const mb = document.getElementById("mbtn"); mb.style.display = v.key === "B" ? "" : "none"; mb.textContent = `mode: ${mode()}`;
   const lg = document.getElementById("legend"); const b = document.getElementById("lgtoggle"); if (b) b.setAttribute("aria-expanded", String(lg.classList.contains("open")));
+  const ta = document.getElementById("compose"); if (ta && threadId() === "new") ta.focus();
 }
-function go(screenKey, extra = {}) { setParams({ screen: screenKey, thread: null, create: null, login: null, mode: null, ...extra }); }
+function go(screenKey, extra = {}) { setParams({ screen: screenKey, thread: null, login: null, mode: null, pj: null, wf: null, ...extra }); }
 function cycle(d) { const i = (vIndex() + d + VARIANTS.length) % VARIANTS.length; setParams({ variant: VARIANTS[i].key }); }
 function toggleTheme() { const r = document.documentElement; const dark = r.dataset.theme === "dark" || (!r.dataset.theme && matchMedia("(prefers-color-scheme: dark)").matches); r.dataset.theme = dark ? "light" : "dark"; }
 function cyclePulse() { const o = ["top", "foot", "none"]; setParams({ pulse: o[(o.indexOf(pulsePlace()) + 1) % 3] }); }
+function cycleStack() { setParams({ stack: STACKS[(STACKS.indexOf(stack()) + 1) % STACKS.length] }); }
+function cycleRows() { setParams({ rows: ROWS[(ROWS.indexOf(rows()) + 1) % ROWS.length] }); }
+function startThread() {
+  const ta = document.getElementById("compose"); const text = (ta && ta.value.trim()) || "Add a --json flag to hydra runner list so scripts can read it.";
+  const id = "c0ffee" + String(STARTED.length + 10);
+  STARTED.unshift({ id, title: text.length > 42 ? text.slice(0, 40).replace(/\s+\S*$/, "") + "…" : text, first: text, state: "working", age: "now", ws: fresh() ? "no workspace" : "worktree", branch: fresh() ? "" : "hydra/run-" + id.slice(-3), provider: "Claude Code", model: "claude-sonnet-5", freshData: fresh() });
+  setParams({ thread: id });
+}
 
 document.addEventListener("click", (e) => {
-  const el = e.target.closest("[data-go],[data-thread],[data-create],[data-login],[data-login-done],[data-start],[data-mode],#lgtoggle,[data-noop]");
+  const el = e.target.closest("[data-go],[data-thread],[data-login],[data-login-done],[data-send],[data-mode],[data-pj],[data-wf],#lgtoggle,[data-noop]");
   if (!el) { if (!e.target.closest("#legend")) toggleLegend(false); return; }
   e.preventDefault();
   if (el.id === "lgtoggle") return toggleLegend();
   if (el.dataset.go) return go(el.dataset.go, el.dataset.all ? { mode: V() === "B" ? "threads" : null } : {});
-  if (el.dataset.thread) return setParams({ screen: "sessions", thread: el.dataset.thread, create: null, login: null, mode: null });
-  if (el.dataset.create !== undefined) return setParams({ screen: "sessions", thread: null, create: el.dataset.create || null, mode: null });
+  if (el.dataset.thread) return setParams({ screen: "sessions", thread: el.dataset.thread, login: null, mode: null });
   if (el.dataset.login !== undefined) return setParams({ screen: "sessions", thread: null, login: el.dataset.login || null, mode: null });
   if (el.dataset.loginDone) return setParams({ li: "1", login: null });
-  if (el.dataset.start) return setParams({ thread: "new", create: null });
+  if (el.dataset.send === "start") return startThread();
+  if (el.dataset.send === "reply") { const ta = document.getElementById("compose"); if (ta) ta.value = ""; return; }
   if (el.dataset.mode) return setParams({ mode: el.dataset.mode });
+  if (el.dataset.pj) return setParams({ pj: el.dataset.pj === "all" ? null : el.dataset.pj });
+  if (el.dataset.wf !== undefined) return setParams({ wf: el.dataset.wf === "1" ? "1" : null });
 });
 document.getElementById("prev").onclick = () => cycle(-1);
 document.getElementById("next").onclick = () => cycle(1);
-document.getElementById("dbtn").onclick = () => setParams({ data: fresh() ? null : "fresh", thread: null, create: null, login: null });
+document.getElementById("dbtn").onclick = () => setParams({ data: fresh() ? null : "fresh", thread: null, login: null, pj: null });
 document.getElementById("lbtn").onclick = () => setParams({ li: loggedIn() ? null : "1", login: null });
 document.getElementById("pbtn").onclick = cyclePulse;
+document.getElementById("sbtn").onclick = cycleStack;
+document.getElementById("rbtn").onclick = cycleRows;
 document.getElementById("mbtn").onclick = () => setParams({ mode: mode() === "threads" ? "hydra" : "threads" });
 document.getElementById("theme").onclick = toggleTheme;
 document.addEventListener("keydown", (e) => {
   const tag = (e.target.tagName || "").toLowerCase();
+  if (tag === "textarea" && e.key === "Enter" && !e.shiftKey && e.target.id === "compose") { e.preventDefault(); if (threadId() === "new") startThread(); else e.target.value = ""; return; }
   if (tag === "input" || tag === "textarea" || e.target.isContentEditable) return;
   if (e.key === "ArrowLeft") cycle(-1); else if (e.key === "ArrowRight") cycle(1);
   else if (e.key === "d") document.getElementById("dbtn").click();
   else if (e.key === "l") document.getElementById("lbtn").click();
   else if (e.key === "p") cyclePulse();
+  else if (e.key === "s" && V() === "C") cycleStack();
+  else if (e.key === "r") cycleRows();
   else if (e.key === "m" && V() === "B") document.getElementById("mbtn").click();
   else if (e.key === "t") toggleTheme();
   else if (e.key === "?") toggleLegend();
