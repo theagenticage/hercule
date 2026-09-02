@@ -1,16 +1,16 @@
 # Public API and agent surface
 
-Hydra has one public API. The web app, the `hydra` CLI, agents inside sessions, built-in workflow actions and plugins all operate the system through the same set of operations, defined once in a framework-free service layer and described once in a shared Zod contract package. HTTP is a thin proxy over that layer; the `hydra` CLI is a thin client over HTTP. Agents reach the API with a per-session token that carries their agent's permission profile; the user reaches it with an API key. Every mutation is stamped with its actor in the event log. No endpoint blocks: long waits are expressed as subscriptions whose matches arrive as queued input. This document pins the contract structure, the operation vocabulary, the transports and route style, the error envelope, the operation catalogue, the credential and attribution rules, the `hydra` CLI (including `hydra memory`), session subscriptions and the no-blocking rule. Rationale lives in [ADR 0013](../adr/0013-agents-operate-hydra-through-the-public-api.md), [ADR 0020](../adr/0020-assistant-memory-is-reached-only-through-the-api.md) and [ADR 0021](../adr/0021-one-operation-vocabulary-coarse-grants-explicit-routes.md).
+Hydra has one public API. The web app, the `hydra` CLI, agents inside sessions, built-in workflow actions and plugins all operate the system through the same set of operations, defined once in a framework-free service layer and described once in a shared contract package of Effect Schema declarations. HTTP routes are derived from that contract and call the service layer; the `hydra` CLI is a thin client over HTTP. Agents reach the API with a per-session token that carries their agent's permission profile; the user reaches it with an API key. Every mutation is stamped with its actor in the event log. No endpoint blocks: long waits are expressed as subscriptions whose matches arrive as queued input. This document pins the contract structure, the operation vocabulary, the transports and route style, the error envelope, the operation catalogue, the credential and attribution rules, the `hydra` CLI (including `hydra memory`), session subscriptions and the no-blocking rule. Rationale lives in [ADR 0013](../adr/0013-agents-operate-hydra-through-the-public-api.md), [ADR 0020](../adr/0020-assistant-memory-is-reached-only-through-the-api.md), [ADR 0021](../adr/0021-one-operation-vocabulary-coarse-grants-explicit-routes.md) and [ADR 0031](../adr/0031-the-backend-is-written-on-effect.md).
 
 ## 1. Contract structure
 
 ### 1.1 Service layer
 
-A framework-free TypeScript service layer defines every operation. "Framework-free" means: plain functions/classes with no dependency on an HTTP or RPC framework. Every consumer goes through it:
+A framework-free TypeScript service layer defines every operation: each operation is a method on an Effect service (`Sessions.spawn(input)`), the backend being written on Effect ([ADR 0031](../adr/0031-the-backend-is-written-on-effect.md)). "Framework-free" means: **no operation logic in any transport handler.** An HttpApi handler is a one-line call into the service method, and an RPC handler would be the same one line, so an operation can later be exposed over the WebSocket by adding one handler line, never by moving logic. Every consumer goes through it:
 
 | Consumer | How it calls |
 |---|---|
-| HTTP routes | proxy: validate input schema, call service, serialize output schema |
+| HTTP routes | derived from the contract's HttpApi declaration (input validated and output encoded by the derived route); one-line call into the service method |
 | `hydra` CLI (agent and ops) | over HTTP |
 | Web app | over HTTP (plus one WebSocket for live topics, see [./14-web-app.md](./14-web-app.md)) |
 | Built-in workflow actions (`workflow.run`, `notification.create`, `task.create`, `task.update`, `task.query`) | in-process, same service layer |
@@ -18,15 +18,15 @@ A framework-free TypeScript service layer defines every operation. "Framework-fr
 
 Permission enforcement (section 5) and actor stamping (section 3) sit inside the service layer, so they bind every consumer identically.
 
+**Request lifetime.** Each HTTP request or RPC call runs as one fiber. The transport handler resolves the credential and provides the current actor and a tracing span as request-scoped context, which service methods read (`CurrentActor`), never a context parameter threaded through signatures. A client disconnect interrupts the fiber, and an open transaction rolls back with it ([./04-state-store.md](./04-state-store.md)). Every service operation and repository call carries a span from day one; v1 exports spans nowhere beyond the log line, and an OpenTelemetry exporter is a later layer swap ([ADR 0031](../adr/0031-the-backend-is-written-on-effect.md)).
+
 **Parity guarantee (hard rule):** nothing is reachable in-process that is not reachable over HTTP. A service operation without an HTTP route is a defect. The WebSocket carries live-topic subscriptions only; every query and mutation stays on HTTP ([ADR 0017](../adr/0017-the-web-app-is-a-static-pure-client-of-the-public-api.md)).
 
 ### 1.2 Contract package
 
-`packages/contract` holds, per operation: its id, a Zod input schema, a Zod output schema, the grant it requires (section 5), and its HTTP route (section 1.4). It is the pinned, expensive-to-retrofit asset. Consumers of the package: server-side validation, the `hydra` CLI, the web app (`client-core`, [./14-web-app.md](./14-web-app.md)), the plugin public-API client, and the workflow editor's schema-driven autocomplete.
+`packages/contract` holds, per operation: its id, an Effect Schema input schema, an Effect Schema output schema, its error schemas, the grant it requires (section 5), and its HTTP route (section 1.4), all as one Effect HttpApi declaration. It is the pinned, expensive-to-retrofit asset. Consumers of the package: server-side validation, the `hydra` CLI, the web app (`client-core`, [./14-web-app.md](./14-web-app.md)), the plugin public-API client, and the workflow editor's schema-driven autocomplete.
 
-OpenAPI is generated from the schemas with zod-openapi-style tooling. No framework derives routes; HTTP routes are hand-written proxies that read the contract's route table.
-
-RPC-framework adoption (tRPC, oRPC, Effect RPC) is deliberately deferred post-v1 ([ADR 0013](../adr/0013-agents-operate-hydra-through-the-public-api.md)).
+From that declaration the server routes, request validation, the OpenAPI document and the typed client are derived ([ADR 0031](../adr/0031-the-backend-is-written-on-effect.md)); the route table of section 1.4 is what the declaration follows. The `hydra` CLI and `client-core` use the derived client. The same package holds the Effect RPC group for the WebSocket's live topics ([./14-web-app.md](./14-web-app.md)); every query and mutation stays on HttpApi (section 1.1). The deferral of RPC-framework adoption in [ADR 0013](../adr/0013-agents-operate-hydra-through-the-public-api.md) is withdrawn by its 2026-09-02 amendment.
 
 ### 1.3 Operation vocabulary
 
@@ -76,7 +76,7 @@ A Hydra MCP server is not a v1 transport (section 10).
 | custom verb without an entity | `POST /api/v1/<xs>/<verb>` | `POST /api/v1/workflows/submit`, `POST /api/v1/events/emit` |
 | owned sub-resource | `.../{id}/<sub>...` | `GET /api/v1/sessions/s_12/transcript`, `PUT /api/v1/assistants/a_1/memory/core` |
 
-Path nouns are plural (`/tasks`) although operation ids are singular; that is the one place the two spellings differ. Query strings repeat the key for list-valued filters (`label=a&label=b`); the generic client in `client-core` serializes from the Zod input schema, so neither the CLI nor the web app hand-builds URLs. `me` is accepted wherever an id names the caller's own session or assistant (`/api/v1/assistants/me/memory`): a session token resolves it, a user credential gets 400 `validation`.
+Path nouns are plural (`/tasks`) although operation ids are singular; that is the one place the two spellings differ. Query strings repeat the key for list-valued filters (`label=a&label=b`); the derived client serializes from the operation's input schema, so neither the CLI nor the web app hand-builds URLs. `me` is accepted wherever an id names the caller's own session or assistant (`/api/v1/assistants/me/memory`): a session token resolves it, a user credential gets 400 `validation`.
 
 ### 1.5 Success and error shapes
 
@@ -89,7 +89,7 @@ Path nouns are plural (`/tasks`) although operation ids are singular; that is th
 ```
 
 - `code` is a closed enum in the contract, extended additively: `unauthenticated` (401), `forbidden` (403), `validation` (400), `not_found` (404), `conflict` (409), `invalid_state` (409), `cap_exceeded` (422), `internal` (500).
-- `details` is typed per code: `forbidden` carries `{ grant }`; `cap_exceeded` carries `{ size, cap }` or `{ count, cap }`; `validation` carries `{ issues: ZodIssue[] }`.
+- `details` is typed per code: `forbidden` carries `{ grant }`; `cap_exceeded` carries `{ size, cap }` or `{ count, cap }`; `validation` carries `{ issues: { path: string[]; message: string }[] }`, mapped from the schema library's parse issues; the wire contract names no schema library.
 - `message` is for people and is never parsed.
 - **One error per response.** The service layer runs its checks in a fixed order and the first failing check is the response: `unauthenticated`, then the static grant check (`forbidden`, before any entity is touched), then `validation`, then `not_found`, then entity-dependent `forbidden` (the `memory` scope rule, section 6.4), then business rules (`conflict`, `invalid_state`, `cap_exceeded`), then `internal`. A caller lacking a grant learns that before learning whether the entity exists. `validation` is the one code that reports everything wrong at once, so a caller fixes every field in one retry.
 
@@ -490,7 +490,6 @@ The ops CLI is the same `hydra` binary under a user credential: `hydra login` wr
 ## 10. Post-v1
 
 - **Hydra MCP server** - the public API exposed to sessions as typed MCP tools (t3-code-style self-injection). High on the revisit list. V1 keeps the `SessionSpec.mcpServers` passthrough ([./06-providers.md](./06-providers.md)) so it lands without redesign; the operation catalogue maps one-to-one onto tools.
-- **RPC-framework adoption** (tRPC, oRPC, Effect RPC) - deriving routes and clients from the contract. V1 keeps the contract package as the pinned asset so derivation can be added later with evidence.
 - **Scoped grants** ("the sessions you spawned", "this project's tasks") - finer grants inside a family; v1 grants are unscoped except `memory`.
 - **One-call permission outcome (`once`)** - a fourth decision on a Permission Request that carries an `operation`: an overlay row on the session with `remainingUses: 1`, consumed by the first successful call of the named operation, so "may I do X once?" is answerable without a session-wide grant. `permission.request` already carries the `operation` field this needs. Its CLI sugar (`hydra <failed command> --request "<reason>"`, packing the failed call into the request) lands with it.
 - **Bulk operations** (delete-many, cancel-all) - none exist in v1; when they do, they are tagged in the contract and withheld from every profile but `unrestricted` by default, per [./13-security.md](./13-security.md).
@@ -523,8 +522,11 @@ Tickets:
 - [Controller promotion & portability](https://github.com/rogierpennink/hydra/issues/10)
 - [Workflow model: recipes, triggers, human gates](https://github.com/rogierpennink/hydra/issues/13)
 - [Provider adapter interface](https://github.com/rogierpennink/hydra/issues/12)
+- [Revisit Effect for the backend (#53)](https://github.com/rogierpennink/hydra/issues/53) (Effect, HttpApi as the contract, handler-free operations, request lifetime, neutral validation issues)
 
 ADRs:
+
+- [ADR 0031 - The backend is written on Effect](../adr/0031-the-backend-is-written-on-effect.md)
 
 - [ADR 0021 - One operation vocabulary, coarse grants, explicit routes](../adr/0021-one-operation-vocabulary-coarse-grants-explicit-routes.md)
 - [ADR 0013 - Agents operate Hydra through the public API, behind one contract with two transports](../adr/0013-agents-operate-hydra-through-the-public-api.md)

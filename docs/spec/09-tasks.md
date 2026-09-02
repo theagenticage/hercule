@@ -193,7 +193,7 @@ Delete is a public-API operation ([./11](./11-public-api-and-agent-surface.md)).
 
 ## API operations an agent uses
 
-Task operations are ordinary public-API operations defined in the service layer and Zod contract, reachable over HTTP and through the `hydra` CLI ([./11](./11-public-api-and-agent-surface.md), [ADR 0013](../adr/0013-agents-operate-hydra-through-the-public-api.md)). Available to any permission profile granting the `task` family; the shipped profiles and their verbs are in [./13](./13-security.md) (both `assistant` and `worker` grant task read/create/update).
+Task operations are ordinary public-API operations defined in the service layer and contract package, reachable over HTTP and through the `hydra` CLI ([./11](./11-public-api-and-agent-surface.md), [ADR 0013](../adr/0013-agents-operate-hydra-through-the-public-api.md)). Available to any permission profile granting the `task` family; the shipped profiles and their verbs are in [./13](./13-security.md) (both `assistant` and `worker` grant task read/create/update).
 
 | CLI | Operation |
 |---|---|

@@ -27,14 +27,14 @@ One pnpm monorepo: `apps/controller`, `apps/runner`, `apps/web`, `packages/contr
 
 | Package | Contents | Framework |
 |---|---|---|
-| `packages/contract` | Shared Zod input/output schemas for every API operation ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md)) | none |
-| `packages/protocol` | The versioned controller-runner WebSocket message schema ([./03-controller-and-runners.md](./03-controller-and-runners.md)); not imported by the web app | none |
-| `packages/client-core` | Typed client over the contract; WebSocket supervisor (connect, ticket refresh, reconnect, cursor replay); live stores; auth (token holding, login, logout); `detectLocalRunner()` | none (framework-agnostic) |
+| `packages/contract` | The Effect HttpApi declaration (input/output/error schemas per operation) and the Effect RPC group for live topics ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md), [ADR 0031](../adr/0031-the-backend-is-written-on-effect.md)) | Effect Schema |
+| `packages/protocol` | The versioned controller-runner WebSocket message schema ([./03-controller-and-runners.md](./03-controller-and-runners.md)), in Effect Schema; not imported by the web app | Effect Schema |
+| `packages/client-core` | Promise-returning wrapper over the derived HttpApi client; RPC stream subscriptions exposed as plain subscribe callbacks; WebSocket supervisor (connect, ticket refresh, reconnect, cursor replay); live stores; auth (token holding, login, logout); `detectLocalRunner()` | none (framework-agnostic; the only client package that writes Effect code) |
 | `client-core` React bindings | Thin hooks over the live stores and client | React |
 | `packages/ui` | The component library (shadcn/ui-based), built in the pinned design language | React |
 | `apps/web` | Routes and presentation only | React |
 
-Discipline: **no domain logic in components**. Anything that interprets domain data (ranking strands, deriving provenance tiers, mapping verdicts to labels) lives in `client-core` and is tested there.
+Discipline: **no domain logic in components**. Anything that interprets domain data (ranking strands, deriving provenance tiers, mapping verdicts to labels) lives in `client-core` and is tested there. **The React codebase writes no Effect code**: the backend is written on Effect ([ADR 0031](../adr/0031-the-backend-is-written-on-effect.md)), the web app is not. Its two doors are `packages/contract` and `client-core`; it never imports `effect` directly and never uses generators, layers, streams or atoms. `effect` reaches it transitively through the contract's schemas (the Schema module, roughly 15 KB compressed in Effect 4, inside the bundle budget). Components and hooks use the types inferred from the schemas; schemas are used as values only for form validation through the Standard Schema interface; responses are decoded once in `client-core` and components receive plain typed objects.
 
 Desktop readiness is achieved through this structure, not through a shell. Planning assumption: Electron (any realistic option renders web tech, so `ui` transfers either way). The final call belongs to the post-v1 desktop effort. The desktop app is explicitly NOT a wrapped webview of the web app; it reuses `client-core` and `ui` and stays free to build desktop-specific UI. The onboarding and setup views ship in the web app and are reused unchanged when the desktop app becomes the installer ([./15-packaging-and-operations.md](./15-packaging-and-operations.md)).
 
@@ -55,22 +55,17 @@ Two push modes, chosen by data shape:
 
 ### Wire format
 
-Pinned by [Web app details](https://github.com/rogierpennink/hydra/issues/45) (2026-09-01). The envelope is client-facing contract, defined as Zod schemas in `packages/contract` (not in `packages/protocol`, which is the runner's). Flat JSON objects with a `type` discriminator; the protocol version `v` travels in `hello` only; `sub` is a client-chosen subscription id.
+Pinned by [Web app details](https://github.com/rogierpennink/hydra/issues/45) (2026-09-01) as a hand-rolled envelope; superseded 2026-09-02 by [Revisit Effect for the backend (#53)](https://github.com/rogierpennink/hydra/issues/53) ([ADR 0031](../adr/0031-the-backend-is-written-on-effect.md)): the WebSocket is an **Effect RPC** connection and the wire framing is Effect RPC's own. The semantics the envelope pinned survive as the RPC group's method definitions in `packages/contract` (not in `packages/protocol`, which is the runner's):
 
 ```
-client -> server
-  hello       { v: 1, ticket }                 // the auth.wsTicket value, in the first frame, never in the URL
-  subscribe   { sub, topic, cursor? }
-  unsubscribe { sub }
-  ping        { }                              // app-level, every 30 s; browsers cannot send WS ping frames
-server -> client
-  hello       { v: 1, serverVersion }
-  subscribed  { sub, cursor? }                 // cursor = replay start for append-only topics
-  delta       { sub, cursor, items: [...] }    // append-only topics only
-  invalidate  { sub, ids: string[], kind: "created" | "updated" | "deleted" }
-  error       { sub?, code, message }          // codes from the HTTP error envelope
-  pong        { }
+hello       { v: 1, ticket } -> { v: 1, serverVersion }     // first call on the connection; the auth.wsTicket value, never in the URL
+subscribe   { topic, cursor? } -> stream                     // one streaming method; the client ends the stream to unsubscribe
+  stream items, append-only topics:  delta      { cursor, items: [...] }
+  stream items, mutable topics:      invalidate { ids: string[], kind: "created" | "updated" | "deleted" }
+ping        { } -> { }                                      // app-level keepalive every 30 s; browsers cannot send WS ping frames
 ```
+
+The first delta of a subscription carries the replay start as its cursor. Errors are the HTTP error codes of [./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md) section 1.5, carried as the method's typed failures. Nothing else is reachable over the socket.
 
 **Topics** are flat strings named like operation entities (singular), in two families. Prior art is the accepted pattern of coarse channels carrying fine-grained payloads (Phoenix Channels, Centrifugo, Ably): the *topic* is the collection, the *message* names the records, and the client decides what to refetch.
 
@@ -108,7 +103,7 @@ Named conventions, lint- or CI-enforced where possible:
 5. Route-level code splitting plus a CI bundle budget.
 6. TanStack Query for all HTTP reads, WebSocket-driven invalidation, no hand-rolled fetch state.
 
-t3-code validates the family (React Compiler, virtualized transcript, rAF, memoized rows). Its Effect-stream state and no-Query approach do not transfer because Hydra does not use Effect.
+t3-code validates the family (React Compiler, virtualized transcript, rAF, memoized rows). Its `@effect/atom-react` state and no-Query approach do not transfer: Hydra's backend is on Effect ([ADR 0031](../adr/0031-the-backend-is-written-on-effect.md)) but its web app is not, because the socket carries only live topics and TanStack Query already fits the two push modes above. `@effect/atom-react` is the named revisit if the transport split ever collapses onto the WebSocket.
 
 ## V1 screen inventory
 
@@ -370,6 +365,7 @@ Tickets:
 - [Assistant design](https://github.com/rogierpennink/hydra/issues/17) and [Prototype: assistant memory interface](https://github.com/rogierpennink/hydra/issues/31) (web chat, memory editing)
 - [Assemble the v1 spec](https://github.com/rogierpennink/hydra/issues/21) (Intake model requirements)
 - [Web app details: workflow text format, onboarding steps, Settings > Bounds, WS envelope](https://github.com/rogierpennink/hydra/issues/45) (YAML source, thin gate and first-session onboarding, Settings > Bounds and > System, check-in tiers, wire format, `localStorage` + CSP, runner-owned identity port, retention horizon, Sessions as home)
+- [Revisit Effect for the backend (#53)](https://github.com/rogierpennink/hydra/issues/53) (Effect RPC replaces the envelope, contract in Effect Schema, the web app stays outside Effect)
 
 ADRs:
 
@@ -380,3 +376,4 @@ ADRs:
 - [ADR 0004 - Controller state lives in one SQLite database](../adr/0004-controller-state-lives-in-one-sqlite-database.md)
 - [ADR 0018 - Hydra ships as one self-contained binary](../adr/0018-hydra-ships-as-one-self-contained-binary.md)
 - [ADR 0029 - Workflow definitions are stored as their YAML source](../adr/0029-workflow-definitions-are-stored-as-their-yaml-source.md)
+- [ADR 0031 - The backend is written on Effect](../adr/0031-the-backend-is-written-on-effect.md)

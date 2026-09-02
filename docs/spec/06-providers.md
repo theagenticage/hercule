@@ -130,15 +130,19 @@ Probe-first, curated overlay where introspection falls short:
 ```ts
 interface ProviderAdapter {
   providerId: string
-  probe(config: InstanceConfig): Promise<ProbeResult>
-  startSession(spec: SessionSpec, ctx: ProviderRunnerContext): Promise<SessionBinding>
-  sendInput(sessionId: string, input: TurnInput): Promise<SendResult>
-  interrupt(sessionId: string): Promise<void>
-  respondToRequest(sessionId: string, requestId: string, decision: ApprovalDecision): Promise<void>
-  stopSession(sessionId: string): Promise<void>
-  listSessions(): Promise<SessionBinding[]>   // reconciliation after runner restart
-  events: AsyncIterable<ProviderEvent>        // the one output channel
+  probe(config: InstanceConfig): Effect<ProbeResult>
+  startSession(spec: SessionSpec, ctx: ProviderRunnerContext): Effect<SessionBinding>
+  sendInput(sessionId: string, input: TurnInput): Effect<SendResult>
+  interrupt(sessionId: string): Effect<void>
+  respondToRequest(sessionId: string, requestId: string, decision: ApprovalDecision): Effect<void>
+  stopSession(sessionId: string): Effect<void>
+  listSessions(): Effect<SessionBinding[]>    // reconciliation after runner restart
+  events: Stream<ProviderEvent>               // the one output channel
 }
+// Effect-typed natively (ADR 0031): methods return Effects and `events` is a Stream, so session supervision,
+// interruption and subprocess cleanup on the runner use Effect's structured concurrency directly.
+// Vendor SDK boundaries (the Agent SDK's async generator, Codex stdio JSONL, pi's RPC) are wrapped at the edge.
+// A promise-shaped facade is a post-v1 option if runner-side plugin loading wants one.
 
 interface SessionSpec {                       // controller-authored - carries ids, never paths
   instanceId: string
@@ -494,6 +498,6 @@ Tickets:
 - [Research: Bun compile feasibility (#34)](https://github.com/rogierpennink/hydra/issues/34)
 - [Runner substrate details (#43)](https://github.com/rogierpennink/hydra/issues/43): `ProviderRunnerContext`, instance config vs paths, `provider-instance` secrets, pi RPC posture, harness delivery and version policy
 
-ADRs: [0007](../adr/0007-provider-adapter-is-a-thin-interface-behind-a-normalized-event-stream.md), [0002](../adr/0002-orchestration-stays-on-the-controller.md), [0003](../adr/0003-sessions-run-as-bare-processes.md), [0018](../adr/0018-hydra-ships-as-one-self-contained-binary.md).
+ADRs: [0007](../adr/0007-provider-adapter-is-a-thin-interface-behind-a-normalized-event-stream.md), [0002](../adr/0002-orchestration-stays-on-the-controller.md), [0003](../adr/0003-sessions-run-as-bare-processes.md), [0018](../adr/0018-hydra-ships-as-one-self-contained-binary.md), [0031](../adr/0031-the-backend-is-written-on-effect.md).
 
 Research: `research/claude-agent-sdk.md` (branch `research/claude-agent-sdk`), `research/codex-app-server.md` (branch `research/codex-app-server`), `research/pi-sdk.md` (branch `research/pi-sdk`), `research/pi-approval-parking.md` (branch `research/pi-approval-parking`), `research/event-taxonomy-matrix.md` (branch `research/event-taxonomy-matrix`), `research/structured-output.md` (branch `research/structured-output`), `research/t3code.md` (branch `research/t3code`), `research/provider-portability.md` (branch `research/provider-portability`), `research/bun-compile.md` (branch `research/bun-compile`).

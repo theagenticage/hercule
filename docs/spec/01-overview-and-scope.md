@@ -24,7 +24,7 @@ Ticket #15 adds a sixth, named **Intake**: the quality of agent prep-work before
 
 These decisions predate the design tickets. They are fixed context for the whole spec and are not reopened by any subsystem document.
 
-- **Clean-slate TypeScript codebase.** Controller, runner, and plugins are one language in one repository. Old agentick is a quarry for ideas, never a constraint, and never a data source: v1 starts empty (see [out of scope](#v1-scope-out-of-scope)).
+- **Clean-slate TypeScript codebase.** Controller, runner, and plugins are one language in one repository. The controller and runner are written on Effect 4, with Effect Schema as the contract language ([ADR 0031](../adr/0031-the-backend-is-written-on-effect.md), 2026-09-02); the web app stays outside Effect ([./14-web-app.md](./14-web-app.md)). Old agentick is a quarry for ideas, never a constraint, and never a data source: v1 starts empty (see [out of scope](#v1-scope-out-of-scope)).
 - **Providers wrap interactive harnesses.** The v1 providers are Claude Code (via the Agent SDK), Codex (via the app server), and pi (via the pi.dev SDK). A provider is only this; integrations such as GitHub are event sources, not providers.
 - **No repo-local config.** The controller's state is the single source of truth. A repository is one kind of workspace material and holds no Hydra configuration. This is the mistake that held back old agentick and it is not repeated.
 - **Single-user v1.** There is one user. No tenancy machinery is built, but no decision may make a later user concept a rewrite. The concrete guard: every mutation is stamped with an actor (`user` or `session:<id>`) that is widened, never restructured, when multi-user arrives.

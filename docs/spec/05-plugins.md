@@ -54,9 +54,9 @@ Every plugin exports a manifest and two hooks.
 interface Plugin {
   manifest: PluginManifest
   register(host: RegistrationHost): void          // pure: declares contributions only
-  activate(host: ActivationHost): Promise<Deactivate>   // starts machinery; returns its own teardown
+  activate(host: ActivationHost): Effect<Deactivate>    // starts machinery; returns its own teardown
 }
-type Deactivate = () => Promise<void>
+type Deactivate = Effect<void>
 ```
 
 `register()`:
@@ -120,7 +120,7 @@ interface EventSourceContribution {
   kinds: Record<string, KindDeclaration>       // "github.issue.opened" -> payload schema + description
   feeds?: Record<string, FeedDeclaration>      // named poll feeds; absent for purely push-driven sources
   connectionConfigSchema?: Schema              // per-Connection config (the GitHub watch list)
-  open(connection: ConnectionRef, ctx: IngestContext): Promise<IngestHandle>
+  open(connection: ConnectionRef, ctx: IngestContext): Effect<IngestHandle>
 }
 
 interface KindDeclaration { schema: Schema; description: string }
@@ -128,15 +128,15 @@ interface FeedDeclaration { defaultIntervalSeconds: number; minIntervalSeconds?:
 
 // What the core hands the ingest loop.
 interface IngestContext {
-  emit(e: EmitEvent): Promise<{ eventId: string }>   // the `events` capability; connection-stamped by the host
+  emit(e: EmitEvent): Effect<{ eventId: string }>    // the `events` capability; connection-stamped by the host
   state: KeyValueStore                         // Connection-scoped KV view (section 6): cursors, watch-list diffs
   status(s: { state: "connected" | "degraded" | "disconnected"; detail?: string }): void
 }
 
 // What the core calls on a live ingest loop.
 interface IngestHandle {
-  poll?(feed: string): Promise<{ nextAfterSeconds?: number } | void>
-  close(): Promise<void>
+  poll?(feed: string): Effect<{ nextAfterSeconds?: number } | void>
+  close(): Effect<void>
 }
 ```
 
@@ -161,7 +161,7 @@ interface WorkflowActionContribution {
   input: Schema
   output: Schema                               // what edge conditions route on: steps.<id>.output.*
   connection?: { type: string }                // this action acts through one Connection of this type
-  execute(input: unknown, ctx: ActionContext): Promise<unknown>
+  execute(input: unknown, ctx: ActionContext): Effect<unknown>
 }
 
 interface ActionContext {
@@ -215,12 +215,13 @@ Rules:
 - `channels` and `notifications` are the capability names pinned by the tickets; the remaining spellings are this spec's and MUST be used consistently. The `events` capability has one method, `emit`; "`events.emit`" in [./08-events-and-connections.md](./08-events-and-connections.md) names that method, not a separate capability. The *set* of services is pinned: contribution registration per extension point, events emit, notifications emit, connections, resources read, secrets, KV, public-API client.
 - A capability's registration surface is what `register()` receives; its runtime surface is what `activate()` receives. `register()` never sees a runtime surface.
 - Everything crossing a capability API is plain serializable data.
-- **Schemas are authored in Zod, persisted as JSON Schema.** Every schema crossing the host API (manifest `configSchema`, event payload kinds, action input/output, per-Connection config, credential fields) is written as a Zod schema in plugin code; the catalog persists the derived JSON Schema, which is what workflow validation and the web app's generated forms consume.
+- **Interfaces are Effect-typed natively** ([ADR 0031](../adr/0031-the-backend-is-written-on-effect.md)): every hook and capability method returns an `Effect` (typed failures; deactivation interrupts whatever `activate()` started) and anything stream-shaped is a `Stream`. V1 plugins are in-process built-ins, so there is no promise-shaped facade; one can be added post-v1 if third-party loading wants it.
+- **Schemas are authored in Effect Schema, persisted as JSON Schema.** Every schema crossing the host API (manifest `configSchema`, event payload kinds, action input/output, per-Connection config, credential fields) is written as an Effect Schema in plugin code; the catalog persists the JSON Schema Effect derives from it, which is what workflow validation and the web app's generated forms consume.
 - Plugin capabilities are not user permissions. They are granted by the manifest at load, not by the user; the user's control over a plugin is the enabled flag and its config (section 8). This is the honest v1 position for compiled-in plugins; a review step for third-party manifests is a post-v1 concern.
 
 ### The public-API client
 
-A plugin that needs to act on the wider system (create a Task, start a Run, query Sessions) requests `public-api` and receives a client that calls the **same service layer** as HTTP, bound to the same shared Zod contract ([ADR 0013](../adr/0013-agents-operate-hydra-through-the-public-api.md); [./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md)). Parity holds: nothing is reachable in-process that is not reachable over HTTP. Plugins do not get a wider surface than any other API consumer.
+A plugin that needs to act on the wider system (create a Task, start a Run, query Sessions) requests `public-api` and receives a client that calls the **same service layer** as HTTP, bound to the same shared contract package ([ADR 0013](../adr/0013-agents-operate-hydra-through-the-public-api.md); [./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md)). Parity holds: nothing is reachable in-process that is not reachable over HTTP. Plugins do not get a wider surface than any other API consumer.
 
 Plugin-originated mutations are stamped `plugin:<pluginId>` and are ungated: the user enabled the plugin and granted the capability ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md) section 3.1).
 
@@ -296,7 +297,7 @@ interface ConnectionTypeContribution {
   type: string                                 // "github", "gmail", "discord", "slack"
   displayName: string
   setup: SetupStep[]
-  validate(credentials: unknown, ctx: ValidateContext): Promise<{ displayName: string; detail?: string }>
+  validate(credentials: unknown, ctx: ValidateContext): Effect<{ displayName: string; detail?: string }>
   oauth?: OAuthDeclaration                     // required iff an oauth step appears
 }
 
@@ -398,3 +399,4 @@ ADRs:
 - [ADR 0015 - Secrets are encrypted per-value under a keychain-held master key](../adr/0015-secrets-are-encrypted-per-value-under-a-keychain-held-master-key.md)
 - [ADR 0016 - Git credentials derive from Connections](../adr/0016-git-credentials-derive-from-connections.md)
 - [ADR 0026 - Workflow actions may call the public API as the run](../adr/0026-workflow-actions-may-call-the-public-api-as-the-run.md)
+- [ADR 0031 - The backend is written on Effect](../adr/0031-the-backend-is-written-on-effect.md)
