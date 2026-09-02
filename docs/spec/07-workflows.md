@@ -6,6 +6,8 @@ A Workflow is a stored, editable, declarative source of execution plans: typed i
 
 A workflow is data in the controller database, created and edited through the public API and the web app ([./14-web-app.md](./14-web-app.md) owns the editor: schema-validated structured text plus a read-only DAG preview). There is no user-authored code in a workflow and no repo-local definition; expressiveness comes from agent steps and plugin-contributed actions ([ADR 0008](../adr/0008-workflow-graphs-route-on-declared-outputs.md)). Editing a workflow never affects in-flight runs, because every run executes its own frozen copy ([ADR 0001](../adr/0001-runs-freeze-an-execution-plan.md)); there is no workflow versioning.
 
+**The stored form of a workflow is its YAML source** (resolved 2026-09-01, [Web app details](https://github.com/rogierpennink/hydra/issues/45), [ADR 0029](../adr/0029-workflow-definitions-are-stored-as-their-yaml-source.md)): the text the user wrote, kept byte for byte, so comments, key order and formatting survive every save and a git-versioned future round-trips exactly. The `Workflow` shape below is what the controller *parses* the source into - a derived column recomputed on every write and never written on its own - for validation, the editor's preview and stamping; a run's frozen plan holds the parsed form only. The public API accepts either the source or a definition object and always stores source: an object is rendered to canonical YAML by one deterministic rule (contract key order, a block scalar for any string containing a newline, double quotes for anything else that needs quoting, two-space indent) so two controllers render identically. `workflow.read` returns the source, never a parsed object ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md) section 2). Three fields of the shape are **row state outside the text** - `id`, `enabled` and the timestamps - and so is each start trigger's `status`, keyed by `(workflowId, triggerId)`: a breaker trip or an enable toggle must never rewrite the user's file.
+
 Names pinned by the tickets are used verbatim (`maxTraversals`, `freshSession`, `iteration-limit`, cron `schedule`/`timezone`, action ids). Other field names below are this document's consolidation and are normative for the implementation; the concepts behind them are the tickets'. The execution semantics (joins, skips, signal nodes, terminal steps, errors, run and step states, one workspace per run) were pinned by [Workflow execution semantics](https://github.com/rogierpennink/hydra/issues/36).
 
 ```ts
@@ -13,7 +15,7 @@ interface Workflow {
   id: string
   name: string
   description?: string
-  enabled: boolean                     // false = no trigger of this workflow matches (pausing a workflow covers quiet hours)
+  enabled: boolean                     // row state, not in the source; false = no trigger of this workflow matches (pausing a workflow covers quiet hours)
   inputs: InputDeclaration[]
   triggers: Trigger[]                  // >= 0 start triggers, >= 0 signal triggers
   steps: Step[]
@@ -69,9 +71,9 @@ interface StartTrigger {
   source: EventSelector
   inputs: Record<string, CelExpression> // input name -> expression over `event`
   spawnBound: { maxRuns: number; windowSeconds: number }   // default ~30 per hour
-  status: "active" | "paused"          // paused by the user or by a tripped breaker; enable/disable lives on the Workflow
+  status: "active" | "paused"          // row state keyed by (workflowId, triggerId), not in the source; paused by the user or by a tripped breaker; enable/disable lives on the Workflow
   schedule?: string                    // cron triggers only (source.kind == "cron.tick"): cron expression
-  timezone?: string                    // cron triggers only; controller default when omitted
+  timezone?: string                    // cron triggers only; the user's timezone setting when omitted
 }
 
 interface SignalTrigger {
@@ -100,7 +102,7 @@ Event kinds a start trigger can name in v1: GitHub and Gmail events from their p
 
 ### 2.2 Cron
 
-Cron is a core emitter, not a plugin. The schedule is trigger configuration: a start trigger whose `source.kind` is `cron.tick` carries `schedule` and optional `timezone` (per trigger, controller default when omitted). The core scheduler emits `cron.tick { workflowId, triggerId, scheduledFor }` through the pipeline and the matcher routes it by trigger id, so no filter is needed. Ticks missed while the controller was down are skipped with a visible note. A "scheduled task" form in the UI is sugar over creating a workflow with one cron trigger and one step, or adding a cron trigger to an existing workflow.
+Cron is a core emitter, not a plugin. The schedule is trigger configuration: a start trigger whose `source.kind` is `cron.tick` carries `schedule` and optional `timezone` (per trigger; when omitted, the **user's timezone setting**, the one spec-wide timezone source pinned in [./12-assistants.md](./12-assistants.md) section 5.2 - there is no separate controller timezone). The core **Scheduler** emits `cron.tick { workflowId, triggerId, scheduledFor, previousFiredAt }` (`previousFiredAt` = when this trigger last actually fired, `null` on the first tick; the shipped Triage workflow maps it to its `since` input) through the pipeline and the matcher routes it by trigger id, so no filter is needed. Ticks missed while the controller was down are skipped with a visible note. The same Scheduler also fires assistant Scheduled Wakes (heartbeat, reminders), which never enter the pipeline ([./12-assistants.md](./12-assistants.md) section 8, [ADR 0024](../adr/0024-assistants-are-woken-by-the-scheduler-not-by-workflows.md)). A "scheduled task" form in the UI is sugar over creating a workflow with one cron trigger and one step, or adding a cron trigger to an existing workflow.
 
 ### 2.3 Manual
 
@@ -158,9 +160,9 @@ interface ActionStep extends StepBase {
 interface AgentStep extends StepBase {
   kind: "agent"
   agent: string                        // Agent id; supplies the provider instance and the permission profile
-  model?: { model: string; options?: Record<string, string | boolean> }  // model selection for this step; well-known option ids per ./06
+  model?: { model: string; options?: Record<string, string | boolean> }  // overrides the Agent's model; well-known option ids per ./06
   prompt: Template                     // first turn input; interpolates `inputs`, `steps`
-  accessMode: AccessMode               // approval-required | auto-accept-edits | auto | full-access
+  accessMode?: AccessMode              // overrides the Agent's accessMode (default full-access); resolved before session start
   freshSession?: boolean               // default false: iterations resume the same session
   outputSchema?: JsonSchema            // draft-07; declares steps.<id>.output
 }
@@ -182,13 +184,13 @@ interface Edge {
 
 An action step invokes a plugin-contributed workflow action by contribution id (a tool call is just this). The contribution declares an input schema and an output schema; `params` are literals or expressions and are validated at save time. Built-in actions (section 8) have the same shape and are invoked the same way. The action's return value becomes `steps.<id>.output`. An action that fails fails the run; failure is not redirection, and actions never steer the graph ([ADR 0008](../adr/0008-workflow-graphs-route-on-declared-outputs.md)).
 
-Actor and permission context: a built-in action executing inside a run is stamped `run:<runId>` and is **ungated**: the workflow was authored by the user and its action steps run with the user's parity. Agent steps are sessions and act as `session:<id>` under their own profile ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md) section 3.1). That is why the `worker` profile withholds `workflow.run` and `workflow.submit` (a session cannot fan out) while a `workflow.run` *action step* needs no grant (the user wrote it into the recipe).
+Actor and permission context: a built-in action executing inside a run is stamped `run:<runId>` and is **ungated**: the workflow was authored by the user and its action steps run with the user's parity. Agent steps are sessions and act as `session:<id>` under their own profile ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md) section 3.1). That is why the `worker` profile withholds `workflow.run` and `workflow.submit` (a session cannot fan out) while a `workflow.run` *action step* needs no grant (the user wrote it into the recipe). Plugin-contributed actions stand on the same footing: `execute()` receives `ctx.api`, a public-API client stamped `run:<runId>` with the `stepId` carried in the audit entry, and every mutation made through it is summarised on the step record ([ADR 0026](../adr/0026-workflow-actions-may-call-the-public-api-as-the-run.md); interface in [./05-plugins.md](./05-plugins.md) section 4.4). Actions still never redirect: routing reads declared outputs only.
 
 ### 4.2 Agent steps
 
-An agent step starts a Session for the named Agent and waits until its turn completes. The controller authors the SessionSpec (the agent's provider instance, the step's `model` selection, `accessMode`, the run's `workspaceId` (section 4.4), system prompt from the agent, the step's `outputSchema`), places it on the run's runner (section 4.4; a full runner queues the placement and the step waits), and sends the rendered `prompt` as the first turn. The session carries the agent's permission profile (shipped default for workflow agent steps: `worker`, [./13-security.md](./13-security.md)) and reaches Hydra through the `hydra` CLI with its session token. The session is linked to the run and step from the session side; the run's step record holds the session id.
+An agent step starts a Session for the named Agent and waits until its turn completes. The controller authors the SessionSpec (the agent's provider instance, the step's `model` selection, `accessMode`, the run's `workspaceId` (section 4.4), system prompt from the agent, the step's `outputSchema`), places it on the run's runner (section 4.4; a full runner queues the placement and the step waits), and sends the rendered `prompt` as the first turn. The session carries a copy of the agent's permission profile id (shipped default for workflow agent steps: `worker`, [./13-security.md](./13-security.md)) and reaches Hydra through the `hydra` CLI with its session token. The session is linked to the run and step from the session side; the run's step record holds the session id.
 
-Which of these values the Agent may carry as defaults (model selection, access mode) is Open in [./02-domain-model.md](./02-domain-model.md); this document places `accessMode` and `model` on the step as the spec's consolidation (ticket #12 pins `SessionSpec.accessMode` without saying where it is chosen).
+Defaults come from the Agent (resolved 2026-09-01, [Domain model residue](https://github.com/rogierpennink/hydra/issues/46)): the step's `model` and `accessMode` are optional overrides of the Agent's `model` and `accessMode` (default `full-access`); absent both, the instance's default model applies. Every resolved value is copied into the Session at spawn; the session never reads through its agent afterwards ([./02-domain-model.md](./02-domain-model.md) rule 9).
 
 `accessMode` names one of the four fixed modes. If the provider does not support it natively, the controller substitutes the hardcoded fallback before session start, strictly downward in permissiveness; if no equal-or-less-permissive mode exists the step fails with a clear error ([./06-providers.md](./06-providers.md), [./13-security.md](./13-security.md); [ADR 0007](../adr/0007-provider-adapter-is-a-thin-interface-behind-a-normalized-event-stream.md) as amended).
 
@@ -329,6 +331,7 @@ type FailureReason =                   // closed set, grows additively
   | "schema-failure"                   // an agent step produced no schema-valid result (section 6)
   | "step-failed"                      // an action threw; the message is in the step record's error
   | "session-failed"                   // an agent step's session ended abnormally; the session's reason is in error
+  | "workspace-failed"                 // the run's workspace never provisioned: the setup command failed (section 4.4; ./03 section 6.3)
 
 interface StepRecord {
   stepId: string                       // step id or signal trigger id

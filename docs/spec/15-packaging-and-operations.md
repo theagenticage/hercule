@@ -7,10 +7,10 @@ Hydra ships as one Bun-compiled, self-contained executable per platform. The sam
 - One executable per platform: macOS arm64, Linux x64, Linux arm64. No Windows in v1 (runners are Linux and macOS only, [./03](./03-controller-and-runners.md)).
 - Published on GitHub Releases behind a `curl | sh` installer. A brew tap comes later (see Post-v1).
 - No Docker image and no npm-global install in v1 ([ADR 0018](../adr/0018-hydra-ships-as-one-self-contained-binary.md)).
-- No external runtime on any machine: no Node, no separately installed Bun. The binary carries its own runtime, the SQLite engine, the web bundle, the migrations, and the Claude Agent SDK's native binary (section 11).
-- Expected size is roughly 250-270 MB per platform with the embedded Claude binary. Downloading that binary at install time instead of embedding it is the recorded option if size hurts.
+- No external runtime on any machine: no Node, no separately installed Bun. The binary carries its own runtime, the SQLite engine, the web bundle, and the migrations. Provider harnesses are **not** embedded: they are runner-installed executables ([ADR 0028](../adr/0028-provider-harnesses-are-runner-installed-executables.md), section 12).
+- Expected size is roughly 60-70 MB per platform.
 
-**Open:** the installer's target path for the binary (for example `~/.local/bin/hydra`) and how it adds it to `PATH` are not pinned. The path must be writable by the user, because `hydra upgrade` swaps the binary in place (section 9).
+The installer places the binary at **`~/.local/bin/hydra`** (resolved 2026-09-01, [#44](https://github.com/rogierpennink/hydra/issues/44)): the same convention the Claude Code and Codex installers use, so on most runner machines the directory is already on `PATH`. The path is user-writable, which `hydra upgrade`'s in-place swap requires (section 9). The installer checks whether `~/.local/bin` is on `PATH`; if not, it appends one export line to the detected shell profile (zsh, bash, or fish) and prints exactly what it changed. No sudo, ever.
 
 ## 2. One binary, three roles: the subcommand tree
 
@@ -21,11 +21,14 @@ A thin dispatcher reads `argv` and hands off to one of three entrypoints: contro
 | `hydra serve` | controller | Foreground run is the dev mode; under a service unit it is the production mode. Auto-initializes an empty home (section 7). |
 | `hydra runner` | runner daemon | Dials the controller, holds one WebSocket. Runner protocol in [./03](./03-controller-and-runners.md). |
 | `hydra runner --local` | runner daemon | The controller's local runner. Self-spawned by `hydra serve`, never started by the user (section 4). |
-| `hydra runner join <url> --token <t>` | runner enrolment | Single-use token exchange for a durable per-runner credential; fully programmatic, no prompts (section 13, [./03](./03-controller-and-runners.md)). |
-| `hydra service install` | ops | Generates and registers the user-level OS unit for this machine's role (section 4). |
-| `hydra upgrade` | ops | Self-update: fetch, verify, atomic swap, supervisor restart (section 9). |
+| `hydra runner join <url> --token <t>` | runner enrolment | Single-use token exchange for a durable per-runner credential; fully programmatic, no prompts. Installs provider CLIs and the service unit by default (`--no-service` skips, `--reserved` flags the runner reserved) (section 13, [./03](./03-controller-and-runners.md)). |
+| `hydra runner set-controller <url>` | runner ops | Re-points this runner at the controller's new address after a promotion it missed; keeps the existing credential, verifies the controller's logical identity at hello ([./03](./03-controller-and-runners.md) §8.3). |
+| `hydra service install` / `uninstall` / `start` / `stop` / `restart` / `status` | ops | The full verb set (resolved 2026-09-01, [#44](https://github.com/rogierpennink/hydra/issues/44)): thin, idempotent wrappers over `systemctl --user` / `launchctl` for the unit `service install` generates (section 4). |
+| `hydra setup-url` | ops | Prints the one-time setup URL while setup is incomplete (section 7). Reads a file in Hydra Home; needs no credential. |
+| `hydra runner create-join-token` | ops | Mints a single-use runner join token (the CLI form of `runner.createJoinToken`, [./11](./11-public-api-and-agent-surface.md)) and prints the complete paste-ready join command, mirroring the web app's "Add machine" spot (section 13). |
+| `hydra upgrade` | ops | Self-update: fetch, verify signature and checksum, atomic swap, supervisor restart (section 9). |
 | `hydra promote --from <addr> --token <t>` | ops | Runs on the new machine; pulls the Data Root from the old controller. `export` / `import` of a bundle file is the offline fallback. Ceremony in [./03](./03-controller-and-runners.md#8-promotion-and-portability). |
-| `hydra login` | ops | Password in, API key out, stored 0600 ([./13](./13-security.md)). |
+| `hydra login` | ops | Password in, API key out, stored in `credentials.json` (section 5). `--password-stdin` is the scripted form; on a TTY it prompts with echo off, the one documented exception to the never-prompts rule ([./11](./11-public-api-and-agent-surface.md) §6.1, [./13](./13-security.md)). |
 | `hydra task ...`, `hydra memory ...`, `hydra subscription create ...`, `hydra permission request`, and every other API-facing verb | CLI | The public API over HTTP. The same commands serve the user (API key) and sessions (session token). Full command set, `--json`, agent-addressed `--help` at any position: [./11](./11-public-api-and-agent-surface.md). |
 
 Global options: `--home <dir>` (the only real flag, it locates the config file; `HYDRA_HOME` is its env form) and `-c key=value` (generic override of any config key, section 6).
@@ -34,9 +37,9 @@ The ops CLI and hydra-as-a-tool are the same commands under different credential
 
 Ticket #24 called this step `hydra takeover <token>`; ticket #10 and ADR 0005 pin `hydra promote --from <A-addr> --token <t>` with the same semantics. The spec settles on `promote` (ADR 0005 is the owning decision); `takeover` is not a command.
 
-**Open:** the ops-CLI command that mints a runner join token (ticket #7: "minted in web app or ops CLI") and the `hydra service` verbs beyond `install` (uninstall, start, stop, status) are not pinned.
+Token-minting ops are named `create`, not `mint` (resolved 2026-09-01, [#44](https://github.com/rogierpennink/hydra/issues/44)): `runner.createJoinToken` and `controller.createPromotionToken` in the catalogue ([./11](./11-public-api-and-agent-surface.md)).
 
-**Open:** how a session finds the `hydra` binary is not pinned. The runner ships the CLI (it is `process.execPath`), so the runner must either prepend that directory to the session's `PATH` or inject an absolute path alongside `HYDRA_API_URL` / `HYDRA_TOKEN`.
+A session reaches the `hydra` binary through a **PATH prepend** (resolved 2026-08-31, [#43](https://github.com/rogierpennink/hydra/issues/43)): the runner maintains `~/.hydra/runner/bin/` containing a `hydra` symlink to `process.execPath`, refreshed at runner start so upgrades follow, and prepends that directory to every session's `PATH`. The skill text stays portable (`hydra task ...`, no absolute paths) and `which hydra` works for the agent. The git credential helper is a subcommand of the same binary and needs nothing extra.
 
 ## 3. Mode isolation (CI-enforced)
 
@@ -57,11 +60,9 @@ The compiled artifact still contains all three graphs. Isolation is a property o
 
 The controller hosts its local runner as a supervised child process: it spawns `process.execPath` with `["runner", "--local"]` (spawn, never `fork()`, section 11). The child dials the controller over a loopback WebSocket and joins as an ordinary fleet member. There is no embedded or special-cased runner code path; the local runner is pinned by the same protocol, states, and capabilities as a remote one ([./03](./03-controller-and-runners.md)). It survives promotion as itself: same identity, name, and workspaces, re-pointed to the new controller ([ADR 0005](../adr/0005-promotion-is-migration-behind-a-stable-controller-identity.md)).
 
-The runner also serves `GET /identity` on a fixed loopback-only port for the web app's "local" placement alias ([./14](./14-web-app.md)). This is the only listener a runner opens; a runner accepts no inbound connections from the controller or from other machines ([./03](./03-controller-and-runners.md)).
+The runner also serves `GET /identity` on a loopback-only port for the web app's "local" placement alias - runner-local setting `identity.port`, default 4939, reported as a probed fact ([./14](./14-web-app.md) §The "local" runner alias; resolved 2026-09-01, [#45](https://github.com/rogierpennink/hydra/issues/45)). This is the only listener a runner opens; a runner accepts no inbound connections from the controller or from other machines ([./03](./03-controller-and-runners.md)).
 
-**Open:** the controller's restart policy for a crashed local runner child (backoff, give-up threshold, how the failure surfaces) is not pinned.
-
-**Open:** the join mechanics for the auto-joined local runner are not pinned. Ticket #7 says it is "auto-joined at first boot"; the controller presumably mints the single-use join token itself and passes it to the child, but the exact handoff (argv, env, or pipe) is unspecified.
+Crash-restart and join handoff (resolved 2026-08-31, [#43](https://github.com/rogierpennink/hydra/issues/43)): the controller respawns a crashed local runner child with exponential backoff (1 s doubling to 30 s), retrying indefinitely; three crashes inside five minutes raise a Notification, and the runner shows as `unreachable` meanwhile. At **first boot only**, the controller mints the single-use join token itself and writes it to the child's stdin - never argv (visible in `ps`) or env (inherited by grandchildren); the child completes the ordinary join exchange over loopback and persists `runner.json` (section 5) like any runner. Every later spawn reads that file; no token.
 
 ## 5. Hydra Home layout
 
@@ -69,13 +70,17 @@ Everything Hydra keeps on a machine lives in one directory, `~/.hydra` by defaul
 
 ```
 ~/.hydra/
-  config.toml    bootstrap config (section 6)
-  data/          Data Root: the controller's SQLite database (with -wal/-shm),
-                 packed secrets at export, future blob storage
-  runner/        runner-owned material state
-  logs/          rotated process logs
-  backups/       VACUUM INTO snapshots (backups/<timestamp>.db) and pre-migration copies
-  (CLI credential file: the user's API key, mode 0600; location Open below)
+  config.toml       bootstrap config (section 6)
+  credentials.json  CLI credential: { url, apiKey }, written by hydra login, mode 0600
+  master.key        master-key plain-file fallback on headless Linux only, mode 0600 (./13)
+  setup-url         one-time setup URL, mode 0600; exists only while setup is
+                    incomplete, deleted on completion (section 7)
+  data/             Data Root: the controller's SQLite database (with -wal/-shm),
+                    packed secrets at export, future blob storage
+  tls/              tailscale-managed HTTPS cert material, when enabled (./13 §3.3)
+  runner/           runner-owned material state
+  logs/             rotated process logs
+  backups/          VACUUM INTO snapshots (backups/<timestamp>.db) and pre-migration copies
 ```
 
 | Part | Moves with promotion? | Owner |
@@ -84,8 +89,9 @@ Everything Hydra keeps on a machine lives in one directory, `~/.hydra` by defaul
 | `runner/` | No - runner disks never move; a re-enlisted machine gets a fresh random storage directory | runner |
 | `logs/`, `backups/` | No | machine |
 | `config.toml` | No - each machine bootstraps itself | machine |
-| CLI credential file | No - a user credential for this machine's CLI | machine |
-| master key | Never - held in the OS keychain, re-wrapped on the new machine | machine |
+| `credentials.json` | No - a user credential for this machine's CLI | machine |
+| `master.key` / keychain entry | Never - the master key never leaves its machine; the new controller re-wraps under its own ([./13](./13-security.md)) | machine |
+| `tls/` | No - a cert is bound to this machine's tailnet node name; the new machine mints its own ([./13](./13-security.md) §3.3) | machine |
 
 The Data Root is relocatable: the controller database stores no absolute paths, runner-side paths never reach the controller, and future blob storage must live inside `data/`. The rules are pinned in [./04](./04-state-store.md#relocatable-data-root-no-absolute-paths). The controller's persistent identity (id plus key material, created at first run) is carried in the Data Root ([ADR 0005](../adr/0005-promotion-is-migration-behind-a-stable-controller-identity.md)).
 
@@ -93,11 +99,9 @@ The Data Root is relocatable: the controller database stores no absolute paths, 
 
 Process logs are rotated files under `logs/`, outside the database ([./04](./04-state-store.md)).
 
-**Open:** the location and name of the CLI credential file (the API key `hydra login` stores with mode 0600, [./11](./11-public-api-and-agent-surface.md), [./13](./13-security.md)) are not pinned. It is not a `config.toml` key (bootstrap keys only) and MUST NOT live inside `data/`.
+The CLI credential file is **`~/.hydra/credentials.json`** (mode 0600; resolved 2026-09-01, [#44](https://github.com/rogierpennink/hydra/issues/44)): `{ "url": ..., "apiKey": ... }` - the CLI needs the controller URL as well as the key, and `hydra login` learns both. The plain-file master key fallback on headless Linux is **`~/.hydra/master.key`** (mode 0600, same resolution): at the home root, outside `data/` and `backups/`, so promotion bundles and offsite backups stay inert. Neither is a `config.toml` key.
 
-**Open:** the location of the plain-file master key on headless Linux (the keychain fallback in ADR 0015) is not pinned. The one constraint: it MUST NOT be inside `data/`, because the master key never leaves its machine and `data/` moves.
-
-**Open:** where a runner persists its durable per-runner credential and the controller URL after `hydra runner join` is not pinned (presumably under `runner/`; it is not a `config.toml` key, which holds controller bootstrap keys only).
+A runner persists its durable credential and controller URL in **`~/.hydra/runner/runner.json`** (mode 0600; resolved 2026-08-31, [#43](https://github.com/rogierpennink/hydra/issues/43)): runner id, credential, controller URL, the controller's logical identity and public key, and the storage-directory name. Written by `hydra runner join`, read at runner start, edited by `hydra runner set-controller`. A plain file, not a keychain entry: anyone who can read it as this OS user can already read the running runner's memory and the provider homes, so a keychain would add no trust boundary - the controls are 0600, revocation (retire the runner), and the perimeter ([./13](./13-security.md)). It is not a `config.toml` key (bootstrap keys only).
 
 ## 6. Configuration
 
@@ -108,32 +112,41 @@ Two tiers, with a hard line between them:
 
 Provider-instance settings live in controller state against the provider's `configSchema`; how the binary path and config directory in that schema reconcile with the no-paths rule is a Conflict owned by [./06](./06-providers.md).
 
-**Open:** the default values of `retention.events` and `retention.security`, and whether they are exposed as one setting or per event kind, are not pinned here; [./04](./04-state-store.md) states the retention policy.
+Retention defaults (resolved 2026-09-01, [#44](https://github.com/rogierpennink/hydra/issues/44)): `retention.events`, `retention.security`, and `retention.conversations` each default to **90 days**, one setting each, not per event kind. [./04](./04-state-store.md) states the retention policy, including the live-referrer prune exemption.
 
 Override mechanics: there are no curated per-key flags. Any bootstrap key is reachable with a generic `-c key=value` flag and with a `HYDRA_*` environment variable. Precedence is flag > env > file > default. `--home` is the only dedicated flag because it locates the config file itself.
 
-**Open:** the complete bootstrap key list, the TOML key names, and the exact `HYDRA_*` mapping rule (for example `bind.port` -> `HYDRA_BIND_PORT`) are not pinned.
+The complete bootstrap key list is **four keys** (resolved 2026-09-01, [#44](https://github.com/rogierpennink/hydra/issues/44)), dotted TOML names:
 
-**Open:** whether the optional BYO TLS certificate and key paths ([./13](./13-security.md)) are bootstrap keys (needed before serving) or controller state is not pinned.
+| Key | Default |
+|---|---|
+| `data.dir` | `<home>/data` |
+| `bind.host` | `127.0.0.1` |
+| `bind.port` | `4937` |
+| `log.level` | `info` |
+
+`bind.host` defaults to loopback - the safe default; LAN and tailnet users set it explicitly, and the perimeter warning ([./13](./13-security.md)) covers the rest. Port 4937 is "HYDR" on a phone keypad. The env mapping rule is mechanical: uppercase, dots become underscores, prefix `HYDRA_` - `bind.port` -> `HYDRA_BIND_PORT`, `data.dir` -> `HYDRA_DATA_DIR`. `HYDRA_HOME` is the one special (it locates the file itself). Nothing else may be added to this list without meeting the tier-1 test.
+
+There are **no TLS keys** (same resolution): v1 has no BYO TLS. HTTPS is a controller feature backed by hardcoded Tailscale support - enabled from Settings or a Connection setup step, cert material minted by the controller into `<home>/tls/` and renewed automatically ([./13](./13-security.md) §3.3). Nothing TLS-related is needed before the database opens, so the tier line stays clean. The HTTPS listener's port is controller state, default `4938`.
 
 ## 7. First run and onboarding
 
 `hydra serve` on an empty home auto-initializes, with no flags and no prompts:
 
 1. Create the Hydra Home directories.
-2. Create the database and run all migrations.
+2. Create the database and run all migrations, and create one provider instance per shipped provider plugin ([./06](./06-providers.md) section 2; resolved 2026-09-01, [#45](https://github.com/rogierpennink/hydra/issues/45)).
 3. Mint the master key into the OS keychain (plain key file on headless Linux) and create the controller identity.
 4. Start the local runner (section 4).
 5. Bind, and if the bind is non-loopback and non-tailnet, print the perimeter warning ([./13](./13-security.md)).
-6. Print a **one-time setup URL** containing a single-use setup token.
+6. Print a **one-time setup URL** containing a single-use setup token, and write it to `<home>/setup-url` (mode 0600) for retrieval under a service unit.
 
-That print is the CLI's entire onboarding role. Setup state and the one-time token are public-API surface; the password setup screen and everything after it are web views ([./14](./14-web-app.md), [./11](./11-public-api-and-agent-surface.md)). Completing setup creates the one default assistant ([./12](./12-assistants.md)); its profile and bindings are edited later like any other assistant's. The CLI never prompts interactively. This invariant is what lets the future desktop app become the installer: it manages the binary, runs `serve`, reads the token, and opens the same setup views unchanged.
+That print (and the `setup-url` file behind it) is the CLI's entire onboarding role. Setup state and the one-time token are public-API surface; the password setup screen and everything after it are web views ([./14](./14-web-app.md), [./11](./11-public-api-and-agent-surface.md)). Completing setup creates the one default assistant ([./12](./12-assistants.md)); its profile and bindings are edited later like any other assistant's. The CLI never prompts interactively. This invariant is what lets the future desktop app become the installer: it manages the binary, runs `serve`, reads the token, and opens the same setup views unchanged.
 
 Provider login is not part of controller onboarding; it happens per runner (section 12).
 
-**Open:** when the controller is installed as a service before first run (`hydra service install` then unit start), how the user retrieves the one-time setup URL is not pinned - from `logs/`, from a CLI command that re-prints it, or by having `service install` run the first boot in the foreground. Also unpinned: the setup token's lifetime and whether it can be re-minted.
+Setup URL retrieval and token lifetime (resolved 2026-09-01, [#44](https://github.com/rogierpennink/hydra/issues/44)): the setup URL is `http://<bind-host>:<port>/setup?token=<single-use-token>`. While setup is incomplete the controller keeps it in `<home>/setup-url` (mode 0600), and **`hydra setup-url`** prints it - a filesystem read, no credential needed, the same trust boundary as the master key file. The controller deletes the file when setup completes. The token is valid until used; each controller boot while setup is incomplete mints a fresh one and invalidates the old, so re-minting is restarting the unit. No unauthenticated HTTP endpoint serves the URL.
 
-**Open:** the "setup incomplete" behaviour of API calls and the web app before the password exists (what is reachable with the setup token, what is refused) belongs to [./11](./11-public-api-and-agent-surface.md) / [./14](./14-web-app.md) and is not pinned here.
+Before the password exists (same resolution), exactly two API surfaces are reachable and everything else is 401: `setup.read` (unauthenticated, `{ complete: boolean }`, so the web app knows to route to `/setup`) and `setup.complete` (requires the setup token; atomically sets the password, finishes onboarding, and returns a logged-in bearer token). The static web bundle itself is always served. The fields `setup.complete` carries beyond the password are the onboarding steps, owned by [./14](./14-web-app.md).
 
 ## 8. Migrations
 
@@ -142,7 +155,7 @@ Provider login is not part of controller onboarding; it happens per runner (sect
 - An older binary that opens a newer database MUST refuse to start with a clear error naming both versions. There are no downgrade migrations.
 - Runners have no database and no migrations (section 3). Their on-disk outbox format is versioned by the runner protocol version ([./03](./03-controller-and-runners.md)).
 
-**Open:** whether the pre-migration copy is a plain file copy (the database is quiescent at boot, before the controller serves) or a `VACUUM INTO` is not pinned; either satisfies "timestamped DB file backup".
+The pre-migration copy is a **`VACUUM INTO`** to `backups/<timestamp>-premigration.db` (resolved 2026-09-01, [#44](https://github.com/rogierpennink/hydra/issues/44)) - the same code path as the daily backup (section 10). A plain file copy has a real flaw: after an unclean shutdown a `-wal` file holds unmerged writes, and copying only the `.db` file loses them; `VACUUM INTO` checkpoints and is always consistent.
 
 ## 9. Upgrades
 
@@ -164,11 +177,11 @@ Provider harness versions (Claude Code, Codex, pi) are a separate, per-runner fa
 
 The controller can upgrade a runner with one command over the runner's WebSocket. The runner executes the same self-update path as `hydra upgrade` (fetch, verify, swap, restart via its own unit). This is how the fleet is kept in step without a shell on each machine.
 
-**Open:** the signing scheme for releases (which key, which tool, how the public key ships in the binary) is not pinned; only "verify checksum/signature" is.
+Release signing (resolved 2026-09-01, [#44](https://github.com/rogierpennink/hydra/issues/44)): **minisign-format ed25519**. CI signs the release's `SHA256SUMS` file; the public key ships embedded in the binary and is published as a file in the repo. `hydra upgrade` and remote runner upgrades verify the signature and the artifact checksum before the swap - ed25519 verification is built into Bun's crypto, no dependency. First install over `curl | sh` trusts HTTPS, like everyone's. This is the standard auto-updater design (Sparkle's embedded EdDSA key on macOS, Tailscale's distsign); t3-code gets the equivalent from OS code signing via electron-updater, which an app bundle has and a Linux CLI binary does not. The consumer that matters is the remote runner upgrade: the controller telling a fleet machine "fetch this binary and exec it" is worth more than HTTPS-plus-checksums.
 
-**Open:** the update-check cadence is not pinned.
+Update-check cadence (same resolution): on controller boot plus every 24 hours, jittered; one Notification per new version, not per check. Hardcoded, not a setting.
 
-**Open:** whether a runner restarting for upgrade drains first (waits for running sessions) or performs an announced shutdown that cleanly interrupts sessions for resume ([./03](./03-controller-and-runners.md) runner states) is not pinned.
+A runner upgrade **quiesces at the turn boundary** (resolved 2026-08-31, [#43](https://github.com/rogierpennink/hydra/issues/43)): stop accepting placements, wait up to 30 minutes for in-flight turns to reach `turn.completed` (then interrupt), perform an announced shutdown (sessions cleanly interrupted, resumable), swap, restart; the controller resumes the sessions and flushes held input. `--now` skips the wait. Full drain-to-empty is not required - it could block an upgrade for hours behind a long-lived session.
 
 ## 10. Backups
 
@@ -178,64 +191,58 @@ The controller can upgrade a runner with one command over the runner's WebSocket
 - Restore on the **same machine** works with the same master key. Restore on **another machine** is not a backup story: the master key does not travel, so the snapshot's secrets cannot be decrypted there. Moving the controller is promotion, whose export re-encrypts secrets under a token-derived key ([./03](./03-controller-and-runners.md)).
 - Backups cover the controller only. Runner material state (workspaces, provider session data) is not backed up; losing a runner disk loses resumability, never history ([ADR 0002](../adr/0002-orchestration-stays-on-the-controller.md)).
 
-**Open:** retention (count or days), the time of day, and the restore procedure (stop the unit, replace the file, start) are not pinned.
+Resolved 2026-09-01 ([#44](https://github.com/rogierpennink/hydra/issues/44)): the daily snapshot runs at **03:30 in the user timezone setting** (the spec-wide source, [./12](./12-assistants.md) §5.2); retention keeps the last **14 daily snapshots** and, separately, the last **3 pre-migration copies**. Both are controller-state settings (`backup.time`, `backup.keep`) with those defaults. The restore runbook, same machine only: stop the unit, replace `data/hydra.db` with the snapshot, delete `-wal`/`-shm`, start the unit. Moving to another machine is promotion, never restore.
 
 ## 11. Bun build notes
 
 Findings from `research/bun-compile.md` (branch `research/bun-compile`); verdict go-with-workarounds. Every item below is against a documented Bun or SDK mechanism.
 
-**Claude Agent SDK.** Current SDK versions ship a native Claude Code binary per platform (optional dependencies `@anthropic-ai/claude-agent-sdk-<platform>`) instead of a `cli.js`. Inside a compiled binary `require.resolve` cannot find it, so the build embeds the target platform's binary with `import binPath from "..." with { type: "file" }`, and at runtime calls `extractFromBunfs(binPath)` (the SDK's `/extract` export) and passes the result as `pathToClaudeCodeExecutable`. Child processes cannot read Bun's `$bunfs` virtual filesystem, hence the extraction. The SDK has zero runtime dependencies; pin its version exactly ([./06](./06-providers.md)). CI must install all platform optional dependencies to cross-build.
+**Claude Agent SDK.** The SDK compiles into the Hydra binary; its per-platform native CLI packages (optional dependencies `@anthropic-ai/claude-agent-sdk-<platform>`) are **excluded from the build**, because sessions drive the runner-installed `claude` via `pathToClaudeCodeExecutable` ([ADR 0028](../adr/0028-provider-harnesses-are-runner-installed-executables.md), section 12). The SDK's documented embed-and-`extractFromBunfs` flow is the recorded fallback if exclusion ever misbehaves. The SDK has zero runtime dependencies; pin its version exactly ([./06](./06-providers.md)).
 
-**Self-spawn.** `process.execPath` is the compiled binary; role dispatch is `spawn(process.execPath, [role, ...args])`. `child_process.fork()` and `cluster.fork()` are broken in compiled mode and MUST NOT be used. Code MUST NOT shell out to a literal `bun` command; the binary does not substitute itself. Pi's on-disk TypeScript entrypoints (pi runs in a child process per session, [./06](./06-providers.md)) run with `BUN_BE_BUN=1 <hydra> run <file.ts>`, which exposes the full `bun` CLI (Bun >= 1.2.16). Workers must be listed as extra compile entrypoints; `--compile-exec-argv` embeds `process.execArgv`.
+**Self-spawn.** `process.execPath` is the compiled binary; role dispatch is `spawn(process.execPath, [role, ...args])`. `child_process.fork()` and `cluster.fork()` are broken in compiled mode and MUST NOT be used. Code MUST NOT shell out to a literal `bun` command; the binary does not substitute itself. (`BUN_BE_BUN=1` exposes the full `bun` CLI from the compiled binary, Bun >= 1.2.16 - no longer needed for pi, which ships as its own binary, but on record for future on-disk TypeScript needs.) Workers must be listed as extra compile entrypoints; `--compile-exec-argv` embeds `process.execArgv`.
 
 **SQLite.** `bun:sqlite` is blessed under `--compile`. WAL and `VACUUM INTO` work. macOS links Apple's system SQLite (no extension loading without `Database.setCustomSQLite`), Linux links Bun's own; Hydra needs no extensions. Migrations must be inline strings or embedded files (section 8).
 
-**Web bundle.** Full-stack executables (Bun >= 1.2.17): `import index from "./index.html"` plus `Bun.serve({ routes })` bundles and embeds the SPA and serves it with correct MIME and cache headers. Fallbacks: per-file `with { type: "file" }` imports served via `Bun.file()`, or Bun 1.4's `--asset`. Use `Bun.file()` / `readFileSync` on `$bunfs` paths, not `fs.open()`.
+**Web bundle.** Full-stack executables (Bun >= 1.2.17): `import index from "./index.html"` plus `Bun.serve({ routes })` bundles and embeds the SPA and serves it with correct MIME and cache headers. Fallbacks: per-file `with { type: "file" }` imports served via `Bun.file()`, or Bun 1.4's `--asset`. Use `Bun.file()` / `readFileSync` on `$bunfs` paths, not `fs.open()`. Hydra's HTTP server is Effect's, on `@effect/platform-bun` ([ADR 0031](../adr/0031-the-backend-is-written-on-effect.md)); whether the embedded bundle is served through it or by a `Bun.serve({ routes })` route beside it on the same port is verified at implementation start ([./16-open-items.md](./16-open-items.md) section C).
 
 **Cross-compilation and signing.** `--target` builds `bun-darwin-arm64`, `bun-linux-x64`, and `bun-linux-arm64` from one host; the x64 baseline/modern split is obsolete. `codesign` works since Bun 1.2.4 with the documented JIT entitlements; it must run on a macOS runner. Pin the Bun version in CI past the 1.3.12 signature regression (fixed).
 
-**Dependencies.** Use `Bun.serve()`'s native WebSocket server (`ws` is the fallback, viable since Bun 1.4). Do not use keytar (archived upstream); reach the macOS keychain by spawning the `security` CLI. Avoid native addons where a subprocess will do.
+**Dependencies.** The backend runs on Effect 4 ([ADR 0031](../adr/0031-the-backend-is-written-on-effect.md)): `effect` pinned to the current 4.0.0 release candidate exactly, moved to 4.0 stable when released; HttpApi, RPC, SQL and Schema live under `effect/unstable/*` and may break on minor releases, so every upgrade is a deliberate, reviewed change. With it `@effect/platform-bun` (HTTP and WebSocket server, reaching `Bun.serve()`'s native WebSocket implementation; `ws` is the fallback, viable since Bun 1.4) and `@effect/sql-sqlite-bun` over `bun:sqlite`. Do not use keytar (archived upstream); reach the macOS keychain by spawning the `security` CLI. Avoid native addons where a subprocess will do.
 
-**Not prior art.** t3code runs the SDK under Node/Electron and passes the user's installed `claude`; it does not `bun build --compile`. The SDK's own Bun-compilation documentation carries the bet.
+**Prior art.** t3code runs the SDK under Node/Electron, excludes the SDK's platform packages from packaging, and passes the user's installed `claude` - the same harness-delivery posture Hydra uses (ADR 0028). It does not `bun build --compile`; the compile-mode mechanics rest on Bun's and the SDK's own documentation. t3code is Effect end to end under Node on a v4 beta; OpenCode ships twelve platform binaries built with `Bun.build({ compile })` on Effect and is the compile-mode precedent for the Effect runtime.
 
 **Verify at build time:** macOS notarization of a Bun-compiled binary is undocumented by Bun. Prototype notarize + staple before anything else in packaging; it is the one residual risk to the `curl | sh` story on macOS.
-
-**Verify at build time:** where `extractFromBunfs` places the extracted Claude binary, whether it is re-extracted on every boot, and whether that location should be redirected into the Hydra Home.
 
 Fallbacks, for the record: Node SEA loses runtime TypeScript (no `BUN_BE_BUN` equivalent for pi), `bun:sqlite`, and cheap asset embedding; npm-global eliminates compile-mode risk but reintroduces Node on every runner, which ADR 0018 rejected.
 
 ## 12. Provider CLI installs on runners
 
-- Hydra installs **only provider CLIs** on a runner, and it installs them at join (pinned by ticket #8). Every other toolchain is the machine owner's responsibility; the runner probes what is present and reports it as capabilities for placement ([./03](./03-controller-and-runners.md), [ADR 0003](../adr/0003-sessions-run-as-bare-processes.md)).
-- Each provider installs with one portable command; none needs a package manager or an image:
-  - Claude Code: the native installer (`curl -fsSL https://claude.ai/install.sh | bash`) places a self-contained, self-updating binary at `~/.local/bin/claude`.
-  - Codex: a single static binary at `~/.local/bin/codex`.
-  - pi: an npm global install of `@earendil-works/pi-coding-agent` (upstream requires Node >= 22.19).
-- Login is **per runner and headless**, and Hydra drives it: the runner runs the provider's own login command and relays the device code or login URL to the user's browser; the provider CLI stores its own credential inside its instance's isolated provider home. Whether this runs inside `hydra runner join` or as a post-join step is Open in [./03](./03-controller-and-runners.md). Hydra never holds or moves vendor tokens ([./13](./13-security.md)). This section owns the per-provider flows; [./03](./03-controller-and-runners.md), [./06](./06-providers.md) and [./13](./13-security.md) link here. Credential copying is a bootstrap shortcut owned by exactly one runner afterward, never a fleet distribution mechanism, because refresh-token rotation with reuse detection logs the loser out (documented by OpenAI; structurally identical in pi). Per-provider flows:
-  - Claude Code: `/login`'s paste-a-code fallback over SSH, or a one-year `claude setup-token` in `CLAUDE_CODE_OAUTH_TOKEN` (no rotation to race; model requests only). Always set `CLAUDE_CONFIG_DIR` so `.claude.json` and, on Linux, `.credentials.json` form one relocatable directory. On macOS either accept the Keychain (never override `HOME`) or set `CLAUDE_CODE_CREDENTIAL_HELPER_DISABLE_KEYCHAIN=1` before first login.
+Delivery and version policy are pinned by [ADR 0028](../adr/0028-provider-harnesses-are-runner-installed-executables.md) (resolved 2026-08-31, [#43](https://github.com/rogierpennink/hydra/issues/43)): all three harnesses are runner-installed executables, floor-pinned, explicitly updated.
+
+- Hydra installs **only provider CLIs** on a runner, and it installs them at join (pinned by ticket #8); a failed install never fails the join - the harness reports as absent with an "Install" retry in the fleet UI. Every other toolchain is the machine owner's responsibility; the runner probes what is present and reports it as capabilities for placement ([./03](./03-controller-and-runners.md), [ADR 0003](../adr/0003-sessions-run-as-bare-processes.md)).
+- Each provider installs with one portable command; none needs a package manager, an image, or Node:
+  - Claude Code: the native installer (`curl -fsSL https://claude.ai/install.sh | bash`; accepts an exact version as `bash -s 2.1.N`) places a self-contained binary at `~/.local/bin/claude`.
+  - Codex: a single static binary at `~/.local/bin/codex` (installer accepts `CODEX_RELEASE=x.y.z` for an exact version).
+  - pi: the official standalone Bun-compiled binary via `curl -fsSL https://pi.dev/install.sh | sh` (a managed install, which is what makes `pi update` work).
+- **Version policy: floor-pinned, latest at join.** Each Hydra release stamps a per-harness **minimum** (Claude: the CLI version its compiled-in SDK bundles - SDK 0.3.N pairs with a byte-identical CLI 2.1.N; Codex and pi: the release the adapter was built against) and a **tested-max**. Below the minimum blocks placement for that instance x runner; above the tested-max warns ("untested") but runs - most harness updates are not breaking, and pi (unversioned RPC with recorded breaks) is where the warning earns its keep. Join installs the vendor's latest, >= the floor by construction.
+  - Vendor auto-updaters are **disabled** so a harness never changes under a running session: `DISABLE_AUTOUPDATER=1` (Claude, session env), `check_for_update_on_startup = false` (Codex, instance `config.toml`), `PI_SKIP_VERSION_CHECK=1` (pi).
+  - **Updates are explicit and fleet-driven, no ssh:** the controller checks vendor latest (the npm registry for Claude Code and Codex, pi.dev's release API for pi) and the Fleet view shows "update available" per runner x harness with "Update harness" and "Update all" actions; the runner executes the vendor's own updater (`claude update` / `codex update` / `pi update`) over the runner WebSocket, between sessions.
+- Login is **per runner, headless, and a post-join step driven from the fleet UI** ([./03](./03-controller-and-runners.md) §3.3): the runner runs the provider's own login command inside the instance's home and relays the device code or login URL to the user's browser; the provider CLI stores its own credential there. Hydra never holds or moves vendor tokens ([./13](./13-security.md)). This section owns the per-provider flows; [./03](./03-controller-and-runners.md), [./06](./06-providers.md) and [./13](./13-security.md) link here. Credential copying is a bootstrap shortcut owned by exactly one runner afterward, never a fleet distribution mechanism, because refresh-token rotation with reuse detection logs the loser out (documented by OpenAI; structurally identical in pi). Per-provider flows:
+  - Claude Code: `/login`'s paste-a-code flow (open the relayed URL anywhere, paste the code back), or a one-year `claude setup-token` in `CLAUDE_CODE_OAUTH_TOKEN` (no rotation to race; model requests only). Always set `CLAUDE_CONFIG_DIR` so `.claude.json` and `.credentials.json` form one relocatable directory. *Correction (2026-08-31, #43):* `CLAUDE_CODE_CREDENTIAL_HELPER_DISABLE_KEYCHAIN` does not exist (earlier research cited it); the real behaviour is that macOS Keychain items are keyed per config dir (`Claude Code-credentials-<hash>`), so instance logins never collide with the user's own, and the CLI falls back to `.credentials.json` in the config dir when the Keychain rejects the write (locked, SSH). Never override `HOME`.
   - Codex: `codex login --device-auth` (beta, gated behind a ChatGPT settings toggle); fallbacks are `ssh -L 1455:localhost:1455` plus `codex login`, or seeding `$CODEX_HOME/auth.json`. Keep `cli_auth_credentials_store` at its `file` default.
-  - pi: device-code flow for ChatGPT and Copilot, paste-the-redirect-URL for Anthropic; `~/.pi/agent/auth.json` is plain JSON under `PI_CODING_AGENT_DIR`.
-- Auth state is probed per runner without touching credential files (SDK init `AccountInfo`, Codex `account/read`, pi `checkAuth`) and lands in the capability snapshot ([./06](./06-providers.md)).
+  - pi: the pinned v1 path is an **API key** (z.ai coding plan: provider `zai` / `zai-coding-cn`, key stored as a `provider-instance` secret, injected as `ZAI_API_KEY`; [./06](./06-providers.md) §10.3). pi's OAuth flows are TUI-only (no headless login command), so the fleet UI's fallback is a copy-paste panel: `PI_CODING_AGENT_DIR=<instance home> pi`, then `/login`. On record: a headless `pi auth login` upstream contribution would close the gap.
+- Auth state is probed per runner without touching credential files (SDK init `AccountInfo`, Codex `account/read`, `pi auth check --json`) and lands in the capability snapshot ([./06](./06-providers.md)).
 - A provider home is **per provider instance** on a runner (one instance = one login = one home), long-lived, and isolated from the user's global home so user-global instructions, skills, and packages never leak into Hydra sessions. Every session of that instance runs inside the instance's home; homes are never per session. The mechanics (setting-source switches, env) are [./06](./06-providers.md)'s.
-
-**Open:** which Claude Code binary the provider drives on a runner is not pinned. Section 11 embeds the SDK's native binary in the Hydra executable; this section installs `claude` at join for login. Either the embedded binary is used for sessions with the installed CLI's config directory holding the login, or `pathToClaudeCodeExecutable` points at the installed `claude` (t3code's posture) and the embedded copy is unused. Decide once; the answer changes the binary size story.
-
-**Open:** how pi's npm package gets onto a runner with no Node is not pinned. `BUN_BE_BUN=1 <hydra> install` exposes Bun's package installer without Node and is the obvious route, but it is unverified against pi's install requirements.
-
-**Open:** whether join installs Hydra-pinned provider CLI versions or the vendors' latest is not pinned. Codex offers no cross-version protocol guarantee and the Agent SDK is 0.x, so version drift across runners is a real operational risk ([./06](./06-providers.md)).
 
 ## 13. Runner join
 
 The join exchange is owned by [./03](./03-controller-and-runners.md); the operational shape is:
 
-1. The user mints a single-use join token in the web app's Fleet "Add machine" spot or with the ops CLI. The UI shows the complete command with the token filled in.
-2. On the new machine: install the binary (one line), then `hydra runner join <url> --token <t>`. The exchange is fully programmatic (no prompts) and upgrades the token to a durable per-runner credential; the runner creates its random storage directory and installs the provider CLIs (pinned: install happens at join).
-3. Per-runner provider login is Hydra-driven (section 12); whether it runs inside `hydra runner join` or as a separate post-join step is Open in [./03](./03-controller-and-runners.md).
-4. `hydra service install` registers the unit that runs `hydra runner` from then on.
+1. The user mints a single-use join token (1-hour lifetime, [./03](./03-controller-and-runners.md) §3.1) in the web app's Fleet "Add machine" spot or with the ops CLI. The UI shows the complete command with the token filled in, plus a "Personal machine" checkbox that adds `--reserved` ([./03](./03-controller-and-runners.md) §5.5).
+2. On the new machine: install the binary (one line), then `hydra runner join <url> --token <t>`. The exchange is fully programmatic (no prompts) and upgrades the token to a durable per-runner credential (`runner.json`, section 5); the runner creates its random storage directory, installs the provider CLIs (section 12; a failed install never fails the join), and registers and starts the service unit - one paste, and the machine is online when the command returns. `--no-service` skips the unit for hand-started runners; `hydra service install` stays available and idempotent.
+3. Per-runner provider login is a post-join step driven from the fleet UI (section 12, [./03](./03-controller-and-runners.md) §3.3).
 
-The join command must stay prompt-free so a future auto-installer can drive it end to end (see Post-v1). Login relays a URL or device code to the user's browser rather than prompting in the terminal, so it does not break this rule.
-
-**Open:** the order and coupling of steps 2 and 4 are not pinned: whether `hydra service install` on a runner-only machine accepts the join arguments and performs both, or join must complete first and the service reads the persisted credential.
+The join command must stay prompt-free so a future auto-installer can drive it end to end (see Post-v1). Login relays a URL or device code to the user's browser rather than prompting in the terminal, so it does not break this rule. (Resolved 2026-08-31, [#43](https://github.com/rogierpennink/hydra/issues/43).)
 
 ## Post-v1
 
@@ -243,9 +250,9 @@ The join command must stay prompt-free so a future auto-installer can drive it e
 - **Unattended auto-install of updates** - arrives with the desktop app; v1 keeps the Notification plus explicit `hydra upgrade`.
 - **Desktop app as installer** - v1 keeps onboarding wholly in web + API and the CLI prompt-free so the desktop app reuses the setup views unchanged.
 - **Fleet auto-discovery and push-install** - v1 keeps the programmatic, prompt-free join exchange and the reserved "Add machine" spot.
-- **Fleet-managed harness updates** - v1 surfaces provider version skew per runner as a capability-snapshot fact.
 - **Hydra-managed toolchains and an Environment concept** - v1 installs provider CLIs only and treats toolchains as probed machine facts.
 - **Native OS sandboxing** - returns as a probed runner capability behind the existing capability negotiation.
+- **BYO TLS cert/key paths** - returns only if a non-tailscale CA with a real need appears; v1 HTTPS is tailscale-managed ([./13](./13-security.md) §3.3). TLS between fleet machines - a genuine bootstrap concern - is designed when it lands.
 
 ## Sources
 
@@ -262,7 +269,9 @@ Tickets:
 - Security & secrets model - https://github.com/rogierpennink/hydra/issues/18
 - Web app architecture - https://github.com/rogierpennink/hydra/issues/19
 - Assemble the v1 spec (provider-home isolation handoff) - https://github.com/rogierpennink/hydra/issues/21
+- Operations details: bootstrap config, first run, login, upgrade, backups, key file - https://github.com/rogierpennink/hydra/issues/44
+- Revisit Effect for the backend - https://github.com/rogierpennink/hydra/issues/53
 
-ADRs: [0002](../adr/0002-orchestration-stays-on-the-controller.md), [0003](../adr/0003-sessions-run-as-bare-processes.md), [0004](../adr/0004-controller-state-lives-in-one-sqlite-database.md), [0005](../adr/0005-promotion-is-migration-behind-a-stable-controller-identity.md), [0013](../adr/0013-agents-operate-hydra-through-the-public-api.md), [0015](../adr/0015-secrets-are-encrypted-per-value-under-a-keychain-held-master-key.md), [0018](../adr/0018-hydra-ships-as-one-self-contained-binary.md).
+ADRs: [0002](../adr/0002-orchestration-stays-on-the-controller.md), [0003](../adr/0003-sessions-run-as-bare-processes.md), [0004](../adr/0004-controller-state-lives-in-one-sqlite-database.md), [0005](../adr/0005-promotion-is-migration-behind-a-stable-controller-identity.md), [0013](../adr/0013-agents-operate-hydra-through-the-public-api.md), [0015](../adr/0015-secrets-are-encrypted-per-value-under-a-keychain-held-master-key.md), [0018](../adr/0018-hydra-ships-as-one-self-contained-binary.md), [0031](../adr/0031-the-backend-is-written-on-effect.md).
 
 Research: `research/bun-compile.md` (branch `research/bun-compile`), `research/provider-portability.md` (branch `research/provider-portability`), `research/t3code.md` (branch `research/t3code`).

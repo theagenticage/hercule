@@ -129,8 +129,8 @@ above:
   anything hiding forever.
 - **Decisions are questions.** Every needs-you item is phrased as a question whose
   answers are its (quiet) buttons, marked by the `?` decision mark (see Marks). The decision
-  card is uniform-height with labeled fields (FROM / WHY / AGENT) so cycling never moves
-  the controls; one decision at a time ("Focus") is the pinned treatment.
+  card has labeled fields (FROM / WHY / AGENT); one decision at a time ("Focus") is the
+  pinned treatment, its answers a ledger (amendment of 2026-09-01 below).
 - **One calm headline sentence** ("2 decisions wait · 3 strands in motion · 6 outcomes
   today") and a **pulse rail** (fleet / assistants / intake as quiet text lines) replace
   stat-card rows, which are banned. Assistants are ambient presence, never work strands.
@@ -215,6 +215,35 @@ check-in are **separate views** for now; merging is a post-dogfooding question.
 - **Rejected on the record**: narrative brief prose at the top of the page (round 2), a
   time-first ledger as the page (round 1), master/detail split (round 3: too little room for
   the overview), a full detail page (round 3: the light card reads better).
+
+Amended 2026-08-31 by ticket #42 (Notification lifecycle and shipped triage conventions):
+proposal answers are **Accept / Start *X* / Dismiss** - park is dropped for v1 ("not now" is
+Accept: the task waits in the backlog); the dossier has no separate verdict block, the
+notification body carries the agent's reasoning; **offers** (an immediate action with no task)
+sit beside proposals with their own answers; the events-view stamp vocabulary is → *task*
+(proposal / attached), offer, FYI, unsure, known, held, pending triage, no action - "filed",
+"routed", "ignored" and "filtered" are retired; the receipt line reads "212 events →
+6 proposals · 1 attached · 2 offers · 3 FYI · 2 unsure · 198 no action" and a "last triage"
+line (time + summary) closes the page. Owner: spec 10 §2-3.
+
+Amended 2026-09-01 by ticket #50 (Prototype: rendering bound actions in the Focus card): a
+decision's answers render as a **ledger** - one full-width row per answer, the row is the
+button: label in the left column (ink for the primary answer) · the core's **describe line**
+at metadata size with entity names in ink · the producer's **description** as fine print
+under it. Nothing behind hover or a confirm step; no glyph prefix on describe lines. The
+card's height follows its answers ("uniform-height" above is withdrawn); the arrow row stays
+below the card. Chat sinks use the same hierarchy: "label · describe", description as
+subtext. Owner: spec 14 §The check-in view, spec 12 §11.6.
+
+Amended 2026-09-01 by ticket #51 (Prototype: the app shell and navigation): the **app shell** is one
+sidebar with two faces behind a segmented switch (Threads: the t3-code list; Hydra: the orchestration
+nav), thread rows at the **meta** density (a second faint mono line), the **pulse** as one summary line
+at the sidebar foot above Marks that expands on click, a Codex / t3-shaped thread surface with
+"Worked for" dividers and docked permission requests, and the **composer as the thread's
+configuration**: every selector opens a menu anchored above it, and whatever cannot be picked is
+**dimmed with the reason, never hidden**. The t3-code selector clone (brand orange, yellow stars, a blue
+focus rule) was built as the record and rejected under the color doctrine; provider marks, if ever
+shown, are monochrome. Owner: spec 14 §App shell.
 
 ## Provenance
 

@@ -1,6 +1,6 @@
 # Providers
 
-A provider wraps one interactive coding harness (Claude Code via the Agent SDK, Codex via `codex app-server`, pi via its SDK) behind two surfaces: a **ProviderDefinition** on the controller (static self-description, registered by the provider plugin) and a **ProviderAdapter** on the runner (execution: probe plus five session methods, one normalized event stream). The controller authors a `SessionSpec` that names ids, never paths; the runner resolves it and drives the adapter; the adapter normalizes vendor traffic into one event vocabulary at the runner, with a tagged raw passthrough. Degradation is declared, never silent: per-mode and per-feature support are pure facts on the definition, and the controller substitutes an unsupported access mode by a hardcoded, strictly downward fallback before the session starts. Rationale lives in [ADR 0007](../adr/0007-provider-adapter-is-a-thin-interface-behind-a-normalized-event-stream.md).
+A provider wraps one interactive coding harness (Claude Code via the Agent SDK, Codex via `codex app-server`, pi via its RPC mode) behind two surfaces: a **ProviderDefinition** on the controller (static self-description, registered by the provider plugin) and a **ProviderAdapter** on the runner (execution: probe plus five session methods, one normalized event stream). The controller authors a `SessionSpec` that names ids, never paths; the runner resolves it and drives the adapter; the adapter normalizes vendor traffic into one event vocabulary at the runner, with a tagged raw passthrough. Degradation is declared, never silent: per-mode and per-feature support are pure facts on the definition, and the controller substitutes an unsupported access mode by a hardcoded, strictly downward fallback before the session starts. Rationale lives in [ADR 0007](../adr/0007-provider-adapter-is-a-thin-interface-behind-a-normalized-event-stream.md).
 
 ## 1. Shape
 
@@ -11,6 +11,8 @@ A provider wraps one interactive coding harness (Claude Code via the Agent SDK, 
 
 A **provider instance** is a definition plus decoded config (t3-code's driver/instance split). The instance id, not the provider id, is the routing key everywhere: snapshots, session specs, placement. `supportsMultipleInstances` providers get multi-account by config-dir isolation (one login per instance).
 
+**Default instances exist from first run** (resolved 2026-09-01, [Web app details](https://github.com/rogierpennink/hydra/issues/45)): the controller creates one provider instance per shipped provider plugin (Claude Code, Codex, pi) with default config - subscription auth, no overrides - named after the provider, so the first-session onboarding ([./14-web-app.md](./14-web-app.md) §Onboarding) can offer "Log in to Claude Code" without the user ever meeting the instance concept; a second instance appears only when they want a second account.
+
 The runner never sees Hydra domain state and the controller never sees runner paths ([./03-controller-and-runners.md](./03-controller-and-runners.md), ADR 0002). Provider-native session state (transcripts, thread rollouts, session trees) lives on the runner's disk; the controller's normalized per-session stream ([./04-state-store.md](./04-state-store.md)) is the observable record.
 
 ## 2. ProviderDefinition and declared capabilities
@@ -20,7 +22,7 @@ interface ProviderDefinition {
   id: string                                  // "claude-code" | "codex" | "pi"
   displayName: string
   supportsMultipleInstances: boolean          // multi-account via config-dir isolation
-  configSchema: JsonSchema                    // per-instance: binary path, config dir, env
+  configSchema: JsonSchema                    // per-instance logical settings: env, model defaults - never paths (§2.1)
   defaultConfig(): unknown
   declared: DeclaredCapabilities              // static facts of the pinned adapter version
 }
@@ -31,6 +33,7 @@ interface DeclaredCapabilities {
   modelSwitch: "in-session" | "new-session"
   accessModes: Record<AccessMode, "native" | "unsupported">
   mcpPassthrough: "native" | "unsupported"    // pi: verify at build time
+  disallowedTools: "native" | "unsupported"   // Claude disallowedTools, pi excludeTools; Codex unsupported
   structuredOutput: "supported" | "unsupported"
 }
 
@@ -50,12 +53,10 @@ Declared values for the three v1 providers:
 |---|---|---|---|
 | `steering` | native (stream-append into the running `query()`) | native (`turn/steer`) | native (`steer()`) |
 | `fork` | native (`resume` + `forkSession: true`) | native (`thread/fork`) | native (`fork()`) |
-| `modelSwitch` | in-session (`setModel()`) | in-session (per-turn `model` override on `turn/start`) | verify at build time (below) |
+| `modelSwitch` | in-session (`setModel()`) | in-session (per-turn `model` override on `turn/start`) | in-session (RPC `set_model`) |
 | `accessModes` | all four native | all four native | approval-required, auto-accept-edits, full-access native; `auto` unsupported |
 | `mcpPassthrough` | native (`mcpServers` option) | native (MCP servers, `mcpToolCall` items) | verify at build time (below) |
 | `structuredOutput` | supported (native `outputFormat`) | supported (native `outputSchema`) | supported (adapter-owned `submit_result` tool) |
-
-**Verify at build time:** pi `modelSwitch` - pi's RPC mode switches models; confirm the SDK session exposes the same, else declare `new-session`.
 
 **Verify at build time:** pi `mcpPassthrough` - the taxonomy matrix records no MCP support in pi; declare `unsupported` unless the pinned version has it.
 
@@ -63,13 +64,9 @@ pi's `auto` is unsupported because `auto` means a harness-side reviewer judges r
 
 ### 2.1 Instance config
 
-`configSchema` covers, per instance: the harness binary path, the isolated config directory (Claude `CLAUDE_CONFIG_DIR`, Codex `CODEX_HOME`, pi `PI_CODING_AGENT_DIR`; section 9), and extra environment for the spawned process (API keys, `ANTHROPIC_BASE_URL`-style routing). Instance config is validated against `configSchema` and stored on the controller; the runner receives the instance's config with each probe and session request. Secret-valued entries are never logged and never returned by the API ([./13-security.md](./13-security.md)).
+`configSchema` covers, per instance, **logical settings only**: extra environment for the spawned process (API keys, `ANTHROPIC_BASE_URL`-style routing, `CLAUDE_CODE_USE_BEDROCK=1`), model defaults, and provider-specific options. It never holds paths. The runner derives both paths itself: the provider home is `<storage dir>/providers/<instanceId>/` under the runner's material state ([./15-packaging-and-operations.md](./15-packaging-and-operations.md)), and the binary is the runner-installed harness ([15 §12](./15-packaging-and-operations.md)); both reach the adapter on `ProviderRunnerContext` (section 4). Per-runner path overrides ("use my own `claude`") are post-v1. This resolves ticket 12's "binary path, config dir" wording against the no-runner-paths rule (ADR 0005): those two were the runner's to resolve all along (resolved 2026-08-31, [#43](https://github.com/rogierpennink/hydra/issues/43)). The one path-shaped fact that does exist lives per instance × runner, not in instance config: `userMaterialDir` (§9.1 User Material), an opaque runner-scoped string stored beside the capability snapshot.
 
-**Conflict:** ticket 12 pins `configSchema` as "per-instance: binary path, config dir, env" held by the controller, while ticket 10 / ADR 0005 forbid runner paths in the controller DB ("runner-side paths are runner-owned opaque facts keyed by ID"), and one instance spans runners with potentially different paths. Likely reconciliation: the instance stores logical settings on the controller and each runner resolves the binary and the provider home under its own storage directory ([./15-packaging-and-operations.md](./15-packaging-and-operations.md) places provider homes under the runner's material state); not pinned.
-
-**Open:** the secrets table's owner kinds are `connection | plugin | runner | core` ([./13-security.md](./13-security.md)); no owner kind is pinned for provider-instance secrets (API keys in instance env), and how the runner obtains them at spawn time is not pinned either.
-
-Which `claude` binary drives sessions by default (the SDK binary embedded in the Hydra executable vs the user's installed `claude`) is an Open item owned by [./15-packaging-and-operations.md](./15-packaging-and-operations.md); the instance's binary-path field can express either.
+Instance config is validated against `configSchema` and stored on the controller; the runner receives the instance's config with each probe and session request. Secret-valued entries are `provider-instance`-owned rows in the secrets table ([./13-security.md](./13-security.md)): the controller decrypts them and sends them inline with each probe or session request over the runner WebSocket; they are held in memory for the operation and never land on runner disk (the same posture as git credentials, 13 §9). They are never logged and never returned by the API.
 
 ## 3. Capability snapshots
 
@@ -113,7 +110,7 @@ Discovery never creates, resumes, or mutates a provider conversation, and never 
 |---|---|
 | Claude Code | a throwaway SDK `query()` with a prompt that never yields (`persistSession: false`, hooks disabled, MCP stripped, bounded timeout) reads the init message: account identity, subscription/plan label, `apiProvider` (first-party vs Bedrock etc.), CLI version. No API call is made. |
 | Codex | `initialize` (user-agent carries the version) + `account/read` + `model/list` over a probe-only app-server process |
-| pi | `checkAuth(providerId)` per configured upstream provider; package version from the pinned SDK |
+| pi | `pi auth check --provider <id> --json` per configured upstream provider; `pi --version` for the harness version |
 
 `auth.status` is `unauthenticated` when the harness reports no usable login, `error` when the probe itself failed (binary missing, protocol error), `ok` otherwise. A provider instance with `auth.status !== "ok"` on a runner is filtered out of placement for that runner ([./03-controller-and-runners.md](./03-controller-and-runners.md)).
 
@@ -123,7 +120,7 @@ Probe-first, curated overlay where introspection falls short:
 
 - **Codex**: models, reasoning efforts and service tiers come fully probed from `model/list`.
 - **Claude Code**: the catalog is curated (option descriptors cannot be probed) but gated by the probed CLI version, t3-code style: an entry is offered only when the runner's CLI is new enough.
-- **pi**: not pinned by ticket 12. Spec addition: models come from pi's own model registry (`models.json`) for the authenticated upstream providers, treated as probed.
+- **pi**: models come from RPC `get_available_models` for the authenticated upstream providers, treated as probed.
 - **Custom-model entries** are the user's escape hatch on every provider: a user-typed slug with no descriptor, rendered generically.
 
 **Well-known option ids** are documented conventions, not an enum: `effort`, `thinking`, `contextWindow`, `fastMode`. The composer renders dedicated controls for them and workflows can reference them portably across providers; unknown ids render generically from the descriptor. Reasoning effort is a per-model `effort` option: probed per model for Codex, curated per model for Claude.
@@ -133,15 +130,19 @@ Probe-first, curated overlay where introspection falls short:
 ```ts
 interface ProviderAdapter {
   providerId: string
-  probe(config: InstanceConfig): Promise<ProbeResult>
-  startSession(spec: SessionSpec, ctx: RunnerContext): Promise<SessionBinding>
-  sendInput(sessionId: string, input: TurnInput): Promise<SendResult>
-  interrupt(sessionId: string): Promise<void>
-  respondToRequest(sessionId: string, requestId: string, decision: ApprovalDecision): Promise<void>
-  stopSession(sessionId: string): Promise<void>
-  listSessions(): Promise<SessionBinding[]>   // reconciliation after runner restart
-  events: AsyncIterable<ProviderEvent>        // the one output channel
+  probe(config: InstanceConfig): Effect<ProbeResult>
+  startSession(spec: SessionSpec, ctx: ProviderRunnerContext): Effect<SessionBinding>
+  sendInput(sessionId: string, input: TurnInput): Effect<SendResult>
+  interrupt(sessionId: string): Effect<void>
+  respondToRequest(sessionId: string, requestId: string, decision: ApprovalDecision): Effect<void>
+  stopSession(sessionId: string): Effect<void>
+  listSessions(): Effect<SessionBinding[]>    // reconciliation after runner restart
+  events: Stream<ProviderEvent>               // the one output channel
 }
+// Effect-typed natively (ADR 0031): methods return Effects and `events` is a Stream, so session supervision,
+// interruption and subprocess cleanup on the runner use Effect's structured concurrency directly.
+// Vendor SDK boundaries (the Agent SDK's async generator, Codex stdio JSONL, pi's RPC) are wrapped at the edge.
+// A promise-shaped facade is a post-v1 option if runner-side plugin loading wants one.
 
 interface SessionSpec {                       // controller-authored - carries ids, never paths
   instanceId: string
@@ -150,11 +151,17 @@ interface SessionSpec {                       // controller-authored - carries i
   accessMode: AccessMode                      // always a mode the target provider declares native
   systemPrompt?: string
   mcpServers?: McpServerConfig[]              // the decided passthrough field (#11)
+  disallowedTools?: string[]                  // harness tool families to remove, Hydra vocabulary (rules below); copied from the Agent
   continue?: { nativeSessionId: string; mode: "resume" | "fork" }
   outputSchema?: JsonSchema                   // structured result contract, section 7
 }
 
-interface RunnerContext { cwd: string | null }  // runner-resolved from workspaceId
+interface ProviderRunnerContext {             // the facts the runner resolved for this session on this machine
+  cwd: string | null                          // workspace or scratch dir; null only as the controller-side "no workspace" marker (§9.1)
+  env: Record<string, string>                 // session env: HYDRA_*, GH_TOKEN, GIT_CONFIG_*, PATH prepend (§9.3)
+  home: string                                // this instance's provider home on this runner (CLAUDE_CONFIG_DIR / CODEX_HOME / PI_CODING_AGENT_DIR)
+  binary: string                              // resolved harness binary path on this runner (§11)
+}
 
 interface SendResult { turnId: string; delivery: "opened" | "steered" }
 
@@ -169,16 +176,19 @@ type ApprovalDecision = "allow" | "allow_always" | "deny" | "cancel"
 
 Rules:
 
-- **No merged spec type.** `startSession` takes the controller-authored `SessionSpec` byte-for-byte (auditable, storable, comparable) plus a `RunnerContext` holding exactly the facts the runner resolved: `cwd` now; resolved binary path and environment are later additions to `RunnerContext`, never to `SessionSpec`.
+- **No merged spec type.** `startSession` takes the controller-authored `SessionSpec` byte-for-byte (auditable, storable, comparable) plus a `ProviderRunnerContext` holding exactly the facts the runner resolved: cwd, session env, provider home, binary. Nothing here ever moves to `SessionSpec`. (Renamed from ticket 12's `RunnerContext`, 2026-08-31, [#43](https://github.com/rogierpennink/hydra/issues/43): the old name read as "facts about the runner", which it is not.)
 - **Ids in, paths out.** The runner's session supervisor resolves `workspaceId` to a path and hands the adapter the context. The adapter never sees workspace ids; the controller never sees paths (runner paths are runner-owned opaque facts, ADR 0005).
 - `accessMode` on the spec is post-fallback (section 8.4); adapters carry no fallback logic and may reject a mode they do not declare native as a programming error.
 - `mcpServers` is the per-session MCP-config passthrough decided in [plugin architecture](https://github.com/rogierpennink/hydra/issues/11): it carries self-injection and, later, plugin-contributed MCP tools. In v1 hydra-as-a-tool is the `hydra` CLI, not MCP ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md)), so v1 core passes nothing here by default.
+- `disallowedTools` names harness tool *families* in a small Hydra vocabulary (`edit`, `write`, `shell`, `web`, ...); the adapter owns the mapping to its harness's tool names and declares `disallowedTools: native | unsupported` in its capabilities. Unsupported is honest, not silent: the controller passes the field anyway, the adapter ignores it, and the UI shows "not enforced on <provider>" from the snapshot. The value is the Agent's `disallowedTools` copied at spawn ([./02-domain-model.md](./02-domain-model.md) rule 9); assistants default to `["edit"]` ([./12-assistants.md](./12-assistants.md) section 7). Resolved 2026-09-01, [Domain model residue](https://github.com/rogierpennink/hydra/issues/46).
 - `outputSchema` carries the agent step's declared schema ([./07-workflows.md](./07-workflows.md)); the adapter applies it by the provider's mechanism (section 7).
-- **Deliberately absent:** `readThread` / `rollbackThread` (return with the checkpoint/revert feature; fork covers branching), a separate steer method, any queue surface, a mode-switch method.
+- **Deliberately absent:** `readThread` / `rollbackThread` (return with the checkpoint/revert feature; fork covers branching), a separate steer method, any queue surface, a mode-switch method (so a session's access mode locks at start; the composer shows it read-only, [./14-web-app.md](./14-web-app.md) §App shell, 2026-09-01).
 
 **Open:** `TurnInput` is pinned only as "the user input for one turn" (text). Whether it carries attachments or images in v1 is not decided.
 
-**Open:** ticket 16 requires the runner to inject `HYDRA_API_URL`, `HYDRA_TOKEN`, `HYDRA_SESSION=1` (and ticket 18 `GH_TOKEN` plus `GIT_CONFIG_*`) into the provider process, and the adapter is the party that spawns that process. Ticket 12 pins `RunnerContext` as `{ cwd }` with "env later". The field through which the runner hands the adapter the session environment must be added at build time (an `env` map on `RunnerContext` is the natural place).
+Amended 2026-09-01 ([Prototype: the app shell and navigation](https://github.com/rogierpennink/hydra/issues/51)): `TurnInput` carries an optional `modelSelection: { model, options }` that replaces the session's selection from that turn on - Claude `setModel()` on the live `query()` before the turn, Codex the per-turn `model` on `turn/start`, pi `set_model` / `set_thinking_level`. It applies only when the input **opens** a turn; a steered turn keeps its model (the controller holds the change as Queued Input until `turn.completed`, section 5). The Session row's `modelSelection` is updated on delivery, so resume and fork carry the new value. This is the one live setting of a running thread; every other field of `SessionSpec` is fixed at start.
+
+The session environment rides `ctx.env` (resolved 2026-08-31, [#43](https://github.com/rogierpennink/hydra/issues/43)). The adapter builds the spawned process environment as: the runner's base env, then the instance config env, then `ctx.env` - Hydra-owned keys always win, so instance config can never override `HYDRA_SESSION` or the git credential material.
 
 ### 4.1 Session identity and binding
 
@@ -310,7 +320,7 @@ An agent step may declare an output schema; the graph routes on the schema-confo
 |---|---|---|---|
 | Claude Code | `outputFormat: { type: "json_schema", schema }` on `query()`; SDK validates and re-prompts | `structured_output` on the final `result` message | `subtype: "error_max_structured_output_retries"`, or `success` with no `structured_output` (treated as failure per SDK docs) |
 | Codex | `outputSchema` on `turn/start` (stable, not experimental-gated); enforced server-side as strict constrained decoding | text of the turn's final `agentMessage` item | turn `failed`, or turn completed with a final item that is not an `agentMessage` (missing output; the adapter may retry with a fresh `turn/start`, default once) |
-| pi | adapter-registered `submit_result` custom tool via `customTools`: Typebox parameters = output schema, `terminate: true`, `constrainedSampling: { type: "json_schema", strict: "prefer" }`; pi validates args and feeds violations back to the model | the tool's captured args (a trailing assistant message is ignored) | agent settled without calling the tool: adapter re-prompts ("You must call submit_result with ...") a bounded number of times (default 2 retries, the research's example figure), then schema-failure |
+| pi | `submit_result` tool registered by the Hydra extension file (section 10.3): Typebox parameters = output schema, `terminate: true`, `constrainedSampling: { type: "json_schema", strict: "prefer" }`; pi validates args and feeds violations back to the model | the tool's captured args (carried on `tool_execution_end`; a trailing assistant message is ignored) | agent settled without calling the tool: adapter re-prompts ("You must call submit_result with ...") a bounded number of times (default 2 retries, the research's example figure), then schema-failure |
 
 Normalized outcome, carried as `structuredResult` on `turn.completed` when the session has an `outputSchema`:
 
@@ -323,7 +333,7 @@ type StructuredResult =
 
 The runner re-validates `value` against the declared schema before routing, on every provider (cheap, catches harness regressions, one uniform error surface). Schemas are linted at workflow validation ([./07-workflows.md](./07-workflows.md)) against the common strict subset, regardless of which provider the step runs on: OpenAI's strict subset is the binding constraint (`additionalProperties: false`, all properties required), within JSON Schema draft-07 (Claude) and pi-ai's strict-transform subset (no `$ref`, `oneOf`, `patternProperties`). pi string enums compile to `StringEnum`, not unions of literals.
 
-`outputSchema` lives on `SessionSpec` only, and the adapter applies it to **every turn** of that session by the provider's mechanism (Codex re-sends it on each `turn/start`, Claude on each `query()`, pi registered the tool at session creation). `TurnInput` never carries it. This works because a session belongs to exactly one agent step and the schema is that step's: iterations re-enter the same session and each yields its own `structuredResult` ([Workflow execution semantics](https://github.com/rogierpennink/hydra/issues/36)).
+`outputSchema` lives on `SessionSpec` only, and the adapter applies it to **every turn** of that session by the provider's mechanism (Codex re-sends it on each `turn/start`, Claude on each `query()`, pi's extension registers the tool at session start). `TurnInput` never carries it. This works because a session belongs to exactly one agent step and the schema is that step's: iterations re-enter the same session and each yields its own `structuredResult` ([Workflow execution semantics](https://github.com/rogierpennink/hydra/issues/36)).
 
 ## 8. Access modes
 
@@ -350,6 +360,7 @@ From `research/pi-approval-parking.md` (branch `research/pi-approval-parking`), 
 - **A park serializes the tool batch**: preflights run sequentially and sibling calls wait for all preflights. Same shape as Claude; accepted.
 - **Handler exceptions deny fail-safe**: wrap the wait so an IPC failure produces a clear deny reason, never a silent allow.
 - **No contractual guarantee** (pre-1.0): pin the pi version and ship a regression test asserting that a pending `tool_call` handler delays execution.
+- **The park is bridged in-band over RPC**: the Hydra extension's `tool_call` handler blocks on `ctx.ui`, which RPC mode surfaces as an `extension_ui_request` on stdout; the adapter answers with `extension_ui_response` when `respondToRequest` arrives. No side channel.
 - While parked no LLM connection is held open; the turn stays active; `tool_execution_start` has already fired, so the UI overlays "awaiting approval" on the started item.
 - On Claude, `canUseTool` is reached only when the pipeline falls through to a prompt; auto-approved tools never hit it. That is the intended behaviour for the mapped modes. A `PreToolUse` hook is the seam if every call must be observed.
 
@@ -369,17 +380,41 @@ Sandboxing is enforced by Codex (Seatbelt on macOS, bubblewrap on Linux; WSL1 un
 
 Every provider instance has its own isolated provider home (one instance = one login = one home; never per session), and every session runs inside its instance's home, so user-global instructions, skills, packages and memory never leak into Hydra sessions (constraint from the [memory-interface prototype](https://github.com/rogierpennink/hydra/issues/31): Codex picked up `~/.codex/AGENTS.md` and pi discovered `~/.claude/skills` until isolated). The handed knobs are the config-dir variables, `--setting-sources project`, `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`; the rest of the table are spec additions supported by the research:
 
+Isolation is the default for every session kind. **Threads are the one exception**: they see the user's own material, linked live - the User Material rules below (resolved 2026-09-02, [User knowledge in Hydra sessions](https://github.com/rogierpennink/hydra/issues/52), [ADR 0032](../adr/0032-threads-link-the-users-own-material.md)). Assistant sessions stay isolated (the user's material distorted them, #31) and workflow agent steps stay isolated for reproducibility: a step must behave identically on every runner, and if an Agent needs knowledge, that is the post-v1 Hydra-owned-knowledge work, not a link.
+
 | Provider | Isolation |
 |---|---|
 | Claude Code | `CLAUDE_CONFIG_DIR` per instance (never `HOME`: relocating `HOME` breaks the macOS Keychain lookup and the CLI reports "Not logged in"); `settingSources: ["project"]` (the SDK equivalent of `--setting-sources project`) so only the workspace's own `.claude/` loads, plus `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` (auto memory loads regardless of setting sources); `strictMcpConfig: true` so only `SessionSpec.mcpServers` apply. The `env` option replaces the subprocess environment: spread the runner's base env, then session env. |
-| Codex | `CODEX_HOME` per instance; the app-server process is started with it. |
-| pi | `PI_CODING_AGENT_DIR` per instance; project-local `.pi/extensions` stay disabled (arbitrary TS, supply-chain surface). |
+| Codex | `CODEX_HOME` per instance; the app-server process is started with it. **Amended 2026-09-02 (#52):** `CODEX_HOME` alone does not isolate skills - Codex discovers them HOME-relative (`~/.agents/skills`, plus cwd/repo `.agents/skills`), and no global disable flag is documented. Isolated Codex sessions (everything but a Thread with User Material) therefore run with `HOME` overridden to a neutral directory under the instance home; auth is `CODEX_HOME`-relative (`auth.json`) so login survives. **Verify at build time:** nothing else Codex needs is HOME-relative. |
+| pi | `PI_CODING_AGENT_DIR` per instance; launched with `--no-extensions --no-skills --no-prompt-templates --no-themes --no-approve` so nothing in the agent dir or the project's `.pi/` loads (arbitrary TS, supply-chain surface); the Hydra extension alone is passed explicitly with `-e`, which loads even under `--no-extensions`. |
 
 The instance's config dir is also where the vendor login lives, which is why the home is per instance on every provider.
 
-**Codex needs a cwd even when workspace-less.** Claude and pi take `cwd: null` for a workspace-less session. Codex has no system-prompt parameter in `codex exec`; instructions travel as `AGENTS.md` in the cwd. For a workspace-less Codex session the runner provisions a scratch directory (not a Workspace) and the adapter materializes `systemPrompt` into `AGENTS.md` there.
+**Every workspace-less session gets an empty scratch cwd, and context-file loading is off.** "`cwd: null`" would mean `process.cwd()` on every harness (Claude Agent SDK and pi both default to it), and both read instruction files from there: pi loads `AGENTS.md` / `CLAUDE.md` from the cwd, every parent directory and `~/.pi/agent/`; the Claude SDK loads the cwd's `CLAUDE.md` whenever `settingSources` includes `project`. So a workspace-less session could silently pick up a file from the runner's install directory. Rule ([Assistant runtime](https://github.com/rogierpennink/hydra/issues/40)): the runner provisions an **empty scratch directory** (not a Workspace) as cwd for every workspace-less session on every harness, and the adapter disables context-file discovery - Claude `settingSources: []`, pi `--no-context-files`. Codex has no system-prompt parameter and takes instructions only as `AGENTS.md` in the cwd, so the Codex adapter materializes `systemPrompt` into `AGENTS.md` in *its* scratch directory; no other harness can see that directory, so nothing is duplicated. `ProviderRunnerContext.cwd` is therefore never `null` in practice; the type keeps `null` for "no workspace" semantics at the controller.
 
 **Verify at build time:** whether the Codex app-server protocol (`thread/start` `personality`, per-turn params, or a developer-instructions field) offers a proper system-prompt channel; if it does, prefer it and keep the scratch cwd only because `thread/start` requires one.
+
+#### User Material: what a Thread sees
+
+**User Material** is the user's own knowledge and configuration from a local harness installation - skills, subagents, instructions, commands, settings ([CONTEXT.md](../../CONTEXT.md)). Threads get it; nothing else does (resolved 2026-09-02, [#52](https://github.com/rogierpennink/hydra/issues/52), [ADR 0032](../adr/0032-threads-link-the-users-own-material.md)). The intent is t3-code parity: a Thread is the harness with different UI sauce, and t3-code loads the user's config wholesale (it never restricts `settingSources`).
+
+**Source.** Each (instance × runner) pair may carry a `userMaterialDir`: the installation's directory on that machine (Claude: a config dir, `~/.claude` or a second installation's `CLAUDE_CONFIG_DIR`; Codex: a `CODEX_HOME`; pi: an agent dir). It is a runner-scoped opaque path stored beside the capability snapshot, never in instance config (§2.1 stays path-free). On the local runner it is **auto-set** when first-run detection ([./14-web-app.md](./14-web-app.md) §Onboarding) recognizes the installation - the material comes with the provider, no separate opt-in; creating an instance by hand (a second, work installation) includes the decision, assumed yes; the field is clearable per runner. Multiple local installations map to multiple instances, exactly like multiple logins.
+
+**Mechanism: live directory symlinks** at instance provision, so material is always current. Directory-level links make the user's own inner symlinks resolve normally (Claude documents symlinked skills as supported and loaded once even when reachable from two locations). No copying, no de-dup machinery: each harness reads only its native locations.
+
+| Provider | A Thread with User Material |
+|---|---|
+| Claude Code | Symlink `skills/`, `agents/`, `commands/`, `rules/`, `CLAUDE.md`, `settings.json` from the material dir into the instance `CLAUDE_CONFIG_DIR`; `plugins/` too (**verify at build time**: which setting source gates plugin loading is undocumented). `settingSources: ["user", "project", "local"]` with a workspace, `["user"]` workspace-less (the scratch-cwd rule above stands). `strictMcpConfig: false` for Threads only, so the instance login's claude.ai connectors load. `.claude.json` **never links** - it carries login and account state - so user-scoped MCP servers are a stated v1 gap. Auto memory: `CLAUDE_CODE_DISABLE_AUTO_MEMORY` is lifted for Threads on a primary or adopted workspace (stable cwd, memory accrues in the instance home) and stays set for ephemeral-worktree and workspace-less Threads (fresh cwd every time; it would only litter orphan memory dirs). |
+| Codex | Symlink the material dir's `AGENTS.md` (and `AGENTS.override.md` if present) into the instance `CODEX_HOME`. Skills arrive natively: the Thread keeps the real `HOME`, so `~/.agents/skills` loads by discovery. `config.toml` **never links** - it is Hydra-owned (compaction knob) and Codex writes trust state back into it. |
+| pi | Launch flags unchanged (`--no-skills --no-prompt-templates --no-extensions ...`) plus explicit additions: `--skill <dir>/skills --skill ~/.agents/skills` and `--prompt-template <dir>/prompts`; symlink the material dir's `AGENTS.md` / `CLAUDE.md` into the instance `PI_CODING_AGENT_DIR`. **Extensions never load, even for Threads** - they are arbitrary TypeScript sharing the process with Hydra's own approval extension and could fight the approval loop. This is the one deliberate parity gap. |
+
+**What parity costs, accepted** ([ADR 0032](../adr/0032-threads-link-the-users-own-material.md)): the user's hooks and permission allow-rules ride in on Claude and can auto-approve tools beneath an `approval-required` Thread profile, and a session can write through the links into the real `~/.claude`. Both are the trust the user already extends to the harness itself; Hydra states them and does not half-sandbox.
+
+**Absent material.** On a runner without the material dir, the Thread runs plain - no spawn failure, no copying across machines; the composer's instance group row states it ([./14-web-app.md](./14-web-app.md) §App shell). t3-code offers no prior art here: its instances are per-machine, so the case cannot arise there.
+
+**Code fencing.** The Thread linking machinery is its own runner module, invoked only for Thread sessions; isolated-session provisioning never imports it (same posture as 15 §1's mode isolation), so cross-pollution between Thread and isolated provisioning is a build error, not a runtime surprise.
+
+**Post-v1**, on the map: Hydra-owned knowledge per Agent materialized fleet-wide (shape 3, strongly wanted - and if it gets good enough it may retire even the Thread link); linking per-project `memory/` for adopted-in-place folders as a finer cut of the material set.
 
 ### 9.2 Compaction control
 
@@ -389,17 +424,25 @@ For assistant sessions ([./12-assistants.md](./12-assistants.md)) provider-nativ
 |---|---|
 | Claude Code | `DISABLE_COMPACT=1` in the session env (the `--autocompact` flag equivalent) |
 | Codex | `model_auto_compact_token_limit` set out of reach via the instance's `config.toml` in `CODEX_HOME` |
-| pi | `compaction.enabled = false` in session settings |
+| pi | RPC `set_auto_compaction: false` at session start |
 
-The adapter reports context usage through `session.usage.updated`; the controller compares it against the rotation threshold. Rotation itself (one flush turn on the dying session, then a fresh session with core memory and topic index injected) is the assistant subsystem's contract ([./12-assistants.md](./12-assistants.md)). Sessions of agents that are not assistants keep native compaction on; `context_compaction` items make it visible.
+The adapter reports context usage through `session.usage.updated`; the controller compares it against the rotation threshold (`min(0.7 x window, 200k tokens)` by default, checked after every `turn.completed`). Rotation itself (one flush turn on the dying session, then a fresh session with core memory and topic index injected) is the assistant subsystem's contract ([./12-assistants.md](./12-assistants.md)). Sessions of agents that are not assistants keep native compaction on; `context_compaction` items make it visible.
 
-**Open:** where the injected memory (core note plus topic index) lands per harness - in `SessionSpec.systemPrompt` or as the first user turn - is not pinned; the per-harness mapping belongs here once decided.
+**Memory injection mapping (pinned).** The controller composes `SessionSpec.systemPrompt` for an assistant session as: the agent's `systemPrompt` (persona), the hydra-as-a-tool skill (section 9.3), then a `## Memory (core)` section and a `## Memory topics` index, volatile content last. It lands in the harness's system-prompt channel on every provider:
+
+| Provider | Channel |
+|---|---|
+| Claude Code | the SDK's `systemPrompt` option (a plain string, not the preset-plus-append form, so nothing of the CLI's default prompt leaks in) |
+| Codex | `AGENTS.md` in the session's scratch cwd (section 9.1), Codex's only instruction channel |
+| pi | the session's system prompt parameter |
+
+Never the first user turn: memory is standing context, and a synthetic first message would show in the conversation view as a message nobody sent.
 
 **Verify at build time:** the exact knob names above are as observed in the prototype; confirm each against the pinned harness version.
 
 ### 9.3 Session environment and skills
 
-The runner injects, per session: `HYDRA_API_URL`, `HYDRA_TOKEN` (the session token; dies with the session), `HYDRA_SESSION=1` (makes the `hydra` CLI refuse file credentials), plus the git credential material (`GH_TOKEN`, `GIT_CONFIG_*`) whose mechanics [./13-security.md](./13-security.md) owns (session token: [./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md)). The runner makes the `hydra` binary reachable from the session (PATH prepend or absolute path: Open in [./15-packaging-and-operations.md](./15-packaging-and-operations.md)). One provider-agnostic skill source describes hydra-as-a-tool; each adapter materializes it into its harness's native form (Claude skill file under the session's project settings, Codex `AGENTS.md` section, pi prompt/skill file) at session start.
+The runner injects, per session: `HYDRA_API_URL`, `HYDRA_TOKEN` (the session token; dies with the session), `HYDRA_SESSION=1` (makes the `hydra` CLI refuse file credentials), plus the git credential material (`GH_TOKEN`, `GIT_CONFIG_*`) whose mechanics [./13-security.md](./13-security.md) owns (session token: [./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md)). The runner makes the `hydra` binary reachable from the session by prepending its own bin directory to `PATH` ([./15-packaging-and-operations.md](./15-packaging-and-operations.md) §2), so `which hydra` works and the skill text stays portable. One provider-agnostic skill source describes hydra-as-a-tool; each adapter materializes it into its harness's native form (Claude skill file under the session's project settings, Codex `AGENTS.md` section, pi prompt/skill file) at session start.
 
 ## 10. Per-provider build notes
 
@@ -407,17 +450,17 @@ The runner injects, per session: `HYDRA_API_URL`, `HYDRA_TOKEN` (the session tok
 
 - **Surface**: `query()` async generator of typed `SDKMessage` plus the `Query` control object (`interrupt`, `setPermissionMode`, `setModel`, `streamInput`, `getContextUsage`, `close`). One long-lived `query()` per session in streaming-input mode (required for the control methods and for steering); `includePartialMessages: true` for deltas. Session id on the init message and every `result`.
 - **Process**: each session is one Claude Code CLI subprocess, about 1 GiB RAM as a starting point, memory growing over long sessions; no built-in timeout, no per-subagent deadline. The runner's supervisor owns deadlines and recycling; `maxConcurrentSessions` derives from RAM (~1 session per 2 GiB, [./03-controller-and-runners.md](./03-controller-and-runners.md)). Subagent caps via `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH` / `CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS` and `maxBudgetUsd`.
-- **Binary**: `pathToClaudeCodeExecutable` selects the CLI; the SDK spawns it without a shell (resolve npm shims to the real binary). Embedded vs installed default: Open in [./15-packaging-and-operations.md](./15-packaging-and-operations.md) (section 2.1).
-- **Auth**: delegation only. The CLI holds its own login in the instance's `CLAUDE_CONFIG_DIR` (Linux: `.credentials.json` in that dir; macOS: Keychain, which is why `HOME` is never overridden). Hydra never reads, extracts, or refreshes vendor tokens. API-key / Bedrock / Vertex routes are instance env (`ANTHROPIC_API_KEY`, `CLAUDE_CODE_USE_BEDROCK=1`, ...), not separate code paths. The read-only probe reads `AccountInfo` (email, subscription type, `apiProvider`) from the init message.
+- **Binary**: `pathToClaudeCodeExecutable` points at the runner-installed `claude` (`ctx.binary`; the SDK spawns it without a shell). The SDK's bundled per-platform CLI packages are excluded from the Hydra build; the installed CLI is floor-pinned to the SDK's own version - SDK 0.3.N pairs with CLI 2.1.N, and newer CLI with older SDK is the supported direction ([ADR 0028](../adr/0028-provider-harnesses-are-runner-installed-executables.md), [./15-packaging-and-operations.md](./15-packaging-and-operations.md) §12).
+- **Auth**: delegation only. The CLI holds its own login in the instance's `CLAUDE_CONFIG_DIR` (Linux: `.credentials.json` in that dir; macOS: a Keychain item keyed per config dir - `Claude Code-credentials-<hash of dir>` - so instance logins never collide with each other or with the user's personal login; when the Keychain rejects the write, e.g. locked over SSH, the CLI falls back to `.credentials.json` in the config dir. `HOME` is never overridden). Hydra never reads, extracts, or refreshes vendor tokens. API-key / Bedrock / Vertex routes are instance env (`ANTHROPIC_API_KEY`, `CLAUDE_CODE_USE_BEDROCK=1`, ...), not separate code paths. The read-only probe reads `AccountInfo` (email, subscription type, `apiProvider`) from the init message.
 
 **Risk:** Claude subscription auth. Research #2 (`research/claude-agent-sdk.md`) read Anthropic's Agent SDK policy as forbidding it ("Claude.ai subscription login is not permitted ... Hydra must design around API-key billing"); tickets 22 and 23 and the charting decision accept the t3-code posture (the user's own tool driving the user's own login through the unmodified vendor CLI; the prohibition targets products offering claude.ai login to other users). The decision stands; the risk that Anthropic reads it the other way is on record. API-key / Bedrock / Vertex remain first-class on the same instance config.
 - **Resume / fork**: `resume: <id>` (+ `forkSession: true`); transcripts under `$CLAUDE_CONFIG_DIR/projects/<encoded-cwd>/`; same-runner only (the alpha `sessionStore` mirror is not used in v1). `persistSession: false` for probes.
 - **Sharp edges**: single-shot `query()` throws after yielding an error result (wrap iteration); `env` replaces the subprocess env; MCP tools need explicit allow rules (`acceptEdits` does not auto-approve them); `AskUserQuestion` and `ExitPlanMode` are intercepted in `canUseTool` and mapped to `user_input` / `plan`.
-- **Stability**: 0.x semver, weekly releases version-locked to the CLI, several breaking changes shipped. Pin the exact SDK version; treat CLI-version-gated behaviour as part of the adapter contract; keep the SDK entirely behind the adapter seam.
+- **Stability**: 0.x semver, weekly releases version-locked to the CLI, several breaking changes shipped. Pin the exact SDK version; the installed CLI floats above the floor (version policy in [./15-packaging-and-operations.md](./15-packaging-and-operations.md) §12); treat CLI-version-gated behaviour as part of the adapter contract; keep the SDK entirely behind the adapter seam.
 
 ### 10.2 Codex (app server)
 
-- **Transport**: spawn `codex app-server` (CLI from npm `@openai/codex` or the static-binary installer), newline-delimited JSON-RPC 2.0 over stdio with the `jsonrpc` field **omitted on the wire**; a thin Hydra-owned codec, not a strict JSON-RPC library. One `initialize` + `initialized` per connection; `capabilities.experimentalApi` stays off (experimental surface has no compatibility guarantee). WebSocket transport is explicitly unsupported.
+- **Transport**: spawn `codex app-server` (CLI from npm `@openai/codex` or the static-binary installer), newline-delimited JSON-RPC 2.0 over stdio with the `jsonrpc` field **omitted on the wire**; a thin Hydra-owned codec, not a strict JSON-RPC library. One `initialize` + `initialized` per connection; `capabilities.experimentalApi` stays off - the stable surface keeps deprecated fields for compatibility, the experimental surface promises nothing, and t3code's opting into experimental is prior art to avoid, not follow (pinned, [#43](https://github.com/rogierpennink/hydra/issues/43)). WebSocket transport is explicitly unsupported.
 - **Model**: Thread > Turn > Item maps 1:1 onto Session > Turn > Item. `thread/start` (`model`, `cwd`, `approvalPolicy`, `sandbox`, `ephemeral`), `thread/resume`, `thread/fork`, `turn/start` (per-turn `model`, `outputSchema`), `turn/steer`, `turn/interrupt`. Notifications `turn/started` -> `item/started` -> deltas -> `item/completed` -> `turn/completed`; usage via `thread/tokenUsage/updated`. Unknown notifications are ignored for forward compatibility.
 - **Approvals**: server-to-client requests (section 8.1); the adapter implements every request handler even where the answer is always decline.
 - **Process ownership**: topology unpinned; suggested one app-server process per instance per runner (section 4.1). Single-writer per thread; the server unloads idle unsubscribed threads after 30 minutes and emits `thread/closed` (maps to `session.exited`, resumable).
@@ -425,19 +468,20 @@ The runner injects, per session: `HYDRA_API_URL`, `HYDRA_TOKEN` (the session tok
 - **Auth**: ChatGPT OAuth or API key via `account/*`; credentials in `$CODEX_HOME/auth.json` (file store default); tokens auto-refresh. `cli_auth_credentials_store` stays `file` on runners.
 - **Stability**: no cross-version protocol guarantee. Pin the CLI release, generate types with `codex app-server generate-ts` for that release, regenerate and re-verify on every upgrade.
 
-### 10.3 pi (SDK in a child process)
+### 10.3 pi (standalone binary, RPC mode)
 
-- **Hosting**: pi runs in a Hydra-owned child host process per session (SDK `createAgentSession()` inside the host, not `--mode rpc`): richer typed API, full control of the `tool_call` seam, crash isolation per session, consistent with ADR 0003. The host is spawned from the Hydra binary with `spawn(process.execPath, ...)`, never `fork()`; on-disk TypeScript entrypoints run via `BUN_BE_BUN=1` ([./15-packaging-and-operations.md](./15-packaging-and-operations.md)). Host and adapter speak a private IPC carrying the normalized events, `sendInput`, `interrupt`, and approval decisions.
-- **Surface**: `session.prompt()`, `session.steer()`, `session.subscribe()` (events `agent_start/settled`, `turn_*`, `message_*` with `text_delta` / `thinking_delta`, `tool_execution_*`, `compaction_*`, retry events); `customTools` for `submit_result`; `tools` / `excludeTools` allowlists; `authPath` / `PI_CODING_AGENT_DIR` for isolation; `checkAuth()` for probing. Sessions are tree-structured JSONL files under the instance dir; `fork()` branches in place.
+- **Hosting**: pi runs as its own executable - the official standalone Bun-compiled binary, installed per runner ([./15-packaging-and-operations.md](./15-packaging-and-operations.md) §12) - one `pi --mode rpc` child process per session, LF-delimited JSONL over stdio. This supersedes the earlier SDK-in-a-child-host consolidation (decided 2026-08-31, [#43](https://github.com/rogierpennink/hydra/issues/43)): an external binary keeps pi independently updatable like the other two harnesses, the RPC protocol is the contract instead of a pre-1.0 TypeScript API, and no pi code compiles into the Hydra binary. Launch: `--mode rpc --no-context-files --no-extensions --no-skills --no-prompt-templates --no-themes --no-approve -e <hydra extension>`, `--session-dir` under the instance home, `--session-id` so Hydra picks the session id up front.
+- **The Hydra extension file**: one TypeScript file materialized into the instance home at session start and loaded with `-e` (explicit paths load even under `--no-extensions`; jiti and typebox ship inside pi's binary, so the extension's imports resolve). It carries the two seams RPC lacks: the awaited `tool_call` hook for approvals (section 8.2: parks on `ctx.ui`, bridged as `extension_ui_request` / `extension_ui_response`) and the `submit_result` structured-output tool (`pi.registerTool`, `terminate: true`; section 7).
+- **Surface**: `prompt` / `steer` / `follow_up` / `abort`; events `agent_start` .. `agent_settled`, `turn_*`, `message_*` deltas, `tool_execution_*`, compaction and retry events; `set_model`, `set_thinking_level`, `set_auto_compaction`; `get_session_stats` (tokens, cost, context usage). Sessions are tree-structured JSONL files under the instance dir; resume via `--session <id>`, fork via `--fork <id>` or in-process `fork {entryId}`.
 - **Absent by design**: subagents, plan mode, MCP (verify). Declared, not emulated.
-- **Auth**: multi-provider; `auth.json` in the instance dir holds raw vendor OAuth tokens (plain file on every OS, no keychain). Hydra never touches it.
-- **Stability**: pre-1.0 (0.84.x) with rapid churn and no stability promise; Node >= 22.19 for the reference runtime. Pin the exact version; regression-test the awaited `tool_call` behaviour (section 8.2) and the `submit_result` `terminate` handling on every bump.
+- **Auth**: multi-provider. The pinned v1 path is API-key auth - z.ai coding plan: provider `zai` (or `zai-coding-cn`), the key a `provider-instance` secret injected as `ZAI_API_KEY`. OAuth logins exist but are TUI-only (`/login`, no headless command); the fleet UI shows the copy-paste command as the fallback ([./15-packaging-and-operations.md](./15-packaging-and-operations.md) §12). `auth.json` in the instance dir holds raw vendor tokens (plain file on every OS); Hydra never touches it. Probe: `pi auth check --provider <id> --json`.
+- **Stability**: pre-1.0 (0.84.x), repeated RPC breaking changes, no protocol version on the wire (0.84.0 changed `message_update` to deltas, 0.43.0 renamed `branch` to `fork`, 0.32.0 split the queue commands). The tested-max version policy ([./15-packaging-and-operations.md](./15-packaging-and-operations.md) §12) matters most here; gate on `pi --version`, and regression-test the awaited `tool_call` park and `terminate` handling on every bump.
 
-**Verify at build time:** pi's SDK runs correctly under the Bun host (`research/bun-compile.md` verifies the spawn mechanism, not pi's Bun compatibility), and how the pinned pi package reaches the host on a runner (bundled into the Hydra binary vs the runner's npm global install).
+**Verify at build time:** the Hydra extension file against the pinned pi version (`tool_call` hook and `registerTool` API churn), and the strict LF JSONL framing.
 
 ## 11. Provider install portability and per-runner login
 
-Installs are one command per provider (Claude Code and Codex are self-contained binaries; pi is an npm global) and are installed at runner join; credentials are not distributed. Per-runner login is the durable model: refresh-token rotation with reuse detection (documented for Codex, structurally identical in pi, undocumented for Claude) makes two live copies of one credential log each other out. Hydra therefore drives each provider's own headless login on the runner and relays the device code or login URL to the user's browser; whether that runs inside `hydra runner join` or as a post-join step is Open in [./03-controller-and-runners.md](./03-controller-and-runners.md). The per-provider login flows are listed in [./15-packaging-and-operations.md](./15-packaging-and-operations.md) section 12. Copying a credential file remains a bootstrap shortcut owned by exactly one runner afterwards. All three vendors permit the user's own account on the user's own machines; prohibitions target sharing with other people. Credential posture: [./13-security.md](./13-security.md). Findings: `research/provider-portability.md` (branch `research/provider-portability`).
+Installs are one command per provider (all three are self-contained binaries: Claude Code and Codex native, pi Bun-compiled) and are installed at runner join with a floor-pinned version policy ([ADR 0028](../adr/0028-provider-harnesses-are-runner-installed-executables.md), [./15-packaging-and-operations.md](./15-packaging-and-operations.md) §12); credentials are not distributed. Per-runner login is the durable model: refresh-token rotation with reuse detection (documented for Codex, structurally identical in pi, undocumented for Claude) makes two live copies of one credential log each other out. Hydra therefore drives each provider's own headless login on the runner as a post-join step from the fleet UI ([./03-controller-and-runners.md](./03-controller-and-runners.md) §3.3), relaying the device code or login URL to the user's browser. The per-provider login flows are listed in [./15-packaging-and-operations.md](./15-packaging-and-operations.md) section 12. Copying a credential file remains a bootstrap shortcut owned by exactly one runner afterwards. All three vendors permit the user's own account on the user's own machines; prohibitions target sharing with other people. Credential posture: [./13-security.md](./13-security.md). Findings: `research/provider-portability.md` (branch `research/provider-portability`).
 
 ## 12. Cost and usage
 
@@ -449,11 +493,11 @@ v1 records, per session, every `session.usage.updated` snapshot and, per turn, `
 - `readThread` / `rollbackThread` with the checkpoint/revert feature (v1 keeps fork and the normalized stream as the record).
 - Plugin-contributed MCP tools through `SessionSpec.mcpServers` (v1 keeps the field).
 - Rate-table cost pricing and a cost dashboard (v1 keeps `costUsd` and usage snapshots).
-- Fleet-managed harness updates (v1 surfaces version skew per snapshot).
 - Cross-runner session resumability via transcript mirroring (v1 pins sessions to their runner).
 - Additional stream kinds (`reasoning_summary_text`, tool-argument streaming) and item kinds (review mode, image generation) as open-enum additions.
 - Hydra-level OS sandboxing as a probed runner capability (ADR 0003).
 - ACP-based adapters (Cursor and similar) need an extension-method seam beyond `sessionUpdate` mapping.
+- **Reusing the user's existing local login, and moving logins between runners** - strongly wanted (noted 2026-09-01 by [Web app details](https://github.com/rogierpennink/hydra/issues/45)): adopting the `claude` / `codex` / `pi` login already on the user's laptop instead of a fresh paste-a-code per instance, `claude setup-token` (one year, no rotation to race) as the Claude path, and Hydra shuffling tokens so a new runner needs no login at all; together with the instance-level "use my own binary and my own login" opt-in that skips home isolation (section 2.1 lists the binary half). The blocker to reopen is the refresh-token rotation fact from ticket #23; `setup-token` is why it may be solvable for Claude specifically.
 
 ## Sources
 
@@ -473,8 +517,9 @@ Tickets:
 - [Plugin architecture (#11)](https://github.com/rogierpennink/hydra/issues/11), MCP passthrough
 - [Agent-operates-system surface (#16)](https://github.com/rogierpennink/hydra/issues/16), session env and skills
 - [Controller/runner architecture (#7)](https://github.com/rogierpennink/hydra/issues/7), probed facts and placement
-- [Research: Bun compile feasibility (#34)](https://github.com/rogierpennink/hydra/issues/34), pi host spawning
+- [Research: Bun compile feasibility (#34)](https://github.com/rogierpennink/hydra/issues/34)
+- [Runner substrate details (#43)](https://github.com/rogierpennink/hydra/issues/43): `ProviderRunnerContext`, instance config vs paths, `provider-instance` secrets, pi RPC posture, harness delivery and version policy
 
-ADRs: [0007](../adr/0007-provider-adapter-is-a-thin-interface-behind-a-normalized-event-stream.md), [0002](../adr/0002-orchestration-stays-on-the-controller.md), [0003](../adr/0003-sessions-run-as-bare-processes.md), [0018](../adr/0018-hydra-ships-as-one-self-contained-binary.md).
+ADRs: [0007](../adr/0007-provider-adapter-is-a-thin-interface-behind-a-normalized-event-stream.md), [0002](../adr/0002-orchestration-stays-on-the-controller.md), [0003](../adr/0003-sessions-run-as-bare-processes.md), [0018](../adr/0018-hydra-ships-as-one-self-contained-binary.md), [0031](../adr/0031-the-backend-is-written-on-effect.md).
 
 Research: `research/claude-agent-sdk.md` (branch `research/claude-agent-sdk`), `research/codex-app-server.md` (branch `research/codex-app-server`), `research/pi-sdk.md` (branch `research/pi-sdk`), `research/pi-approval-parking.md` (branch `research/pi-approval-parking`), `research/event-taxonomy-matrix.md` (branch `research/event-taxonomy-matrix`), `research/structured-output.md` (branch `research/structured-output`), `research/t3code.md` (branch `research/t3code`), `research/provider-portability.md` (branch `research/provider-portability`), `research/bun-compile.md` (branch `research/bun-compile`).

@@ -6,7 +6,7 @@ Hydra v1 is a single-user system whose supported perimeter is a home LAN or a ta
 
 - **Supported perimeter: LAN or tailnet.** The controller serves plain HTTP by default. A tailnet is already encrypted; a home LAN is a proportionate trust boundary for one user.
 - **Bind warning.** When the controller binds to an address that is neither loopback nor a tailnet address, it prints a warning at startup. It does not refuse.
-- **Optional TLS.** The user may supply their own certificate and key (BYO TLS). On a tailnet, `tailscale cert` provides a real Let's Encrypt certificate for `<node>.<tailnet>.ts.net` with no public exposure; this is the documented way to give the controller an HTTPS origin, which Google OAuth redirects require (see §3.3). Tailscale Funnel is not needed for anything in this document: the user's browser already reaches the controller.
+- **Optional HTTPS, tailscale-managed.** *(Amended 2026-09-01, [#44](https://github.com/rogierpennink/hydra/issues/44); tickets #18/#32 pinned BYO cert/key paths, replaced here.)* HTTPS is a controller feature, not a config concern: v1's only HTTPS consumer is the Google OAuth redirect origin (§3.3), and the documented cert source was already `tailscale cert` - so the controller runs it itself. When the user enables HTTPS (a Settings toggle, or prompted as a step in the Google Connection's declarative setup flow, [./08-events-and-connections.md](./08-events-and-connections.md)), the controller shells out to `tailscale cert`, stores the material under `<home>/tls/`, opens an HTTPS listener on a second port (controller state, default 4938), and re-mints before expiry - renewal is automatic, which BYO paths never gave. Runner WS and LAN HTTP traffic stay on the plain listener, untouched. There are no cert-path keys anywhere; cert material is machine-owned and never travels (a cert is bound to this machine's tailnet node name; a promoted controller mints its own). BYO cert paths return post-v1 only with a real non-tailscale need. Tailscale Funnel is not needed for anything in this document: the user's browser already reaches the controller.
 - **No hostile-internet hardening in v1.** Rate limiting of login attempts, brute-force lockout, CSRF machinery, and similar public-exposure defences are out of scope. Revisited if multi-tenant hosting arrives.
 - **Disk theft is in scope.** Any copy of the database, a backup, or a promotion bundle is useless without the master key (§2).
 - **Shared-machine limit, stated honestly.** Sessions run as bare processes under the same OS user as the runner ([ADR 0003](../adr/0003-sessions-run-as-bare-processes.md)). Agent/user credential separation (§5) defends against accident and drift, not against a malicious process on the same machine. Real isolation (OS sandboxing, containers) is post-v1.
@@ -24,8 +24,8 @@ One owner-scoped secrets table in the controller SQLite database ([./04-state-st
 
 | Field | Meaning |
 |---|---|
-| `ownerKind` | `connection` \| `plugin` \| `runner` \| `core` |
-| `ownerId` | the owning Connection, plugin, or runner id; a fixed name for `core` |
+| `ownerKind` | `connection` \| `plugin` \| `runner` \| `provider-instance` \| `core` |
+| `ownerId` | the owning Connection, plugin, runner, or provider-instance id; a fixed name for `core` |
 | `name` | key within the owner's namespace (e.g. `oauth.refreshToken`, `pat`, `clientSecret`) |
 | `ciphertext` | the value encrypted under the master key |
 | `createdAt`, `rotatedAt` | timestamps; rotation replaces the ciphertext in place |
@@ -35,9 +35,10 @@ What lives here:
 - **Connection credentials**: pasted tokens (GitHub PAT, Slack and Discord bot tokens), OAuth client id/secret the user registered (BYO client), and OAuth refresh tokens obtained through a Connection's setup flow. Access tokens refreshed from a refresh token are also stored here when the plugin persists them.
 - **Plugin secrets**: whatever a plugin writes through the plugin secrets API (§2.4).
 - **Runner-scoped secrets**: the `runner` owner kind is reserved for secrets scoped to one runner. The runner's own credential is not stored here: it is an opaque token stored hashed like every other token (§4.5).
+- **Provider-instance secrets**: secret-valued instance settings (API keys such as `ANTHROPIC_API_KEY` or `ZAI_API_KEY`, base-URL credentials) under the `provider-instance` owner kind. The controller decrypts them and sends them inline with each probe or session request over the runner WebSocket; they are held in memory for the operation and never land on runner disk ([./06-providers.md](./06-providers.md) §2.1; resolved 2026-08-31, [#43](https://github.com/rogierpennink/hydra/issues/43)).
 - **Core**: the controller's own key material (its persistent identity from [ADR 0005](../adr/0005-promotion-is-migration-behind-a-stable-controller-identity.md)) and any other core-owned secret.
 
-What does not live here: provider (Claude Code, Codex, pi) login credentials. Those stay with the vendor CLI on each runner (§8). Secret-valued provider-instance settings (an API key for an API-billed instance) go through this table; their owner kind is Open in [./06-providers.md](./06-providers.md).
+What does not live here: provider (Claude Code, Codex, pi) login credentials. Those stay with the vendor CLI on each runner (§8).
 
 ADR 0015 originally listed "runner credentials" among the encrypted rows; it is amended (2026-08-28): the runner credential is a token and is stored hashed (§4.5), and the `runner` owner kind stays reserved for runner-scoped secrets.
 
@@ -52,7 +53,7 @@ ADR 0015 originally listed "runner credentials" among the encrypted rows; it is 
 - The controller runs as a user-level service precisely so it can read the login keychain without a prompt.
 - **The master key never leaves its machine.** It is not in the database, not in backups, not in a promotion bundle. Backups (`VACUUM INTO` snapshots) therefore contain inert ciphertext; copying the backups directory offsite is safe.
 
-**Open:** the tickets say "plain key file fallback on headless Linux" without pinning its path; place it under Hydra Home but outside `data/` so promotion never moves it.
+The plain key file is **`~/.hydra/master.key`**, mode 0600 (resolved 2026-09-01, [#44](https://github.com/rogierpennink/hydra/issues/44)): at the Hydra Home root, outside `data/` and `backups/`, so promotion never moves it and backups stay inert.
 
 ### 2.3 Promotion re-wrapping
 
@@ -94,6 +95,7 @@ Google = redirect flow to the controller's own HTTPS origin (BYO client); GitHub
 
 - The controller derives the exact redirect URI from the origin the user's browser is already using and displays it for the user to register. No Hydra-hosted relay is involved.
 - On a tailnet, `tailscale cert` gives the controller a real certificate for `https://<node>.<tailnet>.ts.net`, which Google accepts as a redirect host; raw private IPs and `.local`/`.internal` names are rejected. `http://localhost` is a same-machine fallback only.
+- The controller runs `tailscale cert` itself when HTTPS is enabled (§1): the Google Connection setup flow can surface "Enable HTTPS via Tailscale" as one of its declarative steps, which is where the cert finally lives next to the feature that needs it. Prerequisite surfaced in the same step: MagicDNS and the tailnet's HTTPS toggle must be on.
 
 ## 4. User authentication
 
@@ -102,7 +104,7 @@ Resolves the credential side of [ADR 0013](../adr/0013-agents-operate-hydra-thro
 ### 4.1 Principles
 
 - No OAuth machinery for Hydra's own auth. No JWTs.
-- Every credential Hydra issues is an opaque random token. The database stores only a hash; resolution is one indexed lookup, which satisfies the constraint that token -> session -> agent -> profile resolution adds no meaningful endpoint latency.
+- Every credential Hydra issues is an opaque random token. The database stores only a hash; resolution is one indexed lookup, which satisfies the constraint that token -> session -> profile resolution adds no meaningful endpoint latency (the profile id sits on the Session row, copied at spawn).
 - Both user credential kinds and session tokens resolve to the same actor-stamped API ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md)).
 
 ### 4.2 Password login
@@ -112,12 +114,12 @@ Resolves the credential side of [ADR 0013](../adr/0013-agents-operate-hydra-thro
 
 **Verify at build time:** the password hash function (no source names one; argon2id is the expected choice).
 
-**Open:** the lifetime of the login-issued bearer token. Ticket #18 pinned 30 days rolling for the (superseded) cookie; nothing pins it for the bearer token.
+The bearer token's lifetime is **30 days rolling** (resolved 2026-09-01, [#44](https://github.com/rogierpennink/hydra/issues/44)): carried over from ticket #18's cookie number - each authenticated use extends it, and logout revokes it server-side. Where the web app stores it between page loads is [./14-web-app.md](./14-web-app.md)'s.
 
 ### 4.3 API keys
 
 - Long-lived, opaque, revocable. Always the user's identity, never an agent's.
-- Minted in the web app (Settings) or via `hydra login` (password in, token out). The CLI stores it in a credential file with mode 0600 inside Hydra Home; location in [./15-packaging-and-operations.md](./15-packaging-and-operations.md).
+- Minted in the web app (Settings) or via `hydra login` (password in, token out; `--password-stdin` scripted, echo-off TTY prompt as the one exception to the never-prompts rule, [./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md) §6.1). The CLI stores it in `~/.hydra/credentials.json`, mode 0600 ([./15-packaging-and-operations.md](./15-packaging-and-operations.md)).
 - Revocable individually; a revoked key fails on its next use.
 - Used by the ops CLI and scripts. The ops CLI and the runner-shipped `hydra` CLI are the same binary; the difference is the credential ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md)).
 
@@ -143,7 +145,7 @@ Passkeys and 2FA are post-v1. Nothing in v1 forecloses them: the login op is the
 
 ## 6. Permission profiles
 
-Mechanism: every agent carries a **permission profile**; the session token inherits it; enforcement sits at the service layer so it binds HTTP and in-process session callers alike ([ADR 0013](../adr/0013-agents-operate-hydra-through-the-public-api.md)). Run and plugin actors are ungated ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md) section 3.1). This section pins the content.
+Mechanism: every agent carries a **permission profile**, copied onto each Session at spawn (a Thread takes the `thread.profileId` setting, [./02-domain-model.md](./02-domain-model.md)); the session token carries the session's profile; enforcement sits at the service layer so it binds HTTP and in-process session callers alike ([ADR 0013](../adr/0013-agents-operate-hydra-through-the-public-api.md)). Run and plugin actors are ungated ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md) section 3.1). This section pins the content.
 
 ### 6.1 Grant families
 
@@ -156,7 +158,8 @@ A profile is a set of grants. Grants are coarse: one family per operation area, 
 | `run` | `run.*` (read, cancel) | `read`, `write` |
 | `session` | `session.*`, `input.*`, `transcript.*` | `read` (records and transcripts), `spawn` (spawn, continue), `steer` (input, interrupt, stop, respond, queue edits) |
 | `subscription` | `subscription.*` | `read`, `write` |
-| `notification` | `notification.*` | `read`, `write` (create, act, mark read) |
+| `notification` | `notification.*` | `read`, `write` (create, act, withdraw own) |
+| `settings` | `settings.*` (the user settings store: timezone, topic order, mutes, last-checked markers) | `read`, `write` |
 | `event` | `event.*` | `read`, `emit` |
 | `connection` | `connection.*` and plugin actions that act via a Connection | `read`, `manage` (create, edit, delete, credentials), `use` (act via a Connection; dormant in v1, see 11 section 2) |
 | `infra` | `runner.*`, `plugin.*`, `provider.*`, `controller.*` | `read`, `write` |
@@ -179,7 +182,7 @@ The operation-to-grant mapping is an explicit table in the contract package; [./
 
 | Profile | Default for | Grants | Withholds |
 |---|---|---|---|
-| **assistant** | assistants | `task` (read, create, update, delete), `workflow` (read, run, submit), `run` (read, write), `session` (read, spawn, steer), `subscription` (read, write), `notification` (read, write), `event` (read, emit), `memory` (read, write), and `read` on `connection`, `infra`, `workspace`, `agent`, `permission`, `project`, `resource` | `workflow.write`, `connection.manage`, `connection.use`, `infra.write`, `workspace.write`, `agent.write`, `permission.write`, `project.write`, `resource.write`, `secret`, `credential`, direct work tools (no Workspace), bulk-destructive operations |
+| **assistant** | assistants | `task` (read, create, update, delete), `workflow` (read, run, submit), `run` (read, write), `session` (read, spawn, steer), `subscription` (read, write), `notification` (read, write), `event` (read, emit), `memory` (read, write), `settings` (read), and `read` on `connection`, `infra`, `workspace`, `agent`, `permission`, `project`, `resource` | `workflow.write`, `connection.manage`, `connection.use`, `infra.write`, `workspace.write`, `agent.write`, `permission.write`, `project.write`, `resource.write`, `secret`, `credential`, direct work tools (no Workspace), bulk-destructive operations |
 | **worker** | agent steps in workflows | `task` (read, create, update), `notification` (write), `subscription` (read, write), `run` (read), `event` (read) | `task.delete`, `session.spawn`, `workflow.run`, `workflow.submit` (so a workflow cannot fan out recursively unless granted), `session.read`, `memory`, everything the assistant profile withholds |
 | **unrestricted** | nobody by default | user parity: everything the user can do | nothing; assigned only explicitly |
 
@@ -198,7 +201,7 @@ The operation-to-grant mapping is an explicit table in the contract package; [./
 
 1. The agent calls `permission.request { grant, reason, operation? }` (granted to everyone; `hydra permission request <grant> --reason "..."`). `operation` optionally names the call it wanted to make (`{ op: "connection.create", input }`), so the user sees what the agent is trying to do, not only which family it lacks.
 2. The controller creates a **Permission Request** Notification ([./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md)) naming the session, the agent, the grant, the reason and the operation, and, when the caller is a session, registers a `{ kind: "request" }` subscription for that session in the same call. The response carries `requestId` and `subscriptionId`.
-3. The user decides in the web app, or from an interactive channel sink where the click must come from an owner platform identity ([./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md) section 7.4), through the bound `permission.decide` with one of three outcomes: **`session`** (a session-scoped grant overlay that dies with the session), **`profile`** (edits the agent's profile; every future session of every agent on that profile gains it), or **`deny`**.
+3. The user decides in the web app, or from an interactive channel sink where the click must come from an **owner** platform identity - a trusted identity may command an assistant but not decide ([./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md) section 7.4), through the bound `permission.decide` with one of three outcomes: **`session`** (a session-scoped grant overlay that dies with the session), **`profile`** (edits the agent's profile; every future session of every agent on that profile gains it), or **`deny`**.
 4. The decision arrives as queued input on a turn boundary and the agent retries the original operation itself, so the actor stays `session:<id>`. There is no blocking wait, consistent with the no-blocking rule in [./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md).
 
 A fourth outcome, **`once`** (a one-use overlay consumed by the first successful call of the named operation), is post-v1; `operation` on the request is the field it needs ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md) section 10).
@@ -209,7 +212,7 @@ Raising and deciding a Permission Request are audited (section 11).
 
 Decision Notifications carry bound actions: answers that bind an operation proposed by an agent, a run, a plugin or the core, executed when the user chooses one ([./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md) section 7.4). The actor of the executed operation is the user who clicked; it runs under user parity.
 
-**Authoring is not profile-checked** ([ADR 0022](../adr/0022-proposing-is-not-doing.md)): a session may propose an operation its own profile forbids; the user's informed click is the authorisation. The guardrails are: a per-operation `bindable` flag that withholds the `credential`, `secret`, `infra` and `permission` families, `connection.manage` and bulk-destructive operations from non-core producers; a core-rendered `describe(input)` line on every answer that the producer can neither write nor suppress; and an audit entry naming decider, proposer and (for channel clicks) the channel connection. Channel clicks execute only from owner platform identities ([./12-assistants.md](./12-assistants.md) section 4); any other sender is refused.
+**Authoring is not profile-checked** ([ADR 0022](../adr/0022-proposing-is-not-doing.md)): a session may propose an operation its own profile forbids; the user's informed click is the authorisation. The guardrails are: a per-operation `bindable` flag that withholds the `credential`, `secret`, `infra` and `permission` families, `connection.manage` and bulk-destructive operations from non-core producers; a core-rendered `describe(input)` line on every answer that the producer can neither write nor suppress; and an audit entry naming decider, proposer and (for channel clicks) the channel connection. Channel clicks execute only from owner platform identities ([./12-assistants.md](./12-assistants.md) section 4.1); trusted identities and any other sender are refused with an ephemeral reply.
 
 ## 7. Access-mode fallback guardrail
 
@@ -271,13 +274,14 @@ Runner-local, user-managed auth (`ssh` keys, `git credential` stores the user co
 
 Resolves the handoff from [./12-assistants.md](./12-assistants.md). Prior art: OpenClaw taint-gating and Hermes context-not-instructions marking in `research/assistant-systems.md` (branch `research/assistant-systems`).
 
-- Third-party text in a shared channel (anything not from the owner's configured platform identities) is **context, never instructions**. It enters the session wrapped in explicit data-not-instructions markers.
+- Third-party text in a shared channel (anything not from an owner or trusted platform identity, and every bot line) is **context, never instructions**. It enters the session wrapped in explicit data-not-instructions markers.
 - The markers survive through rotation and distillation: the distiller sees the same wrapping, and its prompt is hardened against treating quoted content as directives.
-- A memory write distilled from a conversation containing tainted content carries a **one-line provenance marker** in the memory document (e.g. `> distilled from #general on 2026-08-27; includes third-party content`). The user can already read and edit memory, so this is auditable and correctable.
+- **Session taint is set by the core**: a session is tainted from the moment the core delivers it any wrapped line, for the rest of that incarnation; the agent passes nothing. Every memory write from a tainted session carries **provenance metadata on the document** (one entry per source conversation, latest date), set by the write op, shown beside the document in the memory view and rendered by `read` as a trailing line: `> provenance: session s_12, Discord #general, 2026-08-30, includes third-party content`. Metadata rather than an in-body line so the next `write` cannot silently erase it and it never eats cap. The user clears an entry after review; the session stays tainted until rotation ([./12-assistants.md](./12-assistants.md) section 6.7).
 - Hard-excluding third-party content from distillation is rejected: it discards the signal shared-channel assistants exist to keep.
-- Only the owner's configured platform identities can command an assistant in v1 (single user).
+- Only **owner** and **trusted** platform identities can command an assistant ([./12-assistants.md](./12-assistants.md) section 4.1); only owner identities decide bound actions. Identities are claimed by a one-time pairing code DMed to the bot; unknown DM senders are ignored, never answered.
+- **Stated limit:** a trusted identity's DM is its own conversation with the same assistant and therefore the same memory, which holds facts about the owner. Granting trusted grants that; there is no per-identity memory partition in v1 (single user). Bots can never be paired, so no bot can command.
 
-**Open:** the exact marker syntax (both the in-context wrapper and the memory provenance line) is not pinned; keep it stable and greppable.
+The provenance line's shape is pinned above; the in-context wrapper syntax stays an implementer's choice ([./16-open-items.md](./16-open-items.md) B), stable and greppable.
 
 ## 11. Audit
 
@@ -307,6 +311,7 @@ Stated explicitly by the tickets:
 - Finer grants inside families; v1 keeps families coarse so profiles do not break.
 - Short-lived git tokens (e.g. GitHub App installation tokens) as a drop-in behind the same on-demand helper.
 - MCP-based hydra-as-a-tool, which would carry the same session token.
+- BYO TLS cert/key paths (a non-tailscale CA), and TLS between fleet machines - the latter a genuine bootstrap-config concern when it lands ([#44](https://github.com/rogierpennink/hydra/issues/44)).
 
 ## Sources
 
@@ -325,6 +330,7 @@ Tickets:
 - Runner execution substrate (git credential handoff) - https://github.com/rogierpennink/hydra/issues/8
 - Controller packaging & install story (keychain, backups) - https://github.com/rogierpennink/hydra/issues/24
 - Assemble the v1 spec (bound-action authorisation, provider-home isolation) - https://github.com/rogierpennink/hydra/issues/21
+- Operations details: bootstrap config, first run, login, upgrade, backups, key file - https://github.com/rogierpennink/hydra/issues/44
 
 ADRs:
 

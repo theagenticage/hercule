@@ -24,7 +24,7 @@ Ticket #15 adds a sixth, named **Intake**: the quality of agent prep-work before
 
 These decisions predate the design tickets. They are fixed context for the whole spec and are not reopened by any subsystem document.
 
-- **Clean-slate TypeScript codebase.** Controller, runner, and plugins are one language in one repository. Old agentick is a quarry for ideas, never a constraint.
+- **Clean-slate TypeScript codebase.** Controller, runner, and plugins are one language in one repository. The controller and runner are written on Effect 4, with Effect Schema as the contract language ([ADR 0031](../adr/0031-the-backend-is-written-on-effect.md), 2026-09-02); the web app stays outside Effect ([./14-web-app.md](./14-web-app.md)). Old agentick is a quarry for ideas, never a constraint, and never a data source: v1 starts empty (see [out of scope](#v1-scope-out-of-scope)).
 - **Providers wrap interactive harnesses.** The v1 providers are Claude Code (via the Agent SDK), Codex (via the app server), and pi (via the pi.dev SDK). A provider is only this; integrations such as GitHub are event sources, not providers.
 - **No repo-local config.** The controller's state is the single source of truth. A repository is one kind of workspace material and holds no Hydra configuration. This is the mistake that held back old agentick and it is not repeated.
 - **Single-user v1.** There is one user. No tenancy machinery is built, but no decision may make a later user concept a rewrite. The concrete guard: every mutation is stamped with an actor (`user` or `session:<id>`) that is widened, never restructured, when multi-user arrives.
@@ -98,6 +98,7 @@ Every item below is ruled beyond the v1 destination. It returns only if the dest
 - **Runner-side plugin loading.** V1 plugins load controller-only; runner-side provider execution is built-in but plugin-shaped, lifted once three real providers have taught the hooks (ticket #11).
 - **Fleet auto-discovery and push-install** (LAN/tailnet scanning, one-click runner install from the fleet UI). Ruled post-v1 by ticket #7; v1 protects it with a fully programmatic join exchange and a reserved "Add machine" spot showing the join command.
 - **Native OS sandboxing** (macOS Seatbelt, Linux Landlock; containers a far-remoter option). Ruled post-v1 by ticket #8; returns as a probed runner capability behind the existing capability negotiation.
+- **Import from old agentick.** Nothing is imported: not tasks, sessions, workflows, agent definitions, prompts, or environments. V1 starts empty and the user re-adds repositories by hand through onboarding. A `.agentick/` directory in a repository is another product's convention; Hydra ignores it exactly as it ignores any other tool's folder, with no detection and no warning. Ruled by ticket #47.
 - **Hydra-managed toolchains and an Environment concept** (named toolchain plus setup bundles, old agentick's environments reborn). Post-v1; v1 treats toolchains as machine facts surfaced as runner capabilities.
 - **Folder-resource workspaces.** No versioning story for non-git materials yet; v1 workspaces are git-only, mailboxes never produce workspaces. Ruled by ticket #8.
 - **Artifact storage** (sessions producing artifacts held by the controller). Not in v1. Constraint pinned by ticket #10 for when it lands: artifact and blob storage must live inside the controller Data Root and move with the promotion bundle; streaming or resumable transfer is the escape hatch if volume hurts.
@@ -147,7 +148,7 @@ Every item below is ruled beyond the v1 destination. It returns only if the dest
 
 ### Not yet specified
 
-Four items are neither in nor out; they sharpen with dogfooding and are tracked in [16-open-items.md](./16-open-items.md): migration or import from old agentick; a presentation layer over task status (kanban-style groupings, explicitly not domain states); platform-auto subscription detection (explicit subscription is the v1 primitive); execution-plan snapshot dedup and GC (content-hash dedup is the known escape hatch).
+Four items are neither in nor out; they sharpen with dogfooding and are tracked in [16-open-items.md](./16-open-items.md): a presentation layer over task status (kanban-style groupings, explicitly not domain states); platform-auto subscription detection (explicit subscription is the v1 primitive); execution-plan snapshot dedup and GC (content-hash dedup is the known escape hatch); Task and Project pruning (both soft-delete in v1 and events live as long as a live Task refers to them, so the log's real bound is task retention).
 
 ## How this spec is organised
 

@@ -33,8 +33,16 @@ A fully-qualified canonical identifier for a thing outside Hydra (`github:issue:
 _Avoid_: link, URL (a ref is an identity, not a location)
 
 **Session**:
-One conversation with a provider-backed agent, resumable and forkable. Maps onto a Claude Code session or Codex thread. A session can drive work directly (chat-first) and is not required to belong to a task or workspace.
-_Avoid_: execution, thread (reserved for provider-native objects)
+One conversation with a provider-backed agent, resumable and forkable. Maps onto a Claude Code session, a Codex thread or a pi session. A session copies its configuration from an Agent at spawn and never reads through it afterwards, or has no Agent at all and is a Thread. Not required to belong to a task or workspace.
+_Avoid_: execution, chat
+
+**Thread**:
+A session the user starts and drives by hand, with no Agent behind it: nothing outlives it, nothing about it is named or reusable. The bare word always means this; a Codex thread or a Slack thread is always qualified.
+_Avoid_: interactive session, chat-first session, chat (reserved for a possible non-agentic conversation surface)
+
+**User Material**:
+The user's own knowledge and configuration from a local harness installation - skills, subagents, instructions, commands, settings. Linked live into Threads on runners that have it; never seen by assistant sessions or workflow steps. UI copy may say "personal config".
+_Avoid_: user config (ambiguous with instance config), user knowledge, dotfiles
 
 **Run**:
 One execution of an execution plan, usually stamped from a workflow. Nothing else in the system is called a run.
@@ -59,7 +67,7 @@ _Avoid_: follow-up (provider-native term), pending message
 ### Actors
 
 **Agent**:
-A configured identity that does work: prompt, provider, capabilities. Owned by the controller, not by any repo.
+A named, reusable configuration and identity for work: prompt, provider instance, permission profile and session defaults. Supplies values to a session at spawn; the session never reads through it afterwards. Owned by the controller, not by any repo.
 _Avoid_: persona, worker (as a noun)
 
 **Assistant**:
@@ -71,11 +79,11 @@ Who performed an operation against the API: the user, a session, a run's built-i
 _Avoid_: principal, subject
 
 **Permission Profile**:
-The named bundle of operation grants attached to an agent, bounding what its sessions may do through the API. Parity with the user is the ceiling, not the default.
+The named bundle of operation grants attached to an agent and copied onto each of its sessions (a thread takes the user's thread default), bounding what the session may do through the API. Parity with the user is the ceiling, not the default.
 _Avoid_: role, scope set
 
 **Session Token**:
-The credential minted per session whose subject is that Session: injected into the session's environment by the runner, carrying the agent's permission profile, dead when the session ends.
+The credential minted per session whose subject is that Session: injected into the session's environment by the runner, carrying the session's permission profile, dead when the session ends.
 _Avoid_: API key (reserved for user credentials), auth session
 
 **API Key**:
@@ -90,6 +98,10 @@ _Avoid_: scope, right
 An agent's ask for a grant its profile lacks, optionally naming the operation it wanted to make, surfaced as a notification the user approves for the session, bakes into the profile, or denies.
 _Avoid_: escalation (as a noun for the record), override
 
+**Platform Identity**:
+One person's account on one chat platform, recorded with a role: an owner (the user; may command an assistant and decide bound actions) or a trusted person (may command, never decides). Claimed by a pairing code; anyone without one is context in groups and ignored in DMs.
+_Avoid_: allowlist entry, member, user (reserved for the future Hydra user concept)
+
 **Master Key**:
 The per-machine key that encrypts secret values in the controller database; held in the OS keychain and never leaves its machine, even during promotion.
 _Avoid_: root key, database key
@@ -97,29 +109,37 @@ _Avoid_: root key, database key
 ### Assistants
 
 **Channel Binding**:
-A rule mapping part of a channel connection (its DMs, a named channel or thread scope) to exactly one assistant; the most specific binding wins. How channels reach an assistant, not what makes it one.
+A rule mapping part of a channel connection (all its DMs, or a nested place: a server, a channel, a thread) to exactly one assistant; the most specific binding wins. How channels reach an assistant, not what makes it one.
 _Avoid_: registration, route (bare)
 
 **Conversation**:
-One continuous exchange with an assistant inside one platform container: a Discord channel or DM, a Slack thread, a web chat. Each conversation has its own session lineage and is never merged with another; continuity across conversations comes from memory and recall.
+One continuous exchange with an assistant inside one platform container: a Discord channel, thread or DM, a Slack thread or DM, a web chat. Each conversation has its own session lineage and is never merged with another; continuity across conversations comes from memory and recall. Its messages are conversation input, never events.
 _Avoid_: chat, thread (reserved for provider-native objects)
 
 **Rotation**:
-Retiring a conversation's live session by distilling what matters into memory and continuing the conversation in a fresh session. Triggered by context size or a timer; distillation is part of the contract, not an optional step.
+Retiring a conversation's live session by distilling what matters into memory and continuing the conversation in a fresh session. Triggered by context size, a daily timer, or the user asking to start fresh; never mid-turn; distillation is part of the contract, not an optional step. Distinct from a session's process merely stopping while idle and resuming later, which changes nothing the assistant remembers.
 _Avoid_: reset, compaction (reserved for provider-native context handling)
 
 **Memory**:
-An assistant's durable notes: assistant-scoped, maintained by the assistant itself, visible and editable by the user, bounded in size, never shared between assistants. Two tiers: a single **core** note (always present in every session) and named **topic** notes (listed by name and gist, opened on demand).
+An assistant's durable notes: assistant-scoped, maintained by the assistant itself, visible and editable by the user, bounded in size, never shared between assistants. Two tiers: a single **core** note (always present in every session; what the assistant knows about the user, as opposed to the persona the user wrote for it) and named **topic** notes (each with a one-line gist, listed by name and gist, opened on demand). A note written while the assistant could see third-party messages carries a provenance mark the user can review.
 _Avoid_: knowledge base, brain, journal
 
 **Heartbeat**:
-A scheduled wake of an assistant with a standing prompt, letting it check on things and act unprompted. On by default; the main mechanism of true proactivity.
+An assistant's standing recurring scheduled wake with a user-editable prompt, letting it check on things and act unprompted. On by default; the main mechanism of true proactivity. A heartbeat that finds nothing to say stays silent.
 _Avoid_: poll
+
+**Scheduled Wake**:
+Waking an assistant at a time rather than on an event: a prompt delivered into one of its conversations by the scheduler. Two kinds: the recurring heartbeat and one-shot reminders. Never a run, never an event.
+_Avoid_: cron job (reserved for workflow triggers), scheduled task
+
+**Reminder**:
+A one-shot scheduled wake an assistant sets on itself (or the user sets for it), delivered back into the conversation that created it, so the assistant can act or speak at that time.
+_Avoid_: timer, alarm
 
 ### Organization
 
 **Project**:
-A grouping of related work and its materials. May span multiple resources (repos, folders, mailboxes); not bound to a single git repo.
+A grouping of related work and its materials, purely a way to organise information inside Hydra: no behaviour, no defaults. May span multiple resources (repos, folders, mailboxes), and a resource may belong to several projects; not bound to a single git repo.
 _Avoid_: workspace (as a grouping term)
 
 **Resource**:
@@ -140,6 +160,10 @@ The always-on brain: holds all state, receives events, schedules work. The singl
 
 **Runner**:
 A daemon on a machine that executes sessions on the controller's behalf.
+
+**Reserved**:
+A runner flag: a reserved runner hosts only work explicitly placed on it (named by the user or a workflow, resolved by the "local" alias, or following a workspace already there); placement fallback never chooses it. For personal machines that should never catch scheduled work.
+_Avoid_: unreliable, personal (as a state name)
 
 **Fleet**:
 All runners enrolled with a controller, viewed as a collective.
@@ -224,6 +248,14 @@ _Avoid_: internal event, system event
 **Event**:
 A fact that happened, emitted by an event source ("issue #42 was labelled ready-for-agent").
 
+**Feed**:
+A named poll cadence an event-source contribution declares (`notifications`, `repos`, `checks`): the plugin declares the numbers, the core runs one timer per connection per feed. A push-driven source declares none.
+_Avoid_: poller, loop
+
+**Enrichment**:
+Post-ingest amendment of an event's `system`, `url`, or `refs` (append-only) by a sender rule or the triage agent. Gives the matcher one more idempotent look at that event; never re-delivers to consumers that already fired.
+_Avoid_: editing events, reprocessing
+
 **Workflow**:
 A named, stored, editable source of execution plans. Owns its triggers; can be as small as one trigger plus one action. Editing a workflow never affects in-flight runs.
 _Avoid_: recipe
@@ -257,7 +289,7 @@ A trigger's limit on how many runs it may spawn per window. Exceeding it trips t
 _Avoid_: rate limit (bare), throttle
 
 **Notification**:
-A persisted message from Hydra to its user ("run failed", "trigger paused", "agent needs a decision"). Produced by the core, by workflow notify steps, or by plugins; always recorded centrally, with delivery through channels decided by the core, never claimed by plugins.
+A persisted message from Hydra to its user ("run failed", "trigger paused", "agent needs a decision"). Produced by the core, by workflow notify steps, by sessions, or by plugins; always recorded centrally, with delivery through channels decided by the core, never claimed by plugins. A decision stays open until its question is answered, wherever that happens, and is withdrawn when the question stops existing; nothing else about it ever changes.
 _Avoid_: alert, ping
 
 **Bound Action**:
@@ -269,8 +301,12 @@ The formation boundary where external signals become work: signals are triaged, 
 _Avoid_: command center, inbox, dashboard
 
 **Proposal**:
-A task the agents prepared and are asking the user to accept, park, or dismiss: a Task labelled `proposed` together with its pending go/no-go Notification. The unit Intake presents; a vocabulary term, not a separate entity.
+A task the agents prepared and are asking the user to accept or dismiss: a Task labelled `proposed` together with its open go/no-go Notification. Accepting means "this is work" and leaves the task in the backlog; starting it is a separate act. The unit Intake presents; a vocabulary term, not a separate entity.
 _Avoid_: suggestion, recommendation, candidate
+
+**Offer**:
+An immediate action triage proposes with no task behind it ("merge these three dependency bumps"): a decision Notification whose answers carry the action and a dismiss. Decided by its answers alone; leaves nothing when dismissed.
+_Avoid_: quick fix, shortcut, suggestion
 
 **Topic**:
 A label that groups Intake: each Connection files its events into one default topic, and triage labels a proposal with a topic (the connection's, unless the content says otherwise). User-defined and ordered; a label, never a domain state.

@@ -1,16 +1,16 @@
 # Public API and agent surface
 
-Hydra has one public API. The web app, the `hydra` CLI, agents inside sessions, built-in workflow actions and plugins all operate the system through the same set of operations, defined once in a framework-free service layer and described once in a shared Zod contract package. HTTP is a thin proxy over that layer; the `hydra` CLI is a thin client over HTTP. Agents reach the API with a per-session token that carries their agent's permission profile; the user reaches it with an API key. Every mutation is stamped with its actor in the event log. No endpoint blocks: long waits are expressed as subscriptions whose matches arrive as queued input. This document pins the contract structure, the operation vocabulary, the transports and route style, the error envelope, the operation catalogue, the credential and attribution rules, the `hydra` CLI (including `hydra memory`), session subscriptions and the no-blocking rule. Rationale lives in [ADR 0013](../adr/0013-agents-operate-hydra-through-the-public-api.md), [ADR 0020](../adr/0020-assistant-memory-is-reached-only-through-the-api.md) and [ADR 0021](../adr/0021-one-operation-vocabulary-coarse-grants-explicit-routes.md).
+Hydra has one public API. The web app, the `hydra` CLI, agents inside sessions, built-in workflow actions and plugins all operate the system through the same set of operations, defined once in a framework-free service layer and described once in a shared contract package of Effect Schema declarations. HTTP routes are derived from that contract and call the service layer; the `hydra` CLI is a thin client over HTTP. Agents reach the API with a per-session token that carries their agent's permission profile; the user reaches it with an API key. Every mutation is stamped with its actor in the event log. No endpoint blocks: long waits are expressed as subscriptions whose matches arrive as queued input. This document pins the contract structure, the operation vocabulary, the transports and route style, the error envelope, the operation catalogue, the credential and attribution rules, the `hydra` CLI (including `hydra memory`), session subscriptions and the no-blocking rule. Rationale lives in [ADR 0013](../adr/0013-agents-operate-hydra-through-the-public-api.md), [ADR 0020](../adr/0020-assistant-memory-is-reached-only-through-the-api.md), [ADR 0021](../adr/0021-one-operation-vocabulary-coarse-grants-explicit-routes.md) and [ADR 0031](../adr/0031-the-backend-is-written-on-effect.md).
 
 ## 1. Contract structure
 
 ### 1.1 Service layer
 
-A framework-free TypeScript service layer defines every operation. "Framework-free" means: plain functions/classes with no dependency on an HTTP or RPC framework. Every consumer goes through it:
+A framework-free TypeScript service layer defines every operation: each operation is a method on an Effect service (`Sessions.spawn(input)`), the backend being written on Effect ([ADR 0031](../adr/0031-the-backend-is-written-on-effect.md)). "Framework-free" means: **no operation logic in any transport handler.** An HttpApi handler is a one-line call into the service method, and an RPC handler would be the same one line, so an operation can later be exposed over the WebSocket by adding one handler line, never by moving logic. Every consumer goes through it:
 
 | Consumer | How it calls |
 |---|---|
-| HTTP routes | proxy: validate input schema, call service, serialize output schema |
+| HTTP routes | derived from the contract's HttpApi declaration (input validated and output encoded by the derived route); one-line call into the service method |
 | `hydra` CLI (agent and ops) | over HTTP |
 | Web app | over HTTP (plus one WebSocket for live topics, see [./14-web-app.md](./14-web-app.md)) |
 | Built-in workflow actions (`workflow.run`, `notification.create`, `task.create`, `task.update`, `task.query`) | in-process, same service layer |
@@ -18,15 +18,15 @@ A framework-free TypeScript service layer defines every operation. "Framework-fr
 
 Permission enforcement (section 5) and actor stamping (section 3) sit inside the service layer, so they bind every consumer identically.
 
+**Request lifetime.** Each HTTP request or RPC call runs as one fiber. The transport handler resolves the credential and provides the current actor and a tracing span as request-scoped context, which service methods read (`CurrentActor`), never a context parameter threaded through signatures. A client disconnect interrupts the fiber, and an open transaction rolls back with it ([./04-state-store.md](./04-state-store.md)). Every service operation and repository call carries a span from day one; v1 exports spans nowhere beyond the log line, and an OpenTelemetry exporter is a later layer swap ([ADR 0031](../adr/0031-the-backend-is-written-on-effect.md)).
+
 **Parity guarantee (hard rule):** nothing is reachable in-process that is not reachable over HTTP. A service operation without an HTTP route is a defect. The WebSocket carries live-topic subscriptions only; every query and mutation stays on HTTP ([ADR 0017](../adr/0017-the-web-app-is-a-static-pure-client-of-the-public-api.md)).
 
 ### 1.2 Contract package
 
-`packages/contract` holds, per operation: its id, a Zod input schema, a Zod output schema, the grant it requires (section 5), and its HTTP route (section 1.4). It is the pinned, expensive-to-retrofit asset. Consumers of the package: server-side validation, the `hydra` CLI, the web app (`client-core`, [./14-web-app.md](./14-web-app.md)), the plugin public-API client, and the workflow editor's schema-driven autocomplete.
+`packages/contract` holds, per operation: its id, an Effect Schema input schema, an Effect Schema output schema, its error schemas, the grant it requires (section 5), and its HTTP route (section 1.4), all as one Effect HttpApi declaration. It is the pinned, expensive-to-retrofit asset. Consumers of the package: server-side validation, the `hydra` CLI, the web app (`client-core`, [./14-web-app.md](./14-web-app.md)), the plugin public-API client, and the workflow editor's schema-driven autocomplete.
 
-OpenAPI is generated from the schemas with zod-openapi-style tooling. No framework derives routes; HTTP routes are hand-written proxies that read the contract's route table.
-
-RPC-framework adoption (tRPC, oRPC, Effect RPC) is deliberately deferred post-v1 ([ADR 0013](../adr/0013-agents-operate-hydra-through-the-public-api.md)).
+From that declaration the server routes, request validation, the OpenAPI document and the typed client are derived ([ADR 0031](../adr/0031-the-backend-is-written-on-effect.md)); the route table of section 1.4 is what the declaration follows. The `hydra` CLI and `client-core` use the derived client. The same package holds the Effect RPC group for the WebSocket's live topics ([./14-web-app.md](./14-web-app.md)); every query and mutation stays on HttpApi (section 1.1). The deferral of RPC-framework adoption in [ADR 0013](../adr/0013-agents-operate-hydra-through-the-public-api.md) is withdrawn by its 2026-09-02 amendment.
 
 ### 1.3 Operation vocabulary
 
@@ -61,6 +61,8 @@ The web app additionally holds one WebSocket for live topics (subscriptions only
 
 A Hydra MCP server is not a v1 transport (section 10).
 
+**Ids on the wire** are canonical lowercase UUIDv7 strings, except event ids, which are integers ([./04-state-store.md](./04-state-store.md)). The CLI accepts a full id or an unambiguous tail of eight or more characters for any `<id>` argument (`conflict` if ambiguous) and prints tails in human output; `--json` always prints full ids.
+
 **Routes are resource paths with HTTP methods**, under `/api/v1/`. Every operation's `{ method, path }` is written explicitly in the contract's route table; the conventions below are what the table follows, and any exception (an irregular plural, a nested resource) is simply written in the table. One CI test asserts that operations and routes are one-to-one.
 
 | Operation shape | Route | Example |
@@ -74,7 +76,7 @@ A Hydra MCP server is not a v1 transport (section 10).
 | custom verb without an entity | `POST /api/v1/<xs>/<verb>` | `POST /api/v1/workflows/submit`, `POST /api/v1/events/emit` |
 | owned sub-resource | `.../{id}/<sub>...` | `GET /api/v1/sessions/s_12/transcript`, `PUT /api/v1/assistants/a_1/memory/core` |
 
-Path nouns are plural (`/tasks`) although operation ids are singular; that is the one place the two spellings differ. Query strings repeat the key for list-valued filters (`label=a&label=b`); the generic client in `client-core` serializes from the Zod input schema, so neither the CLI nor the web app hand-builds URLs. `me` is accepted wherever an id names the caller's own session or assistant (`/api/v1/assistants/me/memory`): a session token resolves it, a user credential gets 400 `validation`.
+Path nouns are plural (`/tasks`) although operation ids are singular; that is the one place the two spellings differ. Query strings repeat the key for list-valued filters (`label=a&label=b`); the derived client serializes from the operation's input schema, so neither the CLI nor the web app hand-builds URLs. `me` is accepted wherever an id names the caller's own session or assistant (`/api/v1/assistants/me/memory`): a session token resolves it, a user credential gets 400 `validation`.
 
 ### 1.5 Success and error shapes
 
@@ -87,7 +89,7 @@ Path nouns are plural (`/tasks`) although operation ids are singular; that is th
 ```
 
 - `code` is a closed enum in the contract, extended additively: `unauthenticated` (401), `forbidden` (403), `validation` (400), `not_found` (404), `conflict` (409), `invalid_state` (409), `cap_exceeded` (422), `internal` (500).
-- `details` is typed per code: `forbidden` carries `{ grant }`; `cap_exceeded` carries `{ size, cap }` or `{ count, cap }`; `validation` carries `{ issues: ZodIssue[] }`.
+- `details` is typed per code: `forbidden` carries `{ grant }`; `cap_exceeded` carries `{ size, cap }` or `{ count, cap }`; `validation` carries `{ issues: { path: string[]; message: string }[] }`, mapped from the schema library's parse issues; the wire contract names no schema library.
 - `message` is for people and is never parsed.
 - **One error per response.** The service layer runs its checks in a fixed order and the first failing check is the response: `unauthenticated`, then the static grant check (`forbidden`, before any entity is touched), then `validation`, then `not_found`, then entity-dependent `forbidden` (the `memory` scope rule, section 6.4), then business rules (`conflict`, `invalid_state`, `cap_exceeded`), then `internal`. A caller lacking a grant learns that before learning whether the entity exists. `validation` is the one code that reports everything wrong at once, so a caller fixes every field in one retry.
 
@@ -111,7 +113,7 @@ Semantics: [./09-tasks.md](./09-tasks.md).
 | `task.read` | `{ taskId }` | `task.read` | `GET /tasks/{id}` |
 | `task.create` | `{ title, description, priority?, labels?, projectId?, provenance? }` | `task.create` | `POST /tasks` |
 | `task.update` | `{ taskId, ...changes }` | `task.update` | `PATCH /tasks/{id}` |
-| `task.delete` | `{ taskId }` | `task.delete` | `DELETE /tasks/{id}` |
+| `task.delete` | `{ taskId }` (soft: sets `deletedAt`, [./09-tasks.md](./09-tasks.md) Delete) | `task.delete` | `DELETE /tasks/{id}` |
 
 ```ts
 interface TaskFilter {
@@ -131,17 +133,17 @@ Semantics: [./07-workflows.md](./07-workflows.md); breaker semantics in [./10-tr
 
 | Operation | Input | Grant | Route |
 |---|---|---|---|
-| `workflow.query` | `{ enabled?, text? }` | `workflow.read` | `GET /workflows` |
-| `workflow.read` | `{ workflowId }` | `workflow.read` | `GET /workflows/{id}` |
-| `workflow.create` / `update` / `delete` | definition ([./07](./07-workflows.md) section 1) | `workflow.write` | `POST` / `PATCH` / `DELETE /workflows[/{id}]` |
+| `workflow.query` | `{ enabled?, text? }` -> `{ items: { id, name, description, enabled, updatedAt }[] }` (parse-time denormalized columns) | `workflow.read` | `GET /workflows` |
+| `workflow.read` | `{ workflowId }` -> `{ id, enabled, source, createdAt, updatedAt }`; `source` is the stored YAML text, and no parsed object is returned - clients parse it themselves with the contract schema ([./07](./07-workflows.md) section 1; resolved 2026-09-01, [#45](https://github.com/rogierpennink/hydra/issues/45)) | `workflow.read` | `GET /workflows/{id}` |
+| `workflow.create` / `update` / `delete` | `{ source: string }` (YAML) or `{ definition: object }` (rendered to canonical YAML by the controller; the object form is the agents' convenience); `enabled` is a separate field on update ([./07](./07-workflows.md) section 1) | `workflow.write` | `POST` / `PATCH` / `DELETE /workflows[/{id}]` |
 | `workflow.run` | `{ workflowId, inputs }` -> `{ runId }` | `workflow.run` | `POST /workflows/{id}/run` |
-| `workflow.submit` | `{ definition, inputs }` -> `{ runId }` | `workflow.submit` | `POST /workflows/submit` |
+| `workflow.submit` | `{ source | definition, inputs }` -> `{ runId }` (same input union as `workflow.create`) | `workflow.submit` | `POST /workflows/submit` |
 | `trigger.query` | `{ workflowId?, kind?, status? }` | `workflow.read` | `GET /triggers` |
 | `trigger.read` | `{ triggerId }` (includes the held-event count) | `workflow.read` | `GET /triggers/{id}` |
 | `trigger.pause` | `{ triggerId }` | `workflow.write` | `POST /triggers/{id}/pause` |
 | `trigger.resume` | `{ triggerId, discardHeld?: boolean }` | `workflow.write` | `POST /triggers/{id}/resume` |
 | `run.query` | `{ workflowId?, status?, since?, until?, actor? }` | `run.read` | `GET /runs` |
-| `run.read` | `{ runId }` (frozen plan, inputs, trigger event, step records, failure reason, triage verdict, live subscriptions) | `run.read` | `GET /runs/{id}` |
+| `run.read` | `{ runId }` (frozen plan, inputs, trigger event, step records, failure reason, final output, live subscriptions) | `run.read` | `GET /runs/{id}` |
 | `run.cancel` | `{ runId }` | `run.write` | `POST /runs/{id}/cancel` |
 | `run.rerun` | `{ runId, mode?: "re-stamp" \| "replay" }` -> `{ runId }` | `workflow.run` | `POST /runs/{id}/rerun` |
 
@@ -153,9 +155,9 @@ Semantics: [./06-providers.md](./06-providers.md), [./12-assistants.md](./12-ass
 
 | Operation | Input | Grant | Route |
 |---|---|---|---|
-| `session.query` | `{ status?, agentId?, assistantId?, runnerId?, runId?, actor?, since?, until? }` | `session.read` | `GET /sessions` |
+| `session.query` | `{ status?, agentId?, thread?, assistantId?, runnerId?, runId?, actor?, since?, until? }` (`thread: true` = sessions with no agent) | `session.read` | `GET /sessions` |
 | `session.read` | `{ sessionId }` (the record: status, agent, runner, workspace, usage) | `session.read` | `GET /sessions/{id}` |
-| `session.spawn` | `{ agentId, prompt, instanceId?, model?, accessMode?, workspace? }` -> `{ sessionId }` | `session.spawn` | `POST /sessions` |
+| `session.spawn` | `{ agentId?, prompt, instanceId?, model?, accessMode?, workspace? }` -> `{ sessionId }`; without `agentId` the session is a Thread built from the `thread.*` settings plus the overrides given, allowed for actor `user` only (`forbidden` otherwise; [./02-domain-model.md](./02-domain-model.md) Thread) | `session.spawn` | `POST /sessions` |
 | `session.continue` | `{ sessionId, mode: "resume" \| "fork", prompt }` -> `{ sessionId }` | `session.spawn` | `POST /sessions/{id}/continue` |
 | `session.input` | `{ sessionId, content }` -> `{ inputId, result: "opened" \| "steered" }` | `session.steer` | `POST /sessions/{id}/input` |
 | `session.interrupt` / `session.stop` | `{ sessionId }` | `session.steer` | `POST /sessions/{id}/interrupt` / `.../stop` |
@@ -197,13 +199,13 @@ Record and router: [./10-triage-intake-and-notifications.md](./10-triage-intake-
 
 | Operation | Input | Grant | Route |
 |---|---|---|---|
-| `notification.query` | `{ kind?, unresolved?, unread?, since? }` | `notification.read` | `GET /notifications` |
+| `notification.query` | `{ kind?, status?, since? }` | `notification.read` | `GET /notifications` |
 | `notification.read` | `{ notificationId }` | `notification.read` | `GET /notifications/{id}` |
 | `notification.create` | producer input `{ kind, title, body?, actions?, subject? }` -> `{ notificationId }` | `notification.write` | `POST /notifications` |
-| `notification.update` | `{ notificationId, read?: boolean }` | `notification.write` | `PATCH /notifications/{id}` |
+| `notification.withdraw` | `{ notificationId, reason }` - own notifications only (`producer` match) | `notification.write` | `POST /notifications/{id}/withdraw` |
 | `notification.act` | `{ notificationId, actionId }` | `notification.write` | `POST /notifications/{id}/act` |
 
-`notification.create` is the operation the tickets called `notify`; the built-in action carries the operation's name. `notification.act` decides a decision notification and executes its bound operation (section 3.2).
+`notification.create` is the operation the tickets called `notify`; the built-in action carries the operation's name. `notification.act` decides a decision notification and executes its bound operation (section 3.2). `notification.withdraw` resolves a decision as `withdrawn` when its question has stopped existing; a producer may withdraw only what it produced, and there is no other mutation - records are immutable apart from resolution, and there is no per-record read state ([./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md) sections 7.1, 7.7).
 
 Two per-operation facts in the contract's operation table serve bound actions ([./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md) section 7.4): a **`bindable`** flag, default true, `false` for the `credential`, `secret`, `infra` and `permission` families, `connection.manage` and bulk-destructive-tagged operations (the core may still bind those; other producers may not), and a **`describe(input) -> string`** renderer, the core-rendered line shown on every bound action so the click is informed.
 
@@ -216,6 +218,7 @@ Pipeline: [./08-events-and-connections.md](./08-events-and-connections.md).
 | `event.query` | `{ connectionId?, kind?, triggerId?, runId?, since?, until? }` (joined to effect rows; `triggerId` lists a paused trigger's held events) | `event.read` | `GET /events` |
 | `event.read` | `{ eventId }` | `event.read` | `GET /events/{id}` |
 | `event.emit` | `{ kind, payload, connectionId? }` -> `{ eventId }` (the `manual` source) | `event.emit` | `POST /events/emit` |
+| `event.enrich` | `{ eventId, system?, url?, refs? }`; `system`/`url` overwrite, `refs` append-only; re-matches the event idempotently ([./08-events-and-connections.md](./08-events-and-connections.md) section 4.2) | `event.emit` | `POST /events/{id}/enrich` |
 
 ### connection
 
@@ -239,7 +242,7 @@ Semantics: [./03-controller-and-runners.md](./03-controller-and-runners.md), [./
 | `runner.update` | `{ runnerId, name?, labels?, maxConcurrentSessions? }` | `infra.write` | `PATCH /runners/{id}` |
 | `runner.drain` / `runner.retire` / `runner.upgrade` | `{ runnerId }`; `retire` takes `force?: boolean` for an unreachable runner | `infra.write` | `POST /runners/{id}/drain` etc. |
 | `runner.probe` | `{ runnerId, instanceId }` -> capability snapshot | `infra.write` | `POST /runners/{id}/probe` |
-| `runner.mintJoinToken` | `{}` -> single-use join token | `infra.write` | `POST /runners/join-tokens` |
+| `runner.createJoinToken` | `{}` -> single-use join token (renamed from `mintJoinToken` 2026-09-01, [#44](https://github.com/rogierpennink/hydra/issues/44): `create` over `mint`, consistently) | `infra.write` | `POST /runners/join-tokens` |
 | `plugin.query` / `plugin.read` | `{}` / `{ pluginId }` (state, config, contributions) | `infra.read` | `GET /plugins[/{id}]` |
 | `plugin.enable` / `plugin.disable` | `{ pluginId }` | `infra.write` | `POST /plugins/{id}/enable` etc. |
 | `plugin.configure` | `{ pluginId, config }` (deactivate + reactivate) | `infra.write` | `PUT /plugins/{id}/config` |
@@ -247,7 +250,7 @@ Semantics: [./03-controller-and-runners.md](./03-controller-and-runners.md), [./
 | `provider.create` / `update` / `delete` | instance config ([./06](./06-providers.md)) | `infra.write` | `POST` / `PATCH` / `DELETE /providers[/{id}]` |
 | `controller.read` | `{}` -> identity, version, update availability, default runner | `infra.read` | `GET /controller` |
 | `controller.update` | `{ defaultRunnerId? }` | `infra.write` | `PATCH /controller` |
-| `controller.mintPromotionToken` / `controller.export` / `controller.import` | promotion ([./15](./15-packaging-and-operations.md)) | `infra.write` | `POST /controller/promotion-tokens`, `.../export`, `.../import` |
+| `controller.createPromotionToken` / `controller.export` / `controller.import` | promotion ([./15](./15-packaging-and-operations.md)); renamed from `mintPromotionToken` with `runner.createJoinToken` ([#44](https://github.com/rogierpennink/hydra/issues/44)) | `infra.write` | `POST /controller/promotion-tokens`, `.../export`, `.../import` |
 
 ### workspace
 
@@ -257,7 +260,7 @@ Semantics: [./03-controller-and-runners.md](./03-controller-and-runners.md).
 |---|---|---|---|
 | `workspace.query` / `workspace.read` | `{ runnerId?, resourceId?, kind?, status? }` / `{ workspaceId }` | `workspace.read` | `GET /workspaces[/{id}]` |
 | `workspace.provision` | `{ resourceId, runnerId }` -> a primary workspace (adopts an existing local checkout in place) | `workspace.write` | `POST /workspaces` |
-| `workspace.dispose` | `{ workspaceId }` (an ephemeral, including one `kept-on-failure`; a primary is never torn down by Hydra: 409 `invalid_state`) | `workspace.write` | `DELETE /workspaces/{id}` |
+| `workspace.dispose` | `{ workspaceId }` (an ephemeral, including the kept workspace of a failed run; a primary is never torn down by Hydra: 409 `invalid_state`) | `workspace.write` | `DELETE /workspaces/{id}` |
 
 Workspaces otherwise appear as side effects of session and run placement; `lost` is set by runner retirement, never by an operation.
 
@@ -268,15 +271,28 @@ Semantics: [./12-assistants.md](./12-assistants.md).
 | Operation | Input | Grant | Route |
 |---|---|---|---|
 | `agent.query` / `agent.read` | | `agent.read` | `GET /agents[/{id}]` |
-| `agent.create` / `update` / `delete` | prompt, provider instance, capabilities, `profileId` (assigning a permission profile is an `agent.update`) | `agent.write` | `POST` / `PATCH` / `DELETE /agents[/{id}]` |
+| `agent.create` / `update` / `delete` | `name`, `systemPrompt`, `instanceId`, `permissionProfileId`, `accessMode?`, `model?`, `mcpServers?`, `disallowedTools?` ([./02-domain-model.md](./02-domain-model.md) Agent); assigning a permission profile is an `agent.update` and affects sessions spawned afterwards; `delete` is `invalid_state` while a non-exited session references the agent | `agent.write` | `POST` / `PATCH` / `DELETE /agents[/{id}]` |
 | `assistant.query` / `assistant.read` | | `agent.read` | `GET /assistants[/{id}]` |
-| `assistant.create` / `update` / `delete` | an agent plus heartbeat (standing prompt, enabled); `delete` is the confirmed action that deletes memory and bindings | `agent.write` | `POST` / `PATCH` / `DELETE /assistants[/{id}]` |
+| `assistant.create` / `update` / `delete` | an agent plus `heartbeat { enabled, schedule, timezone?, prompt, target }`, `rotation { contextFraction, maxContextTokens, dailyAt, timezone? }`, `reply`, `accessMode` ([./12-assistants.md](./12-assistants.md) section 1); `delete` is the confirmed action that deletes memory and bindings | `agent.write` | `POST` / `PATCH` / `DELETE /assistants[/{id}]` |
 | `binding.query` / `create` / `update` / `delete` | channel bindings of an assistant | `agent.read` / `agent.write` | `GET` / `POST /assistants/{id}/bindings`, `PATCH` / `DELETE /assistants/{id}/bindings/{bindingId}` |
 | `conversation.query` / `conversation.read` | `{ assistantId, ... }` (lineage of sessions) | `agent.read` | `GET /assistants/{id}/conversations[/{conversationId}]` |
+| `conversation.rotate` | manual rotation ("start fresh"): distill, end the incarnation, successor on next wake ([./12-assistants.md](./12-assistants.md) section 5.2) | `agent.write` | `POST /assistants/{id}/conversations/{conversationId}/rotate` |
+
+### reminder (scheduled wakes)
+
+Semantics: [./12-assistants.md](./12-assistants.md) section 8.3. A reminder is a one-shot Scheduled Wake delivered as input to the conversation that created it; the heartbeat (the recurring wake) is edited through `assistant.update`, not here. Grant family `subscription` - a reminder is "wake me later" on a clock instead of an event.
+
+| Operation | Input | Grant | Route |
+|---|---|---|---|
+| `reminder.create` | `{ at: ISO datetime, text }` -> `{ reminderId }`; from a session token the conversation is the session's own, a user credential names `conversationId` | `subscription.write` | `POST /reminders` |
+| `reminder.query` | `{ conversationId? }`; a session token lists its own conversation's | `subscription.read` | `GET /reminders` |
+| `reminder.cancel` | `{ reminderId }` | `subscription.write` | `DELETE /reminders/{id}` |
+
+CLI: `hydra reminder create --at 2026-09-03T09:00 "Remind Rogier to chase the Acme invoice"`, `hydra reminder query | cancel`.
 
 ### memory (assistant-scoped)
 
-Section 6.4 specifies the operations. Grant family `memory` (`read`: `list`, `read`, `search`; `write`: `write`, `append`, `delete`). Routes: `GET /assistants/{id}/memory` (list), `GET .../memory/search?text=`, `GET` / `PUT` / `DELETE .../memory/{name}`, `POST .../memory/{name}/append`. `{id}` is `me` for a session token (section 6.4 pins the scope rule).
+Section 6.4 specifies the operations. Grant family `memory` (`read`: `list`, `read`, `search`; `write`: `write`, `append`, `delete`). Routes: `GET /assistants/{id}/memory` (list), `GET .../memory/search?text=`, `GET` / `PUT` / `DELETE .../memory/{name}`, `POST .../memory/{name}/append`. `PUT` takes `{ body, gist?, confirmShrink? }`. `{id}` is `me` for a session token (section 6.4 pins the scope rule).
 
 ### permission, profile
 
@@ -303,7 +319,17 @@ Semantics: [./13-security.md](./13-security.md), [./15-packaging-and-operations.
 | `user.setPassword` | `{ current, next }` | `credential.write` | `POST /user/password` |
 | `auth.login` | `{ username, password }` -> bearer token | none (pre-auth) | `POST /auth/login` |
 | `auth.wsTicket` | `{}` -> short-lived WebSocket ticket | any authenticated caller | `POST /auth/ws-ticket` |
-| `setup.*` | first-run setup, reachable only with the one-time setup token ([./15](./15-packaging-and-operations.md)) | none (pre-auth) | `POST /setup/...` |
+| `setup.read` | `{}` -> `{ complete: boolean }`; unauthenticated, so the web app knows to route to `/setup` (resolved 2026-09-01, [#44](https://github.com/rogierpennink/hydra/issues/44)) | none (pre-auth) | `GET /setup` |
+| `setup.complete` | `{ username, password, timezone }` - the thin gate; every later onboarding step is an ordinary authenticated call ([./14](./14-web-app.md) §Onboarding, resolved 2026-09-01, [#45](https://github.com/rogierpennink/hydra/issues/45)); requires the one-time setup token ([./15](./15-packaging-and-operations.md)); atomically sets the password and returns a logged-in bearer token. Before setup completes, these two ops and the static bundle are all that is reachable; everything else is 401 | none (setup token) | `POST /setup/complete` |
+
+### settings
+
+The user settings store: per-user preference and presentation state with a closed, schema-validated key set - `timezone`, `topics.order: string[]`, `notifications.muted: string[]` (`workflow:<id>` | `plugin:<id>` | `assistant:<id>`), `lastChecked.intake`, `lastChecked.checkin`, `lastChecked.notifications`, `onboarding.completedSteps: string[]` (the post-gate onboarding steps, [./14](./14-web-app.md) §Onboarding), `thread.instanceId`, `thread.model`, `thread.accessMode`, `thread.profileId` (the defaults for a new Thread, [./02-domain-model.md](./02-domain-model.md) Thread; [./14](./14-web-app.md) Settings > Threads). Keyed by user id from day one so a later user concept is a `WHERE` clause. Not a domain entity ([./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md) sections 4, 7.2, 8; [./12-assistants.md](./12-assistants.md) section 5.2).
+
+| Operation | Input | Grant | Route |
+|---|---|---|---|
+| `settings.read` | `{}` -> the settings object | `settings.read` | `GET /settings` |
+| `settings.update` | a partial settings object; unknown keys rejected | `settings.write` | `PATCH /settings` |
 
 ### project, resource
 
@@ -311,8 +337,8 @@ Semantics: [./02-domain-model.md](./02-domain-model.md).
 
 | Operation | Input | Grant | Route |
 |---|---|---|---|
-| `project.query` / `read` / `create` / `update` / `delete` | `{ name, description? }` | `project.read` / `project.write` | `/projects[/{id}]` |
-| `resource.query` / `read` / `create` / `update` / `delete` | kind, remote, `connectionId`, setup command, `.workspaceinclude` convention, project link | `resource.read` / `resource.write` | `/resources[/{id}]` |
+| `project.query` / `read` / `create` / `update` / `delete` | `{ name, description? }`; `delete` is soft ([./02-domain-model.md](./02-domain-model.md) Deletion rules) | `project.read` / `project.write` | `/projects[/{id}]` |
+| `resource.query` / `read` / `create` / `update` / `delete` | kind, remote (repo resources are unique on the canonical remote: `conflict`), `connectionId`, setup command, `.workspaceinclude` convention, `projectIds[]`; `delete` is `invalid_state` while a workspace referencing it is not `deleted \| lost` | `resource.read` / `resource.write` | `/resources[/{id}]` |
 
 ## 3. Actor stamping
 
@@ -326,7 +352,7 @@ actor: "user" | "session:<sessionId>" | "run:<runId>" | "plugin:<pluginId>"
 
 - `user`: an API key or the web app's login token. Full parity; no profile applies.
 - `session:<id>`: a session token. Bounded by the agent's permission profile (section 5).
-- `run:<id>`: a built-in action step executing inside a run (`task.create` on a cron tick). **Ungated**: the workflow was authored by the user, and its action steps run with the user's parity. Agent steps are sessions and act as `session:<id>` under their own profile, which is what keeps a `worker` session from fanning out.
+- `run:<id>`: an action step executing inside a run (`task.create` on a cron tick). **Ungated**: the workflow was authored by the user, and its action steps run with the user's parity. A plugin action's `ctx.api` mutations are also `run:<id>`, with the `stepId` carried in the audit entry ([ADR 0026](../adr/0026-workflow-actions-may-call-the-public-api-as-the-run.md)). Agent steps are sessions and act as `session:<id>` under their own profile, which is what keeps a `worker` session from fanning out.
 - `plugin:<id>`: a plugin calling the service layer in-process through the public-API client capability. **Ungated**: the user enabled the plugin and granted the capability ([./05-plugins.md](./05-plugins.md)).
 
 The event log is the audit log; there is no separate audit subsystem. Multi-user later widens the `user` value to a user id and never restructures the field. Security events and actor-stamped mutations keep 90-day retention ([./13-security.md](./13-security.md)).
@@ -337,7 +363,7 @@ The actor is derived from the credential or the in-process caller, never supplie
 
 ### 3.2 Bound Notification actions
 
-A decision Notification may bind an operation (for example "Start Bugfix" = `workflow.run` with workflow X and task Y; "Merge dev bumps" = `github.merge` over three PRs; "Event-sourced" = `session.input` replying to the session that asked). Pinned by ticket 37 ([ADR 0022](../adr/0022-proposing-is-not-doing.md)): **proposing is not doing.** The producer - a session, a run's `notify` step, a plugin or the core - declares the operation, and it is not checked against the producer's permission profile. The operation executes through `notification.act` when the user decides, as actor `user` under full parity; the event log entry records the notification id, its producer and, for a channel click, the connection it came through. Two guardrails replace the profile check: the `bindable` flag withholds the credential/secret/infra/permission families, `connection.manage` and bulk-destructive operations from non-core producers, and every operation's `describe(input)` line is rendered by the core on every answer. Record shape, execution, failure and channel-click rules: [./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md) section 7.4.
+A decision Notification may bind an operation (for example "Start Bugfix" = `workflow.run` with workflow X and task Y; "Merge dev bumps" = `github.merge` over three PRs; "Event-sourced" = `session.input` replying to the session that asked). Pinned by ticket 37 ([ADR 0022](../adr/0022-proposing-is-not-doing.md)): **proposing is not doing.** The producer - a session, a run's `notify` step, a plugin or the core - declares the operation, and it is not checked against the producer's permission profile. The operation executes through `notification.act` when the user decides, as actor `user` under full parity; the event log entry records the notification id, its producer and, for a channel click, the connection it came through. Two guardrails replace the profile check: the `bindable` flag withholds the credential/secret/infra/permission families, `connection.manage` and bulk-destructive operations from non-core producers, and every operation's `describe(input)` line is rendered by the core on every answer. An answer may carry `operation: null` - decide and do nothing ("Dismiss" on an offer, "Neither" on an agent question). Record shape, execution, failure and channel-click rules: [./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md) section 7.4.
 
 ## 4. Credentials
 
@@ -345,7 +371,7 @@ Two credential kinds resolve to the same actor-stamped API. Both are opaque rand
 
 ### 4.1 Session tokens
 
-- **Minting:** at session start the controller mints a session token whose subject is the Session row. The token carries no claims of its own; the agent's permission profile is reached by resolution `token -> session -> agent -> profile`.
+- **Minting:** at session start the controller mints a session token whose subject is the Session row. The token carries no claims of its own; the session's permission profile is reached by resolution `token -> session -> profile`: the profile id was copied onto the Session at spawn ([./02-domain-model.md](./02-domain-model.md) rule 9), so a Thread (no agent) resolves the same way.
 - **Injection:** the runner injects `HYDRA_API_URL`, `HYDRA_TOKEN` and `HYDRA_SESSION=1` into the provider process environment. Nothing is written to runner disk.
 - **Lifetime:** the token dies with the session. It is revoked when the session ends. A rotated assistant conversation continues in a fresh session and therefore under a fresh token; the old session's subscriptions migrate to the successor ([./12-assistants.md](./12-assistants.md)).
 - **Latency constraint (hard rule):** resolving token to profile MUST NOT meaningfully add endpoint latency. One indexed lookup on the hashed token plus a cached or joined profile read satisfies it; a per-request chain of separate queries does not.
@@ -357,7 +383,7 @@ Long-lived, opaque, revocable, minted in the web app or via `hydra login` (passw
 
 ## 5. Permission enforcement
 
-Every agent carries a permission profile; its session tokens inherit it. Enforcement happens in the service layer, so it binds HTTP callers and in-process session callers alike (run and plugin actors are ungated, section 3.1). Parity with the user is the ceiling, not the default.
+Every Session carries a permission profile, copied from its Agent at spawn or from the `thread.profileId` setting for a Thread; its session token carries it. Enforcement happens in the service layer, so it binds HTTP callers and in-process session callers alike (run and plugin actors are ungated, section 3.1). Parity with the user is the ceiling, not the default.
 
 Grant families and verbs, the operation-to-grant table's vocabulary, and the three shipped profiles (`assistant`, `worker`, `unrestricted`) are specified in [./13-security.md](./13-security.md) section 6; this document does not restate them. Section 2 names the grant beside every operation.
 
@@ -375,14 +401,14 @@ Grant families and verbs, the operation-to-grant table's vocabulary, and the thr
 
 The CLI never prompts interactively: onboarding lives wholly in the web app + API, and the runner join exchange is fully programmatic.
 
-**Open:** how `hydra login` receives the password under the never-prompts rule (flag, stdin, or an explicit exception for this one command).
+`hydra login` takes the password docker-style (resolved 2026-09-01, [#44](https://github.com/rogierpennink/hydra/issues/44)): `--password-stdin` is the canonical scripted form; on a TTY with no flag it prompts with echo off, **the one documented exception** to the never-prompts rule. The rule's purpose is that automation and the future desktop installer never wedge on a hidden prompt - `--password-stdin` preserves programmatic drivability, and the desktop app never runs `hydra login`. A bare `--password` flag does not exist (it would leak into `ps` and shell history).
 
 ### 6.2 Credential resolution
 
 The CLI resolves its credential in this order:
 
 1. `HYDRA_TOKEN` from the environment (with `HYDRA_API_URL`).
-2. The CLI credential file (written by `hydra login`; location **Open** in [./15-packaging-and-operations.md](./15-packaging-and-operations.md)).
+2. The CLI credential file, `~/.hydra/credentials.json` (written by `hydra login`; [./15-packaging-and-operations.md](./15-packaging-and-operations.md)).
 
 When `HYDRA_SESSION=1` is set, step 2 is skipped: the CLI refuses file credentials outright. This is what makes the ops CLI and hydra-as-a-tool the same binary: identical commands, different credential.
 
@@ -420,26 +446,21 @@ Assistant memory is reached only through these operations ([ADR 0020](../adr/002
 |---|---|
 | `list` | Returns the index: per document, name, size and gist. This is the same index injected at session start. |
 | `read <name>` | Returns the full body of `core` or one topic. |
-| `search <words>` | Searches across the assistant's memory documents and returns matches. The API's substitute for `grep`. |
-| `write <name>` | Replaces the whole body of `core` or a topic; creates the topic if absent. Content on stdin. |
-| `append <name>` | Appends content to an existing document. Content on stdin. |
-| `delete <name>` | Removes a topic. |
+| `search <words>` | SQLite FTS5 over `core` and every topic; returns per matching document `{ name, snippets[] }`. The API's substitute for `grep`. |
+| `write <name> [--gist "..."] [--confirm-shrink]` | Replaces the whole body of `core` or a topic; creates the topic if absent. Content on stdin; `--gist` sets the topic's one-line gist (optional, unchanged when omitted, ignored for `core`). |
+| `append <name>` | Appends content to an existing document. Content on stdin. Never touches the gist. |
+| `delete <name>` | Removes a topic. `delete core` is refused (`core` is seeded and always injected; `write core` with an empty body clears it). |
 
 Enforcement at the write seam (hard rules):
 
 - A `write` or `append` whose resulting size exceeds the document's cap fails with `cap_exceeded`, naming the current size and the cap so the agent can consolidate. The over-cap write is a visible event, never a silent truncation.
 - A `write` that would exceed the topic count cap fails with `cap_exceeded`, naming the topic count and its cap.
-- Every write is actor-stamped (section 3). Writes distilled from tainted conversation content carry a one-line provenance marker inside the document ([./13-security.md](./13-security.md)).
+- **Shrink guard.** A `write` that would shrink a document of 1,000 or more characters by more than 50% fails with `shrink_rejected`, naming old and new sizes, unless the call carries `confirmShrink: true`. The error is the teaching channel ([./12-assistants.md](./12-assistants.md) section 6.4).
+- Every write is actor-stamped (section 3). Writes from a tainted session (one that has been delivered third-party lines) get provenance metadata *on* the document, set by the core, rendered by `read` as a trailing `> provenance:` line ([./12-assistants.md](./12-assistants.md) section 6.7, [./13-security.md](./13-security.md) section 10).
 
 **Scope (hard rule, the one scoped family in v1):** memory operations from a session token act on the memory of that session's assistant and on nothing else; `assistantId` (`/assistants/{id}/memory`) is honoured for user credentials only, and a session token naming another assistant gets 403 `forbidden`. A session under a profile without `memory` (the `worker` profile) reaches no memory at all. The user reaches every assistant's memory through the same operations; the web app's memory view is a client of them.
 
-**Open:** whether `delete core` is refused (core is seeded and always injected; the tickets say nothing about deleting it).
-
-**Open:** whether `write` validates the two-line topic header (`# name`, `> gist`) and rejects a nonconforming body, or accepts any body and derives the gist leniently.
-
-**Open:** the matching semantics of `memory search` (SQLite FTS like task search, or substring) and whether it searches `core` as well as topics.
-
-**Open:** whether v1 applies a shrink guard on `write` (reject a write that shrinks a document by more than N% unless confirmed). [Prototype: assistant memory interface](https://github.com/rogierpennink/hydra/issues/31) recorded it as the cheaper v1-shaped alternative to version history after a cap rejection led a model to drop fifteen unique decisions in one rewrite; it was put on the record, not adopted.
+There is no header convention to validate: the gist is a field (`--gist`), the body is pure content ([./12-assistants.md](./12-assistants.md) section 6.2).
 
 ## 7. Session subscriptions
 
@@ -469,14 +490,13 @@ The ops CLI is the same `hydra` binary under a user credential: `hydra login` wr
 ## 10. Post-v1
 
 - **Hydra MCP server** - the public API exposed to sessions as typed MCP tools (t3-code-style self-injection). High on the revisit list. V1 keeps the `SessionSpec.mcpServers` passthrough ([./06-providers.md](./06-providers.md)) so it lands without redesign; the operation catalogue maps one-to-one onto tools.
-- **RPC-framework adoption** (tRPC, oRPC, Effect RPC) - deriving routes and clients from the contract. V1 keeps the contract package as the pinned asset so derivation can be added later with evidence.
 - **Scoped grants** ("the sessions you spawned", "this project's tasks") - finer grants inside a family; v1 grants are unscoped except `memory`.
 - **One-call permission outcome (`once`)** - a fourth decision on a Permission Request that carries an `operation`: an overlay row on the session with `remainingUses: 1`, consumed by the first successful call of the named operation, so "may I do X once?" is answerable without a session-wide grant. `permission.request` already carries the `operation` field this needs. Its CLI sugar (`hydra <failed command> --request "<reason>"`, packing the failed call into the request) lands with it.
 - **Bulk operations** (delete-many, cancel-all) - none exist in v1; when they do, they are tagged in the contract and withheld from every profile but `unrestricted` by default, per [./13-security.md](./13-security.md).
 - **Offset pagination and totals** - bolted on beside cursors if usage shows a real need for random access.
 - **CEL subscription targets** - a fifth `SubscriptionTarget` kind carrying a filter over `event`, if the four shorthand kinds prove short.
 - **Read-only memory materialization on runners** (memory as files for native grep, writes still via API) - a pure read convenience addable without touching the write path.
-- **Memory version history** - ruled post-v1; the retrofit is additive (history table beside the live document). The write seam already makes every rewrite a visible actor-stamped event.
+- **Memory version history** - ruled post-v1; the retrofit is additive (history table beside the live document). V1 ships the shrink guard on the write seam instead, and every rewrite is a visible actor-stamped event.
 - **Platform-auto subscription detection** - the controller subscribing a session to artifacts it created; explicit registration stays the primitive.
 - **Multi-user** - widens the actor field to a user id; no restructuring.
 - **Per-agent git identity** - a policy addition on unchanged plumbing ([./13-security.md](./13-security.md)).
@@ -502,8 +522,11 @@ Tickets:
 - [Controller promotion & portability](https://github.com/rogierpennink/hydra/issues/10)
 - [Workflow model: recipes, triggers, human gates](https://github.com/rogierpennink/hydra/issues/13)
 - [Provider adapter interface](https://github.com/rogierpennink/hydra/issues/12)
+- [Revisit Effect for the backend (#53)](https://github.com/rogierpennink/hydra/issues/53) (Effect, HttpApi as the contract, handler-free operations, request lifetime, neutral validation issues)
 
 ADRs:
+
+- [ADR 0031 - The backend is written on Effect](../adr/0031-the-backend-is-written-on-effect.md)
 
 - [ADR 0021 - One operation vocabulary, coarse grants, explicit routes](../adr/0021-one-operation-vocabulary-coarse-grants-explicit-routes.md)
 - [ADR 0013 - Agents operate Hydra through the public API, behind one contract with two transports](../adr/0013-agents-operate-hydra-through-the-public-api.md)

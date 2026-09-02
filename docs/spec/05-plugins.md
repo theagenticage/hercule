@@ -54,9 +54,9 @@ Every plugin exports a manifest and two hooks.
 interface Plugin {
   manifest: PluginManifest
   register(host: RegistrationHost): void          // pure: declares contributions only
-  activate(host: ActivationHost): Promise<Deactivate>   // starts machinery; returns its own teardown
+  activate(host: ActivationHost): Effect<Deactivate>    // starts machinery; returns its own teardown
 }
-type Deactivate = () => Promise<void>
+type Deactivate = Effect<void>
 ```
 
 `register()`:
@@ -79,7 +79,7 @@ Consumers of contributions read the persisted catalog, never the live plugin obj
 - UI pickers (action steps, channel bindings, provider selection, connection types) list from the catalog.
 - "What does this disabled plugin offer" is answered from the catalog; the catalog records for each contribution which plugin owns it and whether that plugin is currently enabled.
 
-**Open:** whether the core's built-in workflow actions (`workflow.run`, `notify`, `task.create`, `task.update`, `task.query`) are entered into the same contribution catalog under a core namespace so validation and pickers read one list, or kept in a separate core registry. The tickets call them built-in and distinguish them from plugin contributions but do not say where they are listed.
+Built-in contributions live in the **same catalog**. The five built-in workflow actions (`workflow.run`, `notification.create`, `task.create`, `task.update`, `task.query`) are registered into the workflow-action extension point at boot, owned by `core`, ids unprefixed and equal to their operation ids ([./07-workflows.md](./07-workflows.md) section 8). Validation and pickers read one list; the catalog's owner column distinguishes core from plugin, and core contributions are never disabled.
 
 ### Where plugins run
 
@@ -101,37 +101,94 @@ The contribution is the act of registering a `ProviderDefinition`: the provider'
 
 ### 4.2 Channel
 
-A channel contribution makes one chat platform reachable. Its obligations at the boundary:
+A channel contribution makes one chat platform reachable. The TypeScript interface (`ChannelContribution`, `ChannelHost`, `ChannelHandle`, the inbound and outbound message shapes, the sink facet) is pinned in [./12-assistants.md](./12-assistants.md) section 11.1; the obligations at the boundary:
 
-- **Identity**: contribution id and the connection type(s) it services (a Discord bot token connection, a Slack bot token connection). Channel connections are established by paste-a-token ([./08-events-and-connections.md](./08-events-and-connections.md)).
-- **Inbound**: for each live connection, deliver every observed message to the core with the route facts bindings match on (connection, guild/workspace, channel, thread, DM flag), the platform sender identity, message text, and mention facts (explicit mention, reply-to-assistant, assistant-active-in-thread). The core, not the plugin, evaluates wake rules, which assistant the binding resolves to, and whether third-party text is context or instruction ([./12-assistants.md](./12-assistants.md)). This placement is the spec's, consistent with the dumb-sink posture; ticket 17 pins the rules, not where they are evaluated. Inbound chat messages are not pipeline Events ([./08-events-and-connections.md](./08-events-and-connections.md)); whether they should be is Open in [./12-assistants.md](./12-assistants.md).
-- **Outbound**: send a message into a named conversation container on a named connection, on the core's request. Outbound sends leave the core through outbox rows with retry ([./04-state-store.md](./04-state-store.md)).
-- **Conversation container**: the plugin defines how its platform's containers map to Hydra Conversations (Discord channel or DM, Slack thread). One container = one Conversation, never merged ([ADR 0014](../adr/0014-assistants-remember-through-distilled-memory-not-merged-sessions.md)).
-- **Notification sink (optional)**: deliver a Notification rendered by the core to a connection. See section 11.
+- **Identity**: contribution id, the connection type it services (a Discord bot-token connection; a Slack connection holding a bot token and an app-level token), and its **scope model** - the container levels, outermost first, for group containers and DMs (Discord `guild > channel > thread` / `user`; Slack `channel > thread` / `user`). The scope model is catalog data: the binding editor and the core's binding matcher read it, so bindings validate while the plugin is disabled.
+- **Inbound**: for each live connection, deliver every observed message to the core through `host.message()` with its container key (`{ kind, path }` of platform ids), the platform sender identity (plugin-formatted identity key, display name, bot and self flags), the text normalized to markdown, attachment links, and the mention facts it can see (explicit platform mention, reply-to-self). The core, not the plugin, resolves bindings, evaluates wake rules and roles, stores conversation messages and decides what is context and what is instruction ([./12-assistants.md](./12-assistants.md) section 4). Inbound chat messages are not pipeline Events ([ADR 0023](../adr/0023-chat-messages-are-conversation-input-not-events.md)).
+- **Outbound**: `send` a markdown message into a named container on the core's request, converting markup and splitting at the platform limit; `activity` renders a working indicator (Discord typing, Slack reaction). Outbound sends leave the core through outbox rows with retry ([./04-state-store.md](./04-state-store.md)).
+- **Conversation container**: the plugin defines how its platform's containers map to Hydra Conversations (Discord channel, thread or DM; Slack thread, DM or group DM - a top-level Slack mention opens a thread). One container = one Conversation, never merged ([ADR 0014](../adr/0014-assistants-remember-through-distilled-memory-not-merged-sessions.md)).
+- **Notification sink (optional)**: deliver a Notification rendered by the core to a container on a connection, render its bound actions as native buttons, report clicks through `host.click()` and edit the message on `resolved()`. See section 11 and [./12-assistants.md](./12-assistants.md) section 11.6.
 
 ### 4.3 Event source
 
-An event-source contribution ingests external facts. Obligations at the boundary ([ADR 0009](../adr/0009-all-events-flow-through-one-persisted-pipeline.md)):
+An event-source contribution ingests external facts ([ADR 0009](../adr/0009-all-events-flow-through-one-persisted-pipeline.md)). The interface is pinned here; pipeline behaviour, kind rosters and cadence numbers are owned by [./08-events-and-connections.md](./08-events-and-connections.md).
 
-- **Identity**: contribution id, the connection type(s) it ingests for, and the event kinds it emits with a declared payload schema per kind. Kinds and schemas are part of the catalog so trigger filters and UI can be validated against them.
-- **Ingest**: on activation, run **one ingest loop per enabled connection** of its type. Emit every event through the `events` capability with: `connectionId`, `kind`, a plugin-supplied `dedupKey`, `occurredAt`, the normalized `payload`, `refs` (the External Refs the event is about, canonicalized by this plugin: `github:issue:owner/repo#42`, `gmail:thread:<id>`), `url` (where a human opens it in its system, or null), `system` (the system the event is about; defaults to the source's own system, writable after ingest for enrichment), and the `raw` vendor payload as passthrough. Field names and the full envelope are pinned in [./08-events-and-connections.md](./08-events-and-connections.md).
-- **Only emit.** The core persists, deduplicates, matches, and dispatches. A plugin never sees triggers, subscriptions, or dispatch.
+```ts
+interface EventSourceContribution {
+  id: string                                   // "github", "gmail"
+  connectionType: string                       // the Connection type it ingests for
+  kinds: Record<string, KindDeclaration>       // "github.issue.opened" -> payload schema + description
+  feeds?: Record<string, FeedDeclaration>      // named poll feeds; absent for purely push-driven sources
+  connectionConfigSchema?: Schema              // per-Connection config (the GitHub watch list)
+  open(connection: ConnectionRef, ctx: IngestContext): Effect<IngestHandle>
+}
+
+interface KindDeclaration { schema: Schema; description: string }
+interface FeedDeclaration { defaultIntervalSeconds: number; minIntervalSeconds?: number }
+
+// What the core hands the ingest loop.
+interface IngestContext {
+  emit(e: EmitEvent): Effect<{ eventId: string }>    // the `events` capability; connection-stamped by the host
+  state: KeyValueStore                         // Connection-scoped KV view (section 6): cursors, watch-list diffs
+  status(s: { state: "connected" | "degraded" | "disconnected"; detail?: string }): void
+}
+
+// What the core calls on a live ingest loop.
+interface IngestHandle {
+  poll?(feed: string): Effect<{ nextAfterSeconds?: number } | void>
+  close(): Effect<void>
+}
+```
+
+Division of labour in one line: **core clock, plugin numbers.**
+
+- The core drives the lifecycle exactly as it does for channels: `open()` once per `connected` Connection of the type after `activate()`, `close()` on disable, deactivate, Connection removal or status change. The core owns the timers - one per (Connection, feed), fired at the per-Connection interval, paused during controller promotion, backed off on errors (section 8.1) - and reports health uniformly.
+- The plugin owns the cadence *numbers*: each feed declares its `defaultIntervalSeconds` (and optionally a `minIntervalSeconds` floor), and `poll()` may return `nextAfterSeconds` as a per-tick floor derived from what the wire said (`X-Poll-Interval`, `Retry-After`, quota math); the core never fires sooner. The user may override the interval per Connection, per feed, clamped to the plugin's floor.
+- **Push sources declare no feeds**: a source holding a persistent connection (a websocket, post-v1 webhook delivery) opens it inside `open()`, emits whenever the wire says so, reports `status()`, and never implements `poll`. The core restarts a dead handle with backoff. Poll and push are one contribution shape (ADR 0009's push-agnostic boundary); the Discord channel plugin's gateway socket already proves the always-on pattern in v1.
+- **Kind names are prefixed** with the plugin id (`github.`), enforced at `register()`. Kinds and their payload schemas are catalog data, so trigger filters and UI validate against them while the plugin is disabled.
+- **Emit is the whole output**: the plugin supplies `kind`, `dedupKey`, `occurredAt`, `payload`, `refs` (canonicalized by this plugin: `github:issue:owner/repo#42`), `url`, `system` and `raw` per the envelope in [./08-events-and-connections.md](./08-events-and-connections.md); the host stamps `connectionId`. The core persists, deduplicates, matches and dispatches; a plugin never sees triggers, subscriptions or dispatch.
 - **Baseline at now**: a newly established connection emits no history.
-- **Push-agnostic**: the interface does not care whether the plugin polled or was pushed. V1 sources poll; post-v1 webhook and Pub/Sub ingress change the plugin's internals, not the boundary.
-- **Per-connection plugin config**: an event source may declare a per-connection config schema (the GitHub watched-repo list, seeded from repo Resources via the `resources` capability and user-editable). Ingest cadence and the polling designs for GitHub and Gmail are in [./08-events-and-connections.md](./08-events-and-connections.md).
 
 ### 4.4 Workflow action
 
-A workflow action is what an action step invokes ([ADR 0008](../adr/0008-workflow-graphs-route-on-declared-outputs.md); step semantics in [./07-workflows.md](./07-workflows.md)). Obligations at the boundary:
+A workflow action is what an action step invokes ([ADR 0008](../adr/0008-workflow-graphs-route-on-declared-outputs.md); step semantics in [./07-workflows.md](./07-workflows.md)).
 
-- **Identity and schemas**: contribution id, display name, typed input schema, typed output schema. The output schema is what edge conditions route on (`steps.<id>.output.*`), so it is part of the catalog and validated at workflow save time.
-- **Connection**: an action that acts on an external service names the Connection it acts as, as an ordinary input. Workflow inputs can map it from the triggering event's connection stamp, so reply-as-the-triggering-account needs no special machinery ([ADR 0010](../adr/0010-external-accounts-are-core-owned-connections.md)).
-- **Execution**: `execute(input, ctx)` runs on the controller, in-process, and returns the output or throws. Actions never redirect the graph; a thrown error fails the step and the run.
-- **No blocking waits**: an action that would wait for something external is instead expressed as a subscription-holding run, not an action that sleeps ([./07-workflows.md](./07-workflows.md)). This generalises ticket 16's no-blocking rule, which is stated for API endpoints, to action contributions.
+```ts
+interface WorkflowActionContribution {
+  id: string                                   // "<plugin>.<entity>.<verb>", e.g. "github.pr.merge"
+  displayName: string
+  description: string                          // shown in pickers; raw material for a bound action's describe line
+  input: Schema
+  output: Schema                               // what edge conditions route on: steps.<id>.output.*
+  connection?: { type: string }                // this action acts through one Connection of this type
+  execute(input: unknown, ctx: ActionContext): Effect<unknown>
+}
 
-**Open:** the TypeScript signatures of the channel, event-source and workflow-action contribution interfaces are not pinned by any ticket; the obligations above are the pinned contract. The provider contribution (`ProviderDefinition`) is the only pinned interface. Fix the three signatures at build time against the obligations here and the event envelope in [./08-events-and-connections.md](./08-events-and-connections.md).
+interface ActionContext {
+  connection?: { id: string; credentials: unknown; config: unknown }   // decoded; present iff declared
+  run: { runId: string; stepId: string }       // where this execution sits
+  api: PublicApiClient                         // stamped run:<runId>, stepId carried in the audit entry (ADR 0026)
+  signal: AbortSignal                          // fires when the run is cancelled
+}
+```
 
-**Open:** the per-plugin v1 workflow-action roster (which `github.*` and `gmail.*` actions ship) is not pinned. Pinned facts: Gmail bodies are fetched on demand through Gmail actions; the Intake prototype used `github.merge` as an example of an agent-authored bound action.
+Rules at the boundary:
+
+- **Failure is a throw.** An action throws `ActionError { code, message, detail? }`; anything else thrown is wrapped as `code: "unexpected"`. The step record stores `{code, message}` and the run fails (`step-failed`, [./07-workflows.md](./07-workflows.md)). No retries, and actions never redirect the graph ([ADR 0008](../adr/0008-workflow-graphs-route-on-declared-outputs.md)).
+- **Connection is resolved by the core.** The step's `params` carry the Connection id, usually mapped from the triggering event's connection stamp so reply-as-the-triggering-account needs no special machinery ([ADR 0010](../adr/0010-external-accounts-are-core-owned-connections.md)); the core validates its type against the declaration and hands `execute` the decoded credential. The plugin never lists or picks Connections.
+- **Actions may call the host** through `ctx.api`, a public-API client whose mutations are stamped `run:<runId>` with the `stepId` in the audit entry, on the same ungated parity footing as built-in actions ([ADR 0026](../adr/0026-workflow-actions-may-call-the-public-api-as-the-run.md); [./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md) section 3.1). Every `ctx.api` mutation is also summarised on the step record (op + entity id), so the run view reports what a step did beyond its declared output.
+- **No event emission from `execute()`.** An action wanting to inject a signal calls the `event.emit` operation explicitly, which stamps `source: "manual"` and the actor; the `events` capability's emit belongs to ingest loops only.
+- **No blocking waits**: an action that would wait for something external is instead expressed as a subscription-holding run, not an action that sleeps ([./07-workflows.md](./07-workflows.md)). This generalises ticket 16's no-blocking rule, stated for API endpoints, to action contributions.
+- **Single-purpose is the shipped convention, not a mechanism.** The v1 rosters below each do one external thing and return output; routing decisions belong in the graph. `ctx.api` is the escape hatch for deterministic logic (fan-out bookkeeping over a list) that would otherwise demand a pointless agent step; routing written into `execute()` is the smell the review bar catches.
+
+The v1 rosters (ids follow the operation vocabulary of [./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md); the Intake prototype's `github.merge` is spelled `github.pr.merge`):
+
+| Plugin | Actions |
+|---|---|
+| `github` | `github.issue.read`, `github.issue.comment`, `github.issue.update` (labels, assignees, state); `github.pr.read`, `github.pr.comment`, `github.pr.review` (approve / request-changes / comment), `github.pr.update` (labels, reviewers, draft/ready, base), `github.pr.merge` (method, delete-branch), `github.pr.create` (from an already-pushed branch) |
+| `gmail` | `gmail.message.read` (full body, parsed text + html), `gmail.thread.read`, `gmail.message.search` (Gmail query syntax, headers only), `gmail.message.send`, `gmail.message.reply` (in-thread), `gmail.message.modify` (add/remove labels: archive, mark read, star) |
+
+Anything git (clone, push, branch) is not an action: it happens in the run's workspace. Gmail bodies stay out of ingest and are fetched on demand through `gmail.message.read` / `gmail.thread.read` ([./08-events-and-connections.md](./08-events-and-connections.md) section 5.2).
 
 ## 5. Host API and plugin capabilities
 
@@ -142,12 +199,12 @@ V1 plugin capabilities:
 | Capability | Phase | Grants |
 |---|---|---|
 | `providers` | register | register a `ProviderDefinition` |
-| `channels` | register + activate | register a channel contribution; at runtime deliver inbound messages and receive outbound send and notification-delivery requests |
+| `channels` | register + activate | register a channel contribution (scope model included); at runtime deliver inbound messages and clicks, report connection status, and receive outbound send, activity and notification-delivery requests ([./12-assistants.md](./12-assistants.md) section 11.1) |
 | `event-sources` | register + activate | register an event-source contribution (kinds + schemas, per-connection config schema) |
 | `workflow-actions` | register | register workflow actions |
 | `connections` | register + activate | declare the connection types the plugin services and their setup flow; at runtime list the plugin's own connections, read their decoded credentials and per-connection config, report connection status |
 | `events` | activate | emit events into the pipeline ([ADR 0009](../adr/0009-all-events-flow-through-one-persisted-pipeline.md)) |
-| `notifications` | activate | emit a Notification ([ADR 0012](../adr/0012-notifications-are-core-routed-sinks-are-dumb.md)) |
+| `notifications` | activate | emit a Notification, withdraw one of its own ([ADR 0012](../adr/0012-notifications-are-core-routed-sinks-are-dumb.md)) |
 | `resources` | activate | read Resources (repos, mailboxes) relevant to the plugin's connection types, e.g. to seed a watch list |
 | `secrets` | activate | plugin-scoped secrets service (section 7) |
 | `kv` | activate | plugin-scoped state (section 6) |
@@ -158,11 +215,13 @@ Rules:
 - `channels` and `notifications` are the capability names pinned by the tickets; the remaining spellings are this spec's and MUST be used consistently. The `events` capability has one method, `emit`; "`events.emit`" in [./08-events-and-connections.md](./08-events-and-connections.md) names that method, not a separate capability. The *set* of services is pinned: contribution registration per extension point, events emit, notifications emit, connections, resources read, secrets, KV, public-API client.
 - A capability's registration surface is what `register()` receives; its runtime surface is what `activate()` receives. `register()` never sees a runtime surface.
 - Everything crossing a capability API is plain serializable data.
+- **Interfaces are Effect-typed natively** ([ADR 0031](../adr/0031-the-backend-is-written-on-effect.md)): every hook and capability method returns an `Effect` (typed failures; deactivation interrupts whatever `activate()` started) and anything stream-shaped is a `Stream`. V1 plugins are in-process built-ins, so there is no promise-shaped facade; one can be added post-v1 if third-party loading wants it.
+- **Schemas are authored in Effect Schema, persisted as JSON Schema.** Every schema crossing the host API (manifest `configSchema`, event payload kinds, action input/output, per-Connection config, credential fields) is written as an Effect Schema in plugin code; the catalog persists the JSON Schema Effect derives from it, which is what workflow validation and the web app's generated forms consume.
 - Plugin capabilities are not user permissions. They are granted by the manifest at load, not by the user; the user's control over a plugin is the enabled flag and its config (section 8). This is the honest v1 position for compiled-in plugins; a review step for third-party manifests is a post-v1 concern.
 
 ### The public-API client
 
-A plugin that needs to act on the wider system (create a Task, start a Run, query Sessions) requests `public-api` and receives a client that calls the **same service layer** as HTTP, bound to the same shared Zod contract ([ADR 0013](../adr/0013-agents-operate-hydra-through-the-public-api.md); [./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md)). Parity holds: nothing is reachable in-process that is not reachable over HTTP. Plugins do not get a wider surface than any other API consumer.
+A plugin that needs to act on the wider system (create a Task, start a Run, query Sessions) requests `public-api` and receives a client that calls the **same service layer** as HTTP, bound to the same shared contract package ([ADR 0013](../adr/0013-agents-operate-hydra-through-the-public-api.md); [./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md)). Parity holds: nothing is reachable in-process that is not reachable over HTTP. Plugins do not get a wider surface than any other API consumer.
 
 Plugin-originated mutations are stamped `plugin:<pluginId>` and are ungated: the user enabled the plugin and granted the capability ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md) section 3.1).
 
@@ -171,9 +230,9 @@ Plugin-originated mutations are stamped `plugin:<pluginId>` and are ungated: the
 - Every plugin gets a key-value store namespaced by plugin id, values as JSON, stored as rows in the one controller SQLite database ([ADR 0004](../adr/0004-controller-state-lives-in-one-sqlite-database.md); [./04-state-store.md](./04-state-store.md)).
 - This is the only durable state a plugin has. Plugins keep nothing on disk: no files under Hydra Home, no caches outside the database. Consequences: plugin state is inside the Data Root, moves with promotion ([ADR 0005](../adr/0005-promotion-is-migration-behind-a-stable-controller-identity.md)), and is covered by the daily backup.
 - Typical contents: polling cursors per connection (GitHub `since` markers, Gmail `historyId`), last-seen markers, small caches. Secrets do not go in KV (section 7).
-- KV is plugin-wide. Per-connection state is the plugin's own convention inside its namespace (key it by `connectionId`).
+- KV has two views over the same table. `activate()` receives the **plugin-scoped** store: global, connection-agnostic state (a repo metadata cache, a sender-rule override map). Ingest and channel handles additionally receive a **Connection-scoped** view (`ctx.state`), keys physically `<pluginId>/<connectionId>/...`: cursors and per-connection markers live there, so the core can wipe exactly that slice when the Connection is deleted or re-baselined, without knowing the plugin's key conventions.
 
-**Open:** whether a plugin's KV namespace is wiped when the plugin is disabled, or only on explicit user reset. The tickets pin disable as deactivate-plus-drop-contributions and say nothing about state retention; retaining it (so re-enabling resumes cursors) is the reading consistent with "disable is a toggle".
+KV is **retained on disable**: disable is a toggle, and re-enabling resumes cursors. It is wiped only by an explicit **Reset plugin state** in Settings > Plugins (which also re-baselines every Connection of the plugin) or, per slice, by deleting a Connection.
 
 ## 7. Plugin secrets
 
@@ -183,7 +242,7 @@ Plugin-originated mutations are stamped `plugin:<pluginId>` and are ungated: the
 - Plugin secrets are packable at export, so promotion carries them like every other secret.
 - **Connection credentials are not plugin secrets.** They are owned by the Connection (owner kind `connection`) and reached through the `connections` capability, which hands the plugin the decoded credential for a connection it services. Plugin-owned secrets are for values that are the plugin's own and not tied to one Connection.
 
-**Open:** where a BYO OAuth client id and secret live: as plugin config plus a plugin-owned secret (one client shared by all Connections of the type), or as per-Connection credentials as the setup recipe in [./08-events-and-connections.md](./08-events-and-connections.md) section 9.2 writes. Ticket 18 pins only "BYO OAuth client where the provider demands one".
+A BYO OAuth client lives at the **plugin level**: client id in plugin config, client secret as a plugin-owned secret; one client serves every Connection of the type (work and personal Gmail connect through the same GCP app, pasted once), as the setup recipe in [./08-events-and-connections.md](./08-events-and-connections.md) section 9.2 writes. Known v1 limitation, accepted: mixing accounts that demand different clients (a Workspace that only trusts an Internal app, plus a personal account) is impossible; the fix is the additive per-Connection client override (Post-v1).
 
 ## 8. Configuration and lifecycle
 
@@ -203,7 +262,14 @@ Lifecycle rules:
 - **Config change or toggle = deactivate + reactivate.** There is no hot-reconfigure protocol; a plugin never observes a config change while running. Config writes are validated against the manifest schema before the restart.
 - **Connections survive toggles.** A Connection is a core record; disabling its plugin stops ingest and outbound use but deletes nothing.
 
-**Open:** behaviour when `activate()` throws or the deactivate function fails: whether the controller retries, marks the plugin as errored in Settings, and whether it emits a Notification. The tickets are silent.
+Failure handling:
+
+- **`activate()` throws**: the plugin enters an **`errored`** state (beside enabled, disabled and the `hostApi` mismatch) with the error shown in Settings > Plugins, and one `core.plugin-error` Notification is emitted. There is no automatic retry loop - a broken plugin retrying every 30 seconds is noise; it is retried at the next controller boot or by the user's Retry button. Transient per-Connection trouble is the ingest loop's business (section 8.1), not this state's.
+- **Deactivate fails**: logged, the plugin is marked `errored`, its contributions are treated as disabled, and Settings says a controller restart clears the leftover machinery.
+
+### 8.1 Ingest-loop failures
+
+`open()` or `poll()` throwing is the common failure (network blip, rate limit). The core retries with exponential backoff (base = the feed's interval, cap 15 minutes); after 5 consecutive failures the Connection goes `error` with one Notification. A success resets the counter and recovers `connected` without user action. A plugin throws a typed `AuthError` to send the Connection straight to `needs-reauth`, no retries.
 
 ## 9. Versioning
 
@@ -222,16 +288,46 @@ Connections are core-owned; plugins define types and drive setup. The full Conne
 - **Ingest is per connection**: one loop per enabled connection, every event stamped with its `connectionId`. Triggers select connections explicitly; outbound actions name their connection.
 - A Resource may reference the Connection used to reach it; the `resources` capability exposes that link to the plugin.
 
-**Open:** the shape of the setup-flow contribution: how a plugin declares a paste-token form versus an OAuth redirect flow, and how the controller routes the OAuth callback (`/oauth/callback`) to the plugin that started the flow. The policy and per-provider path are pinned; the plugin-boundary mechanics are not.
+### 10.1 The setup-flow contribution
+
+A connection type is declared in `register()` with its setup flow as **catalog data**: a list of steps from a small fixed set, rendered entirely by the core (no UI extension point exists), so the Connections screen can show what setting a type up takes before the plugin is even enabled.
+
+```ts
+interface ConnectionTypeContribution {
+  type: string                                 // "github", "gmail", "discord", "slack"
+  displayName: string
+  setup: SetupStep[]
+  validate(credentials: unknown, ctx: ValidateContext): Effect<{ displayName: string; detail?: string }>
+  oauth?: OAuthDeclaration                     // required iff an oauth step appears
+}
+
+type SetupStep =
+  | { kind: "checklist"; markdown: string }    // platform-side prep: Discord intents + invite URL; Slack Socket Mode + scopes; the Google recipe
+  | { kind: "credentials"; fields: CredentialField[] }   // one or more secret fields (Slack: bot token + app-level token)
+  | { kind: "oauth" }                          // run the core OAuth2 client against `oauth`
+  | { kind: "pairing" }                        // core-owned: DM the bot a one-time code ([./12-assistants.md](./12-assistants.md) section 4.1); channels only
+
+interface OAuthDeclaration {
+  authorizationUrl: string
+  tokenUrl: string
+  scopes: string[]
+  extraParams?: Record<string, string>         // Google: { access_type: "offline", prompt: "consent" }
+}
+```
+
+- **The core runs the OAuth dance.** One generic authorization-code client (PKCE, token exchange, refresh) lives in the core, parameterised by the plugin's `OAuthDeclaration`; the plugin writes no OAuth code and never touches the client secret. Refreshed access tokens are what `ctx.connection.credentials` hands the plugin at poll or execute time; a refresh failure sets `needs-reauth` uniformly.
+- **Callback routing**: the core mints an opaque `state` referencing a pending-setup row `{pluginId, type, connectionId?, expiresAt}` and serves `/oauth/callback` itself; the row, not the plugin, is what the callback resolves. The plugin is never routed a request.
+- **A pending setup is not a Connection.** The Connection record exists once `validate()` has passed; `validate` names the account (`displayName`: the GitHub login, the Gmail address) for the Connections screen. The status enum stays `connected | needs-reauth | error | disabled` ([./08-events-and-connections.md](./08-events-and-connections.md) section 8.1).
+- **Reconnect reuses the Connection id**, so triggers and Resources stay attached ([./08-events-and-connections.md](./08-events-and-connections.md) section 8.4).
 
 ## 11. Notifications from plugins
 
 Rationale and the full Notification model: [ADR 0012](../adr/0012-notifications-are-core-routed-sinks-are-dumb.md), [./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md). At the plugin boundary:
 
-- **Producing.** A plugin with the `notifications` capability emits a Notification (for example Gmail warning that its OAuth token is expiring). It becomes one persisted core-owned Notification record like every other producer's. The plugin decides nothing about delivery.
+- **Producing.** A plugin with the `notifications` capability emits a Notification (for example Gmail warning that its OAuth token is expiring). It becomes one persisted core-owned Notification record like every other producer's. The plugin decides nothing about delivery. The same capability offers `withdraw(notificationId, reason)` for a decision the plugin raised whose question has stopped existing ("token refreshed"); it works only on the plugin's own notifications, and it is the only mutation a producer has - records are otherwise immutable ([./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md) section 7.7).
 - **Delivering.** Delivery is core-push, never plugin-claim. The core router alone decides fan-out. A **sink** is a channel contribution that optionally implements notification delivery; it rides the channel extension point, so the fixed set of four stays intact. The web app's notification center always records the notification regardless of sinks.
 - **User control.** The user toggles delivery per channel connection. V1 routing policy is deliver-to-all-enabled. **Producer-side muting** (silence a chatty plugin's notifications) is a separate control from sink-side toggles.
-- **Sink contract grows additively.** Post-v1 fields (device class, presence, receipts) are optional; a sink that reports nothing is treated as always available. Presence-aware routing lands as a router upgrade touching no plugin.
+- **Sink contract grows additively.** V1 sinks implement `deliver` (returning a delivery ref) and `resolved` (edit the delivered message when the decision is taken anywhere), and report clicks to the core, which authenticates and executes them ([./12-assistants.md](./12-assistants.md) section 11.6). Post-v1 fields (device class, presence, receipts) are optional; a sink that reports nothing is treated as always available. Presence-aware routing lands as a router upgrade touching no plugin.
 - **No second path.** A plugin MUST NOT deliver a user-facing notification by any route other than the `notifications` capability, even when it has a channel connection in hand. Assistants speaking unprompted in a conversation are not notifications; the no-double-fire rule and its router mechanism are in [./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md) section 7.5.
 
 ## 12. V1 inventory
@@ -271,6 +367,7 @@ All of these travel the same pipeline and the same catalog-facing surfaces as th
 - **Gmail Pub/Sub pull**: post-v1 latency upgrade behind the same boundary.
 - **Presence-aware notification routing**: post-v1 router upgrade; V1 keeps: additive sink contract.
 - **Connection dedupe on OAuth identity** across plugin-namespaced types: later nicety.
+- **Per-Connection OAuth client override**: the additive fix for mixed-client account sets (section 7); v1 ships one BYO client per plugin.
 - **Manifest review / trust gating** for third-party plugins: with dynamic loading.
 
 ## Sources
@@ -289,6 +386,7 @@ Tickets:
 - Assemble the v1 spec (Intake handoffs: `system` field, labelable Connections) - https://github.com/rogierpennink/hydra/issues/21
 - Controller packaging & install story - https://github.com/rogierpennink/hydra/issues/24
 - Research: smoothest Connection-setup path - https://github.com/rogierpennink/hydra/issues/32
+- Plugin contribution interfaces and v1 event kinds - https://github.com/rogierpennink/hydra/issues/41
 
 ADRs:
 
@@ -300,3 +398,5 @@ ADRs:
 - [ADR 0013 - Agents operate Hydra through the public API](../adr/0013-agents-operate-hydra-through-the-public-api.md)
 - [ADR 0015 - Secrets are encrypted per-value under a keychain-held master key](../adr/0015-secrets-are-encrypted-per-value-under-a-keychain-held-master-key.md)
 - [ADR 0016 - Git credentials derive from Connections](../adr/0016-git-credentials-derive-from-connections.md)
+- [ADR 0026 - Workflow actions may call the public API as the run](../adr/0026-workflow-actions-may-call-the-public-api-as-the-run.md)
+- [ADR 0031 - The backend is written on Effect](../adr/0031-the-backend-is-written-on-effect.md)
