@@ -40,6 +40,10 @@ _Avoid_: execution, chat
 A session the user starts and drives by hand, with no Agent behind it: nothing outlives it, nothing about it is named or reusable. The bare word always means this; a Codex thread or a Slack thread is always qualified.
 _Avoid_: interactive session, chat-first session, chat (reserved for a possible non-agentic conversation surface)
 
+**User Material**:
+The user's own knowledge and configuration from a local harness installation - skills, subagents, instructions, commands, settings. Linked live into Threads on runners that have it; never seen by assistant sessions or workflow steps. UI copy may say "personal config".
+_Avoid_: user config (ambiguous with instance config), user knowledge, dotfiles
+
 **Run**:
 One execution of an execution plan, usually stamped from a workflow. Nothing else in the system is called a run.
 _Avoid_: job, execution, workflow instance
