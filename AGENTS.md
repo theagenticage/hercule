@@ -1,3 +1,66 @@
+# Hydra - agent instructions
+
+Hydra is a self-hosted agent orchestration platform: one always-on controller, runners that host agent sessions, event-triggered workflows, and assistants with memory bound to chat channels. The product is called **Hydra**; "agentick" and "agentick-next" are retired names - never use them in code, docs, commits, or issues.
+
+**Status: implementing v1 from an assembled spec.** The spec is normative. Your job is to build what it says, as simply as possible, and to surface conflicts instead of resolving them silently.
+
+## The system in one breath
+
+Three roles ship in one self-contained Bun binary: the **controller** (always-on brain; all state in one SQLite database; receives every event, matches triggers, interprets execution plans, places sessions, serves the public API and the web app), **runners** (daemons that dial the controller over one WebSocket and host agent sessions as bare processes in workspaces), and **clients** (the static web app, the `hydra` CLI, and the agents themselves - all clients of the same public API). Channels, event sources, providers, and workflow actions are all built internally as plugins. Work enters as events, is triaged by agents into Tasks and Proposals before the user sees it, and is executed by workflows whose runs freeze an immutable execution plan.
+
+## Read this first, per task
+
+Before writing code:
+
+1. **`CONTEXT.md`** - the vocabulary. Use its terms exactly, in code identifiers too, and respect the "Avoid" lists.
+2. **The spec document that owns your area** - `docs/spec/` (map in `docs/spec/README.md`). Normative text you can build from.
+3. **The ADRs that touch your area** - `docs/adr/`. The "why" behind the spec.
+4. **For UI work**: `docs/design-language.md`.
+
+If what you're about to build contradicts the spec or an ADR, stop and say so explicitly ("Contradicts ADR-0007 because..."). Never silently deviate; never silently pick one of several possible readings. If the spec leaves your question open, check `docs/spec/16-open-items.md` first - it may already be marked an implementer's choice or handed to a ticket.
+
+## Engineering philosophy
+
+Development cost carries almost no weight here. Optimize, in order, for: correctness, simplicity, robustness, long-term maintainability, performance. "It was faster to build this way" justifies nothing.
+
+**Simplicity first.** Write the minimum code that solves the problem.
+
+- No features beyond what the ticket asks.
+- No abstractions for single-use code. An abstraction earns its place with its second consumer, not with a prediction.
+- No configurability, options, or "flexibility" nobody asked for.
+- No error handling for states the types or the spec already rule out.
+- If you wrote 200 lines and it could be 50, rewrite it before presenting it.
+
+The test: would a senior engineer call this overcomplicated? Then it is.
+
+**Think before coding.** State your assumptions. If multiple interpretations of the ticket or spec exist, present them - don't pick one silently. If a simpler approach than the ticket implies exists, say so and push back.
+
+**Boyscouting.** Leave the codebase better than you found it. A warning, a lint error, a flaky test, a UI detail that looks off - fix it even when it's unrelated to your task, and mention that you did.
+
+**Performance is a design property, not a tuning pass.** Choose the design that doesn't need optimizing: don't read what you don't need, don't re-query in a loop, don't hold what you can stream. But never micro-optimize at the cost of clarity without a measurement.
+
+**UI is held to pixel perfection.** When testing end-to-end, be picky; spacing, alignment, and states matter as much as behaviour.
+
+## Hard rules
+
+These come from the spec and ADRs; restated here because violating them is expensive.
+
+- **Effect 4 everywhere on the backend; Effect Schema is the only schema language. No Zod in the codebase.** (ADR 0031)
+- **Every operation is a method on an Effect service.** Permission enforcement and actor stamping live inside the method; a transport handler is one line. No operation logic in any handler. (ADR 0031)
+- **The web app writes no Effect code.** React components hold no domain logic; `client-core` wraps the derived clients into promise functions. (ADR 0017, ADR 0031)
+- **One SQLite database; transactions are ambient** (`withTransaction`). A transaction wraps one operation's write set and never spans a wait on anything outside the database. (ADR 0004, ADR 0031)
+- **Every mutation is stamped with an actor** (`user` or `session:<id>`). Widened later, never restructured.
+- **No repo-local Hydra config.** The controller's state is the single source of truth; repositories hold no Hydra configuration.
+- **Never edit generated files by hand** (derived clients, OpenAPI documents, lockfiles).
+- **Never silently substitute behaviour.** Access-mode fallback, trigger pauses, dropped events: the system tells the user; so do you.
+
+## Working conventions
+
+- Work happens on tickets: GitHub issues via `gh` (see below). Reference the ticket in commits.
+- Branch per ticket; PRs into `main`. Research findings live on `research/*` branches, prototypes on `prototype/*` branches.
+- Definition of done: typecheck, lint, and tests green - including failures you didn't cause (boyscouting).
+- _No code exists yet. When the scaffold lands, this section gains the package map and the exact check commands._
+
 ## Agent skills
 
 ### Issue tracker
