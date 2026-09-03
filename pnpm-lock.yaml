@@ -63,6 +63,9 @@ importers:
       '@hydra/contract':
         specifier: workspace:*
         version: link:../../packages/contract
+      '@hydra/home':
+        specifier: workspace:*
+        version: link:../../packages/home
       '@hydra/protocol':
         specifier: workspace:*
         version: link:../../packages/protocol
@@ -124,6 +127,9 @@ importers:
 
   packages/cli:
     dependencies:
+      '@hydra/home':
+        specifier: workspace:*
+        version: link:../home
       effect:
         specifier: 4.0.0-rc.112
         version: 4.0.0-rc.112
@@ -143,6 +149,12 @@ importers:
         specifier: 4.0.0-rc.112
         version: 4.0.0-rc.112
 
+  packages/home:
+    dependencies:
+      effect:
+        specifier: 4.0.0-rc.112
+        version: 4.0.0-rc.112
+
   packages/hydra:
     dependencies:
       '@hydra/cli':
@@ -151,6 +163,9 @@ importers:
       '@hydra/controller':
         specifier: workspace:*
         version: link:../../apps/controller
+      '@hydra/home':
+        specifier: workspace:*
+        version: link:../home
       '@hydra/runner':
         specifier: workspace:*
         version: link:../../apps/runner

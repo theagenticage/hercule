@@ -1,5 +1,10 @@
-import { Result } from "effect";
-import { InvalidOptionError } from "./errors";
+import { Result, Schema } from "effect";
+
+/** A malformed global option on the command line (`--home`, `-c key=value`). */
+export class InvalidOptionError extends Schema.TaggedError<InvalidOptionError>()(
+  "InvalidOptionError",
+  { option: Schema.String, message: Schema.String },
+) {}
 
 /** The two global options, stripped from `argv` before a role reads it. */
 export interface GlobalOptions {
@@ -9,6 +14,12 @@ export interface GlobalOptions {
   readonly overrides: ReadonlyArray<readonly [key: string, value: string]>;
   /** Everything that is not a global option, in order. */
   readonly rest: ReadonlyArray<string>;
+  /**
+   * Where `rest[0]` sat in `argv`, or `argv.length` when there is no such
+   * token. The dispatcher routes on the verb and hands the role the rest of the
+   * line untouched, so it needs the position and not just the token.
+   */
+  readonly verbIndex: number;
 }
 
 /**
@@ -19,8 +30,9 @@ export interface GlobalOptions {
  * hands them to the role along with the role's own arguments (spec 15 sections
  * 2 and 6).
  *
- * Pure, and free of the database by construction: the runner resolves its home
- * with this too, and the runner links no controller state (spec 15 section 3).
+ * Pure, and free of the database by construction: the dispatcher routes on it,
+ * the CLI resolves its home with it, and the runner will too - and neither the
+ * dispatcher nor the runner links controller state (spec 15 section 3).
  */
 export function parseGlobalOptions(
   argv: ReadonlyArray<string>,
@@ -28,6 +40,7 @@ export function parseGlobalOptions(
   let home: string | undefined;
   const overrides: Array<readonly [string, string]> = [];
   const rest: Array<string> = [];
+  let verbIndex = argv.length;
 
   for (let i = 0; i < argv.length; i++) {
     const token = argv[i]!;
@@ -65,9 +78,10 @@ export function parseGlobalOptions(
       }
       overrides.push([assignment.slice(0, separator), assignment.slice(separator + 1)]);
     } else {
+      if (rest.length === 0) verbIndex = i;
       rest.push(token);
     }
   }
 
-  return Result.succeed({ home, overrides, rest });
+  return Result.succeed({ home, overrides, rest, verbIndex });
 }

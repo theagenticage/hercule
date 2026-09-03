@@ -9,6 +9,7 @@
   "dependencies": {
     "@hydra/cli": "workspace:*",
     "@hydra/controller": "workspace:*",
+    "@hydra/home": "workspace:*",
     "@hydra/runner": "workspace:*"
   }
 }

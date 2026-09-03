@@ -1,10 +1,5 @@
 import { Schema } from "effect";
-
-/** A malformed global option on the command line (`--home`, `-c key=value`). */
-export class InvalidOptionError extends Schema.TaggedError<InvalidOptionError>()(
-  "InvalidOptionError",
-  { option: Schema.String, message: Schema.String },
-) {}
+import type { InvalidOptionError } from "@hydra/home";
 
 /** `config.toml` could not be read, or is not the TOML subset Hydra writes. */
 export class ConfigFileError extends Schema.TaggedError<ConfigFileError>()("ConfigFileError", {

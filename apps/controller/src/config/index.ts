@@ -1,17 +1,23 @@
 import { Effect, Layer } from "effect";
-import { parseGlobalOptions } from "./args";
+import { configFileIn, homePaths, parseGlobalOptions, resolveHomePath } from "@hydra/home";
 import { BootstrapConfig, defaults, loadConfigFile, resolveConfig } from "./bootstrap";
 import type { ConfigError } from "./errors";
-import {
-  configFileIn,
-  createDirectory,
-  createLayout,
-  homePaths,
-  HydraHome,
-  resolveHomePath,
-} from "./home";
+import { createDirectory, createLayout, HydraHome } from "./home";
 
-export * from "./args";
+// The pure home pieces live in `@hydra/home`, which the CLI and the runner link
+// too; a controller module reaches them through here.
+export {
+  configFileIn,
+  DATABASE_FILE_NAME,
+  DEFAULT_HOME_NAME,
+  homePaths,
+  InvalidOptionError,
+  parseGlobalOptions,
+  resolveHomePath,
+  setupUrlFileIn,
+  type GlobalOptions,
+  type HomePaths,
+} from "@hydra/home";
 export * from "./bootstrap";
 export * from "./errors";
 export * from "./home";

@@ -1,9 +1,9 @@
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { homedir, tmpdir } from "node:os";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { Effect, Result } from "effect";
-import { BootstrapConfig, envName, layer, resolveHomePath, HydraHome } from "./index";
+import { BootstrapConfig, envName, layer, HydraHome } from "./index";
 
 let home: string;
 
@@ -40,18 +40,6 @@ const failed = async (
   if (Result.isSuccess(result)) throw new Error("expected a failure");
   return result.failure;
 };
-
-describe("resolveHomePath", () => {
-  it("prefers --home, then HYDRA_HOME, then ~/.hydra", () => {
-    expect(resolveHomePath("/tmp/flag", { HYDRA_HOME: "/tmp/env" })).toBe("/tmp/flag");
-    expect(resolveHomePath(undefined, { HYDRA_HOME: "/tmp/env" })).toBe("/tmp/env");
-    expect(resolveHomePath(undefined, {})).toBe(join(homedir(), ".hydra"));
-  });
-
-  it("makes a relative home absolute", () => {
-    expect(resolveHomePath("rel", {})).toBe(join(process.cwd(), "rel"));
-  });
-});
 
 describe("envName", () => {
   it("uppercases, turns dots into underscores and prefixes HYDRA_", () => {
