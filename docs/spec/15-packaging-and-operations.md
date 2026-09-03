@@ -43,7 +43,7 @@ A session reaches the `hydra` binary through a **PATH prepend** (resolved 2026-0
 
 ## 3. Mode isolation (CI-enforced)
 
-The codebase is one pnpm monorepo: `apps/controller`, `apps/runner`, `apps/web`, `packages/contract`, `packages/client-core`, `packages/ui`, `packages/cli`, and plugins as packages ([./14](./14-web-app.md)). The controller, runner, and shared `protocol` / `contract` packages have separate entrypoints behind the dispatcher.
+The codebase is one pnpm monorepo: `apps/controller`, `apps/runner`, `apps/web`, `packages/contract`, `packages/protocol`, `packages/client-core`, `packages/ui`, `packages/cli`, `packages/hydra`, and plugins as packages ([./14](./14-web-app.md)). The controller, runner, and shared `protocol` / `contract` packages have separate entrypoints behind the dispatcher.
 
 Rule: the runner entrypoint's module graph MUST NOT include any controller package. Concretely, the runner never links the DB engine, the plugin host, or the web bundle. A dependency-lint rule in CI enforces this; convention is not enough ([ADR 0018](../adr/0018-hydra-ships-as-one-self-contained-binary.md)).
 
