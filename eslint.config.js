@@ -20,18 +20,16 @@ const bannedEverywhere = [
   },
 ];
 
-const bannedForkImports = [
-  {
-    name: "child_process",
-    importNames: ["fork"],
-    message: "Use spawnHydra() from @hydra/hydra; fork() is broken under --compile (spec 15 s11).",
-  },
-  {
-    name: "node:child_process",
-    importNames: ["fork"],
-    message: "Use spawnHydra() from @hydra/hydra; fork() is broken under --compile (spec 15 s11).",
-  },
-];
+/**
+ * `fork()` is broken under `bun build --compile` (spec 15 section 11), and no
+ * import form of it can be banned reliably: a default import reaches it as
+ * `cp.fork`. So the module itself is banned, and one file is allowed to use it.
+ */
+const bannedChildProcess = ["child_process", "node:child_process"].map((name) => ({
+  name,
+  message:
+    "Use spawnHydra() from @hydra/hydra; fork() is broken under `bun build --compile` (spec 15 section 11).",
+}));
 
 export default tseslint.config(
   {
@@ -47,7 +45,7 @@ export default tseslint.config(
       },
     },
     rules: {
-      "no-restricted-imports": ["error", { paths: [...bannedEverywhere, ...bannedForkImports] }],
+      "no-restricted-imports": ["error", { paths: [...bannedEverywhere, ...bannedChildProcess] }],
     },
   },
   {
@@ -66,7 +64,7 @@ export default tseslint.config(
         {
           paths: [
             ...bannedEverywhere,
-            ...bannedForkImports,
+            ...bannedChildProcess,
             {
               name: "effect",
               message:
@@ -82,6 +80,14 @@ export default tseslint.config(
           ],
         },
       ],
+    },
+  },
+  {
+    // `spawn()` is the sanctioned way to start another role, and build scripts
+    // are tooling that never ships inside the binary.
+    files: ["packages/hydra/src/spawn.ts", "scripts/**/*.ts"],
+    rules: {
+      "no-restricted-imports": ["error", { paths: bannedEverywhere }],
     },
   },
   {

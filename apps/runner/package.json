@@ -7,7 +7,6 @@
     ".": "./src/index.ts"
   },
   "dependencies": {
-    "@hydra/cli": "workspace:*",
     "@hydra/protocol": "workspace:*",
     "effect": "4.0.0-rc.112"
   }

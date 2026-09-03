@@ -8,11 +8,16 @@
  * this reads the graph Bun actually links: `--sourcemap=external` emits a map
  * whose `sources` array is the post-tree-shake module list. Bun has no
  * `--metafile`.
+ *
+ * Usage: `bun run scripts/dep-lint.ts [entrypoint]`. The optional entrypoint
+ * is what `scripts/dep-lint.test.ts` points at its fixtures.
  */
 import { rm } from "node:fs/promises";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
-const root = new URL("..", import.meta.url).pathname;
-const entrypoint = "apps/runner/src/index.ts";
+const root = fileURLToPath(new URL("..", import.meta.url));
+const entrypoint = process.argv[2] ?? "apps/runner/src/index.ts";
 
 /** Each rule names what it forbids and why; the message is the CI output. */
 const FORBIDDEN = [
@@ -28,7 +33,7 @@ const outdir = `${root}node_modules/.cache/dep-lint`;
 await rm(outdir, { recursive: true, force: true });
 
 const built = await Bun.build({
-  entrypoints: [`${root}${entrypoint}`],
+  entrypoints: [resolve(root, entrypoint)],
   target: "bun",
   sourcemap: "external",
   outdir,
@@ -49,13 +54,38 @@ if (!map) {
 const { sources } = (await Bun.file(map.path).json()) as { sources: string[] };
 
 /**
- * A builtin like `bun:sqlite` is external, so it never lands in `sources`.
- * The bundled output still carries its import specifier, so scan both.
+ * A specifier the bundler leaves external, `bun:sqlite` above all, never lands
+ * in `sources`. Two scans close that hole between them.
+ *
+ * First: the emitted bundle still carries the import of anything external that
+ * survives bundling, in every form that reaches a module.
  */
+const IMPORT_FORMS = /(?:\b(?:from|import)\s*\(?|require\s*\()\s*["']([^"']+)["']/g;
 const js = built.outputs.find((o) => o.kind === "entry-point");
-const specifiers = js ? [...(await js.text()).matchAll(/from\s*"([^"]+)"/g)].map((m) => m[1]!) : [];
+const bundled = js ? [...(await js.text()).matchAll(IMPORT_FORMS)].map((m) => m[1]!) : [];
 
-const graph = [...new Set([...sources, ...specifiers])].sort();
+/**
+ * Second: Bun drops a bare `import "bun:sqlite"` outright, so nothing of it
+ * survives into the bundle. Read our own linked sources and take their
+ * specifiers as written. Third-party sources are skipped: their own dead
+ * branches are not this repo's violations, and their paths are already in the
+ * graph below.
+ */
+const mapDir = dirname(map.path);
+const written = (
+  await Promise.all(
+    sources
+      .filter((source) => !source.includes("node_modules/"))
+      .map(async (source) => {
+        const text = await Bun.file(resolve(mapDir, source))
+          .text()
+          .catch(() => "");
+        return [...text.matchAll(IMPORT_FORMS)].map((m) => m[1]!);
+      }),
+  )
+).flat();
+
+const graph = [...new Set([...sources, ...bundled, ...written])].sort();
 
 const violations = FORBIDDEN.flatMap(({ what, pattern }) => {
   const hits = graph.filter((source) => pattern.test(source));

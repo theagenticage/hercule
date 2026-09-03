@@ -72,9 +72,6 @@ importers:
 
   apps/runner:
     dependencies:
-      '@hydra/cli':
-        specifier: workspace:*
-        version: link:../../packages/cli
       '@hydra/protocol':
         specifier: workspace:*
         version: link:../../packages/protocol

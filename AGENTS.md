@@ -81,13 +81,14 @@ One pnpm workspace. Every package is `@hydra/*`, `"type": "module"`, and exports
 
 ### Check commands
 
-Run from the repository root. All three must be green before a PR.
+Run from the repository root. All four checks must be green before a PR; CI runs the same ones.
 
 ```
 pnpm install
 pnpm typecheck   # tsc over the backend, packages/ui, and apps/web
 pnpm lint        # eslint --max-warnings 0, then prettier --check
 pnpm test        # vitest across every package
+pnpm dep-lint    # the runner entrypoint links no controller package
 ```
 
 Two more, for packaging work:

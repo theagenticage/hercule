@@ -5,7 +5,10 @@ on:
     tags: ["v*"]
   pull_request:
   workflow_dispatch:
-  workflow_call:
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   # All three targets cross-compile from one Linux host (spec 15 section 11).
@@ -16,7 +19,7 @@ jobs:
 
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: 1.4.0
+          bun-version-file: .bun-version
 
       - uses: pnpm/action-setup@v4
         with:
@@ -52,10 +55,21 @@ jobs:
             -v "$PWD/dist-binary:/out" \
             debian:bookworm-slim /out/hydra-linux-arm64 --version
 
+      # The Linux binaries are final here. The darwin one is not: it goes out
+      # under its own name so nothing downstream can mistake it for the signed
+      # artifact that `sign-macos` publishes.
       - uses: actions/upload-artifact@v4
         with:
-          name: hydra-binaries
-          path: dist-binary/
+          name: hydra-linux
+          path: |
+            dist-binary/hydra-linux-x64
+            dist-binary/hydra-linux-arm64
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hydra-darwin-arm64-unsigned
+          path: dist-binary/hydra-darwin-arm64
           if-no-files-found: error
 
   # codesign must run on a macOS runner (spec 15 section 11). Ad-hoc signing
@@ -68,7 +82,7 @@ jobs:
 
       - uses: actions/download-artifact@v5
         with:
-          name: hydra-binaries
+          name: hydra-darwin-arm64-unsigned
           path: dist-binary
 
       - name: Codesign with JIT entitlements
