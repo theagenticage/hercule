@@ -1,0 +1,89 @@
+name: Build
+
+on:
+  push:
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+  workflow_call:
+
+jobs:
+  # All three targets cross-compile from one Linux host (spec 15 section 11).
+  compile:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.12.1
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Compile
+        run: |
+          bun run scripts/gen-version.ts
+          for target in bun-darwin-arm64 bun-linux-x64 bun-linux-arm64; do
+            bun build packages/hydra/src/main.ts \
+              --compile --target="$target" \
+              --outfile "dist-binary/hydra-${target#bun-}"
+          done
+          ls -l dist-binary
+
+      - name: Run hydra --version (linux-x64, native)
+        run: ./dist-binary/hydra-linux-x64 --version
+
+      - uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+
+      - name: Run hydra --version (linux-arm64, under QEMU)
+        run: |
+          docker run --rm --platform linux/arm64 \
+            -v "$PWD/dist-binary:/out" \
+            debian:bookworm-slim /out/hydra-linux-arm64 --version
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hydra-binaries
+          path: dist-binary/
+          if-no-files-found: error
+
+  # codesign must run on a macOS runner (spec 15 section 11). Ad-hoc signing
+  # only; notarization is a separate piece of work.
+  sign-macos:
+    needs: compile
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/download-artifact@v5
+        with:
+          name: hydra-binaries
+          path: dist-binary
+
+      - name: Codesign with JIT entitlements
+        run: |
+          chmod +x dist-binary/hydra-darwin-arm64
+          codesign --sign - --force --timestamp=none \
+            --entitlements .github/hydra.entitlements \
+            dist-binary/hydra-darwin-arm64
+          codesign --verify --verbose dist-binary/hydra-darwin-arm64
+
+      - name: Run hydra --version (darwin-arm64, native)
+        run: ./dist-binary/hydra-darwin-arm64 --version
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hydra-darwin-arm64-signed
+          path: dist-binary/hydra-darwin-arm64
+          if-no-files-found: error
