@@ -1,2 +1,8 @@
 .playwright-cli/
 .agentick/
+node_modules/
+dist/
+*.tsbuildinfo
+/hydra
+/dist-binary/
+packages/hydra/src/version.ts

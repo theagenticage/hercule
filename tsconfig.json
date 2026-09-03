@@ -1,0 +1,19 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "types": ["bun"]
+  },
+  "include": [
+    "apps/controller/src/**/*.ts",
+    "apps/runner/src/**/*.ts",
+    "packages/cli/src/**/*.ts",
+    "packages/client-core/src/**/*.ts",
+    "packages/contract/src/**/*.ts",
+    "packages/hydra/src/**/*.ts",
+    "packages/protocol/src/**/*.ts",
+    "scripts/**/*.ts",
+    "vitest.config.ts",
+    "eslint.config.js",
+    "prettier.config.js"
+  ]
+}
