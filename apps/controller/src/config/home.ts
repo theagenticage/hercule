@@ -1,4 +1,4 @@
-import { mkdirSync } from "node:fs";
+import { chmodSync, mkdirSync } from "node:fs";
 import { Context, Effect } from "effect";
 import type { HomePaths } from "@hydra/home";
 import { HydraHomeError } from "./errors";
@@ -14,10 +14,15 @@ export class HydraHome extends Context.Service<HydraHome, HomePaths>()(
   "hydra/controller/config/HydraHome",
 ) {}
 
-/** Create one directory and its parents. Idempotent. */
+/**
+ * Create one directory and its parents, owner-only. Idempotent.
+ *
+ * The home holds the master key, the setup URL and the database, so nothing in
+ * it is another user's business (spec 13 section 2.2).
+ */
 export const createDirectory = Effect.fn("createDirectory")(function* (path: string) {
   yield* Effect.try({
-    try: () => mkdirSync(path, { recursive: true }),
+    try: () => mkdirSync(path, { recursive: true, mode: 0o700 }),
     catch: (cause) => new HydraHomeError({ path, cause }),
   });
 });
@@ -38,4 +43,10 @@ export const createLayout = Effect.fn("createLayout")(function* (paths: HomePath
   for (const directory of directories) {
     yield* createDirectory(directory);
   }
+  // `mode` applies only when a directory is created, so a home that predates
+  // this rule, or that someone widened, is narrowed again on every boot.
+  yield* Effect.try({
+    try: () => chmodSync(paths.home, 0o700),
+    catch: (cause) => new HydraHomeError({ path: paths.home, cause }),
+  });
 });

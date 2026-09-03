@@ -54,20 +54,23 @@ describe("the config layer", () => {
     const { config, home: paths } = await loaded();
 
     expect(config).toEqual({
-      dataDir: join(home, "data"),
+      dataDir: "data",
       bindHost: "127.0.0.1",
       bindPort: 4937,
       logLevel: "info",
     });
+    // Relative, so the file pins no absolute path and a home that moves keeps
+    // working (spec 04, Relocatable Data Root).
     expect(readFileSync(paths.configFile, "utf8")).toBe(
       [
-        `data.dir = ${JSON.stringify(join(home, "data"))}`,
+        'data.dir = "data"',
         'bind.host = "127.0.0.1"',
         "bind.port = 4937",
         'log.level = "info"',
         "",
       ].join("\n"),
     );
+    expect(paths.dataDir).toBe(join(home, "data"));
   });
 
   it("creates the home layout, and creating it again changes nothing", async () => {
@@ -99,7 +102,7 @@ describe("the config layer", () => {
     expect(fromEnv.config.bindHost).toBe("10.0.0.2");
     expect(fromEnv.config.bindPort).toBe(5001);
 
-    const fromFlag = await loaded(["-c", "bind.host=10.0.0.3", "-cbind.port=5002"], {
+    const fromFlag = await loaded(["-c", "bind.host=10.0.0.3", "-c", "bind.port=5002"], {
       HYDRA_BIND_HOST: "10.0.0.2",
       HYDRA_BIND_PORT: "5001",
     });
@@ -128,12 +131,13 @@ describe("the config layer", () => {
     expect(existsSync(join(home, "data"))).toBe(false);
   });
 
-  it("reports a malformed config file with its path and line", async () => {
+  it("reports a malformed config file with its path and the parser's reason", async () => {
     writeFileSync(join(home, "config.toml"), "bind.host = ?\n");
 
     const error = await failed();
     expect(error._tag).toBe("ConfigFileError");
-    expect(error.message).toContain("line 1");
+    expect(error).toMatchObject({ path: join(home, "config.toml") });
+    expect(error.message).toContain("Expected a value");
   });
 
   it("reports a key the bootstrap config does not hold", async () => {
@@ -149,12 +153,35 @@ describe("the config layer", () => {
     expect(fromFlag.message).toContain("retention.events");
   });
 
-  it("reports a value it cannot use", async () => {
+  it("names the source and the value it cannot use", async () => {
+    const error = await failed(["-c", "bind.port=nope"]);
+    expect(error._tag).toBe("ConfigValueError");
+    expect(error.message).toContain("-c bind.port");
+    expect(error.message).toContain('"nope"');
+
+    const fromEnv = await failed([], { HYDRA_LOG_LEVEL: "chatty" });
+    expect(fromEnv.message).toContain("HYDRA_LOG_LEVEL");
+    expect(fromEnv.message).toContain('"chatty"');
+
+    writeFileSync(join(home, "config.toml"), "bind.port = 0\n");
+    const fromFile = await failed();
+    expect(fromFile.message).toContain(join(home, "config.toml"));
+    rmSync(join(home, "config.toml"));
+
     expect((await failed(["-c", "bind.port=nope"]))._tag).toBe("ConfigValueError");
     expect((await failed(["-c", "bind.port=0"]))._tag).toBe("ConfigValueError");
     expect((await failed(["-c", "bind.port=4937.5"]))._tag).toBe("ConfigValueError");
     expect((await failed(["-c", "log.level=chatty"]))._tag).toBe("ConfigValueError");
     expect((await failed(["-c", "data.dir="]))._tag).toBe("ConfigValueError");
+  });
+
+  it("refuses an argument hydra serve does not have", async () => {
+    const result = await Effect.runPromise(
+      HydraHome.pipe(Effect.provide(layer(["--home", home, "--version"], {})), Effect.result),
+    );
+    expect(Result.isFailure(result) && result.failure._tag).toBe("InvalidOptionError");
+    expect(Result.isFailure(result) && result.failure.message).toContain("usage: hydra serve");
+    expect(existsSync(join(home, "config.toml"))).toBe(false);
   });
 
   it("reports a malformed global option", async () => {

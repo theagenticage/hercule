@@ -8,9 +8,8 @@ import * as Option from "effect/Option";
 import * as Redacted from "effect/Redacted";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { homePaths, HydraHome } from "../config";
-import { TestDatabase, UuidString } from "../db";
+import { TestDatabase } from "../db/testing";
 import { masterKeyLayer } from "../keys";
-import * as Schema from "effect/Schema";
 import { ControllerIdentity, controllerIdentityLayer, SIGNING_KEY_SECRET } from "./identity";
 import { CORE_OWNER, Secrets, secretsLayer } from "./secrets";
 
@@ -39,16 +38,6 @@ afterEach(() => {
 });
 
 describe("the controller identity", () => {
-  it("has none before first run", async () => {
-    const found = await run(
-      Effect.gen(function* () {
-        const identity = yield* ControllerIdentity;
-        return yield* identity.get;
-      }),
-    );
-    expect(Option.isNone(found)).toBe(true);
-  });
-
   it("creates one id and Ed25519 public key on first run", async () => {
     const record = await run(
       Effect.gen(function* () {
@@ -56,27 +45,27 @@ describe("the controller identity", () => {
         return yield* identity.ensure;
       }),
     );
-    expect(Schema.decodeUnknownSync(UuidString)(record.id)).toBe(record.id);
+    expect(record.id).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+    );
     // Raw SPKI for an Ed25519 public key: 12 header bytes plus the 32-byte key.
     expect(record.publicKey).toHaveLength(44);
     expect(new Date(record.createdAt).toISOString()).toBe(record.createdAt);
   });
 
   it("finds the same identity on every later boot", async () => {
-    const { first, second, third, rows } = await run(
+    const { first, second, rows } = await run(
       Effect.gen(function* () {
         const identity = yield* ControllerIdentity;
         const sql = yield* SqlClient.SqlClient;
         const first = yield* identity.ensure;
         const second = yield* identity.ensure;
-        const third = yield* identity.get;
         const rows = yield* sql<{ readonly n: number }>`SELECT count(*) AS n FROM secrets`;
-        return { first, second, third: Option.getOrThrow(third), rows: rows[0]!.n };
+        return { first, second, rows: rows[0]!.n };
       }),
     );
     expect(second).toEqual(first);
-    expect(third.id).toBe(first.id);
-    expect(Buffer.from(third.publicKey).equals(Buffer.from(first.publicKey))).toBe(true);
+    expect(Buffer.from(second.publicKey).equals(Buffer.from(first.publicKey))).toBe(true);
     expect(rows).toBe(1);
   });
 
@@ -86,7 +75,10 @@ describe("the controller identity", () => {
         const identity = yield* ControllerIdentity;
         const secrets = yield* Secrets;
         const record = yield* identity.ensure;
-        const names = yield* secrets.listNames(CORE_OWNER);
+        const sql = yield* SqlClient.SqlClient;
+        const names = (yield* sql<{ readonly name: string }>`
+            SELECT name FROM secrets WHERE owner_kind = 'core' ORDER BY name
+          `).map((row) => row.name);
         const stored = Option.getOrThrow(yield* secrets.get(CORE_OWNER, SIGNING_KEY_SECRET));
 
         // The stored key signs what the stored public key verifies: the two

@@ -70,6 +70,7 @@ One pnpm workspace. Every package is `@hydra/*`, `"type": "module"`, and exports
 | `apps/controller` | `@hydra/controller` | The controller role (`hydra serve`) |
 | `apps/runner` | `@hydra/runner` | The runner role (`hydra runner`). Its import graph must never reach the controller, the DB engine, the plugin host, or the web bundle |
 | `packages/cli` | `@hydra/cli` | The CLI role. HTTP only |
+| `packages/home` | `@hydra/home` | The Hydra Home: the global options that locate it, and the layout inside it. A leaf every role links |
 | `packages/contract` | `@hydra/contract` | The public API contract in Effect Schema |
 | `packages/protocol` | `@hydra/protocol` | The controller-runner WebSocket protocol in Effect Schema |
 | `packages/client-core` | `@hydra/client-core` | The client library. The only client package that writes Effect code |

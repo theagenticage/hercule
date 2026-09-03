@@ -1,4 +1,4 @@
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -21,7 +21,6 @@ afterEach(() => {
 
 const writeSetupUrl = () => {
   writeFileSync(join(home, "setup-url"), `${URL}\n`, { mode: 0o600 });
-  chmodSync(join(home, "setup-url"), 0o600);
 };
 
 describe("hydra setup-url", () => {

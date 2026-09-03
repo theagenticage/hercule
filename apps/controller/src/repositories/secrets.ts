@@ -17,8 +17,13 @@
  *   A row edited that way stops decrypting, which is the point: it makes a
  *   row swapped in from another owner detectable rather than silently readable.
  * - **Owner ids and names carry no `|`**, so the associated data has exactly
- *   one reading. {@link Secrets.set} rejects the character rather than trusting
- *   its callers; plugin-supplied names reach this table (spec 13 section 2.4).
+ *   one reading. Both calls reject the character rather than trusting their
+ *   callers; plugin-supplied names reach this table (spec 13 section 2.4).
+ *
+ * The associated data binds a value to its owner and name, not to a version: a
+ * row rolled back to its own earlier ciphertext still decrypts. Detecting that
+ * needs a monotonic counter in the row, and an attacker who can write the
+ * database file is outside the threat model of spec 13 section 1.
  *
  * Plaintext exists only in this process, only for the length of a call, and
  * only inside a {@link Redacted.Redacted}: it never appears in the event log,
@@ -96,6 +101,23 @@ const NONCE_BYTES = 12;
 const associatedData = (owner: SecretOwner, name: string): Bytes =>
   encoder.encode(`${owner.kind}|${owner.id}|${name}`);
 
+/** The associated data has exactly one reading only while nothing in it holds the separator. */
+const rejectSeparator = (owner: SecretOwner, name: string): Effect.Effect<void, SecretNameError> =>
+  Effect.gen(function* () {
+    for (const [what, text] of [
+      ["owner id", owner.id],
+      ["name", name],
+    ] as const) {
+      if (text.includes("|")) {
+        return yield* new SecretNameError({
+          message:
+            `A secret's ${what} cannot contain "|": it is the separator in the ` +
+            `associated data that binds a value to its owner. Got ${JSON.stringify(text)}.`,
+        });
+      }
+    }
+  });
+
 /** The secrets table (spec 04, Secrets table). */
 export class Secrets extends Context.Service<
   Secrets,
@@ -116,13 +138,10 @@ export class Secrets extends Context.Service<
     readonly get: (
       owner: SecretOwner,
       name: string,
-    ) => Effect.Effect<Option.Option<Redacted.Redacted<string>>, SqlError | SecretDecryptError>;
-
-    /** Removes the value. Removing what is not there is a no-op. */
-    readonly delete: (owner: SecretOwner, name: string) => Effect.Effect<void, SqlError>;
-
-    /** The names this owner stores, in order. References only, never values. */
-    readonly listNames: (owner: SecretOwner) => Effect.Effect<ReadonlyArray<string>, SqlError>;
+    ) => Effect.Effect<
+      Option.Option<Redacted.Redacted<string>>,
+      SqlError | SecretNameError | SecretDecryptError
+    >;
   }
 >()("hydra/controller/repositories/Secrets") {}
 
@@ -178,19 +197,7 @@ export const secretsLayer: Layer.Layer<Secrets, never, MasterKey | SqlClient.Sql
       return Secrets.of({
         set: (owner, name, value) =>
           Effect.gen(function* () {
-            for (const [what, text] of [
-              ["owner id", owner.id],
-              ["name", name],
-            ] as const) {
-              if (text.includes("|")) {
-                return yield* new SecretNameError({
-                  message:
-                    `A secret's ${what} cannot contain "|": it is the separator in the ` +
-                    `associated data that binds a value to its owner. Got ${JSON.stringify(text)}.`,
-                });
-              }
-            }
-
+            yield* rejectSeparator(owner, name);
             const { nonce, ciphertext } = yield* encrypt(owner, name, Redacted.value(value));
             const now = new Date(yield* Clock.currentTimeMillis).toISOString();
             const rows = yield* sql<{
@@ -206,6 +213,9 @@ export const secretsLayer: Layer.Layer<Secrets, never, MasterKey | SqlClient.Sql
               ON CONFLICT (owner_kind, owner_id, name) DO UPDATE SET
                 nonce = excluded.nonce,
                 ciphertext = excluded.ciphertext,
+                -- excluded.created_at is this write's timestamp, not the
+                -- stored row's: rotating stamps rotated_at and leaves
+                -- created_at as it was.
                 rotated_at = excluded.created_at
               RETURNING id, created_at, rotated_at
             `;
@@ -221,6 +231,7 @@ export const secretsLayer: Layer.Layer<Secrets, never, MasterKey | SqlClient.Sql
 
         get: (owner, name) =>
           Effect.gen(function* () {
+            yield* rejectSeparator(owner, name);
             const rows = yield* sql<{
               readonly nonce: Bytes;
               readonly ciphertext: Bytes;
@@ -233,19 +244,6 @@ export const secretsLayer: Layer.Layer<Secrets, never, MasterKey | SqlClient.Sql
             const plaintext = yield* decrypt(owner, name, row.nonce, row.ciphertext);
             return Option.some(Redacted.make(plaintext));
           }),
-
-        delete: (owner, name) =>
-          sql`
-            DELETE FROM secrets
-            WHERE owner_kind = ${owner.kind} AND owner_id = ${owner.id} AND name = ${name}
-          `.pipe(Effect.asVoid),
-
-        listNames: (owner) =>
-          sql<{ readonly name: string }>`
-            SELECT name FROM secrets
-            WHERE owner_kind = ${owner.kind} AND owner_id = ${owner.id}
-            ORDER BY name
-          `.pipe(Effect.map((rows) => rows.map((row) => row.name))),
       });
     }),
   );

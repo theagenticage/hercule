@@ -1,4 +1,12 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Database } from "bun:sqlite";
@@ -20,9 +28,15 @@ afterEach(() => {
 const serve = (argv: ReadonlyArray<string> = []): Promise<BootOutcome> =>
   Effect.runPromise(boot({ argv: ["--home", home, ...argv], env: {}, masterKeyBackend: "file" }));
 
+/** Boot the way `hydra serve` does, and hand the test the error it failed with. */
+const serveError = (argv: ReadonlyArray<string> = [], at: string = home) =>
+  Effect.runPromise(
+    boot({ argv: ["--home", at, ...argv], env: {}, masterKeyBackend: "file" }).pipe(Effect.flip),
+  );
+
 /** Read the database the way an operator would: another connection, plain SQL. */
-const query = <A>(sql: string): ReadonlyArray<A> => {
-  const database = new Database(join(home, "data", "hydra.db"), { readonly: true });
+const query = <A>(sql: string, at: string = home): ReadonlyArray<A> => {
+  const database = new Database(join(at, "data", "hydra.db"), { readonly: true });
   try {
     return database.query(sql).all() as ReadonlyArray<A>;
   } finally {
@@ -40,10 +54,12 @@ const setupState = () =>
 const mode = (path: string): number => statSync(path).mode & 0o777;
 
 describe("the first run", () => {
-  it("creates the home layout and the config file", async () => {
+  it("creates the home layout and the config file, owner-only", async () => {
     const outcome = await serve();
+    expect(mode(home)).toBe(0o700);
     for (const directory of ["data", "runner", "logs", "backups", "tls"]) {
       expect(existsSync(join(home, directory))).toBe(true);
+      expect(mode(join(home, directory))).toBe(0o700);
     }
     expect(readFileSync(join(home, "config.toml"), "utf8")).toContain("bind.port = 4937");
     expect(outcome.paths.databaseFile).toBe(join(home, "data", "hydra.db"));
@@ -103,6 +119,25 @@ describe("the first run", () => {
     expect(JSON.stringify(query("SELECT * FROM setup_state"))).not.toContain(tokenIn(url));
   });
 
+  it("writes a Data Root that moves with the home", async () => {
+    await serve();
+    expect(readFileSync(join(home, "config.toml"), "utf8")).toContain('data.dir = "data"');
+
+    const moved = `${home}-moved`;
+    renameSync(home, moved);
+    try {
+      const outcome = await Effect.runPromise(
+        boot({ argv: ["--home", moved], env: {}, masterKeyBackend: "file" }),
+      );
+      expect(outcome.paths.databaseFile).toBe(join(moved, "data", "hydra.db"));
+      expect(existsSync(join(moved, "data", "hydra.db"))).toBe(true);
+      expect(query("SELECT id FROM controller_identity", moved)).toHaveLength(1);
+    } finally {
+      rmSync(moved, { recursive: true, force: true });
+      home = moved;
+    }
+  });
+
   it("renders a reachable host when the bind host is a wildcard", async () => {
     const outcome = await serve(["-c", "bind.host=0.0.0.0", "-c", "bind.port=8080"]);
     expect(outcome.setupUrl).toContain("http://127.0.0.1:8080/setup?token=");
@@ -136,16 +171,17 @@ describe("a second boot", () => {
 });
 
 describe("once setup is complete", () => {
-  it("deletes the setup URL and mints no token", async () => {
+  it("deletes the setup URL, clears the token hash and mints no token", async () => {
     const first = await serve();
     const database = new Database(join(home, "data", "hydra.db"));
     try {
-      database.run(
-        "UPDATE setup_state SET token_hash = NULL, completed_at = '2026-09-04T00:00:00.000Z'",
-      );
+      // The outstanding token is left in the row: completing setup is what
+      // clears it, and the invariant is the controller's to keep.
+      database.run("UPDATE setup_state SET completed_at = '2026-09-04T00:00:00.000Z'");
     } finally {
       database.close();
     }
+    expect(setupState()?.token_hash).not.toBeNull();
 
     const second = await serve();
 
@@ -164,14 +200,32 @@ describe("the setup URL", () => {
 
 describe("a boot that cannot start", () => {
   it("fails with the config error, and creates no database", async () => {
-    const failure = await Effect.runPromise(
-      boot({
-        argv: ["--home", home, "-c", "bind.port=nope"],
-        env: {},
-        masterKeyBackend: "file",
-      }).pipe(Effect.flip),
-    );
+    const failure = await serveError(["-c", "bind.port=nope"]);
     expect(failure._tag).toBe("ConfigValueError");
     expect(existsSync(join(home, "data", "hydra.db"))).toBe(false);
+  });
+
+  it("mints no second master key over a database that already holds secrets", async () => {
+    await serve();
+    rmSync(join(home, "master.key"));
+
+    const failure = await serveError();
+
+    expect(failure._tag).toBe("MasterKeyError");
+    expect(failure.message).toContain(join(home, "master.key"));
+    expect(failure.message).toContain("1 encrypted secret row");
+    expect(existsSync(join(home, "master.key"))).toBe(false);
+  });
+
+  it("names the database file when it is not a database", async () => {
+    await serve();
+    writeFileSync(join(home, "data", "hydra.db"), "this is not a SQLite database");
+    rmSync(join(home, "data", "hydra.db-wal"), { force: true });
+    rmSync(join(home, "data", "hydra.db-shm"), { force: true });
+
+    const failure = await serveError();
+
+    expect(failure._tag).toBe("DatabaseError");
+    expect(failure.message).toContain(join(home, "data", "hydra.db"));
   });
 });

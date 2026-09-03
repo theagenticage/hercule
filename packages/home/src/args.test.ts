@@ -20,11 +20,15 @@ describe("parseGlobalOptions", () => {
     expect(parsed(["--home=/tmp/h"]).home).toBe("/tmp/h");
   });
 
-  it("reads both forms of -c and keeps every override in order", () => {
-    expect(parsed(["-c", "bind.port=1", "-cbind.host=0.0.0.0"]).overrides).toEqual([
+  it("keeps every override in order", () => {
+    expect(parsed(["-c", "bind.port=1", "-c", "bind.host=0.0.0.0"]).overrides).toEqual([
       ["bind.port", "1"],
       ["bind.host", "0.0.0.0"],
     ]);
+  });
+
+  it("leaves a glued -c form to the role, rather than claiming every -c* flag", () => {
+    expect(parsed(["-cbind.port=1", "serve"]).rest).toEqual(["-cbind.port=1", "serve"]);
   });
 
   it("keeps a value containing an equals sign whole", () => {
@@ -42,7 +46,7 @@ describe("parseGlobalOptions", () => {
 
   it("reports where the verb sat, so the dispatcher can hand the rest on untouched", () => {
     expect(parsed(["--home", "/tmp/h", "serve"]).verbIndex).toBe(2);
-    expect(parsed(["-cbind.port=1", "serve", "extra"]).verbIndex).toBe(1);
+    expect(parsed(["-c", "bind.port=1", "serve", "extra"]).verbIndex).toBe(2);
     // A verb that repeats an option value is still found by position.
     expect(parsed(["--home", "serve", "serve"]).verbIndex).toBe(2);
     expect(parsed(["--home", "/tmp/h"]).verbIndex).toBe(2);

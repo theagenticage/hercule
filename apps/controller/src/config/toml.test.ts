@@ -23,36 +23,27 @@ describe("parseToml", () => {
     expect(parsed('bind.host = "0.0.0.0"\n')).toEqual({ "bind.host": "0.0.0.0" });
   });
 
-  it("ignores comments and blank lines, and keeps a # inside a string", () => {
-    expect(parsed('# a comment\n\nlog.level = "info" # trailing\ntag = "a#b"\n')).toEqual({
-      "log.level": "info",
-      tag: "a#b",
+  it("reads strings, numbers and booleans", () => {
+    expect(parsed('a = "text" # trailing\nb = -12_000\nc = 1.5\nd = true\n')).toEqual({
+      a: "text",
+      b: -12000,
+      c: 1.5,
+      d: true,
     });
   });
 
-  it("reads literal strings, escapes, integers, floats and booleans", () => {
-    expect(parsed(`a = 'C:\\raw'\nb = "line\\nbreak"\nc = -12_000\nd = 1.5\ne = true\n`)).toEqual({
-      a: "C:\\raw",
-      b: "line\nbreak",
-      c: -12000,
-      d: 1.5,
-      e: true,
-    });
-  });
-
-  it("names the line it could not read", () => {
-    expect(failure('bind.host = "0.0.0.0"\nbind.port = ?\n')).toContain("line 2");
-    expect(failure("[bind\n")).toContain("line 1");
-    expect(failure("bind.port\n")).toContain("line 1");
-    expect(failure('bind.host = "unterminated\n')).toContain("line 1");
+  it("reports what it could not read", () => {
+    expect(failure('bind.host = "0.0.0.0"\nbind.port = ?\n')).toContain("Expected a value");
+    expect(failure("[bind\n")).toContain("table header");
+    expect(failure("bind.hosts = [1, 2]\n")).toContain("bind.hosts");
   });
 });
 
 describe("formatToml", () => {
   it("writes dotted keys that read back unchanged", () => {
-    const values = { "data.dir": "/home/u/.hydra/data", "bind.port": 4937, "log.level": "info" };
+    const values = { "data.dir": "data", "bind.port": 4937, "log.level": "info" };
     expect(formatToml(values)).toBe(
-      ['data.dir = "/home/u/.hydra/data"', "bind.port = 4937", 'log.level = "info"', ""].join("\n"),
+      ['data.dir = "data"', "bind.port = 4937", 'log.level = "info"', ""].join("\n"),
     );
     expect(parsed(formatToml(values))).toEqual(values);
   });

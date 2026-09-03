@@ -104,14 +104,21 @@ describe("the shipped permission profiles", () => {
 
   it("seeds exactly three profiles, all marked shipped", async () => {
     const profiles = await run(
-      Effect.flatMap(seed, () => Effect.flatMap(PermissionProfiles, (repo) => repo.list())),
+      Effect.flatMap(seed, () =>
+        Effect.flatMap(
+          SqlClient.SqlClient,
+          (sql) => sql<{ readonly name: string; readonly shipped: number }>`
+            SELECT name, shipped FROM permission_profiles ORDER BY name
+          `,
+        ),
+      ),
     );
     expect(profiles.map((profile) => profile.name)).toEqual([
       "assistant",
       "unrestricted",
       "worker",
     ]);
-    expect(profiles.every((profile) => profile.shipped)).toBe(true);
+    expect(profiles.every((profile) => profile.shipped === 1)).toBe(true);
   });
 });
 
@@ -142,7 +149,12 @@ describe("the controller settings defaults", () => {
 
   it("seeds no user-scope rows: no user exists until setup completes", async () => {
     const rows = await run(
-      Effect.flatMap(seed, () => Effect.flatMap(Settings, (settings) => settings.list("user"))),
+      Effect.flatMap(seed, () =>
+        Effect.flatMap(
+          SqlClient.SqlClient,
+          (sql) => sql`SELECT key FROM settings WHERE scope = 'user'`,
+        ),
+      ),
     );
     expect(rows).toEqual([]);
   });
@@ -185,7 +197,7 @@ describe("seeding twice", () => {
         const settings = yield* Settings;
         yield* seed;
         yield* sql`UPDATE permission_profiles SET grants = '["task.read"]' WHERE name = 'worker'`;
-        yield* settings.set("controller", "retention.events", 7);
+        yield* sql`UPDATE settings SET value = '7' WHERE scope = 'controller' AND key = 'retention.events'`;
         yield* seed;
         return [
           yield* grantsOf("worker"),

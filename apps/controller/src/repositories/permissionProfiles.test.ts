@@ -36,18 +36,18 @@ describe("the grant vocabulary", () => {
 });
 
 describe("PermissionProfiles", () => {
-  it("creates a profile and reads it back by name", async () => {
+  it("seeds a shipped profile and reads it back by name", async () => {
     const found = await run(
       Effect.gen(function* () {
         const profiles = yield* PermissionProfiles;
-        yield* profiles.create("reviewer", ["task.read", "run.read"]);
+        yield* profiles.ensureShipped("reviewer", ["task.read", "run.read"]);
         return yield* profiles.getByName("reviewer");
       }),
     );
     const profile = Option.getOrThrow(found);
     expect(profile.name).toBe("reviewer");
     expect(profile.grants).toEqual(["task.read", "run.read"]);
-    expect(profile.shipped).toBe(false);
+    expect(profile.shipped).toBe(true);
     expect(profile.id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-/);
     expect(profile.createdAt).toBe(profile.updatedAt);
   });
@@ -59,35 +59,29 @@ describe("PermissionProfiles", () => {
     expect(Option.isNone(found)).toBe(true);
   });
 
-  it("refuses a duplicate name", async () => {
-    const error = await runError(
+  it("leaves an existing profile alone rather than writing a second one", async () => {
+    const { profile, rows } = await run(
       Effect.gen(function* () {
         const profiles = yield* PermissionProfiles;
-        yield* profiles.create("reviewer", ["task.read"]);
-        yield* profiles.create("reviewer", ["task.read"]);
+        const sql = yield* SqlClient.SqlClient;
+        yield* profiles.ensureShipped("reviewer", ["task.read"]);
+        yield* profiles.ensureShipped("reviewer", ["task.read", "task.delete"]);
+        const counted = yield* sql<{
+          readonly n: number;
+        }>`SELECT count(*) AS n FROM permission_profiles`;
+        return { profile: yield* profiles.getByName("reviewer"), rows: counted[0]!.n };
       }),
     );
-    expect(error._tag).toBe("DuplicateProfileError");
+    expect(rows).toBe(1);
+    expect(Option.getOrThrow(profile).grants).toEqual(["task.read"]);
   });
 
   it("refuses a grant outside the vocabulary", async () => {
     const error = await runError(
       Effect.flatMap(PermissionProfiles, (profiles) =>
-        profiles.create("broken", ["task.explode" as Grant]),
+        profiles.ensureShipped("broken", ["task.explode" as Grant]),
       ),
     );
     expect(error._tag).toBe("GrantsError");
-  });
-
-  it("lists profiles by name", async () => {
-    const names = await run(
-      Effect.gen(function* () {
-        const profiles = yield* PermissionProfiles;
-        yield* profiles.create("beta", ["task.read"]);
-        yield* profiles.create("alpha", ["task.read"]);
-        return (yield* profiles.list()).map((profile) => profile.name);
-      }),
-    );
-    expect(names).toEqual(["alpha", "beta"]);
   });
 });

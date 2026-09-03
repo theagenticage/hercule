@@ -19,15 +19,23 @@
  * Hydra v1 does not implement it; the file is the only non-macOS store, and
  * that narrowing is recorded in the spec rather than left implicit.
  *
+ * A key is minted only when the store has none **and** the database holds no
+ * encrypted secrets. A store that lost its key with rows still in the table is
+ * a lost key, not a first run: minting there would replace readable ciphertext
+ * with unreadable ciphertext, so the controller refuses to start instead. That
+ * is the one reason this module knows about the database at all.
+ *
  * The key never reaches the database, a backup, a promotion bundle, a log line,
  * or an error message. It is held only as a non-extractable WebCrypto key, and
  * the bytes it was imported from are zeroed as soon as the import succeeds.
  */
-import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
+import * as SqlClient from "effect/unstable/sql/SqlClient";
+import type { SqlError } from "effect/unstable/sql/SqlError";
 import { HydraHome } from "../config";
 
 /** A master key is 32 bytes: AES-256 takes nothing else. */
@@ -35,6 +43,9 @@ export const MASTER_KEY_BYTES = 32;
 
 /** The keychain service name every Hydra home on a machine shares. */
 export const KEYCHAIN_SERVICE = "Hydra";
+
+/** `security` exits 44 when the item is not in the keychain. */
+const KEYCHAIN_ITEM_NOT_FOUND = 44;
 
 /**
  * The master key could not be read, created, or stored.
@@ -61,7 +72,9 @@ export class MasterKey extends Context.Service<
 type Bytes = Uint8Array<ArrayBuffer>;
 
 /** Where a master key is kept. Two implementations: the macOS keychain, and a file. */
-interface KeyStore {
+export interface KeyStore {
+  /** The store, as an error message names it. */
+  readonly describe: string;
   /** The stored key, or `undefined` when this machine has none yet. */
   readonly read: Effect.Effect<Bytes | undefined, MasterKeyError>;
   readonly write: (bytes: Bytes) => Effect.Effect<void, MasterKeyError>;
@@ -77,18 +90,33 @@ const decodeBase64 = (encoded: string, source: string): Bytes => {
   return bytes;
 };
 
-const fileStore = (path: string): KeyStore => ({
+/** The key file, mode 0600. Its mode is the whole protection, so it is checked on read. */
+export const fileStore = (path: string): KeyStore => ({
+  describe: path,
   read: Effect.try({
-    try: () => (existsSync(path) ? decodeBase64(readFileSync(path, "utf8"), path) : undefined),
-    catch: (cause) => new MasterKeyError({ message: `Cannot read ${path}: ${String(cause)}` }),
+    try: () => {
+      if (!existsSync(path)) return undefined;
+      const mode = statSync(path).mode & 0o777;
+      if (mode !== 0o600) {
+        throw new Error(
+          `${path} is mode ${mode.toString(8).padStart(4, "0")}, not 0600: the file mode is the only ` +
+            `thing protecting the master key. Run chmod 600 on it.`,
+        );
+      }
+      return decodeBase64(readFileSync(path, "utf8"), path);
+    },
+    catch: (cause) =>
+      new MasterKeyError({
+        message: `Cannot use the master key: ${cause instanceof Error ? cause.message : String(cause)}`,
+      }),
   }),
   write: (bytes) =>
     Effect.try({
       try: () => {
-        // The mode argument only applies when the file is created, so an
-        // existing file is chmod-ed as well: 0600 is the whole protection.
+        // `mode` applies only when the file is created, so the previous file is
+        // removed rather than chmod-ed after a moment at the default mode.
+        rmSync(path, { force: true });
         writeFileSync(path, `${Buffer.from(bytes).toString("base64")}\n`, { mode: 0o600 });
-        chmodSync(path, 0o600);
       },
       // The cause here is a filesystem error and never carries the key, but the
       // key was an argument to the call that failed, so only the path is named.
@@ -96,98 +124,101 @@ const fileStore = (path: string): KeyStore => ({
     }),
 });
 
-/** The `security` invocation that reads this home's key. Exit code 44 means "no such item". */
-export const keychainReadCommand = (account: string): ReadonlyArray<string> => [
-  "security",
-  "find-generic-password",
-  "-s",
-  KEYCHAIN_SERVICE,
-  "-a",
-  account,
-  "-w",
-];
+/** What `security` did: its exit code and stdout. Injected, so tests drive every branch. */
+export type SecurityRunner = (
+  argv: ReadonlyArray<string>,
+) => Promise<{ readonly exitCode: number; readonly stdout: string }>;
 
 /**
- * The `security` invocation that stores this home's key. `-U` updates an
- * existing item instead of adding a duplicate.
+ * `security` as the login keychain answers it.
  *
- * `security` has no way to take a password on stdin, so the key is on the
- * command line for the lifetime of the process, visible to `ps` for the same
- * OS user. Hydra's perimeter is one user's own machine (spec 13 section 1), and
- * this happens once, at first run.
+ * There is no way to hand it a password on stdin, so the key is on the command
+ * line for the lifetime of the process, visible to `ps` for the same OS user.
+ * Hydra's perimeter is one user's own machine (spec 13 section 1), and this
+ * happens once, at first run.
  */
-export const keychainWriteCommand = (account: string, encoded: string): ReadonlyArray<string> => [
-  "security",
-  "add-generic-password",
-  "-s",
-  KEYCHAIN_SERVICE,
-  "-a",
-  account,
-  "-w",
-  encoded,
-  "-U",
-];
+export const spawnSecurity: SecurityRunner = async (argv) => {
+  const child = Bun.spawn([...argv], { stdin: "ignore", stdout: "pipe", stderr: "ignore" });
+  const stdout = await new Response(child.stdout).text();
+  return { exitCode: await child.exited, stdout };
+};
 
-/** `security` exits 44 when the item is not in the keychain. */
-const KEYCHAIN_ITEM_NOT_FOUND = 44;
-
-const runSecurity = (
-  command: ReadonlyArray<string>,
-  failure: string,
-): Effect.Effect<{ readonly exitCode: number; readonly stdout: string }, MasterKeyError> =>
-  Effect.tryPromise({
-    try: async () => {
-      const child = Bun.spawn([...command], { stdin: "ignore", stdout: "pipe", stderr: "ignore" });
-      const stdout = await new Response(child.stdout).text();
-      const exitCode = await child.exited;
-      return { exitCode, stdout };
-    },
-    // No cause: it would carry the argv, and the write command's argv carries
-    // the key. Same reason stderr is discarded and stdout never appears here -
-    // `find-generic-password -w` prints the key on stdout.
-    catch: () => new MasterKeyError({ message: failure }),
-  });
-
-const keychainStore = (account: string): KeyStore => ({
-  read: Effect.gen(function* () {
-    const result = yield* runSecurity(
-      keychainReadCommand(account),
-      "Cannot run `security` to read the master key from the login keychain.",
-    );
-    if (result.exitCode === KEYCHAIN_ITEM_NOT_FOUND) return undefined;
-    if (result.exitCode !== 0) {
-      return yield* new MasterKeyError({
-        message:
-          `Reading the master key from the login keychain failed: \`security\` exited ` +
-          `${result.exitCode} for service ${KEYCHAIN_SERVICE}, account ${account}.`,
-      });
-    }
-    return yield* Effect.try({
-      try: () => decodeBase64(result.stdout, `The ${KEYCHAIN_SERVICE} keychain item`),
-      catch: (cause) => new MasterKeyError({ message: String(cause) }),
+/** The macOS login keychain, one item per Hydra Home. */
+export const keychainStore = (account: string, run: SecurityRunner = spawnSecurity): KeyStore => {
+  const item = `the ${KEYCHAIN_SERVICE} keychain item for account ${account}`;
+  const security = (argv: ReadonlyArray<string>, failure: string) =>
+    Effect.tryPromise({
+      try: () => run(argv),
+      // No cause: it would carry the argv, and the write command's argv carries
+      // the key. Same reason stderr is discarded and stdout never appears here -
+      // `find-generic-password -w` prints the key on stdout.
+      catch: () => new MasterKeyError({ message: failure }),
     });
-  }),
-  write: (bytes) =>
-    Effect.gen(function* () {
-      const result = yield* runSecurity(
-        keychainWriteCommand(account, Buffer.from(bytes).toString("base64")),
-        "Cannot run `security` to store the master key in the login keychain.",
+
+  return {
+    describe: item,
+    read: Effect.gen(function* () {
+      const result = yield* security(
+        ["security", "find-generic-password", "-s", KEYCHAIN_SERVICE, "-a", account, "-w"],
+        "Cannot run `security` to read the master key from the login keychain.",
       );
+      if (result.exitCode === KEYCHAIN_ITEM_NOT_FOUND) return undefined;
       if (result.exitCode !== 0) {
         return yield* new MasterKeyError({
           message:
-            `Storing the master key in the login keychain failed: \`security\` exited ` +
-            `${result.exitCode} for service ${KEYCHAIN_SERVICE}, account ${account}.`,
+            `Reading the master key from the login keychain failed: \`security\` exited ` +
+            `${result.exitCode} for ${item}.`,
         });
       }
+      return yield* Effect.try({
+        try: () => decodeBase64(result.stdout, item),
+        catch: (cause) => new MasterKeyError({ message: String(cause) }),
+      });
     }),
-});
+    // `-U` updates an existing item instead of adding a duplicate.
+    write: (bytes) =>
+      Effect.gen(function* () {
+        const result = yield* security(
+          [
+            "security",
+            "add-generic-password",
+            "-s",
+            KEYCHAIN_SERVICE,
+            "-a",
+            account,
+            "-w",
+            Buffer.from(bytes).toString("base64"),
+            "-U",
+          ],
+          "Cannot run `security` to store the master key in the login keychain.",
+        );
+        if (result.exitCode !== 0) {
+          return yield* new MasterKeyError({
+            message:
+              `Storing the master key in the login keychain failed: \`security\` exited ` +
+              `${result.exitCode} for ${item}.`,
+          });
+        }
+      }),
+  };
+};
 
 /** Which store this platform uses when the caller does not say (spec 13 section 2.2). */
 export type MasterKeyBackend = "keychain" | "file";
 
 /** macOS keeps the key in the login keychain; every other platform in the file. */
 export const defaultBackend: MasterKeyBackend = process.platform === "darwin" ? "keychain" : "file";
+
+/** How many secrets the database holds; 0 before the first migration has run. */
+const secretCount: Effect.Effect<number, SqlError, SqlClient.SqlClient> = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient;
+  const tables = yield* sql<{
+    readonly name: string;
+  }>`SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'secrets'`;
+  if (tables.length === 0) return 0;
+  const rows = yield* sql<{ readonly n: number }>`SELECT count(*) AS n FROM secrets`;
+  return rows[0]?.n ?? 0;
+});
 
 /**
  * Reads this machine's master key, minting and storing one on first run, and
@@ -198,7 +229,7 @@ export const defaultBackend: MasterKeyBackend = process.platform === "darwin" ? 
  */
 export const masterKeyLayer = (
   backend: MasterKeyBackend = defaultBackend,
-): Layer.Layer<MasterKey, MasterKeyError, HydraHome> =>
+): Layer.Layer<MasterKey, MasterKeyError | SqlError, HydraHome | SqlClient.SqlClient> =>
   Layer.effect(
     MasterKey,
     Effect.gen(function* () {
@@ -208,6 +239,16 @@ export const masterKeyLayer = (
 
       let bytes = yield* store.read;
       if (bytes === undefined) {
+        const secrets = yield* secretCount;
+        if (secrets > 0) {
+          return yield* new MasterKeyError({
+            message:
+              `${store.describe} holds no master key, but ${home.databaseFile} holds ${secrets} ` +
+              `encrypted secret ${secrets === 1 ? "row" : "rows"}. Minting a new key would make ` +
+              `${secrets === 1 ? "it" : "them"} unreadable. ` +
+              `Restore the key this machine had, or start from an empty Hydra Home.`,
+          });
+        }
         bytes = crypto.getRandomValues(new Uint8Array(MASTER_KEY_BYTES));
         yield* store.write(bytes);
       }

@@ -9,7 +9,7 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import * as BunFileSystem from "@effect/platform-bun/BunFileSystem";
 import { MEMORY, openDatabase, withTransaction } from "./client";
 import { backupBeforeMigration, databaseVersion, migrate, runMigrations } from "./migrate";
-import { binaryVersion } from "./migrations/index";
+import { binaryVersion, migrations } from "./migrations/index";
 import { TestDatabase } from "./testing";
 
 /** The tables migration 0001 creates: the boot set of spec 04. */
@@ -60,7 +60,7 @@ describe("migrations", () => {
     const found = await run(
       MEMORY,
       Effect.gen(function* () {
-        const applied = yield* runMigrations;
+        const applied = yield* runMigrations();
         expect(applied.map(([id]) => id)).toEqual([1]);
         return yield* tableNames;
       }),
@@ -72,8 +72,8 @@ describe("migrations", () => {
     const [first, second, version] = await run(
       databaseFile,
       Effect.gen(function* () {
-        const first = yield* migrate({ backupsDir });
-        const second = yield* migrate({ backupsDir });
+        const first = yield* migrate({ backupsDir, databaseExisted: false });
+        const second = yield* migrate({ backupsDir, databaseExisted: true });
         return [first, second, yield* databaseVersion] as const;
       }),
     );
@@ -87,9 +87,9 @@ describe("migrations", () => {
       databaseFile,
       Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient;
-        yield* runMigrations;
+        yield* runMigrations();
         yield* sql`INSERT INTO effect_sql_migrations (migration_id, name) VALUES (99, 'from-the-future')`;
-        return yield* migrate({ backupsDir });
+        return yield* migrate({ backupsDir, databaseExisted: true });
       }),
     );
     expect(Exit.isFailure(exit)).toBe(true);
@@ -104,8 +104,48 @@ describe("migrations", () => {
   });
 
   it("takes no pre-migration copy on a first run", async () => {
-    await run(databaseFile, migrate({ backupsDir }));
+    await run(databaseFile, migrate({ backupsDir, databaseExisted: false }));
     expect(existsSync(backupsDir)).toBe(false);
+  });
+
+  it("copies an existing database before it applies a pending migration", async () => {
+    // A second migration, as a later Hydra would carry it: the composed path is
+    // "the file was already there and something is pending", which the embedded
+    // set alone cannot exercise while it holds one migration.
+    const withSecond = [
+      ...migrations,
+      [
+        2,
+        "add-a-table",
+        Effect.succeed(
+          Effect.gen(function* () {
+            const sql = yield* SqlClient.SqlClient;
+            yield* sql`CREATE TABLE later (id INTEGER PRIMARY KEY)`;
+          }),
+        ),
+      ] as const,
+    ];
+
+    const { applied, tables } = await run(
+      databaseFile,
+      Effect.gen(function* () {
+        yield* migrate({ backupsDir, databaseExisted: false });
+        const applied = yield* migrate({
+          backupsDir,
+          databaseExisted: true,
+          migrations: withSecond,
+        });
+        return { applied, tables: yield* tableNames };
+      }),
+    );
+
+    expect(applied.map(([id]) => id)).toEqual([2]);
+    expect(tables).toContain("later");
+    const copies = readdirSync(backupsDir);
+    expect(copies).toHaveLength(1);
+    // The copy is the database as it was, without the pending migration.
+    const before = await run(join(backupsDir, copies[0]!), tableNames);
+    expect(before).not.toContain("later");
   });
 });
 
@@ -120,7 +160,7 @@ describe("the pre-migration copy", () => {
     const written = await run(
       databaseFile,
       Effect.gen(function* () {
-        yield* runMigrations;
+        yield* runMigrations();
         yield* Effect.sync(() => {
           mkdirSync(backupsDir, { recursive: true });
           for (const stamp of older) {
@@ -177,7 +217,7 @@ describe("ambient transactions", () => {
     const found = await run(
       MEMORY,
       Effect.gen(function* () {
-        yield* runMigrations;
+        yield* runMigrations();
         yield* withTransaction(
           Effect.gen(function* () {
             yield* insert("outer");
@@ -194,7 +234,7 @@ describe("ambient transactions", () => {
     const found = await run(
       MEMORY,
       Effect.gen(function* () {
-        yield* runMigrations;
+        yield* runMigrations();
         yield* withTransaction(
           Effect.gen(function* () {
             yield* insert("outer");

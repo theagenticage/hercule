@@ -60,8 +60,8 @@ export function parseGlobalOptions(
           new InvalidOptionError({ option: token, message: "--home needs a directory" }),
         );
       }
-    } else if (token === "-c" || (token.startsWith("-c") && token.length > 2)) {
-      const assignment = token === "-c" ? argv[++i] : token.slice(2);
+    } else if (token === "-c") {
+      const assignment = argv[++i];
       if (assignment === undefined) {
         return Result.fail(
           new InvalidOptionError({ option: token, message: "-c needs key=value" }),

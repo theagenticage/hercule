@@ -1,8 +1,7 @@
 import { describe, expect, it } from "vitest";
-import * as Schema from "effect/Schema";
-import { mintUuid, shortUuid, uuidFromString, uuidToString, UuidString } from "./id";
+import { mintUuid, uuidToString } from "./id";
 
-const decode = Schema.decodeUnknownSync(UuidString);
+const CANONICAL = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
 describe("Hydra ids", () => {
   it("mints sixteen bytes", () => {
@@ -10,14 +9,7 @@ describe("Hydra ids", () => {
   });
 
   it("renders the canonical lowercase string form", () => {
-    const rendered = uuidToString(mintUuid());
-    expect(rendered).toBe(rendered.toLowerCase());
-    expect(decode(rendered)).toBe(rendered);
-  });
-
-  it("round-trips bytes through the string form", () => {
-    const bytes = mintUuid();
-    expect(uuidFromString(uuidToString(bytes))).toEqual(bytes);
+    expect(uuidToString(mintUuid())).toMatch(CANONICAL);
   });
 
   it("renders every byte value", () => {
@@ -26,23 +18,13 @@ describe("Hydra ids", () => {
       0x3c,
     ]);
     expect(uuidToString(bytes)).toBe("0192ce07-8c4f-7d66-afec-2482b5c9b03c");
-    expect(uuidFromString("0192ce07-8c4f-7d66-afec-2482b5c9b03c")).toEqual(bytes);
   });
 
   it("sorts by creation time", () => {
-    const first = uuidToString(mintUuid());
-    const second = uuidToString(mintUuid());
-    expect(first < second).toBe(true);
+    expect(uuidToString(mintUuid()) < uuidToString(mintUuid())).toBe(true);
   });
 
-  it("shortens to the last eight hex characters", () => {
-    expect(shortUuid("0192ce07-8c4f-7d66-afec-2482b5c9b03c")).toBe("b5c9b03c");
-    const bytes = mintUuid();
-    expect(shortUuid(bytes)).toBe(uuidToString(bytes).slice(-8));
-  });
-
-  it("rejects an uppercase or malformed id", () => {
-    expect(() => decode("0192CE07-8C4F-7D66-AFEC-2482B5C9B03C")).toThrow();
-    expect(() => uuidFromString("not-an-id")).toThrow(TypeError);
+  it("refuses anything that is not sixteen bytes", () => {
+    expect(() => uuidToString(new Uint8Array(15))).toThrow(TypeError);
   });
 });

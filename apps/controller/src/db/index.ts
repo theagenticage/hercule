@@ -2,8 +2,8 @@
  * The controller's state store: one SQLite database, ambient transactions,
  * forward-only migrations (spec 04, ADR 0004).
  */
-export { JournalModeError, MEMORY, openDatabase, withTransaction } from "./client";
-export { mintUuid, shortUuid, uuidFromString, uuidToString, UuidString } from "./id";
+export { DatabaseError, databaseError, MEMORY, openDatabase, withTransaction } from "./client";
+export { mintUuid, uuidToString } from "./id";
 export {
   backupBeforeMigration,
   databaseVersion,
@@ -12,4 +12,3 @@ export {
   SchemaVersionError,
 } from "./migrate";
 export { binaryVersion } from "./migrations/index";
-export { TestDatabase } from "./testing";

@@ -7,6 +7,11 @@
  * new default gains it. It is insert-if-absent throughout: a shipped profile
  * the user has edited and a setting the user has changed both survive
  * untouched, because the alternative is a silent revert on restart.
+ *
+ * The consequence, and it is deliberate: a shipped profile is frozen at the
+ * boot that first seeded it. Spec 13 section 6.2 makes the three shipped
+ * profiles editable, so a later Hydra that adds a grant to one of them cannot
+ * write it over the user's version; that upgrade is a migration, not a seed.
  */
 import { Effect } from "effect";
 import type { SqlClient } from "effect/unstable/sql/SqlClient";

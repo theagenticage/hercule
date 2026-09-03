@@ -46,12 +46,13 @@ describe("dispatch", () => {
     expect(run.cli).not.toHaveBeenCalled();
   });
 
-  it("skips the glued forms of the global options too", async () => {
+  it("skips the glued form of --home too", async () => {
     await dispatch(["--home=/tmp/h", "serve"]);
     expect(run.controller).toHaveBeenCalledWith(["--home=/tmp/h"]);
-    await dispatch(["-cbind.port=1", "--home=/tmp/h", "-c", "log.level=debug", "serve"]);
+    await dispatch(["-c", "bind.port=1", "--home=/tmp/h", "-c", "log.level=debug", "serve"]);
     expect(run.controller).toHaveBeenCalledWith([
-      "-cbind.port=1",
+      "-c",
+      "bind.port=1",
       "--home=/tmp/h",
       "-c",
       "log.level=debug",

@@ -12,7 +12,7 @@
  * cannot produce the key's type is an error rather than a value the caller
  * misinterprets.
  */
-import { Context, Effect, Layer, Schema } from "effect";
+import { Clock, Context, Effect, Layer, Schema } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 
@@ -42,12 +42,7 @@ const SETTING_SCHEMAS = {
   },
 } as const;
 
-/** The scopes the settings table accepts; the column's `CHECK` matches. */
-export const SETTING_SCOPES = ["controller", "user"] as const;
-
-export type SettingScope = (typeof SETTING_SCOPES)[number];
-
-/** A scope whose keys are declared here, and so are typed on `get` and `set`. */
+/** A scope whose keys are declared here, and so are typed on `get` and `setIfAbsent`. */
 export type TypedScope = keyof typeof SETTING_SCHEMAS;
 
 export type SettingKey<S extends TypedScope> = keyof (typeof SETTING_SCHEMAS)[S] & string;
@@ -71,30 +66,8 @@ export class SettingError extends Schema.TaggedError<SettingError>()("SettingErr
 const schemaFor = (scope: TypedScope, key: string): Schema.Codec<unknown, string> =>
   Schema.fromJsonString((SETTING_SCHEMAS[scope] as Record<string, Schema.Codec<unknown>>)[key]!);
 
-const now = Effect.sync(() => new Date().toISOString());
-
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
-
-  const write = (scope: SettingScope, key: string, json: string, orIgnore: boolean) =>
-    Effect.gen(function* () {
-      const at = yield* now;
-      yield* orIgnore
-        ? sql`
-            INSERT OR IGNORE INTO settings (scope, key, value, updated_at)
-            VALUES (${scope}, ${key}, ${json}, ${at})
-          `
-        : sql`
-            INSERT INTO settings (scope, key, value, updated_at)
-            VALUES (${scope}, ${key}, ${json}, ${at})
-            ON CONFLICT (scope, key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
-          `;
-    });
-
-  const encode = (scope: TypedScope, key: string, value: unknown) =>
-    Schema.encodeUnknownEffect(schemaFor(scope, key))(value).pipe(
-      Effect.mapError((error) => new SettingError({ scope, key, message: error.message })),
-    );
 
   return {
     /** Reads one declared setting, decoded to the key's type. */
@@ -117,14 +90,6 @@ const make = Effect.gen(function* () {
         Effect.map((value) => value as SettingValue<S, K>),
       ),
 
-    /** Writes one declared setting, replacing whatever was there. */
-    set: <S extends TypedScope, K extends SettingKey<S>>(
-      scope: S,
-      key: K,
-      value: SettingValue<S, K>,
-    ): Effect.Effect<void, SettingError | SqlError> =>
-      encode(scope, key, value).pipe(Effect.flatMap((json) => write(scope, key, json, false))),
-
     /**
      * Writes a setting only when it is absent. Seeding a default never
      * overwrites what the user has chosen (spec 15 section 7).
@@ -134,18 +99,16 @@ const make = Effect.gen(function* () {
       key: K,
       value: SettingValue<S, K>,
     ): Effect.Effect<void, SettingError | SqlError> =>
-      encode(scope, key, value).pipe(Effect.flatMap((json) => write(scope, key, json, true))),
-
-    /**
-     * Every row in one scope as stored JSON text. The whole-scope read the
-     * `settings.read` operation answers with; per-key decoding is `get`.
-     */
-    list: (
-      scope: SettingScope,
-    ): Effect.Effect<ReadonlyArray<{ readonly key: string; readonly value: string }>, SqlError> =>
-      sql<{ readonly key: string; readonly value: string }>`
-        SELECT key, value FROM settings WHERE scope = ${scope} ORDER BY key
-      `,
+      Effect.gen(function* () {
+        const json = yield* Schema.encodeUnknownEffect(schemaFor(scope, key))(value).pipe(
+          Effect.mapError((error) => new SettingError({ scope, key, message: error.message })),
+        );
+        const at = new Date(yield* Clock.currentTimeMillis).toISOString();
+        yield* sql`
+          INSERT OR IGNORE INTO settings (scope, key, value, updated_at)
+          VALUES (${scope}, ${key}, ${json}, ${at})
+        `;
+      }),
   };
 });
 

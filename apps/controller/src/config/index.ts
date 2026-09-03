@@ -1,6 +1,12 @@
 import { Effect, Layer } from "effect";
-import { configFileIn, homePaths, parseGlobalOptions, resolveHomePath } from "@hydra/home";
-import { BootstrapConfig, defaults, loadConfigFile, resolveConfig } from "./bootstrap";
+import {
+  configFileIn,
+  homePaths,
+  InvalidOptionError,
+  parseGlobalOptions,
+  resolveHomePath,
+} from "@hydra/home";
+import { BootstrapConfig, loadConfigFile, resolveConfig } from "./bootstrap";
 import type { ConfigError } from "./errors";
 import { createDirectory, createLayout, HydraHome } from "./home";
 
@@ -23,6 +29,9 @@ export * from "./errors";
 export * from "./home";
 export { formatToml, parseToml } from "./toml";
 
+/** What `hydra serve` accepts; it takes no arguments of its own. */
+const USAGE = "usage: hydra serve [--home <dir>] [-c key=value]";
+
 /**
  * Resolve the Hydra Home and the bootstrap config, and create the home layout.
  *
@@ -39,19 +48,29 @@ export const layer = (
   Layer.unwrap(
     Effect.gen(function* () {
       const options = yield* Effect.fromResult(parseGlobalOptions(argv));
+      // Everything the global options did not claim is an argument `hydra
+      // serve` does not have. Booting anyway would silently ignore it.
+      const unknown = options.rest[0];
+      if (unknown !== undefined) {
+        return yield* new InvalidOptionError({
+          option: unknown,
+          message: `hydra serve takes no arguments; ${USAGE}`,
+        });
+      }
+
       const home = resolveHomePath(options.home, env);
-      const homeDefaults = defaults(home);
+      const configFile = configFileIn(home);
 
       // The home must exist before `config.toml` can be written into it; the
       // rest of the layout waits until `data.dir` is known, so a configured
       // Data Root elsewhere leaves no stray `<home>/data` behind.
       yield* createDirectory(home);
-      const file = yield* loadConfigFile(configFileIn(home), homeDefaults);
+      const file = yield* loadConfigFile(configFile);
       const config = yield* resolveConfig({
         overrides: options.overrides,
         env,
         file,
-        defaults: homeDefaults,
+        configFile,
       });
 
       const paths = homePaths(home, config.dataDir);

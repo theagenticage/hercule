@@ -14,7 +14,7 @@ import type * as Migrator from "effect/unstable/sql/Migrator";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import * as SqliteMigrator from "@effect/sql-sqlite-bun/SqliteMigrator";
-import { binaryVersion, migrations } from "./migrations/index";
+import { migrations } from "./migrations/index";
 
 /** The Migrator's own ledger table; the highest id in it is the database's schema version. */
 const MIGRATIONS_TABLE = "effect_sql_migrations";
@@ -89,41 +89,54 @@ export const backupBeforeMigration = (
   });
 
 /** Applies every pending migration inside one transaction, and nothing else. */
-export const runMigrations: Effect.Effect<
+export const runMigrations = (
+  set: ReadonlyArray<Migrator.ResolvedMigration> = migrations,
+): Effect.Effect<
   ReadonlyArray<readonly [id: number, name: string]>,
   SqlError | Migrator.MigrationError,
   SqlClient.SqlClient
-> = Effect.suspend(() => SqliteMigrator.run({ loader: Effect.succeed(migrations) }));
+> => Effect.suspend(() => SqliteMigrator.run({ loader: Effect.succeed(set) }));
+
+/** The schema version a migration set carries: the highest id in it. */
+const highestId = (set: ReadonlyArray<Migrator.ResolvedMigration>): number =>
+  set.reduce((highest, [id]) => Math.max(highest, id), 0);
 
 /**
  * The boot sequence: refuse a database newer than this binary, copy it if it
  * holds anything worth keeping, then migrate.
  *
- * The copy is skipped when there is nothing to migrate, and on a database that
- * has never been migrated: a first run has no state to lose, and a boot with no
- * pending migrations would otherwise leave a copy behind every time.
+ * The copy is skipped when the database file did not exist when it was opened -
+ * a first run has nothing to lose - and when nothing is pending, which would
+ * otherwise leave a copy behind on every boot.
+ *
+ * `migrations` is the embedded set; a test passes a longer one to exercise a
+ * pending migration against a database that already exists.
  */
 export const migrate = (options: {
   readonly backupsDir: string;
+  readonly databaseExisted: boolean;
+  readonly migrations?: ReadonlyArray<Migrator.ResolvedMigration>;
 }): Effect.Effect<
   ReadonlyArray<readonly [id: number, name: string]>,
   SqlError | Migrator.MigrationError | SchemaVersionError | PlatformError,
   SqlClient.SqlClient | FileSystem
 > =>
   Effect.gen(function* () {
+    const set = options.migrations ?? migrations;
+    const target = highestId(set);
     const version = yield* databaseVersion;
-    if (version > binaryVersion) {
+    if (version > target) {
       return yield* new SchemaVersionError({
         databaseVersion: version,
-        binaryVersion,
+        binaryVersion: target,
         message:
           `This database is at schema version ${version}, and this Hydra binary only knows ` +
-          `version ${binaryVersion}. Hydra has no down migrations; run a build at or after ` +
+          `version ${target}. Hydra has no down migrations; run a build at or after ` +
           `schema version ${version}.`,
       });
     }
-    if (version > 0 && version < binaryVersion) {
+    if (options.databaseExisted && version < target) {
       yield* backupBeforeMigration(options.backupsDir);
     }
-    return yield* runMigrations;
+    return yield* runMigrations(set);
   });

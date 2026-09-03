@@ -11,7 +11,7 @@
  * The three shipped profiles are seeded at first run with `shipped = 1`: the
  * user may edit them, never delete them.
  */
-import { Context, Effect, Layer, Option, Schema } from "effect";
+import { Clock, Context, Effect, Layer, Option, Schema } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import { mintUuid, uuidToString } from "../db/id";
@@ -78,12 +78,6 @@ export class GrantsError extends Schema.TaggedError<GrantsError>()("GrantsError"
   message: Schema.String,
 }) {}
 
-/** A profile with that name already exists; names are unique (spec 13 section 6.2). */
-export class DuplicateProfileError extends Schema.TaggedError<DuplicateProfileError>()(
-  "DuplicateProfileError",
-  { name: Schema.String },
-) {}
-
 interface Row {
   readonly id: Uint8Array;
   readonly name: string;
@@ -113,67 +107,22 @@ const encodeGrants = (name: string, grants: ReadonlyArray<Grant>) =>
     Effect.mapError((error) => new GrantsError({ name, message: error.message })),
   );
 
-const now = Effect.sync(() => new Date().toISOString());
-
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
-
-  const select = (name: string) =>
-    sql<Row>`SELECT id, name, grants, shipped, created_at, updated_at
-             FROM permission_profiles WHERE name = ${name}`;
-
-  const insertShipped = (name: string, grants: ReadonlyArray<Grant>) =>
-    Effect.gen(function* () {
-      const json = yield* encodeGrants(name, grants);
-      const at = yield* now;
-      yield* sql`
-        INSERT OR IGNORE INTO permission_profiles (id, name, grants, shipped, created_at, updated_at)
-        VALUES (${mintUuid()}, ${name}, ${json}, 1, ${at}, ${at})
-      `;
-    });
-
-  const insert = (name: string, grants: ReadonlyArray<Grant>) =>
-    Effect.gen(function* () {
-      const json = yield* encodeGrants(name, grants);
-      const at = yield* now;
-      yield* sql`
-        INSERT INTO permission_profiles (id, name, grants, shipped, created_at, updated_at)
-        VALUES (${mintUuid()}, ${name}, ${json}, 0, ${at}, ${at})
-      `;
-    });
 
   return {
     /** The profile with that name, if one exists. Names are the user-facing key. */
     getByName: (
       name: string,
     ): Effect.Effect<Option.Option<PermissionProfile>, GrantsError | SqlError> =>
-      select(name).pipe(
+      sql<Row>`SELECT id, name, grants, shipped, created_at, updated_at
+               FROM permission_profiles WHERE name = ${name}`.pipe(
         Effect.flatMap((rows) =>
           rows[0] === undefined
             ? Effect.succeedNone
             : toProfile(rows[0]).pipe(Effect.map(Option.some)),
         ),
       ),
-
-    /** Every profile, shipped and user-created, by name. */
-    list: (): Effect.Effect<ReadonlyArray<PermissionProfile>, GrantsError | SqlError> =>
-      sql<Row>`SELECT id, name, grants, shipped, created_at, updated_at
-               FROM permission_profiles ORDER BY name`.pipe(
-        Effect.flatMap(Effect.forEach(toProfile)),
-      ),
-
-    /** Creates a user-owned profile. */
-    create: (
-      name: string,
-      grants: ReadonlyArray<Grant>,
-    ): Effect.Effect<void, DuplicateProfileError | GrantsError | SqlError> =>
-      Effect.gen(function* () {
-        const existing = yield* select(name);
-        if (existing.length > 0) {
-          return yield* new DuplicateProfileError({ name });
-        }
-        yield* insert(name, grants);
-      }),
 
     /**
      * Seeds one shipped profile. A profile the user has already edited keeps
@@ -182,7 +131,16 @@ const make = Effect.gen(function* () {
     ensureShipped: (
       name: string,
       grants: ReadonlyArray<Grant>,
-    ): Effect.Effect<void, GrantsError | SqlError> => insertShipped(name, grants),
+    ): Effect.Effect<void, GrantsError | SqlError> =>
+      Effect.gen(function* () {
+        const json = yield* encodeGrants(name, grants);
+        const at = new Date(yield* Clock.currentTimeMillis).toISOString();
+        yield* sql`
+          INSERT OR IGNORE INTO permission_profiles
+            (id, name, grants, shipped, created_at, updated_at)
+          VALUES (${mintUuid()}, ${name}, ${json}, 1, ${at}, ${at})
+        `;
+      }),
   };
 });
 

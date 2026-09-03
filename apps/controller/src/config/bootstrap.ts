@@ -1,5 +1,4 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
 import { Context, Effect, Schema } from "effect";
 import { ConfigFileError, ConfigValueError } from "./errors";
 import { formatToml, parseToml, type TomlScalar } from "./toml";
@@ -12,6 +11,10 @@ export type LogLevel = (typeof LOG_LEVELS)[number];
 /**
  * The bootstrap config: the only keys Hydra needs before the database can open
  * (spec 15 section 6). Everything else is controller state.
+ *
+ * `dataDir` is the value as configured, which may be relative: it is resolved
+ * against the Hydra Home by `homePaths`, so a home that moves takes its Data
+ * Root with it (spec 04, Relocatable Data Root).
  */
 export class BootstrapConfig extends Context.Service<
   BootstrapConfig,
@@ -34,20 +37,18 @@ export function envName(key: BootstrapKey): string {
 }
 
 /**
- * The defaults for a given home. `data.dir` is the only one that depends on it;
- * the values are TOML-typed, because these are what a first run writes into
- * `config.toml`.
+ * The values a first run writes into `config.toml`, TOML-typed. `data.dir` is
+ * relative on purpose: the file must not pin the home it was written in.
  */
-export function defaults(home: string): Record<BootstrapKey, TomlScalar> {
-  return {
-    "data.dir": join(home, "data"),
-    "bind.host": "127.0.0.1",
-    "bind.port": 4937,
-    "log.level": "info",
-  };
-}
+export const DEFAULTS: Record<BootstrapKey, TomlScalar> = {
+  "data.dir": "data",
+  "bind.host": "127.0.0.1",
+  "bind.port": 4937,
+  "log.level": "info",
+};
 
-const BootstrapSchema = Schema.Struct({
+/** The schema of each key's value, applied to the string the sources agreed on. */
+const SCHEMAS = {
   "data.dir": Schema.NonEmptyString,
   "bind.host": Schema.NonEmptyString,
   "bind.port": Schema.NumberFromString.check(
@@ -55,7 +56,9 @@ const BootstrapSchema = Schema.Struct({
     Schema.isBetween({ minimum: 1, maximum: 65535 }),
   ),
   "log.level": Schema.Literals(LOG_LEVELS),
-});
+} as const;
+
+type Value<K extends BootstrapKey> = Schema.Schema.Type<(typeof SCHEMAS)[K]>;
 
 const isBootstrapKey = (key: string): key is BootstrapKey =>
   (BOOTSTRAP_KEYS as ReadonlyArray<string>).includes(key);
@@ -67,15 +70,12 @@ const keyList = BOOTSTRAP_KEYS.join(", ");
  * absent: a first run leaves behind the file it would have read (spec 15
  * sections 6 and 7). Returns the keys the file sets, as strings.
  */
-export const loadConfigFile = Effect.fn("loadConfigFile")(function* (
-  configFile: string,
-  fileDefaults: Record<BootstrapKey, TomlScalar>,
-) {
+export const loadConfigFile = Effect.fn("loadConfigFile")(function* (configFile: string) {
   const fail = (message: string) => new ConfigFileError({ path: configFile, message });
 
   if (!existsSync(configFile)) {
     yield* Effect.try({
-      try: () => writeFileSync(configFile, formatToml(fileDefaults)),
+      try: () => writeFileSync(configFile, formatToml(DEFAULTS)),
       catch: () => fail("could not be written"),
     });
   }
@@ -100,39 +100,54 @@ export const loadConfigFile = Effect.fn("loadConfigFile")(function* (
 /**
  * Decide every bootstrap key: flag beats env beats file beats default (spec 15
  * section 6), then validate. A `-c` override of anything but a bootstrap key is
- * an error, never a silently ignored flag.
+ * an error, never a silently ignored flag, and a value that will not do names
+ * the source that set it.
  */
 export const resolveConfig = Effect.fn("resolveConfig")(function* (options: {
   readonly overrides: ReadonlyArray<readonly [key: string, value: string]>;
   readonly env: Readonly<Record<string, string | undefined>>;
   readonly file: Partial<Record<BootstrapKey, string>>;
-  readonly defaults: Record<BootstrapKey, TomlScalar>;
+  readonly configFile: string;
 }) {
   const flags: Partial<Record<BootstrapKey, string>> = {};
   for (const [key, value] of options.overrides) {
     if (!isBootstrapKey(key)) {
       return yield* new ConfigValueError({
-        message: `-c ${key}=... is not a bootstrap key; bootstrap config holds only ${keyList}`,
+        message: `-c ${key}=${value} is not a bootstrap key; bootstrap config holds only ${keyList}`,
       });
     }
     flags[key] = value;
   }
 
-  const merged = Object.fromEntries(
-    BOOTSTRAP_KEYS.map((key) => [
-      key,
-      flags[key] ?? options.env[envName(key)] ?? options.file[key] ?? String(options.defaults[key]),
-    ]),
-  );
+  /** Where a key's value came from, so an unusable one names its source. */
+  const chosen = (key: BootstrapKey): { readonly value: string; readonly source: string } => {
+    const flag = flags[key];
+    if (flag !== undefined) return { value: flag, source: `-c ${key}` };
+    const fromEnv = options.env[envName(key)];
+    if (fromEnv !== undefined) return { value: fromEnv, source: envName(key) };
+    const fromFile = options.file[key];
+    if (fromFile !== undefined)
+      return { value: fromFile, source: `${key} in ${options.configFile}` };
+    return { value: String(DEFAULTS[key]), source: `the default for ${key}` };
+  };
 
-  const decoded = yield* Schema.decodeUnknownEffect(BootstrapSchema)(merged).pipe(
-    Effect.mapError((error) => new ConfigValueError({ message: error.message })),
-  );
+  const decode = <K extends BootstrapKey>(key: K): Effect.Effect<Value<K>, ConfigValueError> => {
+    const { value, source } = chosen(key);
+    const schema = SCHEMAS[key] as unknown as Schema.Codec<Value<K>, string>;
+    return Schema.decodeUnknownEffect(schema)(value).pipe(
+      Effect.mapError(
+        (error) =>
+          new ConfigValueError({
+            message: `${source} is ${JSON.stringify(value)}, which Hydra cannot use: ${error.message}`,
+          }),
+      ),
+    );
+  };
 
   return BootstrapConfig.of({
-    dataDir: decoded["data.dir"],
-    bindHost: decoded["bind.host"],
-    bindPort: decoded["bind.port"],
-    logLevel: decoded["log.level"],
+    dataDir: yield* decode("data.dir"),
+    bindHost: yield* decode("bind.host"),
+    bindPort: yield* decode("bind.port"),
+    logLevel: yield* decode("log.level"),
   });
 });

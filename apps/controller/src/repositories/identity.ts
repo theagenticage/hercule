@@ -21,7 +21,7 @@ import * as Option from "effect/Option";
 import * as Redacted from "effect/Redacted";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
-import { mintUuid, uuidToString, withTransaction } from "../db";
+import { mintUuid, uuidToString } from "../db";
 import { CORE_OWNER, Secrets, type SecretNameError } from "./secrets";
 
 /** The `core`-owned secret holding the controller's Ed25519 private key, PKCS#8 as base64. */
@@ -56,9 +56,6 @@ export class ControllerIdentity extends Context.Service<
      * finds the same id and the same key.
      */
     readonly ensure: Effect.Effect<ControllerIdentityRecord, SqlError | SecretNameError>;
-
-    /** The identity, or `None` before first run has created one. */
-    readonly get: Effect.Effect<Option.Option<ControllerIdentityRecord>, SqlError>;
   }
 >()("hydra/controller/repositories/ControllerIdentity") {}
 
@@ -90,12 +87,10 @@ export const controllerIdentityLayer: Layer.Layer<
     );
 
     return ControllerIdentity.of({
-      get: read,
-
       // One transaction: the identity row and the private key it belongs to are
       // written together or not at all. Generating the keypair is local CPU
       // work, not a wait on anything outside the database.
-      ensure: withTransaction(
+      ensure: sql.withTransaction(
         Effect.gen(function* () {
           const existing = yield* read;
           if (Option.isSome(existing)) return existing.value;
@@ -113,7 +108,6 @@ export const controllerIdentityLayer: Layer.Layer<
             SIGNING_KEY_SECRET,
             Redacted.make(Buffer.from(privateKey).toString("base64")),
           );
-          privateKey.fill(0);
 
           const id = mintUuid();
           const createdAt = new Date(yield* Clock.currentTimeMillis).toISOString();
@@ -123,7 +117,7 @@ export const controllerIdentityLayer: Layer.Layer<
           `;
           return { id: uuidToString(id), publicKey, createdAt };
         }),
-      ).pipe(Effect.provideService(SqlClient.SqlClient, sql)),
+      ),
     });
   }),
 );

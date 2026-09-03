@@ -10,7 +10,8 @@ import * as Option from "effect/Option";
 import * as Redacted from "effect/Redacted";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { homePaths, HydraHome } from "../config";
-import { TestDatabase, withTransaction } from "../db";
+import { withTransaction } from "../db";
+import { TestDatabase } from "../db/testing";
 import { masterKeyLayer } from "../keys";
 import { CORE_OWNER, Secrets, secretsLayer, type SecretOwner } from "./secrets";
 
@@ -134,40 +135,34 @@ describe("secrets", () => {
     expect(Redacted.value(Option.getOrThrow(value))).toBe("rotated");
   });
 
-  it("lists the owner's names and nobody else's", async () => {
-    const names = await run(
-      Effect.gen(function* () {
-        const secrets = yield* Secrets;
-        yield* secrets.set(CONNECTION, "clientSecret", Redacted.make("a"));
-        yield* secrets.set(CONNECTION, "pat", Redacted.make("b"));
-        yield* secrets.set(CORE_OWNER, "elsewhere", Redacted.make("c"));
-        return yield* secrets.listNames(CONNECTION);
-      }),
-    );
-    expect(names).toEqual(["clientSecret", "pat"]);
-  });
-
-  it("deletes the row, and deleting nothing is a no-op", async () => {
-    const after = await run(
+  it("keeps one owner's values out of another owner's reads", async () => {
+    const { mine, theirs } = await run(
       Effect.gen(function* () {
         const secrets = yield* Secrets;
         yield* secrets.set(CONNECTION, "pat", Redacted.make(TOKEN));
-        yield* secrets.delete(CONNECTION, "pat");
-        yield* secrets.delete(CONNECTION, "pat");
-        return yield* secrets.get(CONNECTION, "pat");
+        yield* secrets.set(CORE_OWNER, "pat", Redacted.make("core"));
+        return {
+          mine: yield* secrets.get(CONNECTION, "pat"),
+          theirs: yield* secrets.get(CORE_OWNER, "pat"),
+        };
       }),
     );
-    expect(Option.isNone(after)).toBe(true);
+    expect(Redacted.value(Option.getOrThrow(mine))).toBe(TOKEN);
+    expect(Redacted.value(Option.getOrThrow(theirs))).toBe("core");
   });
 
-  it("refuses an owner id or name that would make the associated data ambiguous", async () => {
-    const exit = await runExit(
-      Effect.gen(function* () {
-        const secrets = yield* Secrets;
-        return yield* secrets.set(CONNECTION, "oauth|token", Redacted.make(TOKEN));
-      }),
+  it("refuses a name that would make the associated data ambiguous, on write and on read", async () => {
+    const written = await runExit(
+      Effect.flatMap(Secrets, (secrets) =>
+        secrets.set(CONNECTION, "oauth|token", Redacted.make(TOKEN)),
+      ),
     );
-    expect(failureOf(exit)?._tag).toBe("SecretNameError");
+    expect(failureOf(written)?._tag).toBe("SecretNameError");
+
+    const read = await runExit(
+      Effect.flatMap(Secrets, (secrets) => secrets.get(CONNECTION, "oauth|token")),
+    );
+    expect(failureOf(read)?._tag).toBe("SecretNameError");
   });
 
   it("fails to decrypt a row whose owner or name was edited behind its back", async () => {

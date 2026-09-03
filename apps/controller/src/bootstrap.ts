@@ -13,7 +13,7 @@
  * (step 2), and starting the local runner (step 4). Later tickets add them
  * here.
  */
-import { chmodSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, rmSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -26,10 +26,11 @@ import type { HomePaths } from "@hydra/home";
 import * as config from "./config";
 import { BootstrapConfig, HydraHome, HydraHomeError, type ConfigError } from "./config";
 import {
+  databaseError,
   migrate,
   openDatabase,
   withTransaction,
-  type JournalModeError,
+  type DatabaseError,
   type SchemaVersionError,
 } from "./db";
 import { masterKeyLayer, type MasterKeyBackend, type MasterKeyError } from "./keys";
@@ -42,13 +43,8 @@ import { seed } from "./seed";
 /** The setup token is 32 random bytes, rendered base64url so it survives a URL. */
 const SETUP_TOKEN_BYTES = 32;
 
-/** Bind hosts that mean "every interface"; a URL needs a reachable one instead. */
-const WILDCARD_HOSTS = new Set([
-  "0.0.0.0",
-  "::",
-  "[::]",
-  "0000:0000:0000:0000:0000:0000:0000:0000",
-]);
+/** The two bind hosts that mean "every interface"; a URL needs a reachable one instead. */
+const WILDCARD_HOSTS = new Set(["0.0.0.0", "::"]);
 
 /** What a boot leaves behind. `setupUrl` is absent once setup is complete. */
 export interface BootOutcome {
@@ -60,8 +56,7 @@ export interface BootOutcome {
 /** Everything that can stop the controller before it binds. */
 export type BootError =
   | ConfigError
-  | SqlError
-  | JournalModeError
+  | DatabaseError
   | Migrator.MigrationError
   | SchemaVersionError
   | PlatformError
@@ -82,12 +77,15 @@ export function hashToken(token: string): string {
 /**
  * The one-time setup URL (spec 15 section 7). A wildcard bind host renders as
  * loopback, because `http://0.0.0.0:4937` is not an address a browser can open;
- * an IPv6 literal is bracketed.
+ * an IPv6 literal is bracketed. A host `URL` will not take is a defect, not a
+ * URL nobody can open.
  */
 export function setupUrl(bindHost: string, bindPort: number, token: string): string {
   const host = WILDCARD_HOSTS.has(bindHost) ? "127.0.0.1" : bindHost;
   const authority = host.includes(":") && !host.startsWith("[") ? `[${host}]` : host;
-  return `http://${authority}:${bindPort}/setup?token=${token}`;
+  const url = new URL(`http://${authority}:${bindPort}/setup`);
+  url.searchParams.set("token", token);
+  return url.toString();
 }
 
 /**
@@ -111,6 +109,9 @@ const ensureSetupUrl = (
     }>`SELECT completed_at FROM setup_state WHERE singleton = 1`;
 
     if (rows[0]?.completed_at != null) {
+      // No token is outstanding once setup is complete, in the file or in the
+      // row: the column holds a hash only while one is.
+      yield* withTransaction(sql`UPDATE setup_state SET token_hash = NULL WHERE singleton = 1`);
       yield* Effect.try({
         try: () => rmSync(paths.setupUrlFile, { force: true }),
         catch: (cause) => new HydraHomeError({ path: paths.setupUrlFile, cause }),
@@ -132,30 +133,16 @@ const ensureSetupUrl = (
     const url = setupUrl(bootstrap.bindHost, bootstrap.bindPort, token);
     yield* Effect.try({
       try: () => {
-        // The mode argument only applies when the file is created, so the file
-        // left by the previous boot is chmod-ed as well.
+        // `mode` applies only when the file is created, so the file the previous
+        // boot left is removed rather than chmod-ed after a moment at the
+        // default mode.
+        rmSync(paths.setupUrlFile, { force: true });
         writeFileSync(paths.setupUrlFile, `${url}\n`, { mode: 0o600 });
-        chmodSync(paths.setupUrlFile, 0o600);
       },
       catch: (cause) => new HydraHomeError({ path: paths.setupUrlFile, cause }),
     });
     return url;
   });
-
-/** The sequence itself, against services something else has provided. */
-const sequence = Effect.gen(function* () {
-  const paths = yield* HydraHome;
-  const bootstrap = yield* BootstrapConfig;
-
-  yield* migrate({ backupsDir: paths.backupsDir });
-  yield* seed;
-
-  const identity = yield* ControllerIdentity;
-  const record = yield* identity.ensure;
-
-  const url = yield* ensureSetupUrl(paths, bootstrap);
-  return { paths, identityId: record.id, setupUrl: url } satisfies BootOutcome;
-});
 
 /**
  * Boot the controller: everything up to, and not including, binding.
@@ -169,22 +156,41 @@ export const boot = (options: {
   readonly env: Readonly<Record<string, string | undefined>>;
   readonly masterKeyBackend?: MasterKeyBackend;
 }): Effect.Effect<BootOutcome, BootError> => {
-  const base = Layer.mergeAll(config.layer(options.argv, options.env), BunFileSystem.layer);
+  const sequence = Effect.gen(function* () {
+    const paths = yield* HydraHome;
+    const bootstrap = yield* BootstrapConfig;
+    // Whether the file was there before the driver created it decides whether
+    // there is anything for a pre-migration copy to preserve (spec 15 section 8).
+    const databaseExisted = existsSync(paths.databaseFile);
 
-  // The database file is `<data.dir>/hydra.db` (spec 15 sections 5 and 10), so
-  // the client layer cannot be built until the config layer has resolved the
-  // Data Root.
-  const database = Layer.unwrap(Effect.map(HydraHome, (paths) => openDatabase(paths.databaseFile)));
+    const repositories = Layer.mergeAll(
+      controllerIdentityLayer.pipe(
+        Layer.provide(secretsLayer.pipe(Layer.provide(masterKeyLayer(options.masterKeyBackend)))),
+      ),
+      SettingsLayer,
+      PermissionProfilesLayer,
+    );
 
-  const repositories = Layer.mergeAll(
-    controllerIdentityLayer.pipe(
-      Layer.provide(secretsLayer.pipe(Layer.provide(masterKeyLayer(options.masterKeyBackend)))),
-    ),
-    SettingsLayer,
-    PermissionProfilesLayer,
-  );
+    const steps = Effect.gen(function* () {
+      yield* migrate({ backupsDir: paths.backupsDir, databaseExisted });
+      yield* seed;
+
+      const identity = yield* ControllerIdentity;
+      const record = yield* identity.ensure;
+
+      const url = yield* ensureSetupUrl(paths, bootstrap);
+      return { paths, identityId: record.id, setupUrl: url } satisfies BootOutcome;
+    });
+
+    return yield* steps.pipe(
+      Effect.provide(repositories.pipe(Layer.provideMerge(openDatabase(paths.databaseFile)))),
+      // Nothing above this line has the database file in hand, and a controller
+      // that fails at boot has said nothing else yet.
+      Effect.catchTag("SqlError", (error) => Effect.fail(databaseError(paths.databaseFile, error))),
+    );
+  });
 
   return sequence.pipe(
-    Effect.provide(repositories.pipe(Layer.provideMerge(database), Layer.provideMerge(base))),
+    Effect.provide(Layer.mergeAll(config.layer(options.argv, options.env), BunFileSystem.layer)),
   );
 };
