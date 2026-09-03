@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      # Bun is pinned exactly, in `.bun-version` and nowhere else: the compiled
+      # binary is built with it, and versions at or below 1.3.12 carry the
+      # codesign signature regression (spec 15 section 11).
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+
+      # pnpm is pinned once, by `packageManager` in package.json.
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm typecheck
+      - run: pnpm lint
+      - run: pnpm test
+
+      # Mode isolation: the runner entrypoint links no controller package
+      # (spec 15 section 3, ADR 0018).
+      - run: pnpm dep-lint
+
+      # The Vite config, the React Compiler Babel pass and the bundle are only
+      # exercised by an actual build.
+      - run: pnpm --filter @hydra/web build

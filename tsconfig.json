@@ -1,0 +1,19 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "types": ["bun"]
+  },
+  // Globbed, never hand-listed: a new package under apps, packages or plugins
+  // is typechecked the day it lands. The two React packages carry their own
+  // tsconfig (DOM lib, JSX) and are excluded here.
+  "include": [
+    "apps/*/src/**/*.ts",
+    "packages/*/src/**/*.ts",
+    "plugins/*/src/**/*.ts",
+    "scripts/**/*.ts",
+    "vitest.config.ts",
+    "eslint.config.js",
+    "prettier.config.js"
+  ],
+  "exclude": ["**/node_modules", "**/dist", "apps/web", "packages/ui"]
+}

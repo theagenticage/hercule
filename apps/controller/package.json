@@ -1,0 +1,16 @@
+{
+  "name": "@hydra/controller",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@hydra/contract": "workspace:*",
+    "@hydra/protocol": "workspace:*",
+    "@effect/platform-bun": "4.0.0-rc.112",
+    "@effect/sql-sqlite-bun": "4.0.0-rc.112",
+    "effect": "4.0.0-rc.112"
+  }
+}

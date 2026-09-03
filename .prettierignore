@@ -1,0 +1,8 @@
+node_modules
+dist
+pnpm-lock.yaml
+packages/hydra/src/version.ts
+.playwright-cli
+
+# Markdown is authored by hand; reformatting the spec would bury real diffs.
+**/*.md

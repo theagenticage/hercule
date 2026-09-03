@@ -1,0 +1,37 @@
+{
+  "name": "hydra",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.12.1",
+  "scripts": {
+    "prepare": "bun run scripts/gen-version.ts",
+    "typecheck": "tsc -p tsconfig.json && tsc -p packages/ui/tsconfig.json && tsc -p apps/web/tsconfig.json",
+    "lint": "eslint . --max-warnings 0 && prettier --check .",
+    "format": "prettier --write .",
+    "test": "vitest run",
+    "dep-lint": "bun run scripts/dep-lint.ts",
+    "build:binary": "bun run scripts/gen-version.ts && bun build packages/hydra/src/main.ts --compile --outfile hydra"
+  },
+  "devDependencies": {
+    "@effect/vitest": "4.0.0-rc.112",
+    "@eslint/js": "10.0.1",
+    "@types/bun": "1.4.0",
+    "effect": "4.0.0-rc.112",
+    "eslint": "10.9.1",
+    "eslint-config-prettier": "10.1.8",
+    "eslint-plugin-react-hooks": "7.1.1",
+    "globals": "17.12.0",
+    "jsdom": "30.0.1",
+    "prettier": "3.9.6",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.69.0",
+    "vitest": "4.1.11"
+  },
+  "pnpm": {
+    "overrides": {
+      "effect": "4.0.0-rc.112",
+      "typescript": "5.9.3"
+    }
+  }
+}
