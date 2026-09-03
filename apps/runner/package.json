@@ -1,0 +1,14 @@
+{
+  "name": "@hydra/runner",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@hydra/cli": "workspace:*",
+    "@hydra/protocol": "workspace:*",
+    "effect": "4.0.0-rc.112"
+  }
+}

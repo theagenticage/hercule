@@ -1,0 +1,13 @@
+{
+  "name": "@hydra/client-core",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@hydra/contract": "workspace:*",
+    "effect": "4.0.0-rc.112"
+  }
+}
