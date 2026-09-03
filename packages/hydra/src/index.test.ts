@@ -1,11 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { dispatch, VERSION } from "./index";
 
 const run = vi.hoisted(() => ({ controller: vi.fn(), runner: vi.fn(), cli: vi.fn() }));
 vi.mock("@hydra/controller", () => ({ run: run.controller }));
 vi.mock("@hydra/runner", () => ({ run: run.runner }));
 vi.mock("@hydra/cli", () => ({ run: run.cli }));
-
-const { dispatch, VERSION } = await import("./index");
 
 beforeEach(() => {
   vi.clearAllMocks();

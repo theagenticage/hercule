@@ -9,23 +9,35 @@
  * whose `sources` array is the post-tree-shake module list. Bun has no
  * `--metafile`.
  *
+ * The rule sees specifiers, so a specifier assembled at runtime
+ * (`await import("bun" + ":sqlite")`) is invisible to it. Nothing in the
+ * codebase does that, and no scan short of running the code could catch it.
+ *
  * Usage: `bun run scripts/dep-lint.ts [entrypoint]`. The optional entrypoint
  * is what `scripts/dep-lint.test.ts` points at its fixtures.
  */
 import { rm } from "node:fs/promises";
-import { dirname, resolve } from "node:path";
+import { dirname, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const entrypoint = process.argv[2] ?? "apps/runner/src/index.ts";
 
-/** Each rule names what it forbids and why; the message is the CI output. */
+/**
+ * Each rule names what it forbids and why; the message is the CI output.
+ * Patterns are matched against repository-relative paths and bare specifiers,
+ * so a first-party plugin is `plugins/...` while a dependency that happens to
+ * ship a `plugins/` directory is under `node_modules/` and does not match.
+ */
 const FORBIDDEN = [
-  { what: "the DB engine", pattern: /@effect[/+]sql|(^|[/"'])bun:sqlite/ },
-  { what: "the plugin host", pattern: /apps[/+]controller|@hydra[/+]controller|(^|\/)plugins\// },
+  { what: "the DB engine", pattern: /@effect[/+]sql|^bun:sqlite$/ },
+  {
+    what: "the plugin host",
+    pattern: /^apps\/controller\/|@hydra[/+]controller|^plugins\//,
+  },
   {
     what: "the web bundle",
-    pattern: /apps[/+]web|@hydra[/+]ui|packages\/ui|(^|[/+])react(-dom)?[/@]|\.(html|css)$/,
+    pattern: /^apps\/web\/|^packages\/ui\/|@hydra[/+]ui|(^|\/)react(-dom)?([/@]|$)|\.(html|css)$/,
   },
 ] as const;
 
@@ -52,40 +64,41 @@ if (!map) {
 }
 
 const { sources } = (await Bun.file(map.path).json()) as { sources: string[] };
+const mapDir = dirname(map.path);
+const linked = sources.map((source) => relative(root, resolve(mapDir, source)));
 
 /**
  * A specifier the bundler leaves external, `bun:sqlite` above all, never lands
- * in `sources`. Two scans close that hole between them.
- *
- * First: the emitted bundle still carries the import of anything external that
- * survives bundling, in every form that reaches a module.
+ * in `sources`, and Bun deletes a bare `import "bun:sqlite"` outright. So read
+ * the imports of our own linked sources, parsed rather than pattern-matched:
+ * `scanImports` sees through comments and string literals, and drops
+ * `import type`, which creates no runtime edge and so is no violation.
+ */
+const written = (
+  await Promise.all(
+    linked
+      .filter((source) => !source.startsWith("node_modules/"))
+      .map(async (source) => {
+        const path = resolve(root, source);
+        const text = await Bun.file(path)
+          .text()
+          .catch(() => "");
+        const transpiler = new Bun.Transpiler({ loader: path.endsWith("x") ? "tsx" : "ts" });
+        return transpiler.scanImports(text).map((record) => record.path);
+      }),
+  )
+).flat();
+
+/**
+ * Secondary: third-party sources are not scanned above, since their own dead
+ * branches are not this repo's violations. The emitted bundle still carries
+ * whatever external they import, so scan it for every specifier form.
  */
 const IMPORT_FORMS = /(?:\b(?:from|import)\s*\(?|require\s*\()\s*["']([^"']+)["']/g;
 const js = built.outputs.find((o) => o.kind === "entry-point");
 const bundled = js ? [...(await js.text()).matchAll(IMPORT_FORMS)].map((m) => m[1]!) : [];
 
-/**
- * Second: Bun drops a bare `import "bun:sqlite"` outright, so nothing of it
- * survives into the bundle. Read our own linked sources and take their
- * specifiers as written. Third-party sources are skipped: their own dead
- * branches are not this repo's violations, and their paths are already in the
- * graph below.
- */
-const mapDir = dirname(map.path);
-const written = (
-  await Promise.all(
-    sources
-      .filter((source) => !source.includes("node_modules/"))
-      .map(async (source) => {
-        const text = await Bun.file(resolve(mapDir, source))
-          .text()
-          .catch(() => "");
-        return [...text.matchAll(IMPORT_FORMS)].map((m) => m[1]!);
-      }),
-  )
-).flat();
-
-const graph = [...new Set([...sources, ...bundled, ...written])].sort();
+const graph = [...new Set([...linked, ...written, ...bundled])].sort();
 
 const violations = FORBIDDEN.flatMap(({ what, pattern }) => {
   const hits = graph.filter((source) => pattern.test(source));

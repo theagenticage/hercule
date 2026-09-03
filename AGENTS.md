@@ -62,7 +62,7 @@ These come from the spec and ADRs; restated here because violating them is expen
 
 ### Package map
 
-One pnpm workspace. Every package is `@hydra/*`, `"type": "module"`, and exports its TypeScript source directly: there is no per-package build step.
+One pnpm workspace. Every package is `@hydra/*`, `"type": "module"`, and exports its TypeScript source directly: nothing is compiled before it is imported. `apps/web` is the one package with a build of its own, `vite build`; everything else reaches a build only through `bun build --compile`.
 
 | Path | Package | What lives here |
 |---|---|---|
@@ -81,10 +81,11 @@ One pnpm workspace. Every package is `@hydra/*`, `"type": "module"`, and exports
 
 ### Check commands
 
-Run from the repository root. All four checks must be green before a PR; CI runs the same ones.
+Install first, then run the four checks. All four must be green before a PR; CI runs the same ones.
 
 ```
 pnpm install
+
 pnpm typecheck   # tsc over the backend, packages/ui, and apps/web
 pnpm lint        # eslint --max-warnings 0, then prettier --check
 pnpm test        # vitest across every package

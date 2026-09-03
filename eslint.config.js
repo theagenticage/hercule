@@ -25,11 +25,25 @@ const bannedEverywhere = [
  * import form of it can be banned reliably: a default import reaches it as
  * `cp.fork`. So the module itself is banned, and one file is allowed to use it.
  */
+const childProcessMessage =
+  "Use spawnHydra() from @hydra/hydra; fork() is broken under `bun build --compile` (spec 15 section 11).";
+
 const bannedChildProcess = ["child_process", "node:child_process"].map((name) => ({
   name,
-  message:
-    "Use spawnHydra() from @hydra/hydra; fork() is broken under `bun build --compile` (spec 15 section 11).",
+  message: childProcessMessage,
 }));
+
+/** `no-restricted-imports` sees static imports only; these are the other two forms. */
+const bannedChildProcessCalls = [
+  {
+    selector: "ImportExpression[source.value=/^(node:)?child_process$/]",
+    message: childProcessMessage,
+  },
+  {
+    selector: "CallExpression[callee.name='require'][arguments.0.value=/^(node:)?child_process$/]",
+    message: childProcessMessage,
+  },
+];
 
 export default tseslint.config(
   {
@@ -46,6 +60,7 @@ export default tseslint.config(
     },
     rules: {
       "no-restricted-imports": ["error", { paths: [...bannedEverywhere, ...bannedChildProcess] }],
+      "no-restricted-syntax": ["error", ...bannedChildProcessCalls],
     },
   },
   {
@@ -88,6 +103,7 @@ export default tseslint.config(
     files: ["packages/hydra/src/spawn.ts", "scripts/**/*.ts"],
     rules: {
       "no-restricted-imports": ["error", { paths: bannedEverywhere }],
+      "no-restricted-syntax": "off",
     },
   },
   {

@@ -1,5 +1,4 @@
 .playwright-cli/
-.agentick/
 node_modules/
 dist/
 *.tsbuildinfo

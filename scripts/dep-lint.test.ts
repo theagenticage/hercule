@@ -26,8 +26,11 @@ export const run = (): void => console.log("runner");`,
   const { Database } = await import("bun:sqlite");
   console.log(Database);
 }`,
-  "db-require": `const { Database } = require("bun:sqlite");
-console.log(Database);`,
+  // Talking about the rule is not breaking it, and a type-only import is no
+  // runtime edge. Both must pass.
+  "type-only": `// The runner must never import "bun:sqlite" or require("bun:sqlite").
+import type { Database } from "bun:sqlite";
+export const run = (db?: Database): void => console.log(typeof db);`,
   "plugin-host": `import { run as controller } from ${JSON.stringify(join(root, "apps/controller/src/index.ts"))};
 export const run = (): void => controller([]);`,
   web: `import { Logo } from ${JSON.stringify(join(root, "packages/ui/src/index.tsx"))};
@@ -66,7 +69,12 @@ describe("dep-lint", () => {
     expect(stdout).toContain("is clean");
   });
 
-  it.each(["db-static", "db-bare", "db-dynamic", "db-require"])(
+  it("passes an entrypoint that only names the DB engine in a comment or a type", async () => {
+    const { stdout } = await depLint("type-only");
+    expect(stdout).toContain("is clean");
+  });
+
+  it.each(["db-static", "db-bare", "db-dynamic"])(
     "fails on the DB engine reached by %s",
     async (fixture) => {
       const error = await failure(fixture);
