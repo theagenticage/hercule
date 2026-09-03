@@ -1,0 +1,37 @@
+# 33. Source is organized by domain and tests are colocated
+
+Date: 2026-09-04
+
+## Status
+
+Accepted. Decided by [State store and first run (#56)](https://github.com/rogierpennink/hydra/issues/56). Follows from [ADR 0031](./0031-the-backend-is-written-on-effect.md) (every operation is a method on an Effect service).
+
+## Context
+
+The first real controller code landed with #56 and the source layout was never decided, so it drifted into by-type folders: `repositories/` next to `keys/`, and the domains themselves nowhere.
+
+ADR 0031 fixes the shape of every feature: a domain carries a repository, a service whose methods are the operations, and a one-line transport handler. By-type folders smear that one feature across three trees, so reading or changing a feature means holding three paths in your head and deleting one means visiting three places. The number of domains is known from the spec and it is large - tasks, runs, sessions, events, connections, plugins, workflows, notifications - so this only gets worse.
+
+Test placement was equally undecided, and it interacts: a mirrored `tests/` tree is a fourth copy of the same structure.
+
+## Decision
+
+Source under an app or package is organized **by domain**, one folder per domain, named with the CONTEXT.md word for it. A domain folder's `index.ts` is its boundary: it exports what other domains consume and nothing more. Cross-domain imports go through that `index.ts`, never at a file inside another domain.
+
+- **`db/` and `config/` are the exceptions**: infrastructure every domain sits on, named for what they are. Adding a third is a deliberate decision, recorded by amending this ADR.
+- **Migrations stay in `db/`.** One migration spans domains - a single statement list that creates tables for all of them - so it cannot live in any one of them.
+- **Tests are colocated**: `foo.test.ts` beside `foo.ts`.
+- **`e2e/` at the repository root** holds tests that cross package boundaries and belong to no single package.
+
+## Considered options
+
+- **By-type folders** (`repositories/`, `services/`, `routes/`). Familiar, and it makes "show me every repository" a directory listing - a question nobody asks. Rejected: it splits every feature three ways and makes cohesion invisible.
+- **A mirrored `tests/unit/...` tree.** Rejected on one decisive ground: most of this code is written and refactored by agents, and a mirrored tree rots under that. An agent that moves or renames a module reliably updates its imports; it does not reliably walk a parallel tree to move the test. Colocated tests move with the code because they are in the way.
+
+## Consequences
+
+- Cohesion: a folder maps to a spec section, and deleting a feature is one `rm -r`.
+- Tests survive refactoring, and an unpaired `x.test.ts` is a visible signal that `x.ts` went away.
+- Domain boundaries must be known before writing code. When a new area has no obvious domain word, that is a CONTEXT.md gap to close first, not a folder to invent.
+- Cross-domain imports need discipline: reaching past an `index.ts` compiles fine, so review has to catch it.
+- Unit and integration tests are told apart by name, not by directory. In practice the distinction is thin here: spec 04 forbids mock repositories, so most controller tests are small integration tests against a `:memory:` database already.

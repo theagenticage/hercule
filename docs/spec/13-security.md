@@ -42,14 +42,14 @@ What does not live here: provider (Claude Code, Codex, pi) login credentials. Th
 
 ADR 0015 originally listed "runner credentials" among the encrypted rows; it is amended (2026-08-28): the runner credential is a token and is stored hashed (§4.5), and the `runner` owner kind stays reserved for runner-scoped secrets.
 
-**Open:** field names above are consolidated from ADR 0015's prose ("owner-scoped", "per-value"); the tickets pin the owner set and per-value encryption but not column names or the cipher.
+**Open:** field names above are consolidated from ADR 0015's prose ("owner-scoped", "per-value"); the tickets pin the owner set and per-value encryption but not column names. Column names are the implementer's ([./16-open-items.md](./16-open-items.md) B); the cipher is settled below.
 
-**Verify at build time:** choose an AEAD cipher (e.g. XChaCha20-Poly1305 or AES-256-GCM) with a per-row nonce and the row's owner/name as associated data.
+The cipher is **AES-256-GCM** through WebCrypto, with a fresh 12-byte random nonce per write and the associated data `<ownerKind>|<ownerId>|<name>` (resolved 2026-09-04, [#56](https://github.com/rogierpennink/hydra/issues/56)): an AEAD the runtime already carries, so it costs no dependency ([ADR 0018](../adr/0018-hydra-ships-as-one-self-contained-binary.md)), where XChaCha20-Poly1305 would. Binding the owner and name into the associated data makes a rename a re-encrypt, and makes a row edited or swapped in outside Hydra fail to decrypt rather than read cleanly. Owner ids and names therefore carry no `|`; the repository rejects one.
 
 ### 2.2 Master key
 
 - One **master key** per controller machine, created at first run (`hydra serve` auto-initializes it; [./15-packaging-and-operations.md](./15-packaging-and-operations.md)).
-- Held in the OS keychain: macOS Keychain via the `security` CLI ([ADR 0018](../adr/0018-hydra-ships-as-one-self-contained-binary.md)); on Linux the desktop keychain where one exists (Secret Service is the intended reading; the sources say only "OS keychain"). Fallback on headless Linux: a plain key file inside Hydra Home, outside the Data Root, mode 0600.
+- Held in the OS keychain: macOS Keychain via the `security` CLI ([ADR 0018](../adr/0018-hydra-ships-as-one-self-contained-binary.md)). Fallback everywhere else: a plain key file inside Hydra Home, outside the Data Root, mode 0600. *(Narrowed 2026-09-04, [#56](https://github.com/rogierpennink/hydra/issues/56): this paragraph previously also named the Linux desktop keychain where one exists, reading "OS keychain" as Secret Service. v1 implements the macOS keychain and the key file, and nothing else - a D-Bus Secret Service path is a second store to keep correct for a platform no v1 user is on. Linux therefore always uses the key file, headless or not; Secret Service returns when a Linux user asks for it.)*
 - The controller runs as a user-level service precisely so it can read the login keychain without a prompt.
 - **The master key never leaves its machine.** It is not in the database, not in backups, not in a promotion bundle. Backups (`VACUUM INTO` snapshots) therefore contain inert ciphertext; copying the backups directory offsite is safe.
 
@@ -183,11 +183,12 @@ The operation-to-grant mapping is an explicit table in the contract package; [./
 | Profile | Default for | Grants | Withholds |
 |---|---|---|---|
 | **assistant** | assistants | `task` (read, create, update, delete), `workflow` (read, run, submit), `run` (read, write), `session` (read, spawn, steer), `subscription` (read, write), `notification` (read, write), `event` (read, emit), `memory` (read, write), `settings` (read), and `read` on `connection`, `infra`, `workspace`, `agent`, `permission`, `project`, `resource` | `workflow.write`, `connection.manage`, `connection.use`, `infra.write`, `workspace.write`, `agent.write`, `permission.write`, `project.write`, `resource.write`, `secret`, `credential`, direct work tools (no Workspace), bulk-destructive operations |
-| **worker** | agent steps in workflows | `task` (read, create, update), `notification` (write), `subscription` (read, write), `run` (read), `event` (read) | `task.delete`, `session.spawn`, `workflow.run`, `workflow.submit` (so a workflow cannot fan out recursively unless granted), `session.read`, `memory`, everything the assistant profile withholds |
+| **worker** | agent steps in workflows | `task` (read, create, update), `notification` (read, write), `subscription` (read, write), `run` (read), `event` (read) | `task.delete`, `session.spawn`, `workflow.run`, `workflow.submit` (so a workflow cannot fan out recursively unless granted), `session.read`, `memory`, everything the assistant profile withholds |
 | **unrestricted** | nobody by default | user parity: everything the user can do | nothing; assigned only explicitly |
 
 - The assistant profile encodes "delegate, don't do": the orchestration surface plus read on everything that is not a secret, so it can answer "what is going on" about anything in the system, including any session's transcript. It is hard by configuration, not by caste, and loosenable per assistant ([./12-assistants.md](./12-assistants.md)).
 - The worker profile is the trust floor for workflow agent steps. A workflow that needs a step to spawn sessions, start runs or read transcripts assigns a profile that grants it.
+- The worker's `notification` cell gained `read` (amended 2026-09-04, [State store and first run](https://github.com/rogierpennink/hydra/issues/56)): it read `write` alone, which would have left a worker able to create a notification and unable to read it back, while every other family in the table lists its read verb explicitly. The seeded profile carries `notification.read`.
 - Profiles are named records the user edits in Settings > Permission profiles ([./14-web-app.md](./14-web-app.md)); the three shipped ones are seeded at first run and can be edited but not deleted. The agent -> profile assignment is a field on the Agent ([./02-domain-model.md](./02-domain-model.md)), set with `agent.update`.
 - This table is the single normative statement of the shipped profiles; [./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md) and [./12-assistants.md](./12-assistants.md) link here.
 

@@ -46,9 +46,35 @@ describe("dispatch", () => {
     expect(run.cli).not.toHaveBeenCalled();
   });
 
+  it("skips the glued form of --home too", async () => {
+    await dispatch(["--home=/tmp/h", "serve"]);
+    expect(run.controller).toHaveBeenCalledWith(["--home=/tmp/h"]);
+    await dispatch(["-c", "bind.port=1", "--home=/tmp/h", "-c", "log.level=debug", "serve"]);
+    expect(run.controller).toHaveBeenCalledWith([
+      "-c",
+      "bind.port=1",
+      "--home=/tmp/h",
+      "-c",
+      "log.level=debug",
+    ]);
+    await dispatch(["--home=/tmp/h", "--version"]);
+    expect(run.cli).not.toHaveBeenCalled();
+  });
+
   it("sends everything else to the CLI", async () => {
     await dispatch(["task", "list"]);
     expect(run.cli).toHaveBeenCalledWith(["task", "list"]);
+  });
+
+  it("starts no role when a global option is malformed", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    await dispatch(["serve", "--home"]);
+    expect(String(error.mock.calls[0]?.[0])).toContain("directory");
+    expect(process.exitCode).toBe(1);
+    process.exitCode = 0;
+    error.mockRestore();
+    expect(run.controller).not.toHaveBeenCalled();
+    expect(run.cli).not.toHaveBeenCalled();
   });
 
   it("propagates a rejection from the role it started", async () => {

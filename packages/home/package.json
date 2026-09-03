@@ -1,5 +1,5 @@
 {
-  "name": "@hydra/cli",
+  "name": "@hydra/home",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -7,7 +7,6 @@
     ".": "./src/index.ts"
   },
   "dependencies": {
-    "@hydra/home": "workspace:*",
     "effect": "4.0.0-rc.112"
   }
 }

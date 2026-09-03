@@ -1,3 +1,5 @@
+import { parseGlobalOptions } from "@hydra/home";
+import { Result } from "effect";
 import { VERSION } from "./version";
 
 export type Role = "controller" | "runner" | "cli";
@@ -17,28 +19,24 @@ const ROLE_ENTRYPOINTS: Record<Role, () => Promise<RoleModule>> = {
 };
 
 /**
- * `--home <dir>` and `-c key=value` are global options: they may precede the
- * verb (spec 15 section 2). Returns the index of the verb.
- */
-function verbIndex(argv: readonly string[]): number {
-  let i = 0;
-  while (argv[i] === "--home" || argv[i] === "-c") i += 2;
-  return i;
-}
-
-/**
  * Which role owns this invocation, and the arguments that role receives.
  *
  * `hydra serve` is the controller and `hydra runner` / `hydra runner --local`
  * are the runner daemon. Every other verb, `hydra runner join` and
  * `hydra runner create-join-token` included, is the CLI (spec 15 section 2).
  * The role keeps the global options; only the verb is consumed.
+ *
+ * `--home <dir>` and `-c key=value` may precede the verb (spec 15 section 2),
+ * so the verb is wherever `parseGlobalOptions` found it - the same parser the
+ * role runs on the same line, rather than a second copy of the rule here.
  */
-function route(argv: readonly string[]): { role: Role; args: readonly string[] } {
-  const i = verbIndex(argv);
-  const withoutVerb = [...argv.slice(0, i), ...argv.slice(i + 1)];
-  const subcommand = argv[i + 1];
-  switch (argv[i]) {
+function route(
+  argv: readonly string[],
+  options: { readonly rest: ReadonlyArray<string>; readonly verbIndex: number },
+): { role: Role; args: readonly string[] } {
+  const withoutVerb = [...argv.slice(0, options.verbIndex), ...argv.slice(options.verbIndex + 1)];
+  const subcommand = options.rest[1];
+  switch (options.rest[0]) {
     case "serve":
       return { role: "controller", args: withoutVerb };
     case "runner":
@@ -53,11 +51,19 @@ function route(argv: readonly string[]): { role: Role; args: readonly string[] }
 }
 
 export async function dispatch(argv: readonly string[]): Promise<void> {
-  if (argv[verbIndex(argv)] === "--version") {
+  const parsed = parseGlobalOptions(argv);
+  if (Result.isFailure(parsed)) {
+    // A malformed global option cannot be routed on: the verb's position
+    // depends on how many tokens the option took.
+    console.error(`hydra: ${parsed.failure.option}: ${parsed.failure.message}`);
+    process.exitCode = 1;
+    return;
+  }
+  if (parsed.success.rest[0] === "--version") {
     console.log(VERSION);
     return;
   }
-  const { role, args } = route(argv);
+  const { role, args } = route(argv, parsed.success);
   const entrypoint = await ROLE_ENTRYPOINTS[role]();
   await entrypoint.run(args);
 }
