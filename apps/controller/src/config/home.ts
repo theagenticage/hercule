@@ -23,7 +23,7 @@ export class HydraHome extends Context.Service<HydraHome, HomePaths>()(
 export const createDirectory = Effect.fn("createDirectory")(function* (path: string) {
   yield* Effect.try({
     try: () => mkdirSync(path, { recursive: true, mode: 0o700 }),
-    catch: (cause) => new HydraHomeError({ path, cause }),
+    catch: (cause) => new HydraHomeError({ action: "create", path, cause }),
   });
 });
 
@@ -47,6 +47,6 @@ export const createLayout = Effect.fn("createLayout")(function* (paths: HomePath
   // this rule, or that someone widened, is narrowed again on every boot.
   yield* Effect.try({
     try: () => chmodSync(paths.home, 0o700),
-    catch: (cause) => new HydraHomeError({ path: paths.home, cause }),
+    catch: (cause) => new HydraHomeError({ action: "secure", path: paths.home, cause }),
   });
 });

@@ -47,10 +47,44 @@ export const DEFAULTS: Record<BootstrapKey, TomlScalar> = {
   "log.level": "info",
 };
 
+/**
+ * A bind host is a whole host and nothing else: no scheme, no port, no path, no
+ * user. `URL` is lenient enough to read `foo/bar` as the host `foo` with a path
+ * on the end, which would quietly turn the setup URL into one nobody can open,
+ * so what it made of the value is checked against what it was given.
+ *
+ * The check is structural rather than an equality on the hostname, because
+ * `URL` also canonicalizes: it reads `127.1` as `127.0.0.1` and `0:0:0:0:0:0:0:1`
+ * as `[::1]`, and both of those are hosts Hydra can bind.
+ */
+const isBindHost = (host: string): boolean => {
+  const authority = host.includes(":") && !host.startsWith("[") ? `[${host}]` : host;
+  try {
+    const url = new URL(`http://${authority}:4937`);
+    return (
+      url.hostname !== "" &&
+      url.port === "4937" &&
+      url.pathname === "/" &&
+      url.username === "" &&
+      url.password === "" &&
+      url.search === "" &&
+      url.hash === ""
+    );
+  } catch {
+    return false;
+  }
+};
+
 /** The schema of each key's value, applied to the string the sources agreed on. */
 const SCHEMAS = {
   "data.dir": Schema.NonEmptyString,
-  "bind.host": Schema.NonEmptyString,
+  "bind.host": Schema.NonEmptyString.check(
+    Schema.makeFilter(
+      (host: string) =>
+        isBindHost(host) ||
+        "a bind host is a hostname or an IP address on its own, with no scheme, port, path or user",
+    ),
+  ),
   "bind.port": Schema.NumberFromString.check(
     Schema.isInt(),
     Schema.isBetween({ minimum: 1, maximum: 65535 }),

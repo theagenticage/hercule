@@ -37,6 +37,14 @@ describe("parseToml", () => {
     expect(failure("[bind\n")).toContain("table header");
     expect(failure("bind.hosts = [1, 2]\n")).toContain("bind.hosts");
   });
+
+  it("rejects a datetime rather than dropping the key", () => {
+    // Bun parses a TOML datetime into a Temporal value, which has no entries to
+    // walk; anything but a plain object at a leaf is a value Hydra cannot use.
+    expect(failure("backup.time = 1979-05-27T07:32:00Z\n")).toContain("backup.time");
+    expect(failure("backup.day = 1979-05-27\n")).toContain("backup.day");
+    expect(failure("backup.at = 07:32:00\n")).toContain("backup.at");
+  });
 });
 
 describe("formatToml", () => {

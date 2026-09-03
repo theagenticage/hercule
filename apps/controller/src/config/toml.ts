@@ -54,5 +54,13 @@ function flatten(
   return undefined;
 }
 
-const isTable = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
+/**
+ * Only a plain object is a table. Bun hands back a `Temporal` value for a TOML
+ * datetime, and any check loose enough to admit that would walk it, find no
+ * entries, and drop the key without a word.
+ */
+const isTable = (value: unknown): value is Record<string, unknown> => {
+  if (typeof value !== "object" || value === null) return false;
+  const prototype = Object.getPrototypeOf(value) as unknown;
+  return prototype === Object.prototype || prototype === null;
+};

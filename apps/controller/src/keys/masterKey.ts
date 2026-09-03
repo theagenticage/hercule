@@ -29,7 +29,7 @@
  * or an error message. It is held only as a non-extractable WebCrypto key, and
  * the bytes it was imported from are zeroed as soon as the import succeeds.
  */
-import { existsSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -77,7 +77,16 @@ export interface KeyStore {
   readonly describe: string;
   /** The stored key, or `undefined` when this machine has none yet. */
   readonly read: Effect.Effect<Bytes | undefined, MasterKeyError>;
-  readonly write: (bytes: Bytes) => Effect.Effect<void, MasterKeyError>;
+  /**
+   * Stores a freshly minted key, and answers with the key the store now holds.
+   *
+   * Reading and minting are two steps, so two first boots of the same home can
+   * both find the store empty and both mint. The store, not the caller, settles
+   * that: whichever write lands first wins, and the loser is handed the winner's
+   * key rather than overwriting it. A key that replaced another one would leave
+   * every secret already encrypted under the first unreadable.
+   */
+  readonly write: (bytes: Bytes) => Effect.Effect<Bytes, MasterKeyError>;
 }
 
 const decodeBase64 = (encoded: string, source: string): Bytes => {
@@ -91,9 +100,8 @@ const decodeBase64 = (encoded: string, source: string): Bytes => {
 };
 
 /** The key file, mode 0600. Its mode is the whole protection, so it is checked on read. */
-export const fileStore = (path: string): KeyStore => ({
-  describe: path,
-  read: Effect.try({
+export const fileStore = (path: string): KeyStore => {
+  const read: Effect.Effect<Bytes | undefined, MasterKeyError> = Effect.try({
     try: () => {
       if (!existsSync(path)) return undefined;
       const mode = statSync(path).mode & 0o777;
@@ -109,20 +117,46 @@ export const fileStore = (path: string): KeyStore => ({
       new MasterKeyError({
         message: `Cannot use the master key: ${cause instanceof Error ? cause.message : String(cause)}`,
       }),
-  }),
-  write: (bytes) =>
-    Effect.try({
-      try: () => {
-        // `mode` applies only when the file is created, so the previous file is
-        // removed rather than chmod-ed after a moment at the default mode.
-        rmSync(path, { force: true });
-        writeFileSync(path, `${Buffer.from(bytes).toString("base64")}\n`, { mode: 0o600 });
-      },
-      // The cause here is a filesystem error and never carries the key, but the
-      // key was an argument to the call that failed, so only the path is named.
-      catch: () => new MasterKeyError({ message: `Cannot write the master key to ${path}.` }),
-    }),
-});
+  });
+
+  /** The key another process wrote between this one's read and its write. */
+  const readAfterRace = Effect.flatMap(read, (bytes) =>
+    bytes === undefined
+      ? new MasterKeyError({
+          message: `${path} appeared while Hydra was creating it, and then held no master key.`,
+        })
+      : Effect.succeed(bytes),
+  );
+
+  return {
+    describe: path,
+    read,
+    write: (bytes) =>
+      Effect.try({
+        // `wx` creates the file or fails; it never truncates one. That is what
+        // makes the mint atomic between two boots, and `mode` applies only when
+        // the file is created, so the key is never briefly world-readable.
+        try: () => {
+          writeFileSync(path, `${Buffer.from(bytes).toString("base64")}\n`, {
+            mode: 0o600,
+            flag: "wx",
+          });
+          return bytes;
+        },
+        // The cause here is a filesystem error and never carries the key, but the
+        // key was an argument to the call that failed, so only the path is named.
+        catch: (cause) => cause as NodeJS.ErrnoException,
+      }).pipe(
+        Effect.catch((cause) =>
+          cause.code === "EEXIST"
+            ? readAfterRace
+            : Effect.fail(
+                new MasterKeyError({ message: `Cannot write the master key to ${path}.` }),
+              ),
+        ),
+      ),
+  };
+};
 
 /** What `security` did: its exit code and stdout. Injected, so tests drive every branch. */
 export type SecurityRunner = (
@@ -155,27 +189,32 @@ export const keychainStore = (account: string, run: SecurityRunner = spawnSecuri
       catch: () => new MasterKeyError({ message: failure }),
     });
 
+  const read: Effect.Effect<Bytes | undefined, MasterKeyError> = Effect.gen(function* () {
+    const result = yield* security(
+      ["security", "find-generic-password", "-s", KEYCHAIN_SERVICE, "-a", account, "-w"],
+      "Cannot run `security` to read the master key from the login keychain.",
+    );
+    if (result.exitCode === KEYCHAIN_ITEM_NOT_FOUND) return undefined;
+    if (result.exitCode !== 0) {
+      return yield* new MasterKeyError({
+        message:
+          `Reading the master key from the login keychain failed: \`security\` exited ` +
+          `${result.exitCode} for ${item}.`,
+      });
+    }
+    return yield* Effect.try({
+      try: () => decodeBase64(result.stdout, item),
+      catch: (cause) => new MasterKeyError({ message: String(cause) }),
+    });
+  });
+
   return {
     describe: item,
-    read: Effect.gen(function* () {
-      const result = yield* security(
-        ["security", "find-generic-password", "-s", KEYCHAIN_SERVICE, "-a", account, "-w"],
-        "Cannot run `security` to read the master key from the login keychain.",
-      );
-      if (result.exitCode === KEYCHAIN_ITEM_NOT_FOUND) return undefined;
-      if (result.exitCode !== 0) {
-        return yield* new MasterKeyError({
-          message:
-            `Reading the master key from the login keychain failed: \`security\` exited ` +
-            `${result.exitCode} for ${item}.`,
-        });
-      }
-      return yield* Effect.try({
-        try: () => decodeBase64(result.stdout, item),
-        catch: (cause) => new MasterKeyError({ message: String(cause) }),
-      });
-    }),
-    // `-U` updates an existing item instead of adding a duplicate.
+    read,
+    // No `-U`: without it `add-generic-password` refuses an item that is
+    // already there rather than replacing it, which is what makes the mint
+    // atomic between two boots. On any refusal the item another boot stored is
+    // read back, and only a keychain that still has no item is a real failure.
     write: (bytes) =>
       Effect.gen(function* () {
         const result = yield* security(
@@ -188,17 +227,17 @@ export const keychainStore = (account: string, run: SecurityRunner = spawnSecuri
             account,
             "-w",
             Buffer.from(bytes).toString("base64"),
-            "-U",
           ],
           "Cannot run `security` to store the master key in the login keychain.",
         );
-        if (result.exitCode !== 0) {
-          return yield* new MasterKeyError({
-            message:
-              `Storing the master key in the login keychain failed: \`security\` exited ` +
-              `${result.exitCode} for ${item}.`,
-          });
-        }
+        if (result.exitCode === 0) return bytes;
+        const stored = yield* read;
+        if (stored !== undefined) return stored;
+        return yield* new MasterKeyError({
+          message:
+            `Storing the master key in the login keychain failed: \`security\` exited ` +
+            `${result.exitCode} for ${item}.`,
+        });
       }),
   };
 };
@@ -249,8 +288,9 @@ export const masterKeyLayer = (
               `Restore the key this machine had, or start from an empty Hydra Home.`,
           });
         }
-        bytes = crypto.getRandomValues(new Uint8Array(MASTER_KEY_BYTES));
-        yield* store.write(bytes);
+        // The store answers with the key it holds, which is another boot's if
+        // that boot minted first; the one minted here is then never used.
+        bytes = yield* store.write(crypto.getRandomValues(new Uint8Array(MASTER_KEY_BYTES)));
       }
 
       const key = yield* Effect.tryPromise({

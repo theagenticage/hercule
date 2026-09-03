@@ -8,6 +8,7 @@ import * as Layer from "effect/Layer";
 import { homePaths, HydraHome } from "../config";
 import { TestDatabase } from "../db/testing";
 import {
+  fileStore,
   KEYCHAIN_SERVICE,
   keychainStore,
   MASTER_KEY_BYTES,
@@ -52,6 +53,16 @@ describe("the master key file", () => {
     expect(Buffer.from(readFileSync(keyFile(), "utf8").trim(), "base64")).toHaveLength(
       MASTER_KEY_BYTES,
     );
+  });
+
+  it("keeps the key another process created between the read and the write", async () => {
+    // The race a second `hydra serve` on an empty home loses: it found no file,
+    // minted, and by the time it wrote, the first boot's key was already there.
+    const winner = new Uint8Array(MASTER_KEY_BYTES).fill(3);
+    writeFileSync(keyFile(), `${Buffer.from(winner).toString("base64")}\n`, { mode: 0o600 });
+    const loser = new Uint8Array(MASTER_KEY_BYTES).fill(4);
+    expect(await Effect.runPromise(fileStore(keyFile()).write(loser))).toEqual(winner);
+    expect(readFileSync(keyFile(), "utf8").trim()).toBe(Buffer.from(winner).toString("base64"));
   });
 
   it("reads the same key back on the next layer build", async () => {
@@ -144,9 +155,9 @@ describe("the keychain store", () => {
     expect(String(exit)).toContain("32 bytes");
   });
 
-  it("updates an existing item rather than adding a duplicate", async () => {
+  it("adds the item without -U, so an existing one is never overwritten", async () => {
     const { run, calls } = runner([{ exitCode: 0, stdout: "" }]);
-    await Effect.runPromise(keychainStore("/Users/x/.hydra", run).write(key));
+    expect(await Effect.runPromise(keychainStore("/Users/x/.hydra", run).write(key))).toEqual(key);
     expect(calls[0]).toEqual([
       "security",
       "add-generic-password",
@@ -156,12 +167,27 @@ describe("the keychain store", () => {
       "/Users/x/.hydra",
       "-w",
       Buffer.from(key).toString("base64"),
-      "-U",
     ]);
   });
 
-  it("fails when security cannot store the item", async () => {
-    const { run } = runner([{ exitCode: 45, stdout: "" }]);
+  it("answers the key another boot stored when the add is refused", async () => {
+    const stored = new Uint8Array(MASTER_KEY_BYTES).fill(9);
+    // 45: the item is already there, because another first boot won the race.
+    const { run, calls } = runner([
+      { exitCode: 45, stdout: "" },
+      { exitCode: 0, stdout: `${Buffer.from(stored).toString("base64")}\n` },
+    ]);
+    expect(await Effect.runPromise(keychainStore("/Users/x/.hydra", run).write(key))).toEqual(
+      stored,
+    );
+    expect(calls[1]?.[1]).toBe("find-generic-password");
+  });
+
+  it("fails when security cannot store the item and there is none to read", async () => {
+    const { run } = runner([
+      { exitCode: 45, stdout: "" },
+      { exitCode: 44, stdout: "" },
+    ]);
     const exit = await Effect.runPromiseExit(keychainStore("/Users/x/.hydra", run).write(key));
     expect(Exit.isFailure(exit)).toBe(true);
     expect(String(exit)).toContain("exited 45");

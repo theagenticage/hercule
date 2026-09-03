@@ -12,8 +12,15 @@ export class ConfigValueError extends Schema.TaggedError<ConfigValueError>()("Co
   message: Schema.String,
 }) {}
 
-/** The Hydra Home layout could not be created or read (spec 15 section 5). */
+/**
+ * Something in the Hydra Home could not be put where it belongs (spec 15
+ * section 5). `action` is the verb the message needs: the home layout is
+ * created, but the setup-url file is also written and removed, and a failure
+ * that says "cannot create" about a removal sends the reader to the wrong
+ * place.
+ */
 export class HydraHomeError extends Schema.TaggedError<HydraHomeError>()("HydraHomeError", {
+  action: Schema.Literals(["create", "secure", "write", "remove"]),
   path: Schema.String,
   cause: Schema.Defect(),
 }) {}

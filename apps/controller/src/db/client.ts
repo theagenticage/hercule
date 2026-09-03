@@ -16,7 +16,7 @@ import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
-import { SqlError } from "effect/unstable/sql/SqlError";
+import { isSqlErrorReason, SqlError } from "effect/unstable/sql/SqlError";
 import * as SqliteClient from "@effect/sql-sqlite-bun/SqliteClient";
 
 /** The in-memory database name; tests open the real schema against it (spec 04). */
@@ -39,9 +39,29 @@ export class DatabaseError extends Data.TaggedError("DatabaseError")<{
  * waits five seconds for it, and the only thing that holds it that long is a
  * second controller on the same home (ADR 0004).
  */
+/**
+ * True when a lock timeout sits anywhere in an error's cause chain.
+ *
+ * The timeout is not always the outermost reason: a transaction wraps the
+ * statement that failed, a migration wraps the transaction, and each wrapper
+ * keeps what it wrapped as `cause` (a `SqlError`'s cause is its reason, a
+ * reason's cause is the driver error). Reading only the top-level reason turns
+ * the one message worth printing into `database is locked`.
+ */
+const lockTimedOut = (error: unknown): boolean => {
+  const seen = new Set<unknown>();
+  let value: unknown = error;
+  while (typeof value === "object" && value !== null && !seen.has(value)) {
+    if (isSqlErrorReason(value) && value._tag === "LockTimeoutError") return true;
+    seen.add(value);
+    value = (value as { readonly cause?: unknown }).cause;
+  }
+  return false;
+};
+
 export const databaseError = (filename: string, error: unknown): DatabaseError => {
   if (error instanceof DatabaseError) return error;
-  if (error instanceof SqlError && error.reason._tag === "LockTimeoutError") {
+  if (lockTimedOut(error)) {
     return new DatabaseError({
       filename,
       message:

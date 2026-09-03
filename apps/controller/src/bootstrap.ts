@@ -77,8 +77,9 @@ export function hashToken(token: string): string {
 /**
  * The one-time setup URL (spec 15 section 7). A wildcard bind host renders as
  * loopback, because `http://0.0.0.0:4937` is not an address a browser can open;
- * an IPv6 literal is bracketed. A host `URL` will not take is a defect, not a
- * URL nobody can open.
+ * an IPv6 literal is bracketed. `bind.host` is checked when the config is
+ * resolved, so by here it is a host and nothing else; a value `URL` will not
+ * take is a defect, not a URL nobody can open.
  */
 export function setupUrl(bindHost: string, bindPort: number, token: string): string {
   const host = WILDCARD_HOSTS.has(bindHost) ? "127.0.0.1" : bindHost;
@@ -114,7 +115,7 @@ const ensureSetupUrl = (
       yield* withTransaction(sql`UPDATE setup_state SET token_hash = NULL WHERE singleton = 1`);
       yield* Effect.try({
         try: () => rmSync(paths.setupUrlFile, { force: true }),
-        catch: (cause) => new HydraHomeError({ path: paths.setupUrlFile, cause }),
+        catch: (cause) => new HydraHomeError({ action: "remove", path: paths.setupUrlFile, cause }),
       });
       return undefined;
     }
@@ -139,7 +140,7 @@ const ensureSetupUrl = (
         rmSync(paths.setupUrlFile, { force: true });
         writeFileSync(paths.setupUrlFile, `${url}\n`, { mode: 0o600 });
       },
-      catch: (cause) => new HydraHomeError({ path: paths.setupUrlFile, cause }),
+      catch: (cause) => new HydraHomeError({ action: "write", path: paths.setupUrlFile, cause }),
     });
     return url;
   });

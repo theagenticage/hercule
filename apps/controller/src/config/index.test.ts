@@ -175,6 +175,30 @@ describe("the config layer", () => {
     expect((await failed(["-c", "data.dir="]))._tag).toBe("ConfigValueError");
   });
 
+  it("refuses a bind host that is not a host on its own", async () => {
+    // `new URL` would read this as the host `foo` with `/bar` on the end, and
+    // the setup URL would come out as one nobody can open.
+    const error = await failed(["-c", "bind.host=foo/bar"]);
+    expect(error._tag).toBe("ConfigValueError");
+    expect(error.message).toContain("bind.host");
+    expect(error.message).toContain('"foo/bar"');
+
+    expect((await failed(["-c", "bind.host=user@host"]))._tag).toBe("ConfigValueError");
+    expect((await failed(["-c", "bind.host=127.0.0.1:8080"]))._tag).toBe("ConfigValueError");
+    expect((await failed(["-c", "bind.host=http://127.0.0.1"]))._tag).toBe("ConfigValueError");
+  });
+
+  it("takes the hosts hydra can actually bind", async () => {
+    for (const host of ["127.0.0.1", "0.0.0.0", "::", "::1", "localhost", "hydra.local"]) {
+      const config = await Effect.runPromise(
+        BootstrapConfig.pipe(
+          Effect.provide(layer(["--home", home, "-c", `bind.host=${host}`], {})),
+        ),
+      );
+      expect(config.bindHost).toBe(host);
+    }
+  });
+
   it("refuses an argument hydra serve does not have", async () => {
     const result = await Effect.runPromise(
       HydraHome.pipe(Effect.provide(layer(["--home", home, "--version"], {})), Effect.result),

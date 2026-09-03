@@ -11,15 +11,20 @@ import { boot, type BootError } from "./bootstrap";
 
 export { boot, hashToken, setupUrl, type BootError, type BootOutcome } from "./bootstrap";
 
-/** One clear line per failure, on stderr. No stack, no Effect internals. */
-function explain(error: BootError): string {
+/**
+ * One clear line per failure, on stderr. No stack, no Effect internals.
+ *
+ * Exported so the wording is testable on its own: it is the only thing a
+ * failing `hydra serve` ever shows.
+ */
+export function explain(error: BootError): string {
   switch (error._tag) {
     case "InvalidOptionError":
       return `${error.option}: ${error.message}`;
     case "ConfigFileError":
       return `${error.path} ${error.message}`;
     case "HydraHomeError":
-      return `Cannot create ${error.path}: ${String(error.cause)}`;
+      return `Cannot ${error.action} ${error.path}: ${String(error.cause)}`;
     default:
       return error.message;
   }
