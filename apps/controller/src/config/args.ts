@@ -1,0 +1,73 @@
+import { Result } from "effect";
+import { InvalidOptionError } from "./errors";
+
+/** The two global options, stripped from `argv` before a role reads it. */
+export interface GlobalOptions {
+  /** `--home <dir>` / `--home=<dir>` / `HYDRA_HOME`; the last one on the line wins. */
+  readonly home: string | undefined;
+  /** `-c key=value`, in the order given; a repeated key is decided by the last one. */
+  readonly overrides: ReadonlyArray<readonly [key: string, value: string]>;
+  /** Everything that is not a global option, in order. */
+  readonly rest: ReadonlyArray<string>;
+}
+
+/**
+ * Split `argv` into the global options and the arguments the role reads.
+ *
+ * `--home <dir>` locates the config file and `-c key=value` overrides any
+ * bootstrap key; both may appear anywhere on the line, because the dispatcher
+ * hands them to the role along with the role's own arguments (spec 15 sections
+ * 2 and 6).
+ *
+ * Pure, and free of the database by construction: the runner resolves its home
+ * with this too, and the runner links no controller state (spec 15 section 3).
+ */
+export function parseGlobalOptions(
+  argv: ReadonlyArray<string>,
+): Result.Result<GlobalOptions, InvalidOptionError> {
+  let home: string | undefined;
+  const overrides: Array<readonly [string, string]> = [];
+  const rest: Array<string> = [];
+
+  for (let i = 0; i < argv.length; i++) {
+    const token = argv[i]!;
+
+    if (token === "--home") {
+      const value = argv[++i];
+      if (value === undefined) {
+        return Result.fail(
+          new InvalidOptionError({ option: token, message: "--home needs a directory" }),
+        );
+      }
+      home = value;
+    } else if (token.startsWith("--home=")) {
+      home = token.slice("--home=".length);
+      if (home === "") {
+        return Result.fail(
+          new InvalidOptionError({ option: token, message: "--home needs a directory" }),
+        );
+      }
+    } else if (token === "-c" || (token.startsWith("-c") && token.length > 2)) {
+      const assignment = token === "-c" ? argv[++i] : token.slice(2);
+      if (assignment === undefined) {
+        return Result.fail(
+          new InvalidOptionError({ option: token, message: "-c needs key=value" }),
+        );
+      }
+      const separator = assignment.indexOf("=");
+      if (separator <= 0) {
+        return Result.fail(
+          new InvalidOptionError({
+            option: `-c ${assignment}`,
+            message: "an override is written key=value",
+          }),
+        );
+      }
+      overrides.push([assignment.slice(0, separator), assignment.slice(separator + 1)]);
+    } else {
+      rest.push(token);
+    }
+  }
+
+  return Result.succeed({ home, overrides, rest });
+}

@@ -46,6 +46,20 @@ describe("dispatch", () => {
     expect(run.cli).not.toHaveBeenCalled();
   });
 
+  it("skips the glued forms of the global options too", async () => {
+    await dispatch(["--home=/tmp/h", "serve"]);
+    expect(run.controller).toHaveBeenCalledWith(["--home=/tmp/h"]);
+    await dispatch(["-cbind.port=1", "--home=/tmp/h", "-c", "log.level=debug", "serve"]);
+    expect(run.controller).toHaveBeenCalledWith([
+      "-cbind.port=1",
+      "--home=/tmp/h",
+      "-c",
+      "log.level=debug",
+    ]);
+    await dispatch(["--home=/tmp/h", "--version"]);
+    expect(run.cli).not.toHaveBeenCalled();
+  });
+
   it("sends everything else to the CLI", async () => {
     await dispatch(["task", "list"]);
     expect(run.cli).toHaveBeenCalledWith(["task", "list"]);

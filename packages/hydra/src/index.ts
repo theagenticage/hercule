@@ -19,10 +19,21 @@ const ROLE_ENTRYPOINTS: Record<Role, () => Promise<RoleModule>> = {
 /**
  * `--home <dir>` and `-c key=value` are global options: they may precede the
  * verb (spec 15 section 2). Returns the index of the verb.
+ *
+ * Both options also take their value glued to the flag, so the number of tokens
+ * to skip depends on the form. The dispatcher only needs to find the verb; the
+ * role parses the options for real (`parseGlobalOptions`, apps/controller
+ * config), and reads them from the arguments it is handed. The two agree by
+ * this rule and are kept apart deliberately: the dispatcher must not pull a
+ * role's module graph in to route to it.
  */
 function verbIndex(argv: readonly string[]): number {
   let i = 0;
-  while (argv[i] === "--home" || argv[i] === "-c") i += 2;
+  for (; i < argv.length; i++) {
+    const token = argv[i]!;
+    if (token === "--home" || token === "-c") i += 1;
+    else if (!token.startsWith("--home=") && !(token.startsWith("-c") && token.length > 2)) break;
+  }
   return i;
 }
 

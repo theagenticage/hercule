@@ -45,6 +45,23 @@ const bannedChildProcessCalls = [
   },
 ];
 
+/**
+ * A tripwire, not a proof. A transaction never spans a wait on anything outside
+ * the database (spec 04, Repository interfaces): SQLite has one writer, so a
+ * transaction held across a runner round trip or an HTTP call blocks every
+ * other write in the controller. No lint rule can see through an effect, so
+ * this catches only the syntactically obvious case - a network call written
+ * inside a `withTransaction` callback - and review catches the rest.
+ */
+const bannedInTransaction = [
+  "callee.name='withTransaction'",
+  "callee.property.name='withTransaction'",
+].map((withTransaction) => ({
+  selector: `CallExpression[${withTransaction}] CallExpression[callee.name='fetch']`,
+  message:
+    "A transaction never spans a wait outside the database (spec 04). Do the network call before or after the write set.",
+}));
+
 export default tseslint.config(
   {
     ignores: ["**/dist/**", "**/node_modules/**", "packages/hydra/src/version.ts", "/hydra"],
@@ -60,7 +77,7 @@ export default tseslint.config(
     },
     rules: {
       "no-restricted-imports": ["error", { paths: [...bannedEverywhere, ...bannedChildProcess] }],
-      "no-restricted-syntax": ["error", ...bannedChildProcessCalls],
+      "no-restricted-syntax": ["error", ...bannedChildProcessCalls, ...bannedInTransaction],
     },
   },
   {
