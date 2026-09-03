@@ -66,7 +66,7 @@ export class MasterKey extends Context.Service<
   {
     readonly key: CryptoKey;
   }
->()("hydra/controller/keys/MasterKey") {}
+>()("hydra/controller/secrets/MasterKey") {}
 
 /** Plain bytes, not a view on a `SharedArrayBuffer`: what WebCrypto accepts. */
 type Bytes = Uint8Array<ArrayBuffer>;

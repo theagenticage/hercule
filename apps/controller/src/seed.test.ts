@@ -2,8 +2,8 @@ import { describe, expect, it } from "vitest";
 import { Effect, Layer, Option } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { TestDatabase } from "./db/testing";
-import { PermissionProfiles, PermissionProfilesLayer } from "./repositories/permissionProfiles";
-import { Settings, SettingsLayer } from "./repositories/settings";
+import { PermissionProfiles, PermissionProfilesLayer } from "./permissions";
+import { Settings, SettingsLayer } from "./settings";
 import { seed } from "./seed";
 
 const layer = Layer.mergeAll(SettingsLayer, PermissionProfilesLayer).pipe(

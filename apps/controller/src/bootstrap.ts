@@ -33,12 +33,17 @@ import {
   type DatabaseError,
   type SchemaVersionError,
 } from "./db";
-import { masterKeyLayer, type MasterKeyBackend, type MasterKeyError } from "./keys";
-import { ControllerIdentity, controllerIdentityLayer } from "./repositories/identity";
-import { PermissionProfilesLayer, type GrantsError } from "./repositories/permissionProfiles";
-import { secretsLayer, type SecretNameError } from "./repositories/secrets";
-import { SettingsLayer, type SettingError } from "./repositories/settings";
+import { ControllerIdentity, controllerIdentityLayer } from "./identity";
+import { PermissionProfilesLayer, type GrantsError } from "./permissions";
+import {
+  masterKeyLayer,
+  secretsLayer,
+  type MasterKeyBackend,
+  type MasterKeyError,
+  type SecretNameError,
+} from "./secrets";
 import { seed } from "./seed";
+import { SettingsLayer, type SettingError } from "./settings";
 
 /** The setup token is 32 random bytes, rendered base64url so it survives a URL. */
 const SETUP_TOKEN_BYTES = 32;

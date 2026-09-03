@@ -16,14 +16,9 @@
 import { Effect } from "effect";
 import type { SqlClient } from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
-import { withTransaction } from "./db/client";
-import {
-  ALL_GRANTS,
-  PermissionProfiles,
-  type Grant,
-  type GrantsError,
-} from "./repositories/permissionProfiles";
-import { Settings, type SettingError } from "./repositories/settings";
+import { withTransaction } from "./db";
+import { ALL_GRANTS, PermissionProfiles, type Grant, type GrantsError } from "./permissions";
+import { Settings, type SettingError } from "./settings";
 
 /**
  * The shipped profiles, verbatim from the table in spec 13 section 6.2.

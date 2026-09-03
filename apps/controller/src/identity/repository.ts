@@ -22,7 +22,7 @@ import * as Redacted from "effect/Redacted";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import { mintUuid, uuidToString } from "../db";
-import { CORE_OWNER, Secrets, type SecretNameError } from "./secrets";
+import { CORE_OWNER, Secrets, type SecretNameError } from "../secrets";
 
 /** The `core`-owned secret holding the controller's Ed25519 private key, PKCS#8 as base64. */
 export const SIGNING_KEY_SECRET = "controller.signing-key";
@@ -57,7 +57,7 @@ export class ControllerIdentity extends Context.Service<
      */
     readonly ensure: Effect.Effect<ControllerIdentityRecord, SqlError | SecretNameError>;
   }
->()("hydra/controller/repositories/ControllerIdentity") {}
+>()("hydra/controller/identity/ControllerIdentity") {}
 
 export const controllerIdentityLayer: Layer.Layer<
   ControllerIdentity,

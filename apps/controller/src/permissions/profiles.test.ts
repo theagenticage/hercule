@@ -8,7 +8,7 @@ import {
   PermissionProfiles,
   PermissionProfilesLayer,
   type Grant,
-} from "./permissionProfiles";
+} from "./profiles";
 
 const layer = PermissionProfilesLayer.pipe(Layer.provideMerge(TestDatabase));
 

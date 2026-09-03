@@ -40,7 +40,7 @@ import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import { mintUuid, uuidToString } from "../db";
-import { MasterKey } from "../keys";
+import { MasterKey } from "./masterKey";
 
 /** Who a secret belongs to (spec 13 section 2.1). */
 export type SecretOwnerKind = "connection" | "plugin" | "runner" | "core" | "provider-instance";
@@ -143,7 +143,7 @@ export class Secrets extends Context.Service<
       SqlError | SecretNameError | SecretDecryptError
     >;
   }
->()("hydra/controller/repositories/Secrets") {}
+>()("hydra/controller/secrets/Secrets") {}
 
 /**
  * The secrets repository over the controller database, encrypting under the

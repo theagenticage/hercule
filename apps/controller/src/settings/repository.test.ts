@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { Effect, Layer } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { TestDatabase } from "../db/testing";
-import { Settings, SettingsLayer } from "./settings";
+import { Settings, SettingsLayer } from "./repository";
 
 const layer = SettingsLayer.pipe(Layer.provideMerge(TestDatabase));
 

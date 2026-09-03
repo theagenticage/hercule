@@ -14,7 +14,7 @@
 import { Clock, Context, Effect, Layer, Option, Schema } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
-import { mintUuid, uuidToString } from "../db/id";
+import { mintUuid, uuidToString } from "../db";
 
 /**
  * The grant families and their verbs (spec 13 section 6.1). Families are
@@ -148,7 +148,7 @@ const make = Effect.gen(function* () {
 export class PermissionProfiles extends Context.Service<
   PermissionProfiles,
   Effect.Success<typeof make>
->()("hydra/controller/repositories/PermissionProfiles") {}
+>()("hydra/controller/permissions/PermissionProfiles") {}
 
 export const PermissionProfilesLayer: Layer.Layer<PermissionProfiles, never, SqlClient.SqlClient> =
   Layer.effect(PermissionProfiles, make);

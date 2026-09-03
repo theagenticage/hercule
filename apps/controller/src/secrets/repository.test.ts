@@ -12,8 +12,8 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { homePaths, HydraHome } from "../config";
 import { withTransaction } from "../db";
 import { TestDatabase } from "../db/testing";
-import { masterKeyLayer } from "../keys";
-import { CORE_OWNER, Secrets, secretsLayer, type SecretOwner } from "./secrets";
+import { masterKeyLayer } from "./masterKey";
+import { CORE_OWNER, Secrets, secretsLayer, type SecretOwner } from "./repository";
 
 const CONNECTION: SecretOwner = { kind: "connection", id: "0198e4b0-0000-7000-8000-000000000001" };
 const TOKEN = "ghp_a-real-looking-token";
