@@ -6,6 +6,8 @@ Date: 2026-09-02
 
 Accepted. Decided by [Revisit Effect for the backend (#53)](https://github.com/rogierpennink/hydra/issues/53). Amends [ADR 0013](./0013-agents-operate-hydra-through-the-public-api.md) (RPC-framework adoption is no longer deferred; the contract language changes) and [ADR 0017](./0017-the-web-app-is-a-static-pure-client-of-the-public-api.md) (the WebSocket is Effect RPC). Refines [ADR 0004](./0004-controller-state-lives-in-one-sqlite-database.md) (the transaction mechanism) and [ADR 0007](./0007-provider-adapter-is-a-thin-interface-behind-a-normalized-event-stream.md) (the adapter's types).
 
+**Amended 2026-09-04 ([#57](https://github.com/rogierpennink/hydra/issues/57)):** the static grant check runs in transport middleware as well. The service method stays the enforcement point for every caller, so nothing reachable in-process is unguarded; on HTTP the derived route decodes and validates the payload before any handler runs, so the check also runs in an `HttpApiMiddleware` ahead of decoding, and the fixed check order of [spec 11](../spec/11-public-api-and-agent-surface.md) §1.5 - `unauthenticated`, `forbidden`, `validation`, `not_found` - holds on the wire. The required grant is a static per-operation fact in the contract, not operation logic, so the one-line-handler rule below is untouched; a call over HTTP is simply checked twice, identically.
+
 ## Context
 
 The spec ruled Effect out in passing: ADR 0013 deferred *RPC frameworks* (tRPC, oRPC, Effect RPC) post-v1 with a Zod contract package as the pinned asset, and spec 14 stated that Hydra does not use Effect. Neither weighed Effect as the backend's programming model, and it is the one choice that cannot be retrofitted, so it was reopened before implementation started.
