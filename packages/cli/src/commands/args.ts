@@ -9,23 +9,33 @@
  * Values that must not appear in `ps` or in shell history arrive on stdin
  * instead: every string field also has a `--<field>-stdin` form. Given once, it
  * takes all of stdin with one trailing newline removed, which is what a
- * heredoc produces; given more than once, stdin supplies one line per flag, in
- * the order the flags were written.
+ * heredoc produces; given more than once, stdin supplies one line per field, in
+ * the order the operation's schema declares them - never in the order the flags
+ * happened to be written, so `hydra user setPassword` always reads the current
+ * password first.
  */
 import { UsageError } from "../exit";
 import type { Command, Field } from "./tree";
 
 /**
- * Fields that may only arrive on stdin.
+ * Fields that may arrive **only** on stdin; the plain `--<field>` flag for one
+ * of these does not exist.
  *
- * The one content channel rule (spec 11 section 6.3): a secret's value must
- * never sit in `argv`, where `ps` and shell history can see it. Passwords on
- * `auth login` and `user setPassword` are deliberately *not* here - they have
- * a `--<field>-stdin` form and the flag stays available for a caller who has
- * already decided the exposure is acceptable, which is what `hydra login`
- * exists to avoid.
+ * Spec 11 section 6.1 is explicit that a bare `--password` flag does not exist,
+ * and the reason generalises: anything in `argv` is visible in process lists and
+ * lands in shell history. So every password the API takes, and a secret's value
+ * (the one content channel rule, section 6.3), is listed here.
  */
-export const STDIN_ONLY = new Map<string, string>([["secret.set", "value"]]);
+export const STDIN_ONLY = new Map<string, ReadonlyArray<string>>([
+  ["setup.complete", ["password"]],
+  ["auth.login", ["password"]],
+  ["user.setPassword", ["current", "next"]],
+  ["secret.set", ["value"]],
+]);
+
+/** True when this operation's field refuses a plain `--<field>` flag. */
+export const isStdinOnly = (id: string, field: string): boolean =>
+  STDIN_ONLY.get(id)?.includes(field) === true;
 
 export interface SortArgument {
   readonly field: string;
@@ -191,9 +201,9 @@ export const parseArguments = async (
 
     const payloadField = payloadFields.get(name);
     if (payloadField !== undefined) {
-      if (STDIN_ONLY.get(command.id) === name) {
+      if (isStdinOnly(command.id, name)) {
         throw new UsageError(
-          `--${name} is not accepted; ${command.id} reads it from stdin, as --${name}-stdin`,
+          `--${name} does not exist: it would be visible in process lists and in shell history. ${command.id} reads it from stdin, as --${name}-stdin.`,
           help,
         );
       }
@@ -211,20 +221,25 @@ export const parseArguments = async (
   }
 
   if (stdinFields.length > 0) {
+    // Declaration order, not flag order: `--next-stdin --current-stdin` must
+    // read the same two lines as `--current-stdin --next-stdin`, or the flags
+    // would silently swap two passwords.
+    const ordered = command.payload.filter((field) => stdinFields.includes(field));
     const text = await readStdin();
-    if (stdinFields.length === 1) {
-      payload[stdinFields[0]!.name] = text.replace(/\n$/, "");
+    if (ordered.length === 1) {
+      payload[ordered[0]!.name] = text.replace(/\n$/, "");
     } else {
-      const lines = text.split("\n");
-      stdinFields.forEach((field, index) => {
-        const line = lines[index];
-        if (line === undefined) {
-          throw new UsageError(
-            `stdin has ${lines.length} lines but ${stdinFields.length} --*-stdin flags were given`,
-            help,
-          );
-        }
-        payload[field.name] = line;
+      const lines = text.replace(/\n$/, "").split("\n");
+      if (lines.length !== ordered.length) {
+        throw new UsageError(
+          `stdin has ${lines.length} line(s) but ${ordered.length} fields read from it: ${ordered
+            .map((field) => field.name)
+            .join(", then ")}`,
+          help,
+        );
+      }
+      ordered.forEach((field, index) => {
+        payload[field.name] = lines[index]!;
       });
     }
   }
@@ -240,7 +255,7 @@ export const parseArguments = async (
   const missing = command.payload
     .filter((field) => !field.optional && !(field.name in payload))
     .map((field) =>
-      STDIN_ONLY.get(command.id) === field.name ? `--${field.name}-stdin` : `--${field.name}`,
+      isStdinOnly(command.id, field.name) ? `--${field.name}-stdin` : `--${field.name}`,
     );
   if (missing.length > 0) {
     throw new UsageError(`missing required ${missing.join(", ")}`, help);

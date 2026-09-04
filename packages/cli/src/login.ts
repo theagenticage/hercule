@@ -102,7 +102,7 @@ export const login = async (
     else if (flag === "json") json = true;
     else if (flag === "password") {
       throw new UsageError(
-        "--password does not exist: it would leak into ps and shell history. Use --password-stdin.",
+        "--password does not exist: it would be visible in process lists and in shell history. Use --password-stdin.",
         "login",
       );
     } else throw new UsageError(`unknown flag --${flag}`, "login");

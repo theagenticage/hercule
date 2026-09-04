@@ -105,6 +105,16 @@ describe("--help", () => {
     expect(text).toContain("--grants");
   });
 
+  it("documents the two-line stdin order of user setPassword", async () => {
+    const { io, run } = cli();
+    expect(await run("user", "setPassword", "--help")).toBe(0);
+    const text = io.stdout.join("\n");
+    expect(text).toContain("--current-stdin");
+    expect(text).toContain("--next-stdin");
+    expect(text).toContain("There is no --current flag.");
+    expect(text).toContain("2 lines, one per field, in this order: current, then next.");
+  });
+
   it("works after other flags have been written", async () => {
     const { io, run } = cli();
     expect(await run("profile", "create", "--name", "x", "--help")).toBe(0);
@@ -220,6 +230,27 @@ describe("running an operation", () => {
       path: "/api/v1/secrets/connection/github/token",
       body: { value: "s3cret" },
     });
+  });
+
+  it("reads two passwords as two lines of stdin, in schema order", async () => {
+    const fetch = stubFetch(() => ({}));
+    const io = stubIo({
+      env: { HYDRA_TOKEN: "t", HYDRA_API_URL: "http://controller.test" },
+      fetch,
+      stdin: "old-one\nnew-one\n",
+    });
+    expect(
+      await main(["--home", home, "user", "setPassword", "--current-stdin", "--next-stdin"], io),
+    ).toBe(0);
+    expect(fetch.calls[0]?.body).toEqual({ current: "old-one", next: "new-one" });
+    expect(io.stdout).toEqual(["ok"]);
+  });
+
+  it("has no plain flag for any password", async () => {
+    const { io, run } = cli();
+    expect(await run("auth", "login", "--username", "u", "--password", "p")).toBe(2);
+    expect(io.stderr.join("\n")).toContain("process lists");
+    expect(io.stderr.join("\n")).toContain("--password-stdin");
   });
 
   it("refuses --value on a secret and says where the value goes", async () => {

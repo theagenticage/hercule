@@ -22,11 +22,38 @@ describe("parseArguments", () => {
     expect(args.payload["name"]).toBe("a name");
   });
 
-  it("gives each of several stdin fields one line, in the order written", async () => {
+  it("gives each of several stdin fields one line, in schema order", async () => {
     const args = await parseArguments(setPassword, ["--current-stdin", "--next-stdin"], () =>
       Promise.resolve("old\nnew\n"),
     );
     expect(args.payload).toEqual({ current: "old", next: "new" });
+  });
+
+  it("ignores the order the stdin flags were written in", async () => {
+    const args = await parseArguments(setPassword, ["--next-stdin", "--current-stdin"], () =>
+      Promise.resolve("old\nnew\n"),
+    );
+    expect(args.payload).toEqual({ current: "old", next: "new" });
+  });
+
+  it("refuses stdin with the wrong number of lines", async () => {
+    await expect(
+      parseArguments(setPassword, ["--current-stdin", "--next-stdin"], () =>
+        Promise.resolve("only-one\n"),
+      ),
+    ).rejects.toThrow(/1 line\(s\) but 2 fields/);
+  });
+
+  it("has no plain flag for a password, and says why", async () => {
+    await expect(
+      parseArguments(setPassword, ["--current", "old", "--next-stdin"], noStdin),
+    ).rejects.toThrow(/does not exist/);
+  });
+
+  it("names the stdin form when a stdin-only field is missing", async () => {
+    await expect(parseArguments(setPassword, [], noStdin)).rejects.toThrow(
+      /missing required --current-stdin, --next-stdin/,
+    );
   });
 
   it("does not read stdin when no stdin flag was given", async () => {

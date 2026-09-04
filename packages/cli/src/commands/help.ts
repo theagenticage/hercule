@@ -7,7 +7,7 @@
  * verb's help names the grant it needs up front.
  */
 import type { Requirement } from "@hydra/contract";
-import { STDIN_ONLY } from "./args";
+import { isStdinOnly, STDIN_ONLY } from "./args";
 import { COMMANDS, ENTITIES, verbsOf, type Command, type Field } from "./tree";
 
 /** The three markers are not grants, so they are rendered as prose. */
@@ -66,13 +66,13 @@ const flagLine = (command: Command, field: Field, fromStdin: boolean): ReadonlyA
   const notes: Array<string> = [field.optional ? "optional" : "required"];
   if (field.repeated) notes.push("repeatable");
 
-  const head =
-    STDIN_ONLY.get(command.id) === field.name
-      ? [
-          `  --${field.name}-stdin`,
-          `      ${notes.join("; ")}; read from stdin, so it never appears in argv`,
-        ]
-      : [`  --${field.name} ${placeholder(field)}`, `      ${notes.join("; ")}`];
+  const head = isStdinOnly(command.id, field.name)
+    ? [
+        `  --${field.name}-stdin`,
+        `      ${notes.join("; ")}; read from stdin, so it is never visible in`,
+        `      process lists or shell history. There is no --${field.name} flag.`,
+      ]
+    : [`  --${field.name} ${placeholder(field)}`, `      ${notes.join("; ")}`];
 
   const lines = [...head];
   if (field.choices !== undefined && field.choices.length > 6) {
@@ -82,7 +82,7 @@ const flagLine = (command: Command, field: Field, fromStdin: boolean): ReadonlyA
     fromStdin &&
     field.kind === "string" &&
     !field.repeated &&
-    STDIN_ONLY.get(command.id) !== field.name
+    !isStdinOnly(command.id, field.name)
   ) {
     lines.push(`      --${field.name}-stdin reads it from stdin instead`);
   }
@@ -119,6 +119,21 @@ export const commandHelp = (command: Command): ReadonlyArray<string> => {
     ...command.query.map((field) => flagLine(command, field, false)),
   ].flat();
   if (flags.length > 0) lines.push("", "flags:", ...flags);
+
+  // With one field on stdin, stdin is the value. With more than one, it is one
+  // line each, and the order is the order the flags are listed above.
+  const onStdin = STDIN_ONLY.get(command.id) ?? [];
+  if (onStdin.length > 1) {
+    lines.push(
+      "",
+      "stdin:",
+      `  ${onStdin.length} lines, one per field, in this order: ${onStdin.join(", then ")}.`,
+      "  The order of the --*-stdin flags on the command line does not change it.",
+      `  e.g. printf '%s\\n%s\\n' "$OLD" "$NEW" | hydra ${command.entity} ${command.verb} ${onStdin
+        .map((name) => `--${name}-stdin`)
+        .join(" ")}`,
+    );
+  }
 
   if (command.paged) {
     lines.push(
