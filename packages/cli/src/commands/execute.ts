@@ -82,7 +82,16 @@ const resolveTail = async (
     );
   }
 
-  const items = await readAll(client, query, {});
+  // Ordered by creation, not by the listing's own default. A keyset walk never
+  // skips a row only as long as nothing moves the key it walks, and the default
+  // order of a task listing is `updatedAt`, which is the one column every write
+  // touches: a task updated while the sweep is between pages jumps above the
+  // cursor and is never visited, so a tail that exists answers `not_found`.
+  // `createdAt` is written once and never again.
+  const stable = query.sortFields.includes("createdAt")
+    ? { sort: { field: "createdAt", direction: "asc" } }
+    : {};
+  const items = await readAll(client, query, stable);
   const matches = items
     .map((item) => item["id"])
     .filter((id): id is string => typeof id === "string" && id.endsWith(text));

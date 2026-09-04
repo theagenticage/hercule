@@ -404,6 +404,56 @@ describe("id tails", () => {
     expect(fetch.calls[0]?.path).toBe("/api/v1/events/42");
   });
 
+  it("sweeps in an order writes do not move, so a touched row is still found", async () => {
+    const row = (tail: string, at: string) => ({
+      id: id(tail),
+      title: `task ${tail}`,
+      description: "",
+      status: "open",
+      priority: "normal",
+      labels: [] as Array<string>,
+      provenance: [] as Array<never>,
+      createdAt: at,
+      updatedAt: at,
+      statusChangedAt: at,
+    });
+    const rows = [
+      row("aaaaaaa1", "2026-01-01T00:00:00.000Z"),
+      row("bbbbbbb2", "2026-01-02T00:00:00.000Z"),
+      row("ccccccc3", "2026-01-03T00:00:00.000Z"),
+    ];
+    let touched = false;
+
+    // A controller that pages two rows at a time, in whatever order the sweep
+    // asks for. Between the first page and the second, the row the sweep has
+    // not reached yet is written: under `updatedAt` it jumps to the head, ahead
+    // of the cursor, and is never visited.
+    const fetch = stubFetch((request) => {
+      if (request.path !== "/api/v1/tasks" || request.method !== "GET") return rows[0];
+      const [field = "updatedAt", direction = "desc"] = (
+        request.query.get("sort") ?? "updatedAt:desc"
+      ).split(":");
+      const key = field as "createdAt" | "updatedAt";
+      const sign = direction === "asc" ? 1 : -1;
+      const ordered = [...rows].sort((a, b) => (a[key] < b[key] ? -1 : 1) * sign);
+      const cursor = request.query.get("cursor");
+      const from = cursor === null ? 0 : ordered.findIndex((item) => item.id === cursor) + 1;
+      const items = ordered.slice(from, from + 2);
+      if (!touched) {
+        touched = true;
+        rows[0]!.updatedAt = "2026-01-04T00:00:00.000Z";
+      }
+      const last = items[items.length - 1];
+      return {
+        items,
+        ...(from + 2 < ordered.length && last !== undefined ? { nextCursor: last.id } : {}),
+      };
+    });
+    const stub = io(fetch);
+    expect(await main(["--home", home, "task", "read", "aaaaaaa1", "--json"], stub)).toBe(0);
+    expect(fetch.calls.at(-1)?.path).toBe(`/api/v1/tasks/${id("aaaaaaa1")}`);
+  });
+
   it("refuses a tail shorter than eight characters before calling anything", async () => {
     const fetch = withProfiles(() => ({}));
     const stub = io(fetch);

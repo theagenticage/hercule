@@ -82,4 +82,29 @@ describe("parseArguments", () => {
   it("rejects the wrong number of positional arguments", async () => {
     await expect(parseArguments(query, ["extra"], noStdin)).rejects.toThrow(/takes 0 argument/);
   });
+
+  it("sends null for a nullable field written as null, and text for one that is not", async () => {
+    const task = commandFor("task", "update")!;
+    const project = commandFor("project", "update")!;
+
+    const detached = await parseArguments(task, ["id", "--projectId", "null"], noStdin);
+    expect(detached.payload["projectId"]).toBeNull();
+
+    const cleared = await parseArguments(project, ["id", "--description", "null"], noStdin);
+    expect(cleared.payload["description"]).toBeNull();
+
+    // A field that does not accept null keeps the word as the word.
+    const titled = await parseArguments(task, ["id", "--title", "null"], noStdin);
+    expect(titled.payload["title"]).toBe("null");
+
+    const named = await parseArguments(project, ["id", "--name", "null"], noStdin);
+    expect(named.payload["name"]).toBe("null");
+  });
+
+  it("still takes a plain value for a nullable field", async () => {
+    const task = commandFor("task", "update")!;
+    const id = "0199e0e7-0000-7000-8000-000000000001";
+    const args = await parseArguments(task, ["id", "--projectId", id], noStdin);
+    expect(args.payload["projectId"]).toBe(id);
+  });
 });

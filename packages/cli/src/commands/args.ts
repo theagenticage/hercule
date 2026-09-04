@@ -58,6 +58,12 @@ export interface Arguments {
 }
 
 const coerce = (field: Field, text: string, help: string): unknown => {
+  // The bare word `null` is how a nullable field is cleared, and it is checked
+  // before anything else: a field that accepts null accepts it whatever shape
+  // its other values have, and `null` is not one of a closed value set. The
+  // cost is that a nullable string field cannot be given the four letters
+  // themselves, which is the trade every command line that spells null makes.
+  if (field.nullable && text === "null") return null;
   if (field.choices !== undefined && !field.choices.includes(text)) {
     throw new UsageError(
       `--${field.name}: ${text} is not one of ${field.choices.join(", ")}`,
