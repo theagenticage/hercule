@@ -14,7 +14,6 @@
  * here.
  */
 import { existsSync, rmSync, writeFileSync } from "node:fs";
-import { createHash } from "node:crypto";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import type { PlatformError } from "effect/PlatformError";
@@ -25,6 +24,7 @@ import * as BunFileSystem from "@effect/platform-bun/BunFileSystem";
 import type { HomePaths } from "@hydra/home";
 import * as config from "./config";
 import { BootstrapConfig, HydraHome, HydraHomeError, type ConfigError } from "./config";
+import { hashToken, mintToken } from "./credentials";
 import {
   databaseError,
   migrate,
@@ -45,8 +45,8 @@ import {
 import { seed } from "./seed";
 import { SettingsLayer, type SettingError } from "./settings";
 
-/** The setup token is 32 random bytes, rendered base64url so it survives a URL. */
-const SETUP_TOKEN_BYTES = 32;
+/** Setup tokens are minted and stored like every other Hydra token (spec 13 section 4.1). */
+export { hashToken };
 
 /** The two bind hosts that mean "every interface"; a URL needs a reachable one instead. */
 const WILDCARD_HOSTS = new Set(["0.0.0.0", "::"]);
@@ -69,15 +69,6 @@ export type BootError =
   | SecretNameError
   | SettingError
   | GrantsError;
-
-/**
- * How a token is stored: SHA-256, hex. A setup token is opaque, 256 bits of
- * randomness, so a fast hash is right - there is nothing to guess (spec 13
- * section 4.1). Passwords are the other case and use a slow hash.
- */
-export function hashToken(token: string): string {
-  return createHash("sha256").update(token).digest("hex");
-}
 
 /**
  * The one-time setup URL (spec 15 section 7). A wildcard bind host renders as
@@ -125,9 +116,7 @@ const ensureSetupUrl = (
       return undefined;
     }
 
-    const token = Buffer.from(crypto.getRandomValues(new Uint8Array(SETUP_TOKEN_BYTES))).toString(
-      "base64url",
-    );
+    const token = mintToken();
     yield* withTransaction(
       sql`
         INSERT INTO setup_state (singleton, token_hash, completed_at)

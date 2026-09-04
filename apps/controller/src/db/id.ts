@@ -22,3 +22,16 @@ export const uuidToString = (bytes: Uint8Array): string => {
   }
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 };
+
+/** Parses the canonical string back into the 16 bytes the column holds. */
+export const uuidFromString = (id: string): Uint8Array => {
+  const hex = id.replaceAll("-", "");
+  if (hex.length !== 32 || !/^[0-9a-f]{32}$/.test(hex)) {
+    throw new TypeError(`Not a canonical lowercase UUID: ${JSON.stringify(id)}`);
+  }
+  const bytes = new Uint8Array(16);
+  for (let index = 0; index < 16; index += 1) {
+    bytes[index] = Number.parseInt(hex.slice(index * 2, index * 2 + 2), 16);
+  }
+  return bytes;
+};

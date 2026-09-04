@@ -12,7 +12,7 @@ import { backupBeforeMigration, databaseVersion, migrate, runMigrations } from "
 import { binaryVersion, migrations } from "./migrations/index";
 import { TestDatabase } from "./testing";
 
-/** The tables migration 0001 creates: the boot set of spec 04. */
+/** The tables the migration set creates: the boot set of spec 04, then the user and credentials. */
 const TABLES = [
   "secrets",
   "permission_profiles",
@@ -20,6 +20,9 @@ const TABLES = [
   "controller_identity",
   "setup_state",
   "events",
+  "users",
+  "login_tokens",
+  "api_keys",
 ];
 
 type DatabaseEffect<A, E> = Effect.Effect<A, E, SqlClient.SqlClient | FileSystem>;
@@ -61,7 +64,7 @@ describe("migrations", () => {
       MEMORY,
       Effect.gen(function* () {
         const applied = yield* runMigrations();
-        expect(applied.map(([id]) => id)).toEqual([1]);
+        expect(applied.map(([id]) => id)).toEqual(migrations.map(([id]) => id));
         return yield* tableNames;
       }),
     );
@@ -109,13 +112,15 @@ describe("migrations", () => {
   });
 
   it("copies an existing database before it applies a pending migration", async () => {
-    // A second migration, as a later Hydra would carry it: the composed path is
-    // "the file was already there and something is pending", which the embedded
-    // set alone cannot exercise while it holds one migration.
+    // One migration past the embedded set, as a later Hydra would carry it: the
+    // composed path is "the file was already there and something is pending",
+    // which the embedded set alone cannot exercise, since it is all applied at
+    // once on a first run.
+    const pendingId = binaryVersion + 1;
     const withSecond = [
       ...migrations,
       [
-        2,
+        pendingId,
         "add-a-table",
         Effect.succeed(
           Effect.gen(function* () {
@@ -139,7 +144,7 @@ describe("migrations", () => {
       }),
     );
 
-    expect(applied.map(([id]) => id)).toEqual([2]);
+    expect(applied.map(([id]) => id)).toEqual([pendingId]);
     expect(tables).toContain("later");
     const copies = readdirSync(backupsDir);
     expect(copies).toHaveLength(1);
