@@ -77,7 +77,7 @@ export { LoginForm, SetupForm } from "./forms";
 /** The form-validation interface the schemas above answer to. */
 export type { StandardSchemaV1 } from "effect/StandardSchema";
 
-export { Actor, Id, Timestamp } from "./ids";
+export { Actor, ExternalRef, Id, MAX_EXTERNAL_REF_LENGTH, NullableActor, Timestamp } from "./ids";
 
 export { Authenticated, SetupToken } from "./security";
 
@@ -96,3 +96,23 @@ export {
 export { Profile } from "./groups/profile";
 export { OwnerKind, SecretRef } from "./groups/secret";
 export { ControllerInfo } from "./groups/controller";
+export {
+  Label,
+  MAX_LABEL_LENGTH,
+  MAX_SEARCH_TEXT_LENGTH,
+  MAX_TASK_DESCRIPTION_LENGTH,
+  MAX_TASK_TITLE_LENGTH,
+  ProvenanceEntry,
+  TASK_SORT_FIELDS,
+  Task,
+  TaskFilter,
+  TaskPriority,
+  TaskStatus,
+} from "./groups/task";
+export {
+  MAX_PROJECT_DESCRIPTION_LENGTH,
+  MAX_PROJECT_NAME_LENGTH,
+  PROJECT_SORT_FIELDS,
+  Project,
+} from "./groups/project";
+export { EVENT_SORT_FIELDS, Event, MAX_EVENT_KIND_LENGTH } from "./groups/event";

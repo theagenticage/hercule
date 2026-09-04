@@ -78,7 +78,19 @@ const literalsOf = (ast: Ast): ReadonlyArray<string> | undefined => {
   return literals;
 };
 
-const scalarKind = (ast: Ast): FieldKind => {
+/**
+ * What is left of `X | null` once the null is taken away. A nullable field is
+ * still the shape it holds; only the way it is cleared is different, and on the
+ * command line that is `--field null`.
+ */
+const withoutNull = (ast: Ast): Ast => {
+  if (ast._tag !== "Union" || ast.types === undefined) return ast;
+  const present = ast.types.filter((member) => member._tag !== "Null");
+  return present.length === 1 ? present[0]! : ast;
+};
+
+const scalarKind = (input: Ast): FieldKind => {
+  const ast = withoutNull(input);
   if (literalsOf(ast) !== undefined) return "string";
   switch (ast._tag) {
     case "String":

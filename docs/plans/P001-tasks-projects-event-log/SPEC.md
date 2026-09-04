@@ -22,7 +22,7 @@ Success looks like: `hydra task create/query/read/update/delete` and
 the `task.*` rows those calls produced, each stamped with its actor; the Tasks
 screen lists, filters, full-text searches and edits tasks in a right-hand drawer.
 
-**Scale:** three new contract groups (13 operations), one migration adding four
+**Scale:** three new contract groups (12 operations), one migration adding four
 tables and an FTS5 index, two new controller domains, one new reader service, one
 rewritten screen, and about six new components in `@hydra/ui`.
 
@@ -174,7 +174,7 @@ One join per page, never a query per task.
 | 1 | Contract, migration, paging primitives | AC-1, AC-2, AC-9 | The three contract groups are declared and one-to-one with `OPERATIONS`; the migration creates the four tables, the partial indexes and the FTS5 table with its triggers; `db/page.ts` carries the integer keyset and offset cursors. |
 | 2 | The Task domain | AC-3, AC-4, AC-5, AC-6, AC-7, AC-10, AC-11, AC-13 | `TaskService` implements all five operations over a real database, with FTS, soft delete, provenance and the three `task.*` events. |
 | 3 | The Project domain | AC-12, AC-23 | `ProjectService` implements all five operations, the join table works, and `project.*` rows land in the log. |
-| 4 | The event reader, the routes, and the actor fix | AC-8, AC-14, AC-15, AC-16 | `event.query/read` read the log; all thirteen operations are reachable over HTTP and from the compiled binary; `auth.login.failed` is stamped `null`. |
+| 4 | The event reader, the routes, and the actor fix | AC-8, AC-14, AC-15, AC-16 | `event.query/read` read the log; all twelve operations are reachable over HTTP and from the compiled binary; `auth.login.failed` is stamped `null`. |
 | 5 | The Tasks screen | AC-17, AC-18, AC-19 | `/tasks` lists, filters and full-text searches, and the drawer edits a task. |
 | 6 | Spec documents and the finish pass | AC-20, AC-21, AC-22 | The decisions are written into the spec, the open items are struck, ADR 0019 is corrected, and the four checks are green. |
 

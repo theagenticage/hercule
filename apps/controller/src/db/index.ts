@@ -7,10 +7,15 @@ export { mintUuid, uuidFromString, uuidToString, UUID_PATTERN } from "./id";
 export {
   CursorError,
   decodeCursor,
+  decodeIdCursor,
+  decodeOffsetCursor,
   encodeCursor,
+  encodeIdCursor,
+  encodeOffsetCursor,
   type CursorScope,
   type Page,
   type PageRequest,
+  type SortKey,
 } from "./page";
 export {
   backupBeforeMigration,
