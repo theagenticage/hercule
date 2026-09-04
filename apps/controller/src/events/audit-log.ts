@@ -33,6 +33,9 @@ export const AUDIT_KINDS = [
   "secret.created",
   "secret.rotated",
   "secret.deleted",
+  "task.created",
+  "task.updated",
+  "task.deleted",
 ] as const;
 
 export type AuditKind = (typeof AUDIT_KINDS)[number];

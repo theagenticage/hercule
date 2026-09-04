@@ -23,6 +23,7 @@ import { SecretLayer } from "./secrets";
 import { ProfilesLayer } from "./permissions";
 import { SettingsOperationsLayer } from "./settings";
 import { SetupLayer } from "./setup";
+import { TaskServiceLayer } from "./tasks";
 import { UserLayer } from "./users";
 
 export { boot, bootWith, hashToken, setupUrl } from "./bootstrap";
@@ -137,6 +138,7 @@ const listen = (outcome: BootOutcome, stopped: Effect.Effect<void>) =>
         ControllerLayer,
         SettingsOperationsLayer,
         ProfilesLayer,
+        TaskServiceLayer,
       ),
     ),
   );

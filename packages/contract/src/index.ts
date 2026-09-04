@@ -42,9 +42,11 @@ export {
   forbidden,
   internal,
   invalidState,
+  issuesOf,
   notFound,
   unauthenticated,
   validation,
+  validationOf,
   type ApiError,
   type CapDetails,
   type ErrorCode,
@@ -105,9 +107,11 @@ export {
   ProvenanceEntry,
   TASK_SORT_FIELDS,
   Task,
+  TaskCreateInput,
   TaskFilter,
   TaskPriority,
   TaskStatus,
+  TaskUpdateInput,
 } from "./groups/task";
 export {
   MAX_PROJECT_DESCRIPTION_LENGTH,

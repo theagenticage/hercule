@@ -122,6 +122,42 @@ export type TaskFilter = Schema.Schema.Type<typeof TaskFilter>;
 /** What a task listing may be sorted by, when it is not sorted by relevance. */
 export const TASK_SORT_FIELDS = ["updatedAt", "createdAt", "priority", "status"] as const;
 
+/**
+ * What creating a task takes. The service decodes it as well, so an in-process
+ * caller is held to the same shape a request is.
+ */
+export const TaskCreateInput = Schema.Struct({
+  title: TaskTitle,
+  description: TaskDescription,
+  priority: Schema.optionalKey(TaskPriority),
+  labels: Schema.optionalKey(Schema.Array(Label)),
+  projectId: Schema.optionalKey(Id),
+  provenance: Schema.optionalKey(Schema.Array(ProvenanceInput)),
+});
+
+export type TaskCreateInput = Schema.Schema.Type<typeof TaskCreateInput>;
+
+/** What editing a task takes. Every field is optional; an absent one is untouched. */
+export const TaskUpdateInput = Schema.Struct({
+  title: Schema.optionalKey(TaskTitle),
+  description: Schema.optionalKey(TaskDescription),
+  status: Schema.optionalKey(TaskStatus),
+  priority: Schema.optionalKey(TaskPriority),
+  /** `null` detaches the task from its project. */
+  projectId: Schema.optionalKey(Schema.NullOr(Id)),
+  /**
+   * Labels move one at a time. The user and a triage agent write the same
+   * task, and a whole-array replace would silently undo whichever of them
+   * read the task first.
+   */
+  addLabels: Schema.optionalKey(Schema.Array(Label)),
+  removeLabels: Schema.optionalKey(Schema.Array(Label)),
+  /** Appends. Provenance is never edited and never removed. */
+  provenance: Schema.optionalKey(Schema.Array(ProvenanceInput)),
+});
+
+export type TaskUpdateInput = Schema.Schema.Type<typeof TaskUpdateInput>;
+
 export const task = HttpApiGroup.make("task")
   .add(
     HttpApiEndpoint.get("query", "/tasks", {
@@ -138,36 +174,13 @@ export const task = HttpApiGroup.make("task")
       error: [Unauthenticated, Forbidden, Validation, NotFound, Internal],
     }),
     HttpApiEndpoint.post("create", "/tasks", {
-      payload: Schema.Struct({
-        title: TaskTitle,
-        description: TaskDescription,
-        priority: Schema.optionalKey(TaskPriority),
-        labels: Schema.optionalKey(Schema.Array(Label)),
-        projectId: Schema.optionalKey(Id),
-        provenance: Schema.optionalKey(Schema.Array(ProvenanceInput)),
-      }),
+      payload: TaskCreateInput,
       success: Task,
       error: [Unauthenticated, Forbidden, Validation, NotFound, Internal],
     }),
     HttpApiEndpoint.patch("update", "/tasks/:id", {
       params: { id: Id },
-      payload: Schema.Struct({
-        title: Schema.optionalKey(TaskTitle),
-        description: Schema.optionalKey(TaskDescription),
-        status: Schema.optionalKey(TaskStatus),
-        priority: Schema.optionalKey(TaskPriority),
-        /** `null` detaches the task from its project. */
-        projectId: Schema.optionalKey(Schema.NullOr(Id)),
-        /**
-         * Labels move one at a time. The user and a triage agent write the same
-         * task, and a whole-array replace would silently undo whichever of them
-         * read the task first.
-         */
-        addLabels: Schema.optionalKey(Schema.Array(Label)),
-        removeLabels: Schema.optionalKey(Schema.Array(Label)),
-        /** Appends. Provenance is never edited and never removed. */
-        provenance: Schema.optionalKey(Schema.Array(ProvenanceInput)),
-      }),
+      payload: TaskUpdateInput,
       success: Task,
       error: [Unauthenticated, Forbidden, Validation, NotFound, Internal],
     }),

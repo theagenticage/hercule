@@ -12,7 +12,7 @@
  * `forbidden`, business rules, `internal` - is the service layer's and the
  * request middleware's, not this module's.
  */
-import { Schema } from "effect";
+import { Schema, SchemaIssue } from "effect";
 import { GrantSchema, type Grant } from "./grants";
 
 /** The closed code enum, extended additively. */
@@ -184,3 +184,23 @@ export const capExceeded = (details: CapDetails, message: string): CapExceeded =
 
 export const internal = (message: string): Internal =>
   new Internal({ error: { code: "internal", message } });
+
+const standardIssues = SchemaIssue.makeFormatterStandardSchemaV1();
+
+/**
+ * A decode failure as the contract's `issues` list: one entry per thing wrong,
+ * so a caller fixes every field in one retry. Path segments are stringified
+ * because a JSON document has no other kind of key.
+ *
+ * The wire vocabulary names no schema library, and this is the one place the
+ * two meet: the transport decodes a request with it and a service decodes an
+ * in-process call with it, so the same bad input reads the same either way.
+ */
+export const issuesOf = (error: Schema.SchemaError): ReadonlyArray<Issue> =>
+  standardIssues(error.issue).issues.map((issue) => ({
+    path: (issue.path ?? []).map(String),
+    message: issue.message,
+  }));
+
+/** A decode failure as the error the operation answers with. */
+export const validationOf = (error: Schema.SchemaError): Validation => validation(issuesOf(error));

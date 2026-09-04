@@ -11,14 +11,14 @@ Every skill run ends by appending a journal entry with a handoff block, even whe
 ## Status
 
 - **State:** in progress
-- **Current slice:** 2
+- **Current slice:** 3
 - **Blocked on:** none
 - **Journey:** not recorded yet
 
 | # | Slice | Status | Evidence |
 |---|---|---|---|
 | 1 | Contract, migration, paging primitives | done | AC-1: `vitest run packages/contract` -> 54 passed, the twelve new operations one-to-one with the table. AC-2: `vitest run apps/controller/src/db/migrations` -> 6 passed, four tables, partial indexes, `tasks_fts` and its three triggers, plus `vitest run apps/controller/src/db/migrate.test.ts` -> 12 passed, the set is a no-op twice. AC-9: `vitest run apps/controller/src/db/page.test.ts` -> 20 passed. `pnpm typecheck` is red, and 58 HTTP tests fail, only on the three new contract groups having no route handlers until slice 4 (F-2); `pnpm lint` and `pnpm dep-lint` are green. |
-| 2 | The Task domain | pending | |
+| 2 | The Task domain | done | AC-3, AC-4, AC-5, AC-6, AC-7, AC-10, AC-13: `vitest run apps/controller/src/tasks` -> 34 passed. AC-11: the same run, plus `vitest run packages/contract/src/groups/task.test.ts` -> 2 passed, the ref grammar as the package exports it. `pnpm lint` and `pnpm dep-lint` green; `pnpm typecheck` and 58 HTTP tests still red on F-2 alone, unchanged by this slice. |
 | 3 | The Project domain | pending | |
 | 4 | The event reader, the routes, and the actor fix | pending | |
 | 5 | The Tasks screen | pending | |
@@ -31,9 +31,11 @@ Every skill run ends by appending a journal entry with a handoff block, even whe
 | F-1 | P2 | ADR 0019 still says "Hard delete is allowed", superseded by spec 09 and spec 02. Boyscouting, folded into slice 6. | AC-21 / `docs/adr/0019-*.md` | open | - |
 | F-2 | P1 | The branch cannot be green between slices 1 and 3. Declaring the three groups in `api` leaves `HttpApiBuilder.layer(api)` without their handlers, which is 3 typecheck errors and 58 failing HTTP tests, every one of them the same "HttpApiGroup task not found". The SPEC anticipated the compile half; the failing tests are the same cause. Resolves when slice 4 lands the handlers; AC-22 is only reachable then. | Slices note / `apps/controller/src/http/routes.ts` | open | - |
 | F-3 | P3 | The SPEC's Scale line and slice 4 said thirteen operations where AC-1 lists twelve (5 task, 5 project, 2 event). Both now say twelve. | SPEC Scale, slice 4 | fixed | - |
-| F-4 | P1 | The offset cursor's scope is operation, field and direction, which does not include the search text, so page two of one search decodes cleanly against another and skips rows of a different result set. `CursorScope` documents the fix: a relevance walk puts what its order depends on into `field`. Slice 4 must do it. | AD-9 / `apps/controller/src/db/page.ts` | open | 1 |
+| F-4 | P1 | The offset cursor's scope did not include what the result set depends on, so page two of one search decoded cleanly against another and skipped rows. Fixed in slice 2: a relevance walk's scope is its match expression plus its filter, so a cursor replayed under other words or another filter is `validation`. | AD-9 / `apps/controller/src/tasks/repository.ts` | fixed | 2 |
 | F-5 | P2 | Spec 09's `ProvenanceEntry` sketch still types `eventId` as a string, which spec 04 and spec 11 §1.4 contradict. Correct it with the other spec edits in slice 6; AC-20 does not list it. | D-7 / `docs/spec/09-tasks.md` | open | 1 |
-| F-6 | P2 | The FTS triggers do not survive `INSERT OR REPLACE` on `tasks`: the displaced row is removed without firing the delete trigger, leaving stale terms in the index. The migration says tasks are never written with REPLACE; slices 2-3 must hold to it, or the database has to open with `PRAGMA recursive_triggers = ON`. | `apps/controller/src/db/migrations/0003-tasks-and-projects.ts` | open | 1 |
+| F-6 | P2 | The FTS triggers do not survive `INSERT OR REPLACE` on `tasks`: the displaced row is removed without firing the delete trigger, leaving stale terms in the index. The task repository writes only INSERT, UPDATE and DELETE, and a reviewer probing edits, soft deletes and status changes found no stale term. Slice 3 has no reason to write tasks at all. | `apps/controller/src/db/migrations/0003-tasks-and-projects.ts` | held | 2 |
+| F-7 | P3 | A search whose text holds no letter or digit (`"+++"`) answers with an empty page rather than `validation`. Accepted: the index holds no punctuation either, so the search is one that can match nothing, not one that was refused. | AD-5 / `apps/controller/src/tasks/repository.ts` | accepted | 2 |
+| F-8 | P3 | The priority rank is spelled in the migration's expression index and again in the repository, and nothing but a matching string makes SQLite use that index. A test now walks the four priorities one row at a time, which fails if either copy drifts. | `apps/controller/src/tasks/repository.ts` | accepted | 2 |
 
 ## Decisions
 
@@ -130,5 +132,58 @@ handoff:
     - apps/controller/src/db/migrations/0003-tasks-and-projects.ts
     - apps/controller/src/db/page.ts
   findings: [F-1, F-2, F-3]
+  pending: []
+```
+
+### 2026-09-04 implement slice 2 (session 3)
+The Task domain. The tests were written first from the SPEC alone by an agent
+that never saw the implementation and confirmed failing on the missing module;
+the implementation then made all of them pass without an assertion changing.
+
+`TaskService` is one service over a repository that is a plain function rather
+than a second layer, because it has exactly one consumer. Input is decoded at
+the service against the contract's own schemas, which is why `task.create`'s and
+`task.update`'s payloads are now named exports of the contract instead of
+inline structs: a built-in workflow action calls these methods directly and is
+held to the title cap, the External Ref grammar and the rule that a provenance
+entry names something, exactly as a request is. The mapping from a decode
+failure to the wire's `issues` list moved from the transport into the contract
+as `issuesOf` / `validationOf`, so both callers produce the same error for the
+same bad input; the transport behaviour is unchanged.
+
+Two things the tests did not force. A task pointing at a project that is not
+there would otherwise have been a foreign-key `SqlError` and a 500, so create
+and update check the project and answer `not_found`; that check has its own
+test. And an update that asks for the values the task already holds now writes
+nothing and emits nothing: the alternative was a `task.updated` row with an
+empty `changes`, which is a false audit entry and a trigger surface that wakes
+workflows for no change.
+
+One review round, one reviewer that tried to break the diff. It could not break
+the MATCH wrapper (FTS5 operators, unicode, punctuation, a full 512 characters),
+the four keyset walks under ties, cursor cross-feeding in six directions, the
+filter composition including empty arrays, the FTS index under edits and soft
+deletes, or the transaction integrity of a failed mutation. Three findings were
+fixed here: the relevance cursor now scopes on its filter as well as its terms,
+so page two of one search cannot skip rows of another (F-4); a label named on
+both `addLabels` and `removeLabels` is reported as neither, because it is still
+on the task and `"proposed" in event.changes.labels.removed` is a shipped filter;
+and the no-op update above. F-7 and F-8 are the two it found that were accepted
+rather than fixed, with the reasons in the table.
+
+F-2 is unchanged: the branch does not typecheck and 58 HTTP tests fail, all on
+the three route groups having no handlers until slice 4.
+
+```yaml
+handoff:
+  state: in-progress
+  next: implement slice 3 (the Project domain)
+  produced:
+    - apps/controller/src/tasks/service.ts
+    - apps/controller/src/tasks/repository.ts
+    - apps/controller/src/tasks/service.test.ts
+    - packages/contract/src/groups/task.ts
+    - packages/contract/src/errors.ts
+  findings: [F-1, F-2, F-5, F-7, F-8]
   pending: []
 ```
