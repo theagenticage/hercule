@@ -69,8 +69,8 @@ export function Field({
   );
 }
 
-/** One settings card: a lane label, its rows, and the fine print under them. */
-export function SettingsForm({
+/** A card: a lane label, its rows, and the fine print under them. */
+export function FormCard({
   label,
   fine,
   children,
@@ -88,7 +88,7 @@ export function SettingsForm({
   );
 }
 
-/** One labelled row of a settings card. */
+/** One labelled row of a card. */
 export function Row({
   label,
   htmlFor,

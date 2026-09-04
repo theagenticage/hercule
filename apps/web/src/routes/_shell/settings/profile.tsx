@@ -2,7 +2,7 @@ import { useState, type FormEvent, type JSX } from "react";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useMutation, useSuspenseQuery } from "@tanstack/react-query";
 import { FALLBACK_TIMEZONE } from "@hydra/client-core";
-import { Button, Row, SettingsForm } from "@hydra/ui";
+import { Button, FormCard, Row } from "@hydra/ui";
 import { LOGIN_PATH } from "../../../app/entry-guard";
 import { settingsQuery } from "../../../app/queries";
 import { TimezoneField } from "../../../screens/timezone-field";
@@ -55,7 +55,7 @@ function Profile(): JSX.Element {
   return (
     <div className="flex flex-col gap-4">
       <form onSubmit={submit}>
-        <SettingsForm
+        <FormCard
           label="Profile"
           fine="Schedules, ages and every time on screen are read in this zone."
         >
@@ -68,10 +68,10 @@ function Profile(): JSX.Element {
             </Button>
             <SaveStatus saved={saved} failure={failure} />
           </div>
-        </SettingsForm>
+        </FormCard>
       </form>
 
-      <SettingsForm
+      <FormCard
         label="Session"
         fine="This browser keeps you signed in until you sign out or the login expires."
       >
@@ -87,7 +87,7 @@ function Profile(): JSX.Element {
             Sign out
           </Button>
         </div>
-      </SettingsForm>
+      </FormCard>
     </div>
   );
 }

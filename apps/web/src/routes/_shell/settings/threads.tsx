@@ -3,7 +3,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { threadRowsMode } from "@hydra/client-core";
 import type { ThreadRows } from "@hydra/contract";
-import { Row, SegmentedControl, SegmentedControlItem, SettingsForm } from "@hydra/ui";
+import { FormCard, Row, SegmentedControl, SegmentedControlItem } from "@hydra/ui";
 import { settingsQuery } from "../../../app/queries";
 import { SaveStatus, useSaveSettings } from "./-form";
 
@@ -24,7 +24,7 @@ function Threads(): JSX.Element {
   const rows = threadRowsMode(settings.user["ui.threadRows"]);
 
   return (
-    <SettingsForm
+    <FormCard
       label="Threads · display"
       fine={
         rows === "plain"
@@ -46,6 +46,6 @@ function Threads(): JSX.Element {
         </SegmentedControl>
       </Row>
       <SaveStatus saved={saved} failure={failure} />
-    </SettingsForm>
+    </FormCard>
   );
 }

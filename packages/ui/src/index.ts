@@ -6,7 +6,7 @@ export { Popover, PopoverAnchor, PopoverContent, PopoverTrigger } from "./primit
 export { Select } from "./primitives/select";
 export { SegmentedControl, SegmentedControlItem } from "./primitives/segmented-control";
 
-export { EmptyState, Field, Group, LaneLabel, Row, SettingsForm } from "./patterns/patterns";
+export { EmptyState, Field, FormCard, Group, LaneLabel, Row } from "./patterns/patterns";
 
 export {
   CancelledMark,
