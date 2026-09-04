@@ -58,6 +58,16 @@ export interface AuditEntry {
    * Intake views and kept for at least 90 days.
    */
   readonly payload: Readonly<Record<string, unknown>>;
+  /**
+   * When the change this entry records happened, which is the timestamp that
+   * change wrote on its own rows. An operation that stamps rows passes it, so
+   * the entry cannot be dated before the row it describes: the two clock reads
+   * it would otherwise take are separated by the wait for the write
+   * transaction, and a caller reading the log by time would then find a task
+   * created before the event that records its creation. An entry with nothing
+   * to agree with - a login, a logout - leaves it out and is timed here.
+   */
+  readonly at?: string;
 }
 
 /** An audit entry as it reads back out of the log. */
@@ -77,7 +87,7 @@ const make = Effect.gen(function* () {
      */
     append: (entry: AuditEntry): Effect.Effect<void, SqlError> =>
       Effect.gen(function* () {
-        const at = new Date(yield* Clock.currentTimeMillis).toISOString();
+        const at = entry.at ?? new Date(yield* Clock.currentTimeMillis).toISOString();
         // `dedup_key` is an emitter's idempotency key, and an audit entry has
         // none: two logins a second apart are two facts, not one repeated. A
         // random value per row satisfies the NOT NULL column and makes the

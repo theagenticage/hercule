@@ -17,7 +17,6 @@
  * seeing it. There is no include-deleted option.
  */
 import * as Context from "effect/Context";
-import * as Clock from "effect/Clock";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
@@ -27,9 +26,8 @@ import type { SqlError } from "effect/unstable/sql/SqlError";
 import {
   DEFAULT_PAGE_LIMIT,
   Id,
-  MAX_PAGE_LIMIT,
+  MAX_TASK_LABELS,
   notFound,
-  SortDirection,
   TASK_SORT_FIELDS,
   TaskCreateInput,
   TaskFilter,
@@ -44,24 +42,12 @@ import {
   type Validation,
 } from "@hydra/contract";
 import { requireGrant, USER_ACTOR } from "../actor";
-import { withTransaction } from "../db";
+import { nowIso, pageInput, refuseCursor, withTransaction } from "../db";
 import { AuditLog } from "../events";
 import { taskRepository, type TaskOrder } from "./repository";
 
 /** What listing takes: the filter, and how much of it in what order. */
-const QueryInput = Schema.Struct({
-  ...TaskFilter.fields,
-  limit: Schema.optionalKey(
-    Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: MAX_PAGE_LIMIT })),
-  ),
-  cursor: Schema.optionalKey(Schema.NonEmptyString),
-  sort: Schema.optionalKey(
-    Schema.Struct({
-      field: Schema.Literals(TASK_SORT_FIELDS),
-      direction: Schema.optionalKey(SortDirection),
-    }),
-  ),
-});
+const QueryInput = Schema.Struct({ ...TaskFilter.fields, ...pageInput(TASK_SORT_FIELDS) });
 
 export type QueryInput = Schema.Schema.Type<typeof QueryInput>;
 
@@ -138,8 +124,6 @@ const make = Effect.gen(function* () {
   const tasks = yield* taskRepository;
   const audit = yield* AuditLog;
 
-  const now = Effect.map(Clock.currentTimeMillis, (millis) => new Date(millis).toISOString());
-
   const live = (id: string): Effect.Effect<Task, NotFound | SqlError> =>
     Effect.flatMap(
       tasks.live(id),
@@ -169,17 +153,9 @@ const make = Effect.gen(function* () {
         const decoded = yield* Effect.mapError(decodeQuery(input), validationOf);
         const { limit, cursor, sort, text, ...filter } = decoded;
         const order = yield* orderOf(text, sort);
-        const listing = yield* tasks
-          .list(filter, {
-            limit: limit ?? DEFAULT_PAGE_LIMIT,
-            cursor,
-            order,
-          })
-          .pipe(
-            Effect.catchTag("CursorError", (error) =>
-              Effect.fail(validation([{ path: ["cursor"], message: error.message }])),
-            ),
-          );
+        const listing = yield* refuseCursor(
+          tasks.list(filter, { limit: limit ?? DEFAULT_PAGE_LIMIT, cursor, order }),
+        );
         return {
           items: listing.items,
           ...(listing.nextCursor === undefined ? {} : { nextCursor: listing.nextCursor }),
@@ -203,10 +179,12 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         yield* requireGrant("task.create");
         const decoded = yield* Effect.mapError(decodeCreate(input), validationOf);
-        const at = yield* now;
         return yield* withTransaction(
           sql,
           Effect.gen(function* () {
+            // One clock read, inside the transaction: the row and the event
+            // that records it carry the same instant.
+            const at = yield* nowIso;
             yield* requireProject(decoded.projectId);
             const task = yield* tasks.insert({
               title: decoded.title,
@@ -219,7 +197,12 @@ const make = Effect.gen(function* () {
               at,
               actor: USER_ACTOR,
             });
-            yield* audit.append({ kind: "task.created", actor: USER_ACTOR, payload: { task } });
+            yield* audit.append({
+              kind: "task.created",
+              actor: USER_ACTOR,
+              payload: { task },
+              at,
+            });
             return task;
           }),
         );
@@ -242,10 +225,10 @@ const make = Effect.gen(function* () {
         if (Object.keys(patch).length === 0) {
           return yield* Effect.fail(validation([{ path: [], message: "name a field to change" }]));
         }
-        const at = yield* now;
         return yield* withTransaction(
           sql,
           Effect.gen(function* () {
+            const at = yield* nowIso;
             const before = yield* live(id);
             yield* requireProject(patch.projectId);
 
@@ -274,6 +257,19 @@ const make = Effect.gen(function* () {
             const kept = before.labels.filter((label) => !removed.includes(label));
             const added = adding.filter((label) => !kept.includes(label));
             if (added.length > 0 || removed.length > 0) {
+              // One call is bounded by the contract; the row is bounded here,
+              // because labels are added a few at a time and the cap is on
+              // what the task ends up carrying, not on what one edit named.
+              if (kept.length + added.length > MAX_TASK_LABELS) {
+                return yield* Effect.fail(
+                  validation([
+                    {
+                      path: ["addLabels"],
+                      message: `A task carries at most ${String(MAX_TASK_LABELS)} labels.`,
+                    },
+                  ]),
+                );
+              }
               changes["labels"] = { added, removed };
               edit["labels"] = [...kept, ...added];
             }
@@ -297,6 +293,7 @@ const make = Effect.gen(function* () {
               kind: "task.updated",
               actor: USER_ACTOR,
               payload: { taskId: id, changes },
+              at,
             });
             // Read back rather than merge in memory: what the caller gets is
             // then the row that was written, whatever the edit touched.
@@ -318,10 +315,10 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         yield* requireGrant("task.delete");
         const { id } = yield* Effect.mapError(decodeIdentified(input), validationOf);
-        const at = yield* now;
         return yield* withTransaction(
           sql,
           Effect.gen(function* () {
+            const at = yield* nowIso;
             const task = yield* live(id);
             yield* tasks.softDelete(id, at);
             // The final snapshot, because nothing can read the row afterwards.
@@ -329,6 +326,7 @@ const make = Effect.gen(function* () {
               kind: "task.deleted",
               actor: USER_ACTOR,
               payload: { taskId: id, snapshot: { ...task, deletedAt: at } },
+              at,
             });
             return {};
           }),

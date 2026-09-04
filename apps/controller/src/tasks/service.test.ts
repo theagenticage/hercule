@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { Effect, Layer } from "effect";
+import { Clock, Effect, Layer } from "effect";
 import { TestClock } from "effect/testing";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
-import { MAX_TASK_TITLE_LENGTH, type Task } from "@hydra/contract";
+import { MAX_TASK_LABELS, MAX_TASK_TITLE_LENGTH, type Task } from "@hydra/contract";
 import { CurrentActor, type Actor } from "../actor";
 import { mintUuid, uuidToString } from "../db";
 import { TestDatabase } from "../db/testing";
@@ -99,6 +99,30 @@ describe("task.create", () => {
       }),
     );
     for (const error of errors) expect(error).toMatchObject({ error: { code: "validation" } });
+  });
+
+  it("caps the labels a task ends up carrying, not just the ones one call names", async () => {
+    const { filled, overflow } = await run(
+      Effect.gen(function* () {
+        const tasks = yield* TaskService;
+        const label = (index: number) => `label-${String(index)}`;
+        const created = yield* tasks.create({
+          title: "Labelled",
+          description: "",
+          labels: Array.from({ length: MAX_TASK_LABELS }, (_, index) => label(index)),
+        });
+        return {
+          filled: created.labels.length,
+          // Every call is under the cap and the row is at it, so what refuses
+          // this is the rule about the row rather than the one about the call.
+          overflow: yield* Effect.flip(
+            tasks.update({ id: created.id, addLabels: [label(MAX_TASK_LABELS)] }),
+          ),
+        };
+      }),
+    );
+    expect(filled).toBe(MAX_TASK_LABELS);
+    expect(overflow).toMatchObject({ error: { code: "validation" } });
   });
 });
 
@@ -346,6 +370,25 @@ describe("full-text search", () => {
     expect(titles(items)).toEqual(["Café Naïve espresso machine", "espresso grinder"]);
   });
 
+  it("follows a retitled task: the old word stops matching and the new one starts", async () => {
+    const { before, after } = await run(
+      Effect.gen(function* () {
+        const tasks = yield* TaskService;
+        const task = yield* tasks.create({ title: "hydrology survey", description: "" });
+        yield* tasks.update({ id: task.id, title: "limnology survey" });
+        return {
+          before: yield* tasks.query({ text: "hydrology" }),
+          after: yield* tasks.query({ text: "limnology" }),
+        };
+      }),
+    );
+    // The index is external content: nothing but the update trigger takes the
+    // old terms out of it, and stale terms would answer for a row that no
+    // longer holds them.
+    expect(titles(before.items)).toEqual([]);
+    expect(titles(after.items)).toEqual(["limnology survey"]);
+  });
+
   it("treats FTS5 operators as plain words rather than as syntax", async () => {
     const page = await run(
       Effect.flatMap(withProse, (tasks) => tasks.query({ text: 'AND OR "(' })),
@@ -459,7 +502,57 @@ describe("external refs", () => {
   });
 });
 
+/**
+ * A clock that moves a second every time it is read. That is what a
+ * transaction wait looks like from inside one operation, and it is what makes
+ * two reads in one operation impossible to confuse with one.
+ */
+const ticking = (): Clock.Clock => {
+  let millis = Date.parse("2026-09-04T10:00:00.000Z");
+  const next = () => (millis += 1000);
+  const nanos = () => BigInt(millis) * 1_000_000n;
+  return {
+    currentTimeMillisUnsafe: next,
+    currentTimeMillis: Effect.sync(next),
+    currentTimeNanosUnsafe: nanos,
+    currentTimeNanos: Effect.sync(nanos),
+    monotonicTimeNanosUnsafe: nanos,
+    monotonicTimeNanos: Effect.sync(nanos),
+    sleep: () => Effect.void,
+  };
+};
+
+const runTicking = <A, E>(effect: Effect.Effect<A, E, Deps>) =>
+  Effect.runPromise(
+    effect.pipe(
+      Effect.provideService(CurrentActor, USER),
+      Effect.provide(layer),
+      Effect.provideService(Clock.Clock, ticking()),
+    ),
+  );
+
 describe("the event log", () => {
+  it("dates an entry by the same clock read as the row it records", async () => {
+    const { created, updated, createdEntries, updatedEntries } = await runTicking(
+      Effect.gen(function* () {
+        const tasks = yield* TaskService;
+        const audit = yield* AuditLog;
+        const created = yield* tasks.create({ title: "Before", description: "d" });
+        const updated = yield* tasks.update({ id: created.id, title: "After" });
+        return {
+          created,
+          updated,
+          createdEntries: yield* audit.listByKind("task.created"),
+          updatedEntries: yield* audit.listByKind("task.updated"),
+        };
+      }),
+    );
+    // The event that records a change is never dated before the change: a
+    // caller reading the log up to a task's own `createdAt` sees the entry.
+    expect(createdEntries[0]?.receivedAt).toBe(created.createdAt);
+    expect(updatedEntries[0]?.receivedAt).toBe(updated.updatedAt);
+  });
+
   it("writes one task.created carrying the task, and nothing about the actor", async () => {
     const { task, entries } = await run(
       Effect.gen(function* () {

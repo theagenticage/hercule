@@ -10,11 +10,19 @@
  * one sortable column plus the id, which the partial indexes on `tasks` serve.
  * With one it is the full-text index ordered by relevance, and a rank no row
  * carries cannot be resumed from, so that walk pages by offset instead.
+ *
+ * The two differ in what a write under the walk does to it. A keyset boundary
+ * is a value, so a row inserted or deleted elsewhere in the order leaves the
+ * pages already handed out alone. An offset is a count, so a matching row
+ * created between two pages pushes one row across the boundary and it comes
+ * back twice, and a deleted one pulls one row across and it is missed. A
+ * relevance walk therefore reads each row exactly once per snapshot, not per
+ * database that is still being written to; a rank is not a key to resume from
+ * and there is nothing else to page it by.
  */
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
-import type { Statement } from "effect/unstable/sql/Statement";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import type {
   ExternalRef,
@@ -29,7 +37,9 @@ import {
   decodeOffsetCursor,
   encodeCursor,
   encodeOffsetCursor,
+  keysetOver,
   mintUuid,
+  pageOf,
   uuidFromString,
   uuidToString,
   type CursorError,
@@ -127,6 +137,14 @@ const SORT_COLUMN: Record<TaskSortField, string> = {
   createdAt: "tasks.created_at",
   priority: "CASE priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'normal' THEN 2 ELSE 3 END",
   status: "tasks.status",
+};
+
+/** What each sortable column holds, so a cursor is compared as that column is. */
+const SORT_KEY_TYPE: Record<TaskSortField, "string" | "number"> = {
+  updatedAt: "string",
+  createdAt: "string",
+  priority: "number",
+  status: "string",
 };
 
 /** The rank the priority index stores, so a cursor resumes on the same value. */
@@ -284,13 +302,6 @@ const make = Effect.gen(function* () {
       { discard: true },
     );
 
-  /** One page of rows, and whether the walk has another. */
-  const walk = (
-    statement: Statement<TaskRow>,
-    limit: number,
-  ): Effect.Effect<{ rows: ReadonlyArray<TaskRow>; more: boolean }, SqlError> =>
-    Effect.map(statement, (rows) => ({ rows: rows.slice(0, limit), more: rows.length > limit }));
-
   return {
     /** The task with that id, unless it has been deleted. */
     live: (id: string): Effect.Effect<Option.Option<Task>, SqlError> =>
@@ -392,55 +403,39 @@ const make = Effect.gen(function* () {
           const offset =
             request.cursor === undefined ? 0 : yield* decodeOffsetCursor(request.cursor, scope);
           // The relevance order is bm25's, which is most negative first.
-          const page = yield* walk(
-            sql<TaskRow>`
-              SELECT ${sql.literal(COLUMNS)}
-              FROM tasks_fts JOIN tasks ON tasks.rowid = tasks_fts.rowid
-              WHERE tasks_fts MATCH ${match} AND ${where}
-              ORDER BY bm25(tasks_fts), tasks.id
-              LIMIT ${request.limit + 1} OFFSET ${offset}
-            `,
-            request.limit,
+          const rows = yield* sql<TaskRow>`
+            SELECT ${sql.literal(COLUMNS)}
+            FROM tasks_fts JOIN tasks ON tasks.rowid = tasks_fts.rowid
+            WHERE tasks_fts MATCH ${match} AND ${where}
+            ORDER BY bm25(tasks_fts), tasks.id
+            LIMIT ${request.limit + 1} OFFSET ${offset}
+          `;
+          // The next page resumes by counting rows rather than off the last of
+          // them, so what that row was does not come into it.
+          return yield* pageOf(rows, request.limit, hydrate, () =>
+            encodeOffsetCursor(scope, offset + request.limit),
           );
-          return {
-            items: yield* hydrate(page.rows),
-            nextCursor: page.more ? encodeOffsetCursor(scope, offset + request.limit) : undefined,
-          };
         }
 
         const { field, direction } = request.order;
         const scope = columnScope(field, direction);
-        const column = sql.literal(SORT_COLUMN[field]);
         const after =
-          request.cursor === undefined ? undefined : yield* decodeCursor(request.cursor, scope);
-        const ascending = direction === "asc";
-        const keyset =
-          after === undefined
-            ? sql`1 = 1`
-            : ascending
-              ? sql`(${column}, tasks.id) > (${after[0]}, ${uuidFromString(after[1])})`
-              : sql`(${column}, tasks.id) < (${after[0]}, ${uuidFromString(after[1])})`;
-        const order = ascending
-          ? sql`ORDER BY ${column} ASC, tasks.id ASC`
-          : sql`ORDER BY ${column} DESC, tasks.id DESC`;
-        // One row more than asked for: whether it came back is whether there is
-        // a next page, which is why no count query is needed to know.
-        const page = yield* walk(
-          sql<TaskRow>`
-            SELECT ${sql.literal(COLUMNS)} FROM tasks
-            WHERE ${where} AND ${keyset} ${order} LIMIT ${request.limit + 1}
-          `,
-          request.limit,
+          request.cursor === undefined
+            ? undefined
+            : yield* decodeCursor(request.cursor, scope, SORT_KEY_TYPE[field]);
+        const { keyset, order } = keysetOver(
+          sql,
+          [SORT_COLUMN[field], "tasks.id"],
+          after === undefined ? undefined : [after[0], uuidFromString(after[1])],
+          direction,
         );
-        const items = yield* hydrate(page.rows);
-        const last = items[items.length - 1];
-        return {
-          items,
-          nextCursor:
-            page.more && last !== undefined
-              ? encodeCursor(scope, sortKeyOf(last, field), last.id)
-              : undefined,
-        };
+        const rows = yield* sql<TaskRow>`
+          SELECT ${sql.literal(COLUMNS)} FROM tasks
+          WHERE ${where} AND ${keyset} ${order} LIMIT ${request.limit + 1}
+        `;
+        return yield* pageOf(rows, request.limit, hydrate, (last) =>
+          encodeCursor(scope, sortKeyOf(last, field), last.id),
+        );
       }),
   };
 });

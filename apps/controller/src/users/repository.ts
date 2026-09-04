@@ -9,14 +9,13 @@
  * is `./password.ts`, so the cost parameters live in one place and no caller
  * can store a password by accident.
  */
-import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
-import { mintUuid, uuidFromString, uuidToString } from "../db";
+import { mintUuid, nowIso, uuidFromString, uuidToString } from "../db";
 
 /** A user row. The password hash comes with it: verifying is one read. */
 export interface UserRecord {
@@ -46,8 +45,6 @@ const toUser = (row: UserRow): UserRecord => ({
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
 
-  const now = Effect.map(Clock.currentTimeMillis, (millis) => new Date(millis).toISOString());
-
   return {
     /**
      * Creates a user. `username` is unique in the schema, so a name already
@@ -57,7 +54,7 @@ const make = Effect.gen(function* () {
      */
     create: (username: string, passwordHash: string): Effect.Effect<UserRecord, SqlError> =>
       Effect.gen(function* () {
-        const at = yield* now;
+        const at = yield* nowIso;
         const id = mintUuid();
         yield* sql`
           INSERT INTO users (id, username, password_hash, created_at, updated_at)
@@ -86,7 +83,7 @@ const make = Effect.gen(function* () {
      */
     setPasswordHash: (id: string, passwordHash: string): Effect.Effect<void, SqlError> =>
       Effect.gen(function* () {
-        const at = yield* now;
+        const at = yield* nowIso;
         yield* sql`
           UPDATE users SET password_hash = ${passwordHash}, updated_at = ${at}
           WHERE id = ${uuidFromString(id)}

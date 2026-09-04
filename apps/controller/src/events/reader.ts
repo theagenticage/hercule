@@ -21,6 +21,7 @@ import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
+import type { Fragment } from "effect/unstable/sql/Statement";
 import {
   bounded,
   DEFAULT_PAGE_LIMIT,
@@ -41,7 +42,14 @@ import {
   type Validation,
 } from "@hydra/contract";
 import { requireGrant } from "../actor";
-import { decodeIdCursor, encodeIdCursor, uuidFromString, uuidToString } from "../db";
+import {
+  decodeIdCursor,
+  encodeIdCursor,
+  keysetOver,
+  pageOf,
+  uuidFromString,
+  uuidToString,
+} from "../db";
 
 /** What narrows and pages a reading of the log. */
 const QueryInput = Schema.Struct({
@@ -142,33 +150,36 @@ const make = Effect.gen(function* () {
                 ),
               );
 
-        const ascending = direction === "asc";
-        const where = [sql`1 = 1`];
+        const where: Array<Fragment> = [sql`1 = 1`];
         if (decoded.connectionId !== undefined) {
           where.push(sql`connection_id = ${uuidFromString(decoded.connectionId)}`);
         }
         if (decoded.kind !== undefined) where.push(sql`kind = ${decoded.kind}`);
         if (decoded.since !== undefined) where.push(sql`received_at >= ${decoded.since}`);
         if (decoded.until !== undefined) where.push(sql`received_at <= ${decoded.until}`);
-        if (after !== undefined) {
-          where.push(ascending ? sql`id > ${after}` : sql`id < ${after}`);
-        }
+        // The log's id is its order, so the walk needs no second column to
+        // break a tie on: the id is the whole key.
+        const { keyset, order } = keysetOver(
+          sql,
+          ["id"],
+          after === undefined ? undefined : [after],
+          direction,
+        );
+        where.push(keyset);
 
-        // One row more than asked for: whether it came back is whether there is
-        // a next page, which is why no count query is needed to know.
         const rows = yield* sql<EventRow>`
           SELECT ${sql.literal(COLUMNS)} FROM events
-          WHERE ${sql.and(where)}
-          ORDER BY id ${ascending ? sql`ASC` : sql`DESC`}
-          LIMIT ${limit + 1}
+          WHERE ${sql.and(where)} ${order} LIMIT ${limit + 1}
         `;
-        const items = rows.slice(0, limit).map(toEvent);
-        const last = items[items.length - 1];
+        const page = yield* pageOf(
+          rows,
+          limit,
+          (read) => Effect.succeed(read.map(toEvent)),
+          (last) => encodeIdCursor(scope, last.id),
+        );
         return {
-          items,
-          ...(rows.length > limit && last !== undefined
-            ? { nextCursor: encodeIdCursor(scope, last.id) }
-            : {}),
+          items: page.items,
+          ...(page.nextCursor === undefined ? {} : { nextCursor: page.nextCursor }),
         };
       }),
 

@@ -21,7 +21,6 @@
  * resource links stay. There is no include-deleted option.
  */
 import * as Context from "effect/Context";
-import * as Clock from "effect/Clock";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
@@ -31,38 +30,26 @@ import type { SqlError } from "effect/unstable/sql/SqlError";
 import {
   DEFAULT_PAGE_LIMIT,
   Id,
-  MAX_PAGE_LIMIT,
   notFound,
   PROJECT_SORT_FIELDS,
   ProjectCreateInput,
   ProjectUpdateInput,
-  SortDirection,
   validation,
   validationOf,
   type Forbidden,
   type NotFound,
   type Project,
+  type SortDirection,
   type Unauthenticated,
   type Validation,
 } from "@hydra/contract";
 import { requireGrant, USER_ACTOR } from "../actor";
-import { withTransaction } from "../db";
+import { nowIso, pageInput, refuseCursor, withTransaction } from "../db";
 import { AuditLog } from "../events";
 import { projectRepository, type ProjectSortField } from "./repository";
 
 /** What listing takes: how much of it, in what order. */
-const QueryInput = Schema.Struct({
-  limit: Schema.optionalKey(
-    Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: MAX_PAGE_LIMIT })),
-  ),
-  cursor: Schema.optionalKey(Schema.NonEmptyString),
-  sort: Schema.optionalKey(
-    Schema.Struct({
-      field: Schema.Literals(PROJECT_SORT_FIELDS),
-      direction: Schema.optionalKey(SortDirection),
-    }),
-  ),
-});
+const QueryInput = Schema.Struct(pageInput(PROJECT_SORT_FIELDS));
 
 export type QueryInput = Schema.Schema.Type<typeof QueryInput>;
 
@@ -111,8 +98,6 @@ const make = Effect.gen(function* () {
   const projects = yield* projectRepository;
   const audit = yield* AuditLog;
 
-  const now = Effect.map(Clock.currentTimeMillis, (millis) => new Date(millis).toISOString());
-
   const live = (id: string): Effect.Effect<Project, NotFound | SqlError> =>
     Effect.flatMap(
       projects.live(id),
@@ -134,13 +119,9 @@ const make = Effect.gen(function* () {
           sort === undefined
             ? DEFAULT_SORT
             : { field: sort.field, direction: sort.direction ?? "asc" };
-        const listing = yield* projects
-          .list({ limit: limit ?? DEFAULT_PAGE_LIMIT, cursor, ...order })
-          .pipe(
-            Effect.catchTag("CursorError", (error) =>
-              Effect.fail(validation([{ path: ["cursor"], message: error.message }])),
-            ),
-          );
+        const listing = yield* refuseCursor(
+          projects.list({ limit: limit ?? DEFAULT_PAGE_LIMIT, cursor, ...order }),
+        );
         return {
           items: listing.items,
           ...(listing.nextCursor === undefined ? {} : { nextCursor: listing.nextCursor }),
@@ -164,10 +145,12 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         yield* requireGrant("project.create");
         const decoded = yield* Effect.mapError(decodeCreate(input), validationOf);
-        const at = yield* now;
         return yield* withTransaction(
           sql,
           Effect.gen(function* () {
+            // One clock read, inside the transaction: the row and the event
+            // that records it carry the same instant.
+            const at = yield* nowIso;
             const project = yield* projects.insert({
               name: decoded.name,
               description: decoded.description,
@@ -177,6 +160,7 @@ const make = Effect.gen(function* () {
               kind: "project.created",
               actor: USER_ACTOR,
               payload: { project },
+              at,
             });
             return project;
           }),
@@ -199,10 +183,10 @@ const make = Effect.gen(function* () {
         if (Object.keys(patch).length === 0) {
           return yield* Effect.fail(validation([{ path: [], message: "name a field to change" }]));
         }
-        const at = yield* now;
         return yield* withTransaction(
           sql,
           Effect.gen(function* () {
+            const at = yield* nowIso;
             const before = yield* live(id);
 
             // A project without a description carries no key at all, and
@@ -229,6 +213,7 @@ const make = Effect.gen(function* () {
               kind: "project.updated",
               actor: USER_ACTOR,
               payload: { projectId: id, changes },
+              at,
             });
             // Read back rather than merge in memory: what the caller gets is
             // then the row that was written, whatever the edit touched.
@@ -250,10 +235,10 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         yield* requireGrant("project.delete");
         const { id } = yield* Effect.mapError(decodeIdentified(input), validationOf);
-        const at = yield* now;
         return yield* withTransaction(
           sql,
           Effect.gen(function* () {
+            const at = yield* nowIso;
             const project = yield* live(id);
             yield* projects.softDelete(id, at);
             // The final snapshot, because nothing can read the row afterwards.
@@ -261,6 +246,7 @@ const make = Effect.gen(function* () {
               kind: "project.deleted",
               actor: USER_ACTOR,
               payload: { projectId: id, snapshot: { ...project, deletedAt: at } },
+              at,
             });
             return {};
           }),

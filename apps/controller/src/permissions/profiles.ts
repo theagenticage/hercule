@@ -14,14 +14,17 @@
  * The three shipped profiles are seeded at first run with `shipped = 1`: the
  * user may edit them, never delete them.
  */
-import { Clock, Context, Effect, Layer, Option, Schema } from "effect";
+import { Context, Effect, Layer, Option, Schema } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import { GrantSchema, type Grant } from "@hydra/contract";
 import {
   decodeCursor,
   encodeCursor,
+  keysetOver,
   mintUuid,
+  nowIso,
+  pageOf,
   uuidFromString,
   uuidToString,
   type CursorError,
@@ -88,8 +91,6 @@ const encodeGrants = (name: string, grants: ReadonlyArray<Grant>) =>
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
 
-  const now = Effect.map(Clock.currentTimeMillis, (millis) => new Date(millis).toISOString());
-
   const byId = (id: string): Effect.Effect<Option.Option<Row>, SqlError> =>
     sql<Row>`SELECT id, name, grants, shipped, created_at, updated_at
              FROM permission_profiles WHERE id = ${uuidFromString(id)}`.pipe(
@@ -120,7 +121,7 @@ const make = Effect.gen(function* () {
     ): Effect.Effect<void, GrantsError | SqlError> =>
       Effect.gen(function* () {
         const json = yield* encodeGrants(name, grants);
-        const at = new Date(yield* Clock.currentTimeMillis).toISOString();
+        const at = yield* nowIso;
         yield* sql`
           INSERT OR IGNORE INTO permission_profiles
             (id, name, grants, shipped, created_at, updated_at)
@@ -149,37 +150,29 @@ const make = Effect.gen(function* () {
       page: PageRequest,
     ): Effect.Effect<Page<PermissionProfile>, GrantsError | CursorError | SqlError> =>
       Effect.gen(function* () {
-        const ascending = page.direction === "asc";
         const scope: CursorScope = {
           op: "profile.query",
           field: "name",
           direction: page.direction,
         };
         const after =
-          page.cursor === undefined ? undefined : yield* decodeCursor(page.cursor, scope);
-        const keyset =
-          after === undefined
-            ? sql``
-            : ascending
-              ? sql`WHERE (name, id) > (${after[0]}, ${uuidFromString(after[1])})`
-              : sql`WHERE (name, id) < (${after[0]}, ${uuidFromString(after[1])})`;
-        const order = ascending ? sql`ORDER BY name ASC, id ASC` : sql`ORDER BY name DESC, id DESC`;
-        // One row more than asked for: whether it came back is whether there is
-        // a next page, which is why no count query is needed to know.
+          page.cursor === undefined ? undefined : yield* decodeCursor(page.cursor, scope, "string");
+        const { keyset, order } = keysetOver(
+          sql,
+          ["name", "id"],
+          after === undefined ? undefined : [after[0], uuidFromString(after[1])],
+          page.direction,
+        );
         const rows = yield* sql<Row>`
           SELECT id, name, grants, shipped, created_at, updated_at
-          FROM permission_profiles ${keyset} ${order} LIMIT ${page.limit + 1}
+          FROM permission_profiles WHERE ${keyset} ${order} LIMIT ${page.limit + 1}
         `;
-
-        const items = yield* Effect.forEach(rows.slice(0, page.limit), toProfile);
-        const last = items[items.length - 1];
-        return {
-          items,
-          nextCursor:
-            rows.length > page.limit && last !== undefined
-              ? encodeCursor(scope, last.name, last.id)
-              : undefined,
-        };
+        return yield* pageOf(
+          rows,
+          page.limit,
+          (read) => Effect.forEach(read, toProfile),
+          (last) => encodeCursor(scope, last.name, last.id),
+        );
       }),
 
     /**
@@ -193,7 +186,7 @@ const make = Effect.gen(function* () {
     ): Effect.Effect<Option.Option<PermissionProfile>, GrantsError | SqlError> =>
       Effect.gen(function* () {
         const json = yield* encodeGrants(name, grants);
-        const at = yield* now;
+        const at = yield* nowIso;
         const id = mintUuid();
         const inserted = yield* sql<{ readonly id: Uint8Array }>`
           INSERT OR IGNORE INTO permission_profiles
@@ -230,7 +223,7 @@ const make = Effect.gen(function* () {
         const name = changes.name ?? current.name;
         const grants = changes.grants ?? current.grants;
         const json = yield* encodeGrants(name, grants);
-        const at = yield* now;
+        const at = yield* nowIso;
         const updated = yield* sql<{ readonly id: Uint8Array }>`
           UPDATE OR IGNORE permission_profiles
           SET name = ${name}, grants = ${json}, updated_at = ${at}

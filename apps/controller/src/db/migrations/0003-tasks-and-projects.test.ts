@@ -75,6 +75,57 @@ describe("the Task and Project tables", () => {
     }
   });
 
+  it("serves both readings of status from an index, neither by a temp b-tree", async () => {
+    const plans = await run(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        const plan = (statement: string) =>
+          Effect.map(
+            sql<{ readonly detail: string }>`${sql.literal(`EXPLAIN QUERY PLAN ${statement}`)}`,
+            (rows) => rows.map((row) => row.detail).join(" / "),
+          );
+        return {
+          sorted: yield* plan(`SELECT id FROM tasks WHERE deleted_at IS NULL
+                               ORDER BY status ASC, id ASC LIMIT 51`),
+          filtered: yield* plan(`SELECT id FROM tasks
+                                 WHERE deleted_at IS NULL AND status IN ('open')
+                                 ORDER BY updated_at DESC, id DESC LIMIT 51`),
+        };
+      }),
+    );
+    // A temp b-tree is the whole matching set sorted per page, which is flat in
+    // the page number: page one hundred costs what page one did.
+    expect(plans.sorted).toContain("SCAN tasks USING INDEX tasks_status");
+    expect(plans.sorted).not.toContain("tasks_status_updated_at");
+    expect(plans.sorted).not.toContain("TEMP B-TREE");
+    expect(plans.filtered).toContain("tasks_status_updated_at");
+    expect(plans.filtered).not.toContain("TEMP B-TREE");
+  });
+
+  it("keys project_resources on the pair, so one link is written once", async () => {
+    const { table, refused } = await run(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        const rows = yield* sql<SchemaRow>`
+          SELECT name, tbl_name, sql FROM sqlite_master WHERE name = 'project_resources'
+        `;
+        yield* sql`INSERT INTO projects (id, name, created_at, updated_at)
+                   VALUES (x'00000000000000000000000000000001', 'p', 'a', 'a')`;
+        const link = sql`INSERT INTO project_resources (project_id, resource_id)
+                         VALUES (x'00000000000000000000000000000001',
+                                 x'00000000000000000000000000000002')`;
+        yield* link;
+        const refused = yield* Effect.match(link, {
+          onFailure: () => true,
+          onSuccess: () => false,
+        });
+        return { table: rows[0]?.sql ?? "", refused };
+      }),
+    );
+    expect(table).toMatch(/PRIMARY KEY\s*\(\s*project_id,\s*resource_id\s*\)/i);
+    expect(refused).toBe(true);
+  });
+
   it("creates the full-text index over tasks with the diacritic-folding tokenizer", async () => {
     const fts = (await run(schema("table"))).find((row) => row.name === "tasks_fts");
     expect(fts?.sql ?? "").toMatch(/unicode61\s+remove_diacritics\s+2/);

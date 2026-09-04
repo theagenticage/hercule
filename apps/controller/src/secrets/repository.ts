@@ -40,7 +40,9 @@ import type { SqlError } from "effect/unstable/sql/SqlError";
 import {
   decodeCursor,
   encodeCursor,
+  keysetOver,
   mintUuid,
+  pageOf,
   uuidFromString,
   uuidToString,
   type CursorError,
@@ -276,31 +278,27 @@ export const secretsLayer: Layer.Layer<Secrets, never, MasterKey | SqlClient.Sql
 
         list: (request) =>
           Effect.gen(function* () {
-            const ascending = request.direction === "asc";
             const scope: CursorScope = {
               op: "secret.query",
               field: "name",
               direction: request.direction,
             };
             const after =
-              request.cursor === undefined ? undefined : yield* decodeCursor(request.cursor, scope);
+              request.cursor === undefined
+                ? undefined
+                : yield* decodeCursor(request.cursor, scope, "string");
             const byKind =
               request.ownerKind === undefined ? sql`` : sql`AND owner_kind = ${request.ownerKind}`;
             const byId =
               request.ownerId === undefined ? sql`` : sql`AND owner_id = ${request.ownerId}`;
-            const keyset =
-              after === undefined
-                ? sql``
-                : ascending
-                  ? sql`AND (name, id) > (${after[0]}, ${uuidFromString(after[1])})`
-                  : sql`AND (name, id) < (${after[0]}, ${uuidFromString(after[1])})`;
             // `(name, id)` rather than name alone: names repeat across owners
             // and an id does not, so a page boundary is unambiguous.
-            const order = ascending
-              ? sql`ORDER BY name ASC, id ASC`
-              : sql`ORDER BY name DESC, id DESC`;
-            // One row more than asked for: whether it came back is whether
-            // there is a next page, which is why no count query is needed.
+            const { keyset, order } = keysetOver(
+              sql,
+              ["name", "id"],
+              after === undefined ? undefined : [after[0], uuidFromString(after[1])],
+              request.direction,
+            );
             const rows = yield* sql<{
               readonly id: Bytes;
               readonly owner_kind: SecretOwnerKind;
@@ -311,25 +309,24 @@ export const secretsLayer: Layer.Layer<Secrets, never, MasterKey | SqlClient.Sql
             }>`
               SELECT id, owner_kind, owner_id, name, created_at, rotated_at
               FROM secrets
-              WHERE 1 = 1 ${byKind} ${byId} ${keyset}
+              WHERE 1 = 1 ${byKind} ${byId} AND ${keyset}
               ${order} LIMIT ${request.limit + 1}
             `;
-
-            const items = rows.slice(0, request.limit).map((row): SecretRef => ({
-              id: uuidToString(row.id),
-              owner: { kind: row.owner_kind, id: row.owner_id },
-              name: row.name,
-              createdAt: row.created_at,
-              rotatedAt: row.rotated_at,
-            }));
-            const last = items[items.length - 1];
-            return {
-              items,
-              nextCursor:
-                rows.length > request.limit && last !== undefined
-                  ? encodeCursor(scope, last.name, last.id)
-                  : undefined,
-            };
+            return yield* pageOf(
+              rows,
+              request.limit,
+              (read) =>
+                Effect.succeed(
+                  read.map((row): SecretRef => ({
+                    id: uuidToString(row.id),
+                    owner: { kind: row.owner_kind, id: row.owner_id },
+                    name: row.name,
+                    createdAt: row.created_at,
+                    rotatedAt: row.rotated_at,
+                  })),
+                ),
+              (last) => encodeCursor(scope, last.name, last.id),
+            );
           }),
 
         delete: (owner, name) =>

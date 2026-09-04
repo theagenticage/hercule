@@ -71,6 +71,7 @@ export {
   PresentedPassword,
   Timezone,
   Username,
+  atMost,
   bounded,
 } from "./strings";
 
@@ -100,8 +101,11 @@ export { OwnerKind, SecretRef } from "./groups/secret";
 export { ControllerInfo } from "./groups/controller";
 export {
   Label,
+  MAX_FILTER_VALUES,
   MAX_LABEL_LENGTH,
+  MAX_PROVENANCE_APPEND,
   MAX_SEARCH_TEXT_LENGTH,
+  MAX_TASK_LABELS,
   MAX_TASK_DESCRIPTION_LENGTH,
   MAX_TASK_TITLE_LENGTH,
   ProvenanceEntry,

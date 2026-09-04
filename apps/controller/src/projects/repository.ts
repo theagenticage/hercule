@@ -14,7 +14,9 @@ import type { Project, SortDirection } from "@hydra/contract";
 import {
   decodeCursor,
   encodeCursor,
+  keysetOver,
   mintUuid,
+  pageOf,
   uuidFromString,
   uuidToString,
   type CursorError,
@@ -140,34 +142,27 @@ const make = Effect.gen(function* () {
     list: (request: ProjectPageRequest): Effect.Effect<Page<Project>, CursorError | SqlError> =>
       Effect.gen(function* () {
         const scope = scopeOf(request.field, request.direction);
-        const column = sql.literal(SORT_COLUMN[request.field]);
+        // Every sortable column of a project holds text.
         const after =
-          request.cursor === undefined ? undefined : yield* decodeCursor(request.cursor, scope);
-        const ascending = request.direction === "asc";
-        const keyset =
-          after === undefined
-            ? sql`1 = 1`
-            : ascending
-              ? sql`(${column}, id) > (${after[0]}, ${uuidFromString(after[1])})`
-              : sql`(${column}, id) < (${after[0]}, ${uuidFromString(after[1])})`;
-        const order = ascending
-          ? sql`ORDER BY ${column} ASC, id ASC`
-          : sql`ORDER BY ${column} DESC, id DESC`;
-        // One row more than asked for: whether it came back is whether there is
-        // a next page, which is why no count query is needed to know.
+          request.cursor === undefined
+            ? undefined
+            : yield* decodeCursor(request.cursor, scope, "string");
+        const { keyset, order } = keysetOver(
+          sql,
+          [SORT_COLUMN[request.field], "id"],
+          after === undefined ? undefined : [after[0], uuidFromString(after[1])],
+          request.direction,
+        );
         const rows = yield* sql<ProjectRow>`
           SELECT ${sql.literal(COLUMNS)} FROM projects
           WHERE deleted_at IS NULL AND ${keyset} ${order} LIMIT ${request.limit + 1}
         `;
-        const items = rows.slice(0, request.limit).map(toProject);
-        const last = items[items.length - 1];
-        return {
-          items,
-          nextCursor:
-            rows.length > request.limit && last !== undefined
-              ? encodeCursor(scope, sortKeyOf(last, request.field), last.id)
-              : undefined,
-        };
+        return yield* pageOf(
+          rows,
+          request.limit,
+          (page) => Effect.succeed(page.map(toProject)),
+          (last) => encodeCursor(scope, sortKeyOf(last, request.field), last.id),
+        );
       }),
   };
 });

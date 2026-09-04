@@ -4,8 +4,12 @@
  * A cursor is the sort key of the page's last row plus that row's id, opaque on
  * the wire. The pair is unique because the id alone already is, so a page
  * boundary never repeats or skips a row - which is why the API needs no page
- * numbers and no totals. A cursor is base64url over JSON, so a sort key holding
- * any character at all still has exactly one reading.
+ * numbers and no totals. That guarantee is over a sort key the walk does not
+ * mutate: a row whose key is rewritten between two pages moves to wherever the
+ * new key puts it, ahead of the cursor or behind it, and a walker who needs to
+ * see every row exactly once orders by a key nothing rewrites. A cursor is
+ * base64url over JSON, so a sort key holding any character at all still has
+ * exactly one reading.
  *
  * A cursor also carries the listing that issued it and the order that listing
  * walked: `[op, field, direction, key, id]`. Without them a cursor is just two
@@ -24,7 +28,15 @@
  */
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
-import type { OperationId } from "@hydra/contract";
+import type * as SqlClient from "effect/unstable/sql/SqlClient";
+import type { Fragment } from "effect/unstable/sql/Statement";
+import {
+  MAX_PAGE_LIMIT,
+  SortDirection,
+  validation,
+  type OperationId,
+  type Validation,
+} from "@hydra/contract";
 import { UUID_PATTERN } from "./id";
 
 /** One page of a keyset listing. `nextCursor` is `undefined` on the last page. */
@@ -119,17 +131,25 @@ export const encodeCursor = (scope: CursorScope, sortKey: SortKey, id: string): 
 /**
  * The sort key and id a cursor names, or `CursorError` if it names neither or
  * belongs to another walk.
+ *
+ * `keyType` is what the ordered column holds, and a cursor whose key is of the
+ * other type is refused rather than compared. SQLite orders every number below
+ * every string, so a key of the wrong type makes the boundary either always
+ * true or always false: the walk silently restarts or silently ends, with
+ * nothing to show for it. A cursor is opaque, so the only way to reach this is
+ * to edit one, and the answer to an edited cursor is that it is not ours.
  */
 export const decodeCursor = (
   cursor: string,
   scope: CursorScope,
+  keyType: "string" | "number",
 ): Effect.Effect<readonly [SortKey, string], CursorError> =>
   open(cursor, scope, (payload) =>
     payload.length === 2 &&
-    (typeof payload[0] === "string" || typeof payload[0] === "number") &&
+    typeof payload[0] === keyType &&
     typeof payload[1] === "string" &&
     UUID_PATTERN.test(payload[1])
-      ? ([payload[0], payload[1]] as const)
+      ? ([payload[0] as SortKey, payload[1]] as const)
       : undefined,
   );
 
@@ -153,6 +173,68 @@ export const decodeIdCursor = (
 export const encodeOffsetCursor = (scope: CursorScope, offset: number): string =>
   seal(scope, ["offset", offset]);
 
+/**
+ * The two fragments a keyset walk adds to its query: the boundary the cursor
+ * names, and the order to read in.
+ *
+ * `columns` is the key the walk runs on, most significant first and the row's
+ * own id last, and `after` holds the value each of them had on the last row of
+ * the previous page. They arrive as SQL text rather than as identifiers because
+ * a key can be an expression - the priority rank - and it has to be spelled
+ * exactly the way the index that serves it was built.
+ *
+ * The boundary is a row-value comparison, which is what lets one index seek
+ * answer the resume: `(a, b) > (x, y)` reads along the index from that pair
+ * rather than filtering out every row before it.
+ */
+export const keysetOver = (
+  sql: SqlClient.SqlClient,
+  columns: ReadonlyArray<string>,
+  after: ReadonlyArray<unknown> | undefined,
+  direction: "asc" | "desc",
+): { readonly keyset: Fragment; readonly order: Fragment } => {
+  const ascending = direction === "asc";
+  const key = sql.literal(columns.join(", "));
+  const values = sql.csv((after ?? []).map((value) => sql`${value}`));
+  return {
+    // A walk that starts at the beginning has no boundary, and says so as a
+    // condition every row passes: the caller then ands one fragment into its
+    // `WHERE` and reads the same query whether or not it was given a cursor.
+    keyset:
+      after === undefined
+        ? sql`1 = 1`
+        : ascending
+          ? sql`(${key}) > (${values})`
+          : sql`(${key}) < (${values})`,
+    order: sql.literal(
+      `ORDER BY ${columns.map((column) => `${column} ${ascending ? "ASC" : "DESC"}`).join(", ")}`,
+    ),
+  };
+};
+
+/**
+ * One page out of the rows a keyset walk read.
+ *
+ * A walk asks for one row more than the caller wanted: whether that row came
+ * back is whether there is a next page, which is why no listing needs a count
+ * query to know. `items` turns the page's rows into what the caller reads -
+ * effectful because a row can need a second query to become a value - and
+ * `cursorOf` seals the last of them into the cursor the next page resumes from.
+ */
+export const pageOf = <Row, A, E, R>(
+  rows: ReadonlyArray<Row>,
+  limit: number,
+  items: (rows: ReadonlyArray<Row>) => Effect.Effect<ReadonlyArray<A>, E, R>,
+  cursorOf: (last: A) => string,
+): Effect.Effect<Page<A>, E, R> =>
+  Effect.map(items(rows.slice(0, limit)), (page) => {
+    const last = page[page.length - 1];
+    return {
+      items: page,
+      nextCursor: rows.length > limit && last !== undefined ? cursorOf(last) : undefined,
+    };
+  });
+
 /** The offset a cursor names, or `CursorError` if it names none or belongs to another walk. */
 export const decodeOffsetCursor = (
   cursor: string,
@@ -163,3 +245,40 @@ export const decodeOffsetCursor = (
       ? payload[1]
       : undefined,
   );
+
+/**
+ * The three parameters every `query` operation takes, over that operation's own
+ * sort fields, ready to be spread into a service's input struct.
+ *
+ * The contract declares the same three, but as the wire carries them: `sort` is
+ * one string there, because a URL query holds nothing else. A service is called
+ * both by a transport that has already decoded that string and by a workflow
+ * action that never had one, so what it decodes is the pair, not the string.
+ */
+export const pageInput = <const Fields extends ReadonlyArray<string>>(fields: Fields) => ({
+  limit: Schema.optionalKey(
+    Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: MAX_PAGE_LIMIT })),
+  ),
+  cursor: Schema.optionalKey(Schema.NonEmptyString),
+  sort: Schema.optionalKey(
+    Schema.Struct({
+      field: Schema.Literals(fields),
+      direction: Schema.optionalKey(SortDirection),
+    }),
+  ),
+});
+
+/**
+ * A cursor a listing will not accept, said the way the caller can act on: the
+ * `cursor` parameter is wrong. Every listing answers the same way, so the
+ * repository raises `CursorError` and the service that owns the operation turns
+ * it into the one `validation` error.
+ */
+export const refuseCursor = <A, E, R>(
+  effect: Effect.Effect<A, E | CursorError, R>,
+): Effect.Effect<A, Exclude<E, CursorError> | Validation, R> =>
+  Effect.catchIf(
+    effect,
+    (error): error is CursorError => error instanceof CursorError,
+    (error) => Effect.fail(validation([{ path: ["cursor"], message: error.message }])),
+  ) as Effect.Effect<A, Exclude<E, CursorError> | Validation, R>;

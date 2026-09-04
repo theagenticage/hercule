@@ -209,46 +209,6 @@ describe("project.delete", () => {
 });
 
 describe("projects and resources", () => {
-  it("lets one resource join two projects and one project hold two resources", async () => {
-    const { hydraId, docsId, byResource, byProject } = await run(
-      Effect.gen(function* () {
-        const sql = yield* SqlClient.SqlClient;
-        const projects = yield* ProjectService;
-        const hydra = yield* projects.create({ name: "Hydra" });
-        const docs = yield* projects.create({ name: "Docs" });
-        // Resources have no table yet, so these are ids the join table holds
-        // without a row of their own to point at.
-        const shared = "0199e0e7-1000-7000-8000-000000000000";
-        const other = "0199e0e7-1001-7000-8000-000000000000";
-        for (const [projectId, resourceId] of [
-          [hydra.id, shared],
-          [docs.id, shared],
-          [hydra.id, other],
-        ] as const) {
-          yield* sql`INSERT INTO project_resources (project_id, resource_id)
-                     VALUES (${uuidFromString(projectId)}, ${uuidFromString(resourceId)})`;
-        }
-        return {
-          hydraId: hydra.id,
-          docsId: docs.id,
-          byResource: yield* sql<{ readonly project_id: Uint8Array }>`
-            SELECT project_id FROM project_resources
-            WHERE resource_id = ${uuidFromString(shared)}`,
-          byProject: yield* sql<{ readonly resource_id: Uint8Array }>`
-            SELECT resource_id FROM project_resources
-            WHERE project_id = ${uuidFromString(hydra.id)}`,
-        };
-      }),
-    );
-    expect(byResource.map((row) => uuidToString(row.project_id)).sort()).toEqual(
-      [hydraId, docsId].sort(),
-    );
-    expect(byProject.map((row) => uuidToString(row.resource_id)).sort()).toEqual([
-      "0199e0e7-1000-7000-8000-000000000000",
-      "0199e0e7-1001-7000-8000-000000000000",
-    ]);
-  });
-
   it("leaves a task's projectId set when the project it names is deleted", async () => {
     const { project, task, rows } = await run(
       Effect.gen(function* () {

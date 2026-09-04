@@ -17,7 +17,7 @@ import { Forbidden, Internal, NotFound, Unauthenticated, Validation } from "../e
 import { Actor, ExternalRef, Id, Timestamp } from "../ids";
 import { page, pageParams } from "../pagination";
 import { Authenticated } from "../security";
-import { bounded } from "../strings";
+import { atMost, bounded } from "../strings";
 import { EventId } from "./event";
 
 /** The longest title. A title is a line, not a paragraph. */
@@ -31,6 +31,28 @@ export const MAX_LABEL_LENGTH = 64;
 
 /** The longest search text. Longer than a sentence is not a search. */
 export const MAX_SEARCH_TEXT_LENGTH = 512;
+
+/**
+ * The most labels one task carries. Labels are a flat namespace with no
+ * registry, so nothing else limits how many an edit can pile onto a row, and
+ * every one of them is re-read on every page and copied into a `task.updated`
+ * payload the log keeps for 90 days. Far more than anyone reads at a glance.
+ */
+export const MAX_TASK_LABELS = 64;
+
+/**
+ * The most provenance entries one call may append. The record itself grows over
+ * a task's life and is not bounded - that is what it is for - so what this
+ * bounds is one write.
+ */
+export const MAX_PROVENANCE_APPEND = 32;
+
+/**
+ * The most values one filter field takes. A filter is `any-of` within a field,
+ * and a list longer than this is not a filter but a query the caller should
+ * have split; four statuses and a handful of labels is what the screens ask.
+ */
+export const MAX_FILTER_VALUES = 64;
 
 /** The fixed status axis. Every transition between these is legal. */
 export const TASK_STATUSES = ["open", "in-progress", "done", "cancelled"] as const;
@@ -97,7 +119,7 @@ export const Task = Schema.Struct({
   description: TaskDescription,
   status: TaskStatus,
   priority: TaskPriority,
-  labels: Schema.Array(Label),
+  labels: atMost(Label, MAX_TASK_LABELS),
   /** At most one project, and it survives that project's deletion. */
   projectId: Schema.optionalKey(Id),
   provenance: Schema.Array(ProvenanceEntry),
@@ -118,9 +140,9 @@ export type Task = Schema.Schema.Type<typeof Task>;
  * never reached through it.
  */
 export const TaskFilter = Schema.Struct({
-  refs: Schema.optionalKey(Schema.Array(ExternalRef)),
-  labels: Schema.optionalKey(Schema.Array(Label)),
-  status: Schema.optionalKey(Schema.Array(TaskStatus)),
+  refs: Schema.optionalKey(atMost(ExternalRef, MAX_FILTER_VALUES)),
+  labels: Schema.optionalKey(atMost(Label, MAX_FILTER_VALUES)),
+  status: Schema.optionalKey(atMost(TaskStatus, MAX_FILTER_VALUES)),
   projectId: Schema.optionalKey(Id),
   text: Schema.optionalKey(bounded(1, MAX_SEARCH_TEXT_LENGTH)),
 });
@@ -138,9 +160,9 @@ export const TaskCreateInput = Schema.Struct({
   title: TaskTitle,
   description: TaskDescription,
   priority: Schema.optionalKey(TaskPriority),
-  labels: Schema.optionalKey(Schema.Array(Label)),
+  labels: Schema.optionalKey(atMost(Label, MAX_TASK_LABELS)),
   projectId: Schema.optionalKey(Id),
-  provenance: Schema.optionalKey(Schema.Array(ProvenanceInput)),
+  provenance: Schema.optionalKey(atMost(ProvenanceInput, MAX_PROVENANCE_APPEND)),
 });
 
 export type TaskCreateInput = Schema.Schema.Type<typeof TaskCreateInput>;
@@ -158,10 +180,10 @@ export const TaskUpdateInput = Schema.Struct({
    * task, and a whole-array replace would silently undo whichever of them
    * read the task first.
    */
-  addLabels: Schema.optionalKey(Schema.Array(Label)),
-  removeLabels: Schema.optionalKey(Schema.Array(Label)),
+  addLabels: Schema.optionalKey(atMost(Label, MAX_TASK_LABELS)),
+  removeLabels: Schema.optionalKey(atMost(Label, MAX_TASK_LABELS)),
   /** Appends. Provenance is never edited and never removed. */
-  provenance: Schema.optionalKey(Schema.Array(ProvenanceInput)),
+  provenance: Schema.optionalKey(atMost(ProvenanceInput, MAX_PROVENANCE_APPEND)),
 });
 
 export type TaskUpdateInput = Schema.Schema.Type<typeof TaskUpdateInput>;
