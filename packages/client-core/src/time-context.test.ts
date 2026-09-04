@@ -21,10 +21,25 @@ describe("formatTimeContext", () => {
     const instant = new Date("2026-09-05T22:05:00Z");
     assert.strictEqual(formatTimeContext(instant, "Europe/Amsterdam"), "Sunday 00:05");
   });
+
+  it("answers nothing for an instant that is not a date", () => {
+    assert.isUndefined(formatTimeContext(new Date("0000-00-00T00:00:00.000Z"), "UTC"));
+    assert.isUndefined(formatTimeContext(new Date(Number.NaN), "UTC"));
+  });
+
+  it("answers nothing for a zone this runtime cannot format", () => {
+    assert.isUndefined(formatTimeContext(MONDAY_MORNING, "Europe/Nowhere"));
+    assert.isUndefined(formatTimeContext(MONDAY_MORNING, ""));
+  });
 });
 
 describe("formatSince", () => {
   it("prefixes the same reading", () => {
     assert.strictEqual(formatSince(MONDAY_MORNING, "UTC"), "since Monday 07:14");
+  });
+
+  it("answers nothing wherever the reading itself is nothing", () => {
+    assert.isUndefined(formatSince(new Date("0000-00-00T00:00:00.000Z"), "UTC"));
+    assert.isUndefined(formatSince(MONDAY_MORNING, "Europe/Nowhere"));
   });
 });

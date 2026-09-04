@@ -194,4 +194,20 @@ describe("the top bar", () => {
       vi.useRealTimers();
     }
   });
+
+  it("keeps Intake standing when the stored marker is not a date", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-09-07T07:14:00.000Z"));
+    try {
+      const api = stubApi(inShell({ "lastChecked.intake": "0000-00-00T00:00:00.000Z" }));
+      await renderApp({ path: "/intake", api: api.fetch, token: "held" });
+
+      expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Intake");
+      expect(screen.getByText("Monday 09:14")).toBeDefined();
+      expect(screen.queryByText(/^since /)).toBeNull();
+      expect(screen.getByRole("navigation", { name: "Hydra" })).toBeDefined();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

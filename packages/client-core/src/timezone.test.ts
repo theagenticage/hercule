@@ -21,6 +21,17 @@ describe("the zones this runtime knows", () => {
     assert.isFalse(isSupportedTimezone("Amsterdam"));
     assert.isFalse(isSupportedTimezone(""));
   });
+
+  it("accepts a spelling the formatter takes but the canonical list leaves out", () => {
+    for (const zone of ["Asia/Kolkata", "US/Pacific", "GMT", "Etc/GMT+5"]) {
+      assert.doesNotThrow(() => new Intl.DateTimeFormat("en-US", { timeZone: zone }), zone);
+      assert.isTrue(isSupportedTimezone(zone), zone);
+    }
+  });
+
+  it("hands back the same list every time", () => {
+    assert.strictEqual(supportedTimezones(), supportedTimezones());
+  });
 });
 
 describe("browserTimezone", () => {

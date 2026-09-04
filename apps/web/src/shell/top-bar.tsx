@@ -19,9 +19,10 @@ import { useMinuteClock } from "./clock";
  *
  * A stored zone this browser cannot format - written by another client, or by
  * a browser whose zone database is newer - is read in UTC and said so, with
- * the screen that fixes it one click away. The bar is on every screen inside
- * the shell, so it is the one place that must never be the reason nothing
- * renders.
+ * the screen that fixes it one click away. A marker that is not a date says
+ * nothing at all, and the plain clock stands in its place. The bar is on every
+ * screen inside the shell, so it is the one place that must never be the
+ * reason nothing renders.
  */
 export function TopBar({ settings }: { readonly settings: SettingsState }): JSX.Element {
   const matches = useMatches();
@@ -33,7 +34,9 @@ export function TopBar({ settings }: { readonly settings: SettingsState }): JSX.
   const stored = settings.user.timezone ?? FALLBACK_TIMEZONE;
   const known = isSupportedTimezone(stored);
   const timezone = known ? stored : FALLBACK_TIMEZONE;
-  const since = framing?.sinceMarker === undefined ? undefined : settings.user[framing.sinceMarker];
+  const marker =
+    framing?.sinceMarker === undefined ? undefined : settings.user[framing.sinceMarker];
+  const since = marker === undefined ? undefined : formatSince(new Date(marker), timezone);
 
   return (
     <header className="flex items-baseline gap-3.5 px-8 pt-[22px]">
@@ -41,9 +44,7 @@ export function TopBar({ settings }: { readonly settings: SettingsState }): JSX.
         {framing?.title ?? ""}
       </h1>
       <span className="whitespace-nowrap text-[13px] text-muted">
-        {since === undefined
-          ? formatTimeContext(now, timezone)
-          : formatSince(new Date(since), timezone)}
+        {since ?? formatTimeContext(now, timezone)}
       </span>
       {known ? null : (
         <Link
