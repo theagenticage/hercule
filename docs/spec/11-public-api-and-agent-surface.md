@@ -61,7 +61,7 @@ The web app additionally holds one WebSocket for live topics (subscriptions only
 
 A Hydra MCP server is not a v1 transport (section 10).
 
-**Ids on the wire** are canonical lowercase UUIDv7 strings, except event ids, which are integers ([./04-state-store.md](./04-state-store.md)). The CLI accepts a full id or an unambiguous tail of eight or more characters for any `<id>` argument (`conflict` if ambiguous) and prints tails in human output; `--json` always prints full ids.
+**Ids on the wire** are canonical lowercase UUIDv7 strings, except event ids, which are integers ([./04-state-store.md](./04-state-store.md)). The CLI accepts a full id or an unambiguous tail of eight or more characters for any `<id>` argument (`conflict` if ambiguous) and prints tails in human output; `--json` always prints full ids. *(Amended 2026-09-04, [#57](https://github.com/rogierpennink/hydra/issues/57).)* **Tail resolution is a CLI-side behaviour**: the CLI resolves a tail through the entity's `query` operation and reports `conflict` itself when more than one id matches. The wire carries canonical ids only - no `{id}` path parameter and no input schema accepts a tail - so a tail costs an extra round trip and needs the entity's read grant.
 
 **Routes are resource paths with HTTP methods**, under `/api/v1/`. Every operation's `{ method, path }` is written explicitly in the contract's route table; the conventions below are what the table follows, and any exception (an irregular plural, a nested resource) is simply written in the table. One CI test asserts that operations and routes are one-to-one.
 
@@ -92,6 +92,8 @@ Path nouns are plural (`/tasks`) although operation ids are singular; that is th
 - `details` is typed per code: `forbidden` carries `{ grant }`; `cap_exceeded` carries `{ size, cap }` or `{ count, cap }`; `validation` carries `{ issues: { path: string[]; message: string }[] }`, mapped from the schema library's parse issues; the wire contract names no schema library.
 - `message` is for people and is never parsed.
 - **One error per response.** The service layer runs its checks in a fixed order and the first failing check is the response: `unauthenticated`, then the static grant check (`forbidden`, before any entity is touched), then `validation`, then `not_found`, then entity-dependent `forbidden` (the `memory` scope rule, section 6.4), then business rules (`conflict`, `invalid_state`, `cap_exceeded`), then `internal`. A caller lacking a grant learns that before learning whether the entity exists. `validation` is the one code that reports everything wrong at once, so a caller fixes every field in one retry.
+
+  *(Amended 2026-09-04, [#57](https://github.com/rogierpennink/hydra/issues/57).)* On HTTP the derived route decodes and validates the payload before it ever reaches a handler, so the fixed order only holds if the grant check runs earlier: **the static grant check is performed by transport middleware, before payload decoding**. The contract's operation-to-grant table (section 1.3) is therefore load-bearing at request time, not documentation. Service methods keep the same check inside the method, for in-process callers (built-in workflow actions, plugins) that reach no transport; a caller over HTTP is simply checked twice, identically.
 
 The `hydra` CLI prints `message` (and, for `forbidden`, the grant on its own line); `--json` prints the envelope verbatim.
 
@@ -248,7 +250,7 @@ Semantics: [./03-controller-and-runners.md](./03-controller-and-runners.md), [./
 | `plugin.configure` | `{ pluginId, config }` (deactivate + reactivate) | `infra.write` | `PUT /plugins/{id}/config` |
 | `provider.query` / `provider.read` | provider instances and their capability snapshots | `infra.read` | `GET /providers[/{id}]` |
 | `provider.create` / `update` / `delete` | instance config ([./06](./06-providers.md)) | `infra.write` | `POST` / `PATCH` / `DELETE /providers[/{id}]` |
-| `controller.read` | `{}` -> identity, version, update availability, default runner | `infra.read` | `GET /controller` |
+| `controller.read` | `{}` -> identity, version, update availability, default runner. *(2026-09-04, [#57](https://github.com/rogierpennink/hydra/issues/57): as built it returns identity and version only. Update availability and the default runner land with the update-check and runner tickets - they stay part of the operation's description, they are simply not there yet.)* | `infra.read` | `GET /controller` |
 | `controller.update` | `{ defaultRunnerId? }` | `infra.write` | `PATCH /controller` |
 | `controller.createPromotionToken` / `controller.export` / `controller.import` | promotion ([./15](./15-packaging-and-operations.md)); renamed from `mintPromotionToken` with `runner.createJoinToken` ([#44](https://github.com/rogierpennink/hydra/issues/44)) | `infra.write` | `POST /controller/promotion-tokens`, `.../export`, `.../import` |
 
@@ -314,13 +316,16 @@ Semantics: [./13-security.md](./13-security.md), [./15-packaging-and-operations.
 | Operation | Input | Grant | Route |
 |---|---|---|---|
 | `secret.query` | `{ owner? }` -> references only, never values | `secret.read` | `GET /secrets` |
-| `secret.set` / `secret.delete` | `{ owner, name, value }` / `{ owner, name }` | `secret.write` | `PUT` / `DELETE /secrets/{owner}/{name}` |
-| `apiKey.query` / `apiKey.create` / `apiKey.revoke` | user API keys (mint returns the token once) | `credential.read` / `credential.write` | `GET` / `POST /api-keys`, `DELETE /api-keys/{id}` |
+| `secret.set` / `secret.delete` | `{ ownerKind, ownerId, name, value }` / `{ ownerKind, ownerId, name }` | `secret.write` | `PUT` / `DELETE /secrets/{ownerKind}/{ownerId}/{name}` |
+| `apiKey.query` / `apiKey.create` / `apiKey.revoke` | user API keys; `create` takes `{ name }` and returns `{ id, name, token, createdAt }`, `token` present on create and never again | `credential.read` / `credential.write` | `GET` / `POST /api-keys`, `DELETE /api-keys/{id}` |
 | `user.setPassword` | `{ current, next }` | `credential.write` | `POST /user/password` |
 | `auth.login` | `{ username, password }` -> bearer token | none (pre-auth) | `POST /auth/login` |
+| `auth.logout` | `{}` -> `{}`; revokes the **login bearer that was presented** and nothing else. An API key or a session token gets `validation`: keys are revoked with `apiKey.revoke`, session tokens die with their session (added 2026-09-04, [#57](https://github.com/rogierpennink/hydra/issues/57)) | any authenticated caller | `POST /auth/logout` |
 | `auth.wsTicket` | `{}` -> short-lived WebSocket ticket | any authenticated caller | `POST /auth/ws-ticket` |
 | `setup.read` | `{}` -> `{ complete: boolean }`; unauthenticated, so the web app knows to route to `/setup` (resolved 2026-09-01, [#44](https://github.com/rogierpennink/hydra/issues/44)) | none (pre-auth) | `GET /setup` |
 | `setup.complete` | `{ username, password, timezone }` - the thin gate; every later onboarding step is an ordinary authenticated call ([./14](./14-web-app.md) §Onboarding, resolved 2026-09-01, [#45](https://github.com/rogierpennink/hydra/issues/45)); requires the one-time setup token ([./15](./15-packaging-and-operations.md)); atomically sets the password and returns a logged-in bearer token. Before setup completes, these two ops and the static bundle are all that is reachable; everything else is 401 | none (setup token) | `POST /setup/complete` |
+
+*(Amended 2026-09-04, [#57](https://github.com/rogierpennink/hydra/issues/57).)* A secret's owner is a **pair** - `ownerKind` (`connection | plugin | runner | provider-instance | core`) and `ownerId` - so it is two path segments, not one; the earlier `/secrets/{owner}/{name}` could not carry both, and the AEAD's associated data is `<ownerKind>|<ownerId>|<name>` ([./13-security.md](./13-security.md) §2.1). **`ownerKind: core` is rejected with `validation`** on `secret.set` and `secret.delete`: core secrets are the controller's own key material (the Ed25519 signing key), and overwriting one would break controller identity and every runner's trust in it ([./13-security.md](./13-security.md) §1).
 
 ### settings
 

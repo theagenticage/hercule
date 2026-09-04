@@ -43,10 +43,10 @@ Not design questions. The constraint is stated where one exists.
 - 13 §1: what counts as a tailnet address for the bind warning.
 - 13 §2.1: AEAD cipher choice with per-row nonce and owner/name as associated data.
 - 13 §2.3: the KDF from the promotion token.
-- 13 §4.2: the password hash function (argon2id expected).
+- ~~13 §4.2: the password hash function (argon2id expected).~~ **Resolved 2026-09-04 ([#57](https://github.com/rogierpennink/hydra/issues/57)):** argon2id via `Bun.password`, native in the pinned Bun; recorded in 13 §4.2.
 - 13 §9: the runner daemon's local channel for the git credential helper and how the helper authenticates.
 - 15 §11: macOS notarization of a Bun-compiled binary - prototype notarize + staple first.
-- 15 §11: serving the embedded SPA (`import index from "./index.html"` / `Bun.serve({ routes })`) through the Effect HTTP server on Bun (`@effect/platform-bun`), or beside it on the same port - confirm before the web bundle is wired in.
+- 15 §11: serving the embedded SPA (`import index from "./index.html"` / `Bun.serve({ routes })`) through the Effect HTTP server on Bun (`@effect/platform-bun`), or beside it on the same port - confirm before the web bundle is wired in. *(Still open. [#57](https://github.com/rogierpennink/hydra/issues/57) serves no bundle: it stands the HTTP server up for `/api/v1/*` only, and every non-API path 404s until the web-bundle ticket answers this.)*
 
 ## D. Standing risks
 
