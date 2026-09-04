@@ -86,7 +86,7 @@ One pnpm workspace. Every package is `@hydra/*`, `"type": "module"`, and exports
 
 ### Source layout
 
-Source is organized **by domain**, not by type: one folder per domain, named with the CONTEXT.md word for it, and its `index.ts` is the boundary other domains import through. `db/` and `config/` are the two infrastructure exceptions. Tests sit next to the code they test (`foo.test.ts` beside `foo.ts`); cross-package end-to-end tests live in `e2e/` at the repository root. See [ADR 0033](docs/adr/0033-source-is-organized-by-domain-and-tests-are-colocated.md).
+Source is organized **by domain**, not by type: one folder per domain, named with the CONTEXT.md word for it, and its `index.ts` is the boundary other domains import through. `db/` and `config/` are the two infrastructure exceptions. Tests sit next to the code they test and are told apart by name: a unit test is `foo.test.ts` beside `foo.ts`, and an integration test - one that drives several modules together through a single entry point, an HTTP transport or the whole rendered app - is `<entry>.integration.test.ts` beside the module it enters. End-to-end tests run against the compiled binary and live in `e2e/` at the repository root. See [ADR 0033](docs/adr/0033-source-is-organized-by-domain-and-tests-are-colocated.md).
 
 #### Web app layout
 
@@ -95,7 +95,7 @@ Source is organized **by domain**, not by type: one folder per domain, named wit
 3. A `-` prefixed route file is imported only as `./-<name>` from its own folder - eslint enforces this.
 4. `apps/web/src/app/` is wiring only: router, context, queries, entry guard, form, testing. Nothing that renders a screen.
 5. Reads are `queryOptions`, writes are `useMutation`; no component hand-rolls fetch state.
-6. Anything that interprets domain data goes to `@hydra/client-core` with its own test; a folder-wide test is named for its folder.
+6. Anything that interprets domain data goes to `@hydra/client-core` with its own test.
 
 ### Check commands
 

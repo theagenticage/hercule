@@ -22,8 +22,8 @@
  *
  * Each request is one fiber, and `BunHttpServer` wires the request's abort
  * signal to it: a client that hangs up interrupts the fiber, and
- * `disconnect.test.ts` holds a real socket to the consequence - a request that
- * was abandoned performs no durable write, authenticated or not.
+ * `disconnect.integration.test.ts` holds a real socket to the consequence - a
+ * request that was abandoned performs no durable write, authenticated or not.
  */
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
