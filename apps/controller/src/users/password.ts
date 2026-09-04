@@ -12,6 +12,7 @@
  * leaves every existing password verifiable, and a rehash happens the next time
  * the user sets one.
  */
+import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 
 /** The argon2id cost this controller hashes new passwords at. */
@@ -34,6 +35,15 @@ export const PRODUCTION_PASSWORD_PARAMS: PasswordParams = { memoryCost: 65536, t
  * repeatedly is otherwise dominated by a cost it is not testing.
  */
 export const TEST_PASSWORD_PARAMS: PasswordParams = { memoryCost: 4096, timeCost: 2 };
+
+/**
+ * What this controller hashes at. Production by default; a test provides the
+ * reduced cost once, rather than every call site passing parameters down.
+ */
+export const PasswordCost = Context.Reference<PasswordParams>(
+  "hydra/controller/users/PasswordCost",
+  { defaultValue: () => PRODUCTION_PASSWORD_PARAMS },
+);
 
 /** Hashes a password for storage. The plaintext is never held beyond this call. */
 export const hashPassword = (

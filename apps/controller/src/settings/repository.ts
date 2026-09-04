@@ -40,6 +40,10 @@ const SETTING_SCHEMAS = {
     /** How many daily snapshots to keep (spec 04, Backups). */
     "backup.keep": PositiveDays,
   },
+  user: {
+    /** The IANA zone the user reads times in, chosen during setup (spec 15 section 7). */
+    timezone: Schema.NonEmptyString,
+  },
 } as const;
 
 /** A scope whose keys are declared here, and so are typed on `get` and `setIfAbsent`. */
@@ -89,6 +93,24 @@ const make = Effect.gen(function* () {
         }),
         Effect.map((value) => value as SettingValue<S, K>),
       ),
+
+    /** Writes a setting, replacing whatever was there. */
+    set: <S extends TypedScope, K extends SettingKey<S>>(
+      scope: S,
+      key: K,
+      value: SettingValue<S, K>,
+    ): Effect.Effect<void, SettingError | SqlError> =>
+      Effect.gen(function* () {
+        const json = yield* Schema.encodeUnknownEffect(schemaFor(scope, key))(value).pipe(
+          Effect.mapError((error) => new SettingError({ scope, key, message: error.message })),
+        );
+        const at = new Date(yield* Clock.currentTimeMillis).toISOString();
+        yield* sql`
+          INSERT INTO settings (scope, key, value, updated_at)
+          VALUES (${scope}, ${key}, ${json}, ${at})
+          ON CONFLICT (scope, key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+        `;
+      }),
 
     /**
      * Writes a setting only when it is absent. Seeding a default never
