@@ -14,9 +14,13 @@
 import { Schema } from "effect";
 import { LoginPayload } from "./groups/auth";
 import { SetupPayload } from "./groups/setup";
+import { TaskCreateInput } from "./groups/task";
 
 /** The setup screen's payload: username, password, and the browser's timezone. */
 export const SetupForm = Schema.toStandardSchemaV1(SetupPayload);
 
 /** The login screen's payload. */
 export const LoginForm = Schema.toStandardSchemaV1(LoginPayload);
+
+/** What the Tasks screen's composer writes. */
+export const TaskCreateForm = Schema.toStandardSchemaV1(TaskCreateInput);

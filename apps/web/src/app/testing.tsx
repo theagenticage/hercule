@@ -18,6 +18,8 @@ const BASE_URL = "http://controller.test";
 export interface Call {
   readonly method: string;
   readonly path: string;
+  /** The query string as it went out, leading `?` and all; empty when there was none. */
+  readonly search: string;
   readonly body: unknown;
   readonly token: string | null;
 }
@@ -53,6 +55,7 @@ export const stubApi = (
     const call: Call = {
       method: init?.method ?? "GET",
       path: new URL(url).pathname,
+      search: new URL(url).search,
       body: sent.length === 0 ? undefined : JSON.parse(sent),
       token: authorization === null ? null : authorization.replace(/^Bearer /, ""),
     };

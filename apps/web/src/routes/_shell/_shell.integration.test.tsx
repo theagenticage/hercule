@@ -10,6 +10,9 @@ const api: Readonly<Record<string, Handler>> = {
       user: { "onboarding.completedSteps": ["timezone"], timezone: "Europe/Amsterdam" },
     },
   },
+  // Tasks is the one screen here that reads something of its own.
+  "GET /api/v1/tasks": { body: { items: [] } },
+  "GET /api/v1/projects": { body: { items: [] } },
 };
 
 /** Every screen inside the shell, and the first thing it says. */

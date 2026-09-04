@@ -74,7 +74,7 @@ export {
   bounded,
 } from "./strings";
 
-export { LoginForm, SetupForm } from "./forms";
+export { LoginForm, SetupForm, TaskCreateForm } from "./forms";
 
 /** The form-validation interface the schemas above answer to. */
 export type { StandardSchemaV1 } from "effect/StandardSchema";
@@ -105,7 +105,9 @@ export {
   MAX_TASK_DESCRIPTION_LENGTH,
   MAX_TASK_TITLE_LENGTH,
   ProvenanceEntry,
+  TASK_PRIORITIES,
   TASK_SORT_FIELDS,
+  TASK_STATUSES,
   Task,
   TaskCreateInput,
   TaskFilter,

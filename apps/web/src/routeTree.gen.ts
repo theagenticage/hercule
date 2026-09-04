@@ -21,7 +21,6 @@ import { Route as ShellIntakeRouteImport } from './routes/_shell/intake'
 import { Route as ShellNotificationsRouteImport } from './routes/_shell/notifications'
 import { Route as ShellRunsRouteImport } from './routes/_shell/runs'
 import { Route as ShellSettingsRouteImport } from './routes/_shell/settings'
-import { Route as ShellTasksRouteImport } from './routes/_shell/tasks'
 import { Route as ShellWorkflowsRouteImport } from './routes/_shell/workflows'
 import { Route as OnboardingTimezoneRouteImport } from './routes/onboarding/timezone'
 import { Route as ShellSettingsIndexRouteImport } from './routes/_shell/settings/index'
@@ -34,6 +33,7 @@ import { Route as ShellSettingsProfileRouteImport } from './routes/_shell/settin
 import { Route as ShellSettingsSecretsRouteImport } from './routes/_shell/settings/secrets'
 import { Route as ShellSettingsSystemRouteImport } from './routes/_shell/settings/system'
 import { Route as ShellSettingsThreadsRouteImport } from './routes/_shell/settings/threads'
+import { Route as ShellTasksIndexRouteImport } from './routes/_shell/tasks/index'
 
 const ShellRoute = ShellRouteImport.update({
   id: '/_shell',
@@ -92,11 +92,6 @@ const ShellRunsRoute = ShellRunsRouteImport.update({
 const ShellSettingsRoute = ShellSettingsRouteImport.update({
   id: '/settings',
   path: '/settings',
-  getParentRoute: () => ShellRoute,
-} as any)
-const ShellTasksRoute = ShellTasksRouteImport.update({
-  id: '/tasks',
-  path: '/tasks',
   getParentRoute: () => ShellRoute,
 } as any)
 const ShellWorkflowsRoute = ShellWorkflowsRouteImport.update({
@@ -160,6 +155,11 @@ const ShellSettingsThreadsRoute = ShellSettingsThreadsRouteImport.update({
   path: '/threads',
   getParentRoute: () => ShellSettingsRoute,
 } as any)
+const ShellTasksIndexRoute = ShellTasksIndexRouteImport.update({
+  id: '/tasks/',
+  path: '/tasks/',
+  getParentRoute: () => ShellRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof ShellIndexRoute
@@ -173,7 +173,6 @@ export interface FileRoutesByFullPath {
   '/notifications': typeof ShellNotificationsRoute
   '/runs': typeof ShellRunsRoute
   '/settings': typeof ShellSettingsRouteWithChildren
-  '/tasks': typeof ShellTasksRoute
   '/workflows': typeof ShellWorkflowsRoute
   '/onboarding/timezone': typeof OnboardingTimezoneRoute
   '/settings/assistants': typeof ShellSettingsAssistantsRoute
@@ -186,6 +185,7 @@ export interface FileRoutesByFullPath {
   '/settings/system': typeof ShellSettingsSystemRoute
   '/settings/threads': typeof ShellSettingsThreadsRoute
   '/settings/': typeof ShellSettingsIndexRoute
+  '/tasks/': typeof ShellTasksIndexRoute
 }
 export interface FileRoutesByTo {
   '/login': typeof LoginRoute
@@ -197,7 +197,6 @@ export interface FileRoutesByTo {
   '/intake': typeof ShellIntakeRoute
   '/notifications': typeof ShellNotificationsRoute
   '/runs': typeof ShellRunsRoute
-  '/tasks': typeof ShellTasksRoute
   '/workflows': typeof ShellWorkflowsRoute
   '/onboarding/timezone': typeof OnboardingTimezoneRoute
   '/': typeof ShellIndexRoute
@@ -211,6 +210,7 @@ export interface FileRoutesByTo {
   '/settings/system': typeof ShellSettingsSystemRoute
   '/settings/threads': typeof ShellSettingsThreadsRoute
   '/settings': typeof ShellSettingsIndexRoute
+  '/tasks': typeof ShellTasksIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -225,7 +225,6 @@ export interface FileRoutesById {
   '/_shell/notifications': typeof ShellNotificationsRoute
   '/_shell/runs': typeof ShellRunsRoute
   '/_shell/settings': typeof ShellSettingsRouteWithChildren
-  '/_shell/tasks': typeof ShellTasksRoute
   '/_shell/workflows': typeof ShellWorkflowsRoute
   '/onboarding/timezone': typeof OnboardingTimezoneRoute
   '/_shell/': typeof ShellIndexRoute
@@ -239,6 +238,7 @@ export interface FileRoutesById {
   '/_shell/settings/system': typeof ShellSettingsSystemRoute
   '/_shell/settings/threads': typeof ShellSettingsThreadsRoute
   '/_shell/settings/': typeof ShellSettingsIndexRoute
+  '/_shell/tasks/': typeof ShellTasksIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -254,7 +254,6 @@ export interface FileRouteTypes {
     | '/notifications'
     | '/runs'
     | '/settings'
-    | '/tasks'
     | '/workflows'
     | '/onboarding/timezone'
     | '/settings/assistants'
@@ -267,6 +266,7 @@ export interface FileRouteTypes {
     | '/settings/system'
     | '/settings/threads'
     | '/settings/'
+    | '/tasks/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/login'
@@ -278,7 +278,6 @@ export interface FileRouteTypes {
     | '/intake'
     | '/notifications'
     | '/runs'
-    | '/tasks'
     | '/workflows'
     | '/onboarding/timezone'
     | '/'
@@ -292,6 +291,7 @@ export interface FileRouteTypes {
     | '/settings/system'
     | '/settings/threads'
     | '/settings'
+    | '/tasks'
   id:
     | '__root__'
     | '/_shell'
@@ -305,7 +305,6 @@ export interface FileRouteTypes {
     | '/_shell/notifications'
     | '/_shell/runs'
     | '/_shell/settings'
-    | '/_shell/tasks'
     | '/_shell/workflows'
     | '/onboarding/timezone'
     | '/_shell/'
@@ -319,6 +318,7 @@ export interface FileRouteTypes {
     | '/_shell/settings/system'
     | '/_shell/settings/threads'
     | '/_shell/settings/'
+    | '/_shell/tasks/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -414,13 +414,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ShellSettingsRouteImport
       parentRoute: typeof ShellRoute
     }
-    '/_shell/tasks': {
-      id: '/_shell/tasks'
-      path: '/tasks'
-      fullPath: '/tasks'
-      preLoaderRoute: typeof ShellTasksRouteImport
-      parentRoute: typeof ShellRoute
-    }
     '/_shell/workflows': {
       id: '/_shell/workflows'
       path: '/workflows'
@@ -505,6 +498,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ShellSettingsThreadsRouteImport
       parentRoute: typeof ShellSettingsRoute
     }
+    '/_shell/tasks/': {
+      id: '/_shell/tasks/'
+      path: '/tasks'
+      fullPath: '/tasks/'
+      preLoaderRoute: typeof ShellTasksIndexRouteImport
+      parentRoute: typeof ShellRoute
+    }
   }
 }
 
@@ -547,9 +547,9 @@ interface ShellRouteChildren {
   ShellNotificationsRoute: typeof ShellNotificationsRoute
   ShellRunsRoute: typeof ShellRunsRoute
   ShellSettingsRoute: typeof ShellSettingsRouteWithChildren
-  ShellTasksRoute: typeof ShellTasksRoute
   ShellWorkflowsRoute: typeof ShellWorkflowsRoute
   ShellIndexRoute: typeof ShellIndexRoute
+  ShellTasksIndexRoute: typeof ShellTasksIndexRoute
 }
 
 const ShellRouteChildren: ShellRouteChildren = {
@@ -561,9 +561,9 @@ const ShellRouteChildren: ShellRouteChildren = {
   ShellNotificationsRoute: ShellNotificationsRoute,
   ShellRunsRoute: ShellRunsRoute,
   ShellSettingsRoute: ShellSettingsRouteWithChildren,
-  ShellTasksRoute: ShellTasksRoute,
   ShellWorkflowsRoute: ShellWorkflowsRoute,
   ShellIndexRoute: ShellIndexRoute,
+  ShellTasksIndexRoute: ShellTasksIndexRoute,
 }
 
 const ShellRouteWithChildren = ShellRoute._addFileChildren(ShellRouteChildren)

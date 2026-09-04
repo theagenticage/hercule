@@ -33,12 +33,20 @@ export const MAX_LABEL_LENGTH = 64;
 export const MAX_SEARCH_TEXT_LENGTH = 512;
 
 /** The fixed status axis. Every transition between these is legal. */
-export const TaskStatus = Schema.Literals(["open", "in-progress", "done", "cancelled"]);
+export const TASK_STATUSES = ["open", "in-progress", "done", "cancelled"] as const;
+
+export const TaskStatus = Schema.Literals(TASK_STATUSES);
 
 export type TaskStatus = Schema.Schema.Type<typeof TaskStatus>;
 
-/** How much this matters. Rendered as bars and weight, never as colour. */
-export const TaskPriority = Schema.Literals(["urgent", "high", "normal", "low"]);
+/**
+ * How much this matters. Rendered as bars and weight, never as colour. The
+ * order is the one a reader ranks them in, so a client rendering a chooser
+ * takes it as it is.
+ */
+export const TASK_PRIORITIES = ["urgent", "high", "normal", "low"] as const;
+
+export const TaskPriority = Schema.Literals(TASK_PRIORITIES);
 
 export type TaskPriority = Schema.Schema.Type<typeof TaskPriority>;
 

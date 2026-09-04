@@ -1,5 +1,5 @@
 import { assert, describe, it } from "vitest";
-import { formatSince, formatTimeContext } from "./time-context";
+import { formatSince, formatStamp, formatTimeContext } from "./time-context";
 
 /** Monday 2026-09-07, 07:14 UTC. */
 const MONDAY_MORNING = new Date("2026-09-07T07:14:00Z");
@@ -41,5 +41,20 @@ describe("formatSince", () => {
   it("answers nothing wherever the reading itself is nothing", () => {
     assert.isUndefined(formatSince(new Date("0000-00-00T00:00:00.000Z"), "UTC"));
     assert.isUndefined(formatSince(MONDAY_MORNING, "Europe/Nowhere"));
+  });
+});
+
+describe("formatStamp", () => {
+  /** 17:21 in Amsterdam on the fourth. */
+  const instant = new Date("2026-09-04T15:21:31.646Z");
+
+  it("reads a moment in the zone given, on a 24-hour clock", () => {
+    assert.strictEqual(formatStamp(instant, "Europe/Amsterdam"), "4 Sep 17:21");
+    assert.strictEqual(formatStamp(instant, "UTC"), "4 Sep 15:21");
+  });
+
+  it("answers nothing for a zone it cannot format or a moment that is not one", () => {
+    assert.isUndefined(formatStamp(instant, "Europe/Nowhere"));
+    assert.isUndefined(formatStamp(new Date(Number.NaN), "UTC"));
   });
 });

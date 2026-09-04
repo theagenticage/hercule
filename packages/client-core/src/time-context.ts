@@ -37,6 +37,34 @@ export const formatTimeContext = (instant: Date, timezone: string): string | und
   return `${part("weekday")} ${part("hour")}:${part("minute")}`;
 };
 
+/**
+ * A moment as a stamp beside a record: "4 Sep 17:21". The year is left off
+ * because these sit in lists that are read in the present; the zone and the
+ * 24-hour clock are the same ones every other reading uses.
+ */
+export const formatStamp = (instant: Date, timezone: string): string | undefined => {
+  let parts: readonly Intl.DateTimeFormatPart[];
+  try {
+    parts = new Intl.DateTimeFormat("en-US", {
+      timeZone: timezone,
+      day: "numeric",
+      month: "short",
+      hour: "2-digit",
+      minute: "2-digit",
+      hourCycle: "h23",
+    }).formatToParts(instant);
+  } catch {
+    return undefined;
+  }
+
+  const part = (type: Intl.DateTimeFormatPartTypes) =>
+    parts.find((candidate) => candidate.type === type)?.value ?? "";
+
+  const day = part("day");
+  if (day === "") return undefined;
+  return `${day} ${part("month")} ${part("hour")}:${part("minute")}`;
+};
+
 /** The same reading, framed as the moment a screen counts from. */
 export const formatSince = (instant: Date, timezone: string): string | undefined => {
   const reading = formatTimeContext(instant, timezone);

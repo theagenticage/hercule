@@ -14,7 +14,14 @@ export {
 } from "./client";
 export { ApiError, ConnectionError, type ErrorEnvelope } from "./errors";
 export { nextOnboardingStep, ONBOARDING_STEPS, type OnboardingStep } from "./onboarding";
-export { formatSince, formatTimeContext } from "./time-context";
+export { formatSince, formatStamp, formatTimeContext } from "./time-context";
+export {
+  priorityGlyph,
+  provenanceTarget,
+  taskRecedes,
+  type GlyphTone,
+  type PriorityReading,
+} from "./task-display";
 export { THREAD_ROWS_DEFAULT, threadRowsMode } from "./thread-rows";
 export {
   browserTimezone,

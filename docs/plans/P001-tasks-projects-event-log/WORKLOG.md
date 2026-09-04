@@ -11,7 +11,7 @@ Every skill run ends by appending a journal entry with a handoff block, even whe
 ## Status
 
 - **State:** in progress
-- **Current slice:** 5
+- **Current slice:** 6
 - **Blocked on:** none
 - **Journey:** not recorded yet
 
@@ -21,7 +21,7 @@ Every skill run ends by appending a journal entry with a handoff block, even whe
 | 2 | The Task domain | done | AC-3, AC-4, AC-5, AC-6, AC-7, AC-10, AC-13: `vitest run apps/controller/src/tasks` -> 34 passed. AC-11: the same run, plus `vitest run packages/contract/src/groups/task.test.ts` -> 2 passed, the ref grammar as the package exports it. `pnpm lint` and `pnpm dep-lint` green; `pnpm typecheck` and 58 HTTP tests still red on F-2 alone, unchanged by this slice. |
 | 3 | The Project domain | done | AC-12, AC-23: `bun --bun run vitest run --project node apps/controller/src/projects` -> 18 passed, the five operations, the join table both ways, a task keeping its `projectId` past its project's delete, and one `project.*` row per mutation. `pnpm lint` and `pnpm dep-lint` green; `pnpm typecheck` and 58 HTTP tests still red on F-2 alone, unchanged by this slice. |
 | 4 | The event reader, the routes, and the actor fix | done | AC-8: `vitest run --project node apps/controller/src/http/task.integration.test.ts apps/controller/src/http/event.integration.test.ts` -> 16 passed, both default orders, the refused `text`+`sort` pair, an unknown sort field, and a seven-row walk at limit 2 with and without `text`. AC-14: the same run plus `vitest run --project node apps/controller/src/auth` -> 8 passed, `auth.login.failed` stamped `null` through the service and on the wire. AC-15: the same event run, both populations from one call, all four filters, `GET /events/{id}` and its 404. AC-16: `pnpm build:binary && pnpm test:binary` -> 8 passed (2 files), the twelve operations out of `./hydra`. AC-22 is reachable for the first time: `pnpm typecheck`, `pnpm lint`, `pnpm test` (606 + 139 passed), `pnpm dep-lint` all green. Transcript: `docs/plans/P001-tasks-projects-event-log/evidence/cli-session.md`. |
-| 5 | The Tasks screen | pending | |
+| 5 | The Tasks screen | done | AC-17, AC-18: `vitest run --project react apps/web/src/routes/_shell/tasks` -> 16 passed, the row anatomy, the four filters, search and status going to the controller, both empty states, the composer, and the drawer with its provenance, its any-to-any status and its Esc, plus the five the review round forced. AC-19: `vitest run --project react packages/ui/src/primitives/list.test.tsx` -> 15 passed, the four primitives and the glyph carrying no colour token. All four checks green, plus `pnpm build:binary && pnpm test:binary` -> 8 passed. Visual proof at 1440x900 against `./hydra serve` with a seeded project and eight tasks, in both themes: `evidence/tasks-empty-{light,dark}.png`, `evidence/tasks-list-{light,dark}.png`, `evidence/tasks-search-{light,dark}.png`, `evidence/tasks-drawer-{light,dark}.png`. |
 | 6 | Spec documents and the finish pass | pending | |
 
 ## Findings
@@ -46,6 +46,17 @@ Every skill run ends by appending a journal entry with a handoff block, even whe
 | F-17 | P3 | AC-16 names `e2e/api.test.ts` and the flag `--label x`; the test shipped as `e2e/cli.test.ts` and the derived flag is `--labels`. `e2e/api.test.ts` runs against source under `pnpm test`, and AC-16 asks for the compiled binary, so a new file in the `binary` project is the only place the criterion can be met. The flag name is what the contract's field is called; a singular alias would be CLI code, which AC-16 forbids. | AC-16 / `e2e/cli.test.ts` | accepted | 1 |
 | F-18 | P3 | `Unauthenticated` sits in the error union of the task, project and event services but `requireGrant` only ever fails `Forbidden`, so it is unreachable in all three. Accepted: cutting it from one of the three would make the three disagree, and it becomes reachable the moment a session actor exists. | `apps/controller/src/events/reader.ts` | accepted | 1 |
 | F-8 | P3 | The priority rank is spelled in the migration's expression index and again in the repository, and nothing but a matching string makes SQLite use that index. A test now walks the four priorities one row at a time, which fails if either copy drifts. | `apps/controller/src/tasks/repository.ts` | accepted | 2 |
+| F-19 | P2 | The Tasks screen ships no priority filter, although the ticket asked for one: `task.query` declares `refs`, `labels`, `status`, `projectId` and `text` and nothing for priority. Filtering the loaded page in the browser would show a filtered page over an unfiltered walk, which is the silent substitution the hard rules forbid. Recorded rather than built: adding `priority` to `TaskFilter` is a contract change and a decision. | AC-17 / `packages/contract/src/groups/task.ts` | open | - |
+| F-20 | P2 | One task the contract's `Task` cannot decode empties the whole Tasks screen, because the page decodes as a unit. The same shape as F-15 on the reader, and unreachable for the same reason - the only writer is `TaskService`, which writes what the schema says. Recorded against the ingest ticket, which is where a foreign row first reaches these tables. | `apps/web/src/routes/_shell/tasks/index.tsx` | held | - |
+| F-21 | P3 | `pnpm test` collected the whole repository a second time out of `.claude/worktrees/<agent>`, so 137 tests failed on paths that are another agent's copy of this tree. Boyscouting, fixed in slice 5: the `node` project excludes `**/.claude/**`, and the directory is gitignored. | `vitest.config.ts` | fixed | - |
+| F-22 | P1 | A write the controller refused said nothing at all: neither mutation read its error, so a 403 on `task.update` left the drawer showing the old status and a 500 on `task.create` left the composer sitting there. The write was lost in silence, which the hard rules forbid outright. Fixed in slice 5: both the composer and the drawer render the controller's own message, and two tests hold it. | `apps/web/src/routes/_shell/tasks/index.tsx` | fixed | 1 |
+| F-23 | P1 | A task naming a project the picker did not hold - one past the page of projects that was read, or one whose project has been deleted, which the contract pins as a thing that happens - rendered a select whose value matched no option, so the browser showed the first: **No project**. The screen stated something untrue about the task. Fixed in slice 5: the select offers the task's own project, named by its id tail, and the row says the same. | `apps/web/src/routes/_shell/tasks/-detail.tsx` | fixed | 1 |
+| F-24 | P1 | The drawer read its task out of the listing, so `?task=<id>` for a task on no fetched page opened nothing and said nothing, and an edit that took the task out of the current filter unmounted the panel the user was working in. Fixed in slice 5: the drawer reads `task.read` and falls back to the listed row only until that answers, so it survives both. | `apps/web/src/routes/_shell/tasks/index.tsx` | fixed | 1 |
+| F-25 | P2 | Three smaller ones from the same round, all fixed in slice 5: the Labels filter asked the controller once per keystroke where the search box settles first; the drawer heard Escape on the document, so one press closed both the marks legend over it and the drawer; and it claimed `aria-modal` while the page behind it stayed focusable. Escape is now heard on the panel and the claim is gone. | `packages/ui/src/primitives/drawer.tsx` | fixed | 1 |
+| F-26 | P2 | One edit invalidates `["tasks"]`, which refetches every page the user has loaded: three requests after two `Show more` clicks. Accepted: the alternative is patching the cached page in place, which means the client deciding what the server would have answered, and the walk is short by construction. | `apps/web/src/routes/_shell/tasks/index.tsx` | accepted | 1 |
+| F-27 | P2 | The drawer's selects are controlled from the task, with no optimistic update, so on a slow controller a chosen status snaps back for the length of the round trip and the user clicks again. Accepted for now: an optimistic patch is a second copy of what the mutation does, and the failure it would mask is exactly what F-22 now shows. | `apps/web/src/routes/_shell/tasks/-detail.tsx` | accepted | 1 |
+| F-28 | P2 | The task list is not virtualized, against spec 14's pinned performance guardrail 3, although it is unbounded by design: `Show more` appends pages without limit. No criterion asked for it and TanStack Virtual is a new dependency, so it is recorded rather than built. | Spec 14 §Performance guardrails / `apps/web/src/routes/_shell/tasks/index.tsx` | open | 1 |
+| F-29 | P3 | "Nothing matches these filters." is new copy: spec 14's pinned empty-state table has the no-tasks-at-all case and nothing for a filter that matched nothing. The screen needs both. Add the second to the table with the other spec edits in slice 6. | `docs/spec/14-web-app.md` | open | 1 |
 
 ## Decisions
 
@@ -307,5 +318,90 @@ handoff:
     - e2e/cli.test.ts
     - docs/plans/P001-tasks-projects-event-log/evidence/cli-session.md
   findings: [F-1, F-5, F-14, F-15, F-16, F-17, F-18]
+  pending: []
+```
+
+### 2026-09-04 implement slice 5 (session 6)
+The Tasks screen, the four primitives it is built from, and the two readings of
+task data that are not presentation. The tests were written first from the SPEC
+alone by an agent that never saw the implementation and confirmed failing on the
+missing controls and the missing exports.
+
+`/tasks` is a folder route rather than one file: past a hundred and fifty lines
+the screen splits into `-composer` and `-detail`, and eslint holds a `-` file to
+its own folder, so the screen itself moved to `tasks/index.tsx`. The drawer is
+opened by `?task=<id>` and closed by taking it off again; there is no
+`/tasks/<id>` and no second read behind it - the drawer renders the task the
+listing already answered with, so opening one costs nothing.
+
+Four things the criteria did not force. The listing follows `nextCursor` behind
+a **Show more** rather than stopping at the first page, because a list that
+showed fifty of two hundred without saying so is the silent truncation the spec
+forbids on every other surface. The first page and the projects are answered in
+the route loader, so the screen never renders as a frame around nothing. A
+narrowed filter keeps the rows it had until the new ones arrive. And the search
+box waits two hundred milliseconds, so a typed word is one question rather than
+nine.
+
+`priorityGlyph`, `taskRecedes` and `provenanceTarget` are in `client-core` with
+their own tests: four priorities have to reach three bars, and which of them
+recede is a reading of the domain, not a component's business. `formatStamp`
+joins `formatTimeContext` there for the same reason. The glyph's four readings
+are bars and grey together - low one faint bar, normal two muted, high three
+muted, urgent three ink - because the two axes the design language allows are
+the only two there are, and four steps do not fit on one.
+
+The contract gained three things the screen needed and nothing else could give:
+`TASK_STATUSES` and `TASK_PRIORITIES` as plain arrays behind the two `Literals`,
+so a picker reads the axis rather than restating it, and `TaskCreateForm`, the
+create payload as a Standard Schema, so the composer is checked against exactly
+what the controller checks.
+
+Visual proof rather than a person's eye: eight screenshots at 1440x900 against
+the compiled binary with a seeded project and eight tasks, in both themes, in
+`evidence/`. Three things they caught and this slice fixed: the stamp column
+wrapped onto two lines and made every row 52px tall, the filter bar ran to the
+viewport edge while the list stopped at 940px, and Chrome drew its own blue
+clear button inside the search field - the one hue this palette has no place
+for. The one thing they did not settle: the priority glyph now trails its select
+in the drawer, which keeps every control on one left edge at the cost of that
+one select ending 23px early.
+
+Boyscouting: `pnpm test` was collecting a second copy of the whole repository
+out of another agent's worktree under `.claude/`, which failed 137 tests on
+paths that are not this tree (F-21). The `node` project now excludes it and it
+is gitignored.
+
+One test fixture was corrected rather than the code: it stamped a provenance
+entry `session:01a06d02`, which the contract's `Actor` refuses, so the page it
+was in decoded as nothing at all. That is F-20, recorded and held.
+
+One review round, one reviewer that tried to break the diff. It could not break
+the paging (a filter changed mid-walk starts one clean listing and never mixes
+old pages into it), a `?task=` carrying script tags, nulls or a very long value,
+two writes racing, focus restoration when the row that opened the drawer is
+gone, the class merging on any of the four primitives, or the contract change -
+`Schema.Literals(TASK_STATUSES)` builds the identical AST, so the CLI's walk and
+the generated document are untouched. Three P1s it did find are fixed here, each
+with a test: a refused write that said nothing (F-22), a task claiming it has no
+project when the picker simply did not hold the one it names (F-23), and a
+drawer that read its task out of the listing, so a deep link opened nothing and
+the user's own edit could unmount the panel they were working in (F-24). Three
+smaller ones are fixed with them (F-25) and three are accepted or recorded
+(F-26, F-27, F-28). Its last catch is boyscouting the boyscouting: `eslint` was
+still walking the agent worktree that `vitest` had stopped walking.
+
+```yaml
+handoff:
+  state: in-progress
+  next: implement slice 6 (spec documents and the finish pass)
+  produced:
+    - apps/web/src/routes/_shell/tasks/index.tsx
+    - apps/web/src/routes/_shell/tasks/-composer.tsx
+    - apps/web/src/routes/_shell/tasks/-detail.tsx
+    - packages/ui/src/primitives/{drawer,list-row,priority-glyph,textarea}.tsx
+    - packages/client-core/src/task-display.ts
+    - docs/plans/P001-tasks-projects-event-log/evidence/tasks-*.png
+  findings: [F-1, F-5, F-19, F-20, F-28, F-29]
   pending: []
 ```

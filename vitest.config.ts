@@ -32,6 +32,8 @@ export default defineConfig({
           exclude: [
             "**/node_modules/**",
             "**/dist/**",
+            // Agent worktrees are whole copies of this repository.
+            "**/.claude/**",
             ...reactPackages.map((p) => `${p}/**`),
             ...binaryTests,
           ],
