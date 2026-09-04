@@ -136,7 +136,9 @@ describe("createClient", () => {
     expectTypeOf(client.profile.read).parameter(0).toEqualTypeOf<{
       readonly params: { readonly id: string };
     }>();
-    expectTypeOf(client.setToken).toEqualTypeOf<(token: string | null) => void>();
+    expectTypeOf(client.setToken).toEqualTypeOf<
+      (token: string | null, persist?: boolean) => void
+    >();
   });
 });
 
@@ -181,6 +183,19 @@ describe("createClient with a token store", () => {
     assert.strictEqual(store.held, "tok_1");
 
     client.setToken(null);
+    assert.strictEqual(store.held, null);
+  });
+
+  it("sends a token it was told not to persist, without writing it", async () => {
+    const store = fakeStore();
+    const { fetch, sent } = stubFetch(() => json({ complete: false }));
+    const client = createClient({ baseUrl: BASE, fetch, tokenStore: store });
+
+    client.setToken("tok_one_time", false);
+    assert.strictEqual(store.held, null);
+
+    await client.setup.read();
+    assert.strictEqual(sent(0).headers.get("authorization"), "Bearer tok_one_time");
     assert.strictEqual(store.held, null);
   });
 

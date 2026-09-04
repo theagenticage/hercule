@@ -32,8 +32,14 @@ type Promisified<T> = {
 export type Operations = Promisified<HttpApiClient.ForApi<typeof api>>;
 
 export type HydraClient = Operations & {
-  /** The bearer token sent on every call from now on. `null` sends none. */
-  readonly setToken: (token: string | null) => void;
+  /**
+   * The bearer token sent on every call from now on. `null` sends none.
+   *
+   * A token that is not meant to outlive the call it is presented on - the
+   * one-time setup token - is held for this page load only: pass `false` and
+   * nothing is written to the store.
+   */
+  readonly setToken: (token: string | null, persist?: boolean) => void;
   /** The bearer token currently held. */
   readonly getToken: () => string | null;
 };
@@ -71,14 +77,16 @@ const TOKEN_FROM: Record<string, (result: unknown) => string | null> = {
 
 export const createClient = (options: ClientOptions): HydraClient => {
   const store = options.tokenStore;
-  let token = options.token ?? store?.read() ?? null;
 
-  const setToken = (next: string | null): void => {
+  // A token given to the constructor is the caller's answer and replaces
+  // whatever the store holds; only its absence falls back to the store.
+  let token = options.token === undefined ? (store?.read() ?? null) : options.token;
+  if (options.token !== undefined) store?.write(options.token);
+
+  const setToken = (next: string | null, persist = true): void => {
     token = next;
-    store?.write(next);
+    if (persist) store?.write(next);
   };
-
-  if (options.token !== undefined) setToken(options.token);
 
   const derived = Effect.runSync(
     HttpApiClient.make(api, {

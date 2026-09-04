@@ -18,6 +18,3 @@ export type OnboardingStep = (typeof ONBOARDING_STEPS)[number];
 /** The first step not yet completed, or `null` when there is none left. */
 export const nextOnboardingStep = (completedSteps: readonly string[]): OnboardingStep | null =>
   ONBOARDING_STEPS.find((step) => !completedSteps.includes(step)) ?? null;
-
-export const isOnboardingComplete = (completedSteps: readonly string[]): boolean =>
-  nextOnboardingStep(completedSteps) === null;

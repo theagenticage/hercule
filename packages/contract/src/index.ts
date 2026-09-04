@@ -62,10 +62,12 @@ export {
 
 export {
   MAX_PASSWORD_LENGTH,
+  MAX_TIMEZONE_LENGTH,
   MAX_USERNAME_LENGTH,
   MIN_PASSWORD_LENGTH,
   NewPassword,
   PresentedPassword,
+  Timezone,
   Username,
   bounded,
 } from "./strings";

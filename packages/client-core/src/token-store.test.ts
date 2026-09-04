@@ -48,3 +48,29 @@ describe("token store", () => {
     assert.strictEqual(storage.map.has("hydra:token:http://a.test"), false);
   });
 });
+
+describe("a browser that denies site data", () => {
+  const denied = (): StorageLike => ({
+    getItem: () => {
+      throw new DOMException("denied", "SecurityError");
+    },
+    setItem: () => {
+      throw new DOMException("denied", "SecurityError");
+    },
+    removeItem: () => {
+      throw new DOMException("denied", "SecurityError");
+    },
+  });
+
+  it("holds no token and swallows the write, rather than throwing at the caller", () => {
+    const store = createTokenStore("http://a.test", denied());
+    assert.strictEqual(store.read(), null);
+    assert.doesNotThrow(() => {
+      store.write("tok");
+    });
+    assert.doesNotThrow(() => {
+      store.write(null);
+    });
+    assert.strictEqual(store.read(), null);
+  });
+});

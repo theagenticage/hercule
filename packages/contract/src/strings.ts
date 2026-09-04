@@ -31,8 +31,11 @@ export const MAX_PASSWORD_LENGTH = 1024;
  * A password being set. Both bounds apply: this is a value the user chooses.
  */
 export const NewPassword = Schema.String.check(
-  Schema.isLengthBetween(MIN_PASSWORD_LENGTH, MAX_PASSWORD_LENGTH, {
+  Schema.isMinLength(MIN_PASSWORD_LENGTH, {
     message: `A password is at least ${String(MIN_PASSWORD_LENGTH)} characters.`,
+  }),
+  Schema.isMaxLength(MAX_PASSWORD_LENGTH, {
+    message: `A password is at most ${String(MAX_PASSWORD_LENGTH)} characters.`,
   }),
 );
 
@@ -44,7 +47,11 @@ export const MAX_USERNAME_LENGTH = 64;
  * before checking it would tell an anonymous caller the policy, and the answer
  * to a wrong password is `unauthenticated` either way.
  */
-export const PresentedPassword = bounded(1, MAX_PASSWORD_LENGTH);
+export const PresentedPassword = Schema.String.check(
+  Schema.isLengthBetween(1, MAX_PASSWORD_LENGTH, {
+    message: `A password is 1 to ${String(MAX_PASSWORD_LENGTH)} characters.`,
+  }),
+);
 
 /** A login name. */
 export const Username = Schema.String.check(
@@ -65,3 +72,17 @@ export const MAX_SECRET_VALUE_LENGTH = 64 * 1024;
 
 /** A secret's value. Empty is not a secret; use `secret.delete` instead. */
 export const SecretValue = bounded(1, MAX_SECRET_VALUE_LENGTH);
+
+/**
+ * The longest IANA zone name. The longest the zone database carries is under
+ * half of this; the bound is here because the value is caller-controlled text
+ * that every `settings.read` hands back.
+ */
+export const MAX_TIMEZONE_LENGTH = 64;
+
+/**
+ * An IANA zone name. Which names exist is the runtime's to say and changes with
+ * the zone database, so the contract bounds the length and the client that
+ * offers the field picks from the list its own runtime knows.
+ */
+export const Timezone = bounded(1, MAX_TIMEZONE_LENGTH);
