@@ -382,9 +382,11 @@ describe("the first run and everything after it", () => {
 
     // Exit 0 alone would also follow from `process.exit()`: the kernel releases
     // SQLite's locks either way. Closing the database is what checkpoints the
-    // write-ahead log back into `hydra.db` and truncates it, so a 0-byte `-wal`
-    // is the observable that separates a clean close from a killed process.
-    expect(statSync(wal).size).toBe(0);
+    // write-ahead log back into `hydra.db`, so an empty `-wal` is the
+    // observable that separates a clean close from a killed process. SQLite
+    // then removes the file where the platform lets it and truncates it to
+    // zero where it does not, so both outcomes mean checkpointed.
+    expect(existsSync(wal) ? statSync(wal).size : 0).toBe(0);
 
     controller = await startController({ home: state.home, port });
     expect(controller.output()).toContain("Hydra is set up.");
