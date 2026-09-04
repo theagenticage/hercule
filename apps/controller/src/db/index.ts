@@ -2,6 +2,7 @@
  * The controller's state store: one SQLite database, ambient transactions,
  * forward-only migrations.
  */
+export { AfterCommit, announce, type AfterCommitListener, type Change } from "./after-commit";
 export { DatabaseError, databaseError, MEMORY, openDatabase, withTransaction } from "./client";
 export { mintUuid, uuidFromString, uuidToString, UUID_PATTERN } from "./id";
 export {

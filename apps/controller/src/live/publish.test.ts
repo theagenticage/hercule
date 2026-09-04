@@ -1,0 +1,148 @@
+/**
+ * What a rolled-back mutation announces: nothing.
+ *
+ * An invalidation is a claim that a record changed, and a client that hears one
+ * refetches. So the claim has to be made after the write is durable, never
+ * before: a transaction that rolls back has changed nothing, however far it
+ * got, and a subscriber told otherwise would refetch a task that was never
+ * written and, worse, would have been told a lie the log itself does not hold.
+ *
+ * The case that matters is the one that gets furthest: a mutation whose audit
+ * row is already written when the transaction fails. Transactions are ambient
+ * and nest, so an outer `withTransaction` around `task.create` is exactly that
+ * mutation with a failure bolted after it - the task row and the `task.created`
+ * audit row are both written, and both are rolled back.
+ *
+ * This is the one thing about publishing a wire test cannot show, because no
+ * HTTP route fails after its audit row: the seam is reached here instead.
+ */
+import { describe, expect, it } from "vitest";
+import { Effect, Layer, Queue } from "effect";
+import type * as Scope from "effect/Scope";
+import * as SqlClient from "effect/unstable/sql/SqlClient";
+import type { LiveMessage } from "@hydra/contract";
+import { CurrentActor, type Actor } from "../actor";
+import { withTransaction } from "../db";
+import { TestDatabase } from "../db/testing";
+import { AuditLog, AuditLogLayer } from "../events";
+import { TaskService, TaskServiceLayer } from "../tasks";
+import { LiveTopics, LiveTopicsLayer, type LiveQueue } from "./topics";
+
+type Deps = TaskService | AuditLog | LiveTopics | SqlClient.SqlClient;
+
+const layer = TaskServiceLayer.pipe(
+  Layer.provideMerge(AuditLogLayer),
+  Layer.provideMerge(LiveTopicsLayer),
+  Layer.provideMerge(TestDatabase),
+);
+
+const USER: Actor = {
+  _tag: "user",
+  userId: "0199e0e7-0000-7000-8000-000000000000",
+  credential: { kind: "login", id: "0199e0e7-0001-7000-8000-000000000000", tokenHash: "x" },
+};
+
+const run = <A, E>(effect: Effect.Effect<A, E, Deps | Scope.Scope>): Promise<A> =>
+  Effect.runPromise(
+    Effect.scoped(effect).pipe(Effect.provideService(CurrentActor, USER), Effect.provide(layer)),
+  );
+
+/** What the failing transaction fails with. Nothing reads it; it only aborts. */
+class Rollback {
+  readonly _tag = "Rollback";
+}
+
+/**
+ * Everything a subscription has been handed, given a moment to arrive: the
+ * publish happens after the commit, so a read in the same turn as the write
+ * would be measuring the race rather than the behaviour.
+ */
+const settled = (queue: LiveQueue): Effect.Effect<ReadonlyArray<LiveMessage>> =>
+  Effect.gen(function* () {
+    for (let attempt = 0; attempt < 20; attempt++) {
+      const size = yield* Queue.size(queue);
+      if (size > 0) break;
+      yield* Effect.sleep("10 millis");
+    }
+    return yield* Effect.orDie(Queue.clear(queue));
+  });
+
+describe("publishing after a commit", () => {
+  it("says nothing for a transaction that rolled back after its audit row was written", async () => {
+    const held = await run(
+      Effect.gen(function* () {
+        const topics = yield* LiveTopics;
+        const tasks = yield* TaskService;
+        const sql = yield* SqlClient.SqlClient;
+        const queue = yield* topics.subscribe("task");
+
+        yield* Effect.ignore(
+          withTransaction(
+            sql,
+            Effect.gen(function* () {
+              yield* tasks.create({ title: "a task nobody will hear about", description: "" });
+              return yield* Effect.fail(new Rollback());
+            }),
+          ),
+        );
+
+        return yield* settled(queue);
+      }),
+    );
+
+    expect(held).toEqual([]);
+  });
+
+  it("says nothing for an inner write set that rolled back inside one that did not", async () => {
+    const [held, kept] = await run(
+      Effect.gen(function* () {
+        const topics = yield* LiveTopics;
+        const tasks = yield* TaskService;
+        const sql = yield* SqlClient.SqlClient;
+        const queue = yield* topics.subscribe("task");
+
+        const task = yield* withTransaction(
+          sql,
+          Effect.gen(function* () {
+            // A savepoint that is rolled back and gone on with: the outer
+            // transaction commits, and only what it kept is announced.
+            yield* Effect.ignore(
+              withTransaction(
+                sql,
+                Effect.andThen(
+                  tasks.create({ title: "a task that was thought better of", description: "" }),
+                  Effect.fail(new Rollback()),
+                ),
+              ),
+            );
+            return yield* tasks.create({ title: "a task that stayed", description: "" });
+          }),
+        );
+
+        return [yield* settled(queue), task.id] as const;
+      }),
+    );
+
+    expect(held).toEqual([{ _tag: "invalidate", ids: [kept], kind: "created" }]);
+  });
+
+  it("announces the same mutation when its transaction commits", async () => {
+    const [held, id] = await run(
+      Effect.gen(function* () {
+        const topics = yield* LiveTopics;
+        const tasks = yield* TaskService;
+        const sql = yield* SqlClient.SqlClient;
+        const queue = yield* topics.subscribe("task");
+
+        const task = yield* withTransaction(
+          sql,
+          tasks.create({ title: "a task that sticks", description: "" }),
+        );
+
+        return [yield* settled(queue), task.id] as const;
+      }),
+    );
+
+    expect(held).toEqual([{ _tag: "invalidate", ids: [id], kind: "created" }]);
+  });
+});

@@ -9,6 +9,8 @@ export {
   AuditLogLayer,
   type AuditEntry,
   type AuditKind,
+  type AuditRecord,
   type AuditRow,
 } from "./audit-log";
+export { eventsAfter, headOfLog } from "./log";
 export { EventService, EventServiceLayer } from "./reader";

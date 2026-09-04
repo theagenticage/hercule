@@ -25,7 +25,14 @@
 import { Schema } from "effect";
 import * as Rpc from "effect/unstable/rpc/Rpc";
 import * as RpcGroup from "effect/unstable/rpc/RpcGroup";
-import { Internal, Unauthenticated, Validation } from "../errors";
+import {
+  CapExceeded,
+  Forbidden,
+  Internal,
+  InvalidState,
+  Unauthenticated,
+  Validation,
+} from "../errors";
 import { Event } from "./event";
 
 /** The protocol version `hello` agrees on. One conversation, one version. */
@@ -110,12 +117,12 @@ export const live = RpcGroup.make(
   Rpc.make("hello", {
     payload: { v: Schema.Number, ticket: Schema.String },
     success: HelloResult,
-    error: Schema.Union([Unauthenticated, Validation, Internal]),
+    error: Schema.Union([Unauthenticated, Validation, InvalidState, Internal]),
   }),
   Rpc.make("subscribe", {
     payload: { topic: Schema.String, cursor: Schema.optionalKey(Schema.String) },
     success: LiveMessage,
-    error: Schema.Union([Unauthenticated, Validation, Internal]),
+    error: Schema.Union([Unauthenticated, Forbidden, Validation, CapExceeded, Internal]),
     stream: true,
   }),
   Rpc.make("ping", {

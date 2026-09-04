@@ -15,10 +15,20 @@
  * client that mis-asks once can go on working. And a subscription the client
  * lets go of leaves nothing behind on the controller.
  *
- * What a subscription then carries - invalidations and deltas - is not here;
- * nothing publishes yet.
+ * What a subscription then carries is here too: a mutable topic's
+ * invalidations, which name the changed records and nothing else, and the
+ * `event` log's deltas, which carry the records themselves with the cursor a
+ * reconnecting client replays from. Both are driven by ordinary HTTP calls
+ * against the same controller, because a push that does not agree with what
+ * `GET /tasks` and `GET /events` answer is worse than no push at all.
+ *
+ * And a connection is not trusted for ever: the credential behind it can be
+ * revoked, the log it reads needs the grant reading the log needs, a subscriber
+ * that stops reading is ended rather than buffered without bound, and the
+ * greeting happens once.
  */
 import { describe, expect, it } from "vitest";
+import type * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
@@ -29,8 +39,20 @@ import type { RpcClientError } from "effect/unstable/rpc/RpcClientError";
 import type * as RpcGroup from "effect/unstable/rpc/RpcGroup";
 import * as RpcSerialization from "effect/unstable/rpc/RpcSerialization";
 import * as BunSocket from "@effect/platform-bun/BunSocket";
-import { live, Unauthenticated, Validation } from "@hydra/contract";
-import { completeSetup, get, post, withServer, type LiveReader } from "../http/testing";
+import {
+  CapExceeded,
+  InvalidState,
+  live,
+  MUTABLE_LIVE_TOPICS,
+  Unauthenticated,
+  Validation,
+  type Delta,
+  type Event,
+  type LiveMessage,
+  type LiveTopic,
+  type Task,
+} from "@hydra/contract";
+import { completeSetup, del, get, post, send, withServer, type LiveReader } from "../http/testing";
 
 type LiveClient = RpcClient.RpcClient<RpcGroup.Rpcs<typeof live>, RpcClientError>;
 
@@ -90,18 +112,118 @@ const firstItem = (client: LiveClient, payload: { topic: string; cursor?: string
   Stream.runHead(client.subscribe(payload));
 
 /**
- * Asserts the controller holds exactly this many `task` subscriptions, giving it
- * time to get there. A subscription is torn down asynchronously, so a count read
- * in the same turn as the interrupt would be measuring the race rather than the
- * behaviour.
+ * Asserts the controller holds exactly this many subscriptions to a topic,
+ * giving it time to get there. A subscription is taken out and torn down
+ * asynchronously, so a count read in the same turn as the call would be
+ * measuring the race rather than the behaviour.
  */
-const expectHeld = async (reader: LiveReader, expected: number): Promise<void> => {
-  let seen = await reader.subscriberCount("task");
+const expectHeld = async (
+  reader: LiveReader,
+  expected: number,
+  topic: LiveTopic = "task",
+): Promise<void> => {
+  let seen = await reader.subscriberCount(topic);
   for (let attempt = 0; attempt < 200 && seen !== expected; attempt++) {
     await new Promise((resolve) => setTimeout(resolve, 10));
-    seen = await reader.subscriberCount("task");
+    seen = await reader.subscriberCount(topic);
   }
-  expect(seen).toBe(expected);
+  expect(seen, topic).toBe(expected);
+};
+
+/**
+ * What a call answered with, refusal or not, and never later than `limit`.
+ *
+ * A call the controller ought to refuse but does not would, flipped, throw its
+ * own success as a defect and say nothing about what happened; and one that is
+ * meant to fail but instead waits for a push that never comes would hang out
+ * the whole suite. Both read here as a value the assertion can name.
+ */
+const answer = <A, E>(
+  effect: Effect.Effect<A, E>,
+  limit: Duration.Input = "2 seconds",
+): Effect.Effect<unknown> =>
+  Effect.match(Effect.timeout(effect, limit), {
+    onSuccess: (value): unknown => value,
+    onFailure: (error): unknown => error,
+  });
+
+/** The value, asserted present, so a test reads past an index without a cast. */
+const present = <T>(value: T | undefined): T => {
+  expect(value).toBeDefined();
+  return value as T;
+};
+
+/** Waits up to `ms` for something to become true, and answers whether it did. */
+const within = async (ms: number, ready: () => boolean): Promise<boolean> => {
+  const deadline = Date.now() + ms;
+  while (!ready() && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  return ready();
+};
+
+/** What one subscription has pushed so far, collected as it arrives. */
+interface Collected {
+  readonly received: ReadonlyArray<LiveMessage>;
+  readonly fiber: Fiber.Fiber<void, unknown>;
+}
+
+/**
+ * Holds a subscription open and keeps everything it pushes, in order. The
+ * assertions are made against the array afterwards, so a test says what the
+ * subscriber ended up seeing rather than when each frame landed.
+ */
+const collecting = (
+  client: LiveClient,
+  payload: { readonly topic: string; readonly cursor?: string },
+): Effect.Effect<Collected, never, Scope.Scope> =>
+  Effect.gen(function* () {
+    const received: Array<LiveMessage> = [];
+    const fiber = yield* Effect.forkChild(
+      Stream.runForEach(client.subscribe(payload), (message) =>
+        Effect.sync(() => {
+          received.push(message);
+        }),
+      ),
+    );
+    return { received, fiber };
+  });
+
+/** The deltas a collector saw, which is every message on an append-only topic. */
+const deltas = (collected: Collected): ReadonlyArray<Delta> =>
+  collected.received.filter((message): message is Delta => message._tag === "delta");
+
+const createTask = async (base: string, token: string, title: string): Promise<Task> => {
+  const response = await post(base, "/api/v1/tasks", { title, description: "" }, token);
+  expect(response.status).toBe(200);
+  return (await response.json()) as Task;
+};
+
+const updateTask = async (base: string, token: string, id: string): Promise<void> => {
+  const response = await send("PATCH", base, `/api/v1/tasks/${id}`, {
+    body: { status: "done" },
+    token,
+  });
+  expect(response.status).toBe(200);
+};
+
+const deleteTask = async (base: string, token: string, id: string): Promise<void> => {
+  const response = await del(base, `/api/v1/tasks/${id}`, token);
+  expect(response.status).toBe(200);
+};
+
+/** The log as `GET /events` answers it, oldest first. */
+const logEvents = async (base: string, token: string): Promise<ReadonlyArray<Event>> => {
+  const response = await get(base, "/api/v1/events?sort=id:asc&limit=500", token);
+  expect(response.status).toBe(200);
+  return ((await response.json()) as { items: ReadonlyArray<Event> }).items;
+};
+
+/** One entry of the log, read back the way any other client reads it. */
+const readEvent = async (base: string, token: string, id: number): Promise<Event> => {
+  const response = await get(base, `/api/v1/events/${String(id)}`, token);
+  expect(response.status).toBe(200);
+  return (await response.json()) as Event;
 };
 
 describe("opening a live connection", () => {
@@ -357,6 +479,439 @@ describe("letting a subscription go", () => {
       // The scope closed the socket. Nothing is held for a connection that is
       // gone, whether or not it unsubscribed first.
       await expectHeld(reader, 0);
+    });
+  });
+});
+
+describe("what a task subscription is told", () => {
+  it("names the task on a create, an update and a delete, and tells no other topic", async () => {
+    await withServer(async (base, _audit, _sql, reader) => {
+      const token = await completeSetup(base);
+      const ticket = await ticketFor(base, token);
+
+      await onSocket(base, (client) =>
+        Effect.gen(function* () {
+          yield* client.hello({ v: 1, ticket });
+          const tasks = yield* collecting(client, { topic: "task" });
+          const runs = yield* collecting(client, { topic: "run" });
+          yield* Effect.promise(() => expectHeld(reader, 1, "task"));
+          yield* Effect.promise(() => expectHeld(reader, 1, "run"));
+
+          const task = yield* Effect.promise(() => createTask(base, token, "watched"));
+          expect(yield* Effect.promise(() => within(200, () => tasks.received.length >= 1))).toBe(
+            true,
+          );
+          expect(tasks.received[0]).toEqual({
+            _tag: "invalidate",
+            ids: [task.id],
+            kind: "created",
+          });
+
+          yield* Effect.promise(() => updateTask(base, token, task.id));
+          expect(yield* Effect.promise(() => within(200, () => tasks.received.length >= 2))).toBe(
+            true,
+          );
+          expect(tasks.received[1]).toEqual({
+            _tag: "invalidate",
+            ids: [task.id],
+            kind: "updated",
+          });
+
+          yield* Effect.promise(() => deleteTask(base, token, task.id));
+          expect(yield* Effect.promise(() => within(200, () => tasks.received.length >= 3))).toBe(
+            true,
+          );
+          expect(tasks.received[2]).toEqual({
+            _tag: "invalidate",
+            ids: [task.id],
+            kind: "deleted",
+          });
+
+          // A topic nothing happened on hears nothing: an invalidation is not
+          // a broadcast.
+          expect(runs.received).toEqual([]);
+
+          yield* Fiber.interrupt(tasks.fiber);
+          yield* Fiber.interrupt(runs.fiber);
+        }),
+      );
+    });
+  });
+
+  it("coalesces a burst into one message per kind, naming each id once", async () => {
+    await withServer(async (base, _audit, _sql, reader) => {
+      const token = await completeSetup(base);
+      const ticket = await ticketFor(base, token);
+
+      await onSocket(base, (client) =>
+        Effect.gen(function* () {
+          yield* client.hello({ v: 1, ticket });
+          const tasks = yield* collecting(client, { topic: "task" });
+          yield* Effect.promise(() => expectHeld(reader, 1, "task"));
+
+          const created = yield* Effect.promise(() =>
+            Promise.all([
+              createTask(base, token, "one"),
+              createTask(base, token, "two"),
+              createTask(base, token, "three"),
+            ]),
+          );
+          const doomed = present(created[0]);
+          yield* Effect.promise(() => deleteTask(base, token, doomed.id));
+
+          // Two messages and no more: the window holds a create and a delete,
+          // and each kind is announced once.
+          expect(yield* Effect.promise(() => within(1000, () => tasks.received.length >= 2))).toBe(
+            true,
+          );
+          yield* Effect.promise(() => within(200, () => tasks.received.length >= 3));
+          expect(tasks.received).toHaveLength(2);
+
+          const creates = tasks.received.filter(
+            (message) => message._tag === "invalidate" && message.kind === "created",
+          );
+          const deletes = tasks.received.filter(
+            (message) => message._tag === "invalidate" && message.kind === "deleted",
+          );
+          expect(creates).toHaveLength(1);
+          expect(deletes).toHaveLength(1);
+
+          const createdIds = (creates[0] as { ids: ReadonlyArray<string> }).ids;
+          expect([...createdIds].sort()).toEqual([...created.map((task) => task.id)].sort());
+          expect((deletes[0] as { ids: ReadonlyArray<string> }).ids).toEqual([doomed.id]);
+
+          // No message repeats an id, whatever the window swept up.
+          for (const message of tasks.received) {
+            const ids = (message as { ids: ReadonlyArray<string> }).ids;
+            expect(new Set(ids).size).toBe(ids.length);
+          }
+
+          yield* Fiber.interrupt(tasks.fiber);
+        }),
+      );
+    });
+  });
+});
+
+describe("what an event subscription is told", () => {
+  it("opens at the head of the log and pushes what is appended after it", async () => {
+    await withServer(async (base) => {
+      const token = await completeSetup(base);
+      const ticket = await ticketFor(base, token);
+      const before = await logEvents(base, token);
+      const head = present(before[before.length - 1]);
+
+      await onSocket(base, (client) =>
+        Effect.gen(function* () {
+          yield* client.hello({ v: 1, ticket });
+          const events = yield* collecting(client, { topic: "event" });
+
+          // The first item positions the client and hands it nothing: a
+          // subscriber with no cursor is asking for what happens next.
+          expect(yield* Effect.promise(() => within(1000, () => events.received.length >= 1))).toBe(
+            true,
+          );
+          expect(events.received[0]).toEqual({
+            _tag: "delta",
+            cursor: String(head.id),
+            items: [],
+          });
+
+          yield* Effect.promise(() => createTask(base, token, "a task the log records"));
+          expect(yield* Effect.promise(() => within(1000, () => events.received.length >= 2))).toBe(
+            true,
+          );
+
+          const pushed = present(deltas(events)[1]);
+          expect(pushed.items).toHaveLength(1);
+          const item = present(pushed.items[0]);
+          expect(item.kind).toBe("task.created");
+          expect(pushed.cursor).toBe(String(item.id));
+
+          // The record on the socket is the record over HTTP, field for field.
+          expect(item).toEqual(yield* Effect.promise(() => readEvent(base, token, item.id)));
+
+          yield* Fiber.interrupt(events.fiber);
+        }),
+      );
+    });
+  });
+
+  it("replays from a cursor, hands back nothing at the head, and refuses a cursor that is not one", async () => {
+    await withServer(async (base) => {
+      const token = await completeSetup(base);
+      for (const title of ["one", "two", "three", "four", "five"]) {
+        await createTask(base, token, title);
+      }
+      const ticket = await ticketFor(base, token);
+      const log = await logEvents(base, token);
+      expect(log.length).toBeGreaterThanOrEqual(5);
+      const from = present(log[log.length - 3]);
+      const missed = log.slice(log.length - 2);
+      const newest = present(log[log.length - 1]);
+
+      await onSocket(base, (client) =>
+        Effect.gen(function* () {
+          yield* client.hello({ v: 1, ticket });
+
+          const replay = yield* collecting(client, { topic: "event", cursor: String(from.id) });
+          expect(yield* Effect.promise(() => within(1000, () => replay.received.length >= 1))).toBe(
+            true,
+          );
+          const caught = present(deltas(replay)[0]);
+          expect(caught.items.map((item) => item.id)).toEqual(missed.map((item) => item.id));
+          expect(caught.cursor).toBe(String(newest.id));
+          yield* Fiber.interrupt(replay.fiber);
+
+          // A client already at the head has missed nothing, and is told so
+          // rather than told the log again.
+          const current = yield* collecting(client, { topic: "event", cursor: String(newest.id) });
+          expect(
+            yield* Effect.promise(() => within(1000, () => current.received.length >= 1)),
+          ).toBe(true);
+          expect(current.received[0]).toEqual({
+            _tag: "delta",
+            cursor: String(newest.id),
+            items: [],
+          });
+          yield* Fiber.interrupt(current.fiber);
+
+          const refused = yield* answer(
+            firstItem(client, { topic: "event", cursor: "the day before yesterday" }),
+          );
+          expect(refused).toBeInstanceOf(Validation);
+          expect((refused as Validation).error.code).toBe("validation");
+        }),
+      );
+    });
+  });
+
+  it("reads the log for a credential that may read the log, and needs no grant for the mutable topics", async () => {
+    await withServer(async (base, _audit, _sql, reader) => {
+      const token = await completeSetup(base);
+      const ticket = await ticketFor(base, token);
+
+      await onSocket(base, (client) =>
+        Effect.gen(function* () {
+          yield* client.hello({ v: 1, ticket });
+
+          const events = yield* collecting(client, { topic: "event" });
+          expect(yield* Effect.promise(() => within(1000, () => events.received.length >= 1))).toBe(
+            true,
+          );
+          expect(present(events.received[0])._tag).toBe("delta");
+          yield* Fiber.interrupt(events.fiber);
+
+          // The eight mutable topics carry no records, so being greeted is the
+          // whole of what they ask for: each one is accepted and held.
+          for (const topic of MUTABLE_LIVE_TOPICS) {
+            const held = yield* collecting(client, { topic });
+            yield* Effect.promise(() => expectHeld(reader, 1, topic));
+            yield* Fiber.interrupt(held.fiber);
+            yield* Effect.promise(() => expectHeld(reader, 0, topic));
+          }
+        }),
+      );
+    });
+  });
+
+  it("ends a subscriber that stops reading rather than queueing for it without bound", async () => {
+    await withServer(async (base, _audit, _sql, reader) => {
+      const token = await completeSetup(base);
+      const ticket = await ticketFor(base, token);
+
+      await onSocket(base, (client) =>
+        Effect.gen(function* () {
+          yield* client.hello({ v: 1, ticket });
+
+          // A subscriber that crawls: it takes a delta and then spends long
+          // enough on it that the controller cannot hand it the next thousand.
+          const seen: Array<Delta> = [];
+          const slow = yield* Effect.forkChild(
+            Stream.runForEach(client.subscribe({ topic: "event" }), (message) =>
+              Effect.gen(function* () {
+                if (message._tag === "delta") seen.push(message);
+                yield* Effect.sleep("5 millis");
+              }),
+            ),
+          );
+          yield* Effect.promise(() => expectHeld(reader, 1, "event"));
+
+          // Past the cap of a thousand queued deltas, and by enough that the
+          // crawl cannot be what saved it.
+          yield* Effect.promise(async () => {
+            for (let batch = 0; batch < 45; batch++) {
+              await Promise.all(
+                Array.from({ length: 50 }, (_, index) =>
+                  createTask(base, token, `flood ${String(batch)}-${String(index)}`),
+                ),
+              );
+            }
+          });
+
+          const failure = yield* answer(Fiber.join(slow), "20 seconds");
+          expect(failure).toBeInstanceOf(CapExceeded);
+          expect((failure as CapExceeded).error.code).toBe("cap_exceeded");
+          expect((failure as CapExceeded).error.details).toMatchObject({ cap: 1000 });
+
+          // The controller is holding nothing for it any more.
+          yield* Effect.promise(() => expectHeld(reader, 0, "event"));
+
+          // And the client can come back where it left off: what it missed is
+          // still the log, replayed from its last cursor.
+          const last = present(seen[seen.length - 1]);
+          const again = yield* collecting(client, { topic: "event", cursor: last.cursor });
+          expect(yield* Effect.promise(() => within(2000, () => again.received.length >= 1))).toBe(
+            true,
+          );
+          const replayed = present(deltas(again)[0]);
+          expect(replayed.items[0]?.id).toBe(Number(last.cursor) + 1);
+          yield* Fiber.interrupt(again.fiber);
+        }),
+      );
+    });
+  }, 120_000);
+});
+
+describe("a connection whose credential is gone", () => {
+  it("stops answering a login bearer that logged out, and pushes nothing more", async () => {
+    await withServer(async (base, _audit, _sql, reader) => {
+      const token = await completeSetup(base);
+      const ticket = await ticketFor(base, token);
+      // A second credential, so the test can still write once the first one is
+      // revoked. It is never the connection's; the connection is the bearer's.
+      const minted = await post(base, "/api/v1/api-keys", { name: "a writing key" }, token);
+      expect(minted.status).toBe(200);
+      const other = ((await minted.json()) as { token: string }).token;
+
+      await onSocket(base, (client) =>
+        Effect.gen(function* () {
+          yield* client.hello({ v: 1, ticket });
+          const tasks = yield* collecting(client, { topic: "task" });
+          yield* Effect.promise(() => expectHeld(reader, 1, "task"));
+
+          const loggedOut = yield* Effect.promise(() =>
+            post(base, "/api/v1/auth/logout", {}, token),
+          );
+          expect(loggedOut.status).toBe(200);
+
+          const refused = yield* answer(client.ping({}));
+          expect(refused).toBeInstanceOf(Unauthenticated);
+          expect((refused as Unauthenticated).error.code).toBe("unauthenticated");
+
+          // The connection is closed, not merely refused once: nothing on it
+          // answers afterwards.
+          expect(yield* Effect.exit(client.ping({}))).toMatchObject({ _tag: "Failure" });
+
+          // And what it was subscribed to reaches it no more. The mutation
+          // needs a live credential of its own, which is what the key is for.
+          const before = tasks.received.length;
+          yield* Effect.promise(() => createTask(base, other, "after the logout"));
+          yield* Effect.promise(() => within(500, () => tasks.received.length > before));
+          expect(tasks.received).toHaveLength(before);
+        }),
+      );
+    });
+  });
+
+  it("stops answering an API key that was revoked", async () => {
+    await withServer(async (base) => {
+      const token = await completeSetup(base);
+      const minted = await post(base, "/api/v1/api-keys", { name: "a socket key" }, token);
+      expect(minted.status).toBe(200);
+      const key = (await minted.json()) as { id: string; token: string };
+      const ticket = await ticketFor(base, key.token);
+
+      await onSocket(base, (client) =>
+        Effect.gen(function* () {
+          yield* client.hello({ v: 1, ticket });
+          expect(yield* client.ping({})).toEqual({});
+
+          const revoked = yield* Effect.promise(() =>
+            del(base, `/api/v1/api-keys/${key.id}`, token),
+          );
+          expect(revoked.status).toBe(200);
+
+          const refused = yield* answer(client.ping({}));
+          expect(refused).toBeInstanceOf(Unauthenticated);
+          expect((refused as Unauthenticated).error.code).toBe("unauthenticated");
+        }),
+      );
+    });
+  });
+});
+
+describe("what a connection may hold", () => {
+  it("refuses a ticket whose credential was revoked before it was spent", async () => {
+    await withServer(async (base) => {
+      const token = await completeSetup(base);
+      const ticket = await ticketFor(base, token);
+      // The ticket is good for five minutes, which is five minutes longer than
+      // the credential that fetched it is guaranteed to last.
+      expect((await post(base, "/api/v1/auth/logout", {}, token)).status).toBe(200);
+
+      await onSocket(base, (client) =>
+        Effect.gen(function* () {
+          const refused = yield* answer(client.hello({ v: 1, ticket }));
+          expect(refused).toBeInstanceOf(Unauthenticated);
+        }),
+      );
+    });
+  });
+
+  it("refuses a position the log has not reached, rather than watching nothing", async () => {
+    await withServer(async (base, _audit, _sql, reader) => {
+      const token = await completeSetup(base);
+      const ticket = await ticketFor(base, token);
+      const log = await logEvents(base, token);
+      const beyond = String(present(log[log.length - 1]).id + 1000);
+
+      await onSocket(base, (client) =>
+        Effect.gen(function* () {
+          yield* client.hello({ v: 1, ticket });
+          const refused = yield* answer(firstItem(client, { topic: "event", cursor: beyond }));
+          expect(refused).toBeInstanceOf(Validation);
+          yield* Effect.promise(() => expectHeld(reader, 0, "event"));
+        }),
+      );
+    });
+  });
+});
+
+describe("greeting a connection twice", () => {
+  it("refuses the second hello and leaves the connection as it was", async () => {
+    await withServer(async (base, _audit, _sql, reader) => {
+      const token = await completeSetup(base);
+      const ticket = await ticketFor(base, token);
+      const second = await ticketFor(base, token);
+
+      await onSocket(base, (client) =>
+        Effect.gen(function* () {
+          yield* client.hello({ v: 1, ticket });
+          const tasks = yield* collecting(client, { topic: "task" });
+          yield* Effect.promise(() => expectHeld(reader, 1, "task"));
+
+          const refused = yield* answer(client.hello({ v: 1, ticket: second }));
+          expect(refused).toBeInstanceOf(InvalidState);
+          expect((refused as InvalidState).error.code).toBe("invalid_state");
+
+          // The connection kept everything it had: it still answers, and what
+          // it was watching still reaches it.
+          expect(yield* client.ping({})).toEqual({});
+          yield* Effect.promise(() => expectHeld(reader, 1, "task"));
+          const task = yield* Effect.promise(() => createTask(base, token, "still watched"));
+          expect(yield* Effect.promise(() => within(1000, () => tasks.received.length >= 1))).toBe(
+            true,
+          );
+          expect(tasks.received[0]).toEqual({
+            _tag: "invalidate",
+            ids: [task.id],
+            kind: "created",
+          });
+
+          yield* Fiber.interrupt(tasks.fiber);
+        }),
+      );
     });
   });
 });
