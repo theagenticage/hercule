@@ -1,14 +1,15 @@
-import * as Schema from "effect/Schema";
-import { Health } from "@hydra/contract";
-
-const decodeHealth = Schema.decodeUnknownPromise(Health);
-
 /**
- * Decode a `/health` payload into a plain typed object.
+ * `@hydra/client-core`: the public API as promises.
  *
- * Decoding happens here so components never see a schema: `client-core` is the
- * only client package that writes Effect code.
+ * The one client package that writes Effect code (ADR 0017, ADR 0031). The web
+ * app and the CLI import `createClient` and see promises, plain objects, and
+ * the two error classes below - nothing else.
  */
-export function parseHealth(input: unknown): Promise<Health> {
-  return decodeHealth(input);
-}
+export {
+  createClient,
+  type ClientOptions,
+  type FetchLike,
+  type HydraClient,
+  type Operations,
+} from "./client";
+export { ApiError, ConnectionError, type ErrorEnvelope } from "./errors";

@@ -6,23 +6,8 @@
  * is generated from it. `OPERATIONS` is the route and grant table every 403 and
  * every `hydra ... --help` reads.
  */
-import { Schema } from "effect";
-
 /** Version of the public API surface this build speaks. */
 export const API_VERSION = 1;
-
-/**
- * Response of the unauthenticated liveness probe.
- *
- * Scaffolding from the first-run ticket: there is no `health` operation in the
- * catalogue, and this goes when `client-core` stops using it.
- */
-export const Health = Schema.Struct({
-  status: Schema.Literal("ok"),
-  apiVersion: Schema.Number,
-});
-
-export type Health = Schema.Schema.Type<typeof Health>;
 
 export { api } from "./api";
 
