@@ -303,10 +303,17 @@ export const createLive = (options: LiveOptions): Live => {
       }
     });
 
-  /** One connection, from the dial to whatever ends it. */
+  /**
+   * One connection, from the dial to whatever ends it. Answers how long it was
+   * greeted for, or nothing when it never was, which is what tells the next
+   * wait whether this was one drop in a bad minute or the first after a good
+   * hour. The reading is monotonic, so a clock the machine corrects while the
+   * connection is up does not make a moment look like an hour.
+   */
   const connect = (ticket: string) =>
     Effect.suspend(() => {
       const closed = Latch.makeUnsafe(false);
+      let greetedAt: number | null = null;
       const construct = (address: string): WebSocket => {
         const socket = dial(address);
         const ended = (): void => {
@@ -334,11 +341,15 @@ export const createLive = (options: LiveOptions): Live => {
           const rpc = yield* RpcClient.make(liveGroup);
           const greeting = yield* rpc.hello({ v: LIVE_PROTOCOL_VERSION, ticket });
           serverVersion = greeting.serverVersion;
+          greetedAt = performance.now();
           setStatus("connected");
           yield* Effect.raceFirst(session(rpc, closed), closed.await);
         }).pipe(Effect.provide(protocol)),
+      ).pipe(
+        Effect.ignore,
+        Effect.map(() => (greetedAt === null ? null : performance.now() - greetedAt)),
       );
-    }).pipe(Effect.ignore);
+    });
 
   /** Connect, and go on connecting, until the credential turns out to be gone. */
   const supervise = Effect.gen(function* () {
@@ -362,8 +373,12 @@ export const createLive = (options: LiveOptions): Live => {
         setStatus("unauthenticated");
         return;
       }
-      if (ticket.ticket !== null) yield* connect(ticket.ticket);
+      const held = ticket.ticket === null ? null : yield* connect(ticket.ticket);
       setStatus("disconnected");
+      // A connection that lasted longer than the longest wait was not a client
+      // that cannot connect, so the next drop starts over at the shortest wait
+      // rather than inheriting a schedule from hours ago.
+      if (held !== null && held >= MAX_RETRY_MS) delay = FIRST_RETRY_MS;
       yield* waitOut(delay);
       delay = Math.min(delay * 2, MAX_RETRY_MS);
     }

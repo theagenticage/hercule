@@ -361,6 +361,44 @@ describe("createLive", () => {
     assert.strictEqual(seen.length, tickets.length);
   });
 
+  it("waits from the shortest delay again after a connection that held", async () => {
+    const { fetch } = ticketServer();
+    const { socket } = await connected(fetch);
+
+    // Three quick drops walk the wait up to eight seconds.
+    let current = socket;
+    for (const delay of [1000, 2000, 4000]) {
+      current.drop();
+      await vi.advanceTimersByTimeAsync(delay);
+      await settle();
+      current = lastSocket();
+    }
+
+    // A connection that outlasts the longest wait was not a client that cannot
+    // connect, so the drop after it starts the schedule over.
+    await vi.advanceTimersByTimeAsync(31_000);
+    await settle();
+    const before = StubSocket.opened.length;
+
+    current.drop();
+    await settle();
+    assert.strictEqual(StubSocket.opened.length, before);
+
+    await vi.advanceTimersByTimeAsync(1000);
+    await settle();
+    assert.strictEqual(StubSocket.opened.length, before + 1);
+
+    // Started over, not flattened: the wait after that one doubles again.
+    lastSocket().drop();
+    await vi.advanceTimersByTimeAsync(1000);
+    await settle();
+    assert.strictEqual(StubSocket.opened.length, before + 1, "the schedule stopped growing");
+
+    await vi.advanceTimersByTimeAsync(1000);
+    await settle();
+    assert.strictEqual(StubSocket.opened.length, before + 2);
+  });
+
   it("stops for good and reports unauthenticated when the ticket is refused", async () => {
     const { fetch, count } = refusingFetch();
     const started = supervisor(fetch);
