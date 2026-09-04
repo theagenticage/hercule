@@ -3,7 +3,7 @@
  * promise-returning functions.
  *
  * This module is the whole reason `client-core` exists. The web app and the CLI
- * see nothing but promises, plain objects and two `Error` subclasses; every
+ * see nothing but promises, plain objects and three `Error` subclasses; every
  * Effect type stops here. Nothing about a route is written
  * by hand: the shape below is derived from `api`, so an operation added to the
  * contract appears here with no edit.
@@ -106,27 +106,34 @@ export const createClient = (options: ClientOptions): HydraClient => {
 
   /**
    * The fetch client reads its `fetch` from the fiber running the request, not
-   * from the context the client was built in, so an override goes on per call.
+   * from the context the client was built in, so it goes on per call. The
+   * wrapper is what tells a request that could not be encoded from an answer
+   * that could not be decoded: the two fail alike, and only the transport
+   * knows whether anything was sent. The flag is per call, so concurrent calls
+   * do not read each other's.
    */
-  const run = (effect: Effect.Effect<unknown, unknown>): Promise<unknown> =>
-    Effect.runPromise(
+  const run = (effect: Effect.Effect<unknown, unknown>): Promise<unknown> => {
+    let sent = false;
+    // A `FetchLike`, like the one a caller may pass: the transport calls it
+    // with a URL string, which is why `FetchLike` is declared that way.
+    const send: FetchLike = (url, init) => {
+      sent = true;
+      return options.fetch === undefined ? globalThis.fetch(url, init) : options.fetch(url, init);
+    };
+
+    return Effect.runPromise(
       Effect.result(
-        options.fetch === undefined
-          ? effect
-          : Effect.provideService(
-              effect,
-              FetchHttpClient.Fetch,
-              options.fetch as typeof globalThis.fetch,
-            ),
+        Effect.provideService(effect, FetchHttpClient.Fetch, send as typeof globalThis.fetch),
       ),
     ).then((result) => {
       if (Result.isFailure(result)) {
-        const error = toClientError(result.failure, options.baseUrl);
+        const error = toClientError(result.failure, options.baseUrl, sent);
         if (error instanceof ApiError && error.code === "unauthenticated") setToken(null);
         throw error;
       }
       return result.success;
     });
+  };
 
   const client: Record<string, unknown> = {
     setToken,

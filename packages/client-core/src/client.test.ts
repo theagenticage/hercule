@@ -1,5 +1,5 @@
 import { assert, describe, expectTypeOf, it } from "vitest";
-import { ApiError, ConnectionError, createClient, type FetchLike } from "./index";
+import { ApiError, ConnectionError, RequestError, createClient, type FetchLike } from "./index";
 
 const BASE = "http://controller.test";
 
@@ -16,7 +16,7 @@ const stubFetch = (respond: (request: Request) => Response) => {
     assert.isDefined(request, `no request at index ${index}`);
     return request;
   };
-  return { fetch, sent };
+  return { fetch, sent, seen };
 };
 
 const json = (body: unknown, status = 200) =>
@@ -121,6 +121,33 @@ describe("createClient", () => {
 
     assert.instanceOf(error, ApiError);
     assert.strictEqual(error.code, "internal");
+  });
+
+  it("turns a request it cannot encode into a RequestError, having sent nothing", async () => {
+    const { fetch, seen } = stubFetch(() => json({}));
+    const client = createClient({ baseUrl: BASE, fetch });
+
+    const error = await client.task
+      .create({
+        payload: {
+          title: "a task",
+          description: "",
+          provenance: [{ note: "names nothing" }],
+        } as never,
+      })
+      .then(
+        () => undefined,
+        (e: unknown) => e,
+      );
+
+    assert.instanceOf(error, RequestError);
+    assert.deepStrictEqual(error.issues, [
+      {
+        path: ["provenance", "0"],
+        message: "A provenance entry names at least one of ref, eventId and runId.",
+      },
+    ]);
+    assert.strictEqual(seen.length, 0);
   });
 
   it("exposes promises and plain types, never Effect ones", () => {

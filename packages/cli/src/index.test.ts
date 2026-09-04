@@ -426,6 +426,25 @@ describe("failures", () => {
     });
   });
 
+  it("exits 2 when a flag's value does not fit its field, and sends nothing", async () => {
+    const { io, fetch, run } = cli();
+    expect(
+      await run(
+        "task",
+        "create",
+        "--title",
+        "a task",
+        "--description",
+        "",
+        "--provenance",
+        '{"note":"nothing that names anything"}',
+      ),
+    ).toBe(2);
+    expect(fetch.calls).toEqual([]);
+    expect(io.stderr.join("\n")).toContain("--provenance: A provenance entry names at least one");
+    expect(io.stderr.join("\n")).toContain("run `hydra task create --help`");
+  });
+
   it("exits 3 when the controller cannot be reached", async () => {
     const fetch = stubFetch(() => {
       throw new TypeError("connect ECONNREFUSED");
