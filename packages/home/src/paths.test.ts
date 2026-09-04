@@ -25,6 +25,7 @@ describe("homePaths", () => {
     expect(paths).toEqual({
       home: "/srv/hydra",
       configFile: "/srv/hydra/config.toml",
+      credentialsFile: "/srv/hydra/credentials.json",
       dataDir: "/srv/hydra/data",
       databaseFile: "/srv/hydra/data/hydra.db",
       runnerDir: "/srv/hydra/runner",

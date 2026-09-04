@@ -9,6 +9,7 @@
 export { InvalidOptionError, parseGlobalOptions, type GlobalOptions } from "./args";
 export {
   configFileIn,
+  credentialsFileIn,
   DATABASE_FILE_NAME,
   DEFAULT_HOME_NAME,
   homePaths,

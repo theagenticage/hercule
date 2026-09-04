@@ -1,0 +1,131 @@
+/**
+ * Where the CLI gets its controller URL and its bearer token
+ * (spec 11 section 6.2, spec 13 section 5, spec 15 section 5).
+ *
+ * Two sources, in one fixed order: the environment, then
+ * `<home>/credentials.json`. The environment is what a session gets - the
+ * runner injects `HYDRA_API_URL` and `HYDRA_TOKEN` - and the file is what
+ * `hydra login` wrote for the user's own shell.
+ *
+ * `HYDRA_SESSION=1` marks a process the runner started. The file is then
+ * refused outright rather than merely deprioritised, so an agent whose
+ * environment token is missing or expired fails instead of silently acting as
+ * the user (spec 13 section 5).
+ */
+import { readFileSync } from "node:fs";
+import { credentialsFileIn } from "@hydra/home";
+
+/** The contents of `<home>/credentials.json`, exactly as `hydra login` writes it. */
+export interface CredentialFile {
+  readonly url: string;
+  readonly apiKey: string;
+}
+
+/** Where a resolved credential came from; what the human error messages name. */
+export type CredentialSource = "environment" | "file";
+
+export interface Credential {
+  readonly url: string;
+  readonly token: string;
+  readonly source: CredentialSource;
+}
+
+/** A credential could not be resolved. The message says which source failed and why. */
+export class CredentialError extends Error {
+  override readonly name = "CredentialError";
+}
+
+export type Env = Readonly<Record<string, string | undefined>>;
+
+/** True when this process was started by the runner inside a session. */
+export const inSession = (env: Env): boolean => env["HYDRA_SESSION"] === "1";
+
+/**
+ * Read the credential file, or `undefined` when there is none.
+ *
+ * An unreadable or malformed file is an error rather than "no credential": it
+ * is a broken state the user has to see, not a fallback to anonymity.
+ */
+const readCredentialFile = (path: string): CredentialFile | undefined => {
+  let text: string;
+  try {
+    text = readFileSync(path, "utf8");
+  } catch {
+    return undefined;
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    throw new CredentialError(`${path} is not valid JSON. Run \`hydra login <url>\` again.`);
+  }
+  if (typeof parsed !== "object" || parsed === null) {
+    throw new CredentialError(`${path} is not a credential file. Run \`hydra login <url>\` again.`);
+  }
+  const { url, apiKey } = parsed as { url?: unknown; apiKey?: unknown };
+  if (typeof url !== "string" || url === "" || typeof apiKey !== "string" || apiKey === "") {
+    throw new CredentialError(
+      `${path} has no \`url\` and \`apiKey\`. Run \`hydra login <url>\` again.`,
+    );
+  }
+  return { url, apiKey };
+};
+
+/**
+ * The controller URL and the token to send, or a `CredentialError` saying what
+ * to do about it.
+ *
+ * `home` is the already-resolved Hydra Home, so `--home` and `HYDRA_HOME` are
+ * honoured by the one parser every role runs (spec 15 section 6).
+ */
+export const resolveCredential = (home: string, env: Env): Credential => {
+  const token = env["HYDRA_TOKEN"];
+  const envUrl = env["HYDRA_API_URL"];
+
+  if (token !== undefined && token !== "") {
+    if (envUrl === undefined || envUrl === "") {
+      throw new CredentialError("HYDRA_TOKEN is set but HYDRA_API_URL is not. Set both, or none.");
+    }
+    return { url: envUrl, token, source: "environment" };
+  }
+
+  const path = credentialsFileIn(home);
+
+  if (inSession(env)) {
+    throw new CredentialError(
+      `HYDRA_SESSION=1 and no HYDRA_TOKEN. Inside a session the CLI refuses the credential file (${path}), so it cannot act as the user by accident.`,
+    );
+  }
+
+  const file = readCredentialFile(path);
+  if (file === undefined) {
+    throw new CredentialError(
+      `No credential. Set HYDRA_TOKEN and HYDRA_API_URL, or run \`hydra login <url>\`.`,
+    );
+  }
+  return {
+    url: envUrl !== undefined && envUrl !== "" ? envUrl : file.url,
+    token: file.apiKey,
+    source: "file",
+  };
+};
+
+/**
+ * The controller URL alone, for the two operations that need no credential
+ * (`setup.read`, `auth.login`) and for `setup.complete`, which carries a setup
+ * token instead.
+ */
+export const resolveUrl = (home: string, env: Env): string => {
+  const envUrl = env["HYDRA_API_URL"];
+  if (envUrl !== undefined && envUrl !== "") return envUrl;
+  if (inSession(env)) {
+    throw new CredentialError("HYDRA_SESSION=1 and no HYDRA_API_URL. Set HYDRA_API_URL.");
+  }
+  const file = readCredentialFile(credentialsFileIn(home));
+  if (file === undefined) {
+    throw new CredentialError(
+      `No controller URL. Set HYDRA_API_URL, or run \`hydra login <url>\`.`,
+    );
+  }
+  return file.url;
+};

@@ -19,6 +19,7 @@ import { isAbsolute, join, resolve } from "node:path";
 export interface HomePaths {
   readonly home: string;
   readonly configFile: string;
+  readonly credentialsFile: string;
   readonly dataDir: string;
   readonly databaseFile: string;
   readonly runnerDir: string;
@@ -55,6 +56,11 @@ export function configFileIn(home: string): string {
   return join(home, "config.toml");
 }
 
+/** Where the CLI credential file lives; mode 0600, `{ url, apiKey }` (spec 15 section 5). */
+export function credentialsFileIn(home: string): string {
+  return join(home, "credentials.json");
+}
+
 /** Where `setup-url` lives; known without reading any config (spec 15 section 7). */
 export function setupUrlFileIn(home: string): string {
   return join(home, "setup-url");
@@ -66,6 +72,7 @@ export function homePaths(home: string, dataDir: string): HomePaths {
   return {
     home,
     configFile: configFileIn(home),
+    credentialsFile: credentialsFileIn(home),
     dataDir: resolvedDataDir,
     databaseFile: join(resolvedDataDir, DATABASE_FILE_NAME),
     runnerDir: join(home, "runner"),
