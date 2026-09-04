@@ -14,7 +14,8 @@ import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient";
 import * as HttpClient from "effect/unstable/http/HttpClient";
 import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest";
 import * as HttpApiClient from "effect/unstable/httpapi/HttpApiClient";
-import { toClientError } from "./errors";
+import { ApiError, toClientError } from "./errors";
+import type { TokenStore } from "./token-store";
 
 /** The derived client, with every Effect method turned into a promise method. */
 type Promisified<T> = {
@@ -50,10 +51,34 @@ export interface ClientOptions {
   readonly token?: string | null;
   /** The `fetch` to send through. Defaults to the global one; a seam for tests. */
   readonly fetch?: FetchLike;
+  /**
+   * Where the token survives a page load. Given one, the client starts with
+   * the token it holds and keeps it in step: login and setup put their token
+   * in, logout takes it out, and so does an answer the token was rejected by.
+   */
+  readonly tokenStore?: TokenStore;
 }
 
+/**
+ * The operations that change which token is held, and what they change it to.
+ * Keyed `<group>.<name>`; the value reads the token out of the answer.
+ */
+const TOKEN_FROM: Record<string, (result: unknown) => string | null> = {
+  "setup.complete": (result) => (result as { readonly token: string }).token,
+  "auth.login": (result) => (result as { readonly token: string }).token,
+  "auth.logout": () => null,
+};
+
 export const createClient = (options: ClientOptions): HydraClient => {
-  let token = options.token ?? null;
+  const store = options.tokenStore;
+  let token = options.token ?? store?.read() ?? null;
+
+  const setToken = (next: string | null): void => {
+    token = next;
+    store?.write(next);
+  };
+
+  if (options.token !== undefined) setToken(options.token);
 
   const derived = Effect.runSync(
     HttpApiClient.make(api, {
@@ -81,24 +106,33 @@ export const createClient = (options: ClientOptions): HydraClient => {
       ),
     ).then((result) => {
       if (Result.isFailure(result)) {
-        throw toClientError(result.failure, options.baseUrl);
+        const error = toClientError(result.failure, options.baseUrl);
+        if (error instanceof ApiError && error.code === "unauthenticated") setToken(null);
+        throw error;
       }
       return result.success;
     });
 
   const client: Record<string, unknown> = {
-    setToken: (next: string | null) => {
-      token = next;
-    },
+    setToken,
     getToken: () => token,
   };
 
   for (const [group, endpoints] of Object.entries(derived)) {
     client[group] = Object.fromEntries(
-      Object.entries(endpoints).map(([name, call]) => [
-        name,
-        (request?: unknown) => run(call(request)),
-      ]),
+      Object.entries(endpoints).map(([name, call]) => {
+        const tokenFrom = TOKEN_FROM[`${group}.${name}`];
+        return [
+          name,
+          (request?: unknown) =>
+            tokenFrom === undefined
+              ? run(call(request))
+              : run(call(request)).then((result) => {
+                  setToken(tokenFrom(result));
+                  return result;
+                }),
+        ];
+      }),
     );
   }
 
