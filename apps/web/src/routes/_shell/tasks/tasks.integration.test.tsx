@@ -4,7 +4,7 @@
  * own, so the browser address is part of what these tests hold.
  */
 import { describe, expect, it } from "vitest";
-import { screen, waitFor, within } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { envelope, renderApp, stubApi, type Call, type Handler } from "../../../app/testing";
 
@@ -426,6 +426,62 @@ describe("Tasks > what the screen must not hide", () => {
     expect(within(next).queryByRole("alert")).toBeNull();
   });
 
+  it("clears a refusal once a later edit of the same task goes through", async () => {
+    const user = userEvent.setup();
+    const api = stubApi({
+      ...controller([RUNNER]),
+      // The status edit is refused; the priority edit that follows is taken.
+      [`PATCH /api/v1/tasks/${RUNNER.id}`]: (call: Call) => {
+        const sent = call.body as { status?: string; priority?: string };
+        return sent.status === undefined ? { body: { ...RUNNER, ...sent } } : refused;
+      },
+    });
+    await renderApp({ path: "/tasks", api: api.fetch, token: "held" });
+
+    await user.click(await screen.findByRole("button", { name: new RegExp(RUNNER.title) }));
+    const drawer = within(await screen.findByRole("dialog"));
+    await user.selectOptions(drawer.getByLabelText("Status"), "done");
+    expect((await screen.findByRole("alert")).textContent).toContain("task.update is not granted");
+
+    await user.selectOptions(drawer.getByLabelText("Priority"), "low");
+
+    await waitFor(() => {
+      expect(screen.queryByRole("alert")).toBeNull();
+    });
+  });
+
+  it("leaves a refusal behind when the task is left, Back included", async () => {
+    const user = userEvent.setup();
+    const api = stubApi({
+      ...controller([RUNNER]),
+      [`PATCH /api/v1/tasks/${RUNNER.id}`]: refused,
+    });
+    const { router } = await renderApp({ path: "/tasks", api: api.fetch, token: "held" });
+
+    await user.click(await screen.findByRole("button", { name: new RegExp(RUNNER.title) }));
+    await user.selectOptions(
+      within(await screen.findByRole("dialog")).getByLabelText("Status"),
+      "done",
+    );
+    expect((await screen.findByRole("alert")).textContent).toContain("task.update is not granted");
+
+    await user.keyboard("{Escape}");
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog")).toBeNull();
+    });
+
+    // Back reopens the same drawer without going through the row or the Close
+    // button, which is the one way in that clears nothing on the way.
+    await act(async () => {
+      router.history.back();
+      await router.load();
+    });
+
+    const reopened = await screen.findByRole("dialog");
+    expect(reopened.textContent).toContain(RUNNER.title);
+    expect(within(reopened).queryByRole("alert")).toBeNull();
+  });
+
   it("says so when the address names a task the controller will not answer for", async () => {
     const api = stubApi({
       ...controller([]),
@@ -437,7 +493,7 @@ describe("Tasks > what the screen must not hide", () => {
     await renderApp({ path: `/tasks?task=${RUNNER.id}`, api: api.fetch, token: "held" });
 
     const drawer = await screen.findByRole("dialog");
-    expect(drawer.textContent).toContain("could not be read");
+    expect(drawer.textContent).toContain("Task not found");
     expect(drawer.textContent).toContain(`no task with id ${RUNNER.id}`);
   });
 
