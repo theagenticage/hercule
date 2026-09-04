@@ -780,3 +780,56 @@ handoff:
     - the P3 tail from round 1 (F-57 through F-74) is still open apart from F-64's route-file half
     - F-47 is still handed to the session-actor ticket
 ```
+
+### 2026-09-04 ship (session 8)
+
+The branch is pushed and PR [#117](https://github.com/rogierpennink/hydra/pull/117)
+carries the whole of it against `main`. Nothing was committed here that was not
+already committed by the slices and the two fix rounds: the tree was clean at the
+start of this run, so Commit was a no-op and Deliver was the push plus the PR
+body.
+
+The ten commits this run pushed, on top of `fa4bc15` which was already on the
+remote:
+
+- `17bbe36` fix(cli): the CLI can send null, and an id-tail sweep walks a key nothing rewrites
+- `4e7e816` fix(controller,contract): one keyset walk, one clock read, and bounds on every list
+- `86c8325` docs(spec,plans): event.read is wider than the Withholds column, and exactly-once is per snapshot
+- `bd35697` fix(web,client-core): a refusal is shown for the task it belongs to, and a task that cannot be read says so
+- `780e6d0` docs(plans): record the web half of the fix round
+- `52830b0` refactor(controller): the last four hand-spelled clock reads go through nowIso
+- `44132b3` fix(contract): bound the four caller-written lists that had no maximum
+- `c4d24f8` fix(cli): say how a nullable field is cleared, and read stdin the same way
+- `2857b70` fix(web): a refusal belongs to the task it refused, and the Tasks route splits
+- `09a7925` docs(plans): correct three rows and record the second review round
+
+Guard read the whole outgoing diff, `fa4bc15...HEAD`, 52 files and 1981 added
+lines. Nothing was flagged and nothing was dropped: no credential, token or
+`.env` content anywhere in the set, no debug leftover, no configuration flipped
+for a local run, no generated file edited by hand, and `git ls-files` matches
+nothing under `.claude/worktrees` or any scratchpad path. Two deletions in the
+diff are moves rather than losses and were checked as such: the
+`project_resources` test left `projects/service.test.ts` for the migration test
+that owns the table, and the External Ref grammar test left `groups/task.test.ts`
+for `ids.test.ts`, which is where the schema it tests lives.
+
+The PR body keeps the evidence the earlier push uploaded and gains three things:
+a **Review** section stating what the two rounds found and what the fixes were,
+three more rows under **Decisions to review** (F-52, F-47 and F-76, each with
+the reason it is accepted rather than fixed), and the final check counts. The
+eight screenshots were re-fetched after the push and all eight answer 200; they
+404 to an anonymous client only because the repository is private.
+
+```yaml
+handoff:
+  state: shipped
+  next: review and merge #117
+  produced:
+    - https://github.com/rogierpennink/hydra/pull/117
+  findings: []
+  pending:
+    - the P3 tail from round 1 (F-57 through F-74) is open apart from F-64's route-file half
+    - F-47 is handed to the session-actor ticket, and spec 11 and spec 13 both say so
+    - F-76 and F-82 are accepted residuals, each with its reason in its row
+    - the visual pass on the drawer's priority glyph is still a manual check, and the PR says so
+```
