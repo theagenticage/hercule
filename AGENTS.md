@@ -105,7 +105,7 @@ Two more, for packaging work:
 
 ```
 pnpm format        # prettier --write
-pnpm build:binary  # vite build, then bun build --compile, writing ./hydra
+pnpm build:binary  # vite build, the bundle budget check, then bun build --compile, writing ./hydra
 ```
 
 Toolchain versions are pinned exactly, in `package.json` (`packageManager`, every dependency), in `.bun-version`, and in `.npmrc` (`save-exact=true`). Upgrading any of them is a deliberate, reviewed change.
