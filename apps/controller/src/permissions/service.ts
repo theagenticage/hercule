@@ -112,6 +112,7 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         yield* requireGrant("profile.create");
         return yield* withTransaction(
+          sql,
           Effect.gen(function* () {
             const created = yield* profiles.create(input.name, input.grants);
             if (Option.isNone(created)) return yield* Effect.fail(NAME_TAKEN(input.name));
@@ -123,20 +124,31 @@ const make = Effect.gen(function* () {
             return created.value;
           }),
         );
-      }).pipe(Effect.provideService(SqlClient.SqlClient, sql)),
+      }),
 
-    /** Edits a profile, shipped ones included (spec 13 section 6.2). */
+    /**
+     * Edits a profile, shipped ones included (spec 13 section 6.2).
+     *
+     * A patch that changes nothing is `validation`. It would otherwise answer
+     * 200 and stamp a `profile.updated` row for an edit that did not happen,
+     * and the operation that reads a profile without touching it is
+     * `profile.read`.
+     */
     update: (input: {
       readonly id: string;
       readonly name?: string;
       readonly grants?: ReadonlyArray<Grant>;
     }): Effect.Effect<
       Profile,
-      Unauthenticated | Forbidden | NotFound | Conflict | GrantsError | SqlError
+      Unauthenticated | Forbidden | NotFound | Conflict | Validation | GrantsError | SqlError
     > =>
       Effect.gen(function* () {
         yield* requireGrant("profile.update");
+        if (input.name === undefined && input.grants === undefined) {
+          return yield* Effect.fail(validation([{ path: [], message: "name a field to change" }]));
+        }
         return yield* withTransaction(
+          sql,
           Effect.gen(function* () {
             const outcome = yield* profiles.update(input.id, {
               ...(input.name === undefined ? {} : { name: input.name }),
@@ -146,7 +158,9 @@ const make = Effect.gen(function* () {
               case "absent":
                 return yield* Effect.fail(notFound(NO_SUCH_PROFILE));
               case "nameTaken":
-                return yield* Effect.fail(NAME_TAKEN(input.name ?? ""));
+                // Only the unique `name` column can make the update an ignore,
+                // so a patch that got here carried one.
+                return yield* Effect.fail(NAME_TAKEN(input.name!));
               case "updated":
                 yield* audit.append({
                   kind: "profile.updated",
@@ -157,7 +171,7 @@ const make = Effect.gen(function* () {
             }
           }),
         );
-      }).pipe(Effect.provideService(SqlClient.SqlClient, sql)),
+      }),
 
     /**
      * Deletes a profile the user made. A shipped profile is `invalid_state`:
@@ -173,6 +187,7 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         yield* requireGrant("profile.delete");
         return yield* withTransaction(
+          sql,
           Effect.gen(function* () {
             const found = yield* profiles.getById(input.id);
             if (Option.isNone(found)) return yield* Effect.fail(notFound(NO_SUCH_PROFILE));
@@ -190,7 +205,7 @@ const make = Effect.gen(function* () {
             return {};
           }),
         );
-      }).pipe(Effect.provideService(SqlClient.SqlClient, sql)),
+      }),
   };
 });
 

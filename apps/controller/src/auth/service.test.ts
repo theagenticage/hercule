@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { Effect, Layer, Option } from "effect";
+import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { CurrentActor, type Actor } from "../actor";
 import { Credentials, CredentialsLayer, hashToken } from "../credentials";
 import { TestDatabase } from "../db/testing";
@@ -9,7 +10,7 @@ import { Auth, AuthLayer } from "./service";
 
 const PASSWORD = "correct horse battery staple";
 
-type Deps = Auth | Users | Credentials | AuditLog;
+type Deps = Auth | Users | Credentials | AuditLog | SqlClient.SqlClient;
 
 const layer = AuthLayer.pipe(
   Layer.provideMerge(Layer.mergeAll(UsersLayer, CredentialsLayer, AuditLogLayer)),
@@ -64,6 +65,21 @@ describe("auth.login", () => {
 
     expect(wrongPassword).toMatchObject({ error: { code: "unauthenticated" } });
     expect(JSON.stringify(noSuchUser)).toEqual(JSON.stringify(wrongPassword));
+  });
+
+  it("still answers a wrong password 401 when the attempt cannot be logged", async () => {
+    const error = await run(
+      Effect.gen(function* () {
+        const auth = yield* Auth;
+        const sql = yield* SqlClient.SqlClient;
+        yield* withUser;
+        // The one store the failed-login path writes to, taken away under it.
+        yield* sql`DROP TABLE events`;
+        return yield* Effect.flip(auth.login({ username: "rogier", password: "guess" }));
+      }),
+    );
+
+    expect(error).toMatchObject({ error: { code: "unauthenticated" } });
   });
 
   it("verifies a password even when the username does not exist, so login is no oracle", async () => {

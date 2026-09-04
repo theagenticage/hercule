@@ -114,7 +114,14 @@ export const withServer = (
   ).finally(() => rmSync(home, { recursive: true, force: true }));
 };
 
-/** A request with a JSON body, and optionally a bearer token. */
+/**
+ * A request with a JSON body, and optionally a bearer token.
+ *
+ * Every request closes its connection. Node's `fetch` keeps a connection alive
+ * after a request whose body ran past about 64 KB, and the server's graceful
+ * stop then waits some ten seconds for that idle socket, which is long enough
+ * to time a test out in the scope close rather than in the assertion.
+ */
 export const send = (
   method: string,
   base: string,
@@ -125,6 +132,7 @@ export const send = (
     method,
     headers: {
       "content-type": "application/json",
+      connection: "close",
       ...(options.token === undefined ? {} : { authorization: `Bearer ${options.token}` }),
     },
     ...(options.body === undefined

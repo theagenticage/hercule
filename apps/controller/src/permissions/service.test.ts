@@ -49,6 +49,20 @@ describe("profile.create", () => {
     expect(entries[0]?.payload).toEqual({ id: profile.id, name: "reviewer" });
   });
 
+  it("refuses a patch that names no field, and stamps nothing", async () => {
+    const outcome = await run(
+      Effect.gen(function* () {
+        const profiles = yield* Profiles;
+        const audit = yield* AuditLog;
+        const created = yield* profiles.create({ name: "reviewer", grants: READER });
+        const error = yield* Effect.flip(profiles.update({ id: created.id }));
+        return { error, entries: yield* audit.listByKind("profile.updated") };
+      }),
+    );
+    expect(outcome.error).toMatchObject({ error: { code: "validation" } });
+    expect(outcome.entries).toEqual([]);
+  });
+
   it("refuses a name another profile already holds", async () => {
     const error = await runError(
       Effect.gen(function* () {
@@ -152,6 +166,20 @@ describe("profile.update", () => {
       }),
     );
     expect(updated).toMatchObject({ name: "auditor", grants: READER });
+  });
+
+  it("refuses a patch that names no field, and stamps nothing", async () => {
+    const outcome = await run(
+      Effect.gen(function* () {
+        const profiles = yield* Profiles;
+        const audit = yield* AuditLog;
+        const created = yield* profiles.create({ name: "reviewer", grants: READER });
+        const error = yield* Effect.flip(profiles.update({ id: created.id }));
+        return { error, entries: yield* audit.listByKind("profile.updated") };
+      }),
+    );
+    expect(outcome.error).toMatchObject({ error: { code: "validation" } });
+    expect(outcome.entries).toEqual([]);
   });
 
   it("refuses a name another profile already holds", async () => {

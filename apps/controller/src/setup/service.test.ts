@@ -137,8 +137,10 @@ describe("setup.complete", () => {
     const timezone = await run(
       Effect.gen(function* () {
         const settings = yield* Settings;
+        const users = yield* Users;
         yield* complete;
-        return yield* settings.get("user", "timezone");
+        const user = yield* users.findByUsername("rogier");
+        return yield* settings.getForUser(Option.getOrThrow(user).id, "timezone");
       }),
     );
 

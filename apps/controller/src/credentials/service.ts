@@ -90,6 +90,7 @@ const make = Effect.gen(function* () {
         const actor = yield* currentUser("apiKey.create");
         const token = mintToken();
         const record = yield* withTransaction(
+          sql,
           Effect.gen(function* () {
             const created = yield* credentials.createApiKey(
               actor.userId,
@@ -105,7 +106,7 @@ const make = Effect.gen(function* () {
           }),
         );
         return { id: record.id, name: record.name, token, createdAt: record.createdAt };
-      }).pipe(Effect.provideService(SqlClient.SqlClient, sql)),
+      }),
 
     /**
      * The caller's own keys, revoked ones included: a key that was revoked
@@ -145,6 +146,7 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         const actor = yield* currentUser("apiKey.revoke");
         return yield* withTransaction(
+          sql,
           Effect.gen(function* () {
             const revoked = yield* credentials.revokeApiKey(actor.userId, input.id);
             if (!revoked) return yield* Effect.fail(notFound("no such API key"));
@@ -156,7 +158,7 @@ const make = Effect.gen(function* () {
             return {};
           }),
         );
-      }).pipe(Effect.provideService(SqlClient.SqlClient, sql)),
+      }),
   };
 });
 

@@ -21,9 +21,10 @@
  * by `user_id` from day one, so a second user is a `WHERE` clause rather than a
  * migration.
  *
- * It also carries one index that belongs to 0001's tables: the secrets listing
- * had no index for its own sort key. 0001 has shipped in development databases
- * and would not re-run, so the index is added here.
+ * It also carries two things that belong to 0001's tables. The secrets listing
+ * had no index for its own sort key, and the user settings store had no user
+ * column at all. 0001 has shipped in development databases and would not
+ * re-run, so both are settled here.
  */
 import * as Effect from "effect/Effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
@@ -84,4 +85,20 @@ export default Effect.gen(function* () {
   // `(owner_kind, owner_id, name)`, so the default call - the one the CLI and
   // the web app make - was a full scan plus a temp b-tree for the ORDER BY.
   yield* sql`CREATE INDEX secrets_name ON secrets (name, id)`;
+
+  // The user settings store (spec 11 section 2). Keyed by user id from day one,
+  // so a second user is a `WHERE` clause rather than a table rebuild that has
+  // to guess which user owned each row. 0001's `settings` table allowed a
+  // `user` scope and nothing ever wrote one; from here it holds the controller
+  // scope alone, and its unused `scope` value is left in place because 0001 has
+  // shipped.
+  yield* sql`
+    CREATE TABLE user_settings (
+      user_id BLOB NOT NULL REFERENCES users (id),
+      key TEXT NOT NULL,
+      value TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY (user_id, key)
+    ) WITHOUT ROWID
+  `;
 });

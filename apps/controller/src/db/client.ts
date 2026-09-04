@@ -169,8 +169,8 @@ export const openDatabase = (
   );
 
 /**
- * Runs one operation's write set in a transaction. Nested calls join the outer
- * transaction through a savepoint.
+ * Runs one operation's write set in a transaction, on the client the caller
+ * already holds. Nested calls join the outer transaction through a savepoint.
  *
  * A transaction never spans a wait on anything outside this process: not a
  * runner round trip, not a provider call, not an outbox delivery. SQLite has
@@ -178,9 +178,6 @@ export const openDatabase = (
  * write in the controller. Local CPU work, such as generating a key, is fine.
  */
 export const withTransaction = <A, E, R>(
+  sql: SqlClient.SqlClient,
   effect: Effect.Effect<A, E, R>,
-): Effect.Effect<A, E | SqlError, R | SqlClient.SqlClient> =>
-  Effect.gen(function* () {
-    const sql = yield* SqlClient.SqlClient;
-    return yield* sql.withTransaction(effect);
-  });
+): Effect.Effect<A, E | SqlError, R> => sql.withTransaction(effect);

@@ -223,10 +223,12 @@ describe("ambient transactions", () => {
       MEMORY,
       Effect.gen(function* () {
         yield* runMigrations();
+        const sql = yield* SqlClient.SqlClient;
         yield* withTransaction(
+          sql,
           Effect.gen(function* () {
             yield* insert("outer");
-            yield* withTransaction(insert("inner"));
+            yield* withTransaction(sql, insert("inner"));
           }),
         );
         return yield* keys;
@@ -240,10 +242,13 @@ describe("ambient transactions", () => {
       MEMORY,
       Effect.gen(function* () {
         yield* runMigrations();
+        const sql = yield* SqlClient.SqlClient;
         yield* withTransaction(
+          sql,
           Effect.gen(function* () {
             yield* insert("outer");
             yield* withTransaction(
+              sql,
               Effect.gen(function* () {
                 yield* insert("inner");
                 return yield* Effect.fail("the runner said no");

@@ -45,11 +45,14 @@ export const PasswordCost = Context.Reference<PasswordParams>(
   { defaultValue: () => PRODUCTION_PASSWORD_PARAMS },
 );
 
-/** Hashes a password for storage. The plaintext is never held beyond this call. */
-export const hashPassword = (
-  password: string,
-  params: PasswordParams = PRODUCTION_PASSWORD_PARAMS,
-): Effect.Effect<string> =>
+/**
+ * Hashes a password for storage. The plaintext is never held beyond this call.
+ *
+ * The cost is always passed in, from {@link PasswordCost}: a default here would
+ * be a second mechanism for one decision, and the one it would hand a caller
+ * who forgot is the production cost in a test.
+ */
+export const hashPassword = (password: string, params: PasswordParams): Effect.Effect<string> =>
   Effect.promise(() =>
     Bun.password.hash(password, {
       algorithm: "argon2id",

@@ -129,11 +129,11 @@ describe("the controller settings defaults", () => {
         Effect.gen(function* () {
           const settings = yield* Settings;
           return {
-            events: yield* settings.get("controller", "retention.events"),
-            security: yield* settings.get("controller", "retention.security"),
-            conversations: yield* settings.get("controller", "retention.conversations"),
-            time: yield* settings.get("controller", "backup.time"),
-            keep: yield* settings.get("controller", "backup.keep"),
+            events: yield* settings.get("retention.events"),
+            security: yield* settings.get("retention.security"),
+            conversations: yield* settings.get("retention.conversations"),
+            time: yield* settings.get("backup.time"),
+            keep: yield* settings.get("backup.keep"),
           };
         }),
       ),
@@ -199,10 +199,7 @@ describe("seeding twice", () => {
         yield* sql`UPDATE permission_profiles SET grants = '["task.read"]' WHERE name = 'worker'`;
         yield* sql`UPDATE settings SET value = '7' WHERE scope = 'controller' AND key = 'retention.events'`;
         yield* seed;
-        return [
-          yield* grantsOf("worker"),
-          yield* settings.get("controller", "retention.events"),
-        ] as const;
+        return [yield* grantsOf("worker"), yield* settings.get("retention.events")] as const;
       }),
     );
     expect(profile.grants).toEqual(["task.read"]);

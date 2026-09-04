@@ -21,7 +21,7 @@ import type { Actor } from "@hydra/contract";
 export const AUDIT_KINDS = [
   "auth.login.succeeded",
   "auth.login.failed",
-  "auth.logout",
+  "auth.logout.succeeded",
   "auth.apiKey.minted",
   "auth.apiKey.revoked",
   "user.passwordChanged",

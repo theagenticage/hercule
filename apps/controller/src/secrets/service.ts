@@ -151,6 +151,7 @@ const make = Effect.gen(function* () {
 
         const owner = ownerOf(input);
         const stored = yield* withTransaction(
+          sql,
           Effect.gen(function* () {
             const written = yield* secrets.set(owner, input.name, Redacted.make(input.value));
             yield* audit.append({
@@ -164,10 +165,7 @@ const make = Effect.gen(function* () {
           }),
         );
         return toRef(stored);
-      }).pipe(
-        Effect.catchTag("SecretNameError", nameIssue),
-        Effect.provideService(SqlClient.SqlClient, sql),
-      ),
+      }).pipe(Effect.catchTag("SecretNameError", nameIssue)),
 
     /** Removes a stored value. A name nobody stored is `not_found`, not a no-op. */
     delete: (
@@ -182,6 +180,7 @@ const make = Effect.gen(function* () {
 
         const owner = ownerOf(input);
         yield* withTransaction(
+          sql,
           Effect.gen(function* () {
             const removed = yield* secrets.delete(owner, input.name);
             if (!removed) {
@@ -197,10 +196,7 @@ const make = Effect.gen(function* () {
           }),
         );
         return {};
-      }).pipe(
-        Effect.catchTag("SecretNameError", nameIssue),
-        Effect.provideService(SqlClient.SqlClient, sql),
-      ),
+      }).pipe(Effect.catchTag("SecretNameError", nameIssue)),
   };
 });
 

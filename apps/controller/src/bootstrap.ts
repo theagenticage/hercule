@@ -111,7 +111,10 @@ const ensureSetupUrl = (
     if (rows[0]?.completed_at != null) {
       // No token is outstanding once setup is complete, in the file or in the
       // row: the column holds a hash only while one is.
-      yield* withTransaction(sql`UPDATE setup_state SET token_hash = NULL WHERE singleton = 1`);
+      yield* withTransaction(
+        sql,
+        sql`UPDATE setup_state SET token_hash = NULL WHERE singleton = 1`,
+      );
       yield* Effect.try({
         try: () => rmSync(paths.setupUrlFile, { force: true }),
         catch: (cause) => new HydraHomeError({ action: "remove", path: paths.setupUrlFile, cause }),
@@ -121,6 +124,7 @@ const ensureSetupUrl = (
 
     const token = mintToken();
     yield* withTransaction(
+      sql,
       sql`
         INSERT INTO setup_state (singleton, token_hash, completed_at)
         VALUES (1, ${hashToken(token)}, NULL)

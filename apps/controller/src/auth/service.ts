@@ -75,16 +75,30 @@ const make = Effect.gen(function* () {
           // The username is the only thing the attempt carried that is safe to
           // keep: the password is never written anywhere, failed attempt
           // included (spec 13 section 11).
-          yield* audit.append({
-            kind: "auth.login.failed",
-            actor: USER_ACTOR,
-            payload: { username: input.username },
-          });
+          //
+          // The append stands alone - there is no mutation for it to roll back
+          // with - so a database that refuses it must not turn a wrong password
+          // into a 500. The caller is told what is true about their credential
+          // and the store's own failure goes to the log, where the next write
+          // in any operation will say the same thing.
+          yield* audit
+            .append({
+              kind: "auth.login.failed",
+              actor: USER_ACTOR,
+              payload: { username: input.username },
+            })
+            .pipe(
+              Effect.tapError((cause) =>
+                Effect.logError("Cannot record a failed login attempt", cause),
+              ),
+              Effect.ignore,
+            );
           return yield* Effect.fail(unauthenticated(WRONG));
         }
 
         const token = mintToken();
         const record = yield* withTransaction(
+          sql,
           Effect.gen(function* () {
             const issued = yield* credentials.issueLoginToken(user.value.id, hashToken(token));
             yield* audit.append({
@@ -96,7 +110,7 @@ const make = Effect.gen(function* () {
           }),
         );
         return { token, expiresAt: record.expiresAt };
-      }).pipe(Effect.provideService(SqlClient.SqlClient, sql)),
+      }),
 
     /**
      * Revokes the login bearer token the call was made with. An API key is not
@@ -115,13 +129,14 @@ const make = Effect.gen(function* () {
           );
         }
         return yield* withTransaction(
+          sql,
           Effect.gen(function* () {
             yield* credentials.revokeLoginToken(actor.credential.tokenHash);
-            yield* audit.append({ kind: "auth.logout", actor: USER_ACTOR, payload: {} });
+            yield* audit.append({ kind: "auth.logout.succeeded", actor: USER_ACTOR, payload: {} });
             return {};
           }),
         );
-      }).pipe(Effect.provideService(SqlClient.SqlClient, sql)),
+      }),
   };
 });
 

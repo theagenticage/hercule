@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { Effect } from "effect";
 import { completeSetup, send, withServer } from "./testing";
 
 /** `settings.read` and `settings.update` over a real socket (spec 11 section 2). */
@@ -64,6 +65,39 @@ describe("settings over HTTP", () => {
       const response = await patch(base, { controller: { "backup.time": "25:00" } }, token);
       expect(response.status).toBe(400);
       expect(await response.json()).toMatchObject({ error: { code: "validation" } });
+    });
+  });
+
+  it("keys the user scope by the user, not by the scope name", async () => {
+    await withServer(async (base, _audit, sql) => {
+      const token = await completeSetup(base);
+      expect((await patch(base, { user: { timezone: "UTC" } }, token)).status).toBe(200);
+
+      const rows = await Effect.runPromise(
+        Effect.orDie(
+          Effect.all({
+            user: sql<{
+              readonly key: string;
+            }>`SELECT s.key FROM user_settings s JOIN users u ON u.id = s.user_id WHERE u.username = 'rogier'`,
+            scoped: sql<{
+              readonly n: number;
+            }>`SELECT count(*) AS n FROM settings WHERE scope = 'user'`,
+          }),
+        ),
+      );
+      expect(rows.user).toEqual([{ key: "timezone" }]);
+      expect(rows.scoped[0]?.n).toBe(0);
+    });
+  });
+
+  it("refuses a patch that names no setting", async () => {
+    await withServer(async (base, audit) => {
+      const token = await completeSetup(base);
+      const response = await patch(base, {}, token);
+
+      expect(response.status).toBe(400);
+      expect(await response.json()).toMatchObject({ error: { code: "validation" } });
+      expect(await audit("settings.updated")).toEqual([]);
     });
   });
 

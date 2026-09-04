@@ -14,7 +14,7 @@
  * write it over the user's version; that upgrade is a migration, not a seed.
  */
 import { Effect } from "effect";
-import type { SqlClient } from "effect/unstable/sql/SqlClient";
+import { SqlClient } from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import { ALL_GRANTS, type Grant } from "@hydra/contract";
 import { withTransaction } from "./db";
@@ -92,18 +92,22 @@ export const seed: Effect.Effect<
   void,
   SettingError | GrantsError | SqlError,
   Settings | PermissionProfiles | SqlClient
-> = withTransaction(
-  Effect.gen(function* () {
-    const profiles = yield* PermissionProfiles;
-    const settings = yield* Settings;
+> = Effect.gen(function* () {
+  const sql = yield* SqlClient;
+  return yield* withTransaction(
+    sql,
+    Effect.gen(function* () {
+      const profiles = yield* PermissionProfiles;
+      const settings = yield* Settings;
 
-    for (const profile of SHIPPED_PROFILES) {
-      yield* profiles.ensureShipped(profile.name, profile.grants);
-    }
-    yield* settings.setIfAbsent("controller", "retention.events", 90);
-    yield* settings.setIfAbsent("controller", "retention.security", 90);
-    yield* settings.setIfAbsent("controller", "retention.conversations", 90);
-    yield* settings.setIfAbsent("controller", "backup.time", "03:30");
-    yield* settings.setIfAbsent("controller", "backup.keep", 14);
-  }),
-);
+      for (const profile of SHIPPED_PROFILES) {
+        yield* profiles.ensureShipped(profile.name, profile.grants);
+      }
+      yield* settings.setIfAbsent("retention.events", 90);
+      yield* settings.setIfAbsent("retention.security", 90);
+      yield* settings.setIfAbsent("retention.conversations", 90);
+      yield* settings.setIfAbsent("backup.time", "03:30");
+      yield* settings.setIfAbsent("backup.keep", 14);
+    }),
+  );
+});

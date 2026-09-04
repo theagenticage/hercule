@@ -7,10 +7,15 @@
  * boot minted a single-use token and wrote it to `<home>/setup-url`; completing
  * setup consumes it.
  *
- * The write is one transaction: the user, the completion stamp, the token's
- * removal and the timezone go in together or not at all, so a controller that
- * dies mid-setup comes back with the setup URL still valid rather than with a
- * user nobody can log in as.
+ * The write is one transaction: the completion stamp, the token's removal, the
+ * user, the timezone and the login token the caller is handed back go in
+ * together or not at all, so a controller that dies mid-setup comes back with
+ * the setup URL still valid rather than with a user nobody can log in as, or
+ * with a finished setup and no way in.
+ *
+ * Claiming the completion stamp is also what makes the token single use.
+ * Everything that decides happens inside that one transaction, so concurrent
+ * calls carrying the same token produce one user rather than one each.
  *
  * Two things spec 15 section 7 asks of setup are not here: the default
  * assistant, which has no table yet and lands with the assistant ticket, and
@@ -79,29 +84,39 @@ const make = Effect.gen(function* () {
       input: CompleteInput,
     ): Effect.Effect<{ readonly token: string }, InvalidState | SettingError | SqlError> =>
       Effect.gen(function* () {
-        const state = yield* row;
-        if (state?.completed_at != null) {
-          return yield* Effect.fail(invalidState("Hydra is already set up."));
-        }
-
         // Hashing a password takes tens of milliseconds and SQLite has one
         // writer, so it happens before the transaction opens, never inside it.
         const passwordHash = yield* hashPassword(input.password, cost);
+        const token = mintToken();
 
-        const user = yield* withTransaction(
+        yield* withTransaction(
+          sql,
           Effect.gen(function* () {
-            const created = yield* users.create(input.username, passwordHash);
             const at = new Date(yield* Clock.currentTimeMillis).toISOString();
+            // The claim is the guard: whoever's UPDATE changes the row finishes
+            // setup and everyone else is told it is already done. Reading the
+            // flag first and writing afterwards would let two callers holding
+            // the same token both pass.
             yield* sql`
-              UPDATE setup_state SET completed_at = ${at}, token_hash = NULL WHERE singleton = 1
+              UPDATE setup_state SET completed_at = ${at}, token_hash = NULL
+              WHERE singleton = 1 AND completed_at IS NULL
             `;
-            yield* settings.set("user", "timezone", input.timezone);
+            const changed = yield* sql<{ readonly rows: number }>`SELECT changes() AS rows`;
+            if ((changed[0]?.rows ?? 0) === 0) {
+              return yield* Effect.fail(invalidState("Hydra is already set up."));
+            }
+
+            const user = yield* users.create(input.username, passwordHash);
+            yield* settings.setForUser(user.id, "timezone", input.timezone);
             yield* audit.append({
               kind: "setup.completed",
               actor: USER_ACTOR,
               payload: { username: input.username },
             });
-            return created;
+            // Inside the transaction because the caller is logged in when this
+            // returns: a token that cannot be stored is a setup that did not
+            // happen, not a finished setup with nothing to answer with.
+            yield* credentials.issueLoginToken(user.id, hashToken(token));
           }),
         );
 
@@ -115,12 +130,8 @@ const make = Effect.gen(function* () {
           Effect.ignore,
         );
 
-        const token = mintToken();
-        yield* credentials.issueLoginToken(user.id, hashToken(token));
         return { token };
-        // The transaction runs on the client this service already holds, so the
-        // method needs nothing from its caller's context.
-      }).pipe(Effect.provideService(SqlClient.SqlClient, sql)),
+      }),
   };
 });
 

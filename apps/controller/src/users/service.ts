@@ -68,6 +68,7 @@ const make = Effect.gen(function* () {
         // happens before the transaction opens, never inside it.
         const passwordHash = yield* hashPassword(input.next, cost);
         return yield* withTransaction(
+          sql,
           Effect.gen(function* () {
             yield* users.setPasswordHash(actor.userId, passwordHash);
             yield* audit.append({
@@ -78,7 +79,7 @@ const make = Effect.gen(function* () {
             return {};
           }),
         );
-      }).pipe(Effect.provideService(SqlClient.SqlClient, sql)),
+      }),
   };
 });
 

@@ -36,6 +36,7 @@ describe("databaseError", () => {
     const write = Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient;
       yield* withTransaction(
+        sql,
         Effect.gen(function* () {
           yield* sql`SELECT count(*) AS n FROM t`;
           yield* sql`INSERT INTO t (v) VALUES ('second')`;

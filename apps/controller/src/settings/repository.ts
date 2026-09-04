@@ -1,10 +1,11 @@
 /**
- * The settings store: one table for both settings scopes (spec 04, What is in
- * the store).
+ * The settings store: two tables, one per scope (spec 04, What is in the
+ * store).
  *
- * `controller` rows are the controller's operational settings, edited in
- * Settings > System (spec 14) and seeded at first run. `user` rows are the user
- * settings store of spec 11 section 2, keyed by user id from day one.
+ * `settings` holds the controller's operational settings, edited in Settings >
+ * System (spec 14) and seeded at first run. `user_settings` holds the user
+ * settings store of spec 11 section 2, keyed by user id from day one, so a
+ * second user is a `WHERE` clause rather than a table rebuild.
  *
  * The keys and what they hold are declared once, in the contract
  * (`SETTING_VALUES`): the same map shapes `settings.read` on the wire and the
@@ -17,11 +18,12 @@ import { Clock, Context, Effect, Layer, Schema } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import { SETTING_VALUES } from "@hydra/contract";
+import { uuidFromString } from "../db";
 
 /** The keys each scope defines, with the schema of the value. */
 const SETTING_SCHEMAS = SETTING_VALUES;
 
-/** A scope whose keys are declared, and so are typed on `get`, `set` and `setIfAbsent`. */
+/** A scope whose keys are declared, and so are typed on every read and write. */
 export type TypedScope = keyof typeof SETTING_SCHEMAS;
 
 export type SettingKey<S extends TypedScope> = keyof (typeof SETTING_SCHEMAS)[S] & string;
@@ -50,104 +52,168 @@ export class SettingError extends Schema.TaggedError<SettingError>()("SettingErr
 const schemaFor = (scope: TypedScope, key: string): Schema.Codec<unknown, string> =>
   Schema.fromJsonString((SETTING_SCHEMAS[scope] as Record<string, Schema.Codec<unknown>>)[key]!);
 
+/** One stored value, decoded to the key's declared type. */
+const decode = (
+  scope: TypedScope,
+  key: string,
+  value: string,
+): Effect.Effect<unknown, SettingError> =>
+  Schema.decodeUnknownEffect(schemaFor(scope, key))(value).pipe(
+    Effect.mapError((error) => new SettingError({ scope, key, message: error.message })),
+  );
+
+/** One value, encoded to the JSON text the `value` column holds. */
+const encode = (
+  scope: TypedScope,
+  key: string,
+  value: unknown,
+): Effect.Effect<string, SettingError> =>
+  Schema.encodeUnknownEffect(schemaFor(scope, key))(value).pipe(
+    Effect.mapError((error) => new SettingError({ scope, key, message: error.message })),
+  );
+
+/**
+ * Every row of one scope, decoded to its key's declared type.
+ *
+ * A row whose key this build does not declare - what a downgrade leaves behind
+ * - is left out and said so in the log, rather than failing the whole read over
+ * a key the caller never asked about.
+ */
+const decodeRows = <S extends TypedScope>(
+  scope: S,
+  rows: ReadonlyArray<{ readonly key: string; readonly value: string }>,
+): Effect.Effect<ScopeSettings<S>, SettingError> =>
+  Effect.gen(function* () {
+    const entries: Array<readonly [string, unknown]> = [];
+    for (const row of rows) {
+      if (!Object.hasOwn(SETTING_SCHEMAS[scope], row.key)) {
+        yield* Effect.logWarning(`Ignoring the ${scope} setting ${row.key}: no such key.`);
+        continue;
+      }
+      entries.push([row.key, yield* decode(scope, row.key, row.value)] as const);
+    }
+    // The keys are the scope's own and each value came from that key's schema,
+    // which is exactly what the mapped type says; TypeScript cannot follow the
+    // loop that far.
+    return Object.fromEntries(entries) as ScopeSettings<S>;
+  });
+
+/** The row shape both tables answer a listing with. */
+interface KeyValueRow {
+  readonly key: string;
+  readonly value: string;
+}
+
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
 
+  const now = Effect.map(Clock.currentTimeMillis, (millis) => new Date(millis).toISOString());
+
   return {
-    /** Reads one declared setting, decoded to the key's type. */
-    get: <S extends TypedScope, K extends SettingKey<S>>(
-      scope: S,
+    /** Reads one controller setting, decoded to the key's type. */
+    get: <K extends SettingKey<"controller">>(
       key: K,
-    ): Effect.Effect<SettingValue<S, K>, SettingError | SqlError> =>
-      sql<{
-        readonly value: string;
-      }>`SELECT value FROM settings WHERE scope = ${scope} AND key = ${key}`.pipe(
+    ): Effect.Effect<SettingValue<"controller", K>, SettingError | SqlError> =>
+      sql<KeyValueRow>`
+        SELECT key, value FROM settings WHERE scope = 'controller' AND key = ${key}
+      `.pipe(
         Effect.flatMap((rows) => {
           const row = rows[0];
           if (row === undefined) {
-            return Effect.fail(new SettingError({ scope, key, message: "is not set" }));
+            return Effect.fail(
+              new SettingError({ scope: "controller", key, message: "is not set" }),
+            );
           }
-          return Schema.decodeUnknownEffect(schemaFor(scope, key))(row.value).pipe(
-            Effect.mapError((error) => new SettingError({ scope, key, message: error.message })),
-          );
+          return decode("controller", key, row.value);
         }),
-        Effect.map((value) => value as SettingValue<S, K>),
+        Effect.map((value) => value as SettingValue<"controller", K>),
       ),
 
     /**
-     * Every key that is set in one scope, decoded to its declared type. A key
+     * Every controller key that is set, decoded to its declared type. A key
      * nobody has set is absent rather than defaulted, so the default lives in
      * one place: whoever reads the key (spec 11 section 2).
-     *
-     * A row whose key this build does not declare - what a downgrade leaves
-     * behind - is left out and said so in the log, rather than failing the
-     * whole read over a key the caller never asked about.
      */
-    all: <S extends TypedScope>(
-      scope: S,
-    ): Effect.Effect<ScopeSettings<S>, SettingError | SqlError> =>
-      Effect.gen(function* () {
-        const rows = yield* sql<{
-          readonly key: string;
-          readonly value: string;
-        }>`SELECT key, value FROM settings WHERE scope = ${scope} ORDER BY key`;
+    all: (): Effect.Effect<ScopeSettings<"controller">, SettingError | SqlError> =>
+      Effect.flatMap(
+        sql<KeyValueRow>`SELECT key, value FROM settings WHERE scope = 'controller' ORDER BY key`,
+        (rows) => decodeRows("controller", rows),
+      ),
 
-        const entries: Array<readonly [string, unknown]> = [];
-        for (const row of rows) {
-          if (!Object.hasOwn(SETTING_SCHEMAS[scope], row.key)) {
-            yield* Effect.logWarning(`Ignoring the ${scope} setting ${row.key}: no such key.`);
-            continue;
-          }
-          const value = yield* Schema.decodeUnknownEffect(schemaFor(scope, row.key))(
-            row.value,
-          ).pipe(
-            Effect.mapError(
-              (error) => new SettingError({ scope, key: row.key, message: error.message }),
-            ),
-          );
-          entries.push([row.key, value] as const);
-        }
-        // The keys are the scope's own and each value came from that key's
-        // schema, which is exactly what the mapped type says; TypeScript cannot
-        // follow the loop that far.
-        return Object.fromEntries(entries) as ScopeSettings<S>;
-      }),
-
-    /** Writes a setting, replacing whatever was there. */
-    set: <S extends TypedScope, K extends SettingKey<S>>(
-      scope: S,
+    /** Writes a controller setting, replacing whatever was there. */
+    set: <K extends SettingKey<"controller">>(
       key: K,
-      value: SettingValue<S, K>,
+      value: SettingValue<"controller", K>,
     ): Effect.Effect<void, SettingError | SqlError> =>
       Effect.gen(function* () {
-        const json = yield* Schema.encodeUnknownEffect(schemaFor(scope, key))(value).pipe(
-          Effect.mapError((error) => new SettingError({ scope, key, message: error.message })),
-        );
-        const at = new Date(yield* Clock.currentTimeMillis).toISOString();
+        const json = yield* encode("controller", key, value);
+        const at = yield* now;
         yield* sql`
           INSERT INTO settings (scope, key, value, updated_at)
-          VALUES (${scope}, ${key}, ${json}, ${at})
+          VALUES ('controller', ${key}, ${json}, ${at})
           ON CONFLICT (scope, key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
         `;
       }),
 
     /**
-     * Writes a setting only when it is absent. Seeding a default never
-     * overwrites what the user has chosen (spec 15 section 7).
+     * Writes a controller setting only when it is absent. Seeding a default
+     * never overwrites what the user has chosen (spec 15 section 7).
      */
-    setIfAbsent: <S extends TypedScope, K extends SettingKey<S>>(
-      scope: S,
+    setIfAbsent: <K extends SettingKey<"controller">>(
       key: K,
-      value: SettingValue<S, K>,
+      value: SettingValue<"controller", K>,
     ): Effect.Effect<void, SettingError | SqlError> =>
       Effect.gen(function* () {
-        const json = yield* Schema.encodeUnknownEffect(schemaFor(scope, key))(value).pipe(
-          Effect.mapError((error) => new SettingError({ scope, key, message: error.message })),
-        );
-        const at = new Date(yield* Clock.currentTimeMillis).toISOString();
+        const json = yield* encode("controller", key, value);
+        const at = yield* now;
         yield* sql`
           INSERT OR IGNORE INTO settings (scope, key, value, updated_at)
-          VALUES (${scope}, ${key}, ${json}, ${at})
+          VALUES ('controller', ${key}, ${json}, ${at})
+        `;
+      }),
+
+    /** Reads one of a user's settings, decoded to the key's type. */
+    getForUser: <K extends SettingKey<"user">>(
+      userId: string,
+      key: K,
+    ): Effect.Effect<SettingValue<"user", K>, SettingError | SqlError> =>
+      sql<KeyValueRow>`
+        SELECT key, value FROM user_settings
+        WHERE user_id = ${uuidFromString(userId)} AND key = ${key}
+      `.pipe(
+        Effect.flatMap((rows) => {
+          const row = rows[0];
+          if (row === undefined) {
+            return Effect.fail(new SettingError({ scope: "user", key, message: "is not set" }));
+          }
+          return decode("user", key, row.value);
+        }),
+        Effect.map((value) => value as SettingValue<"user", K>),
+      ),
+
+    /** Every key one user has set, decoded to its declared type. */
+    allForUser: (userId: string): Effect.Effect<ScopeSettings<"user">, SettingError | SqlError> =>
+      Effect.flatMap(
+        sql<KeyValueRow>`
+          SELECT key, value FROM user_settings
+          WHERE user_id = ${uuidFromString(userId)} ORDER BY key
+        `,
+        (rows) => decodeRows("user", rows),
+      ),
+
+    /** Writes one of a user's settings, replacing whatever was there. */
+    setForUser: <K extends SettingKey<"user">>(
+      userId: string,
+      key: K,
+      value: SettingValue<"user", K>,
+    ): Effect.Effect<void, SettingError | SqlError> =>
+      Effect.gen(function* () {
+        const json = yield* encode("user", key, value);
+        const at = yield* now;
+        yield* sql`
+          INSERT INTO user_settings (user_id, key, value, updated_at)
+          VALUES (${uuidFromString(userId)}, ${key}, ${json}, ${at})
+          ON CONFLICT (user_id, key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
         `;
       }),
   };

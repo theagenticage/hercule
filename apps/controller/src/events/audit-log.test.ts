@@ -82,6 +82,7 @@ describe("AuditLog", () => {
         const audit = yield* AuditLog;
         const sql = yield* SqlClient.SqlClient;
         yield* withTransaction(
+          sql,
           Effect.gen(function* () {
             yield* audit.append({
               kind: "profile.created",
@@ -110,17 +111,21 @@ describe("AuditLog", () => {
 
   it("keeps both writes when the transaction commits", async () => {
     const entries = await run(
-      withTransaction(
-        Effect.gen(function* () {
-          const audit = yield* AuditLog;
-          yield* audit.append({
-            kind: "profile.updated",
-            actor: "user",
-            payload: { id: "reviewer" },
-          });
-          return yield* audit.listByKind("profile.updated");
-        }),
-      ),
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        return yield* withTransaction(
+          sql,
+          Effect.gen(function* () {
+            const audit = yield* AuditLog;
+            yield* audit.append({
+              kind: "profile.updated",
+              actor: "user",
+              payload: { id: "reviewer" },
+            });
+            return yield* audit.listByKind("profile.updated");
+          }),
+        );
+      }),
     );
     expect(entries).toHaveLength(1);
   });
