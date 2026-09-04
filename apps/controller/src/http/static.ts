@@ -76,19 +76,13 @@ const API_PATH = new RegExp(`^/+${API_PREFIX.slice(1)}(/|$)`, "i");
 
 /** What the bundle can contain. Anything else is served as bytes. */
 const CONTENT_TYPE: Readonly<Record<string, string>> = {
-  avif: "image/avif",
   css: "text/css; charset=utf-8",
-  gif: "image/gif",
   html: "text/html; charset=utf-8",
-  ico: "image/x-icon",
-  jpg: "image/jpeg",
   js: "text/javascript; charset=utf-8",
   json: "application/json; charset=utf-8",
-  map: "application/json; charset=utf-8",
   png: "image/png",
   svg: "image/svg+xml",
   txt: "text/plain; charset=utf-8",
-  wasm: "application/wasm",
   webp: "image/webp",
   woff2: "font/woff2",
 };
@@ -122,6 +116,10 @@ const respond = (file: string, cacheControl: string): HttpServerResponse.HttpSer
     headers: {
       "cache-control": cacheControl,
       "content-security-policy": CONTENT_SECURITY_POLICY,
+      // The type above is the one the browser must use. Anything the table
+      // does not name is served as bytes, and bytes must not be sniffed into
+      // a script.
+      "x-content-type-options": "nosniff",
     },
   });
 

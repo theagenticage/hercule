@@ -57,29 +57,6 @@ function candidatePort(): number {
   return 20_000 + Math.floor(Math.random() * 40_000);
 }
 
-/**
- * Build the release binary and answer where it is.
- *
- * The web bundle is embedded at compile time, so the only honest way to test
- * that a browser is served anything is to build what ships and run it.
- */
-export async function buildBinary(): Promise<string> {
-  const built = Bun.spawn(["pnpm", "run", "build:binary"], {
-    cwd: ROOT,
-    stdout: "pipe",
-    stderr: "pipe",
-  });
-  const [stdout, stderr, code] = await Promise.all([
-    new Response(built.stdout).text(),
-    new Response(built.stderr).text(),
-    built.exited,
-  ]);
-  if (code !== 0) {
-    throw new Error(`pnpm build:binary exited with ${String(code)}:\n${stdout}\n${stderr}`);
-  }
-  return join(ROOT, "hydra");
-}
-
 /** A temporary Hydra Home, removed when the suite ends. */
 export function temporaryHome(): { home: string; remove: () => void } {
   const home = mkdtempSync(join(tmpdir(), "hydra-e2e-"));

@@ -9,7 +9,9 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it, vi } from "vitest";
+import { Effect } from "effect";
+import { loadWebBundle } from "./server";
 import { CONTENT_SECURITY_POLICY, type WebBundle } from "./static";
 import { withServer } from "./testing";
 
@@ -66,7 +68,7 @@ describe("the page", () => {
     });
   });
 
-  it("carries the content security policy", async () => {
+  it("carries the content security policy and refuses type sniffing", async () => {
     await withBundle(async (base) => {
       const page = await fetch(`${base}/`);
       const chunk = await fetch(`${base}${CHUNK_PATH}`);
@@ -74,6 +76,8 @@ describe("the page", () => {
       expect(chunk.headers.get("content-security-policy")).toBe(CONTENT_SECURITY_POLICY);
       expect(CONTENT_SECURITY_POLICY).toContain("script-src 'self'");
       expect(CONTENT_SECURITY_POLICY).not.toContain("unsafe-inline");
+      expect(page.headers.get("x-content-type-options")).toBe("nosniff");
+      expect(chunk.headers.get("x-content-type-options")).toBe("nosniff");
     });
   });
 
@@ -143,5 +147,22 @@ describe("without a bundle", () => {
       expect(response.status).toBe(404);
       expect(await response.json()).toMatchObject({ error: { code: "not_found" } });
     });
+  });
+});
+
+describe("a generated bundle that no longer resolves", () => {
+  it("reads as no bundle, and says which command puts it back", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    try {
+      const loaded = await Effect.runPromise(
+        loadWebBundle(() => Promise.reject(new Error("Cannot find module './assets/index-a.js'"))),
+      );
+
+      expect(loaded).toBeUndefined();
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(warn.mock.calls[0]?.[0]).toContain("pnpm build:binary");
+    } finally {
+      warn.mockRestore();
+    }
   });
 });

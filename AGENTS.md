@@ -101,11 +101,20 @@ pnpm test        # vitest across every package: the backend on Bun, the React pa
 pnpm dep-lint    # the runner entrypoint links no controller package
 ```
 
-Two more, for packaging work:
+Then the packaging pair, which CI runs after those four. `pnpm test:binary` runs the
+release binary rather than building one, so it needs the build before it and fails
+saying so when there is none. Building rewrites `apps/web/dist` and the generated
+file list, which is why it is not part of `pnpm test`.
+
+```
+pnpm build:binary  # vite build, the bundle budget check, then bun build --compile, writing ./hydra
+pnpm test:binary   # ./hydra serves the embedded web app beside the API
+```
+
+And one more, any time:
 
 ```
 pnpm format        # prettier --write
-pnpm build:binary  # vite build, the bundle budget check, then bun build --compile, writing ./hydra
 ```
 
 Toolchain versions are pinned exactly, in `package.json` (`packageManager`, every dependency), in `.bun-version`, and in `.npmrc` (`save-exact=true`). Upgrading any of them is a deliberate, reviewed change.

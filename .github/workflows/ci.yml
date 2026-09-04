@@ -40,6 +40,8 @@ jobs:
       # (spec 15 section 3, ADR 0018).
       - run: pnpm dep-lint
 
-      # The Vite config, the React Compiler Babel pass and the bundle are only
-      # exercised by an actual build.
-      - run: pnpm --filter @hydra/web build
+      # The Vite config, the React Compiler Babel pass, the bundle budget and
+      # the embedded file list are only exercised by an actual build; the
+      # binary suite then runs what that build produced.
+      - run: pnpm build:binary
+      - run: pnpm test:binary

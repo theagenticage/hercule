@@ -10,6 +10,7 @@
     "lint": "eslint . --max-warnings 0 && prettier --check .",
     "format": "prettier --write .",
     "test": "bun --bun run vitest run --project node && vitest run --project react",
+    "test:binary": "bun --bun run vitest run --project binary",
     "dep-lint": "bun run scripts/dep-lint.ts",
     "build:binary": "bun run scripts/gen-version.ts && pnpm --filter @hydra/web build && bun run scripts/check-bundle-budget.ts && bun run scripts/gen-web-bundle.ts && bun build packages/hydra/src/main.ts --compile --outfile hydra"
   },

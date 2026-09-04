@@ -101,9 +101,30 @@ const jsonOnly = <E, R>(
  * `./bundle.ts` is generated, and its `with { type: "file" }` imports name
  * build output and mean something to Bun's bundler alone; anything else that
  * links them - a test runner, above all - tries to evaluate a browser bundle.
+ *
+ * A generated file naming build output that is no longer there is the same
+ * situation as no build at all: the API is served on its own. It says so once,
+ * because it is a checkout that needs rebuilding rather than a broken
+ * controller, and refusing to start over it would be the wrong answer.
  */
-export const webBundle: Effect.Effect<WebBundle | undefined> = Effect.promise(() =>
-  import("./bundle").then((module) => module.webBundle),
+export const loadWebBundle = (
+  load: () => Promise<{ readonly webBundle: WebBundle | undefined }>,
+): Effect.Effect<WebBundle | undefined> =>
+  Effect.promise(() =>
+    load().then(
+      (module) => module.webBundle,
+      (error: unknown) => {
+        console.warn(
+          "hydra: the embedded web bundle is stale or missing, so only the API is served. " +
+            `Run \`pnpm build:binary\` to regenerate it. (${String(error)})`,
+        );
+        return undefined;
+      },
+    ),
+  );
+
+export const webBundle: Effect.Effect<WebBundle | undefined> = loadWebBundle(
+  () => import("./bundle"),
 );
 
 /**
