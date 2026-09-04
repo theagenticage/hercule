@@ -1,7 +1,39 @@
 import { defineConfig } from "vite";
 import react, { reactCompilerPreset } from "@vitejs/plugin-react";
 import babel from "@rolldown/plugin-babel";
+import tailwindcss from "@tailwindcss/vite";
+import { tanstackRouter } from "@tanstack/router-plugin/vite";
 
-export default defineConfig({
-  plugins: [react(), babel({ presets: [reactCompilerPreset()] })],
+/**
+ * Vite decides whether a build is a production build from `NODE_ENV`, not from
+ * the build mode, and React ships two builds behind an export condition keyed
+ * on the same variable. A shell where `NODE_ENV` is anything but "production" -
+ * a test runner sets "test" - therefore emits a bundle carrying React's
+ * development runtime: development warnings, the slow reconciler, and 64 kB
+ * gzipped of it on the first paint. Building this app is always building it
+ * for production, so the answer is settled here rather than at every call
+ * site; the dev server is left as it was.
+ */
+export default defineConfig(({ command }) => {
+  if (command === "build") process.env.NODE_ENV = "production";
+
+  return {
+    plugins: [
+      // The router plugin rewrites route files, so it runs before React's.
+      // `autoCodeSplitting` is what puts every route's component in a chunk of
+      // its own: the generated tree keeps only the route definitions, and the
+      // component is fetched when the route is first visited.
+      tanstackRouter({ target: "react", autoCodeSplitting: true }),
+      react(),
+      babel({ presets: [reactCompilerPreset()] }),
+      tailwindcss(),
+    ],
+    // In development the app is served by Vite and the API by a controller the
+    // developer started themselves, so `/api` is proxied to the port `hydra
+    // serve` binds by default and the app talks to one origin here as it does in
+    // production.
+    server: {
+      proxy: { "/api": "http://127.0.0.1:4937" },
+    },
+  };
 });

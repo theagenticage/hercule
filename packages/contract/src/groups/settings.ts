@@ -20,6 +20,7 @@ import * as HttpApiGroup from "effect/unstable/httpapi/HttpApiGroup";
 import { closedStruct, optional } from "../closed";
 import { Forbidden, Internal, Unauthenticated, Validation } from "../errors";
 import { Id, Timestamp } from "../ids";
+import { Timezone } from "../strings";
 import { Authenticated } from "../security";
 
 /** A retention window or a snapshot count, in whole days or whole snapshots. */
@@ -45,6 +46,11 @@ const MuteTarget = Schema.NonEmptyString.check(
   }),
 );
 
+/** How much a thread row in the sidebar shows. */
+export const ThreadRows = Schema.Literals(["meta", "plain"]);
+
+export type ThreadRows = Schema.Schema.Type<typeof ThreadRows>;
+
 /** What every settings key holds, per scope. The one declaration of a key. */
 export const SETTING_VALUES = {
   controller: {
@@ -61,7 +67,7 @@ export const SETTING_VALUES = {
   },
   user: {
     /** The IANA zone the user reads times in, chosen during setup. */
-    timezone: Schema.NonEmptyString,
+    timezone: Timezone,
     "topics.order": Schema.Array(Schema.NonEmptyString),
     "notifications.muted": Schema.Array(MuteTarget),
     "lastChecked.intake": Timestamp,
@@ -72,6 +78,8 @@ export const SETTING_VALUES = {
     "thread.model": Schema.NonEmptyString,
     "thread.accessMode": AccessMode,
     "thread.profileId": Id,
+    /** The density of a thread row in the sidebar: `meta` unless set otherwise. */
+    "ui.threadRows": ThreadRows,
   },
 } as const;
 

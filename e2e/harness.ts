@@ -95,13 +95,16 @@ export async function startController(options: {
   readonly home: string;
   readonly port?: number | undefined;
   readonly timeoutMs?: number | undefined;
+  /** The compiled binary to run instead of the dispatcher's source. */
+  readonly binary?: string | undefined;
 }): Promise<Controller> {
   const attempts = options.port === undefined ? 20 : 1;
+  const command = options.binary === undefined ? [BUN, ENTRYPOINT] : [options.binary];
   let last: Error | undefined;
   for (let attempt = 0; attempt < attempts; attempt++) {
     const port = options.port ?? candidatePort();
     try {
-      return await startOn(options.home, port, options.timeoutMs);
+      return await startOn(command, options.home, port, options.timeoutMs);
     } catch (error) {
       last = error as Error;
       if (!/in use/.test(last.message)) throw last;
@@ -112,6 +115,7 @@ export async function startController(options: {
 
 /** One attempt: spawn on this port and wait for it to answer. */
 async function startOn(
+  command: ReadonlyArray<string>,
   home: string,
   port: number,
   timeoutMs: number | undefined,
@@ -119,7 +123,7 @@ async function startOn(
   const url = `http://127.0.0.1:${String(port)}`;
   const chunks: Array<string> = [];
 
-  const child = Bun.spawn([BUN, ENTRYPOINT, "serve", "-c", `bind.port=${String(port)}`], {
+  const child = Bun.spawn([...command, "serve", "-c", `bind.port=${String(port)}`], {
     cwd: ROOT,
     env: { ...cleanEnv(), HYDRA_HOME: home },
     stdout: "pipe",

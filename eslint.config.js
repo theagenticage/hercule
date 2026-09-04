@@ -45,9 +45,47 @@ const bannedChildProcessCalls = [
   },
 ];
 
+/** What the browser packages may not import, on top of the bans everywhere. */
+const noEffectMessage =
+  "The React codebase writes no Effect code; go through @hydra/contract or @hydra/client-core (spec 14).";
+
+const bannedInTheBrowser = [
+  ...bannedEverywhere,
+  ...bannedChildProcess,
+  { name: "effect", message: noEffectMessage },
+];
+
+const effectPattern = { group: ["effect/*"], message: noEffectMessage };
+
+/**
+ * A `-` file is local to its own folder, so `./-name` is the only way to reach
+ * one: the patterns cover every specifier that climbs out of a folder or
+ * descends into one to get at it.
+ */
+const routeLocalPattern = {
+  group: ["../**/-*", "./*/**/-*", "**/routes/-*", "**/routes/**/-*"],
+  message:
+    "A `-` route file is local to its own folder and is imported only as `./-name`. Shared presentation goes in apps/web/src/screens/, generic presentation in @hydra/ui.",
+};
+
+/** The shell is the frame; a screen imports presentation, not the frame. */
+const shellPattern = {
+  group: ["**/shell", "**/shell/*"],
+  message:
+    "Screens import presentation from @hydra/ui or apps/web/src/screens/, never from the shell.",
+};
+
 export default tseslint.config(
   {
-    ignores: ["**/dist/**", "**/node_modules/**", "packages/hydra/src/version.ts", "/hydra"],
+    // The generated files are build output that happens to be TypeScript.
+    ignores: [
+      "**/dist/**",
+      "**/node_modules/**",
+      "packages/home/src/version.ts",
+      "apps/controller/src/http/bundle.ts",
+      "apps/web/src/routeTree.gen.ts",
+      "/hydra",
+    ],
   },
   js.configs.recommended,
   tseslint.configs.recommendedTypeChecked,
@@ -76,24 +114,27 @@ export default tseslint.config(
       "react-hooks/unsupported-syntax": "error",
       "no-restricted-imports": [
         "error",
-        {
-          paths: [
-            ...bannedEverywhere,
-            ...bannedChildProcess,
-            {
-              name: "effect",
-              message:
-                "The React codebase writes no Effect code; go through @hydra/contract or @hydra/client-core (spec 14).",
-            },
-          ],
-          patterns: [
-            {
-              group: ["effect/*"],
-              message:
-                "The React codebase writes no Effect code; go through @hydra/contract or @hydra/client-core (spec 14).",
-            },
-          ],
-        },
+        { paths: bannedInTheBrowser, patterns: [effectPattern, routeLocalPattern] },
+      ],
+    },
+  },
+  {
+    // A screen composes presentation; it does not reach into the frame around
+    // it. Only the two layout routes below mount the shell.
+    files: ["apps/web/src/routes/**/*.tsx"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        { paths: bannedInTheBrowser, patterns: [effectPattern, routeLocalPattern, shellPattern] },
+      ],
+    },
+  },
+  {
+    files: ["apps/web/src/routes/_shell.tsx", "apps/web/src/routes/_shell/settings.tsx"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        { paths: bannedInTheBrowser, patterns: [effectPattern, routeLocalPattern] },
       ],
     },
   },

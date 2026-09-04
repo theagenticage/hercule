@@ -76,9 +76,9 @@ describe("the first run and everything after it", () => {
     });
     expect(randomBearer.status).toBe(401);
 
-    // The web bundle is not built yet, so every non-API path is a 404 in the
-    // same envelope shape as any other error.
-    const elsewhere = await fetch(`${url}/dashboard`);
+    // A path under the API prefix that no operation owns is a 404 in the same
+    // envelope shape as any other error, bundle or no bundle.
+    const elsewhere = await fetch(`${url}/api/v1/dashboard`);
     expect(elsewhere.status).toBe(404);
     expect(await elsewhere.json()).toEqual({
       error: { code: "not_found", message: expect.any(String) as string },

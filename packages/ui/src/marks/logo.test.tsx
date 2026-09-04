@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { render, screen } from "@testing-library/react";
-import { App } from "./App";
+import { Logo } from "./logo";
 
-describe("App", () => {
+describe("Logo", () => {
   it("renders the wordmark", () => {
-    render(<App />);
+    render(<Logo />);
     expect(screen.getByTestId("logo").textContent).toBe("Hydra");
   });
 });

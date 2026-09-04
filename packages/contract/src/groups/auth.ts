@@ -14,6 +14,12 @@ import { Timestamp } from "../ids";
 import { PresentedPassword, Username } from "../strings";
 import { Authenticated } from "../security";
 
+/** What the login screen sends. */
+export const LoginPayload = Schema.Struct({
+  username: Username,
+  password: PresentedPassword,
+});
+
 export const LoginResult = Schema.Struct({
   token: Schema.NonEmptyString,
   expiresAt: Timestamp,
@@ -21,10 +27,7 @@ export const LoginResult = Schema.Struct({
 
 export const auth = HttpApiGroup.make("auth").add(
   HttpApiEndpoint.post("login", "/auth/login", {
-    payload: Schema.Struct({
-      username: Username,
-      password: PresentedPassword,
-    }),
+    payload: LoginPayload,
     success: LoginResult,
     error: [Unauthenticated, Validation, Internal],
   }),

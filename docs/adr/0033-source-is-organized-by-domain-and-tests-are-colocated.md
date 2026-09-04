@@ -35,3 +35,12 @@ Source under an app or package is organized **by domain**, one folder per domain
 - Domain boundaries must be known before writing code. When a new area has no obvious domain word, that is a CONTEXT.md gap to close first, not a folder to invent.
 - Cross-domain imports need discipline: reaching past an `index.ts` compiles fine, so review has to catch it.
 - Unit and integration tests are told apart by name, not by directory. In practice the distinction is thin here: spec 04 forbids mock repositories, so most controller tests are small integration tests against a `:memory:` database already.
+
+## Amendment: the web app's layout (2026-09-04)
+
+Recorded by [The web app shell (#58)](https://github.com/rogierpennink/hydra/issues/58). The web app has no domains of its own - it renders the controller's - so the decision above needs three names for it, and the test rule needs one clarification.
+
+- **`apps/web/src/app/` is the third non-domain folder**, the web app's equivalent of `db/`: the wiring that every screen sits on. It holds the router, the router context, the shared query options, the entry guard, the form adapter, and the test harness. **Nothing that renders a screen.**
+- **`apps/web/src/screens/` holds presentation shared across screens that knows about Hydra**: the centered frame outside the shell, the fallback screens, the timezone control, the Connect rows. `apps/web/src/routes/` holds the screens themselves, and a `-` prefixed file there is local to its route folder.
+- **Presentation that knows nothing about Hydra lives in `packages/ui`**, not in a screen and not in the shell. A screen importing presentation from the shell puts the shell's whole module graph on the screen's chunk, which the bundle budget in [spec 14](../spec/14-web-app.md) pays for.
+- **Tests come in three tiers, told apart by name.** A unit test is `foo.test.ts` beside `foo.ts`. An integration test drives several modules together through one entry point - an HTTP transport, the whole rendered app - and is `<entry>.integration.test.ts` beside the module it enters. An end-to-end test runs against the compiled binary and lives in `e2e/` at the repository root. Only the unit tier carries the pairing signal above.

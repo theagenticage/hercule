@@ -46,7 +46,7 @@ Not design questions. The constraint is stated where one exists.
 - ~~13 §4.2: the password hash function (argon2id expected).~~ **Resolved 2026-09-04 ([#57](https://github.com/rogierpennink/hydra/issues/57)):** argon2id via `Bun.password`, native in the pinned Bun; recorded in 13 §4.2.
 - 13 §9: the runner daemon's local channel for the git credential helper and how the helper authenticates.
 - 15 §11: macOS notarization of a Bun-compiled binary - prototype notarize + staple first.
-- 15 §11: serving the embedded SPA (`import index from "./index.html"` / `Bun.serve({ routes })`) through the Effect HTTP server on Bun (`@effect/platform-bun`), or beside it on the same port - confirm before the web bundle is wired in. *(Still open. [#57](https://github.com/rogierpennink/hydra/issues/57) serves no bundle: it stands the HTTP server up for `/api/v1/*` only, and every non-API path 404s until the web-bundle ticket answers this.)*
+- ~~15 §11: serving the embedded SPA (`import index from "./index.html"` / `Bun.serve({ routes })`) through the Effect HTTP server on Bun (`@effect/platform-bun`), or beside it on the same port - confirm before the web bundle is wired in.~~ **Resolved 2026-09-04 ([#58](https://github.com/rogierpennink/hydra/issues/58)):** measured both; Bun's HTML route ignores `vite.config.ts` and so loses the React Compiler and code splitting. `vite build`'s output is embedded per file with `with { type: "file" }` and served through the Effect HTTP server; recorded in 15 §11.
 
 ## D. Standing risks
 
@@ -59,6 +59,7 @@ In scope, not yet sharp enough to ticket; listed on the map under **Not yet spec
 - A presentation layer over task status (kanban-style user-defined groupings above the fixed axis); the Tasks screen ships without it (14 §Screens).
 - Platform-auto subscription detection ("this session opened PR #87" subscribes it automatically); explicit subscription is the v1 primitive.
 - Execution-plan snapshot dedup/GC; content-hash dedup is the known escape hatch if per-run copies ever hurt.
+- `auth.wsTicket` (11 §auth) has no schema in `packages/contract`; it is added by the ticket that builds the live overlay and its `client-core` client. *(Noted 2026-09-04, [#58](https://github.com/rogierpennink/hydra/issues/58).)*
 - Task and Project pruning: both soft-delete in v1 ([Domain model residue](https://github.com/rogierpennink/hydra/issues/46)) and events live as long as a live Task refers to them (04 §Retention), so the log's real bound becomes task retention; the idea on record is hard-pruning deleted tasks with their runs and events after something like a year. Sharpens with dogfooding.
 
 ## Pending prototypes

@@ -33,25 +33,25 @@ describe("createClient", () => {
   });
 
   it("sends the bearer token only while one is held", async () => {
-    const { fetch, sent } = stubFetch(() => json({}));
+    const { fetch, sent } = stubFetch(() => json({ complete: false }));
     const client = createClient({ baseUrl: BASE });
 
     // No token to start with.
     const anonymous = createClient({ baseUrl: BASE, fetch });
-    await anonymous.auth.logout();
+    await anonymous.setup.read();
     assert.strictEqual(sent(0).headers.get("authorization"), null);
 
     const held = createClient({ baseUrl: BASE, token: "tok_1", fetch });
-    await held.auth.logout();
+    await held.setup.read();
     assert.strictEqual(sent(1).headers.get("authorization"), "Bearer tok_1");
 
     held.setToken("tok_2");
-    await held.auth.logout();
+    await held.setup.read();
     assert.strictEqual(sent(2).headers.get("authorization"), "Bearer tok_2");
     assert.strictEqual(held.getToken(), "tok_2");
 
     held.setToken(null);
-    await held.auth.logout();
+    await held.setup.read();
     assert.strictEqual(sent(3).headers.get("authorization"), null);
 
     assert.strictEqual(client.getToken(), null);
@@ -137,5 +137,143 @@ describe("createClient", () => {
       readonly params: { readonly id: string };
     }>();
     expectTypeOf(client.setToken).toEqualTypeOf<(token: string | null) => void>();
+    expectTypeOf(client.presentToken).toEqualTypeOf<(token: string | null) => void>();
+  });
+});
+
+/** A token store over a plain variable, so a test can read what it kept. */
+const fakeStore = (initial: string | null = null) => {
+  let held = initial;
+  return {
+    read: () => held,
+    write: (token: string | null) => {
+      held = token;
+    },
+    get held() {
+      return held;
+    },
+  };
+};
+
+const PROFILE = { params: { id: "0199a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b" } };
+
+describe("createClient with a token store", () => {
+  it("starts with the token the store holds", async () => {
+    const { fetch, sent } = stubFetch(() => json({}));
+    const client = createClient({ baseUrl: BASE, fetch, tokenStore: fakeStore("tok_kept") });
+
+    await client.auth.logout();
+    assert.strictEqual(sent(0).headers.get("authorization"), "Bearer tok_kept");
+  });
+
+  it("prefers an explicit token over the stored one, and keeps it", () => {
+    const store = fakeStore("tok_kept");
+    const client = createClient({ baseUrl: BASE, token: "tok_given", tokenStore: store });
+
+    assert.strictEqual(client.getToken(), "tok_given");
+    assert.strictEqual(store.held, "tok_given");
+  });
+
+  it("writes through what setToken is given", () => {
+    const store = fakeStore();
+    const client = createClient({ baseUrl: BASE, tokenStore: store });
+
+    client.setToken("tok_1");
+    assert.strictEqual(store.held, "tok_1");
+
+    client.setToken(null);
+    assert.strictEqual(store.held, null);
+  });
+
+  it("sends a presented token without writing it", async () => {
+    const store = fakeStore();
+    const { fetch, sent } = stubFetch(() => json({ complete: false }));
+    const client = createClient({ baseUrl: BASE, fetch, tokenStore: store });
+
+    client.presentToken("tok_one_time");
+    assert.strictEqual(store.held, null);
+
+    await client.setup.read();
+    assert.strictEqual(sent(0).headers.get("authorization"), "Bearer tok_one_time");
+    assert.strictEqual(store.held, null);
+  });
+
+  it("keeps the token setup.complete hands back", async () => {
+    const store = fakeStore();
+    const { fetch } = stubFetch(() => json({ token: "tok_setup" }));
+    const client = createClient({ baseUrl: BASE, fetch, tokenStore: store });
+
+    await client.setup.complete({
+      payload: { username: "rogier", password: "correct horse battery staple", timezone: "UTC" },
+    });
+
+    assert.strictEqual(store.held, "tok_setup");
+    assert.strictEqual(client.getToken(), "tok_setup");
+  });
+
+  it("keeps the token auth.login hands back", async () => {
+    const store = fakeStore();
+    const { fetch } = stubFetch(() =>
+      json({ token: "tok_login", expiresAt: "2026-10-07T07:14:00.000Z" }),
+    );
+    const client = createClient({ baseUrl: BASE, fetch, tokenStore: store });
+
+    await client.auth.login({ payload: { username: "rogier", password: "hunter2hunter2" } });
+
+    assert.strictEqual(store.held, "tok_login");
+  });
+
+  it("clears the token on logout", async () => {
+    const store = fakeStore("tok_kept");
+    const { fetch } = stubFetch(() => json({}));
+    const client = createClient({ baseUrl: BASE, fetch, tokenStore: store });
+
+    await client.auth.logout();
+
+    assert.strictEqual(store.held, null);
+    assert.strictEqual(client.getToken(), null);
+  });
+
+  it("clears the token on an unauthenticated answer, and still surfaces it", async () => {
+    const store = fakeStore("tok_stale");
+    const { fetch } = stubFetch(() =>
+      json({ error: { code: "unauthenticated", message: "token expired" } }, 401),
+    );
+    const client = createClient({ baseUrl: BASE, fetch, tokenStore: store });
+
+    const error = await client.profile.read(PROFILE).then(
+      () => undefined,
+      (e: unknown) => e,
+    );
+
+    assert.instanceOf(error, ApiError);
+    assert.strictEqual(error.code, "unauthenticated");
+    assert.strictEqual(store.held, null);
+    assert.strictEqual(client.getToken(), null);
+  });
+
+  it("keeps the token on any other failure", async () => {
+    const store = fakeStore("tok_kept");
+    const { fetch } = stubFetch(() =>
+      json(
+        {
+          error: {
+            code: "forbidden",
+            message: "missing grant profile.read",
+            details: { grant: "profile.read" },
+          },
+        },
+        403,
+      ),
+    );
+    const client = createClient({ baseUrl: BASE, fetch, tokenStore: store });
+
+    await client.profile.read(PROFILE).then(
+      () => undefined,
+      () => undefined,
+    );
+
+    assert.strictEqual(store.held, "tok_kept");
+    assert.strictEqual(client.getToken(), "tok_kept");
   });
 });

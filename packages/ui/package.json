@@ -4,15 +4,26 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/index.tsx"
+    ".": "./src/index.ts",
+    "./styles.css": "./src/styles.css"
   },
   "peerDependencies": {
     "react": "19.2.8"
   },
   "devDependencies": {
+    "@testing-library/dom": "10.4.1",
     "@testing-library/react": "16.3.3",
+    "@testing-library/user-event": "14.6.7",
     "@types/react": "19.2.18",
     "react": "19.2.8",
     "react-dom": "19.2.8"
+  },
+  "dependencies": {
+    "@radix-ui/react-label": "2.1.15",
+    "@radix-ui/react-popover": "1.1.23",
+    "@radix-ui/react-toggle-group": "1.1.19",
+    "clsx": "2.1.1",
+    "tailwind-merge": "3.6.0",
+    "tailwindcss": "4.3.3"
   }
 }
