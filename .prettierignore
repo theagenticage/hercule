@@ -3,6 +3,7 @@ dist
 pnpm-lock.yaml
 packages/home/src/version.ts
 apps/controller/src/http/bundle.ts
+apps/web/src/routeTree.gen.ts
 .playwright-cli
 
 # Markdown is authored by hand; reformatting the spec would bury real diffs.

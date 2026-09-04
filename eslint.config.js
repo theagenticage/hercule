@@ -53,6 +53,7 @@ export default tseslint.config(
       "**/node_modules/**",
       "packages/home/src/version.ts",
       "apps/controller/src/http/bundle.ts",
+      "apps/web/src/routeTree.gen.ts",
       "/hydra",
     ],
   },

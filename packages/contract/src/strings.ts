@@ -30,7 +30,14 @@ export const MAX_PASSWORD_LENGTH = 1024;
 /**
  * A password being set. Both bounds apply: this is a value the user chooses.
  */
-export const NewPassword = bounded(MIN_PASSWORD_LENGTH, MAX_PASSWORD_LENGTH);
+export const NewPassword = Schema.String.check(
+  Schema.isLengthBetween(MIN_PASSWORD_LENGTH, MAX_PASSWORD_LENGTH, {
+    message: `A password is at least ${String(MIN_PASSWORD_LENGTH)} characters.`,
+  }),
+);
+
+/** The longest login name. */
+export const MAX_USERNAME_LENGTH = 64;
 
 /**
  * A password being presented. Only the maximum applies: refusing a short one
@@ -40,7 +47,11 @@ export const NewPassword = bounded(MIN_PASSWORD_LENGTH, MAX_PASSWORD_LENGTH);
 export const PresentedPassword = bounded(1, MAX_PASSWORD_LENGTH);
 
 /** A login name. */
-export const Username = bounded(1, 64);
+export const Username = Schema.String.check(
+  Schema.isLengthBetween(1, MAX_USERNAME_LENGTH, {
+    message: `A username is 1 to ${String(MAX_USERNAME_LENGTH)} characters.`,
+  }),
+);
 
 /**
  * The largest secret value the API stores, in characters.

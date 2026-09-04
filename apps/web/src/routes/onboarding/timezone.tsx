@@ -1,0 +1,84 @@
+import { useState, type FormEvent, type JSX } from "react";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { useSuspenseQuery } from "@tanstack/react-query";
+import { browserTimezone } from "@hydra/client-core";
+import { Button, Input } from "@hydra/ui";
+import { HOME_PATH } from "../../app/entry-guard";
+import { settingsQuery } from "../../app/queries";
+import { CenteredScreen, Field } from "../-centered-screen";
+
+/** The id this step records when it is done. */
+const STEP = "timezone";
+
+export const Route = createFileRoute("/onboarding/timezone")({
+  staticData: { title: "Confirm your timezone" },
+  component: TimezoneStep,
+});
+
+function TimezoneStep(): JSX.Element {
+  const { client, queryClient } = Route.useRouteContext();
+  const navigate = useNavigate();
+  const settings = useSuspenseQuery(settingsQuery(client)).data;
+
+  const [timezone, setTimezone] = useState(settings.user.timezone ?? browserTimezone());
+  const [failure, setFailure] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+
+  const submit = async (event: FormEvent): Promise<void> => {
+    event.preventDefault();
+    setFailure(null);
+    setSubmitting(true);
+
+    const completed = settings.user["onboarding.completedSteps"] ?? [];
+    try {
+      const updated = await client.settings.update({
+        payload: {
+          user: {
+            timezone,
+            "onboarding.completedSteps": [...completed, STEP],
+          },
+        },
+      });
+      queryClient.setQueryData(settingsQuery(client).queryKey, updated);
+    } catch (error) {
+      setFailure(error instanceof Error ? error.message : String(error));
+      setSubmitting(false);
+      return;
+    }
+
+    await navigate({ to: HOME_PATH });
+  };
+
+  return (
+    <CenteredScreen
+      title="Confirm your timezone"
+      lead="Hydra reads every time in this zone: schedules, ages, and what happened since you last looked."
+    >
+      <form className="flex flex-col gap-4" onSubmit={(event) => void submit(event)}>
+        <Field id="timezone" label="Timezone">
+          <Input
+            id="timezone"
+            name="timezone"
+            value={timezone}
+            onChange={(event) => {
+              setTimezone(event.target.value);
+            }}
+          />
+        </Field>
+        {failure === null ? null : (
+          <p className="text-fine text-fail" role="alert">
+            {failure}
+          </p>
+        )}
+        <Button
+          type="submit"
+          variant="primary"
+          disabled={submitting}
+          className="mt-2 w-full justify-center border border-line bg-surface py-2 text-body hover:bg-line-soft"
+        >
+          Continue
+        </Button>
+      </form>
+    </CenteredScreen>
+  );
+}
