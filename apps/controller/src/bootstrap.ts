@@ -24,7 +24,6 @@ import * as BunFileSystem from "@effect/platform-bun/BunFileSystem";
 import type { HomePaths } from "@hydra/home";
 import * as config from "./config";
 import { BootstrapConfig, HydraHome, HydraHomeError, type ConfigError } from "./config";
-import { hashToken, mintToken } from "./credentials";
 import {
   databaseError,
   migrate,
@@ -34,7 +33,9 @@ import {
   type SchemaVersionError,
 } from "./db";
 import { ControllerIdentity, controllerIdentityLayer } from "./identity";
-import { PermissionProfilesLayer, type GrantsError } from "./permissions";
+import { Credentials, CredentialsLayer, hashToken, mintToken } from "./credentials";
+import { Users, UsersLayer } from "./users";
+import { PermissionProfilesLayer, type GrantsError, type PermissionProfiles } from "./permissions";
 import {
   masterKeyLayer,
   secretsLayer,
@@ -43,7 +44,7 @@ import {
   type SecretNameError,
 } from "./secrets";
 import { seed } from "./seed";
-import { SettingsLayer, type SettingError } from "./settings";
+import { Settings, SettingsLayer, type SettingError } from "./settings";
 
 /** Setup tokens are minted and stored like every other Hydra token (spec 13 section 4.1). */
 export { hashToken };
@@ -139,18 +140,47 @@ const ensureSetupUrl = (
     return url;
   });
 
+/** Boot the controller: everything up to, and not including, binding. */
+export const boot = (options: BootOptions): Effect.Effect<BootOutcome, BootError> =>
+  bootWith(options, Effect.succeed);
+
+/** What a boot needs from its caller: the command line, the environment, the key backend. */
+export interface BootOptions {
+  readonly argv: ReadonlyArray<string>;
+  readonly env: Readonly<Record<string, string | undefined>>;
+  readonly masterKeyBackend?: MasterKeyBackend;
+}
+
 /**
- * Boot the controller: everything up to, and not including, binding.
+ * Every service the controller's own code reaches after the boot: the database,
+ * the repositories over it, the home and the bootstrap config.
+ */
+export type ControllerServices =
+  | SqlClient.SqlClient
+  | ControllerIdentity
+  | Settings
+  | PermissionProfiles
+  | Users
+  | Credentials
+  | HydraHome
+  | BootstrapConfig;
+
+/**
+ * Boot the controller and then keep running, with the database open.
+ *
+ * `hydra serve` binds after this and stays up; `boot` is the same sequence with
+ * nothing after it, which is what a test and `hydra setup-url` want. The
+ * database closes when `use` finishes, so a clean exit leaves no open handle
+ * behind (spec 15 section 8).
  *
  * `argv`, `env` and the master-key backend are arguments rather than ambient,
  * so a test drives a temporary home and the file-backed key exactly the way the
  * binary drives the real ones.
  */
-export const boot = (options: {
-  readonly argv: ReadonlyArray<string>;
-  readonly env: Readonly<Record<string, string | undefined>>;
-  readonly masterKeyBackend?: MasterKeyBackend;
-}): Effect.Effect<BootOutcome, BootError> => {
+export const bootWith = <A, E>(
+  options: BootOptions,
+  use: (outcome: BootOutcome) => Effect.Effect<A, E, ControllerServices>,
+): Effect.Effect<A, BootError | E> => {
   const sequence = Effect.gen(function* () {
     const paths = yield* HydraHome;
     const bootstrap = yield* BootstrapConfig;
@@ -164,6 +194,8 @@ export const boot = (options: {
       ),
       SettingsLayer,
       PermissionProfilesLayer,
+      UsersLayer,
+      CredentialsLayer,
     );
 
     const steps = Effect.gen(function* () {
@@ -177,10 +209,10 @@ export const boot = (options: {
       return { paths, identityId: record.id, setupUrl: url } satisfies BootOutcome;
     });
 
-    return yield* steps.pipe(
+    return yield* Effect.flatMap(steps, use).pipe(
       Effect.provide(repositories.pipe(Layer.provideMerge(openDatabase(paths.databaseFile)))),
-      // Nothing above this line has the database file in hand, and a controller
-      // that fails at boot has said nothing else yet.
+      // A statement the database refused reads as one line naming the file; a
+      // controller that fails at boot has said nothing else yet.
       Effect.catchTag("SqlError", (error) => Effect.fail(databaseError(paths.databaseFile, error))),
     );
   });

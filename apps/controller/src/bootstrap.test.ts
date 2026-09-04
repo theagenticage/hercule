@@ -12,7 +12,8 @@ import { join } from "node:path";
 import { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import * as Effect from "effect/Effect";
-import { boot, hashToken, setupUrl, type BootOutcome } from "./bootstrap";
+import * as SqlClient from "effect/unstable/sql/SqlClient";
+import { boot, bootWith, hashToken, setupUrl, type BootOutcome } from "./bootstrap";
 
 let home: string;
 
@@ -141,6 +142,29 @@ describe("the first run", () => {
   it("renders a reachable host when the bind host is a wildcard", async () => {
     const outcome = await serve(["-c", "bind.host=0.0.0.0", "-c", "bind.port=8080"]);
     expect(outcome.setupUrl).toContain("http://127.0.0.1:8080/setup?token=");
+  });
+});
+
+describe("bootWith", () => {
+  it("keeps the database open for whatever runs after the boot, and closes it after", async () => {
+    const rows = await Effect.runPromise(
+      bootWith({ argv: ["--home", home], env: {}, masterKeyBackend: "file" }, (outcome) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient;
+          expect(outcome.setupUrl).toBeDefined();
+          return yield* sql<{ readonly name: string }>`SELECT name FROM permission_profiles`;
+        }),
+      ),
+    );
+
+    expect(rows).toHaveLength(3);
+    // Nothing holds the file once the effect is done: another writer opens it.
+    const database = new Database(join(home, "data", "hydra.db"));
+    try {
+      expect(database.query("PRAGMA journal_mode").all()).toEqual([{ journal_mode: "wal" }]);
+    } finally {
+      database.close();
+    }
   });
 });
 
