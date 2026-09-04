@@ -73,6 +73,14 @@ describe("Settings > Profile", () => {
     });
     expect(client.getToken()).toBeNull();
     expect(api.calls.some((call) => call.path === "/api/v1/auth/logout")).toBe(true);
+
+    // Nothing is read back without a bearer on the way out. A refetch would
+    // be queued rather than sent, so the queue is let run first.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const after = api.calls.slice(
+      api.calls.findIndex((call) => call.path === "/api/v1/auth/logout"),
+    );
+    expect(after.filter((call) => call.path === "/api/v1/settings")).toEqual([]);
   });
 
   it("shows a refused write as the API worded it", async () => {

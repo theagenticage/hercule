@@ -36,6 +36,11 @@ function Profile(): JSX.Element {
    * Sign out: revoke the bearer at the controller, and drop it here whatever
    * the controller answered. A token this browser has thrown away cannot be
    * presented again, so a failed revocation must not leave the user signed in.
+   *
+   * What this screen read is dropped only once the login screen is up. Clearing
+   * it first evicts a query this screen is still subscribed to, which refetches
+   * it with no bearer and turns the answer into a failure screen racing the
+   * navigation.
    */
   const signOut = async (): Promise<void> => {
     setSigningOut(true);
@@ -46,8 +51,8 @@ function Profile(): JSX.Element {
       // with the token either way.
     }
     client.setToken(null);
-    queryClient.clear();
     await navigate({ to: LOGIN_PATH });
+    queryClient.clear();
   };
 
   return (
