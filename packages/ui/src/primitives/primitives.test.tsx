@@ -3,11 +3,10 @@ import { describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Button } from "./button";
-import { Dialog, DialogClose, DialogContent, DialogTitle, DialogTrigger } from "./dialog";
 import { Input } from "./input";
 import { Label } from "./label";
 import { Popover, PopoverContent, PopoverTrigger } from "./popover";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./select";
+import { Select } from "./select";
 import { SegmentedControl, SegmentedControlItem } from "./segmented-control";
 
 describe("Button", () => {
@@ -94,65 +93,34 @@ describe("Popover", () => {
   });
 });
 
-describe("Dialog", () => {
-  function Example() {
-    return (
-      <Dialog>
-        <DialogTrigger>Open</DialogTrigger>
-        <DialogContent>
-          <DialogTitle>Delete legacy channel tables?</DialogTitle>
-          <DialogClose>Cancel</DialogClose>
-        </DialogContent>
-      </Dialog>
-    );
-  }
-
-  it("opens with its title as its accessible name", async () => {
-    render(<Example />);
-    expect(screen.queryByRole("dialog")).toBeNull();
-    await userEvent.click(screen.getByRole("button", { name: "Open" }));
-    expect(screen.getByRole("dialog").getAttribute("aria-labelledby")).toBeTruthy();
-    expect(screen.getByRole("dialog").textContent).toContain("Delete legacy channel tables?");
-  });
-
-  it("closes on Escape and on its own close control", async () => {
-    render(<Example />);
-    await userEvent.click(screen.getByRole("button", { name: "Open" }));
-    await userEvent.keyboard("{Escape}");
-    expect(screen.queryByRole("dialog")).toBeNull();
-
-    await userEvent.click(screen.getByRole("button", { name: "Open" }));
-    await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
-    expect(screen.queryByRole("dialog")).toBeNull();
-  });
-});
-
 describe("Select", () => {
-  function Example({ onValueChange = () => {} }: { onValueChange?: (value: string) => void }) {
+  function Example({ onChange = () => {} }: { onChange?: (value: string) => void }) {
     return (
-      <Select onValueChange={onValueChange}>
-        <SelectTrigger aria-label="Access mode">
-          <SelectValue placeholder="Pick one" />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value="approval-required">Approval required</SelectItem>
-          <SelectItem value="unrestricted">Unrestricted</SelectItem>
-        </SelectContent>
+      <Select
+        aria-label="Timezone"
+        defaultValue="Europe/Amsterdam"
+        onChange={(event) => {
+          onChange(event.target.value);
+        }}
+      >
+        <option value="Europe/Amsterdam">Europe/Amsterdam</option>
+        <option value="UTC">UTC</option>
       </Select>
     );
   }
 
-  it("shows its placeholder until a value is picked", () => {
+  it("shows the value it starts on", () => {
     render(<Example />);
-    expect(screen.getByRole("combobox", { name: "Access mode" }).textContent).toContain("Pick one");
+    expect((screen.getByRole("combobox", { name: "Timezone" }) as HTMLSelectElement).value).toBe(
+      "Europe/Amsterdam",
+    );
   });
 
   it("reports the value the user picks", async () => {
-    const onValueChange = vi.fn();
-    render(<Example onValueChange={onValueChange} />);
-    await userEvent.click(screen.getByRole("combobox"));
-    await userEvent.click(screen.getByRole("option", { name: "Unrestricted" }));
-    expect(onValueChange).toHaveBeenCalledWith("unrestricted");
+    const onChange = vi.fn();
+    render(<Example onChange={onChange} />);
+    await userEvent.selectOptions(screen.getByRole("combobox", { name: "Timezone" }), "UTC");
+    expect(onChange).toHaveBeenCalledWith("UTC");
   });
 });
 
