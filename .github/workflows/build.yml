@@ -34,6 +34,10 @@ jobs:
       - name: Compile
         run: |
           bun run scripts/gen-version.ts
+          # The web bundle is embedded file by file, so it has to exist and be
+          # listed before the compile.
+          pnpm --filter @hydra/web build
+          bun run scripts/gen-web-bundle.ts
           for target in bun-darwin-arm64 bun-linux-x64 bun-linux-arm64; do
             bun build packages/hydra/src/main.ts \
               --compile --target="$target" \

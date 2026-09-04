@@ -47,7 +47,14 @@ const bannedChildProcessCalls = [
 
 export default tseslint.config(
   {
-    ignores: ["**/dist/**", "**/node_modules/**", "packages/hydra/src/version.ts", "/hydra"],
+    // The generated files are build output that happens to be TypeScript.
+    ignores: [
+      "**/dist/**",
+      "**/node_modules/**",
+      "packages/home/src/version.ts",
+      "apps/controller/src/http/bundle.ts",
+      "/hydra",
+    ],
   },
   js.configs.recommended,
   tseslint.configs.recommendedTypeChecked,

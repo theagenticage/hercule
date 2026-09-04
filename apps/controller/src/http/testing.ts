@@ -29,6 +29,7 @@ import { SetupLayer } from "../setup";
 import { PasswordCost, TEST_PASSWORD_PARAMS, UserLayer, UsersLayer } from "../users";
 import { seed } from "../seed";
 import { MAX_REQUEST_BODY_BYTES, serve } from "./server";
+import type { WebBundle } from "./static";
 
 /** The setup token the harness seeds, and the password `completeSetup` uses. */
 export const SETUP_TOKEN = "a-setup-token";
@@ -76,9 +77,13 @@ export type AuditReader = (kind: AuditKind) => Promise<ReadonlyArray<AuditRow>>;
 /**
  * Runs the real controller application over a real socket for the length of
  * `body`, in a temporary home that is removed afterwards.
+ *
+ * With no `bundle` the controller serves the API alone, which is what a
+ * checkout that was never built does.
  */
 export const withServer = (
   body: (base: string, audit: AuditReader, sql: SqlClient.SqlClient) => Promise<void>,
+  bundle?: WebBundle,
 ): Promise<void> => {
   const home = mkdtempSync(join(tmpdir(), "hydra-http-"));
   writeFileSync(join(home, "setup-url"), `http://127.0.0.1:4937/setup?token=${SETUP_TOKEN}\n`);
@@ -95,7 +100,7 @@ export const withServer = (
         // controller has.
         yield* Effect.flatMap(ControllerIdentity, (identity) => identity.ensure);
         yield* seed;
-        yield* serve;
+        yield* serve(bundle);
         const base = yield* baseUrl;
         // The log this database holds, read the way anything else reads it: a
         // request's audit row is asserted through the service that wrote it.

@@ -17,7 +17,7 @@ import { BootstrapConfig } from "./config";
 import { AuthLayer } from "./auth";
 import { bootWith, type BootError, type BootOutcome } from "./bootstrap";
 import { ApiKeysLayer } from "./credentials";
-import { MAX_REQUEST_BODY_BYTES, perimeterWarning, serve } from "./http";
+import { MAX_REQUEST_BODY_BYTES, perimeterWarning, serve, webBundle } from "./http";
 import { ControllerLayer } from "./identity";
 import { SecretLayer } from "./secrets";
 import { ProfilesLayer } from "./permissions";
@@ -104,7 +104,7 @@ export const untilStopped: Effect.Effect<
 const listen = (outcome: BootOutcome, stopped: Effect.Effect<void>) =>
   Effect.gen(function* () {
     const bootstrap = yield* BootstrapConfig;
-    yield* serve;
+    yield* serve(yield* webBundle);
 
     const warning = perimeterWarning(bootstrap.bindHost, bootstrap.bindPort);
     if (warning !== undefined) console.warn(`hydra: ${warning}`);

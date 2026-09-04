@@ -1,7 +1,8 @@
 node_modules
 dist
 pnpm-lock.yaml
-packages/hydra/src/version.ts
+packages/home/src/version.ts
+apps/controller/src/http/bundle.ts
 .playwright-cli
 
 # Markdown is authored by hand; reformatting the spec would bury real diffs.

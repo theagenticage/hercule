@@ -5,11 +5,13 @@
  * else; this module is the order the request passes through:
  *
  * 1. the error envelope, which answers everything the routes did not,
- * 2. routing,
- * 3. the pre-setup gate and the per-request span, both named for the operation
+ * 2. the web bundle, which answers what the router matched nothing for
+ *    (`./static.ts`),
+ * 3. routing,
+ * 4. the pre-setup gate and the per-request span, both named for the operation
  *    the router matched (`./gate.ts`),
- * 4. the credential gate and the static grant check (`./middleware.ts`),
- * 5. the derived route's decoding, then the one-line handler.
+ * 5. the credential gate and the static grant check (`./middleware.ts`),
+ * 6. the derived route's decoding, then the one-line handler.
  *
  * The body cap is not in that order: it is the listener's, given to Bun as
  * `maxRequestBodySize`, so an oversize body is answered `413` by the transport
@@ -34,6 +36,7 @@ import { responseFor, withEnvelope } from "./envelope";
 import { setupGate } from "./gate";
 import { AuthenticatedLayer, SetupTokenLayer } from "./middleware";
 import { handlerLayers } from "./routes";
+import { withWebBundle, type WebBundle } from "./static";
 
 /**
  * The largest request body the controller reads, in bytes. The listener is
@@ -92,15 +95,32 @@ const jsonOnly = <E, R>(
   );
 
 /**
+ * The web bundle this build embeds, or nothing when no web build has run.
+ *
+ * Loaded when the listener starts rather than when this module is imported.
+ * `./bundle.ts` is generated, and its `with { type: "file" }` imports name
+ * build output and mean something to Bun's bundler alone; anything else that
+ * links them - a test runner, above all - tries to evaluate a browser bundle.
+ */
+export const webBundle: Effect.Effect<WebBundle | undefined> = Effect.promise(() =>
+  import("./bundle").then((module) => module.webBundle),
+);
+
+/**
  * The whole application as one effect: what a request runs.
  */
-const application = Effect.map(HttpRouter.toHttpEffect(routerLayer), (routes) =>
-  withEnvelope(jsonOnly(routes)),
-);
+const application = (bundle: WebBundle | undefined) =>
+  Effect.map(HttpRouter.toHttpEffect(routerLayer), (routes) =>
+    withEnvelope(withWebBundle(bundle)(jsonOnly(routes))),
+  );
 
 /**
  * Starts serving on the current `HttpServer` and returns; the caller's scope
  * decides how long the listener lives. Closing it stops accepting, lets
  * in-flight requests finish, and releases the socket.
+ *
+ * The web bundle is the caller's to hand over: the API is the same server with
+ * or without it, and a checkout that was never built has none.
  */
-export const serve = Effect.flatMap(application, HttpServer.serveEffect());
+export const serve = (bundle: WebBundle | undefined) =>
+  Effect.flatMap(application(bundle), HttpServer.serveEffect());
