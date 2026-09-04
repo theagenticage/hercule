@@ -14,6 +14,17 @@ export {
 } from "./client";
 export { ApiError, ConnectionError, RequestError, type ErrorEnvelope } from "./errors";
 export { ID_TAIL, idTail } from "./id-tail";
+export {
+  createLive,
+  type Live,
+  type LiveDelta,
+  type LiveDeltaHandler,
+  type LiveInvalidateHandler,
+  type LiveOptions,
+  type LiveStatus,
+  type LiveWebSocketConstructor,
+} from "./live/live";
+export { queryKeys, queryKeysFor, type LiveQueryKey } from "./live/keys";
 export { nextOnboardingStep, ONBOARDING_STEPS, type OnboardingStep } from "./onboarding";
 export { formatSince, formatStamp, formatTimeContext } from "./time-context";
 export {

@@ -1,7 +1,7 @@
 import { useState, type JSX } from "react";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useInfiniteQuery, useMutation, useQuery, useSuspenseQuery } from "@tanstack/react-query";
-import { FALLBACK_TIMEZONE, idTail, isSupportedTimezone } from "@hydra/client-core";
+import { FALLBACK_TIMEZONE, idTail, isSupportedTimezone, queryKeys } from "@hydra/client-core";
 import type { TaskCreateInput } from "@hydra/contract";
 import { projectsQuery, settingsQuery, tasksQuery } from "../../../app/queries";
 import { TaskComposer } from "./-composer";
@@ -51,10 +51,10 @@ function Tasks(): JSX.Element {
 
   const reread = async (id?: string) => {
     await Promise.all([
-      queryClient.invalidateQueries({ queryKey: ["tasks"] }),
+      queryClient.invalidateQueries({ queryKey: queryKeys.tasks() }),
       id === undefined
         ? Promise.resolve()
-        : queryClient.invalidateQueries({ queryKey: ["task", id] }),
+        : queryClient.invalidateQueries({ queryKey: queryKeys.task(id) }),
     ]);
   };
 

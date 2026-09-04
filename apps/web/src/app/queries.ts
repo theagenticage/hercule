@@ -7,15 +7,19 @@
  * cache. Neither retries - a failure there is something the user has to see,
  * not something to sit through. The listings below are ordinary reads, keyed on
  * what narrows them so a filter that has been seen before answers from cache.
+ *
+ * The keys themselves are `client-core`'s, not this file's: a live push names
+ * records, and only builders both sides share can turn that into the keys the
+ * cache holds them under.
  */
 import { infiniteQueryOptions, queryOptions } from "@tanstack/react-query";
-import type { HydraClient } from "@hydra/client-core";
+import { queryKeys, type HydraClient } from "@hydra/client-core";
 import { MAX_PAGE_LIMIT, type TaskFilter } from "@hydra/contract";
 
 /** Whether first run has been completed. Reachable without a token. */
 export const setupQuery = (client: HydraClient) =>
   queryOptions({
-    queryKey: ["setup"],
+    queryKey: queryKeys.setup(),
     queryFn: () => client.setup.read(),
     staleTime: Infinity,
     retry: false,
@@ -24,7 +28,7 @@ export const setupQuery = (client: HydraClient) =>
 /** The settings store, both scopes. The user scope carries onboarding progress. */
 export const settingsQuery = (client: HydraClient) =>
   queryOptions({
-    queryKey: ["settings"],
+    queryKey: queryKeys.settings(),
     queryFn: () => client.settings.read(),
     staleTime: Infinity,
     retry: false,
@@ -38,7 +42,7 @@ export const settingsQuery = (client: HydraClient) =>
  */
 export const tasksQuery = (client: HydraClient, filter: TaskFilter) =>
   infiniteQueryOptions({
-    queryKey: ["tasks", filter],
+    queryKey: queryKeys.tasks(filter),
     queryFn: ({ pageParam }) =>
       client.task.query({
         query: pageParam === undefined ? filter : { ...filter, cursor: pageParam },
@@ -56,7 +60,7 @@ export const tasksQuery = (client: HydraClient, filter: TaskFilter) =>
  */
 export const taskQuery = (client: HydraClient, id: string) =>
   queryOptions({
-    queryKey: ["task", id],
+    queryKey: queryKeys.task(id),
     queryFn: () => client.task.read({ params: { id } }),
   });
 
@@ -67,6 +71,6 @@ export const taskQuery = (client: HydraClient, id: string) =>
  */
 export const projectsQuery = (client: HydraClient) =>
   queryOptions({
-    queryKey: ["projects"],
+    queryKey: queryKeys.projects(),
     queryFn: () => client.project.query({ query: { limit: MAX_PAGE_LIMIT } }),
   });
