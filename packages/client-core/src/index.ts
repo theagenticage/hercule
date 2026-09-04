@@ -13,6 +13,7 @@ export {
   type Operations,
 } from "./client";
 export { ApiError, ConnectionError, RequestError, type ErrorEnvelope } from "./errors";
+export { ID_TAIL, idTail } from "./id-tail";
 export { nextOnboardingStep, ONBOARDING_STEPS, type OnboardingStep } from "./onboarding";
 export { formatSince, formatStamp, formatTimeContext } from "./time-context";
 export {

@@ -58,3 +58,48 @@ describe("formatStamp", () => {
     assert.isUndefined(formatStamp(new Date(Number.NaN), "UTC"));
   });
 });
+
+describe("the formatters these readings need", () => {
+  /** How many `Intl.DateTimeFormat`s `run` builds. */
+  const built = (run: () => void): number => {
+    const original = Intl.DateTimeFormat;
+    let count = 0;
+    Intl.DateTimeFormat = new Proxy(original, {
+      construct: (target, args: ConstructorParameters<typeof Intl.DateTimeFormat>) => {
+        count += 1;
+        return new target(...args);
+      },
+    });
+    try {
+      run();
+    } finally {
+      Intl.DateTimeFormat = original;
+    }
+    return count;
+  };
+
+  it("are built once per zone and reading, however many rows are read", () => {
+    // A zone no other test here asks for, so nothing is held for it yet.
+    const zone = "Pacific/Auckland";
+    const rows = 50;
+
+    const count = built(() => {
+      for (let row = 0; row < rows; row += 1) {
+        formatStamp(new Date(MONDAY_MORNING.getTime() + row * 60_000), zone);
+        formatTimeContext(MONDAY_MORNING, zone);
+      }
+    });
+
+    assert.strictEqual(count, 2);
+    assert.strictEqual(formatStamp(MONDAY_MORNING, zone), "7 Sep 19:14");
+  });
+
+  it("does not rebuild for a zone this runtime has already refused", () => {
+    const count = built(() => {
+      assert.isUndefined(formatStamp(MONDAY_MORNING, "Europe/Atlantis"));
+      assert.isUndefined(formatStamp(MONDAY_MORNING, "Europe/Atlantis"));
+    });
+
+    assert.strictEqual(count, 1);
+  });
+});

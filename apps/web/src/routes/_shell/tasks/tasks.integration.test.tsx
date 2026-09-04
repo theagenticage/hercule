@@ -375,6 +375,72 @@ describe("Tasks > what the screen must not hide", () => {
     expect((await screen.findByRole("alert")).textContent).toContain("task.update is not granted");
   });
 
+  it("says so for an edit the next edit answers before, rather than losing it", async () => {
+    const user = userEvent.setup();
+    let release = (): void => {};
+    const answered = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const api = stubApi({
+      ...controller([RUNNER]),
+      // The status edit is refused, but only once the priority edit that
+      // follows it has already been answered.
+      [`PATCH /api/v1/tasks/${RUNNER.id}`]: async (call: Call) => {
+        const sent = call.body as { status?: string; priority?: string };
+        if (sent.status === undefined) return { body: { ...RUNNER, ...sent } };
+        await answered;
+        return refused;
+      },
+    });
+    await renderApp({ path: "/tasks", api: api.fetch, token: "held" });
+
+    await user.click(await screen.findByRole("button", { name: new RegExp(RUNNER.title) }));
+    const drawer = within(await screen.findByRole("dialog"));
+    await user.selectOptions(drawer.getByLabelText("Status"), "done");
+    await user.selectOptions(drawer.getByLabelText("Priority"), "low");
+    release();
+
+    expect((await screen.findByRole("alert")).textContent).toContain("task.update is not granted");
+  });
+
+  it("leaves one task's refusal out of the next task's drawer", async () => {
+    const user = userEvent.setup();
+    const api = stubApi({
+      ...controller([RUNNER, PRUNE]),
+      [`PATCH /api/v1/tasks/${RUNNER.id}`]: refused,
+    });
+    await renderApp({ path: "/tasks", api: api.fetch, token: "held" });
+
+    await user.click(await screen.findByRole("button", { name: new RegExp(RUNNER.title) }));
+    await user.selectOptions(
+      within(await screen.findByRole("dialog")).getByLabelText("Status"),
+      "done",
+    );
+    expect((await screen.findByRole("alert")).textContent).toContain("task.update is not granted");
+
+    await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Close" }));
+    await user.click(row(PRUNE.title));
+
+    const next = await screen.findByRole("dialog");
+    expect(next.textContent).toContain(PRUNE.title);
+    expect(within(next).queryByRole("alert")).toBeNull();
+  });
+
+  it("says so when the address names a task the controller will not answer for", async () => {
+    const api = stubApi({
+      ...controller([]),
+      [`GET /api/v1/tasks/${RUNNER.id}`]: {
+        status: 404,
+        body: envelope("not_found", `no task with id ${RUNNER.id}`),
+      },
+    });
+    await renderApp({ path: `/tasks?task=${RUNNER.id}`, api: api.fetch, token: "held" });
+
+    const drawer = await screen.findByRole("dialog");
+    expect(drawer.textContent).toContain("could not be read");
+    expect(drawer.textContent).toContain(`no task with id ${RUNNER.id}`);
+  });
+
   it("says so when the controller refuses a new task, and keeps what was typed", async () => {
     const user = userEvent.setup();
     const api = stubApi({
@@ -389,6 +455,25 @@ describe("Tasks > what the screen must not hide", () => {
 
     expect((await screen.findByRole("alert")).textContent).toContain("the database is locked");
     expect(screen.getByLabelText<HTMLInputElement>("Title").value).toBe("Read the log");
+  });
+
+  it("drops a refused attempt when the composer is closed", async () => {
+    const user = userEvent.setup();
+    const api = stubApi({
+      ...controller([]),
+      "POST /api/v1/tasks": { status: 500, body: envelope("internal", "the database is locked") },
+    });
+    await renderApp({ path: "/tasks", api: api.fetch, token: "held" });
+
+    await user.click(screen.getByRole("button", { name: "New task" }));
+    await user.type(screen.getByLabelText("Title"), "Read the log");
+    await user.click(screen.getByRole("button", { name: "Create" }));
+    expect((await screen.findByRole("alert")).textContent).toContain("the database is locked");
+
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    await user.click(screen.getByRole("button", { name: "New task" }));
+
+    expect(screen.queryByRole("alert")).toBeNull();
   });
 
   it("opens a task named in the address that no page of the listing holds", async () => {

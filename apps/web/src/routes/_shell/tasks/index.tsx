@@ -1,7 +1,7 @@
 import { useEffect, useState, type JSX } from "react";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useInfiniteQuery, useMutation, useQuery, useSuspenseQuery } from "@tanstack/react-query";
-import { FALLBACK_TIMEZONE, isSupportedTimezone } from "@hydra/client-core";
+import { FALLBACK_TIMEZONE, idTail, isSupportedTimezone } from "@hydra/client-core";
 import {
   TASK_STATUSES,
   type TaskCreateInput,
@@ -9,7 +9,7 @@ import {
   type TaskStatus,
   type TaskUpdateInput,
 } from "@hydra/contract";
-import { Button, EmptyState, Field, Input, Select } from "@hydra/ui";
+import { Button, Drawer, EmptyState, Field, Input, Select } from "@hydra/ui";
 import { projectsQuery, settingsQuery, taskQuery, tasksQuery } from "../../../app/queries";
 import { TaskComposer } from "./-composer";
 import { TaskDetail } from "./-detail";
@@ -52,9 +52,6 @@ function useSettled<T>(value: T, delay: number): T {
   return settled;
 }
 
-/** The tail of an id, which is how the product names one it cannot name. */
-const shortId = (id: string): string => id.slice(-8);
-
 /** What a failed write says, or nothing when there was none. */
 const failureOf = (error: Error | null): string | undefined => error?.message;
 
@@ -95,7 +92,7 @@ function Tasks(): JSX.Element {
   const tasks = listing.data?.pages.flatMap((page) => page.items) ?? [];
   const known = projects.data?.items ?? [];
   const nameOf = (id: string): string =>
-    known.find((project) => project.id === id)?.name ?? shortId(id);
+    known.find((project) => project.id === id)?.name ?? idTail(id);
 
   const reread = async (id?: string) => {
     await Promise.all([
@@ -114,14 +111,34 @@ function Tasks(): JSX.Element {
     },
   });
 
+  // A refused edit belongs to the task it was made on. The mutation's own error
+  // cannot say that: every field of the drawer shares one mutation, so a second
+  // edit issued before the first answers clears the first one's error before it
+  // is ever rendered, and an error that does survive is rendered inside
+  // whichever task's drawer is open next. So the refusal is held here, named by
+  // the task it refused, and shown only there.
+  const [refusal, setRefusal] = useState<
+    { readonly taskId: string; readonly message: string } | undefined
+  >(undefined);
+
   const edit = useMutation({
     mutationFn: ({ id, patch }: { readonly id: string; readonly patch: TaskUpdateInput }) =>
       client.task.update({ params: { id }, payload: patch }),
     onSuccess: (_, variables) => reread(variables.id),
+    onError: (error, variables) => {
+      setRefusal({ taskId: variables.id, message: error.message });
+    },
   });
 
-  const openTask = (id: string) => navigate({ to: "/tasks", search: { task: id } });
-  const closeTask = () => navigate({ to: "/tasks", search: {} });
+  // Opening another task, or closing the drawer, puts the refusal behind us.
+  const openTask = (id: string) => {
+    setRefusal(undefined);
+    return navigate({ to: "/tasks", search: { task: id } });
+  };
+  const closeTask = () => {
+    setRefusal(undefined);
+    return navigate({ to: "/tasks", search: {} });
+  };
 
   // The listing answers the panel instantly and the read keeps it right: a task
   // reached by address may be on no page fetched, and one the user has just
@@ -203,6 +220,7 @@ function Tasks(): JSX.Element {
           <Button
             variant="form"
             onClick={() => {
+              create.reset();
               setComposing((open) => !open);
             }}
           >
@@ -220,7 +238,10 @@ function Tasks(): JSX.Element {
             onCreate={(input) => {
               create.mutate(input);
             }}
+            // A refusal is answered for the attempt that drew it and no other,
+            // so it goes when the form does.
             onCancel={() => {
+              create.reset();
               setComposing(false);
             }}
           />
@@ -268,12 +289,21 @@ function Tasks(): JSX.Element {
         </div>
       )}
 
-      {selected === undefined ? null : (
+      {selected === undefined ? (
+        // A task named in the address that the controller will not answer for -
+        // deleted, or never there - is not silence: the drawer opens and says
+        // what the controller said.
+        openId === undefined || !opened.isError ? null : (
+          <Drawer open onClose={() => void closeTask()} title="The task could not be read.">
+            <p className="text-row leading-relaxed text-muted">{failureOf(opened.error)}</p>
+          </Drawer>
+        )
+      ) : (
         <TaskDetail
           task={selected}
           projects={known}
           timezone={timezone}
-          failure={failureOf(edit.error)}
+          failure={refusal?.taskId === selected.id ? refusal.message : undefined}
           onEdit={(patch) => {
             edit.mutate({ id: selected.id, patch });
           }}

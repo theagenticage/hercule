@@ -1,5 +1,5 @@
 import { useState, type FormEvent, type JSX } from "react";
-import { formatStamp, priorityGlyph, provenanceTarget } from "@hydra/client-core";
+import { formatStamp, idTail, priorityGlyph, provenanceTarget } from "@hydra/client-core";
 import {
   TASK_PRIORITIES,
   TASK_STATUSES,
@@ -45,7 +45,7 @@ export function TaskDetail({
   const offered =
     task.projectId === undefined || projects.some((project) => project.id === task.projectId)
       ? projects
-      : [...projects, { id: task.projectId, name: task.projectId.slice(-8) }];
+      : [...projects, { id: task.projectId, name: idTail(task.projectId) }];
 
   const addLabel = (event: FormEvent): void => {
     event.preventDefault();
