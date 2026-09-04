@@ -59,6 +59,7 @@ In scope, not yet sharp enough to ticket; listed on the map under **Not yet spec
 - A presentation layer over task status (kanban-style user-defined groupings above the fixed axis); the Tasks screen ships without it (14 §Screens).
 - Platform-auto subscription detection ("this session opened PR #87" subscribes it automatically); explicit subscription is the v1 primitive.
 - Execution-plan snapshot dedup/GC; content-hash dedup is the known escape hatch if per-run copies ever hurt.
+- `auth.wsTicket` (11 §auth) has no schema in `packages/contract`; it is added by the ticket that builds the live overlay and its `client-core` client. *(Noted 2026-09-04, [#58](https://github.com/rogierpennink/hydra/issues/58).)*
 - Task and Project pruning: both soft-delete in v1 ([Domain model residue](https://github.com/rogierpennink/hydra/issues/46)) and events live as long as a live Task refers to them (04 §Retention), so the log's real bound becomes task retention; the idea on record is hard-pruning deleted tasks with their runs and events after something like a year. Sharpens with dogfooding.
 
 ## Pending prototypes
