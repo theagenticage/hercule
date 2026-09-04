@@ -85,7 +85,7 @@ export { Actor, ExternalRef, Id, MAX_EXTERNAL_REF_LENGTH, NullableActor, Timesta
 export { Authenticated, SetupToken } from "./security";
 
 export { SetupPayload, SetupResult, SetupState } from "./groups/setup";
-export { LoginPayload, LoginResult } from "./groups/auth";
+export { LoginPayload, LoginResult, WsTicket } from "./groups/auth";
 export { ApiKey, MintedApiKey } from "./groups/api-key";
 export {
   AccessMode,
@@ -129,3 +129,19 @@ export {
   ProjectUpdateInput,
 } from "./groups/project";
 export { EVENT_SORT_FIELDS, Event, EventId, MAX_EVENT_KIND_LENGTH } from "./groups/event";
+export {
+  APPEND_ONLY_LIVE_TOPICS,
+  Delta,
+  HelloResult,
+  Invalidate,
+  InvalidateKind,
+  LIVE_PROTOCOL_VERSION,
+  LIVE_TOPICS,
+  LiveMessage,
+  LiveTopic,
+  MUTABLE_LIVE_TOPICS,
+  isAppendOnlyLiveTopic,
+  live,
+  type AppendOnlyLiveTopic,
+  type MutableLiveTopic,
+} from "./groups/live";

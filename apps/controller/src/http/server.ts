@@ -13,9 +13,15 @@
  * 5. the credential gate and the static grant check (`./middleware.ts`),
  * 6. the derived route's decoding, then the one-line handler.
  *
+ * The live socket at `GET /ws` is the one route that is not derived from the
+ * contract's HttpApi declaration, and it stops at step 4: it passes the
+ * pre-setup gate and then authenticates itself in its own first frame, because
+ * a browser cannot put a credential on a WebSocket handshake.
+ *
  * The body cap is not in that order: it is the listener's, given to Bun as
- * `maxRequestBodySize`, so an oversize body is answered `413` by the transport
- * before a byte of it is read and before this module runs at all. That `413` is
+ * `maxRequestBodySize` and, for the socket, as `maxPayloadLength`, so an
+ * oversize body is refused by the transport before a byte of it is read and
+ * before this module runs at all. That `413` is
  * the one response the API sends outside the error envelope, and it is
  * deliberate: an enveloped answer would mean reading the body first, which is
  * the cost the cap exists to avoid.
@@ -35,6 +41,7 @@ import { ALL_OPERATIONS, api, validation } from "@hydra/contract";
 import { responseFor, withEnvelope } from "./envelope";
 import { setupGate } from "./gate";
 import { AuthenticatedLayer, SetupTokenLayer } from "./middleware";
+import { LiveSocketLayer } from "../live";
 import { handlerLayers } from "./routes";
 import { withWebBundle, type WebBundle } from "./static";
 
@@ -46,10 +53,20 @@ import { withWebBundle, type WebBundle } from "./static";
  * is a secret value - and without a cap an unauthenticated caller can push
  * arbitrary bytes into durable storage through a failed login's audit row. The
  * cap is the listener's, so it holds for every operation and for paths no
- * operation owns, and an oversize body is refused with a bare `413` before it
- * is read.
+ * operation owns, and an oversize body is refused before it is read.
  */
 export const MAX_REQUEST_BODY_BYTES = 1024 * 1024;
+
+/**
+ * The listener options that enforce the cap, on a request body and on a socket
+ * frame alike. Bun applies `maxRequestBodySize` to neither WebSocket frames nor
+ * anything else the socket carries, so without the second half an unauthenticated
+ * connection could hand the controller a frame many times the documented size.
+ */
+export const bodyLimits = {
+  maxRequestBodySize: MAX_REQUEST_BODY_BYTES,
+  websocket: { maxPayloadLength: MAX_REQUEST_BODY_BYTES },
+} as const;
 
 /** Which operation a matched route is, so a span carries the name everything else uses. */
 const OPERATION_BY_ROUTE = new Map(
@@ -125,8 +142,16 @@ export const webBundle: Effect.Effect<WebBundle | undefined> = Effect.tryPromise
 /**
  * The whole application as one effect: what a request runs.
  */
+/**
+ * The live socket, behind the same pre-setup gate the operations are behind.
+ * Nothing on it is reachable before setup - a ticket needs a credential and
+ * there is no user yet - but a route that quietly sits outside the gate is a
+ * route the next one is added beside.
+ */
+const liveLayer = LiveSocketLayer.pipe(Layer.provide(setupGate.layer));
+
 const application = (bundle: WebBundle | undefined) =>
-  Effect.map(HttpRouter.toHttpEffect(routerLayer), (routes) =>
+  Effect.map(HttpRouter.toHttpEffect(Layer.mergeAll(routerLayer, liveLayer)), (routes) =>
     withEnvelope(withWebBundle(bundle)(jsonOnly(routes))),
   );
 

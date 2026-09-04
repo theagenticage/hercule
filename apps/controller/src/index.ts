@@ -18,8 +18,9 @@ import { AuthLayer } from "./auth";
 import { bootWith, type BootError, type BootOutcome } from "./bootstrap";
 import { ApiKeysLayer } from "./credentials";
 import { EventServiceLayer } from "./events";
-import { MAX_REQUEST_BODY_BYTES, perimeterWarning, serve, webBundle } from "./http";
+import { bodyLimits, perimeterWarning, serve, webBundle } from "./http";
 import { ControllerLayer } from "./identity";
+import { LiveTopicsLayer, WsTicketsLayer } from "./live";
 import { SecretLayer } from "./secrets";
 import { ProfilesLayer } from "./permissions";
 import { SettingsOperationsLayer } from "./settings";
@@ -143,6 +144,8 @@ const listen = (outcome: BootOutcome, stopped: Effect.Effect<void>) =>
         TaskServiceLayer,
         ProjectServiceLayer,
         EventServiceLayer,
+        LiveTopicsLayer,
+        WsTicketsLayer,
       ),
     ),
   );
@@ -162,7 +165,7 @@ export async function run(argv: readonly string[]): Promise<void> {
                 BunHttpServer.layer({
                   hostname: bootstrap.bindHost,
                   port: bootstrap.bindPort,
-                  maxRequestBodySize: MAX_REQUEST_BODY_BYTES,
+                  ...bodyLimits,
                 }),
               ),
             ),
