@@ -162,6 +162,26 @@ describe("settings.update", () => {
     expect(rows).toEqual([{ key: "timezone" }]);
   });
 
+  it("writes a thread row density and reads it back", async () => {
+    const state = await run(
+      Effect.gen(function* () {
+        const settings = yield* SettingsOperations;
+        yield* settings.update({ user: { "ui.threadRows": "plain" } });
+        return yield* settings.read();
+      }),
+    );
+    expect(state.user).toEqual({ "ui.threadRows": "plain" });
+  });
+
+  it("refuses a thread row density outside the two the shell offers", async () => {
+    const error = await run(
+      Effect.flatMap(SettingsOperations, (settings) =>
+        Effect.flip(settings.update({ user: { "ui.threadRows": "rich" } as never })),
+      ),
+    );
+    expect(error).toMatchObject({ _tag: "SettingError", scope: "user", key: "ui.threadRows" });
+  });
+
   it("writes nothing when the caller may not write", async () => {
     const error = await runAnonymous(
       Effect.flatMap(SettingsOperations, (settings) =>

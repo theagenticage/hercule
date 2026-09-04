@@ -45,6 +45,11 @@ const MuteTarget = Schema.NonEmptyString.check(
   }),
 );
 
+/** How much a thread row in the sidebar shows. */
+export const ThreadRows = Schema.Literals(["meta", "plain"]);
+
+export type ThreadRows = Schema.Schema.Type<typeof ThreadRows>;
+
 /** What every settings key holds, per scope. The one declaration of a key. */
 export const SETTING_VALUES = {
   controller: {
@@ -72,6 +77,8 @@ export const SETTING_VALUES = {
     "thread.model": Schema.NonEmptyString,
     "thread.accessMode": AccessMode,
     "thread.profileId": Id,
+    /** The density of a thread row in the sidebar: `meta` unless set otherwise. */
+    "ui.threadRows": ThreadRows,
   },
 } as const;
 

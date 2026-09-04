@@ -82,6 +82,7 @@ export {
   SETTING_VALUES,
   SettingsPatch,
   SettingsState,
+  ThreadRows,
   UserSettings,
 } from "./groups/settings";
 export { Profile } from "./groups/profile";
