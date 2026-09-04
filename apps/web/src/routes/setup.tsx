@@ -49,12 +49,14 @@ function Setup(): JSX.Element {
 
     setSubmitting(true);
     // The setup token is presented the way every other credential is, as the
-    // client's bearer. A successful call replaces it with the login token.
-    client.setToken(token);
+    // client's bearer, but it is never written where it would outlive the call:
+    // it is spent by the answer, and a tab closed mid-flight must leave no
+    // credential behind. A successful call replaces it with the login token.
+    client.setToken(token, false);
     try {
       await client.setup.complete({ payload: checked.value });
     } catch (error) {
-      client.setToken(null);
+      client.setToken(null, false);
       setFailure(error instanceof Error ? error.message : String(error));
       setSubmitting(false);
       return;

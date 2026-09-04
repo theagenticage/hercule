@@ -17,6 +17,7 @@ describe("the zones this runtime knows", () => {
 
   it("knows a real zone and refuses one that is not", () => {
     assert.isTrue(isSupportedTimezone("Europe/Amsterdam"));
+    assert.isTrue(isSupportedTimezone(FALLBACK_TIMEZONE));
     assert.isFalse(isSupportedTimezone("Amsterdam"));
     assert.isFalse(isSupportedTimezone(""));
   });

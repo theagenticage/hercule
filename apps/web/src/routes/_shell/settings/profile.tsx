@@ -1,9 +1,11 @@
 import { useState, type FormEvent, type JSX } from "react";
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useSuspenseQuery } from "@tanstack/react-query";
-import { browserTimezone } from "@hydra/client-core";
-import { Button, Input } from "@hydra/ui";
+import { FALLBACK_TIMEZONE } from "@hydra/client-core";
+import { Button } from "@hydra/ui";
+import { LOGIN_PATH } from "../../../app/entry-guard";
 import { settingsQuery } from "../../../app/queries";
+import { TimezoneField } from "../../../app/timezone-field";
 import { Row, SaveStatus, SettingsForm, useSaveSettings } from "./-form";
 
 export const Route = createFileRoute("/_shell/settings/profile")({
@@ -13,43 +15,70 @@ export const Route = createFileRoute("/_shell/settings/profile")({
 
 /**
  * The user's timezone: the one zone the whole system reads times in. It is set
- * during onboarding from the browser and changed here.
+ * during onboarding from the browser and changed here, and onboarding is what
+ * guarantees there is one to show.
  */
 function Profile(): JSX.Element {
   const { client, queryClient } = Route.useRouteContext();
+  const navigate = useNavigate();
   const settings = useSuspenseQuery(settingsQuery(client)).data;
   const { save, saving, saved, failure } = useSaveSettings(client, queryClient);
 
-  const [timezone, setTimezone] = useState(settings.user.timezone ?? browserTimezone());
+  const [timezone, setTimezone] = useState(settings.user.timezone ?? FALLBACK_TIMEZONE);
+  const [signingOut, setSigningOut] = useState(false);
 
   const submit = (event: FormEvent): void => {
     event.preventDefault();
     void save({ user: { timezone } });
   };
 
+  /**
+   * Sign out: revoke the bearer at the controller, and drop it here whatever
+   * the controller answered. A token this browser has thrown away cannot be
+   * presented again, so a failed revocation must not leave the user signed in.
+   */
+  const signOut = async (): Promise<void> => {
+    setSigningOut(true);
+    try {
+      await client.auth.logout();
+    } catch {
+      // The revocation is the controller's to record; this browser is done
+      // with the token either way.
+    }
+    client.setToken(null);
+    queryClient.clear();
+    await navigate({ to: LOGIN_PATH });
+  };
+
   return (
-    <form onSubmit={submit}>
+    <div className="flex flex-col gap-4">
+      <form onSubmit={submit}>
+        <SettingsForm
+          label="Profile"
+          fine="Schedules, ages and every time on screen are read in this zone."
+        >
+          <Row label="Timezone" htmlFor="timezone">
+            <TimezoneField value={timezone} onChange={setTimezone} />
+          </Row>
+          <div className="flex items-center gap-3 pt-2">
+            <Button type="submit" variant="form" disabled={saving}>
+              Save
+            </Button>
+            <SaveStatus saved={saved} failure={failure} />
+          </div>
+        </SettingsForm>
+      </form>
+
       <SettingsForm
-        label="Profile"
-        fine="Schedules, ages and every time on screen are read in this zone."
+        label="Session"
+        fine="This browser keeps you signed in until you sign out or the login expires."
       >
-        <Row label="Timezone" htmlFor="timezone">
-          <Input
-            id="timezone"
-            name="timezone"
-            value={timezone}
-            onChange={(event) => {
-              setTimezone(event.target.value);
-            }}
-          />
-        </Row>
-        <div className="flex items-center gap-3 pt-2">
-          <Button type="submit" variant="form" disabled={saving || timezone.length === 0}>
-            Save
+        <div className="pt-1">
+          <Button type="button" variant="form" disabled={signingOut} onClick={() => void signOut()}>
+            Sign out
           </Button>
-          <SaveStatus saved={saved} failure={failure} />
         </div>
       </SettingsForm>
-    </form>
+    </div>
   );
 }

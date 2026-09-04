@@ -92,12 +92,12 @@ export const renderApp = async ({
     createMemoryHistory({ initialEntries: [path] }),
   );
 
-  render(
+  const { unmount } = render(
     <QueryClientProvider client={queryClient}>
       <RouterProvider router={router} />
     </QueryClientProvider>,
   );
   await router.load();
 
-  return { router, client, queryClient };
+  return { router, client, queryClient, unmount };
 };

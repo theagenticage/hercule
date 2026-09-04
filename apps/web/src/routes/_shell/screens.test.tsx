@@ -46,4 +46,34 @@ describe("every screen inside the shell", () => {
     expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(title);
     expect(screen.getAllByText(headline).length).toBeGreaterThan(0);
   });
+
+  it("lands the section path on the first screen of its sub-navigation", async () => {
+    const { router } = await renderApp({
+      path: "/settings",
+      api: stubApi(api).fetch,
+      token: "held",
+    });
+
+    expect(router.state.location.pathname).toBe("/settings/profile");
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Profile");
+  });
+
+  it("shows a screen that failed to load as a Hydra screen with a way out", async () => {
+    const broken: Readonly<Record<string, Handler>> = {
+      ...api,
+      "GET /api/v1/settings": { status: 500, body: { error: { code: "internal", message: "no" } } },
+    };
+    await renderApp({ path: "/tasks", api: stubApi(broken).fetch, token: "held" });
+
+    expect(screen.getAllByText("This screen did not load").length).toBeGreaterThan(0);
+    expect(screen.getByRole("link", { name: "Go to Sessions" })).toBeDefined();
+  });
+
+  it("answers a path no screen owns without taking the navigation away", async () => {
+    await renderApp({ path: "/nope", api: stubApi(api).fetch, token: "held" });
+
+    expect(screen.getAllByText("No screen here").length).toBeGreaterThan(0);
+    expect(screen.getByRole("navigation", { name: "Hydra" })).toBeDefined();
+    expect(screen.getByRole("link", { name: "Go to Sessions" })).toBeDefined();
+  });
 });

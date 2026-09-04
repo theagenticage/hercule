@@ -31,6 +31,21 @@ describe("the login screen", () => {
     expect(router.state.location.pathname).toBe("/login");
   });
 
+  it("says what an empty form is missing, in words a person wrote", async () => {
+    const user = userEvent.setup();
+    const api = stubApi(controller({ body: {} }));
+    await renderApp({ path: "/login", api: api.fetch });
+
+    await user.click(screen.getByRole("button", { name: "Sign in" }));
+
+    const messages = screen.getAllByRole("alert").map((alert) => alert.textContent);
+    expect(messages).toEqual([
+      "A username is 1 to 64 characters.",
+      "A password is 1 to 1024 characters.",
+    ]);
+    expect(api.calls.some((call) => call.method === "POST")).toBe(false);
+  });
+
   it("shows any other failure as the API worded it", async () => {
     const api = stubApi(
       controller({ status: 500, body: envelope("internal", "the database is locked") }),

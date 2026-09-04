@@ -131,17 +131,16 @@ describe("the pulse at the sidebar foot", () => {
 
   it("opens on click and remembers that for the browser session", async () => {
     const user = userEvent.setup();
-    await renderApp({ path: "/tasks", api: stubApi(inShell()).fetch, token: "held" });
+    const first = await renderApp({ path: "/tasks", api: stubApi(inShell()).fetch, token: "held" });
 
     await user.click(pulseButton());
     expect(pulseButton().getAttribute("aria-expanded")).toBe("true");
 
+    // The second load is a second page load, so the first one is gone by then
+    // and the pulse is the only one on screen.
+    first.unmount();
     await renderApp({ path: "/runs", api: stubApi(inShell()).fetch, token: "held" });
-    expect(
-      screen
-        .getAllByRole("button", { name: /Nothing to report yet/ })[1]
-        ?.getAttribute("aria-expanded"),
-    ).toBe("true");
+    expect(pulseButton().getAttribute("aria-expanded")).toBe("true");
   });
 });
 
@@ -154,6 +153,24 @@ describe("the top bar", () => {
 
       expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Runs");
       expect(screen.getByText("Monday 09:14")).toBeDefined();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("reads a zone this browser does not know in UTC, and says so", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-09-07T07:14:00.000Z"));
+    try {
+      const api = stubApi(inShell({ timezone: "Europe/Nowhere" }));
+      await renderApp({ path: "/runs", api: api.fetch, token: "held" });
+
+      expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Runs");
+      expect(screen.getByText("Monday 07:14")).toBeDefined();
+      expect(
+        screen.getByRole("link", { name: /does not know the zone Europe\/Nowhere/ }),
+      ).toBeDefined();
+      expect(screen.getByRole("navigation", { name: "Hydra" })).toBeDefined();
     } finally {
       vi.useRealTimers();
     }

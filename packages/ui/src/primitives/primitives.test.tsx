@@ -111,7 +111,7 @@ describe("Select", () => {
 
   it("shows the value it starts on", () => {
     render(<Example />);
-    expect((screen.getByRole("combobox", { name: "Timezone" }) as HTMLSelectElement).value).toBe(
+    expect(screen.getByRole<HTMLSelectElement>("combobox", { name: "Timezone" }).value).toBe(
       "Europe/Amsterdam",
     );
   });

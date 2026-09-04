@@ -23,8 +23,16 @@ const resolveFromIntl: TimezoneResolver = () => Intl.DateTimeFormat().resolvedOp
 /** The zone offered when the runtime's own answer is not one it knows. */
 export const FALLBACK_TIMEZONE = "UTC";
 
-/** Every IANA zone this runtime can format, in the order it lists them. */
-export const supportedTimezones = (): readonly string[] => Intl.supportedValuesOf("timeZone");
+/**
+ * Every IANA zone this runtime can format, in the order it lists them.
+ *
+ * Some runtimes leave UTC out of the canonical list. It is always formattable
+ * and it is what the browser's zone falls back to, so it is always on offer.
+ */
+export const supportedTimezones = (): readonly string[] => {
+  const zones = Intl.supportedValuesOf("timeZone");
+  return zones.includes(FALLBACK_TIMEZONE) ? zones : [FALLBACK_TIMEZONE, ...zones];
+};
 
 /** Whether this runtime can format times in this zone. */
 export const isSupportedTimezone = (timezone: string): boolean =>

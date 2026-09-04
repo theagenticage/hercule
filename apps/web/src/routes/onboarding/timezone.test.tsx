@@ -22,15 +22,47 @@ describe("the timezone step", () => {
     const api = stubApi(fresh());
     await renderApp({ path: "/", api: api.fetch, token: "bearer" });
 
-    const field = await screen.findByLabelText("Timezone");
-    expect((field as HTMLInputElement).value).toBe(browserTimezone());
+    const field = await screen.findByLabelText<HTMLSelectElement>("Timezone");
+    expect(field.value).toBe(browserTimezone());
+  });
+
+  it("offers only zones this browser can format, and no free text", async () => {
+    const api = stubApi(fresh());
+    await renderApp({ path: "/", api: api.fetch, token: "bearer" });
+
+    const field = await screen.findByLabelText<HTMLSelectElement>("Timezone");
+    expect(field.tagName).toBe("SELECT");
+    const offered = [...field.options].map((option) => option.value);
+    expect(offered).toContain("UTC");
+    expect(offered).not.toContain("Amsterdam");
+    for (const zone of offered) {
+      expect(() => new Intl.DateTimeFormat("en-US", { timeZone: zone })).not.toThrow();
+    }
+  });
+
+  it("sends the zone the user picks", async () => {
+    const api = stubApi(fresh());
+    const { router } = await renderApp({ path: "/", api: api.fetch, token: "bearer" });
+
+    const field = await screen.findByLabelText<HTMLSelectElement>("Timezone");
+    const user = userEvent.setup();
+    await user.selectOptions(field, "Pacific/Auckland");
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe("/");
+    });
+    const written = api.calls.find((call) => call.method === "PATCH")!;
+    expect((written.body as { user: Record<string, unknown> }).user).toMatchObject({
+      timezone: "Pacific/Auckland",
+    });
   });
 
   it("records the step as completed and lets the app open", async () => {
     const api = stubApi(fresh());
     const { router } = await renderApp({ path: "/", api: api.fetch, token: "bearer" });
 
-    await screen.findByLabelText("Timezone");
+    await screen.findByLabelText<HTMLSelectElement>("Timezone");
     await userEvent.setup().click(screen.getByRole("button", { name: "Continue" }));
 
     await waitFor(() => {
@@ -57,7 +89,7 @@ describe("the timezone step", () => {
     });
     const { router } = await renderApp({ path: "/", api: api.fetch, token: "bearer" });
 
-    await screen.findByLabelText("Timezone");
+    await screen.findByLabelText<HTMLSelectElement>("Timezone");
     await userEvent.setup().click(screen.getByRole("button", { name: "Continue" }));
 
     await waitFor(() => {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { screen, within } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { envelope, renderApp, stubApi, type Call, type Handler } from "../../../app/testing";
 
@@ -28,17 +28,51 @@ describe("Settings > Profile", () => {
     const api = stubApi(controller());
     await renderApp({ path: "/settings/profile", api: api.fetch, token: "held" });
 
-    const field = screen.getByLabelText("Timezone");
-    expect((field as HTMLInputElement).value).toBe("Europe/Amsterdam");
+    const field = screen.getByLabelText<HTMLSelectElement>("Timezone");
+    expect(field.value).toBe("Europe/Amsterdam");
 
-    await user.clear(field);
-    await user.type(field, "Pacific/Auckland");
+    await user.selectOptions(field, "Pacific/Auckland");
     await user.click(screen.getByRole("button", { name: "Save" }));
 
     expect(await screen.findByRole("status")).toBeDefined();
     const written = api.calls.filter((call) => call.method === "PATCH");
     expect(written).toHaveLength(1);
     expect(written[0]?.body).toEqual({ user: { timezone: "Pacific/Auckland" } });
+  });
+
+  it("offers only zones this browser can format, and no free text", async () => {
+    const api = stubApi(controller());
+    await renderApp({ path: "/settings/profile", api: api.fetch, token: "held" });
+
+    const field = screen.getByLabelText<HTMLSelectElement>("Timezone");
+    expect(field.tagName).toBe("SELECT");
+    const offered = [...field.options].map((option) => option.value);
+    expect(offered).toContain("Europe/Amsterdam");
+    expect(offered).not.toContain("Amsterdam");
+    for (const zone of offered) {
+      expect(() => new Intl.DateTimeFormat("en-US", { timeZone: zone })).not.toThrow();
+    }
+  });
+
+  it("signs out even when the controller refuses the revocation", async () => {
+    const user = userEvent.setup();
+    const api = stubApi({
+      ...controller(),
+      "POST /api/v1/auth/logout": { status: 500, body: envelope("internal", "no") },
+    });
+    const { router, client } = await renderApp({
+      path: "/settings/profile",
+      api: api.fetch,
+      token: "held",
+    });
+
+    await user.click(screen.getByRole("button", { name: "Sign out" }));
+
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe("/login");
+    });
+    expect(client.getToken()).toBeNull();
+    expect(api.calls.some((call) => call.path === "/api/v1/auth/logout")).toBe(true);
   });
 
   it("shows a refused write as the API worded it", async () => {

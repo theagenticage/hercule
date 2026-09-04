@@ -1,6 +1,11 @@
 import type { JSX } from "react";
-import { useMatches } from "@tanstack/react-router";
-import { formatSince, formatTimeContext } from "@hydra/client-core";
+import { Link, useMatches } from "@tanstack/react-router";
+import {
+  FALLBACK_TIMEZONE,
+  formatSince,
+  formatTimeContext,
+  isSupportedTimezone,
+} from "@hydra/client-core";
 import type { SettingsState } from "@hydra/contract";
 import { useMinuteClock } from "./clock";
 
@@ -11,6 +16,12 @@ import { useMinuteClock } from "./clock";
  * titles the bar and its layout does not have to. The time context is the
  * user's own zone throughout: a screen framed on when the user last looked says
  * so instead, and falls back to the plain reading until that marker exists.
+ *
+ * A stored zone this browser cannot format - written by another client, or by
+ * a browser whose zone database is newer - is read in UTC and said so, with
+ * the screen that fixes it one click away. The bar is on every screen inside
+ * the shell, so it is the one place that must never be the reason nothing
+ * renders.
  */
 export function TopBar({ settings }: { readonly settings: SettingsState }): JSX.Element {
   const matches = useMatches();
@@ -19,7 +30,9 @@ export function TopBar({ settings }: { readonly settings: SettingsState }): JSX.
   const framing = [...matches]
     .reverse()
     .find((match) => match.staticData.title !== undefined)?.staticData;
-  const timezone = settings.user.timezone ?? "UTC";
+  const stored = settings.user.timezone ?? FALLBACK_TIMEZONE;
+  const known = isSupportedTimezone(stored);
+  const timezone = known ? stored : FALLBACK_TIMEZONE;
   const since = framing?.sinceMarker === undefined ? undefined : settings.user[framing.sinceMarker];
 
   return (
@@ -32,6 +45,14 @@ export function TopBar({ settings }: { readonly settings: SettingsState }): JSX.
           ? formatTimeContext(now, timezone)
           : formatSince(new Date(since), timezone)}
       </span>
+      {known ? null : (
+        <Link
+          to="/settings/profile"
+          className="truncate text-fine text-attn underline underline-offset-2"
+        >
+          {`This browser does not know the zone ${stored}; times read in ${FALLBACK_TIMEZONE}.`}
+        </Link>
+      )}
     </header>
   );
 }

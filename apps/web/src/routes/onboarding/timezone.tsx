@@ -2,9 +2,10 @@ import { useState, type FormEvent, type JSX } from "react";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { browserTimezone } from "@hydra/client-core";
-import { Button, Input } from "@hydra/ui";
+import { Button } from "@hydra/ui";
 import { HOME_PATH } from "../../app/entry-guard";
 import { settingsQuery } from "../../app/queries";
+import { TimezoneField } from "../../app/timezone-field";
 import { CenteredScreen, Field } from "../-centered-screen";
 
 /** The id this step records when it is done. */
@@ -56,14 +57,7 @@ function TimezoneStep(): JSX.Element {
     >
       <form className="flex flex-col gap-4" onSubmit={(event) => void submit(event)}>
         <Field id="timezone" label="Timezone">
-          <Input
-            id="timezone"
-            name="timezone"
-            value={timezone}
-            onChange={(event) => {
-              setTimezone(event.target.value);
-            }}
-          />
+          <TimezoneField value={timezone} onChange={setTimezone} />
         </Field>
         {failure === null ? null : (
           <p className="text-fine text-fail" role="alert">
