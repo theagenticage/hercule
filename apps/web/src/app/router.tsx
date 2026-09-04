@@ -16,8 +16,10 @@ declare module "@tanstack/react-router" {
     router: ReturnType<typeof createAppRouter>;
   }
 
-  /** What a screen tells the shell about itself. The top bar reads the title. */
+  /** What a screen tells the shell about itself. The top bar reads both. */
   interface StaticDataRouteOption {
     readonly title?: string;
+    /** The last-checked marker the screen is framed on, where it is framed on one. */
+    readonly sinceMarker?: "lastChecked.intake";
   }
 }

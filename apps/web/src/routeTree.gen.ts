@@ -9,51 +9,32 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
-import { Route as IndexRouteImport } from './routes/index'
-import { Route as CheckInRouteImport } from './routes/check-in'
-import { Route as ConnectionsRouteImport } from './routes/connections'
-import { Route as FleetRouteImport } from './routes/fleet'
-import { Route as IntakeRouteImport } from './routes/intake'
+import { Route as ShellRouteImport } from './routes/_shell'
 import { Route as LoginRouteImport } from './routes/login'
-import { Route as NotificationsRouteImport } from './routes/notifications'
-import { Route as RunsRouteImport } from './routes/runs'
 import { Route as SetupRouteImport } from './routes/setup'
-import { Route as TasksRouteImport } from './routes/tasks'
-import { Route as WorkflowsRouteImport } from './routes/workflows'
+import { Route as ShellIndexRouteImport } from './routes/_shell/index'
+import { Route as ShellCheckInRouteImport } from './routes/_shell/check-in'
+import { Route as ShellConnectionsRouteImport } from './routes/_shell/connections'
+import { Route as ShellFleetRouteImport } from './routes/_shell/fleet'
+import { Route as ShellIntakeRouteImport } from './routes/_shell/intake'
+import { Route as ShellNotificationsRouteImport } from './routes/_shell/notifications'
+import { Route as ShellRunsRouteImport } from './routes/_shell/runs'
+import { Route as ShellSettingsRouteImport } from './routes/_shell/settings'
+import { Route as ShellTasksRouteImport } from './routes/_shell/tasks'
+import { Route as ShellWorkflowsRouteImport } from './routes/_shell/workflows'
 import { Route as OnboardingTimezoneRouteImport } from './routes/onboarding/timezone'
-import { Route as SettingsAssistantsRouteImport } from './routes/settings/assistants'
-import { Route as SettingsBoundsRouteImport } from './routes/settings/bounds'
-import { Route as SettingsIdentitiesRouteImport } from './routes/settings/identities'
-import { Route as SettingsPermissionProfilesRouteImport } from './routes/settings/permission-profiles'
-import { Route as SettingsPluginsRouteImport } from './routes/settings/plugins'
-import { Route as SettingsProfileRouteImport } from './routes/settings/profile'
-import { Route as SettingsSecretsRouteImport } from './routes/settings/secrets'
-import { Route as SettingsSystemRouteImport } from './routes/settings/system'
-import { Route as SettingsThreadsRouteImport } from './routes/settings/threads'
+import { Route as ShellSettingsAssistantsRouteImport } from './routes/_shell/settings/assistants'
+import { Route as ShellSettingsBoundsRouteImport } from './routes/_shell/settings/bounds'
+import { Route as ShellSettingsIdentitiesRouteImport } from './routes/_shell/settings/identities'
+import { Route as ShellSettingsPermissionProfilesRouteImport } from './routes/_shell/settings/permission-profiles'
+import { Route as ShellSettingsPluginsRouteImport } from './routes/_shell/settings/plugins'
+import { Route as ShellSettingsProfileRouteImport } from './routes/_shell/settings/profile'
+import { Route as ShellSettingsSecretsRouteImport } from './routes/_shell/settings/secrets'
+import { Route as ShellSettingsSystemRouteImport } from './routes/_shell/settings/system'
+import { Route as ShellSettingsThreadsRouteImport } from './routes/_shell/settings/threads'
 
-const IndexRoute = IndexRouteImport.update({
-  id: '/',
-  path: '/',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const CheckInRoute = CheckInRouteImport.update({
-  id: '/check-in',
-  path: '/check-in',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ConnectionsRoute = ConnectionsRouteImport.update({
-  id: '/connections',
-  path: '/connections',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const FleetRoute = FleetRouteImport.update({
-  id: '/fleet',
-  path: '/fleet',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const IntakeRoute = IntakeRouteImport.update({
-  id: '/intake',
-  path: '/intake',
+const ShellRoute = ShellRouteImport.update({
+  id: '/_shell',
   getParentRoute: () => rootRouteImport,
 } as any)
 const LoginRoute = LoginRouteImport.update({
@@ -61,165 +42,200 @@ const LoginRoute = LoginRouteImport.update({
   path: '/login',
   getParentRoute: () => rootRouteImport,
 } as any)
-const NotificationsRoute = NotificationsRouteImport.update({
-  id: '/notifications',
-  path: '/notifications',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const RunsRoute = RunsRouteImport.update({
-  id: '/runs',
-  path: '/runs',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const SetupRoute = SetupRouteImport.update({
   id: '/setup',
   path: '/setup',
   getParentRoute: () => rootRouteImport,
 } as any)
-const TasksRoute = TasksRouteImport.update({
+const ShellIndexRoute = ShellIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => ShellRoute,
+} as any)
+const ShellCheckInRoute = ShellCheckInRouteImport.update({
+  id: '/check-in',
+  path: '/check-in',
+  getParentRoute: () => ShellRoute,
+} as any)
+const ShellConnectionsRoute = ShellConnectionsRouteImport.update({
+  id: '/connections',
+  path: '/connections',
+  getParentRoute: () => ShellRoute,
+} as any)
+const ShellFleetRoute = ShellFleetRouteImport.update({
+  id: '/fleet',
+  path: '/fleet',
+  getParentRoute: () => ShellRoute,
+} as any)
+const ShellIntakeRoute = ShellIntakeRouteImport.update({
+  id: '/intake',
+  path: '/intake',
+  getParentRoute: () => ShellRoute,
+} as any)
+const ShellNotificationsRoute = ShellNotificationsRouteImport.update({
+  id: '/notifications',
+  path: '/notifications',
+  getParentRoute: () => ShellRoute,
+} as any)
+const ShellRunsRoute = ShellRunsRouteImport.update({
+  id: '/runs',
+  path: '/runs',
+  getParentRoute: () => ShellRoute,
+} as any)
+const ShellSettingsRoute = ShellSettingsRouteImport.update({
+  id: '/settings',
+  path: '/settings',
+  getParentRoute: () => ShellRoute,
+} as any)
+const ShellTasksRoute = ShellTasksRouteImport.update({
   id: '/tasks',
   path: '/tasks',
-  getParentRoute: () => rootRouteImport,
+  getParentRoute: () => ShellRoute,
 } as any)
-const WorkflowsRoute = WorkflowsRouteImport.update({
+const ShellWorkflowsRoute = ShellWorkflowsRouteImport.update({
   id: '/workflows',
   path: '/workflows',
-  getParentRoute: () => rootRouteImport,
+  getParentRoute: () => ShellRoute,
 } as any)
 const OnboardingTimezoneRoute = OnboardingTimezoneRouteImport.update({
   id: '/onboarding/timezone',
   path: '/onboarding/timezone',
   getParentRoute: () => rootRouteImport,
 } as any)
-const SettingsAssistantsRoute = SettingsAssistantsRouteImport.update({
-  id: '/settings/assistants',
-  path: '/settings/assistants',
-  getParentRoute: () => rootRouteImport,
+const ShellSettingsAssistantsRoute = ShellSettingsAssistantsRouteImport.update({
+  id: '/assistants',
+  path: '/assistants',
+  getParentRoute: () => ShellSettingsRoute,
 } as any)
-const SettingsBoundsRoute = SettingsBoundsRouteImport.update({
-  id: '/settings/bounds',
-  path: '/settings/bounds',
-  getParentRoute: () => rootRouteImport,
+const ShellSettingsBoundsRoute = ShellSettingsBoundsRouteImport.update({
+  id: '/bounds',
+  path: '/bounds',
+  getParentRoute: () => ShellSettingsRoute,
 } as any)
-const SettingsIdentitiesRoute = SettingsIdentitiesRouteImport.update({
-  id: '/settings/identities',
-  path: '/settings/identities',
-  getParentRoute: () => rootRouteImport,
+const ShellSettingsIdentitiesRoute = ShellSettingsIdentitiesRouteImport.update({
+  id: '/identities',
+  path: '/identities',
+  getParentRoute: () => ShellSettingsRoute,
 } as any)
-const SettingsPermissionProfilesRoute =
-  SettingsPermissionProfilesRouteImport.update({
-    id: '/settings/permission-profiles',
-    path: '/settings/permission-profiles',
-    getParentRoute: () => rootRouteImport,
+const ShellSettingsPermissionProfilesRoute =
+  ShellSettingsPermissionProfilesRouteImport.update({
+    id: '/permission-profiles',
+    path: '/permission-profiles',
+    getParentRoute: () => ShellSettingsRoute,
   } as any)
-const SettingsPluginsRoute = SettingsPluginsRouteImport.update({
-  id: '/settings/plugins',
-  path: '/settings/plugins',
-  getParentRoute: () => rootRouteImport,
+const ShellSettingsPluginsRoute = ShellSettingsPluginsRouteImport.update({
+  id: '/plugins',
+  path: '/plugins',
+  getParentRoute: () => ShellSettingsRoute,
 } as any)
-const SettingsProfileRoute = SettingsProfileRouteImport.update({
-  id: '/settings/profile',
-  path: '/settings/profile',
-  getParentRoute: () => rootRouteImport,
+const ShellSettingsProfileRoute = ShellSettingsProfileRouteImport.update({
+  id: '/profile',
+  path: '/profile',
+  getParentRoute: () => ShellSettingsRoute,
 } as any)
-const SettingsSecretsRoute = SettingsSecretsRouteImport.update({
-  id: '/settings/secrets',
-  path: '/settings/secrets',
-  getParentRoute: () => rootRouteImport,
+const ShellSettingsSecretsRoute = ShellSettingsSecretsRouteImport.update({
+  id: '/secrets',
+  path: '/secrets',
+  getParentRoute: () => ShellSettingsRoute,
 } as any)
-const SettingsSystemRoute = SettingsSystemRouteImport.update({
-  id: '/settings/system',
-  path: '/settings/system',
-  getParentRoute: () => rootRouteImport,
+const ShellSettingsSystemRoute = ShellSettingsSystemRouteImport.update({
+  id: '/system',
+  path: '/system',
+  getParentRoute: () => ShellSettingsRoute,
 } as any)
-const SettingsThreadsRoute = SettingsThreadsRouteImport.update({
-  id: '/settings/threads',
-  path: '/settings/threads',
-  getParentRoute: () => rootRouteImport,
+const ShellSettingsThreadsRoute = ShellSettingsThreadsRouteImport.update({
+  id: '/threads',
+  path: '/threads',
+  getParentRoute: () => ShellSettingsRoute,
 } as any)
 
 export interface FileRoutesByFullPath {
-  '/': typeof IndexRoute
-  '/check-in': typeof CheckInRoute
-  '/connections': typeof ConnectionsRoute
-  '/fleet': typeof FleetRoute
-  '/intake': typeof IntakeRoute
+  '/': typeof ShellIndexRoute
   '/login': typeof LoginRoute
-  '/notifications': typeof NotificationsRoute
-  '/runs': typeof RunsRoute
   '/setup': typeof SetupRoute
-  '/tasks': typeof TasksRoute
-  '/workflows': typeof WorkflowsRoute
+  '/check-in': typeof ShellCheckInRoute
+  '/connections': typeof ShellConnectionsRoute
+  '/fleet': typeof ShellFleetRoute
+  '/intake': typeof ShellIntakeRoute
+  '/notifications': typeof ShellNotificationsRoute
+  '/runs': typeof ShellRunsRoute
+  '/settings': typeof ShellSettingsRouteWithChildren
+  '/tasks': typeof ShellTasksRoute
+  '/workflows': typeof ShellWorkflowsRoute
   '/onboarding/timezone': typeof OnboardingTimezoneRoute
-  '/settings/assistants': typeof SettingsAssistantsRoute
-  '/settings/bounds': typeof SettingsBoundsRoute
-  '/settings/identities': typeof SettingsIdentitiesRoute
-  '/settings/permission-profiles': typeof SettingsPermissionProfilesRoute
-  '/settings/plugins': typeof SettingsPluginsRoute
-  '/settings/profile': typeof SettingsProfileRoute
-  '/settings/secrets': typeof SettingsSecretsRoute
-  '/settings/system': typeof SettingsSystemRoute
-  '/settings/threads': typeof SettingsThreadsRoute
+  '/settings/assistants': typeof ShellSettingsAssistantsRoute
+  '/settings/bounds': typeof ShellSettingsBoundsRoute
+  '/settings/identities': typeof ShellSettingsIdentitiesRoute
+  '/settings/permission-profiles': typeof ShellSettingsPermissionProfilesRoute
+  '/settings/plugins': typeof ShellSettingsPluginsRoute
+  '/settings/profile': typeof ShellSettingsProfileRoute
+  '/settings/secrets': typeof ShellSettingsSecretsRoute
+  '/settings/system': typeof ShellSettingsSystemRoute
+  '/settings/threads': typeof ShellSettingsThreadsRoute
 }
 export interface FileRoutesByTo {
-  '/': typeof IndexRoute
-  '/check-in': typeof CheckInRoute
-  '/connections': typeof ConnectionsRoute
-  '/fleet': typeof FleetRoute
-  '/intake': typeof IntakeRoute
   '/login': typeof LoginRoute
-  '/notifications': typeof NotificationsRoute
-  '/runs': typeof RunsRoute
   '/setup': typeof SetupRoute
-  '/tasks': typeof TasksRoute
-  '/workflows': typeof WorkflowsRoute
+  '/check-in': typeof ShellCheckInRoute
+  '/connections': typeof ShellConnectionsRoute
+  '/fleet': typeof ShellFleetRoute
+  '/intake': typeof ShellIntakeRoute
+  '/notifications': typeof ShellNotificationsRoute
+  '/runs': typeof ShellRunsRoute
+  '/settings': typeof ShellSettingsRouteWithChildren
+  '/tasks': typeof ShellTasksRoute
+  '/workflows': typeof ShellWorkflowsRoute
   '/onboarding/timezone': typeof OnboardingTimezoneRoute
-  '/settings/assistants': typeof SettingsAssistantsRoute
-  '/settings/bounds': typeof SettingsBoundsRoute
-  '/settings/identities': typeof SettingsIdentitiesRoute
-  '/settings/permission-profiles': typeof SettingsPermissionProfilesRoute
-  '/settings/plugins': typeof SettingsPluginsRoute
-  '/settings/profile': typeof SettingsProfileRoute
-  '/settings/secrets': typeof SettingsSecretsRoute
-  '/settings/system': typeof SettingsSystemRoute
-  '/settings/threads': typeof SettingsThreadsRoute
+  '/': typeof ShellIndexRoute
+  '/settings/assistants': typeof ShellSettingsAssistantsRoute
+  '/settings/bounds': typeof ShellSettingsBoundsRoute
+  '/settings/identities': typeof ShellSettingsIdentitiesRoute
+  '/settings/permission-profiles': typeof ShellSettingsPermissionProfilesRoute
+  '/settings/plugins': typeof ShellSettingsPluginsRoute
+  '/settings/profile': typeof ShellSettingsProfileRoute
+  '/settings/secrets': typeof ShellSettingsSecretsRoute
+  '/settings/system': typeof ShellSettingsSystemRoute
+  '/settings/threads': typeof ShellSettingsThreadsRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
-  '/': typeof IndexRoute
-  '/check-in': typeof CheckInRoute
-  '/connections': typeof ConnectionsRoute
-  '/fleet': typeof FleetRoute
-  '/intake': typeof IntakeRoute
+  '/_shell': typeof ShellRouteWithChildren
   '/login': typeof LoginRoute
-  '/notifications': typeof NotificationsRoute
-  '/runs': typeof RunsRoute
   '/setup': typeof SetupRoute
-  '/tasks': typeof TasksRoute
-  '/workflows': typeof WorkflowsRoute
+  '/_shell/check-in': typeof ShellCheckInRoute
+  '/_shell/connections': typeof ShellConnectionsRoute
+  '/_shell/fleet': typeof ShellFleetRoute
+  '/_shell/intake': typeof ShellIntakeRoute
+  '/_shell/notifications': typeof ShellNotificationsRoute
+  '/_shell/runs': typeof ShellRunsRoute
+  '/_shell/settings': typeof ShellSettingsRouteWithChildren
+  '/_shell/tasks': typeof ShellTasksRoute
+  '/_shell/workflows': typeof ShellWorkflowsRoute
   '/onboarding/timezone': typeof OnboardingTimezoneRoute
-  '/settings/assistants': typeof SettingsAssistantsRoute
-  '/settings/bounds': typeof SettingsBoundsRoute
-  '/settings/identities': typeof SettingsIdentitiesRoute
-  '/settings/permission-profiles': typeof SettingsPermissionProfilesRoute
-  '/settings/plugins': typeof SettingsPluginsRoute
-  '/settings/profile': typeof SettingsProfileRoute
-  '/settings/secrets': typeof SettingsSecretsRoute
-  '/settings/system': typeof SettingsSystemRoute
-  '/settings/threads': typeof SettingsThreadsRoute
+  '/_shell/': typeof ShellIndexRoute
+  '/_shell/settings/assistants': typeof ShellSettingsAssistantsRoute
+  '/_shell/settings/bounds': typeof ShellSettingsBoundsRoute
+  '/_shell/settings/identities': typeof ShellSettingsIdentitiesRoute
+  '/_shell/settings/permission-profiles': typeof ShellSettingsPermissionProfilesRoute
+  '/_shell/settings/plugins': typeof ShellSettingsPluginsRoute
+  '/_shell/settings/profile': typeof ShellSettingsProfileRoute
+  '/_shell/settings/secrets': typeof ShellSettingsSecretsRoute
+  '/_shell/settings/system': typeof ShellSettingsSystemRoute
+  '/_shell/settings/threads': typeof ShellSettingsThreadsRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/login'
+    | '/setup'
     | '/check-in'
     | '/connections'
     | '/fleet'
     | '/intake'
-    | '/login'
     | '/notifications'
     | '/runs'
-    | '/setup'
+    | '/settings'
     | '/tasks'
     | '/workflows'
     | '/onboarding/timezone'
@@ -234,18 +250,19 @@ export interface FileRouteTypes {
     | '/settings/threads'
   fileRoutesByTo: FileRoutesByTo
   to:
-    | '/'
+    | '/login'
+    | '/setup'
     | '/check-in'
     | '/connections'
     | '/fleet'
     | '/intake'
-    | '/login'
     | '/notifications'
     | '/runs'
-    | '/setup'
+    | '/settings'
     | '/tasks'
     | '/workflows'
     | '/onboarding/timezone'
+    | '/'
     | '/settings/assistants'
     | '/settings/bounds'
     | '/settings/identities'
@@ -257,88 +274,45 @@ export interface FileRouteTypes {
     | '/settings/threads'
   id:
     | '__root__'
-    | '/'
-    | '/check-in'
-    | '/connections'
-    | '/fleet'
-    | '/intake'
+    | '/_shell'
     | '/login'
-    | '/notifications'
-    | '/runs'
     | '/setup'
-    | '/tasks'
-    | '/workflows'
+    | '/_shell/check-in'
+    | '/_shell/connections'
+    | '/_shell/fleet'
+    | '/_shell/intake'
+    | '/_shell/notifications'
+    | '/_shell/runs'
+    | '/_shell/settings'
+    | '/_shell/tasks'
+    | '/_shell/workflows'
     | '/onboarding/timezone'
-    | '/settings/assistants'
-    | '/settings/bounds'
-    | '/settings/identities'
-    | '/settings/permission-profiles'
-    | '/settings/plugins'
-    | '/settings/profile'
-    | '/settings/secrets'
-    | '/settings/system'
-    | '/settings/threads'
+    | '/_shell/'
+    | '/_shell/settings/assistants'
+    | '/_shell/settings/bounds'
+    | '/_shell/settings/identities'
+    | '/_shell/settings/permission-profiles'
+    | '/_shell/settings/plugins'
+    | '/_shell/settings/profile'
+    | '/_shell/settings/secrets'
+    | '/_shell/settings/system'
+    | '/_shell/settings/threads'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
-  IndexRoute: typeof IndexRoute
-  CheckInRoute: typeof CheckInRoute
-  ConnectionsRoute: typeof ConnectionsRoute
-  FleetRoute: typeof FleetRoute
-  IntakeRoute: typeof IntakeRoute
+  ShellRoute: typeof ShellRouteWithChildren
   LoginRoute: typeof LoginRoute
-  NotificationsRoute: typeof NotificationsRoute
-  RunsRoute: typeof RunsRoute
   SetupRoute: typeof SetupRoute
-  TasksRoute: typeof TasksRoute
-  WorkflowsRoute: typeof WorkflowsRoute
   OnboardingTimezoneRoute: typeof OnboardingTimezoneRoute
-  SettingsAssistantsRoute: typeof SettingsAssistantsRoute
-  SettingsBoundsRoute: typeof SettingsBoundsRoute
-  SettingsIdentitiesRoute: typeof SettingsIdentitiesRoute
-  SettingsPermissionProfilesRoute: typeof SettingsPermissionProfilesRoute
-  SettingsPluginsRoute: typeof SettingsPluginsRoute
-  SettingsProfileRoute: typeof SettingsProfileRoute
-  SettingsSecretsRoute: typeof SettingsSecretsRoute
-  SettingsSystemRoute: typeof SettingsSystemRoute
-  SettingsThreadsRoute: typeof SettingsThreadsRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    '/': {
-      id: '/'
-      path: '/'
+    '/_shell': {
+      id: '/_shell'
+      path: ''
       fullPath: '/'
-      preLoaderRoute: typeof IndexRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/check-in': {
-      id: '/check-in'
-      path: '/check-in'
-      fullPath: '/check-in'
-      preLoaderRoute: typeof CheckInRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/connections': {
-      id: '/connections'
-      path: '/connections'
-      fullPath: '/connections'
-      preLoaderRoute: typeof ConnectionsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/fleet': {
-      id: '/fleet'
-      path: '/fleet'
-      fullPath: '/fleet'
-      preLoaderRoute: typeof FleetRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/intake': {
-      id: '/intake'
-      path: '/intake'
-      fullPath: '/intake'
-      preLoaderRoute: typeof IntakeRouteImport
+      preLoaderRoute: typeof ShellRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/login': {
@@ -348,20 +322,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof LoginRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/notifications': {
-      id: '/notifications'
-      path: '/notifications'
-      fullPath: '/notifications'
-      preLoaderRoute: typeof NotificationsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/runs': {
-      id: '/runs'
-      path: '/runs'
-      fullPath: '/runs'
-      preLoaderRoute: typeof RunsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/setup': {
       id: '/setup'
       path: '/setup'
@@ -369,19 +329,75 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SetupRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/tasks': {
-      id: '/tasks'
+    '/_shell/': {
+      id: '/_shell/'
+      path: '/'
+      fullPath: '/'
+      preLoaderRoute: typeof ShellIndexRouteImport
+      parentRoute: typeof ShellRoute
+    }
+    '/_shell/check-in': {
+      id: '/_shell/check-in'
+      path: '/check-in'
+      fullPath: '/check-in'
+      preLoaderRoute: typeof ShellCheckInRouteImport
+      parentRoute: typeof ShellRoute
+    }
+    '/_shell/connections': {
+      id: '/_shell/connections'
+      path: '/connections'
+      fullPath: '/connections'
+      preLoaderRoute: typeof ShellConnectionsRouteImport
+      parentRoute: typeof ShellRoute
+    }
+    '/_shell/fleet': {
+      id: '/_shell/fleet'
+      path: '/fleet'
+      fullPath: '/fleet'
+      preLoaderRoute: typeof ShellFleetRouteImport
+      parentRoute: typeof ShellRoute
+    }
+    '/_shell/intake': {
+      id: '/_shell/intake'
+      path: '/intake'
+      fullPath: '/intake'
+      preLoaderRoute: typeof ShellIntakeRouteImport
+      parentRoute: typeof ShellRoute
+    }
+    '/_shell/notifications': {
+      id: '/_shell/notifications'
+      path: '/notifications'
+      fullPath: '/notifications'
+      preLoaderRoute: typeof ShellNotificationsRouteImport
+      parentRoute: typeof ShellRoute
+    }
+    '/_shell/runs': {
+      id: '/_shell/runs'
+      path: '/runs'
+      fullPath: '/runs'
+      preLoaderRoute: typeof ShellRunsRouteImport
+      parentRoute: typeof ShellRoute
+    }
+    '/_shell/settings': {
+      id: '/_shell/settings'
+      path: '/settings'
+      fullPath: '/settings'
+      preLoaderRoute: typeof ShellSettingsRouteImport
+      parentRoute: typeof ShellRoute
+    }
+    '/_shell/tasks': {
+      id: '/_shell/tasks'
       path: '/tasks'
       fullPath: '/tasks'
-      preLoaderRoute: typeof TasksRouteImport
-      parentRoute: typeof rootRouteImport
+      preLoaderRoute: typeof ShellTasksRouteImport
+      parentRoute: typeof ShellRoute
     }
-    '/workflows': {
-      id: '/workflows'
+    '/_shell/workflows': {
+      id: '/_shell/workflows'
       path: '/workflows'
       fullPath: '/workflows'
-      preLoaderRoute: typeof WorkflowsRouteImport
-      parentRoute: typeof rootRouteImport
+      preLoaderRoute: typeof ShellWorkflowsRouteImport
+      parentRoute: typeof ShellRoute
     }
     '/onboarding/timezone': {
       id: '/onboarding/timezone'
@@ -390,94 +406,133 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof OnboardingTimezoneRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/settings/assistants': {
-      id: '/settings/assistants'
-      path: '/settings/assistants'
+    '/_shell/settings/assistants': {
+      id: '/_shell/settings/assistants'
+      path: '/assistants'
       fullPath: '/settings/assistants'
-      preLoaderRoute: typeof SettingsAssistantsRouteImport
-      parentRoute: typeof rootRouteImport
+      preLoaderRoute: typeof ShellSettingsAssistantsRouteImport
+      parentRoute: typeof ShellSettingsRoute
     }
-    '/settings/bounds': {
-      id: '/settings/bounds'
-      path: '/settings/bounds'
+    '/_shell/settings/bounds': {
+      id: '/_shell/settings/bounds'
+      path: '/bounds'
       fullPath: '/settings/bounds'
-      preLoaderRoute: typeof SettingsBoundsRouteImport
-      parentRoute: typeof rootRouteImport
+      preLoaderRoute: typeof ShellSettingsBoundsRouteImport
+      parentRoute: typeof ShellSettingsRoute
     }
-    '/settings/identities': {
-      id: '/settings/identities'
-      path: '/settings/identities'
+    '/_shell/settings/identities': {
+      id: '/_shell/settings/identities'
+      path: '/identities'
       fullPath: '/settings/identities'
-      preLoaderRoute: typeof SettingsIdentitiesRouteImport
-      parentRoute: typeof rootRouteImport
+      preLoaderRoute: typeof ShellSettingsIdentitiesRouteImport
+      parentRoute: typeof ShellSettingsRoute
     }
-    '/settings/permission-profiles': {
-      id: '/settings/permission-profiles'
-      path: '/settings/permission-profiles'
+    '/_shell/settings/permission-profiles': {
+      id: '/_shell/settings/permission-profiles'
+      path: '/permission-profiles'
       fullPath: '/settings/permission-profiles'
-      preLoaderRoute: typeof SettingsPermissionProfilesRouteImport
-      parentRoute: typeof rootRouteImport
+      preLoaderRoute: typeof ShellSettingsPermissionProfilesRouteImport
+      parentRoute: typeof ShellSettingsRoute
     }
-    '/settings/plugins': {
-      id: '/settings/plugins'
-      path: '/settings/plugins'
+    '/_shell/settings/plugins': {
+      id: '/_shell/settings/plugins'
+      path: '/plugins'
       fullPath: '/settings/plugins'
-      preLoaderRoute: typeof SettingsPluginsRouteImport
-      parentRoute: typeof rootRouteImport
+      preLoaderRoute: typeof ShellSettingsPluginsRouteImport
+      parentRoute: typeof ShellSettingsRoute
     }
-    '/settings/profile': {
-      id: '/settings/profile'
-      path: '/settings/profile'
+    '/_shell/settings/profile': {
+      id: '/_shell/settings/profile'
+      path: '/profile'
       fullPath: '/settings/profile'
-      preLoaderRoute: typeof SettingsProfileRouteImport
-      parentRoute: typeof rootRouteImport
+      preLoaderRoute: typeof ShellSettingsProfileRouteImport
+      parentRoute: typeof ShellSettingsRoute
     }
-    '/settings/secrets': {
-      id: '/settings/secrets'
-      path: '/settings/secrets'
+    '/_shell/settings/secrets': {
+      id: '/_shell/settings/secrets'
+      path: '/secrets'
       fullPath: '/settings/secrets'
-      preLoaderRoute: typeof SettingsSecretsRouteImport
-      parentRoute: typeof rootRouteImport
+      preLoaderRoute: typeof ShellSettingsSecretsRouteImport
+      parentRoute: typeof ShellSettingsRoute
     }
-    '/settings/system': {
-      id: '/settings/system'
-      path: '/settings/system'
+    '/_shell/settings/system': {
+      id: '/_shell/settings/system'
+      path: '/system'
       fullPath: '/settings/system'
-      preLoaderRoute: typeof SettingsSystemRouteImport
-      parentRoute: typeof rootRouteImport
+      preLoaderRoute: typeof ShellSettingsSystemRouteImport
+      parentRoute: typeof ShellSettingsRoute
     }
-    '/settings/threads': {
-      id: '/settings/threads'
-      path: '/settings/threads'
+    '/_shell/settings/threads': {
+      id: '/_shell/settings/threads'
+      path: '/threads'
       fullPath: '/settings/threads'
-      preLoaderRoute: typeof SettingsThreadsRouteImport
-      parentRoute: typeof rootRouteImport
+      preLoaderRoute: typeof ShellSettingsThreadsRouteImport
+      parentRoute: typeof ShellSettingsRoute
     }
   }
 }
 
+interface ShellSettingsRouteChildren {
+  ShellSettingsAssistantsRoute: typeof ShellSettingsAssistantsRoute
+  ShellSettingsBoundsRoute: typeof ShellSettingsBoundsRoute
+  ShellSettingsIdentitiesRoute: typeof ShellSettingsIdentitiesRoute
+  ShellSettingsPermissionProfilesRoute: typeof ShellSettingsPermissionProfilesRoute
+  ShellSettingsPluginsRoute: typeof ShellSettingsPluginsRoute
+  ShellSettingsProfileRoute: typeof ShellSettingsProfileRoute
+  ShellSettingsSecretsRoute: typeof ShellSettingsSecretsRoute
+  ShellSettingsSystemRoute: typeof ShellSettingsSystemRoute
+  ShellSettingsThreadsRoute: typeof ShellSettingsThreadsRoute
+}
+
+const ShellSettingsRouteChildren: ShellSettingsRouteChildren = {
+  ShellSettingsAssistantsRoute: ShellSettingsAssistantsRoute,
+  ShellSettingsBoundsRoute: ShellSettingsBoundsRoute,
+  ShellSettingsIdentitiesRoute: ShellSettingsIdentitiesRoute,
+  ShellSettingsPermissionProfilesRoute: ShellSettingsPermissionProfilesRoute,
+  ShellSettingsPluginsRoute: ShellSettingsPluginsRoute,
+  ShellSettingsProfileRoute: ShellSettingsProfileRoute,
+  ShellSettingsSecretsRoute: ShellSettingsSecretsRoute,
+  ShellSettingsSystemRoute: ShellSettingsSystemRoute,
+  ShellSettingsThreadsRoute: ShellSettingsThreadsRoute,
+}
+
+const ShellSettingsRouteWithChildren = ShellSettingsRoute._addFileChildren(
+  ShellSettingsRouteChildren,
+)
+
+interface ShellRouteChildren {
+  ShellCheckInRoute: typeof ShellCheckInRoute
+  ShellConnectionsRoute: typeof ShellConnectionsRoute
+  ShellFleetRoute: typeof ShellFleetRoute
+  ShellIntakeRoute: typeof ShellIntakeRoute
+  ShellNotificationsRoute: typeof ShellNotificationsRoute
+  ShellRunsRoute: typeof ShellRunsRoute
+  ShellSettingsRoute: typeof ShellSettingsRouteWithChildren
+  ShellTasksRoute: typeof ShellTasksRoute
+  ShellWorkflowsRoute: typeof ShellWorkflowsRoute
+  ShellIndexRoute: typeof ShellIndexRoute
+}
+
+const ShellRouteChildren: ShellRouteChildren = {
+  ShellCheckInRoute: ShellCheckInRoute,
+  ShellConnectionsRoute: ShellConnectionsRoute,
+  ShellFleetRoute: ShellFleetRoute,
+  ShellIntakeRoute: ShellIntakeRoute,
+  ShellNotificationsRoute: ShellNotificationsRoute,
+  ShellRunsRoute: ShellRunsRoute,
+  ShellSettingsRoute: ShellSettingsRouteWithChildren,
+  ShellTasksRoute: ShellTasksRoute,
+  ShellWorkflowsRoute: ShellWorkflowsRoute,
+  ShellIndexRoute: ShellIndexRoute,
+}
+
+const ShellRouteWithChildren = ShellRoute._addFileChildren(ShellRouteChildren)
+
 const rootRouteChildren: RootRouteChildren = {
-  IndexRoute: IndexRoute,
-  CheckInRoute: CheckInRoute,
-  ConnectionsRoute: ConnectionsRoute,
-  FleetRoute: FleetRoute,
-  IntakeRoute: IntakeRoute,
+  ShellRoute: ShellRouteWithChildren,
   LoginRoute: LoginRoute,
-  NotificationsRoute: NotificationsRoute,
-  RunsRoute: RunsRoute,
   SetupRoute: SetupRoute,
-  TasksRoute: TasksRoute,
-  WorkflowsRoute: WorkflowsRoute,
   OnboardingTimezoneRoute: OnboardingTimezoneRoute,
-  SettingsAssistantsRoute: SettingsAssistantsRoute,
-  SettingsBoundsRoute: SettingsBoundsRoute,
-  SettingsIdentitiesRoute: SettingsIdentitiesRoute,
-  SettingsPermissionProfilesRoute: SettingsPermissionProfilesRoute,
-  SettingsPluginsRoute: SettingsPluginsRoute,
-  SettingsProfileRoute: SettingsProfileRoute,
-  SettingsSecretsRoute: SettingsSecretsRoute,
-  SettingsSystemRoute: SettingsSystemRoute,
-  SettingsThreadsRoute: SettingsThreadsRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
