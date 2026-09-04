@@ -115,7 +115,7 @@ Semantics: [./09-tasks.md](./09-tasks.md).
 | `task.query` | `TaskFilter` (below) | `task.read` | `GET /tasks` |
 | `task.read` | `{ taskId }` | `task.read` | `GET /tasks/{id}` |
 | `task.create` | `{ title, description, priority?, labels?, projectId?, provenance? }` | `task.create` | `POST /tasks` |
-| `task.update` | `{ taskId, ...changes }` | `task.update` | `PATCH /tasks/{id}` |
+| `task.update` | `{ taskId, title?, description?, status?, priority?, projectId?, addLabels?, removeLabels?, provenance? }` (`projectId: null` detaches; `provenance` appends) | `task.update` | `PATCH /tasks/{id}` |
 | `task.delete` | `{ taskId }` (soft: sets `deletedAt`, [./09-tasks.md](./09-tasks.md) Delete) | `task.delete` | `DELETE /tasks/{id}` |
 
 ```ts
@@ -129,6 +129,8 @@ interface TaskFilter {
 ```
 
 Within one field the values are **any-of**; across fields the filter is **and**. No `or` across fields and no negation in v1. `TaskFilter` is defined once in the contract and used by the `task.query` operation and the identically named built-in action; the guard-before-agent pattern in [./07-workflows.md](./07-workflows.md) is `task.query` with `refs` set and `text` absent.
+
+`task.query` sorts over `updatedAt | createdAt | priority | status`, default `updatedAt desc`, keyset. With `text` the order is relevance and the walk pages by offset; `text` together with an explicit `sort` is `validation` naming both ([./09-tasks.md](./09-tasks.md) Search). `task.update` never takes a whole `labels` array: labels move one at a time through `addLabels` and `removeLabels`, so a concurrent edit by the user and a triage agent cannot clobber each other.
 
 ### workflow, trigger, run
 
@@ -218,10 +220,16 @@ Pipeline: [./08-events-and-connections.md](./08-events-and-connections.md).
 
 | Operation | Input | Grant | Route |
 |---|---|---|---|
-| `event.query` | `{ connectionId?, kind?, triggerId?, runId?, since?, until? }` (joined to effect rows; `triggerId` lists a paused trigger's held events) | `event.read` | `GET /events` |
+| `event.query` | `{ connectionId?, kind?, since?, until? }` | `event.read` | `GET /events` |
 | `event.read` | `{ eventId }` | `event.read` | `GET /events/{id}` |
 | `event.emit` | `{ kind, payload, connectionId? }` -> `{ eventId }` (the `manual` source) | `event.emit` | `POST /events/emit` |
 | `event.enrich` | `{ eventId, system?, url?, refs? }`; `system`/`url` overwrite, `refs` append-only; re-matches the event idempotently ([./08-events-and-connections.md](./08-events-and-connections.md) section 4.2) | `event.emit` | `POST /events/{id}/enrich` |
+
+*(Amended 2026-09-04, [#59](https://github.com/rogierpennink/hydra/issues/59).)* `event.query` ships with `connectionId`, `kind`, `since` and `until`. The `triggerId` and `runId` filters (joined to effect rows; `triggerId` lists a paused trigger's held events) are added by the workflows ticket, which completes this operation rather than changing it: triggers, runs and held events do not exist yet, and a filter that always answers empty is a silent substitution.
+
+`since` and `until` bound **`receivedAt`**, when the log took the event, not `occurredAt`, when the source says it happened. Arrival is the log's own axis and the one its ids run with, so a window and the order a page comes back in never disagree; an emitter's claim about when something happened is neither.
+
+`event.query` returns **both populations** behind the one `event.read` grant: pipeline events and audit entries come back from one call, told apart only by `kind`. There is no population filter, because reading failed logins beside the events that caused work is what the log is opened for; any holder of `event.read` therefore reads every security entry. The log is walked by `id` only, default `id desc`, keyset. Event ids are integers on the wire (section 1.4).
 
 ### connection
 
@@ -343,7 +351,7 @@ Semantics: [./02-domain-model.md](./02-domain-model.md).
 
 | Operation | Input | Grant | Route |
 |---|---|---|---|
-| `project.query` / `read` / `create` / `update` / `delete` | `{ name, description? }`; `delete` is soft ([./02-domain-model.md](./02-domain-model.md) Deletion rules) | `project.read` / `project.write` | `/projects[/{id}]` |
+| `project.query` / `read` / `create` / `update` / `delete` | `{ name, description? }` (`description: null` on update removes it); `delete` is soft ([./02-domain-model.md](./02-domain-model.md) Deletion rules) | `project.read` / `project.write` | `/projects[/{id}]` |
 | `resource.query` / `read` / `create` / `update` / `delete` | kind, remote (repo resources are unique on the canonical remote: `conflict`), `connectionId`, setup command, `.workspaceinclude` convention, `projectIds[]`; `delete` is `invalid_state` while a workspace referencing it is not `deleted \| lost` | `resource.read` / `resource.write` | `/resources[/{id}]` |
 
 ## 3. Actor stamping
@@ -360,6 +368,8 @@ actor: "user" | "session:<sessionId>" | "run:<runId>" | "plugin:<pluginId>"
 - `session:<id>`: a session token. Bounded by the agent's permission profile (section 5).
 - `run:<id>`: an action step executing inside a run (`task.create` on a cron tick). **Ungated**: the workflow was authored by the user, and its action steps run with the user's parity. A plugin action's `ctx.api` mutations are also `run:<id>`, with the `stepId` carried in the audit entry ([ADR 0026](../adr/0026-workflow-actions-may-call-the-public-api-as-the-run.md)). Agent steps are sessions and act as `session:<id>` under their own profile, which is what keeps a `worker` session from fanning out.
 - `plugin:<id>`: a plugin calling the service layer in-process through the public-API client capability. **Ungated**: the user enabled the plugin and granted the capability ([./05-plugins.md](./05-plugins.md)).
+
+An envelope's `actor` is `Actor | null`, and `null` means no actor caused the row: an ingested or cron event, and **`auth.login.failed`**, which is stamped `null` rather than `user` because nobody has been authenticated at the moment it is written. *(Amended 2026-09-04, [#59](https://github.com/rogierpennink/hydra/issues/59).)*
 
 The event log is the audit log; there is no separate audit subsystem. Multi-user later widens the `user` value to a user id and never restructures the field. Security events and actor-stamped mutations keep 90-day retention ([./13-security.md](./13-security.md)).
 
