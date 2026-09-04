@@ -45,6 +45,24 @@ export function RenderFailure({ error }: { readonly error: Error }): JSX.Element
   );
 }
 
+/** What both not-found screens are headed with. */
+export const NOT_FOUND_HEADLINE = "No screen here";
+
+/**
+ * A path the router could not answer at all.
+ *
+ * The pathless splat inside the shell answers every address that parses, which
+ * leaves the ones that do not: a malformed percent escape (`/%zz`) fails to
+ * decode before any route is matched, so there is no shell to draw this in.
+ */
+export function NotFound(): JSX.Element {
+  return (
+    <CenteredScreen title={NOT_FOUND_HEADLINE} lead="That address does not name anything in Hydra.">
+      <HomeLink />
+    </CenteredScreen>
+  );
+}
+
 /** The way back that every fallback screen offers. */
 export function HomeLink(): JSX.Element {
   return (

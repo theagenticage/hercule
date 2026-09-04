@@ -1,7 +1,7 @@
 import type { JSX } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { EmptyState } from "../../shell";
-import { HomeLink } from "../../app/fallbacks";
+import { HomeLink, NOT_FOUND_HEADLINE } from "../../app/fallbacks";
 
 /**
  * Any path inside the app that names no screen. It is a screen of the shell
@@ -16,7 +16,7 @@ export const Route = createFileRoute("/_shell/$")({
 function NotFoundScreen(): JSX.Element {
   return (
     <EmptyState
-      headline="No screen here"
+      headline={NOT_FOUND_HEADLINE}
       lead="That address does not name anything in Hydra. Pick a screen from the sidebar, or go back to where you were."
     >
       <HomeLink />

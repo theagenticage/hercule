@@ -11,6 +11,13 @@ import type { StandardSchemaV1 } from "@hydra/contract";
 /** One message per field that failed, keyed by the field name. */
 export type FieldErrors = Readonly<Record<string, string>>;
 
+/**
+ * Where a message about the form as a whole is filed. A schema can refuse a
+ * value without blaming one field - a check across two of them - and that
+ * message belongs to the form rather than to a field that does not exist.
+ */
+export const FORM_ERROR = "form";
+
 export const validate = <Value>(
   schema: StandardSchemaV1<unknown, Value>,
   value: unknown,
@@ -23,7 +30,11 @@ export const validate = <Value>(
   for (const issue of result.issues) {
     const segment = issue.path?.[0];
     const field =
-      typeof segment === "object" && segment !== null ? String(segment.key) : String(segment);
+      segment === undefined
+        ? FORM_ERROR
+        : typeof segment === "object" && segment !== null
+          ? String(segment.key)
+          : String(segment);
     errors[field] ??= issue.message;
   }
   return { errors };

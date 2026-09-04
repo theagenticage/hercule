@@ -78,4 +78,14 @@ describe("every screen inside the shell", () => {
     expect(screen.getByRole("navigation", { name: "Hydra" })).toBeDefined();
     expect(screen.getByRole("link", { name: "Go to Sessions" })).toBeDefined();
   });
+
+  it("answers a path it cannot even decode as a Hydra screen", async () => {
+    // A malformed percent escape fails to decode before any route is matched,
+    // so this one never reaches the shell.
+    await renderApp({ path: "/%zz", api: stubApi(api).fetch, token: "held" });
+
+    expect(screen.getByText("No screen here")).toBeDefined();
+    expect(screen.getByRole("link", { name: "Go to Sessions" })).toBeDefined();
+    expect(screen.queryByRole("navigation", { name: "Hydra" })).toBeNull();
+  });
 });

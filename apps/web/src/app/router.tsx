@@ -7,7 +7,7 @@
 import { createRouter, type RouterHistory } from "@tanstack/react-router";
 import { routeTree } from "../routeTree.gen";
 import type { RouterContext } from "./context";
-import { RenderFailure } from "./fallbacks";
+import { NotFound, RenderFailure } from "./fallbacks";
 
 export const createAppRouter = (context: RouterContext, history: RouterHistory) =>
   createRouter({
@@ -15,9 +15,12 @@ export const createAppRouter = (context: RouterContext, history: RouterHistory) 
     context,
     history,
     defaultPreload: "intent",
-    // An unknown path needs no default: `_shell/$` is pathless and so sits at
-    // the top of the tree, which leaves no address for one to answer.
+    // `_shell/$` is pathless and sits at the top of the tree, so it answers
+    // every unknown address the router can parse. The default is for the ones
+    // it cannot: a path whose percent escapes do not decode never reaches a
+    // route, and so never reaches the shell.
     defaultErrorComponent: RenderFailure,
+    defaultNotFoundComponent: NotFound,
   });
 
 declare module "@tanstack/react-router" {
