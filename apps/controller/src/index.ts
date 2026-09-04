@@ -9,13 +9,15 @@
  * beside the listener rather than changing this shape.
  */
 import * as Effect from "effect/Effect";
+import * as Latch from "effect/Latch";
 import * as Layer from "effect/Layer";
+import type * as Scope from "effect/Scope";
 import * as BunHttpServer from "@effect/platform-bun/BunHttpServer";
 import { BootstrapConfig } from "./config";
 import { AuthLayer } from "./auth";
 import { bootWith, type BootError, type BootOutcome } from "./bootstrap";
 import { ApiKeysLayer } from "./credentials";
-import { perimeterWarning, serve } from "./http";
+import { MAX_REQUEST_BODY_BYTES, perimeterWarning, serve } from "./http";
 import { ControllerLayer } from "./identity";
 import { SecretLayer } from "./secrets";
 import { ProfilesLayer } from "./permissions";
@@ -57,27 +59,49 @@ export function report(outcome: BootOutcome): void {
   console.log(`It is also in ${paths.setupUrlFile}, and \`hydra setup-url\` prints it.`);
 }
 
+/** What a second signal during the drain prints, instead of killing the process. */
+export const STILL_STOPPING = "Still stopping Hydra; the requests in flight are finishing.";
+
 /**
- * Resolves when the unit is asked to stop. Both signals are the same request,
- * and the handlers come off again when the fiber is interrupted, so a test can
- * run this more than once in one process.
+ * The stop request, as something the boot can wait on.
+ *
+ * Both signals mean the same thing, and the handlers stay installed for the
+ * whole shutdown - `process.on`, not `process.once`, and they come off only
+ * when the scope that installed them closes, which is after the listener has
+ * drained and the database is closed. A second SIGTERM would otherwise reach
+ * Bun's default disposition and kill the process mid-drain, dropping the
+ * requests in flight and leaving a dirty write-ahead log behind. Every signal
+ * after the first says so and is ignored.
+ *
+ * Scoped, so a test can run this more than once in one process.
  */
-const untilStopped = Effect.callback<void>((resume) => {
-  const stop = (): void => resume(Effect.void);
-  process.once("SIGINT", stop);
-  process.once("SIGTERM", stop);
-  return Effect.sync(() => {
-    process.off("SIGINT", stop);
-    process.off("SIGTERM", stop);
-  });
-});
+export const untilStopped: Effect.Effect<
+  Effect.Effect<void>,
+  never,
+  Scope.Scope
+> = Effect.acquireRelease(
+  Effect.sync(() => {
+    const stopped = Latch.makeUnsafe(false);
+    const stop = (): void => {
+      if (!stopped.openUnsafe()) console.log(STILL_STOPPING);
+    };
+    process.on("SIGINT", stop);
+    process.on("SIGTERM", stop);
+    return { stopped, stop };
+  }),
+  ({ stop }) =>
+    Effect.sync(() => {
+      process.off("SIGINT", stop);
+      process.off("SIGTERM", stop);
+    }),
+).pipe(Effect.map(({ stopped }) => stopped.await));
 
 /**
  * Everything after the boot: bind, report, and hold the listener open until the
  * process is asked to stop. The scope closes on the way out, which stops the
  * server and, once this returns, closes the database.
  */
-const listen = (outcome: BootOutcome) =>
+const listen = (outcome: BootOutcome, stopped: Effect.Effect<void>) =>
   Effect.gen(function* () {
     const bootstrap = yield* BootstrapConfig;
     yield* serve;
@@ -87,7 +111,7 @@ const listen = (outcome: BootOutcome) =>
     console.log(`Hydra is listening on http://${bootstrap.bindHost}:${bootstrap.bindPort}.`);
     report(outcome);
 
-    yield* untilStopped;
+    yield* stopped;
     console.log("Stopping Hydra.");
   }).pipe(
     Effect.provide(
@@ -105,17 +129,28 @@ const listen = (outcome: BootOutcome) =>
   );
 
 export async function run(argv: readonly string[]): Promise<void> {
-  const program = bootWith({ argv, env: process.env }, (outcome) =>
-    Effect.gen(function* () {
-      const bootstrap = yield* BootstrapConfig;
-      return yield* Effect.scoped(
-        listen(outcome).pipe(
-          Effect.provide(
-            BunHttpServer.layer({ hostname: bootstrap.bindHost, port: bootstrap.bindPort }),
-          ),
-        ),
-      );
-    }),
+  // The signal handlers are installed outside the boot and come off only once
+  // the database is closed, so every signal that arrives during the shutdown
+  // still lands on Hydra rather than on Bun's default disposition.
+  const program = Effect.scoped(
+    Effect.flatMap(untilStopped, (stopped) =>
+      bootWith({ argv, env: process.env }, (outcome) =>
+        Effect.gen(function* () {
+          const bootstrap = yield* BootstrapConfig;
+          return yield* Effect.scoped(
+            listen(outcome, stopped).pipe(
+              Effect.provide(
+                BunHttpServer.layer({
+                  hostname: bootstrap.bindHost,
+                  port: bootstrap.bindPort,
+                  maxRequestBodySize: MAX_REQUEST_BODY_BYTES,
+                }),
+              ),
+            ),
+          );
+        }),
+      ),
+    ),
   );
 
   const outcome = await Effect.runPromise(program.pipe(Effect.result)).catch((defect: unknown) => {

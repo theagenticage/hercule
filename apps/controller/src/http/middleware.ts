@@ -40,13 +40,6 @@ import { CurrentActor, grantCheck, type Actor } from "../actor";
 import { Credentials, hashToken } from "../credentials";
 import { Setup } from "../setup";
 
-/**
- * The check itself lives beside the actor, because the service methods run the
- * same one for in-process callers (spec 11 section 1.5). It is re-exported here
- * so the transport's own boundary still names every gate it applies.
- */
-export { grantCheck };
-
 /** What a caller with no usable credential is told; never why (spec 13 section 4). */
 const NO_CREDENTIAL = "this operation needs a credential";
 
@@ -69,7 +62,9 @@ const requirementFor = (id: string): Effect.Effect<Requirement> =>
 /**
  * The live credential behind a presented token, whichever kind it is, with its
  * use recorded: a login bearer's 30-day window rolls forward and an API key's
- * `last_used_at` is stamped (spec 13 sections 4.2 and 4.3).
+ * `last_used_at` is stamped (spec 13 sections 4.2 and 4.3). The repository
+ * decides whether that use is worth a write; on a busy connection most are
+ * not.
  */
 const resolve = (
   credentials: Credentials["Service"],
@@ -80,7 +75,7 @@ const resolve = (
 
     const login = yield* credentials.findLoginToken(tokenHash);
     if (Option.isSome(login)) {
-      yield* credentials.renewLoginToken(login.value.id);
+      yield* credentials.renewLoginToken(login.value);
       return Option.some<Actor>({
         _tag: "user",
         userId: login.value.userId,
@@ -90,7 +85,7 @@ const resolve = (
 
     const apiKey = yield* credentials.findApiKey(tokenHash);
     if (Option.isSome(apiKey)) {
-      yield* credentials.touchApiKey(apiKey.value.id);
+      yield* credentials.touchApiKey(apiKey.value);
       return Option.some<Actor>({
         _tag: "user",
         userId: apiKey.value.userId,

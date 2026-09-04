@@ -6,6 +6,7 @@ export {
   Credentials,
   CredentialsLayer,
   LOGIN_TOKEN_LIFETIME_MS,
+  USE_STAMP_INTERVAL_MS,
   type ApiKeyRecord,
   type LoginTokenRecord,
 } from "./repository";

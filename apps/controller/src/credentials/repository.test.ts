@@ -84,7 +84,7 @@ describe("login tokens", () => {
         const token = mintToken();
         const issued = yield* credentials.issueLoginToken(user.id, hashToken(token));
         yield* TestClock.adjust(LOGIN_TOKEN_LIFETIME_MS / 2);
-        yield* credentials.renewLoginToken(issued.id);
+        yield* credentials.renewLoginToken(issued);
         return [
           issued,
           Option.getOrThrow(yield* credentials.findLoginToken(hashToken(token))),
@@ -121,7 +121,7 @@ describe("api keys", () => {
         const created = yield* credentials.createApiKey(user.id, "laptop", hashToken(token));
         const found = Option.getOrThrow(yield* credentials.findApiKey(hashToken(token)));
         yield* TestClock.adjust(1000);
-        yield* credentials.touchApiKey(created.id);
+        yield* credentials.touchApiKey(created);
         return [
           created,
           found,

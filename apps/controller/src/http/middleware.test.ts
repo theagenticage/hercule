@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { ALL_OPERATIONS, requirementOf } from "@hydra/contract";
-import type { Actor } from "../actor";
-import { grantCheck, operationIdOf } from "./middleware";
+import { grantCheck, type Actor } from "../actor";
+import { operationIdOf } from "./middleware";
 
 const user: Actor = {
   _tag: "user",

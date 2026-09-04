@@ -1,25 +1,32 @@
 /**
  * The pre-setup gate (spec 15 section 7).
  *
- * Before the password exists, exactly two API surfaces are reachable and
- * everything else answers 401 - a valid-looking bearer included, because until
- * setup completes there is no user for one to belong to. The gate runs before
- * routing, so it covers every operation without each one knowing about it.
+ * Before the password exists, exactly two operations are reachable -
+ * `setup.read` and `setup.complete` - and every other operation answers 401, a
+ * valid-looking bearer included, because until setup completes there is no user
+ * for one to belong to.
  *
- * Paths outside `/api/v1` are not the gate's business: the static web bundle is
- * always served, and until it is embedded those paths fall through to a 404.
+ * The gate is route middleware rather than a wrapper around the whole
+ * application, so what it decides on is the operation the router matched, not
+ * the bytes in `request.url`. The router matches case-insensitively and
+ * normalizes the path; a gate that read the raw URL disagreed with it, and
+ * `POST /API/v1/AUTH/LOGIN` or `//api/v1/secrets` reached their operation
+ * without passing the gate.
+ *
+ * A request that matches no route never reaches this middleware and answers 404
+ * through the envelope, whatever its path: the gate does not decide whether the
+ * static web bundle or an unknown path exists.
  *
  * Setup completes once and never un-completes, so the answer is read from the
  * database until it is yes and never again.
  */
 import * as Effect from "effect/Effect";
-import * as HttpServerRequest from "effect/unstable/http/HttpServerRequest";
-import type { HttpServerResponse } from "effect/unstable/http/HttpServerResponse";
-import { API_PREFIX, OPERATIONS, unauthenticated } from "@hydra/contract";
+import * as HttpRouter from "effect/unstable/http/HttpRouter";
+import { OPERATIONS, unauthenticated } from "@hydra/contract";
 import { Setup } from "../setup";
 import { responseFor } from "./envelope";
 
-/** The two operations of spec 15 section 7, as their routes. Neither takes a parameter. */
+/** The two operations of spec 15 section 7, as the routes the router matches. */
 const OPEN_BEFORE_SETUP = new Set([
   `GET ${OPERATIONS["setup.read"].path}`,
   `POST ${OPERATIONS["setup.complete"].path}`,
@@ -28,30 +35,29 @@ const OPEN_BEFORE_SETUP = new Set([
 const NOT_SET_UP = "Hydra is not set up yet. Open the setup URL to finish first run.";
 
 /**
- * Builds the gate. Effectful because it takes the setup service once and keeps
- * the answer, rather than reading the row on every request forever.
+ * The gate as one route middleware. Effectful because it takes the setup
+ * service once and keeps the answer, rather than reading the row on every
+ * request forever.
  */
-export const makeSetupGate = Effect.gen(function* () {
-  const setup = yield* Setup;
-  let complete = false;
+export const setupGate = HttpRouter.middleware(
+  Effect.gen(function* () {
+    const setup = yield* Setup;
+    let complete = false;
 
-  const isComplete = Effect.suspend(() => {
-    if (complete) return Effect.succeed(true);
-    return Effect.map(Effect.orDie(setup.state()), (state) => {
-      complete = state.complete;
-      return complete;
+    const isComplete = Effect.suspend(() => {
+      if (complete) return Effect.succeed(true);
+      return Effect.map(Effect.orDie(setup.state()), (state) => {
+        complete = state.complete;
+        return complete;
+      });
     });
-  });
 
-  return <E, R>(
-    app: Effect.Effect<HttpServerResponse, E, R>,
-  ): Effect.Effect<HttpServerResponse, E, R | HttpServerRequest.HttpServerRequest> =>
-    Effect.gen(function* () {
-      const request = yield* HttpServerRequest.HttpServerRequest;
-      const path = request.url.split("?")[0] ?? "/";
-      const isApi = path === API_PREFIX || path.startsWith(`${API_PREFIX}/`);
-      if (!isApi || OPEN_BEFORE_SETUP.has(`${request.method} ${path}`)) return yield* app;
-      if (yield* isComplete) return yield* app;
-      return responseFor(unauthenticated(NOT_SET_UP));
-    });
-});
+    return (httpEffect) =>
+      Effect.gen(function* () {
+        const { route } = yield* HttpRouter.RouteContext;
+        if (OPEN_BEFORE_SETUP.has(`${route.method} ${route.path}`)) return yield* httpEffect;
+        if (yield* isComplete) return yield* httpEffect;
+        return responseFor(unauthenticated(NOT_SET_UP));
+      });
+  }),
+);

@@ -1,138 +1,22 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { Deferred, Effect, Layer } from "effect";
-import * as HttpRouter from "effect/unstable/http/HttpRouter";
-import * as HttpServer from "effect/unstable/http/HttpServer";
-import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
-import * as BunHttpServer from "@effect/platform-bun/BunHttpServer";
-import { homePaths } from "@hydra/home";
-import { AuthLayer } from "../auth";
-import { HydraHome } from "../config";
-import { ApiKeysLayer, CredentialsLayer, hashToken } from "../credentials";
-import { TestDatabase } from "../db/testing";
-import { AuditLog, AuditLogLayer, type AuditKind, type AuditRow } from "../events";
-import { controllerIdentityLayer, ControllerLayer } from "../identity";
-import { masterKeyLayer, SecretLayer, secretsLayer } from "../secrets";
-import { PermissionProfilesLayer, ProfilesLayer } from "../permissions";
-import { SettingsLayer, SettingsOperationsLayer } from "../settings";
-import { SetupLayer } from "../setup";
-import { PasswordCost, TEST_PASSWORD_PARAMS, UserLayer, UsersLayer } from "../users";
-import { serve } from "./server";
-
-const SETUP_TOKEN = "a-setup-token";
-const PASSWORD = "correct horse battery staple";
-
-let home: string;
-
-beforeEach(() => {
-  home = mkdtempSync(join(tmpdir(), "hydra-server-"));
-  writeFileSync(join(home, "setup-url"), "http://127.0.0.1:4937/setup?token=a-setup-token\n");
-});
-
-afterEach(() => {
-  rmSync(home, { recursive: true, force: true });
-});
-
-const services = (at: string) =>
-  Layer.mergeAll(
-    SetupLayer,
-    AuthLayer,
-    ApiKeysLayer,
-    UserLayer,
-    SecretLayer,
-    ControllerLayer,
-    SettingsOperationsLayer,
-    ProfilesLayer,
-  ).pipe(
-    Layer.provideMerge(
-      Layer.mergeAll(
-        UsersLayer,
-        CredentialsLayer,
-        SettingsLayer,
-        PermissionProfilesLayer,
-        AuditLogLayer,
-        controllerIdentityLayer,
-      ),
-    ),
-    Layer.provideMerge(secretsLayer.pipe(Layer.provide(masterKeyLayer("file")))),
-    Layer.provideMerge(TestDatabase),
-    Layer.provideMerge(Layer.succeed(HydraHome, homePaths(at, join(at, "data")))),
-  );
-
-/** An address a fetch can use; the server binds an ephemeral port on loopback. */
-const baseUrl = Effect.map(HttpServer.HttpServer, (server) => {
-  const address = server.address;
-  if (address._tag !== "TcpAddress") throw new Error("expected a TCP address");
-  return `http://127.0.0.1:${address.port}`;
-});
-
 /**
- * Runs the real controller application over a real socket. Everything a request
- * passes through in production is in this stack; only the database (memory) and
- * the port (ephemeral) differ.
+ * The controller's listener, end to end over a real socket: the order the gates
+ * run in, the envelope on every failure, and the operations a request reaches.
+ *
+ * The stack, the temporary home and the request helpers are `./testing.ts`,
+ * which is the same one every other transport test drives.
  */
-const withServer = (
-  body: (
-    base: string,
-    audit: (kind: AuditKind) => Promise<ReadonlyArray<AuditRow>>,
-  ) => Promise<void>,
-): Promise<void> =>
-  Effect.runPromise(
-    Effect.scoped(
-      Effect.gen(function* () {
-        const sql = yield* SqlClient.SqlClient;
-        yield* sql`INSERT INTO setup_state (singleton, token_hash, completed_at)
-                   VALUES (1, ${hashToken(SETUP_TOKEN)}, NULL)`;
-        yield* serve;
-        const base = yield* baseUrl;
-        // The log this database holds, read the way anything else reads it: a
-        // request's audit row is asserted through the same service that wrote it.
-        const log = yield* AuditLog;
-        const audit = (kind: AuditKind) => Effect.runPromise(Effect.orDie(log.listByKind(kind)));
-        yield* Effect.promise(() => body(base, audit));
-      }),
-    ).pipe(
-      Effect.provide(
-        services(home).pipe(
-          Layer.provideMerge(BunHttpServer.layer({ hostname: "127.0.0.1", port: 0 })),
-        ),
-      ),
-      Effect.provideService(PasswordCost, TEST_PASSWORD_PARAMS),
-    ),
-  );
-
-const post = (base: string, path: string, body: unknown, token?: string): Promise<Response> =>
-  fetch(`${base}${path}`, {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      ...(token === undefined ? {} : { authorization: `Bearer ${token}` }),
-    },
-    body: typeof body === "string" ? body : JSON.stringify(body),
-  });
-
-const get = (base: string, path: string, token: string): Promise<Response> =>
-  fetch(`${base}${path}`, { headers: { authorization: `Bearer ${token}` } });
-
-const del = (base: string, path: string, token: string): Promise<Response> =>
-  fetch(`${base}${path}`, {
-    method: "DELETE",
-    headers: { authorization: `Bearer ${token}` },
-  });
-
-const completeSetup = async (base: string): Promise<string> => {
-  const response = await post(
-    base,
-    "/api/v1/setup/complete",
-    { username: "rogier", password: PASSWORD, timezone: "Europe/Amsterdam" },
-    SETUP_TOKEN,
-  );
-  expect(response.status).toBe(200);
-  return ((await response.json()) as { token: string }).token;
-};
+import { describe, expect, it } from "vitest";
+import {
+  completeSetup,
+  del,
+  get,
+  PASSWORD,
+  post,
+  SETUP_TOKEN,
+  USERNAME,
+  withServer,
+} from "./testing";
+import { MAX_REQUEST_BODY_BYTES } from "./server";
 
 describe("before setup completes", () => {
   it("answers setup.read unauthenticated, so the web app knows where to route", async () => {
@@ -159,7 +43,7 @@ describe("before setup completes", () => {
   it("answers login 401 as well: there is no user to log in as yet", async () => {
     await withServer(async (base) => {
       const response = await post(base, "/api/v1/auth/login", {
-        username: "rogier",
+        username: USERNAME,
         password: PASSWORD,
       });
       expect(response.status).toBe(401);
@@ -168,7 +52,7 @@ describe("before setup completes", () => {
 
   it("refuses setup.complete without the setup token, and with the wrong one", async () => {
     await withServer(async (base) => {
-      const input = { username: "rogier", password: PASSWORD, timezone: "Europe/Amsterdam" };
+      const input = { username: USERNAME, password: PASSWORD, timezone: "Europe/Amsterdam" };
       expect((await post(base, "/api/v1/setup/complete", input)).status).toBe(401);
       expect((await post(base, "/api/v1/setup/complete", input, "wrong")).status).toBe(401);
     });
@@ -199,7 +83,7 @@ describe("setup, login and logout", () => {
       await completeSetup(base);
 
       const login = await post(base, "/api/v1/auth/login", {
-        username: "rogier",
+        username: USERNAME,
         password: PASSWORD,
       });
       expect(login.status).toBe(200);
@@ -217,7 +101,7 @@ describe("setup, login and logout", () => {
     await withServer(async (base) => {
       await completeSetup(base);
       const response = await post(base, "/api/v1/auth/login", {
-        username: "rogier",
+        username: USERNAME,
         password: "guess",
       });
 
@@ -321,11 +205,11 @@ describe("changing the password over the wire", () => {
       expect(changed.status).toBe(200);
 
       const old = await post(base, "/api/v1/auth/login", {
-        username: "rogier",
+        username: USERNAME,
         password: PASSWORD,
       });
       expect(old.status).toBe(401);
-      const fresh = await post(base, "/api/v1/auth/login", { username: "rogier", password: next });
+      const fresh = await post(base, "/api/v1/auth/login", { username: USERNAME, password: next });
       expect(fresh.status).toBe(200);
 
       // The credentials issued under the old password still work: spec 13
@@ -336,7 +220,7 @@ describe("changing the password over the wire", () => {
       expect(await audit("setup.completed")).toMatchObject([{ actor: "user" }]);
       expect(await audit("auth.login.succeeded")).toHaveLength(1);
       expect(await audit("auth.login.failed")).toMatchObject([
-        { actor: "user", payload: { username: "rogier" } },
+        { actor: "user", payload: { username: USERNAME } },
       ]);
     });
   });
@@ -354,41 +238,100 @@ describe("stopping", () => {
   });
 });
 
-describe("a client that hangs up", () => {
-  it("interrupts the fiber handling its request", async () => {
-    const interrupted = await Effect.runPromise(
-      Effect.scoped(
-        Effect.gen(function* () {
-          const started = yield* Deferred.make<void>();
-          const stopped = yield* Deferred.make<void>();
+describe("the pre-setup gate decides on the operation, not on the path", () => {
+  it("gates a path the router matches case-insensitively", async () => {
+    await withServer(async (base, audit) => {
+      const response = await post(base, "/API/v1/AUTH/LOGIN", {
+        username: USERNAME,
+        password: PASSWORD,
+      });
 
-          const routes = HttpRouter.add(
-            "GET",
-            "/slow",
-            Effect.as(Deferred.succeed(started, undefined), HttpServerResponse.empty()).pipe(
-              Effect.andThen(Effect.never),
-              Effect.onInterrupt(() => Deferred.succeed(stopped, undefined)),
-            ),
-          );
+      expect(response.status).toBe(401);
+      expect(await response.json()).toMatchObject({
+        error: {
+          code: "unauthenticated",
+          message: expect.stringContaining("not set up") as string,
+        },
+      });
+      // The operation never ran: no argon2 verify, no row in the event log.
+      expect(await audit("auth.login.failed")).toEqual([]);
+    });
+  });
 
-          yield* HttpServer.serveEffect()(yield* HttpRouter.toHttpEffect(routes));
-          const base = yield* baseUrl;
+  it("gates a path the router reaches through a doubled slash", async () => {
+    await withServer(async (base) => {
+      const response = await get(base, "//api/v1/secrets", "looks-like-a-token");
 
-          const controller = new AbortController();
-          yield* Effect.sync(() => {
-            void fetch(`${base}/slow`, { signal: controller.signal }).catch(() => undefined);
-          });
-          yield* Deferred.await(started);
-          yield* Effect.sync(() => controller.abort());
+      expect(response.status).toBe(401);
+      expect(await response.json()).toMatchObject({
+        error: { message: expect.stringContaining("not set up") as string },
+      });
+    });
+  });
 
-          return yield* Effect.as(Deferred.await(stopped), true);
-        }),
-      ).pipe(
-        Effect.timeout("5 seconds"),
-        Effect.provide(BunHttpServer.layer({ hostname: "127.0.0.1", port: 0 })),
-      ),
-    );
+  it("answers a path no operation owns 404, before setup as after it", async () => {
+    await withServer(async (base) => {
+      const before = await get(base, "/api/v1/nothing-here");
+      expect(before.status).toBe(404);
+      expect(await before.json()).toMatchObject({ error: { code: "not_found" } });
 
-    expect(interrupted).toBe(true);
+      await completeSetup(base);
+      expect((await get(base, "/api/v1/nothing-here")).status).toBe(404);
+    });
+  });
+});
+
+describe("the body cap", () => {
+  it("refuses a body larger than the cap in the envelope, without storing it", async () => {
+    await withServer(async (base, audit) => {
+      const username = "x".repeat(MAX_REQUEST_BODY_BYTES + 1);
+      const response = await post(base, "/api/v1/auth/login", { username, password: PASSWORD });
+
+      expect(response.status).toBe(422);
+      expect(await response.json()).toMatchObject({
+        error: { code: "cap_exceeded", details: { cap: MAX_REQUEST_BODY_BYTES } },
+      });
+      expect(await audit("auth.login.failed")).toEqual([]);
+    });
+  });
+});
+
+describe("a body that is not JSON", () => {
+  it("answers in the envelope rather than a bare 415", async () => {
+    await withServer(async (base) => {
+      await completeSetup(base);
+      const response = await fetch(`${base}/api/v1/auth/login`, {
+        method: "POST",
+        headers: { "content-type": "text/plain" },
+        body: "not json",
+      });
+
+      expect(response.status).toBe(400);
+      expect(await response.json()).toMatchObject({ error: { code: "validation" } });
+    });
+  });
+});
+
+describe("stamping a credential's use", () => {
+  it("writes once for a burst of requests, not once per request", async () => {
+    await withServer(async (base) => {
+      const bearer = await completeSetup(base);
+      const minted = await post(base, "/api/v1/api-keys", { name: "laptop" }, bearer);
+      const key = (await minted.json()) as { id: string; token: string };
+
+      const stampOf = async (): Promise<string | null> => {
+        const page = (await (await get(base, "/api/v1/api-keys", bearer)).json()) as {
+          items: ReadonlyArray<{ id: string; lastUsedAt: string | null }>;
+        };
+        return page.items.find((item) => item.id === key.id)?.lastUsedAt ?? null;
+      };
+
+      expect((await get(base, "/api/v1/api-keys", key.token)).status).toBe(200);
+      const first = await stampOf();
+      await new Promise((resolve) => setTimeout(resolve, 25));
+      expect((await get(base, "/api/v1/api-keys", key.token)).status).toBe(200);
+
+      expect(await stampOf()).toBe(first);
+    });
   });
 });
