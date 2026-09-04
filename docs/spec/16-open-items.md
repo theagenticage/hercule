@@ -31,8 +31,8 @@ Not design questions. The constraint is stated where one exists.
 
 ## C. Verify at build time
 
-- 04 §Engine: FTS5 is enabled in the pinned Bun's bundled SQLite and the minimum macOS system SQLite.
-- 09 §Search: the FTS5 tokenizer and whether raw `MATCH` syntax is exposed or wrapped.
+- ~~04 §Engine: FTS5 is enabled in the pinned Bun's bundled SQLite and the minimum macOS system SQLite.~~ **Resolved 2026-09-04 ([#59](https://github.com/rogierpennink/hydra/issues/59)):** the pinned Bun (1.4.0) bundles SQLite 3.43.2 with `ENABLE_FTS5`, tokenizer and `bm25` included; recorded in 04 §Engine.
+- ~~09 §Search: the FTS5 tokenizer and whether raw `MATCH` syntax is exposed or wrapped.~~ **Resolved 2026-09-04 ([#59](https://github.com/rogierpennink/hydra/issues/59)):** tokenizer `unicode61 remove_diacritics 2`; callers pass plain words and the service builds the `MATCH` expression, so raw syntax is never exposed. Recorded in 09 §Search.
 - 03 §6.1, 06 §9.1: whether the Codex app-server offers a system-prompt channel better than `AGENTS.md` in a scratch cwd.
 - 06 §2: pi `mcpPassthrough` in the pinned version.
 - 06 §9.1: the exact compaction / isolation knob names per pinned harness version, including `settingSources: []` (Claude) and the pi launch flags (`--no-context-files` and friends) for discovery being off in workspace-less sessions.

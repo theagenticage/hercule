@@ -42,9 +42,11 @@ export {
   forbidden,
   internal,
   invalidState,
+  issuesOf,
   notFound,
   unauthenticated,
   validation,
+  validationOf,
   type ApiError,
   type CapDetails,
   type ErrorCode,
@@ -69,15 +71,16 @@ export {
   PresentedPassword,
   Timezone,
   Username,
+  atMost,
   bounded,
 } from "./strings";
 
-export { LoginForm, SetupForm } from "./forms";
+export { LoginForm, SetupForm, TaskCreateForm } from "./forms";
 
 /** The form-validation interface the schemas above answer to. */
 export type { StandardSchemaV1 } from "effect/StandardSchema";
 
-export { Actor, Id, Timestamp } from "./ids";
+export { Actor, ExternalRef, Id, MAX_EXTERNAL_REF_LENGTH, NullableActor, Timestamp } from "./ids";
 
 export { Authenticated, SetupToken } from "./security";
 
@@ -87,12 +90,42 @@ export { ApiKey, MintedApiKey } from "./groups/api-key";
 export {
   AccessMode,
   ControllerSettings,
+  MAX_SETTING_LIST,
   SETTING_VALUES,
   SettingsPatch,
   SettingsState,
   ThreadRows,
   UserSettings,
 } from "./groups/settings";
-export { Profile } from "./groups/profile";
+export { MAX_PROFILE_GRANTS, Profile } from "./groups/profile";
 export { OwnerKind, SecretRef } from "./groups/secret";
 export { ControllerInfo } from "./groups/controller";
+export {
+  Label,
+  MAX_FILTER_VALUES,
+  MAX_LABEL_LENGTH,
+  MAX_PROVENANCE_APPEND,
+  MAX_SEARCH_TEXT_LENGTH,
+  MAX_TASK_LABELS,
+  MAX_TASK_DESCRIPTION_LENGTH,
+  MAX_TASK_TITLE_LENGTH,
+  ProvenanceEntry,
+  TASK_PRIORITIES,
+  TASK_SORT_FIELDS,
+  TASK_STATUSES,
+  Task,
+  TaskCreateInput,
+  TaskFilter,
+  TaskPriority,
+  TaskStatus,
+  TaskUpdateInput,
+} from "./groups/task";
+export {
+  MAX_PROJECT_DESCRIPTION_LENGTH,
+  MAX_PROJECT_NAME_LENGTH,
+  PROJECT_SORT_FIELDS,
+  Project,
+  ProjectCreateInput,
+  ProjectUpdateInput,
+} from "./groups/project";
+export { EVENT_SORT_FIELDS, Event, EventId, MAX_EVENT_KIND_LENGTH } from "./groups/event";

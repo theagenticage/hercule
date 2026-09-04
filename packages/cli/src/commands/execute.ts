@@ -82,7 +82,16 @@ const resolveTail = async (
     );
   }
 
-  const items = await readAll(client, query, {});
+  // Ordered by creation, not by the listing's own default. A keyset walk never
+  // skips a row only as long as nothing moves the key it walks, and the default
+  // order of a task listing is `updatedAt`, which is the one column every write
+  // touches: a task updated while the sweep is between pages jumps above the
+  // cursor and is never visited, so a tail that exists answers `not_found`.
+  // `createdAt` is written once and never again.
+  const stable = query.sortFields.includes("createdAt")
+    ? { sort: { field: "createdAt", direction: "asc" } }
+    : {};
+  const items = await readAll(client, query, stable);
   const matches = items
     .map((item) => item["id"])
     .filter((id): id is string => typeof id === "string" && id.endsWith(text));
@@ -111,9 +120,17 @@ export const execute = async (
   command: Command,
   args: Arguments,
 ): Promise<Outcome> => {
-  const params: Record<string, string> = {};
+  const params: Record<string, string | number> = {};
   for (const [index, field] of command.positionals.entries()) {
     const text = args.positionals[index]!;
+    // A numeric path parameter is the value itself, not a tail of a longer id:
+    // the event log numbers its rows, and `42` is row 42. Text that is not a
+    // number is passed on as written, so the contract refuses it by name.
+    if (field.kind === "number") {
+      const value = Number(text);
+      params[field.name] = text.trim() === "" || Number.isNaN(value) ? text : value;
+      continue;
+    }
     params[field.name] = field.name === "id" ? await resolveTail(client, command, text) : text;
   }
 

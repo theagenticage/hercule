@@ -1,13 +1,16 @@
 /**
- * The reads the shell itself depends on.
+ * Every read the app makes, as query options.
  *
- * Both are answered once per page load and then held: first run happens once,
- * and the settings store changes only through a write this app made, which puts
- * the answer it got back into the cache. Neither retries - a failure here is
- * something the user has to see, not something to sit through.
+ * The first two are the shell's own: they are answered once per page load and
+ * then held, because first run happens once and the settings store changes only
+ * through a write this app made, which puts the answer it got back into the
+ * cache. Neither retries - a failure there is something the user has to see,
+ * not something to sit through. The listings below are ordinary reads, keyed on
+ * what narrows them so a filter that has been seen before answers from cache.
  */
-import { queryOptions } from "@tanstack/react-query";
+import { infiniteQueryOptions, queryOptions } from "@tanstack/react-query";
 import type { HydraClient } from "@hydra/client-core";
+import { MAX_PAGE_LIMIT, type TaskFilter } from "@hydra/contract";
 
 /** Whether first run has been completed. Reachable without a token. */
 export const setupQuery = (client: HydraClient) =>
@@ -25,4 +28,45 @@ export const settingsQuery = (client: HydraClient) =>
     queryFn: () => client.settings.read(),
     staleTime: Infinity,
     retry: false,
+  });
+
+/**
+ * One page of tasks after another, under one filter. Paging is followed rather
+ * than capped: a listing that stopped at its first page would be hiding tasks
+ * without saying so. A narrowed filter holds the rows it had until the new ones
+ * arrive, so a list does not blink out from under the reader between keystrokes.
+ */
+export const tasksQuery = (client: HydraClient, filter: TaskFilter) =>
+  infiniteQueryOptions({
+    queryKey: ["tasks", filter],
+    queryFn: ({ pageParam }) =>
+      client.task.query({
+        query: pageParam === undefined ? filter : { ...filter, cursor: pageParam },
+      }),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (last) => last.nextCursor,
+    placeholderData: (previous) => previous,
+  });
+
+/**
+ * One task on its own, which is what the detail drawer reads. A task opened by
+ * address is not necessarily on a page the listing has fetched, and a task the
+ * user has just edited may have left the listing's filter entirely, so the
+ * panel showing it reads it rather than looking it up in a list.
+ */
+export const taskQuery = (client: HydraClient, id: string) =>
+  queryOptions({
+    queryKey: ["task", id],
+    queryFn: () => client.task.read({ params: { id } }),
+  });
+
+/**
+ * Every project, for the pickers that name one. One page: there are few of
+ * them, and a task naming a project outside it says the id rather than
+ * claiming the task has none.
+ */
+export const projectsQuery = (client: HydraClient) =>
+  queryOptions({
+    queryKey: ["projects"],
+    queryFn: () => client.project.query({ query: { limit: MAX_PAGE_LIMIT } }),
   });

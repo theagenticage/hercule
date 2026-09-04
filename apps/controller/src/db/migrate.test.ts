@@ -12,7 +12,10 @@ import { backupBeforeMigration, databaseVersion, migrate, runMigrations } from "
 import { binaryVersion, migrations } from "./migrations/index";
 import { TestDatabase } from "./testing";
 
-/** The tables the migration set creates: the boot set, then the user and credentials. */
+/**
+ * The tables the migration set creates: the boot set, then the user and
+ * credentials, then tasks and projects.
+ */
 const TABLES = [
   "secrets",
   "permission_profiles",
@@ -23,6 +26,10 @@ const TABLES = [
   "users",
   "login_tokens",
   "api_keys",
+  "tasks",
+  "projects",
+  "task_provenance",
+  "project_resources",
 ];
 
 type DatabaseEffect<A, E> = Effect.Effect<A, E, SqlClient.SqlClient | FileSystem>;

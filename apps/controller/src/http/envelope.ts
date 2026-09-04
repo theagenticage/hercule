@@ -20,36 +20,21 @@
  */
 import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
-import * as Schema from "effect/Schema";
-import * as SchemaIssue from "effect/SchemaIssue";
 import * as HttpServerError from "effect/unstable/http/HttpServerError";
 import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse";
 import { HttpApiSchemaError } from "effect/unstable/httpapi/HttpApiError";
 import {
   ERROR_STATUS,
   internal,
+  issuesOf,
   notFound,
   validation,
   type ApiError,
-  type Issue,
 } from "@hydra/contract";
 
 /** The eight error classes all carry `error`; this is what puts one on the wire. */
 export const responseFor = (error: ApiError): HttpServerResponse.HttpServerResponse =>
   HttpServerResponse.jsonUnsafe({ error: error.error }, { status: ERROR_STATUS[error.error.code] });
-
-const standardIssues = SchemaIssue.makeFormatterStandardSchemaV1();
-
-/**
- * The schema library's issue tree as the contract's `issues` list: one entry
- * per thing wrong, so a caller fixes every field in one retry. Path segments
- * are stringified because a JSON document has no other kind of key.
- */
-export const issuesOf = (error: Schema.SchemaError): ReadonlyArray<Issue> =>
-  standardIssues(error.issue).issues.map((issue) => ({
-    path: (issue.path ?? []).map(String),
-    message: issue.message,
-  }));
 
 /** Which part of the request failed to decode, in the caller's words. */
 const PART: Record<HttpApiSchemaError["kind"], string> = {

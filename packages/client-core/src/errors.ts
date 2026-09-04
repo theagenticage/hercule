@@ -1,12 +1,13 @@
 /**
- * The two failures a client call can reject with.
+ * The three failures a client call can reject with.
  *
  * Nothing Effect-shaped crosses this boundary: `client-core` is the only client
  * package that writes Effect code, so every failure the
- * derived client can produce is folded into one of these two plain errors
+ * derived client can produce is folded into one of these three plain errors
  * before it reaches the web app or the CLI.
  */
-import { ERROR_CODES, ERROR_STATUS, type ErrorCode } from "@hydra/contract";
+import { ERROR_CODES, ERROR_STATUS, issuesOf, type ErrorCode, type Issue } from "@hydra/contract";
+import { Schema } from "effect";
 import * as HttpClientError from "effect/unstable/http/HttpClientError";
 
 /** The wire envelope, exactly as the API sends it. */
@@ -51,6 +52,25 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * The request never left: the caller's input does not match the operation's
+ * input schema, so there was nothing to send.
+ *
+ * This is the caller's mistake, not the controller's, and it is not an
+ * `ApiError`: no request was made, so there is no envelope and no status. The
+ * `issues` list is the contract's own, so a bad flag on the command line and a
+ * bad field over HTTP read the same.
+ */
+export class RequestError extends Error {
+  override readonly name = "RequestError";
+  readonly issues: ReadonlyArray<Issue>;
+
+  constructor(issues: ReadonlyArray<Issue>, cause: unknown) {
+    super(issues.map((issue) => issue.message).join("; "), { cause });
+    this.issues = issues;
+  }
+}
+
 /** The controller could not be reached at all: no response, so no envelope. */
 export class ConnectionError extends Error {
   override readonly name = "ConnectionError";
@@ -76,15 +96,27 @@ const asEnvelope = (u: unknown): ErrorEnvelope | undefined => {
 };
 
 /**
- * Fold anything the derived client can fail with into `ApiError` or
- * `ConnectionError`.
+ * Fold anything the derived client can fail with into `RequestError`,
+ * `ApiError` or `ConnectionError`.
+ *
+ * `sent` says whether the request reached the transport. A schema failure
+ * before it did is the caller's input, not the controller's answer, so it
+ * becomes a `RequestError` and never an envelope the controller never sent.
  *
  * A response that arrived but could not be decoded - an undeclared status, a
  * body that is not the envelope, a success that does not match its schema -
  * becomes `internal`. The caller got something it cannot act on structurally,
  * which is exactly what `internal` means; the original is kept as `cause`.
  */
-export const toClientError = (failure: unknown, url: string): ApiError | ConnectionError => {
+export const toClientError = (
+  failure: unknown,
+  url: string,
+  sent: boolean,
+): RequestError | ApiError | ConnectionError => {
+  if (!sent && Schema.isSchemaError(failure)) {
+    return new RequestError(issuesOf(failure), failure);
+  }
+
   const envelope = asEnvelope(failure);
   if (envelope !== undefined) {
     return new ApiError(envelope.error.code, envelope.error.message, envelope.error.details);

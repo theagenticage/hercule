@@ -1,10 +1,14 @@
 export { cn } from "./primitives/cn";
 export { Button, type ButtonVariant } from "./primitives/button";
+export { Drawer } from "./primitives/drawer";
 export { Input } from "./primitives/input";
 export { Label } from "./primitives/label";
+export { ListRow } from "./primitives/list-row";
 export { Popover, PopoverAnchor, PopoverContent, PopoverTrigger } from "./primitives/popover";
+export { PriorityGlyph, type GlyphTone } from "./primitives/priority-glyph";
 export { Select } from "./primitives/select";
 export { SegmentedControl, SegmentedControlItem } from "./primitives/segmented-control";
+export { Textarea } from "./primitives/textarea";
 
 export { EmptyState, Field, FormCard, Group, LaneLabel, Row } from "./patterns/patterns";
 

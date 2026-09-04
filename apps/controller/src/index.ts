@@ -17,12 +17,15 @@ import { BootstrapConfig } from "./config";
 import { AuthLayer } from "./auth";
 import { bootWith, type BootError, type BootOutcome } from "./bootstrap";
 import { ApiKeysLayer } from "./credentials";
+import { EventServiceLayer } from "./events";
 import { MAX_REQUEST_BODY_BYTES, perimeterWarning, serve, webBundle } from "./http";
 import { ControllerLayer } from "./identity";
 import { SecretLayer } from "./secrets";
 import { ProfilesLayer } from "./permissions";
 import { SettingsOperationsLayer } from "./settings";
 import { SetupLayer } from "./setup";
+import { ProjectServiceLayer } from "./projects";
+import { TaskServiceLayer } from "./tasks";
 import { UserLayer } from "./users";
 
 export { boot, bootWith, hashToken, setupUrl } from "./bootstrap";
@@ -137,6 +140,9 @@ const listen = (outcome: BootOutcome, stopped: Effect.Effect<void>) =>
         ControllerLayer,
         SettingsOperationsLayer,
         ProfilesLayer,
+        TaskServiceLayer,
+        ProjectServiceLayer,
+        EventServiceLayer,
       ),
     ),
   );

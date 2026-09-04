@@ -13,14 +13,14 @@
  * talks to the API through `client-core`'s promises.
  */
 import { readFileSync } from "node:fs";
-import { ApiError, ConnectionError, createClient } from "@hydra/client-core";
+import { ApiError, ConnectionError, RequestError, createClient } from "@hydra/client-core";
 import { parseGlobalOptions, resolveHomePath, setupUrlFileIn } from "@hydra/home";
 import { Result } from "effect";
 import { parseArguments } from "./commands/args";
 import { execute } from "./commands/execute";
 import { commandHelp, entityHelp, rootHelp } from "./commands/help";
 import { renderHuman } from "./commands/render";
-import { commandFor, ENTITIES, verbsOf } from "./commands/tree";
+import { commandFor, ENTITIES, verbsOf, type Command } from "./commands/tree";
 import { CredentialError, resolveCredential, resolveUrl, type Env } from "./credentials";
 import { EXIT, UsageError } from "./exit";
 import { login, loginHelp } from "./login";
@@ -46,6 +46,24 @@ export function readSetupUrl(argv: readonly string[], env: Env): Result.Result<s
 
 const wantsHelp = (tokens: ReadonlyArray<string>): boolean =>
   tokens.includes("--help") || tokens.includes("-h");
+
+/**
+ * A request the client refused to encode, said as the command line that caused
+ * it. Nothing was sent, so this is a usage error and not an API failure: the
+ * value of a flag - a `--<field>` carrying JSON is the way to get here - does
+ * not fit the field it is written into.
+ *
+ * The issue's path is the field's path inside the payload, so its head is the
+ * flag's own name.
+ */
+const usageErrorOf = (error: RequestError, command: Command): UsageError => {
+  const flags = new Set([...command.payload, ...command.query].map((field) => field.name));
+  const said = error.issues.map((issue) => {
+    const head = issue.path[0];
+    return head !== undefined && flags.has(head) ? `--${head}: ${issue.message}` : issue.message;
+  });
+  return new UsageError(said.join("; "), `${command.entity} ${command.verb}`);
+};
 
 /** Run one operation: parse, resolve a credential, call, print. */
 const runOperation = async (
@@ -103,7 +121,9 @@ const runOperation = async (
   }
 
   const client = createClient({ baseUrl: url, token, fetch: io.fetch });
-  const outcome = await execute(client, command, args);
+  const outcome = await execute(client, command, args).catch((error: unknown) => {
+    throw error instanceof RequestError ? usageErrorOf(error, command) : error;
+  });
 
   if (args.json) {
     const value = outcome.kind === "items" ? { items: outcome.items } : outcome.value;

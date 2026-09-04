@@ -10,10 +10,14 @@ import * as Effect from "effect/Effect";
 import type { ResolvedMigration } from "effect/unstable/sql/Migrator";
 import initial from "./0001-initial";
 import usersAndCredentials from "./0002-users-and-credentials";
+import tasksAndProjects from "./0003-tasks-and-projects";
+import readingTheEventLog from "./0004-reading-the-event-log";
 
 export const migrations: ReadonlyArray<ResolvedMigration> = [
   [1, "initial", Effect.succeed(initial)],
   [2, "users-and-credentials", Effect.succeed(usersAndCredentials)],
+  [3, "tasks-and-projects", Effect.succeed(tasksAndProjects)],
+  [4, "reading-the-event-log", Effect.succeed(readingTheEventLog)],
 ];
 
 /** The schema version this binary carries: the highest embedded migration id. */

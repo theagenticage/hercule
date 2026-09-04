@@ -19,7 +19,7 @@ import { defineConfig } from "vitest/config";
  */
 const reactPackages = ["apps/web", "packages/ui"];
 
-const binaryTests = ["e2e/web.test.ts"];
+const binaryTests = ["e2e/web.test.ts", "e2e/cli.test.ts"];
 
 export default defineConfig({
   test: {
@@ -32,6 +32,8 @@ export default defineConfig({
           exclude: [
             "**/node_modules/**",
             "**/dist/**",
+            // Agent worktrees are whole copies of this repository.
+            "**/.claude/**",
             ...reactPackages.map((p) => `${p}/**`),
             ...binaryTests,
           ],

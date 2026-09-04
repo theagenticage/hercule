@@ -10,7 +10,7 @@ The controller keeps everything it durably owns in one SQLite database file insi
 - The controller is the **only writer process** ([ADR 0002](../adr/0002-orchestration-stays-on-the-controller.md): one brain). Runners never open the file; the runner entrypoint must not even import the DB engine ([ADR 0018](../adr/0018-hydra-ships-as-one-self-contained-binary.md) mode isolation).
 - Repository SQL uses SQLite features freely: JSON functions, upserts, partial indexes, FTS5 (task search, see below). There is no lowest-common-denominator constraint.
 
-**Verify at build time:** the pinned Bun version's bundled SQLite (Linux) and the minimum macOS system SQLite both ship FTS5 enabled; Hydra needs FTS5 for `hydra task query` and cannot load it as an extension on macOS.
+**Verified 2026-09-04 ([#59](https://github.com/rogierpennink/hydra/issues/59)):** the pinned Bun (1.4.0) bundles SQLite 3.43.2 with `ENABLE_FTS5`, including the `unicode61 remove_diacritics 2` tokenizer and `bm25`. Hydra needs FTS5 for `hydra task query` and cannot load it as an extension on macOS.
 
 ## Repository interfaces
 

@@ -8,10 +8,11 @@
  * a platform event - `source: "platform"`, no Connection - carrying the actor
  * of the mutation that caused it.
  */
-import { Clock, Context, Effect, Layer } from "effect";
+import { Context, Effect, Layer } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import type { Actor } from "@hydra/contract";
+import { nowIso } from "../db";
 
 /**
  * The audit kinds this build emits, following `<entity>.<verb>ed`. The list
@@ -33,6 +34,12 @@ export const AUDIT_KINDS = [
   "secret.created",
   "secret.rotated",
   "secret.deleted",
+  "task.created",
+  "task.updated",
+  "task.deleted",
+  "project.created",
+  "project.updated",
+  "project.deleted",
 ] as const;
 
 export type AuditKind = (typeof AUDIT_KINDS)[number];
@@ -40,13 +47,28 @@ export type AuditKind = (typeof AUDIT_KINDS)[number];
 /** One audit entry: what happened, who caused it, and what it was about. */
 export interface AuditEntry {
   readonly kind: AuditKind;
-  readonly actor: Actor;
+  /**
+   * Null where nothing caused the entry that the system can name: a login that
+   * failed was made by nobody, because the credential it presented resolved to
+   * nobody. The same null that an ingested or scheduled event carries.
+   */
+  readonly actor: Actor | null;
   /**
    * References only - an id, a name, an owner, a reason. Never a secret value,
    * a token, a password or a password hash: the event log is read by the
    * Intake views and kept for at least 90 days.
    */
   readonly payload: Readonly<Record<string, unknown>>;
+  /**
+   * When the change this entry records happened, which is the timestamp that
+   * change wrote on its own rows. An operation that stamps rows passes it, so
+   * the entry cannot be dated before the row it describes: the two clock reads
+   * it would otherwise take are separated by the wait for the write
+   * transaction, and a caller reading the log by time would then find a task
+   * created before the event that records its creation. An entry with nothing
+   * to agree with - a login, a logout - leaves it out and is timed here.
+   */
+  readonly at?: string;
 }
 
 /** An audit entry as it reads back out of the log. */
@@ -66,7 +88,7 @@ const make = Effect.gen(function* () {
      */
     append: (entry: AuditEntry): Effect.Effect<void, SqlError> =>
       Effect.gen(function* () {
-        const at = new Date(yield* Clock.currentTimeMillis).toISOString();
+        const at = entry.at ?? (yield* nowIso);
         // `dedup_key` is an emitter's idempotency key, and an audit entry has
         // none: two logins a second apart are two facts, not one repeated. A
         // random value per row satisfies the NOT NULL column and makes the
@@ -87,7 +109,7 @@ const make = Effect.gen(function* () {
       sql<{
         readonly id: number;
         readonly kind: string;
-        readonly actor: string;
+        readonly actor: string | null;
         readonly payload: string;
         readonly received_at: string;
       }>`SELECT id, kind, actor, payload, received_at FROM events WHERE kind = ${kind} ORDER BY id`.pipe(

@@ -31,6 +31,8 @@ export interface Field {
   /** The flag may be given more than once; the values become a list. */
   readonly repeated: boolean;
   readonly optional: boolean;
+  /** The field accepts `null`, which on the command line is written `--field null`. */
+  readonly nullable: boolean;
   /** The closed set of accepted values, when the schema declares one. */
   readonly choices: ReadonlyArray<string> | undefined;
 }
@@ -78,7 +80,23 @@ const literalsOf = (ast: Ast): ReadonlyArray<string> | undefined => {
   return literals;
 };
 
-const scalarKind = (ast: Ast): FieldKind => {
+/**
+ * What is left of `X | null` once the null is taken away. A nullable field is
+ * still the shape it holds; only the way it is cleared is different, and on the
+ * command line that is `--field null`.
+ */
+const withoutNull = (ast: Ast): Ast => {
+  if (ast._tag !== "Union" || ast.types === undefined) return ast;
+  const present = ast.types.filter((member) => member._tag !== "Null");
+  return present.length === 1 ? present[0]! : ast;
+};
+
+/** Whether `null` is one of the values this field holds. */
+const isNullable = (ast: Ast): boolean =>
+  ast._tag === "Union" && ast.types !== undefined && ast.types.some((m) => m._tag === "Null");
+
+const scalarKind = (input: Ast): FieldKind => {
+  const ast = withoutNull(input);
   if (literalsOf(ast) !== undefined) return "string";
   switch (ast._tag) {
     case "String":
@@ -101,10 +119,18 @@ const fieldOf = (name: string, ast: Ast): Field => {
       kind: scalarKind(element),
       repeated: true,
       optional,
+      nullable: isNullable(element),
       choices: literalsOf(element),
     };
   }
-  return { name, kind: scalarKind(ast), repeated: false, optional, choices: literalsOf(ast) };
+  return {
+    name,
+    kind: scalarKind(ast),
+    repeated: false,
+    optional,
+    nullable: isNullable(ast),
+    choices: literalsOf(ast),
+  };
 };
 
 const fieldsOf = (schema: unknown): ReadonlyArray<Field> => {
@@ -153,6 +179,7 @@ const build = (): ReadonlyArray<Command> => {
               kind: "string",
               repeated: false,
               optional: false,
+              nullable: false,
               choices: undefined,
             },
         ),

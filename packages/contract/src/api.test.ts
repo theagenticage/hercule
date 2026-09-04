@@ -75,3 +75,53 @@ describe("the HttpApi declaration", () => {
     expect(Object.keys(document.paths).length).toBeGreaterThan(0);
   });
 });
+
+/**
+ * The Task, Project and Event operations: the operation table row and the
+ * endpoint that answers it.
+ */
+const NEW_OPERATIONS = [
+  { id: "task.query", requires: "task.read", method: "GET", path: "/api/v1/tasks" },
+  { id: "task.read", requires: "task.read", method: "GET", path: "/api/v1/tasks/:id" },
+  { id: "task.create", requires: "task.create", method: "POST", path: "/api/v1/tasks" },
+  { id: "task.update", requires: "task.update", method: "PATCH", path: "/api/v1/tasks/:id" },
+  { id: "task.delete", requires: "task.delete", method: "DELETE", path: "/api/v1/tasks/:id" },
+  { id: "project.query", requires: "project.read", method: "GET", path: "/api/v1/projects" },
+  { id: "project.read", requires: "project.read", method: "GET", path: "/api/v1/projects/:id" },
+  { id: "project.create", requires: "project.write", method: "POST", path: "/api/v1/projects" },
+  {
+    id: "project.update",
+    requires: "project.write",
+    method: "PATCH",
+    path: "/api/v1/projects/:id",
+  },
+  {
+    id: "project.delete",
+    requires: "project.write",
+    method: "DELETE",
+    path: "/api/v1/projects/:id",
+  },
+  { id: "event.query", requires: "event.read", method: "GET", path: "/api/v1/events" },
+  { id: "event.read", requires: "event.read", method: "GET", path: "/api/v1/events/:id" },
+] as const;
+
+/** The table read by string, so a missing row is a failed assertion, not a type error. */
+const table: Record<string, { requires: string; method: string; path: string } | undefined> =
+  OPERATIONS;
+
+describe("the Task, Project and Event operations", () => {
+  it.each(NEW_OPERATIONS)("puts $id in the operation table on $method $path", (operation) => {
+    expect(table[operation.id]).toEqual({
+      requires: operation.requires,
+      method: operation.method,
+      path: operation.path,
+    });
+  });
+
+  it.each(NEW_OPERATIONS)("answers $id from one endpoint on $method $path", (operation) => {
+    const endpoints = declared().filter((endpoint) => endpoint.id === operation.id);
+    expect(endpoints).toEqual([
+      { id: operation.id, method: operation.method, path: operation.path },
+    ]);
+  });
+});

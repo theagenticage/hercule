@@ -115,6 +115,22 @@ describe("--help", () => {
     expect(text).toContain("2 lines, one per field, in this order: current, then next.");
   });
 
+  it("says how a nullable field is cleared, on each of the two that are", async () => {
+    const task = cli();
+    expect(await task.run("task", "update", "--help")).toBe(0);
+    expect(task.io.stdout.join("\n")).toContain("--projectId null clears it");
+
+    const project = cli();
+    expect(await project.run("project", "update", "--help")).toBe(0);
+    expect(project.io.stdout.join("\n")).toContain("--description null clears it");
+  });
+
+  it("says nothing about null on a field that does not accept it", async () => {
+    const { io, run } = cli();
+    expect(await run("profile", "create", "--help")).toBe(0);
+    expect(io.stdout.join("\n")).not.toContain("null clears it");
+  });
+
   it("works after other flags have been written", async () => {
     const { io, run } = cli();
     expect(await run("profile", "create", "--name", "x", "--help")).toBe(0);
@@ -382,6 +398,78 @@ describe("id tails", () => {
     expect(stub.stderr.join("\n")).toContain("no profile whose id ends with ffffffff");
   });
 
+  it("sends a numeric id as written, with no tail lookup", async () => {
+    const fetch = stubFetch(() => ({
+      id: 42,
+      source: "platform",
+      connectionId: null,
+      system: "hydra",
+      kind: "auth.login.failed",
+      occurredAt: "2026-09-04T10:00:00.000Z",
+      receivedAt: "2026-09-04T10:00:00.000Z",
+      dedupKey: "d1",
+      refs: [],
+      url: null,
+      payload: {},
+      raw: null,
+      actor: null,
+    }));
+    const stub = io(fetch);
+    expect(await main(["--home", home, "event", "read", "42", "--json"], stub)).toBe(0);
+    expect(fetch.calls.length).toBe(1);
+    expect(fetch.calls[0]?.path).toBe("/api/v1/events/42");
+  });
+
+  it("sweeps in an order writes do not move, so a touched row is still found", async () => {
+    const row = (tail: string, at: string) => ({
+      id: id(tail),
+      title: `task ${tail}`,
+      description: "",
+      status: "open",
+      priority: "normal",
+      labels: [] as Array<string>,
+      provenance: [] as Array<never>,
+      createdAt: at,
+      updatedAt: at,
+      statusChangedAt: at,
+    });
+    const rows = [
+      row("aaaaaaa1", "2026-01-01T00:00:00.000Z"),
+      row("bbbbbbb2", "2026-01-02T00:00:00.000Z"),
+      row("ccccccc3", "2026-01-03T00:00:00.000Z"),
+    ];
+    let touched = false;
+
+    // A controller that pages two rows at a time, in whatever order the sweep
+    // asks for. Between the first page and the second, the row the sweep has
+    // not reached yet is written: under `updatedAt` it jumps to the head, ahead
+    // of the cursor, and is never visited.
+    const fetch = stubFetch((request) => {
+      if (request.path !== "/api/v1/tasks" || request.method !== "GET") return rows[0];
+      const [field = "updatedAt", direction = "desc"] = (
+        request.query.get("sort") ?? "updatedAt:desc"
+      ).split(":");
+      const key = field as "createdAt" | "updatedAt";
+      const sign = direction === "asc" ? 1 : -1;
+      const ordered = [...rows].sort((a, b) => (a[key] < b[key] ? -1 : 1) * sign);
+      const cursor = request.query.get("cursor");
+      const from = cursor === null ? 0 : ordered.findIndex((item) => item.id === cursor) + 1;
+      const items = ordered.slice(from, from + 2);
+      if (!touched) {
+        touched = true;
+        rows[0]!.updatedAt = "2026-01-04T00:00:00.000Z";
+      }
+      const last = items[items.length - 1];
+      return {
+        items,
+        ...(from + 2 < ordered.length && last !== undefined ? { nextCursor: last.id } : {}),
+      };
+    });
+    const stub = io(fetch);
+    expect(await main(["--home", home, "task", "read", "aaaaaaa1", "--json"], stub)).toBe(0);
+    expect(fetch.calls.at(-1)?.path).toBe(`/api/v1/tasks/${id("aaaaaaa1")}`);
+  });
+
   it("refuses a tail shorter than eight characters before calling anything", async () => {
     const fetch = withProfiles(() => ({}));
     const stub = io(fetch);
@@ -424,6 +512,25 @@ describe("failures", () => {
     expect(JSON.parse(io.stderr.join("\n"))).toEqual({
       error: { code: "not_found", message: "no such profile" },
     });
+  });
+
+  it("exits 2 when a flag's value does not fit its field, and sends nothing", async () => {
+    const { io, fetch, run } = cli();
+    expect(
+      await run(
+        "task",
+        "create",
+        "--title",
+        "a task",
+        "--description",
+        "",
+        "--provenance",
+        '{"note":"nothing that names anything"}',
+      ),
+    ).toBe(2);
+    expect(fetch.calls).toEqual([]);
+    expect(io.stderr.join("\n")).toContain("--provenance: A provenance entry names at least one");
+    expect(io.stderr.join("\n")).toContain("run `hydra task create --help`");
   });
 
   it("exits 3 when the controller cannot be reached", async () => {

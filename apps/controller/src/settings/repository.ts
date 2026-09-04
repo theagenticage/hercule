@@ -13,11 +13,11 @@
  * Schema, so a read that cannot produce the key's type is an error rather than
  * a value the caller misinterprets.
  */
-import { Clock, Context, Effect, Layer, Schema } from "effect";
+import { Context, Effect, Layer, Schema } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import { SETTING_VALUES } from "@hydra/contract";
-import { uuidFromString } from "../db";
+import { nowIso, uuidFromString } from "../db";
 
 /** The keys each scope defines, with the schema of the value. */
 const SETTING_SCHEMAS = SETTING_VALUES;
@@ -106,8 +106,6 @@ interface KeyValueRow {
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
 
-  const now = Effect.map(Clock.currentTimeMillis, (millis) => new Date(millis).toISOString());
-
   return {
     /** Reads one controller setting, decoded to the key's type. */
     get: <K extends SettingKey<"controller">>(
@@ -146,7 +144,7 @@ const make = Effect.gen(function* () {
     ): Effect.Effect<void, SettingError | SqlError> =>
       Effect.gen(function* () {
         const json = yield* encode("controller", key, value);
-        const at = yield* now;
+        const at = yield* nowIso;
         yield* sql`
           INSERT INTO settings (scope, key, value, updated_at)
           VALUES ('controller', ${key}, ${json}, ${at})
@@ -164,7 +162,7 @@ const make = Effect.gen(function* () {
     ): Effect.Effect<void, SettingError | SqlError> =>
       Effect.gen(function* () {
         const json = yield* encode("controller", key, value);
-        const at = yield* now;
+        const at = yield* nowIso;
         yield* sql`
           INSERT OR IGNORE INTO settings (scope, key, value, updated_at)
           VALUES ('controller', ${key}, ${json}, ${at})
@@ -208,7 +206,7 @@ const make = Effect.gen(function* () {
     ): Effect.Effect<void, SettingError | SqlError> =>
       Effect.gen(function* () {
         const json = yield* encode("user", key, value);
-        const at = yield* now;
+        const at = yield* nowIso;
         yield* sql`
           INSERT INTO user_settings (user_id, key, value, updated_at)
           VALUES (${uuidFromString(userId)}, ${key}, ${json}, ${at})

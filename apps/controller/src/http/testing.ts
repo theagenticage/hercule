@@ -20,12 +20,20 @@ import { AuthLayer } from "../auth";
 import { HydraHome } from "../config";
 import { ApiKeysLayer, CredentialsLayer, hashToken } from "../credentials";
 import { TestDatabase } from "../db/testing";
-import { AuditLog, AuditLogLayer, type AuditKind, type AuditRow } from "../events";
+import {
+  AuditLog,
+  AuditLogLayer,
+  EventServiceLayer,
+  type AuditKind,
+  type AuditRow,
+} from "../events";
 import { ControllerIdentity, controllerIdentityLayer, ControllerLayer } from "../identity";
 import { masterKeyLayer, SecretLayer, secretsLayer } from "../secrets";
 import { PermissionProfilesLayer, ProfilesLayer } from "../permissions";
 import { SettingsLayer, SettingsOperationsLayer } from "../settings";
 import { SetupLayer } from "../setup";
+import { ProjectServiceLayer } from "../projects";
+import { TaskServiceLayer } from "../tasks";
 import { PasswordCost, TEST_PASSWORD_PARAMS, UserLayer, UsersLayer } from "../users";
 import { seed } from "../seed";
 import { MAX_REQUEST_BODY_BYTES, serve } from "./server";
@@ -47,6 +55,9 @@ const services = (home: string) =>
     ControllerLayer,
     SettingsOperationsLayer,
     ProfilesLayer,
+    TaskServiceLayer,
+    ProjectServiceLayer,
+    EventServiceLayer,
   ).pipe(
     Layer.provideMerge(
       Layer.mergeAll(

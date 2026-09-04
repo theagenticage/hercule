@@ -18,6 +18,8 @@ const BASE_URL = "http://controller.test";
 export interface Call {
   readonly method: string;
   readonly path: string;
+  /** The query string as it went out, leading `?` and all; empty when there was none. */
+  readonly search: string;
   readonly body: unknown;
   readonly token: string | null;
 }
@@ -28,7 +30,11 @@ export interface Answer {
   readonly body: unknown;
 }
 
-export type Handler = Answer | ((call: Call) => Answer);
+/**
+ * What one operation answers with. A handler may answer later rather than at
+ * once, which is how a test holds one write open while it makes another.
+ */
+export type Handler = Answer | ((call: Call) => Answer | Promise<Answer>);
 
 /** The error envelope, in the shape the API sends it. */
 export const envelope = (code: string, message: string): { error: unknown } => ({
@@ -53,6 +59,7 @@ export const stubApi = (
     const call: Call = {
       method: init?.method ?? "GET",
       path: new URL(url).pathname,
+      search: new URL(url).search,
       body: sent.length === 0 ? undefined : JSON.parse(sent),
       token: authorization === null ? null : authorization.replace(/^Bearer /, ""),
     };
@@ -63,7 +70,7 @@ export const stubApi = (
       handler === undefined
         ? { status: 404, body: envelope("not_found", `no stub for ${call.method} ${call.path}`) }
         : typeof handler === "function"
-          ? handler(call)
+          ? await handler(call)
           : handler;
 
     return new Response(JSON.stringify(answer.body), {

@@ -84,6 +84,21 @@ const TABLE = {
     path: "/api/v1/secrets/:ownerKind/:ownerId/:name",
   },
 
+  "task.query": { requires: "task.read", method: "GET", path: "/api/v1/tasks" },
+  "task.read": { requires: "task.read", method: "GET", path: "/api/v1/tasks/:id" },
+  "task.create": { requires: "task.create", method: "POST", path: "/api/v1/tasks" },
+  "task.update": { requires: "task.update", method: "PATCH", path: "/api/v1/tasks/:id" },
+  "task.delete": { requires: "task.delete", method: "DELETE", path: "/api/v1/tasks/:id" },
+
+  "project.query": { requires: "project.read", method: "GET", path: "/api/v1/projects" },
+  "project.read": { requires: "project.read", method: "GET", path: "/api/v1/projects/:id" },
+  "project.create": { requires: "project.write", method: "POST", path: "/api/v1/projects" },
+  "project.update": { requires: "project.write", method: "PATCH", path: "/api/v1/projects/:id" },
+  "project.delete": { requires: "project.write", method: "DELETE", path: "/api/v1/projects/:id" },
+
+  "event.query": { requires: "event.read", method: "GET", path: "/api/v1/events" },
+  "event.read": { requires: "event.read", method: "GET", path: "/api/v1/events/:id" },
+
   "controller.read": { requires: "infra.read", method: "GET", path: "/api/v1/controller" },
 } as const satisfies Record<string, { requires: Requirement; method: Method; path: string }>;
 

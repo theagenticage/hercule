@@ -1,17 +1,22 @@
 /**
- * Bounds on free text.
+ * Bounds on what a caller writes: how long a string may be, and how many items
+ * a list may hold.
  *
- * Every string a caller controls has a maximum length, declared here rather
- * than left to the transport: an unbounded field is an unbounded write, and the
- * audit log keeps what it is told for at least 90 days. The bound belongs in
- * the contract so the refusal is one `validation` error before any handler
- * runs, identical for every client.
+ * Every string and every list a caller controls has a maximum, declared here
+ * rather than left to the transport: an unbounded field is an unbounded write,
+ * and the audit log keeps what it is told for at least 90 days. The bound
+ * belongs in the contract so the refusal is one `validation` error before any
+ * handler runs, identical for every client.
  */
 import { Schema } from "effect";
 
 /** A string of at least `minimum` and at most `maximum` characters. */
 export const bounded = (minimum: number, maximum: number) =>
   Schema.String.check(Schema.isLengthBetween(minimum, maximum));
+
+/** A list of at most `maximum` items. */
+export const atMost = <S extends Schema.Top>(item: S, maximum: number) =>
+  Schema.Array(item).check(Schema.isMaxLength(maximum));
 
 /**
  * The shortest password Hydra accepts. There is no brute-force lockout, so on a

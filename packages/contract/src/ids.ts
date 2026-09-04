@@ -1,5 +1,6 @@
 /**
- * The shared wire vocabulary: ids, timestamps and the actor stamp.
+ * The shared wire vocabulary: ids, timestamps, the actor stamp, and the
+ * canonical form of an identifier for a thing outside Hydra.
  */
 import { Schema } from "effect";
 
@@ -42,3 +43,35 @@ export const Actor = Schema.String.check(
 );
 
 export type Actor = Schema.Schema.Type<typeof Actor>;
+
+/**
+ * Who performed an operation, or nobody. An ingested event, a cron tick and a
+ * failed login all have no actor: nothing that holds a credential caused them.
+ */
+export const NullableActor = Schema.NullOr(Actor);
+
+export type NullableActor = Schema.Schema.Type<typeof NullableActor>;
+
+/** The longest External Ref. It is an identity, not a document. */
+export const MAX_EXTERNAL_REF_LENGTH = 512;
+
+/**
+ * A fully-qualified identifier for a thing outside Hydra:
+ * `<system>:<kind>:<identity>`, for example `github:issue:owner/repo#42` or
+ * `gmail:thread:19b2c`.
+ *
+ * The core pins the grammar and nothing else. What a system's identities look
+ * like is the plugin's to canonicalize, and for systems with no plugin it is
+ * the triage agent's, so anything without whitespace is an identity here. The
+ * system is lowercase so two spellings of the same system cannot become two
+ * refs, which would defeat the duplicate-signal query the ref exists for.
+ */
+export const ExternalRef = Schema.String.check(
+  Schema.isMaxLength(MAX_EXTERNAL_REF_LENGTH),
+  Schema.isPattern(/^[a-z0-9][a-z0-9-]*:[^\s:]+:\S+$/, {
+    title: "external ref",
+    description: "`<system>:<kind>:<identity>`, lowercase system, no whitespace",
+  }),
+);
+
+export type ExternalRef = Schema.Schema.Type<typeof ExternalRef>;

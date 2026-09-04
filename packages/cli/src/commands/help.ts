@@ -74,6 +74,11 @@ const flagLine = (command: Command, field: Field, fromStdin: boolean): ReadonlyA
     : [`  --${field.name} ${placeholder(field)}`, `      ${notes.join("; ")}`];
 
   const lines = [...head];
+  // The only way to clear a nullable field, and the one field shape whose
+  // values the CLI does not pass through as written, so the help says both.
+  if (field.nullable) {
+    lines.push(`      --${field.name} null clears it; the four letters cannot be a value`);
+  }
   if (field.choices !== undefined && field.choices.length > 6) {
     lines.push(...wrap("      one of: ", field.choices));
   }

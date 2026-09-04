@@ -220,7 +220,7 @@ describe("changing the password over the wire", () => {
       expect(await audit("setup.completed")).toMatchObject([{ actor: "user" }]);
       expect(await audit("auth.login.succeeded")).toHaveLength(1);
       expect(await audit("auth.login.failed")).toMatchObject([
-        { actor: "user", payload: { username: USERNAME } },
+        { actor: null, payload: { username: USERNAME } },
       ]);
     });
   });

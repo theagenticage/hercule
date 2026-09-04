@@ -27,7 +27,10 @@ import type { SqlError } from "effect/unstable/sql/SqlError";
 import {
   decodeCursor,
   encodeCursor,
+  keysetOver,
   mintUuid,
+  nowIso,
+  pageOf,
   uuidFromString,
   uuidToString,
   type CursorError,
@@ -117,8 +120,6 @@ const toApiKey = (row: ApiKeyRow): ApiKeyRecord => ({
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
 
-  const now = Effect.map(Clock.currentTimeMillis, (millis) => new Date(millis).toISOString());
-
   return {
     /**
      * Records a freshly minted login bearer, expiring 30 days from now. The
@@ -149,7 +150,7 @@ const make = Effect.gen(function* () {
      */
     findLoginToken: (tokenHash: string): Effect.Effect<Option.Option<LoginTokenRecord>, SqlError> =>
       Effect.gen(function* () {
-        const at = yield* now;
+        const at = yield* nowIso;
         const rows = yield* sql<LoginTokenRow>`
           SELECT id, user_id, issued_at, expires_at, last_used_at
           FROM login_tokens
@@ -184,7 +185,7 @@ const make = Effect.gen(function* () {
      */
     revokeLoginToken: (tokenHash: string): Effect.Effect<void, SqlError> =>
       Effect.gen(function* () {
-        const at = yield* now;
+        const at = yield* nowIso;
         yield* sql`
           UPDATE login_tokens SET revoked_at = ${at}
           WHERE token_hash = ${tokenHash} AND revoked_at IS NULL
@@ -198,7 +199,7 @@ const make = Effect.gen(function* () {
       tokenHash: string,
     ): Effect.Effect<ApiKeyRecord, SqlError> =>
       Effect.gen(function* () {
-        const at = yield* now;
+        const at = yield* nowIso;
         const id = mintUuid();
         yield* sql`
           INSERT INTO api_keys (id, user_id, name, token_hash, created_at, last_used_at, revoked_at)
@@ -244,41 +245,31 @@ const make = Effect.gen(function* () {
       page: PageRequest,
     ): Effect.Effect<Page<ApiKeyRecord>, SqlError | CursorError> =>
       Effect.gen(function* () {
-        const ascending = page.direction === "asc";
         const scope: CursorScope = {
           op: "apiKey.query",
           field: "createdAt",
           direction: page.direction,
         };
         const after =
-          page.cursor === undefined ? undefined : yield* decodeCursor(page.cursor, scope);
-        const keyset =
-          after === undefined
-            ? sql``
-            : ascending
-              ? sql`AND (created_at, id) > (${after[0]}, ${uuidFromString(after[1])})`
-              : sql`AND (created_at, id) < (${after[0]}, ${uuidFromString(after[1])})`;
-        const order = ascending
-          ? sql`ORDER BY created_at ASC, id ASC`
-          : sql`ORDER BY created_at DESC, id DESC`;
-        // One row more than asked for: whether it came back is whether there is
-        // a next page, which is why no count query is needed to know.
+          page.cursor === undefined ? undefined : yield* decodeCursor(page.cursor, scope, "string");
+        const { keyset, order } = keysetOver(
+          sql,
+          ["created_at", "id"],
+          after === undefined ? undefined : [after[0], uuidFromString(after[1])],
+          page.direction,
+        );
         const rows = yield* sql<ApiKeyRow>`
           SELECT id, user_id, name, created_at, last_used_at, revoked_at
           FROM api_keys
-          WHERE user_id = ${uuidFromString(userId)} ${keyset}
+          WHERE user_id = ${uuidFromString(userId)} AND ${keyset}
           ${order} LIMIT ${page.limit + 1}
         `;
-
-        const items = rows.slice(0, page.limit).map(toApiKey);
-        const last = items[items.length - 1];
-        return {
-          items,
-          nextCursor:
-            rows.length > page.limit && last !== undefined
-              ? encodeCursor(scope, last.createdAt, last.id)
-              : undefined,
-        };
+        return yield* pageOf(
+          rows,
+          page.limit,
+          (read) => Effect.succeed(read.map(toApiKey)),
+          (last) => encodeCursor(scope, last.createdAt, last.id),
+        );
       }),
 
     /**
@@ -288,7 +279,7 @@ const make = Effect.gen(function* () {
      */
     revokeApiKey: (userId: string, id: string): Effect.Effect<boolean, SqlError> =>
       Effect.gen(function* () {
-        const at = yield* now;
+        const at = yield* nowIso;
         const revoked = yield* sql<{ readonly id: Uint8Array }>`
           UPDATE api_keys SET revoked_at = ${at}
           WHERE id = ${uuidFromString(id)}

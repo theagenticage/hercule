@@ -10,7 +10,7 @@ type TaskPriority = 'urgent' | 'high' | 'normal' | 'low';
 
 interface ProvenanceEntry {
   ref?: string;      // External Ref in canonical form, e.g. "github:issue:owner/repo#42"
-  eventId?: string;  // id of an event in the event log (./08)
+  eventId?: number;  // id of an event in the event log (./08); integer log position (./04)
   runId?: string;    // id of a Run (./07)
   at: string;        // timestamp of the append
   actor: Actor;      // "user" | "session:<id>" (./11)
@@ -89,7 +89,7 @@ Rendering (bars and weight, never color) is pinned in [../design-language.md](..
 - Labels are bare strings in one flat namespace. A label exists from the moment a task carries it; there is no label registry entity and no create-label operation.
 - The core blesses no label. Shipped workflows may rely on conventional ones.
 - Colors, descriptions, and orderings for labels are presentation-layer concerns of the web app ([./14](./14-web-app.md)); the core stores none of them.
-- `labels` is an array field: `task.update` may add and remove labels, and `task.updated` reports `{added, removed}` for it.
+- `labels` is an array field: `task.update` takes `addLabels?` and `removeLabels?` and never a whole `labels` array, and `task.updated` reports `{added, removed}` for it. The user and a triage agent write the same task, and a whole-array replace would silently undo whichever of them wrote first; a label named on both lists stays on the task and is reported as neither.
 
 Two conventional labels are load-bearing for Intake ([./10](./10-triage-intake-and-notifications.md)):
 
@@ -100,7 +100,7 @@ Which labels a triage workflow sets, and when `proposed` is removed, is owned by
 
 ## Provenance and External Refs
 
-Provenance is a task's append-only record of what created or touched it. Each entry is `{ref?, eventId?, runId?, at, actor}`; every field except `at` and `actor` is optional, and an entry may carry any combination (an event that was the trigger, the run that enriched the task, a ref the triage agent recognised inside an email). Entries are never edited or removed; a hard delete of the task removes them with it.
+Provenance is a task's append-only record of what created or touched it. Each entry is `{ref?, eventId?, runId?, at, actor}`; every field except `at` and `actor` is optional, and an entry may carry any combination (an event that was the trigger, the run that enriched the task, a ref the triage agent recognised inside an email). Entries are never edited or removed; a deleted task is soft-deleted, so its entries stay with the row (see [Delete](#delete)).
 
 Provenance is what lets a duplicate signal find its existing task, and what the Intake "made from" line and the proactive "related to task X" link are rendered from.
 
@@ -181,9 +181,11 @@ One operation, `task.query`, serves every caller: the built-in action in agent-l
 
 Within one field the listed values are **any-of**; across fields the filter is **and**; no filters lists every task. No `or` across fields and no negation in v1. Pagination and sorting follow [./11](./11-public-api-and-agent-surface.md) section 1.6.
 
-No vector search and no embeddings. The semantic part of triage - grouping heterogeneous signals, spotting connections - is the agent iterating its own queries and reading results; that is why agent task search is a hard v1 requirement (ticket #16 handoff).
+The FTS5 table is external-content over `tasks` with the tokenizer `unicode61 remove_diacritics 2`, so a search matches regardless of case and diacritics (`cafe` finds `Café`). **Callers pass plain words.** The service splits `text` on whitespace, quotes each token and joins the tokens with `AND` to build the `MATCH` expression; raw FTS5 `MATCH` syntax is never exposed, so `AND OR "(` is four words to search for rather than a syntax error. A text holding no letter or digit matches nothing and is not an error, because the index holds no punctuation either.
 
-**Verify at build time:** the FTS5 tokenizer and whether the raw `MATCH` syntax is exposed to callers or wrapped in a plain-words form; the store document ([./04](./04-state-store.md)) owns the FTS table.
+**Order.** With `text` the order is relevance (`bm25` ascending) and the walk pages by offset. With `text` and an explicit `sort`, `task.query` fails `validation` naming both: honouring both would pick one of two paging strategies per request, and ignoring the sort would be a silent substitution. Without `text` the order is keyset over `updatedAt`, `createdAt`, `priority` or `status`, default `updatedAt desc`.
+
+No vector search and no embeddings. The semantic part of triage - grouping heterogeneous signals, spotting connections - is the agent iterating its own queries and reading results; that is why agent task search is a hard v1 requirement (ticket #16 handoff).
 
 ## Delete
 
@@ -201,7 +203,7 @@ Task operations are ordinary public-API operations defined in the service layer 
 | `hydra task read <id>` | one task, full row including provenance |
 | `hydra task create` | creates a task; emits `task.created` |
 | `hydra task update <id>` | changes any writable field, adds/removes labels, appends provenance; emits one `task.updated` |
-| `hydra task delete <id>` | hard delete ([Delete](#delete)); grant `task.delete` |
+| `hydra task delete <id>` | soft delete ([Delete](#delete)); grant `task.delete` |
 
 Every mutation is stamped with the calling actor (`user`, `session:<id>`, `run:<id>` or `plugin:<id>`) on the event envelope; a provenance entry appended by the call carries the same actor. All operations return fast; nothing blocks.
 

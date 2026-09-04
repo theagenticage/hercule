@@ -3,7 +3,7 @@
  *
  * The one client package that writes Effect code. The web
  * app and the CLI import `createClient` and see promises, plain objects, and
- * the two error classes below - nothing else.
+ * the three error classes below - nothing else.
  */
 export {
   createClient,
@@ -12,9 +12,17 @@ export {
   type HydraClient,
   type Operations,
 } from "./client";
-export { ApiError, ConnectionError, type ErrorEnvelope } from "./errors";
+export { ApiError, ConnectionError, RequestError, type ErrorEnvelope } from "./errors";
+export { ID_TAIL, idTail } from "./id-tail";
 export { nextOnboardingStep, ONBOARDING_STEPS, type OnboardingStep } from "./onboarding";
-export { formatSince, formatTimeContext } from "./time-context";
+export { formatSince, formatStamp, formatTimeContext } from "./time-context";
+export {
+  priorityGlyph,
+  provenanceTarget,
+  taskRecedes,
+  type GlyphTone,
+  type PriorityReading,
+} from "./task-display";
 export { THREAD_ROWS_DEFAULT, threadRowsMode } from "./thread-rows";
 export {
   browserTimezone,
