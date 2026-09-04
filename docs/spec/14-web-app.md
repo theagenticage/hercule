@@ -93,6 +93,14 @@ Ticket #18 pinned a 30-day rolling session cookie; the later ticket #19 and ADR 
 
 **Storage between page loads** (resolved 2026-09-01, [Web app details](https://github.com/rogierpennink/hydra/issues/45)): the bearer token lives in `localStorage`, keyed by controller origin, removed on logout and on the first 401. Memory-only would demand a login on every page load, unacceptable for a LAN tool; `sessionStorage` dies with the tab; cookies are ruled out by ADR 0017, and a desktop shell has no better option than local storage either. Because agent-authored text is rendered everywhere and any script that runs can read the token, the served bundle carries a strict Content-Security-Policy: no inline scripts, `connect-src 'self'`. The token's lifetime and rolling renewal are [./13-security.md](./13-security.md)'s (30 days rolling, revoked on logout).
 
+The policy as served (pinned 2026-09-04, [#58](https://github.com/rogierpennink/hydra/issues/58)), on `index.html` and on every file under `/assets/`:
+
+```
+default-src 'self'; script-src 'self'; connect-src 'self'; img-src 'self' data:; font-src 'self'; style-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'
+```
+
+`vite build` emits no inline script, so `script-src 'self'` holds with no exception and MUST keep holding: a build that needs an inline script is a build configuration to fix, never a directive to loosen. `style-src` is unqualified for the same reason; if a component library turns out to need inline `style` attributes it may add `'unsafe-inline'` there, and only there.
+
 ## Performance guardrails
 
 Named conventions, lint- or CI-enforced where possible:
