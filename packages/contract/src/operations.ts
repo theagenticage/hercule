@@ -1,0 +1,112 @@
+/**
+ * The operation table (ADR 0021, spec 11 sections 1.3 and 1.4).
+ *
+ * One row per operation: its id (`<entity>.<verb>`, the same word the CLI and
+ * the built-in workflow actions use), what a caller must hold to reach it, and
+ * its explicit `{ method, path }`. Path nouns are plural although operation ids
+ * are singular; that is the one place the two spellings differ.
+ *
+ * This table is load-bearing at request time, not documentation: the static
+ * grant check runs in HTTP middleware before the payload is decoded, so
+ * `unauthenticated` precedes `forbidden` precedes `validation` exactly as
+ * spec 11 section 1.5 requires. The middleware finds the row by joining the
+ * group and endpoint identifiers with a dot. `api.test.ts` asserts the table
+ * and the HttpApi declaration are one-to-one.
+ */
+import type { Grant } from "./grants";
+
+/** The prefix every route carries. */
+export const API_PREFIX = "/api/v1";
+
+/**
+ * What a caller must hold. A grant always contains a dot, so the three markers
+ * can never collide with one:
+ *
+ * - `unauthenticated` - reachable with no credential at all.
+ * - `setup-token` - reachable only with the one-time setup token.
+ * - `authenticated` - any credential of any kind; no grant is checked.
+ */
+export type Requirement = Grant | "unauthenticated" | "setup-token" | "authenticated";
+
+export type Method = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
+
+/**
+ * Routes use Effect's `:param` path syntax; spec 11 writes the same routes with
+ * `{param}`.
+ */
+const TABLE = {
+  "setup.read": { requires: "unauthenticated", method: "GET", path: "/api/v1/setup" },
+  "setup.complete": { requires: "setup-token", method: "POST", path: "/api/v1/setup/complete" },
+
+  "auth.login": { requires: "unauthenticated", method: "POST", path: "/api/v1/auth/login" },
+  "auth.logout": { requires: "authenticated", method: "POST", path: "/api/v1/auth/logout" },
+
+  "apiKey.query": { requires: "credential.read", method: "GET", path: "/api/v1/api-keys" },
+  "apiKey.create": { requires: "credential.write", method: "POST", path: "/api/v1/api-keys" },
+  "apiKey.revoke": {
+    requires: "credential.write",
+    method: "DELETE",
+    path: "/api/v1/api-keys/:id",
+  },
+
+  "user.setPassword": {
+    requires: "credential.write",
+    method: "POST",
+    path: "/api/v1/user/password",
+  },
+
+  "settings.read": { requires: "settings.read", method: "GET", path: "/api/v1/settings" },
+  "settings.update": { requires: "settings.write", method: "PATCH", path: "/api/v1/settings" },
+
+  "profile.query": { requires: "permission.read", method: "GET", path: "/api/v1/profiles" },
+  "profile.read": { requires: "permission.read", method: "GET", path: "/api/v1/profiles/:id" },
+  "profile.create": { requires: "permission.write", method: "POST", path: "/api/v1/profiles" },
+  "profile.update": {
+    requires: "permission.write",
+    method: "PATCH",
+    path: "/api/v1/profiles/:id",
+  },
+  "profile.delete": {
+    requires: "permission.write",
+    method: "DELETE",
+    path: "/api/v1/profiles/:id",
+  },
+
+  "secret.query": { requires: "secret.read", method: "GET", path: "/api/v1/secrets" },
+  "secret.set": {
+    requires: "secret.write",
+    method: "PUT",
+    path: "/api/v1/secrets/:ownerKind/:ownerId/:name",
+  },
+  "secret.delete": {
+    requires: "secret.write",
+    method: "DELETE",
+    path: "/api/v1/secrets/:ownerKind/:ownerId/:name",
+  },
+
+  "controller.read": { requires: "infra.read", method: "GET", path: "/api/v1/controller" },
+} as const satisfies Record<string, { requires: Requirement; method: Method; path: string }>;
+
+/** Every operation id in the public API. */
+export type OperationId = keyof typeof TABLE;
+
+export interface Operation {
+  readonly id: OperationId;
+  readonly requires: Requirement;
+  readonly method: Method;
+  readonly path: string;
+}
+
+export const OPERATIONS = TABLE;
+
+/** Every operation, in table order: what the CLI enumerates for `--help`. */
+export const ALL_OPERATIONS: ReadonlyArray<Operation> = Object.entries(TABLE).map(([id, row]) => ({
+  id: id as OperationId,
+  ...row,
+}));
+
+/** True when the string names an operation. */
+export const isOperationId = (id: string): id is OperationId => id in TABLE;
+
+/** What a caller must hold to reach this operation. */
+export const requirementOf = (id: OperationId): Requirement => TABLE[id].requires;
