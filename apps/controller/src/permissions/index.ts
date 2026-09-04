@@ -1,8 +1,8 @@
 /** Permission profiles: the named grant bundles a Session copies at spawn (spec 13 section 6). */
+export { Profiles, ProfilesLayer } from "./service";
 export {
-  ALL_GRANTS,
   PermissionProfiles,
   PermissionProfilesLayer,
-  type Grant,
+  type PermissionProfile,
   type GrantsError,
 } from "./profiles";

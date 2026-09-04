@@ -22,10 +22,18 @@ import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
-import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
-import { mintUuid, uuidFromString, uuidToString } from "../db";
+import {
+  decodeCursor,
+  encodeCursor,
+  mintUuid,
+  uuidFromString,
+  uuidToString,
+  type CursorError,
+  type Page,
+  type PageRequest,
+} from "../db";
 
 /** The rolling window a login bearer lives in, in milliseconds (spec 13 section 4.2). */
 export const LOGIN_TOKEN_LIFETIME_MS = 30 * 24 * 60 * 60 * 1000;
@@ -48,45 +56,6 @@ export interface ApiKeyRecord {
   readonly lastUsedAt: string | null;
   readonly revokedAt: string | null;
 }
-
-/** One page of a keyset listing. `nextCursor` is `undefined` on the last page. */
-export interface Page<A> {
-  readonly items: ReadonlyArray<A>;
-  readonly nextCursor: string | undefined;
-}
-
-/** What a listing needs: how many, where from, which way (spec 11 section 1.6). */
-export interface PageRequest {
-  readonly limit: number;
-  readonly cursor: string | undefined;
-  readonly direction: "asc" | "desc";
-}
-
-/** A cursor that did not come from this listing, or was edited on its way back. */
-export class CursorError extends Schema.TaggedError<CursorError>()("CursorError", {
-  message: Schema.String,
-}) {}
-
-/**
- * The keyset cursor: the sort key of the page's last row, opaque on the wire.
- * `(created_at, id)` is unique because the id alone already is, so a page
- * boundary never repeats or skips a row - which is why the API needs no page
- * numbers and no totals (spec 11 section 1.6).
- *
- * A timestamp holds no `|`, so the separator has exactly one reading.
- */
-const encodeCursor = (createdAt: string, id: string): string =>
-  Buffer.from(`${createdAt}|${id}`, "utf8").toString("base64url");
-
-const decodeCursor = (cursor: string): Effect.Effect<readonly [string, string], CursorError> => {
-  const decoded = Buffer.from(cursor, "base64url").toString("utf8");
-  const separator = decoded.indexOf("|");
-  const id = decoded.slice(separator + 1);
-  if (separator === -1 || !/^[0-9a-f-]{36}$/.test(id)) {
-    return Effect.fail(new CursorError({ message: "The cursor is not one this listing issued." }));
-  }
-  return Effect.succeed([decoded.slice(0, separator), id] as const);
-};
 
 interface LoginTokenRow {
   readonly id: Uint8Array;

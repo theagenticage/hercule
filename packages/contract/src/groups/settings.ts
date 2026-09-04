@@ -7,12 +7,17 @@
  * clause. A key that is not set is absent rather than defaulted, so the default
  * lives in exactly one place.
  *
- * Unknown keys are rejected. That is a decoding option the transport sets, not
- * something a schema can carry, so the closed shape here is only half of it.
+ * `SETTING_VALUES` is the single declaration of what a key holds: the two
+ * structs here are derived from it, and the controller's settings store reads
+ * the same map to encode a value into its JSON column. A key declared once
+ * cannot drift between the wire and the row.
+ *
+ * Unknown keys are rejected, in the schema itself: `closedStruct` says why.
  */
 import { Schema } from "effect";
 import * as HttpApiEndpoint from "effect/unstable/httpapi/HttpApiEndpoint";
 import * as HttpApiGroup from "effect/unstable/httpapi/HttpApiGroup";
+import { closedStruct, optional } from "../closed";
 import { Forbidden, Internal, Unauthenticated, Validation } from "../errors";
 import { Id, Timestamp } from "../ids";
 import { Authenticated } from "../security";
@@ -40,32 +45,44 @@ const MuteTarget = Schema.NonEmptyString.check(
   }),
 );
 
+/** What every settings key holds, per scope. The one declaration of a key. */
+export const SETTING_VALUES = {
+  controller: {
+    /** TTL for the event log and per-session streams, in days (spec 04). */
+    "retention.events": PositiveDays,
+    /** Minimum retention for security events and actor-stamped mutations, in days. */
+    "retention.security": PositiveDays,
+    /** Retention for conversation messages, in days (spec 12 section 2). */
+    "retention.conversations": PositiveDays,
+    /** When the daily backup snapshot runs, in the user timezone setting. */
+    "backup.time": TimeOfDay,
+    /** How many daily snapshots to keep (spec 04, Backups). */
+    "backup.keep": PositiveDays,
+  },
+  user: {
+    /** The IANA zone the user reads times in, chosen during setup (spec 15 section 7). */
+    timezone: Schema.NonEmptyString,
+    "topics.order": Schema.Array(Schema.NonEmptyString),
+    "notifications.muted": Schema.Array(MuteTarget),
+    "lastChecked.intake": Timestamp,
+    "lastChecked.checkin": Timestamp,
+    "lastChecked.notifications": Timestamp,
+    "onboarding.completedSteps": Schema.Array(Schema.NonEmptyString),
+    "thread.instanceId": Id,
+    "thread.model": Schema.NonEmptyString,
+    "thread.accessMode": AccessMode,
+    "thread.profileId": Id,
+  },
+} as const;
+
 /** The controller's operational settings, edited in Settings > System. */
-export const ControllerSettings = Schema.Struct({
-  "retention.events": Schema.optionalKey(PositiveDays),
-  "retention.security": Schema.optionalKey(PositiveDays),
-  "retention.conversations": Schema.optionalKey(PositiveDays),
-  "backup.time": Schema.optionalKey(TimeOfDay),
-  "backup.keep": Schema.optionalKey(PositiveDays),
-});
+export const ControllerSettings = closedStruct(optional(SETTING_VALUES.controller));
 
 /** The user settings store: preference and presentation state. */
-export const UserSettings = Schema.Struct({
-  timezone: Schema.optionalKey(Schema.NonEmptyString),
-  "topics.order": Schema.optionalKey(Schema.Array(Schema.NonEmptyString)),
-  "notifications.muted": Schema.optionalKey(Schema.Array(MuteTarget)),
-  "lastChecked.intake": Schema.optionalKey(Timestamp),
-  "lastChecked.checkin": Schema.optionalKey(Timestamp),
-  "lastChecked.notifications": Schema.optionalKey(Timestamp),
-  "onboarding.completedSteps": Schema.optionalKey(Schema.Array(Schema.NonEmptyString)),
-  "thread.instanceId": Schema.optionalKey(Id),
-  "thread.model": Schema.optionalKey(Schema.NonEmptyString),
-  "thread.accessMode": Schema.optionalKey(AccessMode),
-  "thread.profileId": Schema.optionalKey(Id),
-});
+export const UserSettings = closedStruct(optional(SETTING_VALUES.user));
 
 /** Everything that is set, in both scopes. */
-export const SettingsState = Schema.Struct({
+export const SettingsState = closedStruct({
   controller: ControllerSettings,
   user: UserSettings,
 });
@@ -73,10 +90,12 @@ export const SettingsState = Schema.Struct({
 export type SettingsState = Schema.Schema.Type<typeof SettingsState>;
 
 /** A partial write over the same closed key set. */
-export const SettingsPatch = Schema.Struct({
+export const SettingsPatch = closedStruct({
   controller: Schema.optionalKey(ControllerSettings),
   user: Schema.optionalKey(UserSettings),
 });
+
+export type SettingsPatch = Schema.Schema.Type<typeof SettingsPatch>;
 
 export const settings = HttpApiGroup.make("settings")
   .add(

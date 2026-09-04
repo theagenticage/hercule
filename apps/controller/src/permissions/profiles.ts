@@ -3,7 +3,10 @@
  * Session copies at spawn (spec 13 section 6, CONTEXT.md "Permission Profile").
  *
  * A grant is written family-dot-verb (`task.delete`, `infra.write`). Grants are
- * coarse and unscoped in v1: `session.read` reads any session. They are stored
+ * coarse and unscoped in v1: `session.read` reads any session. The vocabulary
+ * itself lives in `@hydra/contract` - a 403 names the missing grant on the wire
+ * and `profile.create` takes a list of them - and is re-exported here so the
+ * controller reads it from the domain that enforces it. They are stored
  * as a JSON array of grant strings on the profile row, which keeps a profile
  * one row and one read - the enforcement path resolves token to session to
  * agent to profile on every call (spec 13 section 6.3).
@@ -14,49 +17,17 @@
 import { Clock, Context, Effect, Layer, Option, Schema } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
-import { mintUuid, uuidToString } from "../db";
-
-/**
- * The grant families and their verbs (spec 13 section 6.1). Families are
- * singular and coarser than the operations they cover; finer grants can land
- * inside a family later without invalidating a stored profile.
- */
-export const GRANT_FAMILIES = {
-  task: ["read", "create", "update", "delete"],
-  workflow: ["read", "write", "run", "submit"],
-  run: ["read", "write"],
-  session: ["read", "spawn", "steer"],
-  subscription: ["read", "write"],
-  notification: ["read", "write"],
-  settings: ["read", "write"],
-  event: ["read", "emit"],
-  connection: ["read", "manage", "use"],
-  infra: ["read", "write"],
-  workspace: ["read", "write"],
-  agent: ["read", "write"],
-  memory: ["read", "write"],
-  permission: ["read", "write"],
-  project: ["read", "write"],
-  resource: ["read", "write"],
-  secret: ["read", "write"],
-  credential: ["read", "write"],
-} as const satisfies Record<string, ReadonlyArray<string>>;
-
-/** One grant family: the coarse operation area a grant names. */
-export type GrantFamily = keyof typeof GRANT_FAMILIES;
-
-/** One grant, family-dot-verb: what a 403 names and an escalation asks for. */
-export type Grant = {
-  [F in GrantFamily]: `${F}.${(typeof GRANT_FAMILIES)[F][number]}`;
-}[GrantFamily];
-
-/** Every grant in the vocabulary, family order then verb order (spec 13 section 6.1). */
-export const ALL_GRANTS: ReadonlyArray<Grant> = Object.entries(GRANT_FAMILIES).flatMap(
-  ([family, verbs]) => verbs.map((verb) => `${family}.${verb}` as Grant),
-);
-
-/** A grant string, validated against the closed vocabulary. */
-export const GrantSchema = Schema.Literals(ALL_GRANTS);
+import { GrantSchema, type Grant } from "@hydra/contract";
+import {
+  decodeCursor,
+  encodeCursor,
+  mintUuid,
+  uuidFromString,
+  uuidToString,
+  type CursorError,
+  type Page,
+  type PageRequest,
+} from "../db";
 
 /** The stored form of a profile's grants: a JSON array of grant strings. */
 const GrantsJson = Schema.fromJsonString(Schema.Array(GrantSchema));
@@ -71,6 +42,12 @@ export interface PermissionProfile {
   readonly createdAt: string;
   readonly updatedAt: string;
 }
+
+/** What editing a profile did, or why it did nothing. */
+export type UpdateOutcome =
+  | { readonly _tag: "updated"; readonly profile: PermissionProfile }
+  | { readonly _tag: "absent" }
+  | { readonly _tag: "nameTaken" };
 
 /** A profile row holds something that is not a list of known grants. */
 export class GrantsError extends Schema.TaggedError<GrantsError>()("GrantsError", {
@@ -110,6 +87,14 @@ const encodeGrants = (name: string, grants: ReadonlyArray<Grant>) =>
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
 
+  const now = Effect.map(Clock.currentTimeMillis, (millis) => new Date(millis).toISOString());
+
+  const byId = (id: string): Effect.Effect<Option.Option<Row>, SqlError> =>
+    sql<Row>`SELECT id, name, grants, shipped, created_at, updated_at
+             FROM permission_profiles WHERE id = ${uuidFromString(id)}`.pipe(
+      Effect.map((rows) => Option.fromNullishOr(rows[0])),
+    );
+
   return {
     /** The profile with that name, if one exists. Names are the user-facing key. */
     getByName: (
@@ -141,6 +126,122 @@ const make = Effect.gen(function* () {
           VALUES (${mintUuid()}, ${name}, ${json}, 1, ${at}, ${at})
         `;
       }),
+
+    /** The profile with that id, if one exists. */
+    getById: (
+      id: string,
+    ): Effect.Effect<Option.Option<PermissionProfile>, GrantsError | SqlError> =>
+      byId(id).pipe(
+        Effect.flatMap(
+          Option.match({
+            onNone: () => Effect.succeedNone,
+            onSome: (row) => Effect.map(toProfile(row), Option.some),
+          }),
+        ),
+      ),
+
+    /**
+     * One page of profiles, keyset-paged on `(name, id)`. Name is the only sort
+     * field the contract offers, and it is what the user reads.
+     */
+    list: (
+      page: PageRequest,
+    ): Effect.Effect<Page<PermissionProfile>, GrantsError | CursorError | SqlError> =>
+      Effect.gen(function* () {
+        const ascending = page.direction === "asc";
+        const after = page.cursor === undefined ? undefined : yield* decodeCursor(page.cursor);
+        const keyset =
+          after === undefined
+            ? sql``
+            : ascending
+              ? sql`WHERE (name, id) > (${after[0]}, ${uuidFromString(after[1])})`
+              : sql`WHERE (name, id) < (${after[0]}, ${uuidFromString(after[1])})`;
+        const order = ascending ? sql`ORDER BY name ASC, id ASC` : sql`ORDER BY name DESC, id DESC`;
+        // One row more than asked for: whether it came back is whether there is
+        // a next page, which is why no count query is needed to know.
+        const rows = yield* sql<Row>`
+          SELECT id, name, grants, shipped, created_at, updated_at
+          FROM permission_profiles ${keyset} ${order} LIMIT ${page.limit + 1}
+        `;
+
+        const items = yield* Effect.forEach(rows.slice(0, page.limit), toProfile);
+        const last = items[items.length - 1];
+        return {
+          items,
+          nextCursor:
+            rows.length > page.limit && last !== undefined
+              ? encodeCursor(last.name, last.id)
+              : undefined,
+        };
+      }),
+
+    /**
+     * Creates a profile, or answers `None` when the name is taken. Names are
+     * unique and are what the user names a profile by, so a duplicate is the
+     * caller's to resolve rather than something to disambiguate silently.
+     */
+    create: (
+      name: string,
+      grants: ReadonlyArray<Grant>,
+    ): Effect.Effect<Option.Option<PermissionProfile>, GrantsError | SqlError> =>
+      Effect.gen(function* () {
+        const json = yield* encodeGrants(name, grants);
+        const at = yield* now;
+        const id = mintUuid();
+        const inserted = yield* sql<{ readonly id: Uint8Array }>`
+          INSERT OR IGNORE INTO permission_profiles
+            (id, name, grants, shipped, created_at, updated_at)
+          VALUES (${id}, ${name}, ${json}, 0, ${at}, ${at})
+          RETURNING id
+        `;
+        return inserted.length === 0
+          ? Option.none()
+          : Option.some<PermissionProfile>({
+              id: uuidToString(id),
+              name,
+              grants,
+              shipped: false,
+              createdAt: at,
+              updatedAt: at,
+            });
+      }),
+
+    /**
+     * Edits a profile, including a shipped one: spec 13 section 6.2 makes the
+     * three shipped profiles editable. `None` means no such profile; a name
+     * another profile already holds is a `NameTaken`.
+     */
+    update: (
+      id: string,
+      changes: { readonly name?: string; readonly grants?: ReadonlyArray<Grant> },
+    ): Effect.Effect<UpdateOutcome, GrantsError | SqlError> =>
+      Effect.gen(function* () {
+        const existing = yield* byId(id);
+        if (Option.isNone(existing)) return { _tag: "absent" };
+        const current = yield* toProfile(existing.value);
+
+        const name = changes.name ?? current.name;
+        const grants = changes.grants ?? current.grants;
+        const json = yield* encodeGrants(name, grants);
+        const at = yield* now;
+        const updated = yield* sql<{ readonly id: Uint8Array }>`
+          UPDATE OR IGNORE permission_profiles
+          SET name = ${name}, grants = ${json}, updated_at = ${at}
+          WHERE id = ${uuidFromString(id)}
+          RETURNING id
+        `;
+        return updated.length === 0
+          ? { _tag: "nameTaken" }
+          : { _tag: "updated", profile: { ...current, name, grants, updatedAt: at } };
+      }),
+
+    /**
+     * Deletes a profile. Whether this profile may be deleted at all is the
+     * service's rule, not the store's: a shipped profile is not deletable
+     * (spec 13 section 6.2) and never reaches here.
+     */
+    delete: (id: string): Effect.Effect<void, SqlError> =>
+      sql`DELETE FROM permission_profiles WHERE id = ${uuidFromString(id)}`.pipe(Effect.asVoid),
   };
 });
 

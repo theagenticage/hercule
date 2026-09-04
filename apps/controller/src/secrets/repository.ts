@@ -39,7 +39,16 @@ import * as Redacted from "effect/Redacted";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
-import { mintUuid, uuidToString } from "../db";
+import {
+  decodeCursor,
+  encodeCursor,
+  mintUuid,
+  uuidFromString,
+  uuidToString,
+  type CursorError,
+  type Page,
+  type PageRequest,
+} from "../db";
 import { MasterKey } from "./masterKey";
 
 /** Who a secret belongs to (spec 13 section 2.1). */
@@ -67,6 +76,12 @@ export interface SecretRef {
   readonly name: string;
   readonly createdAt: string;
   readonly rotatedAt: string | null;
+}
+
+/** What a listing asks for: which owner, plus the shared keyset parameters. */
+export interface SecretListRequest extends PageRequest {
+  readonly ownerKind: SecretOwnerKind | undefined;
+  readonly ownerId: string | undefined;
 }
 
 /** An owner id or secret name that would make the associated data ambiguous. */
@@ -133,6 +148,21 @@ export class Secrets extends Context.Service<
       name: string,
       value: Redacted.Redacted<string>,
     ) => Effect.Effect<SecretRef, SqlError | SecretNameError>;
+
+    /**
+     * The references one owner - or every owner - stores, by name. References
+     * only: nothing here decrypts, because nothing outside the repository may
+     * see a value (spec 13 section 2.5).
+     */
+    readonly list: (
+      request: SecretListRequest,
+    ) => Effect.Effect<Page<SecretRef>, SqlError | CursorError>;
+
+    /** Removes a stored value, and answers whether there was one to remove. */
+    readonly delete: (
+      owner: SecretOwner,
+      name: string,
+    ) => Effect.Effect<boolean, SqlError | SecretNameError>;
 
     /** The stored value, or `None` when this owner stores nothing under this name. */
     readonly get: (
@@ -243,6 +273,70 @@ export const secretsLayer: Layer.Layer<Secrets, never, MasterKey | SqlClient.Sql
             if (row === undefined) return Option.none();
             const plaintext = yield* decrypt(owner, name, row.nonce, row.ciphertext);
             return Option.some(Redacted.make(plaintext));
+          }),
+
+        list: (request) =>
+          Effect.gen(function* () {
+            const ascending = request.direction === "asc";
+            const after =
+              request.cursor === undefined ? undefined : yield* decodeCursor(request.cursor);
+            const byKind =
+              request.ownerKind === undefined ? sql`` : sql`AND owner_kind = ${request.ownerKind}`;
+            const byId =
+              request.ownerId === undefined ? sql`` : sql`AND owner_id = ${request.ownerId}`;
+            const keyset =
+              after === undefined
+                ? sql``
+                : ascending
+                  ? sql`AND (name, id) > (${after[0]}, ${uuidFromString(after[1])})`
+                  : sql`AND (name, id) < (${after[0]}, ${uuidFromString(after[1])})`;
+            // `(name, id)` rather than name alone: names repeat across owners
+            // and an id does not, so a page boundary is unambiguous.
+            const order = ascending
+              ? sql`ORDER BY name ASC, id ASC`
+              : sql`ORDER BY name DESC, id DESC`;
+            // One row more than asked for: whether it came back is whether
+            // there is a next page, which is why no count query is needed.
+            const rows = yield* sql<{
+              readonly id: Bytes;
+              readonly owner_kind: SecretOwnerKind;
+              readonly owner_id: string;
+              readonly name: string;
+              readonly created_at: string;
+              readonly rotated_at: string | null;
+            }>`
+              SELECT id, owner_kind, owner_id, name, created_at, rotated_at
+              FROM secrets
+              WHERE 1 = 1 ${byKind} ${byId} ${keyset}
+              ${order} LIMIT ${request.limit + 1}
+            `;
+
+            const items = rows.slice(0, request.limit).map((row): SecretRef => ({
+              id: uuidToString(row.id),
+              owner: { kind: row.owner_kind, id: row.owner_id },
+              name: row.name,
+              createdAt: row.created_at,
+              rotatedAt: row.rotated_at,
+            }));
+            const last = items[items.length - 1];
+            return {
+              items,
+              nextCursor:
+                rows.length > request.limit && last !== undefined
+                  ? encodeCursor(last.name, last.id)
+                  : undefined,
+            };
+          }),
+
+        delete: (owner, name) =>
+          Effect.gen(function* () {
+            yield* rejectSeparator(owner, name);
+            const removed = yield* sql<{ readonly id: Bytes }>`
+              DELETE FROM secrets
+              WHERE owner_kind = ${owner.kind} AND owner_id = ${owner.id} AND name = ${name}
+              RETURNING id
+            `;
+            return removed.length > 0;
           }),
       });
     }),

@@ -7,10 +7,8 @@
  * `internal`, so the error channel on the wire stays the closed enum while the
  * service keeps its honest one.
  *
- * The six groups whose services are not written yet are declared here failing
- * with `internal`, because Effect's HttpApi builds routes for a whole API or
- * for none. Each is one line, and the ticket that writes the service replaces
- * it with the same line pointing at a real method.
+ * Every group is handled here, because Effect's HttpApi builds routes for a
+ * whole API or for none.
  */
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -27,10 +25,13 @@ import {
   Unauthenticated,
   Validation,
   type ApiError,
-  type OperationId,
 } from "@hydra/contract";
 import { Auth } from "../auth";
 import { ApiKeys } from "../credentials";
+import { Controller } from "../identity";
+import { Profiles } from "../permissions";
+import { Secret } from "../secrets";
+import { SettingsOperations } from "../settings";
 import { Setup } from "../setup";
 import { User } from "../users";
 
@@ -63,10 +64,6 @@ export const operation = <A, E, R>(
           Effect.fail(internal("something went wrong")),
         ),
   );
-
-/** Not written yet. The route exists so the API is whole; the ticket named replaces it. */
-const pending = (id: OperationId): Effect.Effect<never, Internal> =>
-  Effect.fail(internal(`${id} is not implemented yet`));
 
 const setupRoutes = HttpApiBuilder.group(api, "setup", (handlers) =>
   Effect.gen(function* () {
@@ -103,35 +100,46 @@ const userRoutes = HttpApiBuilder.group(api, "user", (handlers) =>
   }),
 );
 
-// TODO(#57 WP7): settings.read/update and profile.query/read/create/update/delete
 const settingsRoutes = HttpApiBuilder.group(api, "settings", (handlers) =>
-  handlers.handleAll({
-    read: () => pending("settings.read"),
-    update: () => pending("settings.update"),
+  Effect.gen(function* () {
+    const settings = yield* SettingsOperations;
+    return handlers
+      .handle("read", () => operation(settings.read()))
+      .handle("update", ({ payload }) => operation(settings.update(payload)));
   }),
 );
 
 const profileRoutes = HttpApiBuilder.group(api, "profile", (handlers) =>
-  handlers.handleAll({
-    query: () => pending("profile.query"),
-    read: () => pending("profile.read"),
-    create: () => pending("profile.create"),
-    update: () => pending("profile.update"),
-    delete: () => pending("profile.delete"),
+  Effect.gen(function* () {
+    const profiles = yield* Profiles;
+    return handlers
+      .handle("query", ({ query }) => operation(profiles.query(query)))
+      .handle("read", ({ params }) => operation(profiles.read(params)))
+      .handle("create", ({ payload }) => operation(profiles.create(payload)))
+      .handle("update", ({ params, payload }) =>
+        operation(profiles.update({ id: params.id, ...payload })),
+      )
+      .handle("delete", ({ params }) => operation(profiles.delete(params)));
   }),
 );
 
-// TODO(#57 WP8): secret.query/set/delete and controller.read
 const secretRoutes = HttpApiBuilder.group(api, "secret", (handlers) =>
-  handlers.handleAll({
-    query: () => pending("secret.query"),
-    set: () => pending("secret.set"),
-    delete: () => pending("secret.delete"),
+  Effect.gen(function* () {
+    const secret = yield* Secret;
+    return handlers
+      .handle("query", ({ query }) => operation(secret.query(query)))
+      .handle("set", ({ params, payload }) =>
+        operation(secret.set({ ...params, value: payload.value })),
+      )
+      .handle("delete", ({ params }) => operation(secret.delete(params)));
   }),
 );
 
 const controllerRoutes = HttpApiBuilder.group(api, "controller", (handlers) =>
-  handlers.handleAll({ read: () => pending("controller.read") }),
+  Effect.gen(function* () {
+    const controller = yield* Controller;
+    return handlers.handle("read", () => operation(controller.read()));
+  }),
 );
 
 /** Every group's handlers. What `HttpApiBuilder.layer(api)` needs to build routes. */

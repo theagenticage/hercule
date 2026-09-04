@@ -56,6 +56,12 @@ export class ControllerIdentity extends Context.Service<
      * finds the same id and the same key.
      */
     readonly ensure: Effect.Effect<ControllerIdentityRecord, SqlError | SecretNameError>;
+
+    /**
+     * The identity as it stands, without creating one. `None` only before the
+     * first boot has run: every caller after that has one.
+     */
+    readonly read: Effect.Effect<Option.Option<ControllerIdentityRecord>, SqlError>;
   }
 >()("hydra/controller/identity/ControllerIdentity") {}
 
@@ -87,6 +93,8 @@ export const controllerIdentityLayer: Layer.Layer<
     );
 
     return ControllerIdentity.of({
+      read,
+
       // One transaction: the identity row and the private key it belongs to are
       // written together or not at all. Generating the keypair is local CPU
       // work, not a wait on anything outside the database.

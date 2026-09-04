@@ -4,49 +4,24 @@
  *
  * `controller` rows are the controller's operational settings, edited in
  * Settings > System (spec 14) and seeded at first run. `user` rows are the user
- * settings store of spec 11 section 2, keyed by user id from day one; no user
- * exists until `setup.complete`, so those rows default lazily and this module
- * declares no keys for them yet.
+ * settings store of spec 11 section 2, keyed by user id from day one.
  *
- * Values are JSON text, and every key carries an Effect Schema, so a read that
- * cannot produce the key's type is an error rather than a value the caller
- * misinterprets.
+ * The keys and what they hold are declared once, in the contract
+ * (`SETTING_VALUES`): the same map shapes `settings.read` on the wire and the
+ * JSON in the `value` column, so a key cannot mean one thing to a caller and
+ * another to a row. Values are JSON text, and every key carries an Effect
+ * Schema, so a read that cannot produce the key's type is an error rather than
+ * a value the caller misinterprets.
  */
 import { Clock, Context, Effect, Layer, Schema } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
+import { SETTING_VALUES } from "@hydra/contract";
 
-/** A retention window or a snapshot count, in whole days or whole snapshots. */
-const PositiveDays = Schema.Finite.check(Schema.isInt(), Schema.isGreaterThan(0));
+/** The keys each scope defines, with the schema of the value. */
+const SETTING_SCHEMAS = SETTING_VALUES;
 
-/** A time of day in the user timezone setting, `HH:MM` on a 24-hour clock. */
-const TimeOfDay = Schema.String.check(Schema.isPattern(/^([01]\d|2[0-3]):[0-5]\d$/));
-
-/**
- * The keys each scope defines, with the schema of the value. The typed API
- * covers the scopes listed here; adding the user settings store is adding a
- * `user` block (spec 11 section 2).
- */
-const SETTING_SCHEMAS = {
-  controller: {
-    /** TTL for the event log and per-session streams, in days (spec 04). */
-    "retention.events": PositiveDays,
-    /** Minimum retention for security events and actor-stamped mutations, in days. */
-    "retention.security": PositiveDays,
-    /** Retention for conversation messages, in days (spec 12 section 2). */
-    "retention.conversations": PositiveDays,
-    /** When the daily backup snapshot runs, in the user timezone setting. */
-    "backup.time": TimeOfDay,
-    /** How many daily snapshots to keep (spec 04, Backups). */
-    "backup.keep": PositiveDays,
-  },
-  user: {
-    /** The IANA zone the user reads times in, chosen during setup (spec 15 section 7). */
-    timezone: Schema.NonEmptyString,
-  },
-} as const;
-
-/** A scope whose keys are declared here, and so are typed on `get` and `setIfAbsent`. */
+/** A scope whose keys are declared, and so are typed on `get`, `set` and `setIfAbsent`. */
 export type TypedScope = keyof typeof SETTING_SCHEMAS;
 
 export type SettingKey<S extends TypedScope> = keyof (typeof SETTING_SCHEMAS)[S] & string;
@@ -54,6 +29,11 @@ export type SettingKey<S extends TypedScope> = keyof (typeof SETTING_SCHEMAS)[S]
 export type SettingValue<S extends TypedScope, K extends SettingKey<S>> = Schema.Schema.Type<
   (typeof SETTING_SCHEMAS)[S][K]
 >;
+
+/** Everything one scope holds: the keys that are set, and nothing for the rest. */
+export type ScopeSettings<S extends TypedScope> = {
+  readonly [K in SettingKey<S>]?: SettingValue<S, K>;
+};
 
 /** A setting is absent, or holds a value its schema rejects. */
 export class SettingError extends Schema.TaggedError<SettingError>()("SettingError", {
@@ -93,6 +73,45 @@ const make = Effect.gen(function* () {
         }),
         Effect.map((value) => value as SettingValue<S, K>),
       ),
+
+    /**
+     * Every key that is set in one scope, decoded to its declared type. A key
+     * nobody has set is absent rather than defaulted, so the default lives in
+     * one place: whoever reads the key (spec 11 section 2).
+     *
+     * A row whose key this build does not declare - what a downgrade leaves
+     * behind - is left out and said so in the log, rather than failing the
+     * whole read over a key the caller never asked about.
+     */
+    all: <S extends TypedScope>(
+      scope: S,
+    ): Effect.Effect<ScopeSettings<S>, SettingError | SqlError> =>
+      Effect.gen(function* () {
+        const rows = yield* sql<{
+          readonly key: string;
+          readonly value: string;
+        }>`SELECT key, value FROM settings WHERE scope = ${scope} ORDER BY key`;
+
+        const entries: Array<readonly [string, unknown]> = [];
+        for (const row of rows) {
+          if (!Object.hasOwn(SETTING_SCHEMAS[scope], row.key)) {
+            yield* Effect.logWarning(`Ignoring the ${scope} setting ${row.key}: no such key.`);
+            continue;
+          }
+          const value = yield* Schema.decodeUnknownEffect(schemaFor(scope, row.key))(
+            row.value,
+          ).pipe(
+            Effect.mapError(
+              (error) => new SettingError({ scope, key: row.key, message: error.message }),
+            ),
+          );
+          entries.push([row.key, value] as const);
+        }
+        // The keys are the scope's own and each value came from that key's
+        // schema, which is exactly what the mapped type says; TypeScript cannot
+        // follow the loop that far.
+        return Object.fromEntries(entries) as ScopeSettings<S>;
+      }),
 
     /** Writes a setting, replacing whatever was there. */
     set: <S extends TypedScope, K extends SettingKey<S>>(

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { Effect, Layer, Option } from "effect";
 import { TestClock } from "effect/testing";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
+import type { Page } from "../db";
 import { TestDatabase } from "../db/testing";
 import { Users, UsersLayer } from "../users";
 import {
@@ -9,7 +10,6 @@ import {
   CredentialsLayer,
   LOGIN_TOKEN_LIFETIME_MS,
   type ApiKeyRecord,
-  type Page,
 } from "./repository";
 import { hashToken, mintToken } from "./token";
 

@@ -16,6 +16,10 @@ import { AuthLayer } from "./auth";
 import { bootWith, type BootError, type BootOutcome } from "./bootstrap";
 import { ApiKeysLayer } from "./credentials";
 import { perimeterWarning, serve } from "./http";
+import { ControllerLayer } from "./identity";
+import { SecretLayer } from "./secrets";
+import { ProfilesLayer } from "./permissions";
+import { SettingsOperationsLayer } from "./settings";
 import { SetupLayer } from "./setup";
 import { UserLayer } from "./users";
 
@@ -85,7 +89,20 @@ const listen = (outcome: BootOutcome) =>
 
     yield* untilStopped;
     console.log("Stopping Hydra.");
-  }).pipe(Effect.provide(Layer.mergeAll(SetupLayer, AuthLayer, ApiKeysLayer, UserLayer)));
+  }).pipe(
+    Effect.provide(
+      Layer.mergeAll(
+        SetupLayer,
+        AuthLayer,
+        ApiKeysLayer,
+        UserLayer,
+        SecretLayer,
+        ControllerLayer,
+        SettingsOperationsLayer,
+        ProfilesLayer,
+      ),
+    ),
+  );
 
 export async function run(argv: readonly string[]): Promise<void> {
   const program = bootWith({ argv, env: process.env }, (outcome) =>

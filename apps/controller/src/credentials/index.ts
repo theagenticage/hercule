@@ -5,12 +5,9 @@
 export {
   Credentials,
   CredentialsLayer,
-  CursorError,
   LOGIN_TOKEN_LIFETIME_MS,
   type ApiKeyRecord,
   type LoginTokenRecord,
-  type Page,
-  type PageRequest,
 } from "./repository";
 export { ApiKeys, ApiKeysLayer, type ApiKeyPage, type QueryInput } from "./service";
 export { hashToken, mintToken } from "./token";

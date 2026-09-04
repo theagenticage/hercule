@@ -19,6 +19,8 @@ export const ControllerInfo = Schema.Struct({
   version: Schema.NonEmptyString,
 });
 
+export type ControllerInfo = Schema.Schema.Type<typeof ControllerInfo>;
+
 export const controller = HttpApiGroup.make("controller")
   .add(
     HttpApiEndpoint.get("read", "/controller", {

@@ -14,7 +14,10 @@ import { HydraHome } from "../config";
 import { ApiKeysLayer, CredentialsLayer, hashToken } from "../credentials";
 import { TestDatabase } from "../db/testing";
 import { AuditLog, AuditLogLayer, type AuditKind, type AuditRow } from "../events";
-import { SettingsLayer } from "../settings";
+import { controllerIdentityLayer, ControllerLayer } from "../identity";
+import { masterKeyLayer, SecretLayer, secretsLayer } from "../secrets";
+import { PermissionProfilesLayer, ProfilesLayer } from "../permissions";
+import { SettingsLayer, SettingsOperationsLayer } from "../settings";
 import { SetupLayer } from "../setup";
 import { PasswordCost, TEST_PASSWORD_PARAMS, UserLayer, UsersLayer } from "../users";
 import { serve } from "./server";
@@ -34,8 +37,27 @@ afterEach(() => {
 });
 
 const services = (at: string) =>
-  Layer.mergeAll(SetupLayer, AuthLayer, ApiKeysLayer, UserLayer).pipe(
-    Layer.provideMerge(Layer.mergeAll(UsersLayer, CredentialsLayer, SettingsLayer, AuditLogLayer)),
+  Layer.mergeAll(
+    SetupLayer,
+    AuthLayer,
+    ApiKeysLayer,
+    UserLayer,
+    SecretLayer,
+    ControllerLayer,
+    SettingsOperationsLayer,
+    ProfilesLayer,
+  ).pipe(
+    Layer.provideMerge(
+      Layer.mergeAll(
+        UsersLayer,
+        CredentialsLayer,
+        SettingsLayer,
+        PermissionProfilesLayer,
+        AuditLogLayer,
+        controllerIdentityLayer,
+      ),
+    ),
+    Layer.provideMerge(secretsLayer.pipe(Layer.provide(masterKeyLayer("file")))),
     Layer.provideMerge(TestDatabase),
     Layer.provideMerge(Layer.succeed(HydraHome, homePaths(at, join(at, "data")))),
   );

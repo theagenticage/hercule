@@ -1,6 +1,6 @@
 import { parseGlobalOptions } from "@hydra/home";
+import { VERSION } from "@hydra/home/version";
 import { Result } from "effect";
-import { VERSION } from "./version";
 
 export type Role = "controller" | "runner" | "cli";
 

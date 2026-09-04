@@ -62,6 +62,7 @@ export { ApiKey, MintedApiKey } from "./groups/api-key";
 export {
   AccessMode,
   ControllerSettings,
+  SETTING_VALUES,
   SettingsPatch,
   SettingsState,
   UserSettings,
