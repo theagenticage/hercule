@@ -11,7 +11,7 @@ Every skill run ends by appending a journal entry with a handoff block, even whe
 ## Status
 
 - **State:** in progress
-- **Current slice:** 4
+- **Current slice:** 5
 - **Blocked on:** none
 - **Journey:** not recorded yet
 
@@ -20,7 +20,7 @@ Every skill run ends by appending a journal entry with a handoff block, even whe
 | 1 | Contract, migration, paging primitives | done | AC-1: `vitest run packages/contract` -> 54 passed, the twelve new operations one-to-one with the table. AC-2: `vitest run apps/controller/src/db/migrations` -> 6 passed, four tables, partial indexes, `tasks_fts` and its three triggers, plus `vitest run apps/controller/src/db/migrate.test.ts` -> 12 passed, the set is a no-op twice. AC-9: `vitest run apps/controller/src/db/page.test.ts` -> 20 passed. `pnpm typecheck` is red, and 58 HTTP tests fail, only on the three new contract groups having no route handlers until slice 4 (F-2); `pnpm lint` and `pnpm dep-lint` are green. |
 | 2 | The Task domain | done | AC-3, AC-4, AC-5, AC-6, AC-7, AC-10, AC-13: `vitest run apps/controller/src/tasks` -> 34 passed. AC-11: the same run, plus `vitest run packages/contract/src/groups/task.test.ts` -> 2 passed, the ref grammar as the package exports it. `pnpm lint` and `pnpm dep-lint` green; `pnpm typecheck` and 58 HTTP tests still red on F-2 alone, unchanged by this slice. |
 | 3 | The Project domain | done | AC-12, AC-23: `bun --bun run vitest run --project node apps/controller/src/projects` -> 18 passed, the five operations, the join table both ways, a task keeping its `projectId` past its project's delete, and one `project.*` row per mutation. `pnpm lint` and `pnpm dep-lint` green; `pnpm typecheck` and 58 HTTP tests still red on F-2 alone, unchanged by this slice. |
-| 4 | The event reader, the routes, and the actor fix | pending | |
+| 4 | The event reader, the routes, and the actor fix | done | AC-8: `vitest run --project node apps/controller/src/http/task.integration.test.ts apps/controller/src/http/event.integration.test.ts` -> 16 passed, both default orders, the refused `text`+`sort` pair, an unknown sort field, and a seven-row walk at limit 2 with and without `text`. AC-14: the same run plus `vitest run --project node apps/controller/src/auth` -> 8 passed, `auth.login.failed` stamped `null` through the service and on the wire. AC-15: the same event run, both populations from one call, all four filters, `GET /events/{id}` and its 404. AC-16: `pnpm build:binary && pnpm test:binary` -> 8 passed (2 files), the twelve operations out of `./hydra`. AC-22 is reachable for the first time: `pnpm typecheck`, `pnpm lint`, `pnpm test` (606 + 139 passed), `pnpm dep-lint` all green. Transcript: `docs/plans/P001-tasks-projects-event-log/evidence/cli-session.md`. |
 | 5 | The Tasks screen | pending | |
 | 6 | Spec documents and the finish pass | pending | |
 
@@ -29,7 +29,7 @@ Every skill run ends by appending a journal entry with a handoff block, even whe
 | ID | Sev | Finding | Ref | Status | Rounds seen |
 |---|---|---|---|---|---|
 | F-1 | P2 | ADR 0019 still says "Hard delete is allowed", superseded by spec 09 and spec 02. Boyscouting, folded into slice 6. | AC-21 / `docs/adr/0019-*.md` | open | - |
-| F-2 | P1 | The branch cannot be green between slices 1 and 3. Declaring the three groups in `api` leaves `HttpApiBuilder.layer(api)` without their handlers, which is 3 typecheck errors and 58 failing HTTP tests, every one of them the same "HttpApiGroup task not found". The SPEC anticipated the compile half; the failing tests are the same cause. Resolves when slice 4 lands the handlers; AC-22 is only reachable then. | Slices note / `apps/controller/src/http/routes.ts` | open | - |
+| F-2 | P1 | The branch cannot be green between slices 1 and 3. Declaring the three groups in `api` leaves `HttpApiBuilder.layer(api)` without their handlers, which is 3 typecheck errors and 58 failing HTTP tests, every one of them the same "HttpApiGroup task not found". Fixed in slice 4: the three handler groups landed and all four checks are green. | Slices note / `apps/controller/src/http/routes.ts` | fixed | - |
 | F-3 | P3 | The SPEC's Scale line and slice 4 said thirteen operations where AC-1 lists twelve (5 task, 5 project, 2 event). Both now say twelve. | SPEC Scale, slice 4 | fixed | - |
 | F-4 | P1 | The offset cursor's scope did not include what the result set depends on, so page two of one search decoded cleanly against another and skipped rows. Fixed in slice 2: a relevance walk's scope is its match expression plus its filter, so a cursor replayed under other words or another filter is `validation`. | AD-9 / `apps/controller/src/tasks/repository.ts` | fixed | 2 |
 | F-5 | P2 | Spec 09's `ProvenanceEntry` sketch still types `eventId` as a string, which spec 04 and spec 11 §1.4 contradict. Correct it with the other spec edits in slice 6; AC-20 does not list it. | D-7 / `docs/spec/09-tasks.md` | open | 1 |
@@ -40,6 +40,11 @@ Every skill run ends by appending a journal entry with a handoff block, even whe
 | F-11 | P3 | A hand-edited cursor whose sort key is a number where the column holds text restarts the walk rather than failing, because SQLite orders every number below every string. Accepted: the token is opaque, the trigger is editing it, and the outcome is a repeated page rather than a skipped row. The clean fix is for the scope to carry the key's type, which is `db/page.ts` and touches every walk. | AD-9 / `apps/controller/src/db/page.ts` | accepted | 1 |
 | F-12 | P3 | `ScalarChange` is declared identically in the task and the project service. Accepted: the task service pairs it with a `ListChange` a project has no use for, and lifting one of the pair into a shared module would split it. | `apps/controller/src/projects/service.ts` | accepted | 1 |
 | F-13 | P3 | One description edit writes a `project.updated` payload holding both sides, so a worst case is two 64 KiB strings in one event row, and the log is kept 90 days. Task's `task.updated` has the same shape; Project is the second entity to take it, which makes it a pattern rather than a case. Held for a decision on whether a diff should carry a long field's value at all. | `apps/controller/src/projects/service.ts` | held | 1 |
+| F-14 | P2 | A `since`/`until` window sorts the whole matched window on every page: the filter is on `received_at`, the order is on `id`, so SQLite reads `events_received_at` and then a temp b-tree. Measured at 200k rows: 15.7 ms per page for a whole-log window, and it does not get cheaper as the walk advances. Accepted: the fix is to translate the window into id bounds with two point lookups, which is real code for a cost only a very long window pays, and no criterion asks for it. Recorded so the ingest ticket can take it. | AD-3 / `apps/controller/src/events/reader.ts` | accepted | 1 |
+| F-15 | P2 | One row the contract's `Event` cannot encode turns every listing that touches it into a 500, unfiltered `GET /events` included. Not reachable now - the audit writer is the only writer and it writes well-formed rows - so skipping the bad row would be handling a state the system rules out. Held for the ingest ticket, which is where a vendor payload first reaches the table. | `apps/controller/src/events/reader.ts` | held | 1 |
+| F-16 | P2 | The CLI answers a JSON flag it cannot encode with the envelope `{"code":"internal"}` and exit 1, because `client-core` folds every failure that is not a decoded envelope into `internal`. `task.create --provenance` is the first JSON flag in the product, so this is newly reachable although the code is older than this ticket. Nothing was sent, so the honest answer is a command-line error. Left alone: it changes `client-core`'s error contract and the CLI's exit codes, which is a decision. | `packages/client-core/src/errors.ts` | open | 1 |
+| F-17 | P3 | AC-16 names `e2e/api.test.ts` and the flag `--label x`; the test shipped as `e2e/cli.test.ts` and the derived flag is `--labels`. `e2e/api.test.ts` runs against source under `pnpm test`, and AC-16 asks for the compiled binary, so a new file in the `binary` project is the only place the criterion can be met. The flag name is what the contract's field is called; a singular alias would be CLI code, which AC-16 forbids. | AC-16 / `e2e/cli.test.ts` | accepted | 1 |
+| F-18 | P3 | `Unauthenticated` sits in the error union of the task, project and event services but `requireGrant` only ever fails `Forbidden`, so it is unreachable in all three. Accepted: cutting it from one of the three would make the three disagree, and it becomes reachable the moment a session actor exists. | `apps/controller/src/events/reader.ts` | accepted | 1 |
 | F-8 | P3 | The priority rank is spelled in the migration's expression index and again in the repository, and nothing but a matching string makes SQLite use that index. A test now walks the four priorities one row at a time, which fails if either copy drifts. | `apps/controller/src/tasks/repository.ts` | accepted | 2 |
 
 ## Decisions
@@ -55,6 +60,7 @@ Every skill run ends by appending a journal entry with a handoff block, even whe
 | D-7 | The type of `eventId` on a provenance entry | integer / string | resolved | integer, implementer's call, 2026-09-04: spec 09's TypeScript sketch says `string`, but spec 04 owns id formats and pins the event id as the integer log position, which spec 11 §1.4 and AC-15 repeat. Open to override. |
 | D-8 | Whether `description` is required on `task.create` | required / optional | resolved | required, implementer's call, 2026-09-04: spec 11 §2 marks every optional input with `?` and `description` carries none. Empty string is accepted. Open to override. |
 | D-9 | The default order of `project.query` | `name asc` / `updatedAt desc` | resolved | `name asc`, implementer's call, 2026-09-04: the SPEC pins the defaults of `task.query` and `event.query` and leaves this one open. A project list is read to pick one out of a few, which is what alphabetical order serves; recency is what a task list needs. Open to override. |
+| D-10 | Which column `event.query`'s `since` and `until` bound | `receivedAt` / `occurredAt` | resolved | `receivedAt`, implementer's call, 2026-09-04: neither the SPEC nor spec 11 §2 pins it, and the two are equal for every row that exists today. Arrival is the log's own axis and the one the id runs with, so a window and the page order never disagree; `occurredAt` is the emitter's unverified claim. The sentence is now on the contract's fields, and spec 11 §2 should take it in slice 6. Open to override. |
 
 ## Journal
 
@@ -242,5 +248,64 @@ handoff:
     - packages/contract/src/groups/project.ts
     - apps/controller/src/events/audit-log.ts
   findings: [F-1, F-2, F-5, F-11, F-12, F-13]
+  pending: []
+```
+
+### 2026-09-04 implement slice 4 (session 5)
+The event reader, the twelve route handlers, and the actor fix. The tests were
+written first from the SPEC alone by an agent that never saw the implementation:
+the HTTP ones failed on the three route groups having no handlers, the auth one
+on a failed login claiming the user, and the binary one on a `hydra` older than
+the contract.
+
+The branch is green for the first time since slice 1. F-2 is closed: all twelve
+operations are reachable over HTTP, `pnpm typecheck`, `pnpm lint`, `pnpm test`
+and `pnpm dep-lint` all pass, and so do `pnpm build:binary && pnpm test:binary`.
+
+`EventService` is one file with no repository beside it, unlike the task and the
+project domains. It reads one table, has one consumer and holds no policy past
+the grant check and the decode, so a second module would have been a layer with
+nothing in it.
+
+Two things the criteria did not force. `since` and `until` bound `received_at`
+(D-10), and the reason is now a comment on the contract's own fields rather than
+only in the controller. And a fourth migration adds `events_kind_id`: `?kind=`
+is the query the log is opened for, and without the index every page of it
+scanned the whole table - 4.3 ms per page at 200k rows, worse the rarer the kind
+and the longer the log is kept, against 0.0 ms with it.
+
+The one behaviour change outside this slice's files is in `server.test.ts`,
+which asserted `actor: "user"` on `auth.login.failed`. That assertion was the
+bug the ticket reports, so it now reads `null`.
+
+One review round, one reviewer that tried to break the diff. It could not break
+the keyset walk (four full walks at limits 1 and 500, rows inserted mid-walk),
+cursor cross-feeding in either direction and from both other listings, hand-
+edited and prototype-polluting cursors, malformed timestamps and injection-
+shaped filter values, or `GET /events/{id}` at zero, negative, fractional and
+past 2^53. Three findings were fixed here: the missing `kind` index, the
+undocumented time axis, and the connection-carrying path shipping with no test
+at all - a row written straight to the table now proves the filter and the
+`connectionId` round-trip that ingest will land on. F-14 to F-18 are the rest,
+accepted or held with their reasons in the table.
+
+The transcript of a real session against the compiled binary is in
+`evidence/cli-session.md`: a project, two tasks with provenance refs, a status
+and label edit, a full-text search, the `task.*` rows those commands wrote, and
+a failed login coming back from `hydra event query` stamped `"actor": null`.
+
+```yaml
+handoff:
+  state: in-progress
+  next: implement slice 5 (the Tasks screen)
+  produced:
+    - apps/controller/src/events/reader.ts
+    - apps/controller/src/db/migrations/0004-reading-the-event-log.ts
+    - apps/controller/src/http/routes.ts
+    - apps/controller/src/http/task.integration.test.ts
+    - apps/controller/src/http/event.integration.test.ts
+    - e2e/cli.test.ts
+    - docs/plans/P001-tasks-projects-event-log/evidence/cli-session.md
+  findings: [F-1, F-5, F-14, F-15, F-16, F-17, F-18]
   pending: []
 ```

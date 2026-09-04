@@ -46,7 +46,12 @@ export type AuditKind = (typeof AUDIT_KINDS)[number];
 /** One audit entry: what happened, who caused it, and what it was about. */
 export interface AuditEntry {
   readonly kind: AuditKind;
-  readonly actor: Actor;
+  /**
+   * Null where nothing caused the entry that the system can name: a login that
+   * failed was made by nobody, because the credential it presented resolved to
+   * nobody. The same null that an ingested or scheduled event carries.
+   */
+  readonly actor: Actor | null;
   /**
    * References only - an id, a name, an owner, a reason. Never a secret value,
    * a token, a password or a password hash: the event log is read by the
@@ -93,7 +98,7 @@ const make = Effect.gen(function* () {
       sql<{
         readonly id: number;
         readonly kind: string;
-        readonly actor: string;
+        readonly actor: string | null;
         readonly payload: string;
         readonly received_at: string;
       }>`SELECT id, kind, actor, payload, received_at FROM events WHERE kind = ${kind} ORDER BY id`.pipe(

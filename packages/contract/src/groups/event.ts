@@ -72,6 +72,13 @@ export const event = HttpApiGroup.make("event")
       query: Schema.Struct({
         connectionId: Schema.optionalKey(Id),
         kind: Schema.optionalKey(EventKind),
+        /**
+         * Both bound `receivedAt`, when the log took the event, not
+         * `occurredAt`, when the source says it happened. Arrival is the log's
+         * own axis and the one its ids run with, so a window and the order a
+         * page comes back in never disagree; an emitter's claim about when
+         * something happened is neither.
+         */
         since: Schema.optionalKey(Timestamp),
         until: Schema.optionalKey(Timestamp),
         ...pageParams(EVENT_SORT_FIELDS).fields,

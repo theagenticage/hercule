@@ -67,6 +67,23 @@ describe("auth.login", () => {
     expect(JSON.stringify(noSuchUser)).toEqual(JSON.stringify(wrongPassword));
   });
 
+  it("stamps the failed attempt with no actor, because nobody was authenticated", async () => {
+    const rows = await run(
+      Effect.gen(function* () {
+        const auth = yield* Auth;
+        const log = yield* AuditLog;
+        yield* withUser;
+        yield* Effect.flip(auth.login({ username: "rogier", password: "guess" }));
+        yield* Effect.flip(auth.login({ username: "nobody", password: PASSWORD }));
+        return yield* log.listByKind("auth.login.failed");
+      }),
+    );
+
+    expect(rows).toHaveLength(2);
+    for (const row of rows) expect(row.actor).toBeNull();
+    expect(rows.map((row) => row.actor)).not.toContain("user");
+  });
+
   it("still answers a wrong password 401 when the attempt cannot be logged", async () => {
     const error = await run(
       Effect.gen(function* () {

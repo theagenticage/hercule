@@ -28,11 +28,14 @@ import {
 } from "@hydra/contract";
 import { Auth } from "../auth";
 import { ApiKeys } from "../credentials";
+import { EventService } from "../events";
 import { Controller } from "../identity";
 import { Profiles } from "../permissions";
 import { Secret } from "../secrets";
 import { SettingsOperations } from "../settings";
+import { ProjectService } from "../projects";
 import { Setup } from "../setup";
+import { TaskService } from "../tasks";
 import { User } from "../users";
 
 const API_ERRORS = [
@@ -135,6 +138,43 @@ const secretRoutes = HttpApiBuilder.group(api, "secret", (handlers) =>
   }),
 );
 
+const taskRoutes = HttpApiBuilder.group(api, "task", (handlers) =>
+  Effect.gen(function* () {
+    const tasks = yield* TaskService;
+    return handlers
+      .handle("query", ({ query }) => operation(tasks.query(query)))
+      .handle("read", ({ params }) => operation(tasks.read(params)))
+      .handle("create", ({ payload }) => operation(tasks.create(payload)))
+      .handle("update", ({ params, payload }) =>
+        operation(tasks.update({ id: params.id, ...payload })),
+      )
+      .handle("delete", ({ params }) => operation(tasks.delete(params)));
+  }),
+);
+
+const projectRoutes = HttpApiBuilder.group(api, "project", (handlers) =>
+  Effect.gen(function* () {
+    const projects = yield* ProjectService;
+    return handlers
+      .handle("query", ({ query }) => operation(projects.query(query)))
+      .handle("read", ({ params }) => operation(projects.read(params)))
+      .handle("create", ({ payload }) => operation(projects.create(payload)))
+      .handle("update", ({ params, payload }) =>
+        operation(projects.update({ id: params.id, ...payload })),
+      )
+      .handle("delete", ({ params }) => operation(projects.delete(params)));
+  }),
+);
+
+const eventRoutes = HttpApiBuilder.group(api, "event", (handlers) =>
+  Effect.gen(function* () {
+    const events = yield* EventService;
+    return handlers
+      .handle("query", ({ query }) => operation(events.query(query)))
+      .handle("read", ({ params }) => operation(events.read(params)));
+  }),
+);
+
 const controllerRoutes = HttpApiBuilder.group(api, "controller", (handlers) =>
   Effect.gen(function* () {
     const controller = yield* Controller;
@@ -152,4 +192,7 @@ export const handlerLayers = Layer.mergeAll(
   profileRoutes,
   secretRoutes,
   controllerRoutes,
+  taskRoutes,
+  projectRoutes,
+  eventRoutes,
 );

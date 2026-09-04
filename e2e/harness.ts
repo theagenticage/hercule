@@ -175,9 +175,12 @@ export async function cli(
     readonly home: string;
     readonly env?: Readonly<Record<string, string>> | undefined;
     readonly stdin?: string | undefined;
+    /** The compiled binary to run instead of the dispatcher's source. */
+    readonly binary?: string | undefined;
   },
 ): Promise<Ran> {
-  const child = Bun.spawn([BUN, ENTRYPOINT, ...args], {
+  const command = options.binary === undefined ? [BUN, ENTRYPOINT] : [options.binary];
+  const child = Bun.spawn([...command, ...args], {
     cwd: ROOT,
     env: { ...cleanEnv(), HYDRA_HOME: options.home, ...options.env },
     stdin: options.stdin === undefined ? "ignore" : new TextEncoder().encode(options.stdin),

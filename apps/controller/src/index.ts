@@ -17,6 +17,7 @@ import { BootstrapConfig } from "./config";
 import { AuthLayer } from "./auth";
 import { bootWith, type BootError, type BootOutcome } from "./bootstrap";
 import { ApiKeysLayer } from "./credentials";
+import { EventServiceLayer } from "./events";
 import { MAX_REQUEST_BODY_BYTES, perimeterWarning, serve, webBundle } from "./http";
 import { ControllerLayer } from "./identity";
 import { SecretLayer } from "./secrets";
@@ -141,6 +142,7 @@ const listen = (outcome: BootOutcome, stopped: Effect.Effect<void>) =>
         ProfilesLayer,
         TaskServiceLayer,
         ProjectServiceLayer,
+        EventServiceLayer,
       ),
     ),
   );

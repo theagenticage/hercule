@@ -121,4 +121,4 @@ export {
   ProjectCreateInput,
   ProjectUpdateInput,
 } from "./groups/project";
-export { EVENT_SORT_FIELDS, Event, MAX_EVENT_KIND_LENGTH } from "./groups/event";
+export { EVENT_SORT_FIELDS, Event, EventId, MAX_EVENT_KIND_LENGTH } from "./groups/event";

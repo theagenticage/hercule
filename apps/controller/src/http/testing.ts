@@ -20,7 +20,13 @@ import { AuthLayer } from "../auth";
 import { HydraHome } from "../config";
 import { ApiKeysLayer, CredentialsLayer, hashToken } from "../credentials";
 import { TestDatabase } from "../db/testing";
-import { AuditLog, AuditLogLayer, type AuditKind, type AuditRow } from "../events";
+import {
+  AuditLog,
+  AuditLogLayer,
+  EventServiceLayer,
+  type AuditKind,
+  type AuditRow,
+} from "../events";
 import { ControllerIdentity, controllerIdentityLayer, ControllerLayer } from "../identity";
 import { masterKeyLayer, SecretLayer, secretsLayer } from "../secrets";
 import { PermissionProfilesLayer, ProfilesLayer } from "../permissions";
@@ -51,6 +57,7 @@ const services = (home: string) =>
     ProfilesLayer,
     TaskServiceLayer,
     ProjectServiceLayer,
+    EventServiceLayer,
   ).pipe(
     Layer.provideMerge(
       Layer.mergeAll(

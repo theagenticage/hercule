@@ -74,7 +74,9 @@ const make = Effect.gen(function* () {
         if (Option.isNone(user) || !matches) {
           // The username is the only thing the attempt carried that is safe to
           // keep: the password is never written anywhere, failed attempt
-          // included.
+          // included. The actor is nobody, because the credential resolved to
+          // nobody: a row claiming the user would say someone was authenticated
+          // when the whole point of the row is that nobody was.
           //
           // The append stands alone - there is no mutation for it to roll back
           // with - so a database that refuses it must not turn a wrong password
@@ -84,7 +86,7 @@ const make = Effect.gen(function* () {
           yield* audit
             .append({
               kind: "auth.login.failed",
-              actor: USER_ACTOR,
+              actor: null,
               payload: { username: input.username },
             })
             .pipe(
