@@ -1,5 +1,5 @@
 /**
- * Who is making the current request (spec 11 sections 1.1 and 3.1).
+ * Who is making the current request.
  *
  * The transport resolves the presented credential once and puts the result
  * here; service methods read it rather than taking it as a parameter, so a
@@ -8,8 +8,8 @@
  * `CurrentActor` out of every handler's requirement type.
  *
  * v1 authenticates one population: the user, through a login bearer token or an
- * API key (spec 13 section 4). Session, run and plugin actors arrive with their
- * tickets and widen this union; nothing here is restructured when they do.
+ * API key. Session, run and plugin actors will widen this union later; nothing
+ * here is restructured when they do.
  */
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -33,7 +33,7 @@ export interface PresentedCredential {
   readonly tokenHash: string;
 }
 
-/** The user actor: full parity with the API, no profile applies (spec 13 section 6.3). */
+/** The user actor: full parity with the API, no profile applies. */
 export interface UserActor {
   readonly _tag: "user";
   readonly userId: string;
@@ -55,7 +55,7 @@ export const CurrentActor = Context.Reference<Actor>("hydra/controller/actor/Cur
 });
 
 /**
- * How a mutation by the user is stamped in the event log (spec 11 section 3.1).
+ * How a mutation by the user is stamped in the event log.
  * The user is the bare word; which credential it presented is not part of its
  * identity, and the other actor kinds carry their id (`session:<id>`).
  */
@@ -65,14 +65,14 @@ export const USER_ACTOR = "user";
  * Whether this actor may reach an operation with this requirement, and which
  * grant it is missing if it may not.
  *
- * The user actor has full parity: no profile applies, so it passes every grant
- * (spec 13 section 6.3). Session actors are checked against their profile and
- * run and plugin actors are ungated - neither exists yet, and both are a branch
- * here rather than a rewrite when they do.
+ * The user actor has full parity: no profile applies, so it passes every grant.
+ * Session actors are checked against their profile and run and plugin actors are
+ * ungated - neither exists yet, and both are a branch here rather than a rewrite
+ * when they do.
  *
  * The transport middleware runs this before the payload is decoded and the
- * service method runs it again for in-process callers (spec 11 section 1.5),
- * which is why it lives beside the actor rather than inside either.
+ * service method runs it again for in-process callers, which is why it lives
+ * beside the actor rather than inside either.
  */
 export const grantCheck = (requirement: Requirement, actor: Actor): Grant | undefined => {
   switch (requirement) {
@@ -86,9 +86,9 @@ export const grantCheck = (requirement: Requirement, actor: Actor): Grant | unde
 };
 
 /**
- * The static grant check as a service method runs it (ADR 0031: enforcement
- * lives inside the method, not in the handler). Answers with the current actor,
- * which is what the method stamps its mutation with.
+ * The static grant check as a service method runs it: enforcement lives inside
+ * the method, not in the handler. Answers with the current actor, which is
+ * what the method stamps its mutation with.
  *
  * v1 authenticates one population, so an in-process caller with no actor is
  * told it needs a credential rather than acting as somebody.

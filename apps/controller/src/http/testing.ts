@@ -1,6 +1,6 @@
 /**
- * The controller, over a real socket, for tests (spec 04, Repository interfaces:
- * no mock repositories).
+ * The controller, over a real socket, for tests. The repositories are the real
+ * ones; nothing here is mocked.
  *
  * Everything a request passes through in production is in this stack - the
  * envelope, the pre-setup gate, the derived routes, both credential gates and
@@ -92,7 +92,7 @@ export const withServer = (
         // The boot creates the identity and seeds the shipped defaults before
         // anything binds, so the harness does both the same way: a request sees
         // the three shipped profiles and the controller settings a real
-        // controller has (spec 15 section 7).
+        // controller has.
         yield* Effect.flatMap(ControllerIdentity, (identity) => identity.ensure);
         yield* seed;
         yield* serve;

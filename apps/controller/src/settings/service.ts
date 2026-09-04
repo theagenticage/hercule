@@ -1,5 +1,5 @@
 /**
- * `settings.read` and `settings.update` (spec 11 section 2, Settings).
+ * `settings.read` and `settings.update`.
  *
  * Two scopes, one closed key set each, declared once in the contract. A key
  * that is not set is absent from the answer rather than defaulted: the default
@@ -84,8 +84,8 @@ const make = Effect.gen(function* () {
      *
      * The audit entry names the keys and not their values. A setting is not a
      * secret, but the event log is read by the Intake views and kept for at
-     * least 90 days (spec 13 section 11), and what a reader needs from it is
-     * that these keys changed and who changed them.
+     * least 90 days, and what a reader needs from it is that these keys changed
+     * and who changed them.
      *
      * A patch that names no key is `validation`. It would otherwise answer 200
      * and write an audit row recording a change that did not happen, and the
@@ -130,7 +130,7 @@ const make = Effect.gen(function* () {
   };
 });
 
-/** The settings service (ADR 0031: every operation is a method on an Effect service). */
+/** The settings service. */
 export class SettingsOperations extends Context.Service<
   SettingsOperations,
   Effect.Success<typeof make>

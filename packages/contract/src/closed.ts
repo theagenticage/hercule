@@ -1,6 +1,6 @@
 /**
- * A struct that rejects unknown keys, in the schema itself (spec 11 section 2,
- * `settings.update`).
+ * A struct that rejects unknown keys, in the schema itself, as `settings.update`
+ * needs.
  *
  * Rejecting an unknown key is a decoding option, `onExcessProperty: "error"`,
  * and the transport never sets it: `HttpApiBuilder` decodes every payload with

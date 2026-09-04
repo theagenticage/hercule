@@ -1,7 +1,6 @@
 /**
  * What a fresh database gets at first run: the three shipped permission
- * profiles (spec 13 section 6.2) and the controller-scope settings defaults
- * (spec 04, spec 15 section 6).
+ * profiles and the controller-scope settings defaults.
  *
  * Seeding is idempotent and runs on every boot, so a database that predates a
  * new default gains it. It is insert-if-absent throughout: a shipped profile
@@ -9,9 +8,9 @@
  * untouched, because the alternative is a silent revert on restart.
  *
  * The consequence, and it is deliberate: a shipped profile is frozen at the
- * boot that first seeded it. Spec 13 section 6.2 makes the three shipped
- * profiles editable, so a later Hydra that adds a grant to one of them cannot
- * write it over the user's version; that upgrade is a migration, not a seed.
+ * boot that first seeded it. The three shipped profiles are editable, so a
+ * later Hydra that adds a grant to one of them cannot write it over the user's
+ * version; that upgrade is a migration, not a seed.
  */
 import { Effect } from "effect";
 import { SqlClient } from "effect/unstable/sql/SqlClient";
@@ -22,12 +21,11 @@ import { PermissionProfiles, type GrantsError } from "./permissions";
 import { Settings, type SettingError } from "./settings";
 
 /**
- * The shipped profiles, verbatim from the table in spec 13 section 6.2.
+ * The shipped profiles.
  *
- * One amendment: the worker profile's cell reads `notification` (write) while
- * every other family lists its read verb explicitly, which would leave a worker
- * able to create a notification it cannot read back. It is granted
- * `notification.read` here and the spec table is amended to match (ticket #56).
+ * The worker profile gets `notification.read` as well as `notification.write`:
+ * every other family lists its read verb explicitly, and without it a worker
+ * could create a notification it cannot read back.
  */
 export const SHIPPED_PROFILES: ReadonlyArray<{
   readonly name: string;

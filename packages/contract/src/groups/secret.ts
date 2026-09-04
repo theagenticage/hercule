@@ -1,5 +1,5 @@
 /**
- * Secrets (spec 11 section 2, spec 13 section 2).
+ * Secrets.
  *
  * References only, never values: nothing in the API reads a secret back. An
  * owner is a pair, so the route carries both halves as their own path segments

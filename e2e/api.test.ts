@@ -76,8 +76,8 @@ describe("the first run and everything after it", () => {
     });
     expect(randomBearer.status).toBe(401);
 
-    // The web bundle is a later ticket; until it lands every non-API path is a
-    // 404 in the same envelope shape as any other error.
+    // The web bundle is not built yet, so every non-API path is a 404 in the
+    // same envelope shape as any other error.
     const elsewhere = await fetch(`${url}/dashboard`);
     expect(elsewhere.status).toBe(404);
     expect(await elsewhere.json()).toEqual({
@@ -278,11 +278,11 @@ describe("the first run and everything after it", () => {
     expect(jsonOf(core)).toMatchObject({ error: { code: "validation" } });
   });
 
-  // 403 cannot be reached end to end in this ticket: the only actor is the
-  // user, who holds every grant, and no session actor exists yet. The grant
-  // check is unit-tested against every operation in the contract instead
-  // (apps/controller/src/http/middleware.test.ts). The session-token ticket
-  // adds the case here.
+  // 403 cannot be reached end to end yet: the only actor is the user, who holds
+  // every grant, and no session actor exists yet. The grant check is
+  // unit-tested against every operation in the contract instead
+  // (apps/controller/src/http/middleware.test.ts). Once session tokens exist,
+  // the case belongs here.
 
   it("5. resolves credentials from the environment, and refuses the file in a session", async () => {
     const inSession = await cli(["controller", "read"], {

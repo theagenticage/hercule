@@ -1,5 +1,5 @@
 /**
- * Human output (spec 11 section 6.3).
+ * Human output.
  *
  * `--json` prints the contract's output schema verbatim and this module is not
  * reached. Everything here is for a person: a page becomes a table, a single

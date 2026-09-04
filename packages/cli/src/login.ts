@@ -1,5 +1,5 @@
 /**
- * `hydra login <url>` (spec 13 section 4.3, spec 15 section 5).
+ * `hydra login <url>`.
  *
  * Two calls, on purpose: `auth.login` trades the password for a 30-day bearer,
  * and `apiKey.create` mints the long-lived key under it. The key is what lands
@@ -8,9 +8,9 @@
  * stays an ordinary authenticated operation.
  *
  * The password arrives on stdin (`--password-stdin`) or, on a terminal only,
- * through the echo-off prompt that is the single documented exception to "the
- * CLI never prompts" (spec 11 section 6.1). A bare `--password` flag does not
- * exist: it would sit in `ps` and in shell history.
+ * through the echo-off prompt that is the single exception to "the CLI never
+ * prompts". A bare `--password` flag does not exist: it would sit in `ps` and
+ * in shell history.
  */
 import { randomUUID } from "node:crypto";
 import { mkdirSync, renameSync, rmSync, writeFileSync } from "node:fs";

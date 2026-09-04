@@ -1,6 +1,5 @@
 /**
- * First run, finished: `setup.read` and `setup.complete` (spec 15 section 7,
- * spec 11 section 2).
+ * First run, finished: `setup.read` and `setup.complete`.
  *
  * Until setup completes these two operations are the only ones the controller
  * answers; everything else is 401, which the gate in `../http` enforces. The
@@ -17,9 +16,8 @@
  * Everything that decides happens inside that one transaction, so concurrent
  * calls carrying the same token produce one user rather than one each.
  *
- * Two things spec 15 section 7 asks of setup are not here: the default
- * assistant, which has no table yet and lands with the assistant ticket, and
- * the onboarding steps beyond the timezone, which are the web app's.
+ * Two things setup does not do here: the default assistant, which has no table
+ * yet, and the onboarding steps beyond the timezone, which are the web app's.
  */
 import { rmSync } from "node:fs";
 import * as Clock from "effect/Clock";
@@ -37,7 +35,7 @@ import { AuditLog } from "../events";
 import { Settings, type SettingError } from "../settings";
 import { hashPassword, PasswordCost, Users } from "../users";
 
-/** What `setup.complete` carries beyond the password (spec 15 section 7). */
+/** What `setup.complete` carries beyond the password. */
 export interface CompleteInput {
   readonly username: string;
   readonly password: string;
@@ -77,7 +75,7 @@ const make = Effect.gen(function* () {
 
     /**
      * Creates the user, finishes onboarding and returns a bearer token: the
-     * caller is logged in when this returns (spec 15 section 7). The setup
+     * caller is logged in when this returns. The setup
      * token is verified by the transport gate before this runs.
      */
     complete: (
@@ -120,7 +118,7 @@ const make = Effect.gen(function* () {
           }),
         );
 
-        // The file exists only while setup is incomplete (spec 15 section 7).
+        // The file exists only while setup is incomplete.
         // Setup is done either way, so a file that will not go is a line in the
         // log rather than a failed response.
         yield* Effect.try(() => rmSync(paths.setupUrlFile, { force: true })).pipe(
@@ -135,7 +133,7 @@ const make = Effect.gen(function* () {
   };
 });
 
-/** The setup service (ADR 0031: every operation is a method on an Effect service). */
+/** The setup service. */
 export class Setup extends Context.Service<Setup, Effect.Success<typeof make>>()(
   "hydra/controller/setup/Setup",
 ) {}

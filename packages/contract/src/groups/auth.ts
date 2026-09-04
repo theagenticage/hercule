@@ -1,5 +1,5 @@
 /**
- * Password login and logout (spec 13 section 4.2).
+ * Password login and logout.
  *
  * `auth.login` mints the 30-day rolling bearer token the web app holds and
  * `hydra login` trades for an API key. `auth.logout` revokes the login bearer

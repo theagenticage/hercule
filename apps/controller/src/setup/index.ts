@@ -1,2 +1,2 @@
-/** First run: the setup gate's two operations (spec 15 section 7). */
+/** First run: the setup gate's two operations. */
 export { Setup, SetupLayer, type CompleteInput } from "./service";

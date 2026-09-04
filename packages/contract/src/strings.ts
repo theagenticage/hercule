@@ -1,5 +1,5 @@
 /**
- * Bounds on free text (spec 11 section 1.5).
+ * Bounds on free text.
  *
  * Every string a caller controls has a maximum length, declared here rather
  * than left to the transport: an unbounded field is an unbounded write, and the
@@ -14,9 +14,9 @@ export const bounded = (minimum: number, maximum: number) =>
   Schema.String.check(Schema.isLengthBetween(minimum, maximum));
 
 /**
- * The shortest password Hydra accepts. Spec 13 section 1 puts brute-force
- * lockout out of scope, so on a LAN bind the password is the whole perimeter
- * and a one-character one is not a perimeter.
+ * The shortest password Hydra accepts. There is no brute-force lockout, so on a
+ * LAN bind the password is the whole perimeter, and a one-character one is not
+ * a perimeter.
  */
 export const MIN_PASSWORD_LENGTH = 8;
 

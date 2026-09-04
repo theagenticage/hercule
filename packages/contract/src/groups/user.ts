@@ -1,5 +1,5 @@
 /**
- * The user's own credentials (spec 11 section 2).
+ * The user's own credentials.
  *
  * One user in v1. Changing the password verifies the current one, so a stolen
  * bearer token alone cannot take the account over.

@@ -1,9 +1,9 @@
 /**
- * The controller's own identity (spec 11 section 2).
+ * The controller's own identity.
  *
- * Spec 11 also lists update availability and the default runner here. Neither
- * exists yet - there is no update check and no runner - so neither is declared;
- * the tickets that build them add their fields.
+ * Update availability and the default runner belong here too, but neither
+ * subsystem exists yet - there is no update check and no runner - so neither is
+ * declared; each gains its field once it is built.
  */
 import { Schema } from "effect";
 import * as HttpApiEndpoint from "effect/unstable/httpapi/HttpApiEndpoint";

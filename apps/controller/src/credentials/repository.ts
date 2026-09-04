@@ -1,6 +1,5 @@
 /**
- * The two user credentials: login bearer tokens and API keys (spec 13 section
- * 4).
+ * The two user credentials: login bearer tokens and API keys.
  *
  * Both are opaque random tokens, both are stored only as a SHA-256 hash
  * (`./token.ts`), and both are resolved by one indexed lookup on that hash.
@@ -12,10 +11,9 @@
  * holds it: it goes into exactly one response and is not recoverable
  * afterwards. This module sees hashes.
  *
- * A login bearer's lifetime is **30 days rolling** (spec 13 section 4.2). Every
- * authenticated use calls `renewLoginToken`, which pushes `expires_at` out by
- * another 30 days, so the token dies 30 days after its last use rather than 30
- * days after login. The push itself is written at most once every
+ * A login bearer's lifetime is **30 days rolling**. Every authenticated use
+ * calls `renewLoginToken`, which pushes `expires_at` out by another 30 days, so
+ * the token dies 30 days after its last use rather than 30 days after login. The push itself is written at most once every
  * {@link USE_STAMP_INTERVAL_MS}: a rolling window does not need per-request
  * resolution, and the writes it saves are the whole API's.
  */
@@ -38,7 +36,7 @@ import {
   type PageRequest,
 } from "../db";
 
-/** The rolling window a login bearer lives in, in milliseconds (spec 13 section 4.2). */
+/** The rolling window a login bearer lives in, in milliseconds. */
 export const LOGIN_TOKEN_LIFETIME_MS = 30 * 24 * 60 * 60 * 1000;
 
 /**
@@ -49,7 +47,7 @@ export const LOGIN_TOKEN_LIFETIME_MS = 30 * 24 * 60 * 60 * 1000;
  * has one writer, so the whole controller serializes on it and the write-ahead
  * log grows on traffic that changes nothing. Five minutes of drift is invisible
  * against a 30-day rolling window and against "when was this key last used",
- * which is what the two stamps are for (spec 13 sections 4.2 and 4.3).
+ * which is what the two stamps are for.
  */
 export const USE_STAMP_INTERVAL_MS = 5 * 60 * 1000;
 
@@ -303,7 +301,7 @@ const make = Effect.gen(function* () {
   };
 });
 
-/** The credentials repository (ADR 0031: every operation is a service method). */
+/** The credentials repository. */
 export class Credentials extends Context.Service<Credentials, Effect.Success<typeof make>>()(
   "hydra/controller/credentials/Credentials",
 ) {}

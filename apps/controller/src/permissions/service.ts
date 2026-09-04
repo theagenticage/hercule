@@ -1,6 +1,6 @@
 /**
  * Permission profiles as the API sees them: `profile.query`, `read`, `create`,
- * `update` and `delete` (spec 11 section 2, spec 13 section 6.2).
+ * `update` and `delete`.
  *
  * The three shipped profiles are editable and not deletable. Editing one is an
  * ordinary update - the user is meant to be able to widen or narrow what an
@@ -38,7 +38,7 @@ import { withTransaction } from "../db";
 import { AuditLog } from "../events";
 import { PermissionProfiles, type GrantsError } from "./profiles";
 
-/** What listing takes. Absent fields are the defaults, not "no page" (spec 11 section 1.6). */
+/** What listing takes. Absent fields are the defaults, not "no page". */
 export interface QueryInput {
   readonly limit?: number;
   readonly cursor?: string;
@@ -127,7 +127,7 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * Edits a profile, shipped ones included (spec 13 section 6.2).
+     * Edits a profile, shipped ones included.
      *
      * A patch that changes nothing is `validation`. It would otherwise answer
      * 200 and stamp a `profile.updated` row for an edit that did not happen,
@@ -209,7 +209,7 @@ const make = Effect.gen(function* () {
   };
 });
 
-/** The profile service (ADR 0031: every operation is a method on an Effect service). */
+/** The profile service. */
 export class Profiles extends Context.Service<Profiles, Effect.Success<typeof make>>()(
   "hydra/controller/permissions/Profiles",
 ) {}

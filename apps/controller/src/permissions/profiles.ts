@@ -1,6 +1,6 @@
 /**
  * Permission profiles: the named grant bundles an Agent carries and every
- * Session copies at spawn (spec 13 section 6, CONTEXT.md "Permission Profile").
+ * Session copies at spawn.
  *
  * A grant is written family-dot-verb (`task.delete`, `infra.write`). Grants are
  * coarse and unscoped in v1: `session.read` reads any session. The vocabulary
@@ -9,7 +9,7 @@
  * controller reads it from the domain that enforces it. They are stored
  * as a JSON array of grant strings on the profile row, which keeps a profile
  * one row and one read - the enforcement path resolves token to session to
- * agent to profile on every call (spec 13 section 6.3).
+ * agent to profile on every call.
  *
  * The three shipped profiles are seeded at first run with `shipped = 1`: the
  * user may edit them, never delete them.
@@ -112,7 +112,7 @@ const make = Effect.gen(function* () {
 
     /**
      * Seeds one shipped profile. A profile the user has already edited keeps
-     * its grants: seeding never overwrites (spec 15 section 7).
+     * its grants: seeding never overwrites.
      */
     ensureShipped: (
       name: string,
@@ -214,9 +214,9 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * Edits a profile, including a shipped one: spec 13 section 6.2 makes the
-     * three shipped profiles editable. `None` means no such profile; a name
-     * another profile already holds is a `NameTaken`.
+     * Edits a profile, including a shipped one: the three shipped profiles are
+     * editable. `None` means no such profile; a name another profile already
+     * holds is a `NameTaken`.
      */
     update: (
       id: string,
@@ -244,15 +244,15 @@ const make = Effect.gen(function* () {
 
     /**
      * Deletes a profile. Whether this profile may be deleted at all is the
-     * service's rule, not the store's: a shipped profile is not deletable
-     * (spec 13 section 6.2) and never reaches here.
+     * service's rule, not the store's: a shipped profile is not deletable and
+     * never reaches here.
      */
     delete: (id: string): Effect.Effect<void, SqlError> =>
       sql`DELETE FROM permission_profiles WHERE id = ${uuidFromString(id)}`.pipe(Effect.asVoid),
   };
 });
 
-/** The permission profile repository (ADR 0031: every operation is a service method). */
+/** The permission profile repository. */
 export class PermissionProfiles extends Context.Service<
   PermissionProfiles,
   Effect.Success<typeof make>

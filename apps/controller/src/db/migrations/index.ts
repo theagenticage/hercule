@@ -2,10 +2,9 @@
  * The migration set, embedded in the binary.
  *
  * Migrations are forward-only and statically imported: a compiled binary has no
- * filesystem to load `.sql` files from (spec 04, Migrations on boot; spec 15
- * section 8). Adding one means writing the file, importing it here, and
- * appending an entry with the next id. Ids are never reused and a landed
- * migration is never edited.
+ * filesystem to load `.sql` files from. Adding one means writing the file,
+ * importing it here, and appending an entry with the next id. Ids are never
+ * reused and a landed migration is never edited.
  */
 import * as Effect from "effect/Effect";
 import type { ResolvedMigration } from "effect/unstable/sql/Migrator";

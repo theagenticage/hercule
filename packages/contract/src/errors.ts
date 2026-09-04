@@ -1,5 +1,5 @@
 /**
- * The one error envelope (spec 11 section 1.5).
+ * The one error envelope.
  *
  * Every failing operation answers with `{ error: { code, message, details? } }`
  * and nothing else. `code` is a closed enum, the HTTP status is derived from
@@ -15,7 +15,7 @@
 import { Schema } from "effect";
 import { GrantSchema, type Grant } from "./grants";
 
-/** The closed code enum, extended additively (spec 11 section 1.5). */
+/** The closed code enum, extended additively. */
 export const ERROR_CODES = [
   "unauthenticated",
   "forbidden",

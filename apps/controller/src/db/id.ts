@@ -1,5 +1,5 @@
 /**
- * UUIDv7 ids for every Hydra-owned entity (spec 04, Truth model).
+ * UUIDv7 ids for every Hydra-owned entity.
  *
  * Ids are minted by the controller, stored as a 16-byte `BLOB` primary key, and
  * rendered as the canonical lowercase string everywhere they leave the database.

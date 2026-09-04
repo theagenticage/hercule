@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { Profile } from "@hydra/contract";
 import { completeSetup, post, send, withServer } from "./testing";
 
-/** Permission profiles over a real socket (spec 11 section 2, spec 13 section 6.2). */
+/** Permission profiles over a real socket. */
 const list = async (base: string, token: string, query = ""): Promise<Profile[]> => {
   const response = await send("GET", base, `/api/v1/profiles${query}`, { token });
   expect(response.status).toBe(200);

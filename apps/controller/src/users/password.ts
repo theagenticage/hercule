@@ -1,6 +1,5 @@
 /**
- * How a password is stored: argon2id, through Bun's own implementation (spec 13
- * section 4.2).
+ * How a password is stored: argon2id, through Bun's own implementation.
  *
  * A password is low-entropy and guessable, which is the one case where the slow
  * hash is the point; every other credential Hydra stores is a 256-bit random

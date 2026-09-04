@@ -2,7 +2,7 @@
  * Write `packages/home/src/version.ts`.
  *
  * The version is baked in at build time: a compiled binary has no
- * `package.json` on disk to read (spec 15 section 11). It is generated into
+ * `package.json` on disk to read. It is generated into
  * `@hydra/home` because that is the one leaf every role links: the dispatcher
  * prints it for `hydra --version` and the controller answers it from
  * `controller.read`, and neither may depend on the other.

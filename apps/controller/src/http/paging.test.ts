@@ -1,5 +1,5 @@
 /**
- * Paging and sorting over a real socket (spec 11 section 1.6).
+ * Paging and sorting over a real socket.
  *
  * These are the claims a service-level test cannot make, because each one is
  * about what survives the trip through a URL query: that `sort` arrives at all,

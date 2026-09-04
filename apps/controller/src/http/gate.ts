@@ -1,5 +1,5 @@
 /**
- * The pre-setup gate (spec 15 section 7).
+ * The pre-setup gate.
  *
  * Before the password exists, exactly two operations are reachable -
  * `setup.read` and `setup.complete` - and every other operation answers 401, a
@@ -26,7 +26,7 @@ import { OPERATIONS, unauthenticated } from "@hydra/contract";
 import { Setup } from "../setup";
 import { responseFor } from "./envelope";
 
-/** The two operations of spec 15 section 7, as the routes the router matches. */
+/** The two operations open before setup, as the routes the router matches. */
 const OPEN_BEFORE_SETUP = new Set([
   `GET ${OPERATIONS["setup.read"].path}`,
   `POST ${OPERATIONS["setup.complete"].path}`,

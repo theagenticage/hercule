@@ -2,7 +2,7 @@
  * The command tree, derived from the contract.
  *
  * `hydra <entity> <verb>` is the operation id `<entity>.<verb>`, spelled exactly
- * as the contract spells it (spec 11 section 6.3). Nothing here is a list of
+ * as the contract spells it. Nothing here is a list of
  * commands: the entities, the verbs, the positional arguments and the flags are
  * all read out of the `HttpApi` declaration, so an operation added to the
  * contract appears in the CLI, in `--help` and in the tests with no edit.

@@ -212,8 +212,8 @@ describe("changing the password over the wire", () => {
       const fresh = await post(base, "/api/v1/auth/login", { username: USERNAME, password: next });
       expect(fresh.status).toBe(200);
 
-      // The credentials issued under the old password still work: spec 13
-      // section 4 asks for no revocation, and a rotation is not a compromise.
+      // The credentials issued under the old password still work: a rotation
+      // is not a compromise, so nothing is revoked.
       expect((await get(base, "/api/v1/api-keys", bearer)).status).toBe(200);
 
       expect(await audit("user.passwordChanged")).toMatchObject([{ actor: "user", payload: {} }]);

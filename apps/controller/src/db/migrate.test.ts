@@ -12,7 +12,7 @@ import { backupBeforeMigration, databaseVersion, migrate, runMigrations } from "
 import { binaryVersion, migrations } from "./migrations/index";
 import { TestDatabase } from "./testing";
 
-/** The tables the migration set creates: the boot set of spec 04, then the user and credentials. */
+/** The tables the migration set creates: the boot set, then the user and credentials. */
 const TABLES = [
   "secrets",
   "permission_profiles",

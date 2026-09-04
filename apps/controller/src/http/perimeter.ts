@@ -1,5 +1,5 @@
 /**
- * The bind warning (spec 13 section 1).
+ * The bind warning.
  *
  * Hydra's supported perimeter is a LAN or a tailnet, and it serves plain HTTP.
  * Binding somewhere that is neither loopback nor a tailnet address is allowed -
@@ -7,9 +7,9 @@
  * warns; it never refuses.
  *
  * "Tailnet" is Tailscale's CGNAT range `100.64.0.0/10` and its IPv6 range
- * `fd7a:115c:a1e0::/48`, which is what spec 13 section 1 left to be pinned
- * here. A wildcard bind warns as well: it includes every interface the machine
- * has, which is exactly what the warning is about.
+ * `fd7a:115c:a1e0::/48`; those two ranges are pinned here. A wildcard bind
+ * warns as well: it includes every interface the machine has, which is exactly
+ * what the warning is about.
  */
 
 const isLoopback = (host: string): boolean =>

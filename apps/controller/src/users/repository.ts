@@ -1,5 +1,5 @@
 /**
- * The user: username, password hash, timestamps (spec 13 section 4.2).
+ * The user: username, password hash, timestamps.
  *
  * v1 has exactly one user, created by `setup.complete` and never removed. The
  * table is keyed all the same, and nothing here assumes there is only one, so
@@ -95,7 +95,7 @@ const make = Effect.gen(function* () {
   };
 });
 
-/** The users repository (ADR 0031: every operation is a service method). */
+/** The users repository. */
 export class Users extends Context.Service<Users, Effect.Success<typeof make>>()(
   "hydra/controller/users/Users",
 ) {}

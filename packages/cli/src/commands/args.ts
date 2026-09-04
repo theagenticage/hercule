@@ -2,8 +2,8 @@
  * Turning a command line into one operation's request.
  *
  * Path parameters are positional, in route order; payload and query fields are
- * `--<field>` flags; paging is `--limit`, `--cursor`, `--sort` and `--all`
- * (spec 11 section 6.3). Nothing about a particular operation is written here:
+ * `--<field>` flags; paging is `--limit`, `--cursor`, `--sort` and `--all`.
+ * Nothing about a particular operation is written here:
  * the rules are applied to the `Command` the contract produced.
  *
  * Values that must not appear in `ps` or in shell history arrive on stdin
@@ -21,10 +21,9 @@ import type { Command, Field } from "./tree";
  * Fields that may arrive **only** on stdin; the plain `--<field>` flag for one
  * of these does not exist.
  *
- * Spec 11 section 6.1 is explicit that a bare `--password` flag does not exist,
- * and the reason generalises: anything in `argv` is visible in process lists and
- * lands in shell history. So every password the API takes, and a secret's value
- * (the one content channel rule, section 6.3), is listed here.
+ * A bare `--password` flag does not exist, and the reason generalises:
+ * anything in `argv` is visible in process lists and lands in shell history. So
+ * every password the API takes, and a secret's value, is listed here.
  */
 export const STDIN_ONLY = new Map<string, ReadonlyArray<string>>([
   ["setup.complete", ["password"]],

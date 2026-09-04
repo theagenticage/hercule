@@ -35,8 +35,7 @@ const readAllStdin = async (): Promise<string> => {
 };
 
 /**
- * An echo-off password prompt (spec 11 section 6.1: the one documented
- * exception to "the CLI never prompts").
+ * An echo-off password prompt: the one exception to "the CLI never prompts".
  *
  * `readline` writes the prompt itself and then every echoed character; muting
  * the output stream after the prompt has been written is what turns the echo

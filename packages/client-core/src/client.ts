@@ -4,7 +4,7 @@
  *
  * This module is the whole reason `client-core` exists. The web app and the CLI
  * see nothing but promises, plain objects and two `Error` subclasses; every
- * Effect type stops here (ADR 0017, ADR 0031). Nothing about a route is written
+ * Effect type stops here. Nothing about a route is written
  * by hand: the shape below is derived from `api`, so an operation added to the
  * contract appears here with no edit.
  */

@@ -1,9 +1,9 @@
 /**
- * The `secret.*` operations (spec 11 section 2, spec 13 section 2).
+ * The `secret.*` operations.
  *
  * Everything here is a reference: an owner, a name and two timestamps. A value
  * goes in and is never read back out - not by this service, not by the API, not
- * by the CLI (spec 13 section 2.5). The only code that decrypts is whatever
+ * by the CLI. The only code that decrypts is whatever
  * needs the value to do its job, through the repository, in this process.
  *
  * Two rules the transport cannot enforce, so they live here:
@@ -11,10 +11,9 @@
  * - **`core` is not writable.** The `core` owner holds the controller's own key
  *   material - its Ed25519 signing key is `core`/`controller.signing-key` - and
  *   overwriting it would break controller identity and, with it, every runner's
- *   trust in this controller (spec 13 section 1, ADR 0005). Nothing in the spec
- *   forbade it, so this refuses it: `validation`, naming the field. It stays
- *   *readable* as a reference: hiding a row that exists would be a worse answer
- *   than showing one the API declines to change.
+ *   trust in this controller, so this refuses it: `validation`, naming the
+ *   field. It stays *readable* as a reference: hiding a row that exists would
+ *   be a worse answer than showing one the API declines to change.
  * - **An owner id or a name holding `|`** would make the encryption's
  *   associated data ambiguous. The contract's schema rejects one before the
  *   payload is decoded; the repository rejects it again for the in-process
@@ -140,7 +139,7 @@ const make = Effect.gen(function* () {
      *
      * The encryption happens inside the transaction. It is local CPU work
      * through WebCrypto, not a wait on anything outside the database, which is
-     * the line the ambient-transaction rule draws (ADR 0004).
+     * the line the ambient-transaction rule draws.
      */
     set: (
       input: SecretSetInput,
@@ -158,7 +157,7 @@ const make = Effect.gen(function* () {
               kind: written.rotatedAt === null ? "secret.created" : "secret.rotated",
               actor: USER_ACTOR,
               // The value is not here and never will be: the log is read by the
-              // Intake views and kept for 90 days (spec 13 section 11).
+              // Intake views and kept for 90 days.
               payload: { ownerKind: owner.kind, ownerId: owner.id, name: input.name },
             });
             return written;
@@ -200,7 +199,7 @@ const make = Effect.gen(function* () {
   };
 });
 
-/** The secret service (ADR 0031: every operation is a method on an Effect service). */
+/** The secret service. */
 export class Secret extends Context.Service<Secret, Effect.Success<typeof make>>()(
   "hydra/controller/secrets/Secret",
 ) {}

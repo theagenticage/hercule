@@ -1,12 +1,11 @@
 /**
- * The two credential gates, implemented (spec 11 sections 1.5 and 5, spec 13
- * sections 4 and 6.3).
+ * The two credential gates, implemented.
  *
  * `Authenticated` resolves the bearer token to an actor and then runs the
  * static grant check for the operation, both before the derived route decodes
  * anything. That order is the point: a caller without the grant gets 403 rather
- * than 400 on a malformed body, which is what spec 11 section 1.5 requires and
- * what a handler-side check cannot deliver. The check in the service method
+ * than 400 on a malformed body. A handler-side check cannot deliver that,
+ * because the route decodes the body first. The check in the service method
  * stays as well; it is what binds in-process callers.
  *
  * The required grant is a static per-operation fact, so this is not operation
@@ -40,7 +39,7 @@ import { CurrentActor, grantCheck, type Actor } from "../actor";
 import { Credentials, hashToken } from "../credentials";
 import { Setup } from "../setup";
 
-/** What a caller with no usable credential is told; never why (spec 13 section 4). */
+/** What a caller with no usable credential is told; never why. */
 const NO_CREDENTIAL = "this operation needs a credential";
 
 /** The operation a request is for: the group and endpoint identifiers, joined. */
@@ -62,9 +61,8 @@ const requirementFor = (id: string): Effect.Effect<Requirement> =>
 /**
  * The live credential behind a presented token, whichever kind it is, with its
  * use recorded: a login bearer's 30-day window rolls forward and an API key's
- * `last_used_at` is stamped (spec 13 sections 4.2 and 4.3). The repository
- * decides whether that use is worth a write; on a busy connection most are
- * not.
+ * `last_used_at` is stamped. The repository decides whether that use is worth
+ * a write; on a busy connection most are not.
  */
 const resolve = (
   credentials: Credentials["Service"],

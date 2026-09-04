@@ -1,6 +1,6 @@
 /**
  * `secret.*` and `controller.read` over a real socket, through everything a
- * request passes through in production (spec 11 section 2, spec 13 section 2).
+ * request passes through in production.
  *
  * The claim these tests exist for is the one the unit tests cannot make: that
  * no value reaches the wire. Every response body is searched for the value that
@@ -62,7 +62,7 @@ describe("secret.*", () => {
       const empty = await send("GET", base, "/api/v1/secrets?ownerKind=connection", { token });
       expect(await empty.json()).toEqual({ items: [] });
 
-      // One row per mutation, all stamped with the user (spec 11 section 3.1).
+      // One row per mutation, all stamped with the user.
       expect(await audit("secret.created")).toHaveLength(1);
       expect(await audit("secret.rotated")).toHaveLength(1);
       const deleted = await audit("secret.deleted");

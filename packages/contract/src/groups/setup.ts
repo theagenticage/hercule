@@ -1,5 +1,5 @@
 /**
- * The setup gate (spec 11 section 2, spec 15 section 7).
+ * The setup gate.
  *
  * Before setup completes these two operations and the static bundle are all
  * that is reachable; everything else answers 401.

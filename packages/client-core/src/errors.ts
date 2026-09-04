@@ -2,14 +2,14 @@
  * The two failures a client call can reject with.
  *
  * Nothing Effect-shaped crosses this boundary: `client-core` is the only client
- * package that writes Effect code (ADR 0017, ADR 0031), so every failure the
+ * package that writes Effect code, so every failure the
  * derived client can produce is folded into one of these two plain errors
  * before it reaches the web app or the CLI.
  */
 import { ERROR_CODES, ERROR_STATUS, type ErrorCode } from "@hydra/contract";
 import * as HttpClientError from "effect/unstable/http/HttpClientError";
 
-/** The wire envelope, exactly as spec 11 section 1.5 defines it. */
+/** The wire envelope, exactly as the API sends it. */
 export interface ErrorEnvelope {
   readonly error: {
     readonly code: ErrorCode;

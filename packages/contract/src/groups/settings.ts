@@ -1,5 +1,5 @@
 /**
- * Settings (spec 11 section 2, Settings).
+ * Settings.
  *
  * Two scopes, one closed key set each: `controller` holds the controller's
  * operational settings seeded at first run, `user` holds the user settings
@@ -28,7 +28,7 @@ const PositiveDays = Schema.Int.check(Schema.isGreaterThan(0));
 /** A time of day in the user timezone setting, `HH:MM` on a 24-hour clock. */
 const TimeOfDay = Schema.String.check(Schema.isPattern(/^([01]\d|2[0-3]):[0-5]\d$/));
 
-/** The session-level permission axis a provider adapter enforces (spec 06). */
+/** The session-level permission axis a provider adapter enforces. */
 export const AccessMode = Schema.Literals([
   "approval-required",
   "auto-accept-edits",
@@ -48,19 +48,19 @@ const MuteTarget = Schema.NonEmptyString.check(
 /** What every settings key holds, per scope. The one declaration of a key. */
 export const SETTING_VALUES = {
   controller: {
-    /** TTL for the event log and per-session streams, in days (spec 04). */
+    /** TTL for the event log and per-session streams, in days. */
     "retention.events": PositiveDays,
     /** Minimum retention for security events and actor-stamped mutations, in days. */
     "retention.security": PositiveDays,
-    /** Retention for conversation messages, in days (spec 12 section 2). */
+    /** Retention for conversation messages, in days. */
     "retention.conversations": PositiveDays,
     /** When the daily backup snapshot runs, in the user timezone setting. */
     "backup.time": TimeOfDay,
-    /** How many daily snapshots to keep (spec 04, Backups). */
+    /** How many daily snapshots to keep. */
     "backup.keep": PositiveDays,
   },
   user: {
-    /** The IANA zone the user reads times in, chosen during setup (spec 15 section 7). */
+    /** The IANA zone the user reads times in, chosen during setup. */
     timezone: Schema.NonEmptyString,
     "topics.order": Schema.Array(Schema.NonEmptyString),
     "notifications.muted": Schema.Array(MuteTarget),

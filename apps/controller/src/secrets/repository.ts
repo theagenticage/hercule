@@ -1,6 +1,5 @@
 /**
- * The one owner-scoped secrets table (spec 04, Secrets table; spec 13 section
- * 2.1; ADR 0015).
+ * The one owner-scoped secrets table.
  *
  * Every secret value - Connection credentials, plugin secrets, runner-scoped
  * secrets, provider-instance credentials, the controller's own key material -
@@ -18,17 +17,16 @@
  *   row swapped in from another owner detectable rather than silently readable.
  * - **Owner ids and names carry no `|`**, so the associated data has exactly
  *   one reading. Both calls reject the character rather than trusting their
- *   callers; plugin-supplied names reach this table (spec 13 section 2.4).
+ *   callers; plugin-supplied names reach this table.
  *
  * The associated data binds a value to its owner and name, not to a version: a
  * row rolled back to its own earlier ciphertext still decrypts. Detecting that
  * needs a monotonic counter in the row, and an attacker who can write the
- * database file is outside the threat model of spec 13 section 1.
+ * database file is outside the threat model.
  *
  * Plaintext exists only in this process, only for the length of a call, and
  * only inside a {@link Redacted.Redacted}: it never appears in the event log,
- * an API response, a Notification, a process log, or the web app (spec 13
- * section 2.5).
+ * an API response, a Notification, a process log, or the web app.
  */
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
@@ -52,7 +50,7 @@ import {
 } from "../db";
 import { MasterKey } from "./masterKey";
 
-/** Who a secret belongs to (spec 13 section 2.1). */
+/** Who a secret belongs to. */
 export type SecretOwnerKind = "connection" | "plugin" | "runner" | "core" | "provider-instance";
 
 /**
@@ -64,12 +62,12 @@ export interface SecretOwner {
   readonly id: string;
 }
 
-/** The owner of the controller's own key material (spec 13 section 2.1, "Core"). */
+/** The owner of the controller's own key material. */
 export const CORE_OWNER: SecretOwner = { kind: "core", id: "controller" };
 
 /**
  * What the rest of the system may know about a secret: that it exists, who owns
- * it, and when it was last rotated. Never the value (spec 13 section 2.5).
+ * it, and when it was last rotated. Never the value.
  */
 export interface SecretRef {
   readonly id: string;
@@ -134,7 +132,7 @@ const rejectSeparator = (owner: SecretOwner, name: string): Effect.Effect<void, 
     }
   });
 
-/** The secrets table (spec 04, Secrets table). */
+/** The secrets table. */
 export class Secrets extends Context.Service<
   Secrets,
   {
@@ -153,7 +151,7 @@ export class Secrets extends Context.Service<
     /**
      * The references one owner - or every owner - stores, by name. References
      * only: nothing here decrypts, because nothing outside the repository may
-     * see a value (spec 13 section 2.5).
+     * see a value.
      */
     readonly list: (
       request: SecretListRequest,
@@ -179,7 +177,7 @@ export class Secrets extends Context.Service<
 /**
  * The secrets repository over the controller database, encrypting under the
  * Master Key. Its queries join whatever transaction the caller opened, like
- * every other repository (ADR 0031).
+ * every other repository.
  */
 export const secretsLayer: Layer.Layer<Secrets, never, MasterKey | SqlClient.SqlClient> =
   Layer.effect(

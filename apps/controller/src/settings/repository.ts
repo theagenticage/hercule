@@ -1,11 +1,10 @@
 /**
- * The settings store: two tables, one per scope (spec 04, What is in the
- * store).
+ * The settings store: two tables, one per scope.
  *
  * `settings` holds the controller's operational settings, edited in Settings >
- * System (spec 14) and seeded at first run. `user_settings` holds the user
- * settings store of spec 11 section 2, keyed by user id from day one, so a
- * second user is a `WHERE` clause rather than a table rebuild.
+ * System and seeded at first run. `user_settings` holds the user settings,
+ * keyed by user id from day one, so a second user is a `WHERE` clause rather
+ * than a table rebuild.
  *
  * The keys and what they hold are declared once, in the contract
  * (`SETTING_VALUES`): the same map shapes `settings.read` on the wire and the
@@ -132,7 +131,7 @@ const make = Effect.gen(function* () {
     /**
      * Every controller key that is set, decoded to its declared type. A key
      * nobody has set is absent rather than defaulted, so the default lives in
-     * one place: whoever reads the key (spec 11 section 2).
+     * one place: whoever reads the key.
      */
     all: (): Effect.Effect<ScopeSettings<"controller">, SettingError | SqlError> =>
       Effect.flatMap(
@@ -157,7 +156,7 @@ const make = Effect.gen(function* () {
 
     /**
      * Writes a controller setting only when it is absent. Seeding a default
-     * never overwrites what the user has chosen (spec 15 section 7).
+     * never overwrites what the user has chosen.
      */
     setIfAbsent: <K extends SettingKey<"controller">>(
       key: K,
@@ -219,7 +218,7 @@ const make = Effect.gen(function* () {
   };
 });
 
-/** The settings repository (ADR 0031: every operation is a service method). */
+/** The settings repository. */
 export class Settings extends Context.Service<Settings, Effect.Success<typeof make>>()(
   "hydra/controller/settings/Settings",
 ) {}

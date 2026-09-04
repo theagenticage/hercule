@@ -1,6 +1,5 @@
 /**
- * What `hydra serve` does before it binds: the first-run and boot sequence of
- * spec 15 section 7.
+ * What `hydra serve` does before it binds: the first-run and boot sequence.
  *
  * On an empty home this auto-initializes with no flags and no prompts - the
  * home layout, `config.toml`, the database and its migrations, the shipped
@@ -8,10 +7,9 @@
  * URL. On every later boot it is the same sequence, and everything in it is
  * idempotent, so a restart changes nothing except the setup token.
  *
- * Two steps of spec 15 section 7 are deliberately absent, both because their
- * subject does not exist yet: one provider instance per shipped provider plugin
- * (step 2), and starting the local runner (step 4). Later tickets add them
- * here.
+ * Two steps of the sequence are deliberately absent, both because their subject
+ * does not exist yet: one provider instance per shipped provider plugin, and
+ * starting the local runner. Both belong here once they do.
  */
 import { existsSync, rmSync, writeFileSync } from "node:fs";
 import * as Effect from "effect/Effect";
@@ -48,7 +46,7 @@ import {
 import { seed } from "./seed";
 import { Settings, SettingsLayer, type SettingError } from "./settings";
 
-/** Setup tokens are minted and stored like every other Hydra token (spec 13 section 4.1). */
+/** Setup tokens are minted and stored like every other Hydra token. */
 export { hashToken };
 
 /** The two bind hosts that mean "every interface"; a URL needs a reachable one instead. */
@@ -74,9 +72,9 @@ export type BootError =
   | GrantsError;
 
 /**
- * The one-time setup URL (spec 15 section 7). A wildcard bind host renders as
- * loopback, because `http://0.0.0.0:4937` is not an address a browser can open;
- * an IPv6 literal is bracketed. `bind.host` is checked when the config is
+ * The one-time setup URL. A wildcard bind host renders as loopback, because
+ * `http://0.0.0.0:4937` is not an address a browser can open; an IPv6 literal
+ * is bracketed. `bind.host` is checked when the config is
  * resolved, so by here it is a host and nothing else; a value `URL` will not
  * take is a defect, not a URL nobody can open.
  */
@@ -93,9 +91,9 @@ export function setupUrl(bindHost: string, bindPort: number, token: string): str
  * `<home>/setup-url` in step with it.
  *
  * The token is valid until used and every boot invalidates the previous one, so
- * re-minting is restarting the unit (spec 15 section 7). The file is mode 0600,
- * the same trust boundary as the master key file, and it exists only while
- * setup is incomplete: `hydra setup-url` reads it, and no unauthenticated
+ * re-minting is restarting the unit. The file is mode 0600, the same trust
+ * boundary as the master key file, and it exists only while setup is
+ * incomplete: `hydra setup-url` reads it, and no unauthenticated
  * endpoint serves it.
  */
 const ensureSetupUrl = (
@@ -179,7 +177,7 @@ export type ControllerServices =
  * `hydra serve` binds after this and stays up; `boot` is the same sequence with
  * nothing after it, which is what a test and `hydra setup-url` want. The
  * database closes when `use` finishes, so a clean exit leaves no open handle
- * behind (spec 15 section 8).
+ * behind.
  *
  * `argv`, `env` and the master-key backend are arguments rather than ambient,
  * so a test drives a temporary home and the file-backed key exactly the way the
@@ -193,7 +191,7 @@ export const bootWith = <A, E>(
     const paths = yield* HydraHome;
     const bootstrap = yield* BootstrapConfig;
     // Whether the file was there before the driver created it decides whether
-    // there is anything for a pre-migration copy to preserve (spec 15 section 8).
+    // there is anything for a pre-migration copy to preserve.
     const databaseExisted = existsSync(paths.databaseFile);
 
     // The secrets repository is merged out rather than only provided inwards:

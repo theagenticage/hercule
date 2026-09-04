@@ -1,18 +1,17 @@
 /**
- * `controller.read`: what this controller says about itself (spec 11 section 2).
+ * `controller.read`: what this controller says about itself.
  *
- * Two facts today - the identity the runners verify against (ADR 0005) and the
- * version baked into the binary. Spec 11 also lists update availability and the
- * default runner here; neither subsystem exists yet, so neither is answered.
- * The tickets that build them add their fields to the contract and a line here,
- * rather than this returning nulls in the meantime.
+ * Two facts today - the identity the runners verify against and the version
+ * baked into the binary. Update availability and the default runner belong here
+ * too, but neither subsystem exists yet, so neither is answered. Each gains its
+ * field in the contract and a line here once it is built, rather than this
+ * returning nulls in the meantime.
  *
  * The version comes from `@hydra/home/version`, which `scripts/gen-version.ts`
  * generates at build time: a compiled binary has no `package.json` on disk to
- * read (spec 15 section 11). It is generated into `@hydra/home` because that is
- * the one leaf every role links - the dispatcher prints it for `hydra
- * --version` and the controller answers it here, and neither may depend on the
- * other.
+ * read. It is generated into `@hydra/home` because that is the one leaf every
+ * role links - the dispatcher prints it for `hydra --version` and the
+ * controller answers it here, and neither may depend on the other.
  */
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -48,7 +47,7 @@ const make = Effect.gen(function* () {
   };
 });
 
-/** The controller service (ADR 0031: every operation is a method on an Effect service). */
+/** The controller service. */
 export class Controller extends Context.Service<Controller, Effect.Success<typeof make>>()(
   "hydra/controller/identity/Controller",
 ) {}

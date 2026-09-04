@@ -1,6 +1,5 @@
 /**
- * The user's API keys: mint, list, revoke (spec 11 section 2, spec 13 section
- * 4.3).
+ * The user's API keys: mint, list, revoke.
  *
  * A key's token exists in exactly one place: the response to the call that
  * minted it. Nothing stores it and no later operation can show it again, which
@@ -33,7 +32,7 @@ import { AuditLog } from "../events";
 import { Credentials, type ApiKeyRecord } from "./repository";
 import { hashToken, mintToken } from "./token";
 
-/** What listing takes. Absent fields are the defaults, not "no page" (spec 11 section 1.6). */
+/** What listing takes. Absent fields are the defaults, not "no page". */
 export interface QueryInput {
   readonly limit?: number;
   readonly cursor?: string;
@@ -162,7 +161,7 @@ const make = Effect.gen(function* () {
   };
 });
 
-/** The API key service (ADR 0031: every operation is a method on an Effect service). */
+/** The API key service. */
 export class ApiKeys extends Context.Service<ApiKeys, Effect.Success<typeof make>>()(
   "hydra/controller/credentials/ApiKeys",
 ) {}

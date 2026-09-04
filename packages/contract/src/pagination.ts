@@ -1,6 +1,5 @@
 /**
- * Pagination and sorting, identical on every `query` operation
- * (spec 11 section 1.6).
+ * Pagination and sorting, identical on every `query` operation.
  *
  * Cursors are opaque strings; there are no page numbers and no total counts.
  * The allowed sort fields are declared per operation, so an unknown field is a

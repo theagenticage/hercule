@@ -1,12 +1,11 @@
 /**
- * The shared wire vocabulary: ids, timestamps and the actor stamp
- * (spec 11 sections 1.4 and 3.1).
+ * The shared wire vocabulary: ids, timestamps and the actor stamp.
  */
 import { Schema } from "effect";
 
 /**
  * A canonical lowercase UUIDv7 string: what every Hydra id looks like on the
- * wire (spec 11 section 1.4). Event ids are integers and are not this schema.
+ * wire. Event ids are integers and are not this schema.
  */
 export const Id = Schema.String.check(
   Schema.isPattern(/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/, {
@@ -28,7 +27,7 @@ export const Timestamp = Schema.String.check(
 export type Timestamp = Schema.Schema.Type<typeof Timestamp>;
 
 /**
- * Who performed an operation (spec 11 section 3.1). Derived from the
+ * Who performed an operation. Derived from the
  * credential, never supplied by the caller; widened when multi-user arrives,
  * never restructured.
  */

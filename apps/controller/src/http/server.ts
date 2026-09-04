@@ -1,6 +1,5 @@
 /**
- * The controller's HTTP listener: what `hydra serve` binds (spec 11 section
- * 1.4, spec 13 section 1, spec 15 section 7).
+ * The controller's HTTP listener: what `hydra serve` binds.
  *
  * The routes are derived from the contract's HttpApi declaration and nothing
  * else; this module is the order the request passes through:
@@ -15,9 +14,9 @@
  * The body cap is not in that order: it is the listener's, given to Bun as
  * `maxRequestBodySize`, so an oversize body is answered `413` by the transport
  * before a byte of it is read and before this module runs at all. That `413` is
- * the one response the API sends outside the error envelope of spec 11 section
- * 1.5, and it is deliberate: an enveloped answer would mean reading the body
- * first, which is the cost the cap exists to avoid.
+ * the one response the API sends outside the error envelope, and it is
+ * deliberate: an enveloped answer would mean reading the body first, which is
+ * the cost the cap exists to avoid.
  *
  * Each request is one fiber, and `BunHttpServer` wires the request's abort
  * signal to it: a client that hangs up interrupts the fiber, and
@@ -55,9 +54,9 @@ const OPERATION_BY_ROUTE = new Map(
 );
 
 /**
- * One span per request, named for the operation (spec 11 section 1.1). It wraps
- * every route, so the service calls and repository calls underneath hang off
- * it. v1 exports spans nowhere; an exporter is a later layer swap.
+ * One span per request, named for the operation. It wraps every route, so the
+ * service calls and repository calls underneath hang off it. v1 exports spans
+ * nowhere; an exporter is a later layer swap.
  */
 const spanMiddleware = HttpRouter.middleware((httpEffect) =>
   Effect.flatMap(HttpRouter.RouteContext, (context) =>
@@ -79,7 +78,7 @@ const routerLayer = HttpApiBuilder.layer(api).pipe(
 /**
  * The derived routes answer a body they cannot decode with a bare `415` and a
  * text body of their own, which is the one failure that would leave the
- * envelope of spec 11 section 1.5. It is bad input, so it answers as one.
+ * envelope. It is bad input, so it answers as one.
  */
 const jsonOnly = <E, R>(
   app: Effect.Effect<HttpServerResponse.HttpServerResponse, E, R>,

@@ -1,5 +1,5 @@
 /**
- * The one SQLite database the controller owns (spec 04, ADR 0004).
+ * The one SQLite database the controller owns.
  *
  * `bun:sqlite` through `@effect/sql-sqlite-bun`, WAL, one writer process. The
  * driver enables WAL on open; this module asserts the result rather than
@@ -22,7 +22,7 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { isSqlErrorReason, SqlError } from "effect/unstable/sql/SqlError";
 import * as SqliteClient from "@effect/sql-sqlite-bun/SqliteClient";
 
-/** The in-memory database name; tests open the real schema against it (spec 04). */
+/** The in-memory database name; tests open the real schema against it. */
 export const MEMORY = ":memory:";
 
 /**
@@ -40,7 +40,7 @@ export class DatabaseError extends Data.TaggedError("DatabaseError")<{
  *
  * A lock timeout is the interesting case: SQLite has one writer, the driver
  * waits five seconds for it, and the only thing that holds it that long is a
- * second controller on the same home (ADR 0004).
+ * second controller on the same home.
  */
 /**
  * True when the database was locked by someone else, anywhere in an error's

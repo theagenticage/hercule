@@ -3,14 +3,14 @@
  *
  * `hydra <entity> <verb>` is the operation id `<entity>.<verb>`; the whole
  * command tree is derived from the contract, so this file routes and reports
- * and holds no list of commands (spec 11 section 6.3).
+ * and holds no list of commands.
  *
  * `setup-url` is the one exception and always will be: it is a filesystem read
  * of `<home>/setup-url`, needing no credential, because it is what a user has
- * before they have any credential at all (spec 15 section 7).
+ * before they have any credential at all.
  *
  * No Effect code lives past this package's own use of `@hydra/home`: the CLI
- * talks to the API through `client-core`'s promises (ADR 0017, ADR 0031).
+ * talks to the API through `client-core`'s promises.
  */
 import { readFileSync } from "node:fs";
 import { ApiError, ConnectionError, createClient } from "@hydra/client-core";

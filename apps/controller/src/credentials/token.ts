@@ -1,6 +1,6 @@
 /**
  * How Hydra mints and stores an opaque token: the one place in the controller
- * that does either (spec 13 section 4.1).
+ * that does either.
  *
  * Every credential Hydra issues - the setup token, a login bearer, an API key -
  * is the same thing: 32 random bytes, rendered base64url so it survives a URL,

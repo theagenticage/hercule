@@ -1,5 +1,5 @@
 /**
- * The operation table (ADR 0021, spec 11 sections 1.3 and 1.4).
+ * The operation table.
  *
  * One row per operation: its id (`<entity>.<verb>`, the same word the CLI and
  * the built-in workflow actions use), what a caller must hold to reach it, and
@@ -8,8 +8,8 @@
  *
  * This table is load-bearing at request time, not documentation: the static
  * grant check runs in HTTP middleware before the payload is decoded, so
- * `unauthenticated` precedes `forbidden` precedes `validation` exactly as
- * spec 11 section 1.5 requires. The middleware finds the row by joining the
+ * `unauthenticated` precedes `forbidden` precedes `validation`, the order the
+ * error envelope requires. The middleware finds the row by joining the
  * group and endpoint identifiers with a dot. `api.test.ts` asserts the table
  * and the HttpApi declaration are one-to-one.
  */
@@ -31,8 +31,8 @@ export type Requirement = Grant | "unauthenticated" | "setup-token" | "authentic
 export type Method = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 
 /**
- * Routes use Effect's `:param` path syntax; spec 11 writes the same routes with
- * `{param}`.
+ * Routes use Effect's `:param` path syntax; the published API documents the
+ * same routes with `{param}`.
  */
 const TABLE = {
   "setup.read": { requires: "unauthenticated", method: "GET", path: "/api/v1/setup" },

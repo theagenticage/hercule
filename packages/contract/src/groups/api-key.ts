@@ -1,5 +1,5 @@
 /**
- * User API keys (spec 11 section 2, spec 13 section 4.3).
+ * User API keys.
  *
  * The token is returned once, by `apiKey.create`, and never again: `apiKey.query`
  * lists references only.

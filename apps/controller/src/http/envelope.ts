@@ -1,6 +1,6 @@
 /**
- * One error envelope on the wire, for every failure the transport can produce
- * (spec 11 section 1.5).
+ * One error envelope on the wire, for every failure the transport can
+ * produce.
  *
  * A failing operation answers `{ error: { code, message, details? } }` and
  * nothing else. The service layer already fails with the contract's error
@@ -42,9 +42,8 @@ const standardIssues = SchemaIssue.makeFormatterStandardSchemaV1();
 
 /**
  * The schema library's issue tree as the contract's `issues` list: one entry
- * per thing wrong, so a caller fixes every field in one retry (spec 11 section
- * 1.5). Path segments are stringified because a JSON document has no other kind
- * of key.
+ * per thing wrong, so a caller fixes every field in one retry. Path segments
+ * are stringified because a JSON document has no other kind of key.
  */
 export const issuesOf = (error: Schema.SchemaError): ReadonlyArray<Issue> =>
   standardIssues(error.issue).issues.map((issue) => ({

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { Effect } from "effect";
 import { completeSetup, send, withServer } from "./testing";
 
-/** `settings.read` and `settings.update` over a real socket (spec 11 section 2). */
+/** `settings.read` and `settings.update` over a real socket. */
 const read = (base: string, token: string) => send("GET", base, "/api/v1/settings", { token });
 
 const patch = (base: string, body: unknown, token: string) =>

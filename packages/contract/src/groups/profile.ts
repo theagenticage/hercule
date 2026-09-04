@@ -1,5 +1,5 @@
 /**
- * Permission profiles (spec 11 section 2, spec 13 section 6.2).
+ * Permission profiles.
  *
  * The three shipped profiles can be edited but never deleted: deleting one is
  * `invalid_state`.

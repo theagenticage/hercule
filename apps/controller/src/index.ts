@@ -5,8 +5,8 @@
  * unit is stopped. SIGINT and SIGTERM both mean the same thing: stop accepting,
  * let the requests already in flight finish, close the database, exit 0.
  *
- * The runner socket and the schedulers are later tickets; each adds a step
- * beside the listener rather than changing this shape.
+ * The runner socket and the schedulers are not implemented yet; each adds a
+ * step beside the listener rather than changing this shape.
  */
 import * as Effect from "effect/Effect";
 import * as Latch from "effect/Latch";

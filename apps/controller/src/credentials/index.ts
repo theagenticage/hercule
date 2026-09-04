@@ -1,6 +1,5 @@
 /**
- * User credentials: login bearer tokens and API keys, stored only as hashes
- * (spec 13 section 4).
+ * User credentials: login bearer tokens and API keys, stored only as hashes.
  */
 export {
   Credentials,

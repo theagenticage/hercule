@@ -1,6 +1,5 @@
 /**
- * `--help`, at any position, written for an agent reading it mid-task
- * (spec 11 section 6.3).
+ * `--help`, at any position, written for an agent reading it mid-task.
  *
  * Terse and exact: what the command does not say, it does not have. Static help
  * and 403s that name the missing grant are the two teaching channels, so every

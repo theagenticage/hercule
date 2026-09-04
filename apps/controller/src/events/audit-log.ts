@@ -1,6 +1,6 @@
 /**
  * The audit writer: actor-stamped mutations and security events, appended to
- * the one event log (spec 08 section 3, spec 11 section 3.1, spec 13 section 11).
+ * the one event log.
  *
  * There is no separate audit subsystem. The `events` table holds two
  * populations: pipeline events, which the matcher evaluates against triggers
@@ -14,9 +14,9 @@ import type { SqlError } from "effect/unstable/sql/SqlError";
 import type { Actor } from "@hydra/contract";
 
 /**
- * The audit kinds this build emits, following `<entity>.<verb>ed`
- * (spec 13 section 11). Later tickets add their own; the list grows and is
- * never re-cut, so a kind stays readable in old rows.
+ * The audit kinds this build emits, following `<entity>.<verb>ed`. The list
+ * grows as more operations become auditable, and is never re-cut, so a kind
+ * stays readable in old rows.
  */
 export const AUDIT_KINDS = [
   "auth.login.succeeded",
@@ -44,7 +44,7 @@ export interface AuditEntry {
   /**
    * References only - an id, a name, an owner, a reason. Never a secret value,
    * a token, a password or a password hash: the event log is read by the
-   * Intake views and kept for at least 90 days (spec 13 section 11).
+   * Intake views and kept for at least 90 days.
    */
   readonly payload: Readonly<Record<string, unknown>>;
 }
@@ -104,7 +104,7 @@ const make = Effect.gen(function* () {
   };
 });
 
-/** The audit writer (ADR 0031: every operation is a service method). */
+/** The audit writer. */
 export class AuditLog extends Context.Service<AuditLog, Effect.Success<typeof make>>()(
   "hydra/controller/events/AuditLog",
 ) {}

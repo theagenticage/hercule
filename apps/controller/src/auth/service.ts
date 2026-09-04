@@ -1,5 +1,5 @@
 /**
- * Password login and logout (spec 13 section 4.2).
+ * Password login and logout.
  *
  * Login is the only place in Hydra that checks a password. It hands back an
  * opaque 30-day rolling bearer token: every authenticated use pushes the expiry
@@ -74,7 +74,7 @@ const make = Effect.gen(function* () {
         if (Option.isNone(user) || !matches) {
           // The username is the only thing the attempt carried that is safe to
           // keep: the password is never written anywhere, failed attempt
-          // included (spec 13 section 11).
+          // included.
           //
           // The append stands alone - there is no mutation for it to roll back
           // with - so a database that refuses it must not turn a wrong password
@@ -140,7 +140,7 @@ const make = Effect.gen(function* () {
   };
 });
 
-/** The auth service (ADR 0031: every operation is a method on an Effect service). */
+/** The auth service. */
 export class Auth extends Context.Service<Auth, Effect.Success<typeof make>>()(
   "hydra/controller/auth/Auth",
 ) {}

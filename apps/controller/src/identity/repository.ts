@@ -1,6 +1,6 @@
 /**
  * The controller's persistent identity: an id plus key material, created at
- * install and carried through a promotion (ADR 0005, spec 04).
+ * install and carried through a promotion.
  *
  * Identity is logical, not an address. Runners verify it wherever the
  * controller appears, which is what makes a "controller moved to X"
@@ -10,7 +10,7 @@
  * The keypair is Ed25519: small signatures, no parameter choices to get wrong,
  * and already in Bun's WebCrypto. The public key sits in the singleton
  * `controller_identity` row as raw SPKI bytes; the private key is a secrets row
- * under the `core` owner (spec 13 section 2.1), encrypted under the Master Key
+ * under the `core` owner, encrypted under the Master Key
  * like every other secret, so a stolen database file yields nothing.
  */
 import * as Clock from "effect/Clock";
@@ -47,7 +47,7 @@ const generateSigningKeyPair = Effect.promise(
     ]) as unknown as Promise<CryptoKeyPair>,
 );
 
-/** The controller's own identity (ADR 0005). */
+/** The controller's own identity. */
 export class ControllerIdentity extends Context.Service<
   ControllerIdentity,
   {

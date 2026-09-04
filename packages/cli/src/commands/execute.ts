@@ -2,7 +2,7 @@
  * Running one command: id tails, paging, and the call itself.
  *
  * Two behaviours live here that the wire deliberately does not have. **Id
- * tails** (spec 11 section 1.4, amended by ticket #57) are resolved client-side
+ * tails** are resolved client-side
  * through the entity's own `query` operation, so the API only ever sees
  * canonical ids. **`--all`** follows `nextCursor` to the end, so a caller who
  * wants everything writes one flag instead of a loop.

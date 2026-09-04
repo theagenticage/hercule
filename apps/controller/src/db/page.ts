@@ -1,5 +1,5 @@
 /**
- * Keyset paging, shared by every listing (spec 11 section 1.6).
+ * Keyset paging, shared by every listing.
  *
  * A cursor is the sort key of the page's last row plus that row's id, opaque on
  * the wire. The pair is unique because the id alone already is, so a page
@@ -25,7 +25,7 @@ export interface Page<A> {
   readonly nextCursor: string | undefined;
 }
 
-/** What a listing needs: how many, where from, which way (spec 11 section 1.6). */
+/** What a listing needs: how many, where from, which way. */
 export interface PageRequest {
   readonly limit: number;
   readonly cursor: string | undefined;

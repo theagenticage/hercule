@@ -1,6 +1,6 @@
 /**
  * `setup.complete` over a real socket: what a single-use setup token is worth
- * when more than one caller presents it at the same moment (spec 15 section 7).
+ * when more than one caller presents it at the same moment.
  */
 import { describe, expect, it } from "vitest";
 import { Effect } from "effect";

@@ -1,5 +1,5 @@
 /**
- * The derived routes: one line per operation (ADR 0031, spec 11 section 1.1).
+ * The derived routes: one line per operation.
  *
  * A handler calls its service method and does nothing else. What it does add is
  * the one thing the service layer must not: turning a failure that is not one
@@ -51,7 +51,7 @@ const isApiError = (error: unknown): error is ApiError =>
 
 /**
  * What a handler wraps its service call in: the contract's errors pass through
- * and everything else becomes a logged `internal` (spec 11 section 1.5).
+ * and everything else becomes a logged `internal`.
  */
 export const operation = <A, E, R>(
   self: Effect.Effect<A, E, R>,

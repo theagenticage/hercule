@@ -1,4 +1,4 @@
-/** The user: the one account Hydra authenticates in v1 (spec 13 section 4.2). */
+/** The user: the one account Hydra authenticates in v1. */
 export {
   hashPassword,
   PasswordCost,

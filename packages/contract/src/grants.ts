@@ -1,5 +1,5 @@
 /**
- * The grant vocabulary (spec 13 section 6.1).
+ * The grant vocabulary.
  *
  * A grant is part of the wire contract: a 403 names the missing grant in
  * `details.grant`, `profile.create` takes a list of them, and the CLI's

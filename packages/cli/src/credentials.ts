@@ -1,6 +1,5 @@
 /**
- * Where the CLI gets its controller URL and its bearer token
- * (spec 11 section 6.2, spec 13 section 5, spec 15 section 5).
+ * Where the CLI gets its controller URL and its bearer token.
  *
  * Two sources, in one fixed order: the environment, then
  * `<home>/credentials.json`. The environment is what a session gets - the
@@ -10,7 +9,7 @@
  * `HYDRA_SESSION=1` marks a process the runner started. The file is then
  * refused outright rather than merely deprioritised, so an agent whose
  * environment token is missing or expired fails instead of silently acting as
- * the user (spec 13 section 5).
+ * the user.
  */
 import { readFileSync } from "node:fs";
 import { credentialsFileIn } from "@hydra/home";
@@ -76,7 +75,7 @@ const readCredentialFile = (path: string): CredentialFile | undefined => {
  * to do about it.
  *
  * `home` is the already-resolved Hydra Home, so `--home` and `HYDRA_HOME` are
- * honoured by the one parser every role runs (spec 15 section 6).
+ * honoured by the one parser every role runs.
  */
 export const resolveCredential = (home: string, env: Env): Credential => {
   const token = env["HYDRA_TOKEN"];

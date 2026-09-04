@@ -1,4 +1,4 @@
-/** Permission profiles: the named grant bundles a Session copies at spawn (spec 13 section 6). */
+/** Permission profiles: the named grant bundles a Session copies at spawn. */
 export { Profiles, ProfilesLayer } from "./service";
 export {
   PermissionProfiles,

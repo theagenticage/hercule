@@ -1,5 +1,5 @@
 /**
- * The two credential gates the API declares (spec 11 sections 1.4 and 4).
+ * The two credential gates the API declares.
  *
  * Both read a bearer token from the `Authorization` header. The controller
  * implements them: `Authenticated` resolves the credential to an actor and
