@@ -57,11 +57,15 @@ const bannedInTheBrowser = [
 
 const effectPattern = { group: ["effect/*"], message: noEffectMessage };
 
-/** A `-` file is local to its route folder; shared presentation is a real module. */
+/**
+ * A `-` file is local to its own folder, so `./-name` is the only way to reach
+ * one: the patterns cover every specifier that climbs out of a folder or
+ * descends into one to get at it.
+ */
 const routeLocalPattern = {
-  group: ["**/routes/-*", "**/routes/**/-*"],
+  group: ["../**/-*", "./*/**/-*", "**/routes/-*", "**/routes/**/-*"],
   message:
-    "A `-` route file is local to its folder. Shared presentation goes in apps/web/src/screens/, generic presentation in @hydra/ui.",
+    "A `-` route file is local to its own folder and is imported only as `./-name`. Shared presentation goes in apps/web/src/screens/, generic presentation in @hydra/ui.",
 };
 
 /** The shell is the frame; a screen imports presentation, not the frame. */

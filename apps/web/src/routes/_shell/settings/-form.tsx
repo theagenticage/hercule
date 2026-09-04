@@ -4,6 +4,10 @@ import type { HydraClient } from "@hydra/client-core";
 import type { SettingsPatch } from "@hydra/contract";
 import { settingsQuery } from "../../../app/queries";
 
+/** A rejection that is not an Error still has to say something. */
+const messageOf = (error: unknown): string =>
+  error instanceof Error ? error.message : String(error);
+
 /**
  * Writing a settings patch and saying what happened.
  *
@@ -28,7 +32,7 @@ export function useSaveSettings(client: HydraClient): {
     save: mutation.mutate,
     saving: mutation.isPending,
     saved: mutation.isSuccess,
-    failure: mutation.error === null ? null : mutation.error.message,
+    failure: mutation.error === null ? null : messageOf(mutation.error),
   };
 }
 

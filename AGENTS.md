@@ -91,8 +91,8 @@ Source is organized **by domain**, not by type: one folder per domain, named wit
 #### Web app layout
 
 1. One screen is one route file under `apps/web/src/routes/`, exporting `Route` with `staticData: { title }`; it splits into `routes/<screen>/-<part>.tsx` only past ~150 lines.
-2. Screens import presentation from `@hydra/ui` (generic) or `apps/web/src/screens/` (knows Hydra), never from `shell/` - eslint enforces this.
-3. A `-` prefixed route file is local to its route folder and is never imported from outside `routes/` - eslint enforces this.
+2. Screens import presentation from `@hydra/ui` (generic) or `apps/web/src/screens/` (knows Hydra), never from `shell/`; the layout routes `_shell.tsx` and `_shell/settings.tsx` are the exemption, because mounting the shell is their job - eslint enforces this.
+3. A `-` prefixed route file is imported only as `./-<name>` from its own folder - eslint enforces this.
 4. `apps/web/src/app/` is wiring only: router, context, queries, entry guard, form, testing. Nothing that renders a screen.
 5. Reads are `queryOptions`, writes are `useMutation`; no component hand-rolls fetch state.
 6. Anything that interprets domain data goes to `@hydra/client-core` with its own test; a folder-wide test is named for its folder.
