@@ -206,8 +206,12 @@ const make = Effect.gen(function* () {
     }
     if (filter.refs !== undefined) {
       clauses.push(
-        sql`EXISTS (SELECT 1 FROM task_provenance p
-                    WHERE p.task_id = tasks.id AND ${anyOf("p.ref", filter.refs)})`,
+        // Driven from the ref rather than from the task: a correlated EXISTS
+        // makes SQLite scan every live task and probe provenance once each,
+        // where this seeks `task_provenance_ref` first and then the few ids it
+        // names. The duplicate-signal check runs before every triage.
+        sql`tasks.id IN (SELECT p.task_id FROM task_provenance p
+                         WHERE ${anyOf("p.ref", filter.refs)})`,
       );
     }
     return sql.and(clauses);

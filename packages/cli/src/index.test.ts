@@ -382,6 +382,28 @@ describe("id tails", () => {
     expect(stub.stderr.join("\n")).toContain("no profile whose id ends with ffffffff");
   });
 
+  it("sends a numeric id as written, with no tail lookup", async () => {
+    const fetch = stubFetch(() => ({
+      id: 42,
+      source: "platform",
+      connectionId: null,
+      system: "hydra",
+      kind: "auth.login.failed",
+      occurredAt: "2026-09-04T10:00:00.000Z",
+      receivedAt: "2026-09-04T10:00:00.000Z",
+      dedupKey: "d1",
+      refs: [],
+      url: null,
+      payload: {},
+      raw: null,
+      actor: null,
+    }));
+    const stub = io(fetch);
+    expect(await main(["--home", home, "event", "read", "42", "--json"], stub)).toBe(0);
+    expect(fetch.calls.length).toBe(1);
+    expect(fetch.calls[0]?.path).toBe("/api/v1/events/42");
+  });
+
   it("refuses a tail shorter than eight characters before calling anything", async () => {
     const fetch = withProfiles(() => ({}));
     const stub = io(fetch);

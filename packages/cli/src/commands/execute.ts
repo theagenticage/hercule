@@ -111,9 +111,17 @@ export const execute = async (
   command: Command,
   args: Arguments,
 ): Promise<Outcome> => {
-  const params: Record<string, string> = {};
+  const params: Record<string, string | number> = {};
   for (const [index, field] of command.positionals.entries()) {
     const text = args.positionals[index]!;
+    // A numeric path parameter is the value itself, not a tail of a longer id:
+    // the event log numbers its rows, and `42` is row 42. Text that is not a
+    // number is passed on as written, so the contract refuses it by name.
+    if (field.kind === "number") {
+      const value = Number(text);
+      params[field.name] = text.trim() === "" || Number.isNaN(value) ? text : value;
+      continue;
+    }
     params[field.name] = field.name === "id" ? await resolveTail(client, command, text) : text;
   }
 

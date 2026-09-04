@@ -79,8 +79,10 @@ export default Effect.gen(function* () {
   `;
   // Priorities are stored as words but ordered as ranks: alphabetical order
   // would put `high` before `low` before `normal` before `urgent`, which is not
-  // an order anyone asked for. Sorting on this expression walks the index; the
-  // query has to spell the expression the same way.
+  // an order anyone asked for. Sorting on this expression reads the index in
+  // order rather than sorting in memory; the query has to spell the expression
+  // the same way. The keyset comparison over it filters rather than seeks, so a
+  // later page reads past the rows before it.
   yield* sql`
     CREATE INDEX tasks_priority ON tasks (
       CASE priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'normal' THEN 2 ELSE 3 END,
