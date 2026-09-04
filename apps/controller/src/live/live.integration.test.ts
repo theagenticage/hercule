@@ -872,6 +872,16 @@ describe("what a connection may hold", () => {
           const refused = yield* answer(firstItem(client, { topic: "event", cursor: beyond }));
           expect(refused).toBeInstanceOf(Validation);
           yield* Effect.promise(() => expectHeld(reader, 0, "event"));
+
+          // The client is told, and is still there to be told: it can drop the
+          // cursor it was holding and follow the log from where it is now.
+          expect(yield* client.ping({})).toEqual({});
+          const followed = yield* collecting(client, { topic: "event" });
+          expect(
+            yield* Effect.promise(() => within(1000, () => followed.received.length >= 1)),
+          ).toBe(true);
+          expect(present(followed.received[0])._tag).toBe("delta");
+          yield* Fiber.interrupt(followed.fiber);
         }),
       );
     });
