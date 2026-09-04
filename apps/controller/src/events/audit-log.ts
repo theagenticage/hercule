@@ -36,6 +36,9 @@ export const AUDIT_KINDS = [
   "task.created",
   "task.updated",
   "task.deleted",
+  "project.created",
+  "project.updated",
+  "project.deleted",
 ] as const;
 
 export type AuditKind = (typeof AUDIT_KINDS)[number];

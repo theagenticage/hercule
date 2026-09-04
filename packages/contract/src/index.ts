@@ -118,5 +118,7 @@ export {
   MAX_PROJECT_NAME_LENGTH,
   PROJECT_SORT_FIELDS,
   Project,
+  ProjectCreateInput,
+  ProjectUpdateInput,
 } from "./groups/project";
 export { EVENT_SORT_FIELDS, Event, MAX_EVENT_KIND_LENGTH } from "./groups/event";

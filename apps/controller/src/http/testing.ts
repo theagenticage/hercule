@@ -26,6 +26,7 @@ import { masterKeyLayer, SecretLayer, secretsLayer } from "../secrets";
 import { PermissionProfilesLayer, ProfilesLayer } from "../permissions";
 import { SettingsLayer, SettingsOperationsLayer } from "../settings";
 import { SetupLayer } from "../setup";
+import { ProjectServiceLayer } from "../projects";
 import { TaskServiceLayer } from "../tasks";
 import { PasswordCost, TEST_PASSWORD_PARAMS, UserLayer, UsersLayer } from "../users";
 import { seed } from "../seed";
@@ -49,6 +50,7 @@ const services = (home: string) =>
     SettingsOperationsLayer,
     ProfilesLayer,
     TaskServiceLayer,
+    ProjectServiceLayer,
   ).pipe(
     Layer.provideMerge(
       Layer.mergeAll(

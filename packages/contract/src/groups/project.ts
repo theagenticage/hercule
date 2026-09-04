@@ -39,6 +39,26 @@ export type Project = Schema.Schema.Type<typeof Project>;
 /** What a project listing may be sorted by. */
 export const PROJECT_SORT_FIELDS = ["name", "createdAt", "updatedAt"] as const;
 
+/**
+ * What creating a project takes. The service decodes it as well, so an
+ * in-process caller is held to the same shape a request is.
+ */
+export const ProjectCreateInput = Schema.Struct({
+  name: ProjectName,
+  description: Schema.optionalKey(ProjectDescription),
+});
+
+export type ProjectCreateInput = Schema.Schema.Type<typeof ProjectCreateInput>;
+
+/** What editing a project takes. An absent field is left as it was. */
+export const ProjectUpdateInput = Schema.Struct({
+  name: Schema.optionalKey(ProjectName),
+  /** `null` takes the description off again, which nothing else can do. */
+  description: Schema.optionalKey(Schema.NullOr(ProjectDescription)),
+});
+
+export type ProjectUpdateInput = Schema.Schema.Type<typeof ProjectUpdateInput>;
+
 export const project = HttpApiGroup.make("project")
   .add(
     HttpApiEndpoint.get("query", "/projects", {
@@ -52,19 +72,13 @@ export const project = HttpApiGroup.make("project")
       error: [Unauthenticated, Forbidden, Validation, NotFound, Internal],
     }),
     HttpApiEndpoint.post("create", "/projects", {
-      payload: Schema.Struct({
-        name: ProjectName,
-        description: Schema.optionalKey(ProjectDescription),
-      }),
+      payload: ProjectCreateInput,
       success: Project,
       error: [Unauthenticated, Forbidden, Validation, Internal],
     }),
     HttpApiEndpoint.patch("update", "/projects/:id", {
       params: { id: Id },
-      payload: Schema.Struct({
-        name: Schema.optionalKey(ProjectName),
-        description: Schema.optionalKey(ProjectDescription),
-      }),
+      payload: ProjectUpdateInput,
       success: Project,
       error: [Unauthenticated, Forbidden, Validation, NotFound, Internal],
     }),

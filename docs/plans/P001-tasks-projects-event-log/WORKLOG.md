@@ -11,7 +11,7 @@ Every skill run ends by appending a journal entry with a handoff block, even whe
 ## Status
 
 - **State:** in progress
-- **Current slice:** 3
+- **Current slice:** 4
 - **Blocked on:** none
 - **Journey:** not recorded yet
 
@@ -19,7 +19,7 @@ Every skill run ends by appending a journal entry with a handoff block, even whe
 |---|---|---|---|
 | 1 | Contract, migration, paging primitives | done | AC-1: `vitest run packages/contract` -> 54 passed, the twelve new operations one-to-one with the table. AC-2: `vitest run apps/controller/src/db/migrations` -> 6 passed, four tables, partial indexes, `tasks_fts` and its three triggers, plus `vitest run apps/controller/src/db/migrate.test.ts` -> 12 passed, the set is a no-op twice. AC-9: `vitest run apps/controller/src/db/page.test.ts` -> 20 passed. `pnpm typecheck` is red, and 58 HTTP tests fail, only on the three new contract groups having no route handlers until slice 4 (F-2); `pnpm lint` and `pnpm dep-lint` are green. |
 | 2 | The Task domain | done | AC-3, AC-4, AC-5, AC-6, AC-7, AC-10, AC-13: `vitest run apps/controller/src/tasks` -> 34 passed. AC-11: the same run, plus `vitest run packages/contract/src/groups/task.test.ts` -> 2 passed, the ref grammar as the package exports it. `pnpm lint` and `pnpm dep-lint` green; `pnpm typecheck` and 58 HTTP tests still red on F-2 alone, unchanged by this slice. |
-| 3 | The Project domain | pending | |
+| 3 | The Project domain | done | AC-12, AC-23: `bun --bun run vitest run --project node apps/controller/src/projects` -> 18 passed, the five operations, the join table both ways, a task keeping its `projectId` past its project's delete, and one `project.*` row per mutation. `pnpm lint` and `pnpm dep-lint` green; `pnpm typecheck` and 58 HTTP tests still red on F-2 alone, unchanged by this slice. |
 | 4 | The event reader, the routes, and the actor fix | pending | |
 | 5 | The Tasks screen | pending | |
 | 6 | Spec documents and the finish pass | pending | |
@@ -35,6 +35,11 @@ Every skill run ends by appending a journal entry with a handoff block, even whe
 | F-5 | P2 | Spec 09's `ProvenanceEntry` sketch still types `eventId` as a string, which spec 04 and spec 11 §1.4 contradict. Correct it with the other spec edits in slice 6; AC-20 does not list it. | D-7 / `docs/spec/09-tasks.md` | open | 1 |
 | F-6 | P2 | The FTS triggers do not survive `INSERT OR REPLACE` on `tasks`: the displaced row is removed without firing the delete trigger, leaving stale terms in the index. The task repository writes only INSERT, UPDATE and DELETE, and a reviewer probing edits, soft deletes and status changes found no stale term. Slice 3 has no reason to write tasks at all. | `apps/controller/src/db/migrations/0003-tasks-and-projects.ts` | held | 2 |
 | F-7 | P3 | A search whose text holds no letter or digit (`"+++"`) answers with an empty page rather than `validation`. Accepted: the index holds no punctuation either, so the search is one that can match nothing, not one that was refused. | AD-5 / `apps/controller/src/tasks/repository.ts` | accepted | 2 |
+| F-9 | P2 | `project.query` shipped with no test: the keyset walk, its sort fields and its cursor scope were a new code path nothing exercised. Fixed in slice 3 with a full-walk test at page size 1 and 2 over three orders, and a cursor replayed under another field and another direction. | `apps/controller/src/projects/service.test.ts` | fixed | 1 |
+| F-10 | P2 | A project's description could be set but never taken off again: `description` is optional on the row and the update payload had no way to spell "remove it". Fixed in slice 3: `project.update` takes `description: null`, as `task.update` takes `projectId: null`. | `packages/contract/src/groups/project.ts` | fixed | 1 |
+| F-11 | P3 | A hand-edited cursor whose sort key is a number where the column holds text restarts the walk rather than failing, because SQLite orders every number below every string. Accepted: the token is opaque, the trigger is editing it, and the outcome is a repeated page rather than a skipped row. The clean fix is for the scope to carry the key's type, which is `db/page.ts` and touches every walk. | AD-9 / `apps/controller/src/db/page.ts` | accepted | 1 |
+| F-12 | P3 | `ScalarChange` is declared identically in the task and the project service. Accepted: the task service pairs it with a `ListChange` a project has no use for, and lifting one of the pair into a shared module would split it. | `apps/controller/src/projects/service.ts` | accepted | 1 |
+| F-13 | P3 | One description edit writes a `project.updated` payload holding both sides, so a worst case is two 64 KiB strings in one event row, and the log is kept 90 days. Task's `task.updated` has the same shape; Project is the second entity to take it, which makes it a pattern rather than a case. Held for a decision on whether a diff should carry a long field's value at all. | `apps/controller/src/projects/service.ts` | held | 1 |
 | F-8 | P3 | The priority rank is spelled in the migration's expression index and again in the repository, and nothing but a matching string makes SQLite use that index. A test now walks the four priorities one row at a time, which fails if either copy drifts. | `apps/controller/src/tasks/repository.ts` | accepted | 2 |
 
 ## Decisions
@@ -49,6 +54,7 @@ Every skill run ends by appending a journal entry with a handoff block, even whe
 | D-6 | `task.query` order when `text` is present and a `sort` is also given | refuse with `validation` / honour the sort / ignore it | resolved | refuse, spec author's call, 2026-09-04 (AD-7); open to override |
 | D-7 | The type of `eventId` on a provenance entry | integer / string | resolved | integer, implementer's call, 2026-09-04: spec 09's TypeScript sketch says `string`, but spec 04 owns id formats and pins the event id as the integer log position, which spec 11 §1.4 and AC-15 repeat. Open to override. |
 | D-8 | Whether `description` is required on `task.create` | required / optional | resolved | required, implementer's call, 2026-09-04: spec 11 §2 marks every optional input with `?` and `description` carries none. Empty string is accepted. Open to override. |
+| D-9 | The default order of `project.query` | `name asc` / `updatedAt desc` | resolved | `name asc`, implementer's call, 2026-09-04: the SPEC pins the defaults of `task.query` and `event.query` and leaves this one open. A project list is read to pick one out of a few, which is what alphabetical order serves; recency is what a task list needs. Open to override. |
 
 ## Journal
 
@@ -185,5 +191,56 @@ handoff:
     - packages/contract/src/groups/task.ts
     - packages/contract/src/errors.ts
   findings: [F-1, F-2, F-5, F-7, F-8]
+  pending: []
+```
+
+### 2026-09-04 implement slice 3 (session 4)
+The Project domain. The tests were written first from the SPEC alone by an
+agent that never saw the implementation and confirmed failing on the missing
+module; the implementation then made all of them pass without an assertion
+changing.
+
+`ProjectService` mirrors `TaskService` over a repository that is a plain
+function: five operations, a keyset walk, a soft delete, and one `project.*`
+event per mutation written inside the mutation's transaction. `project.created`
+and `project.deleted` carry the snapshot, `project.updated` carries a
+`{old, new}` per changed field and nothing for the fields it left alone. There
+is no search, no filter and no relevance walk, because a project has nothing to
+search on but its name and there are few of them.
+
+`project_resources` needed no code. The join table is what the many-to-many
+is; no operation in the contract reaches it, so the criterion is verified
+against the table itself, and it will grow an owner when Resources do.
+
+`ProjectCreateInput` and `ProjectUpdateInput` are now named exports of the
+contract, as the task inputs are, so the service decodes an in-process caller
+against exactly what a request is decoded against.
+
+D-9 is the one call taken here and open to override: `project.query` defaults
+to `name asc` rather than the `updatedAt desc` a task list uses.
+
+One review round, one reviewer that tried to break the diff. It could not break
+the keyset walk (18 full walks over duplicate names, a case-only difference and
+shared timestamps), cursor cross-feeding in either direction and from
+`task.query`, transaction integrity under failure and concurrency, the update
+diff at the field caps, or input validation through the service. Two findings
+were fixed here: `project.query` had no test at all (F-9), and a description
+could be set but never removed (F-10). Three were accepted or held with their
+reasons in the table.
+
+F-2 is unchanged: the branch does not typecheck and 58 HTTP tests fail, all on
+the three route groups having no handlers until slice 4.
+
+```yaml
+handoff:
+  state: in-progress
+  next: implement slice 4 (the event reader, the routes, and the actor fix)
+  produced:
+    - apps/controller/src/projects/service.ts
+    - apps/controller/src/projects/repository.ts
+    - apps/controller/src/projects/service.test.ts
+    - packages/contract/src/groups/project.ts
+    - apps/controller/src/events/audit-log.ts
+  findings: [F-1, F-2, F-5, F-11, F-12, F-13]
   pending: []
 ```
