@@ -89,6 +89,16 @@ export const resolveCredential = (home: string, env: Env): Credential => {
     return { url: envUrl, token, source: "environment" };
   }
 
+  // The two sources are never blended. A lone HYDRA_API_URL would otherwise
+  // send the file's long-lived API key to a host it was never minted for, so it
+  // is refused rather than ignored: a stale variable is a misconfiguration the
+  // user has to see.
+  if (envUrl !== undefined && envUrl !== "") {
+    throw new CredentialError(
+      "HYDRA_API_URL is set but HYDRA_TOKEN is not; unset it or set both. The credential file's key is only ever sent to the controller it was minted for.",
+    );
+  }
+
   const path = credentialsFileIn(home);
 
   if (inSession(env)) {

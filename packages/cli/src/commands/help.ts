@@ -142,6 +142,7 @@ export const commandHelp = (command: Command): ReadonlyArray<string> => {
       "  --limit <number>   page size, 1 to 500; the default is 50",
       "  --cursor <cursor>  the nextCursor of a previous page",
       `  --sort <field>[:asc|desc]  sortable: ${command.sortFields.join(", ")}`,
+      "                     omit the direction to keep this operation's own default order",
       "  --all              follow nextCursor to the end and print every item",
     );
   }
@@ -216,6 +217,6 @@ export const rootHelp = (): ReadonlyArray<string> => {
     "  0  the operation succeeded",
     "  1  the controller returned an error envelope",
     "  2  the command line was wrong; nothing was sent",
-    "  3  no credential, or the controller could not be reached",
+    "  3  no credential, no setup URL, or the controller could not be reached",
   ];
 };

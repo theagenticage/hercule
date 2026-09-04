@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -75,14 +75,34 @@ describe("hydra login", () => {
     expect(statSync(credentialsPath()).mode & 0o777).toBe(0o600);
   });
 
-  it("tightens an existing credential file that anyone could read", async () => {
+  it("never writes the key into an existing file anyone could read", async () => {
     writeFileSync(credentialsPath(), "{}", { mode: 0o644 });
+    const before = statSync(credentialsPath()).ino;
+
     const io = stubIo({ fetch: controller(), stdin: "hunter2" });
     await main(
       ["--home", home, "login", "http://c.test", "--username", "rogier", "--password-stdin"],
       io,
     );
-    expect(statSync(credentialsPath()).mode & 0o777).toBe(0o600);
+
+    const after = statSync(credentialsPath());
+    expect(after.mode & 0o777).toBe(0o600);
+    // A new inode: the key went into a fresh 0600 file that was renamed over the
+    // old one, so it was never held at 0644 waiting for a chmod.
+    expect(after.ino).not.toBe(before);
+    expect(JSON.parse(readFileSync(credentialsPath(), "utf8"))).toEqual({
+      url: "http://c.test",
+      apiKey: KEY,
+    });
+  });
+
+  it("leaves no temporary file behind", async () => {
+    const io = stubIo({ fetch: controller(), stdin: "hunter2" });
+    await main(
+      ["--home", home, "login", "http://c.test", "--username", "rogier", "--password-stdin"],
+      io,
+    );
+    expect(readdirSync(home)).toEqual(["credentials.json"]);
   });
 
   it("never prints the key, the bearer or the password", async () => {
@@ -138,6 +158,31 @@ describe("hydra login", () => {
       io,
     );
     expect(fetch.calls[1]?.body).toEqual({ name: "ci" });
+  });
+
+  it("reads its flags with the one parser: --flag=value, and a flag with no value", async () => {
+    const fetch = controller();
+    const io = stubIo({ fetch, stdin: "hunter2" });
+    expect(
+      await main(
+        [
+          "--home",
+          home,
+          "login",
+          "http://c.test",
+          "--username=rogier",
+          "--name=ci",
+          "--password-stdin",
+        ],
+        io,
+      ),
+    ).toBe(0);
+    expect(fetch.calls[0]?.body).toEqual({ username: "rogier", password: "hunter2" });
+    expect(fetch.calls[1]?.body).toEqual({ name: "ci" });
+
+    const dangling = stubIo({ fetch: controller(), stdin: "hunter2" });
+    expect(await main(["--home", home, "login", "http://c.test", "--username"], dangling)).toBe(2);
+    expect(dangling.stderr.join("\n")).toContain("--username needs a value");
   });
 
   it("prompts with echo off only on a terminal", async () => {

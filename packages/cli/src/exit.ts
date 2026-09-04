@@ -12,7 +12,10 @@ export const EXIT = {
   api: 1,
   /** The command line was wrong: unknown command, missing argument, bad value. */
   usage: 2,
-  /** The controller could not be reached, or no credential resolved. */
+  /**
+   * The controller could not be reached, or the local state this command needs
+   * is missing: no credential resolved, no setup URL written.
+   */
   connection: 3,
 } as const;
 

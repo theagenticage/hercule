@@ -145,8 +145,10 @@ const dispatch = async (argv: readonly string[], io: Io): Promise<number> => {
     }
     const url = readSetupUrl(argv, io.env);
     if (Result.isFailure(url)) {
+      // Nothing was sent, so this is not an API failure. It is the same class as
+      // a missing credential: the local file this command needs is not there.
       io.err(`hydra: ${url.failure}`);
-      return EXIT.api;
+      return EXIT.connection;
     }
     io.out(url.success);
     return EXIT.ok;

@@ -62,10 +62,10 @@ describe("parseArguments", () => {
     ).resolves.toBeDefined();
   });
 
-  it("parses --sort into a field and a direction, defaulting to asc", async () => {
+  it("parses --sort into a field and an optional direction", async () => {
+    // No direction means no direction: the operation's own default order stands.
     expect((await parseArguments(query, ["--sort", "name"], noStdin)).sort).toEqual({
       field: "name",
-      direction: "asc",
     });
     expect((await parseArguments(query, ["--sort", "name:desc"], noStdin)).sort).toEqual({
       field: "name",

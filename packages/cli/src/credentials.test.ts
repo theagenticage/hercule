@@ -39,9 +39,25 @@ describe("resolveCredential", () => {
     });
   });
 
-  it("lets HYDRA_API_URL point the file's key at another controller", () => {
+  it("never sends the file's key to a URL from the environment", () => {
     writeCredentials({ url: "http://file", apiKey: "from-file" });
-    expect(resolveCredential(home, { HYDRA_API_URL: "http://env" }).url).toBe("http://env");
+    expect(() => resolveCredential(home, { HYDRA_API_URL: "http://env" })).toThrow(CredentialError);
+    expect(() => resolveCredential(home, { HYDRA_API_URL: "http://env" })).toThrow(
+      /HYDRA_API_URL is set but HYDRA_TOKEN is not/,
+    );
+  });
+
+  it("refuses a lone HYDRA_API_URL even when there is no credential file at all", () => {
+    expect(() => resolveCredential(home, { HYDRA_API_URL: "http://env" })).toThrow(/HYDRA_TOKEN/);
+  });
+
+  it("ignores an empty HYDRA_API_URL, which is not a URL", () => {
+    writeCredentials({ url: "http://file", apiKey: "from-file" });
+    expect(resolveCredential(home, { HYDRA_API_URL: "" })).toEqual({
+      url: "http://file",
+      token: "from-file",
+      source: "file",
+    });
   });
 
   it("refuses the file outright inside a session", () => {
@@ -82,6 +98,10 @@ describe("resolveUrl", () => {
     writeCredentials({ url: "http://file", apiKey: "k" });
     expect(resolveUrl(home, { HYDRA_API_URL: "http://env" })).toBe("http://env");
     expect(resolveUrl(home, {})).toBe("http://file");
+  });
+
+  it("takes a lone HYDRA_API_URL, which carries no credential to leak", () => {
+    expect(resolveUrl(home, { HYDRA_API_URL: "http://env" })).toBe("http://env");
   });
 
   it("fails inside a session with no HYDRA_API_URL", () => {

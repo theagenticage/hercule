@@ -26,7 +26,8 @@ interface Page {
 }
 
 /**
- * Every item of a query operation, following `nextCursor` to the end.
+ * Every item of a query operation from `from` onwards, following `nextCursor`
+ * to the end. `from` absent starts at the beginning.
  *
  * A cursor that does not move is treated as the end rather than as an infinite
  * loop: a broken server should stall the caller once, not forever.
@@ -35,10 +36,11 @@ const readAll = async (
   client: HydraClient,
   command: Command,
   query: Record<string, unknown>,
+  from?: string,
 ): Promise<ReadonlyArray<Record<string, unknown>>> => {
   const call = (client as unknown as Callable)[command.entity]![command.verb]!;
   const items: Array<Record<string, unknown>> = [];
-  let cursor: string | undefined;
+  let cursor: string | undefined = from;
 
   for (;;) {
     const page = (await call({
@@ -121,8 +123,10 @@ export const execute = async (
   if (args.limit !== undefined) query["limit"] = args.limit;
   if (args.sort !== undefined) query["sort"] = args.sort;
 
+  // `--cursor` with `--all` is where the sweep starts, not something to drop: a
+  // caller who paged to a cursor and then asked for the rest gets the rest.
   if (args.all) {
-    return { kind: "items", items: await readAll(client, command, query) };
+    return { kind: "items", items: await readAll(client, command, query, args.cursor) };
   }
 
   if (args.cursor !== undefined) query["cursor"] = args.cursor;

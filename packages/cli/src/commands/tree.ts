@@ -12,7 +12,14 @@
  * JSON - and that is enough for every operation in the API. A deeper mapping
  * would be a schema-to-flags compiler nobody asked for.
  */
-import { OPERATIONS, api, type Method, type OperationId, type Requirement } from "@hydra/contract";
+import {
+  OPERATIONS,
+  api,
+  sortFieldsOf,
+  type Method,
+  type OperationId,
+  type Requirement,
+} from "@hydra/contract";
 import * as HttpApi from "effect/unstable/httpapi/HttpApi";
 
 /** How a flag's or positional's text becomes a value. */
@@ -158,14 +165,6 @@ const build = (): ReadonlyArray<Command> => {
   });
 
   return commands;
-};
-
-/** The literals `sort.field` accepts, read from the operation's own sort schema. */
-const sortFieldsOf = (query: unknown): ReadonlyArray<string> => {
-  const ast = (query as { ast?: Ast } | undefined)?.ast;
-  const sort = ast?.propertySignatures?.find((property) => String(property.name) === "sort")?.type;
-  const field = sort?.propertySignatures?.find((property) => String(property.name) === "field");
-  return field === undefined ? [] : (literalsOf(field.type) ?? []);
 };
 
 /** Every command, in the contract's own order. */

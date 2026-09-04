@@ -61,9 +61,9 @@ describe("hydra setup-url", () => {
     expect(io.stderr).toEqual([]);
   });
 
-  it("reports an absent file on stderr and exits 1", async () => {
+  it("reports an absent file on stderr as missing local state, not as an API failure", async () => {
     const { io, run } = cli();
-    expect(await run("setup-url")).toBe(1);
+    expect(await run("setup-url")).toBe(3);
     expect(io.stdout).toEqual([]);
     expect(io.stderr[0]).toContain(join(home, "setup-url"));
   });
@@ -237,12 +237,12 @@ describe("running an operation", () => {
     const io = stubIo({
       env: { HYDRA_TOKEN: "t", HYDRA_API_URL: "http://controller.test" },
       fetch,
-      stdin: "old-one\nnew-one\n",
+      stdin: "old-password\nnew-password\n",
     });
     expect(
       await main(["--home", home, "user", "setPassword", "--current-stdin", "--next-stdin"], io),
     ).toBe(0);
-    expect(fetch.calls[0]?.body).toEqual({ current: "old-one", next: "new-one" });
+    expect(fetch.calls[0]?.body).toEqual({ current: "old-password", next: "new-password" });
     expect(io.stdout).toEqual(["ok"]);
   });
 
@@ -286,11 +286,45 @@ describe("paging", () => {
     expect(fetch.calls.length).toBe(3);
   });
 
+  it("starts the --all sweep at --cursor instead of discarding it", async () => {
+    const fetch = stubFetch((request) => {
+      const cursor = request.query.get("cursor");
+      if (cursor === null) return page([profile("aaaaaaa1", "one")], "c2");
+      if (cursor === "c2") return page([profile("aaaaaaa2", "two")], "c3");
+      return page([profile("aaaaaaa3", "three")]);
+    });
+    const io = stubIo({
+      env: { HYDRA_TOKEN: "t", HYDRA_API_URL: "http://controller.test" },
+      fetch,
+    });
+    expect(
+      await main(["--home", home, "profile", "query", "--all", "--cursor", "c2", "--json"], io),
+    ).toBe(0);
+    expect(JSON.parse(io.stdout.join("\n"))).toEqual({
+      items: [profile("aaaaaaa2", "two"), profile("aaaaaaa3", "three")],
+    });
+    expect(fetch.calls[0]?.query.get("cursor")).toBe("c2");
+    expect(fetch.calls.length).toBe(2);
+  });
+
   it("passes --limit and --sort through", async () => {
     const { fetch, run } = cli(() => ({ items: [] }));
     await run("profile", "query", "--limit", "2", "--sort", "name:desc");
     expect(fetch.calls[0]?.query.get("limit")).toBe("2");
+    expect(fetch.calls[0]?.query.get("sort")).toBe("name:desc");
     expect(fetch.calls[0]?.path).toBe("/api/v1/profiles");
+  });
+
+  it("leaves the direction out when --sort names only a field", async () => {
+    const { fetch, run } = cli(() => ({ items: [] }));
+    await run("profile", "query", "--sort", "name");
+    expect(fetch.calls[0]?.query.get("sort")).toBe("name");
+  });
+
+  it("rejects a sort direction that is neither asc nor desc", async () => {
+    const { io, run } = cli();
+    expect(await run("profile", "query", "--sort", "name:sideways")).toBe(2);
+    expect(io.stderr.join("\n")).toContain("is not asc or desc");
   });
 
   it("rejects a sort field the operation does not declare", async () => {

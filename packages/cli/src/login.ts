@@ -12,9 +12,11 @@
  * CLI never prompts" (spec 11 section 6.1). A bare `--password` flag does not
  * exist: it would sit in `ps` and in shell history.
  */
-import { chmodSync, mkdirSync, writeFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import { mkdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { createClient, type HydraClient } from "@hydra/client-core";
 import { credentialsFileIn } from "@hydra/home";
+import { tokenize } from "./commands/args";
 import { UsageError } from "./exit";
 import type { Io } from "./io";
 
@@ -56,14 +58,30 @@ const normalizeUrl = (text: string): string => {
   return text.replace(/\/+$/, "");
 };
 
-/** Write `{ url, apiKey }` where only this OS user can read it. */
+/**
+ * Write `{ url, apiKey }` where only this OS user can read it.
+ *
+ * Never into the target file: `writeFileSync`'s `mode` applies only when it
+ * creates the file, so writing over an existing world-readable
+ * `credentials.json` would hold the new API key at the old mode until a
+ * follow-up `chmod`, and any local process reading in that window gets the key.
+ * A fresh file in the same directory is 0600 from its first byte, and renaming
+ * it over the target replaces the credential atomically.
+ */
 const writeCredentials = (home: string, url: string, apiKey: string): string => {
   const path = credentialsFileIn(home);
   mkdirSync(home, { recursive: true, mode: 0o700 });
-  writeFileSync(path, `${JSON.stringify({ url, apiKey }, null, 2)}\n`, { mode: 0o600 });
-  // `writeFileSync`'s mode applies only when it creates the file, so an
-  // already-existing credentials.json with looser permissions is tightened here.
-  chmodSync(path, 0o600);
+  const temporary = `${path}.${randomUUID()}.tmp`;
+  try {
+    writeFileSync(temporary, `${JSON.stringify({ url, apiKey }, null, 2)}\n`, {
+      mode: 0o600,
+      flag: "wx",
+    });
+    renameSync(temporary, path);
+  } catch (error) {
+    rmSync(temporary, { force: true });
+    throw error;
+  }
   return path;
 };
 
@@ -78,25 +96,15 @@ export const login = async (
   let passwordStdin = false;
   let json = false;
 
-  for (let i = 0; i < tokens.length; i++) {
-    const token = tokens[i]!;
-    const equals = token.indexOf("=");
-    const flag = token.startsWith("--")
-      ? equals === -1
-        ? token.slice(2)
-        : token.slice(2, equals)
-      : undefined;
-    const value = (): string => {
-      if (equals !== -1) return token.slice(equals + 1);
-      const next = tokens[++i];
-      if (next === undefined) throw new UsageError(`--${flag} needs a value`, "login");
-      return next;
-    };
-
-    if (flag === undefined) {
+  for (const token of tokenize(tokens, "login")) {
+    if (token.kind === "positional") {
       if (url !== undefined) throw new UsageError("login takes one argument: <url>", "login");
-      url = normalizeUrl(token);
-    } else if (flag === "username") username = value();
+      url = normalizeUrl(token.text);
+      continue;
+    }
+    const { name: flag, value } = token;
+
+    if (flag === "username") username = value();
     else if (flag === "name") name = value();
     else if (flag === "password-stdin") passwordStdin = true;
     else if (flag === "json") json = true;

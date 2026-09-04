@@ -39,7 +39,8 @@ export const isStdinOnly = (id: string, field: string): boolean =>
 
 export interface SortArgument {
   readonly field: string;
-  readonly direction: "asc" | "desc";
+  /** Absent when `--sort` named no direction: the operation's own default order stands. */
+  readonly direction?: "asc" | "desc";
 }
 
 export interface Arguments {
@@ -96,19 +97,80 @@ const set = (into: Record<string, unknown>, field: Field, value: unknown): void 
   into[field.name] = Array.isArray(existing) ? [...(existing as Array<unknown>), value] : [value];
 };
 
+/**
+ * `--sort <field>[:<asc|desc>]`.
+ *
+ * A field with no direction leaves the direction unset rather than assuming
+ * `asc`: the operation declares its own default order, and inventing one here
+ * would silently override it.
+ */
 const parseSort = (text: string, command: Command, help: string): SortArgument => {
-  const [field = "", direction = "asc"] = text.split(":");
+  const colon = text.indexOf(":");
+  const field = colon === -1 ? text : text.slice(0, colon);
   if (!command.sortFields.includes(field)) {
     throw new UsageError(
       `--sort: ${field} is not sortable; ${command.id} sorts on ${command.sortFields.join(", ")}`,
       help,
     );
   }
+  if (colon === -1) return { field };
+  const direction = text.slice(colon + 1);
   if (direction !== "asc" && direction !== "desc") {
     throw new UsageError(`--sort: ${direction} is not asc or desc`, help);
   }
   return { field, direction };
 };
+
+/**
+ * One token of a command line: a bare positional, or a flag.
+ *
+ * `value()` is what reads a flag's argument, from `--flag=value` or from the
+ * next token; calling it on a flag that has neither is the usage error. A flag
+ * that takes no value simply never calls it.
+ */
+export type Token =
+  | { readonly kind: "positional"; readonly text: string }
+  | {
+      readonly kind: "flag";
+      readonly name: string;
+      /** The `value` of `--name=value`, or `undefined` when the token had no `=`. */
+      readonly inline: string | undefined;
+      readonly value: () => string;
+    };
+
+/**
+ * The one command-line token loop, shared by every command.
+ *
+ * It knows only the shape of a token, never what any flag means: the caller
+ * decides that. `value()` advances the loop past the token it consumed, so it
+ * must be called before the generator is asked for the next token - which is
+ * what a `for...of` body does naturally.
+ */
+export function* tokenize(tokens: ReadonlyArray<string>, help: string): Generator<Token> {
+  for (let i = 0; i < tokens.length; i++) {
+    const token = tokens[i]!;
+
+    if (!token.startsWith("--")) {
+      yield { kind: "positional", text: token };
+      continue;
+    }
+
+    const equals = token.indexOf("=");
+    const name = equals === -1 ? token.slice(2) : token.slice(2, equals);
+    const inline = equals === -1 ? undefined : token.slice(equals + 1);
+    yield {
+      kind: "flag",
+      name,
+      inline,
+      value: () => {
+        if (inline !== undefined) return inline;
+        const next = tokens[++i];
+        if (next === undefined) throw new UsageError(`--${name} needs a value`, help);
+        return next;
+      },
+    };
+  }
+}
 
 /**
  * Parse the tokens after `hydra <entity> <verb>`.
@@ -136,29 +198,12 @@ export const parseArguments = async (
   let json = false;
   let setupToken: string | undefined;
 
-  const take = (index: number, flag: string): [string, number] => {
-    const value = tokens[index + 1];
-    if (value === undefined) throw new UsageError(`${flag} needs a value`, help);
-    return [value, index + 1];
-  };
-
-  for (let i = 0; i < tokens.length; i++) {
-    const token = tokens[i]!;
-
-    if (!token.startsWith("--")) {
-      positionals.push(token);
+  for (const token of tokenize(tokens, help)) {
+    if (token.kind === "positional") {
+      positionals.push(token.text);
       continue;
     }
-
-    const equals = token.indexOf("=");
-    const name = equals === -1 ? token.slice(2) : token.slice(2, equals);
-    const inline = equals === -1 ? undefined : token.slice(equals + 1);
-    const value = (): string => {
-      if (inline !== undefined) return inline;
-      const [taken, next] = take(i, `--${name}`);
-      i = next;
-      return taken;
-    };
+    const { name, inline, value } = token;
 
     if (name === "json") {
       json = true;
