@@ -16,6 +16,7 @@ import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import {
   unauthenticated,
@@ -23,8 +24,10 @@ import {
   type Unauthenticated,
   type Validation,
 } from "@hydra/contract";
-import { CurrentActor } from "../actor";
+import { CurrentActor, USER_ACTOR } from "../actor";
 import { Credentials, hashToken, mintToken } from "../credentials";
+import { withTransaction } from "../db";
+import { AuditLog } from "../events";
 import { Users, verifyPassword } from "../users";
 
 /** What login takes. The password is never held beyond the verify. */
@@ -46,8 +49,10 @@ const ABSENT_USER_HASH =
 const WRONG = "the username or password is incorrect";
 
 const make = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient;
   const users = yield* Users;
   const credentials = yield* Credentials;
+  const audit = yield* AuditLog;
 
   return {
     /** Verifies the password and mints the 30-day rolling bearer token. */
@@ -67,15 +72,31 @@ const make = Effect.gen(function* () {
           }),
         );
         if (Option.isNone(user) || !matches) {
-          // TODO(#57 WP5): audit auth.login.failed
+          // The username is the only thing the attempt carried that is safe to
+          // keep: the password is never written anywhere, failed attempt
+          // included (spec 13 section 11).
+          yield* audit.append({
+            kind: "auth.login.failed",
+            actor: USER_ACTOR,
+            payload: { username: input.username },
+          });
           return yield* Effect.fail(unauthenticated(WRONG));
         }
 
         const token = mintToken();
-        const record = yield* credentials.issueLoginToken(user.value.id, hashToken(token));
-        // TODO(#57 WP5): audit auth.login.succeeded
+        const record = yield* withTransaction(
+          Effect.gen(function* () {
+            const issued = yield* credentials.issueLoginToken(user.value.id, hashToken(token));
+            yield* audit.append({
+              kind: "auth.login.succeeded",
+              actor: USER_ACTOR,
+              payload: { username: input.username },
+            });
+            return issued;
+          }),
+        );
         return { token, expiresAt: record.expiresAt };
-      }),
+      }).pipe(Effect.provideService(SqlClient.SqlClient, sql)),
 
     /**
      * Revokes the login bearer token the call was made with. An API key is not
@@ -93,10 +114,14 @@ const make = Effect.gen(function* () {
             ),
           );
         }
-        yield* credentials.revokeLoginToken(actor.credential.tokenHash);
-        // TODO(#57 WP5): audit auth.logout
-        return {};
-      }),
+        return yield* withTransaction(
+          Effect.gen(function* () {
+            yield* credentials.revokeLoginToken(actor.credential.tokenHash);
+            yield* audit.append({ kind: "auth.logout", actor: USER_ACTOR, payload: {} });
+            return {};
+          }),
+        );
+      }).pipe(Effect.provideService(SqlClient.SqlClient, sql)),
   };
 });
 
@@ -105,4 +130,8 @@ export class Auth extends Context.Service<Auth, Effect.Success<typeof make>>()(
   "hydra/controller/auth/Auth",
 ) {}
 
-export const AuthLayer: Layer.Layer<Auth, never, Users | Credentials> = Layer.effect(Auth)(make);
+export const AuthLayer: Layer.Layer<
+  Auth,
+  never,
+  SqlClient.SqlClient | Users | Credentials | AuditLog
+> = Layer.effect(Auth)(make);

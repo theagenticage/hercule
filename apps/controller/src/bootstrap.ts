@@ -32,12 +32,14 @@ import {
   type DatabaseError,
   type SchemaVersionError,
 } from "./db";
+import { AuditLog, AuditLogLayer } from "./events";
 import { ControllerIdentity, controllerIdentityLayer } from "./identity";
 import { Credentials, CredentialsLayer, hashToken, mintToken } from "./credentials";
 import { Users, UsersLayer } from "./users";
 import { PermissionProfilesLayer, type GrantsError, type PermissionProfiles } from "./permissions";
 import {
   masterKeyLayer,
+  Secrets,
   secretsLayer,
   type MasterKeyBackend,
   type MasterKeyError,
@@ -158,6 +160,8 @@ export interface BootOptions {
 export type ControllerServices =
   | SqlClient.SqlClient
   | ControllerIdentity
+  | Secrets
+  | AuditLog
   | Settings
   | PermissionProfiles
   | Users
@@ -188,14 +192,19 @@ export const bootWith = <A, E>(
     // there is anything for a pre-migration copy to preserve (spec 15 section 8).
     const databaseExisted = existsSync(paths.databaseFile);
 
+    // The secrets repository is merged out rather than only provided inwards:
+    // `secret.*` is a public operation, so what runs after the boot needs it.
     const repositories = Layer.mergeAll(
-      controllerIdentityLayer.pipe(
-        Layer.provide(secretsLayer.pipe(Layer.provide(masterKeyLayer(options.masterKeyBackend)))),
-      ),
+      controllerIdentityLayer,
       SettingsLayer,
       PermissionProfilesLayer,
       UsersLayer,
       CredentialsLayer,
+      AuditLogLayer,
+    ).pipe(
+      Layer.provideMerge(
+        secretsLayer.pipe(Layer.provide(masterKeyLayer(options.masterKeyBackend))),
+      ),
     );
 
     const steps = Effect.gen(function* () {

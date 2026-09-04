@@ -14,8 +14,10 @@ import * as BunHttpServer from "@effect/platform-bun/BunHttpServer";
 import { BootstrapConfig } from "./config";
 import { AuthLayer } from "./auth";
 import { bootWith, type BootError, type BootOutcome } from "./bootstrap";
+import { ApiKeysLayer } from "./credentials";
 import { perimeterWarning, serve } from "./http";
 import { SetupLayer } from "./setup";
+import { UserLayer } from "./users";
 
 export { boot, bootWith, hashToken, setupUrl } from "./bootstrap";
 export type { BootError, BootOptions, BootOutcome, ControllerServices } from "./bootstrap";
@@ -83,7 +85,7 @@ const listen = (outcome: BootOutcome) =>
 
     yield* untilStopped;
     console.log("Stopping Hydra.");
-  }).pipe(Effect.provide(Layer.mergeAll(SetupLayer, AuthLayer)));
+  }).pipe(Effect.provide(Layer.mergeAll(SetupLayer, AuthLayer, ApiKeysLayer, UserLayer)));
 
 export async function run(argv: readonly string[]): Promise<void> {
   const program = bootWith({ argv, env: process.env }, (outcome) =>

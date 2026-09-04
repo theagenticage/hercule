@@ -34,12 +34,18 @@ import {
   OPERATIONS,
   SetupToken,
   unauthenticated,
-  type Grant,
   type Requirement,
 } from "@hydra/contract";
-import { CurrentActor, type Actor } from "../actor";
+import { CurrentActor, grantCheck, type Actor } from "../actor";
 import { Credentials, hashToken } from "../credentials";
 import { Setup } from "../setup";
+
+/**
+ * The check itself lives beside the actor, because the service methods run the
+ * same one for in-process callers (spec 11 section 1.5). It is re-exported here
+ * so the transport's own boundary still names every gate it applies.
+ */
+export { grantCheck };
 
 /** What a caller with no usable credential is told; never why (spec 13 section 4). */
 const NO_CREDENTIAL = "this operation needs a credential";
@@ -49,25 +55,6 @@ export const operationIdOf = (options: {
   readonly group: HttpApiGroup.Top;
   readonly endpoint: HttpApiEndpoint.Top;
 }): string => `${options.group.identifier}.${options.endpoint.identifier}`;
-
-/**
- * Whether this actor may reach an operation with this requirement.
- *
- * The user actor has full parity: no profile applies, so it passes every grant
- * (spec 13 section 6.3). Session actors are checked against their profile and
- * run and plugin actors are ungated - neither exists yet, and both are a branch
- * here rather than a rewrite when they do.
- */
-export const grantCheck = (requirement: Requirement, actor: Actor): Grant | undefined => {
-  switch (requirement) {
-    case "unauthenticated":
-    case "setup-token":
-    case "authenticated":
-      return undefined;
-    default:
-      return actor._tag === "user" ? undefined : requirement;
-  }
-};
 
 /**
  * The requirement for one operation. An endpoint the table does not name cannot

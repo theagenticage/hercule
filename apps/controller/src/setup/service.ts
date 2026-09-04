@@ -24,9 +24,11 @@ import * as Layer from "effect/Layer";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import { invalidState, type InvalidState } from "@hydra/contract";
+import { USER_ACTOR } from "../actor";
 import { HydraHome } from "../config";
 import { Credentials, hashToken, mintToken } from "../credentials";
 import { withTransaction } from "../db";
+import { AuditLog } from "../events";
 import { Settings, type SettingError } from "../settings";
 import { hashPassword, PasswordCost, Users } from "../users";
 
@@ -42,6 +44,7 @@ const make = Effect.gen(function* () {
   const users = yield* Users;
   const credentials = yield* Credentials;
   const settings = yield* Settings;
+  const audit = yield* AuditLog;
   const paths = yield* HydraHome;
   const cost = yield* PasswordCost;
 
@@ -93,7 +96,11 @@ const make = Effect.gen(function* () {
               UPDATE setup_state SET completed_at = ${at}, token_hash = NULL WHERE singleton = 1
             `;
             yield* settings.set("user", "timezone", input.timezone);
-            // TODO(#57 WP5): audit setup.completed
+            yield* audit.append({
+              kind: "setup.completed",
+              actor: USER_ACTOR,
+              payload: { username: input.username },
+            });
             return created;
           }),
         );
@@ -125,5 +132,5 @@ export class Setup extends Context.Service<Setup, Effect.Success<typeof make>>()
 export const SetupLayer: Layer.Layer<
   Setup,
   never,
-  SqlClient.SqlClient | Users | Credentials | Settings | HydraHome
+  SqlClient.SqlClient | Users | Credentials | Settings | HydraHome | AuditLog
 > = Layer.effect(Setup)(make);

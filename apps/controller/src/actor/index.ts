@@ -12,6 +12,17 @@
  * tickets and widen this union; nothing here is restructured when they do.
  */
 import * as Context from "effect/Context";
+import * as Effect from "effect/Effect";
+import {
+  forbidden,
+  OPERATIONS,
+  unauthenticated,
+  type Forbidden,
+  type Grant,
+  type OperationId,
+  type Requirement,
+  type Unauthenticated,
+} from "@hydra/contract";
 
 /** Which user credential was presented, and the hash that resolved it. */
 export interface PresentedCredential {
@@ -49,3 +60,54 @@ export const CurrentActor = Context.Reference<Actor>("hydra/controller/actor/Cur
  * identity, and the other actor kinds carry their id (`session:<id>`).
  */
 export const USER_ACTOR = "user";
+
+/**
+ * Whether this actor may reach an operation with this requirement, and which
+ * grant it is missing if it may not.
+ *
+ * The user actor has full parity: no profile applies, so it passes every grant
+ * (spec 13 section 6.3). Session actors are checked against their profile and
+ * run and plugin actors are ungated - neither exists yet, and both are a branch
+ * here rather than a rewrite when they do.
+ *
+ * The transport middleware runs this before the payload is decoded and the
+ * service method runs it again for in-process callers (spec 11 section 1.5),
+ * which is why it lives beside the actor rather than inside either.
+ */
+export const grantCheck = (requirement: Requirement, actor: Actor): Grant | undefined => {
+  switch (requirement) {
+    case "unauthenticated":
+    case "setup-token":
+    case "authenticated":
+      return undefined;
+    default:
+      return actor._tag === "user" ? undefined : requirement;
+  }
+};
+
+/**
+ * The static grant check as a service method runs it (ADR 0031: enforcement
+ * lives inside the method, not in the handler). Answers with the current actor,
+ * which is what the method stamps its mutation with.
+ *
+ * v1 authenticates one population, so an in-process caller with no actor is
+ * told it needs a credential rather than acting as somebody.
+ */
+export const requireGrant = (id: OperationId): Effect.Effect<Actor, Forbidden> =>
+  Effect.flatMap(CurrentActor, (actor) => {
+    const missing = grantCheck(OPERATIONS[id].requires, actor);
+    return missing === undefined ? Effect.succeed(actor) : Effect.fail(forbidden(missing));
+  });
+
+/**
+ * The same check for an operation that acts on the caller's own rows, and so
+ * needs a user rather than an actor of any kind.
+ */
+export const currentUser = (
+  id: OperationId,
+): Effect.Effect<UserActor, Forbidden | Unauthenticated> =>
+  Effect.flatMap(requireGrant(id), (actor) =>
+    actor._tag === "user"
+      ? Effect.succeed(actor)
+      : Effect.fail(unauthenticated("this operation needs a credential")),
+  );

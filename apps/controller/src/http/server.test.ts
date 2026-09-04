@@ -11,11 +11,12 @@ import * as BunHttpServer from "@effect/platform-bun/BunHttpServer";
 import { homePaths } from "@hydra/home";
 import { AuthLayer } from "../auth";
 import { HydraHome } from "../config";
-import { CredentialsLayer, hashToken } from "../credentials";
+import { ApiKeysLayer, CredentialsLayer, hashToken } from "../credentials";
 import { TestDatabase } from "../db/testing";
+import { AuditLog, AuditLogLayer, type AuditKind, type AuditRow } from "../events";
 import { SettingsLayer } from "../settings";
 import { SetupLayer } from "../setup";
-import { PasswordCost, TEST_PASSWORD_PARAMS, UsersLayer } from "../users";
+import { PasswordCost, TEST_PASSWORD_PARAMS, UserLayer, UsersLayer } from "../users";
 import { serve } from "./server";
 
 const SETUP_TOKEN = "a-setup-token";
@@ -33,8 +34,8 @@ afterEach(() => {
 });
 
 const services = (at: string) =>
-  Layer.mergeAll(SetupLayer, AuthLayer).pipe(
-    Layer.provideMerge(Layer.mergeAll(UsersLayer, CredentialsLayer, SettingsLayer)),
+  Layer.mergeAll(SetupLayer, AuthLayer, ApiKeysLayer, UserLayer).pipe(
+    Layer.provideMerge(Layer.mergeAll(UsersLayer, CredentialsLayer, SettingsLayer, AuditLogLayer)),
     Layer.provideMerge(TestDatabase),
     Layer.provideMerge(Layer.succeed(HydraHome, homePaths(at, join(at, "data")))),
   );
@@ -51,7 +52,12 @@ const baseUrl = Effect.map(HttpServer.HttpServer, (server) => {
  * passes through in production is in this stack; only the database (memory) and
  * the port (ephemeral) differ.
  */
-const withServer = (body: (base: string) => Promise<void>): Promise<void> =>
+const withServer = (
+  body: (
+    base: string,
+    audit: (kind: AuditKind) => Promise<ReadonlyArray<AuditRow>>,
+  ) => Promise<void>,
+): Promise<void> =>
   Effect.runPromise(
     Effect.scoped(
       Effect.gen(function* () {
@@ -60,7 +66,11 @@ const withServer = (body: (base: string) => Promise<void>): Promise<void> =>
                    VALUES (1, ${hashToken(SETUP_TOKEN)}, NULL)`;
         yield* serve;
         const base = yield* baseUrl;
-        yield* Effect.promise(() => body(base));
+        // The log this database holds, read the way anything else reads it: a
+        // request's audit row is asserted through the same service that wrote it.
+        const log = yield* AuditLog;
+        const audit = (kind: AuditKind) => Effect.runPromise(Effect.orDie(log.listByKind(kind)));
+        yield* Effect.promise(() => body(base, audit));
       }),
     ).pipe(
       Effect.provide(
@@ -80,6 +90,15 @@ const post = (base: string, path: string, body: unknown, token?: string): Promis
       ...(token === undefined ? {} : { authorization: `Bearer ${token}` }),
     },
     body: typeof body === "string" ? body : JSON.stringify(body),
+  });
+
+const get = (base: string, path: string, token: string): Promise<Response> =>
+  fetch(`${base}${path}`, { headers: { authorization: `Bearer ${token}` } });
+
+const del = (base: string, path: string, token: string): Promise<Response> =>
+  fetch(`${base}${path}`, {
+    method: "DELETE",
+    headers: { authorization: `Bearer ${token}` },
   });
 
 const completeSetup = async (base: string): Promise<string> => {
@@ -209,6 +228,94 @@ describe("the order of the checks", () => {
       const response = await fetch(`${base}/`);
       expect(response.status).toBe(404);
       expect(await response.json()).toMatchObject({ error: { code: "not_found" } });
+    });
+  });
+});
+
+describe("API keys over the wire", () => {
+  it("mints a key, lists it without its token, uses it, and revokes it", async () => {
+    await withServer(async (base, audit) => {
+      const bearer = await completeSetup(base);
+
+      const minted = await post(base, "/api/v1/api-keys", { name: "laptop" }, bearer);
+      expect(minted.status).toBe(200);
+      const key = (await minted.json()) as { id: string; name: string; token: string };
+      expect(key.name).toBe("laptop");
+
+      const listed = await get(base, "/api/v1/api-keys", bearer);
+      expect(listed.status).toBe(200);
+      const page = (await listed.json()) as { items: ReadonlyArray<Record<string, unknown>> };
+      expect(page.items).toHaveLength(1);
+      expect(page.items[0]).toMatchObject({ id: key.id, name: "laptop" });
+      expect(JSON.stringify(page)).not.toContain(key.token);
+
+      // The key authenticates in its own right, without the login bearer.
+      expect((await get(base, "/api/v1/api-keys", key.token)).status).toBe(200);
+
+      const revoked = await del(base, `/api/v1/api-keys/${key.id}`, bearer);
+      expect(revoked.status).toBe(200);
+      expect((await get(base, "/api/v1/api-keys", key.token)).status).toBe(401);
+
+      const again = await del(base, `/api/v1/api-keys/${key.id}`, bearer);
+      expect(again.status).toBe(404);
+
+      expect(await audit("auth.apiKey.minted")).toMatchObject([
+        { actor: "user", payload: { id: key.id, name: "laptop" } },
+      ]);
+      expect(await audit("auth.apiKey.revoked")).toMatchObject([
+        { actor: "user", payload: { id: key.id } },
+      ]);
+    });
+  });
+
+  it("refuses an id that is not a canonical uuid before it looks for a key", async () => {
+    await withServer(async (base) => {
+      const bearer = await completeSetup(base);
+      const response = await del(base, "/api/v1/api-keys/not-an-id", bearer);
+      expect(response.status).toBe(400);
+      expect(await response.json()).toMatchObject({ error: { code: "validation" } });
+    });
+  });
+});
+
+describe("changing the password over the wire", () => {
+  it("takes the new password afterwards and refuses the old one", async () => {
+    await withServer(async (base, audit) => {
+      const bearer = await completeSetup(base);
+      const next = "an entirely different passphrase";
+
+      const wrong = await post(base, "/api/v1/user/password", { current: "guess", next }, bearer);
+      expect(wrong.status).toBe(400);
+      expect(await wrong.json()).toMatchObject({
+        error: { code: "validation", details: { issues: [{ path: ["current"] }] } },
+      });
+
+      const changed = await post(
+        base,
+        "/api/v1/user/password",
+        { current: PASSWORD, next },
+        bearer,
+      );
+      expect(changed.status).toBe(200);
+
+      const old = await post(base, "/api/v1/auth/login", {
+        username: "rogier",
+        password: PASSWORD,
+      });
+      expect(old.status).toBe(401);
+      const fresh = await post(base, "/api/v1/auth/login", { username: "rogier", password: next });
+      expect(fresh.status).toBe(200);
+
+      // The credentials issued under the old password still work: spec 13
+      // section 4 asks for no revocation, and a rotation is not a compromise.
+      expect((await get(base, "/api/v1/api-keys", bearer)).status).toBe(200);
+
+      expect(await audit("user.passwordChanged")).toMatchObject([{ actor: "user", payload: {} }]);
+      expect(await audit("setup.completed")).toMatchObject([{ actor: "user" }]);
+      expect(await audit("auth.login.succeeded")).toHaveLength(1);
+      expect(await audit("auth.login.failed")).toMatchObject([
+        { actor: "user", payload: { username: "rogier" } },
+      ]);
     });
   });
 });

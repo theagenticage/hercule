@@ -12,4 +12,5 @@ export {
   type Page,
   type PageRequest,
 } from "./repository";
+export { ApiKeys, ApiKeysLayer, type ApiKeyPage, type QueryInput } from "./service";
 export { hashToken, mintToken } from "./token";

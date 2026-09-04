@@ -30,7 +30,9 @@ import {
   type OperationId,
 } from "@hydra/contract";
 import { Auth } from "../auth";
+import { ApiKeys } from "../credentials";
 import { Setup } from "../setup";
+import { User } from "../users";
 
 const API_ERRORS = [
   Unauthenticated,
@@ -84,17 +86,21 @@ const authRoutes = HttpApiBuilder.group(api, "auth", (handlers) =>
   }),
 );
 
-// TODO(#57 WP6): apiKey.query/create/revoke and user.setPassword
 const apiKeyRoutes = HttpApiBuilder.group(api, "apiKey", (handlers) =>
-  handlers.handleAll({
-    query: () => pending("apiKey.query"),
-    create: () => pending("apiKey.create"),
-    revoke: () => pending("apiKey.revoke"),
+  Effect.gen(function* () {
+    const apiKeys = yield* ApiKeys;
+    return handlers
+      .handle("query", ({ query }) => operation(apiKeys.query(query)))
+      .handle("create", ({ payload }) => operation(apiKeys.create(payload)))
+      .handle("revoke", ({ params }) => operation(apiKeys.revoke(params)));
   }),
 );
 
 const userRoutes = HttpApiBuilder.group(api, "user", (handlers) =>
-  handlers.handleAll({ setPassword: () => pending("user.setPassword") }),
+  Effect.gen(function* () {
+    const user = yield* User;
+    return handlers.handle("setPassword", ({ payload }) => operation(user.setPassword(payload)));
+  }),
 );
 
 // TODO(#57 WP7): settings.read/update and profile.query/read/create/update/delete

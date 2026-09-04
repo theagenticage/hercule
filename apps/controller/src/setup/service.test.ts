@@ -8,6 +8,7 @@ import { homePaths } from "@hydra/home";
 import { HydraHome } from "../config";
 import { Credentials, CredentialsLayer, hashToken } from "../credentials";
 import { TestDatabase } from "../db/testing";
+import { AuditLog, AuditLogLayer } from "../events";
 import { Settings, SettingsLayer } from "../settings";
 import { PasswordCost, TEST_PASSWORD_PARAMS, Users, UsersLayer, verifyPassword } from "../users";
 import { Setup, SetupLayer } from "./service";
@@ -25,7 +26,7 @@ afterEach(() => {
   rmSync(home, { recursive: true, force: true });
 });
 
-type Deps = Setup | Users | Credentials | Settings | SqlClient.SqlClient;
+type Deps = Setup | Users | Credentials | Settings | AuditLog | SqlClient.SqlClient;
 
 const run = <A, E>(effect: Effect.Effect<A, E, Deps>) =>
   Effect.runPromise(
@@ -38,7 +39,9 @@ const run = <A, E>(effect: Effect.Effect<A, E, Deps>) =>
     }).pipe(
       Effect.provide(
         SetupLayer.pipe(
-          Layer.provideMerge(Layer.mergeAll(UsersLayer, CredentialsLayer, SettingsLayer)),
+          Layer.provideMerge(
+            Layer.mergeAll(UsersLayer, CredentialsLayer, SettingsLayer, AuditLogLayer),
+          ),
           Layer.provideMerge(TestDatabase),
           Layer.provideMerge(Layer.succeed(HydraHome, homePaths(home, join(home, "data")))),
         ),

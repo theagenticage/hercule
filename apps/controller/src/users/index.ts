@@ -8,3 +8,4 @@ export {
   type PasswordParams,
 } from "./password";
 export { Users, UsersLayer, type UserRecord } from "./repository";
+export { User, UserLayer, type SetPasswordInput } from "./service";

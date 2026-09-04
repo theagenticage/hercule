@@ -3,15 +3,16 @@ import { Effect, Layer, Option } from "effect";
 import { CurrentActor, type Actor } from "../actor";
 import { Credentials, CredentialsLayer, hashToken } from "../credentials";
 import { TestDatabase } from "../db/testing";
+import { AuditLog, AuditLogLayer } from "../events";
 import { hashPassword, TEST_PASSWORD_PARAMS, Users, UsersLayer } from "../users";
 import { Auth, AuthLayer } from "./service";
 
 const PASSWORD = "correct horse battery staple";
 
-type Deps = Auth | Users | Credentials;
+type Deps = Auth | Users | Credentials | AuditLog;
 
 const layer = AuthLayer.pipe(
-  Layer.provideMerge(Layer.mergeAll(UsersLayer, CredentialsLayer)),
+  Layer.provideMerge(Layer.mergeAll(UsersLayer, CredentialsLayer, AuditLogLayer)),
   Layer.provideMerge(TestDatabase),
 );
 
