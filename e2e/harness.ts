@@ -10,7 +10,6 @@
  * inherits stdio: a test has to read what the command printed.
  */
 import { mkdtempSync, rmSync } from "node:fs";
-import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -48,19 +47,14 @@ export interface Ran {
   readonly stderr: string;
 }
 
-/** A port nothing is listening on, handed over by the kernel. */
-export async function freePort(): Promise<number> {
-  return await new Promise<number>((resolve, reject) => {
-    const probe = createServer();
-    probe.on("error", reject);
-    probe.listen(0, "127.0.0.1", () => {
-      const address = probe.address();
-      const port = typeof address === "object" && address !== null ? address.port : 0;
-      probe.close(() => {
-        resolve(port);
-      });
-    });
-  });
+/**
+ * A port to try. Nothing reserves it: `bind.port` rejects 0, so the kernel
+ * cannot hand the controller an ephemeral port, and probing one by binding and
+ * closing would only move the race. `startController` treats a bind failure as
+ * an ordinary outcome and picks another number instead.
+ */
+function candidatePort(): number {
+  return 20_000 + Math.floor(Math.random() * 40_000);
 }
 
 /** A temporary Hydra Home, removed when the suite ends. */
@@ -77,6 +71,8 @@ export function temporaryHome(): { home: string; remove: () => void } {
 /** A controller process that is up and answering. */
 export interface Controller {
   readonly url: string;
+  /** The port it bound, so a restart can ask for the same one. */
+  readonly port: number;
   /** Everything the process has printed on stdout and stderr, in order. */
   output: () => string;
   /** SIGTERM, then the exit code it left with. */
@@ -84,23 +80,48 @@ export interface Controller {
 }
 
 /**
- * Start `hydra serve` against a home and a port, and resolve once it answers.
+ * Start `hydra serve` against a home, and resolve once it answers.
  *
  * Readiness is the unauthenticated `setup.read`, not a line of output: the
  * listener is what the tests need, and the log line is printed just before it
  * would be reachable anyway.
+ *
+ * With no `port`, a number is picked and the start is retried on another if the
+ * bind loses to whatever else on the machine took it in the meantime. With a
+ * `port` - a restart on the port the first run bound - a bind failure is the
+ * test's answer, so it is reported rather than retried.
  */
 export async function startController(options: {
   readonly home: string;
-  readonly port: number;
+  readonly port?: number | undefined;
   readonly timeoutMs?: number | undefined;
 }): Promise<Controller> {
-  const url = `http://127.0.0.1:${String(options.port)}`;
+  const attempts = options.port === undefined ? 20 : 1;
+  let last: Error | undefined;
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    const port = options.port ?? candidatePort();
+    try {
+      return await startOn(options.home, port, options.timeoutMs);
+    } catch (error) {
+      last = error as Error;
+      if (!/in use/.test(last.message)) throw last;
+    }
+  }
+  throw last ?? new Error("hydra serve never started");
+}
+
+/** One attempt: spawn on this port and wait for it to answer. */
+async function startOn(
+  home: string,
+  port: number,
+  timeoutMs: number | undefined,
+): Promise<Controller> {
+  const url = `http://127.0.0.1:${String(port)}`;
   const chunks: Array<string> = [];
 
-  const child = Bun.spawn([BUN, ENTRYPOINT, "serve", "-c", `bind.port=${String(options.port)}`], {
+  const child = Bun.spawn([BUN, ENTRYPOINT, "serve", "-c", `bind.port=${String(port)}`], {
     cwd: ROOT,
-    env: { ...cleanEnv(), HYDRA_HOME: options.home },
+    env: { ...cleanEnv(), HYDRA_HOME: home },
     stdout: "pipe",
     stderr: "pipe",
   });
@@ -113,7 +134,7 @@ export async function startController(options: {
   void drain(child.stderr);
 
   const output = (): string => chunks.join("");
-  const deadline = Date.now() + (options.timeoutMs ?? 20_000);
+  const deadline = Date.now() + (timeoutMs ?? 20_000);
   for (;;) {
     if (child.exitCode !== null) {
       throw new Error(`hydra serve exited with ${String(child.exitCode)}:\n${output()}`);
@@ -130,6 +151,7 @@ export async function startController(options: {
 
   return {
     url,
+    port,
     output,
     stop: async () => {
       child.kill("SIGTERM");

@@ -10,7 +10,7 @@
 import { readFileSync, existsSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { cli, freePort, jsonOf, startController, temporaryHome, type Controller } from "./harness";
+import { cli, jsonOf, startController, temporaryHome, type Controller } from "./harness";
 
 const PASSWORD = "correct horse battery staple";
 const USERNAME = "rogier";
@@ -48,9 +48,9 @@ const withToken = (token: string, args: ReadonlyArray<string>, stdin?: string) =
   cli(args, { home: bare.home, env: { HYDRA_TOKEN: token, HYDRA_API_URL: url }, stdin });
 
 beforeAll(async () => {
-  port = await freePort();
-  url = `http://127.0.0.1:${String(port)}`;
-  controller = await startController({ home: state.home, port });
+  controller = await startController({ home: state.home });
+  port = controller.port;
+  url = controller.url;
 }, 30_000);
 
 afterAll(async () => {
@@ -370,10 +370,21 @@ describe("the first run and everything after it", () => {
     expect(fromSetup.status).toBe(200);
   }, 15_000);
 
-  it("9. stops on SIGTERM and opens the same home again", async () => {
+  it("9. stops on SIGTERM, closing the database, and opens the same home again", async () => {
+    const wal = join(state.home, "data", "hydra.db-wal");
+    // Under load the write-ahead log is not empty while the controller is up,
+    // so the checkpoint below is a real transition rather than a no-op.
+    expect(statSync(wal).size).toBeGreaterThan(0);
+
     const code = await controller.stop();
     expect(code).toBe(0);
     expect(controller.output()).toContain("Stopping Hydra.");
+
+    // Exit 0 alone would also follow from `process.exit()`: the kernel releases
+    // SQLite's locks either way. Closing the database is what checkpoints the
+    // write-ahead log back into `hydra.db` and truncates it, so a 0-byte `-wal`
+    // is the observable that separates a clean close from a killed process.
+    expect(statSync(wal).size).toBe(0);
 
     controller = await startController({ home: state.home, port });
     expect(controller.output()).toContain("Hydra is set up.");

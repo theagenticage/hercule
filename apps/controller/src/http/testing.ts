@@ -6,9 +6,6 @@
  * envelope, the pre-setup gate, the derived routes, both credential gates and
  * every service. Only the database (`:memory:`), the master key (a file in a
  * temporary home) and the port (ephemeral) differ.
- *
- * `server.test.ts` still carries its own copy of this stack, written before this
- * module existed. Folding it in is a tidy-up for whoever touches that file next.
  */
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -67,7 +64,7 @@ const services = (home: string) =>
   );
 
 /** An address a fetch can use; the server binds an ephemeral port on loopback. */
-const baseUrl = Effect.map(HttpServer.HttpServer, (server) => {
+export const baseUrl = Effect.map(HttpServer.HttpServer, (server) => {
   const address = server.address;
   if (address._tag !== "TcpAddress") throw new Error("expected a TCP address");
   return `http://127.0.0.1:${address.port}`;
@@ -81,7 +78,7 @@ export type AuditReader = (kind: AuditKind) => Promise<ReadonlyArray<AuditRow>>;
  * `body`, in a temporary home that is removed afterwards.
  */
 export const withServer = (
-  body: (base: string, audit: AuditReader) => Promise<void>,
+  body: (base: string, audit: AuditReader, sql: SqlClient.SqlClient) => Promise<void>,
 ): Promise<void> => {
   const home = mkdtempSync(join(tmpdir(), "hydra-http-"));
   writeFileSync(join(home, "setup-url"), `http://127.0.0.1:4937/setup?token=${SETUP_TOKEN}\n`);
@@ -104,7 +101,7 @@ export const withServer = (
         // request's audit row is asserted through the service that wrote it.
         const log = yield* AuditLog;
         const audit: AuditReader = (kind) => Effect.runPromise(Effect.orDie(log.listByKind(kind)));
-        yield* Effect.promise(() => body(base, audit));
+        yield* Effect.promise(() => body(base, audit, sql));
       }),
     ).pipe(
       Effect.provide(
@@ -136,6 +133,14 @@ export const send = (
           body: typeof options.body === "string" ? options.body : JSON.stringify(options.body),
         }),
   });
+
+/** A GET with a bearer token. */
+export const get = (base: string, path: string, token?: string): Promise<Response> =>
+  send("GET", base, path, token === undefined ? {} : { token });
+
+/** A DELETE with a bearer token. */
+export const del = (base: string, path: string, token?: string): Promise<Response> =>
+  send("DELETE", base, path, token === undefined ? {} : { token });
 
 /** A POST with a JSON body, the shape most of these tests need. */
 export const post = (
