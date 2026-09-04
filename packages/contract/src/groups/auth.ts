@@ -11,6 +11,7 @@ import * as HttpApiEndpoint from "effect/unstable/httpapi/HttpApiEndpoint";
 import * as HttpApiGroup from "effect/unstable/httpapi/HttpApiGroup";
 import { Internal, Unauthenticated, Validation } from "../errors";
 import { Timestamp } from "../ids";
+import { PresentedPassword, Username } from "../strings";
 import { Authenticated } from "../security";
 
 export const LoginResult = Schema.Struct({
@@ -21,8 +22,8 @@ export const LoginResult = Schema.Struct({
 export const auth = HttpApiGroup.make("auth").add(
   HttpApiEndpoint.post("login", "/auth/login", {
     payload: Schema.Struct({
-      username: Schema.NonEmptyString,
-      password: Schema.NonEmptyString,
+      username: Username,
+      password: PresentedPassword,
     }),
     success: LoginResult,
     error: [Unauthenticated, Validation, Internal],

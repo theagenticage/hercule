@@ -20,6 +20,10 @@
  * v1 has exactly one user (spec 13 section 4.2), but every credential is keyed
  * by `user_id` from day one, so a second user is a `WHERE` clause rather than a
  * migration.
+ *
+ * It also carries one index that belongs to 0001's tables: the secrets listing
+ * had no index for its own sort key. 0001 has shipped in development databases
+ * and would not re-run, so the index is added here.
  */
 import * as Effect from "effect/Effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
@@ -74,4 +78,10 @@ export default Effect.gen(function* () {
   // The listing is one user's keys in created order, paged by keyset on
   // `(created_at, id)` (spec 11 section 1.6), which is exactly this index.
   yield* sql`CREATE INDEX api_keys_user_created ON api_keys (user_id, created_at, id)`;
+
+  // Not a credentials table, but the same omission: the unfiltered secrets
+  // listing pages by keyset on `(name, id)` and 0001 gave it only
+  // `(owner_kind, owner_id, name)`, so the default call - the one the CLI and
+  // the web app make - was a full scan plus a temp b-tree for the ORDER BY.
+  yield* sql`CREATE INDEX secrets_name ON secrets (name, id)`;
 });

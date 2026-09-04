@@ -20,10 +20,14 @@ import { GrantSchema } from "../grants";
 import { Id, Timestamp } from "../ids";
 import { page, pageParams } from "../pagination";
 import { Authenticated } from "../security";
+import { bounded } from "../strings";
+
+/** What a user may call a profile. */
+const ProfileName = bounded(1, 128);
 
 export const Profile = Schema.Struct({
   id: Id,
-  name: Schema.NonEmptyString,
+  name: ProfileName,
   grants: Schema.Array(GrantSchema),
   /** A shipped profile is seeded at first run and cannot be deleted. */
   shipped: Schema.Boolean,
@@ -47,7 +51,7 @@ export const profile = HttpApiGroup.make("profile")
     }),
     HttpApiEndpoint.post("create", "/profiles", {
       payload: Schema.Struct({
-        name: Schema.NonEmptyString,
+        name: ProfileName,
         grants: Schema.Array(GrantSchema),
       }),
       success: Profile,
@@ -56,7 +60,7 @@ export const profile = HttpApiGroup.make("profile")
     HttpApiEndpoint.patch("update", "/profiles/:id", {
       params: { id: Id },
       payload: Schema.Struct({
-        name: Schema.optionalKey(Schema.NonEmptyString),
+        name: Schema.optionalKey(ProfileName),
         grants: Schema.optionalKey(Schema.Array(GrantSchema)),
       }),
       success: Profile,

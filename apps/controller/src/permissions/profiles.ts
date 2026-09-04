@@ -26,6 +26,7 @@ import {
   uuidToString,
   type CursorError,
   type Page,
+  type CursorScope,
   type PageRequest,
 } from "../db";
 
@@ -149,7 +150,13 @@ const make = Effect.gen(function* () {
     ): Effect.Effect<Page<PermissionProfile>, GrantsError | CursorError | SqlError> =>
       Effect.gen(function* () {
         const ascending = page.direction === "asc";
-        const after = page.cursor === undefined ? undefined : yield* decodeCursor(page.cursor);
+        const scope: CursorScope = {
+          op: "profile.query",
+          field: "name",
+          direction: page.direction,
+        };
+        const after =
+          page.cursor === undefined ? undefined : yield* decodeCursor(page.cursor, scope);
         const keyset =
           after === undefined
             ? sql``
@@ -170,7 +177,7 @@ const make = Effect.gen(function* () {
           items,
           nextCursor:
             rows.length > page.limit && last !== undefined
-              ? encodeCursor(last.name, last.id)
+              ? encodeCursor(scope, last.name, last.id)
               : undefined,
         };
       }),

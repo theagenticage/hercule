@@ -15,6 +15,7 @@ import * as HttpApiGroup from "effect/unstable/httpapi/HttpApiGroup";
 import { Forbidden, Internal, NotFound, Unauthenticated, Validation } from "../errors";
 import { Timestamp } from "../ids";
 import { page, pageParams } from "../pagination";
+import { bounded } from "../strings";
 import { Authenticated } from "../security";
 
 /** Who a secret belongs to. */
@@ -29,7 +30,7 @@ export const OwnerKind = Schema.Literals([
 export type OwnerKind = Schema.Schema.Type<typeof OwnerKind>;
 
 /** An owner id or a secret name: any non-empty string without `|`. */
-const OwnerSegment = Schema.NonEmptyString.check(
+const OwnerSegment = bounded(1, 256).check(
   Schema.isPattern(/^[^|]+$/, { description: "no `|`, which separates the associated data" }),
 );
 

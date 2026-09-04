@@ -42,7 +42,7 @@ import { PermissionProfiles, type GrantsError } from "./profiles";
 export interface QueryInput {
   readonly limit?: number;
   readonly cursor?: string;
-  readonly sort?: { readonly field: "name"; readonly direction: SortDirection };
+  readonly sort?: { readonly field: "name"; readonly direction?: SortDirection };
 }
 
 /** One page of profiles, in the contract's shape. */

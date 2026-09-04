@@ -15,7 +15,9 @@
  * A login bearer's lifetime is **30 days rolling** (spec 13 section 4.2). Every
  * authenticated use calls `renewLoginToken`, which pushes `expires_at` out by
  * another 30 days, so the token dies 30 days after its last use rather than 30
- * days after login.
+ * days after login. The push itself is written at most once every
+ * {@link USE_STAMP_INTERVAL_MS}: a rolling window does not need per-request
+ * resolution, and the writes it saves are the whole API's.
  */
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
@@ -32,11 +34,34 @@ import {
   uuidToString,
   type CursorError,
   type Page,
+  type CursorScope,
   type PageRequest,
 } from "../db";
 
 /** The rolling window a login bearer lives in, in milliseconds (spec 13 section 4.2). */
 export const LOGIN_TOKEN_LIFETIME_MS = 30 * 24 * 60 * 60 * 1000;
+
+/**
+ * How stale a credential's `last_used_at` has to be before a use writes it
+ * again.
+ *
+ * Stamping every request turns every read of the API into a write, and SQLite
+ * has one writer, so the whole controller serializes on it and the write-ahead
+ * log grows on traffic that changes nothing. Five minutes of drift is invisible
+ * against a 30-day rolling window and against "when was this key last used",
+ * which is what the two stamps are for (spec 13 sections 4.2 and 4.3).
+ */
+export const USE_STAMP_INTERVAL_MS = 5 * 60 * 1000;
+
+/**
+ * Whether a use is worth writing down. A credential that has never been stamped
+ * always is; an unparseable stamp is treated as stale rather than trusted.
+ */
+const worthStamping = (lastUsedAt: string | null, nowMillis: number): boolean => {
+  if (lastUsedAt === null) return true;
+  const stamped = Date.parse(lastUsedAt);
+  return Number.isNaN(stamped) || nowMillis - stamped >= USE_STAMP_INTERVAL_MS;
+};
 
 /** A login bearer token, without the token: only its hash was ever stored. */
 export interface LoginTokenRecord {
@@ -138,17 +163,19 @@ const make = Effect.gen(function* () {
     /**
      * Extends a login bearer by another 30 days and stamps its use. This is
      * what makes the lifetime rolling, and it runs on every authenticated
-     * request that presented one.
+     * request that presented one - but it writes at most once per
+     * {@link USE_STAMP_INTERVAL_MS}.
      */
-    renewLoginToken: (id: string): Effect.Effect<void, SqlError> =>
+    renewLoginToken: (token: LoginTokenRecord): Effect.Effect<void, SqlError> =>
       Effect.gen(function* () {
         const millis = yield* Clock.currentTimeMillis;
+        if (!worthStamping(token.lastUsedAt, millis)) return;
         const at = new Date(millis).toISOString();
         const expiresAt = new Date(millis + LOGIN_TOKEN_LIFETIME_MS).toISOString();
         yield* sql`
           UPDATE login_tokens
           SET last_used_at = ${at}, expires_at = ${expiresAt}
-          WHERE id = ${uuidFromString(id)} AND revoked_at IS NULL
+          WHERE id = ${uuidFromString(token.id)} AND revoked_at IS NULL
         `;
       }),
 
@@ -197,11 +224,16 @@ const make = Effect.gen(function* () {
         WHERE token_hash = ${tokenHash} AND revoked_at IS NULL
       `.pipe(Effect.map((rows) => Option.fromNullishOr(rows[0]).pipe(Option.map(toApiKey)))),
 
-    /** Stamps an API key's use, so a key nobody uses is visible as unused. */
-    touchApiKey: (id: string): Effect.Effect<void, SqlError> =>
+    /**
+     * Stamps an API key's use, so a key nobody uses is visible as unused. Like
+     * a login bearer's renewal, at most once per {@link USE_STAMP_INTERVAL_MS}.
+     */
+    touchApiKey: (key: ApiKeyRecord): Effect.Effect<void, SqlError> =>
       Effect.gen(function* () {
-        const at = yield* now;
-        yield* sql`UPDATE api_keys SET last_used_at = ${at} WHERE id = ${uuidFromString(id)}`;
+        const millis = yield* Clock.currentTimeMillis;
+        if (!worthStamping(key.lastUsedAt, millis)) return;
+        const at = new Date(millis).toISOString();
+        yield* sql`UPDATE api_keys SET last_used_at = ${at} WHERE id = ${uuidFromString(key.id)}`;
       }),
 
     /**
@@ -215,7 +247,13 @@ const make = Effect.gen(function* () {
     ): Effect.Effect<Page<ApiKeyRecord>, SqlError | CursorError> =>
       Effect.gen(function* () {
         const ascending = page.direction === "asc";
-        const after = page.cursor === undefined ? undefined : yield* decodeCursor(page.cursor);
+        const scope: CursorScope = {
+          op: "apiKey.query",
+          field: "createdAt",
+          direction: page.direction,
+        };
+        const after =
+          page.cursor === undefined ? undefined : yield* decodeCursor(page.cursor, scope);
         const keyset =
           after === undefined
             ? sql``
@@ -240,7 +278,7 @@ const make = Effect.gen(function* () {
           items,
           nextCursor:
             rows.length > page.limit && last !== undefined
-              ? encodeCursor(last.createdAt, last.id)
+              ? encodeCursor(scope, last.createdAt, last.id)
               : undefined,
         };
       }),

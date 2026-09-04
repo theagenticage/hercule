@@ -50,7 +50,24 @@ export {
   type ErrorCode,
 } from "./errors";
 
-export { DEFAULT_PAGE_LIMIT, MAX_PAGE_LIMIT, SortDirection, page, pageParams } from "./pagination";
+export {
+  DEFAULT_PAGE_LIMIT,
+  MAX_PAGE_LIMIT,
+  SortDirection,
+  page,
+  pageParams,
+  sortFieldsOf,
+  sortParam,
+} from "./pagination";
+
+export {
+  MAX_PASSWORD_LENGTH,
+  MIN_PASSWORD_LENGTH,
+  NewPassword,
+  PresentedPassword,
+  Username,
+  bounded,
+} from "./strings";
 
 export { Actor, Id, Timestamp } from "./ids";
 

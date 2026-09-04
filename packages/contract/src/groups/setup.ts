@@ -8,6 +8,7 @@ import { Schema } from "effect";
 import * as HttpApiEndpoint from "effect/unstable/httpapi/HttpApiEndpoint";
 import * as HttpApiGroup from "effect/unstable/httpapi/HttpApiGroup";
 import { Internal, InvalidState, Unauthenticated, Validation } from "../errors";
+import { bounded, NewPassword, Username } from "../strings";
 import { SetupToken } from "../security";
 
 /** Whether the first run has been completed. Unauthenticated, so the web app can route. */
@@ -23,9 +24,9 @@ export const setup = HttpApiGroup.make("setup").add(
   }),
   HttpApiEndpoint.post("complete", "/setup/complete", {
     payload: Schema.Struct({
-      username: Schema.NonEmptyString,
-      password: Schema.NonEmptyString,
-      timezone: Schema.NonEmptyString,
+      username: Username,
+      password: NewPassword,
+      timezone: bounded(1, 64),
     }),
     success: SetupResult,
     error: [Unauthenticated, Validation, InvalidState, Internal],

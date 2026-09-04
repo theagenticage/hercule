@@ -9,13 +9,14 @@ import * as HttpApiEndpoint from "effect/unstable/httpapi/HttpApiEndpoint";
 import * as HttpApiGroup from "effect/unstable/httpapi/HttpApiGroup";
 import { Forbidden, Internal, Unauthenticated, Validation } from "../errors";
 import { Authenticated } from "../security";
+import { NewPassword, PresentedPassword } from "../strings";
 
 export const user = HttpApiGroup.make("user")
   .add(
     HttpApiEndpoint.post("setPassword", "/user/password", {
       payload: Schema.Struct({
-        current: Schema.NonEmptyString,
-        next: Schema.NonEmptyString,
+        current: PresentedPassword,
+        next: NewPassword,
       }),
       success: Schema.Struct({}),
       error: [Unauthenticated, Forbidden, Validation, Internal],

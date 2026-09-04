@@ -54,7 +54,7 @@ export interface SecretQueryInput {
   readonly ownerId?: string;
   readonly limit?: number;
   readonly cursor?: string;
-  readonly sort?: { readonly field: "name"; readonly direction: SortDirection };
+  readonly sort?: { readonly field: "name"; readonly direction?: SortDirection };
 }
 
 /** A value to store under an owner and a name. Rotation is the same call. */

@@ -11,11 +11,15 @@ import { Forbidden, Internal, NotFound, Unauthenticated, Validation } from "../e
 import { Id, Timestamp } from "../ids";
 import { page, pageParams } from "../pagination";
 import { Authenticated } from "../security";
+import { bounded } from "../strings";
 
 /** An API key as it is listed: everything about it except the token. */
+/** What a user may call a key. */
+const KeyName = bounded(1, 128);
+
 export const ApiKey = Schema.Struct({
   id: Id,
-  name: Schema.NonEmptyString,
+  name: KeyName,
   createdAt: Timestamp,
   lastUsedAt: Schema.optionalKey(Timestamp),
   revokedAt: Schema.optionalKey(Timestamp),
@@ -26,7 +30,7 @@ export type ApiKey = Schema.Schema.Type<typeof ApiKey>;
 /** What minting answers with. `token` is shown here and nowhere else. */
 export const MintedApiKey = Schema.Struct({
   id: Id,
-  name: Schema.NonEmptyString,
+  name: KeyName,
   token: Schema.NonEmptyString,
   createdAt: Timestamp,
 });
@@ -39,7 +43,7 @@ export const apiKey = HttpApiGroup.make("apiKey")
       error: [Unauthenticated, Forbidden, Validation, Internal],
     }),
     HttpApiEndpoint.post("create", "/api-keys", {
-      payload: Schema.Struct({ name: Schema.NonEmptyString }),
+      payload: Schema.Struct({ name: KeyName }),
       success: MintedApiKey,
       error: [Unauthenticated, Forbidden, Validation, Internal],
     }),

@@ -37,7 +37,7 @@ import { hashToken, mintToken } from "./token";
 export interface QueryInput {
   readonly limit?: number;
   readonly cursor?: string;
-  readonly sort?: { readonly field: "createdAt"; readonly direction: SortDirection };
+  readonly sort?: { readonly field: "createdAt"; readonly direction?: SortDirection };
 }
 
 /** One page of keys, in the contract's shape. */

@@ -47,6 +47,7 @@ import {
   uuidToString,
   type CursorError,
   type Page,
+  type CursorScope,
   type PageRequest,
 } from "../db";
 import { MasterKey } from "./masterKey";
@@ -278,8 +279,13 @@ export const secretsLayer: Layer.Layer<Secrets, never, MasterKey | SqlClient.Sql
         list: (request) =>
           Effect.gen(function* () {
             const ascending = request.direction === "asc";
+            const scope: CursorScope = {
+              op: "secret.query",
+              field: "name",
+              direction: request.direction,
+            };
             const after =
-              request.cursor === undefined ? undefined : yield* decodeCursor(request.cursor);
+              request.cursor === undefined ? undefined : yield* decodeCursor(request.cursor, scope);
             const byKind =
               request.ownerKind === undefined ? sql`` : sql`AND owner_kind = ${request.ownerKind}`;
             const byId =
@@ -323,7 +329,7 @@ export const secretsLayer: Layer.Layer<Secrets, never, MasterKey | SqlClient.Sql
               items,
               nextCursor:
                 rows.length > request.limit && last !== undefined
-                  ? encodeCursor(last.name, last.id)
+                  ? encodeCursor(scope, last.name, last.id)
                   : undefined,
             };
           }),
