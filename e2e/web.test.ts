@@ -17,7 +17,7 @@ import { ROOT, startController, temporaryHome, type Controller } from "./harness
 
 const state = temporaryHome();
 
-let controller: Controller;
+let controller: Controller | undefined;
 let url: string;
 
 beforeAll(async () => {
@@ -32,7 +32,9 @@ beforeAll(async () => {
 }, 60_000);
 
 afterAll(async () => {
-  await controller.stop().catch(() => -1);
+  // The binary may have been missing, in which case nothing was started - and
+  // the temporary home still has to go.
+  await controller?.stop().catch(() => -1);
   state.remove();
 });
 
@@ -80,9 +82,12 @@ describe("the binary serving the web app", () => {
 
     for (const source of sources) {
       const chunk = await (await fetch(`${url}${source}`)).text();
+      // Two marks of a development build, in the code that ships rather than
+      // in the page that names it: React's development-only invariant, and the
+      // development JSX runtime the production build never links.
       expect(chunk, source).not.toContain("Invalid hook call");
+      expect(chunk, source).not.toContain("jsx-dev-runtime");
     }
-    expect(page).not.toContain("jsx-dev-runtime");
   });
 
   it("keeps the JSON error envelope on the API beside it", async () => {

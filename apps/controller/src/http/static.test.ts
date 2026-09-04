@@ -9,9 +9,9 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterAll, describe, expect, it, vi } from "vitest";
+import { afterAll, describe, expect, it } from "vitest";
 import { Effect } from "effect";
-import { loadWebBundle } from "./server";
+import { webBundle } from "./server";
 import { CONTENT_SECURITY_POLICY, type WebBundle } from "./static";
 import { withServer } from "./testing";
 
@@ -150,19 +150,11 @@ describe("without a bundle", () => {
   });
 });
 
-describe("a generated bundle that no longer resolves", () => {
-  it("reads as no bundle, and says which command puts it back", async () => {
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-    try {
-      const loaded = await Effect.runPromise(
-        loadWebBundle(() => Promise.reject(new Error("Cannot find module './assets/index-a.js'"))),
-      );
-
-      expect(loaded).toBeUndefined();
-      expect(warn).toHaveBeenCalledTimes(1);
-      expect(warn.mock.calls[0]?.[0]).toContain("pnpm build:binary");
-    } finally {
-      warn.mockRestore();
-    }
+describe("a generated bundle a test runner cannot evaluate", () => {
+  it("reads as no bundle rather than as a failure to start", async () => {
+    // `./bundle.ts` names build output through Bun's own import attributes, so
+    // this runner cannot load it whether or not a build has run - which is the
+    // stale-bundle situation, reached here through the effect the listener uses.
+    expect(await Effect.runPromise(webBundle)).toBeUndefined();
   });
 });

@@ -107,24 +107,19 @@ const jsonOnly = <E, R>(
  * because it is a checkout that needs rebuilding rather than a broken
  * controller, and refusing to start over it would be the wrong answer.
  */
-export const loadWebBundle = (
-  load: () => Promise<{ readonly webBundle: WebBundle | undefined }>,
-): Effect.Effect<WebBundle | undefined> =>
-  Effect.promise(() =>
-    load().then(
-      (module) => module.webBundle,
-      (error: unknown) => {
-        console.warn(
-          "hydra: the embedded web bundle is stale or missing, so only the API is served. " +
-            `Run \`pnpm build:binary\` to regenerate it. (${String(error)})`,
-        );
-        return undefined;
-      },
+export const webBundle: Effect.Effect<WebBundle | undefined> = Effect.tryPromise({
+  try: () => import("./bundle").then((module) => module.webBundle),
+  catch: (error: unknown) => String(error),
+}).pipe(
+  Effect.catch((reason) =>
+    Effect.as(
+      Effect.logWarning(
+        "The embedded web bundle is stale or missing, so only the API is served. " +
+          `Run \`pnpm build:binary\` to regenerate it. (${reason})`,
+      ),
+      undefined,
     ),
-  );
-
-export const webBundle: Effect.Effect<WebBundle | undefined> = loadWebBundle(
-  () => import("./bundle"),
+  ),
 );
 
 /**
