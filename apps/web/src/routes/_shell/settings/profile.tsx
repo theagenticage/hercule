@@ -1,6 +1,6 @@
 import { useState, type FormEvent, type JSX } from "react";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useSuspenseQuery } from "@tanstack/react-query";
+import { useMutation, useSuspenseQuery } from "@tanstack/react-query";
 import { FALLBACK_TIMEZONE } from "@hydra/client-core";
 import { Button, Row, SettingsForm } from "@hydra/ui";
 import { LOGIN_PATH } from "../../../app/entry-guard";
@@ -22,38 +22,35 @@ function Profile(): JSX.Element {
   const { client, queryClient } = Route.useRouteContext();
   const navigate = useNavigate();
   const settings = useSuspenseQuery(settingsQuery(client)).data;
-  const { save, saving, saved, failure } = useSaveSettings(client, queryClient);
+  const { save, saving, saved, failure } = useSaveSettings(client);
 
   const [timezone, setTimezone] = useState(settings.user.timezone ?? FALLBACK_TIMEZONE);
-  const [signingOut, setSigningOut] = useState(false);
 
   const submit = (event: FormEvent): void => {
     event.preventDefault();
-    void save({ user: { timezone } });
+    save({ user: { timezone } });
   };
 
   /**
    * Sign out: revoke the bearer at the controller, and drop it here whatever
    * the controller answered. A token this browser has thrown away cannot be
-   * presented again, so a failed revocation must not leave the user signed in.
+   * presented again, so a failed revocation must not leave the user signed in,
+   * which is why the local half runs when the mutation settles rather than
+   * when it succeeds.
    *
    * What this screen read is dropped only once the login screen is up. Clearing
    * it first evicts a query this screen is still subscribed to, which refetches
    * it with no bearer and turns the answer into a failure screen racing the
    * navigation.
    */
-  const signOut = async (): Promise<void> => {
-    setSigningOut(true);
-    try {
-      await client.auth.logout();
-    } catch {
-      // The revocation is the controller's to record; this browser is done
-      // with the token either way.
-    }
-    client.setToken(null);
-    await navigate({ to: LOGIN_PATH });
-    queryClient.clear();
-  };
+  const signOut = useMutation({
+    mutationFn: () => client.auth.logout(),
+    onSettled: async () => {
+      client.setToken(null);
+      await navigate({ to: LOGIN_PATH });
+      queryClient.clear();
+    },
+  });
 
   return (
     <div className="flex flex-col gap-4">
@@ -79,7 +76,14 @@ function Profile(): JSX.Element {
         fine="This browser keeps you signed in until you sign out or the login expires."
       >
         <div className="pt-1">
-          <Button type="button" variant="form" disabled={signingOut} onClick={() => void signOut()}>
+          <Button
+            type="button"
+            variant="form"
+            disabled={signOut.isPending}
+            onClick={() => {
+              signOut.mutate();
+            }}
+          >
             Sign out
           </Button>
         </div>

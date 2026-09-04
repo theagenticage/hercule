@@ -17,9 +17,9 @@ export const Route = createFileRoute("/_shell/settings/threads")({
  * a choice is written the moment it is made and the sidebar follows.
  */
 function Threads(): JSX.Element {
-  const { client, queryClient } = Route.useRouteContext();
+  const { client } = Route.useRouteContext();
   const settings = useSuspenseQuery(settingsQuery(client)).data;
-  const { save, saved, failure } = useSaveSettings(client, queryClient);
+  const { save, saved, failure } = useSaveSettings(client);
 
   const rows = threadRowsMode(settings.user["ui.threadRows"]);
 
@@ -38,7 +38,7 @@ function Threads(): JSX.Element {
           className="w-[220px]"
           value={rows}
           onValueChange={(next) => {
-            void save({ user: { "ui.threadRows": next as ThreadRows } });
+            save({ user: { "ui.threadRows": next as ThreadRows } });
           }}
         >
           <SegmentedControlItem value="meta">meta</SegmentedControlItem>
