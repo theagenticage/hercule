@@ -115,6 +115,22 @@ describe("--help", () => {
     expect(text).toContain("2 lines, one per field, in this order: current, then next.");
   });
 
+  it("says how a nullable field is cleared, on each of the two that are", async () => {
+    const task = cli();
+    expect(await task.run("task", "update", "--help")).toBe(0);
+    expect(task.io.stdout.join("\n")).toContain("--projectId null clears it");
+
+    const project = cli();
+    expect(await project.run("project", "update", "--help")).toBe(0);
+    expect(project.io.stdout.join("\n")).toContain("--description null clears it");
+  });
+
+  it("says nothing about null on a field that does not accept it", async () => {
+    const { io, run } = cli();
+    expect(await run("profile", "create", "--help")).toBe(0);
+    expect(io.stdout.join("\n")).not.toContain("null clears it");
+  });
+
   it("works after other flags have been written", async () => {
     const { io, run } = cli();
     expect(await run("profile", "create", "--name", "x", "--help")).toBe(0);

@@ -101,6 +101,20 @@ describe("parseArguments", () => {
     expect(named.payload["name"]).toBe("null");
   });
 
+  it("reads a value from stdin the same way it reads one from argv", async () => {
+    const project = commandFor("project", "update")!;
+
+    const cleared = await parseArguments(project, ["id", "--description-stdin"], () =>
+      Promise.resolve("null\n"),
+    );
+    expect(cleared.payload["description"]).toBeNull();
+
+    const written = await parseArguments(project, ["id", "--description-stdin"], () =>
+      Promise.resolve("what it is for\n"),
+    );
+    expect(written.payload["description"]).toBe("what it is for");
+  });
+
   it("still takes a plain value for a nullable field", async () => {
     const task = commandFor("task", "update")!;
     const id = "0199e0e7-0000-7000-8000-000000000001";

@@ -13,6 +13,10 @@
  * the order the operation's schema declares them - never in the order the flags
  * happened to be written, so `hydra user setPassword` always reads the current
  * password first.
+ *
+ * What arrives on stdin is read exactly as the flag's value is read, `coerce`
+ * and all, so a field means the same thing however it was given: the bare word
+ * `null` clears a nullable field from stdin as it does from `argv`.
  */
 import { UsageError } from "../exit";
 import type { Command, Field } from "./tree";
@@ -277,7 +281,8 @@ export const parseArguments = async (
     const ordered = command.payload.filter((field) => stdinFields.includes(field));
     const text = await readStdin();
     if (ordered.length === 1) {
-      payload[ordered[0]!.name] = text.replace(/\n$/, "");
+      const field = ordered[0]!;
+      payload[field.name] = coerce(field, text.replace(/\n$/, ""), help);
     } else {
       const lines = text.replace(/\n$/, "").split("\n");
       if (lines.length !== ordered.length) {
@@ -289,7 +294,7 @@ export const parseArguments = async (
         );
       }
       ordered.forEach((field, index) => {
-        payload[field.name] = lines[index]!;
+        payload[field.name] = coerce(field, lines[index]!, help);
       });
     }
   }
