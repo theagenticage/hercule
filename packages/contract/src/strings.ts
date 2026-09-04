@@ -45,18 +45,21 @@ export const MAX_USERNAME_LENGTH = 64;
 /**
  * A password being presented. Only the maximum applies: refusing a short one
  * before checking it would tell an anonymous caller the policy, and the answer
- * to a wrong password is `unauthenticated` either way.
+ * to a wrong password is `unauthenticated` either way. An empty field is not a
+ * policy, so what it says is what a person needs to do about it.
  */
 export const PresentedPassword = Schema.String.check(
-  Schema.isLengthBetween(1, MAX_PASSWORD_LENGTH, {
-    message: `A password is 1 to ${String(MAX_PASSWORD_LENGTH)} characters.`,
+  Schema.isMinLength(1, { message: "Enter your password." }),
+  Schema.isMaxLength(MAX_PASSWORD_LENGTH, {
+    message: `A password is at most ${String(MAX_PASSWORD_LENGTH)} characters.`,
   }),
 );
 
 /** A login name. */
 export const Username = Schema.String.check(
-  Schema.isLengthBetween(1, MAX_USERNAME_LENGTH, {
-    message: `A username is 1 to ${String(MAX_USERNAME_LENGTH)} characters.`,
+  Schema.isMinLength(1, { message: "Enter your username." }),
+  Schema.isMaxLength(MAX_USERNAME_LENGTH, {
+    message: `A username is at most ${String(MAX_USERNAME_LENGTH)} characters.`,
   }),
 );
 

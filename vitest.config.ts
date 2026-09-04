@@ -41,6 +41,9 @@ export default defineConfig({
         test: {
           name: "react",
           environment: "jsdom",
+          // Stylesheets are processed rather than stubbed, so a test can read
+          // the one this workspace ships as its source.
+          css: true,
           // Testing Library registers its auto-cleanup only when a global
           // `afterEach` exists, so without this a second render in one file
           // sees the first one still mounted.

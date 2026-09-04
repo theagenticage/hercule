@@ -39,10 +39,7 @@ describe("the login screen", () => {
     await user.click(screen.getByRole("button", { name: "Sign in" }));
 
     const messages = screen.getAllByRole("alert").map((alert) => alert.textContent);
-    expect(messages).toEqual([
-      "A username is 1 to 64 characters.",
-      "A password is 1 to 1024 characters.",
-    ]);
+    expect(messages).toEqual(["Enter your username.", "Enter your password."]);
     expect(api.calls.some((call) => call.method === "POST")).toBe(false);
   });
 

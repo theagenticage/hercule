@@ -52,11 +52,11 @@ function Setup(): JSX.Element {
     // client's bearer, but it is never written where it would outlive the call:
     // it is spent by the answer, and a tab closed mid-flight must leave no
     // credential behind. A successful call replaces it with the login token.
-    client.setToken(token, false);
+    client.presentToken(token);
     try {
       await client.setup.complete({ payload: checked.value });
     } catch (error) {
-      client.setToken(null, false);
+      client.presentToken(null);
       setFailure(error instanceof Error ? error.message : String(error));
       setSubmitting(false);
       return;

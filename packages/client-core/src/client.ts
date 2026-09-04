@@ -33,13 +33,16 @@ export type Operations = Promisified<HttpApiClient.ForApi<typeof api>>;
 
 export type HydraClient = Operations & {
   /**
-   * The bearer token sent on every call from now on. `null` sends none.
-   *
-   * A token that is not meant to outlive the call it is presented on - the
-   * one-time setup token - is held for this page load only: pass `false` and
-   * nothing is written to the store.
+   * The bearer token sent on every call from now on, and kept where a token
+   * store was given. `null` sends none and clears what was kept.
    */
-  readonly setToken: (token: string | null, persist?: boolean) => void;
+  readonly setToken: (token: string | null) => void;
+  /**
+   * The same, for a credential that must not outlive this page load: the
+   * one-time setup token is presented on the call that spends it and is never
+   * written to the store, so a tab closed mid-flight leaves nothing behind.
+   */
+  readonly presentToken: (token: string | null) => void;
   /** The bearer token currently held. */
   readonly getToken: () => string | null;
 };
@@ -83,9 +86,13 @@ export const createClient = (options: ClientOptions): HydraClient => {
   let token = options.token === undefined ? (store?.read() ?? null) : options.token;
   if (options.token !== undefined) store?.write(options.token);
 
-  const setToken = (next: string | null, persist = true): void => {
+  const presentToken = (next: string | null): void => {
     token = next;
-    if (persist) store?.write(next);
+  };
+
+  const setToken = (next: string | null): void => {
+    presentToken(next);
+    store?.write(next);
   };
 
   const derived = Effect.runSync(
@@ -123,6 +130,7 @@ export const createClient = (options: ClientOptions): HydraClient => {
 
   const client: Record<string, unknown> = {
     setToken,
+    presentToken,
     getToken: () => token,
   };
 
