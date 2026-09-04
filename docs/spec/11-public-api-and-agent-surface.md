@@ -231,6 +231,8 @@ Pipeline: [./08-events-and-connections.md](./08-events-and-connections.md).
 
 `event.query` returns **both populations** behind the one `event.read` grant: pipeline events and audit entries come back from one call, told apart only by `kind`. There is no population filter, because reading failed logins beside the events that caused work is what the log is opened for; any holder of `event.read` therefore reads every security entry. The log is walked by `id` only, default `id desc`, keyset. Event ids are integers on the wire (section 1.4).
 
+*(Amended 2026-09-04, [#59](https://github.com/rogierpennink/hydra/issues/59).)* **`event.read` exposes security-entry metadata**, and that is wider than the two shipped agent profiles intend. `secret.created`, `secret.rotated`, `secret.deleted`, `auth.apiKey.minted` and `auth.login.failed` name the secret, its owner, the key and the username that failed - never a value, but the metadata of the two families [./13-security.md](./13-security.md) section 6.2 lists in the **Withholds** column of both `assistant` and `worker`, which both hold `event.read`. The two statements cannot both stand, so this ticket records the conflict rather than resolving it silently in either direction. Nothing reaches it yet: only the `user` actor passes the grant check in this build, and the user has parity anyway. **The session-actor ticket must close it**, by splitting the population behind a second grant or by dropping `event.read` from the two agent profiles. Whichever it picks, this paragraph and the Withholds column are amended together.
+
 ### connection
 
 Semantics: [./08-events-and-connections.md](./08-events-and-connections.md).
