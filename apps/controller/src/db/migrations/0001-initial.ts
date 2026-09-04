@@ -57,10 +57,12 @@ export default Effect.gen(function* () {
     )
   `;
 
-  // Every setting that is not needed before the database opens (spec 04, What
-  // is in the store). One table for both stores: `controller` rows are the
-  // controller state settings, `user` rows the user settings store, which is
-  // keyed by user id from day one and defaults lazily.
+  // Every controller setting that is not needed before the database opens
+  // (spec 04, What is in the store). The `scope` column allowed a `user` value
+  // too, but nothing ever wrote one and nothing can: user settings are keyed by
+  // user id, in the `user_settings` table 0002 adds. This table holds the
+  // controller scope alone; `'user'` in the CHECK is vestigial and stays only
+  // because 0001 has shipped and migrations are forward-only (spec 04).
   yield* sql`
     CREATE TABLE settings (
       scope TEXT NOT NULL CHECK (scope IN ('controller', 'user')),

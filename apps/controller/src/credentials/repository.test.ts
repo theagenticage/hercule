@@ -9,6 +9,7 @@ import {
   Credentials,
   CredentialsLayer,
   LOGIN_TOKEN_LIFETIME_MS,
+  USE_STAMP_INTERVAL_MS,
   type ApiKeyRecord,
 } from "./repository";
 import { hashToken, mintToken } from "./token";
@@ -242,5 +243,68 @@ describe("api keys", () => {
       }),
     );
     expect(error._tag).toBe("CursorError");
+  });
+});
+
+/**
+ * The throttle on `last_used_at`: a use inside the interval writes nothing, a
+ * use past it writes. Both directions are asserted, so inverting the
+ * comparison in `worthStamping` fails one of them.
+ */
+describe("use stamps", () => {
+  it("renews a login bearer at most once per interval", async () => {
+    const [issued, early, late] = await run(
+      Effect.gen(function* () {
+        const { user, credentials } = yield* withUser;
+        const token = mintToken();
+        const issued = yield* credentials.issueLoginToken(user.id, hashToken(token));
+        const read = credentials
+          .findLoginToken(hashToken(token))
+          .pipe(Effect.map(Option.getOrThrow));
+
+        yield* TestClock.adjust(USE_STAMP_INTERVAL_MS - 1);
+        yield* credentials.renewLoginToken(issued);
+        const early = yield* read;
+
+        yield* TestClock.adjust(1);
+        yield* credentials.renewLoginToken(issued);
+        const late = yield* read;
+
+        return [issued, early, late] as const;
+      }),
+    );
+    expect(early.expiresAt).toBe(issued.expiresAt);
+    expect(early.lastUsedAt).toBe(issued.lastUsedAt);
+    expect(Date.parse(late.expiresAt)).toBe(Date.parse(issued.expiresAt) + USE_STAMP_INTERVAL_MS);
+  });
+
+  it("stamps an API key at most once per interval", async () => {
+    const [stamped, early, late] = await run(
+      Effect.gen(function* () {
+        const { user, credentials } = yield* withUser;
+        const token = mintToken();
+        const created = yield* credentials.createApiKey(user.id, "laptop", hashToken(token));
+        const read = credentials.findApiKey(hashToken(token)).pipe(Effect.map(Option.getOrThrow));
+
+        // A key that has never been used always stamps, whatever the clock says.
+        yield* credentials.touchApiKey(created);
+        const stamped = yield* read;
+
+        yield* TestClock.adjust(USE_STAMP_INTERVAL_MS - 1);
+        yield* credentials.touchApiKey(stamped);
+        const early = yield* read;
+
+        yield* TestClock.adjust(1);
+        yield* credentials.touchApiKey(stamped);
+        const late = yield* read;
+
+        return [stamped, early, late] as const;
+      }),
+    );
+    expect(stamped.lastUsedAt).not.toBeNull();
+    expect(early.lastUsedAt).toBe(stamped.lastUsedAt);
+    expect(Date.parse(late.lastUsedAt ?? "")).toBe(
+      Date.parse(stamped.lastUsedAt ?? "") + USE_STAMP_INTERVAL_MS,
+    );
   });
 });

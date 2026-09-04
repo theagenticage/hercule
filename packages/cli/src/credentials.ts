@@ -113,11 +113,10 @@ export const resolveCredential = (home: string, env: Env): Credential => {
       `No credential. Set HYDRA_TOKEN and HYDRA_API_URL, or run \`hydra login <url>\`.`,
     );
   }
-  return {
-    url: envUrl !== undefined && envUrl !== "" ? envUrl : file.url,
-    token: file.apiKey,
-    source: "file",
-  };
+  // A non-empty HYDRA_API_URL threw above, so the file's own URL is the only
+  // one left: a file credential is never sent to a controller it was not
+  // minted for.
+  return { url: file.url, token: file.apiKey, source: "file" };
 };
 
 /**

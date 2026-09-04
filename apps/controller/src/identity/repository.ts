@@ -21,7 +21,7 @@ import * as Option from "effect/Option";
 import * as Redacted from "effect/Redacted";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
-import { mintUuid, uuidToString } from "../db";
+import { mintUuid, uuidToString, withTransaction } from "../db";
 import { CORE_OWNER, Secrets, type SecretNameError } from "../secrets";
 
 /** The `core`-owned secret holding the controller's Ed25519 private key, PKCS#8 as base64. */
@@ -98,7 +98,8 @@ export const controllerIdentityLayer: Layer.Layer<
       // One transaction: the identity row and the private key it belongs to are
       // written together or not at all. Generating the keypair is local CPU
       // work, not a wait on anything outside the database.
-      ensure: sql.withTransaction(
+      ensure: withTransaction(
+        sql,
         Effect.gen(function* () {
           const existing = yield* read;
           if (Option.isSome(existing)) return existing.value;

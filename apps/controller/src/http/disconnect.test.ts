@@ -1,17 +1,22 @@
 /**
  * What a client hanging up mid-request does to the real controller.
  *
- * `server.ts` claims each request is one fiber and that a disconnect interrupts
- * it, rolling an open transaction back. Asserting that against a hand-rolled
- * router would only re-test `@effect/platform-bun`, so this drives the whole
- * stack the way anything else does: the envelope, the body cap, the pre-setup
- * gate, both credential gates, the derived route and the operation's own
- * transaction behind it.
+ * What these tests prove is the outcome, not the mechanism: a request the
+ * client abandoned performs no durable write, and the controller goes on
+ * serving. They deliberately do not claim that a particular fiber was
+ * interrupted with a transaction open - an interrupt requested inside an
+ * uninterruptible region is delivered later, so no test of this shape could
+ * tell that apart from a request abandoned before its handler ran.
+ *
+ * Asserting the outcome against a hand-rolled router would only re-test
+ * `@effect/platform-bun`, so this drives the whole stack the way anything else
+ * does: the envelope, the pre-setup gate, both credential gates, the derived
+ * route and the operation's own transaction behind it.
  *
  * Both cases matter and they are not the same request. An unauthenticated one
- * runs with no security middleware at all; an authenticated one runs the whole
- * credential gate first, so it is the one that proves the gate sits inside the
- * interruptible region rather than in front of it.
+ * runs with no security middleware at all; an authenticated one has passed the
+ * whole credential gate, so it is the one that shows a resolved bearer does not
+ * make the abandoned write happen anyway.
  *
  * The request is parked deliberately rather than raced. SQLite has one writer
  * and `@effect/sql-sqlite-bun` puts every statement behind one connection
@@ -22,6 +27,7 @@ import { connect } from "node:net";
 import { describe, expect, it } from "vitest";
 import * as Effect from "effect/Effect";
 import type * as SqlClient from "effect/unstable/sql/SqlClient";
+import { withTransaction } from "../db";
 import { completeSetup, get, PASSWORD, post, USERNAME, withServer } from "./testing";
 
 /** Long enough for the parked request to reach the database and stop there. */
@@ -83,7 +89,8 @@ const parkTheDatabase = async (
   const parked = Promise.withResolvers<void>();
   const letGo = Promise.withResolvers<void>();
   const holder = Effect.runPromise(
-    sql.withTransaction(
+    withTransaction(
+      sql,
       Effect.gen(function* () {
         yield* sql`SELECT 1`;
         parked.resolve();
@@ -100,6 +107,19 @@ const parkTheDatabase = async (
   };
 };
 
+/** Parks the write connection for the body, and always lets it go again. */
+const withParkedDatabase = async (
+  sql: SqlClient.SqlClient,
+  body: () => Promise<void>,
+): Promise<void> => {
+  const held = await parkTheDatabase(sql);
+  try {
+    await body();
+  } finally {
+    await held.release();
+  }
+};
+
 describe("a client that hangs up", () => {
   it("leaves no login token, no audit row and a controller that keeps serving", async () => {
     await withServer(async (base, audit, sql) => {
@@ -108,13 +128,13 @@ describe("a client that hangs up", () => {
 
       // Hold the one write connection until this test lets go of it, so the
       // request below is still inside `auth.login` when the socket closes.
-      const held = await parkTheDatabase(sql);
-      expect(await hangUp(base, "/api/v1/auth/login", credential)).toBe("closed");
-      await held.release();
+      await withParkedDatabase(sql, async () => {
+        expect(await hangUp(base, "/api/v1/auth/login", credential)).toBe("closed");
+      });
 
-      // The login never happened: no token was issued and the operation's
-      // audit row went back with its transaction. A disconnect is also not a
-      // failure, so the envelope answered nothing and logged nothing.
+      // The login never happened: no token was issued and no audit row was
+      // written. A disconnect is also not a failure, so the envelope answered
+      // nothing and logged nothing.
       expect(await audit("auth.login.succeeded")).toEqual([]);
       expect(await audit("auth.login.failed")).toEqual([]);
 
@@ -135,12 +155,12 @@ describe("a client that hangs up", () => {
       // in front of it.
       expect((await get(base, "/api/v1/api-keys", bearer)).status).toBe(200);
 
-      const held = await parkTheDatabase(sql);
-      expect(await hangUp(base, "/api/v1/api-keys", { name: "laptop" }, bearer)).toBe("closed");
-      await held.release();
+      await withParkedDatabase(sql, async () => {
+        expect(await hangUp(base, "/api/v1/api-keys", { name: "laptop" }, bearer)).toBe("closed");
+      });
 
-      // The credential gate had resolved the bearer and the handler had its
-      // transaction open; neither survived the disconnect.
+      // The bearer was good and the request had reached the database, and the
+      // key was still never minted.
       expect(await audit("auth.apiKey.minted")).toEqual([]);
       expect(await (await get(base, "/api/v1/api-keys", bearer)).json()).toMatchObject({
         items: [],

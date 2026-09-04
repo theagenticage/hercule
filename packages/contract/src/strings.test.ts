@@ -6,7 +6,7 @@ import { profile } from "./groups/profile";
 import { secret } from "./groups/secret";
 import { setup } from "./groups/setup";
 import { user } from "./groups/user";
-import { MAX_PASSWORD_LENGTH, MIN_PASSWORD_LENGTH } from "./strings";
+import { MAX_PASSWORD_LENGTH, MAX_SECRET_VALUE_LENGTH, MIN_PASSWORD_LENGTH } from "./strings";
 
 const decode = (schema: unknown, input: unknown) =>
   Effect.runSyncExit(Schema.decodeUnknownEffect(schema as Schema.Codec<unknown, unknown>)(input))
@@ -85,5 +85,12 @@ describe("bounds on free text (spec 11 section 1.5)", () => {
     expect(decode(params, { ownerKind: "plugin", ownerId: "x".repeat(257), name: "n" })).toBe(
       "Failure",
     );
+  });
+
+  it("caps a secret's value, which is the largest thing the API accepts", () => {
+    const set = payloadOf(secret, "set");
+    expect(decode(set, { value: "x".repeat(MAX_SECRET_VALUE_LENGTH) })).toBe("Success");
+    expect(decode(set, { value: "x".repeat(MAX_SECRET_VALUE_LENGTH + 1) })).toBe("Failure");
+    expect(decode(set, { value: "" })).toBe("Failure");
   });
 });

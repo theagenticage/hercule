@@ -41,3 +41,16 @@ export const PresentedPassword = bounded(1, MAX_PASSWORD_LENGTH);
 
 /** A login name. */
 export const Username = bounded(1, 64);
+
+/**
+ * The largest secret value the API stores, in characters.
+ *
+ * A secret is the largest thing v1 accepts - a private key, a PEM bundle, a
+ * service-account JSON - so the bound is generous, but it is a bound: it is
+ * caller-controlled text that lands in the database, and the listener's own 1
+ * MiB body cap is a limit on the request, not on the field.
+ */
+export const MAX_SECRET_VALUE_LENGTH = 64 * 1024;
+
+/** A secret's value. Empty is not a secret; use `secret.delete` instead. */
+export const SecretValue = bounded(1, MAX_SECRET_VALUE_LENGTH);

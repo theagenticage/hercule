@@ -28,7 +28,7 @@ import { SettingsLayer, SettingsOperationsLayer } from "../settings";
 import { SetupLayer } from "../setup";
 import { PasswordCost, TEST_PASSWORD_PARAMS, UserLayer, UsersLayer } from "../users";
 import { seed } from "../seed";
-import { serve } from "./server";
+import { MAX_REQUEST_BODY_BYTES, serve } from "./server";
 
 /** The setup token the harness seeds, and the password `completeSetup` uses. */
 export const SETUP_TOKEN = "a-setup-token";
@@ -106,7 +106,16 @@ export const withServer = (
     ).pipe(
       Effect.provide(
         services(home).pipe(
-          Layer.provideMerge(BunHttpServer.layer({ hostname: "127.0.0.1", port: 0 })),
+          // The same listener `hydra serve` builds, body cap included: the cap
+          // is the transport's, so a harness without it would test a different
+          // server from the one that ships.
+          Layer.provideMerge(
+            BunHttpServer.layer({
+              hostname: "127.0.0.1",
+              port: 0,
+              maxRequestBodySize: MAX_REQUEST_BODY_BYTES,
+            }),
+          ),
         ),
       ),
       Effect.provideService(PasswordCost, TEST_PASSWORD_PARAMS),

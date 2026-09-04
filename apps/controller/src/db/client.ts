@@ -81,7 +81,7 @@ const wasLocked = (error: unknown): boolean => {
  */
 const BUSY_TIMEOUT = Duration.seconds(1);
 
-/** What a second controller on the same home is told, whichever step refuses. */
+/** What a second controller on the same home is told. */
 const ALREADY_OPEN = (filename: string): string =>
   `${filename} is already open by another Hydra controller. One controller serves a home ` +
   `(ADR 0004); stop the other one and try again.`;
@@ -144,8 +144,8 @@ const takeTheHome = (
     const sql = yield* SqlClient.SqlClient;
     yield* sql`PRAGMA locking_mode = EXCLUSIVE`;
     const taken = Effect.andThen(sql`BEGIN IMMEDIATE`, sql`COMMIT`);
-    yield* Effect.catchTag(taken, "SqlError", () =>
-      Effect.fail(new DatabaseError({ filename, message: ALREADY_OPEN(filename) })),
+    yield* Effect.catchTag(taken, "SqlError", (error) =>
+      Effect.fail(databaseError(filename, error)),
     );
   });
 

@@ -3,9 +3,9 @@
  *
  * Two scopes, one closed key set each: `controller` holds the controller's
  * operational settings seeded at first run, `user` holds the user settings
- * store, keyed by user id from day one so a later user concept is a `WHERE`
- * clause. A key that is not set is absent rather than defaulted, so the default
- * lives in exactly one place.
+ * store, which is keyed by user id so a later multi-user concept is a `WHERE`
+ * clause rather than a table rebuild. A key that is not set is absent rather
+ * than defaulted, so the default lives in exactly one place.
  *
  * `SETTING_VALUES` is the single declaration of what a key holds: the two
  * structs here are derived from it, and the controller's settings store reads

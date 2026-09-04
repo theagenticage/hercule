@@ -282,15 +282,17 @@ describe("the pre-setup gate decides on the operation, not on the path", () => {
 });
 
 describe("the body cap", () => {
-  it("refuses a body larger than the cap in the envelope, without storing it", async () => {
+  /**
+   * The cap is the listener's, so the refusal is the transport's bare `413` -
+   * the one response outside the error envelope - and it lands before the body
+   * is read, which is why nothing reaches the audit log.
+   */
+  it("refuses a body larger than the cap with a 413, without storing it", async () => {
     await withServer(async (base, audit) => {
       const username = "x".repeat(MAX_REQUEST_BODY_BYTES + 1);
       const response = await post(base, "/api/v1/auth/login", { username, password: PASSWORD });
 
-      expect(response.status).toBe(422);
-      expect(await response.json()).toMatchObject({
-        error: { code: "cap_exceeded", details: { cap: MAX_REQUEST_BODY_BYTES } },
-      });
+      expect(response.status).toBe(413);
       expect(await audit("auth.login.failed")).toEqual([]);
     });
   });

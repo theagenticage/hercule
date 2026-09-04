@@ -15,7 +15,7 @@ import * as HttpApiGroup from "effect/unstable/httpapi/HttpApiGroup";
 import { Forbidden, Internal, NotFound, Unauthenticated, Validation } from "../errors";
 import { Timestamp } from "../ids";
 import { page, pageParams } from "../pagination";
-import { bounded } from "../strings";
+import { bounded, SecretValue } from "../strings";
 import { Authenticated } from "../security";
 
 /** Who a secret belongs to. */
@@ -64,7 +64,7 @@ export const secret = HttpApiGroup.make("secret")
     }),
     HttpApiEndpoint.put("set", "/secrets/:ownerKind/:ownerId/:name", {
       params: SecretPath,
-      payload: Schema.Struct({ value: Schema.NonEmptyString }),
+      payload: Schema.Struct({ value: SecretValue }),
       success: SecretRef,
       error: [Unauthenticated, Forbidden, Validation, Internal],
     }),

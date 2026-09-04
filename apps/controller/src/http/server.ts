@@ -6,39 +6,46 @@
  * else; this module is the order the request passes through:
  *
  * 1. the error envelope, which answers everything the routes did not,
- * 2. the body cap, which refuses a body too large to be a real request,
- * 3. routing,
- * 4. the pre-setup gate and the per-request span, both named for the operation
+ * 2. routing,
+ * 3. the pre-setup gate and the per-request span, both named for the operation
  *    the router matched (`./gate.ts`),
- * 5. the credential gate and the static grant check (`./middleware.ts`),
- * 6. the derived route's decoding, then the one-line handler.
+ * 4. the credential gate and the static grant check (`./middleware.ts`),
+ * 5. the derived route's decoding, then the one-line handler.
  *
- * Each request is one fiber. A client that hangs up interrupts it, which rolls
- * an open transaction back: `BunHttpServer` wires the request's abort signal to
- * the fiber, and `disconnect.test.ts` holds it to that over a real socket, for
- * an unauthenticated request and for one that has passed the credential gate.
+ * The body cap is not in that order: it is the listener's, given to Bun as
+ * `maxRequestBodySize`, so an oversize body is answered `413` by the transport
+ * before a byte of it is read and before this module runs at all. That `413` is
+ * the one response the API sends outside the error envelope of spec 11 section
+ * 1.5, and it is deliberate: an enveloped answer would mean reading the body
+ * first, which is the cost the cap exists to avoid.
+ *
+ * Each request is one fiber, and `BunHttpServer` wires the request's abort
+ * signal to it: a client that hangs up interrupts the fiber, and
+ * `disconnect.test.ts` holds a real socket to the consequence - a request that
+ * was abandoned performs no durable write, authenticated or not.
  */
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as HttpRouter from "effect/unstable/http/HttpRouter";
 import * as HttpServer from "effect/unstable/http/HttpServer";
-import * as HttpServerRequest from "effect/unstable/http/HttpServerRequest";
 import type * as HttpServerResponse from "effect/unstable/http/HttpServerResponse";
 import * as HttpApiBuilder from "effect/unstable/httpapi/HttpApiBuilder";
-import { ALL_OPERATIONS, api, capExceeded, validation } from "@hydra/contract";
+import { ALL_OPERATIONS, api, validation } from "@hydra/contract";
 import { responseFor, withEnvelope } from "./envelope";
 import { setupGate } from "./gate";
 import { AuthenticatedLayer, SetupTokenLayer } from "./middleware";
 import { handlerLayers } from "./routes";
 
 /**
- * The largest request body the controller reads, in bytes.
+ * The largest request body the controller reads, in bytes. The listener is
+ * given this as `maxRequestBodySize`, so it is enforced by the transport.
  *
  * Nothing the public API takes in v1 is anywhere near a megabyte - the largest
  * is a secret value - and without a cap an unauthenticated caller can push
  * arbitrary bytes into durable storage through a failed login's audit row. The
  * cap is the listener's, so it holds for every operation and for paths no
- * operation owns.
+ * operation owns, and an oversize body is refused with a bare `413` before it
+ * is read.
  */
 export const MAX_REQUEST_BODY_BYTES = 1024 * 1024;
 
@@ -70,32 +77,6 @@ const routerLayer = HttpApiBuilder.layer(api).pipe(
 );
 
 /**
- * Refuses a body larger than the cap before anything reads it, in the envelope
- * the rest of the API answers in. This is the declared content length; a body
- * that arrives without one, or lies about it, is cut off by the listener's own
- * `maxRequestBodySize`, which is the same number.
- */
-const withBodyCap = <E, R>(
-  app: Effect.Effect<HttpServerResponse.HttpServerResponse, E, R>,
-): Effect.Effect<
-  HttpServerResponse.HttpServerResponse,
-  E,
-  R | HttpServerRequest.HttpServerRequest
-> =>
-  Effect.flatMap(HttpServerRequest.HttpServerRequest, (request) => {
-    const declared = Number(request.headers["content-length"] ?? "0");
-    if (!Number.isFinite(declared) || declared <= MAX_REQUEST_BODY_BYTES) return app;
-    return Effect.succeed(
-      responseFor(
-        capExceeded(
-          { size: declared, cap: MAX_REQUEST_BODY_BYTES },
-          "the request body is larger than this API accepts",
-        ),
-      ),
-    );
-  });
-
-/**
  * The derived routes answer a body they cannot decode with a bare `415` and a
  * text body of their own, which is the one failure that would leave the
  * envelope of spec 11 section 1.5. It is bad input, so it answers as one.
@@ -115,7 +96,7 @@ const jsonOnly = <E, R>(
  * The whole application as one effect: what a request runs.
  */
 const application = Effect.map(HttpRouter.toHttpEffect(routerLayer), (routes) =>
-  withEnvelope(withBodyCap(jsonOnly(routes))),
+  withEnvelope(jsonOnly(routes)),
 );
 
 /**
