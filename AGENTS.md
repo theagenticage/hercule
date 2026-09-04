@@ -88,6 +88,15 @@ One pnpm workspace. Every package is `@hydra/*`, `"type": "module"`, and exports
 
 Source is organized **by domain**, not by type: one folder per domain, named with the CONTEXT.md word for it, and its `index.ts` is the boundary other domains import through. `db/` and `config/` are the two infrastructure exceptions. Tests sit next to the code they test (`foo.test.ts` beside `foo.ts`); cross-package end-to-end tests live in `e2e/` at the repository root. See [ADR 0033](docs/adr/0033-source-is-organized-by-domain-and-tests-are-colocated.md).
 
+#### Web app layout
+
+1. One screen is one route file under `apps/web/src/routes/`, exporting `Route` with `staticData: { title }`; it splits into `routes/<screen>/-<part>.tsx` only past ~150 lines.
+2. Screens import presentation from `@hydra/ui` (generic) or `apps/web/src/screens/` (knows Hydra), never from `shell/` - eslint enforces this.
+3. A `-` prefixed route file is local to its route folder and is never imported from outside `routes/` - eslint enforces this.
+4. `apps/web/src/app/` is wiring only: router, context, queries, entry guard, form, testing. Nothing that renders a screen.
+5. Reads are `queryOptions`, writes are `useMutation`; no component hand-rolls fetch state.
+6. Anything that interprets domain data goes to `@hydra/client-core` with its own test; a folder-wide test is named for its folder.
+
 ### Check commands
 
 Install first, then run the four checks. All four must be green before a PR; CI runs the same ones.
