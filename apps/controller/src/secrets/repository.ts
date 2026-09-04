@@ -28,7 +28,6 @@
  * only inside a {@link Redacted.Redacted}: it never appears in the event log,
  * an API response, a Notification, a process log, or the web app.
  */
-import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -42,6 +41,7 @@ import {
   encodeCursor,
   keysetOver,
   mintUuid,
+  nowIso,
   pageOf,
   uuidFromString,
   uuidToString,
@@ -230,7 +230,7 @@ export const secretsLayer: Layer.Layer<Secrets, never, MasterKey | SqlClient.Sql
           Effect.gen(function* () {
             yield* rejectSeparator(owner, name);
             const { nonce, ciphertext } = yield* encrypt(owner, name, Redacted.value(value));
-            const now = new Date(yield* Clock.currentTimeMillis).toISOString();
+            const now = yield* nowIso;
             const rows = yield* sql<{
               readonly id: Bytes;
               readonly created_at: string;

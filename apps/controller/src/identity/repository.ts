@@ -13,7 +13,6 @@
  * under the `core` owner, encrypted under the Master Key
  * like every other secret, so a stolen database file yields nothing.
  */
-import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -21,7 +20,7 @@ import * as Option from "effect/Option";
 import * as Redacted from "effect/Redacted";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
-import { mintUuid, uuidToString, withTransaction } from "../db";
+import { mintUuid, nowIso, uuidToString, withTransaction } from "../db";
 import { CORE_OWNER, Secrets, type SecretNameError } from "../secrets";
 
 /** The `core`-owned secret holding the controller's Ed25519 private key, PKCS#8 as base64. */
@@ -119,7 +118,7 @@ export const controllerIdentityLayer: Layer.Layer<
           );
 
           const id = mintUuid();
-          const createdAt = new Date(yield* Clock.currentTimeMillis).toISOString();
+          const createdAt = yield* nowIso;
           yield* sql`
             INSERT INTO controller_identity (singleton, id, public_key, created_at)
             VALUES (1, ${id}, ${publicKey}, ${createdAt})

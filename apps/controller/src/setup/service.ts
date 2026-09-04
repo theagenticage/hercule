@@ -20,7 +20,6 @@
  * yet, and the onboarding steps beyond the timezone, which are the web app's.
  */
 import { rmSync } from "node:fs";
-import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -30,7 +29,7 @@ import { invalidState, type InvalidState } from "@hydra/contract";
 import { USER_ACTOR } from "../actor";
 import { HydraHome } from "../config";
 import { Credentials, hashToken, mintToken } from "../credentials";
-import { withTransaction } from "../db";
+import { nowIso, withTransaction } from "../db";
 import { AuditLog } from "../events";
 import { Settings, type SettingError } from "../settings";
 import { hashPassword, PasswordCost, Users } from "../users";
@@ -90,7 +89,7 @@ const make = Effect.gen(function* () {
         yield* withTransaction(
           sql,
           Effect.gen(function* () {
-            const at = new Date(yield* Clock.currentTimeMillis).toISOString();
+            const at = yield* nowIso;
             // The claim is the guard: whoever's UPDATE changes the row finishes
             // setup and everyone else is told it is already done. Reading the
             // flag first and writing afterwards would let two callers holding

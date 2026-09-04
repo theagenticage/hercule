@@ -220,6 +220,14 @@ export const keysetOver = (
  * query to know. `items` turns the page's rows into what the caller reads -
  * effectful because a row can need a second query to become a value - and
  * `cursorOf` seals the last of them into the cursor the next page resumes from.
+ *
+ * `items` must be total and order-preserving: one value per row it was given,
+ * in that order. The cursor is sealed off the last value because that is what
+ * carries the sort key, so an `items` that dropped a row would resume the next
+ * page from the wrong one - and one that dropped the last row would end the
+ * walk with no cursor and no error, which is the silent end `decodeCursor`
+ * warns about. Both callbacks in the tree map every row; the `undefined` guard
+ * below is what the generic's own type demands, not a case that can arise.
  */
 export const pageOf = <Row, A, E, R>(
   rows: ReadonlyArray<Row>,

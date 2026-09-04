@@ -8,10 +8,11 @@
  * a platform event - `source: "platform"`, no Connection - carrying the actor
  * of the mutation that caused it.
  */
-import { Clock, Context, Effect, Layer } from "effect";
+import { Context, Effect, Layer } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import type { Actor } from "@hydra/contract";
+import { nowIso } from "../db";
 
 /**
  * The audit kinds this build emits, following `<entity>.<verb>ed`. The list
@@ -87,7 +88,7 @@ const make = Effect.gen(function* () {
      */
     append: (entry: AuditEntry): Effect.Effect<void, SqlError> =>
       Effect.gen(function* () {
-        const at = entry.at ?? new Date(yield* Clock.currentTimeMillis).toISOString();
+        const at = entry.at ?? (yield* nowIso);
         // `dedup_key` is an emitter's idempotency key, and an audit entry has
         // none: two logins a second apart are two facts, not one repeated. A
         // random value per row satisfies the NOT NULL column and makes the
