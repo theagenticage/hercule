@@ -1,6 +1,6 @@
 import { parseGlobalOptions } from "@hydra/home";
+import { VERSION } from "@hydra/home/version";
 import { Result } from "effect";
-import { VERSION } from "./version";
 
 export type Role = "controller" | "runner" | "cli";
 
@@ -10,7 +10,7 @@ type RoleModule = { run: (argv: readonly string[]) => void | Promise<void> };
 /**
  * One binary, three roles. Each role is a separate entrypoint reached by a
  * dynamic import, so starting as a runner never evaluates the controller's
- * module graph (spec 15 sections 2 and 3).
+ * module graph.
  */
 const ROLE_ENTRYPOINTS: Record<Role, () => Promise<RoleModule>> = {
   controller: () => import("@hydra/controller"),
@@ -23,12 +23,12 @@ const ROLE_ENTRYPOINTS: Record<Role, () => Promise<RoleModule>> = {
  *
  * `hydra serve` is the controller and `hydra runner` / `hydra runner --local`
  * are the runner daemon. Every other verb, `hydra runner join` and
- * `hydra runner create-join-token` included, is the CLI (spec 15 section 2).
- * The role keeps the global options; only the verb is consumed.
+ * `hydra runner create-join-token` included, is the CLI. The role keeps the
+ * global options; only the verb is consumed.
  *
- * `--home <dir>` and `-c key=value` may precede the verb (spec 15 section 2),
- * so the verb is wherever `parseGlobalOptions` found it - the same parser the
- * role runs on the same line, rather than a second copy of the rule here.
+ * `--home <dir>` and `-c key=value` may precede the verb, so the verb is
+ * wherever `parseGlobalOptions` found it - the same parser the role runs on the
+ * same line, rather than a second copy of the rule here.
  */
 function route(
   argv: readonly string[],

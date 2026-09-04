@@ -27,12 +27,11 @@ export interface GlobalOptions {
  *
  * `--home <dir>` locates the config file and `-c key=value` overrides any
  * bootstrap key; both may appear anywhere on the line, because the dispatcher
- * hands them to the role along with the role's own arguments (spec 15 sections
- * 2 and 6).
+ * hands them to the role along with the role's own arguments.
  *
  * Pure, and free of the database by construction: the dispatcher routes on it,
  * the CLI resolves its home with it, and the runner will too - and neither the
- * dispatcher nor the runner links controller state (spec 15 section 3).
+ * dispatcher nor the runner links controller state.
  */
 export function parseGlobalOptions(
   argv: ReadonlyArray<string>,

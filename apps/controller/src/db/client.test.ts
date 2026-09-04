@@ -36,6 +36,7 @@ describe("databaseError", () => {
     const write = Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient;
       yield* withTransaction(
+        sql,
         Effect.gen(function* () {
           yield* sql`SELECT count(*) AS n FROM t`;
           yield* sql`INSERT INTO t (v) VALUES ('second')`;
@@ -47,7 +48,9 @@ describe("databaseError", () => {
 
     try {
       const error = await Effect.runPromise(write.pipe(Effect.flip));
-      expect(databaseError(file, error).message).toContain("Another Hydra controller");
+      expect(databaseError(file, error).message).toContain(
+        "already open by another Hydra controller",
+      );
     } finally {
       holder.run("ROLLBACK");
       holder.close();
@@ -59,7 +62,9 @@ describe("databaseError", () => {
       reason: new LockTimeoutError({ cause: { code: "SQLITE_BUSY" } }),
     });
     const outer = new SqlError({ reason: new UnknownError({ cause: inner }) });
-    expect(databaseError(file, outer).message).toContain("Another Hydra controller");
+    expect(databaseError(file, outer).message).toContain(
+      "already open by another Hydra controller",
+    );
   });
 
   it("says what it could not do when the failure is not a lock", async () => {
@@ -70,5 +75,37 @@ describe("databaseError", () => {
       }).pipe(Effect.provide(openDatabase(file)), Effect.flip),
     );
     expect(databaseError(file, error).message).toContain(`Cannot use ${file}`);
+  });
+});
+
+describe("one controller per home", () => {
+  it("refuses a second open of the same database file", async () => {
+    const open = Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      yield* sql`SELECT 1`;
+    });
+
+    const both = Effect.gen(function* () {
+      // The first controller holds the home for as long as its scope lives; the
+      // second one boots against the same file while it does.
+      yield* Effect.forkScoped(
+        Effect.provide(Effect.andThen(open, Effect.never), openDatabase(file)),
+      );
+      yield* Effect.sleep(Duration.millis(250));
+      return yield* Effect.flip(Effect.provide(open, openDatabase(file)));
+    });
+
+    const error = await Effect.runPromise(Effect.scoped(both));
+    expect(error.message).toContain("already open by another Hydra controller");
+  });
+
+  it("lets the next controller in once the first has closed", async () => {
+    const open = Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      yield* sql`SELECT 1`;
+    });
+
+    await Effect.runPromise(Effect.provide(open, openDatabase(file)));
+    await Effect.runPromise(Effect.provide(open, openDatabase(file)));
   });
 });

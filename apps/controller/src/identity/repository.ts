@@ -1,6 +1,6 @@
 /**
  * The controller's persistent identity: an id plus key material, created at
- * install and carried through a promotion (ADR 0005, spec 04).
+ * install and carried through a promotion.
  *
  * Identity is logical, not an address. Runners verify it wherever the
  * controller appears, which is what makes a "controller moved to X"
@@ -10,7 +10,7 @@
  * The keypair is Ed25519: small signatures, no parameter choices to get wrong,
  * and already in Bun's WebCrypto. The public key sits in the singleton
  * `controller_identity` row as raw SPKI bytes; the private key is a secrets row
- * under the `core` owner (spec 13 section 2.1), encrypted under the Master Key
+ * under the `core` owner, encrypted under the Master Key
  * like every other secret, so a stolen database file yields nothing.
  */
 import * as Clock from "effect/Clock";
@@ -21,7 +21,7 @@ import * as Option from "effect/Option";
 import * as Redacted from "effect/Redacted";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
-import { mintUuid, uuidToString } from "../db";
+import { mintUuid, uuidToString, withTransaction } from "../db";
 import { CORE_OWNER, Secrets, type SecretNameError } from "../secrets";
 
 /** The `core`-owned secret holding the controller's Ed25519 private key, PKCS#8 as base64. */
@@ -47,7 +47,7 @@ const generateSigningKeyPair = Effect.promise(
     ]) as unknown as Promise<CryptoKeyPair>,
 );
 
-/** The controller's own identity (ADR 0005). */
+/** The controller's own identity. */
 export class ControllerIdentity extends Context.Service<
   ControllerIdentity,
   {
@@ -56,6 +56,12 @@ export class ControllerIdentity extends Context.Service<
      * finds the same id and the same key.
      */
     readonly ensure: Effect.Effect<ControllerIdentityRecord, SqlError | SecretNameError>;
+
+    /**
+     * The identity as it stands, without creating one. `None` only before the
+     * first boot has run: every caller after that has one.
+     */
+    readonly read: Effect.Effect<Option.Option<ControllerIdentityRecord>, SqlError>;
   }
 >()("hydra/controller/identity/ControllerIdentity") {}
 
@@ -87,10 +93,13 @@ export const controllerIdentityLayer: Layer.Layer<
     );
 
     return ControllerIdentity.of({
+      read,
+
       // One transaction: the identity row and the private key it belongs to are
       // written together or not at all. Generating the keypair is local CPU
       // work, not a wait on anything outside the database.
-      ensure: sql.withTransaction(
+      ensure: withTransaction(
+        sql,
         Effect.gen(function* () {
           const existing = yield* read;
           if (Option.isSome(existing)) return existing.value;

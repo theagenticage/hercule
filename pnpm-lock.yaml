@@ -127,6 +127,12 @@ importers:
 
   packages/cli:
     dependencies:
+      '@hydra/client-core':
+        specifier: workspace:*
+        version: link:../client-core
+      '@hydra/contract':
+        specifier: workspace:*
+        version: link:../contract
       '@hydra/home':
         specifier: workspace:*
         version: link:../home

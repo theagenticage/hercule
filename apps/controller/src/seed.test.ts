@@ -22,8 +22,8 @@ const grantsOf = (name: string) =>
   });
 
 /**
- * The shipped profiles, transcribed from the table in spec 13 section 6.2 so a
- * spec change shows up here as a failing test rather than as drift.
+ * The shipped profiles, listed in full so a change to the seeded grants shows
+ * up here as a failing test rather than as drift.
  */
 describe("the shipped permission profiles", () => {
   it("seeds assistant with the orchestration surface plus read on everything but secrets", async () => {
@@ -70,8 +70,8 @@ describe("the shipped permission profiles", () => {
         "task.read",
         "task.create",
         "task.update",
-        // Amended by ticket #56: the table's `notification (write)` cell would
-        // leave a worker unable to read the notifications it creates.
+        // A worker reads as well as writes notifications: without the read
+        // grant it could not read back the ones it creates.
         "notification.read",
         "notification.write",
         "subscription.read",
@@ -129,11 +129,11 @@ describe("the controller settings defaults", () => {
         Effect.gen(function* () {
           const settings = yield* Settings;
           return {
-            events: yield* settings.get("controller", "retention.events"),
-            security: yield* settings.get("controller", "retention.security"),
-            conversations: yield* settings.get("controller", "retention.conversations"),
-            time: yield* settings.get("controller", "backup.time"),
-            keep: yield* settings.get("controller", "backup.keep"),
+            events: yield* settings.get("retention.events"),
+            security: yield* settings.get("retention.security"),
+            conversations: yield* settings.get("retention.conversations"),
+            time: yield* settings.get("backup.time"),
+            keep: yield* settings.get("backup.keep"),
           };
         }),
       ),
@@ -199,10 +199,7 @@ describe("seeding twice", () => {
         yield* sql`UPDATE permission_profiles SET grants = '["task.read"]' WHERE name = 'worker'`;
         yield* sql`UPDATE settings SET value = '7' WHERE scope = 'controller' AND key = 'retention.events'`;
         yield* seed;
-        return [
-          yield* grantsOf("worker"),
-          yield* settings.get("controller", "retention.events"),
-        ] as const;
+        return [yield* grantsOf("worker"), yield* settings.get("retention.events")] as const;
       }),
     );
     expect(profile.grants).toEqual(["task.read"]);

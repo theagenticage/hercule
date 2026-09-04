@@ -1,12 +1,10 @@
 /**
- * Where Hydra keeps things on a machine: the Hydra Home layout (spec 15
- * section 5).
+ * Where Hydra keeps things on a machine: the Hydra Home layout.
  *
  * Pure path arithmetic, no filesystem and no Effect services, because three
  * roles resolve a home and only one of them may link controller state: the
  * dispatcher routes on `--home`, the CLI reads `<home>/setup-url`, the runner
- * reads `<home>/runner/`, and the controller opens the database (spec 15
- * section 3).
+ * reads `<home>/runner/`, and the controller opens the database.
  */
 import { homedir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
@@ -14,11 +12,12 @@ import { isAbsolute, join, resolve } from "node:path";
 /**
  * Every path in a Hydra Home, absolute. `dataDir` is the resolved `data.dir`
  * bootstrap key, so it is the only member that can point outside the home, and
- * the only part that moves with a promotion (spec 15 section 5).
+ * the only part that moves with a promotion.
  */
 export interface HomePaths {
   readonly home: string;
   readonly configFile: string;
+  readonly credentialsFile: string;
   readonly dataDir: string;
   readonly databaseFile: string;
   readonly runnerDir: string;
@@ -32,12 +31,12 @@ export interface HomePaths {
 /** The default Hydra Home, used when neither `--home` nor `HYDRA_HOME` is set. */
 export const DEFAULT_HOME_NAME = ".hydra";
 
-/** The controller's one SQLite database, inside the Data Root (spec 15 sections 5 and 10). */
+/** The controller's one SQLite database, inside the Data Root. */
 export const DATABASE_FILE_NAME = "hydra.db";
 
 /**
  * Where this process's Hydra Home is: `--home` beats `HYDRA_HOME` beats
- * `~/.hydra` (spec 15 sections 5 and 6). Relative paths resolve against the
+ * `~/.hydra`. Relative paths resolve against the
  * working directory; the result is always absolute.
  */
 export function resolveHomePath(
@@ -55,7 +54,12 @@ export function configFileIn(home: string): string {
   return join(home, "config.toml");
 }
 
-/** Where `setup-url` lives; known without reading any config (spec 15 section 7). */
+/** Where the CLI credential file lives; mode 0600, `{ url, apiKey }`. */
+export function credentialsFileIn(home: string): string {
+  return join(home, "credentials.json");
+}
+
+/** Where `setup-url` lives; known without reading any config. */
 export function setupUrlFileIn(home: string): string {
   return join(home, "setup-url");
 }
@@ -66,6 +70,7 @@ export function homePaths(home: string, dataDir: string): HomePaths {
   return {
     home,
     configFile: configFileIn(home),
+    credentialsFile: credentialsFileIn(home),
     dataDir: resolvedDataDir,
     databaseFile: join(resolvedDataDir, DATABASE_FILE_NAME),
     runnerDir: join(home, "runner"),

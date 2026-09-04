@@ -109,10 +109,9 @@ Resolves the credential side of [ADR 0013](../adr/0013-agents-operate-hydra-thro
 
 ### 4.2 Password login
 
-- One user, username + password, set during first-run onboarding in the web app. The password is stored as a slow hash.
+- One user, username + password, set during first-run onboarding in the web app. The password is stored as a slow hash: **argon2id, via `Bun.password`** (resolved 2026-09-04, [#57](https://github.com/rogierpennink/hydra/issues/57); native in the pinned Bun, so Hydra carries no hashing dependency, and `Bun.password.verify` reads the algorithm and parameters back off the stored string, which is what lets the parameters be raised later without a migration).
 - Login returns an opaque bearer token the client holds and sends as `Authorization: Bearer <token>` on every HTTP call. No cookies, no CSRF machinery; this works identically in a future desktop shell ([ADR 0017](../adr/0017-the-web-app-is-a-static-pure-client-of-the-public-api.md)).
 
-**Verify at build time:** the password hash function (no source names one; argon2id is the expected choice).
 
 The bearer token's lifetime is **30 days rolling** (resolved 2026-09-01, [#44](https://github.com/rogierpennink/hydra/issues/44)): carried over from ticket #18's cookie number - each authenticated use extends it, and logout revokes it server-side. Where the web app stores it between page loads is [./14-web-app.md](./14-web-app.md)'s.
 
@@ -120,6 +119,7 @@ The bearer token's lifetime is **30 days rolling** (resolved 2026-09-01, [#44](h
 
 - Long-lived, opaque, revocable. Always the user's identity, never an agent's.
 - Minted in the web app (Settings) or via `hydra login` (password in, token out; `--password-stdin` scripted, echo-off TTY prompt as the one exception to the never-prompts rule, [./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md) §6.1). The CLI stores it in `~/.hydra/credentials.json`, mode 0600 ([./15-packaging-and-operations.md](./15-packaging-and-operations.md)).
+  - **`hydra login` is two calls** (pinned 2026-09-04, [#57](https://github.com/rogierpennink/hydra/issues/57)): `auth.login` with the username and password returns a 30-day bearer (§4.2), and `apiKey.create { name }` under that bearer mints the long-lived key. The key is what lands in the credential file; the bearer is discarded and never written to disk. There is no login mode that hands out a long-lived key directly - minting a key is an authenticated operation like any other, and this keeps it that way. The key's name defaults to the machine's hostname, so a laptop's key is distinguishable in Settings from one minted in the web app; `--name` overrides it.
 - Revocable individually; a revoked key fails on its next use.
 - Used by the ops CLI and scripts. The ops CLI and the runner-shipped `hydra` CLI are the same binary; the difference is the credential ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md)).
 
@@ -194,7 +194,7 @@ The operation-to-grant mapping is an explicit table in the contract package; [./
 
 ### 6.3 Enforcement and 403s
 
-- The service layer checks the actor's grants before executing an operation, before any entity is loaded. The user actor (password login or API key) has full parity: no profile applies.
+- The service layer checks the actor's grants before executing an operation, before any entity is loaded. The user actor (password login or API key) has full parity: no profile applies. *(Amended 2026-09-04, [#57](https://github.com/rogierpennink/hydra/issues/57).)* On HTTP the same static check also runs in transport middleware, ahead of payload decoding, so a caller without the grant gets 403 rather than 400 on a malformed body ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md) §1.5). The check in the method stays: it is what binds in-process callers.
 - A denied call returns HTTP 403 whose body names the missing grant (`{ error: { code: "forbidden", details: { grant: "session.spawn" } } }`, envelope in [./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md) section 1.5). The `hydra` CLI surfaces that name verbatim so the agent can ask for it, and `hydra <entity> <verb> --help` names the grant up front.
 - Resolution is one indexed lookup from token hash to session to agent to profile, cached per session and invalidated on session end, profile edit, or a decided Permission Request.
 
@@ -290,6 +290,7 @@ The event log ([./04-state-store.md](./04-state-store.md)) is the audit log; the
 
 - Every mutation on the public API carries `actor: user | session:<id>`.
 - Auth and security event kinds: `auth.login.succeeded`, `auth.login.failed`, `auth.apiKey.minted`, `auth.apiKey.revoked`, `permission.requested`, `permission.decided`, `secret.created`, `secret.rotated`, `secret.deleted`, `runner.joined`, `runner.retired`. Names are indicative; the kinds pinned by ticket #18 are login success/failure, token minted/revoked, permission request raised/decided, secret created/rotated.
+- **Kinds emitted as of 2026-09-04** ([#57](https://github.com/rogierpennink/hydra/issues/57)), following `<entity>.<verb>ed` under `source: "platform"`: `auth.login.succeeded`, `auth.login.failed`, `auth.logout`, `auth.apiKey.minted`, `auth.apiKey.revoked`, `user.passwordChanged`, `setup.completed`, `settings.updated`, `profile.created`, `profile.updated`, `profile.deleted`, `secret.created`, `secret.rotated`, `secret.deleted`. Later tickets add their own; the list grows, it is not re-cut.
 - **Retention.** Security events and actor-stamped mutations are kept at least 90 days; the full retention statement (event log TTL, per-session streams, domain rows) is in [./04-state-store.md](./04-state-store.md).
 
 ## 12. What v1 does not defend against

@@ -244,7 +244,9 @@ describe("secrets", () => {
     const after = await run(
       Effect.gen(function* () {
         const secrets = yield* Secrets;
+        const sql = yield* SqlClient.SqlClient;
         yield* withTransaction(
+          sql,
           Effect.gen(function* () {
             yield* secrets.set(CONNECTION, "pat", Redacted.make(TOKEN));
             return yield* Effect.fail(new Error("the operation failed after the write"));

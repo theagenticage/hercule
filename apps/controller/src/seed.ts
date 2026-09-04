@@ -1,7 +1,6 @@
 /**
  * What a fresh database gets at first run: the three shipped permission
- * profiles (spec 13 section 6.2) and the controller-scope settings defaults
- * (spec 04, spec 15 section 6).
+ * profiles and the controller-scope settings defaults.
  *
  * Seeding is idempotent and runs on every boot, so a database that predates a
  * new default gains it. It is insert-if-absent throughout: a shipped profile
@@ -9,24 +8,24 @@
  * untouched, because the alternative is a silent revert on restart.
  *
  * The consequence, and it is deliberate: a shipped profile is frozen at the
- * boot that first seeded it. Spec 13 section 6.2 makes the three shipped
- * profiles editable, so a later Hydra that adds a grant to one of them cannot
- * write it over the user's version; that upgrade is a migration, not a seed.
+ * boot that first seeded it. The three shipped profiles are editable, so a
+ * later Hydra that adds a grant to one of them cannot write it over the user's
+ * version; that upgrade is a migration, not a seed.
  */
 import { Effect } from "effect";
-import type { SqlClient } from "effect/unstable/sql/SqlClient";
+import { SqlClient } from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
+import { ALL_GRANTS, type Grant } from "@hydra/contract";
 import { withTransaction } from "./db";
-import { ALL_GRANTS, PermissionProfiles, type Grant, type GrantsError } from "./permissions";
+import { PermissionProfiles, type GrantsError } from "./permissions";
 import { Settings, type SettingError } from "./settings";
 
 /**
- * The shipped profiles, verbatim from the table in spec 13 section 6.2.
+ * The shipped profiles.
  *
- * One amendment: the worker profile's cell reads `notification` (write) while
- * every other family lists its read verb explicitly, which would leave a worker
- * able to create a notification it cannot read back. It is granted
- * `notification.read` here and the spec table is amended to match (ticket #56).
+ * The worker profile gets `notification.read` as well as `notification.write`:
+ * every other family lists its read verb explicitly, and without it a worker
+ * could create a notification it cannot read back.
  */
 export const SHIPPED_PROFILES: ReadonlyArray<{
   readonly name: string;
@@ -91,18 +90,22 @@ export const seed: Effect.Effect<
   void,
   SettingError | GrantsError | SqlError,
   Settings | PermissionProfiles | SqlClient
-> = withTransaction(
-  Effect.gen(function* () {
-    const profiles = yield* PermissionProfiles;
-    const settings = yield* Settings;
+> = Effect.gen(function* () {
+  const sql = yield* SqlClient;
+  return yield* withTransaction(
+    sql,
+    Effect.gen(function* () {
+      const profiles = yield* PermissionProfiles;
+      const settings = yield* Settings;
 
-    for (const profile of SHIPPED_PROFILES) {
-      yield* profiles.ensureShipped(profile.name, profile.grants);
-    }
-    yield* settings.setIfAbsent("controller", "retention.events", 90);
-    yield* settings.setIfAbsent("controller", "retention.security", 90);
-    yield* settings.setIfAbsent("controller", "retention.conversations", 90);
-    yield* settings.setIfAbsent("controller", "backup.time", "03:30");
-    yield* settings.setIfAbsent("controller", "backup.keep", 14);
-  }),
-);
+      for (const profile of SHIPPED_PROFILES) {
+        yield* profiles.ensureShipped(profile.name, profile.grants);
+      }
+      yield* settings.setIfAbsent("retention.events", 90);
+      yield* settings.setIfAbsent("retention.security", 90);
+      yield* settings.setIfAbsent("retention.conversations", 90);
+      yield* settings.setIfAbsent("backup.time", "03:30");
+      yield* settings.setIfAbsent("backup.keep", 14);
+    }),
+  );
+});

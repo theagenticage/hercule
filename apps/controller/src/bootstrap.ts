@@ -1,6 +1,5 @@
 /**
- * What `hydra serve` does before it binds: the first-run and boot sequence of
- * spec 15 section 7.
+ * What `hydra serve` does before it binds: the first-run and boot sequence.
  *
  * On an empty home this auto-initializes with no flags and no prompts - the
  * home layout, `config.toml`, the database and its migrations, the shipped
@@ -8,13 +7,11 @@
  * URL. On every later boot it is the same sequence, and everything in it is
  * idempotent, so a restart changes nothing except the setup token.
  *
- * Two steps of spec 15 section 7 are deliberately absent, both because their
- * subject does not exist yet: one provider instance per shipped provider plugin
- * (step 2), and starting the local runner (step 4). Later tickets add them
- * here.
+ * Two steps of the sequence are deliberately absent, both because their subject
+ * does not exist yet: one provider instance per shipped provider plugin, and
+ * starting the local runner. Both belong here once they do.
  */
 import { existsSync, rmSync, writeFileSync } from "node:fs";
-import { createHash } from "node:crypto";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import type { PlatformError } from "effect/PlatformError";
@@ -33,20 +30,24 @@ import {
   type DatabaseError,
   type SchemaVersionError,
 } from "./db";
+import { AuditLog, AuditLogLayer } from "./events";
 import { ControllerIdentity, controllerIdentityLayer } from "./identity";
-import { PermissionProfilesLayer, type GrantsError } from "./permissions";
+import { Credentials, CredentialsLayer, hashToken, mintToken } from "./credentials";
+import { Users, UsersLayer } from "./users";
+import { PermissionProfilesLayer, type GrantsError, type PermissionProfiles } from "./permissions";
 import {
   masterKeyLayer,
+  Secrets,
   secretsLayer,
   type MasterKeyBackend,
   type MasterKeyError,
   type SecretNameError,
 } from "./secrets";
 import { seed } from "./seed";
-import { SettingsLayer, type SettingError } from "./settings";
+import { Settings, SettingsLayer, type SettingError } from "./settings";
 
-/** The setup token is 32 random bytes, rendered base64url so it survives a URL. */
-const SETUP_TOKEN_BYTES = 32;
+/** Setup tokens are minted and stored like every other Hydra token. */
+export { hashToken };
 
 /** The two bind hosts that mean "every interface"; a URL needs a reachable one instead. */
 const WILDCARD_HOSTS = new Set(["0.0.0.0", "::"]);
@@ -71,18 +72,9 @@ export type BootError =
   | GrantsError;
 
 /**
- * How a token is stored: SHA-256, hex. A setup token is opaque, 256 bits of
- * randomness, so a fast hash is right - there is nothing to guess (spec 13
- * section 4.1). Passwords are the other case and use a slow hash.
- */
-export function hashToken(token: string): string {
-  return createHash("sha256").update(token).digest("hex");
-}
-
-/**
- * The one-time setup URL (spec 15 section 7). A wildcard bind host renders as
- * loopback, because `http://0.0.0.0:4937` is not an address a browser can open;
- * an IPv6 literal is bracketed. `bind.host` is checked when the config is
+ * The one-time setup URL. A wildcard bind host renders as loopback, because
+ * `http://0.0.0.0:4937` is not an address a browser can open; an IPv6 literal
+ * is bracketed. `bind.host` is checked when the config is
  * resolved, so by here it is a host and nothing else; a value `URL` will not
  * take is a defect, not a URL nobody can open.
  */
@@ -99,9 +91,9 @@ export function setupUrl(bindHost: string, bindPort: number, token: string): str
  * `<home>/setup-url` in step with it.
  *
  * The token is valid until used and every boot invalidates the previous one, so
- * re-minting is restarting the unit (spec 15 section 7). The file is mode 0600,
- * the same trust boundary as the master key file, and it exists only while
- * setup is incomplete: `hydra setup-url` reads it, and no unauthenticated
+ * re-minting is restarting the unit. The file is mode 0600, the same trust
+ * boundary as the master key file, and it exists only while setup is
+ * incomplete: `hydra setup-url` reads it, and no unauthenticated
  * endpoint serves it.
  */
 const ensureSetupUrl = (
@@ -117,7 +109,10 @@ const ensureSetupUrl = (
     if (rows[0]?.completed_at != null) {
       // No token is outstanding once setup is complete, in the file or in the
       // row: the column holds a hash only while one is.
-      yield* withTransaction(sql`UPDATE setup_state SET token_hash = NULL WHERE singleton = 1`);
+      yield* withTransaction(
+        sql,
+        sql`UPDATE setup_state SET token_hash = NULL WHERE singleton = 1`,
+      );
       yield* Effect.try({
         try: () => rmSync(paths.setupUrlFile, { force: true }),
         catch: (cause) => new HydraHomeError({ action: "remove", path: paths.setupUrlFile, cause }),
@@ -125,10 +120,9 @@ const ensureSetupUrl = (
       return undefined;
     }
 
-    const token = Buffer.from(crypto.getRandomValues(new Uint8Array(SETUP_TOKEN_BYTES))).toString(
-      "base64url",
-    );
+    const token = mintToken();
     yield* withTransaction(
+      sql,
       sql`
         INSERT INTO setup_state (singleton, token_hash, completed_at)
         VALUES (1, ${hashToken(token)}, NULL)
@@ -150,31 +144,69 @@ const ensureSetupUrl = (
     return url;
   });
 
+/** Boot the controller: everything up to, and not including, binding. */
+export const boot = (options: BootOptions): Effect.Effect<BootOutcome, BootError> =>
+  bootWith(options, Effect.succeed);
+
+/** What a boot needs from its caller: the command line, the environment, the key backend. */
+export interface BootOptions {
+  readonly argv: ReadonlyArray<string>;
+  readonly env: Readonly<Record<string, string | undefined>>;
+  readonly masterKeyBackend?: MasterKeyBackend;
+}
+
 /**
- * Boot the controller: everything up to, and not including, binding.
+ * Every service the controller's own code reaches after the boot: the database,
+ * the repositories over it, the home and the bootstrap config.
+ */
+export type ControllerServices =
+  | SqlClient.SqlClient
+  | ControllerIdentity
+  | Secrets
+  | AuditLog
+  | Settings
+  | PermissionProfiles
+  | Users
+  | Credentials
+  | HydraHome
+  | BootstrapConfig;
+
+/**
+ * Boot the controller and then keep running, with the database open.
+ *
+ * `hydra serve` binds after this and stays up; `boot` is the same sequence with
+ * nothing after it, which is what a test and `hydra setup-url` want. The
+ * database closes when `use` finishes, so a clean exit leaves no open handle
+ * behind.
  *
  * `argv`, `env` and the master-key backend are arguments rather than ambient,
  * so a test drives a temporary home and the file-backed key exactly the way the
  * binary drives the real ones.
  */
-export const boot = (options: {
-  readonly argv: ReadonlyArray<string>;
-  readonly env: Readonly<Record<string, string | undefined>>;
-  readonly masterKeyBackend?: MasterKeyBackend;
-}): Effect.Effect<BootOutcome, BootError> => {
+export const bootWith = <A, E>(
+  options: BootOptions,
+  use: (outcome: BootOutcome) => Effect.Effect<A, E, ControllerServices>,
+): Effect.Effect<A, BootError | E> => {
   const sequence = Effect.gen(function* () {
     const paths = yield* HydraHome;
     const bootstrap = yield* BootstrapConfig;
     // Whether the file was there before the driver created it decides whether
-    // there is anything for a pre-migration copy to preserve (spec 15 section 8).
+    // there is anything for a pre-migration copy to preserve.
     const databaseExisted = existsSync(paths.databaseFile);
 
+    // The secrets repository is merged out rather than only provided inwards:
+    // `secret.*` is a public operation, so what runs after the boot needs it.
     const repositories = Layer.mergeAll(
-      controllerIdentityLayer.pipe(
-        Layer.provide(secretsLayer.pipe(Layer.provide(masterKeyLayer(options.masterKeyBackend)))),
-      ),
+      controllerIdentityLayer,
       SettingsLayer,
       PermissionProfilesLayer,
+      UsersLayer,
+      CredentialsLayer,
+      AuditLogLayer,
+    ).pipe(
+      Layer.provideMerge(
+        secretsLayer.pipe(Layer.provide(masterKeyLayer(options.masterKeyBackend))),
+      ),
     );
 
     const steps = Effect.gen(function* () {
@@ -188,10 +220,10 @@ export const boot = (options: {
       return { paths, identityId: record.id, setupUrl: url } satisfies BootOutcome;
     });
 
-    return yield* steps.pipe(
+    return yield* Effect.flatMap(steps, use).pipe(
       Effect.provide(repositories.pipe(Layer.provideMerge(openDatabase(paths.databaseFile)))),
-      // Nothing above this line has the database file in hand, and a controller
-      // that fails at boot has said nothing else yet.
+      // A statement the database refused reads as one line naming the file; a
+      // controller that fails at boot has said nothing else yet.
       Effect.catchTag("SqlError", (error) => Effect.fail(databaseError(paths.databaseFile, error))),
     );
   });

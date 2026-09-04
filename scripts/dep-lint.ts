@@ -108,7 +108,7 @@ const violations = FORBIDDEN.flatMap(({ what, pattern }) => {
 if (violations.length > 0) {
   console.error(`dep-lint: ${entrypoint} links what the runner must not link.`);
   console.error("The runner entrypoint's module graph must contain no controller package:");
-  console.error("no DB engine, no plugin host, no web bundle (spec 15 section 3, ADR 0018).\n");
+  console.error("no DB engine, no plugin host, no web bundle.\n");
   for (const { what, hits } of violations) {
     console.error(`  ${what}:`);
     for (const hit of hits) console.error(`    ${hit}`);

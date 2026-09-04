@@ -5,16 +5,15 @@
  *
  * Conventions this migration establishes, and every later one keeps:
  *
- * - Every Hydra-owned entity has a 16-byte `BLOB` primary key holding a UUIDv7
- *   (spec 04, Truth model). The event log is the one exception: its id is the
- *   integer log position.
+ * - Every Hydra-owned entity has a 16-byte `BLOB` primary key holding a UUIDv7.
+ *   The event log is the one exception: its id is the integer log position.
  * - **Timestamps are ISO-8601 strings in UTC** with millisecond precision
  *   (`2026-09-04T09:21:33.084Z`), which sort lexicographically, read plainly in
  *   a `sqlite3` shell, and carry their zone.
  * - Enumerations are `TEXT` with a `CHECK` constraint, so an unknown value is a
  *   write error rather than a row nobody can interpret.
  * - Nothing in the database holds an absolute path: the Data Root moves with a
- *   promotion (spec 04, Relocatable Data Root).
+ *   promotion.
  */
 import * as Effect from "effect/Effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
@@ -22,11 +21,11 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 export default Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
 
-  // Secret values, encrypted per value under the master key (spec 13 section
-  // 2.1, ADR 0015). `owner_id` is text because it is polymorphic: the canonical
-  // id string of a connection, plugin, runner or provider instance, or a fixed
-  // name for the `core` owner. The owner and name are the AEAD associated data,
-  // so renaming a secret is a re-encrypt, never an UPDATE of `name` alone.
+  // Secret values, encrypted per value under the master key. `owner_id` is text
+  // because it is polymorphic: the canonical id string of a connection, plugin,
+  // runner or provider instance, or a fixed name for the `core` owner. The
+  // owner and name are the AEAD associated data, so renaming a secret is a
+  // re-encrypt, never an UPDATE of `name` alone.
   yield* sql`
     CREATE TABLE secrets (
       id BLOB PRIMARY KEY NOT NULL,
@@ -43,7 +42,7 @@ export default Effect.gen(function* () {
   `;
   yield* sql`CREATE UNIQUE INDEX secrets_owner_name ON secrets (owner_kind, owner_id, name)`;
 
-  // Named grant bundles (spec 13 section 6). `grants` is a JSON array of
+  // Named grant bundles. `grants` is a JSON array of
   // `family.verb` strings. The three shipped profiles carry `shipped = 1`: the
   // user may edit them but never delete them.
   yield* sql`
@@ -57,10 +56,12 @@ export default Effect.gen(function* () {
     )
   `;
 
-  // Every setting that is not needed before the database opens (spec 04, What
-  // is in the store). One table for both stores: `controller` rows are the
-  // controller state settings, `user` rows the user settings store, which is
-  // keyed by user id from day one and defaults lazily.
+  // Every controller setting that is not needed before the database opens.
+  // The `scope` column allowed a `user` value too, but nothing ever wrote one
+  // and nothing can: user settings are keyed by user id, in the `user_settings`
+  // table 0002 adds. This table holds the controller scope alone; `'user'` in
+  // the CHECK is vestigial and stays only because 0001 has shipped and
+  // migrations are forward-only.
   yield* sql`
     CREATE TABLE settings (
       scope TEXT NOT NULL CHECK (scope IN ('controller', 'user')),
@@ -72,9 +73,9 @@ export default Effect.gen(function* () {
   `;
 
   // The controller's stable identity, created at install and carried through a
-  // promotion (ADR 0005). The private key is not here: it is a secrets row
-  // under the `core` owner kind, encrypted like every other secret. The
-  // `singleton` column is the primary key so a second row cannot be written.
+  // promotion. The private key is not here: it is a secrets row under the
+  // `core` owner kind, encrypted like every other secret. The `singleton`
+  // column is the primary key so a second row cannot be written.
   yield* sql`
     CREATE TABLE controller_identity (
       singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
@@ -84,10 +85,10 @@ export default Effect.gen(function* () {
     )
   `;
 
-  // First-run state (spec 15 section 7). `token_hash` holds the single-use
-  // setup token, hashed like every other token; it is null once setup completes
-  // and while no token is outstanding. A fresh token is minted on every boot
-  // until `completed_at` is set.
+  // First-run state. `token_hash` holds the single-use setup token, hashed like
+  // every other token; it is null once setup completes and while no token is
+  // outstanding. A fresh token is minted on every boot until `completed_at` is
+  // set.
   yield* sql`
     CREATE TABLE setup_state (
       singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
@@ -96,10 +97,10 @@ export default Effect.gen(function* () {
     )
   `;
 
-  // The event log: one envelope per row (spec 08 section 2), and the system's
-  // one integer id, which is also the log position consumers store as a cursor.
-  // AUTOINCREMENT because TTL pruning deletes from the head of the table and a
-  // reused rowid would hand a new event a position some cursor has passed.
+  // The event log: one envelope per row, and the system's one integer id, which
+  // is also the log position consumers store as a cursor. AUTOINCREMENT because
+  // TTL pruning deletes from the head of the table and a reused rowid would hand
+  // a new event a position some cursor has passed.
   // `refs`, `payload` and `raw` are JSON text.
   yield* sql`
     CREATE TABLE events (

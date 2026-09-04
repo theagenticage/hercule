@@ -4,4 +4,4 @@ dist/
 *.tsbuildinfo
 /hydra
 /dist-binary/
-packages/hydra/src/version.ts
+packages/home/src/version.ts

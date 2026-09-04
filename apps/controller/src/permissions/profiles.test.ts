@@ -1,14 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { Effect, Layer, Option, Schema } from "effect";
+import { Effect, Layer, Option } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
+import type { Grant } from "@hydra/contract";
 import { TestDatabase } from "../db/testing";
-import {
-  ALL_GRANTS,
-  GrantSchema,
-  PermissionProfiles,
-  PermissionProfilesLayer,
-  type Grant,
-} from "./profiles";
+import { PermissionProfiles, PermissionProfilesLayer } from "./profiles";
 
 const layer = PermissionProfilesLayer.pipe(Layer.provideMerge(TestDatabase));
 
@@ -18,22 +13,6 @@ const run = <A, E>(effect: Effect.Effect<A, E, PermissionProfiles | SqlClient.Sq
 /** Runs an effect that is expected to fail, and hands the test its error. */
 const runError = <A, E>(effect: Effect.Effect<A, E, PermissionProfiles | SqlClient.SqlClient>) =>
   Effect.runPromise(effect.pipe(Effect.flip, Effect.provide(layer)));
-
-describe("the grant vocabulary", () => {
-  it("accepts a grant from the table and rejects anything else", () => {
-    const decode = Schema.decodeUnknownEffect(GrantSchema);
-    expect(Effect.runSync(decode("task.delete"))).toBe("task.delete");
-    for (const bad of ["task.explode", "tasks.read", "task", "read.task", ""]) {
-      expect(Effect.runSyncExit(decode(bad))._tag).toBe("Failure");
-    }
-  });
-
-  it("has no duplicates and covers every family", () => {
-    expect(new Set(ALL_GRANTS).size).toBe(ALL_GRANTS.length);
-    expect(ALL_GRANTS).toContain("credential.write");
-    expect(ALL_GRANTS).toContain("connection.use");
-  });
-});
 
 describe("PermissionProfiles", () => {
   it("seeds a shipped profile and reads it back by name", async () => {
