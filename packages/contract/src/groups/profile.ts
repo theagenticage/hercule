@@ -16,19 +16,29 @@ import {
   Unauthenticated,
   Validation,
 } from "../errors";
-import { GrantSchema } from "../grants";
+import { ALL_GRANTS, GrantSchema } from "../grants";
 import { Id, Timestamp } from "../ids";
 import { page, pageParams } from "../pagination";
 import { Authenticated } from "../security";
-import { bounded } from "../strings";
+import { atMost, bounded } from "../strings";
 
 /** What a user may call a profile. */
 const ProfileName = bounded(1, 128);
 
+/**
+ * The longest grant list a profile may carry: the grant vocabulary itself. A
+ * profile names a grant or it does not, so a longer list is repeats, and the
+ * bound moves on its own as the vocabulary grows.
+ */
+export const MAX_PROFILE_GRANTS = ALL_GRANTS.length;
+
+/** The grants of a profile, as it is written and as it reads back. */
+const Grants = atMost(GrantSchema, MAX_PROFILE_GRANTS);
+
 export const Profile = Schema.Struct({
   id: Id,
   name: ProfileName,
-  grants: Schema.Array(GrantSchema),
+  grants: Grants,
   /** A shipped profile is seeded at first run and cannot be deleted. */
   shipped: Schema.Boolean,
   createdAt: Timestamp,
@@ -52,7 +62,7 @@ export const profile = HttpApiGroup.make("profile")
     HttpApiEndpoint.post("create", "/profiles", {
       payload: Schema.Struct({
         name: ProfileName,
-        grants: Schema.Array(GrantSchema),
+        grants: Grants,
       }),
       success: Profile,
       error: [Unauthenticated, Forbidden, Validation, Conflict, Internal],
@@ -61,7 +71,7 @@ export const profile = HttpApiGroup.make("profile")
       params: { id: Id },
       payload: Schema.Struct({
         name: Schema.optionalKey(ProfileName),
-        grants: Schema.optionalKey(Schema.Array(GrantSchema)),
+        grants: Schema.optionalKey(Grants),
       }),
       success: Profile,
       error: [Unauthenticated, Forbidden, Validation, NotFound, Conflict, Internal],

@@ -90,13 +90,14 @@ export { ApiKey, MintedApiKey } from "./groups/api-key";
 export {
   AccessMode,
   ControllerSettings,
+  MAX_SETTING_LIST,
   SETTING_VALUES,
   SettingsPatch,
   SettingsState,
   ThreadRows,
   UserSettings,
 } from "./groups/settings";
-export { Profile } from "./groups/profile";
+export { MAX_PROFILE_GRANTS, Profile } from "./groups/profile";
 export { OwnerKind, SecretRef } from "./groups/secret";
 export { ControllerInfo } from "./groups/controller";
 export {

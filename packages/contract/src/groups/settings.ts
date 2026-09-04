@@ -20,8 +20,15 @@ import * as HttpApiGroup from "effect/unstable/httpapi/HttpApiGroup";
 import { closedStruct, optional } from "../closed";
 import { Forbidden, Internal, Unauthenticated, Validation } from "../errors";
 import { Id, Timestamp } from "../ids";
-import { Timezone } from "../strings";
+import { atMost, Timezone } from "../strings";
 import { Authenticated } from "../security";
+
+/**
+ * The longest list a single user setting may hold. The three that are lists -
+ * the topic order, the mutes and the onboarding steps - are all short by nature
+ * and are replaced whole on every write, so one generous bound covers them.
+ */
+export const MAX_SETTING_LIST = 256;
 
 /** A retention window or a snapshot count, in whole days or whole snapshots. */
 const PositiveDays = Schema.Int.check(Schema.isGreaterThan(0));
@@ -68,12 +75,12 @@ export const SETTING_VALUES = {
   user: {
     /** The IANA zone the user reads times in, chosen during setup. */
     timezone: Timezone,
-    "topics.order": Schema.Array(Schema.NonEmptyString),
-    "notifications.muted": Schema.Array(MuteTarget),
+    "topics.order": atMost(Schema.NonEmptyString, MAX_SETTING_LIST),
+    "notifications.muted": atMost(MuteTarget, MAX_SETTING_LIST),
     "lastChecked.intake": Timestamp,
     "lastChecked.checkin": Timestamp,
     "lastChecked.notifications": Timestamp,
-    "onboarding.completedSteps": Schema.Array(Schema.NonEmptyString),
+    "onboarding.completedSteps": atMost(Schema.NonEmptyString, MAX_SETTING_LIST),
     "thread.instanceId": Id,
     "thread.model": Schema.NonEmptyString,
     "thread.accessMode": AccessMode,
