@@ -141,7 +141,8 @@ export const commandHelp = (command: Command): ReadonlyArray<string> => {
       "paging:",
       "  --limit <number>   page size, 1 to 500; the default is 50",
       "  --cursor <cursor>  the nextCursor of a previous page",
-      `  --sort <field>[:asc|desc]  sortable: ${command.sortFields.join(", ")}`,
+      "  --sort <field>[:asc|desc]",
+      `                     sortable: ${command.sortFields.join(", ")}`,
       "                     omit the direction to keep this operation's own default order",
       "  --all              follow nextCursor to the end and print every item",
     );
