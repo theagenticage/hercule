@@ -38,7 +38,7 @@ describe("settings over HTTP", () => {
     });
   });
 
-  it("refuses an unknown key rather than stripping it (spec 11 section 2)", async () => {
+  it("refuses an unknown key rather than stripping it", async () => {
     await withServer(async (base) => {
       const token = await completeSetup(base);
 

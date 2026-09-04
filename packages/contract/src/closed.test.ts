@@ -36,7 +36,7 @@ describe("settings.update's payload", () => {
     });
   });
 
-  it("rejects an unknown key in a scope (spec 11 section 2)", () => {
+  it("rejects an unknown key in a scope", () => {
     expect(decode(SettingsPatch)({ user: { timezone: "UTC", nope: 1 } })._tag).toBe("Failure");
   });
 

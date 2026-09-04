@@ -83,8 +83,8 @@ const BUSY_TIMEOUT = Duration.seconds(1);
 
 /** What a second controller on the same home is told. */
 const ALREADY_OPEN = (filename: string): string =>
-  `${filename} is already open by another Hydra controller. One controller serves a home ` +
-  `(ADR 0004); stop the other one and try again.`;
+  `${filename} is already open by another Hydra controller. One controller serves a home; ` +
+  `stop the other one and try again.`;
 
 export const databaseError = (filename: string, error: unknown): DatabaseError => {
   if (error instanceof DatabaseError) return error;
@@ -112,7 +112,7 @@ const configure = (
       if (journalMode.toLowerCase() !== "wal") {
         return yield* new DatabaseError({
           filename,
-          message: `${filename} opened in journal mode ${journalMode}; Hydra requires WAL (spec 04).`,
+          message: `${filename} opened in journal mode ${journalMode}; Hydra requires WAL.`,
         });
       }
       yield* takeTheHome(filename);

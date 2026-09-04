@@ -140,7 +140,7 @@ describe("profile.read", () => {
 });
 
 describe("profile.update", () => {
-  it("edits a shipped profile: the three Hydra ships are editable (spec 13 section 6.2)", async () => {
+  it("edits a shipped profile: the three Hydra ships are editable", async () => {
     const { updated, entries } = await run(
       Effect.gen(function* () {
         const store = yield* PermissionProfiles;
@@ -223,7 +223,7 @@ describe("profile.delete", () => {
     expect(entries[0]?.payload).toMatchObject({ name: "reviewer" });
   });
 
-  it("refuses to delete a shipped profile (spec 13 section 6.2)", async () => {
+  it("refuses to delete a shipped profile", async () => {
     const error = await runError(
       Effect.gen(function* () {
         const store = yield* PermissionProfiles;

@@ -78,7 +78,7 @@ describe("databaseError", () => {
   });
 });
 
-describe("one controller per home (ADR 0004)", () => {
+describe("one controller per home", () => {
   it("refuses a second open of the same database file", async () => {
     const open = Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient;

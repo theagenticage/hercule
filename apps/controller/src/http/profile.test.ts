@@ -84,7 +84,7 @@ describe("permission profiles over HTTP", () => {
     });
   });
 
-  it("edits a shipped profile but refuses to delete one (spec 13 section 6.2)", async () => {
+  it("edits a shipped profile but refuses to delete one", async () => {
     await withServer(async (base) => {
       const token = await completeSetup(base);
       const worker = (await list(base, token)).find((one) => one.name === "worker");

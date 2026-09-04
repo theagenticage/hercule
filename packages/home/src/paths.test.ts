@@ -20,7 +20,7 @@ describe("resolveHomePath", () => {
 });
 
 describe("homePaths", () => {
-  it("lays out the home of spec 15 section 5", () => {
+  it("lays out the home", () => {
     const paths = homePaths("/srv/hydra", "/srv/hydra/data");
     expect(paths).toEqual({
       home: "/srv/hydra",

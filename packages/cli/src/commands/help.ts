@@ -209,7 +209,7 @@ export const rootHelp = (): ReadonlyArray<string> => {
     "  --json         print output, or the error envelope, verbatim",
     "  --help         this help; works at any position on any command",
     "",
-    "credential (spec 11 section 6.2):",
+    "credential:",
     "  HYDRA_TOKEN with HYDRA_API_URL, else <home>/credentials.json from `hydra login`.",
     "  With HYDRA_SESSION=1 the file is refused outright: the environment token or nothing.",
     "",

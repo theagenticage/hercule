@@ -38,7 +38,7 @@ const PASSWORD = "correct horse battery staple";
 const TOO_LONG_PASSWORD = "x".repeat(MAX_PASSWORD_LENGTH + 1);
 const HUGE = "x".repeat(20_000);
 
-describe("bounds on free text (spec 11 section 1.5)", () => {
+describe("bounds on free text", () => {
   it("caps the login username and password, so an anonymous caller cannot write megabytes", () => {
     const login = payloadOf(auth, "login");
     expect(decode(login, { username: "rogier", password: PASSWORD })).toBe("Success");
