@@ -33,7 +33,7 @@ import type { Database } from "bun:sqlite";
 export const run = (db?: Database): void => console.log(typeof db);`,
   "plugin-host": `import { run as controller } from ${JSON.stringify(join(root, "apps/controller/src/index.ts"))};
 export const run = (): void => controller([]);`,
-  web: `import { Logo } from ${JSON.stringify(join(root, "packages/ui/src/index.tsx"))};
+  web: `import { Logo } from ${JSON.stringify(join(root, "packages/ui/src/index.ts"))};
 export const run = (): void => console.log(typeof Logo);`,
 } as const;
 

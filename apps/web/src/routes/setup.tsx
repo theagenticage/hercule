@@ -2,10 +2,10 @@ import { useState, type FormEvent, type JSX } from "react";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { browserTimezone } from "@hydra/client-core";
 import { SetupForm } from "@hydra/contract";
-import { Button, Input } from "@hydra/ui";
+import { Button, Field, Input } from "@hydra/ui";
 import { validate, type FieldErrors } from "../app/form";
 import { SETUP_PATH } from "../app/entry-guard";
-import { CenteredScreen, Field } from "./-centered-screen";
+import { CenteredScreen } from "../screens/centered-screen";
 
 export const Route = createFileRoute("/setup")({
   validateSearch: (search: Record<string, unknown>) => ({

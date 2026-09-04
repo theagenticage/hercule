@@ -1,5 +1,5 @@
 import type { JSX, ReactNode } from "react";
-import { Label, Logo } from "@hydra/ui";
+import { Logo } from "@hydra/ui";
 
 /**
  * The frame the three screens outside the app shell share: setup, login, and an
@@ -29,30 +29,5 @@ export function CenteredScreen({
         </div>
       </div>
     </main>
-  );
-}
-
-/** One labelled field with the message its own validation produced, if any. */
-export function Field({
-  id,
-  label,
-  error,
-  children,
-}: {
-  readonly id: string;
-  readonly label: string;
-  readonly error?: string | undefined;
-  readonly children: ReactNode;
-}): JSX.Element {
-  return (
-    <div className="flex flex-col gap-1.5">
-      <Label htmlFor={id}>{label}</Label>
-      {children}
-      {error === undefined ? null : (
-        <p className="text-fine text-fail" role="alert">
-          {error}
-        </p>
-      )}
-    </div>
   );
 }

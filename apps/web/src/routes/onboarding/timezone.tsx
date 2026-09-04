@@ -2,11 +2,11 @@ import { useState, type FormEvent, type JSX } from "react";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { browserTimezone } from "@hydra/client-core";
-import { Button } from "@hydra/ui";
+import { Button, Field } from "@hydra/ui";
 import { HOME_PATH } from "../../app/entry-guard";
 import { settingsQuery } from "../../app/queries";
-import { TimezoneField } from "../../app/timezone-field";
-import { CenteredScreen, Field } from "../-centered-screen";
+import { CenteredScreen } from "../../screens/centered-screen";
+import { TimezoneField } from "../../screens/timezone-field";
 
 /** The id this step records when it is done. */
 const STEP = "timezone";

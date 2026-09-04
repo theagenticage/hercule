@@ -1,6 +1,7 @@
 import type { JSX } from "react";
 import { createFileRoute } from "@tanstack/react-router";
-import { ConnectRows, EmptyState } from "../../shell";
+import { EmptyState } from "@hydra/ui";
+import { ConnectRows } from "../../screens/connect-rows";
 
 export const Route = createFileRoute("/_shell/notifications")({
   staticData: { title: "Notifications" },

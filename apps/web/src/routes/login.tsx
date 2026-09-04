@@ -2,10 +2,10 @@ import { useState, type FormEvent, type JSX } from "react";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { ApiError } from "@hydra/client-core";
 import { LoginForm } from "@hydra/contract";
-import { Button, Input } from "@hydra/ui";
+import { Button, Field, Input } from "@hydra/ui";
 import { validate, type FieldErrors } from "../app/form";
 import { HOME_PATH } from "../app/entry-guard";
-import { CenteredScreen, Field } from "./-centered-screen";
+import { CenteredScreen } from "../screens/centered-screen";
 
 /** One message for both halves, so the form never says which one was right. */
 const REJECTED = "Wrong username or password.";

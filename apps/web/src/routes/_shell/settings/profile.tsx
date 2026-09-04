@@ -2,11 +2,11 @@ import { useState, type FormEvent, type JSX } from "react";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { FALLBACK_TIMEZONE } from "@hydra/client-core";
-import { Button } from "@hydra/ui";
+import { Button, Row, SettingsForm } from "@hydra/ui";
 import { LOGIN_PATH } from "../../../app/entry-guard";
 import { settingsQuery } from "../../../app/queries";
-import { TimezoneField } from "../../../app/timezone-field";
-import { Row, SaveStatus, SettingsForm, useSaveSettings } from "./-form";
+import { TimezoneField } from "../../../screens/timezone-field";
+import { SaveStatus, useSaveSettings } from "./-form";
 
 export const Route = createFileRoute("/_shell/settings/profile")({
   staticData: { title: "Profile" },

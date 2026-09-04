@@ -3,7 +3,7 @@ import { render, screen } from "@testing-library/react";
 import { RouterContextProvider } from "@tanstack/react-router";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { RenderFailure } from "./fallbacks";
-import { renderApp, stubApi, type Handler } from "./testing";
+import { renderApp, stubApi, type Handler } from "../app/testing";
 
 const api: Readonly<Record<string, Handler>> = {
   "GET /api/v1/setup": { body: { complete: true } },

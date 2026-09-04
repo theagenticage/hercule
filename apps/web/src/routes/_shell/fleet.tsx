@@ -1,7 +1,6 @@
 import type { JSX } from "react";
 import { createFileRoute } from "@tanstack/react-router";
-import { Button } from "@hydra/ui";
-import { Group, LaneLabel } from "../../shell";
+import { Button, Group, LaneLabel } from "@hydra/ui";
 
 export const Route = createFileRoute("/_shell/fleet")({
   staticData: { title: "Fleet" },

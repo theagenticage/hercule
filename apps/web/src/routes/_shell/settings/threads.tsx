@@ -3,9 +3,9 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { threadRowsMode } from "@hydra/client-core";
 import type { ThreadRows } from "@hydra/contract";
-import { SegmentedControl, SegmentedControlItem } from "@hydra/ui";
+import { Row, SegmentedControl, SegmentedControlItem, SettingsForm } from "@hydra/ui";
 import { settingsQuery } from "../../../app/queries";
-import { Row, SaveStatus, SettingsForm, useSaveSettings } from "./-form";
+import { SaveStatus, useSaveSettings } from "./-form";
 
 export const Route = createFileRoute("/_shell/settings/threads")({
   staticData: { title: "Threads" },

@@ -1,7 +1,6 @@
 import type { JSX } from "react";
 import { createFileRoute } from "@tanstack/react-router";
-import { Button } from "@hydra/ui";
-import { EmptyState } from "../../shell";
+import { Button, EmptyState } from "@hydra/ui";
 
 export const Route = createFileRoute("/_shell/")({
   staticData: { title: "Sessions" },

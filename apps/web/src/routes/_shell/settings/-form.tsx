@@ -1,50 +1,8 @@
-import { useState, type JSX, type ReactNode } from "react";
+import { useState, type JSX } from "react";
 import type { QueryClient } from "@tanstack/react-query";
 import type { HydraClient } from "@hydra/client-core";
 import type { SettingsPatch } from "@hydra/contract";
 import { settingsQuery } from "../../../app/queries";
-
-/** One settings card: a lane label, its rows, and the fine print under them. */
-export function SettingsForm({
-  label,
-  fine,
-  children,
-}: {
-  readonly label: string;
-  readonly fine?: ReactNode;
-  readonly children: ReactNode;
-}): JSX.Element {
-  return (
-    <section className="flex max-w-[520px] flex-col gap-2 rounded-card border border-line bg-raised px-4.5 py-3.5 shadow-card">
-      <div className="text-label font-emph tracking-[0.1em] text-faint uppercase">{label}</div>
-      {children}
-      {fine === undefined ? null : <p className="text-fine text-faint">{fine}</p>}
-    </section>
-  );
-}
-
-/** One labelled row of a settings card. */
-export function Row({
-  label,
-  htmlFor,
-  children,
-}: {
-  readonly label: string;
-  readonly htmlFor?: string | undefined;
-  readonly children: ReactNode;
-}): JSX.Element {
-  return (
-    <div className="grid grid-cols-[110px_minmax(0,1fr)] items-baseline gap-3 text-row">
-      <label
-        htmlFor={htmlFor}
-        className="text-[10px] font-emph tracking-[0.09em] text-faint uppercase"
-      >
-        {label}
-      </label>
-      {children}
-    </div>
-  );
-}
 
 /**
  * Writing a settings patch and saying what happened.

@@ -1,6 +1,6 @@
 import type { JSX } from "react";
 import { createFileRoute } from "@tanstack/react-router";
-import { EmptyState } from "../../../shell";
+import { EmptyState } from "@hydra/ui";
 
 export const Route = createFileRoute("/_shell/settings/assistants")({
   staticData: { title: "Assistants" },

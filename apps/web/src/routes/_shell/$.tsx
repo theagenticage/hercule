@@ -1,7 +1,7 @@
 import type { JSX } from "react";
 import { createFileRoute } from "@tanstack/react-router";
-import { EmptyState } from "../../shell";
-import { HomeLink, NOT_FOUND_HEADLINE } from "../../app/fallbacks";
+import { EmptyState } from "@hydra/ui";
+import { HomeLink, NOT_FOUND_HEADLINE } from "../../screens/fallbacks";
 
 /**
  * Any path inside the app that names no screen. It is a screen of the shell

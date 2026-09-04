@@ -1,8 +1,8 @@
 import type { JSX } from "react";
 import { Link, useMatches } from "@tanstack/react-router";
-import { EmptyState } from "../shell";
-import { CenteredScreen } from "../routes/-centered-screen";
-import { HOME_PATH } from "./entry-guard";
+import { EmptyState } from "@hydra/ui";
+import { HOME_PATH } from "../app/entry-guard";
+import { CenteredScreen } from "./centered-screen";
 
 /**
  * What the router shows when a screen cannot be shown.

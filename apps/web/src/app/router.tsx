@@ -7,7 +7,7 @@
 import { createRouter, type RouterHistory } from "@tanstack/react-router";
 import { routeTree } from "../routeTree.gen";
 import type { RouterContext } from "./context";
-import { NotFound, RenderFailure } from "./fallbacks";
+import { NotFound, RenderFailure } from "../screens/fallbacks";
 
 export const createAppRouter = (context: RouterContext, history: RouterHistory) =>
   createRouter({
