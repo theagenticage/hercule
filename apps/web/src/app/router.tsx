@@ -7,7 +7,7 @@
 import { createRouter, type RouterHistory } from "@tanstack/react-router";
 import { routeTree } from "../routeTree.gen";
 import type { RouterContext } from "./context";
-import { NotFound, RenderFailure } from "./fallbacks";
+import { RenderFailure } from "./fallbacks";
 
 export const createAppRouter = (context: RouterContext, history: RouterHistory) =>
   createRouter({
@@ -15,11 +15,9 @@ export const createAppRouter = (context: RouterContext, history: RouterHistory) 
     context,
     history,
     defaultPreload: "intent",
-    // Outside the shell there is no navigation to keep, so these two are the
-    // whole screen. Inside it, `_shell/$` answers an unknown path with the
-    // sidebar still standing.
+    // An unknown path needs no default: `_shell/$` is pathless and so sits at
+    // the top of the tree, which leaves no address for one to answer.
     defaultErrorComponent: RenderFailure,
-    defaultNotFoundComponent: NotFound,
   });
 
 declare module "@tanstack/react-router" {
