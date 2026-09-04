@@ -22,6 +22,7 @@ export default defineConfig({
           // `afterEach` exists, so without this a second render in one file
           // sees the first one still mounted.
           globals: true,
+          setupFiles: ["packages/ui/src/test-setup.ts"],
           include: reactPackages.map((p) => `${p}/src/**/*.test.{ts,tsx}`),
         },
       },

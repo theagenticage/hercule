@@ -86,6 +86,9 @@ surface plus a faint white inner top highlight - never a color wash.
   urgent-priority names.
 - **Mono face: IBM Plex Mono** for ids, refs, ages, timestamps, counts.
   `font-variant-numeric: tabular-nums` wherever digits align.
+- **Both faces are self-hosted**, as woff2 files in `packages/ui/src/fonts` with their
+  OFL licences beside them; nothing is fetched from a font CDN at runtime. Onest ships as
+  one variable file per subset covering 400-600; IBM Plex Mono ships static 400 and 500.
 - Body 14px/1.5; row names 13.5px; metadata 12-12.5px; uppercase lane labels 10.5px with
   0.1em letter-spacing in `--faint`.
 
