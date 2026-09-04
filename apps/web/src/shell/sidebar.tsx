@@ -111,7 +111,7 @@ function ThreadsFace({ rows }: { readonly rows: ThreadRows }): JSX.Element {
       <button
         type="button"
         disabled
-        className="mb-2.5 flex w-full items-center gap-2 rounded-control border border-line bg-raised px-2.5 py-1.5 text-left text-row font-emph text-ink shadow-card disabled:opacity-50"
+        className="mb-2.5 flex w-full items-center gap-2 rounded-control border border-line bg-raised px-2.5 py-1.5 text-left text-row font-emph text-ink shadow-card disabled:opacity-70"
       >
         <span className="font-mono text-row text-faint">+</span>
         Create new thread

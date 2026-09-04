@@ -72,9 +72,9 @@ function TimezoneStep(): JSX.Element {
         )}
         <Button
           type="submit"
-          variant="primary"
+          variant="form"
           disabled={submitting}
-          className="mt-2 w-full justify-center border border-line bg-surface py-2 text-body hover:bg-line-soft"
+          className="mt-2 w-full justify-center py-2"
         >
           Continue
         </Button>

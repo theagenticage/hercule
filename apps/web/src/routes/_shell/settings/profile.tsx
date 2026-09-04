@@ -43,8 +43,8 @@ function Profile(): JSX.Element {
             }}
           />
         </Row>
-        <div className="-ml-2 flex items-center gap-3 pt-1.5">
-          <Button type="submit" variant="primary" disabled={saving || timezone.length === 0}>
+        <div className="flex items-center gap-3 pt-2">
+          <Button type="submit" variant="form" disabled={saving || timezone.length === 0}>
             Save
           </Button>
           <SaveStatus saved={saved} failure={failure} />
