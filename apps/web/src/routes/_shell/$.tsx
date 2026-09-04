@@ -17,8 +17,7 @@ function NotFoundScreen(): JSX.Element {
   return (
     <EmptyState
       headline="No screen here"
-      lead="That address does not name anything in Hydra."
-      fine="Pick a screen from the sidebar, or go back to where you were."
+      lead="That address does not name anything in Hydra. Pick a screen from the sidebar, or go back to where you were."
     >
       <Link
         to={HOME_PATH}
