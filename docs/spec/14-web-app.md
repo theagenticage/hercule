@@ -93,13 +93,13 @@ Ticket #18 pinned a 30-day rolling session cookie; the later ticket #19 and ADR 
 
 **Storage between page loads** (resolved 2026-09-01, [Web app details](https://github.com/rogierpennink/hydra/issues/45)): the bearer token lives in `localStorage`, keyed by controller origin, removed on logout and on the first 401. Memory-only would demand a login on every page load, unacceptable for a LAN tool; `sessionStorage` dies with the tab; cookies are ruled out by ADR 0017, and a desktop shell has no better option than local storage either. Because agent-authored text is rendered everywhere and any script that runs can read the token, the served bundle carries a strict Content-Security-Policy: no inline scripts, `connect-src 'self'`. The token's lifetime and rolling renewal are [./13-security.md](./13-security.md)'s (30 days rolling, revoked on logout).
 
-*(2026-09-04, [#58](https://github.com/rogierpennink/hydra/issues/58).)* The **Content-Security-Policy** the controller sends with the bundle, as one response header:
+*(Pinned 2026-09-04, [#58](https://github.com/rogierpennink/hydra/issues/58).)* The **Content-Security-Policy** the controller sends with the bundle, as one response header on `index.html` and on every file under `/assets/`:
 
 ```
 default-src 'self'; script-src 'self'; connect-src 'self'; img-src 'self' data:; font-src 'self'; style-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'
 ```
 
-Everything the app needs it carries: fonts are self-hosted ([../design-language.md](../design-language.md) §Typography), and no script is ever inline. `img-src` allows `data:` for inline icons and avatars. **Final list confirmed by the serving slice**: if a shipped library positions itself with inline `style` attributes (Radix's popper is the known candidate), `style-src` gains `'unsafe-inline'` and the amended list is recorded here - no other directive relaxes without a note saying why.
+Everything the app needs it carries: fonts are self-hosted ([../design-language.md](../design-language.md) §Typography), and no script is ever inline. `img-src` allows `data:` for inline icons and avatars. `vite build` emits no inline script, so `script-src 'self'` holds with no exception and MUST keep holding: a build that needs an inline script is a build configuration to fix, never a directive to loosen. `style-src` is unqualified for the same reason; if a shipped component library turns out to need inline `style` attributes (Radix's popper is the known candidate) it may add `'unsafe-inline'` there, and only there, with a note saying why. No other directive relaxes.
 
 ## Performance guardrails
 

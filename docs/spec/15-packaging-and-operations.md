@@ -205,6 +205,20 @@ Findings from `research/bun-compile.md` (branch `research/bun-compile`); verdict
 
 **Web bundle.** Full-stack executables (Bun >= 1.2.17): `import index from "./index.html"` plus `Bun.serve({ routes })` bundles and embeds the SPA and serves it with correct MIME and cache headers. Fallbacks: per-file `with { type: "file" }` imports served via `Bun.file()`, or Bun 1.4's `--asset`. Use `Bun.file()` / `readFileSync` on `$bunfs` paths, not `fs.open()`. Hydra's HTTP server is Effect's, on `@effect/platform-bun` ([ADR 0031](../adr/0031-the-backend-is-written-on-effect.md)); whether the embedded bundle is served through it or by a `Bun.serve({ routes })` route beside it on the same port is verified at implementation start ([./16-open-items.md](./16-open-items.md) section C).
 
+Serving path (resolved 2026-09-04, [#58](https://github.com/rogierpennink/hydra/issues/58)): **`vite build`'s output, embedded per file with `with { type: "file" }`, served through the Effect HTTP server.** Measured on the pinned Bun 1.4.0 and Vite 8.2.2 with a component using JSX and a `React.lazy` dynamic import:
+
+| | `import index from "./index.html"` + `Bun.serve({ routes })` | `vite build`, embedded per file |
+|---|---|---|
+| Bundler | Bun's own; `vite.config.ts` is never read | Vite, the pinned stack |
+| React Compiler | absent - `function Comp({ items })` reached the browser untransformed | applied - the same component came out calling `useMemoCache` |
+| Code splitting | none - the lazily imported component was inlined into the entry | one chunk per lazy import |
+| Entry served | 977 kB | 191 kB entry + a 0.19 kB lazy chunk |
+| Cache headers | `ETag` only, no `Cache-Control` | whatever the controller sets |
+
+So path (a) is out on the first row alone: it bypasses the whole pinned toolchain ([./14](./14-web-app.md) section Stack), and two of Hydra's performance guardrails with it. Two `Bun.serve()` listeners cannot share a port either, so "beside it" was never available: the Effect server owns the socket.
+
+What ships: `scripts/gen-web-bundle.ts` writes `apps/controller/src/http/bundle.ts` after each `vite build` - one `with { type: "file" }` import per file in `apps/web/dist`, which is what embeds them - and the controller answers a request the router matched nothing for from that map with `Bun.file()`, the `$bunfs`-aware reader. Fingerprinted files under `/assets/` are `public, max-age=31536000, immutable`; `index.html` is `no-cache` and answers every other `GET`, so a deep link loads. A path under `/api/v1` is never the bundle's, so an unknown operation keeps the JSON error envelope. `pnpm build:binary` runs `vite build` and the generator before `bun build --compile`; a checkout with no `dist/` generates an empty bundle and serves the API alone.
+
 **Cross-compilation and signing.** `--target` builds `bun-darwin-arm64`, `bun-linux-x64`, and `bun-linux-arm64` from one host; the x64 baseline/modern split is obsolete. `codesign` works since Bun 1.2.4 with the documented JIT entitlements; it must run on a macOS runner. Pin the Bun version in CI past the 1.3.12 signature regression (fixed).
 
 **Dependencies.** The backend runs on Effect 4 ([ADR 0031](../adr/0031-the-backend-is-written-on-effect.md)): `effect` pinned to the current 4.0.0 release candidate exactly, moved to 4.0 stable when released; HttpApi, RPC, SQL and Schema live under `effect/unstable/*` and may break on minor releases, so every upgrade is a deliberate, reviewed change. With it `@effect/platform-bun` (HTTP and WebSocket server, reaching `Bun.serve()`'s native WebSocket implementation; `ws` is the fallback, viable since Bun 1.4) and `@effect/sql-sqlite-bun` over `bun:sqlite`. Do not use keytar (archived upstream); reach the macOS keychain by spawning the `security` CLI. Avoid native addons where a subprocess will do.

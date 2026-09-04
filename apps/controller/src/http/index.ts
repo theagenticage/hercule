@@ -6,4 +6,4 @@
  * only what the controller's entrypoint uses.
  */
 export { perimeterWarning } from "./perimeter";
-export { MAX_REQUEST_BODY_BYTES, serve } from "./server";
+export { MAX_REQUEST_BODY_BYTES, serve, webBundle } from "./server";

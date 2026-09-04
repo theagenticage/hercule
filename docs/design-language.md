@@ -77,7 +77,7 @@ surface plus a faint white inner top highlight - never a color wash.
 
 ## Typography
 
-*(Pinned 2026-09-04, [#58](https://github.com/rogierpennink/hydra/issues/58).)* **Both faces are self-hosted**: the `woff2` files ship in `packages/ui` and are served from the controller's own origin, never fetched from Google Fonts at runtime. Hydra runs on a LAN and on machines with no internet, the served bundle's CSP allows `font-src 'self'` only ([spec/14](./spec/14-web-app.md) §Auth in the client), and a font request to a third party would tell that party who is using Hydra and when. Google Fonts is where the faces come from, not where the browser gets them.
+*(Pinned 2026-09-04, [#58](https://github.com/rogierpennink/hydra/issues/58).)* **Both faces are self-hosted**: the `woff2` files ship in `packages/ui` and are served from the controller's own origin, never fetched from Google Fonts at runtime. Hydra runs on a LAN and on machines with no internet, the served bundle's CSP allows `font-src 'self'` only ([spec/14](./spec/14-web-app.md) §Auth in the client), and a font request to a third party would tell that party who is using Hydra and when. Google Fonts is where the faces come from, not where the browser gets them. The files live in `packages/ui/src/fonts` with their OFL licences beside them: Onest as one variable file per subset covering 400-600, IBM Plex Mono as static 400 and 500.
 
 - **UI face: Onest** (Google Fonts), weights 400/500/600. Chosen for calm rhythm and
   slightly narrow letterforms that ease dense monitoring rows.
@@ -86,9 +86,6 @@ surface plus a faint white inner top highlight - never a color wash.
   urgent-priority names.
 - **Mono face: IBM Plex Mono** for ids, refs, ages, timestamps, counts.
   `font-variant-numeric: tabular-nums` wherever digits align.
-- **Both faces are self-hosted**, as woff2 files in `packages/ui/src/fonts` with their
-  OFL licences beside them; nothing is fetched from a font CDN at runtime. Onest ships as
-  one variable file per subset covering 400-600; IBM Plex Mono ships static 400 and 500.
 - Body 14px/1.5; row names 13.5px; metadata 12-12.5px; uppercase lane labels 10.5px with
   0.1em letter-spacing in `--faint`.
 

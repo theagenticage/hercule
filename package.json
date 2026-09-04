@@ -5,13 +5,13 @@
   "type": "module",
   "packageManager": "pnpm@10.12.1",
   "scripts": {
-    "prepare": "bun run scripts/gen-version.ts",
+    "prepare": "bun run scripts/gen-version.ts && bun run scripts/gen-web-bundle.ts",
     "typecheck": "tsc -p tsconfig.json && tsc -p packages/ui/tsconfig.json && tsc -p apps/web/tsconfig.json",
     "lint": "eslint . --max-warnings 0 && prettier --check .",
     "format": "prettier --write .",
     "test": "bun --bun run vitest run",
     "dep-lint": "bun run scripts/dep-lint.ts",
-    "build:binary": "bun run scripts/gen-version.ts && bun build packages/hydra/src/main.ts --compile --outfile hydra"
+    "build:binary": "bun run scripts/gen-version.ts && pnpm --filter @hydra/web build && bun run scripts/gen-web-bundle.ts && bun build packages/hydra/src/main.ts --compile --outfile hydra"
   },
   "devDependencies": {
     "@effect/vitest": "4.0.0-rc.112",

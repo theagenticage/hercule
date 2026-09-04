@@ -46,7 +46,7 @@ Not design questions. The constraint is stated where one exists.
 - ~~13 §4.2: the password hash function (argon2id expected).~~ **Resolved 2026-09-04 ([#57](https://github.com/rogierpennink/hydra/issues/57)):** argon2id via `Bun.password`, native in the pinned Bun; recorded in 13 §4.2.
 - 13 §9: the runner daemon's local channel for the git credential helper and how the helper authenticates.
 - 15 §11: macOS notarization of a Bun-compiled binary - prototype notarize + staple first.
-- 15 §11: serving the embedded SPA (`import index from "./index.html"` / `Bun.serve({ routes })`) through the Effect HTTP server on Bun (`@effect/platform-bun`), or beside it on the same port - confirm before the web bundle is wired in. *(Still open. [#57](https://github.com/rogierpennink/hydra/issues/57) serves no bundle: it stands the HTTP server up for `/api/v1/*` only, and every non-API path 404s until the web-bundle ticket answers this.)*
+- ~~15 §11: serving the embedded SPA (`import index from "./index.html"` / `Bun.serve({ routes })`) through the Effect HTTP server on Bun (`@effect/platform-bun`), or beside it on the same port - confirm before the web bundle is wired in.~~ **Resolved 2026-09-04 ([#58](https://github.com/rogierpennink/hydra/issues/58)):** measured both; Bun's HTML route ignores `vite.config.ts` and so loses the React Compiler and code splitting. `vite build`'s output is embedded per file with `with { type: "file" }` and served through the Effect HTTP server; recorded in 15 §11.
 
 ## D. Standing risks
 
