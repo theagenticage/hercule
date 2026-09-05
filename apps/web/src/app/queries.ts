@@ -57,11 +57,16 @@ export const tasksQuery = (client: HydraClient, filter: TaskFilter) =>
  * address is not necessarily on a page the listing has fetched, and a task the
  * user has just edited may have left the listing's filter entirely, so the
  * panel showing it reads it rather than looking it up in a list.
+ *
+ * A refusal is answered at once rather than retried: a task deleted while the
+ * panel is open answers 404 for good, and retrying it behind the reader leaves
+ * the panel showing a record the list beside it has already dropped.
  */
 export const taskQuery = (client: HydraClient, id: string) =>
   queryOptions({
     queryKey: queryKeys.task(id),
     queryFn: () => client.task.read({ params: { id } }),
+    retry: false,
   });
 
 /**

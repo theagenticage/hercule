@@ -93,9 +93,9 @@ export interface LiveDelta {
 export type LiveDeltaHandler = (delta: LiveDelta) => void;
 
 /**
- * Where the supervisor is. `unauthenticated` and `stopped` are terminal: the
- * first means the credential is gone and only a fresh sign-in helps, the second
- * that the caller asked for this.
+ * Where the supervisor is. Neither `unauthenticated` nor `stopped` goes
+ * anywhere on its own - the first means the credential is gone, the second that
+ * the caller asked for it - and `start` is what leaves either of them.
  */
 export type LiveStatus =
   "idle" | "connecting" | "connected" | "disconnected" | "unauthenticated" | "stopped";
@@ -103,12 +103,16 @@ export type LiveStatus =
 export interface Live {
   /**
    * Begins connecting, and keeps connecting. Calling it while it is already
-   * connecting or connected does nothing; calling it after it gave up on a
-   * credential that was gone is how a fresh sign-in gets live updates back.
-   * Once stopped it stays stopped.
+   * connecting or connected does nothing; calling it after it stopped, or
+   * after it gave up on a credential that was gone, is how a fresh sign-in
+   * gets live updates back.
    */
   start(): void;
-  /** Ends the connection for good. Calling it again does nothing. */
+  /**
+   * Ends the connection and everything it was doing. What was subscribed stays
+   * subscribed: a later `start` takes the whole registry out again, the way a
+   * reconnect does.
+   */
   stop(): Promise<void>;
   subscribe(topic: MutableLiveTopic, handler: LiveInvalidateHandler): () => void;
   subscribe(topic: AppendOnlyLiveTopic, handler: LiveDeltaHandler): () => void;
@@ -182,18 +186,30 @@ export const createLive = (options: LiveOptions): Live => {
    * other than the caller letting go of it.
    */
   const sweep = (subscription: Subscription): void => {
-    if (isAppendOnlyLiveTopic(subscription.topic)) return;
-    (subscription.handler as LiveInvalidateHandler)(queryKeysFor(subscription.topic, []));
+    const topic = subscription.topic;
+    if (isAppendOnlyLiveTopic(topic)) return;
+    isolate(() => (subscription.handler as LiveInvalidateHandler)(queryKeysFor(topic, [])));
   };
 
   /**
-   * Hands one message to the caller's callback. A callback that throws is the
-   * caller's bug and not this subscription's business, so the throw is handed
-   * to the host to report - the way a DOM listener's is - rather than taking
-   * the reader off the air with nothing said.
+   * Runs one of the caller's callbacks. A callback that throws is the caller's
+   * bug and not this connection's business, so the throw is handed to the host
+   * to report - the way a DOM listener's is - rather than taking a reader off
+   * the air, or the whole connection down, with nothing said.
    */
-  const deliver = (subscription: Subscription, message: LiveMessage): void => {
+  const isolate = (call: () => void): void => {
     try {
+      call();
+    } catch (thrown) {
+      queueMicrotask(() => {
+        throw thrown;
+      });
+    }
+  };
+
+  /** Hands one message to the caller's callback. */
+  const deliver = (subscription: Subscription, message: LiveMessage): void => {
+    isolate(() => {
       if (message._tag === "delta") {
         subscription.cursor = message.cursor;
         (subscription.handler as LiveDeltaHandler)({
@@ -206,11 +222,7 @@ export const createLive = (options: LiveOptions): Live => {
       (subscription.handler as LiveInvalidateHandler)(
         queryKeysFor(subscription.topic as MutableLiveTopic, message.ids),
       );
-    } catch (thrown) {
-      queueMicrotask(() => {
-        throw thrown;
-      });
-    }
+    });
   };
 
   /**
@@ -257,7 +269,9 @@ export const createLive = (options: LiveOptions): Live => {
           subscription.cursor !== undefined
         ) {
           subscription.cursor = undefined;
-          (subscription.handler as LiveDeltaHandler)({ cursor: null, items: [], reset: true });
+          isolate(() =>
+            (subscription.handler as LiveDeltaHandler)({ cursor: null, items: [], reset: true }),
+          );
           continue;
         }
         sweep(subscription);
@@ -386,7 +400,7 @@ export const createLive = (options: LiveOptions): Live => {
 
   return {
     start: () => {
-      if (running !== null || status === "stopped") return;
+      if (running !== null) return;
       running = Effect.runFork(supervise);
     },
     stop: async () => {

@@ -27,149 +27,21 @@ import {
   type LiveDelta,
   type LiveQueryKey,
 } from "../index";
+import { STUB_SERVER_VERSION as SERVER_VERSION, StubSocket } from "./socket-stub";
 
 const BASE = "http://controller.test";
 const SOCKET_URL = "ws://controller.test/ws";
-const SERVER_VERSION = "0.1.0";
 
-/** One frame as it crosses the wire: the RPC codec's own JSON envelope. */
-type Frame = Record<string, unknown>;
-
-interface Listener {
-  readonly handler: (event: unknown) => void;
-  readonly once: boolean;
-}
-
-/**
- * A `WebSocket` that is also the fake server. It opens immediately, records
- * every frame the client writes, and answers the three things the transport
- * cannot get on with without: its own keepalive, `hello` and `ping`. Streams are
- * driven by the test.
- */
-class StubSocket {
-  static readonly opened: Array<StubSocket> = [];
-
-  readonly url: string;
-  readonly sent: Array<Frame> = [];
-  readyState = 1;
-  closedWith: { readonly code: number; readonly reason: string } | null = null;
-
-  private readonly listeners = new Map<string, Array<Listener>>();
-
-  constructor(url: string) {
-    this.url = url;
-    StubSocket.opened.push(this);
-  }
-
-  addEventListener(
-    type: string,
-    handler: (event: unknown) => void,
-    options?: { readonly once?: boolean },
-  ): void {
-    const existing = this.listeners.get(type) ?? [];
-    existing.push({ handler, once: options?.once === true });
-    this.listeners.set(type, existing);
-  }
-
-  removeEventListener(type: string, handler: (event: unknown) => void): void {
-    const existing = this.listeners.get(type) ?? [];
-    this.listeners.set(
-      type,
-      existing.filter((listener) => listener.handler !== handler),
-    );
-  }
-
-  send(data: string): void {
-    const decoded: unknown = JSON.parse(data);
-    const frames = (Array.isArray(decoded) ? decoded : [decoded]) as Array<Frame>;
-    for (const frame of frames) {
-      this.sent.push(frame);
-      this.answer(frame);
-    }
-  }
-
-  close(code = 1000, reason = ""): void {
-    if (this.readyState !== 1) return;
-    this.readyState = 3;
-    this.closedWith = { code, reason };
-    queueMicrotask(() => this.emit("close", { code, reason }));
-  }
-
-  /** The frames the client sent, of one kind. */
-  frames(tag: string): Array<Frame> {
-    return this.sent.filter((frame) => frame._tag === tag);
-  }
-
-  /** The calls the client made to one RPC method, oldest first. */
-  calls(name: string): Array<Frame> {
-    return this.frames("Request").filter((frame) => frame.tag === name);
-  }
-
-  /** A stream chunk for a call the client has open. */
-  chunk(requestId: unknown, values: ReadonlyArray<unknown>): void {
-    this.deliver({ _tag: "Chunk", requestId, values });
-  }
-
-  /** A call's typed failure, in the contract's envelope. */
-  fail(requestId: unknown, error: unknown): void {
-    this.deliver({
-      _tag: "Exit",
-      requestId,
-      exit: { _tag: "Failure", cause: [{ _tag: "Fail", error }] },
-    });
-  }
-
-  /** The connection going away underneath the client. */
-  drop(code = 1006): void {
-    this.readyState = 3;
-    this.emit("close", { code, reason: "" });
-  }
-
-  private answer(frame: Frame): void {
-    if (frame._tag === "Ping") {
-      this.deliver({ _tag: "Pong" });
-      return;
-    }
-    if (frame._tag !== "Request") return;
-    if (frame.tag === "hello") {
-      this.deliver({
-        _tag: "Exit",
-        requestId: frame.id,
-        exit: { _tag: "Success", value: { v: 1, serverVersion: SERVER_VERSION } },
-      });
-    } else if (frame.tag === "ping") {
-      this.deliver({
-        _tag: "Exit",
-        requestId: frame.id,
-        exit: { _tag: "Success", value: {} },
-      });
-    }
-  }
-
-  private deliver(message: unknown): void {
-    queueMicrotask(() => {
-      if (this.readyState !== 1) return;
-      this.emit("message", { data: JSON.stringify(message) });
-    });
-  }
-
-  private emit(type: string, event: unknown): void {
-    const existing = this.listeners.get(type) ?? [];
-    this.listeners.set(
-      type,
-      existing.filter((listener) => !listener.once),
-    );
-    for (const listener of existing) listener.handler(event);
-  }
-}
+/** Every socket the supervisor under test has opened, oldest first. */
+const opened: Array<StubSocket> = [];
 
 const socketAt = (index: number): StubSocket => {
-  const socket = StubSocket.opened[index];
+  const socket = opened[index];
   assert.isDefined(socket, `no socket at index ${index}`);
   return socket;
 };
 
-const lastSocket = (): StubSocket => socketAt(StubSocket.opened.length - 1);
+const lastSocket = (): StubSocket => socketAt(opened.length - 1);
 
 /**
  * Lets everything already due happen: the promises of the ticket fetch, the
@@ -272,7 +144,11 @@ const supervisor = (fetch: FetchLike): Live => {
   live = createLive({
     client,
     baseUrl: BASE,
-    webSocket: (url) => new StubSocket(url) as unknown as WebSocket,
+    webSocket: (url) => {
+      const socket = new StubSocket(url);
+      opened.push(socket);
+      return socket as unknown as WebSocket;
+    },
   });
   return live;
 };
@@ -289,7 +165,7 @@ const connected = async (
 
 beforeEach(() => {
   vi.useFakeTimers();
-  StubSocket.opened.length = 0;
+  opened.length = 0;
 });
 
 afterEach(async () => {
@@ -317,7 +193,7 @@ describe("createLive", () => {
     assert.strictEqual(seen[0]?.url, `${BASE}/api/v1/auth/ws-ticket`);
     assert.strictEqual(seen[0]?.method, "POST");
 
-    assert.strictEqual(StubSocket.opened.length, 1);
+    assert.strictEqual(opened.length, 1);
     assert.strictEqual(socketAt(0).url, SOCKET_URL);
 
     const hello = socketAt(0).calls("hello");
@@ -332,7 +208,7 @@ describe("createLive", () => {
     const { fetch, seen } = ticketServer();
     const { socket } = await connected(fetch);
 
-    assert.strictEqual(StubSocket.opened.length, 1);
+    assert.strictEqual(opened.length, 1);
 
     // The sixth and seventh delays would be 32 s and 64 s uncapped, so reaching
     // an attempt after 30 s is what proves the cap.
@@ -340,19 +216,19 @@ describe("createLive", () => {
     let current = socket;
 
     for (const delay of delays) {
-      const before = StubSocket.opened.length;
+      const before = opened.length;
       current.drop();
       await settle();
-      assert.strictEqual(StubSocket.opened.length, before, `reconnected before ${delay} ms`);
+      assert.strictEqual(opened.length, before, `reconnected before ${delay} ms`);
 
       await vi.advanceTimersByTimeAsync(delay);
       await settle();
-      assert.strictEqual(StubSocket.opened.length, before + 1, `no reconnect after ${delay} ms`);
+      assert.strictEqual(opened.length, before + 1, `no reconnect after ${delay} ms`);
       current = lastSocket();
     }
 
     // Every attempt bought its own ticket, and no ticket was used twice.
-    const tickets = StubSocket.opened.map((each) => {
+    const tickets = opened.map((each) => {
       const hello = each.calls("hello")[0];
       return (hello?.payload as { readonly ticket: string }).ticket;
     });
@@ -378,25 +254,51 @@ describe("createLive", () => {
     // connect, so the drop after it starts the schedule over.
     await vi.advanceTimersByTimeAsync(31_000);
     await settle();
-    const before = StubSocket.opened.length;
+    const before = opened.length;
 
     current.drop();
     await settle();
-    assert.strictEqual(StubSocket.opened.length, before);
+    assert.strictEqual(opened.length, before);
 
     await vi.advanceTimersByTimeAsync(1000);
     await settle();
-    assert.strictEqual(StubSocket.opened.length, before + 1);
+    assert.strictEqual(opened.length, before + 1);
 
     // Started over, not flattened: the wait after that one doubles again.
     lastSocket().drop();
     await vi.advanceTimersByTimeAsync(1000);
     await settle();
-    assert.strictEqual(StubSocket.opened.length, before + 1, "the schedule stopped growing");
+    assert.strictEqual(opened.length, before + 1, "the schedule stopped growing");
 
     await vi.advanceTimersByTimeAsync(1000);
     await settle();
-    assert.strictEqual(StubSocket.opened.length, before + 2);
+    assert.strictEqual(opened.length, before + 2);
+  });
+
+  it("closes the socket when it is stopped, and opens a fresh one when it is started again", async () => {
+    // Signing out and back in inside one page is exactly this, and the second
+    // connection must be the second person's rather than the first's.
+    const { fetch, seen } = ticketServer();
+    const { live: started, socket } = await connected(fetch);
+    started.subscribe("task", () => {});
+    await settle();
+
+    await started.stop();
+    await settle();
+    assert.strictEqual(socket.readyState, 3);
+
+    started.start();
+    await settle();
+    assert.strictEqual(opened.length, 2);
+    assert.strictEqual(seen.length, 2);
+    assert.strictEqual(lastSocket().calls("hello").length, 1);
+    // The registry survived, so the second connection watches what the first did.
+    assert.deepStrictEqual(
+      lastSocket()
+        .subscriptions()
+        .map((each) => each.topic),
+      ["task"],
+    );
   });
 
   it("stops for good and reports unauthenticated when the ticket is refused", async () => {
@@ -409,13 +311,13 @@ describe("createLive", () => {
     await settle();
 
     assert.strictEqual(statuses[statuses.length - 1], "unauthenticated");
-    assert.strictEqual(StubSocket.opened.length, 0);
+    assert.strictEqual(opened.length, 0);
 
     // Terminal: no later attempt, however long it is given.
     await vi.advanceTimersByTimeAsync(120_000);
     await settle();
     assert.strictEqual(count(), 1);
-    assert.strictEqual(StubSocket.opened.length, 0);
+    assert.strictEqual(opened.length, 0);
     assert.strictEqual(statuses[statuses.length - 1], "unauthenticated");
   });
 
@@ -574,14 +476,14 @@ describe("createLive", () => {
     await settle();
 
     assert.isNotNull(socket.closedWith);
-    assert.strictEqual(StubSocket.opened.length, 1);
+    assert.strictEqual(opened.length, 1);
 
     await vi.advanceTimersByTimeAsync(1000);
     await settle();
 
     // The fresh connection is what finds out whether there is a credential
     // left: its ticket fetch is the one that would be refused.
-    assert.strictEqual(StubSocket.opened.length, 2);
+    assert.strictEqual(opened.length, 2);
     assert.strictEqual(lastSocket().calls("hello").length, 1);
   });
 
@@ -610,7 +512,7 @@ describe("createLive", () => {
 
     // One subscription being refused is not the connection's problem, and the
     // others on it go on working.
-    assert.strictEqual(StubSocket.opened.length, 1);
+    assert.strictEqual(opened.length, 1);
     assert.isNull(socket.closedWith);
   });
 
