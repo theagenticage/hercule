@@ -2,9 +2,11 @@
  * The controller-runner protocol: one versioned catalogue of the messages that
  * cross the single WebSocket a runner holds with its controller.
  *
- * Two tagged unions, one per direction, plus the one HTTP exchange that comes
- * before the socket exists: the answer a joining machine is handed, which is
- * where it learns the identity it will pin the socket's controller against.
+ * Two tagged unions, one per direction, plus the exchanges that come before the
+ * socket exists: the answer a joining machine is handed, which is where it
+ * learns the identity it will pin the socket's controller against, and the two
+ * lines a controller and the runner it spawned beside itself exchange over
+ * their pipes.
  *
  * A message is a struct with a `_tag`; anything a peer sends that is not in its
  * direction's union fails to decode, and a hello that cannot be honoured is
@@ -145,6 +147,37 @@ export const JoinAnswer = Schema.Struct({
 });
 
 export type JoinAnswer = Schema.Schema.Type<typeof JoinAnswer>;
+
+/**
+ * The first line a runner spawned by a controller writes to its stdout: either
+ * the id it already holds, or a request to be enlisted.
+ *
+ * A controller and the runner it spawns are one machine, so nothing durable
+ * says which runner is the local one. The child reads its own `runner.json` -
+ * which is the runner's file and the controller never opens - and says on the
+ * one pipe only the two of them share who it turned out to be.
+ */
+export const LocalAnnouncement = Schema.Union([
+  Schema.Struct({ runnerId: Fact }),
+  Schema.Struct({ join: Schema.Literal(true) }),
+]);
+
+export type LocalAnnouncement = Schema.Schema.Type<typeof LocalAnnouncement>;
+
+/**
+ * What the controller writes back on the child's stdin when the child asked to
+ * be enlisted, and the only place that token appears: not in the child's argv,
+ * which `ps` shows to every account on the machine, and not in its environment,
+ * which every process it starts inherits.
+ */
+export const LocalEnrolment = Schema.Struct({
+  /** Where the controller answers, as something on this machine reaches it. */
+  controllerUrl: Fact,
+  /** The single-use join token, minted for this child and no other. */
+  token: Fact,
+});
+
+export type LocalEnrolment = Schema.Schema.Type<typeof LocalEnrolment>;
 
 /**
  * Just enough of any frame to read the version off it.

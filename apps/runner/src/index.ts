@@ -8,24 +8,79 @@
  * `hydra runner join` belongs to this role rather than to the CLI because
  * everything it writes - `runner.json` and the storage directory - is the
  * runner's own; `hydra runner` then holds the connection that join made
- * possible. `hydra runner --local`, the supervised child of a controller on the
- * same machine, is not built yet.
+ * possible. `hydra runner --local` is the same daemon with an enrolment
+ * handshake in front of it, for the child a controller spawns beside itself.
+ *
+ * Both daemon forms stop on a signal rather than being killed by it: the
+ * connection's scope closes on the way out, which is where the runner tells its
+ * controller it is going. A runner that vanished would read as unreachable for
+ * a minute; one that said goodbye reads as offline at once.
  */
 import * as Effect from "effect/Effect";
+import * as Latch from "effect/Latch";
+import * as Logger from "effect/Logger";
+import type * as Scope from "effect/Scope";
 import { Result } from "effect";
 import { parseGlobalOptions, resolveHomePath } from "@hydra/home";
 import { daemon } from "./daemon";
 import { join } from "./join";
+import { local } from "./local";
 
 /** How the runner ends, in the same vocabulary the CLI uses. */
 const EXIT = { failed: 1, usage: 2 } as const;
 
 const USAGE = [
   "usage: hydra runner",
+  "       hydra runner --local",
   "       hydra runner join <controller-url> --token <token>",
 ].join("\n");
 
-const NOT_YET = "`hydra runner --local` is not built yet.";
+/**
+ * The stop request, as something a daemon can be raced against.
+ *
+ * Both signals mean the same thing, and the handlers stay installed until the
+ * scope that put them there closes, which is after the connection has been let
+ * go of: a second signal otherwise reaches Bun's default disposition and kills
+ * the process mid-goodbye.
+ */
+const untilStopped: Effect.Effect<Effect.Effect<void>, never, Scope.Scope> = Effect.acquireRelease(
+  Effect.sync(() => {
+    const stopped = Latch.makeUnsafe(false);
+    const stop = (): void => {
+      stopped.openUnsafe();
+    };
+    process.on("SIGINT", stop);
+    process.on("SIGTERM", stop);
+    return { stopped, stop };
+  }),
+  ({ stop }) =>
+    Effect.sync(() => {
+      process.off("SIGINT", stop);
+      process.off("SIGTERM", stop);
+    }),
+).pipe(Effect.map(({ stopped }) => stopped.await));
+
+/**
+ * Runs a daemon until it fails or the process is asked to stop. A daemon that
+ * returns on its own has failed: holding the connection is all it does.
+ *
+ * Everything it logs goes to stderr. A runner's stdout is a channel, not a
+ * console: the controller that spawned this one reads a line off it and has to
+ * be able to tell that line from whatever the daemon had to say.
+ */
+const hold = async (work: Effect.Effect<void, { readonly message: string }>): Promise<void> => {
+  const outcome = await Effect.runPromise(
+    Effect.result(
+      Effect.scoped(
+        Effect.flatMap(untilStopped, (stopped) => Effect.raceFirst(work, stopped)),
+      ).pipe(Effect.provideService(Logger.LogToStderr, true)),
+    ),
+  );
+  if (outcome._tag === "Failure") {
+    console.error(`hydra: ${outcome.failure.message}`);
+    process.exitCode = EXIT.failed;
+  }
+};
 
 /** The value of `--token`, or nothing when the flag is absent or bare. */
 const tokenOf = (argv: ReadonlyArray<string>): string | undefined => {
@@ -62,26 +117,17 @@ export async function run(argv: readonly string[]): Promise<void> {
   const verb = rest[0];
 
   if (verb === undefined || verb.startsWith("-")) {
-    // The supervised child the controller spawns takes its enrolment off stdin
-    // before any of this; until it does, it is not the same daemon.
-    if (verb === "--local") {
-      console.error(`hydra: ${NOT_YET}`);
-      process.exitCode = EXIT.failed;
-      return;
-    }
-    // A daemon takes no flags of its own, so anything else on the line is a
+    const home = resolveHomePath(options.success.home, process.env);
+    // A daemon takes no flags but `--local`, so anything else on the line is a
     // typo, and starting a daemon is the wrong answer to one.
-    if (verb !== undefined) {
-      misuse(`unknown runner option \`${verb}\``);
+    const unknown = rest.find((token) => token !== "--local");
+    if (unknown !== undefined) {
+      misuse(`unknown runner option \`${unknown}\``);
       return;
     }
-    const held = await Effect.runPromise(
-      Effect.result(daemon(resolveHomePath(options.success.home, process.env))),
-    );
-    // The daemon returns only by failing: it holds a connection for ever.
-    if (held._tag === "Failure") console.error(`hydra: ${held.failure.message}`);
-    process.exitCode = EXIT.failed;
-    return;
+    // The supervised child the controller spawns takes its enrolment off stdin
+    // before it dials; everything after that is the ordinary daemon.
+    return await hold(verb === "--local" ? local(home) : daemon(home));
   }
   if (verb !== "join") {
     misuse(`unknown runner command \`${verb}\``);

@@ -7,9 +7,9 @@
  * URL. On every later boot it is the same sequence, and everything in it is
  * idempotent, so a restart changes nothing except the setup token.
  *
- * Two steps of the sequence are deliberately absent, both because their subject
- * does not exist yet: one provider instance per shipped provider plugin, and
- * starting the local runner. Both belong here once they do.
+ * One step of the sequence is deliberately absent, because its subject does not
+ * exist yet: one provider instance per shipped provider plugin. It belongs
+ * here once it does.
  */
 import { existsSync, rmSync, writeFileSync } from "node:fs";
 import * as Effect from "effect/Effect";
@@ -43,7 +43,14 @@ import {
   type MasterKeyError,
   type SecretNameError,
 } from "./secrets";
-import { JoinTokens, JoinTokensLayer } from "./runners";
+import {
+  JoinTokensLayer,
+  startLocalRunner,
+  type JoinTokens,
+  type LocalRunner,
+  type LocalRunnerFailed,
+  type LocalRunnerOptions,
+} from "./runners";
 import { seed } from "./seed";
 import { Settings, SettingsLayer, type SettingError } from "./settings";
 
@@ -58,6 +65,8 @@ export interface BootOutcome {
   readonly paths: HomePaths;
   readonly identityId: string;
   readonly setupUrl: string | undefined;
+  /** The child this boot spawned, for a boot that was asked to spawn one. */
+  readonly localRunner: LocalRunner | undefined;
 }
 
 /** Everything that can stop the controller before it binds. */
@@ -70,19 +79,25 @@ export type BootError =
   | MasterKeyError
   | SecretNameError
   | SettingError
-  | GrantsError;
+  | GrantsError
+  | LocalRunnerFailed;
 
 /**
- * The one-time setup URL. A wildcard bind host renders as loopback, because
- * `http://0.0.0.0:4937` is not an address a browser can open; an IPv6 literal
- * is bracketed. `bind.host` is checked when the config is
- * resolved, so by here it is a host and nothing else; a value `URL` will not
+ * Where something on this machine reaches the controller. A wildcard bind host
+ * renders as loopback, because `http://0.0.0.0:4937` is not an address anything
+ * can open; an IPv6 literal is bracketed. `bind.host` is checked when the config
+ * is resolved, so by here it is a host and nothing else; a value `URL` will not
  * take is a defect, not a URL nobody can open.
  */
-export function setupUrl(bindHost: string, bindPort: number, token: string): string {
+export function controllerOrigin(bindHost: string, bindPort: number): string {
   const host = WILDCARD_HOSTS.has(bindHost) ? "127.0.0.1" : bindHost;
   const authority = host.includes(":") && !host.startsWith("[") ? `[${host}]` : host;
-  const url = new URL(`http://${authority}:${bindPort}/setup`);
+  return `http://${authority}:${bindPort}`;
+}
+
+/** The one-time setup URL, at the address a browser on this machine can open. */
+export function setupUrl(bindHost: string, bindPort: number, token: string): string {
+  const url = new URL("/setup", controllerOrigin(bindHost, bindPort));
   url.searchParams.set("token", token);
   return url.toString();
 }
@@ -154,6 +169,13 @@ export interface BootOptions {
   readonly argv: ReadonlyArray<string>;
   readonly env: Readonly<Record<string, string | undefined>>;
   readonly masterKeyBackend?: MasterKeyBackend;
+  /**
+   * How to run the runner this controller keeps beside itself, for a boot that
+   * goes on to serve. A boot with nothing after it - `hydra setup-url`, a
+   * repository test - spawns none: a second Hydra process is not what reading
+   * one value is for.
+   */
+  readonly localRunner?: LocalRunnerOptions;
 }
 
 /**
@@ -220,10 +242,22 @@ export const bootWith = <A, E>(
       const record = yield* identity.ensure;
 
       const url = yield* ensureSetupUrl(paths, bootstrap);
-      return { paths, identityId: record.id, setupUrl: url } satisfies BootOutcome;
+
+      // Last, because the child joins over loopback as soon as it is up: it has
+      // nothing to join until the identity and the schema behind it are there.
+      const localRunner =
+        options.localRunner === undefined
+          ? undefined
+          : yield* startLocalRunner(
+              options.localRunner,
+              controllerOrigin(bootstrap.bindHost, bootstrap.bindPort),
+              paths.home,
+            );
+
+      return { paths, identityId: record.id, setupUrl: url, localRunner } satisfies BootOutcome;
     });
 
-    return yield* Effect.flatMap(steps, use).pipe(
+    return yield* Effect.scoped(Effect.flatMap(steps, use)).pipe(
       Effect.provide(repositories.pipe(Layer.provideMerge(openDatabase(paths.databaseFile)))),
       // A statement the database refused reads as one line naming the file; a
       // controller that fails at boot has said nothing else yet.

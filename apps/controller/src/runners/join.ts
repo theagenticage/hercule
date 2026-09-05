@@ -26,6 +26,7 @@ import { AuditLog } from "../events";
 // which also reaches the service that reads runners: importing through it would
 // make the two domains circular.
 import { ControllerIdentity } from "../identity/repository";
+import { Settings, type SettingError } from "../settings";
 import { JoinTokens } from "./join-tokens";
 import { pickName } from "./names";
 import { runnerRepository } from "./repository";
@@ -45,6 +46,7 @@ const make = Effect.gen(function* () {
   const runners = yield* runnerRepository;
   const joinTokens = yield* JoinTokens;
   const identity = yield* ControllerIdentity;
+  const settings = yield* Settings;
   const audit = yield* AuditLog;
 
   return {
@@ -59,7 +61,7 @@ const make = Effect.gen(function* () {
      * The runner is `offline` because joining is not connecting: it becomes
      * `online` when it holds a socket, which is its own exchange.
      */
-    join: (token: string): Effect.Effect<JoinAnswer, Unauthenticated | SqlError> =>
+    join: (token: string): Effect.Effect<JoinAnswer, Unauthenticated | SettingError | SqlError> =>
       withTransaction(
         sql,
         Effect.gen(function* () {
@@ -75,7 +77,8 @@ const make = Effect.gen(function* () {
             return yield* Effect.die("the controller has no identity row");
           }
           const credential = mintToken();
-          const name = pickName(yield* runners.names());
+          const fleet = yield* runners.names();
+          const name = pickName(fleet);
           const enlisted = yield* runners.insert({
             name,
             state: "offline",
@@ -84,10 +87,23 @@ const make = Effect.gen(function* () {
             credentialHash: hashToken(credential),
             at,
           });
+          // The fleet's first member is what work falls back to until somebody
+          // chooses otherwise. Only the first: a default a person set, and a
+          // default a person cleared, are both choices, and the next machine to
+          // join may take neither. The entry below says when it happened,
+          // because nothing else would - this is the one writer of the setting
+          // that no user asked for.
+          const tookTheDefault = fleet.size === 0 && (yield* settings.defaultRunnerId()) === null;
+          if (tookTheDefault) yield* settings.setDefaultRunnerId(enlisted.id, at);
           yield* audit.append({
             kind: "runner.joined",
             actor: SYSTEM_ACTOR,
-            payload: { runnerId: enlisted.id, name, joinTokenId: invitation.value },
+            payload: {
+              runnerId: enlisted.id,
+              name,
+              joinTokenId: invitation.value,
+              becameDefaultRunner: tookTheDefault,
+            },
             at,
           });
           return {
@@ -110,5 +126,5 @@ export class RunnerJoin extends Context.Service<RunnerJoin, Effect.Success<typeo
 export const RunnerJoinLayer: Layer.Layer<
   RunnerJoin,
   never,
-  SqlClient.SqlClient | JoinTokens | ControllerIdentity | AuditLog
+  SqlClient.SqlClient | JoinTokens | ControllerIdentity | Settings | AuditLog
 > = Layer.effect(RunnerJoin)(make);

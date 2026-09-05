@@ -189,7 +189,18 @@ export const connect = (
               headers: { authorization: `Bearer ${pin.credential}` },
             } as unknown as string[]),
         ),
-        (ws) => Effect.sync(() => ws.close(1000)),
+        // A connection still open at the end of this scope is one this runner
+        // is walking away from rather than one it lost - the process was asked
+        // to stop, or this build will not speak to that controller. Saying so
+        // is what tells the controller `offline` from silence, and the frame
+        // goes out on the socket itself because everything above it is already
+        // being torn down. A connection the peer or the network ended is not
+        // open here, and nothing is said over it.
+        (ws) =>
+          Effect.sync(() => {
+            if (ws.readyState === WebSocket.OPEN) ws.send(asText({ _tag: "goodbye" }));
+            ws.close(1000);
+          }),
       ),
     );
     const write = yield* socket.writer;

@@ -32,6 +32,12 @@ const STORAGE_NAME_BYTES = 8;
 /** The join could not be completed, said in one line a person can act on. */
 export class JoinError extends Schema.TaggedError<JoinError>()("JoinError", {
   message: Schema.String,
+  /**
+   * Whether trying the same join again could work. A controller that is not
+   * listening yet is the ordinary case for the runner a controller spawns
+   * before it binds; a token it refused is not something waiting fixes.
+   */
+  retryable: Schema.Boolean,
 }) {}
 
 /** What a join needs to know. */
@@ -77,7 +83,11 @@ const ask = (options: JoinOptions): Effect.Effect<JoinAnswer, JoinError> =>
     const call = options.fetch ?? fetch;
     const url = yield* Effect.try({
       try: () => new URL(JOIN_PATH, options.controllerUrl).toString(),
-      catch: () => new JoinError({ message: `${options.controllerUrl} is not a controller URL` }),
+      catch: () =>
+        new JoinError({
+          message: `${options.controllerUrl} is not a controller URL`,
+          retryable: false,
+        }),
     });
     const response = yield* Effect.tryPromise({
       try: () =>
@@ -89,23 +99,33 @@ const ask = (options: JoinOptions): Effect.Effect<JoinAnswer, JoinError> =>
           },
           body: "{}",
         }),
-      catch: (cause) => new JoinError({ message: `cannot reach ${url}: ${String(cause)}` }),
+      catch: (cause) =>
+        new JoinError({ message: `cannot reach ${url}: ${String(cause)}`, retryable: true }),
     });
     const body = yield* Effect.tryPromise({
       try: () => response.text(),
       catch: (cause) =>
-        new JoinError({ message: `cannot read the answer from ${url}: ${String(cause)}` }),
+        new JoinError({
+          message: `cannot read the answer from ${url}: ${String(cause)}`,
+          retryable: true,
+        }),
     });
     if (!response.ok) {
-      return yield* Effect.fail(new JoinError({ message: refusal(response.status, body) }));
+      return yield* Effect.fail(
+        new JoinError({ message: refusal(response.status, body), retryable: false }),
+      );
     }
     const parsed = yield* Effect.try({
       try: () => JSON.parse(body) as unknown,
-      catch: () => new JoinError({ message: `${url} did not answer with JSON` }),
+      catch: () => new JoinError({ message: `${url} did not answer with JSON`, retryable: false }),
     });
     return yield* Effect.mapError(
       decodeAnswer(parsed),
-      () => new JoinError({ message: `${url} answered something this build cannot read` }),
+      () =>
+        new JoinError({
+          message: `${url} answered something this build cannot read`,
+          retryable: false,
+        }),
     );
   });
 
@@ -156,7 +176,11 @@ export const join = (options: JoinOptions): Effect.Effect<Joined, JoinError> =>
           throw error;
         }
       },
-      catch: (cause) => new JoinError({ message: `cannot write ${configPath}: ${String(cause)}` }),
+      catch: (cause) =>
+        new JoinError({
+          message: `cannot write ${configPath}: ${String(cause)}`,
+          retryable: false,
+        }),
     });
 
     return { runnerId: answer.runnerId, name: answer.name, configPath, storageDirectory };

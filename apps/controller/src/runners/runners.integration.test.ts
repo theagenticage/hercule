@@ -593,6 +593,55 @@ describe("POST /runners/join", () => {
     });
   });
 
+  it("makes the first machine the default runner and leaves the choice alone after that", async () => {
+    await withServer(async (harness) => {
+      const token = await completeSetup(harness.base);
+      const controller = async (): Promise<string | null> =>
+        (
+          (await (await get(harness.base, "/api/v1/controller", token)).json()) as {
+            defaultRunnerId: string | null;
+          }
+        ).defaultRunnerId;
+
+      expect(await controller()).toBeNull();
+      const first = JSON.parse(
+        await (await join(harness.base, (await mint(harness.base, token)).token)).text(),
+      ) as JoinAnswer;
+      expect(await controller()).toBe(first.runnerId);
+
+      // A second machine does not take a default the fleet already has, which
+      // is the same rule whether the first was chosen or fell into it.
+      const second = JSON.parse(
+        await (await join(harness.base, (await mint(harness.base, token)).token)).text(),
+      ) as JoinAnswer;
+      expect(second.runnerId).not.toBe(first.runnerId);
+      expect(await controller()).toBe(first.runnerId);
+
+      // Nor one a person deliberately took off: an empty default is an answer,
+      // not an absence waiting to be filled in by whoever turns up next.
+      await send("PATCH", harness.base, "/api/v1/controller", {
+        body: { defaultRunnerId: null },
+        token,
+      });
+      await join(harness.base, (await mint(harness.base, token)).token);
+      expect(await controller()).toBeNull();
+
+      // The log says which enlistment took the default and which did not; it is
+      // the only writer of that setting with nobody behind it.
+      const log = (await (await get(harness.base, "/api/v1/events", token)).json()) as {
+        items: ReadonlyArray<{ kind: string; payload: Record<string, unknown> }>;
+      };
+      // The log reads newest first; these are the three enlistments in the
+      // order they happened.
+      const joined = log.items.filter((entry) => entry.kind === "runner.joined").reverse();
+      expect(joined.map((entry) => entry.payload["becameDefaultRunner"])).toEqual([
+        true,
+        false,
+        false,
+      ]);
+    });
+  });
+
   it("is reachable before Hydra has been set up, because the local runner joins then", async () => {
     await withServer(async (harness) => {
       const response = await join(harness.base, await harness.joinToken());

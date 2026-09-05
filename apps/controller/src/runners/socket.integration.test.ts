@@ -21,6 +21,9 @@
  * behaviour is asserted with values of tens of milliseconds handed to the
  * harness, because a real Bun listener cannot be driven by a `TestClock`.
  */
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { Duration, Effect, Schema } from "effect";
 import {
@@ -989,4 +992,62 @@ describe("what a runner reports about its machine", () => {
       { pings: { ...FAST, interval: Duration.seconds(30), silence: Duration.seconds(60) } },
     );
   });
+});
+
+describe("what the controller stopping does to its local runner", () => {
+  /** The dispatcher, run from source: `hydra` before it is compiled. */
+  const HYDRA = `${import.meta.dirname}/../../../../packages/hydra/src/main.ts`;
+
+  it("leaves the row offline when the child is asked to stop, never unreachable", async () => {
+    const home = mkdtempSync(join(tmpdir(), "hydra-local-child-"));
+    await withServer(async (harness) => {
+      const token = await completeSetup(harness.base);
+      const child = Bun.spawn(
+        [process.execPath, "run", HYDRA, "runner", "--local", "--home", home],
+        { stdin: "pipe", stdout: "pipe", stderr: "pipe" },
+      );
+      let said = "";
+      void (async () => {
+        const decoder = new TextDecoder();
+        for await (const chunk of child.stdout) said += decoder.decode(chunk, { stream: true });
+      })();
+
+      try {
+        // The handshake the controller does: it reads the child's first line
+        // and answers on its stdin, exactly as the boot step does.
+        for (let waited = 0; waited < 15_000 && said === ""; waited += 20) await delay(20);
+        expect(said).toBe('{"join":true}\n');
+        void child.stdin.write(
+          `${JSON.stringify({ controllerUrl: harness.base, token: await harness.joinToken() })}\n`,
+        );
+        await child.stdin.end();
+
+        // It joins, dials, and the fleet reads it as a machine ready for work.
+        let listed = await (await get(harness.base, "/api/v1/runners", token)).json();
+        for (let waited = 0; waited < 20_000; waited += 50) {
+          listed = await (await get(harness.base, "/api/v1/runners", token)).json();
+          const items = (listed as { items: ReadonlyArray<RunnerDetail> }).items;
+          if (items[0]?.state === "online") break;
+          await delay(50);
+        }
+        const items = (listed as { items: ReadonlyArray<RunnerDetail> }).items;
+        expect(items, JSON.stringify(listed)).toHaveLength(1);
+        const runnerId = items[0]!.id;
+        expect(items[0]!.state).toBe("online");
+
+        // What the drain does: the child is asked to stop, and it announces
+        // that it is going rather than simply vanishing.
+        child.kill("SIGTERM");
+        expect(await child.exited).toBe(0);
+
+        const row = await rowWhen(harness.base, token, runnerId, (one) => one.state === "offline");
+        expect(row.state).toBe("offline");
+        // Never through `unreachable`: a runner that says goodbye was not lost.
+        expect(await transitions(harness)).toEqual(["online", "offline"]);
+      } finally {
+        child.kill("SIGKILL");
+      }
+    });
+    rmSync(home, { recursive: true, force: true });
+  }, 60_000);
 });

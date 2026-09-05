@@ -3,6 +3,8 @@ import { Effect, Schema } from "effect";
 import {
   ControllerToRunner,
   JoinAnswer,
+  LocalAnnouncement,
+  LocalEnrolment,
   PROTOCOL_VERSION,
   RunnerToController,
   Sequenced,
@@ -271,5 +273,34 @@ describe("the join answer", () => {
     ).toBe("Failure");
     expect(decode({ ...answer, credential: "x".repeat(513) })._tag).toBe("Failure");
     expect(decode({ ...answer, name: "" })._tag).toBe("Failure");
+  });
+});
+
+describe("what a controller and the runner it spawned say over their pipes", () => {
+  const decodeSaid = (input: unknown) =>
+    Effect.runSyncExit(Schema.decodeUnknownEffect(LocalAnnouncement)(input));
+  const decodeHanded = (input: unknown) =>
+    Effect.runSyncExit(Schema.decodeUnknownEffect(LocalEnrolment)(input));
+
+  it("carries the two things a child can be, and nothing between them", () => {
+    const enrolled = { runnerId: "0199e0e7-1111-7000-8000-000000000000" };
+    expect(decodeSaid(enrolled)._tag).toBe("Success");
+    expect(Effect.runSync(Schema.encodeEffect(LocalAnnouncement)(enrolled))).toEqual(enrolled);
+    expect(decodeSaid({ join: true })._tag).toBe("Success");
+    // A child that says nothing, says both, or says it is not joining is a
+    // child the controller cannot place: none of them is an answer.
+    expect(decodeSaid({})._tag).toBe("Failure");
+    expect(decodeSaid({ join: false })._tag).toBe("Failure");
+    expect(decodeSaid({ runnerId: "" })._tag).toBe("Failure");
+  });
+
+  it("hands back where to join and the token to join with, both required", () => {
+    const enrolment = { controllerUrl: "http://127.0.0.1:4937", token: "a-join-token" };
+    expect(decodeHanded(enrolment)._tag).toBe("Success");
+    expect(Effect.runSync(Schema.encodeEffect(LocalEnrolment)(enrolment))).toEqual(enrolment);
+    for (const key of Object.keys(enrolment)) {
+      expect(decodeHanded(without(enrolment, key))._tag, key).toBe("Failure");
+    }
+    expect(decodeHanded({ ...enrolment, token: "" })._tag).toBe("Failure");
   });
 });

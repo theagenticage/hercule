@@ -29,7 +29,7 @@ import { ProfilesLayer } from "./permissions";
 import { SettingsOperationsLayer } from "./settings";
 import { SetupLayer } from "./setup";
 import { ProjectServiceLayer } from "./projects";
-import { RunnerJoinLayer, RunnerPresenceLayer, RunnerServiceLayer } from "./runners";
+import { LOCAL_RUNNER, RunnerJoinLayer, RunnerPresenceLayer, RunnerServiceLayer } from "./runners";
 import { TaskServiceLayer } from "./tasks";
 import { UserLayer } from "./users";
 
@@ -158,6 +158,10 @@ const listen = (outcome: BootOutcome, stopped: Effect.Effect<void>) =>
 
     yield* stopped;
     console.log("Stopping Hydra.");
+    // Before the listener goes: the child says goodbye over the socket it holds
+    // with this controller, and a controller that had already stopped listening
+    // would read that departure as a machine that vanished.
+    if (outcome.localRunner !== undefined) yield* outcome.localRunner.stop;
   }).pipe(
     Effect.provide(
       Layer.mergeAll(
@@ -187,7 +191,7 @@ export async function run(argv: readonly string[]): Promise<void> {
   // still lands on Hydra rather than on Bun's default disposition.
   const program = Effect.scoped(
     Effect.flatMap(untilStopped, (stopped) =>
-      bootWith({ argv, env: process.env }, (outcome) =>
+      bootWith({ argv, env: process.env, localRunner: LOCAL_RUNNER }, (outcome) =>
         Effect.gen(function* () {
           const bootstrap = yield* BootstrapConfig;
           return yield* Effect.scoped(

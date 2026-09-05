@@ -194,7 +194,9 @@ describe("the first run and everything after it", () => {
       id: expect.any(String) as string,
       publicKey: expect.any(String) as string,
       version: expect.any(String) as string,
-      defaultRunnerId: null,
+      // The runner this controller spawned beside itself, which is the fleet's
+      // first member and so what a placement falls back to.
+      defaultRunnerId: expect.any(String) as string,
     });
 
     const settings = await hydra(["settings", "read", "--json"]);
