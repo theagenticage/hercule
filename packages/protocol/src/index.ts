@@ -16,6 +16,9 @@ export const PROTOCOL_VERSION = 1;
 /**
  * A version a peer claims. Any version that could exist decodes, ours or not,
  * so a mismatch is refused by name rather than reported as an unreadable frame.
+ *
+ * Every other kind of skew between the two binaries is warn-don't-block, which
+ * is why the runner sends its binary version and the controller only stores it.
  */
 const ProtocolVersion = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1));
 

@@ -27,6 +27,7 @@ import { JoinTokens } from "./join-tokens";
  */
 export const LOCAL_RUNNER_COMMAND: ReadonlyArray<string> = [process.execPath, "runner", "--local"];
 
+/** Bun's own marker for an entry script that lives inside a compiled binary. */
 const EMBEDDED = "/$bunfs/";
 
 /**
@@ -46,7 +47,10 @@ export const LOCAL_RUNNER_BACKOFF = {
 /** The listener's drain takes the same ten seconds, because it is the same shutdown. */
 export const LOCAL_RUNNER_STOP_DEADLINE: Duration.Duration = Duration.seconds(10);
 
-/** Nothing binds until the handshake is over, so a wedged child cannot hold the boot. */
+/**
+ * Long enough for a cold start on a loaded machine, short enough that a wedged
+ * child is not what the boot waits on: nothing binds until the handshake is over.
+ */
 const HANDSHAKE_DEADLINE: Duration.Duration = Duration.seconds(30);
 
 /** How many deaths inside the window make a loop rather than a bad afternoon. */

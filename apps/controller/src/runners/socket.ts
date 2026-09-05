@@ -3,6 +3,9 @@
  * it can put a credential on the handshake; that credential is checked before
  * the upgrade and buys nothing else anywhere in Hydra.
  *
+ * The proof runs the other way too: `greet` signs the runner's nonce beside its
+ * id, and `signedChallenge` in `@hydra/protocol` says why both are in there.
+ *
  * Liveness is a protocol frame, never a WebSocket control frame: Bun answers a
  * control ping in the runtime, which would prove the machine is up rather than
  * the runner process.
@@ -69,6 +72,7 @@ const WRONG_VERSION = `this controller speaks runner protocol version ${String(P
 const GREETED_ALREADY = "this connection has already said hello";
 const DISPLACED = "this runner opened another connection";
 
+/** The RFC 6455 close codes: a protocol error, and a peer going away. */
 const PROTOCOL_ERROR = 1002;
 
 const GOING_AWAY = 1001;

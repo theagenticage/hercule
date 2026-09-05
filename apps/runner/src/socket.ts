@@ -36,6 +36,7 @@ const NONCE_BYTES = 16;
 
 const ED25519 = { name: "Ed25519" } as const;
 
+/** The RFC 6455 protocol-error close code. */
 const PROTOCOL_ERROR = 1002;
 
 /** Until the proof arrives this connection has passed no check, so waiting buys nothing. */
