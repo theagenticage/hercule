@@ -394,6 +394,54 @@ describe("createLive", () => {
     );
   });
 
+  it("reads everything again for a reader that subscribed before the first connection", async () => {
+    // A screen mounted before the socket was up read the API over HTTP and then
+    // subscribed. Whatever was pushed in between named records it cannot name,
+    // so the first greeting owes it the same sweep a reconnect owes.
+    const { fetch } = ticketServer();
+    const started = supervisor(fetch);
+
+    const invalidations: Array<ReadonlyArray<LiveQueryKey>> = [];
+    started.subscribe("task", (keys) => invalidations.push(keys));
+
+    started.start();
+    await settle();
+
+    assert.strictEqual(invalidations.length, 1);
+    assert.deepStrictEqual(sorted(invalidations[0] ?? []), sorted(queryKeysFor("task", [])));
+
+    // And it happened before the connection carried anything.
+    const socket = lastSocket();
+    const call = socket.calls("subscribe")[0];
+    assert.isDefined(call);
+    socket.chunk(call?.id, [{ _tag: "invalidate", ids: ["task-1"], kind: "created" }]);
+    await settle();
+    assert.strictEqual(invalidations.length, 2);
+    assert.deepStrictEqual(
+      sorted(invalidations[1] ?? []),
+      sorted(queryKeysFor("task", ["task-1"])),
+    );
+  });
+
+  it("reads everything again for a reader that subscribed while the connection was down", async () => {
+    const { fetch } = ticketServer();
+    const { live: started, socket } = await connected(fetch);
+
+    const invalidations: Array<ReadonlyArray<LiveQueryKey>> = [];
+    socket.drop();
+    await settle();
+    started.subscribe("task", (keys) => invalidations.push(keys));
+
+    // Nothing is owed while there is nothing to have missed a push.
+    assert.strictEqual(invalidations.length, 0);
+
+    await vi.advanceTimersByTimeAsync(1000);
+    await settle();
+
+    assert.strictEqual(invalidations.length, 1);
+    assert.deepStrictEqual(sorted(invalidations[0] ?? []), sorted(queryKeysFor("task", [])));
+  });
+
   it("drops a refused cursor, resubscribes from the head and tells the handler", async () => {
     const { fetch } = ticketServer();
     const { live: started, socket } = await connected(fetch);

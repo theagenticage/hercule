@@ -4,6 +4,7 @@ import { RouterProvider, createBrowserHistory } from "@tanstack/react-router";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createClient, createLive, createTokenStore } from "@hydra/client-core";
 import { createAppRouter } from "./app/router";
+import { followLiveStatus } from "./app/live-status";
 import "./styles.css";
 
 // The controller serves the app at its own origin, so that origin is the API's
@@ -14,6 +15,7 @@ const client = createClient({ baseUrl, tokenStore: createTokenStore(baseUrl) });
 const live = createLive({ client, baseUrl });
 const queryClient = new QueryClient();
 const router = createAppRouter({ client, queryClient, live }, createBrowserHistory());
+followLiveStatus(live, router);
 
 const root = document.getElementById("root");
 if (root === null) {

@@ -14,6 +14,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createClient, createLive, type FetchLike, type Live } from "@hydra/client-core";
 import { StubSocket } from "@hydra/client-core/testing";
 import { createAppRouter } from "./router";
+import { followLiveStatus } from "./live-status";
 
 const BASE_URL = "http://controller.test";
 
@@ -167,6 +168,8 @@ export const renderApp = async ({
     { client, queryClient, live },
     createMemoryHistory({ initialEntries: [path] }),
   );
+
+  followLiveStatus(live, router);
 
   const { unmount } = render(
     <QueryClientProvider client={queryClient}>

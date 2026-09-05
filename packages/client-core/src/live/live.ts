@@ -128,8 +128,6 @@ interface Subscription {
   readonly handler: LiveInvalidateHandler | LiveDeltaHandler;
   /** Where an append-only reader has got to; `undefined` means from the head. */
   cursor: string | undefined;
-  /** Whether some connection has already carried this one, which is what makes a reconnect a gap. */
-  carried: boolean;
 }
 
 /** What a subscription's stream can fail with: a refusal, or the transport. */
@@ -243,7 +241,6 @@ export const createLive = (options: LiveOptions): Live => {
     Effect.gen(function* () {
       let delay = FIRST_RETRY_MS;
       for (;;) {
-        subscription.carried = true;
         const payload =
           subscription.cursor === undefined
             ? { topic: subscription.topic }
@@ -283,12 +280,17 @@ export const createLive = (options: LiveOptions): Live => {
   /**
    * One greeted connection's work: tell the readers that missed pushes to
    * refetch, keep the connection proven, and keep the registry on the wire.
+   *
+   * Every mutable reader in the registry is swept, whether or not a connection
+   * has carried it before. A subscription made while there was no connection
+   * has the same gap as one that survived a drop: whatever was pushed between
+   * the screen's own read and this greeting named records nobody can name any
+   * more. The price is one refetch per reader on the first connection of a page
+   * load, which is what a gap nobody can see is worth.
    */
   const session = (rpc: LiveClient, closed: Latch.Latch) =>
     Effect.gen(function* () {
-      for (const subscription of subscriptions) {
-        if (subscription.carried) sweep(subscription);
-      }
+      for (const subscription of subscriptions) sweep(subscription);
 
       yield* Effect.forkChild(
         rpc.ping({}).pipe(
@@ -410,7 +412,7 @@ export const createLive = (options: LiveOptions): Live => {
       if (fiber !== null) await Effect.runPromise(Fiber.interrupt(fiber));
     },
     subscribe: (topic: LiveTopic, handler: LiveInvalidateHandler | LiveDeltaHandler) => {
-      const subscription: Subscription = { topic, handler, cursor: undefined, carried: false };
+      const subscription: Subscription = { topic, handler, cursor: undefined };
       subscriptions.add(subscription);
       changed.openUnsafe();
       return () => {
