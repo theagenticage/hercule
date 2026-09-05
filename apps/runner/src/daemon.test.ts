@@ -92,4 +92,47 @@ describe("the runner daemon", () => {
       await server.stop(true);
     }
   });
+
+  it("answers who it is on the port its hello reports", async () => {
+    // The hello is the only place the runner says where to find it, so a
+    // listener that never started, or one on a port the facts do not name,
+    // reads here as a machine a browser cannot recognise.
+    let greeted: ((hello: unknown) => void) | undefined;
+    const hello = new Promise<{ facts: { identityPort: number } }>((resolve) => {
+      greeted = resolve as (hello: unknown) => void;
+    });
+    const server = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      fetch: (request, self) =>
+        self.upgrade(request) ? undefined : new Response("no", { status: 401 }),
+      websocket: {
+        message(_socket, said) {
+          greeted?.(JSON.parse(String(said)) as unknown);
+        },
+      },
+    });
+
+    try {
+      const home = enrolledAt(`http://127.0.0.1:${String(server.port)}`);
+      // The listener lives as long as the daemon does, so it is asked from
+      // inside the race rather than after it.
+      const answered = await Effect.runPromise(
+        Effect.raceFirst(
+          Effect.as(Effect.ignore(daemon(home)), undefined as unknown),
+          Effect.promise(async () => {
+            const said = await hello;
+            const answer = await fetch(
+              `http://127.0.0.1:${String(said.facts.identityPort)}/identity`,
+            );
+            return await answer.json();
+          }),
+        ),
+      );
+
+      expect(answered).toEqual({ runnerId: "0199e0e7-0000-7000-8000-000000000000" });
+    } finally {
+      await server.stop(true);
+    }
+  });
 });

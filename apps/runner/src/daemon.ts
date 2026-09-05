@@ -9,6 +9,7 @@
  */
 import { networkInterfaces } from "node:os";
 import * as Effect from "effect/Effect";
+import { identityListener } from "./identity";
 import { DEFAULT_IDENTITY_PORT, probeFacts, thisMachine } from "./probe";
 import { reconnect, reconnectSignals } from "./reconnect";
 import { readRunnerFile, type NotEnrolled } from "./runner-file";
@@ -30,12 +31,21 @@ const addresses = (): ReadonlyArray<string> =>
  * so in the hello of the second.
  */
 export const daemon = (home: string): Effect.Effect<never, NotEnrolled> =>
-  Effect.gen(function* () {
-    const pin = yield* readRunnerFile(home);
-    const probe = probeFacts(thisMachine, DEFAULT_IDENTITY_PORT);
-    const headroom = machineHeadroom(home);
-    return yield* reconnect({
-      attempt: Effect.flatMap(probe, (facts) => connect({ pin, facts, probe, headroom })),
-      signals: reconnectSignals({ now: () => Date.now(), addresses }),
-    });
-  });
+  Effect.scoped(
+    Effect.gen(function* () {
+      const pin = yield* readRunnerFile(home);
+      // The listener comes up before the first probe, so the port the facts
+      // report is the port a browser will actually find this runner on.
+      const identityPort = yield* identityListener({
+        runnerId: pin.runnerId,
+        controllerUrl: pin.controllerUrl,
+        port: DEFAULT_IDENTITY_PORT,
+      });
+      const probe = probeFacts(thisMachine, identityPort);
+      const headroom = machineHeadroom(home);
+      return yield* reconnect({
+        attempt: Effect.flatMap(probe, (facts) => connect({ pin, facts, probe, headroom })),
+        signals: reconnectSignals({ now: () => Date.now(), addresses }),
+      });
+    }),
+  );
