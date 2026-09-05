@@ -11,7 +11,7 @@ const list = async (base: string, token: string, query = ""): Promise<Profile[]>
 
 describe("permission profiles over HTTP", () => {
   it("lists the three profiles Hydra ships, by name", async () => {
-    await withServer(async (base) => {
+    await withServer(async ({ base }) => {
       const token = await completeSetup(base);
       const items = await list(base, token);
       expect(items.map((profile) => profile.name)).toEqual(["assistant", "unrestricted", "worker"]);
@@ -20,7 +20,7 @@ describe("permission profiles over HTTP", () => {
   });
 
   it("creates, reads, edits and deletes one the user made", async () => {
-    await withServer(async (base, audit) => {
+    await withServer(async ({ base, audit }) => {
       const token = await completeSetup(base);
 
       const created = await post(
@@ -61,7 +61,7 @@ describe("permission profiles over HTTP", () => {
   });
 
   it("refuses a second profile with a name one already holds", async () => {
-    await withServer(async (base) => {
+    await withServer(async ({ base }) => {
       const token = await completeSetup(base);
       const response = await post(base, "/api/v1/profiles", { name: "worker", grants: [] }, token);
       expect(response.status).toBe(409);
@@ -70,7 +70,7 @@ describe("permission profiles over HTTP", () => {
   });
 
   it("refuses a grant outside the vocabulary, before anything is written", async () => {
-    await withServer(async (base) => {
+    await withServer(async ({ base }) => {
       const token = await completeSetup(base);
       const response = await post(
         base,
@@ -85,7 +85,7 @@ describe("permission profiles over HTTP", () => {
   });
 
   it("edits a shipped profile but refuses to delete one", async () => {
-    await withServer(async (base) => {
+    await withServer(async ({ base }) => {
       const token = await completeSetup(base);
       const worker = (await list(base, token)).find((one) => one.name === "worker");
       expect(worker).toBeDefined();
@@ -106,7 +106,7 @@ describe("permission profiles over HTTP", () => {
   });
 
   it("answers not_found for an id nobody has, and 401 with no credential", async () => {
-    await withServer(async (base) => {
+    await withServer(async ({ base }) => {
       const token = await completeSetup(base);
       const missing = "0199e0e7-9999-7000-8000-000000000000";
       expect((await send("GET", base, `/api/v1/profiles/${missing}`, { token })).status).toBe(404);

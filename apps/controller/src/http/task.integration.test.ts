@@ -59,7 +59,7 @@ const walk = async (
 
 describe("the order of a task listing", () => {
   it("defaults to updatedAt desc, and honours an explicit sort", async () => {
-    await withServer(async (base) => {
+    await withServer(async ({ base }) => {
       const token = await completeSetup(base);
       const first = await create(base, token, { title: "first" });
       await tick();
@@ -95,7 +95,7 @@ describe("the order of a task listing", () => {
   });
 
   it("refuses a sort field the operation does not declare", async () => {
-    await withServer(async (base) => {
+    await withServer(async ({ base }) => {
       const token = await completeSetup(base);
       const response = await get(base, "/api/v1/tasks?sort=deletedAt", token);
       expect(response.status).toBe(400);
@@ -104,7 +104,7 @@ describe("the order of a task listing", () => {
   });
 
   it("refuses a search that also names a sort, naming both", async () => {
-    await withServer(async (base) => {
+    await withServer(async ({ base }) => {
       const token = await completeSetup(base);
       await create(base, token, { title: "a searchable task" });
 
@@ -128,7 +128,7 @@ describe("the order of a task listing", () => {
   });
 
   it("orders a search by relevance rather than by updatedAt", async () => {
-    await withServer(async (base) => {
+    await withServer(async ({ base }) => {
       const token = await completeSetup(base);
       // Written first, so `updatedAt desc` would put it last. It is the
       // strongest match: short, and holding the word four times.
@@ -156,7 +156,7 @@ describe("the order of a task listing", () => {
 
 describe("paging a task listing", () => {
   it("walks seven rows at limit 2, returning each exactly once, with and without text", async () => {
-    await withServer(async (base) => {
+    await withServer(async ({ base }) => {
       const token = await completeSetup(base);
       const created: Array<string> = [];
       for (let index = 0; index < 7; index++) {
@@ -179,7 +179,7 @@ describe("paging a task listing", () => {
   });
 
   it("pages by keyset without a search: a row written mid-walk repeats nothing", async () => {
-    await withServer(async (base) => {
+    await withServer(async ({ base }) => {
       const token = await completeSetup(base);
       const created: Array<string> = [];
       for (let index = 0; index < 7; index++) {

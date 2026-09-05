@@ -32,7 +32,7 @@ const fetchTicket = async (base: string, token: string): Promise<string> => {
 
 describe("fetching a ticket for the live socket", () => {
   it("hands the login bearer a fresh, long ticket every time it asks", async () => {
-    await withServer(async (base) => {
+    await withServer(async ({ base }) => {
       const bearer = await completeSetup(base);
 
       const tickets = [
@@ -50,7 +50,7 @@ describe("fetching a ticket for the live socket", () => {
   });
 
   it("answers an API key too, because every credential reaches the same socket", async () => {
-    await withServer(async (base) => {
+    await withServer(async ({ base }) => {
       const bearer = await completeSetup(base);
       const minted = await post(base, "/api/v1/api-keys", { name: "laptop" }, bearer);
       expect(minted.status).toBe(200);
@@ -63,7 +63,7 @@ describe("fetching a ticket for the live socket", () => {
   });
 
   it("refuses a caller with no credential, and one whose credential is dead", async () => {
-    await withServer(async (base) => {
+    await withServer(async ({ base }) => {
       const bearer = await completeSetup(base);
 
       const anonymous = await post(base, "/api/v1/auth/ws-ticket", {});

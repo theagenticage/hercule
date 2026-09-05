@@ -110,22 +110,10 @@ const handlers = live.toLayer(
      * token itself was never kept - only the hash it resolved through - which
      * is all a second lookup needs.
      */
-    const stillThere = (actor: Actor): Effect.Effect<boolean, Internal> => {
-      if (actor._tag === "none") return Effect.succeed(false);
-      const { id, kind, tokenHash } = actor.credential;
-      const found =
-        kind === "login"
-          ? Effect.map(credentials.findLoginToken(tokenHash), (token) =>
-              Option.map(token, (record) => record.id),
-            )
-          : Effect.map(credentials.findApiKey(tokenHash), (key) =>
-              Option.map(key, (record) => record.id),
-            );
-      return Effect.mapError(
-        Effect.map(found, (resolved) => Option.isSome(resolved) && resolved.value === id),
-        () => internal(UNREADABLE),
-      );
-    };
+    const stillThere = (actor: Actor): Effect.Effect<boolean, Internal> =>
+      actor._tag === "none"
+        ? Effect.succeed(false)
+        : Effect.mapError(credentials.stillLive(actor.credential), () => internal(UNREADABLE));
 
     /**
      * Takes everything away from a connection whose credential has gone. A

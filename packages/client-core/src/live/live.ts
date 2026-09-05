@@ -117,7 +117,7 @@ export interface Live {
   subscribe(topic: MutableLiveTopic, handler: LiveInvalidateHandler): () => void;
   subscribe(topic: AppendOnlyLiveTopic, handler: LiveDeltaHandler): () => void;
   /** Reports where the supervisor is now, and again on every change. */
-  onStatus(listener: (status: LiveStatus) => void): () => void;
+  onStatus(listener: (status: LiveStatus) => void): void;
   /** What the controller answered at the greeting, or `null` before the first one. */
   readonly serverVersion: string | null;
 }
@@ -423,9 +423,6 @@ export const createLive = (options: LiveOptions): Live => {
     onStatus: (listener: (status: LiveStatus) => void) => {
       listeners.add(listener);
       listener(status);
-      return () => {
-        listeners.delete(listener);
-      };
     },
     get serverVersion(): string | null {
       return serverVersion;

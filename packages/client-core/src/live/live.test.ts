@@ -27,7 +27,7 @@ import {
   type LiveDelta,
   type LiveQueryKey,
 } from "../index";
-import { STUB_SERVER_VERSION as SERVER_VERSION, StubSocket } from "./socket-stub";
+import { STUB_SERVER_VERSION as SERVER_VERSION, StubSocket, openInto } from "./socket-stub";
 
 const BASE = "http://controller.test";
 const SOCKET_URL = "ws://controller.test/ws";
@@ -141,15 +141,7 @@ let live: Live | null = null;
 
 const supervisor = (fetch: FetchLike): Live => {
   const client = createClient({ baseUrl: BASE, token: "tok", fetch });
-  live = createLive({
-    client,
-    baseUrl: BASE,
-    webSocket: (url) => {
-      const socket = new StubSocket(url);
-      opened.push(socket);
-      return socket as unknown as WebSocket;
-    },
-  });
+  live = createLive({ client, baseUrl: BASE, webSocket: openInto(opened) });
   return live;
 };
 

@@ -130,13 +130,10 @@ export {
 } from "./groups/project";
 export { EVENT_SORT_FIELDS, Event, EventId, MAX_EVENT_KIND_LENGTH } from "./groups/event";
 export {
-  APPEND_ONLY_LIVE_TOPICS,
   Delta,
-  HelloResult,
   Invalidate,
   InvalidateKind,
   LIVE_PROTOCOL_VERSION,
-  LIVE_TOPICS,
   LiveMessage,
   LiveTopic,
   MUTABLE_LIVE_TOPICS,

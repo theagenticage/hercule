@@ -12,7 +12,7 @@ import { cleanup, render } from "@testing-library/react";
 import { RouterProvider, createMemoryHistory } from "@tanstack/react-router";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createClient, createLive, type FetchLike, type Live } from "@hydra/client-core";
-import { StubSocket } from "@hydra/client-core/testing";
+import { StubSocket, openInto } from "@hydra/client-core/testing";
 import { createAppRouter } from "./router";
 import { followLiveStatus } from "./live-status";
 
@@ -140,15 +140,7 @@ export const renderApp = async ({
 }) => {
   const client = createClient({ baseUrl: BASE_URL, fetch: api, token });
   const sockets: StubSocket[] = [];
-  const live = createLive({
-    client,
-    baseUrl: BASE_URL,
-    webSocket: (url) => {
-      const socket = new StubSocket(url);
-      sockets.push(socket);
-      return socket as unknown as WebSocket;
-    },
-  });
+  const live = createLive({ client, baseUrl: BASE_URL, webSocket: openInto(sockets) });
   started.push(live);
   const liveStub: LiveStub = {
     topics: () =>

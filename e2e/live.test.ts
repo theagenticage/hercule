@@ -14,10 +14,17 @@ import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createClient, createLive, queryKeysFor } from "../packages/client-core/src/index";
 import type { LiveQueryKey } from "../packages/client-core/src/index";
-import { ROOT, cli, jsonOf, startController, temporaryHome, type Controller } from "./harness";
-
-const PASSWORD = "correct horse battery staple";
-const USERNAME = "rogier";
+import {
+  PASSWORD,
+  ROOT,
+  USERNAME,
+  cli,
+  completeSetup,
+  jsonOf,
+  startController,
+  temporaryHome,
+  type Controller,
+} from "./harness";
 
 const state = temporaryHome();
 const binary = join(ROOT, "hydra");
@@ -55,23 +62,7 @@ beforeAll(async () => {
   controller = await startController({ home: state.home, binary });
   url = controller.url;
 
-  const setupUrl = readFileSync(join(state.home, "setup-url"), "utf8").trim();
-  const setupToken = new URL(setupUrl).searchParams.get("token");
-  const completed = await cli(
-    [
-      "setup",
-      "complete",
-      "--setup-token",
-      setupToken!,
-      "--username",
-      USERNAME,
-      "--password-stdin",
-      "--timezone",
-      "Europe/Amsterdam",
-      "--json",
-    ],
-    { home: state.home, binary, env: { HYDRA_API_URL: url }, stdin: PASSWORD },
-  );
+  const completed = await completeSetup({ home: state.home, url, binary });
   expect(completed.code, `${completed.stdout}\n${completed.stderr}`).toBe(0);
 
   const login = await hydra(
@@ -101,23 +92,7 @@ describe("the binary serving live topics", () => {
     let its: Controller | undefined;
     try {
       its = await startController({ home: home.home, binary });
-      const setupUrl = readFileSync(join(home.home, "setup-url"), "utf8").trim();
-      const setupToken = new URL(setupUrl).searchParams.get("token");
-      const completed = await cli(
-        [
-          "setup",
-          "complete",
-          "--setup-token",
-          setupToken!,
-          "--username",
-          USERNAME,
-          "--password-stdin",
-          "--timezone",
-          "Europe/Amsterdam",
-          "--json",
-        ],
-        { home: home.home, binary, env: { HYDRA_API_URL: its.url }, stdin: PASSWORD },
-      );
+      const completed = await completeSetup({ home: home.home, url: its.url, binary });
       expect(completed.code, `${completed.stdout}\n${completed.stderr}`).toBe(0);
 
       // Nothing is said on it: an upgraded connection is enough to hold a drain,

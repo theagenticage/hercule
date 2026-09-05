@@ -94,6 +94,15 @@ export interface LiveReader {
   readonly subscriberCount: (topic: LiveTopic) => Promise<number>;
 }
 
+/** What a test is handed: the running controller, and the ways to read it back. */
+export interface ServerHarness {
+  /** An address a fetch can use. */
+  readonly base: string;
+  readonly audit: AuditReader;
+  readonly sql: SqlClient.SqlClient;
+  readonly live: LiveReader;
+}
+
 /**
  * Runs the real controller application over a real socket for the length of
  * `body`, in a temporary home that is removed afterwards.
@@ -102,12 +111,7 @@ export interface LiveReader {
  * checkout that was never built does.
  */
 export const withServer = (
-  body: (
-    base: string,
-    audit: AuditReader,
-    sql: SqlClient.SqlClient,
-    live: LiveReader,
-  ) => Promise<void>,
+  body: (harness: ServerHarness) => Promise<void>,
   bundle?: WebBundle,
 ): Promise<void> => {
   const home = mkdtempSync(join(tmpdir(), "hydra-http-"));
@@ -138,7 +142,7 @@ export const withServer = (
         const live: LiveReader = {
           subscriberCount: (topic) => Effect.runPromise(topics.subscriberCount(topic)),
         };
-        yield* Effect.promise(() => body(base, audit, sql, live));
+        yield* Effect.promise(() => body({ base, audit, sql, live }));
       }),
     ).pipe(
       Effect.provide(

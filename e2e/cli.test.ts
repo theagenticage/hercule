@@ -7,13 +7,20 @@
  * the CLI, which is why it is out of `pnpm test`: `pnpm build:binary` first,
  * then `pnpm test:binary`.
  */
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { ROOT, cli, jsonOf, startController, temporaryHome, type Controller } from "./harness";
-
-const PASSWORD = "correct horse battery staple";
-const USERNAME = "rogier";
+import {
+  PASSWORD,
+  ROOT,
+  USERNAME,
+  cli,
+  completeSetup,
+  jsonOf,
+  startController,
+  temporaryHome,
+  type Controller,
+} from "./harness";
 
 const state = temporaryHome();
 const binary = join(ROOT, "hydra");
@@ -24,10 +31,6 @@ let url: string;
 /** The CLI, as the binary, under the credential file the login wrote. */
 const hydra = (args: ReadonlyArray<string>, stdin?: string) =>
   cli(args, { home: state.home, binary, stdin });
-
-/** The CLI before a credential file exists: only the environment says where. */
-const beforeLogin = (args: ReadonlyArray<string>, stdin?: string) =>
-  cli(args, { home: state.home, binary, env: { HYDRA_API_URL: url }, stdin });
 
 /** Fails with the command's own output rather than on an undefined field. */
 const ok = (ran: { code: number; stdout: string; stderr: string }): unknown => {
@@ -52,24 +55,8 @@ beforeAll(async () => {
   controller = await startController({ home: state.home, binary });
   url = controller.url;
 
-  const setupUrl = readFileSync(join(state.home, "setup-url"), "utf8").trim();
-  const token = new URL(setupUrl).searchParams.get("token");
-  const completed = await beforeLogin(
-    [
-      "setup",
-      "complete",
-      "--setup-token",
-      token!,
-      "--username",
-      USERNAME,
-      "--password-stdin",
-      "--timezone",
-      "Europe/Amsterdam",
-      "--json",
-    ],
-    PASSWORD,
-  );
-  expect(completed.code).toBe(0);
+  const completed = await completeSetup({ home: state.home, url, binary });
+  expect(completed.code, `${completed.stdout}\n${completed.stderr}`).toBe(0);
 
   const login = await hydra(
     ["login", url, "--username", USERNAME, "--password-stdin", "--name", "e2e-cli"],

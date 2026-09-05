@@ -228,7 +228,7 @@ const readEvent = async (base: string, token: string, id: number): Promise<Event
 
 describe("opening a live connection", () => {
   it("is not there at all until Hydra is set up", async () => {
-    await withServer(async (base) => {
+    await withServer(async ({ base }) => {
       // Nothing on the socket is reachable before the password exists - a
       // ticket needs a credential, and there is no user to hold one - so the
       // controller refuses the upgrade rather than holding the connection.
@@ -239,7 +239,7 @@ describe("opening a live connection", () => {
   });
 
   it("greets a ticket holder with the version the API answers with", async () => {
-    await withServer(async (base) => {
+    await withServer(async ({ base }) => {
       const token = await completeSetup(base);
       const identity = await get(base, "/api/v1/controller", token);
       expect(identity.status).toBe(200);
@@ -261,7 +261,7 @@ describe("opening a live connection", () => {
   });
 
   it("spends the ticket on the first hello, so a replay of it is nobody", async () => {
-    await withServer(async (base) => {
+    await withServer(async ({ base }) => {
       const token = await completeSetup(base);
       const ticket = await ticketFor(base, token);
 
@@ -282,7 +282,7 @@ describe("opening a live connection", () => {
   });
 
   it("refuses a ticket that was never issued", async () => {
-    await withServer(async (base) => {
+    await withServer(async ({ base }) => {
       await completeSetup(base);
 
       await onSocket(base, (client) =>
@@ -298,7 +298,7 @@ describe("opening a live connection", () => {
   });
 
   it("greets one connection and leaves the others where they were", async () => {
-    await withServer(async (base) => {
+    await withServer(async ({ base }) => {
       const token = await completeSetup(base);
       const ticket = await ticketFor(base, token);
 
@@ -323,7 +323,7 @@ describe("opening a live connection", () => {
   });
 
   it("refuses a protocol version it does not speak", async () => {
-    await withServer(async (base) => {
+    await withServer(async ({ base }) => {
       const token = await completeSetup(base);
       const ticket = await ticketFor(base, token);
 
@@ -340,7 +340,7 @@ describe("opening a live connection", () => {
   });
 
   it("answers nothing before hello: neither a ping nor a subscription", async () => {
-    await withServer(async (base) => {
+    await withServer(async ({ base }) => {
       const token = await completeSetup(base);
       const ticket = await ticketFor(base, token);
 
@@ -364,7 +364,7 @@ describe("opening a live connection", () => {
 
 describe("the keepalive", () => {
   it("answers a ping on a connection past hello", async () => {
-    await withServer(async (base) => {
+    await withServer(async ({ base }) => {
       const token = await completeSetup(base);
       const ticket = await ticketFor(base, token);
 
@@ -381,7 +381,7 @@ describe("the keepalive", () => {
 
 describe("what a subscription may ask for", () => {
   it("refuses a topic that is not a Live Topic", async () => {
-    await withServer(async (base) => {
+    await withServer(async ({ base }) => {
       const token = await completeSetup(base);
       const ticket = await ticketFor(base, token);
 
@@ -399,7 +399,7 @@ describe("what a subscription may ask for", () => {
   });
 
   it("refuses a cursor on a mutable topic, which has nothing to replay", async () => {
-    await withServer(async (base) => {
+    await withServer(async ({ base }) => {
       const token = await completeSetup(base);
       const ticket = await ticketFor(base, token);
 
@@ -415,7 +415,7 @@ describe("what a subscription may ask for", () => {
   });
 
   it("keeps the connection up after a refusal, so a client can ask again", async () => {
-    await withServer(async (base, _audit, _sql, reader) => {
+    await withServer(async ({ base, live: reader }) => {
       const token = await completeSetup(base);
       const ticket = await ticketFor(base, token);
 
@@ -442,7 +442,7 @@ describe("what a subscription may ask for", () => {
 
 describe("letting a subscription go", () => {
   it("drops it when the client ends the stream", async () => {
-    await withServer(async (base, _audit, _sql, reader) => {
+    await withServer(async ({ base, live: reader }) => {
       const token = await completeSetup(base);
       const ticket = await ticketFor(base, token);
 
@@ -464,7 +464,7 @@ describe("letting a subscription go", () => {
   });
 
   it("drops it when the socket closes without the client saying anything", async () => {
-    await withServer(async (base, _audit, _sql, reader) => {
+    await withServer(async ({ base, live: reader }) => {
       const token = await completeSetup(base);
       const ticket = await ticketFor(base, token);
 
@@ -485,7 +485,7 @@ describe("letting a subscription go", () => {
 
 describe("what a task subscription is told", () => {
   it("names the task on a create, an update and a delete, and tells no other topic", async () => {
-    await withServer(async (base, _audit, _sql, reader) => {
+    await withServer(async ({ base, live: reader }) => {
       const token = await completeSetup(base);
       const ticket = await ticketFor(base, token);
 
@@ -539,7 +539,7 @@ describe("what a task subscription is told", () => {
   });
 
   it("coalesces a burst into one message per kind, naming each id once", async () => {
-    await withServer(async (base, _audit, _sql, reader) => {
+    await withServer(async ({ base, live: reader }) => {
       const token = await completeSetup(base);
       const ticket = await ticketFor(base, token);
 
@@ -595,7 +595,7 @@ describe("what a task subscription is told", () => {
 
 describe("what an event subscription is told", () => {
   it("opens at the head of the log and pushes what is appended after it", async () => {
-    await withServer(async (base) => {
+    await withServer(async ({ base }) => {
       const token = await completeSetup(base);
       const ticket = await ticketFor(base, token);
       const before = await logEvents(base, token);
@@ -638,7 +638,7 @@ describe("what an event subscription is told", () => {
   });
 
   it("replays from a cursor, hands back nothing at the head, and refuses a cursor that is not one", async () => {
-    await withServer(async (base) => {
+    await withServer(async ({ base }) => {
       const token = await completeSetup(base);
       for (const title of ["one", "two", "three", "four", "five"]) {
         await createTask(base, token, title);
@@ -687,7 +687,7 @@ describe("what an event subscription is told", () => {
   });
 
   it("reads the log for a credential that may read the log, and needs no grant for the mutable topics", async () => {
-    await withServer(async (base, _audit, _sql, reader) => {
+    await withServer(async ({ base, live: reader }) => {
       const token = await completeSetup(base);
       const ticket = await ticketFor(base, token);
 
@@ -716,7 +716,7 @@ describe("what an event subscription is told", () => {
   });
 
   it("ends a subscriber that stops reading rather than queueing for it without bound", async () => {
-    await withServer(async (base, _audit, _sql, reader) => {
+    await withServer(async ({ base, live: reader }) => {
       const token = await completeSetup(base);
       const ticket = await ticketFor(base, token);
 
@@ -775,7 +775,7 @@ describe("what an event subscription is told", () => {
 
 describe("a connection whose credential is gone", () => {
   it("stops answering a login bearer that logged out, and pushes nothing more", async () => {
-    await withServer(async (base, _audit, _sql, reader) => {
+    await withServer(async ({ base, live: reader }) => {
       const token = await completeSetup(base);
       const ticket = await ticketFor(base, token);
       // A second credential, so the test can still write once the first one is
@@ -815,7 +815,7 @@ describe("a connection whose credential is gone", () => {
   });
 
   it("stops answering an API key that was revoked", async () => {
-    await withServer(async (base) => {
+    await withServer(async ({ base }) => {
       const token = await completeSetup(base);
       const minted = await post(base, "/api/v1/api-keys", { name: "a socket key" }, token);
       expect(minted.status).toBe(200);
@@ -843,7 +843,7 @@ describe("a connection whose credential is gone", () => {
 
 describe("what a connection may hold", () => {
   it("refuses a ticket whose credential was revoked before it was spent", async () => {
-    await withServer(async (base) => {
+    await withServer(async ({ base }) => {
       const token = await completeSetup(base);
       const ticket = await ticketFor(base, token);
       // The ticket is good for five minutes, which is five minutes longer than
@@ -860,7 +860,7 @@ describe("what a connection may hold", () => {
   });
 
   it("refuses a position the log has not reached, rather than watching nothing", async () => {
-    await withServer(async (base, _audit, _sql, reader) => {
+    await withServer(async ({ base, live: reader }) => {
       const token = await completeSetup(base);
       const ticket = await ticketFor(base, token);
       const log = await logEvents(base, token);
@@ -890,7 +890,7 @@ describe("what a connection may hold", () => {
 
 describe("greeting a connection twice", () => {
   it("refuses the second hello and leaves the connection as it was", async () => {
-    await withServer(async (base, _audit, _sql, reader) => {
+    await withServer(async ({ base, live: reader }) => {
       const token = await completeSetup(base);
       const ticket = await ticketFor(base, token);
       const second = await ticketFor(base, token);

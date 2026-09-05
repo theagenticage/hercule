@@ -41,7 +41,7 @@ const threeKeys = async (base: string, token: string): Promise<void> => {
 
 describe("sort over the wire", () => {
   it("reverses the default order when asked, and refuses what it cannot sort on", async () => {
-    await withServer(async (base) => {
+    await withServer(async ({ base }) => {
       const token = await completeSetup(base);
       await threeKeys(base, token);
 
@@ -66,7 +66,7 @@ describe("sort over the wire", () => {
   });
 
   it("sorts the secrets listing both ways", async () => {
-    await withServer(async (base) => {
+    await withServer(async ({ base }) => {
       const token = await completeSetup(base);
       for (const name of ["alpha", "beta"]) {
         const stored = await send("PUT", base, `/api/v1/secrets/plugin/p1/${name}`, {
@@ -94,7 +94,7 @@ describe("a cursor that is not this listing's", () => {
   const dashes = Buffer.from(JSON.stringify(["x", "-".repeat(36)]), "utf8").toString("base64url");
 
   it("is a validation error, not a crash", async () => {
-    await withServer(async (base) => {
+    await withServer(async ({ base }) => {
       const token = await completeSetup(base);
       for (const path of ["/api/v1/api-keys", "/api/v1/secrets", "/api/v1/profiles"]) {
         const response = await send("GET", base, `${path}?cursor=${dashes}`, { token });
@@ -105,7 +105,7 @@ describe("a cursor that is not this listing's", () => {
   });
 
   it("is refused when it came from another listing", async () => {
-    await withServer(async (base) => {
+    await withServer(async ({ base }) => {
       const token = await completeSetup(base);
       await threeKeys(base, token);
       const stored = await send("PUT", base, "/api/v1/secrets/plugin/p1/alpha", {
@@ -127,7 +127,7 @@ describe("a cursor that is not this listing's", () => {
   });
 
   it("is refused when it was issued under a different sort", async () => {
-    await withServer(async (base) => {
+    await withServer(async ({ base }) => {
       const token = await completeSetup(base);
       await threeKeys(base, token);
       const descending = await nextCursor(base, token, "/api/v1/api-keys?limit=1");
@@ -149,7 +149,7 @@ describe("a cursor that is not this listing's", () => {
 
 describe("bounds on what a caller may send", () => {
   it("refuses a huge username before it can be authenticated or audited", async () => {
-    await withServer(async (base, audit) => {
+    await withServer(async ({ base, audit }) => {
       await completeSetup(base);
       const response = await post(base, "/api/v1/auth/login", {
         username: "x".repeat(20_000),

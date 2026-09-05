@@ -10,7 +10,7 @@ const patch = (base: string, body: unknown, token: string) =>
 
 describe("settings over HTTP", () => {
   it("answers with what the boot seeded, and takes a write in both scopes", async () => {
-    await withServer(async (base) => {
+    await withServer(async ({ base }) => {
       const token = await completeSetup(base);
 
       const seeded = (await (await read(base, token)).json()) as {
@@ -39,7 +39,7 @@ describe("settings over HTTP", () => {
   });
 
   it("refuses an unknown key rather than stripping it", async () => {
-    await withServer(async (base) => {
+    await withServer(async ({ base }) => {
       const token = await completeSetup(base);
 
       const response = await patch(base, { user: { timezone: "UTC", nope: 1 } }, token);
@@ -60,7 +60,7 @@ describe("settings over HTTP", () => {
   });
 
   it("refuses a value the key's schema rejects", async () => {
-    await withServer(async (base) => {
+    await withServer(async ({ base }) => {
       const token = await completeSetup(base);
       const response = await patch(base, { controller: { "backup.time": "25:00" } }, token);
       expect(response.status).toBe(400);
@@ -69,7 +69,7 @@ describe("settings over HTTP", () => {
   });
 
   it("keys the user scope by the user, not by the scope name", async () => {
-    await withServer(async (base, _audit, sql) => {
+    await withServer(async ({ base, sql }) => {
       const token = await completeSetup(base);
       expect((await patch(base, { user: { timezone: "UTC" } }, token)).status).toBe(200);
 
@@ -91,7 +91,7 @@ describe("settings over HTTP", () => {
   });
 
   it("refuses a patch that names no setting", async () => {
-    await withServer(async (base, audit) => {
+    await withServer(async ({ base, audit }) => {
       const token = await completeSetup(base);
       const response = await patch(base, {}, token);
 
@@ -102,14 +102,14 @@ describe("settings over HTTP", () => {
   });
 
   it("needs a credential", async () => {
-    await withServer(async (base) => {
+    await withServer(async ({ base }) => {
       await completeSetup(base);
       expect((await send("GET", base, "/api/v1/settings")).status).toBe(401);
     });
   });
 
   it("stamps the write in the audit log, with the keys and not the values", async () => {
-    await withServer(async (base, audit) => {
+    await withServer(async ({ base, audit }) => {
       const token = await completeSetup(base);
       await patch(base, { user: { "thread.model": "claude-opus-5" } }, token);
 

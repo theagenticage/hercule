@@ -56,7 +56,7 @@ const ids = (page: EventPage): ReadonlyArray<number> => page.items.map((item) =>
 
 describe("the event log over HTTP", () => {
   it("returns both populations from one unfiltered call, told apart only by kind", async () => {
-    await withServer(async (base) => {
+    await withServer(async ({ base }) => {
       const token = await completeSetup(base);
       await createTask(base, token, "a task the log should hold");
       await failLogin(base);
@@ -81,7 +81,7 @@ describe("the event log over HTTP", () => {
   });
 
   it("filters by kind", async () => {
-    await withServer(async (base) => {
+    await withServer(async ({ base }) => {
       const token = await completeSetup(base);
       await createTask(base, token, "one");
       await createTask(base, token, "two");
@@ -100,7 +100,7 @@ describe("the event log over HTTP", () => {
   });
 
   it("filters by since and until, and by the two together", async () => {
-    await withServer(async (base) => {
+    await withServer(async ({ base }) => {
       const token = await completeSetup(base);
       await createTask(base, token, "before the boundary");
       const boundary = await between();
@@ -129,7 +129,7 @@ describe("the event log over HTTP", () => {
   });
 
   it("filters by connectionId, which no platform row carries", async () => {
-    await withServer(async (base) => {
+    await withServer(async ({ base }) => {
       const token = await completeSetup(base);
       await createTask(base, token, "a task through no connection");
 
@@ -146,7 +146,7 @@ describe("the event log over HTTP", () => {
   });
 
   it("finds a row that did arrive through a connection, and hands its id back", async () => {
-    await withServer(async (base, _audit, sql) => {
+    await withServer(async ({ base, sql }) => {
       const token = await completeSetup(base);
       // No operation writes a connection yet, so the row is written straight
       // to the table: the filter and the id it hands back are the reader's
@@ -182,7 +182,7 @@ describe("the event log over HTTP", () => {
   });
 
   it("reads one row by its integer id, and answers not_found for one nobody has", async () => {
-    await withServer(async (base) => {
+    await withServer(async ({ base }) => {
       const token = await completeSetup(base);
       await createTask(base, token, "readable");
 
@@ -204,7 +204,7 @@ describe("the event log over HTTP", () => {
 
 describe("the event log's order and paging", () => {
   it("defaults to id desc and accepts id as its only sort field", async () => {
-    await withServer(async (base) => {
+    await withServer(async ({ base }) => {
       const token = await completeSetup(base);
       await createTask(base, token, "one");
       await createTask(base, token, "two");
@@ -228,7 +228,7 @@ describe("the event log's order and paging", () => {
   });
 
   it("walks seven rows at limit 2, returning each exactly once", async () => {
-    await withServer(async (base) => {
+    await withServer(async ({ base }) => {
       const token = await completeSetup(base);
       for (let index = 0; index < 7; index++) {
         await createTask(base, token, `task ${String(index)}`);
@@ -255,7 +255,7 @@ describe("the event log's order and paging", () => {
 
 describe("a failed login in the log", () => {
   it("stamps auth.login.failed with a null actor, and no row claims the user", async () => {
-    await withServer(async (base, audit) => {
+    await withServer(async ({ base, audit }) => {
       const token = await completeSetup(base);
       await failLogin(base);
 

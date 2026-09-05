@@ -18,14 +18,11 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import { unauthenticated, type Unauthenticated } from "@hydra/contract";
-import { CurrentActor, type Actor } from "../actor";
+import { CurrentActor, NO_CREDENTIAL, type Actor } from "../actor";
 import { mintToken } from "../credentials";
 
 /** How long a ticket stays good. Long enough to dial, short enough to lose. */
 const WS_TICKET_LIFETIME_MS = 5 * 60 * 1000;
-
-/** What a caller with no usable credential is told; never why. */
-const NO_CREDENTIAL = "this operation needs a credential";
 
 interface Held {
   readonly actor: Actor;

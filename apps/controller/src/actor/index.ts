@@ -24,6 +24,9 @@ import {
   type Unauthenticated,
 } from "@hydra/contract";
 
+/** What a caller with no usable credential is told; never why. */
+export const NO_CREDENTIAL = "this operation needs a credential";
+
 /** Which user credential was presented, and the hash that resolved it. */
 export interface PresentedCredential {
   readonly kind: "login" | "apiKey";
@@ -107,7 +110,5 @@ export const currentUser = (
   id: OperationId,
 ): Effect.Effect<UserActor, Forbidden | Unauthenticated> =>
   Effect.flatMap(requireGrant(id), (actor) =>
-    actor._tag === "user"
-      ? Effect.succeed(actor)
-      : Effect.fail(unauthenticated("this operation needs a credential")),
+    actor._tag === "user" ? Effect.succeed(actor) : Effect.fail(unauthenticated(NO_CREDENTIAL)),
   );

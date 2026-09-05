@@ -17,6 +17,19 @@
 /** What the stub greets with, and what a caller can assert it read. */
 export const STUB_SERVER_VERSION = "0.1.0";
 
+/**
+ * The `webSocket` a supervisor is built with in a test: it opens a stub and
+ * keeps it, in the order it opened them, so the caller can reach the one a
+ * connection is on now and the ones it has been on.
+ */
+export const openInto =
+  (sockets: Array<StubSocket>) =>
+  (url: string): WebSocket => {
+    const socket = new StubSocket(url);
+    sockets.push(socket);
+    return socket as unknown as WebSocket;
+  };
+
 /** One frame as it crosses the wire: the RPC codec's own JSON envelope. */
 export type Frame = Record<string, unknown>;
 
