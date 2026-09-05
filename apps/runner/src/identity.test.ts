@@ -158,7 +158,11 @@ describe("the port it binds", () => {
         },
       );
 
-      expect(port).toBeGreaterThanOrEqual(run.base + IDENTITY_PORT_COUNT);
+      // Where the last resort lands is the OS's choice, and its ephemeral range
+      // sits below the taken run as readily as above it. All that is owed is a
+      // port outside the run, answering on the number it reported.
+      const inRun = port >= run.base && port < run.base + IDENTITY_PORT_COUNT;
+      expect(inRun).toBe(false);
       expect(body).toEqual({ runnerId: RUNNER_ID });
     } finally {
       await run.release();
