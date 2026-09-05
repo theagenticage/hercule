@@ -53,13 +53,16 @@ export const MAX_FACT_LENGTH = 512;
  * A name, a version or a path a peer states about itself. Bounded because
  * every one of them is stored: a fact is an identifier, never a document.
  */
-const Fact = Schema.String.check(Schema.isLengthBetween(1, MAX_FACT_LENGTH));
+export const Fact = Schema.String.check(Schema.isLengthBetween(1, MAX_FACT_LENGTH));
+
+/** The most entries any list of facts in this catalogue holds. */
+export const MAX_FACT_ITEMS = 64;
 
 /**
  * The extensibility seam: what a side can do, named. A feature is used only
  * when both hellos list it.
  */
-const Capabilities = Schema.Array(Fact).check(Schema.isMaxLength(64));
+export const Capabilities = Schema.Array(Fact).check(Schema.isMaxLength(MAX_FACT_ITEMS));
 
 /**
  * Key material and the nonce it signs. Standard base64, padding and all: the
@@ -116,17 +119,17 @@ export const IDENTITY_PORT_COUNT = 10;
  * What a runner knows about the machine it is on. Latest-wins state, not
  * events: it rides the hello and is re-sent only when a value changed.
  *
- * The controller stores a report whole and hands it back on its public API, so
- * `RunnerFacts` in `@hydra/contract` declares the same fields with the same
- * bounds; loosening one without the other makes a fleet listing fail to answer.
+ * The controller stores a report whole and hands it back on its public API,
+ * which is why `@hydra/contract` exports this schema rather than a copy: a
+ * bound the two ends disagreed on would make a fleet listing fail to answer.
  */
 export const RunnerFacts = Schema.Struct({
   os: Fact,
   arch: Fact,
   totalMemoryBytes: Bytes,
   docker: Schema.Boolean,
-  toolchains: Schema.Array(Toolchain).check(Schema.isMaxLength(64)),
-  providers: Schema.Array(ProviderBinary).check(Schema.isMaxLength(64)),
+  toolchains: Schema.Array(Toolchain).check(Schema.isMaxLength(MAX_FACT_ITEMS)),
+  providers: Schema.Array(ProviderBinary).check(Schema.isMaxLength(MAX_FACT_ITEMS)),
   /** The loopback port serving `GET /identity`, which resolves the "local" alias. */
   identityPort: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 65535 })),
 });
@@ -135,8 +138,7 @@ export type RunnerFacts = Schema.Schema.Type<typeof RunnerFacts>;
 
 /**
  * The fast-moving half of a runner's state, refreshed on a short interval. A
- * report older than the latest one is worthless, so it is never buffered. Its
- * twin in `@hydra/contract` must agree with it, as the facts' twin must.
+ * report older than the latest one is worthless, so it is never buffered.
  */
 export const RunnerWatermark = Schema.Struct({
   diskFreeBytes: Bytes,

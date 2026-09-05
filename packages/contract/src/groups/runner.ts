@@ -13,6 +13,7 @@
  * looking at.
  */
 import { Schema } from "effect";
+import { Capabilities, Fact, RunnerFacts, RunnerWatermark } from "@hydra/protocol";
 import * as HttpApiEndpoint from "effect/unstable/httpapi/HttpApiEndpoint";
 import * as HttpApiGroup from "effect/unstable/httpapi/HttpApiGroup";
 import * as HttpApiSchema from "effect/unstable/httpapi/HttpApiSchema";
@@ -22,6 +23,19 @@ import { Id, Timestamp } from "../ids";
 import { page, pageParams } from "../pagination";
 import { Authenticated } from "../security";
 import { atMost, bounded } from "../strings";
+
+/**
+ * The runner's own report of itself, as it reaches the controller. The
+ * controller stores a report whole and hands it back here, so the public shape
+ * is the wire shape rather than a copy of it that can drift out of step.
+ */
+export {
+  Capabilities as RunnerCapabilities,
+  ProviderBinary as RunnerProvider,
+  RunnerFacts,
+  RunnerWatermark,
+  Toolchain as RunnerToolchain,
+} from "@hydra/protocol";
 
 /** The longest runner name. A name is what the fleet list shows, not a note. */
 export const MAX_RUNNER_NAME_LENGTH = 128;
@@ -36,12 +50,6 @@ export const MAX_RUNNER_LABEL_LENGTH = 64;
  */
 export const MAX_RUNNER_LABELS = 64;
 
-/** The longest string a runner reports about itself: a version, a path, a name. */
-export const MAX_RUNNER_FACT_LENGTH = 512;
-
-/** The most entries one reported fact list holds. */
-export const MAX_RUNNER_FACT_ITEMS = 64;
-
 /** The five states a runner is in. Only the protocol moves a runner between them. */
 export const RUNNER_STATES = ["online", "offline", "unreachable", "draining", "retired"] as const;
 
@@ -53,64 +61,13 @@ const RunnerName = bounded(1, MAX_RUNNER_NAME_LENGTH);
 
 const RunnerLabel = bounded(1, MAX_RUNNER_LABEL_LENGTH);
 
-const Reported = bounded(1, MAX_RUNNER_FACT_LENGTH);
-
-/** A whole number of bytes. Every size a runner reports is in bytes. */
-const Bytes = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0));
-
-/** One toolchain the runner found, with the version its `--version` printed. */
-export const RunnerToolchain = Schema.Struct({
-  name: Reported,
-  version: Reported,
-  path: Reported,
-});
-
-/** One provider binary the runner looked for, present or not. */
-export const RunnerProvider = Schema.Struct({
-  name: Reported,
-  present: Schema.Boolean,
-  path: Schema.optionalKey(Reported),
-});
-
-/**
- * What a runner probed about the machine it runs on. The same shape the runner
- * reports over the protocol (`RunnerFacts` in `@hydra/protocol`), because the
- * controller stores the report whole and hands it back here; the two must agree
- * field for field and bound for bound.
- */
-export const RunnerFacts = Schema.Struct({
-  os: Reported,
-  arch: Reported,
-  totalMemoryBytes: Bytes,
-  docker: Schema.Boolean,
-  toolchains: atMost(RunnerToolchain, MAX_RUNNER_FACT_ITEMS),
-  providers: atMost(RunnerProvider, MAX_RUNNER_FACT_ITEMS),
-  /** Where the runner answers `GET /identity` on loopback. */
-  identityPort: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 65535 })),
-});
-
-export type RunnerFacts = Schema.Schema.Type<typeof RunnerFacts>;
-
-/**
- * What a runner reports about its headroom, refreshed every minute. Like the
- * facts, the same shape the protocol carries (`RunnerWatermark` in
- * `@hydra/protocol`); the two must agree.
- */
-export const RunnerWatermark = Schema.Struct({
-  diskFreeBytes: Bytes,
-  availableMemoryBytes: Bytes,
-  acceptingPlacements: Schema.Boolean,
-});
-
-export type RunnerWatermark = Schema.Schema.Type<typeof RunnerWatermark>;
-
 /** A runner as the fleet list shows it. */
 export const Runner = Schema.Struct({
   id: Id,
   name: RunnerName,
   state: RunnerState,
   /** The version of the Hydra binary the runner runs; null until it says. */
-  version: Schema.NullOr(Reported),
+  version: Schema.NullOr(Fact),
   labels: atMost(RunnerLabel, MAX_RUNNER_LABELS),
   facts: Schema.NullOr(RunnerFacts),
   watermark: Schema.NullOr(RunnerWatermark),
@@ -120,9 +77,6 @@ export const Runner = Schema.Struct({
 });
 
 export type Runner = Schema.Schema.Type<typeof Runner>;
-
-/** What the two ends of the runner protocol agreed to speak. */
-export const RunnerCapabilities = atMost(Reported, MAX_RUNNER_FACT_ITEMS);
 
 /**
  * One runner in full: the list's fields plus what the hello negotiated.
@@ -135,7 +89,7 @@ export const RunnerCapabilities = atMost(Reported, MAX_RUNNER_FACT_ITEMS);
  */
 export const RunnerDetail = Schema.Struct({
   ...Runner.fields,
-  negotiatedCapabilities: Schema.NullOr(RunnerCapabilities),
+  negotiatedCapabilities: Schema.NullOr(Capabilities),
   protocolVersion: Schema.NullOr(Schema.Int.check(Schema.isGreaterThanOrEqualTo(1))),
 });
 

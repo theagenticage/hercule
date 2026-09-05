@@ -101,8 +101,6 @@ export { MAX_PROFILE_GRANTS, Profile } from "./groups/profile";
 export { OwnerKind, SecretRef } from "./groups/secret";
 export { ControllerInfo, ControllerUpdateInput } from "./groups/controller";
 export {
-  MAX_RUNNER_FACT_ITEMS,
-  MAX_RUNNER_FACT_LENGTH,
   MAX_RUNNER_LABELS,
   MAX_RUNNER_LABEL_LENGTH,
   MAX_RUNNER_NAME_LENGTH,
