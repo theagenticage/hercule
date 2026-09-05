@@ -93,6 +93,58 @@ afterAll(async () => {
 });
 
 describe("the binary serving live topics", () => {
+  it("stops when it is told to, although a socket is still open", async () => {
+    // A watched controller always has an open socket, and the listener's drain
+    // waits for every connection, so without a deadline `hydra serve` could not
+    // be stopped while anybody was looking at it.
+    const home = temporaryHome();
+    let its: Controller | undefined;
+    try {
+      its = await startController({ home: home.home, binary });
+      const setupUrl = readFileSync(join(home.home, "setup-url"), "utf8").trim();
+      const setupToken = new URL(setupUrl).searchParams.get("token");
+      const completed = await cli(
+        [
+          "setup",
+          "complete",
+          "--setup-token",
+          setupToken!,
+          "--username",
+          USERNAME,
+          "--password-stdin",
+          "--timezone",
+          "Europe/Amsterdam",
+          "--json",
+        ],
+        { home: home.home, binary, env: { HYDRA_API_URL: its.url }, stdin: PASSWORD },
+      );
+      expect(completed.code, `${completed.stdout}\n${completed.stderr}`).toBe(0);
+
+      // Nothing is said on it: an upgraded connection is enough to hold a drain,
+      // and one that never greets is the worst case.
+      const socket = new WebSocket(`${its.url.replace(/^http/, "ws")}/ws`);
+      await new Promise<void>((resolve, reject) => {
+        socket.addEventListener("open", () => resolve(), { once: true });
+        socket.addEventListener("error", () => reject(new Error("the socket never opened")), {
+          once: true,
+        });
+      });
+
+      const stopping = its;
+      const began = Date.now();
+      const code = await stopping.stop();
+      const took = Date.now() - began;
+      its = undefined;
+
+      expect(code, stopping.output()).toBe(0);
+      expect(took, "the drain never gave up on the open socket").toBeLessThan(25_000);
+      expect(stopping.output()).toContain("Connections were still open");
+    } finally {
+      await its?.stop().catch(() => -1);
+      home.remove();
+    }
+  }, 60_000);
+
   it("prints a ws ticket", async () => {
     const ran = await hydra(["auth", "wsTicket", "--json"]);
     const ticket = ok(ran) as { readonly ticket: string };

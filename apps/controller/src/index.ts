@@ -3,7 +3,10 @@
  *
  * Boot (`./bootstrap.ts`), say where things are, bind, and stay up until the
  * unit is stopped. SIGINT and SIGTERM both mean the same thing: stop accepting,
- * let the requests already in flight finish, close the database, exit 0.
+ * let the requests already in flight finish, close the database, exit 0. A
+ * connection that is meant to stay open, such as a client watching a Live
+ * Topic, would hold that drain for ever, so the drain has a deadline and says
+ * when it reaches one.
  *
  * The runner socket and the schedulers are not implemented yet; each adds a
  * step beside the listener rather than changing this shape.
@@ -78,6 +81,21 @@ export function report(outcome: BootOutcome, webApp: boolean): void {
 /** What a second signal during the drain prints, instead of killing the process. */
 export const STILL_STOPPING = "Still stopping Hydra; the requests in flight are finishing.";
 
+/** What the drain prints when it gives up waiting for the connections still open. */
+export const STILL_OPEN = "Connections were still open; Hydra stopped anyway.";
+
+/**
+ * How long the drain waits before the process stops regardless.
+ *
+ * A client watching a Live Topic holds its socket open for as long as its tab
+ * is, and the listener's drain waits for every open connection, so a controller
+ * anybody is watching would otherwise never finish stopping. Cutting it short
+ * costs nothing that was not already lost: every committed write is durable
+ * before the signal arrives, and a request in flight has these ten seconds to
+ * answer.
+ */
+const DRAIN_DEADLINE_MS = 10_000;
+
 /**
  * The stop request, as something the boot can wait on.
  *
@@ -98,15 +116,24 @@ export const untilStopped: Effect.Effect<
 > = Effect.acquireRelease(
   Effect.sync(() => {
     const stopped = Latch.makeUnsafe(false);
+    let deadline: ReturnType<typeof setTimeout> | undefined;
     const stop = (): void => {
-      if (!stopped.openUnsafe()) console.log(STILL_STOPPING);
+      if (!stopped.openUnsafe()) {
+        console.log(STILL_STOPPING);
+        return;
+      }
+      deadline = setTimeout(() => {
+        console.log(STILL_OPEN);
+        process.exit(0);
+      }, DRAIN_DEADLINE_MS);
     };
     process.on("SIGINT", stop);
     process.on("SIGTERM", stop);
-    return { stopped, stop };
+    return { stopped, stop, clear: () => clearTimeout(deadline) };
   }),
-  ({ stop }) =>
+  ({ stop, clear }) =>
     Effect.sync(() => {
+      clear();
       process.off("SIGINT", stop);
       process.off("SIGTERM", stop);
     }),
