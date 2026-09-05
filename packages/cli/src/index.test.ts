@@ -195,9 +195,15 @@ describe("running an operation", () => {
       id: id("abcdef12"),
       publicKey: "key",
       version: "0.1.0",
+      defaultRunnerId: null,
     }));
     await run("controller", "read");
-    expect(io.stdout).toEqual(["id         abcdef12", "publicKey  key", "version    0.1.0"]);
+    expect(io.stdout).toEqual([
+      "id               abcdef12",
+      "publicKey        key",
+      "version          0.1.0",
+      "defaultRunnerId",
+    ]);
   });
 
   it("flattens a nested object into dotted keys", async () => {

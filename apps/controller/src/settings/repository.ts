@@ -16,7 +16,7 @@
 import { Context, Effect, Layer, Schema } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
-import { SETTING_VALUES } from "@hydra/contract";
+import { Id, SETTING_VALUES } from "@hydra/contract";
 import { nowIso, uuidFromString } from "../db";
 
 /** The keys each scope defines, with the schema of the value. */
@@ -42,6 +42,25 @@ export class SettingError extends Schema.TaggedError<SettingError>()("SettingErr
   key: Schema.String,
   message: Schema.String,
 }) {}
+
+/**
+ * The runner a placement falls back to.
+ *
+ * It lives in the controller's settings table because there is no controller
+ * table to widen, but it is not one of the settings the settings API carries:
+ * `controller.update` is its only writer, so that the id is checked against the
+ * fleet before it lands, and `controller.read` is where it is answered.
+ *
+ * `all` below leaves the key out by name rather than letting `decodeRows` drop
+ * it as undeclared, because that path logs a warning, and a key deliberately
+ * kept out of the settings API is not a downgrade leftover to complain about.
+ */
+const DEFAULT_RUNNER_ID = "defaultRunnerId";
+
+const DefaultRunnerId = Schema.fromJsonString(Schema.NullOr(Id));
+
+const unreadable = (message: string): SettingError =>
+  new SettingError({ scope: "controller", key: DEFAULT_RUNNER_ID, message });
 
 /**
  * The stored codec for one key: its declared schema wrapped in the JSON text
@@ -133,9 +152,45 @@ const make = Effect.gen(function* () {
      */
     all: (): Effect.Effect<ScopeSettings<"controller">, SettingError | SqlError> =>
       Effect.flatMap(
-        sql<KeyValueRow>`SELECT key, value FROM settings WHERE scope = 'controller' ORDER BY key`,
+        sql<KeyValueRow>`
+          SELECT key, value FROM settings
+          WHERE scope = 'controller' AND key <> ${DEFAULT_RUNNER_ID} ORDER BY key
+        `,
         (rows) => decodeRows("controller", rows),
       ),
+
+    /** The runner a placement falls back to, or null while none is chosen. */
+    defaultRunnerId: (): Effect.Effect<string | null, SettingError | SqlError> =>
+      Effect.flatMap(
+        sql<KeyValueRow>`
+          SELECT key, value FROM settings
+          WHERE scope = 'controller' AND key = ${DEFAULT_RUNNER_ID}
+        `,
+        (rows) => {
+          const row = rows[0];
+          if (row === undefined) return Effect.succeed(null);
+          return Schema.decodeUnknownEffect(DefaultRunnerId)(row.value).pipe(
+            Effect.mapError((error) => unreadable(error.message)),
+          );
+        },
+      ),
+
+    /** Names the runner a placement falls back to, or takes the default off. */
+    setDefaultRunnerId: (
+      id: string | null,
+      at: string,
+    ): Effect.Effect<void, SettingError | SqlError> =>
+      Effect.gen(function* () {
+        const json = yield* Effect.mapError(
+          Schema.encodeUnknownEffect(DefaultRunnerId)(id),
+          (error) => unreadable(error.message),
+        );
+        yield* sql`
+          INSERT INTO settings (scope, key, value, updated_at)
+          VALUES ('controller', ${DEFAULT_RUNNER_ID}, ${json}, ${at})
+          ON CONFLICT (scope, key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+        `;
+      }),
 
     /** Writes a controller setting, replacing whatever was there. */
     set: <K extends SettingKey<"controller">>(

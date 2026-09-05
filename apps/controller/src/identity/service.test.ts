@@ -7,7 +7,9 @@ import { VERSION } from "@hydra/home/version";
 import { CurrentActor, type Actor } from "../actor";
 import { homePaths, HydraHome } from "../config";
 import { TestDatabase } from "../db/testing";
+import { AuditLogLayer } from "../events";
 import { masterKeyLayer, secretsLayer } from "../secrets";
+import { SettingsLayer } from "../settings";
 import { ControllerIdentity, controllerIdentityLayer } from "./repository";
 import { Controller, ControllerLayer } from "./service";
 
@@ -28,7 +30,7 @@ const stack = () => {
   const home = mkdtempSync(join(tmpdir(), "hydra-controller-read-"));
   homes.push(home);
   return ControllerLayer.pipe(
-    Layer.provideMerge(controllerIdentityLayer),
+    Layer.provideMerge(Layer.mergeAll(controllerIdentityLayer, SettingsLayer, AuditLogLayer)),
     Layer.provideMerge(secretsLayer.pipe(Layer.provide(masterKeyLayer("file")))),
     Layer.provideMerge(TestDatabase),
     Layer.provideMerge(Layer.succeed(HydraHome, homePaths(home, join(home, "data")))),
@@ -67,7 +69,7 @@ describe("controller.read", () => {
       Effect.flatMap(Controller, (controller) => controller.read()),
     );
 
-    expect(Object.keys(result).sort()).toEqual(["id", "publicKey", "version"]);
+    expect(Object.keys(result).sort()).toEqual(["defaultRunnerId", "id", "publicKey", "version"]);
   });
 
   it("refuses a caller without the grant before it reads anything", async () => {
@@ -78,6 +80,27 @@ describe("controller.read", () => {
 
     expect(result).toMatchObject({
       error: { code: "forbidden", details: { grant: "infra.read" } },
+    });
+  });
+});
+
+/**
+ * `controller.update`'s grant refusal, asserted where it lives.
+ *
+ * Over HTTP it is unreachable: v1 authenticates one population, the user, and
+ * the user passes every grant, so no request can present a credential missing
+ * `infra.write`. An in-process call with nobody in `CurrentActor` is what
+ * reaches the check.
+ */
+describe("controller.update", () => {
+  it("refuses a caller without the grant before it writes anything", async () => {
+    const { result } = await withIdentity(
+      Effect.flatMap(Controller, (controller) => Effect.flip(controller.update({}))),
+      null,
+    );
+
+    expect(result).toMatchObject({
+      error: { code: "forbidden", details: { grant: "infra.write" } },
     });
   });
 });

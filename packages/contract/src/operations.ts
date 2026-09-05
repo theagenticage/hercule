@@ -100,7 +100,12 @@ const TABLE = {
   "event.query": { requires: "event.read", method: "GET", path: "/api/v1/events" },
   "event.read": { requires: "event.read", method: "GET", path: "/api/v1/events/:id" },
 
+  "runner.query": { requires: "infra.read", method: "GET", path: "/api/v1/runners" },
+  "runner.read": { requires: "infra.read", method: "GET", path: "/api/v1/runners/:id" },
+  "runner.update": { requires: "infra.write", method: "PATCH", path: "/api/v1/runners/:id" },
+
   "controller.read": { requires: "infra.read", method: "GET", path: "/api/v1/controller" },
+  "controller.update": { requires: "infra.write", method: "PATCH", path: "/api/v1/controller" },
 } as const satisfies Record<string, { requires: Requirement; method: Method; path: string }>;
 
 /** Every operation id in the public API. */

@@ -15,11 +15,12 @@ import * as Layer from "effect/Layer";
 import * as HttpServer from "effect/unstable/http/HttpServer";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import * as BunHttpServer from "@effect/platform-bun/BunHttpServer";
-import type { LiveTopic } from "@hydra/contract";
+import type { LiveTopic, Runner, RunnerState } from "@hydra/contract";
 import { homePaths } from "@hydra/home";
 import { AuthLayer } from "../auth";
 import { HydraHome } from "../config";
 import { ApiKeysLayer, CredentialsLayer, hashToken } from "../credentials";
+import { nowIso } from "../db";
 import { TestDatabase } from "../db/testing";
 import {
   AuditLog,
@@ -35,6 +36,7 @@ import { PermissionProfilesLayer, ProfilesLayer } from "../permissions";
 import { SettingsLayer, SettingsOperationsLayer } from "../settings";
 import { SetupLayer } from "../setup";
 import { ProjectServiceLayer } from "../projects";
+import { RunnerServiceLayer, runnerRepository } from "../runners";
 import { TaskServiceLayer } from "../tasks";
 import { PasswordCost, TEST_PASSWORD_PARAMS, UserLayer, UsersLayer } from "../users";
 import { seed } from "../seed";
@@ -59,6 +61,7 @@ const services = (home: string) =>
     ProfilesLayer,
     TaskServiceLayer,
     ProjectServiceLayer,
+    RunnerServiceLayer,
     EventServiceLayer,
     LiveTopicsLayer,
     WsTicketsLayer,
@@ -89,6 +92,18 @@ export const baseUrl = Effect.map(HttpServer.HttpServer, (server) => {
 /** Reads back what a request wrote to the audit log. */
 export type AuditReader = (kind: AuditKind) => Promise<ReadonlyArray<AuditRow>>;
 
+/**
+ * Arranges a runner row. No operation enlists a runner - joining does, over the
+ * runner protocol - so a test that needs a fleet writes one through the same
+ * repository the join will.
+ */
+export type RunnerArranger = (fields: {
+  readonly name: string;
+  readonly state?: RunnerState;
+  readonly labels?: ReadonlyArray<string>;
+  readonly maxConcurrentSessions?: number;
+}) => Promise<Runner>;
+
 /** Reads back what the controller is holding for the clients on its live socket. */
 export interface LiveReader {
   readonly subscriberCount: (topic: LiveTopic) => Promise<number>;
@@ -101,6 +116,7 @@ export interface ServerHarness {
   readonly audit: AuditReader;
   readonly sql: SqlClient.SqlClient;
   readonly live: LiveReader;
+  readonly insertRunner: RunnerArranger;
 }
 
 /**
@@ -142,7 +158,23 @@ export const withServer = (
         const live: LiveReader = {
           subscriberCount: (topic) => Effect.runPromise(topics.subscriberCount(topic)),
         };
-        yield* Effect.promise(() => body({ base, audit, sql, live }));
+        const repository = yield* runnerRepository;
+        const insertRunner: RunnerArranger = (fields) =>
+          Effect.runPromise(
+            Effect.orDie(
+              Effect.flatMap(nowIso, (at) =>
+                repository.insert({
+                  name: fields.name,
+                  state: fields.state ?? "offline",
+                  labels: fields.labels ?? [],
+                  maxConcurrentSessions: fields.maxConcurrentSessions ?? 1,
+                  credentialHash: hashToken(crypto.randomUUID()),
+                  at,
+                }),
+              ),
+            ),
+          );
+        yield* Effect.promise(() => body({ base, audit, sql, live, insertRunner }));
       }),
     ).pipe(
       Effect.provide(

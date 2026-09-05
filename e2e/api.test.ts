@@ -194,6 +194,7 @@ describe("the first run and everything after it", () => {
       id: expect.any(String) as string,
       publicKey: expect.any(String) as string,
       version: expect.any(String) as string,
+      defaultRunnerId: null,
     });
 
     const settings = await hydra(["settings", "read", "--json"]);

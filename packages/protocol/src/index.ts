@@ -87,6 +87,10 @@ export type ProviderBinary = Schema.Schema.Type<typeof ProviderBinary>;
 /**
  * What a runner knows about the machine it is on. Latest-wins state, not
  * events: it rides the hello and is re-sent only when a value changed.
+ *
+ * The controller stores a report whole and hands it back on its public API, so
+ * `RunnerFacts` in `@hydra/contract` declares the same fields with the same
+ * bounds; loosening one without the other makes a fleet listing fail to answer.
  */
 export const RunnerFacts = Schema.Struct({
   os: Fact,
@@ -103,7 +107,8 @@ export type RunnerFacts = Schema.Schema.Type<typeof RunnerFacts>;
 
 /**
  * The fast-moving half of a runner's state, refreshed on a short interval. A
- * report older than the latest one is worthless, so it is never buffered.
+ * report older than the latest one is worthless, so it is never buffered. Its
+ * twin in `@hydra/contract` must agree with it, as the facts' twin must.
  */
 export const RunnerWatermark = Schema.Struct({
   diskFreeBytes: Bytes,

@@ -40,6 +40,8 @@ export const AUDIT_KINDS = [
   "project.created",
   "project.updated",
   "project.deleted",
+  "runner.updated",
+  "controller.updated",
 ] as const;
 
 export type AuditKind = (typeof AUDIT_KINDS)[number];

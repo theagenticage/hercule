@@ -35,6 +35,7 @@ import { Profiles } from "../permissions";
 import { Secret } from "../secrets";
 import { SettingsOperations } from "../settings";
 import { ProjectService } from "../projects";
+import { RunnerService } from "../runners";
 import { Setup } from "../setup";
 import { TaskService } from "../tasks";
 import { User } from "../users";
@@ -178,10 +179,24 @@ const eventRoutes = HttpApiBuilder.group(api, "event", (handlers) =>
   }),
 );
 
+const runnerRoutes = HttpApiBuilder.group(api, "runner", (handlers) =>
+  Effect.gen(function* () {
+    const runners = yield* RunnerService;
+    return handlers
+      .handle("query", ({ query }) => operation(runners.query(query)))
+      .handle("read", ({ params }) => operation(runners.read(params)))
+      .handle("update", ({ params, payload }) =>
+        operation(runners.update({ id: params.id, ...payload })),
+      );
+  }),
+);
+
 const controllerRoutes = HttpApiBuilder.group(api, "controller", (handlers) =>
   Effect.gen(function* () {
     const controller = yield* Controller;
-    return handlers.handle("read", () => operation(controller.read()));
+    return handlers
+      .handle("read", () => operation(controller.read()))
+      .handle("update", ({ payload }) => operation(controller.update(payload)));
   }),
 );
 
@@ -198,4 +213,5 @@ export const handlerLayers = Layer.mergeAll(
   taskRoutes,
   projectRoutes,
   eventRoutes,
+  runnerRoutes,
 );

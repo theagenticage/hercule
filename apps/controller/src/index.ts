@@ -29,6 +29,7 @@ import { ProfilesLayer } from "./permissions";
 import { SettingsOperationsLayer } from "./settings";
 import { SetupLayer } from "./setup";
 import { ProjectServiceLayer } from "./projects";
+import { RunnerServiceLayer } from "./runners";
 import { TaskServiceLayer } from "./tasks";
 import { UserLayer } from "./users";
 
@@ -170,6 +171,7 @@ const listen = (outcome: BootOutcome, stopped: Effect.Effect<void>) =>
         ProfilesLayer,
         TaskServiceLayer,
         ProjectServiceLayer,
+        RunnerServiceLayer,
         EventServiceLayer,
         LiveTopicsLayer,
         WsTicketsLayer,
