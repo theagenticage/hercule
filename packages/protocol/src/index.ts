@@ -140,6 +140,20 @@ export const JoinAnswer = Schema.Struct({
 export type JoinAnswer = Schema.Schema.Type<typeof JoinAnswer>;
 
 /**
+ * Just enough of any frame to read the version off it.
+ *
+ * A peer speaking a later version of this catalogue may send a hello carrying
+ * fields this build's schema does not know and requires nothing of, so the full
+ * decode fails before the version can be looked at. Reading the version first
+ * is what lets an incompatible peer be refused by name instead of reported as a
+ * frame nobody sent - and it has to be in version 1, because version 2 cannot
+ * add it retroactively to the build it is talking to.
+ */
+export const PeerVersion = Schema.Struct({ protocolVersion: ProtocolVersion });
+
+export type PeerVersion = Schema.Schema.Type<typeof PeerVersion>;
+
+/**
  * The envelope every replayable runner event carries, so the controller can
  * acknowledge a position and the runner can replay from it. Nothing in this
  * catalogue extends it yet; the shape is fixed here so the wire is settled
@@ -224,7 +238,7 @@ export const ControllerHello = Schema.Struct({
 
 export type ControllerHello = Schema.Schema.Type<typeof ControllerHello>;
 
-/** The heartbeat. A protocol frame, so it proves the runner process is alive. */
+/** The liveness check. A protocol frame, so it proves the runner process is alive. */
 export const Ping = Schema.Struct({ _tag: Schema.Literal("ping") });
 
 export type Ping = Schema.Schema.Type<typeof Ping>;

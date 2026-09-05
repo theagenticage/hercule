@@ -56,6 +56,14 @@ export interface NewRunner {
   readonly at: string;
 }
 
+/** What a runner said about itself when it opened its connection. */
+export interface RunnerHelloRecord {
+  readonly binaryVersion: string;
+  readonly protocolVersion: number;
+  readonly negotiatedCapabilities: ReadonlyArray<string>;
+  readonly facts: RunnerFacts;
+}
+
 /** The columns an edit may set. An absent one is left as it was. */
 export interface RunnerEdit {
   readonly name?: string;
@@ -121,6 +129,27 @@ const make = Effect.gen(function* () {
         (rows) => Option.fromNullishOr(rows[0]).pipe(Option.map(toDetail)),
       ),
 
+    /**
+     * The runner this credential belongs to, if it is one a machine may still
+     * connect with. A `retired` runner's credential is revoked, so it resolves
+     * to nothing rather than to a row nobody may use.
+     */
+    byCredential: (credentialHash: string): Effect.Effect<Option.Option<string>, SqlError> =>
+      Effect.map(
+        sql<{ readonly id: Uint8Array }>`
+          SELECT id FROM runners
+          WHERE credential_hash = ${credentialHash} AND state <> 'retired'
+        `,
+        (rows) => Option.fromNullishOr(rows[0]).pipe(Option.map((row) => uuidToString(row.id))),
+      ),
+
+    /** Every runner a connection is supposed to be open to. */
+    connected: (): Effect.Effect<ReadonlyArray<string>, SqlError> =>
+      Effect.map(
+        sql<{ readonly id: Uint8Array }>`SELECT id FROM runners WHERE state = 'online'`,
+        (rows) => rows.map((row) => uuidToString(row.id)),
+      ),
+
     /** Every name the fleet holds, so a joining machine can be given a free one. */
     names: (): Effect.Effect<ReadonlySet<string>, SqlError> =>
       Effect.map(
@@ -168,6 +197,49 @@ const make = Effect.gen(function* () {
         sql`UPDATE runners SET ${sql.csv(sets)} WHERE id = ${uuidFromString(id)}`,
       );
     },
+
+    /**
+     * Stores everything a runner's hello said about itself. The state is not
+     * here: moving a runner is `setState`, so that one statement decides both
+     * whether the row changed and whether that change is worth recording.
+     */
+    recordHello: (
+      id: string,
+      hello: RunnerHelloRecord,
+      at: string,
+    ): Effect.Effect<void, SqlError> =>
+      Effect.asVoid(sql`
+        UPDATE runners SET
+          binary_version = ${hello.binaryVersion},
+          protocol_version = ${hello.protocolVersion},
+          negotiated_capabilities = ${JSON.stringify(hello.negotiatedCapabilities)},
+          facts = ${JSON.stringify(hello.facts)},
+          last_seen_at = ${at},
+          updated_at = ${at}
+        WHERE id = ${uuidFromString(id)}
+      `),
+
+    /** Records that the runner answered, without changing what it is. */
+    touch: (id: string, at: string): Effect.Effect<void, SqlError> =>
+      Effect.asVoid(
+        sql`UPDATE runners SET last_seen_at = ${at}, updated_at = ${at}
+            WHERE id = ${uuidFromString(id)}`,
+      ),
+
+    /**
+     * Moves a runner to a state and answers whether it moved. A runner already
+     * in that state is left alone, so nothing records a change that did not
+     * happen.
+     */
+    setState: (id: string, state: RunnerState, at: string): Effect.Effect<boolean, SqlError> =>
+      Effect.map(
+        sql<{ readonly id: Uint8Array }>`
+          UPDATE runners SET state = ${state}, updated_at = ${at}
+          WHERE id = ${uuidFromString(id)} AND state <> ${state}
+          RETURNING id
+        `,
+        (rows) => rows.length > 0,
+      ),
 
     /** One page of the fleet, by name. */
     list: (request: RunnerPageRequest): Effect.Effect<Page<Runner>, CursorError | SqlError> =>

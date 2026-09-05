@@ -40,8 +40,11 @@ import {
   JoinTokens,
   JoinTokensLayer,
   RunnerJoinLayer,
+  RunnerPingSchedule,
+  RunnerPresenceLayer,
   RunnerServiceLayer,
   runnerRepository,
+  type RunnerPings,
 } from "../runners";
 import { TaskServiceLayer } from "../tasks";
 import { PasswordCost, TEST_PASSWORD_PARAMS, UserLayer, UsersLayer } from "../users";
@@ -69,6 +72,7 @@ const services = (home: string) =>
     ProjectServiceLayer,
     RunnerServiceLayer,
     RunnerJoinLayer,
+    RunnerPresenceLayer,
     EventServiceLayer,
     LiveTopicsLayer,
     WsTicketsLayer,
@@ -135,17 +139,31 @@ export interface ServerHarness {
   readonly joinToken: JoinTokenArranger;
 }
 
+/** What a test may vary about the controller it is handed. */
+export interface ServerOptions {
+  readonly bundle?: WebBundle;
+  /**
+   * How often the controller pings a runner it holds a socket with, and how
+   * long it lets one stay silent. The shipped values are counted in tens of
+   * seconds, which no test can wait for, and a real Bun listener cannot be
+   * driven by a `TestClock` - so a test about liveness hands over its own.
+   */
+  readonly pings?: RunnerPings;
+}
+
 /**
  * Runs the real controller application over a real socket for the length of
  * `body`, in a temporary home that is removed afterwards.
  *
  * With no `bundle` the controller serves the API alone, which is what a
- * checkout that was never built does.
+ * checkout that was never built does. With no `pings` the shipped intervals
+ * apply.
  */
 export const withServer = (
   body: (harness: ServerHarness) => Promise<void>,
-  bundle?: WebBundle,
+  options: ServerOptions = {},
 ): Promise<void> => {
+  const bundle = options.bundle;
   const home = mkdtempSync(join(tmpdir(), "hydra-http-"));
   writeFileSync(join(home, "setup-url"), `http://127.0.0.1:4937/setup?token=${SETUP_TOKEN}\n`);
 
@@ -161,7 +179,9 @@ export const withServer = (
         // controller has.
         yield* Effect.flatMap(ControllerIdentity, (identity) => identity.ensure);
         yield* seed;
-        yield* serve(bundle);
+        yield* options.pings === undefined
+          ? serve(bundle)
+          : Effect.provideService(serve(bundle), RunnerPingSchedule, options.pings);
         const base = yield* baseUrl;
         // The log this database holds, read the way anything else reads it: a
         // request's audit row is asserted through the service that wrote it.

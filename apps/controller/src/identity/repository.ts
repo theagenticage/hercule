@@ -34,13 +34,29 @@ export interface ControllerIdentityRecord {
   readonly createdAt: string;
 }
 
+/** The algorithm the identity keypair is made, signed and verified under. */
+const ED25519 = { name: "Ed25519" } as const;
+
+/**
+ * The bytes base64 stands for, in the buffer WebCrypto's types ask for: a
+ * `Buffer` is backed by a pool it shares, which is a `SharedArrayBuffer` as far
+ * as the DOM types are concerned. Exported because the socket decodes the nonce
+ * it hands to `sign` the same way.
+ */
+export const asBytes = (encoded: string): Uint8Array<ArrayBuffer> => {
+  const decoded = Buffer.from(encoded, "base64");
+  const bytes = new Uint8Array(decoded.byteLength);
+  bytes.set(decoded);
+  return bytes;
+};
+
 /**
  * Ed25519 is not in the DOM's `generateKey` overloads, which resolve to a
  * single `CryptoKey`; every Ed25519 generation returns a pair.
  */
 const generateSigningKeyPair = Effect.promise(
   () =>
-    crypto.subtle.generateKey({ name: "Ed25519" }, true, [
+    crypto.subtle.generateKey(ED25519, true, [
       "sign",
       "verify",
     ]) as unknown as Promise<CryptoKeyPair>,
@@ -61,6 +77,15 @@ export class ControllerIdentity extends Context.Service<
      * first boot has run: every caller after that has one.
      */
     readonly read: Effect.Effect<Option.Option<ControllerIdentityRecord>, SqlError>;
+
+    /**
+     * Signs bytes with the identity's private key, which is how the controller
+     * proves to a runner that the address it dialled is the controller that
+     * enlisted it. The key never leaves this service.
+     */
+    readonly sign: (
+      payload: Uint8Array<ArrayBuffer>,
+    ) => Effect.Effect<Uint8Array<ArrayBuffer>, SqlError | SecretNameError>;
   }
 >()("hydra/controller/identity/ControllerIdentity") {}
 
@@ -73,6 +98,25 @@ export const controllerIdentityLayer: Layer.Layer<
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
     const secrets = yield* Secrets;
+
+    const signingKey = Effect.gen(function* () {
+      const stored = yield* secrets.get(CORE_OWNER, SIGNING_KEY_SECRET).pipe(
+        // A value this build cannot decrypt is the same situation as one that
+        // is not there: there is no key to sign with either way.
+        Effect.catchTag("SecretDecryptError", () => Effect.succeedNone),
+      );
+      // `ensure` writes the key with the identity row in one transaction and
+      // the boot runs it before anything binds, so a controller with an
+      // identity and no key it can read is a home somebody assembled by hand.
+      if (Option.isNone(stored)) {
+        return yield* Effect.die("the controller's signing key cannot be read");
+      }
+      return yield* Effect.promise(() =>
+        crypto.subtle.importKey("pkcs8", asBytes(Redacted.value(stored.value)), ED25519, false, [
+          "sign",
+        ]),
+      );
+    });
 
     const read = sql<{
       readonly id: Uint8Array<ArrayBuffer>;
@@ -93,6 +137,14 @@ export const controllerIdentityLayer: Layer.Layer<
 
     return ControllerIdentity.of({
       read,
+
+      sign: (payload) =>
+        Effect.gen(function* () {
+          const key = yield* signingKey;
+          return new Uint8Array(
+            yield* Effect.promise(() => crypto.subtle.sign(ED25519, key, payload)),
+          );
+        }),
 
       // One transaction: the identity row and the private key it belongs to are
       // written together or not at all. Generating the keypair is local CPU

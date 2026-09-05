@@ -21,12 +21,10 @@ import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import { runnerDirIn } from "@hydra/home";
 import { JoinAnswer } from "@hydra/protocol";
+import { runnerFileIn, type RunnerFile } from "./runner-file";
 
 /** Where a machine joins. Outside the operation table, so it is written here. */
 const JOIN_PATH = "/api/v1/runners/join";
-
-/** The file that holds what this runner is, once it is one. */
-const RUNNER_FILE_NAME = "runner.json";
 
 /** How many random bytes name a storage directory. */
 const STORAGE_NAME_BYTES = 8;
@@ -56,21 +54,6 @@ export interface Joined {
   /** The `runner.json` this join wrote. */
   readonly configPath: string;
   /** The storage directory this enrolment owns, absolute. */
-  readonly storageDirectory: string;
-}
-
-/**
- * Everything `runner.json` holds. The controller URL is here rather than in
- * `config.toml` because it is not a bootstrap key: it is part of who this
- * runner belongs to, and `hydra runner set-controller` is what changes it.
- */
-interface RunnerFile {
-  readonly runnerId: string;
-  readonly credential: string;
-  readonly controllerUrl: string;
-  readonly controllerIdentityId: string;
-  readonly controllerPublicKey: string;
-  /** The directory's name, not its path: the home it sits in can move. */
   readonly storageDirectory: string;
 }
 
@@ -140,7 +123,7 @@ export const join = (options: JoinOptions): Effect.Effect<Joined, JoinError> =>
       crypto.getRandomValues(new Uint8Array(STORAGE_NAME_BYTES)),
     ).toString("hex");
     const storageDirectory = joinPath(runnerDir, storageName);
-    const configPath = joinPath(runnerDir, RUNNER_FILE_NAME);
+    const configPath = runnerFileIn(options.home);
     const contents: RunnerFile = {
       runnerId: answer.runnerId,
       credential: answer.credential,

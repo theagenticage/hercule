@@ -14,9 +14,9 @@
  */
 import * as Effect from "effect/Effect";
 import * as HttpRouter from "effect/unstable/http/HttpRouter";
-import type * as HttpServerRequest from "effect/unstable/http/HttpServerRequest";
 import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse";
 import { internal, Unauthenticated, unauthenticated } from "@hydra/contract";
+import { bearerOf } from "../http/bearer";
 import { responseFor } from "../http/envelope";
 import { RunnerJoin } from "./join";
 
@@ -24,16 +24,6 @@ import { RunnerJoin } from "./join";
 const JOIN_PATH = "/api/v1/runners/join";
 
 const NO_TOKEN = "a join needs a join token as a bearer credential";
-
-/** The bearer token a request presents, or nothing when it presents none. */
-const bearerOf = (request: HttpServerRequest.HttpServerRequest): string | undefined => {
-  const header = request.headers["authorization"];
-  if (header === undefined) return undefined;
-  const space = header.indexOf(" ");
-  if (space < 0 || header.slice(0, space).toLowerCase() !== "bearer") return undefined;
-  const token = header.slice(space + 1).trim();
-  return token === "" ? undefined : token;
-};
 
 /**
  * The join route. `201`: the answer is a runner that did not exist before the
@@ -55,5 +45,8 @@ export const RunnerJoinRouteLayer = HttpRouter.add("POST", JOIN_PATH, (request) 
             ),
       ),
     );
-  }),
+    // The derived routes get their span from the router middleware, which this
+    // route sits outside of; without one it is the only call in the controller
+    // whose service and repository work hangs off nothing.
+  }).pipe(Effect.withSpan("runner.join")),
 );

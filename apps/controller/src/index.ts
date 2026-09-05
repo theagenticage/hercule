@@ -8,8 +8,8 @@
  * Topic, would hold that drain for ever, so the drain has a deadline and says
  * when it reaches one.
  *
- * The runner socket and the schedulers are not implemented yet; each adds a
- * step beside the listener rather than changing this shape.
+ * The schedulers are not implemented yet; each adds a step beside the listener
+ * rather than changing this shape.
  */
 import * as Effect from "effect/Effect";
 import * as Latch from "effect/Latch";
@@ -29,7 +29,7 @@ import { ProfilesLayer } from "./permissions";
 import { SettingsOperationsLayer } from "./settings";
 import { SetupLayer } from "./setup";
 import { ProjectServiceLayer } from "./projects";
-import { RunnerJoinLayer, RunnerServiceLayer } from "./runners";
+import { RunnerJoinLayer, RunnerPresenceLayer, RunnerServiceLayer } from "./runners";
 import { TaskServiceLayer } from "./tasks";
 import { UserLayer } from "./users";
 
@@ -173,6 +173,7 @@ const listen = (outcome: BootOutcome, stopped: Effect.Effect<void>) =>
         ProjectServiceLayer,
         RunnerServiceLayer,
         RunnerJoinLayer,
+        RunnerPresenceLayer,
         EventServiceLayer,
         LiveTopicsLayer,
         WsTicketsLayer,

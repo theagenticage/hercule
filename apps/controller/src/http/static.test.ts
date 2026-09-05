@@ -38,7 +38,7 @@ afterAll(() => {
 
 /** The controller with the bundle mounted; every request here is a browser's. */
 const withBundle = (body: (base: string) => Promise<void>): Promise<void> =>
-  withServer(async ({ base }) => body(base), bundle);
+  withServer(async ({ base }) => body(base), { bundle });
 
 describe("the page", () => {
   it("serves index.html at the root, revalidated on every load", async () => {

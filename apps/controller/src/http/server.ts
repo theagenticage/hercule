@@ -13,13 +13,15 @@
  * 5. the credential gate and the static grant check (`./middleware.ts`),
  * 6. the derived route's decoding, then the one-line handler.
  *
- * Two routes are not derived from the contract's HttpApi declaration. The live
+ * Three routes are not derived from the contract's HttpApi declaration. The live
  * socket at `GET /ws` stops at step 4: it passes the pre-setup gate and then
  * authenticates itself in its own first frame, because a browser cannot put a
  * credential on a WebSocket handshake. The join at `POST /api/v1/runners/join`
  * stops before it: the caller is a machine holding a single-use join token
  * rather than a user, and the controller's own local runner joins before
- * anybody has set Hydra up.
+ * anybody has set Hydra up. The runner socket at `GET /api/v1/runners/socket`
+ * stops there too, and for the same reason: what it presents is a runner's
+ * durable credential, which no operation accepts and no grant belongs to.
  *
  * The body cap is not in that order: it is the listener's, given to Bun as
  * `maxRequestBodySize` and, for the socket, as `maxPayloadLength`, so an
@@ -45,7 +47,7 @@ import { responseFor, withEnvelope } from "./envelope";
 import { setupGate } from "./gate";
 import { AuthenticatedLayer, SetupTokenLayer } from "./middleware";
 import { LiveSocketLayer } from "../live";
-import { RunnerJoinRouteLayer } from "../runners";
+import { RunnerJoinRouteLayer, RunnerPresence, RunnerSocketRouteLayer } from "../runners";
 import { handlerLayers } from "./routes";
 import { withWebBundle, type WebBundle } from "./static";
 
@@ -156,7 +158,9 @@ const liveLayer = LiveSocketLayer.pipe(Layer.provide(setupGate.layer));
 
 const application = (bundle: WebBundle | undefined) =>
   Effect.map(
-    HttpRouter.toHttpEffect(Layer.mergeAll(routerLayer, liveLayer, RunnerJoinRouteLayer)),
+    HttpRouter.toHttpEffect(
+      Layer.mergeAll(routerLayer, liveLayer, RunnerJoinRouteLayer, RunnerSocketRouteLayer),
+    ),
     (routes) => withEnvelope(withWebBundle(bundle)(jsonOnly(routes))),
   );
 
@@ -169,4 +173,13 @@ const application = (bundle: WebBundle | undefined) =>
  * or without it, and a checkout that was never built has none.
  */
 export const serve = (bundle: WebBundle | undefined) =>
-  Effect.flatMap(application(bundle), HttpServer.serveEffect());
+  Effect.gen(function* () {
+    // Before anything can dial: a runner row saying `online` means a connection
+    // is open, and no connection survives the process that held it. A
+    // controller killed rather than drained would otherwise show its whole
+    // fleet as ready for work for ever, because the only thing that moves a
+    // runner off `online` is the connection that put it there.
+    const presence = yield* RunnerPresence;
+    yield* Effect.orDie(presence.strandedByTheLastRun);
+    yield* Effect.flatMap(application(bundle), HttpServer.serveEffect());
+  });
