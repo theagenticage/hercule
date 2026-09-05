@@ -7,9 +7,10 @@
  * later.
  */
 import { describe, expect, it } from "vitest";
+import { Effect } from "effect";
 import type { Runner } from "@hydra/contract";
 import type { ServerHarness } from "../http/testing";
-import { completeSetup, get, send, withServer } from "../http/testing";
+import { SETUP_TOKEN, completeSetup, get, post, send, withServer } from "../http/testing";
 
 interface RunnerPage {
   readonly items: ReadonlyArray<Runner>;
@@ -36,6 +37,94 @@ const patch = (base: string, token: string, id: string, body: unknown): Promise<
 
 const names = (page: RunnerPage): ReadonlyArray<string> =>
   page.items.map((runner) => runner.name).sort();
+
+/** What a machine is handed when it joins. */
+interface JoinAnswer {
+  readonly runnerId: string;
+  readonly credential: string;
+  readonly controllerIdentityId: string;
+  readonly controllerPublicKey: string;
+  readonly name: string;
+}
+
+/** Every row of a table, whatever columns it turns out to have. */
+const allRows = (
+  sql: ServerHarness["sql"],
+  table: string,
+): Promise<ReadonlyArray<Record<string, unknown>>> =>
+  Effect.runPromise(Effect.orDie(sql.unsafe<Record<string, unknown>>(`SELECT * FROM ${table}`)));
+
+/**
+ * The join tokens as the database holds them.
+ *
+ * The table is found through the schema rather than named here, so what is
+ * asserted is what the database really stores and not what this file guessed
+ * it would be called.
+ */
+const joinTokens = async (
+  sql: ServerHarness["sql"],
+): Promise<{ readonly table: string; readonly rows: ReadonlyArray<Record<string, unknown>> }> => {
+  const tables = await Effect.runPromise(
+    Effect.orDie(
+      sql<{ readonly name: string }>`
+        SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE '%join%token%'`,
+    ),
+  );
+  expect(
+    tables.map((one) => one.name),
+    "exactly one table holds the join tokens",
+  ).toHaveLength(1);
+  const table = tables[0]!.name;
+  return { table, rows: await allRows(sql, table) };
+};
+
+/**
+ * Ages the token that expires at this instant by two hours, because nothing
+ * over the wire can wait an hour. Every instant on the row moves together, so
+ * what the row describes is a token minted two hours ago and expired one hour
+ * ago rather than one that expired before it was minted; the columns are found
+ * by their values, so no column name is written here.
+ */
+const expire = async (sql: ServerHarness["sql"], expiresAt: string): Promise<void> => {
+  const TWO_HOURS = 2 * 60 * 60 * 1000;
+  const { table, rows } = await joinTokens(sql);
+  const instant = Date.parse(expiresAt);
+  const parsed = (value: unknown): number | undefined =>
+    typeof value === "string" && !Number.isNaN(Date.parse(value)) ? Date.parse(value) : undefined;
+  const row = rows.find((one) => Object.values(one).some((value) => parsed(value) === instant));
+  expect(row, `no column holds the expiry ${expiresAt} the mint answered with`).toBeDefined();
+  const moved = Object.entries(row!).flatMap(([column, value]) => {
+    const at = parsed(value);
+    return at === undefined ? [] : [[column, new Date(at - TWO_HOURS).toISOString()] as const];
+  });
+  const sets = moved.map(([column]) => `${column} = ?`).join(", ");
+  await Effect.runPromise(
+    Effect.orDie(
+      sql.unsafe(`UPDATE ${table} SET ${sets} WHERE ${moved[0]![0]} = ?`, [
+        ...moved.map(([, value]) => value),
+        String(row![moved[0]![0]]),
+      ]),
+    ),
+  );
+};
+
+/** Mints a join token the way the fleet's "Add machine" spot does. */
+const mint = async (
+  base: string,
+  token: string,
+): Promise<{ readonly token: string; readonly expiresAt: string }> => {
+  const response = await post(base, "/api/v1/runners/join-tokens", {}, token);
+  expect(response.status, await response.clone().text()).toBe(201);
+  return (await response.json()) as { token: string; expiresAt: string };
+};
+
+/** The join exchange, as a machine holding a join token makes it. */
+const join = (base: string, bearer: string): Promise<Response> =>
+  send("POST", base, "/api/v1/runners/join", { body: {}, token: bearer });
+
+/** How many runners the controller has enlisted. */
+const runnerCount = async (base: string, token: string): Promise<number> =>
+  (await list(base, token)).items.length;
 
 /** Three rows: three states, one of them labelled `gpu`. */
 const three = async (harness: ServerHarness) => ({
@@ -322,6 +411,7 @@ describe("the infra routes with no credential", () => {
           body: { name: "iris-2" },
         }),
         await send("PATCH", harness.base, "/api/v1/controller", { body: {} }),
+        await send("POST", harness.base, "/api/v1/runners/join-tokens", { body: {} }),
       ];
 
       for (const response of responses) {
@@ -331,6 +421,206 @@ describe("the infra routes with no credential", () => {
 
       // Nothing an anonymous request sent changed anything.
       expect(await read(harness.base, token, runner.id)).toMatchObject({ name: "iris" });
+    });
+  });
+});
+
+describe("POST /runners/join-tokens", () => {
+  it("mints a fresh single-use token, good for an hour, that the database never holds", async () => {
+    await withServer(async (harness) => {
+      const token = await completeSetup(harness.base);
+      const before = Date.now();
+
+      const first = await mint(harness.base, token);
+      const second = await mint(harness.base, token);
+
+      expect(first.token).not.toBe(second.token);
+      for (const minted of [first, second]) {
+        expect(typeof minted.token).toBe("string");
+        expect(minted.token.length).toBeGreaterThan(0);
+        const ahead = Date.parse(minted.expiresAt) - before;
+        expect(ahead).toBeGreaterThan(59 * 60 * 1000);
+        expect(ahead).toBeLessThanOrEqual(61 * 60 * 1000);
+      }
+
+      // The token is a bearer secret: whoever reads the database must not be
+      // able to join with what they find there.
+      const { rows } = await joinTokens(harness.sql);
+      expect(rows).toHaveLength(2);
+      for (const row of rows) {
+        for (const [column, value] of Object.entries(row)) {
+          for (const minted of [first, second]) {
+            expect(String(value), `${column} holds the token itself`).not.toContain(minted.token);
+          }
+        }
+      }
+    });
+  });
+
+  it("clears out the tokens that can no longer be spent", async () => {
+    await withServer(async (harness) => {
+      const token = await completeSetup(harness.base);
+      const stale = await mint(harness.base, token);
+      await expire(harness.sql, stale.expiresAt);
+
+      // The "Add machine" spot mints one every time it is opened, so without
+      // this the table would grow with the number of times somebody looked.
+      const fresh = await mint(harness.base, token);
+      const { rows } = await joinTokens(harness.sql);
+      expect(rows).toHaveLength(1);
+
+      expect((await join(harness.base, stale.token)).status).toBe(401);
+      expect((await join(harness.base, fresh.token)).status).toBe(201);
+    });
+  });
+});
+
+describe("POST /runners/join", () => {
+  it("enlists a machine, hands it a credential, and stores only the credential's hash", async () => {
+    await withServer(async (harness) => {
+      const token = await completeSetup(harness.base);
+      const minted = await mint(harness.base, token);
+
+      const response = await send("POST", harness.base, "/api/v1/runners/join", {
+        body: {},
+        token: minted.token,
+      });
+      const body = await response.text();
+      expect([200, 201], body).toContain(response.status);
+      const answer = JSON.parse(body) as JoinAnswer;
+
+      for (const field of [
+        "runnerId",
+        "credential",
+        "controllerIdentityId",
+        "controllerPublicKey",
+        "name",
+      ]) {
+        expect(Object.keys(answer), `the join answer carries ${field}`).toContain(field);
+      }
+      expect(answer.credential.length).toBeGreaterThan(0);
+      expect(answer.name.length).toBeGreaterThan(0);
+
+      // The identity a runner pins is the one the controller publishes.
+      const controller = (await (await get(harness.base, "/api/v1/controller", token)).json()) as {
+        id: string;
+        publicKey: string;
+      };
+      expect(answer.controllerIdentityId).toBe(controller.id);
+      expect(answer.controllerPublicKey).toBe(controller.publicKey);
+
+      const row = await read(harness.base, token, answer.runnerId);
+      expect(row).toMatchObject({ id: answer.runnerId, name: answer.name, state: "offline" });
+
+      const runnerRows = await allRows(harness.sql, "runners");
+      expect(runnerRows).toHaveLength(1);
+      for (const [column, value] of Object.entries(runnerRows[0]!)) {
+        expect(String(value), `${column} holds the credential itself`).not.toContain(
+          answer.credential,
+        );
+      }
+    });
+  });
+
+  it("refuses a second use of the same token, and enlists nothing", async () => {
+    await withServer(async (harness) => {
+      const token = await completeSetup(harness.base);
+      const minted = await mint(harness.base, token);
+
+      expect((await join(harness.base, minted.token)).status).toBeLessThan(300);
+      expect(await runnerCount(harness.base, token)).toBe(1);
+
+      const again = await join(harness.base, minted.token);
+      expect(again.status).toBe(401);
+      expect(await runnerCount(harness.base, token)).toBe(1);
+    });
+  });
+
+  it("refuses a token older than an hour, and enlists nothing", async () => {
+    await withServer(async (harness) => {
+      const token = await completeSetup(harness.base);
+      const minted = await mint(harness.base, token);
+      await expire(harness.sql, minted.expiresAt);
+
+      const response = await join(harness.base, minted.token);
+      expect(response.status).toBe(401);
+      expect(await runnerCount(harness.base, token)).toBe(0);
+    });
+  });
+
+  it("enlists a second machine under a name of its own", async () => {
+    await withServer(async (harness) => {
+      const token = await completeSetup(harness.base);
+      const first = JSON.parse(
+        await (await join(harness.base, (await mint(harness.base, token)).token)).text(),
+      ) as JoinAnswer;
+      const second = JSON.parse(
+        await (await join(harness.base, (await mint(harness.base, token)).token)).text(),
+      ) as JoinAnswer;
+
+      expect(second.runnerId).not.toBe(first.runnerId);
+      expect(second.name).not.toBe(first.name);
+      expect(second.credential).not.toBe(first.credential);
+      expect(names(await list(harness.base, token))).toEqual([first.name, second.name].sort());
+    });
+  });
+
+  it("is reachable before Hydra has been set up, because the local runner joins then", async () => {
+    await withServer(async (harness) => {
+      const response = await join(harness.base, await harness.joinToken());
+      expect(response.status, await response.clone().text()).toBe(201);
+
+      // Every operation is still closed: setup has not happened.
+      expect((await get(harness.base, "/api/v1/runners")).status).toBe(401);
+    });
+  });
+
+  it("records the enlistment as the system's own doing", async () => {
+    await withServer(async (harness) => {
+      const token = await completeSetup(harness.base);
+      const minted = await mint(harness.base, token);
+      const answer = JSON.parse(
+        await (await join(harness.base, minted.token)).text(),
+      ) as JoinAnswer;
+
+      // Read back over the wire, because a `system` stamp the event schema
+      // cannot encode would fail the whole page rather than the row.
+      const log = (await (await get(harness.base, "/api/v1/events", token)).json()) as {
+        items: ReadonlyArray<{
+          kind: string;
+          actor: string | null;
+          payload: Record<string, unknown>;
+        }>;
+      };
+      const joined = log.items.find((entry) => entry.kind === "runner.joined");
+      expect(joined).toBeDefined();
+      expect(joined!.actor, "nobody holding a credential asked for this row").toBe("system");
+      expect(joined!.payload).toMatchObject({ runnerId: answer.runnerId, name: answer.name });
+
+      const mintedRow = log.items.find((entry) => entry.kind === "runner.joinToken.minted");
+      expect(mintedRow).toBeDefined();
+      expect(mintedRow!.actor).toBe("user");
+      // The two entries name the same invitation, which is what makes the log
+      // able to say which mint let which machine in.
+      expect(mintedRow!.payload["joinTokenId"]).toBe(joined!.payload["joinTokenId"]);
+      for (const entry of log.items) {
+        expect(JSON.stringify(entry.payload)).not.toContain(minted.token);
+      }
+    });
+  });
+
+  it("refuses an unknown token and a user credential, and enlists nothing", async () => {
+    await withServer(async (harness) => {
+      const token = await completeSetup(harness.base);
+      await mint(harness.base, token);
+
+      // A user's own credential is not a join token: the two populations are
+      // separate, and a bearer that opens the API must not enlist a machine.
+      for (const bearer of ["a-token-nobody-minted", token, SETUP_TOKEN]) {
+        const response = await join(harness.base, bearer);
+        expect(response.status, bearer).toBe(401);
+      }
+      expect(await runnerCount(harness.base, token)).toBe(0);
     });
   });
 });

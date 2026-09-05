@@ -103,6 +103,11 @@ const TABLE = {
   "runner.query": { requires: "infra.read", method: "GET", path: "/api/v1/runners" },
   "runner.read": { requires: "infra.read", method: "GET", path: "/api/v1/runners/:id" },
   "runner.update": { requires: "infra.write", method: "PATCH", path: "/api/v1/runners/:id" },
+  "runner.createJoinToken": {
+    requires: "infra.write",
+    method: "POST",
+    path: "/api/v1/runners/join-tokens",
+  },
 
   "controller.read": { requires: "infra.read", method: "GET", path: "/api/v1/controller" },
   "controller.update": { requires: "infra.write", method: "PATCH", path: "/api/v1/controller" },

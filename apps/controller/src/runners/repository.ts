@@ -121,6 +121,13 @@ const make = Effect.gen(function* () {
         (rows) => Option.fromNullishOr(rows[0]).pipe(Option.map(toDetail)),
       ),
 
+    /** Every name the fleet holds, so a joining machine can be given a free one. */
+    names: (): Effect.Effect<ReadonlySet<string>, SqlError> =>
+      Effect.map(
+        sql<{ readonly name: string }>`SELECT name FROM runners`,
+        (rows) => new Set(rows.map((row) => row.name)),
+      ),
+
     /** Enlists a runner. Everything it reports about itself arrives later. */
     insert: (runner: NewRunner): Effect.Effect<RunnerDetail, SqlError> =>
       Effect.gen(function* () {

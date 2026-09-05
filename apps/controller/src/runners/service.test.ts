@@ -8,12 +8,13 @@
  */
 import { describe, expect, it } from "vitest";
 import { Effect, Layer } from "effect";
+import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { AuditLogLayer } from "../events";
 import { TestDatabase } from "../db/testing";
-import { RunnerService, RunnerServiceLayer } from "./index";
+import { JoinTokensLayer, RunnerService, RunnerServiceLayer } from "./index";
 
 const layer = RunnerServiceLayer.pipe(
-  Layer.provideMerge(AuditLogLayer),
+  Layer.provideMerge(Layer.mergeAll(AuditLogLayer, JoinTokensLayer)),
   Layer.provideMerge(TestDatabase),
 );
 
@@ -43,5 +44,21 @@ describe("a caller with no actor", () => {
     expect(error).toMatchObject({
       error: { code: "forbidden", details: { grant: "infra.write" } },
     });
+  });
+
+  it("is refused infra.write by createJoinToken, before a token is minted", async () => {
+    const error = await failure(
+      Effect.flatMap(RunnerService, (runners) => runners.createJoinToken()),
+    );
+    expect(error).toMatchObject({
+      error: { code: "forbidden", details: { grant: "infra.write" } },
+    });
+    const rows = await Effect.runPromise(
+      Effect.flatMap(
+        SqlClient.SqlClient,
+        (sql) => sql`SELECT token_hash FROM runner_join_tokens`,
+      ).pipe(Effect.provide(layer), Effect.orDie),
+    );
+    expect(rows).toHaveLength(0);
   });
 });

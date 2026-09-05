@@ -15,6 +15,7 @@
 import { Schema } from "effect";
 import * as HttpApiEndpoint from "effect/unstable/httpapi/HttpApiEndpoint";
 import * as HttpApiGroup from "effect/unstable/httpapi/HttpApiGroup";
+import * as HttpApiSchema from "effect/unstable/httpapi/HttpApiSchema";
 import { closedStruct } from "../closed";
 import { Forbidden, Internal, NotFound, Unauthenticated, Validation } from "../errors";
 import { Id, Timestamp } from "../ids";
@@ -167,6 +168,18 @@ export const RunnerUpdateInput = closedStruct(RUNNER_EDIT_FIELDS);
 
 export type RunnerUpdateInput = Schema.Schema.Type<typeof RunnerUpdateInput>;
 
+/**
+ * A freshly minted join token. Like an API key's token it is shown here and
+ * nowhere else: the controller keeps only its hash, so a token nobody wrote
+ * down is a token nobody can use.
+ */
+export const MintedJoinToken = Schema.Struct({
+  token: Schema.NonEmptyString,
+  expiresAt: Timestamp,
+});
+
+export type MintedJoinToken = Schema.Schema.Type<typeof MintedJoinToken>;
+
 export const runner = HttpApiGroup.make("runner")
   .add(
     HttpApiEndpoint.get("query", "/runners", {
@@ -187,6 +200,10 @@ export const runner = HttpApiGroup.make("runner")
       payload: RunnerUpdateInput,
       success: RunnerDetail,
       error: [Unauthenticated, Forbidden, Validation, NotFound, Internal],
+    }),
+    HttpApiEndpoint.post("createJoinToken", "/runners/join-tokens", {
+      success: HttpApiSchema.status(201)(MintedJoinToken),
+      error: [Unauthenticated, Forbidden, Validation, Internal],
     }),
   )
   .middleware(Authenticated);

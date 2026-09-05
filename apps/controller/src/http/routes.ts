@@ -187,7 +187,8 @@ const runnerRoutes = HttpApiBuilder.group(api, "runner", (handlers) =>
       .handle("read", ({ params }) => operation(runners.read(params)))
       .handle("update", ({ params, payload }) =>
         operation(runners.update({ id: params.id, ...payload })),
-      );
+      )
+      .handle("createJoinToken", () => operation(runners.createJoinToken()));
   }),
 );
 

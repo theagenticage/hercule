@@ -1,5 +1,6 @@
 /**
- * Runners as the API sees them: `runner.query`, `read` and `update`.
+ * Runners as the API sees them: `runner.query`, `read`, `update` and the mint
+ * that invites a machine to join.
  *
  * A runner is almost entirely self-describing. Its state, version, negotiated
  * capabilities, probed facts and watermark all arrive over the runner protocol
@@ -28,6 +29,7 @@ import {
   RunnerFilter,
   validationOf,
   type Forbidden,
+  type MintedJoinToken,
   type NotFound,
   type Runner,
   type RunnerDetail,
@@ -38,6 +40,7 @@ import {
 import { requireGrant, USER_ACTOR } from "../actor";
 import { nowIso, pageInput, refuseCursor, withTransaction } from "../db";
 import { AuditLog } from "../events";
+import { JoinTokens } from "./join-tokens";
 import { runnerRepository, type RunnerEdit } from "./repository";
 
 /** What listing takes: how much of it, and what narrows it. */
@@ -88,6 +91,7 @@ const sameLabels = (left: ReadonlyArray<string>, right: ReadonlyArray<string>): 
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const runners = yield* runnerRepository;
+  const joinTokens = yield* JoinTokens;
   const audit = yield* AuditLog;
 
   const one = (id: string): Effect.Effect<RunnerDetail, NotFound | SqlError> =>
@@ -196,6 +200,32 @@ const make = Effect.gen(function* () {
           }),
         );
       }),
+
+    /**
+     * Mints an invitation for one machine. The token is in the answer and
+     * nowhere else; the fleet's "Add machine" spot mints a fresh one every time
+     * it is opened, so an expired one costs a page refresh.
+     */
+    createJoinToken: (): Effect.Effect<MintedJoinToken, Unauthenticated | Forbidden | SqlError> =>
+      Effect.gen(function* () {
+        yield* requireGrant("runner.createJoinToken");
+        return yield* withTransaction(
+          sql,
+          Effect.gen(function* () {
+            const at = yield* nowIso;
+            const minted = yield* joinTokens.create(at);
+            yield* audit.append({
+              kind: "runner.joinToken.minted",
+              actor: USER_ACTOR,
+              // The token itself is a bearer secret; the invitation's id is
+              // what ties this entry to the machine that spends it.
+              payload: { joinTokenId: minted.id, expiresAt: minted.expiresAt },
+              at,
+            });
+            return minted;
+          }),
+        );
+      }),
   };
 });
 
@@ -204,5 +234,8 @@ export class RunnerService extends Context.Service<RunnerService, Effect.Success
   "hydra/controller/runners/RunnerService",
 ) {}
 
-export const RunnerServiceLayer: Layer.Layer<RunnerService, never, SqlClient.SqlClient | AuditLog> =
-  Layer.effect(RunnerService)(make);
+export const RunnerServiceLayer: Layer.Layer<
+  RunnerService,
+  never,
+  SqlClient.SqlClient | JoinTokens | AuditLog
+> = Layer.effect(RunnerService)(make);

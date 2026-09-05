@@ -2,11 +2,14 @@
  * The controller-runner protocol: one versioned catalogue of the messages that
  * cross the single WebSocket a runner holds with its controller.
  *
- * Two tagged unions, one per direction, and nothing else. A message is a
- * struct with a `_tag`; anything a peer sends that is not in its direction's
- * union fails to decode, and a hello that cannot be honoured is answered by
- * closing the socket with a reason rather than by a message, so the catalogue
- * carries no error member.
+ * Two tagged unions, one per direction, plus the one HTTP exchange that comes
+ * before the socket exists: the answer a joining machine is handed, which is
+ * where it learns the identity it will pin the socket's controller against.
+ *
+ * A message is a struct with a `_tag`; anything a peer sends that is not in its
+ * direction's union fails to decode, and a hello that cannot be honoured is
+ * answered by closing the socket with a reason rather than by a message, so the
+ * catalogue carries no error member.
  *
  * The version is the compatibility gate, so `protocolVersion` is an ordinary
  * integer rather than a literal: a hello claiming a version this build does not
@@ -117,6 +120,24 @@ export const RunnerWatermark = Schema.Struct({
 });
 
 export type RunnerWatermark = Schema.Schema.Type<typeof RunnerWatermark>;
+
+/**
+ * What the controller hands a machine that presented a valid join token.
+ *
+ * The credential is the bearer secret the runner puts on every later socket
+ * upgrade, and it is in this one answer and nowhere else. The identity and its
+ * public key are what the runner pins: a controller is a logical identity, not
+ * an address, so a hello signed by another key is refused wherever it appears.
+ */
+export const JoinAnswer = Schema.Struct({
+  runnerId: Fact,
+  name: Fact,
+  credential: Fact,
+  controllerIdentityId: Fact,
+  controllerPublicKey: Base64,
+});
+
+export type JoinAnswer = Schema.Schema.Type<typeof JoinAnswer>;
 
 /**
  * The envelope every replayable runner event carries, so the controller can

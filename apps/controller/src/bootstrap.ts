@@ -43,6 +43,7 @@ import {
   type MasterKeyError,
   type SecretNameError,
 } from "./secrets";
+import { JoinTokens, JoinTokensLayer } from "./runners";
 import { seed } from "./seed";
 import { Settings, SettingsLayer, type SettingError } from "./settings";
 
@@ -168,6 +169,7 @@ export type ControllerServices =
   | PermissionProfiles
   | Users
   | Credentials
+  | JoinTokens
   | HydraHome
   | BootstrapConfig;
 
@@ -203,6 +205,7 @@ export const bootWith = <A, E>(
       UsersLayer,
       CredentialsLayer,
       AuditLogLayer,
+      JoinTokensLayer,
     ).pipe(
       Layer.provideMerge(
         secretsLayer.pipe(Layer.provide(masterKeyLayer(options.masterKeyBackend))),

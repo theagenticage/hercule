@@ -36,7 +36,13 @@ import { PermissionProfilesLayer, ProfilesLayer } from "../permissions";
 import { SettingsLayer, SettingsOperationsLayer } from "../settings";
 import { SetupLayer } from "../setup";
 import { ProjectServiceLayer } from "../projects";
-import { RunnerServiceLayer, runnerRepository } from "../runners";
+import {
+  JoinTokens,
+  JoinTokensLayer,
+  RunnerJoinLayer,
+  RunnerServiceLayer,
+  runnerRepository,
+} from "../runners";
 import { TaskServiceLayer } from "../tasks";
 import { PasswordCost, TEST_PASSWORD_PARAMS, UserLayer, UsersLayer } from "../users";
 import { seed } from "../seed";
@@ -62,6 +68,7 @@ const services = (home: string) =>
     TaskServiceLayer,
     ProjectServiceLayer,
     RunnerServiceLayer,
+    RunnerJoinLayer,
     EventServiceLayer,
     LiveTopicsLayer,
     WsTicketsLayer,
@@ -74,6 +81,7 @@ const services = (home: string) =>
         PermissionProfilesLayer,
         AuditLogLayer,
         controllerIdentityLayer,
+        JoinTokensLayer,
         PermissionProfilesLayer,
       ),
     ),
@@ -104,6 +112,13 @@ export type RunnerArranger = (fields: {
   readonly maxConcurrentSessions?: number;
 }) => Promise<Runner>;
 
+/**
+ * Mints a join token. `runner.createJoinToken` is how a person gets one, but it
+ * needs a credential, and the join is reachable before anybody has one - the
+ * controller's own first boot mints for its child through this same repository.
+ */
+export type JoinTokenArranger = () => Promise<string>;
+
 /** Reads back what the controller is holding for the clients on its live socket. */
 export interface LiveReader {
   readonly subscriberCount: (topic: LiveTopic) => Promise<number>;
@@ -117,6 +132,7 @@ export interface ServerHarness {
   readonly sql: SqlClient.SqlClient;
   readonly live: LiveReader;
   readonly insertRunner: RunnerArranger;
+  readonly joinToken: JoinTokenArranger;
 }
 
 /**
@@ -174,7 +190,14 @@ export const withServer = (
               ),
             ),
           );
-        yield* Effect.promise(() => body({ base, audit, sql, live, insertRunner }));
+        const tokens = yield* JoinTokens;
+        const joinToken: JoinTokenArranger = () =>
+          Effect.runPromise(
+            Effect.orDie(
+              Effect.flatMap(nowIso, (at) => Effect.map(tokens.create(at), (one) => one.token)),
+            ),
+          );
+        yield* Effect.promise(() => body({ base, audit, sql, live, insertRunner, joinToken }));
       }),
     ).pipe(
       Effect.provide(

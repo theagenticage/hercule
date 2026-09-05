@@ -65,6 +65,17 @@ export const CurrentActor = Context.Reference<Actor>("hydra/controller/actor/Cur
 export const USER_ACTOR = "user";
 
 /**
+ * How a mutation Hydra made on nobody's behalf is stamped. Enlisting a machine
+ * that presented a join token, and everything that machine reports about itself
+ * afterwards, are changes with no credential behind them and still have to say
+ * who made them.
+ *
+ * It is a stamp and never an actor: nothing carrying it reaches an operation,
+ * so `grantCheck` never sees it and the union above gains no member.
+ */
+export const SYSTEM_ACTOR = "system";
+
+/**
  * Whether this actor may reach an operation with this requirement, and which
  * grant it is missing if it may not.
  *

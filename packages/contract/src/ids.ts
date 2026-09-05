@@ -31,13 +31,18 @@ export type Timestamp = Schema.Schema.Type<typeof Timestamp>;
  * Who performed an operation. Derived from the
  * credential, never supplied by the caller; widened when multi-user arrives,
  * never restructured.
+ *
+ * `system` is Hydra itself: a mutation that nothing holding a credential asked
+ * for. Enlisting a machine that presented a join token, and everything a runner
+ * reports about itself afterwards, are its writes - a runner is never an actor,
+ * because it can do nothing on the public API.
  */
 export const Actor = Schema.String.check(
   Schema.isPattern(
-    /^(user|(session|run):[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}|plugin:[a-z0-9][a-z0-9-]*)$/,
+    /^(user|system|(session|run):[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}|plugin:[a-z0-9][a-z0-9-]*)$/,
     {
       title: "actor",
-      description: "`user`, `session:<id>`, `run:<id>` or `plugin:<id>`",
+      description: "`user`, `system`, `session:<id>`, `run:<id>` or `plugin:<id>`",
     },
   ),
 );

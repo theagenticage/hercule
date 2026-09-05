@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { Effect, Schema } from "effect";
 import {
   ControllerToRunner,
+  JoinAnswer,
   PROTOCOL_VERSION,
   RunnerToController,
   Sequenced,
@@ -234,5 +235,41 @@ describe("the bare messages", () => {
       Schema.decodeUnknownEffect(ControllerToRunner)({ _tag: "ping", seq: 3 }),
     );
     expect(Object.keys(decoded)).toEqual(["_tag"]);
+  });
+});
+
+describe("the join answer", () => {
+  const answer = {
+    runnerId: "0199e0e7-1111-7000-8000-000000000000",
+    name: "thalia",
+    credential: "sqEs5ZE0Kk_1Rz9dJqjqxN9lHkGx2xhK1zC1tXqU2Yw",
+    controllerIdentityId: "0199e0e7-2222-7000-8000-000000000000",
+    controllerPublicKey: "IH5nqcbHvGUYs1n9y0sBnPGSNVYA3ZfCpZKDvXH7pqA=",
+  } as const;
+
+  const decode = (input: unknown) =>
+    Effect.runSyncExit(Schema.decodeUnknownEffect(JoinAnswer)(input));
+
+  it("round-trips what the controller hands a joining machine", () => {
+    const decoded = decode(answer);
+    expect(decoded._tag).toBe("Success");
+    expect(Effect.runSync(Schema.encodeEffect(JoinAnswer)(answer))).toEqual(answer);
+  });
+
+  it("needs every field", () => {
+    for (const key of Object.keys(answer)) {
+      expect(decode(without(answer, key))._tag, key).toBe("Failure");
+    }
+  });
+
+  it("refuses a public key that is not standard base64, and an unbounded string", () => {
+    // The URL-safe alphabet is a different encoding, and a key in it would
+    // fail later as a signature that will not verify.
+    expect(
+      decode({ ...answer, controllerPublicKey: "IH5nqcbHvGUYs1n9-0sBnPGSNVYA3ZfCpZKDvXH7pqA=" })
+        ._tag,
+    ).toBe("Failure");
+    expect(decode({ ...answer, credential: "x".repeat(513) })._tag).toBe("Failure");
+    expect(decode({ ...answer, name: "" })._tag).toBe("Failure");
   });
 });
