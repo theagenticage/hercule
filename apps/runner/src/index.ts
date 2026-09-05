@@ -82,23 +82,6 @@ const hold = async (work: Effect.Effect<void, { readonly message: string }>): Pr
   }
 };
 
-/** The value of `--token`, or nothing when the flag is absent or bare. */
-const tokenOf = (argv: ReadonlyArray<string>): string | undefined => {
-  const flag = argv.indexOf("--token");
-  return flag < 0 ? undefined : argv[flag + 1];
-};
-
-/** Everything on the line that is neither a flag nor a flag's value. */
-const positionals = (argv: ReadonlyArray<string>): ReadonlyArray<string> => {
-  const rest: Array<string> = [];
-  for (let i = 0; i < argv.length; i++) {
-    const token = argv[i]!;
-    if (token === "--token") i++;
-    else if (!token.startsWith("-")) rest.push(token);
-  }
-  return rest;
-};
-
 /** Refuses the line, saying how it should have read. */
 const misuse = (reason: string): void => {
   console.error(`hydra: ${reason}`);
@@ -134,9 +117,14 @@ export async function run(argv: readonly string[]): Promise<void> {
     return;
   }
 
-  const [, ...targets] = positionals(rest);
+  const args = rest.slice(1);
+  const flag = args.indexOf("--token");
+  const token = flag < 0 ? undefined : args[flag + 1];
+  // Whatever is left once the flag and its value are struck out is the URL, and
+  // there is exactly one of those, so a stray flag is refused rather than
+  // ignored.
+  const targets = flag < 0 ? args : args.filter((_, at) => at !== flag && at !== flag + 1);
   const controllerUrl = targets[0];
-  const token = tokenOf(rest);
   if (controllerUrl === undefined) {
     misuse("join needs the controller's URL");
     return;
