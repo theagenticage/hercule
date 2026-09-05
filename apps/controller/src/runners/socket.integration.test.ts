@@ -26,6 +26,7 @@ import { Duration, Effect, Schema } from "effect";
 import {
   ControllerToRunner,
   PROTOCOL_VERSION,
+  signedChallenge,
   type ControllerHello,
   type ControllerToRunner as ControllerMessage,
   type JoinAnswer,
@@ -227,8 +228,11 @@ const rowWhen = async (
   return row;
 };
 
-/** Whether the controller's signature over the runner's nonce is really its own. */
-const verifies = async (hello: ControllerHello, sent: RunnerHello): Promise<boolean> => {
+/** Whether the controller's signature over the given bytes is really its own. */
+const verifies = async (
+  hello: ControllerHello,
+  payload: Uint8Array<ArrayBuffer>,
+): Promise<boolean> => {
   const key = await crypto.subtle.importKey(
     "spki",
     bytes(hello.publicKey),
@@ -236,7 +240,7 @@ const verifies = async (hello: ControllerHello, sent: RunnerHello): Promise<bool
     false,
     ["verify"],
   );
-  return crypto.subtle.verify({ name: "Ed25519" }, key, bytes(hello.signature), bytes(sent.nonce));
+  return crypto.subtle.verify({ name: "Ed25519" }, key, bytes(hello.signature), payload);
 };
 
 /** Opens a connection and greets the controller on it, answering as a runner does. */
@@ -332,7 +336,10 @@ describe("the hello exchange", () => {
       expect(answer.identityId).toBe(joined.controllerIdentityId);
       expect(answer.publicKey).toBe(joined.controllerPublicKey);
       expect(answer.nonce).toBe(sent.nonce);
-      expect(await verifies(answer, sent)).toBe(true);
+      expect(await verifies(answer, signedChallenge(joined.runnerId, sent.nonce))).toBe(true);
+      // Over the nonce alone the same signature is good on any connection, so a
+      // peer holding any runner's credential could relay it to this one.
+      expect(await verifies(answer, bytes(sent.nonce))).toBe(false);
 
       const row = await rowWhen(
         harness.base,

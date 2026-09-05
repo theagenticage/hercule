@@ -8,9 +8,9 @@
  * What the runner checks in return is that it is talking to *its* controller. A
  * controller is a logical identity, not an address, so the runner sends a fresh
  * nonce and refuses to go on unless the answer carries the id and the public key
- * its `runner.json` holds and an Ed25519 signature over that nonce made with
- * that key. All three must hold: an id it recognises is not licence to trust
- * whatever key arrives beside it.
+ * its `runner.json` holds and an Ed25519 signature made with that key over that
+ * nonce and this runner's own id. All three must hold: an id it recognises is
+ * not licence to trust whatever key arrives beside it.
  *
  * This returns when the connection ends, however it ends. Holding one open
  * again afterwards is `./reconnect.ts`.
@@ -27,6 +27,7 @@ import {
   PeerVersion,
   PROTOCOL_VERSION,
   RunnerToController,
+  signedChallenge,
   type ControllerHello,
   type RunnerFacts,
 } from "@hydra/protocol";
@@ -53,6 +54,8 @@ export const PROOF_DEADLINE: Duration.Duration = Duration.seconds(10);
 
 /** What `runner.json` says about the controller this runner belongs to. */
 export interface ControllerPin {
+  /** Who this machine is to that controller. Part of what the answer is signed over. */
+  readonly runnerId: string;
   /** Where the controller answers, as the join was told. */
   readonly controllerUrl: string;
   /** The durable credential the join handed back. */
@@ -140,7 +143,12 @@ const isOurs = (
           false,
           ["verify"],
         );
-        return crypto.subtle.verify(ED25519, key, asBytes(hello.signature), asBytes(nonce));
+        return crypto.subtle.verify(
+          ED25519,
+          key,
+          asBytes(hello.signature),
+          signedChallenge(pin.runnerId, nonce),
+        );
       }).pipe(
         // A key the runner cannot even import cannot have signed anything.
         Effect.catchCause(() => Effect.succeed(false)),

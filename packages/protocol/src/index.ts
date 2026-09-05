@@ -216,7 +216,7 @@ export const RunnerToController = Schema.Union([
 export type RunnerToController = Schema.Schema.Type<typeof RunnerToController>;
 
 /**
- * The controller's opening frame. `signature` is over the runner's nonce, made
+ * The controller's opening frame. `signature` is over `signedChallenge`, made
  * with the key `publicKey` names, which is how a runner recognises its own
  * controller at whatever address it answers on.
  */
@@ -237,6 +237,21 @@ export const ControllerHello = Schema.Struct({
 });
 
 export type ControllerHello = Schema.Schema.Type<typeof ControllerHello>;
+
+/**
+ * The bytes a controller signs when it answers a hello, and the bytes the
+ * runner verifies against.
+ *
+ * The runner's own id is in there beside the nonce it sent. Over the nonce
+ * alone, a signature would be good on any connection: anyone holding any
+ * runner credential could open a socket, forward a victim runner's nonce as
+ * its own, and relay the answer back to that victim as proof of an identity it
+ * does not have. Naming the runner ties the answer to the connection it was
+ * made for. The prefix keeps these bytes from ever being mistaken for
+ * something else the same key signs.
+ */
+export const signedChallenge = (runnerId: string, nonce: string): Uint8Array<ArrayBuffer> =>
+  new TextEncoder().encode(`hydra:runner-hello:${runnerId}:${nonce}`);
 
 /** The liveness check. A protocol frame, so it proves the runner process is alive. */
 export const Ping = Schema.Struct({ _tag: Schema.Literal("ping") });

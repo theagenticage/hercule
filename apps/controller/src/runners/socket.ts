@@ -8,8 +8,9 @@
  *
  * The proof runs the other way too. A runner pins a logical identity rather
  * than an address, so its hello carries a nonce and the answer carries the
- * controller's id, its public key and an Ed25519 signature over that nonce. A
- * runner that dialled an impostor sees the signature fail and hangs up.
+ * controller's id, its public key and an Ed25519 signature over that nonce and
+ * the runner's own id. A runner that dialled an impostor sees the signature
+ * fail and hangs up.
  *
  * Liveness is a protocol frame and never a WebSocket control frame. Bun answers
  * a control ping in the runtime, so a control frame proves the machine is up
@@ -37,12 +38,13 @@ import {
   PeerVersion,
   PROTOCOL_VERSION,
   RunnerToController,
+  signedChallenge,
   type ControllerHello,
   type RunnerHello,
 } from "@hydra/protocol";
 import { bearerOf } from "../http/bearer";
 import { responseFor } from "../http/envelope";
-import { asBytes, ControllerIdentity } from "../identity/repository";
+import { ControllerIdentity } from "../identity/repository";
 import { newConnection, RunnerPresence, type Connection, type Departure } from "./presence";
 
 /** Where a runner dials, beside the join it was enlisted through. */
@@ -132,7 +134,7 @@ const hold = (runnerId: string, socket: Socket.Socket) =>
 
     const refuse = (reason: string) => write(new Socket.CloseEvent(PROTOCOL_ERROR, reason));
 
-    /** The answer to a hello: the identity the runner pins, over its own nonce. */
+    /** The answer to a hello: the identity the runner pins, over its own challenge. */
     const greet = (hello: RunnerHello) =>
       Effect.gen(function* () {
         const controller = yield* identity.read;
@@ -141,7 +143,7 @@ const hold = (runnerId: string, socket: Socket.Socket) =>
           // socket without one is a bug rather than a state to answer.
           return yield* Effect.die("the controller has no identity row");
         }
-        const signature = yield* identity.sign(asBytes(hello.nonce));
+        const signature = yield* identity.sign(signedChallenge(runnerId, hello.nonce));
         const answer: ControllerHello = {
           _tag: "controllerHello",
           protocolVersion: PROTOCOL_VERSION,

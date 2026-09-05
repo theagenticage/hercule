@@ -16,6 +16,7 @@ import { Duration, Effect, Schema } from "effect";
 import {
   PROTOCOL_VERSION,
   RunnerToController,
+  signedChallenge,
   type ControllerHello,
   type RunnerFacts,
   type RunnerHello,
@@ -39,6 +40,10 @@ const FACTS: RunnerFacts = {
   providers: [{ name: "claude", present: true, path: "/usr/local/bin/claude" }],
   identityPort: 4939,
 };
+
+/** Who this machine is to the controller it joined, and who it is not. */
+const RUNNER_ID = "01999999-0000-7000-8000-00000000000a";
+const ANOTHER_RUNNER_ID = "01999999-0000-7000-8000-00000000000b";
 
 const base64 = (value: Uint8Array): string => Buffer.from(value).toString("base64");
 
@@ -111,7 +116,12 @@ afterEach(() => {
 /** A controller that upgrades anything and answers one hello with another. */
 const stubController = async (
   tamper: Tamper = (real) => real,
-  answers: { readonly greet?: boolean; readonly ping?: boolean } = {},
+  answers: {
+    readonly greet?: boolean;
+    readonly ping?: boolean;
+    /** What the stub puts its name to, when the test wants that to be the wrong thing. */
+    readonly signs?: (nonce: string) => Uint8Array<ArrayBuffer>;
+  } = {},
 ): Promise<Stub> => {
   const controller = await identity();
   const received: Array<RunnerMessage> = [];
@@ -147,7 +157,9 @@ const stubController = async (
           identityId: controller.id,
           publicKey: controller.publicKey,
           nonce: frame.nonce,
-          signature: await controller.sign(bytes(frame.nonce)),
+          signature: await controller.sign(
+            (answers.signs ?? ((nonce) => signedChallenge(RUNNER_ID, nonce)))(frame.nonce),
+          ),
         };
         socket.send(JSON.stringify(tamper(real, frame)));
       },
@@ -180,6 +192,7 @@ const stubController = async (
 
 /** What `runner.json` holds about the controller this runner belongs to. */
 const pinning = (stub: Stub, overrides: Partial<ControllerPin> = {}): ControllerPin => ({
+  runnerId: RUNNER_ID,
   controllerUrl: stub.url,
   credential: "the-credential-the-join-handed-back",
   controllerIdentityId: stub.identityId,
@@ -240,6 +253,24 @@ describe("the controller a runner is willing to talk to", () => {
     expect(failureOf(outcome)).toBeInstanceOf(ControllerNotRecognised);
     expect(stub.received.map((frame) => frame._tag)).toEqual(["runnerHello"]);
     expect(await stub.ended()).toBe(true);
+  });
+
+  it("hangs up on a signature that was not made for this runner, saying nothing more", async () => {
+    // The relay. A peer holding a runner credential of its own can have the
+    // controller sign anything it likes, so a signature that names another
+    // runner - or names none at all - proves nothing on this connection.
+    for (const signs of [
+      (nonce: string) => bytes(nonce),
+      (nonce: string) => signedChallenge(ANOTHER_RUNNER_ID, nonce),
+    ]) {
+      const stub = await stubController(undefined, { signs });
+
+      const outcome = await attempt(pinning(stub));
+
+      expect(failureOf(outcome)).toBeInstanceOf(ControllerNotRecognised);
+      expect(stub.received.map((frame) => frame._tag)).toEqual(["runnerHello"]);
+      expect(await stub.ended()).toBe(true);
+    }
   });
 
   it("hangs up when its own pinned key is not a key, rather than trusting the answer", async () => {
