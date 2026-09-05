@@ -52,6 +52,7 @@ import {
   type LiveTopic,
   type Task,
 } from "@hydra/contract";
+import { PROTOCOL_VERSION, type JoinAnswer, type RunnerFacts } from "@hydra/protocol";
 import { completeSetup, del, get, post, send, withServer, type LiveReader } from "../http/testing";
 
 type LiveClient = RpcClient.RpcClient<RpcGroup.Rpcs<typeof live>, RpcClientError>;
@@ -920,6 +921,189 @@ describe("greeting a connection twice", () => {
           });
 
           yield* Fiber.interrupt(tasks.fiber);
+        }),
+      );
+    });
+  });
+});
+
+describe("what a runner subscription is told", () => {
+  /** What a runner in this test says about the machine it is on. */
+  const FACTS: RunnerFacts = {
+    os: "darwin",
+    arch: "arm64",
+    totalMemoryBytes: 68719476736,
+    docker: false,
+    toolchains: [{ name: "git", version: "2.50.1", path: "/usr/bin/git" }],
+    providers: [],
+    identityPort: 4939,
+  };
+
+  /** Enlists a machine the way one enlists: a minted token, spent on the join. */
+  const enlist = async (harness: {
+    readonly base: string;
+    readonly joinToken: () => Promise<string>;
+  }): Promise<JoinAnswer> => {
+    const response = await send("POST", harness.base, "/api/v1/runners/join", {
+      body: {},
+      token: await harness.joinToken(),
+    });
+    expect(response.status, await response.clone().text()).toBe(201);
+    return (await response.json()) as JoinAnswer;
+  };
+
+  /**
+   * A machine's end of the runner socket, open and greeted. Only what a runner
+   * says is needed here: what the controller answers is the socket suite's
+   * business, and what matters on this one is that the row's changes reach a
+   * watching client.
+   */
+  const machine = async (
+    base: string,
+    credential: string,
+  ): Promise<{ say: (message: unknown) => void; close: () => void }> => {
+    const socket = new WebSocket(`${base.replace(/^http:/, "ws:")}/api/v1/runners/socket`, {
+      headers: { authorization: `Bearer ${credential}` },
+    });
+    await new Promise<void>((resolve, reject) => {
+      socket.onopen = () => resolve();
+      socket.onerror = () => reject(new Error("the controller refused the runner's upgrade"));
+      setTimeout(() => reject(new Error("the controller never upgraded the runner")), 3000);
+    });
+    return {
+      say: (message) => socket.send(JSON.stringify(message)),
+      close: () => socket.close(),
+    };
+  };
+
+  /** The ids one invalidation named, whatever kind it was. */
+  const named = (message: LiveMessage): ReadonlyArray<string> =>
+    message._tag === "invalidate" ? message.ids : [];
+
+  it("names the runner when it joins, comes online, reports facts and is patched", async () => {
+    await withServer(async (harness) => {
+      const { base } = harness;
+      const token = await completeSetup(base);
+      const ticket = await ticketFor(base, token);
+
+      await onSocket(base, (client) =>
+        Effect.gen(function* () {
+          yield* client.hello({ v: 1, ticket });
+          const fleet = yield* collecting(client, { topic: "runner" });
+          const tasks = yield* collecting(client, { topic: "task" });
+          yield* Effect.promise(() => expectHeld(harness.live, 1, "runner"));
+          yield* Effect.promise(() => expectHeld(harness.live, 1, "task"));
+
+          // A machine enlisting is a runner appearing in the fleet.
+          const joined = yield* Effect.promise(() => enlist(harness));
+          expect(yield* Effect.promise(() => within(1000, () => fleet.received.length >= 1))).toBe(
+            true,
+          );
+          expect(fleet.received[0]).toEqual({
+            _tag: "invalidate",
+            ids: [joined.runnerId],
+            kind: "created",
+          });
+
+          const runner = yield* Effect.promise(() => machine(base, joined.credential));
+          runner.say({
+            _tag: "runnerHello",
+            protocolVersion: PROTOCOL_VERSION,
+            capabilities: [],
+            binaryVersion: "0.1.0",
+            nonce: Buffer.from(crypto.getRandomValues(new Uint8Array(16))).toString("base64"),
+            facts: FACTS,
+          });
+
+          // The row is online now, which is a change a fleet screen has to see.
+          expect(yield* Effect.promise(() => within(2000, () => fleet.received.length >= 2))).toBe(
+            true,
+          );
+          expect(named(present(fleet.received[1]))).toContain(joined.runnerId);
+
+          const seenBeforeFacts = fleet.received.length;
+          runner.say({
+            _tag: "factsReport",
+            facts: { ...FACTS, docker: true, totalMemoryBytes: 137438953472 },
+          });
+          expect(
+            yield* Effect.promise(() =>
+              within(2000, () => fleet.received.length > seenBeforeFacts),
+            ),
+            "a facts report reaches the subscriber",
+          ).toBe(true);
+          expect(named(present(fleet.received[seenBeforeFacts]))).toContain(joined.runnerId);
+
+          const seenBeforePatch = fleet.received.length;
+          const patched = yield* Effect.promise(() =>
+            send("PATCH", base, `/api/v1/runners/${joined.runnerId}`, {
+              body: { name: "moss" },
+              token,
+            }),
+          );
+          expect(patched.status).toBe(200);
+          expect(
+            yield* Effect.promise(() =>
+              within(2000, () => fleet.received.length > seenBeforePatch),
+            ),
+            "a patch reaches the subscriber",
+          ).toBe(true);
+          expect(named(present(fleet.received[seenBeforePatch]))).toContain(joined.runnerId);
+
+          // A topic none of this happened on hears nothing.
+          expect(tasks.received).toEqual([]);
+
+          runner.close();
+          yield* Fiber.interrupt(fleet.fiber);
+          yield* Fiber.interrupt(tasks.fiber);
+        }),
+      );
+    });
+  });
+  it("tells a watcher about a hello that changed nothing but the row", async () => {
+    await withServer(async (harness) => {
+      const { base } = harness;
+      const token = await completeSetup(base);
+      const ticket = await ticketFor(base, token);
+
+      await onSocket(base, (client) =>
+        Effect.gen(function* () {
+          yield* client.hello({ v: 1, ticket });
+          const fleet = yield* collecting(client, { topic: "runner" });
+          yield* Effect.promise(() => expectHeld(harness.live, 1, "runner"));
+
+          const joined = yield* Effect.promise(() => enlist(harness));
+          const greet = (say: (message: unknown) => void, version: string) =>
+            say({
+              _tag: "runnerHello",
+              protocolVersion: PROTOCOL_VERSION,
+              capabilities: [],
+              binaryVersion: version,
+              nonce: Buffer.from(crypto.getRandomValues(new Uint8Array(16))).toString("base64"),
+              facts: FACTS,
+            });
+
+          const runner = yield* Effect.promise(() => machine(base, joined.credential));
+          greet(runner.say, "0.1.0");
+          expect(yield* Effect.promise(() => within(2000, () => fleet.received.length >= 2))).toBe(
+            true,
+          );
+
+          // A machine that dials again inside the silence window never left
+          // `online`, so nothing about its state changed - but its hello
+          // rewrote the version and the facts the row shows.
+          const second = yield* Effect.promise(() => machine(base, joined.credential));
+          const seenBefore = fleet.received.length;
+          greet(second.say, "0.2.0");
+          expect(
+            yield* Effect.promise(() => within(2000, () => fleet.received.length > seenBefore)),
+            "a hello on a row already online reaches the subscriber",
+          ).toBe(true);
+          expect(named(present(fleet.received[seenBefore]))).toContain(joined.runnerId);
+
+          second.close();
+          runner.close();
+          yield* Fiber.interrupt(fleet.fiber);
         }),
       );
     });

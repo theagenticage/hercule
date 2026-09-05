@@ -10,9 +10,18 @@ const api: Readonly<Record<string, Handler>> = {
       user: { "onboarding.completedSteps": ["timezone"], timezone: "Europe/Amsterdam" },
     },
   },
-  // Tasks is the one screen here that reads something of its own.
+  // Tasks and Fleet are the screens here that read something of their own.
   "GET /api/v1/tasks": { body: { items: [] } },
   "GET /api/v1/projects": { body: { items: [] } },
+  "GET /api/v1/runners": { body: { items: [] } },
+  "GET /api/v1/controller": {
+    body: {
+      id: "01a06d02-a000-7000-8000-000000000001",
+      publicKey: "bm90LWEta2V5",
+      version: "0.1.0",
+      defaultRunnerId: null,
+    },
+  },
 };
 
 /** Every screen inside the shell, and the first thing it says. */

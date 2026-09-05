@@ -19,10 +19,14 @@
  * The port it is asked for is a preference, not a requirement: two runners on
  * one machine, or an unrelated service on the number, must not stop a runner
  * from starting. Whatever it ends up on is reported in the facts, so the
- * browser is told where to look.
+ * browser is told where to look - but a browser is only allowed to ask a small
+ * fixed set of ports, so the search walks that set before it takes anything
+ * free. A runner that ends up outside it still runs; it is simply not the one a
+ * page can recognise as this machine.
  */
 import * as Effect from "effect/Effect";
 import type * as Scope from "effect/Scope";
+import { IDENTITY_PORT_COUNT } from "@hydra/protocol";
 /** The only address the listener binds. */
 const LOOPBACK = "127.0.0.1";
 
@@ -41,7 +45,7 @@ export interface IdentityOptions {
   readonly runnerId: string;
   /** The controller this runner belongs to; its origin is who may read the answer. */
   readonly controllerUrl: string;
-  /** The port to prefer. Any free one will do when this one is taken. */
+  /** The first port to try. The next few will do when this one is taken. */
   readonly port: number;
 }
 
@@ -84,11 +88,20 @@ export const identityListener = (
       Effect.gen(function* () {
         const fetch = answer(options.runnerId, new URL(options.controllerUrl).origin);
         const serve = (port: number) => Bun.serve({ hostname: LOOPBACK, port, fetch });
-        const bound = yield* Effect.result(Effect.try(() => serve(options.port)));
-        if (bound._tag === "Success") return bound.success;
-        // Falling back is not a failure, but it does move where the browser has
-        // to look, so it is never done quietly.
-        yield* Effect.logWarning(`cannot answer on port ${String(options.port)}`, bound.failure);
+        for (let offset = 0; offset < IDENTITY_PORT_COUNT; offset += 1) {
+          const port = options.port + offset;
+          const bound = yield* Effect.result(Effect.try(() => serve(port)));
+          if (bound._tag === "Success") return bound.success;
+          // Moving is not a failure, but it does move where the browser has to
+          // look, so it is never done quietly.
+          yield* Effect.logWarning(`cannot answer on port ${String(port)}`, bound.failure);
+        }
+        // Past the ports a browser may ask, the listener is only good for a
+        // person with `curl`. Better that than a runner that will not start.
+        yield* Effect.logWarning(
+          `no port from ${String(options.port)} on was free; ` +
+            "this machine cannot be recognised in a browser",
+        );
         // A machine that will not give this process any port at all is not a
         // machine that can host sessions either, so there is nothing to fall
         // back to and nothing to carry on with.

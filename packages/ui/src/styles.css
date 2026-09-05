@@ -242,9 +242,26 @@
   animation: hydra-drawer-in 160ms cubic-bezier(0.32, 0.72, 0, 1);
 }
 
+/* Currency: a thing that is live carries a slow pulse beside its state word.
+   Nothing static moves, so the motion itself is the signal. */
+@keyframes hydra-live-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+.hydra-live-dot {
+  animation: hydra-live-pulse 2.4s ease-in-out infinite;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .hydra-equalizer rect,
-  .hydra-drawer {
+  .hydra-drawer,
+  .hydra-live-dot {
     animation: none;
   }
 }

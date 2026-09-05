@@ -13,8 +13,8 @@
  * cache holds them under.
  */
 import { infiniteQueryOptions, queryOptions } from "@tanstack/react-query";
-import { queryKeys, type HydraClient } from "@hydra/client-core";
-import { MAX_PAGE_LIMIT, type TaskFilter } from "@hydra/contract";
+import { loopbackEndpoints, queryKeys, type HydraClient } from "@hydra/client-core";
+import { MAX_PAGE_LIMIT, type Runner, type TaskFilter } from "@hydra/contract";
 
 /** Whether first run has been completed. Reachable without a token. */
 export const setupQuery = (client: HydraClient) =>
@@ -78,4 +78,47 @@ export const projectsQuery = (client: HydraClient) =>
   queryOptions({
     queryKey: queryKeys.projects(),
     queryFn: () => client.project.query({ query: { limit: MAX_PAGE_LIMIT } }),
+  });
+
+/**
+ * The fleet, as one page. A fleet is a handful of machines and the screen shows
+ * all of them, so nothing follows the cursor; a fleet past one page would lose
+ * rows silently, and is the point at which this grows a listing of its own.
+ */
+export const runnersQuery = (client: HydraClient) =>
+  queryOptions({
+    queryKey: queryKeys.runners(),
+    queryFn: () => client.runner.query({ query: { limit: MAX_PAGE_LIMIT } }),
+  });
+
+/**
+ * The controller itself: its identity, its version and the runner work falls
+ * back to. The version is what a runner's own is compared against, so it is
+ * read rather than assumed to match.
+ */
+export const controllerQuery = (client: HydraClient) =>
+  queryOptions({
+    queryKey: queryKeys.controller(),
+    queryFn: () => client.controller.read(),
+  });
+
+/**
+ * Which listed runner is on the machine this browser is on.
+ *
+ * Keyed on the machines that could answer and on where each says to ask, so a
+ * runner that joined, left or moved its port is asked again while a refetch of
+ * the same fleet is not. A refusal is not retried: silence, a hang and a
+ * stranger's answer all mean the same thing, and retrying only turns a bounded
+ * wait into a longer one.
+ */
+export const localRunnerQuery = (
+  detect: (runners: ReadonlyArray<Runner>) => Promise<string | null>,
+  runners: ReadonlyArray<Runner>,
+) =>
+  queryOptions({
+    queryKey: queryKeys.localRunner(
+      loopbackEndpoints(runners).map(({ id, port }) => `${id}:${String(port)}`),
+    ),
+    queryFn: () => detect(runners),
+    retry: false,
   });

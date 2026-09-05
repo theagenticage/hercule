@@ -12,6 +12,7 @@ import { cleanup, render } from "@testing-library/react";
 import { RouterProvider, createMemoryHistory } from "@tanstack/react-router";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createClient, createLive, type FetchLike, type Live } from "@hydra/client-core";
+import type { Runner } from "@hydra/contract";
 import { StubSocket, openInto } from "@hydra/client-core/testing";
 import { createAppRouter } from "./router";
 import { followLiveStatus } from "./live-status";
@@ -133,10 +134,17 @@ export const renderApp = async ({
   path,
   api,
   token = null,
+  detectLocalRunner = () => Promise.resolve(null),
 }: {
   readonly path: string;
   readonly api: FetchLike;
   readonly token?: string | null;
+  /**
+   * Which runner is on this machine. There is no loopback to probe in a test,
+   * so the answer is handed over rather than fetched; without one, nothing on
+   * this browser answers, which is what a headless run really is.
+   */
+  readonly detectLocalRunner?: (runners: ReadonlyArray<Runner>) => Promise<string | null>;
 }) => {
   const client = createClient({ baseUrl: BASE_URL, fetch: api, token });
   const sockets: StubSocket[] = [];
@@ -157,7 +165,7 @@ export const renderApp = async ({
   };
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const router = createAppRouter(
-    { client, queryClient, live },
+    { client, queryClient, live, detectLocalRunner },
     createMemoryHistory({ initialEntries: [path] }),
   );
 

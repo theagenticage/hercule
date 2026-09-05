@@ -97,6 +97,22 @@ export const ProviderBinary = Schema.Struct({
 export type ProviderBinary = Schema.Schema.Type<typeof ProviderBinary>;
 
 /**
+ * The first loopback port a runner offers `GET /identity` on, and how many
+ * consecutive ports it will settle for.
+ *
+ * The set is small and fixed rather than "whatever is free" because a browser
+ * has to be allowed to reach it in advance: the web app's Content-Security-
+ * Policy names these ports, and a policy that named every port would let any
+ * script that runs in the app talk to every service on the reader's machine.
+ * Ten covers the collision the fallback exists for - more than one runner, or
+ * something else, on the number - and a machine that has taken all ten gets a
+ * runner on some other port that no browser will be allowed to ask.
+ */
+export const IDENTITY_PORT = 4939;
+
+export const IDENTITY_PORT_COUNT = 10;
+
+/**
  * What a runner knows about the machine it is on. Latest-wins state, not
  * events: it rides the hello and is re-sent only when a value changed.
  *

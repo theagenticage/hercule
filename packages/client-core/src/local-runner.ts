@@ -57,6 +57,27 @@ const whoIsOn = (port: number, fetch: FetchLike, timeoutMs: number): Promise<unk
       .then(settle, () => settle(undefined));
   });
 
+/** One machine that could answer for itself: who it says it is, and where. */
+export interface LoopbackEndpoint {
+  readonly id: string;
+  readonly port: number;
+}
+
+/**
+ * The runners worth asking, out of a whole fleet listing: the ones that are
+ * connected and have said where they answer. Exported because what is asked is
+ * also what an answer depends on, and a caller caching the answer has to key it
+ * on the same set.
+ */
+export const loopbackEndpoints = (
+  runners: ReadonlyArray<Runner>,
+): ReadonlyArray<LoopbackEndpoint> =>
+  runners.flatMap((runner) =>
+    runner.state === "online" && runner.facts !== null
+      ? [{ id: runner.id, port: runner.facts.identityPort }]
+      : [],
+  );
+
 /**
  * The id of the runner on this machine, or `null` when nothing on it answers
  * for one.
@@ -75,13 +96,8 @@ export const detectLocalRunner = async (
   fetch: FetchLike,
   timeoutMs: number = IDENTITY_TIMEOUT_MS,
 ): Promise<string | null> => {
-  const reachable = runners.flatMap((runner) =>
-    runner.state === "online" && runner.facts !== null
-      ? [{ id: runner.id, port: runner.facts.identityPort }]
-      : [],
-  );
   const answers = await Promise.all(
-    reachable.map(async ({ id, port }) => ({
+    loopbackEndpoints(runners).map(async ({ id, port }) => ({
       id,
       answered: await whoIsOn(port, fetch, timeoutMs),
     })),

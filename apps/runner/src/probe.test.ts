@@ -16,9 +16,8 @@ import { describe, expect, it } from "vitest";
 import { Duration, Effect, Fiber, Schema } from "effect";
 import { TestClock } from "effect/testing";
 import { arch, platform, totalmem } from "node:os";
-import { MAX_FACT_LENGTH, RunnerFacts } from "@hydra/protocol";
+import { IDENTITY_PORT, MAX_FACT_LENGTH, RunnerFacts } from "@hydra/protocol";
 import {
-  DEFAULT_IDENTITY_PORT,
   FACTS_REFRESH,
   VERSION_DEADLINE,
   probeFacts,
@@ -53,7 +52,7 @@ const FULL: Printed = {
   pi: "1.0.0",
 };
 
-const probe = (printed: Printed, port = DEFAULT_IDENTITY_PORT): Promise<RunnerFacts> =>
+const probe = (printed: Printed, port = IDENTITY_PORT): Promise<RunnerFacts> =>
   Effect.runPromise(probeFacts(machineWith(printed), port));
 
 const run = <A, E>(effect: Effect.Effect<A, E>): Promise<A> =>
@@ -75,8 +74,8 @@ describe("probing the machine", () => {
   });
 
   it("reports the identity port it was given, defaulting to 4939", async () => {
-    expect(DEFAULT_IDENTITY_PORT).toBe(4939);
-    expect((await probe(FULL)).identityPort).toBe(DEFAULT_IDENTITY_PORT);
+    expect(IDENTITY_PORT).toBe(4939);
+    expect((await probe(FULL)).identityPort).toBe(IDENTITY_PORT);
     // The listener falls back to a free port when 4939 is taken, and the facts
     // say where it really ended up rather than where it meant to be.
     expect((await probe(FULL, 51234)).identityPort).toBe(51234);
@@ -153,7 +152,7 @@ describe("the toolchains a runner reports", () => {
               locate: (binary) => (binary === "git" ? "/usr/local/bin/git" : undefined),
               version: () => Effect.never,
             },
-            DEFAULT_IDENTITY_PORT,
+            IDENTITY_PORT,
           ),
         );
         yield* TestClock.adjust(VERSION_DEADLINE);
@@ -178,7 +177,7 @@ describe("the toolchains a runner reports", () => {
           locate: (binary) => (binary === "git" ? "/usr/local/bin/git" : undefined),
           version: () => Effect.succeed(undefined),
         },
-        DEFAULT_IDENTITY_PORT,
+        IDENTITY_PORT,
       ),
     );
 
@@ -193,7 +192,7 @@ describe("the toolchains a runner reports", () => {
           locate: (binary) => (binary === "git" ? `${deep}git` : undefined),
           version: () => Effect.succeed("x".repeat(900)),
         },
-        DEFAULT_IDENTITY_PORT,
+        IDENTITY_PORT,
       ),
     );
 
@@ -234,7 +233,7 @@ describe("the real machine", () => {
   it("locates nothing that is not there and probes the machine this test runs on", async () => {
     expect(thisMachine.locate("a-binary-no-machine-has-installed")).toBeUndefined();
 
-    const facts = await Effect.runPromise(probeFacts(thisMachine, DEFAULT_IDENTITY_PORT));
+    const facts = await Effect.runPromise(probeFacts(thisMachine, IDENTITY_PORT));
     expect(facts.os).toBe(platform());
     expect(facts.arch).toBe(arch());
     expect(facts.totalMemoryBytes).toBe(totalmem());
@@ -250,12 +249,12 @@ describe("the hourly refresh", () => {
   it("says nothing while nothing about the machine has changed", async () => {
     await run(
       Effect.gen(function* () {
-        const reported = yield* probeFacts(machineWith(FULL), DEFAULT_IDENTITY_PORT);
+        const reported = yield* probeFacts(machineWith(FULL), IDENTITY_PORT);
         const sent: Array<RunnerFacts> = [];
 
         const loop = yield* Effect.forkChild(
           refreshFacts({
-            probe: probeFacts(machineWith(FULL), DEFAULT_IDENTITY_PORT),
+            probe: probeFacts(machineWith(FULL), IDENTITY_PORT),
             reported,
             send: (facts) => Effect.sync(() => void sent.push(facts)),
           }),
@@ -276,14 +275,14 @@ describe("the hourly refresh", () => {
   it("reports the whole facts once a value differs from what was reported", async () => {
     await run(
       Effect.gen(function* () {
-        const reported = yield* probeFacts(machineWith(FULL), DEFAULT_IDENTITY_PORT);
+        const reported = yield* probeFacts(machineWith(FULL), IDENTITY_PORT);
         const sent: Array<RunnerFacts> = [];
         // What the machine looks like now, which the test changes underneath it.
         let installed: Printed = FULL;
 
         const loop = yield* Effect.forkChild(
           refreshFacts({
-            probe: Effect.suspend(() => probeFacts(machineWith(installed), DEFAULT_IDENTITY_PORT)),
+            probe: Effect.suspend(() => probeFacts(machineWith(installed), IDENTITY_PORT)),
             reported,
             send: (facts) => Effect.sync(() => void sent.push(facts)),
           }),
@@ -324,13 +323,13 @@ describe("the hourly refresh", () => {
   it("stops reporting the moment it is interrupted", async () => {
     await run(
       Effect.gen(function* () {
-        const reported = yield* probeFacts(machineWith(FULL), DEFAULT_IDENTITY_PORT);
+        const reported = yield* probeFacts(machineWith(FULL), IDENTITY_PORT);
         const sent: Array<RunnerFacts> = [];
         let installed: Printed = FULL;
 
         const loop = yield* Effect.forkChild(
           refreshFacts({
-            probe: Effect.suspend(() => probeFacts(machineWith(installed), DEFAULT_IDENTITY_PORT)),
+            probe: Effect.suspend(() => probeFacts(machineWith(installed), IDENTITY_PORT)),
             reported,
             send: (facts) => Effect.sync(() => void sent.push(facts)),
           }),

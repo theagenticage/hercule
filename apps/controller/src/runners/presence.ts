@@ -29,7 +29,7 @@ import type { SqlError } from "effect/unstable/sql/SqlError";
 import type { RunnerFacts, RunnerWatermark } from "@hydra/contract";
 import { SYSTEM_ACTOR } from "../actor";
 import { hashToken } from "../credentials";
-import { nowIso, withTransaction } from "../db";
+import { announce, nowIso, withTransaction } from "../db";
 import { AuditLog } from "../events";
 import { runnerRepository, type RunnerHelloRecord } from "./repository";
 
@@ -63,6 +63,7 @@ const make = Effect.gen(function* () {
       yield* audit.append({
         kind: "runner.stateChanged",
         actor: SYSTEM_ACTOR,
+        record: { topic: "runner", id },
         payload: { runnerId: id, state },
         at,
       });
@@ -98,6 +99,11 @@ const make = Effect.gen(function* () {
             const at = yield* nowIso;
             yield* runners.recordHello(id, hello, at);
             yield* moved(id, "online", at);
+            // The hello rewrites the version, the capabilities and the facts
+            // whether or not the state moved, and a runner that dials again
+            // inside the silence window never left `online` - so the row can
+            // change here with nothing in the log to announce it.
+            yield* announce({ _tag: "record", topic: "runner", id, kind: "updated" });
           }),
         );
         const previous = reachable.get(id);
@@ -129,6 +135,10 @@ const make = Effect.gen(function* () {
         Effect.gen(function* () {
           if (reachable.get(id)?.connection !== connection) return;
           yield* runners.recordFacts(id, facts, yield* nowIso);
+          // A fresh report writes no audit row - what a machine has installed
+          // is not an event anyone reads back - so the fleet's watchers are
+          // told here rather than by the log.
+          yield* announce({ _tag: "record", topic: "runner", id, kind: "updated" });
         }),
       ),
 
@@ -151,6 +161,7 @@ const make = Effect.gen(function* () {
           yield* audit.append({
             kind: "runner.placementsChanged",
             actor: SYSTEM_ACTOR,
+            record: { topic: "runner", id },
             payload: { runnerId: id, acceptingPlacements: watermark.acceptingPlacements },
             at,
           });

@@ -61,6 +61,10 @@ const RECORD_KINDS = {
   "task.created": "created",
   "task.updated": "updated",
   "task.deleted": "deleted",
+  "runner.joined": "created",
+  "runner.updated": "updated",
+  "runner.stateChanged": "updated",
+  "runner.placementsChanged": "updated",
 } as const satisfies Partial<Record<AuditKind, InvalidateKind>>;
 
 type RecordAuditKind = keyof typeof RECORD_KINDS;

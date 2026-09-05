@@ -98,6 +98,7 @@ const make = Effect.gen(function* () {
           yield* audit.append({
             kind: "runner.joined",
             actor: SYSTEM_ACTOR,
+            record: { topic: "runner", id: enlisted.id },
             payload: {
               runnerId: enlisted.id,
               name,

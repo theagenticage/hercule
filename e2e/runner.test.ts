@@ -38,15 +38,26 @@ const mintToken = async (): Promise<string> => {
   return (JSON.parse(ran.stdout) as { token: string }).token;
 };
 
-/** The runners the controller has enlisted, by id and name. */
-const runners = async (): Promise<ReadonlyArray<{ id: string; name: string; state: string }>> => {
+/** One machine as the fleet lists it, with what it probed about itself. */
+interface Listed {
+  readonly id: string;
+  readonly name: string;
+  readonly state: string;
+  readonly facts: {
+    readonly os: string;
+    readonly arch: string;
+    readonly identityPort: number;
+  } | null;
+}
+
+/** The runners the controller has enlisted. */
+const runners = async (): Promise<ReadonlyArray<Listed>> => {
   const response = await fetch(`${url}/api/v1/runners`, {
     headers: { authorization: `Bearer ${apiKey}` },
   });
   const body = await response.text();
   expect(response.status, body).toBe(200);
-  return (JSON.parse(body) as { items: ReadonlyArray<{ id: string; name: string; state: string }> })
-    .items;
+  return (JSON.parse(body) as { items: ReadonlyArray<Listed> }).items;
 };
 
 beforeAll(async () => {
@@ -136,4 +147,31 @@ describe("hydra runner join through the binary", () => {
       machine.remove();
     }
   }, 60_000);
+});
+
+describe("the runner the controller starts for itself", () => {
+  it("is online with what it probed, and answers on the loopback port it reported", async () => {
+    // The controller spawned its child while it was booting, so what is waited
+    // for here is the join and the first hello finishing, not the process.
+    const deadline = Date.now() + 10_000;
+    let online = (await runners()).filter((one) => one.state === "online");
+    while (online.length === 0 && Date.now() < deadline) {
+      await Bun.sleep(200);
+      online = (await runners()).filter((one) => one.state === "online");
+    }
+
+    expect(online, `no runner came online:\n${controller.output()}`).toHaveLength(1);
+    const local = online[0]!;
+    expect(local.facts, "the runner reported what it probed").not.toBeNull();
+    expect(local.facts!.os.length).toBeGreaterThan(0);
+    expect(local.facts!.arch.length).toBeGreaterThan(0);
+
+    // The port it reported is the one it is really listening on, and the runner
+    // behind it is the row that reported it: that pairing is the whole of what
+    // makes "this machine" answerable from a browser.
+    const identity = await fetch(`http://127.0.0.1:${String(local.facts!.identityPort)}/identity`);
+    const said = await identity.text();
+    expect(identity.status, said).toBe(200);
+    expect(JSON.parse(said)).toEqual({ runnerId: local.id });
+  }, 30_000);
 });

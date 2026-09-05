@@ -9,8 +9,9 @@
  */
 import { networkInterfaces } from "node:os";
 import * as Effect from "effect/Effect";
+import { IDENTITY_PORT } from "@hydra/protocol";
 import { identityListener } from "./identity";
-import { DEFAULT_IDENTITY_PORT, probeFacts, thisMachine } from "./probe";
+import { probeFacts, thisMachine } from "./probe";
 import { reconnect, reconnectSignals } from "./reconnect";
 import { readRunnerFile, type NotEnrolled } from "./runner-file";
 import { connect } from "./socket";
@@ -39,7 +40,7 @@ export const daemon = (home: string): Effect.Effect<never, NotEnrolled> =>
       const identityPort = yield* identityListener({
         runnerId: pin.runnerId,
         controllerUrl: pin.controllerUrl,
-        port: DEFAULT_IDENTITY_PORT,
+        port: IDENTITY_PORT,
       });
       const probe = probeFacts(thisMachine, identityPort);
       const headroom = machineHeadroom(home);

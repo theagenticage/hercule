@@ -76,6 +76,15 @@ describe("the page", () => {
       expect(chunk.headers.get("content-security-policy")).toBe(CONTENT_SECURITY_POLICY);
       expect(CONTENT_SECURITY_POLICY).toContain("script-src 'self'");
       expect(CONTENT_SECURITY_POLICY).not.toContain("unsafe-inline");
+      // The one relaxation, and the shape of it: the ports a runner's identity
+      // listener will settle for, named one by one. A wildcard port here would
+      // hand anything that runs in the page every service on the reader's
+      // machine, WebSockets included.
+      expect(CONTENT_SECURITY_POLICY).toContain(
+        "connect-src 'self' http://127.0.0.1:4939 http://127.0.0.1:4940",
+      );
+      expect(CONTENT_SECURITY_POLICY).toContain("http://127.0.0.1:4948;");
+      expect(CONTENT_SECURITY_POLICY).not.toContain("127.0.0.1:*");
       expect(page.headers.get("x-content-type-options")).toBe("nosniff");
       expect(chunk.headers.get("x-content-type-options")).toBe("nosniff");
     });

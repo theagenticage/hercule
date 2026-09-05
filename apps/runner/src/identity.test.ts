@@ -16,6 +16,7 @@
 import { describe, expect, it } from "vitest";
 import { Effect } from "effect";
 import { networkInterfaces } from "node:os";
+import { IDENTITY_PORT_COUNT } from "@hydra/protocol";
 import { identityListener } from "./identity";
 import { probeFacts, type Machine } from "./probe";
 
@@ -97,23 +98,50 @@ describe("the port it binds", () => {
     expect(port).toBe(wanted);
   });
 
-  it("takes a free port when the one it asked for is taken, and answers there", async () => {
-    const held = occupy(0);
+  it("walks the whole set of ports a browser may ask before it gives up on one", async () => {
+    // Every port in the set but the last, so the walk has to reach the end of
+    // it. How many ports that is cannot be told apart here from the last-resort
+    // bind - an ephemeral port is handed out from the same place - so the count
+    // itself is pinned where it is enforced, in the policy the browser reads.
+    const base = await freePort();
+    const taken = Array.from({ length: IDENTITY_PORT_COUNT - 1 }, (_, offset) =>
+      occupy(base + offset),
+    );
     try {
       const { port, body } = await withListener(
-        { runnerId: RUNNER_ID, controllerUrl: CONTROLLER_URL, port: held.port },
+        { runnerId: RUNNER_ID, controllerUrl: CONTROLLER_URL, port: base },
         async (bound) => {
-          const response = await fetch(`http://127.0.0.1:${bound}/identity`);
+          const response = await fetch(`http://127.0.0.1:${String(bound)}/identity`);
           return { port: bound, body: await response.json() };
         },
       );
 
-      expect(port).not.toBe(held.port);
-      expect(port).toBeGreaterThan(0);
-      // A port it fell back to is a port it actually serves on, not a number.
+      expect(port).toBe(base + IDENTITY_PORT_COUNT - 1);
+      // A port it moved to is a port it actually serves on, not a number.
       expect(body).toEqual({ runnerId: RUNNER_ID });
     } finally {
-      await held.release();
+      await Promise.all(taken.map((held) => held.release()));
+    }
+  });
+
+  it("still serves when every port a browser may ask is taken", async () => {
+    // The last resort: a machine can host sessions without being one a page can
+    // recognise, so the listener takes whatever is free rather than giving up.
+    const base = await freePort();
+    const taken = Array.from({ length: IDENTITY_PORT_COUNT }, (_, offset) => occupy(base + offset));
+    try {
+      const { port, body } = await withListener(
+        { runnerId: RUNNER_ID, controllerUrl: CONTROLLER_URL, port: base },
+        async (bound) => {
+          const response = await fetch(`http://127.0.0.1:${String(bound)}/identity`);
+          return { port: bound, body: await response.json() };
+        },
+      );
+
+      expect(taken.map((held) => held.port)).not.toContain(port);
+      expect(body).toEqual({ runnerId: RUNNER_ID });
+    } finally {
+      await Promise.all(taken.map((held) => held.release()));
     }
   });
 

@@ -45,10 +45,10 @@ const make = Effect.gen(function* () {
     /**
      * Mints a token good for an hour and records its hash.
      *
-     * The rows that have already expired go with it. The fleet's "Add machine"
-     * spot mints one every time it is opened, so without this the table would
-     * grow with the number of times somebody looked at a screen; a token past
-     * its hour can never be spent again, so nothing is lost with it.
+     * The rows that have already expired go with it. Nothing lists or revokes
+     * an outstanding token, so this sweep is the only thing that bounds the
+     * table; a token past its hour can never be spent again, so nothing is lost
+     * with it.
      */
     create: (at: string): Effect.Effect<JoinToken, SqlError> =>
       Effect.gen(function* () {

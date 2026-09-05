@@ -25,6 +25,10 @@ export const queryKeys = {
     filter === undefined ? ["tasks"] : ["tasks", filter],
   task: (id?: string): LiveQueryKey => (id === undefined ? ["task"] : ["task", id]),
   projects: (): LiveQueryKey => ["projects"],
+  runners: (): LiveQueryKey => ["runners"],
+  controller: (): LiveQueryKey => ["controller"],
+  /** Keyed on the loopback endpoints it asks, because that is what it depends on. */
+  localRunner: (endpoints: ReadonlyArray<string>): LiveQueryKey => ["local-runner", endpoints],
 } as const;
 
 /**
@@ -36,10 +40,15 @@ export const queryKeysFor = (
   topic: MutableLiveTopic,
   ids: ReadonlyArray<string>,
 ): ReadonlyArray<LiveQueryKey> => {
-  // Tasks are the only records a screen reads so far. A topic nothing reads has
-  // no key to invalidate; a topic gains a row here when a screen starts reading it.
-  if (topic !== "task") return [];
-  return ids.length === 0
-    ? [queryKeys.tasks(), queryKeys.task()]
-    : [queryKeys.tasks(), ...ids.map((id) => queryKeys.task(id))];
+  // A topic nothing reads has no key to invalidate; a topic gains a case here
+  // when a screen starts reading it.
+  if (topic === "task") {
+    return ids.length === 0
+      ? [queryKeys.tasks(), queryKeys.task()]
+      : [queryKeys.tasks(), ...ids.map((id) => queryKeys.task(id))];
+  }
+  // The fleet is read as one listing and never a machine at a time, so which
+  // runners changed narrows nothing: the listing is reread either way.
+  if (topic === "runner") return [queryKeys.runners()];
+  return [];
 };

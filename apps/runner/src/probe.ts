@@ -20,9 +20,6 @@ import {
   type Toolchain,
 } from "@hydra/protocol";
 
-/** The loopback port a runner serves `GET /identity` on, before it owns one. */
-export const DEFAULT_IDENTITY_PORT = 4939;
-
 /**
  * The toolchains a runner probes for. Deliberately two: anything else the
  * machine owner installs by hand and, if placement needs it, says so with a
