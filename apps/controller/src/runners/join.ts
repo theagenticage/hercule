@@ -1,14 +1,10 @@
 /**
  * Enlisting a machine that presented a join token.
  *
- * This is not an operation and it is not on `RunnerService`: no grant reaches
- * it, because a machine holding a join token is not a user and holds nothing on
- * the public API. What it presents is the token itself, which is why the method
- * takes it as an argument and answers `unauthenticated` when it is not one to
- * spend.
- *
- * The row it writes is stamped `system`: nothing holding a credential asked for
- * it. A runner is never an actor.
+ * Not an operation and not on `RunnerService`: no grant reaches it, because a
+ * machine holding a join token is not a user. It presents the token itself,
+ * which is why the method takes it as an argument, and the row it writes is
+ * stamped `system` because a runner is never an actor.
  */
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -32,9 +28,8 @@ import { pickName } from "./names";
 import { runnerRepository } from "./repository";
 
 /**
- * What a machine is told when its token is refused. It never says which of
- * unminted, already spent and expired it was: the presenter has the same
- * nothing to do in all three cases, and the difference is a probe.
+ * Never says which of unminted, spent and expired it was: the presenter has the
+ * same nothing to do in all three, and the difference is a probe.
  */
 const NO_JOIN = "that is not a join token";
 
@@ -51,15 +46,10 @@ const make = Effect.gen(function* () {
 
   return {
     /**
-     * Enlists the machine that presented this token, and hands it the durable
-     * credential it will hold its socket with.
-     *
      * One transaction spends the token and writes the row, so a token cannot be
-     * spent by an enlistment that then fails, and two machines racing with the
-     * same token cannot both be enlisted.
-     *
-     * The runner is `offline` because joining is not connecting: it becomes
-     * `online` when it holds a socket, which is its own exchange.
+     * spent by an enlistment that fails, and two machines racing with the same
+     * token cannot both be enlisted. The runner is `offline` because joining is
+     * not connecting.
      */
     join: (token: string): Effect.Effect<JoinAnswer, Unauthenticated | SettingError | SqlError> =>
       withTransaction(
@@ -72,8 +62,8 @@ const make = Effect.gen(function* () {
           }
           const controller = yield* identity.read;
           if (Option.isNone(controller)) {
-            // The boot creates the identity before anything binds, so serving a
-            // join without one is a bug rather than a state to answer.
+            // The boot creates the identity before anything binds, so this is a
+            // bug rather than a state to answer.
             return yield* Effect.die("the controller has no identity row");
           }
           const credential = mintToken();
@@ -87,12 +77,9 @@ const make = Effect.gen(function* () {
             credentialHash: hashToken(credential),
             at,
           });
-          // The fleet's first member is what work falls back to until somebody
-          // chooses otherwise. Only the first: a default a person set, and a
-          // default a person cleared, are both choices, and the next machine to
-          // join may take neither. The entry below says when it happened,
-          // because nothing else would - this is the one writer of the setting
-          // that no user asked for.
+          // Only the first: a default a person set and one they cleared are both
+          // choices, and the next machine to join may take neither. The entry
+          // below records it, since this is the one writer no user asked for.
           const tookTheDefault = fleet.size === 0 && (yield* settings.defaultRunnerId()) === null;
           if (tookTheDefault) yield* settings.setDefaultRunnerId(enlisted.id, at);
           yield* audit.append({
@@ -119,7 +106,6 @@ const make = Effect.gen(function* () {
   };
 });
 
-/** The join exchange. */
 export class RunnerJoin extends Context.Service<RunnerJoin, Effect.Success<typeof make>>()(
   "hydra/controller/runners/RunnerJoin",
 ) {}

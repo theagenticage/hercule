@@ -1,45 +1,29 @@
 /**
- * Which fleet runner is the one on the machine the user is sitting at.
+ * Which fleet runner is the one on the machine the user is sitting at. The
+ * controller knows every runner and where none of them are, so only the browser
+ * can tell, by asking each reported loopback port who is there.
  *
- * The controller cannot answer this: it knows every runner and where none of
- * them are. Only the browser can, by asking each reported loopback port who is
- * there - a runner on another machine simply does not answer on 127.0.0.1. So
- * the port is a fact the runner reports, the fetch never leaves the machine,
- * and the only thing taken from an answer is an id that is already in the
- * fleet list. An answer naming anything else is discarded rather than
- * believed.
- *
- * It is a convenience, and a wrong answer would be worse than none: silence,
- * a hang and a stranger's answer all mean "no local runner", and the caller
- * offers the user a runner by name instead.
+ * A wrong answer would be worse than none, so silence, a hang and a stranger's
+ * answer all mean "no local runner" and the caller falls back to a runner by name.
  */
 import type { Runner } from "@hydra/contract";
 import type { FetchLike } from "./client";
 
-/** How long a loopback endpoint has to say who is there before nobody waits. */
 export const IDENTITY_TIMEOUT_MS = 1000;
 
-/** Where a runner on this machine answers, and the only address ever asked. */
 const identityUrl = (port: number): string => `http://127.0.0.1:${String(port)}/identity`;
 
 /**
- * The id in an answer, or nothing when there is no id in it.
- *
- * Nothing else about the answer is checked - not its status, not the rest of
- * its shape - because the id is compared against one the caller already holds.
- * Anything on the port that is not this runner fails that comparison whatever
- * it said.
+ * Nothing else about the answer is checked, because the id is compared against
+ * one the caller already holds and anything else fails that comparison.
  */
 const identityIn = async (response: Response): Promise<unknown> => {
   return ((await response.json()) as { readonly runnerId?: unknown }).runnerId;
 };
 
 /**
- * Who answers on one port, or nothing.
- *
- * The wait is bounded here rather than left to the browser: a port held by
- * something that accepts a connection and then says nothing would otherwise
- * keep the whole detection pending for as long as the page is open.
+ * The wait is bounded here rather than left to the browser: a port that accepts
+ * a connection and says nothing would keep detection pending for the page's life.
  */
 const whoIsOn = (port: number, fetch: FetchLike, timeoutMs: number): Promise<unknown> =>
   new Promise((resolve) => {
@@ -57,17 +41,14 @@ const whoIsOn = (port: number, fetch: FetchLike, timeoutMs: number): Promise<unk
       .then(settle, () => settle(undefined));
   });
 
-/** One machine that could answer for itself: who it says it is, and where. */
 export interface LoopbackEndpoint {
   readonly id: string;
   readonly port: number;
 }
 
 /**
- * The runners worth asking, out of a whole fleet listing: the ones that are
- * connected and have said where they answer. Exported because what is asked is
- * also what an answer depends on, and a caller caching the answer has to key it
- * on the same set.
+ * Exported because what is asked is what an answer depends on, and a caller
+ * caching that answer has to key it on the same set.
  */
 export const loopbackEndpoints = (
   runners: ReadonlyArray<Runner>,
@@ -79,17 +60,11 @@ export const loopbackEndpoints = (
   );
 
 /**
- * The id of the runner on this machine, or `null` when nothing on it answers
- * for one.
+ * Only the id of the runner whose own port answered is taken. Accepting any
+ * fleet id from any port would let a machine be told it is one somewhere else,
+ * and the alias decides where a person's next session runs.
  *
- * Each online runner's own reported port is asked, and only that runner's own
- * id is taken from it. Accepting any fleet id from any port would let a machine
- * with nothing on it be told it is a machine somewhere else - and the alias
- * decides where a person's next session runs, so being wrong is worse than
- * answering nothing.
- *
- * The whole fleet listing is handed in and the online runners are picked out
- * here, so a caller cannot forget to.
+ * The whole listing is handed in so a caller cannot forget to filter it.
  */
 export const detectLocalRunner = async (
   runners: ReadonlyArray<Runner>,

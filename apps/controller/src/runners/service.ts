@@ -1,16 +1,10 @@
 /**
- * Runners as the API sees them: `runner.query`, `read`, `update` and the mint
- * that invites a machine to join.
+ * Runners as the API sees them. A runner is almost entirely self-describing:
+ * everything but the name, the labels and the session cap arrives over the
+ * runner protocol, and the payload schema refuses the rest.
  *
- * A runner is almost entirely self-describing. Its state, version, negotiated
- * capabilities, probed facts and watermark all arrive over the runner protocol
- * and are written by it; what an operation may change is the name, the labels
- * and the session cap, and the payload schema refuses anything else.
- *
- * Input is decoded against the contract's own schemas rather than trusted. A
- * request has already been decoded by the transport, but a built-in workflow
- * action calls these methods directly, and the bounds are the same rule
- * whichever way the call arrived.
+ * Input is decoded here rather than trusted, because a built-in workflow action
+ * calls these methods directly and the bounds are the same rule either way.
  */
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -43,7 +37,6 @@ import { AuditLog } from "../events";
 import { JoinTokens } from "./join-tokens";
 import { runnerRepository, type RunnerEdit } from "./repository";
 
-/** What listing takes: how much of it, and what narrows it. */
 const QueryInput = Schema.Struct({
   ...RunnerFilter.fields,
   ...pageInput(RUNNER_SORT_FIELDS),
@@ -51,7 +44,6 @@ const QueryInput = Schema.Struct({
 
 export type QueryInput = Schema.Schema.Type<typeof QueryInput>;
 
-/** What identifies one runner: the id, and what an edit does to it. */
 const UpdateInput = Schema.Struct({ id: Id, ...RUNNER_EDIT_FIELDS });
 
 export type UpdateInput = Schema.Schema.Type<typeof UpdateInput>;
@@ -64,13 +56,11 @@ const decodeQuery = Schema.decodeUnknownEffect(QueryInput);
 const decodeUpdate = Schema.decodeUnknownEffect(UpdateInput);
 const decodeIdentified = Schema.decodeUnknownEffect(Identified);
 
-/** One page of the fleet, in the contract's shape. */
 export interface RunnerPage {
   readonly items: ReadonlyArray<Runner>;
   readonly nextCursor?: string;
 }
 
-/** What an update reports for a field that changed. */
 interface Change {
   readonly old: unknown;
   readonly new: unknown;
@@ -81,7 +71,6 @@ const NO_SUCH_RUNNER = "no such runner";
 /** Alphabetical: a fleet is short, and its name is how a reader picks one out. */
 const DEFAULT_DIRECTION: SortDirection = "asc";
 
-/** The repository's edit, writable while the patch is compared to the row. */
 type Edit = { -readonly [K in keyof RunnerEdit]: RunnerEdit[K] };
 
 /** Labels are replaced whole, so their order is part of the value. */
@@ -104,7 +93,6 @@ const make = Effect.gen(function* () {
     );
 
   return {
-    /** One page of the fleet. */
     query: (
       input: QueryInput,
     ): Effect.Effect<RunnerPage, Unauthenticated | Forbidden | Validation | SqlError> =>
@@ -129,7 +117,6 @@ const make = Effect.gen(function* () {
         };
       }),
 
-    /** One runner by id, with everything its hello negotiated. */
     read: (
       input: Identified,
     ): Effect.Effect<
@@ -143,11 +130,8 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * Changes what a person owns on a runner and says what changed.
-     *
-     * A patch that names no field is refused, and a patch that asks for the
-     * values the runner already holds writes nothing at all: either would move
-     * `updatedAt` and stamp a `runner.updated` row describing nothing.
+     * A patch naming no field is refused, and one asking for the values already
+     * held writes nothing: either would stamp a row describing nothing.
      */
     update: (
       input: UpdateInput,
@@ -164,8 +148,7 @@ const make = Effect.gen(function* () {
         return yield* withTransaction(
           sql,
           Effect.gen(function* () {
-            // One clock read, inside the transaction: the row and the event
-            // that records it carry the same instant.
+            // One clock read, so the row and the event carry the same instant.
             const at = yield* nowIso;
             const before = yield* one(id);
 
@@ -195,17 +178,15 @@ const make = Effect.gen(function* () {
               payload: { runnerId: id, changes },
               at,
             });
-            // Read back rather than merge in memory: what the caller gets is
-            // then the row that was written, whatever the edit touched.
+            // Read back rather than merged, so the caller gets the written row.
             return yield* one(id);
           }),
         );
       }),
 
     /**
-     * Mints an invitation for one machine. The token is in the answer and
-     * nowhere else; the fleet's "Add machine" spot mints a fresh one every time
-     * it is opened, so an expired one costs a page refresh.
+     * The token is in the answer and nowhere else. The fleet's "Add machine"
+     * mints a fresh one each time it opens, so an expired one costs a refresh.
      */
     createJoinToken: (): Effect.Effect<MintedJoinToken, Unauthenticated | Forbidden | SqlError> =>
       Effect.gen(function* () {
@@ -218,8 +199,8 @@ const make = Effect.gen(function* () {
             yield* audit.append({
               kind: "runner.joinToken.minted",
               actor: USER_ACTOR,
-              // The token itself is a bearer secret; the invitation's id is
-              // what ties this entry to the machine that spends it.
+              // The token is a bearer secret; its id is what ties this entry to
+              // the machine that spends it.
               payload: { joinTokenId: minted.id, expiresAt: minted.expiresAt },
               at,
             });
@@ -230,7 +211,6 @@ const make = Effect.gen(function* () {
   };
 });
 
-/** The runner service. */
 export class RunnerService extends Context.Service<RunnerService, Effect.Success<typeof make>>()(
   "hydra/controller/runners/RunnerService",
 ) {}

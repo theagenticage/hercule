@@ -1,30 +1,14 @@
 /**
- * The runner socket: the one connection a runner holds with its controller.
+ * The runner socket. A runner is an HTTP client of its own, so unlike a browser
+ * it can put a credential on the handshake; that credential is checked before
+ * the upgrade and buys nothing else anywhere in Hydra.
  *
- * A runner is an HTTP client of its own, so unlike a browser it can put a
- * credential on the handshake. It does, and that credential is checked before
- * the upgrade: a machine that cannot present one is refused with a `401` and
- * never costs a socket. The credential buys nothing else anywhere in Hydra.
- *
- * The proof runs the other way too. A runner pins a logical identity rather
- * than an address, so its hello carries a nonce and the answer carries the
- * controller's id, its public key and an Ed25519 signature over that nonce and
- * the runner's own id. A runner that dialled an impostor sees the signature
- * fail and hangs up.
- *
- * What the runner says about its machine - the facts it probed and the
- * headroom it keeps refreshing - is latest-wins state and nothing more. It is
- * stored whole, it advances no liveness, and it is acted on only on the
- * connection the runner is currently reachable through.
- *
- * Liveness is a protocol frame and never a WebSocket control frame. Bun answers
- * a control ping in the runtime, so a control frame proves the machine is up
- * rather than that the runner process is; `Ping` and `Pong` are messages the
- * runner's own loop has to answer.
+ * Liveness is a protocol frame, never a WebSocket control frame: Bun answers a
+ * control ping in the runtime, which would prove the machine is up rather than
+ * the runner process.
  *
  * The loop is awaited inline in the handler. Forking it before returning the
- * response kills it with the request scope, and the server then silently
- * receives nothing.
+ * response kills it with the request scope, and the server receives nothing.
  */
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
@@ -52,20 +36,14 @@ import { responseFor } from "../http/envelope";
 import { ControllerIdentity } from "../identity/repository";
 import { newConnection, RunnerPresence, type Connection, type Departure } from "./presence";
 
-/** Where a runner dials, beside the join it was enlisted through. */
 const RUNNER_SOCKET_PATH = "/api/v1/runners/socket";
 
-/** How often the controller asks a runner it is holding whether it is there. */
 export const RUNNER_PING_INTERVAL: Duration.Duration = Duration.seconds(15);
 
-/**
- * How long a runner may say nothing before the controller stops believing it is
- * there. Four missed intervals: one lost answer is a network hiccup, four in a
- * row is a machine.
- */
+/** Four missed intervals: one lost answer is a hiccup, four in a row is a machine. */
 export const RUNNER_SILENCE_LIMIT: Duration.Duration = Duration.seconds(60);
 
-/** What the liveness check runs on. Tests hand over values they can wait out. */
+/** Tests hand over values they can wait out. */
 export interface RunnerPings {
   readonly interval: Duration.Duration;
   readonly silence: Duration.Duration;
@@ -83,23 +61,16 @@ export const RunnerPingSchedule = Context.Reference<RunnerPings>(
 
 const NO_CREDENTIAL = "the runner socket needs a runner's credential";
 
-/**
- * What every hello this build makes offers. Empty in v1: the seam exists so
- * plan-shipping and OS sandboxing can be turned on only where both ends have
- * them, and nothing has been built to negotiate yet.
- */
+/** Empty in v1: the seam exists, and nothing has been built to negotiate yet. */
 const CAPABILITIES: ReadonlyArray<string> = [];
 
-/** A frame the catalogue cannot read, or a hello in a version this build cannot speak. */
 const UNREADABLE = "that is not a message this controller can read";
 const WRONG_VERSION = `this controller speaks runner protocol version ${String(PROTOCOL_VERSION)}`;
 const GREETED_ALREADY = "this connection has already said hello";
 const DISPLACED = "this runner opened another connection";
 
-/** How a refusal ends the connection. 1002 is the protocol error a WebSocket has. */
 const PROTOCOL_ERROR = 1002;
 
-/** How a connection the controller has stopped believing in ends. */
 const GOING_AWAY = 1001;
 const SILENT = "this runner stopped answering";
 
@@ -115,12 +86,9 @@ const negotiated = (theirs: ReadonlyArray<string>): ReadonlyArray<string> =>
   CAPABILITIES.filter((capability) => theirs.includes(capability));
 
 /**
- * The connection, from the upgrade to the end of it.
- *
  * `mine` names this connection, so what it writes on its way out is dropped if
- * the runner has already dialled again. `departure` is `unreachable` until the
- * runner says otherwise: silence is the default reading of a connection that
- * stopped, and only a `Goodbye` makes it an announcement.
+ * the runner already dialled again, and `departure` stays `unreachable` until a
+ * `Goodbye` makes it an announcement.
  */
 const hold = (runnerId: string, socket: Socket.Socket) =>
   Effect.gen(function* () {
@@ -134,18 +102,16 @@ const hold = (runnerId: string, socket: Socket.Socket) =>
     let departure: Departure = "unreachable";
     let lastHeard = yield* Clock.currentTimeMillis;
 
-    /** Opened when this runner turns up on a connection that is not this one. */
     const displaced = Latch.makeUnsafe(false);
 
     const refuse = (reason: string) => write(new Socket.CloseEvent(PROTOCOL_ERROR, reason));
 
-    /** The answer to a hello: the identity the runner pins, over its own challenge. */
     const greet = (hello: RunnerHello) =>
       Effect.gen(function* () {
         const controller = yield* identity.read;
         if (Option.isNone(controller)) {
-          // The boot creates the identity before anything binds, so serving a
-          // socket without one is a bug rather than a state to answer.
+          // The boot creates the identity before anything binds, so this is a
+          // bug rather than a state to answer.
           return yield* Effect.die("the controller has no identity row");
         }
         const signature = yield* identity.sign(signedChallenge(runnerId, hello.nonce));
@@ -158,8 +124,8 @@ const hold = (runnerId: string, socket: Socket.Socket) =>
           nonce: hello.nonce,
           signature: Buffer.from(signature).toString("base64"),
         };
-        // The row is written before the answer goes out, so a runner that is
-        // told it is in is a runner the fleet already reads as online.
+        // Before the answer goes out, so a runner told it is in is one the fleet
+        // already reads as online.
         yield* presence.greeted(runnerId, mine, () => void displaced.openUnsafe(), {
           binaryVersion: hello.binaryVersion,
           protocolVersion: hello.protocolVersion,
@@ -176,9 +142,8 @@ const hold = (runnerId: string, socket: Socket.Socket) =>
           Effect.try({ try: () => JSON.parse(raw) as unknown, catch: () => undefined }),
         );
         if (Option.isNone(parsed)) return yield* refuse(UNREADABLE);
-        // The version is read before the frame is, because a peer on a later
-        // version sends a hello this build's schema cannot decode and would
-        // otherwise be told its frame was gibberish rather than its version.
+        // Read before the frame, because a later peer's hello will not decode
+        // here and would otherwise be called gibberish rather than a mismatch.
         const version = yield* Effect.option(decodePeerVersion(parsed.value));
         if (Option.isSome(version) && version.value.protocolVersion !== PROTOCOL_VERSION) {
           return yield* refuse(WRONG_VERSION);
@@ -188,25 +153,20 @@ const hold = (runnerId: string, socket: Socket.Socket) =>
         const message = frame.value;
         switch (message._tag) {
           case "runnerHello":
-            // One hello per connection. Without this a runner could make the
-            // controller sign and write for every frame it cares to send.
+            // Without this a runner could make the controller sign and write for
+            // every frame it cares to send.
             if (greeted) return yield* refuse(GREETED_ALREADY);
             return yield* greet(message);
           case "pong":
-            // The answer to the question, and the only frame that counts as
-            // one. A runner whose pong path is broken but whose other reports
-            // still arrive is a runner nothing can place work on.
-            //
-            // Only a connection that has said who it is is answering: without
-            // that, anything holding a credential could keep a row reading as
-            // last seen a moment ago while never joining the fleet at all.
+            // The only frame that counts as an answer, and only from a
+            // connection that has said who it is: otherwise anything holding a
+            // credential could keep a row reading as last seen a moment ago.
             if (!greeted) return;
             lastHeard = yield* Clock.currentTimeMillis;
             return yield* presence.answered(runnerId);
           case "factsReport":
-            // Nothing a runner says about itself is worth storing before it has
-            // said who it is: until the hello lands, all this connection has
-            // shown is that somebody holds a credential.
+            // Until the hello lands, all this connection has shown is that
+            // somebody holds a credential.
             if (!greeted) return;
             return yield* presence.reportedFacts(runnerId, mine, message.facts);
           case "watermarkReport":
@@ -218,16 +178,12 @@ const hold = (runnerId: string, socket: Socket.Socket) =>
         }
       });
 
-    // The transport forks a fiber per frame, so two frames arriving together
-    // would otherwise run the exchange twice over the same four variables.
+    // The transport forks a fiber per frame, so two arriving together would
+    // otherwise run the exchange twice over the same four variables.
     const frames = yield* Semaphore.make(1);
     const receive = (raw: string) => frames.withPermits(1)(handle(raw));
 
-    /**
-     * Asks, on the interval, and gives up on a runner that has stopped
-     * answering. Racing the receive loop rather than forking it means neither
-     * outlives the other by so much as a frame.
-     */
+    /** Raced against the receive loop, so neither outlives the other by a frame. */
     const ask = Effect.gen(function* () {
       while (true) {
         yield* Effect.sleep(pings.interval);
@@ -238,22 +194,15 @@ const hold = (runnerId: string, socket: Socket.Socket) =>
       }
     });
 
-    /** Hangs up when the same runner turns up on a newer connection. */
     const yieldToNewer = Effect.andThen(
       displaced.await,
       write(new Socket.CloseEvent(GOING_AWAY, DISPLACED)),
     );
 
     /**
-     * What the row is left saying. Every way of ending is silence unless the
-     * runner announced otherwise, including a close this controller made
-     * itself; a connection that never came online is not this runner's and
-     * `ended` drops it.
-     *
-     * It runs as a finaliser because a runner that hangs up aborts the request,
-     * and an aborted request interrupts the fiber serving it: without this the
-     * one write that matters most - the row no longer being online - would be
-     * the one write that never happens.
+     * A finaliser because a runner that hangs up aborts the request, and an
+     * aborted request interrupts the fiber serving it: without this the one
+     * write that matters most, the row leaving online, never happens.
      */
     const leave = Effect.suspend(() => presence.ended(runnerId, mine, departure));
 
@@ -270,19 +219,14 @@ const hold = (runnerId: string, socket: Socket.Socket) =>
     );
   });
 
-/**
- * The socket route. The credential is resolved before the upgrade, so a refusal
- * is an ordinary `401` in the error envelope and no connection is ever opened
- * for a machine that could not present one.
- */
+/** Resolved before the upgrade, so a refusal is an ordinary `401` in the envelope. */
 export const RunnerSocketRouteLayer = HttpRouter.add("GET", RUNNER_SOCKET_PATH, (request) =>
   Effect.gen(function* () {
     const presence = yield* RunnerPresence;
     const credential = bearerOf(request);
     if (credential === undefined) return responseFor(unauthenticated(NO_CREDENTIAL));
-    // A database that will not answer is not a credential that was refused: a
-    // runner told `unauthenticated` has no reason to present that credential
-    // again, and this one is still good.
+    // A database that will not answer is not a credential that was refused, and
+    // a runner told `unauthenticated` stops presenting a credential still good.
     const admitted = yield* Effect.catch(presence.admits(credential), (error) =>
       Effect.as(Effect.logError("A runner's credential could not be resolved", error), undefined),
     );
@@ -290,8 +234,7 @@ export const RunnerSocketRouteLayer = HttpRouter.add("GET", RUNNER_SOCKET_PATH, 
     if (Option.isNone(admitted)) return responseFor(unauthenticated(NO_CREDENTIAL));
 
     const socket = yield* request.upgrade;
-    // Once the connection is up there is nobody left to answer with a status:
-    // whatever went wrong is logged inside and the connection ends.
+    // Once the connection is up there is nobody left to answer with a status.
     yield* hold(admitted.value, socket);
     return HttpServerResponse.empty();
   }).pipe(Effect.withSpan("runner.socket")),

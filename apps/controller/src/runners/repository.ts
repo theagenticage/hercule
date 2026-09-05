@@ -1,15 +1,7 @@
 /**
- * Runner rows. Nothing here decides policy - who may write, what a change
- * means, what gets logged - it only reads and writes.
- *
- * One walk answers a listing: a keyset over the name plus the id, which
- * `runners_name` serves. The two filters narrow that walk; neither is indexed,
- * because a fleet is a few dozen machines and an index on either would serve a
- * scan that reads them all anyway.
- *
- * The reported columns hold JSON, decoded on its way in by whatever writes it
- * and read back here as the shape that writer produced, the way a task's labels
- * are. Nothing queries inside them, so they are documents rather than columns.
+ * Runner rows; nothing here decides policy. A listing is one keyset walk over
+ * `runners_name`, and neither filter is indexed because a fleet is a few dozen
+ * machines. The reported columns hold JSON, since nothing queries inside them.
  */
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
@@ -31,7 +23,6 @@ import {
   type Page,
 } from "../db";
 
-/** What a fleet listing asks for. */
 export interface RunnerPageRequest {
   readonly limit: number;
   readonly cursor: string | undefined;
@@ -40,7 +31,6 @@ export interface RunnerPageRequest {
   readonly label: string | undefined;
 }
 
-/** Everything a new runner row holds. The rest is what the runner reports. */
 export interface NewRunner {
   readonly name: string;
   readonly state: RunnerState;
@@ -51,7 +41,6 @@ export interface NewRunner {
   readonly at: string;
 }
 
-/** What a runner said about itself when it opened its connection. */
 export interface RunnerHelloRecord {
   readonly binaryVersion: string;
   readonly protocolVersion: number;
@@ -59,7 +48,7 @@ export interface RunnerHelloRecord {
   readonly facts: RunnerFacts;
 }
 
-/** The columns an edit may set. An absent one is left as it was. */
+/** An absent column is left as it was. */
 export interface RunnerEdit {
   readonly name?: string;
   readonly labels?: ReadonlyArray<string>;
@@ -91,11 +80,8 @@ const scopeOf = (direction: SortDirection): CursorScope => ({
 });
 
 /**
- * Reads one JSON column as the shape the public API answers with.
- *
- * A document this build cannot read comes back as absent rather than failing
- * the page it is on. These columns hold what a runner reported, so one row
- * written by a version that says something else must not take a whole fleet
+ * A document this build cannot read comes back as absent rather than failing the
+ * page it is on: one row written by another version must not take a whole fleet
  * listing with it.
  */
 const documentIn = <S extends Schema.ConstraintDecoder<unknown>>(schema: S, what: string) => {
@@ -150,7 +136,6 @@ const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
 
   return {
-    /** The runner with that id, in full. */
     read: (id: string): Effect.Effect<Option.Option<RunnerDetail>, SqlError> =>
       Effect.flatMap(
         sql<RunnerRow>`SELECT ${sql.literal(COLUMNS)} FROM runners
@@ -161,11 +146,7 @@ const make = Effect.gen(function* () {
             : Effect.map(toDetail(rows[0]), Option.some),
       ),
 
-    /**
-     * The runner this credential belongs to, if it is one a machine may still
-     * connect with. A `retired` runner's credential is revoked, so it resolves
-     * to nothing rather than to a row nobody may use.
-     */
+    /** A `retired` runner's credential is revoked, so it resolves to nothing. */
     byCredential: (credentialHash: string): Effect.Effect<Option.Option<string>, SqlError> =>
       Effect.map(
         sql<{ readonly id: Uint8Array }>`
@@ -175,21 +156,19 @@ const make = Effect.gen(function* () {
         (rows) => Option.fromNullishOr(rows[0]).pipe(Option.map((row) => uuidToString(row.id))),
       ),
 
-    /** Every runner a connection is supposed to be open to. */
     connected: (): Effect.Effect<ReadonlyArray<string>, SqlError> =>
       Effect.map(
         sql<{ readonly id: Uint8Array }>`SELECT id FROM runners WHERE state = 'online'`,
         (rows) => rows.map((row) => uuidToString(row.id)),
       ),
 
-    /** Every name the fleet holds, so a joining machine can be given a free one. */
+    /** So a joining machine can be given a free one. */
     names: (): Effect.Effect<ReadonlySet<string>, SqlError> =>
       Effect.map(
         sql<{ readonly name: string }>`SELECT name FROM runners`,
         (rows) => new Set(rows.map((row) => row.name)),
       ),
 
-    /** Enlists a runner. Everything it reports about itself arrives later. */
     insert: (runner: NewRunner): Effect.Effect<RunnerDetail, SqlError> =>
       Effect.gen(function* () {
         const id = mintUuid();
@@ -217,7 +196,6 @@ const make = Effect.gen(function* () {
         };
       }),
 
-    /** Applies an edit. Only the columns the edit names are written. */
     update: (id: string, edit: RunnerEdit, at: string): Effect.Effect<void, SqlError> => {
       const sets = [sql`updated_at = ${at}`];
       if (edit.name !== undefined) sets.push(sql`name = ${edit.name}`);
@@ -230,11 +208,7 @@ const make = Effect.gen(function* () {
       );
     },
 
-    /**
-     * Stores everything a runner's hello said about itself. The state is not
-     * here: moving a runner is `setState`, so that one statement decides both
-     * whether the row changed and whether that change is worth recording.
-     */
+    /** The state is `setState`'s, so one statement decides whether the row moved. */
     recordHello: (
       id: string,
       hello: RunnerHelloRecord,
@@ -251,11 +225,7 @@ const make = Effect.gen(function* () {
         WHERE id = ${uuidFromString(id)}
       `),
 
-    /**
-     * Stores what a runner reported about its machine. The report is the whole
-     * of it: only the latest reading is worth anything, and a runner sends one
-     * only when something changed.
-     */
+    /** The report is the whole of it: only the latest reading is worth anything. */
     recordFacts: (id: string, facts: RunnerFacts, at: string): Effect.Effect<void, SqlError> =>
       Effect.asVoid(
         sql`UPDATE runners SET facts = ${JSON.stringify(facts)}, updated_at = ${at}
@@ -263,18 +233,10 @@ const make = Effect.gen(function* () {
       ),
 
     /**
-     * Stores the headroom a runner reported, and answers whether that changed
-     * what the fleet may do with the machine. The reading itself is refreshed
-     * every time - it is what the row is for - but only the crossing of the
-     * watermark is a change anything else acts on.
-     *
-     * The old reading is read through the same tolerant decode the API answers
-     * with, so a column this build cannot make sense of does not become a
-     * statement that fails and takes the runner's connection with it.
-     *
-     * A machine that has said nothing yet is taken to be accepting work, so the
-     * first reading of a healthy disk is not news. A first reading that says
-     * the machine has no room left is.
+     * The reading is refreshed every time, but only the crossing is acted on.
+     * The old one goes through the same tolerant decode the API answers with, so
+     * an unreadable column does not take the connection down. A machine that has
+     * said nothing is taken to be accepting work.
      */
     recordWatermark: (
       id: string,
@@ -293,18 +255,13 @@ const make = Effect.gen(function* () {
         return (was?.acceptingPlacements ?? true) !== watermark.acceptingPlacements;
       }),
 
-    /** Records that the runner answered, without changing what it is. */
     touch: (id: string, at: string): Effect.Effect<void, SqlError> =>
       Effect.asVoid(
         sql`UPDATE runners SET last_seen_at = ${at}, updated_at = ${at}
             WHERE id = ${uuidFromString(id)}`,
       ),
 
-    /**
-     * Moves a runner to a state and answers whether it moved. A runner already
-     * in that state is left alone, so nothing records a change that did not
-     * happen.
-     */
+    /** Answers whether it moved, so nothing records a change that did not happen. */
     setState: (id: string, state: RunnerState, at: string): Effect.Effect<boolean, SqlError> =>
       Effect.map(
         sql<{ readonly id: Uint8Array }>`
@@ -315,11 +272,9 @@ const make = Effect.gen(function* () {
         (rows) => rows.length > 0,
       ),
 
-    /** One page of the fleet, by name. */
     list: (request: RunnerPageRequest): Effect.Effect<Page<Runner>, CursorError | SqlError> =>
       Effect.gen(function* () {
         const scope = scopeOf(request.direction);
-        // The one sortable column of a runner holds text.
         const after =
           request.cursor === undefined
             ? undefined
@@ -351,5 +306,4 @@ const make = Effect.gen(function* () {
   };
 });
 
-/** Everything the runner service reads and writes. */
 export const runnerRepository = make;

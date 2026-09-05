@@ -4,10 +4,8 @@ import { formatBytes, formatStamp } from "@hydra/client-core";
 import type { Runner, RunnerState } from "@hydra/contract";
 
 /**
- * The grey or hue a state word is read in. Only `online` is a machine doing
- * anything, so only it is live, and `unreachable` is the one state nobody
- * chose. The attention hue is left free for the skew warning, which is the one
- * thing on this screen a person can act on.
+ * Only `online` is live and only `unreachable` was nobody's choice. The
+ * attention hue is left free for the skew warning, the one actionable thing here.
  */
 const STATE_HUE: Record<RunnerState, string> = {
   online: "text-live",
@@ -17,7 +15,7 @@ const STATE_HUE: Record<RunnerState, string> = {
   retired: "text-faint",
 };
 
-/** What a machine probed about itself, in the order a person scans it. */
+/** In the order a person scans it. */
 const probed = (runner: Runner): ReadonlyArray<string> => [
   ...(runner.facts === null
     ? []
@@ -33,15 +31,10 @@ const probed = (runner: Runner): ReadonlyArray<string> => [
 ];
 
 /**
- * One machine: what it is on the first line, what it reported on the second.
- *
- * A binary that is not the controller's is called out rather than left as two
- * numbers to compare, because a fleet is scanned and skew is the one thing here
- * that needs doing something about. Labels sit apart from the probed facts: a
- * label is what a person wrote on the machine, and reading `gpu` as something
- * the machine found would be backwards. A machine that is not connected carries
- * how long ago it was, because everything else on its row was true then and
- * nothing says whether it is true now.
+ * A skewed binary is called out rather than left as two numbers to compare,
+ * because a fleet is scanned. Labels sit apart from the probed facts, since
+ * reading `gpu` as something the machine found would be backwards, and a machine
+ * that is not connected carries how long ago its row was true.
  */
 export function RunnerRow({
   runner,

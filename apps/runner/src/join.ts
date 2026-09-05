@@ -1,16 +1,11 @@
 /**
- * Enlisting this machine with a controller.
+ * Enlisting this machine with a controller. One function for both callers, the
+ * command line and the child a controller spawns, because a second
+ * implementation is how the two would drift apart.
  *
- * One function, two callers: `hydra runner join`, which reads the token off the
- * command line, and the local runner the controller spawns, which reads it off
- * stdin. Neither has anything of its own to do here - a join is a join - and a
- * second implementation is how the two would drift apart.
- *
- * What it leaves behind is the runner's whole durable identity: `runner.json`,
- * mode 0600, and a storage directory named at random. The random name is what
- * makes a re-enlisted machine harmless: it never opens a previous life's
- * workspaces or caches, and it never deletes them either - they stay where they
- * are for a person to look through.
+ * The storage directory is named at random, which is what makes a re-enlisted
+ * machine harmless: it never opens a previous life's workspaces, and never
+ * deletes them either.
  *
  * This module is the only writer of `runner.json`. Everything else reads it.
  */
@@ -23,49 +18,40 @@ import { runnerDirIn } from "@hydra/home";
 import { JoinAnswer } from "@hydra/protocol";
 import { runnerFileIn, type RunnerFile } from "./runner-file";
 
-/** Where a machine joins. Outside the operation table, so it is written here. */
+/** Outside the operation table, so it is written here. */
 const JOIN_PATH = "/api/v1/runners/join";
 
-/** How many random bytes name a storage directory. */
 const STORAGE_NAME_BYTES = 8;
 
-/** The join could not be completed, said in one line a person can act on. */
 export class JoinError extends Schema.TaggedError<JoinError>()("JoinError", {
   message: Schema.String,
   /**
-   * Whether trying the same join again could work. A controller that is not
-   * listening yet is the ordinary case for the runner a controller spawns
-   * before it binds; a token it refused is not something waiting fixes.
+   * A controller not listening yet is ordinary for the child spawned before it
+   * binds; a token it refused is not something waiting fixes.
    */
   retryable: Schema.Boolean,
 }) {}
 
-/** What a join needs to know. */
 export interface JoinOptions {
-  /** Where the controller answers, as the user typed it. */
+  /** As the user typed it. */
   readonly controllerUrl: string;
-  /** The single-use join token. */
   readonly token: string;
-  /** This machine's Hydra Home. */
   readonly home: string;
-  /** How the controller is called; the global one unless a caller says otherwise. */
+  /** The global `fetch` unless a caller says otherwise. */
   readonly fetch?: typeof fetch;
 }
 
-/** What a machine is once it has joined. */
 export interface Joined {
   readonly runnerId: string;
-  /** The name the controller assigned. The owner renames it whenever they like. */
+  /** The name the controller assigned, which the owner may rename. */
   readonly name: string;
-  /** The `runner.json` this join wrote. */
   readonly configPath: string;
-  /** The storage directory this enrolment owns, absolute. */
+  /** Absolute. */
   readonly storageDirectory: string;
 }
 
 const decodeAnswer = Schema.decodeUnknownEffect(JoinAnswer);
 
-/** What the controller said went wrong, or the status when it said nothing usable. */
 const refusal = (status: number, body: string): string => {
   try {
     const envelope = JSON.parse(body) as { error?: { message?: unknown } };
@@ -77,7 +63,6 @@ const refusal = (status: number, body: string): string => {
   return `the controller answered ${String(status)}`;
 };
 
-/** The join exchange itself: one request, one answer. */
 const ask = (options: JoinOptions): Effect.Effect<JoinAnswer, JoinError> =>
   Effect.gen(function* () {
     const call = options.fetch ?? fetch;
@@ -129,12 +114,7 @@ const ask = (options: JoinOptions): Effect.Effect<JoinAnswer, JoinError> =>
     );
   });
 
-/**
- * Enlists this machine and persists what it was given.
- *
- * The files are written after the exchange succeeds, so a refused join leaves
- * the home exactly as it found it.
- */
+/** The files are written after the exchange, so a refused join leaves the home alone. */
 export const join = (options: JoinOptions): Effect.Effect<Joined, JoinError> =>
   Effect.gen(function* () {
     const answer = yield* ask(options);
@@ -155,15 +135,11 @@ export const join = (options: JoinOptions): Effect.Effect<Joined, JoinError> =>
 
     yield* Effect.try({
       try: () => {
-        // Everything under here is this runner's alone, workspaces and provider
-        // homes included.
         mkdirSync(storageDirectory, { recursive: true, mode: 0o700 });
-        // Never written into the target file. `mode` applies only when a file
-        // is created, so writing over an earlier enrolment's `runner.json`
-        // would hold the new credential at the old mode until a chmod; and a
-        // write that fails halfway would leave a machine holding neither
-        // credential, both of which the controller keeps only the hash of. A
-        // fresh file is 0600 from its first byte and the rename is atomic.
+        // Never written into the target file: `mode` applies only on creation,
+        // so overwriting an earlier `runner.json` would hold the new credential
+        // at the old mode, and a half-written one would leave the machine with
+        // neither credential, of which the controller keeps only hashes.
         const temporary = `${configPath}.${randomUUID()}.tmp`;
         try {
           writeFileSync(temporary, `${JSON.stringify(contents, null, 2)}\n`, {

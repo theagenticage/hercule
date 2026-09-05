@@ -1,20 +1,13 @@
 /**
- * The runner role: a daemon that dials the controller and hosts sessions, and
- * the one command that turns a machine into one.
+ * The runner role. This module's import graph must never reach the controller,
+ * the DB engine, the plugin host, or the web bundle.
  *
- * This module's import graph must never reach the controller, the DB engine,
- * the plugin host, or the web bundle.
- *
- * `hydra runner join` belongs to this role rather than to the CLI because
- * everything it writes - `runner.json` and the storage directory - is the
- * runner's own; `hydra runner` then holds the connection that join made
- * possible. `hydra runner --local` is the same daemon with an enrolment
- * handshake in front of it, for the child a controller spawns beside itself.
+ * `join` belongs to this role rather than to the CLI because everything it
+ * writes is the runner's own.
  *
  * Both daemon forms stop on a signal rather than being killed by it: the
- * connection's scope closes on the way out, which is where the runner tells its
- * controller it is going. A runner that vanished would read as unreachable for
- * a minute; one that said goodbye reads as offline at once.
+ * connection's scope closes on the way out, which is where the runner says it is
+ * going. A runner that vanished reads as unreachable for a minute instead.
  */
 import * as Effect from "effect/Effect";
 import * as Latch from "effect/Latch";
@@ -26,7 +19,7 @@ import { daemon } from "./daemon";
 import { join } from "./join";
 import { local } from "./local";
 
-/** How the runner ends, in the same vocabulary the CLI uses. */
+/** The same vocabulary the CLI uses. */
 const EXIT = { failed: 1, usage: 2 } as const;
 
 const USAGE = [
@@ -36,12 +29,9 @@ const USAGE = [
 ].join("\n");
 
 /**
- * The stop request, as something a daemon can be raced against.
- *
- * Both signals mean the same thing, and the handlers stay installed until the
- * scope that put them there closes, which is after the connection has been let
- * go of: a second signal otherwise reaches Bun's default disposition and kills
- * the process mid-goodbye.
+ * The handlers stay installed until the scope that put them there closes, which
+ * is after the connection is let go of: a second signal would otherwise reach
+ * Bun's default disposition and kill the process mid-goodbye.
  */
 const untilStopped: Effect.Effect<Effect.Effect<void>, never, Scope.Scope> = Effect.acquireRelease(
   Effect.sync(() => {
@@ -61,12 +51,9 @@ const untilStopped: Effect.Effect<Effect.Effect<void>, never, Scope.Scope> = Eff
 ).pipe(Effect.map(({ stopped }) => stopped.await));
 
 /**
- * Runs a daemon until it fails or the process is asked to stop. A daemon that
- * returns on its own has failed: holding the connection is all it does.
- *
- * Everything it logs goes to stderr. A runner's stdout is a channel, not a
- * console: the controller that spawned this one reads a line off it and has to
- * be able to tell that line from whatever the daemon had to say.
+ * A daemon that returns on its own has failed: holding the connection is all it
+ * does. Everything it logs goes to stderr, because a runner's stdout is a
+ * channel the spawning controller reads one line off.
  */
 const hold = async (work: Effect.Effect<void, { readonly message: string }>): Promise<void> => {
   const outcome = await Effect.runPromise(
@@ -82,7 +69,6 @@ const hold = async (work: Effect.Effect<void, { readonly message: string }>): Pr
   }
 };
 
-/** Refuses the line, saying how it should have read. */
 const misuse = (reason: string): void => {
   console.error(`hydra: ${reason}`);
   console.error(USAGE);
@@ -101,15 +87,12 @@ export async function run(argv: readonly string[]): Promise<void> {
 
   if (verb === undefined || verb.startsWith("-")) {
     const home = resolveHomePath(options.success.home, process.env);
-    // A daemon takes no flags but `--local`, so anything else on the line is a
-    // typo, and starting a daemon is the wrong answer to one.
+    // Anything else is a typo, and starting a daemon is the wrong answer to one.
     const unknown = rest.find((token) => token !== "--local");
     if (unknown !== undefined) {
       misuse(`unknown runner option \`${unknown}\``);
       return;
     }
-    // The supervised child the controller spawns takes its enrolment off stdin
-    // before it dials; everything after that is the ordinary daemon.
     return await hold(verb === "--local" ? local(home) : daemon(home));
   }
   if (verb !== "join") {
@@ -120,9 +103,8 @@ export async function run(argv: readonly string[]): Promise<void> {
   const args = rest.slice(1);
   const flag = args.indexOf("--token");
   const token = flag < 0 ? undefined : args[flag + 1];
-  // Whatever is left once the flag and its value are struck out is the URL, and
-  // there is exactly one of those, so a stray flag is refused rather than
-  // ignored.
+  // What is left once the flag and its value are struck out is the URL, so a
+  // stray flag is refused rather than ignored.
   const targets = flag < 0 ? args : args.filter((_, at) => at !== flag && at !== flag + 1);
   const controllerUrl = targets[0];
   if (controllerUrl === undefined) {

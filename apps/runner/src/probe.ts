@@ -1,14 +1,9 @@
 /**
  * What a runner says about the machine it is on.
  *
- * Part of it the operating system already knows - the platform, the
- * architecture, how much memory is fitted. The rest has to be looked for, and
- * looking is the whole reason the machine is handed in rather than reached
- * directly: a probe that calls `Bun.which` itself can only ever be tested on
- * the machine the test happens to run on.
- *
- * Nothing here reads a credential file. What a runner reports is what is on its
- * PATH and what a binary prints when asked its version, and that is all.
+ * The machine is handed in rather than reached directly because a probe that
+ * calls `Bun.which` itself can only be tested on whatever machine the test runs
+ * on. Nothing here reads a credential file.
  */
 import { arch, platform, totalmem } from "node:os";
 import * as Duration from "effect/Duration";
@@ -20,47 +15,36 @@ import {
   type Toolchain,
 } from "@hydra/protocol";
 
-/**
- * The toolchains a runner probes for. Deliberately two: anything else the
- * machine owner installs by hand and, if placement needs it, says so with a
- * label.
- */
+/** Deliberately two: anything else is installed by hand and named with a label. */
 const TOOLCHAINS = ["git", "gh"] as const;
 
 /**
- * The provider harnesses a runner is asked about. Unlike a toolchain, an absent
- * one is still reported: what the fleet needs to know is which machines could
- * host a given provider's sessions, and that includes the ones that could not.
+ * Unlike a toolchain, an absent one is still reported: the fleet needs to know
+ * which machines could host a provider's sessions, including those that could not.
  */
 const PROVIDER_BINARIES = ["claude", "codex", "pi"] as const;
 
-/** Docker presence is whether the binary is there; nothing runs it. */
+/** Presence is whether the binary is there; nothing runs it. */
 const DOCKER = "docker";
 
-/** How long a binary has to say what version it is before nobody waits further. */
 export const VERSION_DEADLINE: Duration.Duration = Duration.seconds(5);
 
-/** The first thing in a version line that looks like a version. */
 const SEMVER = /\d+\.\d+\.\d+\S*/;
 
 /** How the probe reaches the machine it is on. */
 export interface Machine {
-  /** The absolute path of a binary on the PATH, or undefined when there is none. */
   readonly locate: (binary: string) => string | undefined;
   /** What `<binary> --version` printed, or undefined when it could not be run. */
   readonly version: (path: string) => Effect.Effect<string | undefined>;
 }
 
-/** The machine this process is on. */
 export const thisMachine: Machine = {
   locate: (binary) => Bun.which(binary) ?? undefined,
   version: (path) =>
     Effect.tryPromise(async (signal) => {
       const child = Bun.spawn([path, "--version"], { stdout: "pipe", stderr: "ignore" });
-      // Giving up on the answer is not giving up on the process. A binary that
-      // blocks on `--version` - a wrapper waiting on a credential helper, a
-      // shim on a wedged mount - would otherwise be left running, one more of
-      // them every hour for the life of the runner.
+      // Giving up on the answer is not giving up on the process: a binary that
+      // blocks on `--version` would be left running, one more every hour.
       signal.addEventListener("abort", () => {
         child.kill();
       });
@@ -68,46 +52,36 @@ export const thisMachine: Machine = {
       await child.exited;
       return child.exitCode === 0 ? printed : undefined;
     }).pipe(
-      // A binary that will not start or exits with a failure has said nothing
-      // about itself, and a machine missing a tool is an ordinary machine
-      // rather than one the probe should fail on.
+      // A machine missing a tool is an ordinary machine, not a failed probe.
       Effect.orElseSucceed(() => undefined),
     ),
 };
 
 /**
- * Anything this machine states about itself, cut to what the protocol carries.
- * A single over-long value - a version banner, a binary under a deeply nested
- * path - would otherwise make the whole report fail to encode, which a runner
- * discovers as a connection that can never be made.
+ * Cut to what the protocol carries. One over-long value would otherwise make the
+ * whole report fail to encode, which a runner meets as a connection it cannot make.
  */
 const fact = (value: string): string => value.slice(0, MAX_FACT_LENGTH);
 
-/**
- * The version a binary printed. What `--version` prints is the binary's own
- * business, so anything unrecognisable is reported raw rather than dropped.
- */
+/** What `--version` prints is the binary's business, so the unrecognisable goes raw. */
 const versionFrom = (printed: string): string => fact(SEMVER.exec(printed)?.[0] ?? printed.trim());
 
-/** One toolchain, or nothing at all when the machine has none of it to report. */
 const toolchainAt = (machine: Machine, name: string): Effect.Effect<Toolchain | undefined> =>
   Effect.gen(function* () {
     const path = machine.locate(name);
     if (path === undefined) return undefined;
-    // The deadline is here rather than inside the machine, so that every way of
-    // running a binary is bounded by it and a stub can prove that it is.
+    // Here rather than inside the machine, so every way of running a binary is
+    // bounded by it and a stub can prove so.
     const printed = yield* Effect.orElseSucceed(
       Effect.timeout(machine.version(path), VERSION_DEADLINE),
       () => undefined,
     );
     if (printed === undefined) return undefined;
     const version = versionFrom(printed);
-    // A tool that printed nothing readable is a tool nothing can be said about,
-    // and an entry with an empty version is not a fact this protocol carries.
+    // An entry with an empty version is not a fact this protocol carries.
     return version.length === 0 ? undefined : { name, version, path: fact(path) };
   });
 
-/** Everything this machine can say about itself right now. */
 export const probeFacts = (machine: Machine, identityPort: number): Effect.Effect<RunnerFacts> =>
   Effect.gen(function* () {
     const toolchains: Array<Toolchain> = [];
@@ -132,10 +106,8 @@ export const probeFacts = (machine: Machine, identityPort: number): Effect.Effec
     };
   });
 
-/** How often a connected runner looks at its machine again. */
 export const FACTS_REFRESH: Duration.Duration = Duration.hours(1);
 
-/** What the refresh needs to do its work. */
 export interface FactsRefresh<E> {
   readonly probe: Effect.Effect<RunnerFacts>;
   /** What has already been reported - at the start of a connection, the hello's. */
@@ -144,17 +116,10 @@ export interface FactsRefresh<E> {
 }
 
 /**
- * Probes again on the interval, reporting only what differs from what the
- * controller has already been told. Facts change when somebody installs
- * something, which is rarely, so a report every hour regardless would rewrite
- * every row in the fleet hourly to say nothing new.
- *
- * The comparison is over the text the report is sent as: the probe builds its
- * answer the same way every time, so a difference in the text is a difference
- * in the machine.
- *
- * Runs until it is interrupted, which is the end of the connection it belongs
- * to. Nothing is held for a later one: a report is worth only what it says now.
+ * Reports only what differs from what the controller was already told: facts
+ * change rarely, and an hourly report regardless would rewrite every row in the
+ * fleet to say nothing new. The comparison is over the text the report is sent
+ * as, because the probe builds its answer the same way every time.
  */
 export const refreshFacts = <E>(refresh: FactsRefresh<E>): Effect.Effect<never, E> =>
   Effect.gen(function* () {

@@ -1,19 +1,13 @@
 /**
  * Join tokens: minting one, and spending it.
  *
- * A join token is the same kind of thing as every other credential Hydra
- * issues - 32 random bytes, stored as a SHA-256 hash - so it is minted and
- * hashed by `../credentials/token.ts` rather than by a second implementation.
- * The plaintext exists only in the answer that returns it.
- *
- * Minting lives here, at the repository, because the two callers are not alike:
- * `runner.createJoinToken` has a user behind it, and the controller's first
- * boot has nobody at all - it mints a token for the local runner it is about to
- * spawn. Neither may be the only place that knows how a token is made.
+ * Minting lives at the repository because the two callers are not alike: one
+ * has a user behind it, and the first boot has nobody at all. Neither may be the
+ * only place that knows how a token is made.
  *
  * Spending is one statement on purpose. Single use is the whole security
- * property of a join token, and a read followed by a write would let two
- * machines that presented the same token both pass the read.
+ * property, and a read followed by a write would let two machines presenting
+ * the same token both pass the read.
  */
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -25,13 +19,11 @@ import { hashToken, mintToken } from "../credentials";
 import { mintUuid, uuidToString } from "../db";
 
 /**
- * How long a join token is good for. Long enough to walk to the other machine
- * and type the command, short enough that a token left in a chat window is
- * worthless by the time anyone else reads it.
+ * Long enough to walk to the other machine and type the command, short enough
+ * that one left in a chat window is worthless by the time anyone reads it.
  */
 export const JOIN_TOKEN_LIFETIME_MS = 60 * 60 * 1000;
 
-/** A minted token, the invitation it belongs to, and when it stops being one. */
 export interface JoinToken {
   readonly id: string;
   readonly token: string;
@@ -43,12 +35,9 @@ const make = Effect.gen(function* () {
 
   return {
     /**
-     * Mints a token good for an hour and records its hash.
-     *
-     * The rows that have already expired go with it. Nothing lists or revokes
-     * an outstanding token, so this sweep is the only thing that bounds the
-     * table; a token past its hour can never be spent again, so nothing is lost
-     * with it.
+     * Expired rows go with it. Nothing lists or revokes an outstanding token, so
+     * this sweep is the only thing bounding the table, and a token past its hour
+     * can never be spent again.
      */
     create: (at: string): Effect.Effect<JoinToken, SqlError> =>
       Effect.gen(function* () {
@@ -64,10 +53,8 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * Spends a presented token, and answers which invitation it was. A token
-     * that was never minted, one already used and one past its hour all answer
-     * `None`: the presenter learns nothing from the difference, and there is
-     * nothing different for it to do.
+     * Unminted, used and expired all answer `None`: the presenter learns nothing
+     * from the difference, and has nothing different to do.
      */
     spend: (token: string, at: string): Effect.Effect<Option.Option<string>, SqlError> =>
       Effect.map(
@@ -81,7 +68,6 @@ const make = Effect.gen(function* () {
   };
 });
 
-/** The join-token repository. */
 export class JoinTokens extends Context.Service<JoinTokens, Effect.Success<typeof make>>()(
   "hydra/controller/runners/JoinTokens",
 ) {}

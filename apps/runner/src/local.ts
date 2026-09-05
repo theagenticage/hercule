@@ -1,16 +1,11 @@
 /**
- * `hydra runner --local`: the runner a controller spawns beside itself.
+ * `hydra runner --local`: an ordinary runner in every way but its first two
+ * seconds.
  *
- * It is an ordinary runner in every way but its first two seconds. A controller
- * that starts a child has no way to ask it who it is - `runner.json` belongs to
- * the runner, and a controller that read it would be a second reader of a file
- * with one owner - so the child says so itself, on the one pipe the two of them
- * share, before it does anything else. A machine that has never joined says that
- * instead, and is handed a single-use token back on its stdin: the one place a
- * token can travel that `ps` does not show and no grandchild inherits.
- *
- * After the handshake there is nothing local about it: the same join and the
- * same daemon as a machine somebody enlisted by hand.
+ * `runner.json` has one owner, so a controller cannot read who its child is; the
+ * child says so itself on the pipe they share. A machine that has never joined
+ * says that instead, and is handed a token back on stdin, the one place a token
+ * travels that `ps` does not show and no grandchild inherits.
  */
 import { existsSync } from "node:fs";
 import * as Duration from "effect/Duration";
@@ -22,16 +17,14 @@ import { daemon } from "./daemon";
 import { join, JoinError } from "./join";
 import { readRunnerFile, runnerFileIn, type NotEnrolled } from "./runner-file";
 
-/** How long the child waits between join attempts a retry might fix. */
 const JOIN_RETRY_INTERVAL = Duration.millis(250);
 
 const encodeAnnouncement = Schema.encodeUnknownSync(LocalAnnouncement);
 const decodeEnrolment = Schema.decodeUnknownEffect(LocalEnrolment);
 
 /**
- * Says one thing on stdout, as one line and nothing more. The controller reads
- * exactly this much and then leaves the pipe to whatever the runner logs, so a
- * second line here would be read as a second answer.
+ * One line and nothing more: the controller reads exactly this much and leaves
+ * the pipe to the runner's logs, so a second line reads as a second answer.
  */
 const announce = (said: LocalAnnouncement): Effect.Effect<void> =>
   Effect.sync(() => {
@@ -39,9 +32,8 @@ const announce = (said: LocalAnnouncement): Effect.Effect<void> =>
   });
 
 /**
- * The first line the controller writes back, or nothing when it closes the pipe
- * without writing one. Reading stops at the newline rather than at end of file,
- * so a controller that holds the pipe open is not waited on.
+ * Reading stops at the newline rather than at end of file, so a controller that
+ * holds the pipe open is not waited on.
  */
 const firstStdinLine = Effect.promise(async () => {
   const decoder = new TextDecoder();
@@ -54,7 +46,6 @@ const firstStdinLine = Effect.promise(async () => {
   return undefined;
 });
 
-/** Enlists this machine with what the controller handed it on stdin. */
 const enrol = (home: string): Effect.Effect<void, JoinError> =>
   Effect.gen(function* () {
     const line = yield* firstStdinLine;
@@ -74,8 +65,7 @@ const enrol = (home: string): Effect.Effect<void, JoinError> =>
       () => new JoinError({ message: "that is not a join this runner can make", retryable: false }),
     );
     // The controller spawns its runner before it binds, so the first attempts
-    // are made against a listener that is not up yet. A refusal is not one of
-    // those: a token the controller will not take is not a token time fixes.
+    // meet a listener that is not up. A refusal is not one of those.
     yield* join({
       controllerUrl: enrolment.controllerUrl,
       token: enrolment.token,
@@ -88,12 +78,10 @@ const enrol = (home: string): Effect.Effect<void, JoinError> =>
     );
   });
 
-/** Runs the local runner: the handshake, then the ordinary daemon. */
 export const local = (home: string): Effect.Effect<void, NotEnrolled | JoinError> =>
   Effect.gen(function* () {
-    // Whether the file is there, not whether it reads: a machine holding a
-    // `runner.json` nobody can parse should say so rather than quietly enlist
-    // again and leave the row it already has behind.
+    // Whether the file is there, not whether it reads: a machine holding an
+    // unparseable `runner.json` should say so rather than enlist again.
     if (existsSync(runnerFileIn(home))) {
       const enrolled = yield* readRunnerFile(home);
       yield* announce({ runnerId: enrolled.runnerId });
