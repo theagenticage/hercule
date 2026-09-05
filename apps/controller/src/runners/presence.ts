@@ -26,6 +26,7 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
+import type { RunnerFacts, RunnerWatermark } from "@hydra/contract";
 import { SYSTEM_ACTOR } from "../actor";
 import { hashToken } from "../credentials";
 import { nowIso, withTransaction } from "../db";
@@ -111,6 +112,50 @@ const make = Effect.gen(function* () {
      */
     answered: (id: string): Effect.Effect<void, SqlError> =>
       Effect.flatMap(nowIso, (at) => runners.touch(id, at)),
+
+    /**
+     * Stores what a runner said about its machine, on the connection it is
+     * currently reachable through. A report that arrives on a connection the
+     * runner has already replaced is stale by definition, and writing it would
+     * put yesterday's machine back over today's.
+     */
+    reportedFacts: (
+      id: string,
+      connection: Connection,
+      facts: RunnerFacts,
+    ): Effect.Effect<void, SqlError> =>
+      withTransaction(
+        sql,
+        Effect.gen(function* () {
+          if (reachable.get(id)?.connection !== connection) return;
+          yield* runners.recordFacts(id, facts, yield* nowIso);
+        }),
+      ),
+
+    /**
+     * Stores the headroom a runner reported. The reading is refreshed every
+     * time; what is recorded is the machine crossing its watermark, because
+     * that is the part placement acts on.
+     */
+    reportedWatermark: (
+      id: string,
+      connection: Connection,
+      watermark: RunnerWatermark,
+    ): Effect.Effect<void, SqlError> =>
+      withTransaction(
+        sql,
+        Effect.gen(function* () {
+          if (reachable.get(id)?.connection !== connection) return;
+          const at = yield* nowIso;
+          if (!(yield* runners.recordWatermark(id, watermark, at))) return;
+          yield* audit.append({
+            kind: "runner.placementsChanged",
+            actor: SYSTEM_ACTOR,
+            payload: { runnerId: id, acceptingPlacements: watermark.acceptingPlacements },
+            at,
+          });
+        }),
+      ),
 
     /**
      * Records that this connection ended. `offline` is an announced departure

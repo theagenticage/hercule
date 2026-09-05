@@ -13,16 +13,11 @@
  */
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
+import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
-import type {
-  Runner,
-  RunnerDetail,
-  RunnerFacts,
-  RunnerState,
-  RunnerWatermark,
-  SortDirection,
-} from "@hydra/contract";
+import { RunnerCapabilities, RunnerFacts, RunnerWatermark } from "@hydra/contract";
+import type { Runner, RunnerDetail, RunnerState, SortDirection } from "@hydra/contract";
 import {
   decodeCursor,
   encodeCursor,
@@ -95,27 +90,61 @@ const scopeOf = (direction: SortDirection): CursorScope => ({
   direction,
 });
 
-/** One JSON column, or null where the runner has not reported it yet. */
-const parsed = <A>(column: string | null): A | null =>
-  column === null ? null : (JSON.parse(column) as A);
+/**
+ * Reads one JSON column as the shape the public API answers with.
+ *
+ * A document this build cannot read comes back as absent rather than failing
+ * the page it is on. These columns hold what a runner reported, so one row
+ * written by a version that says something else must not take a whole fleet
+ * listing with it.
+ */
+const documentIn = <S extends Schema.ConstraintDecoder<unknown>>(schema: S, what: string) => {
+  const decode = Schema.decodeUnknownExit(Schema.fromJsonString(schema));
+  return (id: string, column: string | null): Effect.Effect<S["Type"] | null> => {
+    if (column === null) return Effect.succeed(null);
+    const decoded = decode(column);
+    if (decoded._tag === "Success") return Effect.succeed(decoded.value);
+    return Effect.as(
+      Effect.logWarning(
+        `Runner ${id}: its ${what} were written by a build this one cannot read, ` +
+          `and are answered as though the runner had never reported them.`,
+      ),
+      null,
+    );
+  };
+};
 
-const toRunner = (row: RunnerRow): Runner => ({
-  id: uuidToString(row.id),
-  name: row.name,
-  state: row.state,
-  version: row.binary_version,
-  labels: JSON.parse(row.labels) as ReadonlyArray<string>,
-  facts: parsed<RunnerFacts>(row.facts),
-  watermark: parsed<RunnerWatermark>(row.watermark),
-  maxConcurrentSessions: row.max_concurrent_sessions,
-  lastSeenAt: row.last_seen_at,
-});
+const factsIn = documentIn(RunnerFacts, "facts");
+const watermarkIn = documentIn(RunnerWatermark, "watermark");
+const capabilitiesIn = documentIn(RunnerCapabilities, "negotiated capabilities");
 
-const toDetail = (row: RunnerRow): RunnerDetail => ({
-  ...toRunner(row),
-  negotiatedCapabilities: parsed<ReadonlyArray<string>>(row.negotiated_capabilities),
-  protocolVersion: row.protocol_version,
-});
+const toRunner = (row: RunnerRow): Effect.Effect<Runner> =>
+  Effect.gen(function* () {
+    const id = uuidToString(row.id);
+    return {
+      id,
+      name: row.name,
+      state: row.state,
+      version: row.binary_version,
+      labels: JSON.parse(row.labels) as ReadonlyArray<string>,
+      facts: yield* factsIn(id, row.facts),
+      watermark: yield* watermarkIn(id, row.watermark),
+      maxConcurrentSessions: row.max_concurrent_sessions,
+      lastSeenAt: row.last_seen_at,
+    };
+  });
+
+const toDetail = (row: RunnerRow): Effect.Effect<RunnerDetail> =>
+  Effect.gen(function* () {
+    return {
+      ...(yield* toRunner(row)),
+      negotiatedCapabilities: yield* capabilitiesIn(
+        uuidToString(row.id),
+        row.negotiated_capabilities,
+      ),
+      protocolVersion: row.protocol_version,
+    };
+  });
 
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
@@ -123,10 +152,13 @@ const make = Effect.gen(function* () {
   return {
     /** The runner with that id, in full. */
     read: (id: string): Effect.Effect<Option.Option<RunnerDetail>, SqlError> =>
-      Effect.map(
+      Effect.flatMap(
         sql<RunnerRow>`SELECT ${sql.literal(COLUMNS)} FROM runners
                        WHERE id = ${uuidFromString(id)}`,
-        (rows) => Option.fromNullishOr(rows[0]).pipe(Option.map(toDetail)),
+        (rows) =>
+          rows[0] === undefined
+            ? Effect.succeed(Option.none())
+            : Effect.map(toDetail(rows[0]), Option.some),
       ),
 
     /**
@@ -219,6 +251,48 @@ const make = Effect.gen(function* () {
         WHERE id = ${uuidFromString(id)}
       `),
 
+    /**
+     * Stores what a runner reported about its machine. The report is the whole
+     * of it: only the latest reading is worth anything, and a runner sends one
+     * only when something changed.
+     */
+    recordFacts: (id: string, facts: RunnerFacts, at: string): Effect.Effect<void, SqlError> =>
+      Effect.asVoid(
+        sql`UPDATE runners SET facts = ${JSON.stringify(facts)}, updated_at = ${at}
+            WHERE id = ${uuidFromString(id)}`,
+      ),
+
+    /**
+     * Stores the headroom a runner reported, and answers whether that changed
+     * what the fleet may do with the machine. The reading itself is refreshed
+     * every time - it is what the row is for - but only the crossing of the
+     * watermark is a change anything else acts on.
+     *
+     * The old reading is read through the same tolerant decode the API answers
+     * with, so a column this build cannot make sense of does not become a
+     * statement that fails and takes the runner's connection with it.
+     *
+     * A machine that has said nothing yet is taken to be accepting work, so the
+     * first reading of a healthy disk is not news. A first reading that says
+     * the machine has no room left is.
+     */
+    recordWatermark: (
+      id: string,
+      watermark: RunnerWatermark,
+      at: string,
+    ): Effect.Effect<boolean, SqlError> =>
+      Effect.gen(function* () {
+        const key = uuidFromString(id);
+        const rows = yield* sql<{
+          readonly watermark: string | null;
+        }>`SELECT watermark FROM runners WHERE id = ${key}`;
+        const was = yield* watermarkIn(id, rows[0]?.watermark ?? null);
+        yield* sql`UPDATE runners
+                   SET watermark = ${JSON.stringify(watermark)}, updated_at = ${at}
+                   WHERE id = ${key}`;
+        return (was?.acceptingPlacements ?? true) !== watermark.acceptingPlacements;
+      }),
+
     /** Records that the runner answered, without changing what it is. */
     touch: (id: string, at: string): Effect.Effect<void, SqlError> =>
       Effect.asVoid(
@@ -270,7 +344,7 @@ const make = Effect.gen(function* () {
         return yield* pageOf(
           rows,
           request.limit,
-          (page) => Effect.succeed(page.map(toRunner)),
+          (page) => Effect.forEach(page, toRunner),
           (last) => encodeCursor(scope, last.name, last.id),
         );
       }),

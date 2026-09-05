@@ -121,6 +121,9 @@ export const Runner = Schema.Struct({
 
 export type Runner = Schema.Schema.Type<typeof Runner>;
 
+/** What the two ends of the runner protocol agreed to speak. */
+export const RunnerCapabilities = atMost(Reported, MAX_RUNNER_FACT_ITEMS);
+
 /**
  * One runner in full: the list's fields plus what the hello negotiated.
  *
@@ -132,7 +135,7 @@ export type Runner = Schema.Schema.Type<typeof Runner>;
  */
 export const RunnerDetail = Schema.Struct({
   ...Runner.fields,
-  negotiatedCapabilities: Schema.NullOr(atMost(Reported, MAX_RUNNER_FACT_ITEMS)),
+  negotiatedCapabilities: Schema.NullOr(RunnerCapabilities),
   protocolVersion: Schema.NullOr(Schema.Int.check(Schema.isGreaterThanOrEqualTo(1))),
 });
 

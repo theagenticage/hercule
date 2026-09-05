@@ -12,11 +12,18 @@
  * nonce and this runner's own id. All three must hold: an id it recognises is
  * not licence to trust whatever key arrives beside it.
  *
+ * Once the proof is in, the connection also carries what this machine has to
+ * say about itself: its headroom at once and every minute after, and its facts
+ * again whenever an hourly probe finds them changed. Both stop with the
+ * connection, because a report nobody can hear is not worth keeping.
+ *
  * This returns when the connection ends, however it ends. Holding one open
  * again afterwards is `./reconnect.ts`.
  */
+import * as Cause from "effect/Cause";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
+import * as Latch from "effect/Latch";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
@@ -31,6 +38,8 @@ import {
   type ControllerHello,
   type RunnerFacts,
 } from "@hydra/protocol";
+import { refreshFacts } from "./probe";
+import { checkWatermark, type Headroom } from "./watermark";
 
 /** Where a runner dials, on the authority its `runner.json` names. */
 const SOCKET_PATH = "/api/v1/runners/socket";
@@ -68,8 +77,12 @@ export interface ControllerPin {
 /** What one connection needs to know. */
 export interface ConnectOptions {
   readonly pin: ControllerPin;
-  /** What this machine says about itself. */
+  /** What this machine says about itself, which the hello carries. */
   readonly facts: RunnerFacts;
+  /** How to look at the machine again, for the refresh. */
+  readonly probe: Effect.Effect<RunnerFacts>;
+  /** How to read what the machine has left, for the minute-by-minute report. */
+  readonly headroom: Effect.Effect<Headroom, Cause.UnknownError>;
   /** What this build can do that both ends have to list to use. */
   readonly capabilities?: ReadonlyArray<string>;
   /** How long the peer has to prove who it is. The shipped value unless a test says otherwise. */
@@ -183,6 +196,8 @@ export const connect = (
 
     const nonce = base64(crypto.getRandomValues(new Uint8Array(NONCE_BYTES)));
     let greeted = false;
+    /** Opened when the peer has proved it is this runner's controller. */
+    const proven = Latch.makeUnsafe(false);
     let impostor: ControllerNotRecognised | undefined;
 
     /** Stops talking and hangs up. Nothing further goes out on this connection. */
@@ -223,6 +238,7 @@ export const connect = (
             return yield* disown("that is not the controller this runner joined");
           }
           greeted = true;
+          proven.openUnsafe();
           return;
         }
         // Nothing but the hello is answered before the hello: a peer that has
@@ -238,15 +254,33 @@ export const connect = (
     const receive = (raw: string) => frames.withPermits(1)(handle(raw));
 
     /**
-     * Gives up on a peer that never proves who it is. Once the proof is in, it
-     * has nothing further to say and must not be what ends the connection: a
-     * deadline that fires on a healthy socket would hang the runner up every
-     * ten seconds for the life of the process.
+     * Waits for the proof, gives up on a peer that never offers one, and then
+     * spends the rest of the connection saying what this machine is like.
+     *
+     * The deadline is only ever the answer before the proof arrives. One that
+     * could still fire on a proven connection would hang a healthy runner up
+     * every ten seconds for the life of the process.
      */
-    const proof = Effect.gen(function* () {
-      yield* Effect.sleep(options.proofDeadline ?? PROOF_DEADLINE);
-      if (greeted) return yield* Effect.never;
-      yield* disown("the controller did not say who it is");
+    const reporting = Effect.gen(function* () {
+      const proved = yield* Effect.raceFirst(
+        Effect.as(proven.await, true),
+        Effect.as(Effect.sleep(options.proofDeadline ?? PROOF_DEADLINE), false),
+      );
+      if (!proved) return yield* disown("the controller did not say who it is");
+      yield* Effect.all(
+        [
+          checkWatermark({
+            read: options.headroom,
+            send: (watermark) => write(asText({ _tag: "watermarkReport", watermark })),
+          }),
+          refreshFacts({
+            probe: options.probe,
+            reported: options.facts,
+            send: (facts) => write(asText({ _tag: "factsReport", facts })),
+          }),
+        ],
+        { concurrency: "unbounded" },
+      );
     });
 
     // `raceFirst`, not `race`: the connection ending is a failure, and `race`
@@ -264,7 +298,7 @@ export const connect = (
           }),
         ).pipe(Effect.ignore),
       }),
-      proof,
+      reporting,
     ).pipe(
       // However the connection ended, being hung up on by an impostor is the
       // more useful answer than the close that followed it.

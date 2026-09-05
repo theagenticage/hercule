@@ -12,6 +12,11 @@
  * the runner's own id. A runner that dialled an impostor sees the signature
  * fail and hangs up.
  *
+ * What the runner says about its machine - the facts it probed and the
+ * headroom it keeps refreshing - is latest-wins state and nothing more. It is
+ * stored whole, it advances no liveness, and it is acted on only on the
+ * connection the runner is currently reachable through.
+ *
  * Liveness is a protocol frame and never a WebSocket control frame. Bun answers
  * a control ping in the runtime, so a control frame proves the machine is up
  * rather than that the runner process is; `Ping` and `Pong` are messages the
@@ -191,15 +196,24 @@ const hold = (runnerId: string, socket: Socket.Socket) =>
             // The answer to the question, and the only frame that counts as
             // one. A runner whose pong path is broken but whose other reports
             // still arrive is a runner nothing can place work on.
+            //
+            // Only a connection that has said who it is is answering: without
+            // that, anything holding a credential could keep a row reading as
+            // last seen a moment ago while never joining the fleet at all.
+            if (!greeted) return;
             lastHeard = yield* Clock.currentTimeMillis;
             return yield* presence.answered(runnerId);
+          case "factsReport":
+            // Nothing a runner says about itself is worth storing before it has
+            // said who it is: until the hello lands, all this connection has
+            // shown is that somebody holds a credential.
+            if (!greeted) return;
+            return yield* presence.reportedFacts(runnerId, mine, message.facts);
+          case "watermarkReport":
+            if (!greeted) return;
+            return yield* presence.reportedWatermark(runnerId, mine, message.watermark);
           case "goodbye":
             departure = "offline";
-            return;
-          default:
-            // Facts and watermark reports are latest-wins state the fleet does
-            // not store yet; a runner that sends one is not doing anything
-            // wrong, so its connection is not disturbed.
             return;
         }
       });

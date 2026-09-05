@@ -13,7 +13,6 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { Effect } from "effect";
 import { runnerDirIn } from "@hydra/home";
-import { currentFacts, DEFAULT_IDENTITY_PORT } from "./facts";
 import { daemon } from "./daemon";
 
 const homes: Array<string> = [];
@@ -92,20 +91,5 @@ describe("the runner daemon", () => {
     } finally {
       await server.stop(true);
     }
-  });
-});
-
-describe("what this machine says about itself", () => {
-  it("states the machine it is on and the port it will answer on", async () => {
-    const facts = await Effect.runPromise(currentFacts);
-
-    expect(facts.os).not.toBe("");
-    expect(facts.arch).not.toBe("");
-    expect(facts.totalMemoryBytes).toBeGreaterThan(0);
-    expect(facts.identityPort).toBe(DEFAULT_IDENTITY_PORT);
-    // Nothing has been looked for yet; the probe is its own piece of work.
-    expect(facts.toolchains).toEqual([]);
-    expect(facts.providers).toEqual([]);
-    expect(facts.docker).toBe(false);
   });
 });

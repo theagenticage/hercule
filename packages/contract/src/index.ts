@@ -111,6 +111,7 @@ export {
   RUNNER_SORT_FIELDS,
   RUNNER_STATES,
   Runner,
+  RunnerCapabilities,
   RunnerDetail,
   RunnerFacts,
   RunnerFilter,

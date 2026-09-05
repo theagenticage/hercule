@@ -9,10 +9,11 @@
  */
 import { networkInterfaces } from "node:os";
 import * as Effect from "effect/Effect";
-import { currentFacts } from "./facts";
+import { DEFAULT_IDENTITY_PORT, probeFacts, thisMachine } from "./probe";
 import { reconnect, reconnectSignals } from "./reconnect";
 import { readRunnerFile, type NotEnrolled } from "./runner-file";
 import { connect } from "./socket";
+import { machineHeadroom } from "./watermark";
 
 /** Every address this machine holds, in an order two readings can be compared in. */
 const addresses = (): ReadonlyArray<string> =>
@@ -31,8 +32,10 @@ const addresses = (): ReadonlyArray<string> =>
 export const daemon = (home: string): Effect.Effect<never, NotEnrolled> =>
   Effect.gen(function* () {
     const pin = yield* readRunnerFile(home);
+    const probe = probeFacts(thisMachine, DEFAULT_IDENTITY_PORT);
+    const headroom = machineHeadroom(home);
     return yield* reconnect({
-      attempt: Effect.flatMap(currentFacts, (facts) => connect({ pin, facts })),
+      attempt: Effect.flatMap(probe, (facts) => connect({ pin, facts, probe, headroom })),
       signals: reconnectSignals({ now: () => Date.now(), addresses }),
     });
   });

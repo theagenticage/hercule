@@ -44,6 +44,7 @@ export const AUDIT_KINDS = [
   "runner.joinToken.minted",
   "runner.joined",
   "runner.stateChanged",
+  "runner.placementsChanged",
   "controller.updated",
 ] as const;
 

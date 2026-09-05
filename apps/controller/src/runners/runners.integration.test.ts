@@ -8,7 +8,8 @@
  */
 import { describe, expect, it } from "vitest";
 import { Effect } from "effect";
-import type { Runner } from "@hydra/contract";
+import type { Runner, RunnerDetail } from "@hydra/contract";
+import { uuidFromString } from "../db";
 import type { ServerHarness } from "../http/testing";
 import { SETUP_TOKEN, completeSetup, get, post, send, withServer } from "../http/testing";
 
@@ -26,10 +27,10 @@ const list = async (base: string, token: string, query = ""): Promise<RunnerPage
   return (await response.json()) as RunnerPage;
 };
 
-const read = async (base: string, token: string, id: string): Promise<Runner> => {
+const read = async (base: string, token: string, id: string): Promise<RunnerDetail> => {
   const response = await get(base, `/api/v1/runners/${id}`, token);
   expect(response.status).toBe(200);
-  return (await response.json()) as Runner;
+  return (await response.json()) as RunnerDetail;
 };
 
 const patch = (base: string, token: string, id: string, body: unknown): Promise<Response> =>
@@ -249,6 +250,33 @@ describe("GET /runners/{id}", () => {
         expect(Object.keys(row), `a read runner carries ${field}`).toContain(field);
       }
       expect(row).toMatchObject({ id: online.id, name: "iris", state: "online" });
+    });
+  });
+
+  it("reads a reported document this build cannot make sense of as absent", async () => {
+    await withServer(async (harness) => {
+      const token = await completeSetup(harness.base);
+      const { online, offline } = await three(harness);
+      // A row written by a build that reported something else. The column holds
+      // what a runner sent, so a fleet listing has to survive one of them
+      // rather than answering with nothing at all.
+      await Effect.runPromise(
+        Effect.orDie(
+          harness.sql`UPDATE runners
+                      SET facts = '{"os":42}',
+                          watermark = 'not json at all',
+                          negotiated_capabilities = '{"not":"a list"}'
+                      WHERE id = ${uuidFromString(online.id)}`,
+        ),
+      );
+
+      const row = await read(harness.base, token, online.id);
+      expect(row.facts).toBeNull();
+      expect(row.watermark).toBeNull();
+      expect(row.negotiatedCapabilities).toBeNull();
+
+      const page = await list(harness.base, token);
+      expect(page.items.map((one) => one.id)).toContain(offline.id);
     });
   });
 

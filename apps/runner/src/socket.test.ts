@@ -209,7 +209,17 @@ const DEADLINE = Duration.millis(200);
 
 /** Runs one connection to its end and reports how it ended. */
 const attempt = (pin: ControllerPin) =>
-  Effect.runPromise(Effect.result(connect({ pin, facts: FACTS, proofDeadline: DEADLINE })));
+  Effect.runPromise(
+    Effect.result(
+      connect({
+        pin,
+        facts: FACTS,
+        probe: Effect.succeed(FACTS),
+        headroom: Effect.succeed({ diskFreeBytes: 200 * 1024 ** 3, availableMemoryBytes: 1 }),
+        proofDeadline: DEADLINE,
+      }),
+    ),
+  );
 
 /** The error a finished connection ended with, or nothing when it ended well. */
 const failureOf = (outcome: Awaited<ReturnType<typeof attempt>> | undefined): unknown =>
@@ -328,7 +338,7 @@ describe("the controller a runner is willing to talk to", () => {
     });
 
     await stub.connected();
-    await waitUntil(() => stub.received.length === 1);
+    await waitUntil(() => stub.received.length >= 1);
     // A hello claiming to be somebody else, after the real one was accepted. It
     // must not be able to talk the runner out of the controller it proved.
     stub.say({
@@ -343,6 +353,32 @@ describe("the controller a runner is willing to talk to", () => {
     await delay(Duration.toMillis(DEADLINE) * 3);
 
     expect(settled, "a second hello is not something to hang up on").toBeUndefined();
+    stub.hangUp();
+    await pending;
+    expect(failureOf(settled)).not.toBeInstanceOf(ControllerNotRecognised);
+  });
+
+  it("says what the machine has left as soon as the controller has proved itself", async () => {
+    const stub = await stubController();
+
+    let settled: Awaited<ReturnType<typeof attempt>> | undefined;
+    const pending = attempt(pinning(stub)).then((outcome) => {
+      settled = outcome;
+    });
+
+    await stub.connected();
+    // Not a minute later: a runner that has just come online with an unknown
+    // disk is a runner nothing can decide to place work on.
+    await waitUntil(() => stub.received.length >= 2);
+    expect(stub.received[1]).toEqual({
+      _tag: "watermarkReport",
+      watermark: {
+        diskFreeBytes: 200 * 1024 ** 3,
+        availableMemoryBytes: 1,
+        acceptingPlacements: true,
+      },
+    });
+
     stub.hangUp();
     await pending;
     expect(failureOf(settled)).not.toBeInstanceOf(ControllerNotRecognised);

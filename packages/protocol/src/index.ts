@@ -41,10 +41,17 @@ const ProtocolVersion = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1));
 const Seq = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1));
 
 /**
+ * The longest a peer's statement about itself may be. Exported because the side
+ * producing one has to cut it to fit: a fact too long to encode would otherwise
+ * make a whole hello unsendable.
+ */
+export const MAX_FACT_LENGTH = 512;
+
+/**
  * A name, a version or a path a peer states about itself. Bounded because
  * every one of them is stored: a fact is an identifier, never a document.
  */
-const Fact = Schema.String.check(Schema.isLengthBetween(1, 512));
+const Fact = Schema.String.check(Schema.isLengthBetween(1, MAX_FACT_LENGTH));
 
 /**
  * The extensibility seam: what a side can do, named. A feature is used only
@@ -249,6 +256,9 @@ export type ControllerHello = Schema.Schema.Type<typeof ControllerHello>;
  * does not have. Naming the runner ties the answer to the connection it was
  * made for. The prefix keeps these bytes from ever being mistaken for
  * something else the same key signs.
+ *
+ * The two halves cannot run together into a different pair: a nonce is standard
+ * base64, whose alphabet has no colon, so the last colon always separates them.
  */
 export const signedChallenge = (runnerId: string, nonce: string): Uint8Array<ArrayBuffer> =>
   new TextEncoder().encode(`hydra:runner-hello:${runnerId}:${nonce}`);

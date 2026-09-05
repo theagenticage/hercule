@@ -1,4 +1,6 @@
 /**
+ * Two rules about which connection a runner's row follows.
+ *
  * What a controller does about the fleet it was holding when it stopped.
  *
  * A row saying `online` means a connection is open, and the only thing that
@@ -10,12 +12,12 @@
  */
 import { describe, expect, it } from "vitest";
 import { Effect, Layer, Option } from "effect";
-import type { RunnerState } from "@hydra/contract";
+import type { RunnerFacts, RunnerState, RunnerWatermark } from "@hydra/contract";
 import { hashToken } from "../credentials";
 import { nowIso } from "../db";
 import { TestDatabase } from "../db/testing";
 import { AuditLog, AuditLogLayer } from "../events";
-import { RunnerPresence, RunnerPresenceLayer } from "./presence";
+import { newConnection, RunnerPresence, RunnerPresenceLayer } from "./presence";
 import { runnerRepository } from "./repository";
 
 const layer = RunnerPresenceLayer.pipe(
@@ -73,5 +75,61 @@ describe("the fleet a stopped controller left behind", () => {
       { actor: "system", state: "unreachable" },
       { actor: "system", state: "unreachable" },
     ]);
+  });
+});
+
+/** What a machine says about itself; nothing here is about the probe. */
+const FACTS: RunnerFacts = {
+  os: "darwin",
+  arch: "arm64",
+  totalMemoryBytes: 68719476736,
+  docker: false,
+  toolchains: [],
+  providers: [],
+  identityPort: 4939,
+};
+
+const WATERMARK: RunnerWatermark = {
+  diskFreeBytes: 200 * 1024 * 1024 * 1024,
+  availableMemoryBytes: 1,
+  acceptingPlacements: true,
+};
+
+describe("a report from a connection the runner has replaced", () => {
+  it("is dropped, so the older socket cannot put its machine back over the newer one", async () => {
+    const row = await Effect.runPromise(
+      Effect.gen(function* () {
+        const presence = yield* RunnerPresence;
+        const runners = yield* runnerRepository;
+        const [runner] = yield* fleetOf(["offline"]);
+
+        const older = newConnection();
+        const newer = newConnection();
+        yield* presence.greeted(runner!.id, older, () => undefined, {
+          binaryVersion: "0.1.0",
+          protocolVersion: 1,
+          negotiatedCapabilities: [],
+          facts: FACTS,
+        });
+        // The machine dialled again, and the row is the newer connection's now.
+        yield* presence.greeted(runner!.id, newer, () => undefined, {
+          binaryVersion: "0.1.0",
+          protocolVersion: 1,
+          negotiatedCapabilities: [],
+          facts: { ...FACTS, docker: true },
+        });
+
+        // A frame the older connection had already sent, arriving late.
+        yield* presence.reportedFacts(runner!.id, older, { ...FACTS, docker: false });
+        yield* presence.reportedWatermark(runner!.id, older, WATERMARK);
+
+        return yield* runners.read(runner!.id);
+      }).pipe(Effect.provide(layer)),
+    );
+
+    expect(Option.isSome(row)).toBe(true);
+    const one = Option.getOrThrow(row);
+    expect(one.facts?.docker, "the newer connection's hello still stands").toBe(true);
+    expect(one.watermark, "a stale watermark is not a reading of this machine").toBeNull();
   });
 });

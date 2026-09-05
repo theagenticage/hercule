@@ -35,6 +35,7 @@ import {
   type RunnerToController as RunnerMessage,
 } from "@hydra/protocol";
 import type { RunnerDetail } from "@hydra/contract";
+import { uuidFromString } from "../db";
 import { completeSetup, get, send, withServer, type ServerHarness } from "../http/testing";
 // The two shipped durations are read off the domain's own exports rather than
 // imported by name, so a file that is otherwise about the wire still reports
@@ -598,7 +599,7 @@ describe("the liveness check", () => {
 
         wire.close();
       },
-      { pings: { interval: Duration.millis(40), silence: Duration.millis(80) } },
+      { pings: { ...FAST, silence: Duration.millis(80) } },
     );
   });
 
@@ -630,7 +631,7 @@ describe("the liveness check", () => {
 
         wire.close();
       },
-      { pings: { interval: Duration.millis(40), silence: Duration.millis(200) } },
+      { pings: { ...FAST, silence: Duration.millis(200) } },
     );
   });
 
@@ -696,6 +697,296 @@ describe("the liveness check", () => {
         again.wire.close();
       },
       { pings: FAST },
+    );
+  });
+});
+
+describe("what a runner reports about its machine", () => {
+  /** A watermark as a runner sends one, with the disk the test wants. */
+  const watermarkOf = (diskFreeBytes: number, acceptingPlacements: boolean) => ({
+    diskFreeBytes,
+    availableMemoryBytes: 16 * 1024 * 1024 * 1024,
+    acceptingPlacements,
+  });
+
+  const GIB = 1024 * 1024 * 1024;
+
+  it("stores the watermark a runner reports and hands it back on the row", async () => {
+    await withServer(
+      async (harness) => {
+        const token = await completeSetup(harness.base);
+        const joined = await enlist(harness);
+        const { wire } = await greet(harness.base, joined.credential);
+
+        const online = await rowWhen(
+          harness.base,
+          token,
+          joined.runnerId,
+          (one) => one.state === "online",
+        );
+        // A runner that has only just said hello has said nothing about its
+        // disk yet.
+        expect(online.watermark).toBeNull();
+
+        wire.send({ _tag: "watermarkReport", watermark: watermarkOf(200 * GIB, true) });
+        const stored = await rowWhen(
+          harness.base,
+          token,
+          joined.runnerId,
+          (one) => one.watermark !== null,
+        );
+        expect(stored.watermark).toEqual(watermarkOf(200 * GIB, true));
+
+        const before = await harness.audit("runner.placementsChanged");
+        // A machine nobody had heard from is taken to be accepting work, so a
+        // first reading of a healthy disk is not news about it.
+        expect(before).toHaveLength(0);
+
+        // The same reading again, then a different disk that means the same
+        // thing for placement. Waiting for the second one to land is what
+        // proves the first was seen and deliberately left no row.
+        wire.send({ _tag: "watermarkReport", watermark: watermarkOf(200 * GIB, true) });
+        wire.send({ _tag: "watermarkReport", watermark: watermarkOf(150 * GIB, true) });
+        const again = await rowWhen(
+          harness.base,
+          token,
+          joined.runnerId,
+          (one) => one.watermark?.diskFreeBytes === 150 * GIB,
+        );
+        expect(again.watermark).toEqual(watermarkOf(150 * GIB, true));
+        expect(
+          await harness.audit("runner.placementsChanged"),
+          "nothing about placement changed",
+        ).toHaveLength(before.length);
+
+        // The disk filled up: this one is a change of what the fleet may do
+        // with the machine, and that is what gets recorded.
+        wire.send({ _tag: "watermarkReport", watermark: watermarkOf(4 * GIB, false) });
+        const short = await rowWhen(
+          harness.base,
+          token,
+          joined.runnerId,
+          (one) => one.watermark?.acceptingPlacements === false,
+        );
+        expect(short.watermark).toEqual(watermarkOf(4 * GIB, false));
+
+        const after = await harness.audit("runner.placementsChanged");
+        expect(after).toHaveLength(before.length + 1);
+        const flip = after[after.length - 1];
+        // Nobody holding a credential asked for this: a runner is never an actor.
+        expect(flip?.actor).toBe("system");
+        expect(flip?.payload).toMatchObject({
+          runnerId: joined.runnerId,
+          acceptingPlacements: false,
+        });
+
+        // And a `system` stamp the event schema cannot encode would fail the
+        // whole page rather than the row, so it is read back over the wire too.
+        const log = (await (await get(harness.base, "/api/v1/events", token)).json()) as {
+          items: ReadonlyArray<{
+            kind: string;
+            actor: string | null;
+            payload: Record<string, unknown>;
+          }>;
+        };
+        const recorded = log.items.find((entry) => entry.kind === "runner.placementsChanged");
+        expect(recorded).toBeDefined();
+        expect(recorded!.actor).toBe("system");
+        expect(recorded!.payload).toMatchObject({ runnerId: joined.runnerId });
+
+        wire.close();
+      },
+      { pings: FAST },
+    );
+  });
+
+  it("records a machine that comes back with no room left", async () => {
+    await withServer(
+      async (harness) => {
+        const token = await completeSetup(harness.base);
+        const joined = await enlist(harness);
+        const { wire } = await greet(harness.base, joined.credential);
+        await rowWhen(harness.base, token, joined.runnerId, (one) => one.state === "online");
+
+        // Its very first reading, and the disk is full. Nothing had been heard
+        // about this machine before, but a machine that cannot take work is
+        // news whether or not anything was.
+        wire.send({ _tag: "watermarkReport", watermark: watermarkOf(4 * GIB, false) });
+        await rowWhen(harness.base, token, joined.runnerId, (one) => one.watermark !== null);
+
+        const entries = await harness.audit("runner.placementsChanged");
+        expect(entries).toHaveLength(1);
+        expect(entries[0]?.actor).toBe("system");
+        expect(entries[0]?.payload).toMatchObject({ acceptingPlacements: false });
+
+        wire.close();
+      },
+      { pings: FAST },
+    );
+  });
+
+  it("stores facts a runner reports after its hello", async () => {
+    await withServer(
+      async (harness) => {
+        const token = await completeSetup(harness.base);
+        const joined = await enlist(harness);
+        const { wire } = await greet(harness.base, joined.credential);
+
+        const online = await rowWhen(
+          harness.base,
+          token,
+          joined.runnerId,
+          (one) => one.state === "online",
+        );
+        expect(online.facts).toEqual(FACTS);
+
+        // The machine gained a `gh` while the connection was up.
+        const grown: RunnerFacts = {
+          ...FACTS,
+          toolchains: [
+            ...FACTS.toolchains,
+            { name: "gh", version: "2.99.0", path: "/usr/local/bin/gh" },
+          ],
+        };
+        wire.send({ _tag: "factsReport", facts: grown });
+
+        const changed = await rowWhen(
+          harness.base,
+          token,
+          joined.runnerId,
+          (one) => one.facts?.toolchains.length === 2,
+        );
+        // The whole report replaces the whole column: only the latest reading
+        // is worth anything, so nothing is merged.
+        expect(changed.facts).toEqual(grown);
+
+        wire.close();
+      },
+      { pings: FAST },
+    );
+  });
+
+  it("keeps the row readable when the stored watermark is one it cannot read", async () => {
+    await withServer(
+      async (harness) => {
+        const token = await completeSetup(harness.base);
+        const joined = await enlist(harness);
+        const { wire } = await greet(harness.base, joined.credential);
+        await rowWhen(harness.base, token, joined.runnerId, (one) => one.state === "online");
+
+        // A column written by a build that said something else. The read side
+        // answers it as absent; the write side must not choke on it, or this
+        // runner would lose its socket a minute after every hello, forever.
+        await Effect.runPromise(
+          Effect.orDie(
+            harness.sql`UPDATE runners SET watermark = 'not json at all'
+                        WHERE id = ${uuidFromString(joined.runnerId)}`,
+          ),
+        );
+
+        wire.send({ _tag: "watermarkReport", watermark: watermarkOf(200 * GIB, true) });
+        const stored = await rowWhen(
+          harness.base,
+          token,
+          joined.runnerId,
+          (one) => one.watermark !== null,
+        );
+        expect(stored.watermark).toEqual(watermarkOf(200 * GIB, true));
+        expect(stored.state).toBe("online");
+
+        wire.close();
+      },
+      { pings: FAST },
+    );
+  });
+
+  it("stores nothing a connection that has not said who it is reports", async () => {
+    await withServer(
+      async (harness) => {
+        const token = await completeSetup(harness.base);
+        const joined = await enlist(harness);
+        // A credential is proof that a machine was enlisted, not that this
+        // connection is that machine speaking the protocol. Until the hello
+        // lands there is nothing to attach a report to.
+        const wire = await dial(harness.base, joined.credential);
+
+        wire.send({ _tag: "watermarkReport", watermark: watermarkOf(4 * GIB, false) });
+        wire.send({ _tag: "factsReport", facts: { ...FACTS, docker: true } });
+        await delay(100);
+
+        const row = await readRunner(harness.base, token, joined.runnerId);
+        expect(row.state).toBe("offline");
+        expect(row.watermark).toBeNull();
+        expect(row.facts).toBeNull();
+
+        wire.close();
+      },
+      { pings: FAST },
+    );
+  });
+
+  it("gives a connection that never says hello nothing, and lets go of it", async () => {
+    await withServer(
+      async (harness) => {
+        const token = await completeSetup(harness.base);
+        const joined = await enlist(harness);
+        // A credential, a socket, and no hello. It answers every ping, which is
+        // the one way a connection can look alive without ever joining.
+        const wire = await dial(harness.base, joined.credential);
+        const answering = setInterval(() => {
+          wire.send({ _tag: "pong" });
+        }, 10);
+
+        const ended = await wire.closed();
+        clearInterval(answering);
+
+        expect(ended.code).toBe(1001);
+        const row = await readRunner(harness.base, token, joined.runnerId);
+        // Nothing about this machine was ever heard, so nothing about the row
+        // may say it was: "last seen a moment ago" is what places work.
+        expect(row.lastSeenAt).toBeNull();
+        expect(row.state).toBe("offline");
+      },
+      { pings: { ...FAST, silence: Duration.millis(200) } },
+    );
+  });
+
+  it("keeps its hands off what the row last saw; only a pong touches that", async () => {
+    await withServer(
+      async (harness) => {
+        const token = await completeSetup(harness.base);
+        const joined = await enlist(harness);
+        const { wire } = await greet(harness.base, joined.credential);
+
+        const online = await rowWhen(
+          harness.base,
+          token,
+          joined.runnerId,
+          (one) => one.state === "online",
+        );
+        expect(online.lastSeenAt).not.toBeNull();
+
+        // Long enough that a report which touched the timestamp would show it.
+        await delay(50);
+        wire.send({ _tag: "watermarkReport", watermark: watermarkOf(200 * GIB, true) });
+        wire.send({ _tag: "factsReport", facts: { ...FACTS, docker: true } });
+
+        const reported = await rowWhen(
+          harness.base,
+          token,
+          joined.runnerId,
+          (one) => one.watermark !== null && one.facts?.docker === true,
+        );
+        expect(reported.watermark, "the report never landed").not.toBeNull();
+        expect(reported.facts?.docker, "the report never landed").toBe(true);
+        // Liveness is the heartbeat's to say. A machine can report a disk while
+        // being unable to answer a ping, and the row must read that as silence.
+        expect(reported.lastSeenAt).toBe(online.lastSeenAt);
+        expect(reported.state).toBe("online");
+
+        wire.close();
+      },
+      { pings: { ...FAST, interval: Duration.seconds(30), silence: Duration.seconds(60) } },
     );
   });
 });
