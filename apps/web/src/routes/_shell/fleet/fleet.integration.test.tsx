@@ -174,16 +174,12 @@ const rowFor = async (name: string, others: readonly string[]): Promise<HTMLElem
 };
 
 /**
- * Whether a size is on screen. Which unit a byte count is written in is the
- * screen's business, so both readings of it count - what this asserts is that
- * the number reached the reader at all, not how it was rounded.
+ * Whether a size is on screen, as the whole number of gibibytes the fixtures
+ * are all round multiples of. Anything else the screen might have printed is
+ * something a reader would have to convert in their head.
  */
-const showsSize = (text: string, bytes: number): boolean => {
-  const binary = bytes / 1024 ** 3;
-  const decimal = bytes / 1000 ** 3;
-  const shapes = [binary.toFixed(0), decimal.toFixed(0), decimal.toFixed(1)];
-  return shapes.some((shape) => new RegExp(`(^|[^\\d.])${shape}\\s?G`, "i").test(text));
-};
+const showsSize = (text: string, bytes: number): boolean =>
+  new RegExp(`(^|[^\\d.])${(bytes / 1024 ** 3).toFixed(0)} ?GiB`).test(text);
 
 describe("Fleet", () => {
   it("shows what each machine is and what it reported about itself", async () => {
@@ -265,9 +261,7 @@ describe("Fleet > add machine", () => {
     const user = userEvent.setup();
     const { api } = await open([MOSS]);
 
-    // The spot may already be open; what matters is the token and the command.
-    const spot = screen.queryByRole("button", { name: /add machine/i });
-    if (spot !== null) await user.click(spot);
+    await user.click(screen.getByRole("button", { name: /add machine/i }));
 
     await waitFor(() => {
       expect(reading()).toContain(`hydra runner join ${window.location.origin} --token ${TOKEN}`);

@@ -17,7 +17,8 @@ import { runnerDirIn } from "@hydra/home";
 /**
  * Everything `runner.json` holds. The controller URL is here rather than in
  * `config.toml` because it is not a bootstrap key: it is part of who this
- * runner belongs to, and `hydra runner set-controller` is what changes it.
+ * runner belongs to. `join` writes the file once; nothing re-points a runner at
+ * another controller yet, and when something does it will rewrite this.
  */
 export const RunnerFile = Schema.Struct({
   runnerId: Schema.String,

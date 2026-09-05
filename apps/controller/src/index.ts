@@ -13,25 +13,12 @@
  */
 import * as Effect from "effect/Effect";
 import * as Latch from "effect/Latch";
-import * as Layer from "effect/Layer";
 import type * as Scope from "effect/Scope";
 import * as BunHttpServer from "@effect/platform-bun/BunHttpServer";
 import { BootstrapConfig } from "./config";
-import { AuthLayer } from "./auth";
 import { bootWith, type BootError, type BootOutcome } from "./bootstrap";
-import { ApiKeysLayer } from "./credentials";
-import { EventServiceLayer } from "./events";
-import { bodyLimits, perimeterWarning, serve, webBundle } from "./http";
-import { ControllerLayer } from "./identity";
-import { LiveTopicsLayer, WsTicketsLayer } from "./live";
-import { SecretLayer } from "./secrets";
-import { ProfilesLayer } from "./permissions";
-import { SettingsOperationsLayer } from "./settings";
-import { SetupLayer } from "./setup";
-import { ProjectServiceLayer } from "./projects";
-import { LOCAL_RUNNER, RunnerJoinLayer, RunnerPresenceLayer, RunnerServiceLayer } from "./runners";
-import { TaskServiceLayer } from "./tasks";
-import { UserLayer } from "./users";
+import { bodyLimits, operationLayers, perimeterWarning, serve, webBundle } from "./http";
+import { LOCAL_RUNNER } from "./runners";
 
 export { boot, bootWith, hashToken, setupUrl } from "./bootstrap";
 export type { BootError, BootOptions, BootOutcome, ControllerServices } from "./bootstrap";
@@ -162,28 +149,7 @@ const listen = (outcome: BootOutcome, stopped: Effect.Effect<void>) =>
     // with this controller, and a controller that had already stopped listening
     // would read that departure as a machine that vanished.
     if (outcome.localRunner !== undefined) yield* outcome.localRunner.stop;
-  }).pipe(
-    Effect.provide(
-      Layer.mergeAll(
-        SetupLayer,
-        AuthLayer,
-        ApiKeysLayer,
-        UserLayer,
-        SecretLayer,
-        ControllerLayer,
-        SettingsOperationsLayer,
-        ProfilesLayer,
-        TaskServiceLayer,
-        ProjectServiceLayer,
-        RunnerServiceLayer,
-        RunnerJoinLayer,
-        RunnerPresenceLayer,
-        EventServiceLayer,
-        LiveTopicsLayer,
-        WsTicketsLayer,
-      ),
-    ),
-  );
+  }).pipe(Effect.provide(operationLayers));
 
 export async function run(argv: readonly string[]): Promise<void> {
   // The signal handlers are installed outside the boot and come off only once

@@ -201,15 +201,13 @@ const make = Effect.gen(function* () {
      * because the only thing that moves a runner off `online` is the connection
      * that put it there.
      */
-    strandedByTheLastRun: Effect.gen(function* () {
-      yield* withTransaction(
-        sql,
-        Effect.gen(function* () {
-          const at = yield* nowIso;
-          for (const id of yield* runners.connected()) yield* moved(id, "unreachable", at);
-        }),
-      );
-    }),
+    strandedByTheLastRun: withTransaction(
+      sql,
+      Effect.gen(function* () {
+        const at = yield* nowIso;
+        for (const id of yield* runners.connected()) yield* moved(id, "unreachable", at);
+      }),
+    ),
   };
 });
 

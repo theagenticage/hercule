@@ -53,7 +53,9 @@ const allRows = (
   sql: ServerHarness["sql"],
   table: string,
 ): Promise<ReadonlyArray<Record<string, unknown>>> =>
-  Effect.runPromise(Effect.orDie(sql.unsafe<Record<string, unknown>>(`SELECT * FROM ${table}`)));
+  Effect.runPromise(
+    Effect.orDie(sql.unsafe<Record<string, unknown>>(`SELECT rowid, * FROM ${table}`)),
+  );
 
 /**
  * The join tokens as the database holds them.
@@ -84,7 +86,9 @@ const joinTokens = async (
  * over the wire can wait an hour. Every instant on the row moves together, so
  * what the row describes is a token minted two hours ago and expired one hour
  * ago rather than one that expired before it was minted; the columns are found
- * by their values, so no column name is written here.
+ * by their values, so no column name is written here. The write is keyed on
+ * `rowid`, which every SQLite table has, because two tokens minted in the same
+ * millisecond share every timestamp there is.
  */
 const expire = async (sql: ServerHarness["sql"], expiresAt: string): Promise<void> => {
   const TWO_HOURS = 2 * 60 * 60 * 1000;
@@ -101,9 +105,9 @@ const expire = async (sql: ServerHarness["sql"], expiresAt: string): Promise<voi
   const sets = moved.map(([column]) => `${column} = ?`).join(", ");
   await Effect.runPromise(
     Effect.orDie(
-      sql.unsafe(`UPDATE ${table} SET ${sets} WHERE ${moved[0]![0]} = ?`, [
+      sql.unsafe(`UPDATE ${table} SET ${sets} WHERE rowid = ?`, [
         ...moved.map(([, value]) => value),
-        String(row![moved[0]![0]]),
+        row!["rowid"] as number,
       ]),
     ),
   );

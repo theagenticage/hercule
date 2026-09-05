@@ -83,8 +83,6 @@ export interface ConnectOptions {
   readonly probe: Effect.Effect<RunnerFacts>;
   /** How to read what the machine has left, for the minute-by-minute report. */
   readonly headroom: Effect.Effect<Headroom, Cause.UnknownError>;
-  /** What this build can do that both ends have to list to use. */
-  readonly capabilities?: ReadonlyArray<string>;
   /** How long the peer has to prove who it is. The shipped value unless a test says otherwise. */
   readonly proofDeadline?: Duration.Duration;
 }
@@ -302,7 +300,7 @@ export const connect = (
           asText({
             _tag: "runnerHello",
             protocolVersion: PROTOCOL_VERSION,
-            capabilities: options.capabilities ?? [],
+            capabilities: [],
             binaryVersion: VERSION,
             nonce,
             facts: options.facts,

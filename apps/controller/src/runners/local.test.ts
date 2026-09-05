@@ -19,23 +19,12 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "no
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { Duration, Effect, Layer } from "effect";
+import { Duration, Effect } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import * as BunHttpServer from "@effect/platform-bun/BunHttpServer";
-import { AuthLayer } from "../auth";
 import { bootWith, type BootOutcome, type ControllerServices } from "../bootstrap";
-import { ApiKeysLayer } from "../credentials";
-import { EventServiceLayer } from "../events";
-import { serve } from "../http";
-import { ControllerLayer } from "../identity";
-import { LiveTopicsLayer, WsTicketsLayer } from "../live";
-import { ProfilesLayer } from "../permissions";
-import { ProjectServiceLayer } from "../projects";
-import { SecretLayer } from "../secrets";
-import { Settings, SettingsOperationsLayer } from "../settings";
-import { SetupLayer } from "../setup";
-import { TaskServiceLayer } from "../tasks";
-import { UserLayer } from "../users";
+import { operationLayers, serve } from "../http";
+import { Settings } from "../settings";
 import {
   CRASH_LOOP_LIMIT,
   CRASH_LOOP_WINDOW,
@@ -46,27 +35,6 @@ import {
   RunnerAlerts,
   type LocalRunnerOptions,
 } from "./local";
-import { RunnerJoinLayer, RunnerPresenceLayer, RunnerServiceLayer } from "./index";
-
-/** Everything the routes need on top of what a boot already provides. */
-const operations = Layer.mergeAll(
-  SetupLayer,
-  AuthLayer,
-  ApiKeysLayer,
-  UserLayer,
-  SecretLayer,
-  ControllerLayer,
-  SettingsOperationsLayer,
-  ProfilesLayer,
-  TaskServiceLayer,
-  ProjectServiceLayer,
-  RunnerServiceLayer,
-  RunnerJoinLayer,
-  RunnerPresenceLayer,
-  EventServiceLayer,
-  LiveTopicsLayer,
-  WsTicketsLayer,
-);
 
 const homes: Array<string> = [];
 
@@ -236,7 +204,7 @@ const bootHolding = <A>(
             yield* serve(undefined);
             return yield* body(outcome);
           }).pipe(
-            Effect.provide(operations),
+            Effect.provide(operationLayers),
             Effect.provide(BunHttpServer.layer({ hostname: "127.0.0.1", port, reusePort: true })),
           ),
         ),
@@ -265,6 +233,7 @@ const runnerNames = Effect.map(
 const FAST = {
   backoff: { first: Duration.millis(20), cap: Duration.millis(60) },
   stopDeadline: Duration.millis(200),
+  handshakeDeadline: Duration.millis(200),
 };
 
 describe("the command the controller spawns", () => {
@@ -504,14 +473,10 @@ describe("supervising the child", () => {
     // It announces who it is and then dies, over and over.
     const child = childIn(home, JSON.stringify({ runnerId: crypto.randomUUID() }), ["--exit", "3"]);
 
-    await bootHolding(
-      home,
-      port,
-      { command: child.command, backoff: FAST.backoff, stopDeadline: FAST.stopDeadline },
-      () =>
-        Effect.promise(() =>
-          until(child.notes, (notes) => notes.filter((n) => n.what === "spawned").length >= 6),
-        ),
+    await bootHolding(home, port, { ...FAST, command: child.command }, () =>
+      Effect.promise(() =>
+        until(child.notes, (notes) => notes.filter((n) => n.what === "spawned").length >= 6),
+      ),
     );
 
     const starts = child
@@ -544,11 +509,7 @@ describe("supervising the child", () => {
           argv: ["--home", home, "-c", "bind.host=127.0.0.1", "-c", `bind.port=${String(port)}`],
           env: {},
           masterKeyBackend: "file",
-          localRunner: {
-            command: child.command,
-            backoff: FAST.backoff,
-            stopDeadline: FAST.stopDeadline,
-          },
+          localRunner: { ...FAST, command: child.command },
         },
         () =>
           Effect.gen(function* () {

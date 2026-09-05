@@ -91,7 +91,7 @@ export interface LocalRunnerOptions {
   readonly backoff: { readonly first: Duration.Duration; readonly cap: Duration.Duration };
   readonly stopDeadline: Duration.Duration;
   /** How long the child has to say who it is. The shipped value unless a test says otherwise. */
-  readonly handshakeDeadline?: Duration.Duration;
+  readonly handshakeDeadline: Duration.Duration;
 }
 
 /** The shipped supervision, which everything but a test wants. */
@@ -99,6 +99,7 @@ export const LOCAL_RUNNER: LocalRunnerOptions = {
   command: spawnCommand(),
   backoff: LOCAL_RUNNER_BACKOFF,
   stopDeadline: LOCAL_RUNNER_STOP_DEADLINE,
+  handshakeDeadline: HANDSHAKE_DEADLINE,
 };
 
 /**
@@ -243,7 +244,7 @@ export const startLocalRunner = (
       child?.kill("SIGKILL");
     };
 
-    /** Spawns one child and answers whatever it says it is. */
+    /** Spawns one child, hears it out, and answers the process it started. */
     const start = Effect.gen(function* () {
       const spawned = Bun.spawn([...options.command], {
         stdin: "pipe",
@@ -258,7 +259,7 @@ export const startLocalRunner = (
 
       const line = yield* Effect.raceFirst(
         Effect.promise(() => announcement(spawned.stdout)),
-        Effect.as(Effect.sleep(options.handshakeDeadline ?? HANDSHAKE_DEADLINE), undefined),
+        Effect.as(Effect.sleep(options.handshakeDeadline), undefined),
       );
       // A child that said nothing died, or is wedged saying nothing. Killing it
       // makes the two the same thing - a death the supervisor answers - and the
@@ -266,7 +267,8 @@ export const startLocalRunner = (
       // runner would hold its whole API hostage to a file it may not even read.
       if (line === undefined) {
         spawned.kill("SIGKILL");
-        return yield* Effect.logWarning("The local runner started without saying who it is.");
+        yield* Effect.logWarning("The local runner started without saying who it is.");
+        return spawned;
       }
       const said = yield* Effect.mapError(
         Effect.flatMap(
@@ -293,7 +295,8 @@ export const startLocalRunner = (
         announced = said.runnerId;
         // Nothing to hand a child that already knows who it is, and a pipe left
         // open is a child that goes on waiting for one.
-        return yield* answer();
+        yield* answer();
+        return spawned;
       }
       // A machine that has never joined, which on the first boot of an empty
       // home is every machine. The token is good for one enlistment and for an
@@ -302,6 +305,7 @@ export const startLocalRunner = (
       yield* answer(
         `${JSON.stringify(encodeEnrolment({ controllerUrl, token: invitation.token }))}\n`,
       );
+      return spawned;
     });
 
     /** Records a death, and says so when enough of them fall together. */
@@ -323,39 +327,40 @@ export const startLocalRunner = (
     });
 
     /** Starts the child again for as long as nobody asked it to stop. */
-    const supervise = Effect.gen(function* () {
-      const cap = Duration.toMillis(options.backoff.cap);
-      let wait = Duration.toMillis(options.backoff.first);
-      while (true) {
-        const held = child;
-        // Only if the first spawn never got as far as one, which is a machine
-        // that cannot start a process at all.
-        if (held === undefined) return;
-        const code = yield* Effect.promise(() => held.exited);
-        if (stopping) return;
-        yield* Effect.logWarning(
-          `The local runner exited with ${String(code)}; starting it again.`,
-        );
-        yield* died.pipe(
-          Effect.tapCause((cause) =>
-            Effect.logWarning("The local runner's crash could not be recorded.", cause),
-          ),
-          Effect.ignore,
-        );
-        yield* Effect.sleep(Duration.millis(wait));
-        wait = Math.min(wait * 2, cap);
-        if (stopping) return;
-        yield* Effect.catchCause(start, (cause) =>
-          Effect.gen(function* () {
-            // A child that will not complete the handshake is no more use than
-            // one that exited, and it is the loop's next death rather than
-            // anything the boot can still be told about.
-            yield* Effect.logWarning("The local runner could not be started.", cause);
-            child?.kill("SIGKILL");
-          }),
-        );
-      }
-    });
+    const supervise = (first: Bun.Subprocess) =>
+      Effect.gen(function* () {
+        const cap = Duration.toMillis(options.backoff.cap);
+        let wait = Duration.toMillis(options.backoff.first);
+        let held = first;
+        while (true) {
+          const code = yield* Effect.promise(() => held.exited);
+          if (stopping) return;
+          yield* Effect.logWarning(
+            `The local runner exited with ${String(code)}; starting it again.`,
+          );
+          yield* died.pipe(
+            Effect.tapCause((cause) =>
+              Effect.logWarning("The local runner's crash could not be recorded.", cause),
+            ),
+            Effect.ignore,
+          );
+          yield* Effect.sleep(Duration.millis(wait));
+          wait = Math.min(wait * 2, cap);
+          if (stopping) return;
+          held = yield* Effect.catchCause(start, (cause) =>
+            Effect.gen(function* () {
+              // A child that will not complete the handshake is no more use
+              // than one that exited, and it is the loop's next death rather
+              // than anything the boot can still be told about.
+              yield* Effect.logWarning("The local runner could not be started.", cause);
+              child?.kill("SIGKILL");
+              // Nothing new to wait on, so the loop waits out the one that just
+              // died again, behind the backoff that is already growing.
+              return held;
+            }),
+          );
+        }
+      });
 
     /**
      * Asks the child to stop, waits for it, and kills it if it will not go.
@@ -397,8 +402,7 @@ export const startLocalRunner = (
       ),
     );
 
-    yield* start;
-    supervisor = yield* Effect.forkChild(supervise);
+    supervisor = yield* Effect.forkChild(supervise(yield* start));
 
     return { runnerId: () => announced, stop };
   });

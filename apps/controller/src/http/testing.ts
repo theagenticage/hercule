@@ -17,38 +17,26 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import * as BunHttpServer from "@effect/platform-bun/BunHttpServer";
 import type { LiveTopic, Runner, RunnerState } from "@hydra/contract";
 import { homePaths } from "@hydra/home";
-import { AuthLayer } from "../auth";
 import { HydraHome } from "../config";
-import { ApiKeysLayer, CredentialsLayer, hashToken } from "../credentials";
+import { CredentialsLayer, hashToken } from "../credentials";
 import { nowIso } from "../db";
 import { TestDatabase } from "../db/testing";
-import {
-  AuditLog,
-  AuditLogLayer,
-  EventServiceLayer,
-  type AuditKind,
-  type AuditRow,
-} from "../events";
-import { ControllerIdentity, controllerIdentityLayer, ControllerLayer } from "../identity";
-import { LiveTopics, LiveTopicsLayer, WsTicketsLayer } from "../live";
-import { masterKeyLayer, SecretLayer, secretsLayer } from "../secrets";
-import { PermissionProfilesLayer, ProfilesLayer } from "../permissions";
-import { SettingsLayer, SettingsOperationsLayer } from "../settings";
-import { SetupLayer } from "../setup";
-import { ProjectServiceLayer } from "../projects";
+import { AuditLog, AuditLogLayer, type AuditKind, type AuditRow } from "../events";
+import { ControllerIdentity, controllerIdentityLayer } from "../identity";
+import { LiveTopics } from "../live";
+import { masterKeyLayer, secretsLayer } from "../secrets";
+import { PermissionProfilesLayer } from "../permissions";
+import { SettingsLayer } from "../settings";
 import {
   JoinTokens,
   JoinTokensLayer,
-  RunnerJoinLayer,
   RunnerPingSchedule,
-  RunnerPresenceLayer,
-  RunnerServiceLayer,
   runnerRepository,
   type RunnerPings,
 } from "../runners";
-import { TaskServiceLayer } from "../tasks";
-import { PasswordCost, TEST_PASSWORD_PARAMS, UserLayer, UsersLayer } from "../users";
+import { PasswordCost, TEST_PASSWORD_PARAMS, UsersLayer } from "../users";
 import { seed } from "../seed";
+import { operationLayers } from "./routes";
 import { bodyLimits, serve } from "./server";
 import type { WebBundle } from "./static";
 
@@ -59,24 +47,7 @@ export const USERNAME = "rogier";
 
 /** Every service the routes resolve, over one `:memory:` database. */
 const services = (home: string) =>
-  Layer.mergeAll(
-    SetupLayer,
-    AuthLayer,
-    ApiKeysLayer,
-    UserLayer,
-    SecretLayer,
-    ControllerLayer,
-    SettingsOperationsLayer,
-    ProfilesLayer,
-    TaskServiceLayer,
-    ProjectServiceLayer,
-    RunnerServiceLayer,
-    RunnerJoinLayer,
-    RunnerPresenceLayer,
-    EventServiceLayer,
-    LiveTopicsLayer,
-    WsTicketsLayer,
-  ).pipe(
+  operationLayers.pipe(
     Layer.provideMerge(
       Layer.mergeAll(
         UsersLayer,

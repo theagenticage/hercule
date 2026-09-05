@@ -43,7 +43,7 @@ import { completeSetup, get, send, withServer, type ServerHarness } from "../htt
 // The two shipped durations are read off the domain's own exports rather than
 // imported by name, so a file that is otherwise about the wire still reports
 // each behaviour's failure separately when the constants are not there yet.
-import * as runners from "./index";
+import { RUNNER_PING_INTERVAL, RUNNER_SILENCE_LIMIT } from "./socket";
 
 /** Where a runner dials, on the same authority the API is served from. */
 const SOCKET_PATH = "/api/v1/runners/socket";
@@ -536,8 +536,8 @@ describe("what a connection leaves behind", () => {
 
 describe("the liveness check", () => {
   it("pings every 15 seconds and gives up on 60 seconds of silence", () => {
-    expect(Duration.toMillis(runners.RUNNER_PING_INTERVAL)).toBe(15_000);
-    expect(Duration.toMillis(runners.RUNNER_SILENCE_LIMIT)).toBe(60_000);
+    expect(Duration.toMillis(RUNNER_PING_INTERVAL)).toBe(15_000);
+    expect(Duration.toMillis(RUNNER_SILENCE_LIMIT)).toBe(60_000);
   });
 
   it("pings on the interval, and every pong advances what the row last saw", async () => {

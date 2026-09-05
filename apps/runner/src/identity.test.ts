@@ -46,6 +46,30 @@ const occupy = (port: number): { readonly port: number; readonly release: () => 
   return { port: server.port!, release: () => server.stop(true) };
 };
 
+/**
+ * A run of consecutive ports, all held. Nothing reserves the numbers after a
+ * free one, so a run that turns out to be partly taken is given back and tried
+ * again from somewhere else rather than failing as though the code were wrong.
+ */
+const occupyRun = async (
+  length: number,
+): Promise<{ readonly base: number; readonly release: () => Promise<void> }> => {
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    const base = await freePort();
+    const held: Array<{ readonly release: () => Promise<void> }> = [];
+    try {
+      for (let offset = 0; offset < length; offset += 1) held.push(occupy(base + offset));
+      return {
+        base,
+        release: async () => void (await Promise.all(held.map((one) => one.release()))),
+      };
+    } catch {
+      await Promise.all(held.map((one) => one.release()));
+    }
+  }
+  throw new Error(`no run of ${String(length)} free ports on this machine`);
+};
+
 /** A port nothing is on, and nothing takes while this test holds the number. */
 const freePort = async (): Promise<number> => {
   const held = occupy(0);
@@ -103,45 +127,41 @@ describe("the port it binds", () => {
     // it. How many ports that is cannot be told apart here from the last-resort
     // bind - an ephemeral port is handed out from the same place - so the count
     // itself is pinned where it is enforced, in the policy the browser reads.
-    const base = await freePort();
-    const taken = Array.from({ length: IDENTITY_PORT_COUNT - 1 }, (_, offset) =>
-      occupy(base + offset),
-    );
+    const run = await occupyRun(IDENTITY_PORT_COUNT - 1);
     try {
       const { port, body } = await withListener(
-        { runnerId: RUNNER_ID, controllerUrl: CONTROLLER_URL, port: base },
+        { runnerId: RUNNER_ID, controllerUrl: CONTROLLER_URL, port: run.base },
         async (bound) => {
           const response = await fetch(`http://127.0.0.1:${String(bound)}/identity`);
           return { port: bound, body: await response.json() };
         },
       );
 
-      expect(port).toBe(base + IDENTITY_PORT_COUNT - 1);
+      expect(port).toBe(run.base + IDENTITY_PORT_COUNT - 1);
       // A port it moved to is a port it actually serves on, not a number.
       expect(body).toEqual({ runnerId: RUNNER_ID });
     } finally {
-      await Promise.all(taken.map((held) => held.release()));
+      await run.release();
     }
   });
 
   it("still serves when every port a browser may ask is taken", async () => {
     // The last resort: a machine can host sessions without being one a page can
     // recognise, so the listener takes whatever is free rather than giving up.
-    const base = await freePort();
-    const taken = Array.from({ length: IDENTITY_PORT_COUNT }, (_, offset) => occupy(base + offset));
+    const run = await occupyRun(IDENTITY_PORT_COUNT);
     try {
       const { port, body } = await withListener(
-        { runnerId: RUNNER_ID, controllerUrl: CONTROLLER_URL, port: base },
+        { runnerId: RUNNER_ID, controllerUrl: CONTROLLER_URL, port: run.base },
         async (bound) => {
           const response = await fetch(`http://127.0.0.1:${String(bound)}/identity`);
           return { port: bound, body: await response.json() };
         },
       );
 
-      expect(taken.map((held) => held.port)).not.toContain(port);
+      expect(port).toBeGreaterThanOrEqual(run.base + IDENTITY_PORT_COUNT);
       expect(body).toEqual({ runnerId: RUNNER_ID });
     } finally {
-      await Promise.all(taken.map((held) => held.release()));
+      await run.release();
     }
   });
 

@@ -8,10 +8,12 @@
  * the secret's shadow and never appears in the log.
  *
  * Spending a token is an update rather than a delete: `used_at IS NULL` is the
- * single-use guard, and a spent row is the durable record that the invitation
- * was taken. A presenter is never told which of unminted, spent and expired its
- * token was - that difference is a probe - so the timestamp is for the operator
- * reading the table, not for an answer.
+ * single-use guard, and it has to stay for as long as the token could be
+ * presented again. The row itself is swept once the hour is up, so what
+ * survives an invitation is the audit entry naming its id, not this table. A
+ * presenter is never told which of unminted, spent and expired its token was -
+ * that difference is a probe - so the timestamp is for the operator reading the
+ * table, not for an answer.
  *
  * The bounds are CHECK constraints because SQLite cannot add one to a table
  * later: the alternative to writing them here is rebuilding the table.
