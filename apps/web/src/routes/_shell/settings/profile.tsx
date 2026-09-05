@@ -42,6 +42,9 @@ function Profile(): JSX.Element {
    * it first evicts a query this screen is still subscribed to, which refetches
    * it with no bearer and turns the answer into a failure screen racing the
    * navigation.
+   *
+   * The live connection goes with it, and the navigation is what ends it: the
+   * entry guard holds a connection open only while there is a credential.
    */
   const signOut = useMutation({
     mutationFn: () => client.auth.logout(),

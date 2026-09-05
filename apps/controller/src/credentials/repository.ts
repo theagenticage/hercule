@@ -38,6 +38,7 @@ import {
   type CursorScope,
   type PageRequest,
 } from "../db";
+import type { PresentedCredential } from "../actor";
 
 /** The rolling window a login bearer lives in, in milliseconds. */
 export const LOGIN_TOKEN_LIFETIME_MS = 30 * 24 * 60 * 60 * 1000;
@@ -120,6 +121,32 @@ const toApiKey = (row: ApiKeyRow): ApiKeyRecord => ({
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
 
+  /**
+   * The live login bearer behind a presented token, if there is one. A revoked
+   * or expired token is simply not found: the caller has nothing to do with the
+   * difference, and the response says the same either way.
+   */
+  const findLoginToken = (
+    tokenHash: string,
+  ): Effect.Effect<Option.Option<LoginTokenRecord>, SqlError> =>
+    Effect.gen(function* () {
+      const at = yield* nowIso;
+      const rows = yield* sql<LoginTokenRow>`
+        SELECT id, user_id, issued_at, expires_at, last_used_at
+        FROM login_tokens
+        WHERE token_hash = ${tokenHash} AND revoked_at IS NULL AND expires_at > ${at}
+      `;
+      return Option.fromNullishOr(rows[0]).pipe(Option.map(toLoginToken));
+    });
+
+  /** The live API key behind a presented token, if there is one. A revoked key is not found. */
+  const findApiKey = (tokenHash: string): Effect.Effect<Option.Option<ApiKeyRecord>, SqlError> =>
+    sql<ApiKeyRow>`
+      SELECT id, user_id, name, created_at, last_used_at, revoked_at
+      FROM api_keys
+      WHERE token_hash = ${tokenHash} AND revoked_at IS NULL
+    `.pipe(Effect.map((rows) => Option.fromNullishOr(rows[0]).pipe(Option.map(toApiKey))));
+
   return {
     /**
      * Records a freshly minted login bearer, expiring 30 days from now. The
@@ -143,21 +170,7 @@ const make = Effect.gen(function* () {
         return { id: uuidToString(id), userId, issuedAt: at, expiresAt, lastUsedAt: at };
       }),
 
-    /**
-     * The live login bearer behind a presented token, if there is one. A
-     * revoked or expired token is simply not found: the caller has nothing to
-     * do with the difference, and the response says the same either way.
-     */
-    findLoginToken: (tokenHash: string): Effect.Effect<Option.Option<LoginTokenRecord>, SqlError> =>
-      Effect.gen(function* () {
-        const at = yield* nowIso;
-        const rows = yield* sql<LoginTokenRow>`
-          SELECT id, user_id, issued_at, expires_at, last_used_at
-          FROM login_tokens
-          WHERE token_hash = ${tokenHash} AND revoked_at IS NULL AND expires_at > ${at}
-        `;
-        return Option.fromNullishOr(rows[0]).pipe(Option.map(toLoginToken));
-      }),
+    findLoginToken,
 
     /**
      * Extends a login bearer by another 30 days and stamps its use. This is
@@ -215,13 +228,30 @@ const make = Effect.gen(function* () {
         };
       }),
 
-    /** The live API key behind a presented token, if there is one. A revoked key is not found. */
-    findApiKey: (tokenHash: string): Effect.Effect<Option.Option<ApiKeyRecord>, SqlError> =>
-      sql<ApiKeyRow>`
-        SELECT id, user_id, name, created_at, last_used_at, revoked_at
-        FROM api_keys
-        WHERE token_hash = ${tokenHash} AND revoked_at IS NULL
-      `.pipe(Effect.map((rows) => Option.fromNullishOr(rows[0]).pipe(Option.map(toApiKey)))),
+    findApiKey,
+
+    /**
+     * Whether a credential that resolved earlier still resolves to the same
+     * row. A request never has to ask - resolving the token it presents
+     * answers it - but a connection held open for hours presents nothing a
+     * second time, only the hash its first frame resolved through.
+     */
+    stillLive: (credential: PresentedCredential): Effect.Effect<boolean, SqlError> => {
+      const found =
+        credential.kind === "login"
+          ? Effect.map(
+              findLoginToken(credential.tokenHash),
+              Option.map((token) => token.id),
+            )
+          : Effect.map(
+              findApiKey(credential.tokenHash),
+              Option.map((key) => key.id),
+            );
+      return Effect.map(
+        found,
+        (resolved) => Option.isSome(resolved) && resolved.value === credential.id,
+      );
+    },
 
     /**
      * Stamps an API key's use, so a key nobody uses is visible as unused. Like

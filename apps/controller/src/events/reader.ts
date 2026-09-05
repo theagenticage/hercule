@@ -42,14 +42,8 @@ import {
   type Validation,
 } from "@hydra/contract";
 import { requireGrant } from "../actor";
-import {
-  decodeIdCursor,
-  encodeIdCursor,
-  keysetOver,
-  pageOf,
-  uuidFromString,
-  uuidToString,
-} from "../db";
+import { decodeIdCursor, encodeIdCursor, keysetOver, pageOf, uuidFromString } from "../db";
+import { EVENT_COLUMNS, toEvent, type EventRow } from "./log";
 
 /** What narrows and pages a reading of the log. */
 const QueryInput = Schema.Struct({
@@ -86,45 +80,6 @@ export interface EventPage {
 
 /** Newest first: the log is read from its head. */
 const DEFAULT_DIRECTION: SortDirection = "desc";
-
-const COLUMNS =
-  "id, source, connection_id, system, kind, occurred_at, received_at, " +
-  "dedup_key, refs, url, payload, raw, actor";
-
-interface EventRow {
-  readonly id: number;
-  readonly source: string;
-  readonly connection_id: Uint8Array | null;
-  readonly system: string;
-  readonly kind: string;
-  readonly occurred_at: string;
-  readonly received_at: string;
-  readonly dedup_key: string;
-  readonly refs: string;
-  readonly url: string | null;
-  readonly payload: string;
-  readonly raw: string | null;
-  readonly actor: string | null;
-}
-
-const object = (text: string): Record<string, unknown> =>
-  JSON.parse(text) as Record<string, unknown>;
-
-const toEvent = (row: EventRow): Event => ({
-  id: row.id,
-  source: row.source,
-  connectionId: row.connection_id === null ? null : uuidToString(row.connection_id),
-  system: row.system,
-  kind: row.kind,
-  occurredAt: row.occurred_at,
-  receivedAt: row.received_at,
-  dedupKey: row.dedup_key,
-  refs: JSON.parse(row.refs) as ReadonlyArray<string>,
-  url: row.url,
-  payload: object(row.payload),
-  raw: row.raw === null ? null : object(row.raw),
-  actor: row.actor,
-});
 
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
@@ -168,7 +123,7 @@ const make = Effect.gen(function* () {
         where.push(keyset);
 
         const rows = yield* sql<EventRow>`
-          SELECT ${sql.literal(COLUMNS)} FROM events
+          SELECT ${sql.literal(EVENT_COLUMNS)} FROM events
           WHERE ${sql.and(where)} ${order} LIMIT ${limit + 1}
         `;
         const page = yield* pageOf(
@@ -191,7 +146,7 @@ const make = Effect.gen(function* () {
         yield* requireGrant("event.read");
         const { id } = yield* Effect.mapError(decodeIdentified(input), validationOf);
         const rows = yield* sql<EventRow>`
-          SELECT ${sql.literal(COLUMNS)} FROM events WHERE id = ${id}
+          SELECT ${sql.literal(EVENT_COLUMNS)} FROM events WHERE id = ${id}
         `;
         const row = rows[0];
         return row === undefined ? yield* Effect.fail(notFound("no such event")) : toEvent(row);

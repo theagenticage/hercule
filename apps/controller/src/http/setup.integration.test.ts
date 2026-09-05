@@ -14,7 +14,7 @@ const complete = (base: string, username: string) =>
 
 describe("setup.complete over HTTP", () => {
   it("finishes first run once, however many callers race with the same token", async () => {
-    await withServer(async (base, audit, sql) => {
+    await withServer(async ({ base, audit, sql }) => {
       const responses = await Promise.all(
         ["alice", "bob", "carol", "dave"].map((username) => complete(base, username)),
       );

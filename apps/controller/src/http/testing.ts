@@ -15,6 +15,7 @@ import * as Layer from "effect/Layer";
 import * as HttpServer from "effect/unstable/http/HttpServer";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import * as BunHttpServer from "@effect/platform-bun/BunHttpServer";
+import type { LiveTopic } from "@hydra/contract";
 import { homePaths } from "@hydra/home";
 import { AuthLayer } from "../auth";
 import { HydraHome } from "../config";
@@ -28,6 +29,7 @@ import {
   type AuditRow,
 } from "../events";
 import { ControllerIdentity, controllerIdentityLayer, ControllerLayer } from "../identity";
+import { LiveTopics, LiveTopicsLayer, WsTicketsLayer } from "../live";
 import { masterKeyLayer, SecretLayer, secretsLayer } from "../secrets";
 import { PermissionProfilesLayer, ProfilesLayer } from "../permissions";
 import { SettingsLayer, SettingsOperationsLayer } from "../settings";
@@ -36,7 +38,7 @@ import { ProjectServiceLayer } from "../projects";
 import { TaskServiceLayer } from "../tasks";
 import { PasswordCost, TEST_PASSWORD_PARAMS, UserLayer, UsersLayer } from "../users";
 import { seed } from "../seed";
-import { MAX_REQUEST_BODY_BYTES, serve } from "./server";
+import { bodyLimits, serve } from "./server";
 import type { WebBundle } from "./static";
 
 /** The setup token the harness seeds, and the password `completeSetup` uses. */
@@ -58,6 +60,8 @@ const services = (home: string) =>
     TaskServiceLayer,
     ProjectServiceLayer,
     EventServiceLayer,
+    LiveTopicsLayer,
+    WsTicketsLayer,
   ).pipe(
     Layer.provideMerge(
       Layer.mergeAll(
@@ -85,6 +89,20 @@ export const baseUrl = Effect.map(HttpServer.HttpServer, (server) => {
 /** Reads back what a request wrote to the audit log. */
 export type AuditReader = (kind: AuditKind) => Promise<ReadonlyArray<AuditRow>>;
 
+/** Reads back what the controller is holding for the clients on its live socket. */
+export interface LiveReader {
+  readonly subscriberCount: (topic: LiveTopic) => Promise<number>;
+}
+
+/** What a test is handed: the running controller, and the ways to read it back. */
+export interface ServerHarness {
+  /** An address a fetch can use. */
+  readonly base: string;
+  readonly audit: AuditReader;
+  readonly sql: SqlClient.SqlClient;
+  readonly live: LiveReader;
+}
+
 /**
  * Runs the real controller application over a real socket for the length of
  * `body`, in a temporary home that is removed afterwards.
@@ -93,7 +111,7 @@ export type AuditReader = (kind: AuditKind) => Promise<ReadonlyArray<AuditRow>>;
  * checkout that was never built does.
  */
 export const withServer = (
-  body: (base: string, audit: AuditReader, sql: SqlClient.SqlClient) => Promise<void>,
+  body: (harness: ServerHarness) => Promise<void>,
   bundle?: WebBundle,
 ): Promise<void> => {
   const home = mkdtempSync(join(tmpdir(), "hydra-http-"));
@@ -117,7 +135,14 @@ export const withServer = (
         // request's audit row is asserted through the service that wrote it.
         const log = yield* AuditLog;
         const audit: AuditReader = (kind) => Effect.runPromise(Effect.orDie(log.listByKind(kind)));
-        yield* Effect.promise(() => body(base, audit, sql));
+        // The live subscriptions this controller is holding, read through the
+        // service that holds them: a test asserts what the running server has,
+        // not what it can infer from the wire.
+        const topics = yield* LiveTopics;
+        const live: LiveReader = {
+          subscriberCount: (topic) => Effect.runPromise(topics.subscriberCount(topic)),
+        };
+        yield* Effect.promise(() => body({ base, audit, sql, live }));
       }),
     ).pipe(
       Effect.provide(
@@ -126,11 +151,7 @@ export const withServer = (
           // is the transport's, so a harness without it would test a different
           // server from the one that ships.
           Layer.provideMerge(
-            BunHttpServer.layer({
-              hostname: "127.0.0.1",
-              port: 0,
-              maxRequestBodySize: MAX_REQUEST_BODY_BYTES,
-            }),
+            BunHttpServer.layer({ hostname: "127.0.0.1", port: 0, ...bodyLimits }),
           ),
         ),
       ),

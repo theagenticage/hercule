@@ -1,7 +1,7 @@
-import { useState, type JSX } from "react";
+import { useEffect, useState, type JSX } from "react";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useInfiniteQuery, useMutation, useQuery, useSuspenseQuery } from "@tanstack/react-query";
-import { FALLBACK_TIMEZONE, idTail, isSupportedTimezone } from "@hydra/client-core";
+import { FALLBACK_TIMEZONE, idTail, isSupportedTimezone, queryKeys } from "@hydra/client-core";
 import type { TaskCreateInput } from "@hydra/contract";
 import { projectsQuery, settingsQuery, tasksQuery } from "../../../app/queries";
 import { TaskComposer } from "./-composer";
@@ -28,9 +28,21 @@ export const Route = createFileRoute("/_shell/tasks/")({
 });
 
 function Tasks(): JSX.Element {
-  const { client, queryClient } = Route.useRouteContext();
+  const { client, queryClient, live } = Route.useRouteContext();
   const navigate = useNavigate();
   const openId = Route.useSearch().task;
+
+  // Tasks change under this screen all the time - an agent triages one, the
+  // CLI creates one - so what is on it is what the controller says it is, not
+  // what it said when the screen opened. A push names the reads that moved and
+  // the cache fetches them again; the screen itself never learns of the socket.
+  useEffect(
+    () =>
+      live.subscribe("task", (keys) => {
+        for (const queryKey of keys) void queryClient.invalidateQueries({ queryKey });
+      }),
+    [live, queryClient],
+  );
 
   const settings = useSuspenseQuery(settingsQuery(client)).data;
   const stored = settings.user.timezone ?? FALLBACK_TIMEZONE;
@@ -51,10 +63,10 @@ function Tasks(): JSX.Element {
 
   const reread = async (id?: string) => {
     await Promise.all([
-      queryClient.invalidateQueries({ queryKey: ["tasks"] }),
+      queryClient.invalidateQueries({ queryKey: queryKeys.tasks() }),
       id === undefined
         ? Promise.resolve()
-        : queryClient.invalidateQueries({ queryKey: ["task", id] }),
+        : queryClient.invalidateQueries({ queryKey: queryKeys.task(id) }),
     ]);
   };
 

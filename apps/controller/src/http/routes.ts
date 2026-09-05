@@ -27,6 +27,7 @@ import {
   type ApiError,
 } from "@hydra/contract";
 import { Auth } from "../auth";
+import { WsTickets } from "../live";
 import { ApiKeys } from "../credentials";
 import { EventService } from "../events";
 import { Controller } from "../identity";
@@ -80,9 +81,11 @@ const setupRoutes = HttpApiBuilder.group(api, "setup", (handlers) =>
 const authRoutes = HttpApiBuilder.group(api, "auth", (handlers) =>
   Effect.gen(function* () {
     const auth = yield* Auth;
+    const tickets = yield* WsTickets;
     return handlers
       .handle("login", ({ payload }) => operation(auth.login(payload)))
-      .handle("logout", () => operation(auth.logout()));
+      .handle("logout", () => operation(auth.logout()))
+      .handle("wsTicket", () => operation(Effect.map(tickets.issue(), (ticket) => ({ ticket }))));
   }),
 );
 

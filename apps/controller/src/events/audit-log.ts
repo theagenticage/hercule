@@ -11,8 +11,8 @@
 import { Context, Effect, Layer } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
-import type { Actor } from "@hydra/contract";
-import { nowIso } from "../db";
+import type { Actor, InvalidateKind, MutableLiveTopic } from "@hydra/contract";
+import { announce, nowIso } from "../db";
 
 /**
  * The audit kinds this build emits, following `<entity>.<verb>ed`. The list
@@ -44,9 +44,28 @@ export const AUDIT_KINDS = [
 
 export type AuditKind = (typeof AUDIT_KINDS)[number];
 
-/** One audit entry: what happened, who caused it, and what it was about. */
-export interface AuditEntry {
-  readonly kind: AuditKind;
+/**
+ * The audit kinds that record a change to a Live Topic record, and which way
+ * the record changed. A kind listed here has to name the record it is about:
+ * the id sits in the free-form payload under a different shape per verb, and
+ * the live overlay needs one it can read without knowing the verb.
+ */
+const RECORD_KINDS = {
+  "task.created": "created",
+  "task.updated": "updated",
+  "task.deleted": "deleted",
+} as const satisfies Partial<Record<AuditKind, InvalidateKind>>;
+
+type RecordAuditKind = keyof typeof RECORD_KINDS;
+
+/** Which record an entry is about, in the vocabulary the live overlay uses. */
+export interface AuditRecord {
+  readonly topic: MutableLiveTopic;
+  readonly id: string;
+}
+
+/** What every audit entry carries, whichever kind it is. */
+interface AuditFields {
   /**
    * Null where nothing caused the entry that the system can name: a login that
    * failed was made by nobody, because the credential it presented resolved to
@@ -71,9 +90,20 @@ export interface AuditEntry {
   readonly at?: string;
 }
 
+/** One audit entry: what happened, who caused it, and what it was about. */
+export type AuditEntry =
+  | (AuditFields & { readonly kind: RecordAuditKind; readonly record: AuditRecord })
+  | (AuditFields & {
+      readonly kind: Exclude<AuditKind, RecordAuditKind>;
+      readonly record?: undefined;
+    });
+
 /** An audit entry as it reads back out of the log. */
-export interface AuditRow extends AuditEntry {
+export interface AuditRow {
   readonly id: number;
+  readonly kind: AuditKind;
+  readonly actor: Actor | null;
+  readonly payload: Readonly<Record<string, unknown>>;
   readonly receivedAt: string;
 }
 
@@ -102,6 +132,17 @@ const make = Effect.gen(function* () {
             ('platform', NULL, 'platform', ${entry.kind}, ${at}, ${at},
              ${dedupKey}, '[]', NULL, ${JSON.stringify(entry.payload)}, NULL, ${entry.actor})
         `;
+        // The log is a Live Topic of its own, so every row appended to it is
+        // news the log grew; a row about a record is also that record changing.
+        yield* announce({ _tag: "event" });
+        if (entry.record !== undefined) {
+          yield* announce({
+            _tag: "record",
+            topic: entry.record.topic,
+            id: entry.record.id,
+            kind: RECORD_KINDS[entry.kind],
+          });
+        }
       }),
 
     /** Reads the entries of one kind, oldest first. Verification only. */

@@ -10,10 +10,15 @@
 import { readFileSync, existsSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { cli, jsonOf, startController, temporaryHome, type Controller } from "./harness";
-
-const PASSWORD = "correct horse battery staple";
-const USERNAME = "rogier";
+import {
+  PASSWORD,
+  USERNAME,
+  cli,
+  jsonOf,
+  startController,
+  temporaryHome,
+  type Controller,
+} from "./harness";
 
 /** The home the controller and the CLI share; the CLI writes its credential here. */
 const state = temporaryHome();

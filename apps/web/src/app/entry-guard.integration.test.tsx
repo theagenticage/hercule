@@ -60,6 +60,28 @@ describe("the entry guard", () => {
     await at(router, "/");
   });
 
+  it("sends a token the live connection found rejected back to the login screen", async () => {
+    // Nobody asked for the ticket the live connection fetches, so a refusal
+    // there is the one 401 no navigation is waiting behind.
+    const api = stubApi({
+      ...SETUP_COMPLETE,
+      ...settings({ "onboarding.completedSteps": ["timezone"] }),
+      "GET /api/v1/tasks": { body: { items: [] } },
+      "POST /api/v1/auth/ws-ticket": {
+        status: 401,
+        body: envelope("unauthenticated", "the token is not valid"),
+      },
+    });
+    const { router, client } = await renderApp({
+      path: "/tasks",
+      api: api.fetch,
+      token: "stale",
+    });
+
+    await at(router, "/login");
+    expect(client.getToken()).toBeNull();
+  });
+
   it("sends a rejected token back to the login screen, holding it no longer", async () => {
     const api = stubApi({
       ...SETUP_COMPLETE,

@@ -19,7 +19,7 @@ import { defineConfig } from "vitest/config";
  */
 const reactPackages = ["apps/web", "packages/ui"];
 
-const binaryTests = ["e2e/web.test.ts", "e2e/cli.test.ts"];
+const binaryTests = ["e2e/web.test.ts", "e2e/cli.test.ts", "e2e/live.test.ts"];
 
 export default defineConfig({
   test: {

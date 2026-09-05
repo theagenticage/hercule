@@ -35,12 +35,9 @@ import {
   unauthenticated,
   type Requirement,
 } from "@hydra/contract";
-import { CurrentActor, grantCheck, type Actor } from "../actor";
+import { CurrentActor, grantCheck, NO_CREDENTIAL, type Actor } from "../actor";
 import { Credentials, hashToken } from "../credentials";
 import { Setup } from "../setup";
-
-/** What a caller with no usable credential is told; never why. */
-const NO_CREDENTIAL = "this operation needs a credential";
 
 /** The operation a request is for: the group and endpoint identifiers, joined. */
 export const operationIdOf = (options: {

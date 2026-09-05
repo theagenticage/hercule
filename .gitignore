@@ -9,3 +9,6 @@ apps/controller/src/http/bundle.ts
 
 # Agent worktrees, created by the tooling and never part of the tree.
 .claude/worktrees/
+
+# Plan folders (SPEC, WORKLOG, evidence) are one ticket's working state and stay local.
+docs/plans/

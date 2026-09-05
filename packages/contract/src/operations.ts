@@ -40,6 +40,7 @@ const TABLE = {
 
   "auth.login": { requires: "unauthenticated", method: "POST", path: "/api/v1/auth/login" },
   "auth.logout": { requires: "authenticated", method: "POST", path: "/api/v1/auth/logout" },
+  "auth.wsTicket": { requires: "authenticated", method: "POST", path: "/api/v1/auth/ws-ticket" },
 
   "apiKey.query": { requires: "credential.read", method: "GET", path: "/api/v1/api-keys" },
   "apiKey.create": { requires: "credential.write", method: "POST", path: "/api/v1/api-keys" },

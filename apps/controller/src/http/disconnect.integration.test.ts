@@ -122,7 +122,7 @@ const withParkedDatabase = async (
 
 describe("a client that hangs up", () => {
   it("leaves no login token, no audit row and a controller that keeps serving", async () => {
-    await withServer(async (base, audit, sql) => {
+    await withServer(async ({ base, audit, sql }) => {
       await completeSetup(base);
       const credential = { username: USERNAME, password: PASSWORD };
 
@@ -148,7 +148,7 @@ describe("a client that hangs up", () => {
   }, 15_000);
 
   it("leaves no api key and no audit row when the request was authenticated", async () => {
-    await withServer(async (base, audit, sql) => {
+    await withServer(async ({ base, audit, sql }) => {
       const bearer = await completeSetup(base);
       // One request through first, so the pre-setup gate has its answer cached
       // and the parked request below stalls in the credential gate rather than

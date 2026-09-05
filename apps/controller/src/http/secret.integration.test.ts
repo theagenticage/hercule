@@ -17,7 +17,7 @@ const secretsPath = (owner: string, name: string) => `/api/v1/secrets/${owner}/$
 
 describe("secret.*", () => {
   it("stores, lists, rotates and removes, and never puts a value on the wire", async () => {
-    await withServer(async (base, audit) => {
+    await withServer(async ({ base, audit }) => {
       const token = await completeSetup(base);
 
       const created = await send("PUT", base, secretsPath(OWNER, "api-token"), {
@@ -73,7 +73,7 @@ describe("secret.*", () => {
   });
 
   it("answers 404 for a name nobody stored", async () => {
-    await withServer(async (base) => {
+    await withServer(async ({ base }) => {
       const token = await completeSetup(base);
       const response = await send("DELETE", base, secretsPath(OWNER, "absent"), { token });
 
@@ -83,7 +83,7 @@ describe("secret.*", () => {
   });
 
   it("refuses a write to the core owner: that is the controller's own key material", async () => {
-    await withServer(async (base) => {
+    await withServer(async ({ base }) => {
       const token = await completeSetup(base);
       const response = await send("PUT", base, secretsPath("core/controller", "signing-key"), {
         body: { value: VALUE },
@@ -96,7 +96,7 @@ describe("secret.*", () => {
   });
 
   it("refuses an owner id holding the separator the encryption is bound with", async () => {
-    await withServer(async (base) => {
+    await withServer(async ({ base }) => {
       const token = await completeSetup(base);
       const response = await send("PUT", base, secretsPath("plugin/a%7Cb", "k"), {
         body: { value: VALUE },
@@ -109,7 +109,7 @@ describe("secret.*", () => {
   });
 
   it("needs a credential, like every operation after setup", async () => {
-    await withServer(async (base) => {
+    await withServer(async ({ base }) => {
       await completeSetup(base);
       const response = await send("GET", base, "/api/v1/secrets");
 
@@ -120,7 +120,7 @@ describe("secret.*", () => {
 
 describe("controller.read", () => {
   it("answers with the identity and the version baked into the binary", async () => {
-    await withServer(async (base) => {
+    await withServer(async ({ base }) => {
       const token = await completeSetup(base);
       const response = await send("GET", base, "/api/v1/controller", { token });
 

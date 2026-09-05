@@ -21,6 +21,7 @@ import * as Layer from "effect/Layer";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { isSqlErrorReason, SqlError } from "effect/unstable/sql/SqlError";
 import * as SqliteClient from "@effect/sql-sqlite-bun/SqliteClient";
+import { announcing } from "./after-commit";
 
 /** The in-memory database name; tests open the real schema against it. */
 export const MEMORY = ":memory:";
@@ -176,8 +177,11 @@ export const openDatabase = (
  * runner round trip, not a provider call, not an outbox delivery. SQLite has
  * one writer, so a transaction held across an external wait blocks every other
  * write in the controller. Local CPU work, such as generating a key, is fine.
+ *
+ * Whatever the write set announced along the way is handed on after the commit
+ * and thrown away on a rollback (`./after-commit.ts`).
  */
 export const withTransaction = <A, E, R>(
   sql: SqlClient.SqlClient,
   effect: Effect.Effect<A, E, R>,
-): Effect.Effect<A, E | SqlError, R> => sql.withTransaction(effect);
+): Effect.Effect<A, E | SqlError, R> => announcing(sql.withTransaction(effect));

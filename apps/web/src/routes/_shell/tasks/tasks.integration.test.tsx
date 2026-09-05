@@ -594,3 +594,143 @@ describe("Tasks > what the screen must not hide", () => {
     expect(project.selectedOptions[0]?.textContent).not.toBe("No project");
   });
 });
+
+describe("Tasks > live", () => {
+  /** A task that appears while the screen is already open. */
+  const ADDED: Fixture = {
+    ...RUNNER,
+    id: "01a06d03-1111-7000-8000-000000000002",
+    title: "Ship the live overlay",
+    labels: [],
+    provenance: [],
+  };
+
+  /** One invalidation, in the shape the contract puts on the wire. */
+  const invalidate = (kind: string, ids: readonly string[]) => ({
+    _tag: "invalidate",
+    ids,
+    kind,
+  });
+
+  /**
+   * One push on the `task` topic. It crosses a stub socket and the transport's
+   * own fibers, so it is a start rather than a barrier: what it causes is
+   * waited for at the assertion.
+   */
+  const deliver = (
+    live: { push(topic: string, message: unknown): void },
+    kind: string,
+    ids: readonly string[],
+  ): void => {
+    act(() => {
+      live.push("task", invalidate(kind, ids));
+    });
+  };
+
+  /** The screen is watching `task` before a push can mean anything. */
+  const watching = async (live: { topics(): readonly string[] }) => {
+    await waitFor(() => {
+      expect(live.topics()).toContain("task");
+    });
+  };
+
+  it("shows a task created elsewhere, without navigating", async () => {
+    let held: readonly Fixture[] = [RUNNER];
+    const { api, live, router } = await open([RUNNER], {
+      "GET /api/v1/tasks": () => ({ body: { items: held } }),
+    });
+
+    await screen.findByRole("button", { name: new RegExp(RUNNER.title) });
+    await watching(live);
+    const before = listings(api).length;
+
+    // The controller now holds one more task than the screen has read.
+    held = [ADDED, ...held];
+    deliver(live, "created", [ADDED.id]);
+
+    expect(await screen.findByRole("button", { name: new RegExp(ADDED.title) })).toBeTruthy();
+    // The row came from a fresh listing, not from the push itself.
+    expect(listings(api).length).toBeGreaterThan(before);
+    expect(router.state.location.pathname).toBe("/tasks");
+    expect(router.state.location.searchStr).not.toContain(ADDED.id);
+  });
+
+  it("drops the row for a task deleted elsewhere", async () => {
+    let held: readonly Fixture[] = [RUNNER, PRUNE];
+    const { live } = await open([RUNNER, PRUNE], {
+      "GET /api/v1/tasks": () => ({ body: { items: held } }),
+    });
+
+    await screen.findByRole("button", { name: new RegExp(PRUNE.title) });
+    await watching(live);
+
+    held = held.filter((candidate) => candidate.id !== PRUNE.id);
+    deliver(live, "deleted", [PRUNE.id]);
+
+    await waitFor(() => {
+      expect(screen.queryByRole("button", { name: new RegExp(PRUNE.title) })).toBeNull();
+    });
+    expect(row(RUNNER.title)).toBeTruthy();
+  });
+
+  it("shows the new values in a dossier that is open when the task is updated elsewhere", async () => {
+    const user = userEvent.setup();
+    let held: Fixture = { ...RUNNER };
+    const { live } = await open([RUNNER], {
+      "GET /api/v1/tasks": () => ({ body: { items: [held] } }),
+      [`GET /api/v1/tasks/${RUNNER.id}`]: () => ({ body: held }),
+    });
+
+    await user.click(await screen.findByRole("button", { name: new RegExp(RUNNER.title) }));
+    const drawer = await screen.findByRole("dialog");
+    expect(within(drawer).getByLabelText<HTMLSelectElement>("Status").value).toBe("open");
+    await watching(live);
+
+    held = { ...held, title: "Wire the runner socket up, at last", status: "in-progress" };
+    deliver(live, "updated", [RUNNER.id]);
+
+    await waitFor(() => {
+      expect(
+        within(screen.getByRole("dialog")).getByLabelText<HTMLSelectElement>("Status").value,
+      ).toBe("in-progress");
+    });
+    expect(screen.getByRole("dialog").textContent).toContain("Wire the runner socket up, at last");
+  });
+
+  it("says so in a dossier left open on a task deleted elsewhere", async () => {
+    const user = userEvent.setup();
+    let held: readonly Fixture[] = [RUNNER];
+    const { live } = await open([RUNNER], {
+      "GET /api/v1/tasks": () => ({ body: { items: held } }),
+      [`GET /api/v1/tasks/${RUNNER.id}`]: () =>
+        held.length === 0
+          ? { status: 404, body: envelope("not_found", "no task 01a06d02") }
+          : { body: RUNNER },
+    });
+
+    await user.click(await screen.findByRole("button", { name: new RegExp(RUNNER.title) }));
+    await screen.findByRole("dialog");
+    await watching(live);
+
+    held = [];
+    deliver(live, "deleted", [RUNNER.id]);
+
+    expect(await screen.findByText("no task 01a06d02")).toBeTruthy();
+    expect(screen.getByRole("dialog").textContent).not.toContain(RUNNER.title);
+  });
+
+  it("leaves no subscription behind when the screen is left", async () => {
+    const { live, router } = await open([RUNNER]);
+
+    await screen.findByRole("button", { name: new RegExp(RUNNER.title) });
+    await watching(live);
+
+    await act(async () => {
+      await router.navigate({ to: "/runs" });
+    });
+
+    await waitFor(() => {
+      expect(live.topics()).not.toContain("task");
+    });
+  });
+});

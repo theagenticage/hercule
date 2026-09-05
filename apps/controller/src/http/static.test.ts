@@ -38,7 +38,7 @@ afterAll(() => {
 
 /** The controller with the bundle mounted; every request here is a browser's. */
 const withBundle = (body: (base: string) => Promise<void>): Promise<void> =>
-  withServer(async (base) => body(base), bundle);
+  withServer(async ({ base }) => body(base), bundle);
 
 describe("the page", () => {
   it("serves index.html at the root, revalidated on every load", async () => {
@@ -142,7 +142,7 @@ describe("the API beside it", () => {
 
 describe("without a bundle", () => {
   it("answers every non-API path 404, as a checkout that was never built does", async () => {
-    await withServer(async (base) => {
+    await withServer(async ({ base }) => {
       const response = await fetch(`${base}/settings/profile`);
       expect(response.status).toBe(404);
       expect(await response.json()).toMatchObject({ error: { code: "not_found" } });

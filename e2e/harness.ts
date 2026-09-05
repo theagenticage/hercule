@@ -9,7 +9,7 @@
  * The processes are started with `Bun.spawn` rather than `spawnHydra`, which
  * inherits stdio: a test has to read what the command printed.
  */
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -193,6 +193,46 @@ export async function cli(
     child.exited,
   ]);
   return { code, stdout, stderr };
+}
+
+/** The user every suite sets up as, and the password it logs in with. */
+export const USERNAME = "rogier";
+export const PASSWORD = "correct horse battery staple";
+
+/**
+ * Take a fresh controller through first run, the way an operator does: read the
+ * setup URL it wrote into its home, and hand that token back to the CLI. The
+ * caller asserts the exit code, because a suite that means to fail here says so
+ * itself.
+ */
+export async function completeSetup(options: {
+  readonly home: string;
+  readonly url: string;
+  readonly binary?: string | undefined;
+}): Promise<Ran> {
+  const setupUrl = readFileSync(join(options.home, "setup-url"), "utf8").trim();
+  const token = new URL(setupUrl).searchParams.get("token");
+  if (token === null) throw new Error(`no setup token in ${setupUrl}`);
+  return cli(
+    [
+      "setup",
+      "complete",
+      "--setup-token",
+      token,
+      "--username",
+      USERNAME,
+      "--password-stdin",
+      "--timezone",
+      "Europe/Amsterdam",
+      "--json",
+    ],
+    {
+      home: options.home,
+      binary: options.binary,
+      env: { HYDRA_API_URL: options.url },
+      stdin: PASSWORD,
+    },
+  );
 }
 
 /** The CLI's `--json` output, parsed. Fails loudly with the command's own output. */

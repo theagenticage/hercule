@@ -200,6 +200,7 @@ const make = Effect.gen(function* () {
             yield* audit.append({
               kind: "task.created",
               actor: USER_ACTOR,
+              record: { topic: "task", id: task.id },
               payload: { task },
               at,
             });
@@ -292,6 +293,7 @@ const make = Effect.gen(function* () {
             yield* audit.append({
               kind: "task.updated",
               actor: USER_ACTOR,
+              record: { topic: "task", id },
               payload: { taskId: id, changes },
               at,
             });
@@ -325,6 +327,7 @@ const make = Effect.gen(function* () {
             yield* audit.append({
               kind: "task.deleted",
               actor: USER_ACTOR,
+              record: { topic: "task", id },
               payload: { taskId: id, snapshot: { ...task, deletedAt: at } },
               at,
             });

@@ -1,6 +1,6 @@
 import { useState, type JSX } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import type { HydraClient } from "@hydra/client-core";
+import { ApiError, type HydraClient } from "@hydra/client-core";
 import type { Project, Task, TaskUpdateInput } from "@hydra/contract";
 import { Drawer } from "@hydra/ui";
 import { taskQuery } from "../../../app/queries";
@@ -65,7 +65,11 @@ export function TaskDrawer({
   // refetched keeps the answer it had, so an edit that takes the task out of
   // the filter does not take the panel with it.
   const opened = useQuery({ ...taskQuery(client, openId ?? ""), enabled: openId !== undefined });
-  const selected = opened.data ?? listed;
+  // A task the controller no longer has is the one case where what was read
+  // before is not worth keeping: the row is gone from the list under the panel,
+  // and a panel still showing it would be the screen contradicting itself.
+  const gone = opened.error instanceof ApiError && opened.error.code === "not_found";
+  const selected = gone ? undefined : (opened.data ?? listed);
 
   if (selected === undefined) {
     // A task named in the address that the controller will not answer for -

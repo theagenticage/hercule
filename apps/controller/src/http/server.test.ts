@@ -20,7 +20,7 @@ import { MAX_REQUEST_BODY_BYTES } from "./server";
 
 describe("before setup completes", () => {
   it("answers setup.read unauthenticated, so the web app knows where to route", async () => {
-    await withServer(async (base) => {
+    await withServer(async ({ base }) => {
       const response = await fetch(`${base}/api/v1/setup`);
       expect(response.status).toBe(200);
       expect(await response.json()).toEqual({ complete: false });
@@ -28,7 +28,7 @@ describe("before setup completes", () => {
   });
 
   it("answers every other operation 401, credential or not", async () => {
-    await withServer(async (base) => {
+    await withServer(async ({ base }) => {
       const anonymous = await fetch(`${base}/api/v1/settings`);
       const withBearer = await fetch(`${base}/api/v1/settings`, {
         headers: { authorization: "Bearer looks-like-a-token" },
@@ -41,7 +41,7 @@ describe("before setup completes", () => {
   });
 
   it("answers login 401 as well: there is no user to log in as yet", async () => {
-    await withServer(async (base) => {
+    await withServer(async ({ base }) => {
       const response = await post(base, "/api/v1/auth/login", {
         username: USERNAME,
         password: PASSWORD,
@@ -51,7 +51,7 @@ describe("before setup completes", () => {
   });
 
   it("refuses setup.complete without the setup token, and with the wrong one", async () => {
-    await withServer(async (base) => {
+    await withServer(async ({ base }) => {
       const input = { username: USERNAME, password: PASSWORD, timezone: "Europe/Amsterdam" };
       expect((await post(base, "/api/v1/setup/complete", input)).status).toBe(401);
       expect((await post(base, "/api/v1/setup/complete", input, "wrong")).status).toBe(401);
@@ -61,7 +61,7 @@ describe("before setup completes", () => {
 
 describe("setup, login and logout", () => {
   it("completes setup once, and says so afterwards", async () => {
-    await withServer(async (base) => {
+    await withServer(async ({ base }) => {
       const token = await completeSetup(base);
       expect(token).not.toBe("");
 
@@ -79,7 +79,7 @@ describe("setup, login and logout", () => {
   });
 
   it("logs in with the password and logs out again, and the token dies with it", async () => {
-    await withServer(async (base) => {
+    await withServer(async ({ base }) => {
       await completeSetup(base);
 
       const login = await post(base, "/api/v1/auth/login", {
@@ -98,7 +98,7 @@ describe("setup, login and logout", () => {
   });
 
   it("answers a wrong password 401 without saying which half was wrong", async () => {
-    await withServer(async (base) => {
+    await withServer(async ({ base }) => {
       await completeSetup(base);
       const response = await post(base, "/api/v1/auth/login", {
         username: USERNAME,
@@ -113,7 +113,7 @@ describe("setup, login and logout", () => {
 
 describe("the order of the checks", () => {
   it("answers 401 before 400: a malformed body under no credential is unauthenticated", async () => {
-    await withServer(async (base) => {
+    await withServer(async ({ base }) => {
       const bearer = await completeSetup(base);
 
       const anonymous = await post(base, "/api/v1/user/password", { nonsense: true });
@@ -130,7 +130,7 @@ describe("the order of the checks", () => {
   });
 
   it("answers a path no operation owns with the envelope, not an empty body", async () => {
-    await withServer(async (base) => {
+    await withServer(async ({ base }) => {
       const response = await fetch(`${base}/`);
       expect(response.status).toBe(404);
       expect(await response.json()).toMatchObject({ error: { code: "not_found" } });
@@ -140,7 +140,7 @@ describe("the order of the checks", () => {
 
 describe("API keys over the wire", () => {
   it("mints a key, lists it without its token, uses it, and revokes it", async () => {
-    await withServer(async (base, audit) => {
+    await withServer(async ({ base, audit }) => {
       const bearer = await completeSetup(base);
 
       const minted = await post(base, "/api/v1/api-keys", { name: "laptop" }, bearer);
@@ -175,7 +175,7 @@ describe("API keys over the wire", () => {
   });
 
   it("refuses an id that is not a canonical uuid before it looks for a key", async () => {
-    await withServer(async (base) => {
+    await withServer(async ({ base }) => {
       const bearer = await completeSetup(base);
       const response = await del(base, "/api/v1/api-keys/not-an-id", bearer);
       expect(response.status).toBe(400);
@@ -186,7 +186,7 @@ describe("API keys over the wire", () => {
 
 describe("changing the password over the wire", () => {
   it("takes the new password afterwards and refuses the old one", async () => {
-    await withServer(async (base, audit) => {
+    await withServer(async ({ base, audit }) => {
       const bearer = await completeSetup(base);
       const next = "an entirely different passphrase";
 
@@ -229,7 +229,7 @@ describe("changing the password over the wire", () => {
 describe("stopping", () => {
   it("stops accepting once the scope closes, so the port is free again", async () => {
     let base = "";
-    await withServer(async (address) => {
+    await withServer(async ({ base: address }) => {
       base = address;
       expect((await fetch(`${base}/api/v1/setup`)).status).toBe(200);
     });
@@ -240,7 +240,7 @@ describe("stopping", () => {
 
 describe("the pre-setup gate decides on the operation, not on the path", () => {
   it("gates a path the router matches case-insensitively", async () => {
-    await withServer(async (base, audit) => {
+    await withServer(async ({ base, audit }) => {
       const response = await post(base, "/API/v1/AUTH/LOGIN", {
         username: USERNAME,
         password: PASSWORD,
@@ -259,7 +259,7 @@ describe("the pre-setup gate decides on the operation, not on the path", () => {
   });
 
   it("gates a path the router reaches through a doubled slash", async () => {
-    await withServer(async (base) => {
+    await withServer(async ({ base }) => {
       const response = await get(base, "//api/v1/secrets", "looks-like-a-token");
 
       expect(response.status).toBe(401);
@@ -270,7 +270,7 @@ describe("the pre-setup gate decides on the operation, not on the path", () => {
   });
 
   it("answers a path no operation owns 404, before setup as after it", async () => {
-    await withServer(async (base) => {
+    await withServer(async ({ base }) => {
       const before = await get(base, "/api/v1/nothing-here");
       expect(before.status).toBe(404);
       expect(await before.json()).toMatchObject({ error: { code: "not_found" } });
@@ -288,7 +288,7 @@ describe("the body cap", () => {
    * is read, which is why nothing reaches the audit log.
    */
   it("refuses a body larger than the cap with a 413, without storing it", async () => {
-    await withServer(async (base, audit) => {
+    await withServer(async ({ base, audit }) => {
       const username = "x".repeat(MAX_REQUEST_BODY_BYTES + 1);
       const response = await post(base, "/api/v1/auth/login", { username, password: PASSWORD });
 
@@ -300,7 +300,7 @@ describe("the body cap", () => {
 
 describe("a body that is not JSON", () => {
   it("answers in the envelope rather than a bare 415", async () => {
-    await withServer(async (base) => {
+    await withServer(async ({ base }) => {
       await completeSetup(base);
       const response = await fetch(`${base}/api/v1/auth/login`, {
         method: "POST",
@@ -316,7 +316,7 @@ describe("a body that is not JSON", () => {
 
 describe("stamping a credential's use", () => {
   it("writes once for a burst of requests, not once per request", async () => {
-    await withServer(async (base) => {
+    await withServer(async ({ base }) => {
       const bearer = await completeSetup(base);
       const minted = await post(base, "/api/v1/api-keys", { name: "laptop" }, bearer);
       const key = (await minted.json()) as { id: string; token: string };

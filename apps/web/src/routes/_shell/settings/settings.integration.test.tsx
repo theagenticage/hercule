@@ -60,13 +60,22 @@ describe("Settings > Profile", () => {
       ...controller(),
       "POST /api/v1/auth/logout": { status: 500, body: envelope("internal", "no") },
     });
-    const { router, client } = await renderApp({
+    const { router, client, live } = await renderApp({
       path: "/settings/profile",
       api: api.fetch,
       token: "held",
     });
+    await waitFor(() => {
+      expect(live.connected()).toBe(true);
+    });
 
     await user.click(screen.getByRole("button", { name: "Sign out" }));
+
+    // A revocation the controller refused leaves the bearer working, so a
+    // connection left open would carry whoever signs in next on this one.
+    await waitFor(() => {
+      expect(live.connected()).toBe(false);
+    });
 
     await waitFor(() => {
       expect(router.state.location.pathname).toBe("/login");
