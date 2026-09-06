@@ -1,7 +1,7 @@
 import type { JSX } from "react";
 import { createFileRoute } from "@tanstack/react-router";
-import { useMutation, useQuery, useSuspenseQuery } from "@tanstack/react-query";
-import { Button, Group, LaneLabel } from "@hydra/ui";
+import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
+import { Group, LaneLabel } from "@hydra/ui";
 import { FALLBACK_TIMEZONE, isSupportedTimezone } from "@hydra/client-core";
 import { useLiveInvalidation } from "../../../app/live-invalidation";
 import {
@@ -10,6 +10,7 @@ import {
   runnersQuery,
   settingsQuery,
 } from "../../../app/queries";
+import { AddMachine } from "./-add-machine";
 import { NoRunners } from "./-no-runners";
 import { RunnerRow } from "./-row";
 
@@ -37,12 +38,6 @@ function Fleet(): JSX.Element {
   const timezone = isSupportedTimezone(stored) ? stored : FALLBACK_TIMEZONE;
   const local = useQuery(localRunnerQuery(detectLocalRunner, runners)).data ?? null;
 
-  const mint = useMutation({ mutationFn: () => client.runner.createJoinToken() });
-  const command =
-    mint.data === undefined
-      ? undefined
-      : `hydra runner join ${window.location.origin} --token ${mint.data.token}`;
-
   return (
     <div className="flex flex-col gap-7">
       <section>
@@ -64,51 +59,7 @@ function Fleet(): JSX.Element {
         )}
       </section>
 
-      <section className="flex max-w-[560px] flex-col items-start gap-1 rounded-card border border-dashed border-line px-4 py-3 text-row text-muted">
-        {command === undefined ? (
-          <>
-            {/* Before a token exists the action is the whole of this spot, so
-                it carries the name rather than repeating one above itself. */}
-            <Button
-              variant="primary"
-              className="-ml-2"
-              onClick={() => {
-                mint.mutate();
-              }}
-              disabled={mint.isPending}
-            >
-              Add machine
-            </Button>
-            <span className="pt-0.5">
-              Mint a single-use token, then run the command it gives you on that machine.
-            </span>
-          </>
-        ) : (
-          <>
-            <b className="font-emph text-ink">Add machine</b>
-            <span>Run this on the machine, then log in to its providers here.</span>
-            <code className="mt-1 rounded-[4px] bg-line-soft px-1.5 py-px font-mono text-fine break-all text-muted">
-              {command}
-            </code>
-            {/* A fleet is enlisted one machine at a time and each needs a token
-                of its own, so there is a way to the next one without a reload. */}
-            <Button
-              className="-ml-2 mt-1.5"
-              onClick={() => {
-                mint.mutate();
-              }}
-              disabled={mint.isPending}
-            >
-              Mint another
-            </Button>
-          </>
-        )}
-        <span className="pt-1 text-fine text-faint">
-          {mint.isError
-            ? "The token could not be minted. Try again."
-            : "A token is single-use and lasts an hour."}
-        </span>
-      </section>
+      <AddMachine client={client} timezone={timezone} />
     </div>
   );
 }

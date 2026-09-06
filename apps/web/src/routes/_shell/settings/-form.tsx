@@ -1,12 +1,8 @@
-import type { JSX } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import type { HydraClient } from "@hydra/client-core";
 import type { SettingsPatch } from "@hydra/contract";
+import { messageOf } from "../../../screens/save-status";
 import { settingsQuery } from "../../../app/queries";
-
-/** A rejection that is not an Error still has to say something. */
-export const messageOf = (error: unknown): string =>
-  error instanceof Error ? error.message : String(error);
 
 /**
  * Writing a settings patch and saying what happened.
@@ -34,27 +30,4 @@ export function useSaveSettings(client: HydraClient): {
     saved: mutation.isSuccess,
     failure: mutation.error === null ? null : messageOf(mutation.error),
   };
-}
-
-/** What the last write did, where the user can see it. */
-export function SaveStatus({
-  saved,
-  failure,
-}: {
-  readonly saved: boolean;
-  readonly failure: string | null;
-}): JSX.Element | null {
-  if (failure !== null) {
-    return (
-      <p className="text-fine text-fail" role="alert">
-        {failure}
-      </p>
-    );
-  }
-  if (!saved) return null;
-  return (
-    <p className="text-fine text-muted" role="status">
-      Saved.
-    </p>
-  );
 }

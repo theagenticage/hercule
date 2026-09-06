@@ -14,6 +14,20 @@ import { Schema } from "effect";
 export const PROTOCOL_VERSION = 1;
 
 /**
+ * How the controller ends a connection whose runner it has just retired, and
+ * the one close reason the runner reads. Retiring revokes the credential, so a
+ * runner told this stops rather than dialling again with something dead. The
+ * code is RFC 6455's policy violation: the connection is fine, the runner is
+ * no longer one this controller will have.
+ */
+export const RETIRED_CLOSE_CODE = 1008;
+
+export const RETIRED_CLOSE_REASON = "RETIRED";
+
+/** RFC 6455's "going away": the connection is fine, this end is done with it. */
+export const GOING_AWAY_CLOSE_CODE = 1001;
+
+/**
  * A version a peer claims. Any version that could exist decodes, ours or not,
  * so a mismatch is refused by name rather than reported as an unreadable frame.
  *
@@ -113,6 +127,20 @@ export const RunnerWatermark = Schema.Struct({
 export type RunnerWatermark = Schema.Schema.Type<typeof RunnerWatermark>;
 
 /**
+ * What a machine says about itself as it presents a join token. Only what the
+ * controller cannot work out for itself: everything else about a runner is
+ * probed or assigned. An absent `reserved` is a machine that is not personal.
+ *
+ * The one decoder of this refuses unknown keys, so a misspelled `reserved` is
+ * an error rather than a machine quietly enlisted as a shared one.
+ */
+export const JoinRequest = Schema.Struct({
+  reserved: Schema.optionalKey(Schema.Boolean),
+});
+
+export type JoinRequest = Schema.Schema.Type<typeof JoinRequest>;
+
+/**
  * What the controller hands a machine that presented a valid join token. The
  * credential appears in this one answer and nowhere else, and the identity and
  * key are what the runner pins: a controller is a logical identity, not an
@@ -193,12 +221,17 @@ export const Pong = Schema.Struct({ _tag: Schema.Literal("pong") });
 
 export type Pong = Schema.Schema.Type<typeof Pong>;
 
-export const FactsReport = Schema.Struct({
+/**
+ * What the runner reports about its machine: hourly when something changed, and
+ * whenever the controller asks. Named for the runner because the controller has
+ * facts of its own that this frame does not carry.
+ */
+export const RunnerFactsReport = Schema.Struct({
   _tag: Schema.Literal("factsReport"),
   facts: RunnerFacts,
 });
 
-export type FactsReport = Schema.Schema.Type<typeof FactsReport>;
+export type RunnerFactsReport = Schema.Schema.Type<typeof RunnerFactsReport>;
 
 export const WatermarkReport = Schema.Struct({
   _tag: Schema.Literal("watermarkReport"),
@@ -215,7 +248,7 @@ export type Goodbye = Schema.Schema.Type<typeof Goodbye>;
 export const RunnerToController = Schema.Union([
   RunnerHello,
   Pong,
-  FactsReport,
+  RunnerFactsReport,
   WatermarkReport,
   Goodbye,
 ]);
@@ -258,6 +291,16 @@ export type ControllerHello = Schema.Schema.Type<typeof ControllerHello>;
 export const signedChallenge = (runnerId: string, nonce: string): Uint8Array<ArrayBuffer> =>
   new TextEncoder().encode(`hydra:runner-hello:${runnerId}:${nonce}`);
 
+/**
+ * Asks the runner to probe its machine now and report what it finds, whether or
+ * not anything changed. The hourly report is sent only on a change, so without
+ * this an operator pressing "Refresh facts" on a machine nothing happened to
+ * would wait for a frame that is never coming.
+ */
+export const RunnerFactsRequest = Schema.Struct({ _tag: Schema.Literal("factsRequest") });
+
+export type RunnerFactsRequest = Schema.Schema.Type<typeof RunnerFactsRequest>;
+
 /** The liveness check. A protocol frame, so it proves the runner process is alive. */
 export const Ping = Schema.Struct({ _tag: Schema.Literal("ping") });
 
@@ -270,6 +313,6 @@ export const Ack = Schema.Struct({
 
 export type Ack = Schema.Schema.Type<typeof Ack>;
 
-export const ControllerToRunner = Schema.Union([ControllerHello, Ping, Ack]);
+export const ControllerToRunner = Schema.Union([ControllerHello, Ping, Ack, RunnerFactsRequest]);
 
 export type ControllerToRunner = Schema.Schema.Type<typeof ControllerToRunner>;

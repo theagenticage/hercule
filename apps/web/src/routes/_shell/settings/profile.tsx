@@ -6,7 +6,8 @@ import { Button, FormCard, Row } from "@hydra/ui";
 import { LOGIN_PATH } from "../../../app/entry-guard";
 import { settingsQuery } from "../../../app/queries";
 import { TimezoneField } from "../../../screens/timezone-field";
-import { SaveStatus, useSaveSettings } from "./-form";
+import { SaveStatus } from "../../../screens/save-status";
+import { useSaveSettings } from "./-form";
 
 export const Route = createFileRoute("/_shell/settings/profile")({
   staticData: { title: "Profile" },

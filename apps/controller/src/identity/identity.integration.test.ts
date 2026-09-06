@@ -108,6 +108,25 @@ describe("the controller's default runner", () => {
     });
   });
 
+  it("refuses a reserved runner and a retired one, and leaves the setting where it was", async () => {
+    await withServer(async (harness) => {
+      const token = await completeSetup(harness.base);
+      const open: Runner = await harness.insertRunner({ name: "iris" });
+      const personal: Runner = await harness.insertRunner({ name: "atlas", reserved: true });
+      const gone: Runner = await harness.insertRunner({ name: "vega", lifecycle: "retired" });
+      expect((await update(harness.base, token, { defaultRunnerId: open.id })).status).toBe(200);
+
+      // The default is where work with nothing to say about placement lands,
+      // which is exactly what neither of these two takes.
+      for (const runner of [personal, gone]) {
+        const response = await update(harness.base, token, { defaultRunnerId: runner.id });
+        expect(response.status, `${runner.name}: ${await response.clone().text()}`).toBe(409);
+        expect(await response.json()).toMatchObject({ error: { code: "conflict" } });
+        expect((await info(harness.base, token)).defaultRunnerId).toBe(open.id);
+      }
+    });
+  });
+
   it("changes nothing when the patch names no field", async () => {
     await withServer(async (harness) => {
       const token = await completeSetup(harness.base);

@@ -194,7 +194,15 @@ const runnerRoutes = HttpApiBuilder.group(api, "runner", (handlers) =>
       .handle("update", ({ params, payload }) =>
         operation(runners.update({ id: params.id, ...payload })),
       )
-      .handle("createJoinToken", () => operation(runners.createJoinToken()));
+      .handle("drain", ({ params }) => operation(runners.drain(params)))
+      .handle("undrain", ({ params }) => operation(runners.undrain(params)))
+      .handle("retire", ({ params, payload }) =>
+        operation(runners.retire({ id: params.id, ...payload })),
+      )
+      .handle("refreshFacts", ({ params }) => operation(runners.refreshFacts(params)))
+      .handle("createJoinToken", () => operation(runners.createJoinToken()))
+      .handle("queryJoinTokens", () => operation(runners.queryJoinTokens()))
+      .handle("revokeJoinToken", ({ params }) => operation(runners.revokeJoinToken(params)));
   }),
 );
 
@@ -224,6 +232,13 @@ const controllerRoutes = HttpApiBuilder.group(api, "controller", (handlers) =>
 );
 
 /**
+ * One presence, shared. `runner.retire` closes the socket the runner is holding
+ * through the same per-runner map the socket route registers in, so a second
+ * instance would be a service hanging up on connections nobody has.
+ */
+const RunnerLayers = RunnerServiceLayer.pipe(Layer.provideMerge(RunnerPresenceLayer));
+
+/**
  * Every service an operation resolves. One list, because a controller booting
  * with a layer this list has and its own does not is a controller missing an
  * operation, and nothing would say so until a request asked for it.
@@ -245,9 +260,8 @@ export const operationLayers = Layer.mergeAll(
   ProfilesLayer,
   TaskServiceLayer,
   ProjectServiceLayer,
-  RunnerServiceLayer,
+  RunnerLayers,
   RunnerJoinLayer,
-  RunnerPresenceLayer,
   EventServiceLayer,
   LiveTopicsLayer,
   WsTicketsLayer,

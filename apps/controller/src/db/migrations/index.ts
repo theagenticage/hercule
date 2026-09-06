@@ -15,6 +15,7 @@ import readingTheEventLog from "./0004-reading-the-event-log";
 import runners from "./0005-runners";
 import runnerJoinTokens from "./0006-runner-join-tokens";
 import plugins from "./0007-plugins";
+import runnerLifecycle from "./0008-runner-lifecycle";
 
 export const migrations: ReadonlyArray<ResolvedMigration> = [
   [1, "initial", Effect.succeed(initial)],
@@ -24,6 +25,7 @@ export const migrations: ReadonlyArray<ResolvedMigration> = [
   [5, "runners", Effect.succeed(runners)],
   [6, "runner-join-tokens", Effect.succeed(runnerJoinTokens)],
   [7, "plugins", Effect.succeed(plugins)],
+  [8, "runner-lifecycle", Effect.succeed(runnerLifecycle)],
 ];
 
 /** The schema version this binary carries: the highest embedded migration id. */

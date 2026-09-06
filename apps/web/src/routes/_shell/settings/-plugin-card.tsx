@@ -11,7 +11,7 @@ import {
 } from "@hydra/client-core";
 import type { PluginDetail, PluginStatus } from "@hydra/contract";
 import { ConfigForm } from "../../../screens/plugins/config-form";
-import { SaveStatus, messageOf } from "./-form";
+import { SaveStatus, messageOf } from "../../../screens/save-status";
 
 /**
  * Only `errored` is something gone wrong; `refused` is the attention hue

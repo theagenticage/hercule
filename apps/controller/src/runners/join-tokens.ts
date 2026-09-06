@@ -15,8 +15,9 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
+import type { JoinTokenRef } from "@hydra/contract";
 import { hashToken, mintToken } from "../credentials";
-import { mintUuid, uuidToString } from "../db";
+import { mintUuid, uuidFromString, uuidToString } from "../db";
 
 /**
  * Long enough to walk to the other machine and type the command, short enough
@@ -35,9 +36,8 @@ const make = Effect.gen(function* () {
 
   return {
     /**
-     * Expired rows go with it. Nothing lists or revokes an outstanding token, so
-     * this sweep is the only thing bounding the table, and a token past its hour
-     * can never be spent again.
+     * Expired rows go with it: a token past its hour can never be spent again,
+     * and a table nothing sweeps grows for the life of the controller.
      */
     create: (at: string): Effect.Effect<JoinToken, SqlError> =>
       Effect.gen(function* () {
@@ -51,6 +51,45 @@ const make = Effect.gen(function* () {
         `;
         return { id: uuidToString(id), token, expiresAt };
       }),
+
+    /**
+     * What the fleet is still expecting a machine to present. A spent or
+     * expired token is worthless to whoever holds it, so neither is something
+     * to show or to take back.
+     */
+    outstanding: (at: string): Effect.Effect<ReadonlyArray<JoinTokenRef>, SqlError> =>
+      Effect.map(
+        sql<{
+          readonly id: Uint8Array;
+          readonly created_at: string;
+          readonly expires_at: string;
+        }>`
+          SELECT id, created_at, expires_at FROM runner_join_tokens
+          WHERE used_at IS NULL AND expires_at > ${at}
+          ORDER BY created_at DESC, id DESC
+        `,
+        (rows) =>
+          rows.map((row) => ({
+            id: uuidToString(row.id),
+            createdAt: row.created_at,
+            expiresAt: row.expires_at,
+          })),
+      ),
+
+    /**
+     * Takes a minted token back. False for a token that was never minted, one
+     * already spent and one already expired: none of the three is outstanding,
+     * and the caller has nothing different to do about which it was.
+     */
+    revoke: (id: string, at: string): Effect.Effect<boolean, SqlError> =>
+      Effect.map(
+        sql<{ readonly id: Uint8Array }>`
+          DELETE FROM runner_join_tokens
+          WHERE id = ${uuidFromString(id)} AND used_at IS NULL AND expires_at > ${at}
+          RETURNING id
+        `,
+        (deleted) => deleted.length > 0,
+      ),
 
     /**
      * Unminted, used and expired all answer `None`: the presenter learns nothing

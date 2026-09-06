@@ -5,7 +5,8 @@ import { threadRowsMode } from "@hydra/client-core";
 import type { ThreadRows } from "@hydra/contract";
 import { FormCard, Row, SegmentedControl, SegmentedControlItem } from "@hydra/ui";
 import { settingsQuery } from "../../../app/queries";
-import { SaveStatus, useSaveSettings } from "./-form";
+import { SaveStatus } from "../../../screens/save-status";
+import { useSaveSettings } from "./-form";
 
 export const Route = createFileRoute("/_shell/settings/threads")({
   staticData: { title: "Threads" },

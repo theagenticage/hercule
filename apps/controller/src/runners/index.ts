@@ -8,7 +8,7 @@ export {
   type LocalRunner,
   type LocalRunnerOptions,
 } from "./local";
-export { RunnerPresence, RunnerPresenceLayer } from "./presence";
+export { RunnerFactsDeadline, RunnerPresence, RunnerPresenceLayer } from "./presence";
 export { runnerRepository } from "./repository";
 export { RunnerJoinRouteLayer } from "./route";
 export { RunnerPingSchedule, RunnerSocketRouteLayer, type RunnerPings } from "./socket";

@@ -6,17 +6,14 @@
  * The storage directory is named at random, which is what makes a re-enlisted
  * machine harmless: it never opens a previous life's workspaces, and never
  * deletes them either.
- *
- * This module is the only writer of `runner.json`. Everything else reads it.
  */
-import { mkdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import { randomUUID } from "node:crypto";
+import { mkdirSync } from "node:fs";
 import { join as joinPath } from "node:path";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import { runnerDirIn } from "@hydra/home";
 import { JoinAnswer } from "@hydra/protocol";
-import { runnerFileIn, type RunnerFile } from "./runner-file";
+import { runnerFileIn, writeRunnerFile, type RunnerFile } from "./runner-file";
 
 /** Outside the operation table, so it is written here. */
 const JOIN_PATH = "/api/v1/runners/join";
@@ -37,6 +34,8 @@ export interface JoinOptions {
   readonly controllerUrl: string;
   readonly token: string;
   readonly home: string;
+  /** A personal machine: it runs only work sent to it by name. */
+  readonly reserved: boolean;
   /** The global `fetch` unless a caller says otherwise. */
   readonly fetch?: typeof fetch;
 }
@@ -82,7 +81,7 @@ const ask = (options: JoinOptions): Effect.Effect<JoinAnswer, JoinError> =>
             "content-type": "application/json",
             authorization: `Bearer ${options.token}`,
           },
-          body: "{}",
+          body: JSON.stringify({ reserved: options.reserved }),
         }),
       catch: (cause) =>
         new JoinError({ message: `cannot reach ${url}: ${String(cause)}`, retryable: true }),
@@ -136,21 +135,7 @@ export const join = (options: JoinOptions): Effect.Effect<Joined, JoinError> =>
     yield* Effect.try({
       try: () => {
         mkdirSync(storageDirectory, { recursive: true, mode: 0o700 });
-        // Never written into the target file: `mode` applies only on creation,
-        // so overwriting an earlier `runner.json` would hold the new credential
-        // at the old mode, and a half-written one would leave the machine with
-        // neither credential, of which the controller keeps only hashes.
-        const temporary = `${configPath}.${randomUUID()}.tmp`;
-        try {
-          writeFileSync(temporary, `${JSON.stringify(contents, null, 2)}\n`, {
-            mode: 0o600,
-            flag: "wx",
-          });
-          renameSync(temporary, configPath);
-        } catch (error) {
-          rmSync(temporary, { force: true });
-          throw error;
-        }
+        writeRunnerFile(configPath, contents);
       },
       catch: (cause) =>
         new JoinError({

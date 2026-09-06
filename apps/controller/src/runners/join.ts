@@ -33,9 +33,6 @@ import { runnerRepository } from "./repository";
  */
 const NO_JOIN = "that is not a join token";
 
-/** One, until the machine has said how much memory it has. */
-const INITIAL_MAX_CONCURRENT_SESSIONS = 1;
-
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const runners = yield* runnerRepository;
@@ -50,8 +47,14 @@ const make = Effect.gen(function* () {
      * spent by an enlistment that fails, and two machines racing with the same
      * token cannot both be enlisted. The runner is `offline` because joining is
      * not connecting.
+     *
+     * `reserved` is taken here rather than patched afterwards so a machine the
+     * owner called personal is never, for an instant, one the fleet may place on.
      */
-    join: (token: string): Effect.Effect<JoinAnswer, Unauthenticated | SettingError | SqlError> =>
+    join: (
+      token: string,
+      reserved: boolean,
+    ): Effect.Effect<JoinAnswer, Unauthenticated | SettingError | SqlError> =>
       withTransaction(
         sql,
         Effect.gen(function* () {
@@ -71,16 +74,19 @@ const make = Effect.gen(function* () {
           const name = pickName(fleet);
           const enlisted = yield* runners.insert({
             name,
-            state: "offline",
+            connectivity: "offline",
+            lifecycle: "active",
+            reserved,
             labels: [],
-            maxConcurrentSessions: INITIAL_MAX_CONCURRENT_SESSIONS,
             credentialHash: hashToken(credential),
             at,
           });
-          // Only the first: a default a person set and one they cleared are both
-          // choices, and the next machine to join may take neither. The entry
-          // below records it, since this is the one writer no user asked for.
-          const tookTheDefault = fleet.size === 0 && (yield* settings.defaultRunnerId()) === null;
+          // Only the first, and never a reserved one: a default a person set and
+          // one they cleared are both choices, and the next machine to join may
+          // take neither. The entry below records it, since this is the one
+          // writer no user asked for.
+          const tookTheDefault =
+            !reserved && fleet.size === 0 && (yield* settings.defaultRunnerId()) === null;
           if (tookTheDefault) yield* settings.setDefaultRunnerId(enlisted.id, at);
           yield* audit.append({
             kind: "runner.joined",
@@ -89,6 +95,7 @@ const make = Effect.gen(function* () {
             payload: {
               runnerId: enlisted.id,
               name,
+              reserved,
               joinTokenId: invitation.value,
               becameDefaultRunner: tookTheDefault,
             },

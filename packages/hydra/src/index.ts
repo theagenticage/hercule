@@ -21,10 +21,10 @@ const ROLE_ENTRYPOINTS: Record<Role, () => Promise<RoleModule>> = {
 /**
  * Which role owns this invocation, and the arguments that role receives.
  *
- * `hydra serve` is the controller; `hydra runner`, `hydra runner --local` and
- * `hydra runner join` are the runner. Every other verb, `hydra runner
- * createJoinToken` included, is the CLI. The role keeps the global options;
- * only the verb is consumed.
+ * `hydra serve` is the controller; `hydra runner`, `hydra runner --local`,
+ * `hydra runner join` and `hydra runner set-controller` are the runner. Every
+ * other verb, `hydra runner create-join-token` included, is the CLI. The role
+ * keeps the global options; only the verb is consumed.
  *
  * `--home <dir>` and `-c key=value` may precede the verb, so the verb is
  * wherever `parseGlobalOptions` found it - the same parser the role runs on the
@@ -40,10 +40,13 @@ function route(
     case "serve":
       return { role: "controller", args: withoutVerb };
     case "runner":
-      // The daemon forms take no subcommand, and `join` writes the runner's own
-      // files rather than calling an operation; the rest, `runner
-      // createJoinToken` among them, are ops CLI verbs.
-      return subcommand === undefined || subcommand.startsWith("-") || subcommand === "join"
+      // The daemon forms take no subcommand, and `join` and `set-controller`
+      // write the runner's own files rather than calling an operation; the
+      // rest, `runner create-join-token` among them, are ops CLI verbs.
+      return subcommand === undefined ||
+        subcommand.startsWith("-") ||
+        subcommand === "join" ||
+        subcommand === "set-controller"
         ? { role: "runner", args: withoutVerb }
         : { role: "cli", args: argv };
     default:

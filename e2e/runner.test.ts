@@ -19,6 +19,7 @@ import {
   startController,
   temporaryHome,
   type Controller,
+  type Ran,
 } from "./harness";
 
 const state = temporaryHome();
@@ -43,7 +44,9 @@ const mintToken = async (): Promise<string> => {
 interface Listed {
   readonly id: string;
   readonly name: string;
-  readonly state: string;
+  readonly connectivity: string;
+  readonly reserved: boolean;
+  readonly lifecycle: string;
   readonly facts: {
     readonly os: string;
     readonly arch: string;
@@ -152,10 +155,10 @@ describe("the runner the controller starts for itself", () => {
     // The controller spawned its child while it was booting, so what is waited
     // for here is the join and the first hello finishing, not the process.
     const deadline = Date.now() + 10_000;
-    let online = (await runners()).filter((one) => one.state === "online");
+    let online = (await runners()).filter((one) => one.connectivity === "online");
     while (online.length === 0 && Date.now() < deadline) {
       await Bun.sleep(200);
-      online = (await runners()).filter((one) => one.state === "online");
+      online = (await runners()).filter((one) => one.connectivity === "online");
     }
 
     expect(online, `no runner came online:\n${controller.output()}`).toHaveLength(1);
@@ -172,4 +175,88 @@ describe("the runner the controller starts for itself", () => {
     expect(identity.status, said).toBe(200);
     expect(JSON.parse(said)).toEqual({ runnerId: local.id });
   }, 30_000);
+});
+
+describe("retiring a joined runner through the binary", () => {
+  it("joins reserved, retires the daemon out of the fleet, and re-enlists beside it", async () => {
+    const machine = temporaryHome();
+    /** The daemon, once started: awaited only after the retire has landed. */
+    let daemon: Promise<Ran> | undefined;
+    /** The runner it is hosting, so a failed run can still stop the daemon. */
+    let runnerId = "";
+    try {
+      const before = new Set((await runners()).map((one) => one.id));
+
+      const joined = await cli(
+        ["runner", "join", url, "--token", await mintToken(), "--reserved"],
+        {
+          home: machine.home,
+          binary,
+        },
+      );
+      expect(joined.code, `${joined.stdout}\n${joined.stderr}`).toBe(0);
+
+      const enlisted = (await runners()).filter((one) => !before.has(one.id));
+      expect(enlisted).toHaveLength(1);
+      const runner = enlisted[0]!;
+      runnerId = runner.id;
+      expect(runner.reserved, "--reserved is what the fleet reads back").toBe(true);
+      expect(runner.lifecycle).toBe("active");
+
+      // The daemon is long-lived, so the promise is held rather than awaited:
+      // the retire below is what is supposed to end it.
+      daemon = cli(["runner"], { home: machine.home, binary });
+
+      const deadline = Date.now() + 30_000;
+      let live = (await runners()).find((one) => one.id === runner.id);
+      while (live?.connectivity !== "online" && Date.now() < deadline) {
+        await Bun.sleep(200);
+        live = (await runners()).find((one) => one.id === runner.id);
+      }
+      expect(live?.connectivity, "the daemon never came online").toBe("online");
+
+      const retired = await cli(["runner", "retire", runner.id, "--force", "true"], {
+        home: state.home,
+        binary,
+      });
+      expect(retired.code, `${retired.stdout}\n${retired.stderr}`).toBe(0);
+
+      const ended = await daemon;
+      daemon = undefined;
+      expect(ended.code, `the daemon stayed up:\n${ended.stdout}\n${ended.stderr}`).not.toBe(0);
+      expect(`${ended.stdout}${ended.stderr}`).toContain(
+        "this runner was retired; run `hydra runner join` to re-enlist",
+      );
+
+      const afterRetire = (await runners()).find((one) => one.id === runner.id);
+      expect(afterRetire, "the retired runner stays in the fleet").toBeDefined();
+      expect(afterRetire!.lifecycle).toBe("retired");
+
+      // The same machine home, a fresh token: a new runner beside the old row
+      // rather than in place of it.
+      const rejoined = await cli(["runner", "join", url, "--token", await mintToken()], {
+        home: machine.home,
+        binary,
+      });
+      expect(rejoined.code, `${rejoined.stdout}\n${rejoined.stderr}`).toBe(0);
+
+      const fleet = await runners();
+      const fresh = fleet.filter((one) => !before.has(one.id) && one.id !== runner.id);
+      expect(fresh, "the second join made a new runner").toHaveLength(1);
+      expect(fresh[0]!.lifecycle).toBe("active");
+      expect(fleet.map((one) => one.id)).toContain(runner.id);
+    } finally {
+      // A daemon still running here is one this test failed before retiring.
+      // Retire it anyway, so the leftover process cannot outlive the case and
+      // hold up the controller the suite stops afterwards.
+      if (daemon !== undefined) {
+        await cli(["runner", "retire", runnerId, "--force", "true"], {
+          home: state.home,
+          binary,
+        });
+        await daemon.catch(() => undefined);
+      }
+      machine.remove();
+    }
+  }, 90_000);
 });

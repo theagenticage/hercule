@@ -26,9 +26,11 @@ import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import {
+  conflict,
   ControllerUpdateInput,
   validation,
   validationOf,
+  type Conflict,
   type ControllerInfo,
   type Forbidden,
   type Unauthenticated,
@@ -45,6 +47,11 @@ import { ControllerIdentity } from "./repository";
 const decodeUpdate = Schema.decodeUnknownEffect(ControllerUpdateInput);
 
 const NO_SUCH_RUNNER = "no runner has that id";
+
+/** The other half of the rule `runner.update` enforces: the two never meet. */
+const RESERVED = "that runner is reserved, so nothing lands on it by default";
+
+const RETIRED = "that runner is retired";
 
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
@@ -86,7 +93,7 @@ const make = Effect.gen(function* () {
       input: ControllerUpdateInput,
     ): Effect.Effect<
       ControllerInfo,
-      Unauthenticated | Forbidden | Validation | SettingError | SqlError
+      Unauthenticated | Forbidden | Validation | Conflict | SettingError | SqlError
     > =>
       Effect.gen(function* () {
         yield* currentUser("controller.update");
@@ -102,10 +109,17 @@ const make = Effect.gen(function* () {
             // Naming the runner already named is not a change: it would
             // otherwise stamp a `controller.updated` row describing nothing.
             if (chosen === (yield* settings.defaultRunnerId())) return yield* info();
-            if (chosen !== null && Option.isNone(yield* runners.read(chosen))) {
-              return yield* Effect.fail(
-                validation([{ path: ["defaultRunnerId"], message: NO_SUCH_RUNNER }]),
-              );
+            if (chosen !== null) {
+              const runner = yield* runners.read(chosen);
+              if (Option.isNone(runner)) {
+                return yield* Effect.fail(
+                  validation([{ path: ["defaultRunnerId"], message: NO_SUCH_RUNNER }]),
+                );
+              }
+              if (runner.value.reserved) return yield* Effect.fail(conflict(RESERVED));
+              if (runner.value.lifecycle === "retired") {
+                return yield* Effect.fail(conflict(RETIRED));
+              }
             }
             yield* settings.setDefaultRunnerId(chosen, at);
             yield* audit.append({

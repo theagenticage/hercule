@@ -143,25 +143,33 @@ describe("the port it binds", () => {
     // itself is pinned where it is enforced, in the policy the browser reads.
     //
     // The whole set is taken first and the last one let go of only once the
-    // rest is held: a port this test leaves free for the walk to land on is a
-    // port anything else on the machine may take in the meantime.
-    const run = await occupyRun(IDENTITY_PORT_COUNT);
-    await run.releaseAt(IDENTITY_PORT_COUNT - 1);
-    try {
-      const { port, body } = await withListener(
-        { runnerId: RUNNER_ID, controllerUrl: CONTROLLER_URL, port: run.base },
-        async (bound) => {
-          const response = await fetch(`http://127.0.0.1:${String(bound)}/identity`);
-          return { port: bound, body: await response.json() };
-        },
-      );
+    // rest is held. A port this test leaves free for the walk to land on is
+    // still a port anything else on the machine may take in the meantime, and
+    // the listener then falls past the set to an ephemeral port; that is
+    // somebody else's race and not a result, so the arrangement is made again.
+    const attempt = async (): Promise<{ landed: boolean; body: unknown }> => {
+      const run = await occupyRun(IDENTITY_PORT_COUNT);
+      await run.releaseAt(IDENTITY_PORT_COUNT - 1);
+      try {
+        const { port, body } = await withListener(
+          { runnerId: RUNNER_ID, controllerUrl: CONTROLLER_URL, port: run.base },
+          async (bound) => {
+            const response = await fetch(`http://127.0.0.1:${String(bound)}/identity`);
+            return { port: bound, body: await response.json() };
+          },
+        );
+        return { landed: port === run.base + IDENTITY_PORT_COUNT - 1, body };
+      } finally {
+        await run.release();
+      }
+    };
 
-      expect(port).toBe(run.base + IDENTITY_PORT_COUNT - 1);
-      // A port it moved to is a port it actually serves on, not a number.
-      expect(body).toEqual({ runnerId: RUNNER_ID });
-    } finally {
-      await run.release();
-    }
+    let last = await attempt();
+    for (let tries = 0; tries < 5 && !last.landed; tries += 1) last = await attempt();
+
+    expect(last.landed, "the walk reached the last port of the set").toBe(true);
+    // A port it moved to is a port it actually serves on, not a number.
+    expect(last.body).toEqual({ runnerId: RUNNER_ID });
   });
 
   it("still serves when every port a browser may ask is taken", async () => {

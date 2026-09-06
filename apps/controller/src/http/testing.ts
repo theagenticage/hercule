@@ -11,6 +11,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect } from "vitest";
+import type * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import type * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
@@ -29,7 +30,8 @@ import {
   type LiveMessage,
   type LiveTopic,
   type Runner,
-  type RunnerState,
+  type RunnerConnectivity,
+  type RunnerLifecycle,
 } from "@hydra/contract";
 import type { Plugin } from "@hydra/plugin-host";
 import { homePaths } from "@hydra/home";
@@ -47,6 +49,7 @@ import { SettingsLayer } from "../settings";
 import {
   JoinTokens,
   JoinTokensLayer,
+  RunnerFactsDeadline,
   RunnerPingSchedule,
   runnerRepository,
   type RunnerPings,
@@ -104,8 +107,11 @@ export type AuditReader = (kind: AuditKind) => Promise<ReadonlyArray<AuditRow>>;
  */
 export type RunnerArranger = (fields: {
   readonly name: string;
-  readonly state?: RunnerState;
+  readonly connectivity?: RunnerConnectivity;
+  readonly lifecycle?: RunnerLifecycle;
+  readonly reserved?: boolean;
   readonly labels?: ReadonlyArray<string>;
+  /** An override; absent leaves the cap derived from what the machine reports. */
   readonly maxConcurrentSessions?: number;
 }) => Promise<Runner>;
 
@@ -142,6 +148,11 @@ export interface ServerOptions {
    * driven by a `TestClock` - so a test about liveness hands over its own.
    */
   readonly pings?: RunnerPings;
+  /**
+   * How long the controller waits for a runner to answer a request for its
+   * facts. The shipped ten seconds is longer than a test can wait.
+   */
+  readonly factsDeadline?: Duration.Duration;
   /** The shipped registry is compiled in, so a test hands over its own. */
   readonly plugins?: ReadonlyArray<Plugin>;
 }
@@ -177,9 +188,13 @@ export const withServer = (
         // After the schema and the seed, as the real boot runs it: a plugin
         // that activates may read its own state and secrets.
         yield* Effect.flatMap(PluginHost, (host) => host.boot(options.plugins ?? []));
-        yield* options.pings === undefined
-          ? serve(bundle)
-          : Effect.provideService(serve(bundle), RunnerPingSchedule, options.pings);
+        const listening =
+          options.pings === undefined
+            ? serve(bundle)
+            : Effect.provideService(serve(bundle), RunnerPingSchedule, options.pings);
+        yield* options.factsDeadline === undefined
+          ? listening
+          : Effect.provideService(listening, RunnerFactsDeadline, options.factsDeadline);
         const base = yield* baseUrl;
         // The log this database holds, read the way anything else reads it: a
         // request's audit row is asserted through the service that wrote it.
@@ -193,19 +208,27 @@ export const withServer = (
           subscriberCount: (topic) => Effect.runPromise(topics.subscriberCount(topic)),
         };
         const repository = yield* runnerRepository;
+        // The cap is not something a row is inserted with, so an arranged
+        // override is written the way the API writes one.
         const insertRunner: RunnerArranger = (fields) =>
           Effect.runPromise(
             Effect.orDie(
-              Effect.flatMap(nowIso, (at) =>
-                repository.insert({
+              Effect.gen(function* () {
+                const at = yield* nowIso;
+                const runner = yield* repository.insert({
                   name: fields.name,
-                  state: fields.state ?? "offline",
+                  connectivity: fields.connectivity ?? "offline",
+                  lifecycle: fields.lifecycle ?? "active",
+                  reserved: fields.reserved ?? false,
                   labels: fields.labels ?? [],
-                  maxConcurrentSessions: fields.maxConcurrentSessions ?? 1,
                   credentialHash: hashToken(crypto.randomUUID()),
                   at,
-                }),
-              ),
+                });
+                if (fields.maxConcurrentSessions === undefined) return runner;
+                const cap = fields.maxConcurrentSessions;
+                yield* repository.update(runner.id, { maxConcurrentSessions: cap }, at);
+                return { ...runner, maxConcurrentSessions: cap };
+              }),
             ),
           );
         const tokens = yield* JoinTokens;

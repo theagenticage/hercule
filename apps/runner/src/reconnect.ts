@@ -9,12 +9,14 @@
  * and nothing else; `reconnectSignals` below guesses at them, and a platform
  * source can replace it without the loop knowing.
  */
-import type * as Cause from "effect/Cause";
+import * as Cause from "effect/Cause";
 import * as Clock from "effect/Clock";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Queue from "effect/Queue";
+import * as Option from "effect/Option";
 import * as Stream from "effect/Stream";
+import { RunnerRetired } from "./socket";
 
 export const RECONNECT_BASE: Duration.Duration = Duration.seconds(1);
 
@@ -37,7 +39,7 @@ export interface ReconnectOptions<E> {
  * attempt that held longer than the cap, which was a working connection rather
  * than a failure and should not inherit an older outage's climb.
  */
-export const reconnect = <E>(options: ReconnectOptions<E>): Effect.Effect<never> =>
+export const reconnect = <E>(options: ReconnectOptions<E>): Effect.Effect<never, RunnerRetired> =>
   Effect.gen(function* () {
     const cap = Duration.toMillis(RECONNECT_CAP);
     const base = Duration.toMillis(RECONNECT_BASE);
@@ -53,9 +55,25 @@ export const reconnect = <E>(options: ReconnectOptions<E>): Effect.Effect<never>
     let wait = base;
     while (true) {
       const started = yield* Clock.currentTimeMillis;
-      yield* Effect.tapCause(options.attempt, (cause: Cause.Cause<E>) =>
-        Effect.logWarning("The connection to the controller ended", cause),
-      ).pipe(Effect.ignore);
+      // Every ending is logged and dialled again, bar one: a controller that
+      // has retired this runner will not have it back, whatever it waits.
+      const retired = yield* Effect.catchCause(
+        Effect.as(options.attempt, undefined),
+        (cause: Cause.Cause<E>) => {
+          const ended = Option.getOrUndefined(
+            Option.filter(Cause.findErrorOption(cause), (error) => error instanceof RunnerRetired),
+          );
+          // A retirement is not an ending anyone should go looking into, so it
+          // is picked out before the warning: the caller's own message about
+          // re-enlisting is the only line it should produce.
+          if (ended !== undefined) return Effect.succeed(ended);
+          return Effect.as(
+            Effect.logWarning("The connection to the controller ended", cause),
+            undefined,
+          );
+        },
+      );
+      if (retired !== undefined) return yield* Effect.fail(retired);
       const held = (yield* Clock.currentTimeMillis) - started;
       if (held >= cap) {
         wait = base;

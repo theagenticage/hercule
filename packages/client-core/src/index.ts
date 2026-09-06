@@ -25,6 +25,16 @@ export {
 } from "./config-fields";
 export { ApiError, ConnectionError, RequestError, type ErrorEnvelope } from "./errors";
 export { ID_TAIL, idTail } from "./id-tail";
+export { joinCommand } from "./join-command";
+export {
+  retireQuestion,
+  runnerConflictField,
+  runnerDraft,
+  runnerPatch,
+  type RetireQuestion,
+  type RunnerDraft,
+} from "./runner-edit";
+export { runnerFactsReading, type RunnerFactsReading } from "./runner-facts";
 export {
   createLive,
   type Live,

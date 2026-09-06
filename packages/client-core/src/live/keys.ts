@@ -26,6 +26,8 @@ export const queryKeys = {
   task: (id?: string): LiveQueryKey => (id === undefined ? ["task"] : ["task", id]),
   projects: (): LiveQueryKey => ["projects"],
   runners: (): LiveQueryKey => ["runners"],
+  runner: (id?: string): LiveQueryKey => (id === undefined ? ["runner"] : ["runner", id]),
+  joinTokens: (): LiveQueryKey => ["join-tokens"],
   plugins: (): LiveQueryKey => ["plugins"],
   controller: (): LiveQueryKey => ["controller"],
   /** Keyed on the loopback endpoints it asks, because that is what it depends on. */
@@ -48,9 +50,13 @@ export const queryKeysFor = (
       ? [queryKeys.tasks(), queryKeys.task()]
       : [queryKeys.tasks(), ...ids.map((id) => queryKeys.task(id))];
   }
-  // The fleet is read as one listing and never a machine at a time, so which
-  // runners changed narrows nothing: the listing is reread either way.
-  if (topic === "runner") return [queryKeys.runners()];
+  // The listing is reread whichever machine moved; a runner's own page is
+  // reread only when the push names it, or when it names none.
+  if (topic === "runner") {
+    return ids.length === 0
+      ? [queryKeys.runners(), queryKeys.runner()]
+      : [queryKeys.runners(), ...ids.map((id) => queryKeys.runner(id))];
+  }
   // The plugin set is fixed at build time and read as one listing, so which
   // plugin changed narrows nothing.
   if (topic === "plugin") return [queryKeys.plugins()];

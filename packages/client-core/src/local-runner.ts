@@ -54,7 +54,7 @@ export const loopbackEndpoints = (
   runners: ReadonlyArray<Runner>,
 ): ReadonlyArray<LoopbackEndpoint> =>
   runners.flatMap((runner) =>
-    runner.state === "online" && runner.facts !== null
+    runner.connectivity === "online" && runner.facts !== null
       ? [{ id: runner.id, port: runner.facts.identityPort }]
       : [],
   );

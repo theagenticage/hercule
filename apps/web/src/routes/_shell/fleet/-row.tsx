@@ -1,40 +1,31 @@
 import type { JSX } from "react";
-import { cn } from "@hydra/ui";
-import { formatBytes, formatStamp } from "@hydra/client-core";
-import type { Runner, RunnerState } from "@hydra/contract";
+import { Link } from "@tanstack/react-router";
+import { runnerFactsReading } from "@hydra/client-core";
+import type { Runner } from "@hydra/contract";
+import { Connectivity } from "../../../screens/connectivity";
 
 /**
- * Only `online` is live and only `unreachable` was nobody's choice. The
- * attention hue is left free for the skew warning, the one actionable thing here.
+ * In the order a person scans it. A row runs the facts together, so the two
+ * sizes carry what they are: on the page each has a label of its own.
  */
-const STATE_HUE: Record<RunnerState, string> = {
-  online: "text-live",
-  offline: "text-muted",
-  unreachable: "text-fail",
-  draining: "text-muted",
-  retired: "text-faint",
+const probed = (runner: Runner): ReadonlyArray<string> => {
+  const reading = runnerFactsReading(runner);
+  return [
+    reading.machine,
+    reading.memory === null ? null : `${reading.memory} memory`,
+    reading.toolchains,
+    reading.diskFree === null ? null : `${reading.diskFree} disk free`,
+  ].filter((fact): fact is string => fact !== null);
 };
-
-/** In the order a person scans it. */
-const probed = (runner: Runner): ReadonlyArray<string> => [
-  ...(runner.facts === null
-    ? []
-    : [
-        runner.facts.os,
-        runner.facts.arch,
-        `${formatBytes(runner.facts.totalMemoryBytes)} memory`,
-        ...runner.facts.toolchains.map((tool) => `${tool.name} ${tool.version}`),
-      ]),
-  ...(runner.watermark === null
-    ? []
-    : [`${formatBytes(runner.watermark.diskFreeBytes)} disk free`]),
-];
 
 /**
  * A skewed binary is called out rather than left as two numbers to compare,
  * because a fleet is scanned. Labels sit apart from the probed facts, since
- * reading `gpu` as something the machine found would be backwards, and a machine
- * that is not connected carries how long ago its row was true.
+ * reading `gpu` as something the machine found would be backwards.
+ *
+ * The skew note takes a line of its own: it is a sentence rather than a fact,
+ * and left to wrap among the facts it pushed them onto a second line that began
+ * with a separator and no subject.
  */
 export function RunnerRow({
   runner,
@@ -49,42 +40,48 @@ export function RunnerRow({
 }): JSX.Element {
   const skewed = runner.version !== null && runner.version !== controllerVersion;
   const facts = probed(runner);
-  const lastSeen =
-    runner.state === "online" || runner.lastSeenAt === null
-      ? undefined
-      : formatStamp(new Date(runner.lastSeenAt), timezone);
+
   return (
-    <div className="rounded-control px-2.5 py-[7px]">
+    <Link
+      to="/fleet/$runnerId"
+      params={{ runnerId: runner.id }}
+      className="block rounded-control px-2.5 py-[7px] hover:bg-line-soft focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-live"
+    >
       <div className="flex items-baseline gap-2.5 text-row">
         <span className="min-w-0 flex-1 truncate">
           <b className="font-emph text-ink">{runner.name}</b>
           {isLocal ? <small className="ml-1.5 text-fine text-muted">this machine</small> : null}
         </span>
-        <span className={cn("flex items-center gap-1.5 text-fine", STATE_HUE[runner.state])}>
-          {runner.state === "online" ? (
-            <span
-              aria-hidden="true"
-              className="hydra-live-dot size-1.5 shrink-0 rounded-full bg-live"
-            />
-          ) : null}
-          {runner.state}
-          {lastSeen === undefined ? null : <span className="text-faint">last seen {lastSeen}</span>}
-        </span>
+        {/* `active` is the ordinary one; saying so on every row would be noise. */}
+        {runner.lifecycle === "active" ? null : (
+          <span className="text-fine text-faint">{runner.lifecycle}</span>
+        )}
+        <Connectivity runner={runner} timezone={timezone} />
       </div>
-      <div className="flex flex-wrap items-baseline gap-x-1.5 pt-px text-fine">
+
+      {skewed ? (
+        <div className="pt-px text-fine text-attn">
+          {runner.version} · differs from the controller&apos;s {controllerVersion}
+        </div>
+      ) : null}
+
+      <div className="pt-px text-fine">
         {runner.version === null ? (
           <span className="text-faint">has not reported yet</span>
-        ) : (
-          <span className={skewed ? "text-attn" : "text-muted"}>
-            {runner.version}
-            {skewed ? ` · differs from the controller's ${controllerVersion}` : ""}
+        ) : skewed ? null : (
+          <span className="text-muted">{runner.version}</span>
+        )}
+        {facts.length === 0 ? null : (
+          <span className="text-faint">
+            {runner.version === null || skewed ? "" : " · "}
+            {facts.join(" · ")}
           </span>
         )}
-        {facts.length === 0 ? null : <span className="text-faint">· {facts.join(" · ")}</span>}
-        {runner.labels.length === 0 ? null : (
-          <span className="text-muted">· {runner.labels.join(", ")}</span>
-        )}
       </div>
-    </div>
+
+      {runner.labels.length === 0 ? null : (
+        <div className="pt-px text-fine text-muted">{runner.labels.join(", ")}</div>
+      )}
+    </Link>
   );
 }

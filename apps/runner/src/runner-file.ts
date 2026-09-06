@@ -1,9 +1,10 @@
 /**
- * `runner.json`: the runner's whole durable identity. `./join.ts` is the only
- * writer, and everything else reads it through here decoded rather than cast, so
- * a hand-edited file reads as a bad file rather than an undefined credential.
+ * `runner.json`: the runner's whole durable identity. Written and read only
+ * here, and read decoded rather than cast, so a hand-edited file reads as a bad
+ * file rather than an undefined credential.
  */
-import { readFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import { readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join as joinPath } from "node:path";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
@@ -34,6 +35,27 @@ export class NotEnrolled extends Schema.TaggedError<NotEnrolled>()("NotEnrolled"
 }) {}
 
 const decode = Schema.decodeUnknownEffect(RunnerFile);
+
+/**
+ * Written to a fresh file and renamed over the target. `mode` applies only on
+ * creation, so writing into an existing `runner.json` would hold a new
+ * credential at whatever mode the old one had, and a half-written one would
+ * leave the machine with neither credential, of which the controller keeps only
+ * hashes.
+ */
+export const writeRunnerFile = (path: string, contents: RunnerFile): void => {
+  const temporary = `${path}.${randomUUID()}.tmp`;
+  try {
+    writeFileSync(temporary, `${JSON.stringify(contents, null, 2)}\n`, {
+      mode: 0o600,
+      flag: "wx",
+    });
+    renameSync(temporary, path);
+  } catch (error) {
+    rmSync(temporary, { force: true });
+    throw error;
+  }
+};
 
 export const readRunnerFile = (home: string): Effect.Effect<RunnerFile, NotEnrolled> =>
   Effect.gen(function* () {

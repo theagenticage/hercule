@@ -11,7 +11,7 @@ import { Schema } from "effect";
 import * as HttpApiEndpoint from "effect/unstable/httpapi/HttpApiEndpoint";
 import * as HttpApiGroup from "effect/unstable/httpapi/HttpApiGroup";
 import { closedStruct } from "../closed";
-import { Forbidden, Internal, Unauthenticated, Validation } from "../errors";
+import { Conflict, Forbidden, Internal, Unauthenticated, Validation } from "../errors";
 import { Id } from "../ids";
 import { Authenticated } from "../security";
 
@@ -47,7 +47,7 @@ export const controller = HttpApiGroup.make("controller")
     HttpApiEndpoint.patch("update", "/controller", {
       payload: ControllerUpdateInput,
       success: ControllerInfo,
-      error: [Unauthenticated, Forbidden, Validation, Internal],
+      error: [Unauthenticated, Forbidden, Validation, Conflict, Internal],
     }),
   )
   .middleware(Authenticated);
