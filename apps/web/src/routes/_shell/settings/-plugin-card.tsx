@@ -72,15 +72,12 @@ export function PluginCard({
     onSuccess: reread,
   });
 
-  const issues = configIssues(configure.error);
-  // A refusal that named a field is shown under it; one that named none, or
-  // named a field this form does not render, still has to be said somewhere.
-  const named = fields.some((field) => issues[field.name] !== undefined);
-  const unnamed = Object.keys(issues).some((name) => !fields.some((f) => f.name === name));
-  const configFailure = configure.error !== null && (!named || unnamed) ? configure.error : null;
+  const issues = configIssues(configure.error, fields);
   // A move that failed leaves the card exactly as it was, so the card is the
-  // only thing that can say it failed.
-  const failed = configFailure ?? toggle.error ?? retry.error ?? reset.error;
+  // only thing that can say it failed. A refusal shown under the field it
+  // blamed has already been said.
+  const failed =
+    (issues.rest ? configure.error : null) ?? toggle.error ?? retry.error ?? reset.error;
 
   return (
     <FormCard
@@ -121,7 +118,7 @@ export function PluginCard({
           id={plugin.id}
           fields={fields}
           config={plugin.config}
-          issues={issues}
+          issues={issues.perField}
           saving={configure.isPending}
           onEdit={() => {
             if (!configure.isIdle) configure.reset();

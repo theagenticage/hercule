@@ -51,7 +51,12 @@ export function Field({
   error,
   children,
 }: {
-  readonly id: string;
+  /**
+   * The control the label focuses. A child that is a group of controls rather
+   * than one field names itself and is passed no id: a label pointing at an
+   * element that may not exist focuses nothing.
+   */
+  readonly id?: string | undefined;
   readonly label: string;
   readonly error?: string | undefined;
   readonly children: ReactNode;

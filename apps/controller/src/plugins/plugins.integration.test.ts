@@ -12,7 +12,7 @@ import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Schema from "effect/Schema";
 import type { LiveMessage } from "@hydra/contract";
-import { HOST_API, PluginError, type Plugin, type PluginCapability } from "@hydra/plugin-host";
+import { HOST_API, type Plugin } from "@hydra/plugin-host";
 import {
   collecting,
   completeSetup,
@@ -27,7 +27,7 @@ import {
   within,
   type ServerHarness,
 } from "../http/testing";
-import { providerDefinition } from "./testing";
+import { fixture, providerDefinition } from "./testing";
 
 /** A plugin as the API hands it back. */
 interface PluginDetail {
@@ -50,42 +50,6 @@ interface PluginDetail {
   }>;
 }
 
-const fixture = (options: {
-  readonly id: string;
-  readonly hostApi?: number;
-  readonly capabilities?: ReadonlyArray<PluginCapability>;
-  readonly configSchema?: Schema.Top;
-  /** How many `activate` calls fail before the first one that succeeds. */
-  readonly activateFailures?: number;
-}): Plugin => {
-  let remainingFailures = options.activateFailures ?? 0;
-  return {
-    manifest: {
-      id: options.id,
-      displayName: `Plugin ${options.id}`,
-      hostApi: options.hostApi ?? HOST_API,
-      capabilities: options.capabilities ?? ["providers"],
-      configSchema: options.configSchema ?? Schema.Struct({}),
-    },
-    register: (host) =>
-      host.providers === undefined
-        ? Effect.void
-        : host.providers.register(
-            providerDefinition(`${options.id}-provider`, {
-              model: `${options.id}-provider-default`,
-            }),
-          ),
-    activate: () =>
-      Effect.suspend(() => {
-        if (remainingFailures > 0) {
-          remainingFailures -= 1;
-          return Effect.fail(new PluginError({ message: `${options.id} could not start` }));
-        }
-        return Effect.succeed(Effect.void);
-      }),
-  };
-};
-
 /**
  * The registry every test here boots: one plugin with something to configure,
  * one with nothing, one of each way a plugin can be turned away, and one that
@@ -95,17 +59,19 @@ const fixture = (options: {
  * registry shared between tests would hand the second one a plugin the first
  * had already nursed back to health.
  */
-const registry = (): ReadonlyArray<Plugin> => [
-  fixture({
-    id: "alpha",
-    configSchema: Schema.Struct({ model: Schema.optionalKey(Schema.String) }),
-  }),
-  fixture({ id: "beta" }),
-  fixture({ id: "outdated", hostApi: HOST_API + 1 }),
-  fixture({ id: "greedy", capabilities: ["providers", "channels"] }),
-  fixture({ id: "unrenderable", configSchema: Schema.Struct({ nested: Schema.Struct({}) }) }),
-  fixture({ id: "flaky", activateFailures: 1 }),
-];
+const registry = (): ReadonlyArray<Plugin> =>
+  [
+    fixture({
+      id: "alpha",
+      configSchema: Schema.Struct({ model: Schema.optionalKey(Schema.String) }),
+      definitions: [providerDefinition("alpha-provider", { model: "alpha-provider-default" })],
+    }),
+    fixture({ id: "beta" }),
+    fixture({ id: "outdated", hostApi: HOST_API + 1 }),
+    fixture({ id: "greedy", capabilities: ["providers", "channels"] }),
+    fixture({ id: "unrenderable", configSchema: Schema.Struct({ nested: Schema.Struct({}) }) }),
+    fixture({ id: "flaky", activateFailures: 1 }),
+  ].map((built) => built.plugin);
 
 /** The three ways a plugin is turned away before any of its code runs. */
 const REFUSED = ["outdated", "greedy", "unrenderable"] as const;

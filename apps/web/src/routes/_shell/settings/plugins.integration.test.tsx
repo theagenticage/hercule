@@ -12,7 +12,7 @@
  * controller alone, which is why the refused write below is a stubbed answer
  * rather than something the screen could have known.
  */
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderApp, stubApi, type Handler } from "../../../app/testing";
@@ -161,60 +161,29 @@ const writesTo = (
 const reading = (element: HTMLElement | null = document.body): string =>
   (element?.textContent ?? "").replace(/\s+/g, " ").trim();
 
-/**
- * The part of the page that is about one plugin and no other.
- *
- * A card has no shape this test is entitled to know, so it is found rather
- * than assumed: start at the element carrying the display name and climb while
- * the parent still says nothing about any other plugin.
- */
-const cardFor = async (name: string, others: readonly string[]): Promise<HTMLElement> => {
-  const found = await screen.findAllByText(new RegExp(name));
-  let card = found.reduce((left, right) =>
-    (left.textContent ?? "").length <= (right.textContent ?? "").length ? left : right,
-  );
-  while (
-    card.parentElement !== null &&
-    !others.some((other) => (card.parentElement?.textContent ?? "").includes(other))
-  ) {
-    card = card.parentElement;
-  }
+/** The card about one plugin: the section its display name heads. */
+const cardFor = async (plugin: Fixture): Promise<HTMLElement> => {
+  const heading = await screen.findByText(plugin.displayName);
+  const card = heading.closest("section");
+  if (card === null) throw new Error(`no card around ${plugin.displayName}`);
   return card;
 };
-
-/**
- * The control that turns a plugin on and off: whatever names the state it
- * moves to. A settings checkbox on the card is a setting, not the switch.
- */
-const toggleIn = (card: HTMLElement): HTMLElement => {
-  const control = within(card)
-    .queryAllByRole("button")
-    .find((button) => /^(enable|disable)$/i.test((button.textContent ?? "").trim()));
-  if (control === undefined) throw new Error(`no on/off control in: ${reading(card)}`);
-  return control;
-};
-
-const isDisabled = (control: HTMLElement): boolean =>
-  control.hasAttribute("disabled") || control.getAttribute("aria-disabled") === "true";
-
-const OTHERS = [ACTIVE, ERRORED, REFUSED].map((plugin) => plugin.displayName);
-const besides = (plugin: Fixture) => OTHERS.filter((name) => name !== plugin.displayName);
 
 describe("Settings > Plugins", () => {
   it("says what each plugin is, how it is doing, and what it contributes", async () => {
     await open([ACTIVE, ERRORED, REFUSED]);
 
-    const active = reading(await cardFor(ACTIVE.displayName, besides(ACTIVE)));
+    const active = reading(await cardFor(ACTIVE));
     expect(active).toMatch(/active/i);
     expect(active).toMatch(/provider/i);
     expect(active).toContain("acme");
 
-    const errored = reading(await cardFor(ERRORED.displayName, besides(ERRORED)));
+    const errored = reading(await cardFor(ERRORED));
     expect(errored).toMatch(/error/i);
     expect(errored).toMatch(/channel/i);
     expect(errored).toContain("chatter");
 
-    const refused = reading(await cardFor(REFUSED.displayName, besides(REFUSED)));
+    const refused = reading(await cardFor(REFUSED));
     expect(refused).toMatch(/refused|not loaded|turned away/i);
   });
 
@@ -222,10 +191,10 @@ describe("Settings > Plugins", () => {
     const user = userEvent.setup();
     const { api } = await open([ACTIVE, ERRORED, REFUSED]);
 
-    const card = await cardFor(ERRORED.displayName, besides(ERRORED));
+    const card = await cardFor(ERRORED);
     expect(reading(card)).toContain(ACTIVATION_FAILURE);
 
-    await user.click(within(card).getByRole("button", { name: /retry/i }));
+    await user.click(within(card).getByRole("button", { name: "Retry" }));
 
     await waitFor(() => {
       expect(writesTo(api, ERRORED.id).map((call) => call.path)).toEqual([
@@ -237,8 +206,8 @@ describe("Settings > Plugins", () => {
     // running one it would be a second spelling of enable, and on a refused
     // one there is nothing loaded to run.
     for (const plugin of [ACTIVE, REFUSED]) {
-      const other = within(await cardFor(plugin.displayName, besides(plugin)));
-      expect(other.queryByRole("button", { name: /retry/i })).toBeNull();
+      const other = within(await cardFor(plugin));
+      expect(other.queryByRole("button", { name: "Retry" })).toBeNull();
     }
   });
 
@@ -247,10 +216,9 @@ describe("Settings > Plugins", () => {
     const off: Fixture = { ...ACTIVE, enabled: false, status: { _tag: "inactive" } };
     const { api } = await open([off]);
 
-    const toggle = toggleIn(await cardFor(off.displayName, []));
-    expect(toggle.textContent).toMatch(/enable/i);
+    const card = await cardFor(off);
 
-    await user.click(toggle);
+    await user.click(within(card).getByRole("button", { name: "Enable" }));
 
     await waitFor(() => {
       expect(writesTo(api, off.id).map((call) => call.path)).toEqual([
@@ -269,8 +237,8 @@ describe("Settings > Plugins", () => {
       },
     });
 
-    const card = await cardFor(ERRORED.displayName, []);
-    await user.click(within(card).getByRole("button", { name: /retry/i }));
+    const card = await cardFor(ERRORED);
+    await user.click(within(card).getByRole("button", { name: "Retry" }));
 
     expect((await within(card).findByRole("alert")).textContent).toBe(complaint);
     expect(writesTo(api, ERRORED.id)).toHaveLength(1);
@@ -280,14 +248,16 @@ describe("Settings > Plugins", () => {
     const user = userEvent.setup();
     const { api } = await open([ACTIVE, ERRORED, REFUSED]);
 
-    const card = await cardFor(REFUSED.displayName, besides(REFUSED));
+    const card = await cardFor(REFUSED);
     // The reason is a mismatch between two numbers; a card that named neither
     // would leave the user with nothing to act on.
     expect(reading(card)).toMatch(/host api/i);
     expect(reading(card)).toContain("2");
 
-    const toggle = toggleIn(card);
-    expect(isDisabled(toggle)).toBe(true);
+    // A refused plugin is enabled as far as the stored flag goes, so the
+    // control it offers is the one that would turn it off - and it is dead.
+    const toggle = within(card).getByRole("button", { name: "Disable" });
+    expect(toggle.hasAttribute("disabled")).toBe(true);
     await user.click(toggle);
     expect(writesTo(api, REFUSED.id)).toEqual([]);
   });
@@ -296,7 +266,9 @@ describe("Settings > Plugins", () => {
     const user = userEvent.setup();
     const { api } = await open([ACTIVE, ERRORED, REFUSED]);
 
-    await user.click(toggleIn(await cardFor(ACTIVE.displayName, besides(ACTIVE))));
+    const card = await cardFor(ACTIVE);
+
+    await user.click(within(card).getByRole("button", { name: "Disable" }));
 
     await waitFor(() => {
       expect(writesTo(api, ACTIVE.id).map((call) => call.path)).toEqual([
@@ -306,20 +278,6 @@ describe("Settings > Plugins", () => {
   });
 });
 
-/**
- * The form may sit behind a disclosure on a list of plugins, which is the
- * screen's business; what matters is that the fields are reachable without
- * leaving the screen.
- */
-const configForm = async (user: ReturnType<typeof userEvent.setup>): Promise<void> => {
-  if (screen.queryByLabelText(/endpoint/i) !== null) return;
-  const opener = screen
-    .queryAllByRole("button")
-    .find((button) => /config|settings|edit|show|open/i.test(button.textContent ?? ""));
-  if (opener !== undefined) await user.click(opener);
-  await screen.findByLabelText(/endpoint/i);
-};
-
 /** Every value the form is holding right now, whatever widget holds it. */
 const values = (): string =>
   [...document.querySelectorAll("input, select, textarea")]
@@ -328,9 +286,7 @@ const values = (): string =>
 
 describe("Settings > Plugins > configuration", () => {
   it("shows a field per configurable setting, holding what is stored", async () => {
-    const user = userEvent.setup();
     await open([CONFIGURABLE]);
-    await configForm(user);
 
     expect(screen.getByLabelText<HTMLInputElement>(/endpoint/i).value).toBe(
       "https://notes.test/ingest",
@@ -346,7 +302,6 @@ describe("Settings > Plugins > configuration", () => {
   it("sends each setting as the type its schema names", async () => {
     const user = userEvent.setup();
     const { api } = await open([CONFIGURABLE]);
-    await configForm(user);
 
     const endpoint = screen.getByLabelText(/endpoint/i);
     await user.clear(endpoint);
@@ -357,7 +312,7 @@ describe("Settings > Plugins > configuration", () => {
     await user.click(screen.getByLabelText(/verbose/i));
     await user.selectOptions(screen.getByLabelText(/mode/i), "slow");
 
-    await user.click(screen.getByRole("button", { name: /save|apply/i }));
+    await user.click(screen.getByRole("button", { name: "Save" }));
 
     await waitFor(() => {
       expect(writesTo(api, CONFIGURABLE.id)).toHaveLength(1);
@@ -370,6 +325,29 @@ describe("Settings > Plugins > configuration", () => {
         mode: "slow",
         tags: ["alpha", "beta"],
       },
+    });
+  });
+
+  it("leaves a setting nobody answered out of the write, rather than storing a default", async () => {
+    const user = userEvent.setup();
+    const unset: Fixture = {
+      ...CONFIGURABLE,
+      id: "fresh-sink",
+      displayName: "Fresh Sink",
+      config: {},
+    };
+    const { api } = await open([unset]);
+
+    await user.type(screen.getByLabelText(/endpoint/i), "https://notes.test/ingest");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => {
+      expect(writesTo(api, unset.id)).toHaveLength(1);
+    });
+    // An unchecked box and an empty list are what every optional setting looks
+    // like before anyone touches it, so neither is an answer worth storing.
+    expect(writesTo(api, unset.id)[0]?.body).toEqual({
+      config: { endpoint: "https://notes.test/ingest" },
     });
   });
 
@@ -388,9 +366,8 @@ describe("Settings > Plugins > configuration", () => {
         },
       },
     });
-    await configForm(user);
 
-    await user.click(screen.getByRole("button", { name: /save|apply/i }));
+    await user.click(screen.getByRole("button", { name: "Save" }));
 
     const shown = await screen.findByText(new RegExp(complaint));
     // "Under the field named by the path" means beside that field and no
@@ -416,9 +393,8 @@ describe("Settings > Plugins > configuration", () => {
         return { body: CONFIGURABLE };
       },
     });
-    await configForm(user);
 
-    const save = screen.getByRole("button", { name: /save|apply/i });
+    const save = screen.getByRole("button", { name: "Save" });
     await user.click(save);
     await waitFor(() => {
       expect(save.hasAttribute("disabled")).toBe(true);
@@ -448,9 +424,8 @@ describe("Settings > Plugins > configuration", () => {
         },
       },
     });
-    await configForm(user);
 
-    await user.click(screen.getByRole("button", { name: /save|apply/i }));
+    await user.click(screen.getByRole("button", { name: "Save" }));
 
     expect((await screen.findByRole("alert")).textContent).toBe(complaint);
   });
@@ -488,32 +463,20 @@ describe("Settings > Plugins > configuration", () => {
 describe("Settings > Plugins > reset", () => {
   it("asks before it wipes a plugin's state, then wipes it", async () => {
     const user = userEvent.setup();
-    const asked = vi.spyOn(window, "confirm").mockReturnValue(true);
-    try {
-      const { api } = await open([CONFIGURABLE]);
+    const { api } = await open([CONFIGURABLE]);
 
-      await user.click(await screen.findByRole("button", { name: /reset plugin state/i }));
+    await user.click(await screen.findByRole("button", { name: "Reset plugin state" }));
 
-      // The confirmation is the screen's to design: a browser prompt, or a
-      // step the user takes in the page. Either way it comes before the write.
-      let confirmedInPage = false;
-      if (writesTo(api, CONFIGURABLE.id).length === 0 && asked.mock.calls.length === 0) {
-        const confirming = screen
-          .getAllByRole("button")
-          .filter((button) => /reset|confirm|yes|wipe/i.test(button.textContent ?? ""));
-        await user.click(confirming[confirming.length - 1]!);
-        confirmedInPage = true;
-      }
-      expect(asked.mock.calls.length > 0 || confirmedInPage).toBe(true);
+    // Wiping is not undoable, so nothing goes out until the question is answered.
+    expect(writesTo(api, CONFIGURABLE.id)).toEqual([]);
 
-      await waitFor(() => {
-        expect(writesTo(api, CONFIGURABLE.id).map((call) => call.path)).toEqual([
-          `/api/v1/plugins/${CONFIGURABLE.id}/reset-state`,
-        ]);
-      });
-    } finally {
-      asked.mockRestore();
-    }
+    await user.click(screen.getByRole("button", { name: "Confirm" }));
+
+    await waitFor(() => {
+      expect(writesTo(api, CONFIGURABLE.id).map((call) => call.path)).toEqual([
+        `/api/v1/plugins/${CONFIGURABLE.id}/reset-state`,
+      ]);
+    });
   });
 });
 
@@ -535,7 +498,7 @@ describe("Settings > Plugins > live", () => {
       "GET /api/v1/plugins": () => ({ body: held }),
     });
 
-    expect(reading(await cardFor(ERRORED.displayName, [ACTIVE.displayName]))).toMatch(/error/i);
+    expect(reading(await cardFor(ERRORED))).toMatch(/error/i);
     await waitFor(() => {
       expect(live.topics()).toContain("plugin");
     });
@@ -547,7 +510,7 @@ describe("Settings > Plugins > live", () => {
     });
 
     await waitFor(async () => {
-      expect(reading(await cardFor(ERRORED.displayName, [ACTIVE.displayName]))).toMatch(/active/i);
+      expect(reading(await cardFor(ERRORED))).toMatch(/active/i);
     });
     // The card came from a fresh listing, not from the push itself.
     expect(api.calls.filter((call) => call.path === "/api/v1/plugins").length).toBeGreaterThan(

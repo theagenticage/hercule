@@ -16,7 +16,7 @@ export function Checkbox({
   ...props
 }: Omit<ComponentProps<"input">, "type"> & { readonly label: string }): JSX.Element {
   return (
-    <label className="inline-flex cursor-pointer items-center gap-2 text-body text-ink">
+    <label className="inline-flex cursor-pointer items-center gap-2">
       <span className="relative inline-flex size-3.5 shrink-0 items-center justify-center">
         <input
           type="checkbox"
@@ -44,7 +44,7 @@ export function Checkbox({
           />
         </svg>
       </span>
-      <span>{label}</span>
+      <span className="text-meta font-emph text-muted">{label}</span>
     </label>
   );
 }

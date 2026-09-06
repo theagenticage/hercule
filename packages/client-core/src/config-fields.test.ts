@@ -141,13 +141,17 @@ describe("configPayload", () => {
 
   it("sends each setting as the type its schema names", () => {
     expect(
-      configPayload(fields, {
-        endpoint: "https://notes.test",
-        timeout: "1.5",
-        retries: "3",
-        verbose: true,
-        tags: ["alpha", "beta"],
-      }),
+      configPayload(
+        fields,
+        {
+          endpoint: "https://notes.test",
+          timeout: "1.5",
+          retries: "3",
+          verbose: true,
+          tags: ["alpha", "beta"],
+        },
+        {},
+      ),
     ).toEqual({
       endpoint: "https://notes.test",
       timeout: 1.5,
@@ -159,8 +163,26 @@ describe("configPayload", () => {
 
   it("leaves out what nobody filled in, rather than sending an empty one", () => {
     expect(
-      configPayload(fields, { endpoint: "", timeout: "", retries: "", verbose: false, tags: [] }),
-    ).toEqual({
+      configPayload(
+        fields,
+        { endpoint: "", timeout: "", retries: "", verbose: false, tags: [] },
+        {},
+      ),
+    ).toEqual({});
+  });
+
+  it("keeps writing a checkbox and a list the stored config already has an answer for", () => {
+    expect(
+      configPayload(fields, { verbose: false, tags: [] }, { verbose: true, tags: ["alpha"] }),
+    ).toEqual({ verbose: false, tags: [] });
+  });
+
+  it("sends a required checkbox and list even where nothing is stored", () => {
+    const required = configFields(
+      objectSchema({ verbose: { type: "boolean" }, tags: { type: "array" } }, ["verbose", "tags"]),
+    );
+
+    expect(configPayload(required, { verbose: false, tags: [] }, {})).toEqual({
       verbose: false,
       tags: [],
     });
@@ -168,6 +190,10 @@ describe("configPayload", () => {
 });
 
 describe("configIssues", () => {
+  const fields = configFields(
+    objectSchema({ endpoint: { type: "string" }, retries: { type: "integer" } }),
+  );
+
   it("keys a refused write's messages by the setting each blamed", () => {
     const refusal = new ApiError("validation", "the config does not match", {
       issues: [
@@ -176,18 +202,38 @@ describe("configIssues", () => {
       ],
     });
 
-    expect(configIssues(refusal)).toEqual({
-      endpoint: "must be an https URL",
-      retries: "must be at least 1",
+    expect(configIssues(refusal, fields)).toEqual({
+      perField: { endpoint: "must be an https URL", retries: "must be at least 1" },
+      rest: false,
     });
   });
 
-  it("blames no setting for a failure that named none", () => {
-    expect(configIssues(new ApiError("internal", "the database is locked"))).toEqual({});
-    expect(configIssues(new Error("the controller could not be reached"))).toEqual({});
+  it("leaves the form to say what no rendered setting carries", () => {
+    expect(configIssues(new ApiError("internal", "the database is locked"), fields)).toEqual({
+      perField: {},
+      rest: true,
+    });
+    expect(configIssues(new Error("the controller could not be reached"), fields)).toEqual({
+      perField: {},
+      rest: true,
+    });
     // A refusal about the payload as a whole belongs to the form, not a field.
     expect(
-      configIssues(new ApiError("validation", "no", { issues: [{ path: [], message: "no" }] })),
-    ).toEqual({});
+      configIssues(
+        new ApiError("validation", "no", { issues: [{ path: [], message: "no" }] }),
+        fields,
+      ),
+    ).toEqual({ perField: {}, rest: true });
+    // A setting this form does not render would otherwise be shown nowhere.
+    expect(
+      configIssues(
+        new ApiError("validation", "no", { issues: [{ path: ["gone"], message: "unknown key" }] }),
+        fields,
+      ),
+    ).toEqual({ perField: {}, rest: true });
+  });
+
+  it("says nothing at all when the write was not refused", () => {
+    expect(configIssues(null, fields)).toEqual({ perField: {}, rest: false });
   });
 });

@@ -54,7 +54,7 @@ import { nowIso, withTransaction } from "../db";
 import { AuditLog } from "../events";
 import { CurrentActor, SYSTEM_ACTOR, USER_ACTOR } from "../actor";
 import { Secrets, type SecretOwner } from "../secrets";
-import { pluginRepository, type NewContribution, type PluginState } from "./repository";
+import { pluginRepository, type NewContribution } from "./repository";
 
 /**
  * The capabilities this build can actually hand a plugin. The manifest schema
@@ -196,13 +196,6 @@ const asPluginError = (error: Schema.SchemaError): PluginError =>
   new PluginError({
     message: fieldMessage(error),
   });
-
-/** The row a boot just wrote for this plugin. Its absence is a defect, not a state. */
-const stateOf = (states: ReadonlyMap<string, PluginState>, id: string): PluginState => {
-  const state = states.get(id);
-  if (state === undefined) throw new Error(`The plugin ${id} has no stored row.`);
-  return state;
-};
 
 /**
  * Enough to find the offending plugin in the registry file. The id it claims is
@@ -437,10 +430,15 @@ const make = Effect.gen(function* () {
    * with the field named, because `activate` is specified to receive a decoded
    * config and there is nothing honest to hand it instead.
    */
-  const refresh = (id: string, state: PluginState): Effect.Effect<void, SqlError> =>
+  const refresh = (id: string): Effect.Effect<void, SqlError> =>
     Effect.gen(function* () {
       const entry = (yield* Ref.get(entries)).get(id);
       if (entry === undefined) return;
+      // The row is read here rather than passed in, so what the plugin is
+      // started on is what the database holds after the caller's own write. The
+      // column's `json_valid` check rules out a config that cannot be read, so
+      // an unreadable one is a broken database and not a state.
+      const state = yield* Effect.catchTag(repository.state(id), "SchemaError", Effect.die);
       // A plugin the process can no longer start stays as it is: starting it
       // would run a second instance beside whatever the last one left behind.
       if (!state.enabled || !entry.startable) {
@@ -562,14 +560,10 @@ const make = Effect.gen(function* () {
         );
         yield* Ref.set(entries, booted);
 
-        // Every booted id was given a row in the transaction just above, and
-        // the column's `json_valid` check is what rules out a row that cannot
-        // be read, so neither the missing row nor the decode is a real state.
-        const states = yield* Effect.orDie(repository.states());
         yield* gate.withPermits(1)(
           Effect.forEach(
             [...booted].filter(([, entry]) => entry.status._tag === "inactive"),
-            ([id]) => refresh(id, stateOf(states, id)),
+            ([id]) => refresh(id),
             { discard: true },
           ),
         );

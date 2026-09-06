@@ -169,7 +169,7 @@ describe("SegmentedControl", () => {
 describe("StringList", () => {
   function Example({ initial = ["alpha"] }: { readonly initial?: readonly string[] }) {
     const [values, setValues] = useState<readonly string[]>(initial);
-    return <StringList id="tags" label="Tag" values={values} onChange={setValues} />;
+    return <StringList label="Tag" values={values} onChange={setValues} />;
   }
 
   it("names each entry by its place, so a screen reader can tell them apart", () => {

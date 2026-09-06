@@ -8,7 +8,20 @@ import { cn } from "./cn";
  * cursor says the same thing on the way past. Why it cannot be used is written
  * beside it.
  */
-const disabledShape = "disabled:cursor-not-allowed disabled:text-faint";
+const disabledQuiet = "disabled:cursor-not-allowed disabled:text-faint";
+
+/**
+ * The primary answer keeps a box when it cannot be used, because it is often
+ * the only affordance on the surface: gone boxless it reads as another line of
+ * prose, and the reader is left looking for the thing they were offered. The
+ * hairline is drawn inside the button rather than as a border, so a primary
+ * beside a quiet one is the same height whichever state it is in.
+ */
+const disabledPrimary = [
+  "disabled:cursor-not-allowed",
+  "disabled:bg-surface disabled:text-muted",
+  "disabled:shadow-[inset_0_0_0_1px_var(--color-line)]",
+].join(" ");
 
 /**
  * Decision affordances are quiet: text only, a soft background on hover, and
@@ -20,8 +33,8 @@ const disabledShape = "disabled:cursor-not-allowed disabled:text-faint";
  * still receives the pointer: it has to answer for its own cursor.
  */
 const variants = {
-  quiet: `text-muted enabled:hover:bg-line-soft enabled:hover:text-ink ${disabledShape}`,
-  primary: `text-ink enabled:hover:bg-line-soft ${disabledShape}`,
+  quiet: `text-muted enabled:hover:bg-line-soft enabled:hover:text-ink ${disabledQuiet}`,
+  primary: `text-ink enabled:hover:bg-line-soft ${disabledPrimary}`,
   form: `border border-line bg-surface px-3 py-1.5 text-body text-ink enabled:hover:bg-line-soft disabled:cursor-not-allowed disabled:opacity-60`,
 };
 

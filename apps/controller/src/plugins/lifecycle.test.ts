@@ -12,67 +12,30 @@
  * mocked. A fixture keeps the activation contexts it was handed, and the test
  * calls the capability surfaces on them the way the plugin's own code would.
  */
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
-import { Cause, Effect, Layer, Option, Redacted, Schema } from "effect";
+import { describe, expect, it } from "vitest";
+import { Cause, Effect, Option, Redacted, Schema } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import {
   HOST_API,
   PluginError,
   type ActivationContext,
-  type KeyValueStore,
   type Plugin,
-  type PluginCapability,
+  type KeyValueStore,
   type PluginSecrets,
   type RegistrationHost,
 } from "@hydra/plugin-host";
-import { CurrentActor, type Actor } from "../actor";
-import { homePaths, HydraHome } from "../config";
-import { TestDatabase } from "../db/testing";
-import { AuditLog, AuditLogLayer } from "../events";
-import { masterKeyLayer, Secret, SecretLayer, Secrets, secretsLayer } from "../secrets";
-import { PluginHost, PluginHostLayer, Plugins, PluginsLayer } from "./index";
+import { CurrentActor } from "../actor";
+import { AuditLog } from "../events";
+import { Secret, Secrets } from "../secrets";
+import { PluginHost, Plugins } from "./index";
 import { pluginRepository } from "./repository";
-import { providerDefinition } from "./testing";
-
-const USER: Actor = {
-  _tag: "user",
-  userId: "0199f0b7-0000-7000-8000-000000000000",
-  credential: { kind: "login", id: "0199f0b7-0001-7000-8000-000000000000", tokenHash: "x" },
-};
-
-let homes: Array<string> = [];
-
-afterEach(() => {
-  for (const home of homes) rmSync(home, { recursive: true, force: true });
-  homes = [];
-});
-
-/**
- * The real host and service over a `:memory:` database, the real secrets
- * repository and a master key file: a plugin's secrets are rows in the one
- * secrets table, so the encryption is part of what is under test.
- */
-const stack = () => {
-  const home = mkdtempSync(join(tmpdir(), "hydra-plugin-lifecycle-"));
-  homes.push(home);
-  return PluginsLayer.pipe(
-    Layer.provideMerge(PluginHostLayer),
-    Layer.provideMerge(SecretLayer),
-    Layer.provideMerge(secretsLayer.pipe(Layer.provide(masterKeyLayer("file")))),
-    Layer.provideMerge(AuditLogLayer),
-    Layer.provideMerge(TestDatabase),
-    Layer.provideMerge(Layer.succeed(HydraHome, homePaths(home, join(home, "data")))),
-  );
-};
+import { asUser, fixture, pluginStack, USER, type Fixture } from "./testing";
 
 type Services = Plugins | PluginHost | Secret | Secrets | AuditLog | SqlClient.SqlClient;
 
-/** Every call runs as the user actor, which is what a request through the API is. */
+/** Every call runs on a stack of its own, as the user a request would arrive as. */
 const run = <A, E>(body: Effect.Effect<A, E, Services>) =>
-  Effect.runPromise(body.pipe(Effect.provide(stack()), Effect.provideService(CurrentActor, USER)));
+  Effect.runPromise(body.pipe(Effect.provide(pluginStack()), asUser));
 
 /**
  * Whether the catalog says a plugin's contributions may run, per row and in
@@ -85,82 +48,6 @@ const ownerEnabled = (id: string) =>
     Effect.flatMap(pluginRepository, (repository) => repository.contributions()),
     (byOwner) => (byOwner.get(id) ?? []).map((row) => row.ownerEnabled),
   );
-
-interface Fixture {
-  readonly plugin: Plugin;
-  /** `activate` and `deactivate`, in the order the plugin observed them. */
-  readonly calls: Array<string>;
-  /** Whether an instance the plugin started is still up. */
-  running: () => boolean;
-  /** The context of every `activate` call, in order. */
-  readonly contexts: Array<ActivationContext>;
-  /** The host of every `register` call, in order. */
-  readonly hosts: Array<RegistrationHost>;
-}
-
-const fixture = (options: {
-  readonly id: string;
-  readonly capabilities?: ReadonlyArray<PluginCapability>;
-  readonly configSchema?: Schema.Top;
-  /** How many `activate` calls fail before the first one that succeeds. */
-  readonly activateFailures?: number;
-  /** The message the returned deactivate fails with, when it fails. */
-  readonly deactivateFails?: string;
-  /** The message `register` fails with, for a plugin that never gets that far. */
-  readonly registerFails?: string;
-  /** Whether the hooks yield, so a second caller can interleave with them. */
-  readonly slow?: boolean;
-}): Fixture => {
-  const calls: Array<string> = [];
-  const contexts: Array<ActivationContext> = [];
-  const hosts: Array<RegistrationHost> = [];
-  let remainingFailures = options.activateFailures ?? 0;
-  let up = false;
-  const pause = options.slow === true ? Effect.yieldNow : Effect.void;
-
-  const plugin: Plugin = {
-    manifest: {
-      id: options.id,
-      displayName: `Plugin ${options.id}`,
-      hostApi: HOST_API,
-      capabilities: options.capabilities ?? ["providers"],
-      configSchema: options.configSchema ?? Schema.Struct({}),
-    },
-    register: (host) =>
-      Effect.suspend(() => {
-        hosts.push(host);
-        if (options.registerFails !== undefined) {
-          return Effect.fail(new PluginError({ message: options.registerFails }));
-        }
-        return host.providers === undefined
-          ? Effect.void
-          : host.providers.register(providerDefinition(`${options.id}-provider`));
-      }),
-    activate: (ctx) =>
-      Effect.suspend(() => {
-        calls.push("activate");
-        contexts.push(ctx);
-        if (remainingFailures > 0) {
-          remainingFailures -= 1;
-          return Effect.fail(new PluginError({ message: `${options.id} could not start` }));
-        }
-        up = true;
-        return Effect.as(
-          pause,
-          Effect.suspend(() => {
-            calls.push("deactivate");
-            if (options.deactivateFails !== undefined) {
-              return Effect.fail(new PluginError({ message: options.deactivateFails }));
-            }
-            up = false;
-            return pause;
-          }),
-        );
-      }),
-  };
-
-  return { plugin, calls, contexts, hosts, running: () => up };
-};
 
 /** The context of the plugin's most recent activation: what it is running with. */
 const currentContext = (of: Fixture): ActivationContext => {
@@ -1004,7 +891,7 @@ describe("a caller with no credential behind it", () => {
             (kind) => log.listByKind(kind),
           ),
         };
-      }).pipe(Effect.provide(stack())),
+      }).pipe(Effect.provide(pluginStack())),
     );
 
     for (const failure of failures) {

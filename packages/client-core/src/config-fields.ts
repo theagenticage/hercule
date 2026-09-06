@@ -101,45 +101,82 @@ export const configDraft = (fields: ReadonlyArray<ConfigField>, config: unknown)
 };
 
 /**
+ * Whether a checkbox or a list is only showing what an unfilled setting looks
+ * like. Both widgets have a value at rest - unchecked, empty - so writing every
+ * one of them back would store a `false` or an `[]` under a setting the user
+ * never touched, which is not the same thing as leaving it unset. A required
+ * one is written either way: there is no unset for it to go back to.
+ */
+const unfilled = (field: ConfigField, stored: Record<string, unknown>, atRest: boolean): boolean =>
+  atRest && !field.required && stored[field.name] === undefined;
+
+/**
  * The config a draft means, typed the way the schema names.
  *
  * An empty text or number field is left out of the config rather than sent as
  * an empty string or a `NaN`: absent is the one thing every schema can say
  * about a setting nobody filled in. Whether that absence is allowed is the
  * plugin's schema to answer, and only the controller holds it.
+ *
+ * The stored config is read for the same reason: it says which settings the
+ * user has an answer for, which the draft alone cannot.
  */
 export const configPayload = (
   fields: ReadonlyArray<ConfigField>,
   draft: ConfigDraft,
+  config: unknown,
 ): ConfigJson => {
-  const config: Record<string, ConfigJson> = {};
+  const stored = asRecord(config) ?? {};
+  const payload: Record<string, ConfigJson> = {};
   for (const field of fields) {
     const value = draft[field.name];
     if (field.kind === "boolean") {
-      config[field.name] = value === true;
+      if (!unfilled(field, stored, value !== true)) payload[field.name] = value === true;
     } else if (field.kind === "stringList") {
-      config[field.name] = [...(asStrings(value) ?? [])];
+      const list = [...(asStrings(value) ?? [])];
+      if (!unfilled(field, stored, list.length === 0)) payload[field.name] = list;
     } else if (typeof value === "string" && value !== "") {
-      config[field.name] = field.kind === "string" || field.kind === "enum" ? value : Number(value);
+      payload[field.name] =
+        field.kind === "string" || field.kind === "enum" ? value : Number(value);
     }
   }
-  return config;
+  return payload;
 };
 
-/**
- * The message per field a refused write blamed, keyed by the field its path
- * names. Anything else the call could have failed with belongs to the form as a
- * whole, not to one field, so it comes back empty.
- */
-export const configIssues = (error: unknown): Readonly<Record<string, string>> => {
-  if (!(error instanceof ApiError) || error.code !== "validation") return {};
-  const issues = asRecord(error.details)?.["issues"];
-  if (!Array.isArray(issues)) return {};
+/** What a refused write blamed, split by whether this form can show it. */
+export interface ConfigIssues {
+  /** The message per field, keyed by the field its path names. */
+  readonly perField: Readonly<Record<string, string>>;
+  /**
+   * Whether anything the call was refused for lands nowhere: a failure that is
+   * not a validation at all, one that named no field, or one that named a field
+   * this form does not render. It has to be said as the form's own failure, or
+   * a write is refused and the card says nothing.
+   */
+  readonly rest: boolean;
+}
 
-  const messages: Record<string, string> = {};
+/**
+ * What a refused write blamed, read against the fields this form renders.
+ *
+ * Anything the call could have failed with that no rendered field carries is
+ * the form's to say, not one field's.
+ */
+export const configIssues = (error: unknown, fields: ReadonlyArray<ConfigField>): ConfigIssues => {
+  if (error === null || error === undefined) return { perField: {}, rest: false };
+  if (!(error instanceof ApiError) || error.code !== "validation") {
+    return { perField: {}, rest: true };
+  }
+  const issues = asRecord(error.details)?.["issues"];
+  if (!Array.isArray(issues)) return { perField: {}, rest: true };
+
+  const rendered = new Set(fields.map((field) => field.name));
+  const perField: Record<string, string> = {};
+  let rest = false;
   for (const issue of issues as ReadonlyArray<Issue>) {
     const field = issue.path[0];
-    if (field !== undefined) messages[field] ??= issue.message;
+    if (field !== undefined && rendered.has(field)) perField[field] ??= issue.message;
+    else rest = true;
   }
-  return messages;
+  return { perField, rest };
 };

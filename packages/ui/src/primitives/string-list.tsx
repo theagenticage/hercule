@@ -10,20 +10,17 @@ import { Input } from "./input";
  * shows no fields at all: the Add button is what says there is a list here, and
  * a blank row would read as an entry the user had already started.
  *
- * The id lands on the first entry, so a label pointing at this list hands focus
- * to the field a person would type in; the group carries the name for everyone
- * else, including when the list is still empty.
+ * The group carries the name, because there is no one field for a label to
+ * point at: an empty list has no entry at all, and a full one has several.
  */
 export function StringList({
-  id,
   label,
   values,
   required = false,
   onChange,
   addLabel = "Add",
 }: {
-  readonly id: string;
-  /** What the list is called, for the names only a screen reader hears. */
+  /** What the list is called, for the group and for each entry's own name. */
   readonly label: string;
   /** Whether the list has to hold something. Announced on the group, since it
    * is the list rather than any one entry that is being asked for. */
@@ -49,7 +46,6 @@ export function StringList({
         // the list is short and only ever edited in place.
         <div key={index} className="flex w-full items-center gap-1.5">
           <Input
-            id={index === 0 ? id : undefined}
             aria-label={entryName(index)}
             value={value}
             onChange={(event) => {

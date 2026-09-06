@@ -7,44 +7,15 @@
  * every degradation the controller applies is read off them, so one of them
  * changing by accident has to fail here.
  */
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { Effect, Layer } from "effect";
+import { beforeAll, describe, expect, it } from "vitest";
+import { Effect } from "effect";
 import type { PluginDetail } from "@hydra/contract";
-import { CurrentActor, type Actor } from "../actor";
-import { homePaths, HydraHome } from "../config";
-import { TestDatabase } from "../db/testing";
-import { AuditLogLayer } from "../events";
-import { masterKeyLayer, secretsLayer } from "../secrets";
-import { PluginHost, PluginHostLayer, Plugins, PluginsLayer } from "./index";
-import { registry } from "./registry";
+import { PluginHost, Plugins, registry } from "./index";
+import { asUser, pluginStack } from "./testing";
 
-/** The host reads plugin secrets, so the stack needs a home to keep a key file in. */
-const HOME = mkdtempSync(join(tmpdir(), "hydra-plugin-registry-"));
-
-afterAll(() => {
-  rmSync(HOME, { recursive: true, force: true });
-});
-
-const layer = PluginsLayer.pipe(
-  Layer.provideMerge(PluginHostLayer),
-  Layer.provideMerge(secretsLayer.pipe(Layer.provide(masterKeyLayer("file")))),
-  Layer.provideMerge(AuditLogLayer),
-  Layer.provideMerge(TestDatabase),
-  Layer.provideMerge(Layer.succeed(HydraHome, homePaths(HOME, join(HOME, "data")))),
-);
-
-const USER: Actor = {
-  _tag: "user",
-  userId: "0199f0b7-0000-7000-8000-000000000000",
-  credential: { kind: "login", id: "0199f0b7-0001-7000-8000-000000000000", tokenHash: "x" },
-};
-
-/** Every call runs as the user actor, which is what a request through the API is. */
+/** Every call runs on a stack of its own, as the user a request would arrive as. */
 const run = <A, E>(body: Effect.Effect<A, E, Plugins | PluginHost>) =>
-  Effect.runPromise(body.pipe(Effect.provide(layer), Effect.provideService(CurrentActor, USER)));
+  Effect.runPromise(body.pipe(Effect.provide(pluginStack()), asUser));
 
 /** What the derivation makes of a config schema with no settings in it. */
 const NO_SETTINGS = {

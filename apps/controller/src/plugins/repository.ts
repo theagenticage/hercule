@@ -30,6 +30,11 @@ export interface Contribution {
    * Whether the plugin that contributed it may run. A contribution stays in the
    * catalog while its owner is disabled, so a picker can say what is missing
    * rather than silently losing the entry.
+   *
+   * It is the owner's stored flag and nothing else: a plugin whose teardown
+   * failed still has `enabled = 1`, so its rows read `ownerEnabled: true` while
+   * what it left behind is running. Whoever resolves a contribution reads the
+   * host's own fact about the plugin beside this one.
    */
   readonly ownerEnabled: boolean;
 }
@@ -48,6 +53,19 @@ export interface NewContribution {
 
 /** The `config` and `definition` columns: JSON text holding a JSON value. */
 const decodeJson = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Json));
+
+/**
+ * The row a boot wrote for one plugin. Boot gives every plugin it lists a row,
+ * in the transaction that makes it listed at all, so a plugin without one is a
+ * broken database rather than a plugin whose settings are simply unknown.
+ */
+export const storedState = (
+  state: PluginState | undefined,
+  id: string,
+): Effect.Effect<PluginState> =>
+  state === undefined
+    ? Effect.die(new Error(`The plugin ${id} has no stored row.`))
+    : Effect.succeed(state);
 
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
@@ -96,6 +114,22 @@ const make = Effect.gen(function* () {
           });
         }
         return states;
+      }),
+
+    /** What the user decided about one plugin. */
+    state: (id: string): Effect.Effect<PluginState, SqlError | Schema.SchemaError> =>
+      Effect.gen(function* () {
+        const rows = yield* sql<{
+          readonly enabled: number;
+          readonly config: string;
+        }>`SELECT enabled, config FROM plugins WHERE id = ${id}`;
+        const row = rows[0];
+        return yield* storedState(
+          row === undefined
+            ? undefined
+            : { enabled: row.enabled === 1, config: yield* decodeJson(row.config) },
+          id,
+        );
       }),
 
     /**

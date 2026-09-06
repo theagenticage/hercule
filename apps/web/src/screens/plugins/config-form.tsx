@@ -48,7 +48,7 @@ export function ConfigForm({
 
   const submit = (event: FormEvent): void => {
     event.preventDefault();
-    onSave(configPayload(fields, draft));
+    onSave(configPayload(fields, draft, config));
   };
 
   return (
@@ -122,7 +122,7 @@ function ConfigFieldRow({
   }
 
   return (
-    <Field id={inputId} label={field.label} error={error}>
+    <Field id={field.kind === "stringList" ? undefined : inputId} label={field.label} error={error}>
       {/* Above the box, so a refusal reads directly under what it refused. */}
       <Description field={field} />
       <ConfigWidget inputId={inputId} field={field} value={value} onChange={onChange} />
@@ -182,7 +182,6 @@ function ConfigWidget({
   if (field.kind === "stringList") {
     return (
       <StringList
-        id={inputId}
         required={field.required}
         label={field.label}
         values={Array.isArray(value) ? value : []}

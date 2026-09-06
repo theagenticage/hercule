@@ -6,103 +6,17 @@
  *
  * Fixture plugins are built here and record what ran; nothing is mocked.
  */
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { afterAll, describe, expect, it } from "vitest";
-import { Cause, Effect, Layer, Option, Schema } from "effect";
+import { describe, expect, it } from "vitest";
+import { Cause, Effect, Option, Schema } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
-import {
-  HOST_API,
-  PluginError,
-  type Plugin,
-  type PluginCapability,
-  type ProviderDefinition,
-} from "@hydra/plugin-host";
-import { CurrentActor, type Actor } from "../actor";
-import { homePaths, HydraHome } from "../config";
-import { TestDatabase } from "../db/testing";
-import { AuditLogLayer } from "../events";
-import { masterKeyLayer, secretsLayer } from "../secrets";
-import { PluginHost, PluginHostLayer, Plugins, PluginsLayer } from "./index";
+import { HOST_API, type Plugin, type ProviderDefinition } from "@hydra/plugin-host";
+import { PluginHost, Plugins } from "./index";
 import { pluginRepository } from "./repository";
-import { providerDefinition } from "./testing";
+import { asUser, fixture, pluginStack, providerDefinition } from "./testing";
 
-/** The host reads plugin secrets, so the stack needs a home to keep a key file in. */
-const HOME = mkdtempSync(join(tmpdir(), "hydra-plugin-host-"));
-
-afterAll(() => {
-  rmSync(HOME, { recursive: true, force: true });
-});
-
-const layer = PluginsLayer.pipe(
-  Layer.provideMerge(PluginHostLayer),
-  Layer.provideMerge(secretsLayer.pipe(Layer.provide(masterKeyLayer("file")))),
-  Layer.provideMerge(AuditLogLayer),
-  Layer.provideMerge(TestDatabase),
-  Layer.provideMerge(Layer.succeed(HydraHome, homePaths(HOME, join(HOME, "data")))),
-);
-
-type Services = Plugins | PluginHost | SqlClient.SqlClient;
-
-const USER: Actor = {
-  _tag: "user",
-  userId: "0199f0b7-0000-7000-8000-000000000000",
-  credential: { kind: "login", id: "0199f0b7-0001-7000-8000-000000000000", tokenHash: "x" },
-};
-
-/** Every call runs as the user actor, which is what a request through the API is. */
-const run = <A, E>(body: Effect.Effect<A, E, Services>) =>
-  Effect.runPromise(body.pipe(Effect.provide(layer), Effect.provideService(CurrentActor, USER)));
-
-interface Fixture {
-  readonly plugin: Plugin;
-  /** What the two hooks recorded, read after a boot. */
-  readonly ran: { registered: number; activated: number };
-}
-
-const fixture = (options: {
-  readonly id: string;
-  readonly hostApi?: number;
-  readonly capabilities?: ReadonlyArray<PluginCapability>;
-  readonly configSchema?: Schema.Top;
-  /** Registered in order; the default is one provider named after the plugin. */
-  readonly definitions?: ReadonlyArray<ProviderDefinition>;
-  /** Fails after registering, which is where a plugin's own work would go. */
-  readonly registerFails?: string;
-  /** A hook that misbehaves in a way the options above cannot express. */
-  readonly register?: Plugin["register"];
-}): Fixture => {
-  const ran = { registered: 0, activated: 0 };
-  const definitions = options.definitions ?? [providerDefinition(`${options.id}-provider`, {})];
-  const plugin: Plugin = {
-    manifest: {
-      id: options.id,
-      displayName: `Plugin ${options.id}`,
-      hostApi: options.hostApi ?? HOST_API,
-      capabilities: options.capabilities ?? ["providers"],
-      configSchema: options.configSchema ?? Schema.Struct({}),
-    },
-    register:
-      options.register ??
-      ((host) =>
-        Effect.gen(function* () {
-          ran.registered += 1;
-          for (const definition of definitions) {
-            if (host.providers !== undefined) yield* host.providers.register(definition);
-          }
-          if (options.registerFails !== undefined) {
-            return yield* Effect.fail(new PluginError({ message: options.registerFails }));
-          }
-        })),
-    activate: () =>
-      Effect.sync(() => {
-        ran.activated += 1;
-        return Effect.void;
-      }),
-  };
-  return { plugin, ran };
-};
+/** Every call runs on a stack of its own, as the user a request would arrive as. */
+const run = <A, E>(body: Effect.Effect<A, E, Plugins | PluginHost | SqlClient.SqlClient>) =>
+  Effect.runPromise(body.pipe(Effect.provide(pluginStack()), asUser));
 
 const detailOf = <T extends { readonly id: string }>(details: ReadonlyArray<T>, id: string) =>
   details.find((detail) => detail.id === id);
@@ -210,7 +124,7 @@ describe("a plugin built against another host API version", () => {
       }),
     );
 
-    expect(future.ran.registered).toBe(0);
+    expect(future.hosts).toEqual([]);
     expect(Option.getOrNull(status)).toEqual({
       _tag: "refused",
       reason: { kind: "hostApi", expected: HOST_API, actual: HOST_API + 1 },
@@ -255,8 +169,8 @@ describe("a plugin the host cannot load", () => {
     expect(nestedStatus?.reason.kind).toBe("unsupportedConfigSchema");
     expect(nestedStatus?.reason.message.length).toBeGreaterThan(0);
 
-    expect(channels.ran.registered).toBe(0);
-    expect(nested.ran.registered).toBe(0);
+    expect(channels.hosts).toEqual([]);
+    expect(nested.hosts).toEqual([]);
   });
 });
 
@@ -282,7 +196,7 @@ describe("a plugin whose register fails", () => {
     expect(errored?._tag).toBe("errored");
     expect(errored?.message).toContain("the harness binary is missing");
     expect(detail.contributions).toEqual([]);
-    expect(broken.ran.activated).toBe(0);
+    expect(broken.calls).toEqual([]);
   });
 
   it("is errored naming the path when a contribution carries a function", async () => {
@@ -310,7 +224,7 @@ describe("a plugin whose register fails", () => {
     expect(errored?._tag).toBe("errored");
     expect(errored?.message).toContain("defaultConfig");
     expect(detail.contributions).toEqual([]);
-    expect(callback.ran.activated).toBe(0);
+    expect(callback.calls).toEqual([]);
   });
 
   it("is errored, keeping every other plugin's rows, when it registers one id twice", async () => {

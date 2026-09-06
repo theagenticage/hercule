@@ -31,7 +31,7 @@ import { nowIso, withTransaction } from "../db";
 import { requireGrant, USER_ACTOR } from "../actor";
 import { AuditLog } from "../events";
 import { PluginHost } from "./host";
-import { pluginRepository } from "./repository";
+import { pluginRepository, storedState } from "./repository";
 
 /** The audit kinds one of these moves appends. */
 type MoveKind =
@@ -71,23 +71,17 @@ const make = Effect.gen(function* () {
     const loaded = yield* host.loaded();
     const states = yield* repository.states();
     const contributions = yield* repository.contributions();
-    return yield* Effect.forEach(loaded, (plugin) => {
-      const state = states.get(plugin.id);
-      // Boot gives every plugin it lists a row, in the transaction that makes
-      // it listed at all, so a plugin without one is a broken database rather
-      // than a plugin whose settings are simply unknown.
-      return state === undefined
-        ? Effect.die(new Error(`The plugin ${plugin.id} has no stored row.`))
-        : Effect.succeed<PluginDetail>({
-            ...plugin,
-            ...state,
-            // The catalog's own rows carry the owner's enabled flag as well,
-            // which a caller reads off the plugin these rows belong to.
-            contributions: (contributions.get(plugin.id) ?? []).map(
-              ({ extensionPoint, id, definition }) => ({ extensionPoint, id, definition }),
-            ),
-          });
-    });
+    return yield* Effect.forEach(loaded, (plugin) =>
+      Effect.map(storedState(states.get(plugin.id), plugin.id), (state): PluginDetail => ({
+        ...plugin,
+        ...state,
+        // The catalog's own rows carry the owner's enabled flag as well,
+        // which a caller reads off the plugin these rows belong to.
+        contributions: (contributions.get(plugin.id) ?? []).map(
+          ({ extensionPoint, id, definition }) => ({ extensionPoint, id, definition }),
+        ),
+      })),
+    );
   });
 
   /**
@@ -189,7 +183,7 @@ const make = Effect.gen(function* () {
             const detail = yield* restartable(id);
             if (detail.enabled) return detail;
             yield* write(id, "plugin.enabled", (at) => repository.setEnabled(id, true, at));
-            yield* host.refresh(id, { enabled: true, config: detail.config });
+            yield* host.refresh(id);
             return yield* one(id);
           }),
         );
@@ -232,11 +226,11 @@ const make = Effect.gen(function* () {
         const { config } = yield* Effect.mapError(decodeConfigure(input), validationOf);
         return yield* host.serialized(
           Effect.gen(function* () {
-            const detail = yield* restartable(id);
+            yield* restartable(id);
             yield* host.validate(id, config);
             const stopped = yield* host.stop(id);
             yield* write(id, "plugin.configured", (at) => repository.setConfig(id, config, at));
-            if (stopped) yield* host.refresh(id, { enabled: detail.enabled, config });
+            if (stopped) yield* host.refresh(id);
             return yield* one(id);
           }),
         );
@@ -257,7 +251,7 @@ const make = Effect.gen(function* () {
               return yield* Effect.fail(validation([{ path: [], message }], message));
             }
             yield* write(id, "plugin.retried", () => Effect.void);
-            yield* host.refresh(id, { enabled: detail.enabled, config: detail.config });
+            yield* host.refresh(id);
             return yield* one(id);
           }),
         );
@@ -273,11 +267,10 @@ const make = Effect.gen(function* () {
         yield* requireGrant("plugin.resetState");
         return yield* host.serialized(
           Effect.gen(function* () {
-            const detail = yield* restartable(id);
+            yield* restartable(id);
             const stopped = yield* host.stop(id);
             yield* write(id, "plugin.stateReset", () => repository.kvWipe(id));
-            if (stopped)
-              yield* host.refresh(id, { enabled: detail.enabled, config: detail.config });
+            if (stopped) yield* host.refresh(id);
             return yield* one(id);
           }),
         );

@@ -92,8 +92,8 @@ export const runnersQuery = (client: HydraClient) =>
   });
 
 /**
- * Every plugin the binary was built with, which is the whole set: nothing is
- * installed at runtime, so there is nothing to page through or narrow by.
+ * Every plugin the binary was built with, which is the whole set: the registry
+ * is compiled in, so there is nothing to page through or narrow by.
  */
 export const pluginsQuery = (client: HydraClient) =>
   queryOptions({

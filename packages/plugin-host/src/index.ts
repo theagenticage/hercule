@@ -4,7 +4,27 @@
  * register. A plugin package depends on this and on `effect`, and reaches no
  * controller internal, so the same plugin runs out-of-process later.
  */
-export * from "./manifest";
-export * from "./config-schema";
-export * from "./contributions";
-export * from "./plugin";
+export {
+  HOST_API,
+  PLUGIN_CAPABILITIES,
+  PluginCapability,
+  PluginId,
+  PluginManifest,
+  SchemaValue,
+} from "./manifest";
+
+export { configJsonSchema, UnsupportedConfigSchema } from "./config-schema";
+
+export { AccessMode, DeclaredCapabilities, ProviderDefinition } from "./contributions";
+
+export {
+  PluginError,
+  registerProvider,
+  type ActivationContext,
+  type Deactivate,
+  type KeyValueStore,
+  type Plugin,
+  type PluginSecrets,
+  type ProviderRegistration,
+  type RegistrationHost,
+} from "./plugin";
