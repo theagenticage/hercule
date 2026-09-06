@@ -120,6 +120,16 @@ const TABLE = {
     method: "POST",
     path: "/api/v1/runners/join-tokens",
   },
+  "runner.queryJoinTokens": {
+    requires: "infra.write",
+    method: "GET",
+    path: "/api/v1/runners/join-tokens",
+  },
+  "runner.revokeJoinToken": {
+    requires: "infra.write",
+    method: "DELETE",
+    path: "/api/v1/runners/join-tokens/:id",
+  },
 
   "plugin.query": { requires: "infra.read", method: "GET", path: "/api/v1/plugins" },
   "plugin.read": { requires: "infra.read", method: "GET", path: "/api/v1/plugins/:id" },

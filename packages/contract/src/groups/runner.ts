@@ -154,6 +154,19 @@ export const MintedJoinToken = Schema.Struct({
 
 export type MintedJoinToken = Schema.Schema.Type<typeof MintedJoinToken>;
 
+/**
+ * A minted token that has not been spent and has not run out, as the fleet
+ * lists it. Neither the token nor its hash is here: this is what says a machine
+ * is still expected, not a second copy of the invitation.
+ */
+export const JoinTokenRef = Schema.Struct({
+  id: Id,
+  createdAt: Timestamp,
+  expiresAt: Timestamp,
+});
+
+export type JoinTokenRef = Schema.Schema.Type<typeof JoinTokenRef>;
+
 export const runner = HttpApiGroup.make("runner")
   .add(
     HttpApiEndpoint.get("query", "/runners", {
@@ -199,6 +212,17 @@ export const runner = HttpApiGroup.make("runner")
     HttpApiEndpoint.post("createJoinToken", "/runners/join-tokens", {
       success: HttpApiSchema.status(201)(MintedJoinToken),
       error: [Unauthenticated, Forbidden, Validation, Internal],
+    }),
+    // A token lives an hour and a fleet is enlisted one machine at a time, so
+    // the whole outstanding set is one answer rather than a page.
+    HttpApiEndpoint.get("queryJoinTokens", "/runners/join-tokens", {
+      success: Schema.Array(JoinTokenRef),
+      error: [Unauthenticated, Forbidden, Internal],
+    }),
+    HttpApiEndpoint.delete("revokeJoinToken", "/runners/join-tokens/:id", {
+      params: { id: Id },
+      success: Schema.Struct({}),
+      error: [Unauthenticated, Forbidden, Validation, NotFound, Internal],
     }),
   )
   .middleware(Authenticated);

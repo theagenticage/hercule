@@ -200,7 +200,9 @@ const runnerRoutes = HttpApiBuilder.group(api, "runner", (handlers) =>
         operation(runners.retire({ id: params.id, ...payload })),
       )
       .handle("refreshFacts", ({ params }) => operation(runners.refreshFacts(params)))
-      .handle("createJoinToken", () => operation(runners.createJoinToken()));
+      .handle("createJoinToken", () => operation(runners.createJoinToken()))
+      .handle("queryJoinTokens", () => operation(runners.queryJoinTokens()))
+      .handle("revokeJoinToken", ({ params }) => operation(runners.revokeJoinToken(params)));
   }),
 );
 

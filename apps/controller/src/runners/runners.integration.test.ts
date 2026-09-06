@@ -9,9 +9,10 @@
 import { describe, expect, it } from "vitest";
 import { Effect } from "effect";
 import type { Runner, RunnerDetail } from "@hydra/contract";
-import { uuidFromString } from "../db";
+import { uuidFromString, uuidToString } from "../db";
+import { hashToken } from "../credentials";
 import type { ServerHarness } from "../http/testing";
-import { SETUP_TOKEN, completeSetup, get, post, send, withServer } from "../http/testing";
+import { SETUP_TOKEN, completeSetup, del, get, post, send, withServer } from "../http/testing";
 
 interface RunnerPage {
   readonly items: ReadonlyArray<Runner>;
@@ -90,25 +91,30 @@ const joinTokens = async (
   return { table, rows: await allRows(sql, table) };
 };
 
+/** A value that reads as an instant, as milliseconds; anything else, `undefined`. */
+const instantOf = (value: unknown): number | undefined =>
+  typeof value === "string" && !Number.isNaN(Date.parse(value)) ? Date.parse(value) : undefined;
+
 /**
- * Ages the token that expires at this instant by two hours, because nothing
- * over the wire can wait an hour. Every instant on the row moves together, so
- * what the row describes is a token minted two hours ago and expired one hour
- * ago rather than one that expired before it was minted; the columns are found
- * by their values, so no column name is written here. The write is keyed on
- * `rowid`, which every SQLite table has, because two tokens minted in the same
- * millisecond share every timestamp there is.
+ * Ages the token with this id by two hours, because nothing over the wire can
+ * wait an hour. Every instant on the row moves together, so what the row
+ * describes is a token minted two hours ago and expired one hour ago rather
+ * than one that expired before it was minted; the columns are found by their
+ * values, so no column name is written here. The row is found by its id,
+ * because two tokens minted in the same millisecond share every timestamp
+ * there is, and the write is keyed on `rowid`, which every SQLite table has.
  */
-const expire = async (sql: ServerHarness["sql"], expiresAt: string): Promise<void> => {
+const expireById = async (sql: ServerHarness["sql"], id: string): Promise<void> => {
   const TWO_HOURS = 2 * 60 * 60 * 1000;
   const { table, rows } = await joinTokens(sql);
-  const instant = Date.parse(expiresAt);
-  const parsed = (value: unknown): number | undefined =>
-    typeof value === "string" && !Number.isNaN(Date.parse(value)) ? Date.parse(value) : undefined;
-  const row = rows.find((one) => Object.values(one).some((value) => parsed(value) === instant));
-  expect(row, `no column holds the expiry ${expiresAt} the mint answered with`).toBeDefined();
+  const row = rows.find((one) =>
+    Object.values(one).some(
+      (value) => value instanceof Uint8Array && value.length === 16 && uuidToString(value) === id,
+    ),
+  );
+  expect(row, `no join token row has the id ${id}`).toBeDefined();
   const moved = Object.entries(row!).flatMap(([column, value]) => {
-    const at = parsed(value);
+    const at = instantOf(value);
     return at === undefined ? [] : [[column, new Date(at - TWO_HOURS).toISOString()] as const];
   });
   const sets = moved.map(([column]) => `${column} = ?`).join(", ");
@@ -131,6 +137,43 @@ const mint = async (
   expect(response.status, await response.clone().text()).toBe(201);
   return (await response.json()) as { token: string; expiresAt: string };
 };
+
+/** What the fleet is shown about a token that is still outstanding. */
+interface ListedJoinToken {
+  readonly id: string;
+  readonly createdAt: string;
+  readonly expiresAt: string;
+}
+
+/**
+ * The outstanding tokens, as the fleet's "Add machine" spot reads them. A whole
+ * outstanding set is one answer: a token lives an hour and a fleet is enlisted
+ * one machine at a time, so there is no page to turn.
+ */
+const outstanding = async (
+  base: string,
+  token: string,
+): Promise<ReadonlyArray<ListedJoinToken>> => {
+  const response = await get(base, "/api/v1/runners/join-tokens", token);
+  expect(response.status, await response.clone().text()).toBe(200);
+  const body = await response.json();
+  expect(Array.isArray(body), JSON.stringify(body)).toBe(true);
+  return body as ReadonlyArray<ListedJoinToken>;
+};
+
+/** Takes a minted token back, the way the Revoke beside it does. */
+const revoke = (base: string, token: string, id: string): Promise<Response> =>
+  del(base, `/api/v1/runners/join-tokens/${id}`, token);
+
+/**
+ * The ids of the tokens minted so far, oldest first. A mint answers with the
+ * token and its expiry but not its id, and the id is what a revoke names; the
+ * trail the mint writes is where a caller with a credential can find it.
+ */
+const mintedIds = async (harness: ServerHarness): Promise<ReadonlyArray<string>> =>
+  (await harness.audit("runner.joinToken.minted")).map(
+    (entry) => entry.payload["joinTokenId"] as string,
+  );
 
 /** The join exchange, as a machine holding a join token makes it. */
 const joinWith = (base: string, bearer: string, body: unknown): Promise<Response> =>
@@ -550,7 +593,7 @@ describe("POST /runners/join-tokens", () => {
     await withServer(async (harness) => {
       const token = await completeSetup(harness.base);
       const stale = await mint(harness.base, token);
-      await expire(harness.sql, stale.expiresAt);
+      await expireById(harness.sql, (await mintedIds(harness))[0]!);
 
       // The "Add machine" spot mints one every time it is opened, so without
       // this the table would grow with the number of times somebody looked.
@@ -638,7 +681,7 @@ describe("POST /runners/join", () => {
     await withServer(async (harness) => {
       const token = await completeSetup(harness.base);
       const minted = await mint(harness.base, token);
-      await expire(harness.sql, minted.expiresAt);
+      await expireById(harness.sql, (await mintedIds(harness))[0]!);
 
       const response = await join(harness.base, minted.token);
       expect(response.status).toBe(401);
@@ -1076,6 +1119,101 @@ describe("what retiring a runner leaves behind", () => {
       // retirement nothing else records.
       const entries = await harness.audit("runner.retired");
       expect(entries.map((entry) => entry.payload["lostDefaultRunner"])).toEqual([false, true]);
+    });
+  });
+});
+
+describe("GET /runners/join-tokens", () => {
+  it("lists the tokens that can still be spent, and nothing anybody could join with", async () => {
+    await withServer(async (harness) => {
+      const token = await completeSetup(harness.base);
+
+      // All three are minted before either of the first two is put out of use:
+      // a mint sweeps the expired rows away, so ageing one out first would
+      // leave the listing right for the wrong reason.
+      const spent = await mint(harness.base, token);
+      const stale = await mint(harness.base, token);
+      const live = await mint(harness.base, token);
+      const [, staleId, liveId] = await mintedIds(harness);
+
+      expect((await join(harness.base, spent.token)).status).toBe(201);
+      await expireById(harness.sql, staleId!);
+
+      // A token that has been used and one that ran out are both worthless to
+      // whoever holds them, so neither is something the fleet still offers.
+      const items = await outstanding(harness.base, token);
+      expect(items.map((item) => item.id)).toEqual([liveId]);
+      const only = items[0]!;
+      expect(Object.keys(only).sort()).toEqual(["createdAt", "expiresAt", "id"]);
+      expect(Number.isNaN(Date.parse(only.createdAt)), only.createdAt).toBe(false);
+      expect(Date.parse(only.expiresAt)).toBe(Date.parse(live.expiresAt));
+
+      // Whoever reads this listing can mint a token of their own; what they
+      // must not be handed is the one somebody is carrying to another machine.
+      const body = JSON.stringify(items);
+      for (const minted of [spent, stale, live]) {
+        expect(body).not.toContain(minted.token);
+        expect(body).not.toContain(hashToken(minted.token));
+      }
+    });
+  });
+});
+
+describe("DELETE /runners/join-tokens/{id}", () => {
+  it("takes an outstanding token back, and no machine can join with it after", async () => {
+    await withServer(async (harness) => {
+      const token = await completeSetup(harness.base);
+      const revoked = await mint(harness.base, token);
+      const other = await mint(harness.base, token);
+      const [revokedId, otherId] = await mintedIds(harness);
+
+      const response = await revoke(harness.base, token, revokedId!);
+      expect(response.status, await response.clone().text()).toBe(200);
+
+      // The token was pasted into a chat window an hour too early: the point of
+      // revoking it is that the machine reading it is turned away.
+      expect((await join(harness.base, revoked.token)).status).toBe(401);
+      expect(await runnerCount(harness.base, token)).toBe(0);
+      expect((await outstanding(harness.base, token)).map((one) => one.id)).toEqual([otherId]);
+
+      const entries = await harness.audit("runner.joinToken.revoked");
+      expect(entries).toHaveLength(1);
+      expect(entries[0]?.actor).toBe("user");
+      expect(JSON.stringify(entries[0]?.payload), "the trail names the token taken back").toContain(
+        revokedId,
+      );
+      expect(JSON.stringify(entries[0]?.payload)).not.toContain(revoked.token);
+
+      // Revoking one token is not revoking the fleet's outstanding invitations.
+      expect((await join(harness.base, other.token)).status).toBe(201);
+    });
+  });
+
+  it("has nothing to take back for an id that is unknown, spent or expired", async () => {
+    await withServer(async (harness) => {
+      const token = await completeSetup(harness.base);
+      const spent = await mint(harness.base, token);
+      await mint(harness.base, token);
+      const live = await mint(harness.base, token);
+      const [spentId, staleId, liveId] = await mintedIds(harness);
+
+      // Minted first, put out of use after, for the same reason as above: the
+      // third mint's sweep would have taken an already-expired row with it.
+      expect((await join(harness.base, spent.token)).status).toBe(201);
+      await expireById(harness.sql, staleId!);
+
+      for (const id of [UNKNOWN_ID, spentId!, staleId!]) {
+        const refused = await revoke(harness.base, token, id);
+        expect(refused.status, id).toBe(404);
+        expect(await refused.json()).toMatchObject({ error: { code: "not_found" } });
+      }
+      expect(await harness.audit("runner.joinToken.revoked")).toHaveLength(0);
+
+      // The one token that was still outstanding was left alone, and can be
+      // taken back.
+      expect((await outstanding(harness.base, token)).map((one) => one.id)).toEqual([liveId]);
+      expect((await revoke(harness.base, token, liveId!)).status).toBe(200);
+      expect((await join(harness.base, live.token)).status).toBe(401);
     });
   });
 });

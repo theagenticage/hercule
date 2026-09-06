@@ -30,6 +30,7 @@ import {
   type Conflict,
   type Forbidden,
   type InvalidState,
+  type JoinTokenRef,
   type MintedJoinToken,
   type NotFound,
   type Runner,
@@ -82,6 +83,9 @@ interface Change {
 }
 
 const NO_SUCH_RUNNER = "no such runner";
+
+/** A spent, an expired and an unminted token all read the same: not outstanding. */
+const NO_SUCH_JOIN_TOKEN = "no such join token";
 
 const NAME_TAKEN = "another runner already has that name";
 
@@ -411,6 +415,48 @@ const make = Effect.gen(function* () {
               at,
             });
             return minted;
+          }),
+        );
+      }),
+
+    /**
+     * The tokens the fleet is still expecting a machine to present. Never the
+     * token or its hash: this says an invitation is outstanding, and is not a
+     * second copy of one.
+     */
+    queryJoinTokens: (): Effect.Effect<
+      ReadonlyArray<JoinTokenRef>,
+      Unauthenticated | Forbidden | SqlError
+    > =>
+      Effect.gen(function* () {
+        yield* requireGrant("runner.queryJoinTokens");
+        return yield* joinTokens.outstanding(yield* nowIso);
+      }),
+
+    /** Takes back an invitation that was minted and has not been spent. */
+    revokeJoinToken: (
+      input: Identified,
+    ): Effect.Effect<
+      Record<string, never>,
+      Unauthenticated | Forbidden | Validation | NotFound | SqlError
+    > =>
+      Effect.gen(function* () {
+        yield* requireGrant("runner.revokeJoinToken");
+        const { id } = yield* Effect.mapError(decodeIdentified(input), validationOf);
+        return yield* withTransaction(
+          sql,
+          Effect.gen(function* () {
+            const at = yield* nowIso;
+            if (!(yield* joinTokens.revoke(id, at))) {
+              return yield* Effect.fail(notFound(NO_SUCH_JOIN_TOKEN));
+            }
+            yield* audit.append({
+              kind: "runner.joinToken.revoked",
+              actor: USER_ACTOR,
+              payload: { joinTokenId: id },
+              at,
+            });
+            return {};
           }),
         );
       }),
