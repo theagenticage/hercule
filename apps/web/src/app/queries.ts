@@ -92,6 +92,31 @@ export const runnersQuery = (client: HydraClient) =>
   });
 
 /**
+ * One machine on its own, which is what its page reads. A runner reached by
+ * address is not necessarily on a listing this browser has fetched, and the
+ * page shows more than a row does, so it is read rather than looked up.
+ *
+ * A refusal is answered at once rather than retried: a runner that is not there
+ * answers 404 for good.
+ */
+export const runnerQuery = (client: HydraClient, id: string) =>
+  queryOptions({
+    queryKey: queryKeys.runner(id),
+    queryFn: () => client.runner.read({ params: { id } }),
+    retry: false,
+  });
+
+/**
+ * The join tokens still outstanding. A token lives an hour and is spent by one
+ * machine, so this is a handful at most and the whole set is one answer.
+ */
+export const joinTokensQuery = (client: HydraClient) =>
+  queryOptions({
+    queryKey: queryKeys.joinTokens(),
+    queryFn: () => client.runner.queryJoinTokens(),
+  });
+
+/**
  * Every plugin the binary was built with, which is the whole set: the registry
  * is compiled in, so there is nothing to page through or narrow by.
  */

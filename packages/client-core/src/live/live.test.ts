@@ -591,4 +591,21 @@ describe("queryKeysFor", () => {
   it("covers every record of the topic when no id is named", () => {
     assert.deepStrictEqual(queryKeysFor("task", []), [["tasks"], ["task"]]);
   });
+
+  it("maps a runner push to the fleet listing and the page of each machine named", () => {
+    assert.deepStrictEqual(queryKeysFor("runner", ["r1", "r2"]), [
+      ["runners"],
+      ["runner", "r1"],
+      ["runner", "r2"],
+    ]);
+
+    // The same builders the fleet and the runner page are keyed on.
+    assert.deepStrictEqual(queryKeysFor("runner", ["r1"]), [
+      queryKeys.runners(),
+      queryKeys.runner("r1"),
+    ]);
+
+    // A push naming no machine means every one of them moved.
+    assert.deepStrictEqual(queryKeysFor("runner", []), [["runners"], ["runner"]]);
+  });
 });

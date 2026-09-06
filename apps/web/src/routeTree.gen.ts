@@ -23,6 +23,7 @@ import { Route as ShellSettingsRouteImport } from './routes/_shell/settings'
 import { Route as ShellWorkflowsRouteImport } from './routes/_shell/workflows'
 import { Route as OnboardingTimezoneRouteImport } from './routes/onboarding/timezone'
 import { Route as ShellFleetIndexRouteImport } from './routes/_shell/fleet/index'
+import { Route as ShellFleetRunnerIdRouteImport } from './routes/_shell/fleet/$runnerId'
 import { Route as ShellSettingsIndexRouteImport } from './routes/_shell/settings/index'
 import { Route as ShellSettingsAssistantsRouteImport } from './routes/_shell/settings/assistants'
 import { Route as ShellSettingsBoundsRouteImport } from './routes/_shell/settings/bounds'
@@ -104,6 +105,11 @@ const ShellFleetIndexRoute = ShellFleetIndexRouteImport.update({
   path: '/fleet/',
   getParentRoute: () => ShellRoute,
 } as any)
+const ShellFleetRunnerIdRoute = ShellFleetRunnerIdRouteImport.update({
+  id: '/fleet/$runnerId',
+  path: '/fleet/$runnerId',
+  getParentRoute: () => ShellRoute,
+} as any)
 const ShellSettingsIndexRoute = ShellSettingsIndexRouteImport.update({
   id: '/',
   path: '/',
@@ -174,6 +180,7 @@ export interface FileRoutesByFullPath {
   '/settings': typeof ShellSettingsRouteWithChildren
   '/workflows': typeof ShellWorkflowsRoute
   '/onboarding/timezone': typeof OnboardingTimezoneRoute
+  '/fleet/$runnerId': typeof ShellFleetRunnerIdRoute
   '/settings/assistants': typeof ShellSettingsAssistantsRoute
   '/settings/bounds': typeof ShellSettingsBoundsRoute
   '/settings/identities': typeof ShellSettingsIdentitiesRoute
@@ -199,6 +206,7 @@ export interface FileRoutesByTo {
   '/workflows': typeof ShellWorkflowsRoute
   '/onboarding/timezone': typeof OnboardingTimezoneRoute
   '/': typeof ShellIndexRoute
+  '/fleet/$runnerId': typeof ShellFleetRunnerIdRoute
   '/settings/assistants': typeof ShellSettingsAssistantsRoute
   '/settings/bounds': typeof ShellSettingsBoundsRoute
   '/settings/identities': typeof ShellSettingsIdentitiesRoute
@@ -227,6 +235,7 @@ export interface FileRoutesById {
   '/_shell/workflows': typeof ShellWorkflowsRoute
   '/onboarding/timezone': typeof OnboardingTimezoneRoute
   '/_shell/': typeof ShellIndexRoute
+  '/_shell/fleet/$runnerId': typeof ShellFleetRunnerIdRoute
   '/_shell/settings/assistants': typeof ShellSettingsAssistantsRoute
   '/_shell/settings/bounds': typeof ShellSettingsBoundsRoute
   '/_shell/settings/identities': typeof ShellSettingsIdentitiesRoute
@@ -255,6 +264,7 @@ export interface FileRouteTypes {
     | '/settings'
     | '/workflows'
     | '/onboarding/timezone'
+    | '/fleet/$runnerId'
     | '/settings/assistants'
     | '/settings/bounds'
     | '/settings/identities'
@@ -280,6 +290,7 @@ export interface FileRouteTypes {
     | '/workflows'
     | '/onboarding/timezone'
     | '/'
+    | '/fleet/$runnerId'
     | '/settings/assistants'
     | '/settings/bounds'
     | '/settings/identities'
@@ -307,6 +318,7 @@ export interface FileRouteTypes {
     | '/_shell/workflows'
     | '/onboarding/timezone'
     | '/_shell/'
+    | '/_shell/fleet/$runnerId'
     | '/_shell/settings/assistants'
     | '/_shell/settings/bounds'
     | '/_shell/settings/identities'
@@ -426,6 +438,13 @@ declare module '@tanstack/react-router' {
       path: '/fleet'
       fullPath: '/fleet/'
       preLoaderRoute: typeof ShellFleetIndexRouteImport
+      parentRoute: typeof ShellRoute
+    }
+    '/_shell/fleet/$runnerId': {
+      id: '/_shell/fleet/$runnerId'
+      path: '/fleet/$runnerId'
+      fullPath: '/fleet/$runnerId'
+      preLoaderRoute: typeof ShellFleetRunnerIdRouteImport
       parentRoute: typeof ShellRoute
     }
     '/_shell/settings/': {
@@ -548,6 +567,7 @@ interface ShellRouteChildren {
   ShellSettingsRoute: typeof ShellSettingsRouteWithChildren
   ShellWorkflowsRoute: typeof ShellWorkflowsRoute
   ShellIndexRoute: typeof ShellIndexRoute
+  ShellFleetRunnerIdRoute: typeof ShellFleetRunnerIdRoute
   ShellFleetIndexRoute: typeof ShellFleetIndexRoute
   ShellTasksIndexRoute: typeof ShellTasksIndexRoute
 }
@@ -562,6 +582,7 @@ const ShellRouteChildren: ShellRouteChildren = {
   ShellSettingsRoute: ShellSettingsRouteWithChildren,
   ShellWorkflowsRoute: ShellWorkflowsRoute,
   ShellIndexRoute: ShellIndexRoute,
+  ShellFleetRunnerIdRoute: ShellFleetRunnerIdRoute,
   ShellFleetIndexRoute: ShellFleetIndexRoute,
   ShellTasksIndexRoute: ShellTasksIndexRoute,
 }

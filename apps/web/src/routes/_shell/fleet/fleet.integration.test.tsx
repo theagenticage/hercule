@@ -16,6 +16,7 @@
 import { describe, expect, it } from "vitest";
 import { act, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { formatStamp } from "@hydra/client-core";
 import { renderApp, stubApi, type Call, type Handler } from "../../../app/testing";
 
 /** The version this controller answers `controller.read` with. */
@@ -102,7 +103,37 @@ const HETZNER: Fixture = {
   lastSeenAt: "2026-09-05T08:02:00.000Z",
 };
 
+/** A machine the owner is emptying: reachable, but on its way out of the fleet. */
+const SIRIUS: Fixture = {
+  ...HETZNER,
+  id: "01a06d02-d222-7b1f-9c4e-ad2e6b39f0aa",
+  name: "sirius",
+  connectivity: "online",
+  lifecycle: "draining",
+  version: CONTROLLER_VERSION,
+  labels: [],
+};
+
 const TOKEN = "jt_a-token-nobody-else-holds";
+
+/** The timezone the stored settings below put the reader in. */
+const ZONE = "Europe/Amsterdam";
+
+interface TokenFixture {
+  readonly id: string;
+  readonly createdAt: string;
+  readonly expiresAt: string;
+}
+
+/** A token minted a moment ago, running out in `minutes`. */
+const outstanding = (id: string, minutes: number): TokenFixture => ({
+  id,
+  createdAt: new Date(Date.now() - 60_000).toISOString(),
+  expiresAt: new Date(Date.now() + minutes * 60_000).toISOString(),
+});
+
+const EXPIRING_SOON = outstanding("01a06d02-e100-7c00-8a00-000000000001", 12);
+const EXPIRING_LATER = outstanding("01a06d02-e100-7c00-8a00-000000000002", 55);
 
 /** A controller holding the fleet given, and answering for itself. */
 const controller = (
@@ -113,7 +144,7 @@ const controller = (
   "GET /api/v1/settings": {
     body: {
       controller: {},
-      user: { "onboarding.completedSteps": ["timezone"], timezone: "Europe/Amsterdam" },
+      user: { "onboarding.completedSteps": ["timezone"], timezone: ZONE },
     },
   },
   "GET /api/v1/controller": {
@@ -129,6 +160,8 @@ const controller = (
     status: 201,
     body: { token: TOKEN, expiresAt: "2026-09-05T10:14:00.000Z" },
   },
+  // Nothing is outstanding unless a test says so; the screen asks either way.
+  "GET /api/v1/runners/join-tokens": { body: [] },
   ...extra,
 });
 
@@ -186,6 +219,25 @@ const rowFor = async (name: string, others: readonly string[]): Promise<HTMLElem
  */
 const showsSize = (text: string, bytes: number): boolean =>
   new RegExp(`(^|[^\\d.])${(bytes / 1024 ** 3).toFixed(0)} ?GiB`).test(text);
+
+/**
+ * Whether a token's expiry reached the reader.
+ *
+ * When a token runs out is a stamp, read in the user's own zone the way every
+ * other moment on this screen is. A countdown would be a second reading of time
+ * in one app, which is the decision this pins.
+ */
+const showsExpiry = (text: string, token: TokenFixture): boolean => {
+  const stamp = formatStamp(new Date(token.expiresAt), ZONE);
+  return stamp !== undefined && text.includes(stamp);
+};
+
+/** Every Revoke the token list is offering right now. */
+const revokes = (): readonly HTMLElement[] => screen.queryAllByRole("button", { name: /revoke/i });
+
+/** The link a row carries, whether it wraps the row or sits inside it. */
+const linkIn = (row: HTMLElement): HTMLAnchorElement | null =>
+  row.closest("a") ?? row.querySelector("a");
 
 describe("Fleet", () => {
   it("shows what each machine is and what it reported about itself", async () => {
@@ -311,5 +363,117 @@ describe("Fleet > live", () => {
     });
     // The row came from a fresh listing, not from the push itself.
     expect(listings(api).length).toBeGreaterThan(before);
+  });
+});
+
+describe("Fleet > outstanding tokens", () => {
+  it("lists the tokens still waiting to be spent, and when each runs out", async () => {
+    await open([MOSS], {
+      extra: { "GET /api/v1/runners/join-tokens": { body: [EXPIRING_SOON, EXPIRING_LATER] } },
+    });
+
+    await waitFor(() => {
+      expect(revokes()).toHaveLength(2);
+    });
+    const shown = reading();
+    expect(showsExpiry(shown, EXPIRING_SOON), `the first expiry in: ${shown}`).toBe(true);
+    expect(showsExpiry(shown, EXPIRING_LATER), `the second expiry in: ${shown}`).toBe(true);
+  });
+
+  it("offers nothing to take back when no token is outstanding", async () => {
+    await open([MOSS]);
+
+    await screen.findByRole("button", { name: /add machine/i });
+    expect(revokes()).toEqual([]);
+  });
+
+  it("takes a token back, and drops it from the list", async () => {
+    const user = userEvent.setup();
+    let held: readonly TokenFixture[] = [EXPIRING_SOON, EXPIRING_LATER];
+    const { api } = await open([MOSS], {
+      extra: {
+        "GET /api/v1/runners/join-tokens": () => ({ body: held }),
+        [`DELETE /api/v1/runners/join-tokens/${EXPIRING_SOON.id}`]: () => {
+          held = held.filter((token) => token.id !== EXPIRING_SOON.id);
+          return { body: {} };
+        },
+        [`DELETE /api/v1/runners/join-tokens/${EXPIRING_LATER.id}`]: () => {
+          held = held.filter((token) => token.id !== EXPIRING_LATER.id);
+          return { body: {} };
+        },
+      },
+    });
+
+    await waitFor(() => {
+      expect(revokes()).toHaveLength(2);
+    });
+    const first = revokes()[0];
+    expect(first).toBeDefined();
+    await user.click(first!);
+
+    // Which token that button was for is read off the request rather than
+    // guessed from the order the list happens to be in.
+    const deletes = api.calls.filter(
+      (call) => call.method === "DELETE" && call.path.startsWith("/api/v1/runners/join-tokens/"),
+    );
+    expect(deletes).toHaveLength(1);
+    const revoked = [EXPIRING_SOON, EXPIRING_LATER].find(
+      (token) => deletes[0]?.path === `/api/v1/runners/join-tokens/${token.id}`,
+    );
+    expect(
+      revoked,
+      `the revoke named a listed token, not ${String(deletes[0]?.path)}`,
+    ).toBeDefined();
+    const survivor = revoked === EXPIRING_SOON ? EXPIRING_LATER : EXPIRING_SOON;
+
+    await waitFor(() => {
+      expect(revokes()).toHaveLength(1);
+    });
+    expect(showsExpiry(reading(), survivor)).toBe(true);
+    expect(showsExpiry(reading(), revoked!)).toBe(false);
+  });
+});
+
+describe("Fleet > add machine > personal", () => {
+  it("puts the reserved flag on the command the machine will run", async () => {
+    const user = userEvent.setup();
+    await open([MOSS]);
+
+    await user.click(screen.getByRole("button", { name: /add machine/i }));
+    const plain = `hydra runner join ${window.location.origin} --token ${TOKEN}`;
+    await waitFor(() => {
+      expect(reading()).toContain(plain);
+    });
+    expect(reading()).not.toContain("--reserved");
+
+    await user.click(screen.getByRole("checkbox", { name: /personal machine/i }));
+
+    await waitFor(() => {
+      expect(reading()).toContain(`${plain} --reserved`);
+    });
+
+    // The flag is the tick's, so unticking takes it back off.
+    await user.click(screen.getByRole("checkbox", { name: /personal machine/i }));
+    await waitFor(() => {
+      expect(reading()).not.toContain("--reserved");
+    });
+    expect(reading()).toContain(plain);
+  });
+});
+
+describe("Fleet > opening a machine", () => {
+  it("says where each machine stands and leads to the machine itself", async () => {
+    await open([MOSS, SIRIUS]);
+
+    const moss = await rowFor(MOSS.name, [SIRIUS.name]);
+    expect(reading(moss)).toContain(MOSS.connectivity);
+    expect(linkIn(moss)?.getAttribute("href")).toBe(`/fleet/${MOSS.id}`);
+
+    // A machine on its way out says so: its lifecycle is the reason a reader
+    // would open it, and it is not what its connectivity says.
+    const sirius = await rowFor(SIRIUS.name, [MOSS.name]);
+    expect(reading(sirius)).toContain(SIRIUS.connectivity);
+    expect(reading(sirius)).toContain(SIRIUS.lifecycle);
+    expect(linkIn(sirius)?.getAttribute("href")).toBe(`/fleet/${SIRIUS.id}`);
   });
 });

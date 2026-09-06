@@ -1,0 +1,94 @@
+/**
+ * Editing and retiring one runner: what a form draft means, where a refusal
+ * belongs, and what has to be said before a machine is retired. All three are
+ * readings of the domain, so they live here with a test rather than in a
+ * component.
+ */
+import type { Runner, RunnerUpdateInput } from "@hydra/contract";
+import { ApiError } from "./errors";
+
+/** The four fields a runner's owner writes, as a form holds them. */
+export interface RunnerDraft {
+  readonly name: string;
+  readonly labels: ReadonlyArray<string>;
+  readonly maxConcurrentSessions: number;
+  readonly reserved: boolean;
+}
+
+/** The draft a form opens on. */
+export const runnerDraft = (runner: Runner): RunnerDraft => ({
+  name: runner.name,
+  labels: runner.labels,
+  maxConcurrentSessions: runner.maxConcurrentSessions,
+  reserved: runner.reserved,
+});
+
+const sameLabels = (left: ReadonlyArray<string>, right: ReadonlyArray<string>): boolean =>
+  left.length === right.length && left.every((label, index) => label === right[index]);
+
+/**
+ * What a draft asks the controller to change, and nothing else.
+ *
+ * A patch naming a field the runner already holds is a write like any other:
+ * it stamps an actor and appends an audit row. Sending only what moved keeps
+ * the trail readable, and an empty patch says the user pressed Save on an
+ * untouched form.
+ */
+export const runnerPatch = (runner: Runner, draft: RunnerDraft): RunnerUpdateInput => ({
+  // The name is trimmed here and nowhere else, so padding a name is not a
+  // change while a field the user has emptied still reads as one: the form is
+  // what refuses to submit an empty name, and a draft that differs from the
+  // machine is what stops a fresh answer refilling the field under the user.
+  ...(draft.name.trim() === runner.name ? {} : { name: draft.name.trim() }),
+  ...(sameLabels(draft.labels, runner.labels) ? {} : { labels: [...draft.labels] }),
+  ...(draft.maxConcurrentSessions === runner.maxConcurrentSessions
+    ? {}
+    : { maxConcurrentSessions: draft.maxConcurrentSessions }),
+  ...(draft.reserved === runner.reserved ? {} : { reserved: draft.reserved }),
+});
+
+/**
+ * Which field a refused patch was refused over.
+ *
+ * The controller answers one `conflict` per patch and names no field, so the
+ * patch itself is what attributes it: a name it did not send cannot be the
+ * name that was taken. A patch moving both fields at once leaves no way to
+ * tell them apart, and the refusal is answered whole rather than pinned on a
+ * field that may be innocent.
+ */
+export const runnerConflictField = (
+  error: unknown,
+  patch: RunnerUpdateInput,
+): "name" | "reserved" | null => {
+  if (!(error instanceof ApiError) || error.code !== "conflict") return null;
+  if (patch.name !== undefined && patch.reserved !== undefined) return null;
+  if (patch.name !== undefined) return "name";
+  if (patch.reserved !== undefined) return "reserved";
+  return null;
+};
+
+/** What retiring this runner costs, and whether it has to be forced. */
+export interface RetireQuestion {
+  /** What the user is told before confirming, beyond the question itself. */
+  readonly warnings: ReadonlyArray<string>;
+  /** Whether the controller will refuse without being told to do it anyway. */
+  readonly force: boolean;
+}
+
+/**
+ * Retiring is not undoable and the two things it costs are not on the button.
+ * A machine the controller cannot reach may still be running sessions nobody
+ * can see the end of, and retiring the fleet's default leaves it without one.
+ */
+export const retireQuestion = (runner: Runner, defaultRunnerId: string | null): RetireQuestion => {
+  const unreachable = runner.connectivity === "unreachable";
+  return {
+    warnings: [
+      ...(unreachable ? ["This runner is unreachable; retiring it now forces it."] : []),
+      ...(runner.id === defaultRunnerId
+        ? ["This is the default runner; the fleet will have no default."]
+        : []),
+    ],
+    force: unreachable,
+  };
+};
