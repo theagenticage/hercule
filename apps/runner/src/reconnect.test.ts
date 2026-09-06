@@ -12,7 +12,7 @@
  * make a laptop sleep and a network change happen on demand.
  */
 import { describe, expect, it } from "vitest";
-import { Duration, Effect, Fiber, Queue, Stream } from "effect";
+import { Duration, Effect, Fiber, Logger, Queue, Stream } from "effect";
 import { TestClock } from "effect/testing";
 import {
   CLOCK_GAP_LIMIT,
@@ -315,36 +315,51 @@ describe("the reconnect source", () => {
 
 describe("a runner the controller has retired", () => {
   it("stops the loop rather than redialling with a dead credential", async () => {
+    /** Every line the loop logged, so what it said can be asserted. */
+    const said: Array<string> = [];
+    const collecting = Logger.make<unknown, void>(({ message }) => {
+      said.push(String(message));
+    });
+
     await run(
-      Effect.gen(function* () {
-        const count = { at: 0 };
-        const attempt = Effect.suspend(() => {
-          count.at += 1;
-          return Effect.fail(
-            new RunnerRetired({
-              message: "this runner was retired; run `hydra runner join` to re-enlist",
-            }),
+      Effect.provide(
+        Effect.gen(function* () {
+          const count = { at: 0 };
+          const attempt = Effect.suspend(() => {
+            count.at += 1;
+            return Effect.fail(
+              new RunnerRetired({
+                message: "this runner was retired; run `hydra runner join` to re-enlist",
+              }),
+            );
+          });
+          const loop = yield* Effect.forkChild(
+            Effect.result(reconnect({ attempt, signals: Stream.never })),
           );
-        });
-        const loop = yield* Effect.forkChild(
-          Effect.result(reconnect({ attempt, signals: Stream.never })),
-        );
 
-        yield* settle;
-        // Every other ending is worth another dial; this one is the credential
-        // being gone, and no amount of waiting brings it back.
-        const ended = loop.pollUnsafe();
-        expect(ended, "the loop is still trying a controller that will not have it").toBeDefined();
-        expect(count.at).toBe(1);
+          yield* settle;
+          // Every other ending is worth another dial; this one is the credential
+          // being gone, and no amount of waiting brings it back.
+          const ended = loop.pollUnsafe();
+          expect(
+            ended,
+            "the loop is still trying a controller that will not have it",
+          ).toBeDefined();
+          expect(count.at).toBe(1);
 
-        const outcome =
-          ended?._tag === "Success"
-            ? (ended.value as { readonly _tag: string; readonly failure?: unknown })
-            : undefined;
-        expect(outcome?._tag).toBe("Failure");
-        // Carried out rather than logged: the daemon prints it and exits.
-        expect(outcome?.failure).toBeInstanceOf(RunnerRetired);
-      }),
+          const outcome =
+            ended?._tag === "Success"
+              ? (ended.value as { readonly _tag: string; readonly failure?: unknown })
+              : undefined;
+          expect(outcome?._tag).toBe("Failure");
+          // Carried out rather than logged: the daemon prints it and exits.
+          expect(outcome?.failure).toBeInstanceOf(RunnerRetired);
+          // A retirement is not an ending anyone should go looking into, so the
+          // warning every other ending gets is not written for this one.
+          expect(said).toEqual([]);
+        }),
+        Logger.layer([collecting]),
+      ),
     );
   });
 });

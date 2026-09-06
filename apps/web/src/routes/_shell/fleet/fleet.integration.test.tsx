@@ -18,75 +18,14 @@ import { act, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { formatStamp } from "@hydra/client-core";
 import { renderApp, stubApi, type Call, type Handler } from "../../../app/testing";
-
-/** The version this controller answers `controller.read` with. */
-const CONTROLLER_VERSION = "0.4.2";
-
-interface Fixture {
-  readonly id: string;
-  readonly name: string;
-  readonly connectivity: string;
-  readonly lifecycle: string;
-  readonly reserved: boolean;
-  readonly version: string | null;
-  readonly labels: readonly string[];
-  readonly facts: {
-    readonly os: string;
-    readonly arch: string;
-    readonly totalMemoryBytes: number;
-    readonly docker: boolean;
-    readonly toolchains: readonly { name: string; version: string; path: string }[];
-    readonly providers: readonly { name: string; present: boolean }[];
-    readonly identityPort: number;
-  } | null;
-  readonly watermark: {
-    readonly diskFreeBytes: number;
-    readonly availableMemoryBytes: number;
-    readonly acceptingPlacements: boolean;
-  } | null;
-  readonly maxConcurrentSessions: number;
-  readonly lastSeenAt: string | null;
-}
-
-const GIB = 1024 * 1024 * 1024;
-
-/** The machine the browser is on: current, labelled, and reporting everything. */
-const MOSS: Fixture = {
-  id: "01a06d02-beff-7037-9f5b-042822015952",
-  name: "moss",
-  connectivity: "online",
-  lifecycle: "active",
-  reserved: false,
-  version: CONTROLLER_VERSION,
-  labels: ["gpu", "primary"],
-  facts: {
-    os: "darwin",
-    arch: "arm64",
-    totalMemoryBytes: 64 * GIB,
-    docker: true,
-    toolchains: [
-      { name: "git", version: "2.50.1", path: "/usr/bin/git" },
-      { name: "gh", version: "2.99.0", path: "/opt/homebrew/bin/gh" },
-    ],
-    providers: [{ name: "claude", present: true }],
-    identityPort: 4939,
-  },
-  watermark: {
-    diskFreeBytes: 128 * GIB,
-    availableMemoryBytes: 32 * GIB,
-    acceptingPlacements: true,
-  },
-  maxConcurrentSessions: 4,
-  lastSeenAt: "2026-09-05T09:14:00.000Z",
-};
+import { CONTROLLER_VERSION, GIB, MOSS, ZONE, type Fixture } from "./-fixtures";
 
 /** A machine somewhere else, running an older binary than the controller. */
 const HETZNER: Fixture = {
+  ...MOSS,
   id: "01a06d02-c111-7a0e-8b3d-9c1f7c82ebeb",
   name: "hetzner-01",
   connectivity: "unreachable",
-  lifecycle: "active",
-  reserved: false,
   version: "0.3.9",
   labels: ["linux"],
   facts: {
@@ -115,9 +54,6 @@ const SIRIUS: Fixture = {
 };
 
 const TOKEN = "jt_a-token-nobody-else-holds";
-
-/** The timezone the stored settings below put the reader in. */
-const ZONE = "Europe/Amsterdam";
 
 interface TokenFixture {
   readonly id: string;

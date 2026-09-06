@@ -1369,14 +1369,52 @@ describe("refreshing a runner's facts on demand", () => {
           const answered = await late;
           expect(answered.status, await answered.clone().text()).toBe(200);
           expect(((await answered.json()) as RunnerDetail).facts).toEqual(GROWN);
-          // Giving up did not take the request with it: the machine was asked
-          // once, and the answer to that one request is what came back.
-          expect(wire.frames.filter((frame) => frame._tag === "factsRequest")).toHaveLength(1);
+          // Giving up did not take the wait with it: the second caller joined
+          // the wait the first left behind and was answered by the report.
+          expect(wire.frames.filter((frame) => frame._tag === "factsRequest")).toHaveLength(2);
         } finally {
           wire.close();
         }
       },
       { factsDeadline: Duration.seconds(1) },
+    );
+  });
+
+  it("asks again after a request nobody answered, and the next report lands", async () => {
+    await withServer(
+      async (harness) => {
+        const token = await completeSetup(harness.base);
+        const joined = await enlist(harness);
+        const { wire } = await greet(harness.base, joined.credential);
+        try {
+          await rowWhen(
+            harness.base,
+            token,
+            joined.runnerId,
+            (one) => one.connectivity === "online",
+          );
+
+          // The machine says nothing to the first request, and the caller runs
+          // out of time with no report ever arriving.
+          const abandoned = await refreshFacts(harness.base, token, joined.runnerId);
+          expect(abandoned.status).toBe(409);
+          await requestOn(wire);
+
+          // Pressing the button again has to reach the machine. A request the
+          // machine never answered is not one still in flight.
+          const again = refreshFacts(harness.base, token, joined.runnerId);
+          await requestOn(wire);
+          wire.send({ _tag: "factsReport", facts: GROWN });
+
+          const answered = await again;
+          expect(answered.status, await answered.clone().text()).toBe(200);
+          expect(((await answered.json()) as RunnerDetail).facts).toEqual(GROWN);
+          expect(wire.frames.filter((frame) => frame._tag === "factsRequest")).toHaveLength(2);
+        } finally {
+          wire.close();
+        }
+      },
+      { factsDeadline: FACTS_DEADLINE },
     );
   });
 

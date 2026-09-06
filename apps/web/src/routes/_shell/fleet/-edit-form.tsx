@@ -122,7 +122,9 @@ export function EditForm({
         ) : null}
       </div>
       <div className="flex items-center gap-3">
-        <Button type="submit" variant="form" disabled={save.isPending}>
+        {/* An untouched form has no patch to send, and the controller refuses
+            an empty one, so Save is not offered until something has moved. */}
+        <Button type="submit" variant="form" disabled={save.isPending || !edited}>
           Save
         </Button>
         <SaveStatus saved={save.isSuccess} failure={blamed === null ? message : null} />

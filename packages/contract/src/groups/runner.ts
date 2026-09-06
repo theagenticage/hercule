@@ -52,7 +52,7 @@ export const MAX_RUNNER_LABELS = 64;
  * Whether the controller can reach the machine. Written by the socket and by
  * nobody else.
  */
-export const RUNNER_CONNECTIVITIES = ["online", "offline", "unreachable"] as const;
+const RUNNER_CONNECTIVITIES = ["online", "offline", "unreachable"] as const;
 
 export const RunnerConnectivity = Schema.Literals(RUNNER_CONNECTIVITIES);
 
@@ -63,7 +63,7 @@ export type RunnerConnectivity = Schema.Schema.Type<typeof RunnerConnectivity>;
  * by nobody else: the two axes move independently, and a runner being drained
  * is exactly the one whose reachability somebody is watching.
  */
-export const RUNNER_LIFECYCLES = ["active", "draining", "retired"] as const;
+const RUNNER_LIFECYCLES = ["active", "draining", "retired"] as const;
 
 export const RunnerLifecycle = Schema.Literals(RUNNER_LIFECYCLES);
 

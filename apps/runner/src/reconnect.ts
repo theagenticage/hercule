@@ -59,16 +59,19 @@ export const reconnect = <E>(options: ReconnectOptions<E>): Effect.Effect<never,
       // has retired this runner will not have it back, whatever it waits.
       const retired = yield* Effect.catchCause(
         Effect.as(options.attempt, undefined),
-        (cause: Cause.Cause<E>) =>
-          Effect.as(
+        (cause: Cause.Cause<E>) => {
+          const ended = Option.getOrUndefined(
+            Option.filter(Cause.findErrorOption(cause), (error) => error instanceof RunnerRetired),
+          );
+          // A retirement is not an ending anyone should go looking into, so it
+          // is picked out before the warning: the caller's own message about
+          // re-enlisting is the only line it should produce.
+          if (ended !== undefined) return Effect.succeed(ended);
+          return Effect.as(
             Effect.logWarning("The connection to the controller ended", cause),
-            Option.getOrUndefined(
-              Option.filter(
-                Cause.findErrorOption(cause),
-                (error) => error instanceof RunnerRetired,
-              ),
-            ),
-          ),
+            undefined,
+          );
+        },
       );
       if (retired !== undefined) return yield* Effect.fail(retired);
       const held = (yield* Clock.currentTimeMillis) - started;

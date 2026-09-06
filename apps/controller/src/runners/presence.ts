@@ -164,12 +164,15 @@ const make = Effect.gen(function* () {
         const held = reachable.get(id);
         if (held === undefined) return false;
         // A caller arriving while another is already waiting joins that wait:
-        // one report answers both, and asking twice would only cost a second.
-        const waiting = held.awaitingFacts;
-        const mine = waiting ?? Deferred.makeUnsafe<boolean>();
+        // one report answers both, and one report is all a machine sends.
+        const mine = held.awaitingFacts ?? Deferred.makeUnsafe<boolean>();
         held.awaitingFacts = mine;
         const deadline = yield* RunnerFactsDeadline;
-        if (waiting === undefined) yield* held.askForFacts;
+        // Every call asks, because a wait left behind by a caller that gave up
+        // is not evidence that a frame is still in flight: the machine may
+        // never have answered the first one, and skipping the ask would leave
+        // the button inert until the runner reconnects.
+        yield* held.askForFacts;
         // Giving up is this caller's, not the request's: the frame is still out
         // there, and whoever is still listening is answered when it comes back.
         const answer = yield* Effect.timeoutOption(Deferred.await(mine), deadline);

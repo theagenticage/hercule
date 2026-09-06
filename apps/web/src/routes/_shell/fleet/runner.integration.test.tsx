@@ -19,72 +19,10 @@ import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { formatStamp } from "@hydra/client-core";
 import { envelope, renderApp, stubApi, type Call, type Handler } from "../../../app/testing";
+import { CONTROLLER_VERSION, GIB, MOSS as MACHINE, ZONE, type Fixture } from "./-fixtures";
 
-const CONTROLLER_VERSION = "0.4.2";
-
-const ZONE = "Europe/Amsterdam";
-
-const GIB = 1024 * 1024 * 1024;
-
-interface Fixture {
-  readonly id: string;
-  readonly name: string;
-  readonly connectivity: string;
-  readonly lifecycle: string;
-  readonly reserved: boolean;
-  readonly version: string | null;
-  readonly labels: readonly string[];
-  readonly facts: {
-    readonly os: string;
-    readonly arch: string;
-    readonly totalMemoryBytes: number;
-    readonly docker: boolean;
-    readonly toolchains: readonly { name: string; version: string; path: string }[];
-    readonly providers: readonly { name: string; present: boolean }[];
-    readonly identityPort: number;
-  } | null;
-  readonly watermark: {
-    readonly diskFreeBytes: number;
-    readonly availableMemoryBytes: number;
-    readonly acceptingPlacements: boolean;
-  } | null;
-  readonly maxConcurrentSessions: number;
-  readonly lastSeenAt: string | null;
-  readonly negotiatedCapabilities: unknown;
-  readonly protocolVersion: number | null;
-}
-
-/** A machine that has reported everything, seen a moment ago and now away. */
-const MOSS: Fixture = {
-  id: "01a06d02-beff-7037-9f5b-042822015952",
-  name: "moss",
-  connectivity: "offline",
-  lifecycle: "active",
-  reserved: false,
-  version: CONTROLLER_VERSION,
-  labels: ["gpu", "primary"],
-  facts: {
-    os: "darwin",
-    arch: "arm64",
-    totalMemoryBytes: 64 * GIB,
-    docker: true,
-    toolchains: [
-      { name: "git", version: "2.50.1", path: "/usr/bin/git" },
-      { name: "gh", version: "2.99.0", path: "/opt/homebrew/bin/gh" },
-    ],
-    providers: [{ name: "claude", present: true }],
-    identityPort: 4939,
-  },
-  watermark: {
-    diskFreeBytes: 128 * GIB,
-    availableMemoryBytes: 32 * GIB,
-    acceptingPlacements: true,
-  },
-  maxConcurrentSessions: 7,
-  lastSeenAt: "2026-09-05T09:14:00.000Z",
-  negotiatedCapabilities: null,
-  protocolVersion: 1,
-};
+/** The machine this page is opened on, away since it was last seen. */
+const MOSS: Fixture = { ...MACHINE, connectivity: "offline", maxConcurrentSessions: 7 };
 
 /** The same machine, connected, which is what the live moves need. */
 const ONLINE: Fixture = { ...MOSS, connectivity: "online" };
@@ -228,6 +166,9 @@ describe("Runner > saving", () => {
     await waitFor(() => {
       expect(nameField().value).toBe(MOSS.name);
     });
+    // Nothing has been touched, so there is no patch to send and Save says so.
+    expect(action(/^save$/i).hasAttribute("disabled")).toBe(true);
+
     await user.clear(nameField());
     await user.type(nameField(), "moss-2");
     await user.click(action(/^save$/i));
@@ -404,15 +345,11 @@ describe("Runner > moves", () => {
       expect(screen.getByLabelText<HTMLInputElement>(/session/i).value).toBe("4");
     });
 
-    // Saving again with nothing touched sends nothing at all: the answer to
-    // the save above is what the next patch is measured against, whole.
+    // The answer to the save above is what the next patch is measured against,
+    // whole, so nothing is left to send and Save is no longer offered.
+    expect(action(/^save$/i).hasAttribute("disabled")).toBe(true);
     await user.click(action(/^save$/i));
-
-    await waitFor(() => {
-      expect(writesTo(api, ONLINE.id).filter((call) => call.method === "PATCH")).toHaveLength(2);
-    });
-    const second = writesTo(api, ONLINE.id).filter((call) => call.method === "PATCH")[1];
-    expect(second?.body).toEqual({});
+    expect(writesTo(api, ONLINE.id).filter((call) => call.method === "PATCH")).toHaveLength(1);
   });
 
   it("says what a refused move was refused with", async () => {

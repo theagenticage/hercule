@@ -9,7 +9,7 @@
 import { describe, expect, it } from "vitest";
 import { Effect } from "effect";
 import type { Runner, RunnerDetail } from "@hydra/contract";
-import { uuidFromString, uuidToString } from "../db";
+import { uuidFromString } from "../db";
 import { hashToken } from "../credentials";
 import type { ServerHarness } from "../http/testing";
 import { SETUP_TOKEN, completeSetup, del, get, post, send, withServer } from "../http/testing";
@@ -91,39 +91,29 @@ const joinTokens = async (
   return { table, rows: await allRows(sql, table) };
 };
 
-/** A value that reads as an instant, as milliseconds; anything else, `undefined`. */
-const instantOf = (value: unknown): number | undefined =>
-  typeof value === "string" && !Number.isNaN(Date.parse(value)) ? Date.parse(value) : undefined;
-
 /**
  * Ages the token with this id by two hours, because nothing over the wire can
- * wait an hour. Every instant on the row moves together, so what the row
- * describes is a token minted two hours ago and expired one hour ago rather
- * than one that expired before it was minted; the columns are found by their
- * values, so no column name is written here. The row is found by its id,
- * because two tokens minted in the same millisecond share every timestamp
- * there is, and the write is keyed on `rowid`, which every SQLite table has.
+ * wait an hour. Both instants move together, so what the row describes is a
+ * token minted two hours ago and expired one hour ago rather than one that
+ * expired before it was minted, which the table's own CHECK refuses.
  */
 const expireById = async (sql: ServerHarness["sql"], id: string): Promise<void> => {
   const TWO_HOURS = 2 * 60 * 60 * 1000;
-  const { table, rows } = await joinTokens(sql);
-  const row = rows.find((one) =>
-    Object.values(one).some(
-      (value) => value instanceof Uint8Array && value.length === 16 && uuidToString(value) === id,
+  const shift = (at: string): string => new Date(Date.parse(at) - TWO_HOURS).toISOString();
+  const key = uuidFromString(id);
+  const [row] = await Effect.runPromise(
+    Effect.orDie(
+      sql<{ readonly created_at: string; readonly expires_at: string }>`
+        SELECT created_at, expires_at FROM runner_join_tokens WHERE id = ${key}`,
     ),
   );
   expect(row, `no join token row has the id ${id}`).toBeDefined();
-  const moved = Object.entries(row!).flatMap(([column, value]) => {
-    const at = instantOf(value);
-    return at === undefined ? [] : [[column, new Date(at - TWO_HOURS).toISOString()] as const];
-  });
-  const sets = moved.map(([column]) => `${column} = ?`).join(", ");
   await Effect.runPromise(
     Effect.orDie(
-      sql.unsafe(`UPDATE ${table} SET ${sets} WHERE rowid = ?`, [
-        ...moved.map(([, value]) => value),
-        row!["rowid"] as number,
-      ]),
+      sql`
+        UPDATE runner_join_tokens
+        SET created_at = ${shift(row!.created_at)}, expires_at = ${shift(row!.expires_at)}
+        WHERE id = ${key}`,
     ),
   );
 };
