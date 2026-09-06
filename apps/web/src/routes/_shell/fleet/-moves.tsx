@@ -5,8 +5,14 @@ import { queryKeys, retireQuestion, type HydraClient } from "@hydra/client-core"
 import type { RunnerDetail } from "@hydra/contract";
 import { messageOf } from "../../../screens/save-status";
 
+type Move = "drain" | "undrain" | "refreshFacts" | "retire";
+
 /**
  * Draining, re-probing and retiring.
+ *
+ * One move at a time, so one mutation carries all four: what the last one said
+ * goes when the next is asked for, rather than a refusal left standing under a
+ * move that then succeeded.
  *
  * Retiring is the one move that cannot be undone and the one whose cost is not
  * on the button, so it asks in place with whatever else this particular machine
@@ -23,84 +29,55 @@ export function Moves({
 }): JSX.Element {
   const queryClient = useQueryClient();
   const [confirming, setConfirming] = useState(false);
-  const params = { id: runner.id };
 
-  const held = (updated: RunnerDetail): void => {
-    queryClient.setQueryData(queryKeys.runner(runner.id), updated);
-    void queryClient.invalidateQueries({ queryKey: queryKeys.runners() });
+  const question = retireQuestion(runner, defaultRunnerId);
+  const params = { id: runner.id };
+  const calls: Record<Move, () => Promise<RunnerDetail>> = {
+    drain: () => client.runner.drain({ params }),
+    undrain: () => client.runner.undrain({ params }),
+    refreshFacts: () => client.runner.refreshFacts({ params }),
+    retire: () => client.runner.retire({ params, payload: question.force ? { force: true } : {} }),
   };
 
-  const drain = useMutation({ mutationFn: () => client.runner.drain({ params }), onSuccess: held });
-  const undrain = useMutation({
-    mutationFn: () => client.runner.undrain({ params }),
-    onSuccess: held,
-  });
-  const refresh = useMutation({
-    mutationFn: () => client.runner.refreshFacts({ params }),
-    onSuccess: held,
-  });
-  const retire = useMutation({
-    mutationFn: (force: boolean): Promise<RunnerDetail> =>
-      client.runner.retire({ params, payload: force ? { force: true } : {} }),
-    onSuccess: (updated) => {
-      held(updated);
-      void queryClient.invalidateQueries({ queryKey: queryKeys.controller() });
+  const move = useMutation({
+    mutationFn: (which: Move) => calls[which](),
+    onSuccess: (updated, which) => {
+      queryClient.setQueryData(queryKeys.runner(runner.id), updated);
+      void queryClient.invalidateQueries({ queryKey: queryKeys.runners() });
+      // A retirement gives up the fleet default when it held it.
+      if (which === "retire") {
+        void queryClient.invalidateQueries({ queryKey: queryKeys.controller() });
+      }
     },
   });
 
-  const moves = [drain, undrain, refresh, retire];
-  const failed = drain.error ?? undrain.error ?? refresh.error ?? retire.error;
-  const busy = moves.some((move) => move.isPending);
-
-  // What the last move said goes when the next one is asked for: a refusal left
-  // standing under a move that then succeeded reads as that move's.
-  const start = (run: () => void): void => {
-    for (const move of moves) if (!move.isIdle) move.reset();
-    run();
-  };
-
-  const question = retireQuestion(runner, defaultRunnerId);
+  const service: { readonly move: Move; readonly label: string } =
+    runner.lifecycle === "active"
+      ? { move: "drain", label: "Drain" }
+      : { move: "undrain", label: "Undrain" };
 
   return (
     <div className="flex flex-col gap-2 border-t border-line-soft pt-3">
       <div className="flex flex-wrap items-center gap-1.5">
-        {runner.lifecycle === "active" ? (
-          <Button
-            className="-ml-2"
-            disabled={busy}
-            onClick={() => {
-              start(() => {
-                drain.mutate();
-              });
-            }}
-          >
-            Drain
-          </Button>
-        ) : (
-          <Button
-            className="-ml-2"
-            disabled={busy}
-            onClick={() => {
-              start(() => {
-                undrain.mutate();
-              });
-            }}
-          >
-            Undrain
-          </Button>
-        )}
         <Button
-          disabled={busy}
+          className="-ml-2"
+          disabled={move.isPending}
           onClick={() => {
-            start(() => {
-              refresh.mutate();
-            });
+            move.mutate(service.move);
+          }}
+        >
+          {service.label}
+        </Button>
+        <Button
+          disabled={move.isPending}
+          onClick={() => {
+            move.mutate("refreshFacts");
           }}
         >
           Refresh facts
         </Button>
         <Button
-          disabled={confirming || busy}
+          disabled={confirming || move.isPending}
           onClick={() => {
             setConfirming(true);
           }}
@@ -120,9 +97,7 @@ export function Moves({
               variant="primary"
               onClick={() => {
                 setConfirming(false);
-                start(() => {
-                  retire.mutate(question.force);
-                });
+                move.mutate("retire");
               }}
             >
               Confirm
@@ -138,9 +113,9 @@ export function Moves({
         </div>
       ) : null}
 
-      {failed === null ? null : (
+      {move.error === null ? null : (
         <p className="text-fine text-fail" role="alert">
-          {messageOf(failed)}
+          {messageOf(move.error)}
         </p>
       )}
     </div>

@@ -56,6 +56,9 @@ export function EditForm({
 
   const blamed = runnerConflictField(save.error, sent);
   const message = save.error === null ? null : messageOf(save.error);
+  /** What a refusal the controller pinned on one field says, beside that field. */
+  const refusal = (field: "name" | "reserved"): string | undefined =>
+    blamed === field ? (message ?? undefined) : undefined;
 
   const edit = (next: Partial<RunnerDraft>): void => {
     if (!save.isIdle) save.reset();
@@ -71,11 +74,7 @@ export function EditForm({
 
   return (
     <form className="flex flex-col gap-3 border-t border-line-soft pt-3" onSubmit={submit}>
-      <Field
-        id="runner-name"
-        label="Name"
-        error={blamed === "name" ? (message ?? undefined) : undefined}
-      >
+      <Field id="runner-name" label="Name" error={refusal("name")}>
         <Input
           id="runner-name"
           // A machine has to be called something, and the name is what every
@@ -115,11 +114,11 @@ export function EditForm({
             edit({ reserved: event.target.checked });
           }}
         />
-        {blamed === "reserved" && message !== null ? (
+        {refusal("reserved") === undefined ? null : (
           <p className="text-fine text-fail" role="alert">
-            {message}
+            {refusal("reserved")}
           </p>
-        ) : null}
+        )}
       </div>
       <div className="flex items-center gap-3">
         {/* An untouched form has no patch to send, and the controller refuses

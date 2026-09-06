@@ -41,6 +41,12 @@ export function AddMachine({
       ? undefined
       : joinCommand({ origin: window.location.origin, token: mint.data.token, reserved });
 
+  const note = mint.isError
+    ? "The token could not be minted. Try again."
+    : revoke.isError
+      ? "The token could not be revoked. Try again."
+      : "A token is single-use and lasts an hour.";
+
   return (
     <section className="flex max-w-[560px] flex-col items-start gap-1 rounded-card border border-dashed border-line px-4 py-3 text-row text-muted">
       {command === undefined ? (
@@ -98,13 +104,7 @@ export function AddMachine({
         </>
       )}
 
-      <span className="pt-1 text-fine text-faint">
-        {mint.isError
-          ? "The token could not be minted. Try again."
-          : revoke.isError
-            ? "The token could not be revoked. Try again."
-            : "A token is single-use and lasts an hour."}
-      </span>
+      <span className="pt-1 text-fine text-faint">{note}</span>
 
       {outstanding.length === 0 ? null : (
         <ul className="mt-2 flex w-full flex-col gap-0.5 border-t border-line-soft pt-2">
