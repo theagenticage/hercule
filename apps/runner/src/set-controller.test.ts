@@ -25,7 +25,6 @@ const NEW_URL = "https://controller.example:8443";
 const homes: Array<string> = [];
 const logged: Array<string> = [];
 const errored: Array<string> = [];
-const restore: Array<() => void> = [];
 let fetches = 0;
 
 const collect =
@@ -39,29 +38,18 @@ beforeEach(() => {
   logged.length = 0;
   errored.length = 0;
   fetches = 0;
-  const log = vi.spyOn(console, "log").mockImplementation(collect(logged));
-  const error = vi.spyOn(console, "error").mockImplementation(collect(errored));
+  vi.spyOn(console, "log").mockImplementation(collect(logged));
+  vi.spyOn(console, "error").mockImplementation(collect(errored));
   // The verb makes no network call, which is only a claim until something
   // watches the one function that could make one.
-  const fetched = vi.spyOn(globalThis, "fetch").mockImplementation(() => {
+  vi.spyOn(globalThis, "fetch").mockImplementation(() => {
     fetches += 1;
     throw new Error("set-controller reached the network");
   });
-  restore.push(
-    () => {
-      log.mockRestore();
-    },
-    () => {
-      error.mockRestore();
-    },
-    () => {
-      fetched.mockRestore();
-    },
-  );
 });
 
 afterEach(() => {
-  for (const undo of restore.splice(0)) undo();
+  vi.restoreAllMocks();
   process.exitCode = 0;
   for (const home of homes.splice(0)) rmSync(home, { recursive: true, force: true });
 });
@@ -74,7 +62,7 @@ const temporaryHome = (): string => {
 
 const runnerFile = (home: string): string => pathJoin(home, "runner", "runner.json");
 
-/** A home a machine has already joined from. */
+/** A home a machine has already joined from, at the mode the join leaves. */
 const enrolled = (): { home: string; path: string; before: string } => {
   const home = temporaryHome();
   mkdirSync(pathJoin(home, "runner"), { recursive: true, mode: 0o700 });
@@ -87,7 +75,6 @@ const enrolled = (): { home: string; path: string; before: string } => {
     controllerPublicKey: "IH5nqcbHvGUYs1n9y0sBnPGSNVYA3ZfCpZKDvXH7pqA=",
     storageDirectory: "a1b2c3d4a1b2c3d4",
   };
-  // At the mode the join leaves it at.
   writeFileSync(path, `${JSON.stringify(contents, null, 2)}\n`, { mode: 0o600 });
   return { home, path, before: readFileSync(path, "utf8") };
 };
@@ -102,18 +89,12 @@ describe("hydra runner set-controller", () => {
     expect(errored).toEqual([]);
     expect(logged.join("\n")).toContain(NEW_URL);
 
-    const written = JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>;
-    expect(written["controllerUrl"]).toBe(NEW_URL);
-
-    // The credential and the identity it was issued against survive a re-point;
-    // so does the storage directory, whose name is a previous life's folders.
-    const strip = (raw: string): Record<string, unknown> => {
-      const parsed = JSON.parse(raw) as Record<string, unknown>;
-      delete parsed["controllerUrl"];
-      return parsed;
-    };
-    expect(strip(readFileSync(path, "utf8"))).toEqual(strip(before));
-    expect(Object.keys(written)).toEqual(Object.keys(JSON.parse(before) as object));
+    // Byte for byte the file it was, with the one address swapped: the
+    // credential and the identity it was issued against survive a re-point, and
+    // so does the storage directory naming a previous life's folders.
+    const after = readFileSync(path, "utf8");
+    expect(after).toContain(NEW_URL);
+    expect(after.replace(NEW_URL, ORIGINAL_URL)).toBe(before);
 
     expect(statSync(path).mode & 0o777).toBe(0o600);
     expect(fetches).toBe(0);
