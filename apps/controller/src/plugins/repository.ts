@@ -1,0 +1,205 @@
+/**
+ * The three plugin tables. The set is a handful of rows, so both listings read
+ * the whole table, and the two JSON columns are decoded rather than parsed, so
+ * an unreadable row is a typed failure and not a defect mid-listing.
+ */
+import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
+import * as Schema from "effect/Schema";
+import * as SqlClient from "effect/unstable/sql/SqlClient";
+import type { SqlError } from "effect/unstable/sql/SqlError";
+
+/** What the user decided about one plugin. */
+export interface PluginState {
+  readonly enabled: boolean;
+  readonly config: Schema.Json;
+}
+
+/** One catalog row, as it is read back. */
+export interface Contribution {
+  readonly extensionPoint: string;
+  readonly id: string;
+  readonly definition: Schema.Json;
+  /**
+   * A contribution outlives its owner being disabled, so a picker can say what
+   * is missing. This is the stored flag and nothing else: a plugin whose
+   * teardown failed still reads `true`, so a resolver reads the host's fact too.
+   */
+  readonly ownerEnabled: boolean;
+}
+
+/** Typed loosely: the host has decoded it, so what reaches here is JSON by construction. */
+export interface NewContribution {
+  readonly owner: string;
+  readonly extensionPoint: string;
+  readonly id: string;
+  readonly definition: unknown;
+}
+
+/** The `config` and `definition` columns: JSON text holding a JSON value. */
+const decodeJson = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Json));
+
+/** Boot writes a row in the transaction that lists the plugin, so a missing one is a broken database. */
+export const storedState = (
+  state: PluginState | undefined,
+  id: string,
+): Effect.Effect<PluginState> =>
+  state === undefined
+    ? Effect.die(new Error(`The plugin ${id} has no stored row.`))
+    : Effect.succeed(state);
+
+const make = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient;
+
+  return {
+    /** A row per registry plugin. Rows already there hold what the user decided. */
+    ensure: (ids: ReadonlyArray<string>, at: string): Effect.Effect<void, SqlError> =>
+      Effect.forEach(
+        ids,
+        (id) => sql`
+          INSERT INTO plugins (id, enabled, config, created_at, updated_at)
+          VALUES (${id}, 1, '{}', ${at}, ${at})
+          ON CONFLICT (id) DO NOTHING
+        `,
+        { discard: true },
+      ),
+
+    /** Records what the user decided about one plugin. */
+    setEnabled: (id: string, enabled: boolean, at: string): Effect.Effect<void, SqlError> =>
+      sql`UPDATE plugins SET enabled = ${enabled ? 1 : 0}, updated_at = ${at} WHERE id = ${id}`.pipe(
+        Effect.asVoid,
+      ),
+
+    /** Stores a config the plugin's own schema has already accepted. */
+    setConfig: (id: string, config: Schema.Json, at: string): Effect.Effect<void, SqlError> =>
+      sql`
+        UPDATE plugins SET config = ${JSON.stringify(config)}, updated_at = ${at} WHERE id = ${id}
+      `.pipe(Effect.asVoid),
+
+    /** What the user decided, per plugin id. */
+    states: (): Effect.Effect<ReadonlyMap<string, PluginState>, SqlError | Schema.SchemaError> =>
+      Effect.gen(function* () {
+        const rows = yield* sql<{
+          readonly id: string;
+          readonly enabled: number;
+          readonly config: string;
+        }>`SELECT id, enabled, config FROM plugins`;
+        const states = new Map<string, PluginState>();
+        for (const row of rows) {
+          states.set(row.id, {
+            enabled: row.enabled === 1,
+            config: yield* decodeJson(row.config),
+          });
+        }
+        return states;
+      }),
+
+    /** What the user decided about one plugin. */
+    state: (id: string): Effect.Effect<PluginState, SqlError | Schema.SchemaError> =>
+      Effect.gen(function* () {
+        const rows = yield* sql<{
+          readonly enabled: number;
+          readonly config: string;
+        }>`SELECT enabled, config FROM plugins WHERE id = ${id}`;
+        const row = rows[0];
+        return yield* storedState(
+          row === undefined
+            ? undefined
+            : { enabled: row.enabled === 1, config: yield* decodeJson(row.config) },
+          id,
+        );
+      }),
+
+    /**
+     * Replaces the whole catalog. Registration is pure, so what this boot
+     * produced is the whole truth and there is nothing to diff against.
+     */
+    rewriteCatalog: (
+      contributions: ReadonlyArray<NewContribution>,
+    ): Effect.Effect<void, SqlError> =>
+      Effect.gen(function* () {
+        yield* sql`DELETE FROM plugin_contributions`;
+        yield* Effect.forEach(
+          contributions,
+          (contribution) => sql`
+            INSERT INTO plugin_contributions (owner, extension_point, id, definition)
+            VALUES (
+              ${contribution.owner}, ${contribution.extensionPoint}, ${contribution.id},
+              ${JSON.stringify(contribution.definition)}
+            )
+          `,
+          { discard: true },
+        );
+      }),
+
+    /** Ordered, so a listing reads the same on every boot however rows were written. */
+    contributions: (): Effect.Effect<
+      ReadonlyMap<string, ReadonlyArray<Contribution>>,
+      SqlError | Schema.SchemaError
+    > =>
+      Effect.gen(function* () {
+        const rows = yield* sql<{
+          readonly owner: string;
+          readonly extension_point: string;
+          readonly id: string;
+          readonly definition: string;
+          readonly owner_enabled: number;
+        }>`
+          SELECT c.owner, c.extension_point, c.id, c.definition,
+                 -- \`core\` owns contributions and has no row here, because it is
+                 -- not a plugin and is never disabled.
+                 COALESCE(p.enabled, 1) AS owner_enabled
+          FROM plugin_contributions c
+          LEFT JOIN plugins p ON p.id = c.owner
+          ORDER BY c.owner, c.extension_point, c.id
+        `;
+        const byOwner = new Map<string, Array<Contribution>>();
+        for (const row of rows) {
+          const owned = byOwner.get(row.owner) ?? [];
+          owned.push({
+            extensionPoint: row.extension_point,
+            id: row.id,
+            definition: yield* decodeJson(row.definition),
+            ownerEnabled: row.owner_enabled === 1,
+          });
+          byOwner.set(row.owner, owned);
+        }
+        return byOwner;
+      }),
+
+    /** One plugin's stored value under a key, or nothing stored under it. */
+    kvGet: (
+      pluginId: string,
+      key: string,
+    ): Effect.Effect<Option.Option<Schema.Json>, SqlError | Schema.SchemaError> =>
+      Effect.gen(function* () {
+        const rows = yield* sql<{ readonly value: string }>`
+          SELECT value FROM plugin_kv WHERE plugin_id = ${pluginId} AND key = ${key}
+        `;
+        const row = rows[0];
+        return row === undefined ? Option.none() : Option.some(yield* decodeJson(row.value));
+      }),
+
+    kvSet: (pluginId: string, key: string, value: Schema.Json): Effect.Effect<void, SqlError> =>
+      sql`
+        INSERT INTO plugin_kv (plugin_id, key, value)
+        VALUES (${pluginId}, ${key}, ${JSON.stringify(value)})
+        ON CONFLICT (plugin_id, key) DO UPDATE SET value = excluded.value
+      `.pipe(Effect.asVoid),
+
+    kvDelete: (pluginId: string, key: string): Effect.Effect<void, SqlError> =>
+      sql`DELETE FROM plugin_kv WHERE plugin_id = ${pluginId} AND key = ${key}`.pipe(Effect.asVoid),
+
+    /** The keys one plugin stores, ordered so a listing reads the same twice. */
+    kvKeys: (pluginId: string): Effect.Effect<ReadonlyArray<string>, SqlError> =>
+      sql<{ readonly key: string }>`
+        SELECT key FROM plugin_kv WHERE plugin_id = ${pluginId} ORDER BY key
+      `.pipe(Effect.map((rows) => rows.map((row) => row.key))),
+
+    /** Everything one plugin stored. What Reset plugin state means. */
+    kvWipe: (pluginId: string): Effect.Effect<void, SqlError> =>
+      sql`DELETE FROM plugin_kv WHERE plugin_id = ${pluginId}`.pipe(Effect.asVoid),
+  };
+});
+
+export const pluginRepository = make;

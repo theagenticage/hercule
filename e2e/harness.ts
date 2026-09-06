@@ -200,6 +200,18 @@ export const USERNAME = "rogier";
 export const PASSWORD = "correct horse battery staple";
 
 /**
+ * The API key `hydra login` wrote into a home, for the requests no command
+ * expresses. Reading the file is the only way to get one: the key is printed
+ * nowhere, by design.
+ */
+export function apiKeyIn(home: string): string {
+  const credentials = JSON.parse(readFileSync(join(home, "credentials.json"), "utf8")) as {
+    readonly apiKey: string;
+  };
+  return credentials.apiKey;
+}
+
+/**
  * Take a fresh controller through first run, the way an operator does: read the
  * setup URL it wrote into its home, and hand that token back to the CLI. The
  * caller asserts the exit code, because a suite that means to fail here says so

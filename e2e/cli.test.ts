@@ -1,11 +1,13 @@
 /**
- * Tasks, projects and the event log out of the release binary.
+ * Tasks, projects, the event log and the shipped plugins out of the release
+ * binary.
  *
  * Tasks, projects and the event log add no CLI code: the commands are derived
  * from the contract, so the only way to know they are really there is to run
- * the thing a release ships. This suite runs `./hydra` as the controller and as
- * the CLI, which is why it is out of `pnpm test`: `pnpm build:binary` first,
- * then `pnpm test:binary`.
+ * the thing a release ships. The plugin registry is compiled in the same way,
+ * so what a release boots with is only visible from a release. This suite runs
+ * `./hydra` as the controller and as the CLI, which is why it is out of
+ * `pnpm test`: `pnpm build:binary` first, then `pnpm test:binary`.
  */
 import { existsSync } from "node:fs";
 import { join } from "node:path";
@@ -14,6 +16,7 @@ import {
   PASSWORD,
   ROOT,
   USERNAME,
+  apiKeyIn,
   cli,
   completeSetup,
   jsonOf,
@@ -70,7 +73,7 @@ afterAll(async () => {
   state.remove();
 });
 
-describe("tasks, projects and the log through the binary", () => {
+describe("tasks, projects, the log and the plugins through the binary", () => {
   it("creates, queries, reads, updates and deletes a task", async () => {
     const project = ok(await hydra(["project", "create", "--name", "hydra", "--json"])) as {
       id: string;
@@ -139,6 +142,24 @@ describe("tasks, projects and the log through the binary", () => {
       expect(row.kind).toBe("task.created");
       expect(row.actor).toBe("user");
       expect(Number.isInteger(row.id)).toBe(true);
+    }
+  }, 30_000);
+
+  it("lists the three shipped provider plugins, each one active", async () => {
+    // No CLI command for plugins, so the route is called the way the web app
+    // does: the key the login above minted, straight over the wire.
+    const response = await fetch(`${url}/api/v1/plugins`, {
+      headers: { authorization: `Bearer ${apiKeyIn(state.home)}` },
+    });
+    expect(response.status).toBe(200);
+
+    const plugins = (await response.json()) as ReadonlyArray<{
+      id: string;
+      status: { _tag: string };
+    }>;
+    expect(plugins.map((plugin) => plugin.id)).toEqual(["claude-code", "codex", "pi"]);
+    for (const plugin of plugins) {
+      expect(plugin.status, plugin.id).toEqual({ _tag: "active" });
     }
   }, 30_000);
 

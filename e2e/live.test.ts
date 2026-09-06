@@ -9,7 +9,7 @@
  * process has to reach a subscriber in another. `pnpm build:binary` first, then
  * `pnpm test:binary`.
  */
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createClient, createLive, queryKeysFor } from "../packages/client-core/src/index";
@@ -18,6 +18,7 @@ import {
   PASSWORD,
   ROOT,
   USERNAME,
+  apiKeyIn,
   cli,
   completeSetup,
   jsonOf,
@@ -71,11 +72,7 @@ beforeAll(async () => {
   );
   expect(login.code, `${login.stdout}\n${login.stderr}`).toBe(0);
 
-  const credentials = JSON.parse(readFileSync(join(state.home, "credentials.json"), "utf8")) as {
-    readonly url: string;
-    readonly apiKey: string;
-  };
-  token = credentials.apiKey;
+  token = apiKeyIn(state.home);
 }, 90_000);
 
 afterAll(async () => {

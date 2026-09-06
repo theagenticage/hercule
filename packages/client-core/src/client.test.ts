@@ -166,6 +166,49 @@ describe("createClient", () => {
     expectTypeOf(client.setToken).toEqualTypeOf<(token: string | null) => void>();
     expectTypeOf(client.presentToken).toEqualTypeOf<(token: string | null) => void>();
   });
+
+  it("reaches every plugin operation on the route the contract names", async () => {
+    // The listing answers an array and every other plugin call answers one
+    // plugin, so the stub tells them apart by the route it was called on.
+    const detail = {
+      id: "claude-code",
+      displayName: "Claude Code",
+      hostApi: 1,
+      capabilities: ["providers"],
+      enabled: true,
+      status: { _tag: "active" },
+      config: {},
+      contributions: [],
+    };
+    const { fetch, sent } = stubFetch((request) =>
+      json(request.url.endsWith("/api/v1/plugins") ? [detail] : detail),
+    );
+    const client = createClient({ baseUrl: BASE, fetch });
+    const params = { id: "claude-code" };
+
+    await client.plugin.query();
+    await client.plugin.read({ params });
+    await client.plugin.enable({ params });
+    await client.plugin.disable({ params });
+    await client.plugin.retry({ params });
+    await client.plugin.resetState({ params });
+    await client.plugin.configure({ params, payload: { config: { model: "sonnet" } } });
+
+    const calls = [0, 1, 2, 3, 4, 5, 6].map((index) => {
+      const request = sent(index);
+      return `${request.method} ${request.url.slice(BASE.length)}`;
+    });
+    assert.deepStrictEqual(calls, [
+      "GET /api/v1/plugins",
+      "GET /api/v1/plugins/claude-code",
+      "POST /api/v1/plugins/claude-code/enable",
+      "POST /api/v1/plugins/claude-code/disable",
+      "POST /api/v1/plugins/claude-code/retry",
+      "POST /api/v1/plugins/claude-code/reset-state",
+      "PUT /api/v1/plugins/claude-code/config",
+    ]);
+    assert.deepStrictEqual(await sent(6).json(), { config: { model: "sonnet" } });
+  });
 });
 
 /** A token store over a plain variable, so a test can read what it kept. */

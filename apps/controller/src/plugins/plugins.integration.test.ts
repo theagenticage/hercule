@@ -1,0 +1,480 @@
+/**
+ * The plugin routes over a real socket. The controller boots a registry of
+ * fixture plugins through the real host, so what a request reads back is what a
+ * real boot left behind.
+ */
+import { describe, expect, it } from "vitest";
+import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
+import * as Schema from "effect/Schema";
+import type { LiveMessage } from "@hydra/contract";
+import { HOST_API, type Plugin } from "@hydra/plugin-host";
+import {
+  collecting,
+  completeSetup,
+  expectHeld,
+  get,
+  onSocket,
+  post,
+  send,
+  settleLive,
+  ticketFor,
+  withServer,
+  within,
+  type ServerHarness,
+} from "../http/testing";
+import { fixture, providerDefinition } from "./testing";
+
+/** A plugin as the API hands it back. */
+interface PluginDetail {
+  readonly id: string;
+  readonly displayName: string;
+  readonly hostApi: number;
+  readonly capabilities: ReadonlyArray<string>;
+  readonly enabled: boolean;
+  readonly status: {
+    readonly _tag: string;
+    readonly message?: string;
+    readonly reason?: { readonly kind: string; readonly message?: string };
+  };
+  readonly configSchema?: unknown;
+  readonly config: unknown;
+  readonly contributions: ReadonlyArray<{
+    readonly extensionPoint: string;
+    readonly id: string;
+    readonly definition: Record<string, unknown>;
+  }>;
+}
+
+/**
+ * Built afresh per test, because a fixture counts the starts it was given and a
+ * shared registry would hand the second test a plugin the first had already
+ * nursed back to health.
+ */
+const registry = (): ReadonlyArray<Plugin> =>
+  [
+    fixture({
+      id: "alpha",
+      configSchema: Schema.Struct({ model: Schema.optionalKey(Schema.String) }),
+      definitions: [providerDefinition("alpha-provider", { model: "alpha-provider-default" })],
+    }),
+    fixture({ id: "beta" }),
+    fixture({ id: "outdated", hostApi: HOST_API + 1 }),
+    fixture({ id: "greedy", capabilities: ["providers", "channels"] }),
+    fixture({ id: "unrenderable", configSchema: Schema.Struct({ nested: Schema.Struct({}) }) }),
+    fixture({ id: "flaky", activateFailures: 1 }),
+  ].map((built) => built.plugin);
+
+/** The three ways a plugin is turned away before any of its code runs. */
+const REFUSED = ["outdated", "greedy", "unrenderable"] as const;
+
+const withPlugins = (body: (harness: ServerHarness) => Promise<void>): Promise<void> =>
+  withServer(body, { plugins: registry() });
+
+const list = async (base: string, token: string): Promise<ReadonlyArray<PluginDetail>> => {
+  const response = await get(base, "/api/v1/plugins", token);
+  expect(response.status, await response.clone().text()).toBe(200);
+  return (await response.json()) as ReadonlyArray<PluginDetail>;
+};
+
+const read = async (base: string, token: string, id: string): Promise<PluginDetail> => {
+  const response = await get(base, `/api/v1/plugins/${id}`, token);
+  expect(response.status, await response.clone().text()).toBe(200);
+  return (await response.json()) as PluginDetail;
+};
+
+const move = (base: string, token: string, id: string, verb: string): Promise<Response> =>
+  post(base, `/api/v1/plugins/${id}/${verb}`, {}, token);
+
+const configure = (base: string, token: string, id: string, config: unknown): Promise<Response> =>
+  send("PUT", base, `/api/v1/plugins/${id}/config`, { body: { config }, token });
+
+/** The paths and methods of every plugin route, for the sweeps over all of them. */
+const WRITES = [
+  { verb: "enable", audit: "plugin.enabled" },
+  { verb: "disable", audit: "plugin.disabled" },
+  { verb: "retry", audit: "plugin.retried" },
+  { verb: "reset-state", audit: "plugin.stateReset" },
+] as const;
+
+/** The catalog rows as the database holds them, keyed by owner and row id. */
+const persistedDefinitions = async (
+  sql: ServerHarness["sql"],
+): Promise<ReadonlyMap<string, unknown>> => {
+  const rows = await Effect.runPromise(
+    Effect.orDie(
+      sql<{
+        readonly owner: string;
+        readonly id: string;
+        readonly definition: string;
+      }>`SELECT owner, id, definition FROM plugin_contributions`,
+    ),
+  );
+  return new Map(rows.map((row) => [`${row.owner}/${row.id}`, JSON.parse(row.definition)]));
+};
+
+describe("GET /plugins", () => {
+  it("hands back every compiled-in plugin, in registry order, with what each one is", async () => {
+    await withPlugins(async ({ base }) => {
+      const token = await completeSetup(base);
+
+      const plugins = await list(base, token);
+      expect(plugins.map((plugin) => plugin.id)).toEqual([
+        "alpha",
+        "beta",
+        "outdated",
+        "greedy",
+        "unrenderable",
+        "flaky",
+      ]);
+
+      for (const field of [
+        "id",
+        "displayName",
+        "hostApi",
+        "capabilities",
+        "enabled",
+        "status",
+        "config",
+        "contributions",
+      ]) {
+        expect(Object.keys(plugins[0] ?? {}), `a listed plugin carries ${field}`).toContain(field);
+      }
+
+      expect(plugins[0]).toMatchObject({
+        id: "alpha",
+        displayName: "Plugin alpha",
+        hostApi: HOST_API,
+        capabilities: ["providers"],
+        enabled: true,
+        status: { _tag: "active" },
+        config: {},
+      });
+      expect(plugins[2]).toMatchObject({
+        id: "outdated",
+        status: {
+          _tag: "refused",
+          reason: { kind: "hostApi", expected: HOST_API, actual: HOST_API + 1 },
+        },
+      });
+      expect(plugins[3]).toMatchObject({
+        id: "greedy",
+        status: {
+          _tag: "refused",
+          reason: { kind: "unimplementedCapability", capability: "channels" },
+        },
+      });
+      const unrenderable = plugins[4]?.status;
+      expect(unrenderable?._tag).toBe("refused");
+      expect(unrenderable?.reason?.kind).toBe("unsupportedConfigSchema");
+      expect((unrenderable?.reason?.message ?? "").length).toBeGreaterThan(0);
+      expect(plugins[5]).toMatchObject({
+        id: "flaky",
+        status: { _tag: "errored", message: "flaky could not start" },
+      });
+    });
+  });
+
+  it("carries the plugin's config schema as JSON Schema", async () => {
+    await withPlugins(async ({ base }) => {
+      const token = await completeSetup(base);
+      const plugins = await list(base, token);
+
+      expect(plugins[0]?.configSchema).toEqual({
+        type: "object",
+        properties: { model: { type: "string" } },
+        additionalProperties: false,
+      });
+      expect(plugins[1]?.configSchema).toEqual({
+        type: "object",
+        properties: {},
+        required: [],
+        additionalProperties: false,
+      });
+    });
+  });
+
+  it("carries each contribution as the catalog stored it", async () => {
+    await withPlugins(async ({ base, sql }) => {
+      const token = await completeSetup(base);
+      const plugins = await list(base, token);
+      const stored = await persistedDefinitions(sql);
+
+      const alpha = plugins[0]!;
+      expect(alpha.contributions).toHaveLength(1);
+      const contribution = alpha.contributions[0]!;
+      expect(contribution.extensionPoint).toBe("provider");
+      expect(contribution.id).toBe("alpha-provider");
+      expect(contribution.definition).toEqual(stored.get("alpha/alpha-provider"));
+      expect(contribution.definition).toMatchObject({
+        id: "alpha-provider",
+        displayName: "Provider alpha-provider",
+        supportsMultipleInstances: true,
+        defaultConfig: { model: "alpha-provider-default" },
+      });
+
+      for (const refused of REFUSED) {
+        const plugin = plugins.find((one) => one.id === refused);
+        expect(plugin?.contributions, refused).toEqual([]);
+        expect(plugin, refused).not.toHaveProperty("configSchema");
+      }
+    });
+  });
+});
+
+describe("GET /plugins/{id}", () => {
+  it("answers with the same plugin the listing carries", async () => {
+    await withPlugins(async ({ base }) => {
+      const token = await completeSetup(base);
+      const plugins = await list(base, token);
+
+      for (const listed of plugins) {
+        expect(await read(base, token, listed.id)).toEqual(listed);
+      }
+    });
+  });
+
+  it("answers not_found for a plugin this binary does not hold", async () => {
+    await withPlugins(async ({ base }) => {
+      const token = await completeSetup(base);
+      // The same shape of request for a plugin that is installed, so what the
+      // refusal below says is about the id and not about the route.
+      expect((await get(base, "/api/v1/plugins/alpha", token)).status).toBe(200);
+
+      const response = await get(base, "/api/v1/plugins/gamma", token);
+      expect(response.status).toBe(404);
+      expect(await response.json()).toMatchObject({ error: { code: "not_found" } });
+    });
+  });
+});
+
+describe("the plugin routes with no credential", () => {
+  it("answers 401 to every one of them, and changes nothing", async () => {
+    await withPlugins(async ({ base }) => {
+      const token = await completeSetup(base);
+
+      const responses = [
+        await send("GET", base, "/api/v1/plugins"),
+        await send("GET", base, "/api/v1/plugins/alpha"),
+        await send("POST", base, "/api/v1/plugins/alpha/enable", { body: {} }),
+        await send("POST", base, "/api/v1/plugins/alpha/disable", { body: {} }),
+        await send("POST", base, "/api/v1/plugins/flaky/retry", { body: {} }),
+        await send("POST", base, "/api/v1/plugins/alpha/reset-state", { body: {} }),
+        await send("PUT", base, "/api/v1/plugins/alpha/config", {
+          body: { config: { model: "sonnet" } },
+        }),
+      ];
+
+      for (const response of responses) {
+        expect(response.status).toBe(401);
+        expect(await response.json()).toMatchObject({ error: { code: "unauthenticated" } });
+      }
+
+      expect(await read(base, token, "alpha")).toMatchObject({
+        enabled: true,
+        status: { _tag: "active" },
+        config: {},
+      });
+    });
+  });
+});
+
+describe("the five moves a user makes from Settings", () => {
+  it("each answers with the plugin as the move left it", async () => {
+    await withPlugins(async ({ base }) => {
+      const token = await completeSetup(base);
+
+      const disabled = await move(base, token, "alpha", "disable");
+      expect(disabled.status, await disabled.clone().text()).toBe(200);
+      expect(await disabled.json()).toMatchObject({
+        id: "alpha",
+        enabled: false,
+        status: { _tag: "inactive" },
+      });
+
+      const enabled = await move(base, token, "alpha", "enable");
+      expect(enabled.status).toBe(200);
+      expect(await enabled.json()).toMatchObject({
+        id: "alpha",
+        enabled: true,
+        status: { _tag: "active" },
+      });
+
+      const configured = await configure(base, token, "alpha", { model: "sonnet" });
+      expect(configured.status, await configured.clone().text()).toBe(200);
+      expect(await configured.json()).toMatchObject({
+        id: "alpha",
+        config: { model: "sonnet" },
+        status: { _tag: "active" },
+      });
+
+      const reset = await move(base, token, "alpha", "reset-state");
+      expect(reset.status).toBe(200);
+      expect(await reset.json()).toMatchObject({
+        id: "alpha",
+        config: { model: "sonnet" },
+        status: { _tag: "active" },
+      });
+
+      const retried = await move(base, token, "flaky", "retry");
+      expect(retried.status, await retried.clone().text()).toBe(200);
+      expect(await retried.json()).toMatchObject({ id: "flaky", status: { _tag: "active" } });
+    });
+  });
+
+  it("each appends its own audit row, stamped with the user", async () => {
+    await withPlugins(async ({ base, audit }) => {
+      const token = await completeSetup(base);
+
+      expect((await move(base, token, "alpha", "disable")).status).toBe(200);
+      expect((await move(base, token, "alpha", "enable")).status).toBe(200);
+      expect((await move(base, token, "alpha", "reset-state")).status).toBe(200);
+      expect((await configure(base, token, "alpha", { model: "sonnet" })).status).toBe(200);
+      expect((await move(base, token, "flaky", "retry")).status).toBe(200);
+
+      for (const kind of [
+        "plugin.disabled",
+        "plugin.enabled",
+        "plugin.stateReset",
+        "plugin.configured",
+        "plugin.retried",
+      ] as const) {
+        const rows = await audit(kind);
+        expect(rows, kind).toHaveLength(1);
+        expect(rows[0]?.actor, kind).toBe("user");
+      }
+    });
+  });
+});
+
+describe("what a live subscriber is told about a plugin", () => {
+  it("names the plugin once per move, whichever of the five it was", async () => {
+    await withPlugins(async (harness) => {
+      const token = await completeSetup(harness.base);
+      // The boot's own activation failure is a plugin change too, and it is
+      // still in flight when the listener comes up.
+      await settleLive();
+      const ticket = await ticketFor(harness.base, token);
+
+      const moves: ReadonlyArray<readonly [string, () => Promise<Response>]> = [
+        ["alpha", () => move(harness.base, token, "alpha", "disable")],
+        ["alpha", () => move(harness.base, token, "alpha", "enable")],
+        ["alpha", () => configure(harness.base, token, "alpha", { model: "sonnet" })],
+        ["alpha", () => move(harness.base, token, "alpha", "reset-state")],
+        ["flaky", () => move(harness.base, token, "flaky", "retry")],
+      ];
+
+      let seen: ReadonlyArray<LiveMessage> = [];
+      await onSocket(harness.base, (client) =>
+        Effect.gen(function* () {
+          yield* client.hello({ v: 1, ticket });
+          const plugins = yield* collecting(client, { topic: "plugin" });
+          yield* Effect.promise(() => expectHeld(harness.live, 1, "plugin"));
+
+          // One subscription across all five, and each announcement is waited
+          // for before the next move is made: changes are collected for a
+          // short window before they are announced, so two moves made back to
+          // back would arrive as one message naming both plugins.
+          for (const [index, [id, makeMove]] of moves.entries()) {
+            const response = yield* Effect.promise(makeMove);
+            expect(response.status, `${id}: ${yield* Effect.promise(() => response.text())}`).toBe(
+              200,
+            );
+            const arrived = yield* Effect.promise(() =>
+              within(2000, () => plugins.received.length > index),
+            );
+            expect(arrived, id).toBe(true);
+          }
+
+          seen = plugins.received;
+          yield* Fiber.interrupt(plugins.fiber);
+        }),
+      );
+
+      expect(seen).toHaveLength(moves.length);
+      expect(seen.map((message) => (message as { ids: ReadonlyArray<string> }).ids)).toEqual(
+        moves.map(([id]) => [id]),
+      );
+      for (const message of seen) {
+        expect(message._tag).toBe("invalidate");
+      }
+    });
+  });
+});
+
+describe("a move the plugin's state does not allow", () => {
+  it("refuses a config the plugin's schema rejects, naming the field", async () => {
+    await withPlugins(async ({ base }) => {
+      const token = await completeSetup(base);
+
+      const response = await configure(base, token, "alpha", { model: 42 });
+      expect(response.status).toBe(400);
+      const body = (await response.json()) as {
+        readonly error: {
+          readonly code: string;
+          readonly details: {
+            readonly issues: ReadonlyArray<{
+              readonly path: ReadonlyArray<string>;
+              readonly message: string;
+            }>;
+          };
+        };
+      };
+      expect(body.error.code).toBe("validation");
+      expect(body.error.details.issues[0]?.path).toEqual(["model"]);
+      expect(body.error.details.issues[0]?.message.length).toBeGreaterThan(0);
+
+      expect(await read(base, token, "alpha")).toMatchObject({
+        config: {},
+        status: { _tag: "active" },
+      });
+    });
+  });
+
+  it("refuses a config carrying a key the plugin does not declare", async () => {
+    await withPlugins(async ({ base }) => {
+      const token = await completeSetup(base);
+
+      const response = await configure(base, token, "alpha", { model: "sonnet", colour: "red" });
+      expect(response.status, await response.clone().text()).toBe(400);
+      expect(await response.json()).toMatchObject({ error: { code: "validation" } });
+      expect(await read(base, token, "alpha")).toMatchObject({ config: {} });
+    });
+  });
+
+  it("refuses a retry of a plugin that is running, so Retry is never a second Enable", async () => {
+    await withPlugins(async ({ base, audit }) => {
+      const token = await completeSetup(base);
+
+      const response = await move(base, token, "alpha", "retry");
+      expect(response.status).toBe(400);
+      expect(await response.json()).toMatchObject({ error: { code: "validation" } });
+      expect(await audit("plugin.retried")).toHaveLength(0);
+    });
+  });
+
+  it("refuses every write on a plugin that was never loaded, however it was turned away", async () => {
+    await withPlugins(async ({ base, audit }) => {
+      const token = await completeSetup(base);
+
+      for (const id of REFUSED) {
+        for (const { verb } of WRITES) {
+          const response = await move(base, token, id, verb);
+          expect(response.status, `${id} ${verb}`).toBe(400);
+          expect(await response.json(), `${id} ${verb}`).toMatchObject({
+            error: { code: "validation" },
+          });
+        }
+
+        const configured = await configure(base, token, id, {});
+        expect(configured.status, id).toBe(400);
+        expect(await configured.json(), id).toMatchObject({ error: { code: "validation" } });
+      }
+
+      for (const { audit: kind } of WRITES) {
+        expect(await audit(kind), kind).toHaveLength(0);
+      }
+      expect(await audit("plugin.configured")).toHaveLength(0);
+    });
+  });
+});

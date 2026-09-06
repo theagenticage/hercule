@@ -10,8 +10,9 @@ const api: Readonly<Record<string, Handler>> = {
       user: { "onboarding.completedSteps": ["timezone"], timezone: "Europe/Amsterdam" },
     },
   },
-  // Tasks and Fleet are the screens here that read something of their own.
+  // Tasks, Fleet and Plugins are the screens here that read something of their own.
   "GET /api/v1/tasks": { body: { items: [] } },
+  "GET /api/v1/plugins": { body: [] },
   "GET /api/v1/projects": { body: { items: [] } },
   "GET /api/v1/runners": { body: { items: [] } },
   "GET /api/v1/controller": {

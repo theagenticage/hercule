@@ -259,11 +259,15 @@ Semantics: [./03-controller-and-runners.md](./03-controller-and-runners.md), [./
 | `plugin.query` / `plugin.read` | `{}` / `{ pluginId }` (state, config, contributions) | `infra.read` | `GET /plugins[/{id}]` |
 | `plugin.enable` / `plugin.disable` | `{ pluginId }` | `infra.write` | `POST /plugins/{id}/enable` etc. |
 | `plugin.configure` | `{ pluginId, config }` (deactivate + reactivate) | `infra.write` | `PUT /plugins/{id}/config` |
+| `plugin.retry` | `{ pluginId }` -> re-runs `activate()` once on an `errored` plugin; `validation` on any other state *(added 2026-09-06, [#63](https://github.com/rogierpennink/hydra/issues/63))* | `infra.write` | `POST /plugins/{id}/retry` |
+| `plugin.resetState` | `{ pluginId }` -> deactivate, wipe the plugin's KV, activate again if enabled ([./05](./05-plugins.md) sections 6 and 8) *(added 2026-09-06, [#63](https://github.com/rogierpennink/hydra/issues/63))* | `infra.write` | `POST /plugins/{id}/reset-state` |
 | `provider.query` / `provider.read` | provider instances and their capability snapshots | `infra.read` | `GET /providers[/{id}]` |
 | `provider.create` / `update` / `delete` | instance config ([./06](./06-providers.md)) | `infra.write` | `POST` / `PATCH` / `DELETE /providers[/{id}]` |
 | `controller.read` | `{}` -> identity, version, update availability, default runner. *(2026-09-04, [#57](https://github.com/rogierpennink/hydra/issues/57): as built it returned identity and version only. Amended 2026-09-05, [#61](https://github.com/rogierpennink/hydra/issues/61): it now also returns `defaultRunnerId`, nullable, written by `controller.update`. Update availability lands with the update-check ticket - it stays part of the operation's description, it is simply not there yet.)* | `infra.read` | `GET /controller` |
 | `controller.update` | `{ defaultRunnerId? }` | `infra.write` | `PATCH /controller` |
 | `controller.createPromotionToken` / `controller.export` / `controller.import` | promotion ([./15](./15-packaging-and-operations.md)); renamed from `mintPromotionToken` with `runner.createJoinToken` ([#44](https://github.com/rogierpennink/hydra/issues/44)) | `infra.write` | `POST /controller/promotion-tokens`, `.../export`, `.../import` |
+
+*(Amended 2026-09-06, [#63](https://github.com/rogierpennink/hydra/issues/63).)* `plugin.retry` and `plugin.resetState` are the two plugin moves [./05](./05-plugins.md) section 8 describes and this catalogue had no rows for. Both are custom verbs on one entity, so they follow section 1.4's `POST /api/v1/<xs>/{id}/<verb>` shape, and `resetState`'s path is the verb kebab-cased (`reset-state`), which is what a multi-word verb spells here. Reads of a plugin need `infra.read`, every write `infra.write`; the actor is always `user`, since nothing but a person moves a plugin. Every plugin write appends its own audit row and publishes an invalidation on topic `plugin`.
 
 ### workspace
 

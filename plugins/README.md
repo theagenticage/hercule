@@ -1,6 +1,24 @@
 # Plugins
 
-One workspace package per plugin, at `plugins/<id>`, added by the plugin's own ticket
+One workspace package per plugin, at `plugins/<id>`, named `@hydra/plugin-<id>`
 (see [`docs/spec/05-plugins.md`](../docs/spec/05-plugins.md)).
+
+A plugin package depends on `@hydra/plugin-host` and `effect`, and on nothing else in
+this repository: a plugin reaches no controller internal, and everything it needs is
+handed to it through the host. It exports a `Plugin` - a manifest, a `register` that
+declares contributions, and an `activate` that starts machinery and hands back its own
+teardown.
+
+Every plugin runs in-process on the controller, and installed means compiled in. A
+plugin is loaded only once it is listed in
+`apps/controller/src/plugins/registry.ts`, which is the whole inventory: there is no
+discovery, no dynamic loading and no install step. The three shipped so far each
+register one provider definition:
+
+| Package | Contributes |
+| --- | --- |
+| `@hydra/plugin-claude-code` | the `claude-code` provider |
+| `@hydra/plugin-codex` | the `codex` provider |
+| `@hydra/plugin-pi` | the `pi` provider |
 
 The runner entrypoint imports no plugin host and no plugin package.

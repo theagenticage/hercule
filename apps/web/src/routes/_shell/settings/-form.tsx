@@ -5,7 +5,7 @@ import type { SettingsPatch } from "@hydra/contract";
 import { settingsQuery } from "../../../app/queries";
 
 /** A rejection that is not an Error still has to say something. */
-const messageOf = (error: unknown): string =>
+export const messageOf = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
 
 /**

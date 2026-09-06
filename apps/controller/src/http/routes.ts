@@ -32,6 +32,7 @@ import { ApiKeys, ApiKeysLayer } from "../credentials";
 import { EventService, EventServiceLayer } from "../events";
 import { Controller, ControllerLayer } from "../identity";
 import { Profiles, ProfilesLayer } from "../permissions";
+import { Plugins } from "../plugins";
 import { Secret, SecretLayer } from "../secrets";
 import { SettingsOperations, SettingsOperationsLayer } from "../settings";
 import { ProjectService, ProjectServiceLayer } from "../projects";
@@ -197,6 +198,22 @@ const runnerRoutes = HttpApiBuilder.group(api, "runner", (handlers) =>
   }),
 );
 
+const pluginRoutes = HttpApiBuilder.group(api, "plugin", (handlers) =>
+  Effect.gen(function* () {
+    const plugins = yield* Plugins;
+    return handlers
+      .handle("query", () => operation(plugins.query()))
+      .handle("read", ({ params }) => operation(plugins.read(params.id)))
+      .handle("enable", ({ params }) => operation(plugins.enable(params.id)))
+      .handle("disable", ({ params }) => operation(plugins.disable(params.id)))
+      .handle("retry", ({ params }) => operation(plugins.retry(params.id)))
+      .handle("resetState", ({ params }) => operation(plugins.resetState(params.id)))
+      .handle("configure", ({ params, payload }) =>
+        operation(plugins.configure(params.id, payload)),
+      );
+  }),
+);
+
 const controllerRoutes = HttpApiBuilder.group(api, "controller", (handlers) =>
   Effect.gen(function* () {
     const controller = yield* Controller;
@@ -210,6 +227,12 @@ const controllerRoutes = HttpApiBuilder.group(api, "controller", (handlers) =>
  * Every service an operation resolves. One list, because a controller booting
  * with a layer this list has and its own does not is a controller missing an
  * operation, and nothing would say so until a request asked for it.
+ *
+ * One operation service is deliberately absent. `Plugins` reads a host that
+ * holds what this process made of each plugin, and the boot is what filled it
+ * in, so the two must be the same object: building it here would hand the
+ * routes a second host that had never loaded anything. It is built beside the
+ * boot instead, and reaches the handlers from there.
  */
 export const operationLayers = Layer.mergeAll(
   SetupLayer,
@@ -244,4 +267,5 @@ export const handlerLayers = Layer.mergeAll(
   projectRoutes,
   eventRoutes,
   runnerRoutes,
+  pluginRoutes,
 );

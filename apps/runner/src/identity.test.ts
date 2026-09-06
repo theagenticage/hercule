@@ -53,15 +53,29 @@ const occupy = (port: number): { readonly port: number; readonly release: () => 
  */
 const occupyRun = async (
   length: number,
-): Promise<{ readonly base: number; readonly release: () => Promise<void> }> => {
+): Promise<{
+  readonly base: number;
+  /** Lets go of one port of the run, so the listener under test can take it. */
+  readonly releaseAt: (offset: number) => Promise<void>;
+  readonly release: () => Promise<void>;
+}> => {
   for (let attempt = 0; attempt < 20; attempt += 1) {
     const base = await freePort();
     const held: Array<{ readonly release: () => Promise<void> }> = [];
     try {
       for (let offset = 0; offset < length; offset += 1) held.push(occupy(base + offset));
+      const released = new Set<number>();
+      const releaseAt = async (offset: number): Promise<void> => {
+        released.add(offset);
+        await held[offset]!.release();
+      };
       return {
         base,
-        release: async () => void (await Promise.all(held.map((one) => one.release()))),
+        releaseAt,
+        release: async () =>
+          void (await Promise.all(
+            held.filter((_, offset) => !released.has(offset)).map((one) => one.release()),
+          )),
       };
     } catch {
       await Promise.all(held.map((one) => one.release()));
@@ -127,7 +141,12 @@ describe("the port it binds", () => {
     // it. How many ports that is cannot be told apart here from the last-resort
     // bind - an ephemeral port is handed out from the same place - so the count
     // itself is pinned where it is enforced, in the policy the browser reads.
-    const run = await occupyRun(IDENTITY_PORT_COUNT - 1);
+    //
+    // The whole set is taken first and the last one let go of only once the
+    // rest is held: a port this test leaves free for the walk to land on is a
+    // port anything else on the machine may take in the meantime.
+    const run = await occupyRun(IDENTITY_PORT_COUNT);
+    await run.releaseAt(IDENTITY_PORT_COUNT - 1);
     try {
       const { port, body } = await withListener(
         { runnerId: RUNNER_ID, controllerUrl: CONTROLLER_URL, port: run.base },
