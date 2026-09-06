@@ -13,6 +13,7 @@ import {
   PASSWORD,
   ROOT,
   USERNAME,
+  apiKeyIn,
   cli,
   completeSetup,
   startController,
@@ -78,10 +79,7 @@ beforeAll(async () => {
   );
   expect(login.code, `${login.stdout}\n${login.stderr}`).toBe(0);
 
-  const credentials = JSON.parse(readFileSync(join(state.home, "credentials.json"), "utf8")) as {
-    readonly apiKey: string;
-  };
-  apiKey = credentials.apiKey;
+  apiKey = apiKeyIn(state.home);
 }, 90_000);
 
 afterAll(async () => {

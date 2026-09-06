@@ -60,3 +60,20 @@ export interface Plugin {
   /** Runs only for an enabled plugin, once the whole catalog exists. */
   readonly activate: (ctx: ActivationContext) => Effect.Effect<Deactivate, PluginError>;
 }
+
+/**
+ * Register one provider through the surface the manifest asked for.
+ *
+ * Every surface on `RegistrationHost` is optional, because the host builds one
+ * only for a capability the manifest lists. A plugin that did list it still has
+ * to answer for the absent case, and the honest answer is the same every time:
+ * fail its own registration with a message the user can read in Settings,
+ * rather than quietly contributing nothing.
+ */
+export const registerProvider = (
+  host: RegistrationHost,
+  definition: ProviderDefinition,
+): Effect.Effect<void, PluginError> =>
+  host.providers === undefined
+    ? Effect.fail(new PluginError({ message: "the providers capability was not granted" }))
+    : host.providers.register(definition);

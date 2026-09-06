@@ -52,7 +52,7 @@ import {
   type LocalRunnerFailed,
   type LocalRunnerOptions,
 } from "./runners";
-import { PluginHost, PluginHostLayer, Plugins, PluginsLayer } from "./plugins";
+import { PluginHost, PluginHostLayer, Plugins, PluginsLayer, registry } from "./plugins";
 import { seed } from "./seed";
 import { Settings, SettingsLayer, type SettingError } from "./settings";
 
@@ -179,8 +179,8 @@ export interface BootOptions {
    */
   readonly localRunner?: LocalRunnerOptions;
   /**
-   * The plugins to load. The registry is a file in this binary, so this is how
-   * a test drives the host with plugins of its own; nothing else varies it.
+   * The plugins to load, defaulting to the registry this binary compiled in.
+   * Overridden only by a test that drives the host with plugins of its own.
    */
   readonly plugins?: ReadonlyArray<Plugin>;
 }
@@ -262,7 +262,7 @@ export const bootWith = <A, E>(
       // After the schema and the identity, because a plugin that activates may
       // read its own state and secrets, and before the runner, because the
       // catalog is what a session's provider is resolved through.
-      yield* Effect.flatMap(PluginHost, (host) => host.boot(options.plugins ?? []));
+      yield* Effect.flatMap(PluginHost, (host) => host.boot(options.plugins ?? registry));
 
       const url = yield* ensureSetupUrl(paths, bootstrap);
 

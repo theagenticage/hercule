@@ -3,4 +3,5 @@
  * contribution catalog the rest of the system reads instead of the live plugin.
  */
 export { PluginHost, PluginHostLayer } from "./host";
+export { registry } from "./registry";
 export { Plugins, PluginsLayer } from "./service";

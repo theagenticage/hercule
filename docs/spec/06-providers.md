@@ -22,8 +22,8 @@ interface ProviderDefinition {
   id: string                                  // "claude-code" | "codex" | "pi"
   displayName: string
   supportsMultipleInstances: boolean          // multi-account via config-dir isolation
-  configSchema: JsonSchema                    // per-instance logical settings: env, model defaults - never paths (§2.1)
-  defaultConfig(): unknown
+  configSchema: Schema                        // per-instance logical settings, in Effect Schema: env, model defaults - never paths (§2.1)
+  defaultConfig: unknown                      // a plain JSON value, not a function (2026-09-06)
   declared: DeclaredCapabilities              // static facts of the pinned adapter version
 }
 
@@ -32,7 +32,7 @@ interface DeclaredCapabilities {
   fork: "native" | "unsupported"
   modelSwitch: "in-session" | "new-session"
   accessModes: Record<AccessMode, "native" | "unsupported">
-  mcpPassthrough: "native" | "unsupported"    // pi: verify at build time
+  mcpPassthrough: "native" | "unsupported"    // pi: unsupported (2026-09-06)
   disallowedTools: "native" | "unsupported"   // Claude disallowedTools, pi excludeTools; Codex unsupported
   structuredOutput: "supported" | "unsupported"
 }
@@ -55,10 +55,13 @@ Declared values for the three v1 providers:
 | `fork` | native (`resume` + `forkSession: true`) | native (`thread/fork`) | native (`fork()`) |
 | `modelSwitch` | in-session (`setModel()`) | in-session (per-turn `model` override on `turn/start`) | in-session (RPC `set_model`) |
 | `accessModes` | all four native | all four native | approval-required, auto-accept-edits, full-access native; `auto` unsupported |
-| `mcpPassthrough` | native (`mcpServers` option) | native (MCP servers, `mcpToolCall` items) | verify at build time (below) |
+| `mcpPassthrough` | native (`mcpServers` option) | native (MCP servers, `mcpToolCall` items) | unsupported (2026-09-06, below) |
+| `disallowedTools` | native (`disallowedTools`) | unsupported | native (`excludeTools`) |
 | `structuredOutput` | supported (native `outputFormat`) | supported (native `outputSchema`) | supported (adapter-owned `submit_result` tool) |
 
-**Verify at build time:** pi `mcpPassthrough` - the taxonomy matrix records no MCP support in pi; declare `unsupported` unless the pinned version has it.
+*(Amended 2026-09-06, [#63](https://github.com/rogierpennink/hydra/issues/63).)* The table gained the `disallowedTools` row, which the interface above has always declared and the table simply omitted, and pi's `mcpPassthrough` is settled. ~~**Verify at build time:** pi `mcpPassthrough` - the taxonomy matrix records no MCP support in pi; declare `unsupported` unless the pinned version has it.~~ Checked against pi 0.84.x/0.85.1: its README states "No MCP" and MCP is an extension rather than part of the core, so the pinned version passes nothing through and pi declares `mcpPassthrough: "unsupported"`. `excludeTools` and the `set_model` RPC are native, so `disallowedTools: "native"` and `modelSwitch: "in-session"` stand.
+
+*(Amended 2026-09-06, [#63](https://github.com/rogierpennink/hydra/issues/63).)* `configSchema` is an **Effect Schema**, like every other schema crossing the host API ([./05](./05-plugins.md) section 5), and the catalog persists the JSON Schema derived from it. `defaultConfig` reaches the host as a **plain JSON value**, not a function: the plugin calls its own default-building code and passes the result, because nothing that cannot be serialized crosses the host boundary ([./05](./05-plugins.md) section 3).
 
 pi's `auto` is unsupported because `auto` means a harness-side reviewer judges routine actions; parking (section 8.2) fixes pi's approval mechanics but gives it no reviewer.
 

@@ -66,9 +66,18 @@ importers:
       '@hydra/home':
         specifier: workspace:*
         version: link:../../packages/home
+      '@hydra/plugin-claude-code':
+        specifier: workspace:*
+        version: link:../../plugins/claude-code
+      '@hydra/plugin-codex':
+        specifier: workspace:*
+        version: link:../../plugins/codex
       '@hydra/plugin-host':
         specifier: workspace:*
         version: link:../../packages/plugin-host
+      '@hydra/plugin-pi':
+        specifier: workspace:*
+        version: link:../../plugins/pi
       '@hydra/protocol':
         specifier: workspace:*
         version: link:../../packages/protocol
@@ -257,6 +266,33 @@ importers:
       react-dom:
         specifier: 19.2.8
         version: 19.2.8(react@19.2.8)
+
+  plugins/claude-code:
+    dependencies:
+      '@hydra/plugin-host':
+        specifier: workspace:*
+        version: link:../../packages/plugin-host
+      effect:
+        specifier: 4.0.0-rc.112
+        version: 4.0.0-rc.112
+
+  plugins/codex:
+    dependencies:
+      '@hydra/plugin-host':
+        specifier: workspace:*
+        version: link:../../packages/plugin-host
+      effect:
+        specifier: 4.0.0-rc.112
+        version: 4.0.0-rc.112
+
+  plugins/pi:
+    dependencies:
+      '@hydra/plugin-host':
+        specifier: workspace:*
+        version: link:../../packages/plugin-host
+      effect:
+        specifier: 4.0.0-rc.112
+        version: 4.0.0-rc.112
 
 packages:
 
