@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
 import type { Runner } from "@hydra/contract";
 import { ApiError } from "./errors";
-import { retireQuestion, runnerConflictField, runnerDraft, runnerPatch } from "./runner-edit";
+import {
+  retireQuestion,
+  runnerConflictField,
+  runnerDraft,
+  runnerPatch,
+  type RunnerDraft,
+} from "./runner-edit";
 
 const RUNNER: Runner = {
   id: "01a06d02-beff-7037-9f5b-042822015952",
@@ -17,27 +23,30 @@ const RUNNER: Runner = {
   lastSeenAt: null,
 };
 
+/** The form as it opens on the runner above, with something typed into it. */
+const typed = (into: Partial<RunnerDraft>): RunnerDraft => ({ ...runnerDraft(RUNNER), ...into });
+
 describe("runnerPatch", () => {
   it("says nothing when nothing moved", () => {
     expect(runnerPatch(RUNNER, runnerDraft(RUNNER))).toEqual({});
   });
 
   it("carries only the fields the draft moved", () => {
-    const draft = { ...runnerDraft(RUNNER), name: "moss-2", reserved: true };
+    const draft = typed({ name: "moss-2", reserved: true });
     expect(runnerPatch(RUNNER, draft)).toEqual({ name: "moss-2", reserved: true });
   });
 
   it("reads labels by their order, so a reordering is a change", () => {
-    expect(runnerPatch(RUNNER, { ...runnerDraft(RUNNER), labels: ["gpu", "primary"] })).toEqual({});
-    expect(runnerPatch(RUNNER, { ...runnerDraft(RUNNER), labels: ["primary", "gpu"] })).toEqual({
+    expect(runnerPatch(RUNNER, typed({ labels: ["gpu", "primary"] }))).toEqual({});
+    expect(runnerPatch(RUNNER, typed({ labels: ["primary", "gpu"] }))).toEqual({
       labels: ["primary", "gpu"],
     });
-    expect(runnerPatch(RUNNER, { ...runnerDraft(RUNNER), labels: [] })).toEqual({ labels: [] });
+    expect(runnerPatch(RUNNER, typed({ labels: [] }))).toEqual({ labels: [] });
   });
 
   it("trims a name, so padding one is not a change", () => {
-    expect(runnerPatch(RUNNER, { ...runnerDraft(RUNNER), name: "  moss  " })).toEqual({});
-    expect(runnerPatch(RUNNER, { ...runnerDraft(RUNNER), name: "  moss-2 " })).toEqual({
+    expect(runnerPatch(RUNNER, typed({ name: "  moss  " }))).toEqual({});
+    expect(runnerPatch(RUNNER, typed({ name: "  moss-2 " }))).toEqual({
       name: "moss-2",
     });
   });
@@ -45,12 +54,12 @@ describe("runnerPatch", () => {
   it("reads an emptied name as a change, so nothing refills the field behind the user", () => {
     // The form refuses to submit it; what matters here is that the draft is not
     // mistaken for an untouched one.
-    expect(runnerPatch(RUNNER, { ...runnerDraft(RUNNER), name: "" })).toEqual({ name: "" });
-    expect(runnerPatch(RUNNER, { ...runnerDraft(RUNNER), name: "   " })).toEqual({ name: "" });
+    expect(runnerPatch(RUNNER, typed({ name: "" }))).toEqual({ name: "" });
+    expect(runnerPatch(RUNNER, typed({ name: "   " }))).toEqual({ name: "" });
   });
 
   it("sends a cap the controller will refuse rather than swallowing it", () => {
-    expect(runnerPatch(RUNNER, { ...runnerDraft(RUNNER), maxConcurrentSessions: 0 })).toEqual({
+    expect(runnerPatch(RUNNER, typed({ maxConcurrentSessions: 0 }))).toEqual({
       maxConcurrentSessions: 0,
     });
   });
