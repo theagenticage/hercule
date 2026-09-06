@@ -17,11 +17,19 @@
 import { Schema } from "effect";
 import * as HttpApiEndpoint from "effect/unstable/httpapi/HttpApiEndpoint";
 import * as HttpApiGroup from "effect/unstable/httpapi/HttpApiGroup";
+import { AccessMode } from "@hydra/plugin-host";
 import { closedStruct, optional } from "../closed";
 import { Forbidden, Internal, Unauthenticated, Validation } from "../errors";
 import { Id, Timestamp } from "../ids";
 import { atMost, Timezone } from "../strings";
 import { Authenticated } from "../security";
+
+/**
+ * The session-level permission axis a provider adapter enforces, re-exported so
+ * the wire shape and the support a provider plugin declares per mode cannot
+ * drift apart.
+ */
+export { AccessMode };
 
 /**
  * The longest list a single user setting may hold. The three that are lists -
@@ -35,16 +43,6 @@ const PositiveDays = Schema.Int.check(Schema.isGreaterThan(0));
 
 /** A time of day in the user timezone setting, `HH:MM` on a 24-hour clock. */
 const TimeOfDay = Schema.String.check(Schema.isPattern(/^([01]\d|2[0-3]):[0-5]\d$/));
-
-/** The session-level permission axis a provider adapter enforces. */
-export const AccessMode = Schema.Literals([
-  "approval-required",
-  "auto-accept-edits",
-  "auto",
-  "full-access",
-]);
-
-export type AccessMode = Schema.Schema.Type<typeof AccessMode>;
 
 /** What a notification mute names. */
 const MuteTarget = Schema.NonEmptyString.check(
