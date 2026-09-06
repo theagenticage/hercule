@@ -14,7 +14,9 @@
  * one name. The later rows are renamed rather than the boot refused, since a
  * duplicate name is the user's to sort out. A rename takes the last eight hex
  * digits of the row's id, which are the random ones: a UUIDv7 spends its first
- * twelve on a millisecond clock. The boot still refuses if that name is taken.
+ * twelve on a millisecond clock. The name it lost is logged, because nothing
+ * else would say what the machine used to be called. The boot still refuses if
+ * that name is taken.
  *
  * The table is rebuilt rather than altered because SQLite cannot drop a CHECK
  * or relax a NOT NULL in place, and the old `state` CHECK names five values

@@ -49,6 +49,7 @@ const asUser = <A, E>(effect: Effect.Effect<A, E, Provided>): Promise<A> =>
 const insert = (
   name: string,
   lifecycle: RunnerLifecycle = "active",
+  labels: ReadonlyArray<string> = [],
 ): Effect.Effect<RunnerDetail, never, Provided> =>
   Effect.gen(function* () {
     const runners = yield* runnerRepository;
@@ -57,7 +58,7 @@ const insert = (
       connectivity: "offline",
       lifecycle,
       reserved: false,
-      labels: [],
+      labels,
       credentialHash: `hash-${name}`,
       at: yield* nowIso,
     });
@@ -141,13 +142,15 @@ describe("the refusals the state machine makes on its own", () => {
   });
 
   it("refuses a name another runner holds, takes one nobody does, and reads case as its own", async () => {
-    const { taken, cased, free } = await asUser(
+    const { taken, refused, cased, free } = await asUser(
       Effect.gen(function* () {
         const runners = yield* RunnerService;
-        const iris = yield* insert("iris");
+        const iris = yield* insert("iris", "active", ["gpu"]);
         yield* insert("atlas");
+        const taken = yield* Effect.flip(runners.update({ id: iris.id, name: "atlas" }));
         return {
-          taken: yield* Effect.flip(runners.update({ id: iris.id, name: "atlas" })),
+          taken,
+          refused: yield* runners.read({ id: iris.id }),
           // Nothing here folds case: the fleet reads what the user typed.
           cased: yield* runners.update({ id: iris.id, name: "Atlas" }),
           free: yield* runners.update({ id: iris.id, name: "vega" }),
@@ -156,6 +159,10 @@ describe("the refusals the state machine makes on its own", () => {
     );
 
     expect(taken).toMatchObject({ error: { code: "conflict" } });
+    expect(refused, "the refused rename changed nothing").toMatchObject({
+      name: "iris",
+      labels: ["gpu"],
+    });
     expect([cased.name, free.name]).toEqual(["Atlas", "vega"]);
   });
 

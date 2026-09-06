@@ -31,8 +31,8 @@ const sameLabels = (left: ReadonlyArray<string>, right: ReadonlyArray<string>): 
  * What a draft asks the controller to change, and nothing else.
  *
  * A patch naming a field the runner already holds is a write like any other: it
- * stamps an actor and appends an audit row. An empty patch is what the form
- * reads as an untouched one.
+ * stamps an actor and appends an audit row. Sending only what moved keeps the
+ * trail readable, and an empty patch is what the form reads as an untouched one.
  *
  * The name is trimmed here and nowhere else, so padding a name is not a change
  * while a name the user has emptied still reads as one. The form refuses to
