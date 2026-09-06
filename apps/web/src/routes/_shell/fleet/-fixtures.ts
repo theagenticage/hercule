@@ -1,21 +1,15 @@
 /**
- * The machine the two fleet tests both stub a controller with.
- *
- * The list and the page read the same runner from the same API, so one machine
- * serves both and each test spreads over it what its own case needs. Keeping
- * two copies meant a field added to the resource had to be added twice, in the
- * same shape, or the two screens would be tested against different machines.
+ * The machine the two fleet tests both stub a controller with. One copy, so a
+ * field added to the resource cannot reach one screen's test and not the
+ * other's; each test spreads over it what its own case needs.
  */
 
-/** The version this controller answers `controller.read` with. */
 export const CONTROLLER_VERSION = "0.4.2";
 
-/** The timezone the stored settings put the reader in. */
 export const ZONE = "Europe/Amsterdam";
 
 export const GIB = 1024 * 1024 * 1024;
 
-/** A runner as the API answers it, with everything either screen reads. */
 export interface Fixture {
   readonly id: string;
   readonly name: string;
@@ -44,7 +38,6 @@ export interface Fixture {
   readonly protocolVersion: number | null;
 }
 
-/** A machine that has reported everything it can about itself. */
 export const MOSS: Fixture = {
   id: "01a06d02-beff-7037-9f5b-042822015952",
   name: "moss",

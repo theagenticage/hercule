@@ -168,7 +168,6 @@ const showsExpiry = (text: string, token: TokenFixture): boolean => {
   return stamp !== undefined && text.includes(stamp);
 };
 
-/** Every Revoke the token list is offering right now. */
 const revokes = (): readonly HTMLElement[] => screen.queryAllByRole("button", { name: /revoke/i });
 
 /** The link a row carries, whether it wraps the row or sits inside it. */

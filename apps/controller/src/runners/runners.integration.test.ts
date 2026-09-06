@@ -1,10 +1,10 @@
 /**
- * The runner read side over a real socket: what a listing carries, what one
- * row carries, what a patch may change, and what an anonymous caller gets.
+ * The runner operations over a real HTTP server: what a listing and a row
+ * carry, what a patch, a join, a lifecycle move and a join token do on the
+ * wire, and what an anonymous caller gets.
  *
- * Rows are arranged through the harness's `insertRunner`, which goes through
- * the real repository: no operation creates a runner in this slice, join lands
- * later.
+ * Rows nothing here enlists are arranged through the harness's `insertRunner`,
+ * which goes through the real repository.
  */
 import { describe, expect, it } from "vitest";
 import { Effect } from "effect";
@@ -128,7 +128,6 @@ const mint = async (
   return (await response.json()) as { token: string; expiresAt: string };
 };
 
-/** What the fleet is shown about a token that is still outstanding. */
 interface ListedJoinToken {
   readonly id: string;
   readonly createdAt: string;
@@ -171,22 +170,18 @@ const joinWith = (base: string, bearer: string, body: unknown): Promise<Response
 
 const join = (base: string, bearer: string): Promise<Response> => joinWith(base, bearer, {});
 
-/** Enlists a machine and answers with what the controller handed it. */
 const enlist = async (base: string, bearer: string, body: unknown = {}): Promise<JoinAnswer> => {
   const response = await joinWith(base, bearer, body);
   expect(response.status, await response.clone().text()).toBe(201);
   return (await response.json()) as JoinAnswer;
 };
 
-/** The one thing a caller may write about the controller. */
 const patchController = (base: string, token: string, body: unknown): Promise<Response> =>
   send("PATCH", base, "/api/v1/controller", { body, token });
 
-/** How many runners the controller has enlisted. */
 const runnerCount = async (base: string, token: string): Promise<number> =>
   (await list(base, token)).items.length;
 
-/** Three rows: three connectivities, one of them labelled `gpu`, one retired. */
 const three = async (harness: ServerHarness) => ({
   online: await harness.insertRunner({ name: "iris", connectivity: "online", labels: ["gpu"] }),
   offline: await harness.insertRunner({ name: "atlas", connectivity: "offline" }),

@@ -3,7 +3,6 @@ import { Row } from "@hydra/ui";
 import { runnerFactsReading, type RunnerFactsReading } from "@hydra/client-core";
 import type { RunnerDetail } from "@hydra/contract";
 
-/** The lines, in the order a page states them. */
 const LINES: ReadonlyArray<readonly [string, keyof RunnerFactsReading]> = [
   ["Machine", "machine"],
   ["Memory", "memory"],
@@ -15,11 +14,9 @@ const LINES: ReadonlyArray<readonly [string, keyof RunnerFactsReading]> = [
 ];
 
 /**
- * What the machine reported about itself, one labelled line per kind of fact.
- *
- * A fleet row runs these together because it is scanned; a page is read, so
- * each is named. Nothing here is editable: it is the machine's own report, and
- * the only way to change it is to make the machine report again.
+ * What the machine reported about itself. A fleet row runs these together
+ * because it is scanned; a page is read, so each fact is named. None of it is
+ * editable: the only way to change it is to make the machine report again.
  */
 export function RunnerFacts({ runner }: { readonly runner: RunnerDetail }): JSX.Element {
   const reading = runnerFactsReading(runner);

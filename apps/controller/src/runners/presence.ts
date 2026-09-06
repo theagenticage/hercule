@@ -155,9 +155,8 @@ const make = Effect.gen(function* () {
 
     /**
      * Asks the runner to report its facts now and waits for the report, which
-     * arrives on the connection and lands through `reportedFacts`. False when
-     * the runner is holding no connection, when the connection ended first, or
-     * when nothing came back in time.
+     * lands through `reportedFacts`. False when the runner is holding no
+     * connection, when it ended first, or when nothing came back in time.
      */
     refreshedFacts: (id: string): Effect.Effect<boolean> =>
       Effect.gen(function* () {
@@ -168,10 +167,9 @@ const make = Effect.gen(function* () {
         const mine = held.awaitingFacts ?? Deferred.makeUnsafe<boolean>();
         held.awaitingFacts = mine;
         const deadline = yield* RunnerFactsDeadline;
-        // Every call asks, because a wait left behind by a caller that gave up
-        // is not evidence that a frame is still in flight: the machine may
-        // never have answered the first one, and skipping the ask would leave
-        // the button inert until the runner reconnects.
+        // Every call asks: a wait left behind by a caller that gave up is not
+        // evidence that a frame is still in flight, and skipping the ask would
+        // leave the button inert until the runner reconnects.
         yield* held.askForFacts;
         // Giving up is this caller's, not the request's: the frame is still out
         // there, and whoever is still listening is answered when it comes back.

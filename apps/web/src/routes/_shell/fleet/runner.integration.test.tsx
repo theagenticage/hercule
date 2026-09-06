@@ -1,18 +1,10 @@
 /**
- * The runner page: everything one machine is, and every move its owner can
- * make on it, over a stubbed controller.
+ * The runner page over a stubbed controller.
  *
- * A row in the fleet list is a summary; this page is where a machine is
- * changed, so the assertions here are about the two directions at once - what
- * the reader is told about the machine, and what leaves the browser when they
- * act on it. A move that only looked right on screen while sending the wrong
- * thing, or the right thing while leaving the page showing the old machine,
- * would both be wrong.
- *
- * Retire is the one move that cannot be taken back, so it is held to the
- * question it asks: what it says when the controller cannot reach the machine,
- * what it says when the fleet is about to lose its default, and that nothing
- * leaves the browser until the question is answered.
+ * This page is where a machine is changed, so each case asserts both
+ * directions: what the reader is told, and what leaves the browser when they
+ * act. Retire cannot be taken back, so it is held to the question it asks and
+ * to sending nothing until that question is answered.
  */
 import { describe, expect, it } from "vitest";
 import { screen, waitFor, within } from "@testing-library/react";

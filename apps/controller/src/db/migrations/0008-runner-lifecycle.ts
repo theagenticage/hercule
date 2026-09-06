@@ -1,33 +1,24 @@
 /**
  * The fleet's two axes, the reserved flag and a fleet-wide unique name.
  *
- * `state` held five values that answered two different questions: three said
- * whether the controller could reach the machine, two said where the machine
- * stood with its owner. They move independently - a runner being drained is
- * exactly the one whose reachability somebody is watching - so they become
- * `connectivity`, written only by the socket, and `lifecycle`, written only by
- * the user operations.
+ * `state` held five values answering two questions that move independently:
+ * whether the controller can reach the machine, and where the machine stands
+ * with its owner. They split into `connectivity` and `lifecycle`.
  *
- * `max_concurrent_sessions` becomes nullable, where `NULL` means the cap is
- * derived from the reported memory at read time. Facts first arrive at hello
- * rather than at join, so the derivation cannot be stored at insert. Every
- * existing row is set to `NULL`, which discards any cap that was set through
- * the API; a discarded one is logged, because nothing else would say where it
- * went.
+ * `max_concurrent_sessions` becomes nullable, `NULL` meaning derived from the
+ * reported memory at read time. Facts first arrive at hello rather than at
+ * join, so nothing can be derived at insert; every existing row is set to
+ * `NULL`, and a cap that was set through the API is logged as it is discarded.
  *
- * Names were never unique before this, so a fleet may hold two of one name and
- * the index below would refuse to build. The losers are renamed rather than the
- * boot refused: a duplicate name is the user's to sort out, not a reason to
- * leave them without a controller. A loser is renamed `runner-` and the last
- * eight hex digits of its id, which are random: a UUIDv7 spends its first
- * twelve on a millisecond clock, so two runners of one fleet share those. The
- * name it lost is logged, because nothing else would say what the machine used
- * to be called. The boot still refuses if a generated name is one the fleet
- * already holds, which takes a runner somebody named in exactly that shape.
+ * Names were never unique, so the index below could find a fleet holding two of
+ * one name. The later rows are renamed rather than the boot refused, since a
+ * duplicate name is the user's to sort out. A rename takes the last eight hex
+ * digits of the row's id, which are the random ones: a UUIDv7 spends its first
+ * twelve on a millisecond clock. The boot still refuses if that name is taken.
  *
  * The table is rebuilt rather than altered because SQLite cannot drop a CHECK
- * constraint or relax a NOT NULL in place, and the old `state` CHECK names the
- * five values that are going away.
+ * or relax a NOT NULL in place, and the old `state` CHECK names five values
+ * that are going away.
  */
 import * as Effect from "effect/Effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
