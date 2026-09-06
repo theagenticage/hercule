@@ -63,13 +63,18 @@ export function StringList({
         </div>
       ))}
       {/* Hang-aligned, so its text starts where every other line of the form
-          does rather than a button's padding to the right of it. */}
+          does rather than a button's padding to the right of it. It is drawn in
+          ink behind the same leading glyph the one other add affordance wears,
+          because a muted word under a form reads as another field's name. */}
       <Button
-        className="-ml-2"
+        className="-ml-2 text-ink"
         onClick={() => {
           onChange([...values, ""]);
         }}
       >
+        <span aria-hidden="true" className="font-mono text-row text-faint">
+          +
+        </span>
         {addLabel}
       </Button>
     </div>
