@@ -29,7 +29,8 @@ import {
   type LiveMessage,
   type LiveTopic,
   type Runner,
-  type RunnerState,
+  type RunnerConnectivity,
+  type RunnerLifecycle,
 } from "@hydra/contract";
 import type { Plugin } from "@hydra/plugin-host";
 import { homePaths } from "@hydra/home";
@@ -104,8 +105,11 @@ export type AuditReader = (kind: AuditKind) => Promise<ReadonlyArray<AuditRow>>;
  */
 export type RunnerArranger = (fields: {
   readonly name: string;
-  readonly state?: RunnerState;
+  readonly connectivity?: RunnerConnectivity;
+  readonly lifecycle?: RunnerLifecycle;
+  readonly reserved?: boolean;
   readonly labels?: ReadonlyArray<string>;
+  /** An override; absent leaves the cap derived from what the machine reports. */
   readonly maxConcurrentSessions?: number;
 }) => Promise<Runner>;
 
@@ -193,19 +197,27 @@ export const withServer = (
           subscriberCount: (topic) => Effect.runPromise(topics.subscriberCount(topic)),
         };
         const repository = yield* runnerRepository;
+        // The cap is not something a row is inserted with, so an arranged
+        // override is written the way the API writes one.
         const insertRunner: RunnerArranger = (fields) =>
           Effect.runPromise(
             Effect.orDie(
-              Effect.flatMap(nowIso, (at) =>
-                repository.insert({
+              Effect.gen(function* () {
+                const at = yield* nowIso;
+                const runner = yield* repository.insert({
                   name: fields.name,
-                  state: fields.state ?? "offline",
+                  connectivity: fields.connectivity ?? "offline",
+                  lifecycle: fields.lifecycle ?? "active",
+                  reserved: fields.reserved ?? false,
                   labels: fields.labels ?? [],
-                  maxConcurrentSessions: fields.maxConcurrentSessions ?? 1,
                   credentialHash: hashToken(crypto.randomUUID()),
                   at,
-                }),
-              ),
+                });
+                if (fields.maxConcurrentSessions === undefined) return runner;
+                const cap = fields.maxConcurrentSessions;
+                yield* repository.update(runner.id, { maxConcurrentSessions: cap }, at);
+                return { ...runner, maxConcurrentSessions: cap };
+              }),
             ),
           );
         const tokens = yield* JoinTokens;

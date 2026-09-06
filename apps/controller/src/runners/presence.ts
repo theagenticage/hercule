@@ -14,7 +14,7 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
-import type { RunnerFacts, RunnerWatermark } from "@hydra/contract";
+import type { RunnerConnectivity, RunnerFacts, RunnerWatermark } from "@hydra/contract";
 import { SYSTEM_ACTOR } from "../actor";
 import { hashToken } from "../credentials";
 import { announce, nowIso, withTransaction } from "../db";
@@ -40,15 +40,19 @@ const make = Effect.gen(function* () {
 
   const reachable = new Map<string, Reachable>();
 
-  /** A move to where the runner already is is not a move, and writes no row. */
-  const moved = (id: string, state: Departure | "online", at: string) =>
+  /**
+   * A move to where the runner already is is not a move, and writes no row.
+   * Only connectivity is written here: where the runner stands with its owner
+   * is the user's, and a drain outlives the socket that was dropped under it.
+   */
+  const moved = (id: string, connectivity: RunnerConnectivity, at: string) =>
     Effect.gen(function* () {
-      if (!(yield* runners.setState(id, state, at))) return;
+      if (!(yield* runners.setConnectivity(id, connectivity, at))) return;
       yield* audit.append({
         kind: "runner.stateChanged",
         actor: SYSTEM_ACTOR,
         record: { topic: "runner", id },
-        payload: { runnerId: id, state },
+        payload: { runnerId: id, state: connectivity },
         at,
       });
     });

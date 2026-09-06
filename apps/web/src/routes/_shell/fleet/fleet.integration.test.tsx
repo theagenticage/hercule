@@ -4,7 +4,7 @@
  *
  * The fleet is the one screen whose rows are almost entirely a machine's own
  * report, so the assertions here are about what a runner said reaching the
- * reader: the state it is in, the binary it runs, and the facts it probed. A
+ * reader: whether it is reachable, the binary it runs, and the facts it probed. A
  * row that shows a name and nothing else would leave a person no way to tell
  * two machines apart.
  *
@@ -24,7 +24,9 @@ const CONTROLLER_VERSION = "0.4.2";
 interface Fixture {
   readonly id: string;
   readonly name: string;
-  readonly state: string;
+  readonly connectivity: string;
+  readonly lifecycle: string;
+  readonly reserved: boolean;
   readonly version: string | null;
   readonly labels: readonly string[];
   readonly facts: {
@@ -51,7 +53,9 @@ const GIB = 1024 * 1024 * 1024;
 const MOSS: Fixture = {
   id: "01a06d02-beff-7037-9f5b-042822015952",
   name: "moss",
-  state: "online",
+  connectivity: "online",
+  lifecycle: "active",
+  reserved: false,
   version: CONTROLLER_VERSION,
   labels: ["gpu", "primary"],
   facts: {
@@ -79,7 +83,9 @@ const MOSS: Fixture = {
 const HETZNER: Fixture = {
   id: "01a06d02-c111-7a0e-8b3d-9c1f7c82ebeb",
   name: "hetzner-01",
-  state: "unreachable",
+  connectivity: "unreachable",
+  lifecycle: "active",
+  reserved: false,
   version: "0.3.9",
   labels: ["linux"],
   facts: {
@@ -280,10 +286,10 @@ describe("Fleet > live", () => {
   /** One invalidation, in the shape the contract puts on the wire. */
   const invalidate = (kind: string, ids: readonly string[]) => ({ _tag: "invalidate", ids, kind });
 
-  it("shows a machine's new state when it changes elsewhere", async () => {
+  it("shows that a machine has become unreachable when it does so elsewhere", async () => {
     // A second machine, so what the changed row says is read off that row and
     // not off a page that has the word on it somewhere.
-    const OTHER: Fixture = { ...HETZNER, state: "offline" };
+    const OTHER: Fixture = { ...HETZNER, connectivity: "offline" };
     let held: readonly Fixture[] = [MOSS, OTHER];
     const { api, live } = await open(held, {
       extra: { "GET /api/v1/runners": () => ({ body: { items: held } }) },
@@ -295,7 +301,7 @@ describe("Fleet > live", () => {
     });
     const before = listings(api).length;
 
-    held = [{ ...MOSS, state: "unreachable" }, OTHER];
+    held = [{ ...MOSS, connectivity: "unreachable" }, OTHER];
     act(() => {
       live.push("runner", invalidate("updated", [MOSS.id]));
     });

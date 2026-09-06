@@ -19,7 +19,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "no
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { Duration, Effect } from "effect";
+import { Duration, Effect, Option } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import * as BunHttpServer from "@effect/platform-bun/BunHttpServer";
 import { bootWith, type BootOutcome, type ControllerServices } from "../bootstrap";
@@ -35,6 +35,7 @@ import {
   RunnerAlerts,
   type LocalRunnerOptions,
 } from "./local";
+import { runnerRepository } from "./repository";
 
 const homes: Array<string> = [];
 
@@ -261,10 +262,13 @@ describe("the first boot of an empty home", () => {
         yield* Effect.promise(() =>
           until(child.notes, (notes) => notes.some((note) => note.what === "joined")),
         );
+        const id = String(child.notes().find((note) => note.what === "joined")?.answer?.runnerId);
+        const runners = yield* runnerRepository;
         return {
           names: yield* Effect.orDie(runnerNames),
           minted: yield* Effect.orDie(tokensMinted),
           defaultRunnerId: yield* Effect.orDie((yield* Settings).defaultRunnerId()),
+          row: Option.getOrThrow(yield* Effect.orDie(runners.read(id))),
         };
       }),
     );
@@ -301,6 +305,9 @@ describe("the first boot of an empty home", () => {
     expect(seen.names).toHaveLength(1);
     expect(seen.minted).toBe(1);
     expect(seen.defaultRunnerId).toBe(joined?.answer?.runnerId);
+    // The machine the controller is on is the fleet's general-purpose one:
+    // reserved is a thing a person asks for about a machine of their own.
+    expect(seen.row.reserved).toBe(false);
   }, 30_000);
 
   it("mints nothing and joins nothing for a child that already knows who it is", async () => {

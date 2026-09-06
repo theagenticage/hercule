@@ -11,10 +11,11 @@ import { Effect, Layer } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { AuditLogLayer } from "../events";
 import { TestDatabase } from "../db/testing";
+import { SettingsLayer } from "../settings";
 import { JoinTokensLayer, RunnerService, RunnerServiceLayer } from "./index";
 
 const layer = RunnerServiceLayer.pipe(
-  Layer.provideMerge(Layer.mergeAll(AuditLogLayer, JoinTokensLayer)),
+  Layer.provideMerge(Layer.mergeAll(AuditLogLayer, JoinTokensLayer, SettingsLayer)),
   Layer.provideMerge(TestDatabase),
 );
 

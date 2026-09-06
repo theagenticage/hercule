@@ -77,6 +77,8 @@ const FACTS: RunnerFacts = {
 
 const THIS_BUILD = "0.1.0";
 
+const GIB = 1024 * 1024 * 1024;
+
 const decodeFrame = (raw: unknown): ControllerMessage =>
   Effect.runSync(Schema.decodeUnknownEffect(ControllerToRunner)(raw));
 
@@ -315,7 +317,7 @@ describe("opening the runner socket", () => {
       const live = await opens(harness.base, `Bearer ${joined.credential}`);
       expect(live, "the credential opened the socket before the runner was retired").toBe("open");
       await Effect.runPromise(
-        Effect.orDie(harness.sql.unsafe(`UPDATE runners SET state = 'retired'`)),
+        Effect.orDie(harness.sql.unsafe(`UPDATE runners SET lifecycle = 'retired'`)),
       );
 
       const revoked = await upgrade(harness.base, `Bearer ${joined.credential}`);
@@ -349,9 +351,9 @@ describe("the hello exchange", () => {
         harness.base,
         token,
         joined.runnerId,
-        (one) => one.state === "online",
+        (one) => one.connectivity === "online",
       );
-      expect(row.state).toBe("online");
+      expect(row.connectivity).toBe("online");
       expect(row.version).toBe(THIS_BUILD);
       expect(row.facts).toEqual(FACTS);
       expect(row.protocolVersion).toBe(PROTOCOL_VERSION);
@@ -389,9 +391,9 @@ describe("the hello exchange", () => {
         harness.base,
         token,
         joined.runnerId,
-        (one) => one.state === "online",
+        (one) => one.connectivity === "online",
       );
-      expect(row.state).toBe("online");
+      expect(row.connectivity).toBe("online");
       // Stored, so the fleet can show the skew: warn, never block.
       expect(row.version).toBe("0.0.0-from-another-build");
 
@@ -413,7 +415,7 @@ describe("the hello exchange", () => {
       expect(wire.frames).toEqual([]);
 
       const row = await readRunner(harness.base, token, joined.runnerId);
-      expect(row.state).toBe("offline");
+      expect(row.connectivity).toBe("offline");
       expect(row.lastSeenAt).toBeNull();
       expect(row.version).toBeNull();
       expect(await transitions(harness)).toEqual([]);
@@ -449,8 +451,14 @@ describe("what a connection leaves behind", () => {
         const joined = await enlist(harness);
         const { wire } = await greet(harness.base, joined.credential);
         expect(
-          (await rowWhen(harness.base, token, joined.runnerId, (one) => one.state === "online"))
-            .state,
+          (
+            await rowWhen(
+              harness.base,
+              token,
+              joined.runnerId,
+              (one) => one.connectivity === "online",
+            )
+          ).connectivity,
         ).toBe("online");
 
         // A frame this build cannot read: what a newer runner sending a member
@@ -468,9 +476,9 @@ describe("what a connection leaves behind", () => {
           harness.base,
           token,
           joined.runnerId,
-          (one) => one.state === "unreachable",
+          (one) => one.connectivity === "unreachable",
         );
-        expect(row.state).toBe("unreachable");
+        expect(row.connectivity).toBe("unreachable");
         expect(await transitions(harness)).toEqual(["online", "unreachable"]);
       },
       { pings: FAST },
@@ -509,8 +517,14 @@ describe("what a connection leaves behind", () => {
 
         const older = await greet(harness.base, joined.credential);
         expect(
-          (await rowWhen(harness.base, token, joined.runnerId, (one) => one.state === "online"))
-            .state,
+          (
+            await rowWhen(
+              harness.base,
+              token,
+              joined.runnerId,
+              (one) => one.connectivity === "online",
+            )
+          ).connectivity,
         ).toBe("online");
 
         const newer = await greet(harness.base, joined.credential);
@@ -524,7 +538,7 @@ describe("what a connection leaves behind", () => {
         // newer one is holding.
         await delay(150);
         const row = await readRunner(harness.base, token, joined.runnerId);
-        expect(row.state).toBe("online");
+        expect(row.connectivity).toBe("online");
         expect(await transitions(harness)).toEqual(["online"]);
 
         newer.wire.close();
@@ -551,7 +565,7 @@ describe("the liveness check", () => {
           harness.base,
           token,
           joined.runnerId,
-          (one) => one.state === "online",
+          (one) => one.connectivity === "online",
         );
         expect(first.lastSeenAt).not.toBeNull();
 
@@ -573,7 +587,7 @@ describe("the liveness check", () => {
           Date.parse(String(first.lastSeenAt)),
         );
         // Answering kept it where it was.
-        expect(later.state).toBe("online");
+        expect(later.connectivity).toBe("online");
 
         wire.close();
       },
@@ -597,7 +611,9 @@ describe("the liveness check", () => {
           wire.send({ _tag: "pong" });
         }
 
-        expect((await readRunner(harness.base, token, joined.runnerId)).state).toBe("online");
+        expect((await readRunner(harness.base, token, joined.runnerId)).connectivity).toBe(
+          "online",
+        );
         expect(await transitions(harness)).toEqual(["online"]);
 
         wire.close();
@@ -614,8 +630,14 @@ describe("the liveness check", () => {
         const { wire } = await greet(harness.base, joined.credential);
 
         expect(
-          (await rowWhen(harness.base, token, joined.runnerId, (one) => one.state === "online"))
-            .state,
+          (
+            await rowWhen(
+              harness.base,
+              token,
+              joined.runnerId,
+              (one) => one.connectivity === "online",
+            )
+          ).connectivity,
         ).toBe("online");
 
         // The socket stays up and the runner says nothing on it, which is the
@@ -624,9 +646,9 @@ describe("the liveness check", () => {
           harness.base,
           token,
           joined.runnerId,
-          (one) => one.state === "unreachable",
+          (one) => one.connectivity === "unreachable",
         );
-        expect(row.state).toBe("unreachable");
+        expect(row.connectivity).toBe("unreachable");
 
         expect(await transitions(harness)).toEqual(["online", "unreachable"]);
         const entries = await harness.audit("runner.stateChanged");
@@ -646,15 +668,27 @@ describe("the liveness check", () => {
 
         const announced = await greet(harness.base, joined.credential);
         expect(
-          (await rowWhen(harness.base, token, joined.runnerId, (one) => one.state === "online"))
-            .state,
+          (
+            await rowWhen(
+              harness.base,
+              token,
+              joined.runnerId,
+              (one) => one.connectivity === "online",
+            )
+          ).connectivity,
         ).toBe("online");
         announced.wire.send({ _tag: "goodbye" });
         announced.wire.close();
 
         expect(
-          (await rowWhen(harness.base, token, joined.runnerId, (one) => one.state === "offline"))
-            .state,
+          (
+            await rowWhen(
+              harness.base,
+              token,
+              joined.runnerId,
+              (one) => one.connectivity === "offline",
+            )
+          ).connectivity,
         ).toBe("offline");
         // It never passed through `unreachable` on the way: the departure was
         // announced, so there was no silence to interpret.
@@ -663,8 +697,14 @@ describe("the liveness check", () => {
         // A new hello takes it back out of `offline`.
         const back = await greet(harness.base, joined.credential);
         expect(
-          (await rowWhen(harness.base, token, joined.runnerId, (one) => one.state === "online"))
-            .state,
+          (
+            await rowWhen(
+              harness.base,
+              token,
+              joined.runnerId,
+              (one) => one.connectivity === "online",
+            )
+          ).connectivity,
         ).toBe("online");
 
         // And a connection that just goes away is not a departure.
@@ -675,16 +715,22 @@ describe("the liveness check", () => {
               harness.base,
               token,
               joined.runnerId,
-              (one) => one.state === "unreachable",
+              (one) => one.connectivity === "unreachable",
             )
-          ).state,
+          ).connectivity,
         ).toBe("unreachable");
 
         // A new hello takes it back out of `unreachable` too.
         const again = await greet(harness.base, joined.credential);
         expect(
-          (await rowWhen(harness.base, token, joined.runnerId, (one) => one.state === "online"))
-            .state,
+          (
+            await rowWhen(
+              harness.base,
+              token,
+              joined.runnerId,
+              (one) => one.connectivity === "online",
+            )
+          ).connectivity,
         ).toBe("online");
 
         expect(await transitions(harness)).toEqual([
@@ -694,6 +740,9 @@ describe("the liveness check", () => {
           "unreachable",
           "online",
         ]);
+        // Five moves on the one axis a connection owns, and none on the other:
+        // where a runner stands with its owner is not the socket's to say.
+        expect((await readRunner(harness.base, token, joined.runnerId)).lifecycle).toBe("active");
         const entries = await harness.audit("runner.stateChanged");
         for (const entry of entries) expect(entry.actor).toBe("system");
 
@@ -712,8 +761,6 @@ describe("what a runner reports about its machine", () => {
     acceptingPlacements,
   });
 
-  const GIB = 1024 * 1024 * 1024;
-
   it("stores the watermark a runner reports and hands it back on the row", async () => {
     await withServer(
       async (harness) => {
@@ -725,7 +772,7 @@ describe("what a runner reports about its machine", () => {
           harness.base,
           token,
           joined.runnerId,
-          (one) => one.state === "online",
+          (one) => one.connectivity === "online",
         );
         // A runner that has only just said hello has said nothing about its
         // disk yet.
@@ -809,7 +856,7 @@ describe("what a runner reports about its machine", () => {
         const token = await completeSetup(harness.base);
         const joined = await enlist(harness);
         const { wire } = await greet(harness.base, joined.credential);
-        await rowWhen(harness.base, token, joined.runnerId, (one) => one.state === "online");
+        await rowWhen(harness.base, token, joined.runnerId, (one) => one.connectivity === "online");
 
         // Its very first reading, and the disk is full. Nothing had been heard
         // about this machine before, but a machine that cannot take work is
@@ -839,7 +886,7 @@ describe("what a runner reports about its machine", () => {
           harness.base,
           token,
           joined.runnerId,
-          (one) => one.state === "online",
+          (one) => one.connectivity === "online",
         );
         expect(online.facts).toEqual(FACTS);
 
@@ -869,13 +916,65 @@ describe("what a runner reports about its machine", () => {
     );
   });
 
+  it("caps sessions at one per 2 GiB until somebody overrides it", async () => {
+    await withServer(
+      async (harness) => {
+        const token = await completeSetup(harness.base);
+        const joined = await enlist(harness);
+        // A cap can only be derived once the machine has said how big it is,
+        // and it says that in its hello.
+        const { wire } = await greet(harness.base, joined.credential, {
+          facts: { ...FACTS, totalMemoryBytes: 16 * GIB },
+        });
+
+        const sixteen = await rowWhen(
+          harness.base,
+          token,
+          joined.runnerId,
+          (one) => one.facts?.totalMemoryBytes === 16 * GIB,
+        );
+        expect(sixteen.maxConcurrentSessions).toBe(8);
+
+        // A machine too small for even one 2 GiB session still takes one.
+        wire.send({ _tag: "factsReport", facts: { ...FACTS, totalMemoryBytes: 3 * GIB } });
+        const small = await rowWhen(
+          harness.base,
+          token,
+          joined.runnerId,
+          (one) => one.facts?.totalMemoryBytes === 3 * GIB,
+        );
+        expect(small.maxConcurrentSessions).toBe(1);
+
+        const capped = await send("PATCH", harness.base, `/api/v1/runners/${joined.runnerId}`, {
+          body: { maxConcurrentSessions: 4 },
+          token,
+        });
+        expect(capped.status, await capped.clone().text()).toBe(200);
+
+        // What the user said stands: the machine reporting a different size is
+        // not a reason to throw the answer away.
+        wire.send({ _tag: "factsReport", facts: { ...FACTS, totalMemoryBytes: 64 * GIB } });
+        const overridden = await rowWhen(
+          harness.base,
+          token,
+          joined.runnerId,
+          (one) => one.facts?.totalMemoryBytes === 64 * GIB,
+        );
+        expect(overridden.maxConcurrentSessions).toBe(4);
+
+        wire.close();
+      },
+      { pings: FAST },
+    );
+  });
+
   it("keeps the row readable when the stored watermark is one it cannot read", async () => {
     await withServer(
       async (harness) => {
         const token = await completeSetup(harness.base);
         const joined = await enlist(harness);
         const { wire } = await greet(harness.base, joined.credential);
-        await rowWhen(harness.base, token, joined.runnerId, (one) => one.state === "online");
+        await rowWhen(harness.base, token, joined.runnerId, (one) => one.connectivity === "online");
 
         // A column written by a build that said something else. The read side
         // answers it as absent; the write side must not choke on it, or this
@@ -895,7 +994,7 @@ describe("what a runner reports about its machine", () => {
           (one) => one.watermark !== null,
         );
         expect(stored.watermark).toEqual(watermarkOf(200 * GIB, true));
-        expect(stored.state).toBe("online");
+        expect(stored.connectivity).toBe("online");
 
         wire.close();
       },
@@ -918,7 +1017,7 @@ describe("what a runner reports about its machine", () => {
         await delay(100);
 
         const row = await readRunner(harness.base, token, joined.runnerId);
-        expect(row.state).toBe("offline");
+        expect(row.connectivity).toBe("offline");
         expect(row.watermark).toBeNull();
         expect(row.facts).toBeNull();
 
@@ -948,7 +1047,7 @@ describe("what a runner reports about its machine", () => {
         // Nothing about this machine was ever heard, so nothing about the row
         // may say it was: "last seen a moment ago" is what places work.
         expect(row.lastSeenAt).toBeNull();
-        expect(row.state).toBe("offline");
+        expect(row.connectivity).toBe("offline");
       },
       { pings: { ...FAST, silence: Duration.millis(200) } },
     );
@@ -965,7 +1064,7 @@ describe("what a runner reports about its machine", () => {
           harness.base,
           token,
           joined.runnerId,
-          (one) => one.state === "online",
+          (one) => one.connectivity === "online",
         );
         expect(online.lastSeenAt).not.toBeNull();
 
@@ -985,7 +1084,7 @@ describe("what a runner reports about its machine", () => {
         // Liveness is the heartbeat's to say. A machine can report a disk while
         // being unable to answer a ping, and the row must read that as silence.
         expect(reported.lastSeenAt).toBe(online.lastSeenAt);
-        expect(reported.state).toBe("online");
+        expect(reported.connectivity).toBe("online");
 
         wire.close();
       },
@@ -1027,21 +1126,26 @@ describe("what the controller stopping does to its local runner", () => {
         for (let waited = 0; waited < 20_000; waited += 50) {
           listed = await (await get(harness.base, "/api/v1/runners", token)).json();
           const items = (listed as { items: ReadonlyArray<RunnerDetail> }).items;
-          if (items[0]?.state === "online") break;
+          if (items[0]?.connectivity === "online") break;
           await delay(50);
         }
         const items = (listed as { items: ReadonlyArray<RunnerDetail> }).items;
         expect(items, JSON.stringify(listed)).toHaveLength(1);
         const runnerId = items[0]!.id;
-        expect(items[0]!.state).toBe("online");
+        expect(items[0]!.connectivity).toBe("online");
 
         // What the drain does: the child is asked to stop, and it announces
         // that it is going rather than simply vanishing.
         child.kill("SIGTERM");
         expect(await child.exited).toBe(0);
 
-        const row = await rowWhen(harness.base, token, runnerId, (one) => one.state === "offline");
-        expect(row.state).toBe("offline");
+        const row = await rowWhen(
+          harness.base,
+          token,
+          runnerId,
+          (one) => one.connectivity === "offline",
+        );
+        expect(row.connectivity).toBe("offline");
         // Never through `unreachable`: a runner that says goodbye was not lost.
         expect(await transitions(harness)).toEqual(["online", "offline"]);
       } finally {

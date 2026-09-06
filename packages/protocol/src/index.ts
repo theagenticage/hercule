@@ -113,6 +113,20 @@ export const RunnerWatermark = Schema.Struct({
 export type RunnerWatermark = Schema.Schema.Type<typeof RunnerWatermark>;
 
 /**
+ * What a machine says about itself as it presents a join token. Only what the
+ * controller cannot work out for itself: everything else about a runner is
+ * probed or assigned. An absent `reserved` is a machine that is not personal.
+ *
+ * The one decoder of this refuses unknown keys, so a misspelled `reserved` is
+ * an error rather than a machine quietly enlisted as a shared one.
+ */
+export const JoinRequest = Schema.Struct({
+  reserved: Schema.optionalKey(Schema.Boolean),
+});
+
+export type JoinRequest = Schema.Schema.Type<typeof JoinRequest>;
+
+/**
  * What the controller hands a machine that presented a valid join token. The
  * credential appears in this one answer and nowhere else, and the identity and
  * key are what the runner pins: a controller is a logical identity, not an

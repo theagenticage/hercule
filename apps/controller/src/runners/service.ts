@@ -1,7 +1,8 @@
 /**
  * Runners as the API sees them. A runner is almost entirely self-describing:
- * everything but the name, the labels and the session cap arrives over the
- * runner protocol, and the payload schema refuses the rest.
+ * everything but the name, the labels, the session cap and whether the machine
+ * is reserved arrives over the runner protocol, and the payload schema refuses
+ * the rest.
  *
  * Input is decoded here rather than trusted, because a built-in workflow action
  * calls these methods directly and the bounds are the same rule either way.
@@ -14,6 +15,7 @@ import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import {
+  conflict,
   DEFAULT_PAGE_LIMIT,
   Id,
   notFound,
@@ -22,6 +24,7 @@ import {
   RUNNER_SORT_FIELDS,
   RunnerFilter,
   validationOf,
+  type Conflict,
   type Forbidden,
   type MintedJoinToken,
   type NotFound,
@@ -34,6 +37,7 @@ import {
 import { requireGrant, USER_ACTOR } from "../actor";
 import { nowIso, pageInput, refuseCursor, withTransaction } from "../db";
 import { AuditLog } from "../events";
+import { Settings, type SettingError } from "../settings";
 import { JoinTokens } from "./join-tokens";
 import { runnerRepository, type RunnerEdit } from "./repository";
 
@@ -68,6 +72,15 @@ interface Change {
 
 const NO_SUCH_RUNNER = "no such runner";
 
+const NAME_TAKEN = "another runner already has that name";
+
+/**
+ * §5.5: the fleet default is where work with nothing to say about placement
+ * lands, which is the one thing a reserved runner never takes.
+ */
+const RESERVED_IS_THE_DEFAULT =
+  "this is the fleet's default runner; choose another default before reserving it";
+
 /** Alphabetical: a fleet is short, and its name is how a reader picks one out. */
 const DEFAULT_DIRECTION: SortDirection = "asc";
 
@@ -81,6 +94,7 @@ const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const runners = yield* runnerRepository;
   const joinTokens = yield* JoinTokens;
+  const settings = yield* Settings;
   const audit = yield* AuditLog;
 
   const one = (id: string): Effect.Effect<RunnerDetail, NotFound | SqlError> =>
@@ -98,7 +112,7 @@ const make = Effect.gen(function* () {
     ): Effect.Effect<RunnerPage, Unauthenticated | Forbidden | Validation | SqlError> =>
       Effect.gen(function* () {
         yield* requireGrant("runner.query");
-        const { limit, cursor, sort, state, label } = yield* Effect.mapError(
+        const { limit, cursor, sort, connectivity, lifecycle, label } = yield* Effect.mapError(
           decodeQuery(input),
           validationOf,
         );
@@ -107,7 +121,8 @@ const make = Effect.gen(function* () {
             limit: limit ?? DEFAULT_PAGE_LIMIT,
             cursor,
             direction: sort?.direction ?? DEFAULT_DIRECTION,
-            state,
+            connectivity,
+            lifecycle,
             label,
           }),
         );
@@ -137,7 +152,7 @@ const make = Effect.gen(function* () {
       input: UpdateInput,
     ): Effect.Effect<
       RunnerDetail,
-      Unauthenticated | Forbidden | Validation | NotFound | SqlError
+      Unauthenticated | Forbidden | Validation | NotFound | Conflict | SettingError | SqlError
     > =>
       Effect.gen(function* () {
         yield* requireGrant("runner.update");
@@ -167,8 +182,21 @@ const make = Effect.gen(function* () {
               changes.maxConcurrentSessions = { old: before.maxConcurrentSessions, new: cap };
               edit.maxConcurrentSessions = cap;
             }
+            if (patch.reserved !== undefined && patch.reserved !== before.reserved) {
+              changes.reserved = { old: before.reserved, new: patch.reserved };
+              edit.reserved = patch.reserved;
+            }
 
             if (Object.keys(changes).length === 0) return before;
+
+            // Both reads sit inside the transaction the write is in, so the
+            // fleet cannot take the name, or the default, in between.
+            if (edit.name !== undefined && (yield* runners.names()).has(edit.name)) {
+              return yield* Effect.fail(conflict(NAME_TAKEN));
+            }
+            if (edit.reserved === true && (yield* settings.defaultRunnerId()) === id) {
+              return yield* Effect.fail(conflict(RESERVED_IS_THE_DEFAULT));
+            }
 
             yield* runners.update(id, edit, at);
             yield* audit.append({
@@ -218,5 +246,5 @@ export class RunnerService extends Context.Service<RunnerService, Effect.Success
 export const RunnerServiceLayer: Layer.Layer<
   RunnerService,
   never,
-  SqlClient.SqlClient | JoinTokens | AuditLog
+  SqlClient.SqlClient | JoinTokens | Settings | AuditLog
 > = Layer.effect(RunnerService)(make);

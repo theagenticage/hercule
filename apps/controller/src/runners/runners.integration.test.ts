@@ -124,18 +124,35 @@ const mint = async (
 };
 
 /** The join exchange, as a machine holding a join token makes it. */
-const join = (base: string, bearer: string): Promise<Response> =>
-  send("POST", base, "/api/v1/runners/join", { body: {}, token: bearer });
+const joinWith = (base: string, bearer: string, body: unknown): Promise<Response> =>
+  send("POST", base, "/api/v1/runners/join", { body, token: bearer });
+
+const join = (base: string, bearer: string): Promise<Response> => joinWith(base, bearer, {});
+
+/** Enlists a machine and answers with what the controller handed it. */
+const enlist = async (base: string, bearer: string, body: unknown = {}): Promise<JoinAnswer> => {
+  const response = await joinWith(base, bearer, body);
+  expect(response.status, await response.clone().text()).toBe(201);
+  return (await response.json()) as JoinAnswer;
+};
+
+/** The one thing a caller may write about the controller. */
+const patchController = (base: string, token: string, body: unknown): Promise<Response> =>
+  send("PATCH", base, "/api/v1/controller", { body, token });
 
 /** How many runners the controller has enlisted. */
 const runnerCount = async (base: string, token: string): Promise<number> =>
   (await list(base, token)).items.length;
 
-/** Three rows: three states, one of them labelled `gpu`. */
+/** Three rows: three connectivities, one of them labelled `gpu`, one retired. */
 const three = async (harness: ServerHarness) => ({
-  online: await harness.insertRunner({ name: "iris", state: "online", labels: ["gpu"] }),
-  offline: await harness.insertRunner({ name: "atlas", state: "offline" }),
-  retired: await harness.insertRunner({ name: "vega", state: "retired" }),
+  online: await harness.insertRunner({ name: "iris", connectivity: "online", labels: ["gpu"] }),
+  offline: await harness.insertRunner({ name: "atlas", connectivity: "offline" }),
+  retired: await harness.insertRunner({
+    name: "vega",
+    connectivity: "offline",
+    lifecycle: "retired",
+  }),
 });
 
 describe("GET /runners", () => {
@@ -152,7 +169,9 @@ describe("GET /runners", () => {
       for (const field of [
         "id",
         "name",
-        "state",
+        "connectivity",
+        "lifecycle",
+        "reserved",
         "version",
         "labels",
         "facts",
@@ -162,25 +181,35 @@ describe("GET /runners", () => {
       ]) {
         expect(Object.keys(row ?? {}), `a listed runner carries ${field}`).toContain(field);
       }
+      expect(Object.keys(row ?? {}), "the five-valued state is gone").not.toContain("state");
       expect(row).toMatchObject({
         id: online.id,
         name: "iris",
-        state: "online",
+        connectivity: "online",
+        lifecycle: "active",
+        reserved: false,
         labels: ["gpu"],
         maxConcurrentSessions: 1,
       });
     });
   });
 
-  it("filters by state and by label", async () => {
+  it("filters by either axis and by label", async () => {
     await withServer(async (harness) => {
       const token = await completeSetup(harness.base);
       await three(harness);
 
-      expect(names(await list(harness.base, token, "?state=online"))).toEqual(["iris"]);
+      expect(names(await list(harness.base, token, "?connectivity=online"))).toEqual(["iris"]);
+      expect(names(await list(harness.base, token, "?lifecycle=retired"))).toEqual(["vega"]);
+      expect(names(await list(harness.base, token, "?lifecycle=active"))).toEqual([
+        "atlas",
+        "iris",
+      ]);
       expect(names(await list(harness.base, token, "?label=gpu"))).toEqual(["iris"]);
-      expect(names(await list(harness.base, token, "?state=online&label=gpu"))).toEqual(["iris"]);
-      expect(names(await list(harness.base, token, "?state=offline&label=gpu"))).toEqual([]);
+      expect(names(await list(harness.base, token, "?connectivity=online&label=gpu"))).toEqual([
+        "iris",
+      ]);
+      expect(names(await list(harness.base, token, "?connectivity=offline&label=gpu"))).toEqual([]);
     });
   });
 
@@ -219,14 +248,18 @@ describe("GET /runners", () => {
     });
   });
 
-  it("refuses a state that is not one of the five", async () => {
+  it("refuses a connectivity or a lifecycle that is not one of its own", async () => {
     await withServer(async (harness) => {
       const token = await completeSetup(harness.base);
       await three(harness);
 
-      const response = await get(harness.base, "/api/v1/runners?state=asleep", token);
-      expect(response.status).toBe(400);
-      expect(await response.json()).toMatchObject({ error: { code: "validation" } });
+      // Each axis takes its own three values: `draining` is not a connectivity
+      // and `unreachable` is not a lifecycle.
+      for (const query of ["?connectivity=asleep", "?connectivity=draining", "?lifecycle=online"]) {
+        const response = await get(harness.base, `/api/v1/runners${query}`, token);
+        expect(response.status, query).toBe(400);
+        expect(await response.json()).toMatchObject({ error: { code: "validation" } });
+      }
     });
   });
 });
@@ -241,7 +274,9 @@ describe("GET /runners/{id}", () => {
       for (const field of [
         "id",
         "name",
-        "state",
+        "connectivity",
+        "lifecycle",
+        "reserved",
         "version",
         "labels",
         "facts",
@@ -253,7 +288,13 @@ describe("GET /runners/{id}", () => {
       ]) {
         expect(Object.keys(row), `a read runner carries ${field}`).toContain(field);
       }
-      expect(row).toMatchObject({ id: online.id, name: "iris", state: "online" });
+      expect(Object.keys(row), "the five-valued state is gone").not.toContain("state");
+      expect(row).toMatchObject({
+        id: online.id,
+        name: "iris",
+        connectivity: "online",
+        lifecycle: "active",
+      });
     });
   });
 
@@ -305,7 +346,7 @@ describe("PATCH /runners/{id}", () => {
       const token = await completeSetup(harness.base);
       const runner = await harness.insertRunner({
         name: "iris",
-        state: "online",
+        connectivity: "online",
         labels: ["gpu"],
         maxConcurrentSessions: 3,
       });
@@ -315,7 +356,8 @@ describe("PATCH /runners/{id}", () => {
       expect(await renamed.json()).toMatchObject({
         id: runner.id,
         name: "iris-2",
-        state: "online",
+        connectivity: "online",
+        lifecycle: "active",
         labels: ["gpu"],
         maxConcurrentSessions: 3,
       });
@@ -341,7 +383,7 @@ describe("PATCH /runners/{id}", () => {
         name: "iris-2",
         labels: ["cpu", "arm"],
         maxConcurrentSessions: 8,
-        state: "online",
+        connectivity: "online",
       });
     });
   });
@@ -362,7 +404,11 @@ describe("PATCH /runners/{id}", () => {
   it("writes nothing when the patch asks for the values the runner already holds", async () => {
     await withServer(async (harness) => {
       const token = await completeSetup(harness.base);
-      const runner = await harness.insertRunner({ name: "iris", labels: ["gpu"] });
+      const runner = await harness.insertRunner({
+        name: "iris",
+        labels: ["gpu"],
+        maxConcurrentSessions: 1,
+      });
 
       const response = await patch(harness.base, token, runner.id, {
         name: "iris",
@@ -408,13 +454,14 @@ describe("PATCH /runners/{id}", () => {
   it("refuses a patch that names facts, state or the watermark", async () => {
     await withServer(async (harness) => {
       const token = await completeSetup(harness.base);
-      const runner = await harness.insertRunner({ name: "iris", state: "online" });
+      const runner = await harness.insertRunner({ name: "iris", connectivity: "online" });
 
       // Each one rides beside a field the patch may set, so the refusal is the
       // unknown key and not the empty patch.
       for (const body of [
         { name: "iris-2", facts: { os: "linux" } },
-        { name: "iris-2", state: "retired" },
+        { name: "iris-2", connectivity: "unreachable" },
+        { name: "iris-2", lifecycle: "retired" },
         { name: "iris-2", watermark: { diskFreeBytes: 1 } },
       ]) {
         const response = await patch(harness.base, token, runner.id, body);
@@ -424,7 +471,8 @@ describe("PATCH /runners/{id}", () => {
 
       expect(await read(harness.base, token, runner.id)).toMatchObject({
         name: "iris",
-        state: "online",
+        connectivity: "online",
+        lifecycle: "active",
       });
     });
   });
@@ -541,8 +589,17 @@ describe("POST /runners/join", () => {
       expect(answer.controllerIdentityId).toBe(controller.id);
       expect(answer.controllerPublicKey).toBe(controller.publicKey);
 
+      // Nothing has dialled, so the fleet knows both where the machine stands
+      // with the user (`active`) and that it is not reachable (`offline`).
       const row = await read(harness.base, token, answer.runnerId);
-      expect(row).toMatchObject({ id: answer.runnerId, name: answer.name, state: "offline" });
+      expect(row).toMatchObject({
+        id: answer.runnerId,
+        name: answer.name,
+        connectivity: "offline",
+        lifecycle: "active",
+        reserved: false,
+      });
+      expect(Object.keys(row), "the five-valued state is gone").not.toContain("state");
 
       const runnerRows = await allRows(harness.sql, "runners");
       expect(runnerRows).toHaveLength(1);
@@ -702,6 +759,146 @@ describe("POST /runners/join", () => {
         expect(response.status, bearer).toBe(401);
       }
       expect(await runnerCount(harness.base, token)).toBe(0);
+    });
+  });
+});
+
+describe("a machine that joins as a personal one", () => {
+  it("is reserved when its join says so, and is not when it does not", async () => {
+    await withServer(async (harness) => {
+      const token = await completeSetup(harness.base);
+
+      const reserved = await enlist(harness.base, (await mint(harness.base, token)).token, {
+        reserved: true,
+      });
+      const plain = await enlist(harness.base, (await mint(harness.base, token)).token, {});
+      const explicit = await enlist(harness.base, (await mint(harness.base, token)).token, {
+        reserved: false,
+      });
+
+      expect((await read(harness.base, token, reserved.runnerId)).reserved).toBe(true);
+      expect((await read(harness.base, token, plain.runnerId)).reserved).toBe(false);
+      expect((await read(harness.base, token, explicit.runnerId)).reserved).toBe(false);
+    });
+  });
+
+  it("is never made the fleet default, even when it is the first machine to join", async () => {
+    await withServer(async (harness) => {
+      const token = await completeSetup(harness.base);
+
+      // The default is where work with nothing to say about placement lands,
+      // which is the one thing a reserved runner never takes: an empty fleet is
+      // no reason to write the pair the rules elsewhere refuse to reach.
+      const first = await enlist(harness.base, (await mint(harness.base, token)).token, {
+        reserved: true,
+      });
+
+      const controller = (await (await get(harness.base, "/api/v1/controller", token)).json()) as {
+        defaultRunnerId: string | null;
+      };
+      expect(controller.defaultRunnerId).toBeNull();
+      expect((await read(harness.base, token, first.runnerId)).reserved).toBe(true);
+    });
+  });
+
+  it("refuses a join body that is not one this build understands", async () => {
+    await withServer(async (harness) => {
+      const token = await completeSetup(harness.base);
+
+      // A misspelled key would otherwise enlist a shared machine while its
+      // owner believes they asked for a personal one.
+      for (const body of ["", "not json", { reserved: "yes" }, { reservd: true }]) {
+        const minted = await mint(harness.base, token);
+        const response = await send("POST", harness.base, "/api/v1/runners/join", {
+          body,
+          token: minted.token,
+        });
+        expect(response.status, JSON.stringify(body)).toBe(400);
+        expect(await response.json()).toMatchObject({ error: { code: "validation" } });
+      }
+      expect(await runnerCount(harness.base, token)).toBe(0);
+    });
+  });
+});
+
+describe("PATCH /runners/{id}: reserved", () => {
+  it("flips reserved on any runner but the fleet default, and records the change", async () => {
+    await withServer(async (harness) => {
+      const token = await completeSetup(harness.base);
+      const chosen = await harness.insertRunner({ name: "iris" });
+      const other = await harness.insertRunner({ name: "atlas" });
+      expect(
+        (await patchController(harness.base, token, { defaultRunnerId: chosen.id })).status,
+      ).toBe(200);
+
+      // Work with nothing to say about where it runs lands on the default, and
+      // a reserved runner is the one place such work never goes.
+      const refused = await patch(harness.base, token, chosen.id, { reserved: true });
+      expect(refused.status, await refused.clone().text()).toBe(409);
+      expect(await refused.json()).toMatchObject({ error: { code: "conflict" } });
+      expect((await read(harness.base, token, chosen.id)).reserved).toBe(false);
+      expect(await harness.audit("runner.updated")).toHaveLength(0);
+
+      const flipped = await patch(harness.base, token, other.id, { reserved: true });
+      expect(flipped.status, await flipped.clone().text()).toBe(200);
+      expect(await flipped.json()).toMatchObject({ id: other.id, reserved: true });
+      expect((await read(harness.base, token, other.id)).reserved).toBe(true);
+
+      const entries = await harness.audit("runner.updated");
+      expect(entries).toHaveLength(1);
+      expect(entries[0]?.actor).toBe("user");
+      expect(JSON.stringify(entries[0]?.payload)).toContain("reserved");
+    });
+  });
+});
+
+describe("PATCH /runners/{id}: the name a fleet has only one of", () => {
+  it("refuses a name another runner holds, and takes one nobody does", async () => {
+    await withServer(async (harness) => {
+      const token = await completeSetup(harness.base);
+      const iris = await harness.insertRunner({ name: "iris", labels: ["gpu"] });
+      await harness.insertRunner({ name: "atlas" });
+
+      const taken = await patch(harness.base, token, iris.id, { name: "atlas" });
+      expect(taken.status, await taken.clone().text()).toBe(409);
+      expect(await taken.json()).toMatchObject({ error: { code: "conflict" } });
+      expect(await read(harness.base, token, iris.id)).toMatchObject({
+        name: "iris",
+        labels: ["gpu"],
+      });
+      expect(names(await list(harness.base, token))).toEqual(["atlas", "iris"]);
+
+      // A name that differs only in case is a different name: the fleet reads
+      // what the user typed, and nothing here folds case.
+      const cased = await patch(harness.base, token, iris.id, { name: "Atlas" });
+      expect(cased.status, await cased.clone().text()).toBe(200);
+
+      const free = await patch(harness.base, token, iris.id, { name: "vega" });
+      expect(free.status).toBe(200);
+      expect(names(await list(harness.base, token))).toEqual(["atlas", "vega"]);
+    });
+  });
+});
+
+describe("how many sessions a runner will take", () => {
+  it("derives one per 2 GiB with a floor of 1, until somebody says otherwise", async () => {
+    await withServer(async (harness) => {
+      const token = await completeSetup(harness.base);
+      const runner = await harness.insertRunner({ name: "iris" });
+
+      // Nothing has said how big the machine is, so the fleet claims the least
+      // it can rather than nothing at all.
+      expect((await read(harness.base, token, runner.id)).maxConcurrentSessions).toBe(1);
+
+      const capped = await patch(harness.base, token, runner.id, { maxConcurrentSessions: 4 });
+      expect(capped.status, await capped.clone().text()).toBe(200);
+      expect(await capped.json()).toMatchObject({ maxConcurrentSessions: 4 });
+      expect((await read(harness.base, token, runner.id)).maxConcurrentSessions).toBe(4);
+
+      const refused = await patch(harness.base, token, runner.id, { maxConcurrentSessions: 0 });
+      expect(refused.status).toBe(400);
+      expect(await refused.json()).toMatchObject({ error: { code: "validation" } });
+      expect((await read(harness.base, token, runner.id)).maxConcurrentSessions).toBe(4);
     });
   });
 });

@@ -1,18 +1,16 @@
 import type { JSX } from "react";
 import { cn } from "@hydra/ui";
 import { formatBytes, formatStamp } from "@hydra/client-core";
-import type { Runner, RunnerState } from "@hydra/contract";
+import type { Runner, RunnerConnectivity } from "@hydra/contract";
 
 /**
  * Only `online` is live and only `unreachable` was nobody's choice. The
  * attention hue is left free for the skew warning, the one actionable thing here.
  */
-const STATE_HUE: Record<RunnerState, string> = {
+const CONNECTIVITY_HUE: Record<RunnerConnectivity, string> = {
   online: "text-live",
   offline: "text-muted",
   unreachable: "text-fail",
-  draining: "text-muted",
-  retired: "text-faint",
 };
 
 /** In the order a person scans it. */
@@ -50,7 +48,7 @@ export function RunnerRow({
   const skewed = runner.version !== null && runner.version !== controllerVersion;
   const facts = probed(runner);
   const lastSeen =
-    runner.state === "online" || runner.lastSeenAt === null
+    runner.connectivity === "online" || runner.lastSeenAt === null
       ? undefined
       : formatStamp(new Date(runner.lastSeenAt), timezone);
   return (
@@ -60,14 +58,23 @@ export function RunnerRow({
           <b className="font-emph text-ink">{runner.name}</b>
           {isLocal ? <small className="ml-1.5 text-fine text-muted">this machine</small> : null}
         </span>
-        <span className={cn("flex items-center gap-1.5 text-fine", STATE_HUE[runner.state])}>
-          {runner.state === "online" ? (
+        {/* `active` is the ordinary one; saying so on every row would be noise. */}
+        {runner.lifecycle === "active" ? null : (
+          <span className="text-fine text-faint">{runner.lifecycle}</span>
+        )}
+        <span
+          className={cn(
+            "flex items-center gap-1.5 text-fine",
+            CONNECTIVITY_HUE[runner.connectivity],
+          )}
+        >
+          {runner.connectivity === "online" ? (
             <span
               aria-hidden="true"
               className="hydra-live-dot size-1.5 shrink-0 rounded-full bg-live"
             />
           ) : null}
-          {runner.state}
+          {runner.connectivity}
           {lastSeen === undefined ? null : <span className="text-faint">last seen {lastSeen}</span>}
         </span>
       </div>

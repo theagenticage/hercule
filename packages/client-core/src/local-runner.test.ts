@@ -27,10 +27,16 @@ const facts = (identityPort: number): RunnerFacts => ({
   identityPort,
 });
 
-const runner = (id: string, identityPort: number, state: Runner["state"] = "online"): Runner => ({
+const runner = (
+  id: string,
+  identityPort: number,
+  connectivity: Runner["connectivity"] = "online",
+): Runner => ({
   id,
   name: id,
-  state,
+  connectivity,
+  lifecycle: "active",
+  reserved: false,
   version: "1.0.0",
   labels: [],
   facts: facts(identityPort),

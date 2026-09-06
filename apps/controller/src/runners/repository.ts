@@ -9,7 +9,13 @@ import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import { RunnerCapabilities, RunnerFacts, RunnerWatermark } from "@hydra/contract";
-import type { Runner, RunnerDetail, RunnerState, SortDirection } from "@hydra/contract";
+import type {
+  Runner,
+  RunnerConnectivity,
+  RunnerDetail,
+  RunnerLifecycle,
+  SortDirection,
+} from "@hydra/contract";
 import {
   decodeCursor,
   encodeCursor,
@@ -27,15 +33,17 @@ export interface RunnerPageRequest {
   readonly limit: number;
   readonly cursor: string | undefined;
   readonly direction: SortDirection;
-  readonly state: RunnerState | undefined;
+  readonly connectivity: RunnerConnectivity | undefined;
+  readonly lifecycle: RunnerLifecycle | undefined;
   readonly label: string | undefined;
 }
 
 export interface NewRunner {
   readonly name: string;
-  readonly state: RunnerState;
+  readonly connectivity: RunnerConnectivity;
+  readonly lifecycle: RunnerLifecycle;
+  readonly reserved: boolean;
   readonly labels: ReadonlyArray<string>;
-  readonly maxConcurrentSessions: number;
   /** Only the hash of the runner's durable credential is ever stored. */
   readonly credentialHash: string;
   readonly at: string;
@@ -53,14 +61,17 @@ export interface RunnerEdit {
   readonly name?: string;
   readonly labels?: ReadonlyArray<string>;
   readonly maxConcurrentSessions?: number;
+  readonly reserved?: boolean;
 }
 
 interface RunnerRow {
   readonly id: Uint8Array;
   readonly name: string;
-  readonly state: RunnerState;
+  readonly connectivity: RunnerConnectivity;
+  readonly lifecycle: RunnerLifecycle;
+  readonly reserved: number;
   readonly labels: string;
-  readonly max_concurrent_sessions: number;
+  readonly max_concurrent_sessions: number | null;
   readonly binary_version: string | null;
   readonly protocol_version: number | null;
   readonly negotiated_capabilities: string | null;
@@ -70,8 +81,19 @@ interface RunnerRow {
 }
 
 const COLUMNS =
-  "id, name, state, labels, max_concurrent_sessions, binary_version, protocol_version, " +
-  "negotiated_capabilities, facts, watermark, last_seen_at";
+  "id, name, connectivity, lifecycle, reserved, labels, max_concurrent_sessions, " +
+  "binary_version, protocol_version, negotiated_capabilities, facts, watermark, last_seen_at";
+
+/** Spec 03 §5.3: roughly one session per 2 GiB, floor 1. */
+const BYTES_PER_SESSION = 2 * 1024 ** 3;
+
+/**
+ * The cap the fleet answers with. A machine that has not reported yet is taken
+ * for the smallest one there is rather than for no capacity at all.
+ */
+const effectiveCap = (override: number | null, facts: RunnerFacts | null): number =>
+  override ??
+  (facts === null ? 1 : Math.max(1, Math.floor(facts.totalMemoryBytes / BYTES_PER_SESSION)));
 
 const scopeOf = (direction: SortDirection): CursorScope => ({
   op: "runner.query",
@@ -107,15 +129,18 @@ const capabilitiesIn = documentIn(RunnerCapabilities, "negotiated capabilities")
 const toRunner = (row: RunnerRow): Effect.Effect<Runner> =>
   Effect.gen(function* () {
     const id = uuidToString(row.id);
+    const facts = yield* factsIn(id, row.facts);
     return {
       id,
       name: row.name,
-      state: row.state,
+      connectivity: row.connectivity,
+      lifecycle: row.lifecycle,
+      reserved: row.reserved === 1,
       version: row.binary_version,
       labels: JSON.parse(row.labels) as ReadonlyArray<string>,
-      facts: yield* factsIn(id, row.facts),
+      facts,
       watermark: yield* watermarkIn(id, row.watermark),
-      maxConcurrentSessions: row.max_concurrent_sessions,
+      maxConcurrentSessions: effectiveCap(row.max_concurrent_sessions, facts),
       lastSeenAt: row.last_seen_at,
     };
   });
@@ -151,14 +176,14 @@ const make = Effect.gen(function* () {
       Effect.map(
         sql<{ readonly id: Uint8Array }>`
           SELECT id FROM runners
-          WHERE credential_hash = ${credentialHash} AND state <> 'retired'
+          WHERE credential_hash = ${credentialHash} AND lifecycle <> 'retired'
         `,
         (rows) => Option.fromNullishOr(rows[0]).pipe(Option.map((row) => uuidToString(row.id))),
       ),
 
     connected: (): Effect.Effect<ReadonlyArray<string>, SqlError> =>
       Effect.map(
-        sql<{ readonly id: Uint8Array }>`SELECT id FROM runners WHERE state = 'online'`,
+        sql<{ readonly id: Uint8Array }>`SELECT id FROM runners WHERE connectivity = 'online'`,
         (rows) => rows.map((row) => uuidToString(row.id)),
       ),
 
@@ -169,32 +194,26 @@ const make = Effect.gen(function* () {
         (rows) => new Set(rows.map((row) => row.name)),
       ),
 
+    /**
+     * Answered from the row it wrote, so there is one reader of a runner and
+     * not two. The session cap is not among the columns it writes: facts first
+     * arrive at hello, so a new row has nothing to derive one from and leaves
+     * it to be derived at read time.
+     */
     insert: (runner: NewRunner): Effect.Effect<RunnerDetail, SqlError> =>
-      Effect.gen(function* () {
-        const id = mintUuid();
-        yield* sql`
+      Effect.flatMap(
+        sql<RunnerRow>`
           INSERT INTO runners
-            (id, name, state, labels, max_concurrent_sessions, credential_hash,
-             created_at, updated_at)
+            (id, name, connectivity, lifecycle, reserved, labels,
+             credential_hash, created_at, updated_at)
           VALUES
-            (${id}, ${runner.name}, ${runner.state}, ${JSON.stringify(runner.labels)},
-             ${runner.maxConcurrentSessions}, ${runner.credentialHash},
-             ${runner.at}, ${runner.at})
-        `;
-        return {
-          id: uuidToString(id),
-          name: runner.name,
-          state: runner.state,
-          version: null,
-          labels: runner.labels,
-          facts: null,
-          watermark: null,
-          maxConcurrentSessions: runner.maxConcurrentSessions,
-          lastSeenAt: null,
-          negotiatedCapabilities: null,
-          protocolVersion: null,
-        };
-      }),
+            (${mintUuid()}, ${runner.name}, ${runner.connectivity}, ${runner.lifecycle},
+             ${runner.reserved ? 1 : 0}, ${JSON.stringify(runner.labels)},
+             ${runner.credentialHash}, ${runner.at}, ${runner.at})
+          RETURNING ${sql.literal(COLUMNS)}
+        `,
+        (rows) => toDetail(rows[0]!),
+      ),
 
     update: (id: string, edit: RunnerEdit, at: string): Effect.Effect<void, SqlError> => {
       const sets = [sql`updated_at = ${at}`];
@@ -203,12 +222,13 @@ const make = Effect.gen(function* () {
       if (edit.maxConcurrentSessions !== undefined) {
         sets.push(sql`max_concurrent_sessions = ${edit.maxConcurrentSessions}`);
       }
+      if (edit.reserved !== undefined) sets.push(sql`reserved = ${edit.reserved ? 1 : 0}`);
       return Effect.asVoid(
         sql`UPDATE runners SET ${sql.csv(sets)} WHERE id = ${uuidFromString(id)}`,
       );
     },
 
-    /** The state is `setState`'s, so one statement decides whether the row moved. */
+    /** Connectivity is `setConnectivity`'s, so one statement decides whether the row moved. */
     recordHello: (
       id: string,
       hello: RunnerHelloRecord,
@@ -262,11 +282,15 @@ const make = Effect.gen(function* () {
       ),
 
     /** Answers whether it moved, so nothing records a change that did not happen. */
-    setState: (id: string, state: RunnerState, at: string): Effect.Effect<boolean, SqlError> =>
+    setConnectivity: (
+      id: string,
+      connectivity: RunnerConnectivity,
+      at: string,
+    ): Effect.Effect<boolean, SqlError> =>
       Effect.map(
         sql<{ readonly id: Uint8Array }>`
-          UPDATE runners SET state = ${state}, updated_at = ${at}
-          WHERE id = ${uuidFromString(id)} AND state <> ${state}
+          UPDATE runners SET connectivity = ${connectivity}, updated_at = ${at}
+          WHERE id = ${uuidFromString(id)} AND connectivity <> ${connectivity}
           RETURNING id
         `,
         (rows) => rows.length > 0,
@@ -286,7 +310,10 @@ const make = Effect.gen(function* () {
           request.direction,
         );
         const clauses = [keyset];
-        if (request.state !== undefined) clauses.push(sql`state = ${request.state}`);
+        if (request.connectivity !== undefined) {
+          clauses.push(sql`connectivity = ${request.connectivity}`);
+        }
+        if (request.lifecycle !== undefined) clauses.push(sql`lifecycle = ${request.lifecycle}`);
         if (request.label !== undefined) {
           clauses.push(
             sql`EXISTS (SELECT 1 FROM json_each(runners.labels) WHERE value = ${request.label})`,

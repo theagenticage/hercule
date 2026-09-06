@@ -43,7 +43,7 @@ const mintToken = async (): Promise<string> => {
 interface Listed {
   readonly id: string;
   readonly name: string;
-  readonly state: string;
+  readonly connectivity: string;
   readonly facts: {
     readonly os: string;
     readonly arch: string;
@@ -152,10 +152,10 @@ describe("the runner the controller starts for itself", () => {
     // The controller spawned its child while it was booting, so what is waited
     // for here is the join and the first hello finishing, not the process.
     const deadline = Date.now() + 10_000;
-    let online = (await runners()).filter((one) => one.state === "online");
+    let online = (await runners()).filter((one) => one.connectivity === "online");
     while (online.length === 0 && Date.now() < deadline) {
       await Bun.sleep(200);
-      online = (await runners()).filter((one) => one.state === "online");
+      online = (await runners()).filter((one) => one.connectivity === "online");
     }
 
     expect(online, `no runner came online:\n${controller.output()}`).toHaveLength(1);

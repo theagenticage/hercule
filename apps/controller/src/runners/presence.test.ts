@@ -12,7 +12,12 @@
  */
 import { describe, expect, it } from "vitest";
 import { Effect, Layer, Option } from "effect";
-import type { RunnerFacts, RunnerState, RunnerWatermark } from "@hydra/contract";
+import type {
+  RunnerConnectivity,
+  RunnerFacts,
+  RunnerLifecycle,
+  RunnerWatermark,
+} from "@hydra/contract";
 import { hashToken } from "../credentials";
 import { nowIso } from "../db";
 import { TestDatabase } from "../db/testing";
@@ -25,17 +30,23 @@ const layer = RunnerPresenceLayer.pipe(
   Layer.provideMerge(TestDatabase),
 );
 
-/** Arranges a fleet in the states a stopped controller would have left it in. */
-const fleetOf = (states: ReadonlyArray<RunnerState>) =>
+/** One row as a stopped controller would have left it: where it stood, and how. */
+interface Arranged {
+  readonly connectivity: RunnerConnectivity;
+  readonly lifecycle?: RunnerLifecycle;
+}
+
+const fleetOf = (rows: ReadonlyArray<Arranged>) =>
   Effect.gen(function* () {
     const runners = yield* runnerRepository;
     const at = yield* nowIso;
-    return yield* Effect.forEach(states, (state, index) =>
+    return yield* Effect.forEach(rows, (row, index) =>
       runners.insert({
         name: `runner-${String(index)}`,
-        state,
+        connectivity: row.connectivity,
+        lifecycle: row.lifecycle ?? "active",
+        reserved: false,
         labels: [],
-        maxConcurrentSessions: 1,
         credentialHash: hashToken(crypto.randomUUID()),
         at,
       }),
@@ -44,23 +55,32 @@ const fleetOf = (states: ReadonlyArray<RunnerState>) =>
 
 describe("the fleet a stopped controller left behind", () => {
   it("reads every runner it was holding as unreachable, and leaves the rest alone", async () => {
-    const { states, recorded } = await Effect.runPromise(
+    const { rows, recorded } = await Effect.runPromise(
       Effect.gen(function* () {
         const presence = yield* RunnerPresence;
         const runners = yield* runnerRepository;
         const audit = yield* AuditLog;
-        const arranged = yield* fleetOf(["online", "offline", "online", "retired"]);
+        const arranged = yield* fleetOf([
+          { connectivity: "online" },
+          { connectivity: "offline" },
+          { connectivity: "online" },
+          { connectivity: "offline", lifecycle: "retired" },
+          { connectivity: "online", lifecycle: "draining" },
+        ]);
 
         yield* presence.strandedByTheLastRun;
 
-        const states = yield* Effect.forEach(arranged, (runner) =>
+        const rows = yield* Effect.forEach(arranged, (runner) =>
           Effect.map(runners.read(runner.id), (row) =>
-            Option.match(row, { onNone: () => "gone", onSome: (one) => one.state }),
+            Option.match(row, {
+              onNone: () => "gone",
+              onSome: (one) => `${one.connectivity}/${one.lifecycle}`,
+            }),
           ),
         );
         const entries = yield* audit.listByKind("runner.stateChanged");
         return {
-          states,
+          rows,
           recorded: entries.map((entry) => ({
             actor: entry.actor,
             state: entry.payload["state"],
@@ -69,9 +89,18 @@ describe("the fleet a stopped controller left behind", () => {
       }).pipe(Effect.provide(layer), Effect.orDie),
     );
 
-    expect(states).toEqual(["unreachable", "offline", "unreachable", "retired"]);
+    expect(rows).toEqual([
+      "unreachable/active",
+      "offline/active",
+      "unreachable/active",
+      "offline/retired",
+      // The user asked for the drain and nothing has cancelled it; that a
+      // controller restarted says nothing about it either way.
+      "unreachable/draining",
+    ]);
     // Nobody holding a credential asked for this, and a runner is never an actor.
     expect(recorded).toEqual([
+      { actor: "system", state: "unreachable" },
       { actor: "system", state: "unreachable" },
       { actor: "system", state: "unreachable" },
     ]);
@@ -95,13 +124,41 @@ const WATERMARK: RunnerWatermark = {
   acceptingPlacements: true,
 };
 
+describe("a draining runner whose socket drops", () => {
+  it("becomes unreachable without coming off the drain", async () => {
+    const row = await Effect.runPromise(
+      Effect.gen(function* () {
+        const presence = yield* RunnerPresence;
+        const runners = yield* runnerRepository;
+        const [runner] = yield* fleetOf([{ connectivity: "offline", lifecycle: "draining" }]);
+
+        const connection = newConnection();
+        yield* presence.greeted(runner!.id, connection, () => undefined, {
+          binaryVersion: "0.1.0",
+          protocolVersion: 1,
+          negotiatedCapabilities: [],
+          facts: FACTS,
+        });
+        // The machine vanished: nothing announced it, the connection simply went.
+        yield* presence.ended(runner!.id, connection, "unreachable");
+
+        return yield* runners.read(runner!.id);
+      }).pipe(Effect.provide(layer), Effect.orDie),
+    );
+
+    const one = Option.getOrThrow(row);
+    expect(one.connectivity).toBe("unreachable");
+    expect(one.lifecycle).toBe("draining");
+  });
+});
+
 describe("a report from a connection the runner has replaced", () => {
   it("is dropped, so the older socket cannot put its machine back over the newer one", async () => {
     const row = await Effect.runPromise(
       Effect.gen(function* () {
         const presence = yield* RunnerPresence;
         const runners = yield* runnerRepository;
-        const [runner] = yield* fleetOf(["offline"]);
+        const [runner] = yield* fleetOf([{ connectivity: "offline" }]);
 
         const older = newConnection();
         const newer = newConnection();
