@@ -140,21 +140,18 @@ const make = Effect.gen(function* () {
     });
 
   return {
-    /** Every plugin compiled into this binary, in registry order. */
     query: (): Effect.Effect<ReadonlyArray<PluginDetail>, ReadError> =>
       Effect.gen(function* () {
         yield* requireGrant("plugin.query");
         return yield* details;
       }),
 
-    /** One plugin. An id no registry plugin carries is `not_found`. */
     read: (id: string): Effect.Effect<PluginDetail, ReadError | NotFound> =>
       Effect.gen(function* () {
         yield* requireGrant("plugin.read");
         return yield* one(id);
       }),
 
-    /** Lets a plugin run, and starts it. Enabling an enabled plugin changes nothing. */
     enable: (id: string): Effect.Effect<PluginDetail, MoveError> =>
       Effect.gen(function* () {
         yield* requireGrant("plugin.enable");
@@ -211,7 +208,6 @@ const make = Effect.gen(function* () {
         );
       }),
 
-    /** Only an errored plugin can be retried, so this is never a second enable. */
     retry: (id: string): Effect.Effect<PluginDetail, MoveError> =>
       Effect.gen(function* () {
         yield* requireGrant("plugin.retry");

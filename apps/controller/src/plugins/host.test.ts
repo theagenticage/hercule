@@ -54,7 +54,6 @@ describe("PluginHost.boot on an empty database", () => {
         readonly configSchema: unknown;
         readonly defaultConfig: unknown;
       };
-      // The Effect Schema the plugin authored crossed as derived JSON Schema.
       expect(definition.configSchema).toMatchObject({
         type: "object",
         properties: { token: { type: "string" } },
@@ -331,7 +330,6 @@ describe("a plugin whose register crashes", () => {
       readonly message: string;
     } | null;
     expect(errored?._tag).toBe("errored");
-    // The sentence the plugin threw, not the stack trace under it.
     expect(errored?.message).toBe("no such directory");
     expect(detailOf(details, "other")?.contributions).toHaveLength(1);
   });
@@ -389,8 +387,6 @@ describe("a registry plugin whose manifest does not decode", () => {
     );
 
     expect(crash).toContain("id");
-    // The plugin is named from what it claimed, so the registry file has one
-    // line to look at rather than a list.
     expect(crash).toContain("Not A Slug");
   });
 });

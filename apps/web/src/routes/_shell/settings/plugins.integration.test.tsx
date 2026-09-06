@@ -194,9 +194,6 @@ describe("Settings > Plugins", () => {
       ]);
     });
 
-    // Retry is what an errored plugin offers and nothing else does: on a
-    // running one it would be a second spelling of enable, and on a refused
-    // one there is nothing loaded to run.
     for (const plugin of [ACTIVE, REFUSED]) {
       const other = within(await cardFor(plugin));
       expect(other.queryByRole("button", { name: "Retry" })).toBeNull();
@@ -241,8 +238,6 @@ describe("Settings > Plugins", () => {
     const { api } = await open([ACTIVE, ERRORED, REFUSED]);
 
     const card = await cardFor(REFUSED);
-    // The reason is a mismatch between two numbers; a card that named neither
-    // would leave the user with nothing to act on.
     expect(reading(card)).toMatch(/host api/i);
     expect(reading(card)).toContain("2");
 
@@ -308,8 +303,6 @@ describe("Settings > Plugins > configuration", () => {
     await waitFor(() => {
       expect(writesTo(api, unset.id)).toHaveLength(1);
     });
-    // An unchecked box and an empty list are what every optional setting looks
-    // like before anyone touches it, so neither is an answer worth storing.
     expect(writesTo(api, unset.id)[0]?.body).toEqual({
       config: { endpoint: "https://notes.test/ingest", retries: 5 },
     });
@@ -334,8 +327,6 @@ describe("Settings > Plugins > configuration", () => {
     await user.click(screen.getByRole("button", { name: "Save" }));
 
     const shown = await screen.findByText(new RegExp(complaint));
-    // "Under the field named by the path" means beside that field and no
-    // other: a message floating over the whole form names nothing.
     let group: HTMLElement = shown;
     const endpoint = screen.getByLabelText(/endpoint/i);
     while (group.parentElement !== null && !group.contains(endpoint)) {
@@ -367,8 +358,6 @@ describe("Settings > Plugins > configuration", () => {
     answer();
     expect((await screen.findByRole("status")).textContent).toContain("Saved");
 
-    // What the last write said is about the values it was given, so it goes
-    // the moment they are no longer those values.
     await user.type(screen.getByLabelText(/endpoint/i), "!");
     expect(screen.queryByRole("status")).toBeNull();
   });
@@ -431,7 +420,6 @@ describe("Settings > Plugins > reset", () => {
 
     await user.click(await screen.findByRole("button", { name: "Reset plugin state" }));
 
-    // Wiping is not undoable, so nothing goes out until the question is answered.
     expect(writesTo(api, CONFIGURABLE.id)).toEqual([]);
 
     await user.click(screen.getByRole("button", { name: "Confirm" }));

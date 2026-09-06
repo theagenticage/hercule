@@ -1,8 +1,7 @@
 /**
- * The plugin routes over a real socket: what a listing and a read carry, and
- * what the five moves answer, record and announce. The controller boots a
- * registry of fixture plugins through the real host, so what a request reads
- * back is what a real boot left behind. Nothing is mocked.
+ * The plugin routes over a real socket. The controller boots a registry of
+ * fixture plugins through the real host, so what a request reads back is what a
+ * real boot left behind.
  */
 import { describe, expect, it } from "vitest";
 import * as Effect from "effect/Effect";
@@ -168,7 +167,6 @@ describe("GET /plugins", () => {
       const unrenderable = plugins[4]?.status;
       expect(unrenderable?._tag).toBe("refused");
       expect(unrenderable?.reason?.kind).toBe("unsupportedConfigSchema");
-      // The reason says what the author has to change, not merely that it failed.
       expect((unrenderable?.reason?.message ?? "").length).toBeGreaterThan(0);
       expect(plugins[5]).toMatchObject({
         id: "flaky",
@@ -182,8 +180,6 @@ describe("GET /plugins", () => {
       const token = await completeSetup(base);
       const plugins = await list(base, token);
 
-      // What the settings form is generated from: the manifest's Effect Schema
-      // never crosses the wire, its derived JSON Schema does.
       expect(plugins[0]?.configSchema).toEqual({
         type: "object",
         properties: { model: { type: "string" } },
@@ -217,12 +213,9 @@ describe("GET /plugins", () => {
         defaultConfig: { model: "alpha-provider-default" },
       });
 
-      // A plugin that was turned away never registered anything.
       for (const refused of REFUSED) {
         const plugin = plugins.find((one) => one.id === refused);
         expect(plugin?.contributions, refused).toEqual([]);
-        // The schema is derived once a manifest has been accepted, so no plugin
-        // that was turned away has one, whichever way it was turned away.
         expect(plugin, refused).not.toHaveProperty("configSchema");
       }
     });
@@ -428,11 +421,9 @@ describe("a move the plugin's state does not allow", () => {
         };
       };
       expect(body.error.code).toBe("validation");
-      // Field-level, so the form can put the message under the input it is about.
       expect(body.error.details.issues[0]?.path).toEqual(["model"]);
       expect(body.error.details.issues[0]?.message.length).toBeGreaterThan(0);
 
-      // Nothing was stored, and the plugin is still running.
       expect(await read(base, token, "alpha")).toMatchObject({
         config: {},
         status: { _tag: "active" },
@@ -444,7 +435,6 @@ describe("a move the plugin's state does not allow", () => {
     await withPlugins(async ({ base }) => {
       const token = await completeSetup(base);
 
-      // A stale form field is said out loud rather than quietly dropped.
       const response = await configure(base, token, "alpha", { model: "sonnet", colour: "red" });
       expect(response.status, await response.clone().text()).toBe(400);
       expect(await response.json()).toMatchObject({ error: { code: "validation" } });

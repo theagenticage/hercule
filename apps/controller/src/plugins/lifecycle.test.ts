@@ -1,9 +1,7 @@
 /**
- * What happens to a plugin after it has registered: the boot's activation pass,
- * the surfaces its hooks are handed, and the five moves a user makes from
- * Settings. The behaviour spans the host and the operation service, so both are
- * driven here rather than split across two files that would each see half of
- * every outcome. Nothing is mocked.
+ * What happens to a plugin after it has registered. The behaviour spans the host
+ * and the operation service, so both are driven here rather than split across
+ * two files that would each see half of every outcome.
  */
 import { describe, expect, it } from "vitest";
 import { Cause, Effect, Option, Redacted, Schema } from "effect";
@@ -157,8 +155,6 @@ describe("the activation pass at the end of a boot", () => {
     );
 
     expect(detail.status._tag).toBe("errored");
-    // Field-level, so the user reads which setting is wrong rather than that
-    // something is.
     expect((detail.status as { readonly message: string }).message).toContain("model");
     expect(drifted.calls).toEqual([]);
   });
@@ -185,7 +181,6 @@ describe("disabling and enabling a plugin", () => {
     expect(alpha.calls).toEqual(["activate", "deactivate"]);
     expect(detail.status).toEqual({ _tag: "inactive" });
     expect(detail.enabled).toBe(false);
-    // The rows stay, so the UI can still say what the plugin offers.
     expect(detail.contributions).toHaveLength(1);
     expect(owned).toEqual([false]);
     expect(beta.calls).toEqual(["activate"]);
@@ -239,8 +234,6 @@ describe("configuring a plugin", () => {
     );
 
     expect(rows).toMatchObject([{ actor: "user", payload: { pluginId: "alpha" } }]);
-    // A plugin never observes a config change while running: it is stopped,
-    // then started again with the new one.
     expect(alpha.calls).toEqual(["activate", "deactivate", "activate"]);
     expect(currentContext(alpha).config).toEqual({ model: "sonnet" });
     expect(detail.config).toEqual({ model: "sonnet" });
@@ -273,7 +266,6 @@ describe("configuring a plugin", () => {
     ).error.details.issues;
     expect(issues[0]?.path).toEqual(["model"]);
     expect(issues[0]?.message.length).toBeGreaterThan(0);
-    // Nothing was written, so nothing was restarted.
     expect(alpha.calls).toEqual(["activate"]);
   });
 });
@@ -293,7 +285,6 @@ describe("a plugin whose activate fails", () => {
       }),
     );
 
-    // No automatic retry: a broken plugin retrying on its own is noise.
     expect(flaky.calls).toEqual(["activate"]);
     expect(detail.status).toEqual({ _tag: "errored", message: "flaky could not start" });
     expect(errors).toHaveLength(1);
@@ -579,8 +570,6 @@ describe("configuring a plugin whose deactivate failed", () => {
 
     expect(stuck.calls).toEqual(["activate", "deactivate"]);
     expect(detail.config).toEqual({ model: "sonnet" });
-    // Only a restart clears what the plugin left running, so the state it is in
-    // is not hidden by a second activation.
     expect(detail.status).toEqual({ _tag: "errored", message: "the poll loop would not stop" });
   });
 });
@@ -662,7 +651,6 @@ describe("a plugin that only a restart can start again", () => {
 
     expect(failure).toMatchObject({ error: { code: "validation" } });
     expect(JSON.stringify(failure)).toContain("restart");
-    // No second instance was started on top of what the first one left behind.
     expect(stuck.calls).toEqual(["activate", "deactivate"]);
   });
 });
@@ -842,8 +830,6 @@ describe("a plugin that fails with a very long message", () => {
     const message = rows[0]?.payload.message as string;
     expect(message.length).toBeLessThan(shouted.length);
     expect(message.endsWith("...")).toBe(true);
-    // The status is served on every listing, so it is cut to the same bound the
-    // published shape declares rather than only where it is logged.
     expect(detail.status).toEqual({ _tag: "errored", message });
   });
 });
@@ -888,7 +874,6 @@ describe("a caller with no credential behind it", () => {
     for (const failure of failures) {
       expect(failure).toMatchObject({ error: { code: "forbidden" } });
     }
-    // Nothing ran and nothing was written: the refusal comes before the move.
     expect(alpha.calls).toEqual(["activate"]);
     expect(rows.flat()).toEqual([]);
   });
