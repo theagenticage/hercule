@@ -71,6 +71,8 @@ const enrol = (home: string): Effect.Effect<void, JoinError> =>
       controllerUrl: enrolment.controllerUrl,
       token: enrolment.token,
       home,
+      // The machine the controller is on takes whatever the fleet is given.
+      reserved: false,
     }).pipe(
       Effect.retry({
         while: (error: JoinError) => error.retryable,

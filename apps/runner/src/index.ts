@@ -18,6 +18,7 @@ import { parseGlobalOptions, resolveHomePath } from "@hydra/home";
 import { daemon } from "./daemon";
 import { join } from "./join";
 import { local } from "./local";
+import { setController } from "./set-controller";
 
 /** The same vocabulary the CLI uses. */
 const EXIT = { failed: 1, usage: 2 } as const;
@@ -25,7 +26,8 @@ const EXIT = { failed: 1, usage: 2 } as const;
 const USAGE = [
   "usage: hydra runner",
   "       hydra runner --local",
-  "       hydra runner join <controller-url> --token <token>",
+  "       hydra runner join <controller-url> --token <token> [--reserved]",
+  "       hydra runner set-controller <controller-url>",
 ].join("\n");
 
 /**
@@ -95,17 +97,38 @@ export async function run(argv: readonly string[]): Promise<void> {
     }
     return await hold(verb === "--local" ? local(home) : daemon(home));
   }
-  if (verb !== "join") {
+  if (verb !== "join" && verb !== "set-controller") {
     misuse(`unknown runner command \`${verb}\``);
     return;
   }
 
   const args = rest.slice(1);
+  const home = resolveHomePath(options.success.home, process.env);
+
+  if (verb === "set-controller") {
+    if (args.length !== 1) {
+      misuse("set-controller takes one controller URL");
+      return;
+    }
+    const outcome = await Effect.runPromise(
+      Effect.result(setController({ home, controllerUrl: args[0]! })),
+    );
+    if (outcome._tag === "Failure") {
+      console.error(`hydra: ${outcome.failure.message}`);
+      process.exitCode = EXIT.failed;
+      return;
+    }
+    console.log(`This runner now looks for its controller at ${outcome.success}.`);
+    return;
+  }
+
   const flag = args.indexOf("--token");
   const token = flag < 0 ? undefined : args[flag + 1];
-  // What is left once the flag and its value are struck out is the URL, so a
+  const named = flag < 0 ? args : args.filter((_, at) => at !== flag && at !== flag + 1);
+  const reserved = named.includes("--reserved");
+  // What is left once the flags and the token are struck out is the URL, so a
   // stray flag is refused rather than ignored.
-  const targets = flag < 0 ? args : args.filter((_, at) => at !== flag && at !== flag + 1);
+  const targets = named.filter((value) => value !== "--reserved");
   const controllerUrl = targets[0];
   if (controllerUrl === undefined) {
     misuse("join needs the controller's URL");
@@ -121,13 +144,7 @@ export async function run(argv: readonly string[]): Promise<void> {
   }
 
   const outcome = await Effect.runPromise(
-    Effect.result(
-      join({
-        controllerUrl,
-        token,
-        home: resolveHomePath(options.success.home, process.env),
-      }),
-    ),
+    Effect.result(join({ controllerUrl, token, home, reserved })),
   );
 
   if (outcome._tag === "Failure") {

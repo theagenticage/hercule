@@ -8,8 +8,9 @@
 import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join as pathJoin } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import * as Effect from "effect/Effect";
+import { run as runArgv } from "./index";
 import { join } from "./join";
 
 const homes: Array<string> = [];
@@ -53,6 +54,7 @@ const run = (options: { readonly home: string; readonly body: unknown; readonly 
       controllerUrl: "http://127.0.0.1:4937",
       token: options.token ?? "a-join-token",
       home: options.home,
+      reserved: false,
       fetch: stubFetch(options.body),
     }),
   );
@@ -128,5 +130,63 @@ describe("the join", () => {
     expect(pathJoin(home, "runner", String(written["storageDirectory"]))).toBe(
       second.storageDirectory,
     );
+  });
+});
+
+/**
+ * The `--reserved` flag, through the runner role's `run(argv)`: the flag is
+ * argv, so the parsing and the request body it produces are one behaviour.
+ */
+describe("hydra runner join --reserved", () => {
+  /** The body of the one join request `run(argv)` made. */
+  const joinBody = async (argv: ReadonlyArray<string>): Promise<unknown> => {
+    const bodies: Array<unknown> = [];
+    const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const fetched = vi.spyOn(globalThis, "fetch").mockImplementation((_url, init) => {
+      const body = init?.body;
+      bodies.push(typeof body === "string" ? (JSON.parse(body) as unknown) : body);
+      return Promise.resolve(
+        new Response(JSON.stringify(answer("0199e0e7-5555-7000-8000-000000000000", "lyra")), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      );
+    });
+    try {
+      process.exitCode = 0;
+      await runArgv(argv);
+      expect(error).not.toHaveBeenCalled();
+      expect(process.exitCode).toBe(0);
+      expect(bodies).toHaveLength(1);
+      return bodies[0];
+    } finally {
+      log.mockRestore();
+      error.mockRestore();
+      fetched.mockRestore();
+      process.exitCode = 0;
+    }
+  };
+
+  it("sends reserved: true with the flag", async () => {
+    const home = temporaryHome();
+    expect(
+      await joinBody([
+        "--home",
+        home,
+        "join",
+        "http://127.0.0.1:4937",
+        "--token",
+        "a-join-token",
+        "--reserved",
+      ]),
+    ).toEqual({ reserved: true });
+  });
+
+  it("sends reserved: false without it", async () => {
+    const home = temporaryHome();
+    expect(
+      await joinBody(["--home", home, "join", "http://127.0.0.1:4937", "--token", "a-join-token"]),
+    ).toEqual({ reserved: false });
   });
 });

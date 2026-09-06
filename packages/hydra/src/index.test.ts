@@ -39,6 +39,18 @@ describe("dispatch", () => {
     expect(run.runner).not.toHaveBeenCalled();
   });
 
+  it("sends runner set-controller to the runner, and still sends create-join-token to the CLI", async () => {
+    // `set-controller` rewrites the runner's own file rather than calling an
+    // operation, so it belongs to the runner role beside `join`.
+    await dispatch(["runner", "set-controller", "https://controller.example:8443"]);
+    expect(run.runner).toHaveBeenCalledWith(["set-controller", "https://controller.example:8443"]);
+    expect(run.cli).not.toHaveBeenCalled();
+
+    await dispatch(["runner", "create-join-token"]);
+    expect(run.cli).toHaveBeenCalledWith(["runner", "create-join-token"]);
+    expect(run.runner).toHaveBeenCalledTimes(1);
+  });
+
   it("skips leading global options before matching the verb", async () => {
     await dispatch(["--home", "/tmp/h", "serve"]);
     expect(run.controller).toHaveBeenCalledWith(["--home", "/tmp/h"]);
