@@ -12,6 +12,17 @@ export {
   type HydraClient,
   type Operations,
 } from "./client";
+export {
+  configDraft,
+  configFields,
+  configIssues,
+  configPayload,
+  type ConfigDraft,
+  type ConfigField,
+  type ConfigFieldKind,
+  type ConfigJson,
+  type ConfigValue,
+} from "./config-fields";
 export { ApiError, ConnectionError, RequestError, type ErrorEnvelope } from "./errors";
 export { ID_TAIL, idTail } from "./id-tail";
 export {
@@ -31,6 +42,7 @@ export {
   IDENTITY_TIMEOUT_MS,
   type LoopbackEndpoint,
 } from "./local-runner";
+export { refusalReason } from "./plugin-refusal";
 export { nextOnboardingStep, ONBOARDING_STEPS, type OnboardingStep } from "./onboarding";
 export { formatBytes } from "./format-bytes";
 export { formatSince, formatStamp, formatTimeContext } from "./time-context";

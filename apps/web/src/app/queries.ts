@@ -92,6 +92,16 @@ export const runnersQuery = (client: HydraClient) =>
   });
 
 /**
+ * Every plugin the binary was built with, which is the whole set: nothing is
+ * installed at runtime, so there is nothing to page through or narrow by.
+ */
+export const pluginsQuery = (client: HydraClient) =>
+  queryOptions({
+    queryKey: queryKeys.plugins(),
+    queryFn: () => client.plugin.query(),
+  });
+
+/**
  * The controller itself: its identity, its version and the runner work falls
  * back to. The version is what a runner's own is compared against, so it is
  * read rather than assumed to match.

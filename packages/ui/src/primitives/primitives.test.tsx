@@ -3,11 +3,13 @@ import { describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Button } from "./button";
+import { Checkbox } from "./checkbox";
 import { Input } from "./input";
 import { Label } from "./label";
 import { Popover, PopoverContent, PopoverTrigger } from "./popover";
 import { Select } from "./select";
 import { SegmentedControl, SegmentedControlItem } from "./segmented-control";
+import { StringList } from "./string-list";
 
 describe("Button", () => {
   it("never submits a form unless asked to", () => {
@@ -38,6 +40,13 @@ describe("Button", () => {
     expect(screen.getByRole("button").dataset.variant).toBe("quiet");
     rerender(<Button variant="primary">Allow</Button>);
     expect(screen.getByRole("button").dataset.variant).toBe("primary");
+  });
+
+  it("keeps its own size when it carries a colour of its own", () => {
+    // The type scale is named, not sized, so the merge has to be told the
+    // difference: a button whose size was dropped inherits the ambient one.
+    render(<Button>Allow</Button>);
+    expect(screen.getByRole("button").className).toContain("text-row");
   });
 
   it("lets a caller's class win over its own", () => {
@@ -154,5 +163,63 @@ describe("SegmentedControl", () => {
     await userEvent.tab();
     await userEvent.keyboard("{ArrowRight}");
     expect(screen.getByRole("radio", { name: "Hydra" })).toBe(document.activeElement);
+  });
+});
+
+describe("StringList", () => {
+  function Example({ initial = ["alpha"] }: { readonly initial?: readonly string[] }) {
+    const [values, setValues] = useState<readonly string[]>(initial);
+    return <StringList id="tags" label="Tag" values={values} onChange={setValues} />;
+  }
+
+  it("names each entry by its place, so a screen reader can tell them apart", () => {
+    render(<Example initial={["alpha", "beta"]} />);
+    expect(screen.getByLabelText<HTMLInputElement>("Tag entry 1").value).toBe("alpha");
+    expect(screen.getByLabelText<HTMLInputElement>("Tag entry 2").value).toBe("beta");
+  });
+
+  it("reports an edited entry with the rest of the list beside it", async () => {
+    render(<Example initial={["alpha", "beta"]} />);
+    await userEvent.type(screen.getByLabelText("Tag entry 1"), "!");
+    expect(screen.getByLabelText<HTMLInputElement>("Tag entry 1").value).toBe("alpha!");
+    expect(screen.getByLabelText<HTMLInputElement>("Tag entry 2").value).toBe("beta");
+  });
+
+  it("grows by an empty entry and shrinks by the one removed", async () => {
+    render(<Example initial={["alpha", "beta"]} />);
+    await userEvent.click(screen.getByRole("button", { name: "Add" }));
+    expect(screen.getByLabelText<HTMLInputElement>("Tag entry 3").value).toBe("");
+
+    await userEvent.click(screen.getByRole("button", { name: "Remove Tag entry 1" }));
+    expect(screen.getByLabelText<HTMLInputElement>("Tag entry 1").value).toBe("beta");
+    expect(screen.queryByLabelText("Tag entry 3")).toBeNull();
+  });
+
+  it("shows only the way to add when there is nothing in the list", () => {
+    render(<Example initial={[]} />);
+    expect(screen.queryByLabelText("Tag entry 1")).toBeNull();
+    expect(screen.getByRole("button", { name: "Add" })).toBeTruthy();
+  });
+});
+
+describe("Checkbox", () => {
+  function Example() {
+    const [on, setOn] = useState(false);
+    return (
+      <Checkbox
+        label="Verbose"
+        checked={on}
+        onChange={(event) => {
+          setOn(event.target.checked);
+        }}
+      />
+    );
+  }
+
+  it("is reached by the name beside it", async () => {
+    render(<Example />);
+    expect(screen.getByLabelText<HTMLInputElement>("Verbose").checked).toBe(false);
+    await userEvent.click(screen.getByText("Verbose"));
+    expect(screen.getByLabelText<HTMLInputElement>("Verbose").checked).toBe(true);
   });
 });

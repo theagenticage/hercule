@@ -69,19 +69,29 @@ export function Field({
   );
 }
 
-/** A card: a lane label, its rows, and the fine print under them. */
+/**
+ * A card: its heading, its rows, and the fine print under them.
+ *
+ * A card named after a section of settings is headed by a lane label, which is
+ * what a string means here. A card about one record is headed by that record,
+ * whose name has to read as a name, so a node is drawn as it was written.
+ */
 export function FormCard({
   label,
   fine,
   children,
 }: {
-  readonly label: string;
+  readonly label: ReactNode;
   readonly fine?: ReactNode;
   readonly children: ReactNode;
 }): JSX.Element {
   return (
     <section className="flex max-w-[520px] flex-col gap-2 rounded-card border border-line bg-raised px-4.5 py-3.5 shadow-card">
-      <div className="text-label font-emph tracking-[0.1em] text-faint uppercase">{label}</div>
+      {typeof label === "string" ? (
+        <div className="text-label font-emph tracking-[0.1em] text-faint uppercase">{label}</div>
+      ) : (
+        label
+      )}
       {children}
       {fine === undefined ? null : <p className="text-fine text-faint">{fine}</p>}
     </section>

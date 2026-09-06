@@ -23,7 +23,13 @@ export default defineConfig(({ command }) => {
       // `autoCodeSplitting` is what puts every route's component in a chunk of
       // its own: the generated tree keeps only the route definitions, and the
       // component is fetched when the route is first visited.
-      tanstackRouter({ target: "react", autoCodeSplitting: true }),
+      // Tests sit beside the route files they drive, and a file with no `Route`
+      // export is otherwise reported as a route that could not be read.
+      tanstackRouter({
+        target: "react",
+        autoCodeSplitting: true,
+        routeFileIgnorePattern: "\\.test\\.tsx?$",
+      }),
       react(),
       babel({ presets: [reactCompilerPreset()] }),
       tailwindcss(),
@@ -31,9 +37,13 @@ export default defineConfig(({ command }) => {
     // In development the app is served by Vite and the API by a controller the
     // developer started themselves, so `/api` is proxied to the port `hydra
     // serve` binds by default and the app talks to one origin here as it does in
-    // production.
+    // production. The live connection is on the same authority in production, so
+    // it is proxied too: without it nothing on a screen ever updates in dev.
     server: {
-      proxy: { "/api": "http://127.0.0.1:4937" },
+      proxy: {
+        "/api": "http://127.0.0.1:4937",
+        "/ws": { target: "ws://127.0.0.1:4937", ws: true },
+      },
     },
   };
 });
