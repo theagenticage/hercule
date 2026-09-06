@@ -30,4 +30,18 @@ describe("the plugin manifest", () => {
   it("refuses a config schema that is not an Effect Schema", () => {
     expect(decode({ ...manifest, configSchema: "not a schema" })).toBe("Failure");
   });
+
+  // The id is the namespace for the plugin's KV keys, its secrets and its
+  // contribution ids, and it goes into the associated data that binds a secret
+  // to its owner, so anything but a plain slug makes one of those ambiguous.
+  it.each(["claude-code", "pi", "gh2"])("accepts the slug %s", (id) => {
+    expect(decode({ ...manifest, id })).toBe("Success");
+  });
+
+  it.each(["", "Claude", "a|b", "a b", "-lead", "trail-", "a--b", "a_b", "a/b"])(
+    "refuses the id %j",
+    (id) => {
+      expect(decode({ ...manifest, id })).toBe("Failure");
+    },
+  );
 });

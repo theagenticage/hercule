@@ -12,8 +12,11 @@ import { join } from "node:path";
 import { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import * as Effect from "effect/Effect";
+import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
+import { HOST_API, PluginError, type Plugin } from "@hydra/plugin-host";
 import { boot, bootWith, hashToken, setupUrl, type BootOutcome } from "./bootstrap";
+import { Plugins } from "./plugins";
 
 let home: string;
 
@@ -165,6 +168,77 @@ describe("bootWith", () => {
     } finally {
       database.close();
     }
+  });
+});
+
+/**
+ * A plugin contributing one provider that either starts or refuses to. Enough
+ * to see what a boot does with one of each; the catalog and the lifecycle are
+ * covered where they live.
+ */
+const bootPlugin = (id: string, failure?: string): Plugin => ({
+  manifest: {
+    id,
+    displayName: `Plugin ${id}`,
+    hostApi: HOST_API,
+    capabilities: ["providers"],
+    configSchema: Schema.Struct({}),
+  },
+  register: (host) =>
+    host.providers!.register({
+      id: `${id}-provider`,
+      displayName: `Provider ${id}`,
+      supportsMultipleInstances: true,
+      configSchema: Schema.Struct({}),
+      defaultConfig: {},
+      declared: {
+        steering: "native",
+        fork: "native",
+        modelSwitch: "in-session",
+        accessModes: {
+          "approval-required": "native",
+          "auto-accept-edits": "native",
+          auto: "native",
+          "full-access": "native",
+        },
+        mcpPassthrough: "native",
+        disallowedTools: "native",
+        structuredOutput: "supported",
+      },
+    }),
+  activate: () =>
+    failure === undefined
+      ? Effect.succeed(Effect.void)
+      : Effect.fail(new PluginError({ message: failure })),
+});
+
+describe("a boot with a plugin that will not start", () => {
+  it("still completes, and lists the plugin as errored beside the ones that started", async () => {
+    const details = await Effect.runPromise(
+      bootWith(
+        {
+          argv: ["--home", home],
+          env: {},
+          masterKeyBackend: "file",
+          plugins: [bootPlugin("broken", "the harness binary is missing"), bootPlugin("healthy")],
+        },
+        () => Effect.flatMap(Plugins, (plugins) => plugins.query()),
+      ),
+    );
+
+    expect(details.map((detail) => detail.id)).toEqual(["broken", "healthy"]);
+    expect(details[0]?.status).toEqual({
+      _tag: "errored",
+      message: "the harness binary is missing",
+    });
+    expect(details[1]?.status).toEqual({ _tag: "active" });
+    // Registration ran before activation, so the failure cost it nothing.
+    expect(details[0]?.contributions.map((c) => c.id)).toEqual(["broken-provider"]);
+    // Nobody asked for this boot, so the entry says what did rather than
+    // blaming whoever logged in last.
+    expect(
+      query<{ actor: string | null }>("SELECT actor FROM events WHERE kind = 'plugin.errored'"),
+    ).toEqual([{ actor: "system" }]);
   });
 });
 

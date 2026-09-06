@@ -19,6 +19,7 @@ import type * as Migrator from "effect/unstable/sql/Migrator";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import * as BunFileSystem from "@effect/platform-bun/BunFileSystem";
+import type { Plugin } from "@hydra/plugin-host";
 import type { HomePaths } from "@hydra/home";
 import * as config from "./config";
 import { BootstrapConfig, HydraHome, HydraHomeError, type ConfigError } from "./config";
@@ -51,6 +52,7 @@ import {
   type LocalRunnerFailed,
   type LocalRunnerOptions,
 } from "./runners";
+import { PluginHost, PluginHostLayer, Plugins, PluginsLayer } from "./plugins";
 import { seed } from "./seed";
 import { Settings, SettingsLayer, type SettingError } from "./settings";
 
@@ -176,6 +178,11 @@ export interface BootOptions {
    * one value is for.
    */
   readonly localRunner?: LocalRunnerOptions;
+  /**
+   * The plugins to load. The registry is a file in this binary, so this is how
+   * a test drives the host with plugins of its own; nothing else varies it.
+   */
+  readonly plugins?: ReadonlyArray<Plugin>;
 }
 
 /**
@@ -192,6 +199,7 @@ export type ControllerServices =
   | Users
   | Credentials
   | JoinTokens
+  | Plugins
   | HydraHome
   | BootstrapConfig;
 
@@ -234,12 +242,27 @@ export const bootWith = <A, E>(
       ),
     );
 
+    /**
+     * The plugin host and its operations over those repositories: it reads
+     * secrets and appends to the audit log, so it is layered on top of them
+     * rather than merged beside them.
+     */
+    const withPlugins = PluginsLayer.pipe(
+      Layer.provideMerge(PluginHostLayer),
+      Layer.provideMerge(repositories),
+    );
+
     const steps = Effect.gen(function* () {
       yield* migrate({ backupsDir: paths.backupsDir, databaseExisted });
       yield* seed;
 
       const identity = yield* ControllerIdentity;
       const record = yield* identity.ensure;
+
+      // After the schema and the identity, because a plugin that activates may
+      // read its own state and secrets, and before the runner, because the
+      // catalog is what a session's provider is resolved through.
+      yield* Effect.flatMap(PluginHost, (host) => host.boot(options.plugins ?? []));
 
       const url = yield* ensureSetupUrl(paths, bootstrap);
 
@@ -258,7 +281,7 @@ export const bootWith = <A, E>(
     });
 
     return yield* Effect.scoped(Effect.flatMap(steps, use)).pipe(
-      Effect.provide(repositories.pipe(Layer.provideMerge(openDatabase(paths.databaseFile)))),
+      Effect.provide(withPlugins.pipe(Layer.provideMerge(openDatabase(paths.databaseFile)))),
       // A statement the database refused reads as one line naming the file; a
       // controller that fails at boot has said nothing else yet.
       Effect.catchTag("SqlError", (error) => Effect.fail(databaseError(paths.databaseFile, error))),

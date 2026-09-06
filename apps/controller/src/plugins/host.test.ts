@@ -6,7 +6,10 @@
  *
  * Fixture plugins are built here and record what ran; nothing is mocked.
  */
-import { describe, expect, it } from "vitest";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterAll, describe, expect, it } from "vitest";
 import { Cause, Effect, Layer, Option, Schema } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import {
@@ -16,13 +19,26 @@ import {
   type PluginCapability,
   type ProviderDefinition,
 } from "@hydra/plugin-host";
+import { homePaths, HydraHome } from "../config";
 import { TestDatabase } from "../db/testing";
+import { AuditLogLayer } from "../events";
+import { masterKeyLayer, secretsLayer } from "../secrets";
 import { PluginHost, PluginHostLayer, Plugins, PluginsLayer } from "./index";
 import { pluginRepository } from "./repository";
 
+/** The host reads plugin secrets, so the stack needs a home to keep a key file in. */
+const HOME = mkdtempSync(join(tmpdir(), "hydra-plugin-host-"));
+
+afterAll(() => {
+  rmSync(HOME, { recursive: true, force: true });
+});
+
 const layer = PluginsLayer.pipe(
   Layer.provideMerge(PluginHostLayer),
+  Layer.provideMerge(secretsLayer.pipe(Layer.provide(masterKeyLayer("file")))),
+  Layer.provideMerge(AuditLogLayer),
   Layer.provideMerge(TestDatabase),
+  Layer.provideMerge(Layer.succeed(HydraHome, homePaths(HOME, join(HOME, "data")))),
 );
 
 type Services = Plugins | PluginHost | SqlClient.SqlClient;
@@ -457,6 +473,27 @@ describe("a registry that lists one plugin id twice", () => {
     );
 
     expect(crash).toContain("doubled");
+  });
+});
+
+describe("a registry plugin whose manifest does not decode", () => {
+  it("fails the boot saying what is wrong, because the registry is a file in this binary", async () => {
+    const wrong = fixture({ id: "fine" });
+    const broken: Plugin = {
+      ...wrong.plugin,
+      manifest: { ...wrong.plugin.manifest, id: "Not A Slug" },
+    };
+
+    const crash = await run(
+      Effect.flatMap(PluginHost, (host) => host.boot([broken])).pipe(
+        Effect.catchCause((cause) => Effect.succeed(Cause.pretty(cause))),
+      ),
+    );
+
+    expect(crash).toContain("id");
+    // The plugin is named from what it claimed, so the registry file has one
+    // line to look at rather than a list.
+    expect(crash).toContain("Not A Slug");
   });
 });
 

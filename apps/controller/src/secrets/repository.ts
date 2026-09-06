@@ -165,6 +165,13 @@ export class Secrets extends Context.Service<
       name: string,
     ) => Effect.Effect<boolean, SqlError | SecretNameError>;
 
+    /**
+     * Every name one owner stores, by name. The whole list rather than a page,
+     * because its caller is a scoped view over one owner rather than a listing
+     * anyone browses.
+     */
+    readonly names: (owner: SecretOwner) => Effect.Effect<ReadonlyArray<string>, SqlError>;
+
     /** The stored value, or `None` when this owner stores nothing under this name. */
     readonly get: (
       owner: SecretOwner,
@@ -275,6 +282,13 @@ export const secretsLayer: Layer.Layer<Secrets, never, MasterKey | SqlClient.Sql
             const plaintext = yield* decrypt(owner, name, row.nonce, row.ciphertext);
             return Option.some(Redacted.make(plaintext));
           }),
+
+        names: (owner) =>
+          sql<{ readonly name: string }>`
+            SELECT name FROM secrets
+            WHERE owner_kind = ${owner.kind} AND owner_id = ${owner.id}
+            ORDER BY name
+          `.pipe(Effect.map((rows) => rows.map((row) => row.name))),
 
         list: (request) =>
           Effect.gen(function* () {

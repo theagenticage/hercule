@@ -47,6 +47,12 @@ export const AUDIT_KINDS = [
   "runner.placementsChanged",
   "runner.crashLooping",
   "controller.updated",
+  "plugin.enabled",
+  "plugin.disabled",
+  "plugin.configured",
+  "plugin.retried",
+  "plugin.stateReset",
+  "plugin.errored",
 ] as const;
 
 export type AuditKind = (typeof AUDIT_KINDS)[number];
@@ -65,6 +71,12 @@ const RECORD_KINDS = {
   "runner.updated": "updated",
   "runner.stateChanged": "updated",
   "runner.placementsChanged": "updated",
+  "plugin.enabled": "updated",
+  "plugin.disabled": "updated",
+  "plugin.configured": "updated",
+  "plugin.retried": "updated",
+  "plugin.stateReset": "updated",
+  "plugin.errored": "updated",
 } as const satisfies Partial<Record<AuditKind, InvalidateKind>>;
 
 type RecordAuditKind = keyof typeof RECORD_KINDS;

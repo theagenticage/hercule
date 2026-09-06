@@ -10,6 +10,7 @@
  * thrown from the middle of a listing.
  */
 import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
@@ -25,6 +26,12 @@ export interface Contribution {
   readonly extensionPoint: string;
   readonly id: string;
   readonly definition: Schema.Json;
+  /**
+   * Whether the plugin that contributed it may run. A contribution stays in the
+   * catalog while its owner is disabled, so a picker can say what is missing
+   * rather than silently losing the entry.
+   */
+  readonly ownerEnabled: boolean;
 }
 
 /**
@@ -60,6 +67,18 @@ const make = Effect.gen(function* () {
         `,
         { discard: true },
       ),
+
+    /** Records what the user decided about one plugin. */
+    setEnabled: (id: string, enabled: boolean, at: string): Effect.Effect<void, SqlError> =>
+      sql`UPDATE plugins SET enabled = ${enabled ? 1 : 0}, updated_at = ${at} WHERE id = ${id}`.pipe(
+        Effect.asVoid,
+      ),
+
+    /** Stores a config the plugin's own schema has already accepted. */
+    setConfig: (id: string, config: Schema.Json, at: string): Effect.Effect<void, SqlError> =>
+      sql`
+        UPDATE plugins SET config = ${JSON.stringify(config)}, updated_at = ${at} WHERE id = ${id}
+      `.pipe(Effect.asVoid),
 
     /** What the user decided, per plugin id. */
     states: (): Effect.Effect<ReadonlyMap<string, PluginState>, SqlError | Schema.SchemaError> =>
@@ -115,9 +134,15 @@ const make = Effect.gen(function* () {
           readonly extension_point: string;
           readonly id: string;
           readonly definition: string;
+          readonly owner_enabled: number;
         }>`
-          SELECT owner, extension_point, id, definition FROM plugin_contributions
-          ORDER BY owner, extension_point, id
+          SELECT c.owner, c.extension_point, c.id, c.definition,
+                 -- \`core\` owns contributions and has no row here, because it is
+                 -- not a plugin and is never disabled.
+                 COALESCE(p.enabled, 1) AS owner_enabled
+          FROM plugin_contributions c
+          LEFT JOIN plugins p ON p.id = c.owner
+          ORDER BY c.owner, c.extension_point, c.id
         `;
         const byOwner = new Map<string, Array<Contribution>>();
         for (const row of rows) {
@@ -126,11 +151,45 @@ const make = Effect.gen(function* () {
             extensionPoint: row.extension_point,
             id: row.id,
             definition: yield* decodeJson(row.definition),
+            ownerEnabled: row.owner_enabled === 1,
           });
           byOwner.set(row.owner, owned);
         }
         return byOwner;
       }),
+
+    /** One plugin's stored value under a key, or nothing stored under it. */
+    kvGet: (
+      pluginId: string,
+      key: string,
+    ): Effect.Effect<Option.Option<Schema.Json>, SqlError | Schema.SchemaError> =>
+      Effect.gen(function* () {
+        const rows = yield* sql<{ readonly value: string }>`
+          SELECT value FROM plugin_kv WHERE plugin_id = ${pluginId} AND key = ${key}
+        `;
+        const row = rows[0];
+        return row === undefined ? Option.none() : Option.some(yield* decodeJson(row.value));
+      }),
+
+    kvSet: (pluginId: string, key: string, value: Schema.Json): Effect.Effect<void, SqlError> =>
+      sql`
+        INSERT INTO plugin_kv (plugin_id, key, value)
+        VALUES (${pluginId}, ${key}, ${JSON.stringify(value)})
+        ON CONFLICT (plugin_id, key) DO UPDATE SET value = excluded.value
+      `.pipe(Effect.asVoid),
+
+    kvDelete: (pluginId: string, key: string): Effect.Effect<void, SqlError> =>
+      sql`DELETE FROM plugin_kv WHERE plugin_id = ${pluginId} AND key = ${key}`.pipe(Effect.asVoid),
+
+    /** The keys one plugin stores, ordered so a listing reads the same twice. */
+    kvKeys: (pluginId: string): Effect.Effect<ReadonlyArray<string>, SqlError> =>
+      sql<{ readonly key: string }>`
+        SELECT key FROM plugin_kv WHERE plugin_id = ${pluginId} ORDER BY key
+      `.pipe(Effect.map((rows) => rows.map((row) => row.key))),
+
+    /** Everything one plugin stored. What Reset plugin state means. */
+    kvWipe: (pluginId: string): Effect.Effect<void, SqlError> =>
+      sql`DELETE FROM plugin_kv WHERE plugin_id = ${pluginId}`.pipe(Effect.asVoid),
   };
 });
 

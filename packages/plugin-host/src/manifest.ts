@@ -36,9 +36,22 @@ export type PluginCapability = Schema.Schema.Type<typeof PluginCapability>;
  */
 export const SchemaValue = Schema.declare(Schema.isSchema);
 
+/**
+ * A plugin id: a lowercase slug. It is the namespace for the plugin's KV keys,
+ * its secrets and its contribution ids, and it is written into the associated
+ * data that binds a secret to its owner, so a separator or an empty string in
+ * it would make one of those ambiguous rather than merely ugly.
+ */
+export const PluginId = Schema.String.check(
+  Schema.isPattern(/^[a-z0-9]+(-[a-z0-9]+)*$/, {
+    title: "plugin id",
+    description: "lowercase letters and digits, single dashes between them",
+  }),
+);
+
 export const PluginManifest = Schema.Struct({
   /** Stable, and the namespace for this plugin's KV keys, secrets and contribution ids. */
-  id: Schema.String,
+  id: PluginId,
   displayName: Schema.String,
   hostApi: Schema.Int,
   capabilities: Schema.Array(PluginCapability),
