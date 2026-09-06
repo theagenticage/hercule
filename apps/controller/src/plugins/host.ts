@@ -42,7 +42,14 @@ import {
   type PluginSecrets,
   type RegistrationHost,
 } from "@hydra/plugin-host";
-import { issuesOf, validationOf, type Validation } from "@hydra/contract";
+import {
+  issuesOf,
+  MAX_PLUGIN_MESSAGE_LENGTH,
+  validationOf,
+  type PluginRefusalReason,
+  type PluginStatus,
+  type Validation,
+} from "@hydra/contract";
 import { nowIso, withTransaction } from "../db";
 import { AuditLog } from "../events";
 import { CurrentActor, SYSTEM_ACTOR, USER_ACTOR } from "../actor";
@@ -57,26 +64,17 @@ import { pluginRepository, type NewContribution, type PluginState } from "./repo
  */
 const IMPLEMENTED: ReadonlyArray<PluginCapability> = ["providers", "kv", "secrets"];
 
-/** Why a plugin was not loaded. Each reason is decided before its code runs. */
-export type RefusalReason =
-  | { readonly kind: "hostApi"; readonly expected: number; readonly actual: number }
-  | { readonly kind: "unimplementedCapability"; readonly capability: PluginCapability }
-  | { readonly kind: "unsupportedConfigSchema"; readonly message: string };
-
-/** Where a plugin stands in this process. */
-export type PluginStatus =
-  | { readonly _tag: "active" }
-  | { readonly _tag: "inactive" }
-  | { readonly _tag: "errored"; readonly message: string }
-  | { readonly _tag: "refused"; readonly reason: RefusalReason };
-
 /** What the boot made of one plugin's manifest, for whoever lists plugins. */
 export interface LoadedPlugin {
   readonly id: string;
   readonly displayName: string;
   readonly hostApi: number;
   readonly capabilities: ReadonlyArray<PluginCapability>;
-  /** Absent when the plugin was refused for a schema that cannot be rendered. */
+  /**
+   * Absent for every plugin that was turned away: the schema is derived once
+   * the manifest has been accepted, so no refusal reaches one. There is no form
+   * to generate in any of the three cases, and `status` says which it was.
+   */
   readonly configSchema?: JsonSchema.JsonSchema;
   readonly status: PluginStatus;
 }
@@ -138,21 +136,25 @@ const decodeConfig = (
   })(config);
 
 /**
- * The longest plugin-written message an audit row carries. The text is the
- * plugin's own and has no bound of its own, and the log keeps what it is told
- * for at least 90 days, so the reader of the log is the one who needs one.
+ * A message the plugin wrote, cut to what the API will carry.
+ *
+ * The text is the plugin's own and has no bound of its own, while it is served
+ * on every listing and kept in the log for months, so it is cut here rather
+ * than at either reader: one bound, applied where the message is made, is what
+ * makes the published maximum true of every message that carries one.
  */
-const MAX_MESSAGE_LENGTH = 2048;
-
-/** A message the plugin wrote, cut to what the log will keep. */
 const bounded = (message: string): string =>
-  message.length <= MAX_MESSAGE_LENGTH ? message : `${message.slice(0, MAX_MESSAGE_LENGTH)}...`;
+  message.length <= MAX_PLUGIN_MESSAGE_LENGTH
+    ? message
+    : `${message.slice(0, MAX_PLUGIN_MESSAGE_LENGTH - 3)}...`;
 
 /** A decode failure as one line naming the fields it is about. */
 const fieldMessage = (error: Schema.SchemaError): string =>
-  issuesOf(error)
-    .map((issue) => `${issue.path.join(".")}: ${issue.message}`)
-    .join("; ");
+  bounded(
+    issuesOf(error)
+      .map((issue) => `${issue.path.join(".")}: ${issue.message}`)
+      .join("; "),
+  );
 
 // An excess key is refused rather than stripped: a plugin that hands over a
 // field the host does not know is wrong about the contract, and silently
@@ -168,13 +170,15 @@ const decodeProvider = Schema.decodeUnknownEffect(ProviderDefinition, {
  * stack trace would say less than the sentence at the top of it.
  */
 const messageOf = (cause: Cause.Cause<PluginError>): string =>
-  Option.match(Cause.findErrorOption(cause), {
-    onSome: (error) => error.message,
-    onNone: () => {
-      const defect = Cause.squash(cause);
-      return defect instanceof Error ? defect.message : String(defect);
-    },
-  });
+  bounded(
+    Option.match(Cause.findErrorOption(cause), {
+      onSome: (error) => error.message,
+      onNone: () => {
+        const defect = Cause.squash(cause);
+        return defect instanceof Error ? defect.message : String(defect);
+      },
+    }),
+  );
 
 /**
  * Refuses an empty key or secret name before it reaches a table. It is a defect
@@ -231,7 +235,9 @@ const decodeManifest = (manifest: unknown, index: number): Effect.Effect<PluginM
  * allowed to run: the reason it cannot be loaded, or the config schema the
  * settings form will be generated from.
  */
-const inspect = (manifest: PluginManifest): Result.Result<JsonSchema.JsonSchema, RefusalReason> => {
+const inspect = (
+  manifest: PluginManifest,
+): Result.Result<JsonSchema.JsonSchema, PluginRefusalReason> => {
   if (manifest.hostApi !== HOST_API) {
     return Result.fail({ kind: "hostApi", expected: HOST_API, actual: manifest.hostApi });
   }
@@ -241,7 +247,7 @@ const inspect = (manifest: PluginManifest): Result.Result<JsonSchema.JsonSchema,
   }
   return Result.mapError(configJsonSchema(manifest.configSchema), (error) => ({
     kind: "unsupportedConfigSchema",
-    message: error.message,
+    message: bounded(error.message),
   }));
 };
 
@@ -352,7 +358,7 @@ const make = Effect.gen(function* () {
         audit.append({
           kind: "plugin.errored",
           actor,
-          payload: { pluginId: id, phase, message: bounded(message) },
+          payload: { pluginId: id, phase, message },
           record: { topic: "plugin", id },
           at,
         }),

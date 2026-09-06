@@ -48,11 +48,15 @@ import { AfterCommit, type Change } from "../db";
 import { eventsAfter, headOfLog } from "../events";
 
 /**
- * How long a burst of record changes is collected before it is announced. Long
- * enough that a workflow touching a dozen tasks costs one refetch, short enough
- * that a person clicking a button sees the result as immediate.
+ * How long a burst of record changes is collected before it is announced, in
+ * milliseconds. Long enough that a workflow touching a dozen tasks costs one
+ * refetch, short enough that a person clicking a button sees the result as
+ * immediate. Exported because a test that watches a push has to outwait it, and
+ * a number written twice is a test that goes flaky when this one moves.
  */
-const COALESCE_WINDOW = Duration.millis(50);
+export const COALESCE_WINDOW_MS = 50;
+
+const COALESCE_WINDOW = Duration.millis(COALESCE_WINDOW_MS);
 
 /**
  * How many messages may wait for one subscriber before the controller gives up

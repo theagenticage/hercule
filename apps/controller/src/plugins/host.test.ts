@@ -19,12 +19,14 @@ import {
   type PluginCapability,
   type ProviderDefinition,
 } from "@hydra/plugin-host";
+import { CurrentActor, type Actor } from "../actor";
 import { homePaths, HydraHome } from "../config";
 import { TestDatabase } from "../db/testing";
 import { AuditLogLayer } from "../events";
 import { masterKeyLayer, secretsLayer } from "../secrets";
 import { PluginHost, PluginHostLayer, Plugins, PluginsLayer } from "./index";
 import { pluginRepository } from "./repository";
+import { providerDefinition } from "./testing";
 
 /** The host reads plugin secrets, so the stack needs a home to keep a key file in. */
 const HOME = mkdtempSync(join(tmpdir(), "hydra-plugin-host-"));
@@ -43,31 +45,15 @@ const layer = PluginsLayer.pipe(
 
 type Services = Plugins | PluginHost | SqlClient.SqlClient;
 
-const run = <A, E>(body: Effect.Effect<A, E, Services>) =>
-  Effect.runPromise(body.pipe(Effect.provide(layer)));
+const USER: Actor = {
+  _tag: "user",
+  userId: "0199f0b7-0000-7000-8000-000000000000",
+  credential: { kind: "login", id: "0199f0b7-0001-7000-8000-000000000000", tokenHash: "x" },
+};
 
-/** One provider definition, the only contribution shape with a consumer. */
-const providerDefinition = (id: string, defaultConfig: Schema.Json): ProviderDefinition => ({
-  id,
-  displayName: `Provider ${id}`,
-  supportsMultipleInstances: true,
-  configSchema: Schema.Struct({ token: Schema.String }),
-  defaultConfig,
-  declared: {
-    steering: "native",
-    fork: "native",
-    modelSwitch: "in-session",
-    accessModes: {
-      "approval-required": "native",
-      "auto-accept-edits": "native",
-      auto: "native",
-      "full-access": "native",
-    },
-    mcpPassthrough: "native",
-    disallowedTools: "native",
-    structuredOutput: "supported",
-  },
-});
+/** Every call runs as the user actor, which is what a request through the API is. */
+const run = <A, E>(body: Effect.Effect<A, E, Services>) =>
+  Effect.runPromise(body.pipe(Effect.provide(layer), Effect.provideService(CurrentActor, USER)));
 
 interface Fixture {
   readonly plugin: Plugin;

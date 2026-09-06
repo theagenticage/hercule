@@ -97,6 +97,16 @@ export {
   ThreadRows,
   UserSettings,
 } from "./groups/settings";
+export {
+  MAX_PLUGIN_MESSAGE_LENGTH,
+  PluginCapability,
+  PluginConfigSchema,
+  PluginConfigureInput,
+  PluginContribution,
+  PluginDetail,
+  PluginRefusalReason,
+  PluginStatus,
+} from "./groups/plugin";
 export { MAX_PROFILE_GRANTS, Profile } from "./groups/profile";
 export { OwnerKind, SecretRef } from "./groups/secret";
 export { ControllerInfo, ControllerUpdateInput } from "./groups/controller";

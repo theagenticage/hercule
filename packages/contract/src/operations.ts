@@ -109,6 +109,30 @@ const TABLE = {
     path: "/api/v1/runners/join-tokens",
   },
 
+  "plugin.query": { requires: "infra.read", method: "GET", path: "/api/v1/plugins" },
+  "plugin.read": { requires: "infra.read", method: "GET", path: "/api/v1/plugins/:id" },
+  "plugin.enable": {
+    requires: "infra.write",
+    method: "POST",
+    path: "/api/v1/plugins/:id/enable",
+  },
+  "plugin.disable": {
+    requires: "infra.write",
+    method: "POST",
+    path: "/api/v1/plugins/:id/disable",
+  },
+  "plugin.retry": { requires: "infra.write", method: "POST", path: "/api/v1/plugins/:id/retry" },
+  "plugin.resetState": {
+    requires: "infra.write",
+    method: "POST",
+    path: "/api/v1/plugins/:id/reset-state",
+  },
+  "plugin.configure": {
+    requires: "infra.write",
+    method: "PUT",
+    path: "/api/v1/plugins/:id/config",
+  },
+
   "controller.read": { requires: "infra.read", method: "GET", path: "/api/v1/controller" },
   "controller.update": { requires: "infra.write", method: "PATCH", path: "/api/v1/controller" },
 } as const satisfies Record<string, { requires: Requirement; method: Method; path: string }>;

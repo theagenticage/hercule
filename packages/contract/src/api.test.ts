@@ -77,8 +77,8 @@ describe("the HttpApi declaration", () => {
 });
 
 /**
- * The Task, Project, Event, Runner and Controller operations: the operation
- * table row and the endpoint that answers it.
+ * The Task, Project, Event, Runner, Plugin and Controller operations: the
+ * operation table row and the endpoint that answers it.
  */
 const NEW_OPERATIONS = [
   { id: "task.query", requires: "task.read", method: "GET", path: "/api/v1/tasks" },
@@ -106,6 +106,38 @@ const NEW_OPERATIONS = [
   { id: "runner.query", requires: "infra.read", method: "GET", path: "/api/v1/runners" },
   { id: "runner.read", requires: "infra.read", method: "GET", path: "/api/v1/runners/:id" },
   { id: "runner.update", requires: "infra.write", method: "PATCH", path: "/api/v1/runners/:id" },
+  { id: "plugin.query", requires: "infra.read", method: "GET", path: "/api/v1/plugins" },
+  { id: "plugin.read", requires: "infra.read", method: "GET", path: "/api/v1/plugins/:id" },
+  {
+    id: "plugin.enable",
+    requires: "infra.write",
+    method: "POST",
+    path: "/api/v1/plugins/:id/enable",
+  },
+  {
+    id: "plugin.disable",
+    requires: "infra.write",
+    method: "POST",
+    path: "/api/v1/plugins/:id/disable",
+  },
+  {
+    id: "plugin.retry",
+    requires: "infra.write",
+    method: "POST",
+    path: "/api/v1/plugins/:id/retry",
+  },
+  {
+    id: "plugin.resetState",
+    requires: "infra.write",
+    method: "POST",
+    path: "/api/v1/plugins/:id/reset-state",
+  },
+  {
+    id: "plugin.configure",
+    requires: "infra.write",
+    method: "PUT",
+    path: "/api/v1/plugins/:id/config",
+  },
   {
     id: "controller.update",
     requires: "infra.write",

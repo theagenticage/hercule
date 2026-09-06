@@ -15,8 +15,16 @@ import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { HOST_API, PluginError, type Plugin } from "@hydra/plugin-host";
+import { CurrentActor, type Actor } from "./actor";
 import { boot, bootWith, hashToken, setupUrl, type BootOutcome } from "./bootstrap";
 import { Plugins } from "./plugins";
+
+/** Listing plugins needs a credential; a boot has none, so the read supplies one. */
+const USER: Actor = {
+  _tag: "user",
+  userId: "0199f0b7-0000-7000-8000-000000000000",
+  credential: { kind: "login", id: "0199f0b7-0001-7000-8000-000000000000", tokenHash: "x" },
+};
 
 let home: string;
 
@@ -222,7 +230,12 @@ describe("a boot with a plugin that will not start", () => {
           masterKeyBackend: "file",
           plugins: [bootPlugin("broken", "the harness binary is missing"), bootPlugin("healthy")],
         },
-        () => Effect.flatMap(Plugins, (plugins) => plugins.query()),
+        () =>
+          Effect.provideService(
+            Effect.flatMap(Plugins, (plugins) => plugins.query()),
+            CurrentActor,
+            USER,
+          ),
       ),
     );
 

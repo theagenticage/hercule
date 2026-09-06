@@ -26,7 +26,6 @@ import {
   type Plugin,
   type PluginCapability,
   type PluginSecrets,
-  type ProviderDefinition,
   type RegistrationHost,
 } from "@hydra/plugin-host";
 import { CurrentActor, type Actor } from "../actor";
@@ -35,6 +34,8 @@ import { TestDatabase } from "../db/testing";
 import { AuditLog, AuditLogLayer } from "../events";
 import { masterKeyLayer, Secret, SecretLayer, Secrets, secretsLayer } from "../secrets";
 import { PluginHost, PluginHostLayer, Plugins, PluginsLayer } from "./index";
+import { pluginRepository } from "./repository";
+import { providerDefinition } from "./testing";
 
 const USER: Actor = {
   _tag: "user",
@@ -73,28 +74,17 @@ type Services = Plugins | PluginHost | Secret | Secrets | AuditLog | SqlClient.S
 const run = <A, E>(body: Effect.Effect<A, E, Services>) =>
   Effect.runPromise(body.pipe(Effect.provide(stack()), Effect.provideService(CurrentActor, USER)));
 
-/** One provider definition, the only contribution shape with a consumer. */
-const providerDefinition = (id: string): ProviderDefinition => ({
-  id,
-  displayName: `Provider ${id}`,
-  supportsMultipleInstances: true,
-  configSchema: Schema.Struct({ token: Schema.String }),
-  defaultConfig: {},
-  declared: {
-    steering: "native",
-    fork: "native",
-    modelSwitch: "in-session",
-    accessModes: {
-      "approval-required": "native",
-      "auto-accept-edits": "native",
-      auto: "native",
-      "full-access": "native",
-    },
-    mcpPassthrough: "native",
-    disallowedTools: "native",
-    structuredOutput: "supported",
-  },
-});
+/**
+ * Whether the catalog says a plugin's contributions may run, per row and in
+ * catalog order. It is the catalog's own column, not the plugin's: a
+ * contribution outlives its owner being turned off, so a picker can say what is
+ * missing instead of losing the entry.
+ */
+const ownerEnabled = (id: string) =>
+  Effect.map(
+    Effect.flatMap(pluginRepository, (repository) => repository.contributions()),
+    (byOwner) => (byOwner.get(id) ?? []).map((row) => row.ownerEnabled),
+  );
 
 interface Fixture {
   readonly plugin: Plugin;
@@ -301,13 +291,14 @@ describe("disabling and enabling a plugin", () => {
     const alpha = fixture({ id: "alpha" });
     const beta = fixture({ id: "beta" });
 
-    const { detail, rows } = await run(
+    const { detail, rows, owned } = await run(
       Effect.gen(function* () {
         const host = yield* PluginHost;
         yield* host.boot([alpha.plugin, beta.plugin]);
         return {
           detail: yield* Effect.flatMap(Plugins, (plugins) => plugins.disable("alpha")),
           rows: yield* Effect.flatMap(AuditLog, (log) => log.listByKind("plugin.disabled")),
+          owned: yield* ownerEnabled("alpha"),
         };
       }),
     );
@@ -318,14 +309,14 @@ describe("disabling and enabling a plugin", () => {
     expect(detail.enabled).toBe(false);
     // The rows stay, so the UI can still say what the plugin offers.
     expect(detail.contributions).toHaveLength(1);
-    expect(detail.contributions[0]?.ownerEnabled).toBe(false);
+    expect(owned).toEqual([false]);
     expect(beta.calls).toEqual(["activate"]);
   });
 
   it("activates it again when it is enabled", async () => {
     const alpha = fixture({ id: "alpha" });
 
-    const { detail, rows } = await run(
+    const { detail, rows, owned } = await run(
       Effect.gen(function* () {
         const host = yield* PluginHost;
         yield* host.boot([alpha.plugin]);
@@ -334,6 +325,7 @@ describe("disabling and enabling a plugin", () => {
         return {
           detail: yield* plugins.enable("alpha"),
           rows: yield* Effect.flatMap(AuditLog, (log) => log.listByKind("plugin.enabled")),
+          owned: yield* ownerEnabled("alpha"),
         };
       }),
     );
@@ -342,7 +334,7 @@ describe("disabling and enabling a plugin", () => {
     expect(alpha.calls).toEqual(["activate", "deactivate", "activate"]);
     expect(detail.status).toEqual({ _tag: "active" });
     expect(detail.enabled).toBe(true);
-    expect(detail.contributions[0]?.ownerEnabled).toBe(true);
+    expect(owned).toEqual([true]);
   });
 });
 
@@ -475,13 +467,14 @@ describe("a plugin whose deactivate fails", () => {
   it("is errored with the leftover machinery said out loud, and its contributions read disabled", async () => {
     const stuck = fixture({ id: "stuck", deactivateFails: "the poll loop would not stop" });
 
-    const { detail, errors } = await run(
+    const { detail, errors, owned } = await run(
       Effect.gen(function* () {
         const host = yield* PluginHost;
         yield* host.boot([stuck.plugin]);
         return {
           detail: yield* Effect.flatMap(Plugins, (plugins) => plugins.disable("stuck")),
           errors: yield* Effect.flatMap(AuditLog, (log) => log.listByKind("plugin.errored")),
+          owned: yield* ownerEnabled("stuck"),
         };
       }),
     );
@@ -490,7 +483,7 @@ describe("a plugin whose deactivate fails", () => {
       _tag: "errored",
       message: "the poll loop would not stop",
     });
-    expect(detail.contributions[0]?.ownerEnabled).toBe(false);
+    expect(owned).toEqual([false]);
     expect(errors).toHaveLength(1);
     expect(errors[0]?.payload).toEqual({
       pluginId: "stuck",
@@ -957,16 +950,68 @@ describe("a plugin that fails with a very long message", () => {
       activate: () => Effect.fail(new PluginError({ message: shouted })),
     };
 
-    const rows = await run(
+    const { rows, detail } = await run(
       Effect.gen(function* () {
         const host = yield* PluginHost;
         yield* host.boot([shouty]);
-        return yield* Effect.flatMap(AuditLog, (log) => log.listByKind("plugin.errored"));
+        return {
+          rows: yield* Effect.flatMap(AuditLog, (log) => log.listByKind("plugin.errored")),
+          detail: yield* Effect.flatMap(Plugins, (plugins) => plugins.read("shouty")),
+        };
       }),
     );
 
     const message = rows[0]?.payload.message as string;
     expect(message.length).toBeLessThan(shouted.length);
     expect(message.endsWith("...")).toBe(true);
+    // The status is served on every listing, so it is cut to the same bound the
+    // published shape declares rather than only where it is logged.
+    expect(detail.status).toEqual({ _tag: "errored", message });
+  });
+});
+
+describe("a caller with no credential behind it", () => {
+  it("is refused by every operation, before anything is read or run", async () => {
+    const alpha = fixture({ id: "alpha" });
+
+    const { failures, rows } = await Effect.runPromise(
+      Effect.gen(function* () {
+        const host = yield* PluginHost;
+        // The boot is not an operation: it runs with nobody behind it on every
+        // start, so it is arranged outside the ungated call below.
+        yield* Effect.provideService(host.boot([alpha.plugin]), CurrentActor, USER);
+        const plugins = yield* Plugins;
+        const failures = yield* Effect.all([
+          Effect.flip(plugins.query()),
+          Effect.flip(plugins.read("alpha")),
+          Effect.flip(plugins.enable("alpha")),
+          Effect.flip(plugins.disable("alpha")),
+          Effect.flip(plugins.configure("alpha", { config: {} })),
+          Effect.flip(plugins.retry("alpha")),
+          Effect.flip(plugins.resetState("alpha")),
+        ]);
+        const log = yield* AuditLog;
+        return {
+          failures,
+          rows: yield* Effect.forEach(
+            [
+              "plugin.enabled",
+              "plugin.disabled",
+              "plugin.configured",
+              "plugin.retried",
+              "plugin.stateReset",
+            ] as const,
+            (kind) => log.listByKind(kind),
+          ),
+        };
+      }).pipe(Effect.provide(stack())),
+    );
+
+    for (const failure of failures) {
+      expect(failure).toMatchObject({ error: { code: "forbidden" } });
+    }
+    // Nothing ran and nothing was written: the refusal comes before the move.
+    expect(alpha.calls).toEqual(["activate"]);
+    expect(rows.flat()).toEqual([]);
   });
 });

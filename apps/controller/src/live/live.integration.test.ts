@@ -31,14 +31,8 @@ import { describe, expect, it } from "vitest";
 import type * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
-import * as Layer from "effect/Layer";
-import type * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 import * as RpcClient from "effect/unstable/rpc/RpcClient";
-import type { RpcClientError } from "effect/unstable/rpc/RpcClientError";
-import type * as RpcGroup from "effect/unstable/rpc/RpcGroup";
-import * as RpcSerialization from "effect/unstable/rpc/RpcSerialization";
-import * as BunSocket from "@effect/platform-bun/BunSocket";
 import {
   CapExceeded,
   InvalidState,
@@ -49,41 +43,26 @@ import {
   type Delta,
   type Event,
   type LiveMessage,
-  type LiveTopic,
   type Task,
 } from "@hydra/contract";
 import { PROTOCOL_VERSION, type JoinAnswer, type RunnerFacts } from "@hydra/protocol";
-import { completeSetup, del, get, post, send, withServer, type LiveReader } from "../http/testing";
-
-type LiveClient = RpcClient.RpcClient<RpcGroup.Rpcs<typeof live>, RpcClientError>;
-
-/** The socket sits at `/ws` on the same authority the API is served from. */
-const socketUrl = (base: string): string => `${base.replace(/^http:/, "ws:")}/ws`;
-
-/** One connection's worth of client transport. */
-const connection = (base: string) =>
-  RpcClient.layerProtocolSocket().pipe(
-    Layer.provide(BunSocket.layerWebSocket(socketUrl(base))),
-    Layer.provide(RpcSerialization.layerJson),
-  );
-
-/**
- * Opens one connection for the length of `body` and closes it afterwards. The
- * client is the contract group's own, over JSON framing, which is what a browser
- * client will be.
- */
-const onSocket = (
-  base: string,
-  body: (client: LiveClient) => Effect.Effect<void, unknown, Scope.Scope>,
-): Promise<void> =>
-  Effect.runPromise(
-    Effect.scoped(
-      Effect.gen(function* () {
-        const client = yield* RpcClient.make(live);
-        yield* body(client);
-      }).pipe(Effect.provide(connection(base))),
-    ).pipe(Effect.orDie),
-  );
+import {
+  collecting,
+  completeSetup,
+  del,
+  expectHeld,
+  get,
+  liveConnection,
+  onSocket,
+  post,
+  send,
+  socketUrl,
+  ticketFor,
+  withServer,
+  within,
+  type Collected,
+  type LiveClient,
+} from "../http/testing";
 
 /**
  * Whether the listener will upgrade a plain dial of the socket at all. A dial
@@ -101,35 +80,9 @@ const dial = (base: string): Promise<"open" | "refused" | "hung"> =>
     setTimeout(() => resolve("hung"), 2000);
   });
 
-/** A ticket, fetched the way a client fetches one: over HTTP, before dialling. */
-const ticketFor = async (base: string, token: string): Promise<string> => {
-  const response = await post(base, "/api/v1/auth/ws-ticket", {}, token);
-  expect(response.status).toBe(200);
-  return ((await response.json()) as { ticket: string }).ticket;
-};
-
 /** Runs a subscription to its first item, which is all a refusal needs. */
 const firstItem = (client: LiveClient, payload: { topic: string; cursor?: string }) =>
   Stream.runHead(client.subscribe(payload));
-
-/**
- * Asserts the controller holds exactly this many subscriptions to a topic,
- * giving it time to get there. A subscription is taken out and torn down
- * asynchronously, so a count read in the same turn as the call would be
- * measuring the race rather than the behaviour.
- */
-const expectHeld = async (
-  reader: LiveReader,
-  expected: number,
-  topic: LiveTopic = "task",
-): Promise<void> => {
-  let seen = await reader.subscriberCount(topic);
-  for (let attempt = 0; attempt < 200 && seen !== expected; attempt++) {
-    await new Promise((resolve) => setTimeout(resolve, 10));
-    seen = await reader.subscriberCount(topic);
-  }
-  expect(seen, topic).toBe(expected);
-};
 
 /**
  * What a call answered with, refusal or not, and never later than `limit`.
@@ -153,42 +106,6 @@ const present = <T>(value: T | undefined): T => {
   expect(value).toBeDefined();
   return value as T;
 };
-
-/** Waits up to `ms` for something to become true, and answers whether it did. */
-const within = async (ms: number, ready: () => boolean): Promise<boolean> => {
-  const deadline = Date.now() + ms;
-  while (!ready() && Date.now() < deadline) {
-    await new Promise((resolve) => setTimeout(resolve, 5));
-  }
-  return ready();
-};
-
-/** What one subscription has pushed so far, collected as it arrives. */
-interface Collected {
-  readonly received: ReadonlyArray<LiveMessage>;
-  readonly fiber: Fiber.Fiber<void, unknown>;
-}
-
-/**
- * Holds a subscription open and keeps everything it pushes, in order. The
- * assertions are made against the array afterwards, so a test says what the
- * subscriber ended up seeing rather than when each frame landed.
- */
-const collecting = (
-  client: LiveClient,
-  payload: { readonly topic: string; readonly cursor?: string },
-): Effect.Effect<Collected, never, Scope.Scope> =>
-  Effect.gen(function* () {
-    const received: Array<LiveMessage> = [];
-    const fiber = yield* Effect.forkChild(
-      Stream.runForEach(client.subscribe(payload), (message) =>
-        Effect.sync(() => {
-          received.push(message);
-        }),
-      ),
-    );
-    return { received, fiber };
-  });
 
 /** The deltas a collector saw, which is every message on an append-only topic. */
 const deltas = (collected: Collected): ReadonlyArray<Delta> =>
@@ -314,7 +231,7 @@ describe("opening a live connection", () => {
             Effect.gen(function* () {
               const stranger = yield* RpcClient.make(live);
               expect(yield* Effect.flip(stranger.ping({}))).toBeInstanceOf(Unauthenticated);
-            }).pipe(Effect.provide(connection(base))),
+            }).pipe(Effect.provide(liveConnection(base))),
           );
 
           expect(yield* greeted.ping({})).toEqual({});
