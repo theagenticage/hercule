@@ -222,6 +222,11 @@ export const connect = (
         // A peer that has not proved who it is gets no evidence this runner is alive.
         if (!greeted) return;
         if (message._tag === "ping") return yield* write(asText({ _tag: "pong" }));
+        if (message._tag === "factsRequest") {
+          // Sent whatever the probe finds, unlike the hourly report: the
+          // controller asked because somebody is waiting for an answer.
+          return yield* write(asText({ _tag: "factsReport", facts: yield* options.probe }));
+        }
         // An ack belongs to the replayable events nothing sends yet.
       });
 

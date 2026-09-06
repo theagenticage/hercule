@@ -110,6 +110,11 @@ const TABLE = {
     path: "/api/v1/runners/:id/undrain",
   },
   "runner.retire": { requires: "infra.write", method: "POST", path: "/api/v1/runners/:id/retire" },
+  "runner.refreshFacts": {
+    requires: "infra.write",
+    method: "POST",
+    path: "/api/v1/runners/:id/refresh-facts",
+  },
   "runner.createJoinToken": {
     requires: "infra.write",
     method: "POST",

@@ -191,6 +191,11 @@ export const runner = HttpApiGroup.make("runner")
       success: RunnerDetail,
       error: [Unauthenticated, Forbidden, Validation, NotFound, InvalidState, Internal],
     }),
+    HttpApiEndpoint.post("refreshFacts", "/runners/:id/refresh-facts", {
+      params: { id: Id },
+      success: RunnerDetail,
+      error: [Unauthenticated, Forbidden, Validation, NotFound, InvalidState, Internal],
+    }),
     HttpApiEndpoint.post("createJoinToken", "/runners/join-tokens", {
       success: HttpApiSchema.status(201)(MintedJoinToken),
       error: [Unauthenticated, Forbidden, Validation, Internal],

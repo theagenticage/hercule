@@ -11,6 +11,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect } from "vitest";
+import type * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import type * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
@@ -48,6 +49,7 @@ import { SettingsLayer } from "../settings";
 import {
   JoinTokens,
   JoinTokensLayer,
+  RunnerFactsDeadline,
   RunnerPingSchedule,
   runnerRepository,
   type RunnerPings,
@@ -146,6 +148,11 @@ export interface ServerOptions {
    * driven by a `TestClock` - so a test about liveness hands over its own.
    */
   readonly pings?: RunnerPings;
+  /**
+   * How long the controller waits for a runner to answer a request for its
+   * facts. The shipped ten seconds is longer than a test can wait.
+   */
+  readonly factsDeadline?: Duration.Duration;
   /** The shipped registry is compiled in, so a test hands over its own. */
   readonly plugins?: ReadonlyArray<Plugin>;
 }
@@ -181,9 +188,13 @@ export const withServer = (
         // After the schema and the seed, as the real boot runs it: a plugin
         // that activates may read its own state and secrets.
         yield* Effect.flatMap(PluginHost, (host) => host.boot(options.plugins ?? []));
-        yield* options.pings === undefined
-          ? serve(bundle)
-          : Effect.provideService(serve(bundle), RunnerPingSchedule, options.pings);
+        const listening =
+          options.pings === undefined
+            ? serve(bundle)
+            : Effect.provideService(serve(bundle), RunnerPingSchedule, options.pings);
+        yield* options.factsDeadline === undefined
+          ? listening
+          : Effect.provideService(listening, RunnerFactsDeadline, options.factsDeadline);
         const base = yield* baseUrl;
         // The log this database holds, read the way anything else reads it: a
         // request's audit row is asserted through the service that wrote it.

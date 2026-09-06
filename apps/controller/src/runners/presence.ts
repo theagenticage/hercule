@@ -9,7 +9,10 @@
  * `strandedByTheLastRun` corrects before the listener binds.
  */
 import * as Context from "effect/Context";
+import * as Deferred from "effect/Deferred";
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
@@ -30,14 +33,36 @@ export type Departure = "offline" | "unreachable";
 
 export const DISPLACED_CLOSE_REASON = "this runner opened another connection";
 
-interface Reachable {
-  readonly connection: Connection;
+/** Long enough for a machine to run its probe, short enough to answer a click. */
+const RUNNER_FACTS_DEADLINE: Duration.Duration = Duration.seconds(10);
+
+/** Tests hand over a deadline they can wait out. */
+export const RunnerFactsDeadline = Context.Reference<Duration.Duration>(
+  "hydra/controller/runners/RunnerFactsDeadline",
+  { defaultValue: (): Duration.Duration => RUNNER_FACTS_DEADLINE },
+);
+
+/** How presence reaches back to a connection that is holding a runner. */
+export interface Connected {
   /**
    * Asks the connection to close with a code and a reason. Only the connection
    * can write to its own socket, and a runner holds one, not as many as it
    * opens.
    */
   readonly close: (code: number, reason: string) => void;
+  /** Sends the runner a request for its facts. Answered by `reportedFacts`. */
+  readonly askForFacts: Effect.Effect<void>;
+}
+
+interface Reachable extends Connected {
+  readonly connection: Connection;
+  /**
+   * Who is waiting for this connection's next facts report, and whether one
+   * arrived. Held here rather than per runner id so that two callers waiting at
+   * once share one request and one answer, and so that the connection ending
+   * ends the wait with it.
+   */
+  awaitingFacts: Deferred.Deferred<boolean> | undefined;
 }
 
 const make = Effect.gen(function* () {
@@ -46,6 +71,18 @@ const make = Effect.gen(function* () {
   const audit = yield* AuditLog;
 
   const reachable = new Map<string, Reachable>();
+
+  /**
+   * Ends a wait for facts, if the connection is holding one. Only the three
+   * things that really end a wait call this - the report arriving, the
+   * connection going, and the runner dialling again - so a caller that gave up
+   * leaves the wait in place for whoever is still listening.
+   */
+  const endWait = (held: Reachable | undefined, reported: boolean): void => {
+    if (held?.awaitingFacts === undefined) return;
+    Deferred.doneUnsafe(held.awaitingFacts, Exit.succeed(reported));
+    held.awaitingFacts = undefined;
+  };
 
   /**
    * A move to where the runner already is is not a move, and writes no row.
@@ -81,7 +118,7 @@ const make = Effect.gen(function* () {
     greeted: (
       id: string,
       connection: Connection,
-      close: (code: number, reason: string) => void,
+      connected: Connected,
       hello: RunnerHelloRecord,
     ): Effect.Effect<void, SqlError> =>
       Effect.gen(function* () {
@@ -97,8 +134,11 @@ const make = Effect.gen(function* () {
           }),
         );
         const previous = reachable.get(id);
-        reachable.set(id, { connection, close });
+        reachable.set(id, { connection, ...connected, awaitingFacts: undefined });
         if (previous !== undefined) {
+          // Nothing more is coming over the connection being displaced, and the
+          // entry that would have carried its answer is no longer the one here.
+          endWait(previous, false);
           previous.close(GOING_AWAY_CLOSE_CODE, DISPLACED_CLOSE_REASON);
         }
       }),
@@ -113,6 +153,29 @@ const make = Effect.gen(function* () {
         reachable.get(id)?.close(RETIRED_CLOSE_CODE, RETIRED_CLOSE_REASON);
       }),
 
+    /**
+     * Asks the runner to report its facts now and waits for the report, which
+     * arrives on the connection and lands through `reportedFacts`. False when
+     * the runner is holding no connection, when the connection ended first, or
+     * when nothing came back in time.
+     */
+    refreshedFacts: (id: string): Effect.Effect<boolean> =>
+      Effect.gen(function* () {
+        const held = reachable.get(id);
+        if (held === undefined) return false;
+        // A caller arriving while another is already waiting joins that wait:
+        // one report answers both, and asking twice would only cost a second.
+        const waiting = held.awaitingFacts;
+        const mine = waiting ?? Deferred.makeUnsafe<boolean>();
+        held.awaitingFacts = mine;
+        const deadline = yield* RunnerFactsDeadline;
+        if (waiting === undefined) yield* held.askForFacts;
+        // Giving up is this caller's, not the request's: the frame is still out
+        // there, and whoever is still listening is answered when it comes back.
+        const answer = yield* Effect.timeoutOption(Deferred.await(mine), deadline);
+        return Option.isSome(answer) && answer.value;
+      }),
+
     /** An answer on a replaced connection is still that machine saying it is there. */
     answered: (id: string): Effect.Effect<void, SqlError> =>
       Effect.flatMap(nowIso, (at) => runners.touch(id, at)),
@@ -123,16 +186,22 @@ const make = Effect.gen(function* () {
       connection: Connection,
       facts: RunnerFacts,
     ): Effect.Effect<void, SqlError> =>
-      withTransaction(
-        sql,
-        Effect.gen(function* () {
-          if (reachable.get(id)?.connection !== connection) return;
-          yield* runners.recordFacts(id, facts, yield* nowIso);
-          // No audit row: what a machine has installed is not an event anyone
-          // reads back, so the fleet's watchers are told here instead.
-          yield* announce({ _tag: "record", topic: "runner", id, kind: "updated" });
-        }),
-      ),
+      Effect.gen(function* () {
+        const recorded = yield* withTransaction(
+          sql,
+          Effect.gen(function* () {
+            if (reachable.get(id)?.connection !== connection) return false;
+            yield* runners.recordFacts(id, facts, yield* nowIso);
+            // No audit row: what a machine has installed is not an event anyone
+            // reads back, so the fleet's watchers are told here instead.
+            yield* announce({ _tag: "record", topic: "runner", id, kind: "updated" });
+            return true;
+          }),
+        );
+        // After the commit, so a caller woken by this reads the facts it waited
+        // for rather than the ones they replaced.
+        endWait(recorded ? reachable.get(id) : undefined, true);
+      }),
 
     /** Only the crossing is recorded, because that is the part placement acts on. */
     reportedWatermark: (
@@ -167,14 +236,25 @@ const make = Effect.gen(function* () {
       connection: Connection,
       departure: Departure,
     ): Effect.Effect<void, SqlError> =>
-      withTransaction(
-        sql,
-        Effect.gen(function* () {
-          if (reachable.get(id)?.connection !== connection) return;
-          reachable.delete(id);
-          yield* moved(id, departure, yield* nowIso);
-        }),
-      ),
+      Effect.suspend(() => {
+        const held = reachable.get(id);
+        return Effect.ensuring(
+          withTransaction(
+            sql,
+            Effect.gen(function* () {
+              if (held?.connection !== connection) return;
+              reachable.delete(id);
+              yield* moved(id, departure, yield* nowIso);
+            }),
+          ),
+          // Nothing is coming over a connection that has gone, whether or not
+          // the row could be moved off online, so a caller waiting on this
+          // runner's facts is told now rather than at its deadline.
+          Effect.sync(() => {
+            if (held?.connection === connection) endWait(held, false);
+          }),
+        );
+      }),
 
     /**
      * No connection survives the process that held it, and the only thing that

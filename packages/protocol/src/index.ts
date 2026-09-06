@@ -221,12 +221,17 @@ export const Pong = Schema.Struct({ _tag: Schema.Literal("pong") });
 
 export type Pong = Schema.Schema.Type<typeof Pong>;
 
-export const FactsReport = Schema.Struct({
+/**
+ * What the runner reports about its machine: hourly when something changed, and
+ * whenever the controller asks. Named for the runner because the controller has
+ * facts of its own that this frame does not carry.
+ */
+export const RunnerFactsReport = Schema.Struct({
   _tag: Schema.Literal("factsReport"),
   facts: RunnerFacts,
 });
 
-export type FactsReport = Schema.Schema.Type<typeof FactsReport>;
+export type RunnerFactsReport = Schema.Schema.Type<typeof RunnerFactsReport>;
 
 export const WatermarkReport = Schema.Struct({
   _tag: Schema.Literal("watermarkReport"),
@@ -243,7 +248,7 @@ export type Goodbye = Schema.Schema.Type<typeof Goodbye>;
 export const RunnerToController = Schema.Union([
   RunnerHello,
   Pong,
-  FactsReport,
+  RunnerFactsReport,
   WatermarkReport,
   Goodbye,
 ]);
@@ -286,6 +291,16 @@ export type ControllerHello = Schema.Schema.Type<typeof ControllerHello>;
 export const signedChallenge = (runnerId: string, nonce: string): Uint8Array<ArrayBuffer> =>
   new TextEncoder().encode(`hydra:runner-hello:${runnerId}:${nonce}`);
 
+/**
+ * Asks the runner to probe its machine now and report what it finds, whether or
+ * not anything changed. The hourly report is sent only on a change, so without
+ * this an operator pressing "Refresh facts" on a machine nothing happened to
+ * would wait for a frame that is never coming.
+ */
+export const RunnerFactsRequest = Schema.Struct({ _tag: Schema.Literal("factsRequest") });
+
+export type RunnerFactsRequest = Schema.Schema.Type<typeof RunnerFactsRequest>;
+
 /** The liveness check. A protocol frame, so it proves the runner process is alive. */
 export const Ping = Schema.Struct({ _tag: Schema.Literal("ping") });
 
@@ -298,6 +313,6 @@ export const Ack = Schema.Struct({
 
 export type Ack = Schema.Schema.Type<typeof Ack>;
 
-export const ControllerToRunner = Schema.Union([ControllerHello, Ping, Ack]);
+export const ControllerToRunner = Schema.Union([ControllerHello, Ping, Ack, RunnerFactsRequest]);
 
 export type ControllerToRunner = Schema.Schema.Type<typeof ControllerToRunner>;

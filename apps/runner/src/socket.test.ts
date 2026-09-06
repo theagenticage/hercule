@@ -19,6 +19,8 @@ import {
   signedChallenge,
   type ControllerHello,
   type RunnerFacts,
+  type RunnerFactsReport,
+  type RunnerFactsRequest,
   type RunnerHello,
   type RunnerToController as RunnerMessage,
 } from "@hydra/protocol";
@@ -212,13 +214,13 @@ const pinning = (stub: Stub, overrides: Partial<ControllerPin> = {}): Controller
 const DEADLINE = Duration.millis(200);
 
 /** Runs one connection to its end and reports how it ended. */
-const attempt = (pin: ControllerPin) =>
+const attempt = (pin: ControllerPin, probe: Effect.Effect<RunnerFacts> = Effect.succeed(FACTS)) =>
   Effect.runPromise(
     Effect.result(
       connect({
         pin,
         facts: FACTS,
-        probe: Effect.succeed(FACTS),
+        probe,
         headroom: Effect.succeed({ diskFreeBytes: 200 * 1024 ** 3, availableMemoryBytes: 1 }),
         proofDeadline: DEADLINE,
       }),
@@ -461,5 +463,49 @@ describe("a runner whose controller has retired it", () => {
       const failure = failureOf(settled) as { readonly message?: string } | undefined;
       expect(failure?.message ?? "", `${String(code)} ${reason}`).not.toContain(RE_ENLIST);
     }
+  });
+});
+
+describe("a controller asking for the machine's facts", () => {
+  /**
+   * The frame the controller sends. It is typed against the catalogue rather
+   * than written as a bare object, so a rename of the frame is a compile error
+   * here rather than a request this runner silently ignores.
+   */
+  const REQUEST: RunnerFactsRequest = { _tag: "factsRequest" };
+
+  /** The report the runner answers with, once it has one. */
+  const reportIn = (stub: Stub): RunnerFactsReport | undefined =>
+    stub.received.find((frame): frame is RunnerFactsReport => frame._tag === "factsReport");
+
+  it("reports what the probe finds now, not what it said at the hello", async () => {
+    // The machine gained a `gh` since it connected, which is the whole reason
+    // for asking again.
+    const grown: RunnerFacts = {
+      ...FACTS,
+      toolchains: [
+        ...FACTS.toolchains,
+        { name: "gh", version: "2.99.0", path: "/usr/local/bin/gh" },
+      ],
+    };
+    const stub = await stubController();
+    let settled: Awaited<ReturnType<typeof attempt>> | undefined;
+    const pending = attempt(pinning(stub), Effect.succeed(grown)).then((outcome) => {
+      settled = outcome;
+    });
+
+    await stub.connected();
+    await waitUntil(() => stub.received.length >= 1);
+    stub.say(REQUEST);
+
+    await waitUntil(() => reportIn(stub) !== undefined);
+    // The hourly report is sent only on a change; an answer to a request is
+    // not, or the operator pressing the button on a machine nothing happened to
+    // would wait for a frame that never comes.
+    expect(reportIn(stub)).toEqual({ _tag: "factsReport", facts: grown });
+
+    stub.hangUp();
+    await pending;
+    expect(failureOf(settled)).not.toBeInstanceOf(ControllerNotRecognised);
   });
 });

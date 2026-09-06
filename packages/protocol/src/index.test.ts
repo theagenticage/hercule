@@ -88,6 +88,7 @@ const controllerMessages: ReadonlyArray<ControllerMessage> = [
   controllerHello,
   { _tag: "ping" },
   { _tag: "ack", lastAckedSeq: 7 },
+  { _tag: "factsRequest" },
 ];
 
 describe("the protocol version", () => {

@@ -124,6 +124,9 @@ const WATERMARK: RunnerWatermark = {
   acceptingPlacements: true,
 };
 
+/** A connection this file never writes to: its subject is the row, not the wire. */
+const HELD = { close: () => undefined, askForFacts: Effect.void };
+
 describe("a draining runner whose socket drops", () => {
   it("becomes unreachable without coming off the drain", async () => {
     const row = await Effect.runPromise(
@@ -133,7 +136,7 @@ describe("a draining runner whose socket drops", () => {
         const [runner] = yield* fleetOf([{ connectivity: "offline", lifecycle: "draining" }]);
 
         const connection = newConnection();
-        yield* presence.greeted(runner!.id, connection, () => undefined, {
+        yield* presence.greeted(runner!.id, connection, HELD, {
           binaryVersion: "0.1.0",
           protocolVersion: 1,
           negotiatedCapabilities: [],
@@ -162,14 +165,14 @@ describe("a report from a connection the runner has replaced", () => {
 
         const older = newConnection();
         const newer = newConnection();
-        yield* presence.greeted(runner!.id, older, () => undefined, {
+        yield* presence.greeted(runner!.id, older, HELD, {
           binaryVersion: "0.1.0",
           protocolVersion: 1,
           negotiatedCapabilities: [],
           facts: FACTS,
         });
         // The machine dialled again, and the row is the newer connection's now.
-        yield* presence.greeted(runner!.id, newer, () => undefined, {
+        yield* presence.greeted(runner!.id, newer, HELD, {
           binaryVersion: "0.1.0",
           protocolVersion: 1,
           negotiatedCapabilities: [],

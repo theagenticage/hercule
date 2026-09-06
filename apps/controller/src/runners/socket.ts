@@ -31,6 +31,7 @@ import {
   GOING_AWAY_CLOSE_CODE,
   PeerVersion,
   PROTOCOL_VERSION,
+  RunnerFactsRequest,
   RunnerToController,
   signedChallenge,
   type ControllerHello,
@@ -95,6 +96,8 @@ const encodeFrame = Schema.encodeUnknownSync(ControllerToRunner);
 const asText = (message: typeof ControllerToRunner.Type): string =>
   JSON.stringify(encodeFrame(message));
 
+const FACTS_REQUEST = asText({ _tag: "factsRequest" } satisfies RunnerFactsRequest);
+
 /** What both ends offer, which is the only thing either may use. */
 const negotiated = (theirs: ReadonlyArray<string>): ReadonlyArray<string> =>
   CAPABILITIES.filter((capability) => theirs.includes(capability));
@@ -144,8 +147,13 @@ const hold = (runnerId: string, socket: Socket.Socket) =>
         yield* presence.greeted(
           runnerId,
           mine,
-          (code, reason) => {
-            Deferred.doneUnsafe(asked, Exit.succeed(new Socket.CloseEvent(code, reason)));
+          {
+            close: (code, reason) => {
+              Deferred.doneUnsafe(asked, Exit.succeed(new Socket.CloseEvent(code, reason)));
+            },
+            // A write that fails is a connection that is going; the operation
+            // waiting on the answer meets that as its deadline.
+            askForFacts: Effect.ignore(write(FACTS_REQUEST)),
           },
           {
             binaryVersion: hello.binaryVersion,

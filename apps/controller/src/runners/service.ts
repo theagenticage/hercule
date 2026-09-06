@@ -8,6 +8,7 @@
  * calls these methods directly and the bounds are the same rule either way.
  */
 import * as Context from "effect/Context";
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
@@ -43,7 +44,7 @@ import { nowIso, pageInput, refuseCursor, withTransaction } from "../db";
 import { AuditLog } from "../events";
 import { Settings, type SettingError } from "../settings";
 import { JoinTokens } from "./join-tokens";
-import { RunnerPresence } from "./presence";
+import { RunnerFactsDeadline, RunnerPresence } from "./presence";
 import { runnerRepository, type RunnerEdit } from "./repository";
 
 const QueryInput = Schema.Struct({
@@ -90,6 +91,8 @@ const NAME_TAKEN = "another runner already has that name";
  */
 const RESERVED_IS_THE_DEFAULT =
   "this is the fleet's default runner; choose another default before reserving it";
+
+const NOT_ONLINE = "that runner is not connected, so it cannot be asked anything";
 
 const NOT_ACTIVE = "only an active runner can be drained";
 
@@ -362,6 +365,29 @@ const make = Effect.gen(function* () {
             return retired;
           }),
         );
+      }),
+
+    /**
+     * Asks the machine to probe itself now and hands back the row its answer
+     * left. The runner reports on its own hourly and only when something
+     * changed, so this is the only way to see a machine that was just given a
+     * provider CLI without waiting out the hour.
+     */
+    refreshFacts: (input: Identified): Effect.Effect<RunnerDetail, MoveError> =>
+      Effect.gen(function* () {
+        yield* requireGrant("runner.refreshFacts");
+        const { id } = yield* Effect.mapError(decodeIdentified(input), validationOf);
+        const before = yield* one(id);
+        if (before.connectivity !== "online") {
+          return yield* Effect.fail(invalidState(NOT_ONLINE));
+        }
+        if (!(yield* presence.refreshedFacts(id))) {
+          const waited = Duration.format(yield* RunnerFactsDeadline);
+          return yield* Effect.fail(
+            invalidState(`that runner did not report its facts within ${waited}`),
+          );
+        }
+        return yield* one(id);
       }),
 
     /**

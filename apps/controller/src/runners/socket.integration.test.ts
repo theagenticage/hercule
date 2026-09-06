@@ -1214,3 +1214,205 @@ describe("retiring a runner the controller is holding a connection with", () => 
     });
   });
 });
+
+describe("refreshing a runner's facts on demand", () => {
+  // The shipped deadline is ten seconds, which no test can wait out, so these
+  // servers are handed their own - the way `pings` is handed over.
+  const FACTS_DEADLINE = Duration.millis(200);
+
+  const refreshFacts = (base: string, token: string, id: string): Promise<Response> =>
+    send("POST", base, `/api/v1/runners/${id}/refresh-facts`, { body: {}, token });
+
+  /**
+   * Takes the next frame and says it is the request for facts. The frame was
+   * decoded against the published catalogue on its way in, so what is left to
+   * assert is which member of it the controller sent.
+   */
+  const requestOn = async (wire: Wire): Promise<void> => {
+    const frame = await wire.next();
+    expect(frame._tag, JSON.stringify(frame)).toBe("factsRequest");
+  };
+
+  /** The machine gained a `gh` since it said hello. */
+  const GROWN: RunnerFacts = {
+    ...FACTS,
+    toolchains: [...FACTS.toolchains, { name: "gh", version: "2.99.0", path: "/usr/local/bin/gh" }],
+  };
+
+  it("asks the online runner and answers with the row carrying what it reported", async () => {
+    await withServer(async (harness) => {
+      const token = await completeSetup(harness.base);
+      const joined = await enlist(harness);
+      const { wire } = await greet(harness.base, joined.credential);
+      try {
+        await rowWhen(harness.base, token, joined.runnerId, (one) => one.connectivity === "online");
+
+        // The operation is in flight while the runner answers: the request goes
+        // out on the connection the controller is already holding.
+        const pending = refreshFacts(harness.base, token, joined.runnerId);
+        await requestOn(wire);
+        wire.send({ _tag: "factsReport", facts: GROWN });
+
+        const response = await pending;
+        expect(response.status, await response.clone().text()).toBe(200);
+        // What comes back is the runner as the report left it, not the runner
+        // as it was when the button was pressed.
+        const answered = (await response.json()) as RunnerDetail;
+        expect(answered.id).toBe(joined.runnerId);
+        expect(answered.facts).toEqual(GROWN);
+        expect((await readRunner(harness.base, token, joined.runnerId)).facts).toEqual(GROWN);
+      } finally {
+        wire.close();
+      }
+    });
+  });
+
+  it("answers a report that says nothing new, rather than waiting for a change", async () => {
+    await withServer(async (harness) => {
+      const token = await completeSetup(harness.base);
+      const joined = await enlist(harness);
+      const { wire } = await greet(harness.base, joined.credential);
+      try {
+        await rowWhen(harness.base, token, joined.runnerId, (one) => one.connectivity === "online");
+
+        const pending = refreshFacts(harness.base, token, joined.runnerId);
+        await requestOn(wire);
+        // The very facts the hello carried. A controller waiting for the row to
+        // change would wait for ever on the machine nothing happened to, which
+        // is most machines most of the time.
+        wire.send({ _tag: "factsReport", facts: FACTS });
+
+        const response = await pending;
+        expect(response.status, await response.clone().text()).toBe(200);
+        expect(((await response.json()) as RunnerDetail).facts).toEqual(FACTS);
+      } finally {
+        wire.close();
+      }
+    });
+  });
+
+  it("refuses a runner that is not online, and sends that connection nothing", async () => {
+    await withServer(async (harness) => {
+      const token = await completeSetup(harness.base);
+      const joined = await enlist(harness);
+      // A credential and a socket, and no hello: a connection exists, and the
+      // machine on the other end is not a runner the controller can ask
+      // anything of.
+      const wire = await dial(harness.base, joined.credential);
+      try {
+        expect((await readRunner(harness.base, token, joined.runnerId)).connectivity).toBe(
+          "offline",
+        );
+
+        const response = await refreshFacts(harness.base, token, joined.runnerId);
+        expect(response.status, await response.clone().text()).toBe(409);
+        expect(await response.json()).toMatchObject({ error: { code: "invalid_state" } });
+        // Nothing was asked of it: a request sent down a connection that has
+        // not said who it is would be answered by whoever holds the credential.
+        expect(wire.frames).toEqual([]);
+      } finally {
+        wire.close();
+      }
+    });
+  });
+
+  it("answers two callers waiting at once with the one report they share", async () => {
+    await withServer(async (harness) => {
+      const token = await completeSetup(harness.base);
+      const joined = await enlist(harness);
+      const { wire } = await greet(harness.base, joined.credential);
+      try {
+        await rowWhen(harness.base, token, joined.runnerId, (one) => one.connectivity === "online");
+
+        // Two presses of the same button. Neither may be told the machine went
+        // quiet because the other one was listening.
+        const both = [
+          refreshFacts(harness.base, token, joined.runnerId),
+          refreshFacts(harness.base, token, joined.runnerId),
+        ];
+        await requestOn(wire);
+        wire.send({ _tag: "factsReport", facts: GROWN });
+
+        for (const response of await Promise.all(both)) {
+          expect(response.status, await response.clone().text()).toBe(200);
+          expect(((await response.json()) as RunnerDetail).facts).toEqual(GROWN);
+        }
+      } finally {
+        wire.close();
+      }
+    });
+  });
+
+  it("answers a caller still waiting when the report lands after another gave up", async () => {
+    await withServer(
+      async (harness) => {
+        const token = await completeSetup(harness.base);
+        const joined = await enlist(harness);
+        const { wire } = await greet(harness.base, joined.credential);
+        try {
+          await rowWhen(
+            harness.base,
+            token,
+            joined.runnerId,
+            (one) => one.connectivity === "online",
+          );
+
+          const early = refreshFacts(harness.base, token, joined.runnerId);
+          await requestOn(wire);
+          // Long enough that the second caller still has time in hand when the
+          // first has run out of it.
+          await delay(700);
+          const late = refreshFacts(harness.base, token, joined.runnerId);
+          expect((await early).status).toBe(409);
+
+          wire.send({ _tag: "factsReport", facts: GROWN });
+          const answered = await late;
+          expect(answered.status, await answered.clone().text()).toBe(200);
+          expect(((await answered.json()) as RunnerDetail).facts).toEqual(GROWN);
+          // Giving up did not take the request with it: the machine was asked
+          // once, and the answer to that one request is what came back.
+          expect(wire.frames.filter((frame) => frame._tag === "factsRequest")).toHaveLength(1);
+        } finally {
+          wire.close();
+        }
+      },
+      { factsDeadline: Duration.seconds(1) },
+    );
+  });
+
+  it("gives up on a runner that never reports, saying how long it waited", async () => {
+    await withServer(
+      async (harness) => {
+        const token = await completeSetup(harness.base);
+        const joined = await enlist(harness);
+        const { wire } = await greet(harness.base, joined.credential);
+        try {
+          await rowWhen(
+            harness.base,
+            token,
+            joined.runnerId,
+            (one) => one.connectivity === "online",
+          );
+
+          const pending = refreshFacts(harness.base, token, joined.runnerId);
+          // The frame goes out, and the runner says nothing back.
+          await requestOn(wire);
+
+          const response = await pending;
+          expect(response.status, await response.clone().text()).toBe(409);
+          const refusal = (await response.json()) as { error: { code: string; message: string } };
+          expect(refusal.error.code).toBe("invalid_state");
+          // The refusal says how long the controller waited, so a slow machine
+          // reads differently from a broken one, and it says the deadline this
+          // server is running with rather than the shipped one.
+          expect(refusal.error.message).toContain(Duration.format(FACTS_DEADLINE));
+          // A machine that did not answer said nothing about itself either.
+          expect((await readRunner(harness.base, token, joined.runnerId)).facts).toEqual(FACTS);
+        } finally {
+          wire.close();
+        }
+      },
+      { factsDeadline: FACTS_DEADLINE },
+    );
+  });
+});
