@@ -66,6 +66,9 @@ importers:
       '@hydra/home':
         specifier: workspace:*
         version: link:../../packages/home
+      '@hydra/plugin-host':
+        specifier: workspace:*
+        version: link:../../packages/plugin-host
       '@hydra/protocol':
         specifier: workspace:*
         version: link:../../packages/protocol
