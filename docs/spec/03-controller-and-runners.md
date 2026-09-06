@@ -79,8 +79,6 @@ The fleet UI reserves an "Add machine" spot showing the join command with a fres
 
 The join token is single-use and expires after **1 hour**. Outstanding tokens are listable and revocable, and the "Add machine" spot mints a fresh one each time it is opened, so an expired token costs one page refresh.
 
-*(Amended 2026-09-05, [#61](https://github.com/rogierpennink/hydra/issues/61).)* **Listing and revoking outstanding tokens is not in v1.** Minting sweeps rows that have expired, which is what bounded the table the listing would have shown; a person who has minted a token they do not want waits an hour or mints another. It needs an operation nobody has asked for yet.
-
 ### 3.2 What the runner sets up on enrollment
 
 - A random storage directory for all its workspaces, caches and other material state, under the runner area of Hydra Home (`~/.hydra/runner/`, [15-packaging-and-operations](./15-packaging-and-operations.md)). A re-enlisted machine therefore never overwrites a previous life's folders. Legacy folders from earlier lives MAY surface very discreetly in the UI for manual recovery; Hydra never adopts them automatically.
@@ -260,22 +258,32 @@ A retired runner's workspaces are marked `lost` in the controller (section 7); t
 
 Reaper TTLs (resolved 2026-08-31, [#43](https://github.com/rogierpennink/hydra/issues/43)): orphaned ephemerals are reaped after **24 hours**; the ephemerals of failed runs are kept until the failed run is dismissed or **14 days**, whichever comes first - the run record keeps a "workspace reaped" note so a stale failed run never pretends its files still exist. Both are controller-wide settings.
 
-## 7. Runner states
+## 7. Runner lifecycle and connectivity
 
-| State | Meaning | Placements | Sessions |
+A runner carries two independent axes. **Connectivity** (`online | offline | unreachable`) is written only by presence, from the socket. **Lifecycle** (`active | draining | retired`) is written only by user operations. They vary independently - a `draining` runner can be `unreachable` at the same time, and the controller reports both rather than collapsing them into one state.
+
+### Connectivity
+
+| Connectivity | Meaning | Placements | Sessions |
 |---|---|---|---|
-| `online` | connected, hello complete | accepted (subject to cap and watermark) | running |
+| `online` | connected, hello complete | accepted (subject to cap, watermark and lifecycle) | running |
 | `offline` | announced shutdown: outbox flushed, sessions cleanly interrupted and resumable | wait for return | interrupted, resumable |
 | `unreachable` | silence: no announcement, connection lost | wait for return | unknown; UI shows "state unknown, last seen X" |
+
+### Lifecycle
+
+| Lifecycle | Meaning | Placements | Sessions |
+|---|---|---|---|
+| `active` | normal fleet member | accepted (subject to cap, watermark and connectivity) | running |
 | `draining` | user-initiated: no new placements, running sessions finish | refused | run to completion |
 | `retired` | terminal: credential revoked, workspaces marked lost, session records preserved but unresumable | refused | none |
 
-Transitions (the tickets pin the five states, drain -> retire, and force-retiring an unreachable runner; the rest of this list is this spec's consolidation):
+Transitions (the tickets pin the two axes, drain -> retire, drain -> active (`runner.undrain`), and force-retiring an unreachable runner; the rest of this list is this spec's consolidation):
 
 - `online -> offline` on an announced shutdown; `offline -> online` on reconnect (outbox replays).
 - `online -> unreachable` when the socket drops without an announcement and stays down; `unreachable -> online` on reconnect (outbox replays). An `unreachable` runner's sessions may well still be running; the controller reports honestly that it does not know.
-- `online | offline | unreachable -> draining` by user action.
-- `draining -> retired` by user action once sessions have finished, or immediately by force. Force-retiring an `unreachable` runner is allowed with an explicit confirmation.
+- `active -> draining` by user action; `draining -> active` by user action (`runner.undrain`), cancelling a drain in progress.
+- `active | draining -> retired` by user action once sessions have finished, or immediately by force. Force-retiring a runner whose connectivity is `unreachable` is allowed with an explicit confirmation.
 - `retired` is terminal. Re-enlisting the same machine creates a new runner: new identity, credential, name and labels, a new storage directory, no workspace adoption. The old records stay under the retired runner.
 
 Silence threshold (resolved 2026-08-31, [#43](https://github.com/rogierpennink/hydra/issues/43)): WebSocket ping every **15 seconds**; `online -> unreachable` after **60 seconds** without a pong (four missed intervals). Reconnect backoff is section 2.3's (1 s doubling to 30 s, reset on wake or network change).

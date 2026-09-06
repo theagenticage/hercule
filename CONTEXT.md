@@ -172,6 +172,10 @@ All runners enrolled with a controller, viewed as a collective.
 A fact about a runner used for placement: a probed toolchain or a user-applied label.
 _Avoid_: bare "capability" where the kind isn't obvious
 
+**Runner Facts**:
+The probed facts a runner self-reports about itself: OS and architecture, RAM, toolchains, and which provider CLIs are on PATH. Reported at hello, refreshed hourly with a report only on change, and refreshed unconditionally on demand via `runner.refreshFacts`.
+_Avoid_: re-probe
+
 **Promotion**:
 Moving the controller to another machine by migrating its state bundle. A migration, never a live handoff; the old controller ends up sealed.
 _Avoid_: failover, handoff
