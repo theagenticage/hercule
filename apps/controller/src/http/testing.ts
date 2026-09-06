@@ -63,11 +63,10 @@ export const PASSWORD = "correct horse battery staple";
 export const USERNAME = "rogier";
 
 /**
- * Every service the routes resolve, over one `:memory:` database.
- *
- * The plugin host is built here rather than listed with the operation layers,
- * because the boot and the routes must share one: the status a request reads is
- * held by the same object the boot's activation pass wrote it into.
+ * Every service the routes resolve, over one `:memory:` database. The plugin
+ * host is built here rather than beside the operation layers because the boot
+ * and the routes must share one: the status a request reads is held by the same
+ * object the boot's activation pass wrote it into.
  */
 const services = (home: string) =>
   Layer.mergeAll(operationLayers, PluginsLayer.pipe(Layer.provideMerge(PluginHostLayer))).pipe(
@@ -143,10 +142,7 @@ export interface ServerOptions {
    * driven by a `TestClock` - so a test about liveness hands over its own.
    */
   readonly pings?: RunnerPings;
-  /**
-   * The plugin registry this controller boots. The shipped registry is a file
-   * in the binary, so a test that needs plugins hands over its own.
-   */
+  /** The shipped registry is compiled in, so a test hands over its own. */
   readonly plugins?: ReadonlyArray<Plugin>;
 }
 
@@ -293,30 +289,22 @@ export const completeSetup = async (base: string): Promise<string> => {
 };
 
 /**
- * The live socket, for a test that drives one.
- *
  * A real WebSocket against the real listener with the contract group's own RPC
- * client, because the whole point of the socket is the wire. They live beside
- * `withServer` rather than in one test file: the socket is how every domain's
- * pushes are observed, and a second copy of this drifts from the first.
+ * client, because the whole point of the socket is the wire. It lives beside
+ * `withServer` because every domain observes its pushes through this.
  */
 export type LiveClient = RpcClient.RpcClient<RpcGroup.Rpcs<typeof live>, RpcClientError>;
 
 /** The socket sits at `/ws` on the same authority the API is served from. */
 export const socketUrl = (base: string): string => `${base.replace(/^http:/, "ws:")}/ws`;
 
-/** One connection's worth of client transport, for a test that opens its own. */
 export const liveConnection = (base: string) =>
   RpcClient.layerProtocolSocket().pipe(
     Layer.provide(BunSocket.layerWebSocket(socketUrl(base))),
     Layer.provide(RpcSerialization.layerJson),
   );
 
-/**
- * Opens one connection for the length of `body` and closes it afterwards. The
- * client is the contract group's own, over JSON framing, which is what a
- * browser client will be.
- */
+/** Opens one connection for the length of `body`, over the JSON framing a browser uses. */
 export const onSocket = (
   base: string,
   body: (client: LiveClient) => Effect.Effect<void, unknown, Scope.Scope>,

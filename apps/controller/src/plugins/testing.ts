@@ -1,10 +1,7 @@
 /**
- * What the plugin tests build a running host and their fixture plugins out of.
- *
- * Both are the same in every plugin test: the stack is the real host and
- * service over a fresh database, and a fixture is a plugin that records what it
- * was asked to do. Written out per file they drifted apart, so a test that
- * varies nothing still had to be read for what it had changed.
+ * The running host and the fixture plugin every plugin test builds on. Written
+ * out per file these drifted apart, so a test that varies nothing still had to
+ * be read for what it had changed.
  */
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -63,9 +60,9 @@ afterAll(() => {
 });
 
 /**
- * The real host and service over a `:memory:` database, the real secrets
- * repository and a master key file: a plugin's secrets are rows in the one
- * secrets table, so the encryption is part of what is under test.
+ * Real everything over a `:memory:` database, down to the master key file: a
+ * plugin's secrets are rows in the one secrets table, so the encryption is part
+ * of what is under test.
  */
 export const pluginStack = () => {
   const home = mkdtempSync(join(tmpdir(), "hydra-plugins-"));
@@ -94,18 +91,16 @@ export interface Fixture {
   readonly plugin: Plugin;
   /** `activate` and `deactivate`, in the order the plugin observed them. */
   readonly calls: Array<string>;
-  /** The context of every `activate` call, in order. */
   readonly contexts: Array<ActivationContext>;
-  /** The host of every `register` call, in order. */
   readonly hosts: Array<RegistrationHost>;
   /** Whether an instance the plugin started is still up. */
   running: () => boolean;
 }
 
 /**
- * A plugin that does what the options say and remembers everything it was
- * handed. A test names only what it is actually varying; every default is the
- * plugin that comes up and stays up.
+ * Does what the options say and remembers everything it was handed. Every
+ * default is the plugin that comes up and stays up, so a test names only what
+ * it is varying.
  */
 export const fixture = (options: {
   readonly id: string;

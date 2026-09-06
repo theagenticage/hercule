@@ -1,11 +1,8 @@
 /**
  * The plugin routes over a real socket: what a listing and a read carry, and
- * what the five moves a user makes from Settings answer, record and announce.
- *
- * The controller boots a registry of fixture plugins built here, through the
- * real host, so what a request reads back is what a real boot left behind:
- * a plugin that came up, one that was turned away, and one whose first start
- * failed and is waiting for a retry. Nothing is mocked.
+ * what the five moves answer, record and announce. The controller boots a
+ * registry of fixture plugins through the real host, so what a request reads
+ * back is what a real boot left behind. Nothing is mocked.
  */
 import { describe, expect, it } from "vitest";
 import * as Effect from "effect/Effect";
@@ -51,13 +48,9 @@ interface PluginDetail {
 }
 
 /**
- * The registry every test here boots: one plugin with something to configure,
- * one with nothing, one of each way a plugin can be turned away, and one that
- * fell over on its way up.
- *
  * Built afresh per test, because a fixture counts the starts it was given and a
- * registry shared between tests would hand the second one a plugin the first
- * had already nursed back to health.
+ * shared registry would hand the second test a plugin the first had already
+ * nursed back to health.
  */
 const registry = (): ReadonlyArray<Plugin> =>
   [

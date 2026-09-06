@@ -3,15 +3,10 @@ import { Button } from "./button";
 import { Input } from "./input";
 
 /**
- * A list of short strings, edited one entry at a time.
- *
- * A single comma-separated box would be less to build and would quietly refuse
- * any value with a comma in it, so each entry gets its own field. An empty list
- * shows no fields at all: the Add button is what says there is a list here, and
- * a blank row would read as an entry the user had already started.
- *
- * The group carries the name, because there is no one field for a label to
- * point at: an empty list has no entry at all, and a full one has several.
+ * A list of short strings, one field per entry: a comma-separated box would
+ * quietly refuse any value with a comma in it. An empty list shows no fields at
+ * all, because a blank row would read as an entry already started. The group
+ * carries the name, since there is no one field for a label to point at.
  */
 export function StringList({
   label,
@@ -22,8 +17,7 @@ export function StringList({
 }: {
   /** What the list is called, for the group and for each entry's own name. */
   readonly label: string;
-  /** Whether the list has to hold something. Announced on the group, since it
-   * is the list rather than any one entry that is being asked for. */
+  /** Announced on the group: it is the list, not any one entry, being asked for. */
   readonly required?: boolean;
   readonly values: ReadonlyArray<string>;
   readonly onChange: (values: ReadonlyArray<string>) => void;

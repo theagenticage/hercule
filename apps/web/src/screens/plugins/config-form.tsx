@@ -10,14 +10,11 @@ import {
 } from "@hydra/client-core";
 
 /**
- * The form a plugin's own config schema generates.
- *
- * There is no checking here beyond giving each widget the type its field names.
- * The schema this form was built from lives in the plugin, and the controller
- * is the only place it can be applied; a second reading of it in the browser
- * would drift from the first, and the user would be told two different things
- * about one value. So a refusal comes back from the write and is shown under
- * the field it blamed.
+ * The form a plugin's own config schema generates. No checking here beyond
+ * giving each widget the type its field names: the schema lives in the plugin
+ * and only the controller can apply it, so a second reading in the browser
+ * would tell the user two different things about one value. A refusal comes
+ * back from the write and is shown under the field it blamed.
  */
 export function ConfigForm({
   id,
@@ -32,7 +29,6 @@ export function ConfigForm({
   readonly id: string;
   readonly fields: ReadonlyArray<ConfigField>;
   readonly config: unknown;
-  /** What the controller refused, per field name. */
   readonly issues: Readonly<Record<string, string>>;
   readonly saving: boolean;
   /** The first change since the last write, so what that write said can go. */

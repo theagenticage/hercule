@@ -1,16 +1,8 @@
 /**
- * Settings > Plugins: what the screen says about each plugin the binary was
- * built with, and what a click on it sends to the controller.
- *
- * A plugin is the one thing on this screen the user cannot install, move or
- * delete; all they can do is turn it on, configure it, and pick up the pieces
- * when it failed. So the assertions here are about those four readings - what
- * it contributes, whether it is running, why it is not, and what its settings
- * are - and about the write each affordance actually sends.
- *
- * The form is generated from the plugin's own schema and validated by the
- * controller alone, which is why the refused write below is a stubbed answer
- * rather than something the screen could have known.
+ * Settings > Plugins: what the screen says about each plugin, and what a click
+ * sends to the controller. The form is generated from the plugin's own schema
+ * and validated by the controller alone, which is why the refused write below
+ * is a stubbed answer rather than something the screen could have known.
  */
 import { describe, expect, it } from "vitest";
 import { act, screen, waitFor, within } from "@testing-library/react";
@@ -299,35 +291,6 @@ describe("Settings > Plugins > configuration", () => {
     expect(values()).toContain("beta");
   });
 
-  it("sends each setting as the type its schema names", async () => {
-    const user = userEvent.setup();
-    const { api } = await open([CONFIGURABLE]);
-
-    const endpoint = screen.getByLabelText(/endpoint/i);
-    await user.clear(endpoint);
-    await user.type(endpoint, "https://notes.test/other");
-    const retries = screen.getByLabelText(/retries/i);
-    await user.clear(retries);
-    await user.type(retries, "5");
-    await user.click(screen.getByLabelText(/verbose/i));
-    await user.selectOptions(screen.getByLabelText(/mode/i), "slow");
-
-    await user.click(screen.getByRole("button", { name: "Save" }));
-
-    await waitFor(() => {
-      expect(writesTo(api, CONFIGURABLE.id)).toHaveLength(1);
-    });
-    expect(writesTo(api, CONFIGURABLE.id)[0]?.body).toEqual({
-      config: {
-        endpoint: "https://notes.test/other",
-        retries: 5,
-        verbose: false,
-        mode: "slow",
-        tags: ["alpha", "beta"],
-      },
-    });
-  });
-
   it("leaves a setting nobody answered out of the write, rather than storing a default", async () => {
     const user = userEvent.setup();
     const unset: Fixture = {
@@ -339,6 +302,7 @@ describe("Settings > Plugins > configuration", () => {
     const { api } = await open([unset]);
 
     await user.type(screen.getByLabelText(/endpoint/i), "https://notes.test/ingest");
+    await user.type(screen.getByLabelText(/retries/i), "5");
     await user.click(screen.getByRole("button", { name: "Save" }));
 
     await waitFor(() => {
@@ -347,7 +311,7 @@ describe("Settings > Plugins > configuration", () => {
     // An unchecked box and an empty list are what every optional setting looks
     // like before anyone touches it, so neither is an answer worth storing.
     expect(writesTo(api, unset.id)[0]?.body).toEqual({
-      config: { endpoint: "https://notes.test/ingest" },
+      config: { endpoint: "https://notes.test/ingest", retries: 5 },
     });
   });
 

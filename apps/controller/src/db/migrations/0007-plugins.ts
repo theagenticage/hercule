@@ -1,25 +1,15 @@
 /**
  * What the controller keeps about the plugins compiled into it.
  *
- * `plugins` holds the user's intent and nothing else: whether a plugin may run
- * and how it is configured. Runtime state - active, errored, refused - is a
- * fact about the current process and is held in memory, so a restart is the
- * retry a broken plugin gets.
- *
- * `plugin_contributions` is the catalog every consumer reads instead of the
- * live plugin object, which is what lets the UI say what a disabled plugin
- * offers. `owner` is a plugin id or `core`, and `extension_point` is a plain
- * string so a later extension point adds rows rather than a migration. The
- * whole table is rewritten at every boot, because registration is pure and its
- * output therefore depends on nothing but the binary.
- *
- * `plugin_kv` is the only durable state a plugin has of its own. It survives a
- * disable, because disabling is a toggle and re-enabling resumes where the
- * plugin left off; it is wiped only by an explicit reset.
- *
- * A plugin dropped from the registry keeps its `plugins` and `plugin_kv` rows,
- * which is why the catalog is the only table rewritten: a build that adds the
- * plugin back finds the config and the state the user left it with.
+ * `plugins` holds the user's intent and nothing else; runtime state is a fact
+ * about the current process and stays in memory, so a restart is the retry a
+ * broken plugin gets. `plugin_contributions` is the catalog every consumer
+ * reads instead of the live plugin object, which is what lets the UI say what a
+ * disabled plugin offers; `extension_point` is a plain string so a later one
+ * adds rows rather than a migration, and the table is rewritten at every boot
+ * because registration is pure. `plugin_kv` survives a disable, because
+ * disabling is a toggle, and is wiped only by an explicit reset - which is why
+ * the catalog is the only table a dropped plugin loses.
  *
  * The bounds are CHECK constraints because SQLite cannot add one later without
  * rebuilding the table.

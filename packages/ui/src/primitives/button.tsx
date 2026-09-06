@@ -2,20 +2,16 @@ import type { ComponentProps, JSX } from "react";
 import { cn } from "./cn";
 
 /**
- * A quiet button stays borderless when it cannot be used: giving it a box there
- * would be the one shape on the surface that says "this commits", which is what
- * the `form` variant means. It recedes to the faintest ink instead, and the
- * cursor says the same thing on the way past. Why it cannot be used is written
- * beside it.
+ * A quiet button stays borderless when it cannot be used: a box is the one shape
+ * that says "this commits", which is what the `form` variant means.
  */
 const disabledQuiet = "disabled:cursor-not-allowed disabled:text-faint";
 
 /**
- * The primary answer keeps a box when it cannot be used, because it is often
- * the only affordance on the surface: gone boxless it reads as another line of
- * prose, and the reader is left looking for the thing they were offered. The
- * hairline is drawn inside the button rather than as a border, so a primary
- * beside a quiet one is the same height whichever state it is in.
+ * The primary answer keeps its box when it cannot be used, because it is often
+ * the only affordance on the surface and boxless it reads as prose. The
+ * hairline is inset rather than a border, so a primary beside a quiet one is
+ * the same height in either state.
  */
 const disabledPrimary = [
   "disabled:cursor-not-allowed",

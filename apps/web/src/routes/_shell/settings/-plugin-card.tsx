@@ -26,14 +26,10 @@ const STATUS_HUE: Record<PluginStatus["_tag"], string> = {
 };
 
 /**
- * One plugin: what it contributes, whether it is running, and the four things
- * that can be done to it.
- *
  * A plugin cannot be installed or removed - the binary decides that - so the
- * card is about the two facts the user does own, the switch and the config,
- * and about reading back what this boot made of them. A plugin that was turned
- * away has neither: it was never loaded, so there is nothing to switch on and
- * no schema to generate a form from.
+ * card is about the two facts the user does own, the switch and the config. A
+ * refused plugin has neither: it was never loaded, so there is nothing to
+ * switch on and no schema to generate a form from.
  */
 export function PluginCard({
   client,

@@ -62,13 +62,10 @@ export interface Plugin {
 }
 
 /**
- * Register one provider through the surface the manifest asked for.
- *
  * Every surface on `RegistrationHost` is optional, because the host builds one
  * only for a capability the manifest lists. A plugin that did list it still has
- * to answer for the absent case, and the honest answer is the same every time:
- * fail its own registration with a message the user can read in Settings,
- * rather than quietly contributing nothing.
+ * to answer for the absent case, and the honest answer is always this one:
+ * fail, with a message the user reads in Settings.
  */
 export const registerProvider = (
   host: RegistrationHost,

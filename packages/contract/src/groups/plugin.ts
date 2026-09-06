@@ -1,14 +1,8 @@
 /**
  * Plugins: what the binary was built with, what the user decided about each,
- * and what this boot made of it.
- *
- * The set is fixed at build time, so a listing is the whole set: no filter, no
- * paging, and reading one is the listing narrowed to a single item. Both answer
- * the same shape, because Settings shows the same card in a list and on its own.
- *
- * Status is what this process found and does not survive a restart; `enabled`
- * and `config` are what the user decided and do. A client that shows only one
- * of the two would be telling half the story, so both are on every plugin.
+ * and what this boot made of it. The set is fixed at build time, so a listing
+ * is the whole set and both endpoints answer the same shape. `status` is what
+ * this process found and does not survive a restart; `enabled` and `config` do.
  */
 import { Schema } from "effect";
 import { PluginCapability, PluginId } from "@hydra/plugin-host";
@@ -19,27 +13,20 @@ import { Forbidden, Internal, NotFound, Unauthenticated, Validation } from "../e
 import { Authenticated } from "../security";
 
 /**
- * The longest plugin-written message this API carries. The text is a plugin's
- * own - what its hook failed with, what its config schema was rejected for -
- * and has no bound of its own, so the bound is here: it is served to a browser
- * on every listing and kept in the log for months.
+ * A plugin's own text has no bound of its own, yet is served on every listing
+ * and kept in the log for months, so the bound is published here.
  */
 export const MAX_PLUGIN_MESSAGE_LENGTH = 2048;
 
 /** A message a plugin wrote, cut to what this API will carry. */
 const PluginMessage = Schema.String.check(Schema.isMaxLength(MAX_PLUGIN_MESSAGE_LENGTH));
 
-/**
- * The capability names a manifest may ask for. Declared by the package plugins
- * are written against, so the API and the plugin author read one list.
- */
+/** Re-exported from the package plugins are written against: one list, two readers. */
 export { PluginCapability } from "@hydra/plugin-host";
 
 /**
- * Why a plugin was not loaded. Each of the three is decided from the manifest
- * alone, before any of the plugin's own code runs, which is what makes a broken
- * plugin something the user reads about rather than something that breaks a
- * boot.
+ * Each is decided from the manifest alone, before any plugin code runs, which
+ * is what makes a broken plugin something the user reads about.
  */
 export const PluginRefusalReason = Schema.Union([
   Schema.Struct({
@@ -70,17 +57,14 @@ export const PluginStatus = Schema.Union([
 export type PluginStatus = Schema.Schema.Type<typeof PluginStatus>;
 
 /**
- * A JSON Schema document, as the settings form is generated from. It is
- * declared as an open record rather than as JSON, because that is what a JSON
- * Schema node is - any keyword may appear on it - and because the host derives
- * it from the plugin's own Effect Schema, which never crosses the wire.
+ * The document the settings form is generated from. An open record rather than
+ * JSON, because that is what a JSON Schema node is: any keyword may appear.
  */
 export const PluginConfigSchema = Schema.Record(Schema.String, Schema.Unknown);
 
 /**
- * One entry in the contribution catalog, as the plugin registered it. The
- * definition's shape is the extension point's own, so it is carried as the JSON
- * the catalog holds rather than re-declared per extension point here.
+ * A definition's shape is its extension point's own, so it is carried as the
+ * JSON the catalog holds rather than re-declared per extension point here.
  */
 export const PluginContribution = Schema.Struct({
   extensionPoint: Schema.String,
@@ -91,13 +75,9 @@ export const PluginContribution = Schema.Struct({
 export type PluginContribution = Schema.Schema.Type<typeof PluginContribution>;
 
 /**
- * One plugin, whole.
- *
- * `configSchema` is absent for every plugin that was turned away, whichever of
- * the three reasons it was: the schema is derived after the manifest is
- * accepted, so a refused plugin never has one. Its absence therefore says a
- * form cannot be generated, and never which refusal it was - that is what
- * `status.reason` is for.
+ * `configSchema` is absent for every refused plugin, because it is derived only
+ * after the manifest is accepted: its absence says a form cannot be generated,
+ * never which refusal it was. That is `status.reason`.
  */
 export const PluginDetail = Schema.Struct({
   id: PluginId,
@@ -114,10 +94,8 @@ export const PluginDetail = Schema.Struct({
 export type PluginDetail = Schema.Schema.Type<typeof PluginDetail>;
 
 /**
- * What configuring a plugin takes. The config is validated against the plugin's
- * own schema by the host, which is the only place that schema exists; a key
- * beside `config` is refused rather than dropped, so a client sending the wrong
- * shape is told instead of getting a silent 200.
+ * A key beside `config` is refused rather than dropped, so a client sending the
+ * wrong shape is told instead of getting a silent 200.
  */
 export const PluginConfigureInput = closedStruct({ config: Schema.Json });
 

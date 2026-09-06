@@ -1,11 +1,8 @@
 /**
- * The registry a release ships, as the rest of the system meets it after a
- * boot: the three provider plugins and the capabilities each declares.
- *
+ * The registry a release ships, as the rest of the system meets it after a boot.
  * The declared values are written out in full rather than derived from one
- * another, because they are a pinned table: every affordance the UI offers and
- * every degradation the controller applies is read off them, so one of them
- * changing by accident has to fail here.
+ * another: every affordance the UI offers is read off them, so one changing by
+ * accident has to fail here.
  */
 import { beforeAll, describe, expect, it } from "vitest";
 import { Effect } from "effect";
@@ -25,11 +22,7 @@ const NO_SETTINGS = {
   additionalProperties: false,
 };
 
-/**
- * Each row is the whole of what a boot persists for one plugin, written out
- * rather than derived from a neighbour: a copy of the wrong base is exactly the
- * mistake this has to catch.
- */
+/** Written out rather than derived: a copy of the wrong base is the mistake this catches. */
 const SHIPPED = [
   {
     id: "claude-code",

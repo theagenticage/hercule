@@ -15,14 +15,10 @@ export const Route = createFileRoute("/_shell/settings/plugins")({
 });
 
 /**
- * Every plugin this binary was built with, in the order the registry names
- * them: what each contributes, whether this boot got it running, and the
- * settings it declared.
- *
- * The list itself never changes while the screen is open - installing one means
- * a new binary - but every plugin's status does, and a status is a fact about
- * the controller process rather than about this browser, so the screen follows
- * the topic like every other listing.
+ * Every plugin this binary was built with, in registry order. The list never
+ * changes while the screen is open - installing one means a new binary - but a
+ * status is a fact about the controller process, so the screen follows the
+ * topic like every other listing.
  */
 function Plugins(): JSX.Element {
   const { client, queryClient, live } = Route.useRouteContext();

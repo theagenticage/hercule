@@ -1,13 +1,7 @@
 /**
- * The three plugin tables. Nothing here decides policy: which plugins exist is
- * the registry's answer and what a boot found is the host's.
- *
- * The set of plugins is fixed by the binary and is a handful of rows, so both
- * listings read the whole table rather than filtering or paging.
- *
- * The two JSON columns are decoded rather than parsed, so a row this build
- * cannot read is a typed failure the caller can answer with, not a defect
- * thrown from the middle of a listing.
+ * The three plugin tables. The set is a handful of rows, so both listings read
+ * the whole table, and the two JSON columns are decoded rather than parsed, so
+ * an unreadable row is a typed failure and not a defect mid-listing.
  */
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
@@ -27,23 +21,14 @@ export interface Contribution {
   readonly id: string;
   readonly definition: Schema.Json;
   /**
-   * Whether the plugin that contributed it may run. A contribution stays in the
-   * catalog while its owner is disabled, so a picker can say what is missing
-   * rather than silently losing the entry.
-   *
-   * It is the owner's stored flag and nothing else: a plugin whose teardown
-   * failed still has `enabled = 1`, so its rows read `ownerEnabled: true` while
-   * what it left behind is running. Whoever resolves a contribution reads the
-   * host's own fact about the plugin beside this one.
+   * A contribution outlives its owner being disabled, so a picker can say what
+   * is missing. This is the stored flag and nothing else: a plugin whose
+   * teardown failed still reads `true`, so a resolver reads the host's fact too.
    */
   readonly ownerEnabled: boolean;
 }
 
-/**
- * One catalog row, as a boot writes it. The definition is typed loosely because
- * the host has already decoded it against its contribution schema: what reaches
- * here is JSON by construction.
- */
+/** Typed loosely: the host has decoded it, so what reaches here is JSON by construction. */
 export interface NewContribution {
   readonly owner: string;
   readonly extensionPoint: string;
@@ -54,11 +39,7 @@ export interface NewContribution {
 /** The `config` and `definition` columns: JSON text holding a JSON value. */
 const decodeJson = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Json));
 
-/**
- * The row a boot wrote for one plugin. Boot gives every plugin it lists a row,
- * in the transaction that makes it listed at all, so a plugin without one is a
- * broken database rather than a plugin whose settings are simply unknown.
- */
+/** Boot writes a row in the transaction that lists the plugin, so a missing one is a broken database. */
 export const storedState = (
   state: PluginState | undefined,
   id: string,
@@ -71,10 +52,7 @@ const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
 
   return {
-    /**
-     * Gives every plugin in the registry a row, enabled and unconfigured, and
-     * leaves the rows already there alone: those hold what the user decided.
-     */
+    /** A row per registry plugin. Rows already there hold what the user decided. */
     ensure: (ids: ReadonlyArray<string>, at: string): Effect.Effect<void, SqlError> =>
       Effect.forEach(
         ids,
@@ -154,10 +132,7 @@ const make = Effect.gen(function* () {
         );
       }),
 
-    /**
-     * The catalog, grouped by the owner that contributed each row. Ordered, so
-     * a listing reads the same on every boot however the rows were written.
-     */
+    /** Ordered, so a listing reads the same on every boot however rows were written. */
     contributions: (): Effect.Effect<
       ReadonlyMap<string, ReadonlyArray<Contribution>>,
       SqlError | Schema.SchemaError

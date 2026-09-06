@@ -1,16 +1,12 @@
 /**
- * A plugin's configuration form, as data.
+ * A plugin's configuration form, as data: fields from JSON Schema, the stored
+ * config read into them, and the config a draft means. All three are readings
+ * of the domain, so they live here with a test rather than in a component.
  *
- * The controller serves the plugin's config schema as JSON Schema, and the
- * screen has to turn it into fields, read the stored config into them, and hand
- * back a config typed the way the schema names. All three are readings of the
- * domain, so they live here with a test rather than inside a component; what is
- * left in the app is one widget per kind.
- *
- * The shapes accepted here are exactly the ones the host will derive: a flat
- * object of strings, numbers, integers, booleans, string enums and string
- * arrays. Anything else never reaches a client, because a plugin whose schema
- * goes beyond that is turned away at load and carries no schema at all.
+ * The shapes handled are exactly the ones the host derives - a flat object of
+ * strings, numbers, integers, booleans, string enums and string arrays -
+ * because a plugin whose schema goes beyond that is refused at load and carries
+ * no schema at all.
  */
 import type { Issue, PluginConfigureInput } from "@hydra/contract";
 import { ApiError } from "./errors";
@@ -28,7 +24,6 @@ export interface ConfigField {
   readonly options?: ReadonlyArray<string>;
 }
 
-/** A config, in the shape the API carries it. */
 export type ConfigJson = PluginConfigureInput["config"];
 
 /** What a widget holds while the user is editing. One shape per kind. */
@@ -45,11 +40,7 @@ const asRecord = (value: unknown): Record<string, unknown> | undefined =>
 const asStrings = (value: unknown): ReadonlyArray<string> | undefined =>
   Array.isArray(value) && value.every((item) => typeof item === "string") ? value : undefined;
 
-/**
- * Which widget one property asks for. The six are the whole of what a config
- * schema may hold: the host derives this document and refuses every other shape
- * before it is persisted, so nothing else reaches a client.
- */
+/** Which widget one property asks for. */
 const kindOf = (property: Record<string, unknown>): ConfigFieldKind => {
   const type = property["type"];
   if (type === "boolean" || type === "number" || type === "integer") return type;
@@ -84,7 +75,6 @@ export const configFields = (
   return fields;
 };
 
-/** What a field holds before the user has touched anything. */
 const storedValue = (field: ConfigField, stored: unknown): ConfigValue => {
   if (field.kind === "boolean") return stored === true;
   if (field.kind === "stringList") return asStrings(stored) ?? [];
@@ -92,7 +82,6 @@ const storedValue = (field: ConfigField, stored: unknown): ConfigValue => {
   return "";
 };
 
-/** The stored config read into the widgets, one entry per field. */
 export const configDraft = (fields: ReadonlyArray<ConfigField>, config: unknown): ConfigDraft => {
   const stored = asRecord(config) ?? {};
   return Object.fromEntries(
@@ -101,25 +90,19 @@ export const configDraft = (fields: ReadonlyArray<ConfigField>, config: unknown)
 };
 
 /**
- * Whether a checkbox or a list is only showing what an unfilled setting looks
- * like. Both widgets have a value at rest - unchecked, empty - so writing every
- * one of them back would store a `false` or an `[]` under a setting the user
- * never touched, which is not the same thing as leaving it unset. A required
- * one is written either way: there is no unset for it to go back to.
+ * A checkbox and a list both have a value at rest, so writing every one back
+ * would store a `false` or an `[]` under a setting nobody touched, which is not
+ * the same as unset. A required one is written either way: it has no unset.
  */
 const unfilled = (field: ConfigField, stored: Record<string, unknown>, atRest: boolean): boolean =>
   atRest && !field.required && stored[field.name] === undefined;
 
 /**
- * The config a draft means, typed the way the schema names.
- *
- * An empty text or number field is left out of the config rather than sent as
- * an empty string or a `NaN`: absent is the one thing every schema can say
- * about a setting nobody filled in. Whether that absence is allowed is the
- * plugin's schema to answer, and only the controller holds it.
- *
- * The stored config is read for the same reason: it says which settings the
- * user has an answer for, which the draft alone cannot.
+ * The config a draft means, typed the way the schema names. An empty text or
+ * number field is left out rather than sent as `""` or `NaN`: absent is the one
+ * thing every schema can say about a setting nobody filled in, and whether that
+ * is allowed is the plugin's schema to answer. The stored config is read for
+ * the same reason - it says which settings the user has an answer for.
  */
 export const configPayload = (
   fields: ReadonlyArray<ConfigField>,
@@ -148,20 +131,14 @@ export interface ConfigIssues {
   /** The message per field, keyed by the field its path names. */
   readonly perField: Readonly<Record<string, string>>;
   /**
-   * Whether anything the call was refused for lands nowhere: a failure that is
-   * not a validation at all, one that named no field, or one that named a field
-   * this form does not render. It has to be said as the form's own failure, or
-   * a write is refused and the card says nothing.
+   * Whether anything the call was refused for lands on no rendered field. It
+   * has to be said as the form's own failure, or a write is refused and the
+   * card says nothing.
    */
   readonly rest: boolean;
 }
 
-/**
- * What a refused write blamed, read against the fields this form renders.
- *
- * Anything the call could have failed with that no rendered field carries is
- * the form's to say, not one field's.
- */
+/** What a refused write blamed, read against the fields this form renders. */
 export const configIssues = (error: unknown, fields: ReadonlyArray<ConfigField>): ConfigIssues => {
   if (error === null || error === undefined) return { perField: {}, rest: false };
   if (!(error instanceof ApiError) || error.code !== "validation") {

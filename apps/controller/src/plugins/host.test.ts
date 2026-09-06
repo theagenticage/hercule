@@ -1,10 +1,8 @@
 /**
  * The register pass of `PluginHost.boot`, seen through `Plugins.query` and
  * `Plugins.read`: what the catalog holds after a boot, what a second boot on
- * the same database does to it, and what happens to a plugin that cannot be
- * loaded or whose `register` fails.
- *
- * Fixture plugins are built here and record what ran; nothing is mocked.
+ * the same database does to it, and what a plugin that cannot be loaded or
+ * whose `register` fails leaves behind. Nothing is mocked.
  */
 import { describe, expect, it } from "vitest";
 import { Cause, Effect, Option, Schema } from "effect";

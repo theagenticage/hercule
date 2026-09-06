@@ -1,10 +1,8 @@
 /**
- * Why a plugin was turned away, as a sentence.
- *
- * The three reasons carry different fields and none of them means anything on
- * its own: a version number the user never chose, a capability name, a schema
- * complaint. Turning each into the one thing a person can act on is a reading
- * of the domain, so it lives here with a test.
+ * Why a plugin was turned away, as a sentence. None of the three reasons means
+ * anything on its own - a version the user never chose, a capability name, a
+ * schema complaint - so turning each into something a person can act on is a
+ * reading of the domain, and lives here with a test.
  */
 import type { PluginRefusalReason } from "@hydra/contract";
 

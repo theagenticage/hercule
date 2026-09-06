@@ -1,16 +1,9 @@
 /**
- * What happens to a plugin after it has registered: the activation pass at the
- * end of a boot, the surfaces its hooks are handed, and the five moves a user
- * makes from Settings - enable, disable, configure, retry and reset state.
- *
- * The behaviour spans the host (which runs the hooks and holds the status) and
- * the operation service (which is how a user asks for a move), so both are
+ * What happens to a plugin after it has registered: the boot's activation pass,
+ * the surfaces its hooks are handed, and the five moves a user makes from
+ * Settings. The behaviour spans the host and the operation service, so both are
  * driven here rather than split across two files that would each see half of
- * every outcome.
- *
- * Fixture plugins are built here and record what they observed; nothing is
- * mocked. A fixture keeps the activation contexts it was handed, and the test
- * calls the capability surfaces on them the way the plugin's own code would.
+ * every outcome. Nothing is mocked.
  */
 import { describe, expect, it } from "vitest";
 import { Cause, Effect, Option, Redacted, Schema } from "effect";
@@ -38,10 +31,8 @@ const run = <A, E>(body: Effect.Effect<A, E, Services>) =>
   Effect.runPromise(body.pipe(Effect.provide(pluginStack()), asUser));
 
 /**
- * Whether the catalog says a plugin's contributions may run, per row and in
- * catalog order. It is the catalog's own column, not the plugin's: a
- * contribution outlives its owner being turned off, so a picker can say what is
- * missing instead of losing the entry.
+ * The catalog's own column, not the plugin's: a contribution outlives its owner
+ * being turned off, so a picker can say what is missing.
  */
 const ownerEnabled = (id: string) =>
   Effect.map(

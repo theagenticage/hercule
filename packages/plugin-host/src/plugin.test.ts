@@ -47,10 +47,9 @@ describe("registerProvider", () => {
   });
 
   it("fails the plugin's own registration, naming the capability, when the surface is absent", async () => {
-    // A host missing a surface the manifest asked for is the host misbehaving.
-    // It has to be a typed failure rather than a defect or a silent skip: that
-    // is what puts the reason in front of the user instead of leaving them a
-    // plugin that boots fine and contributes nothing.
+    // A typed failure rather than a defect or a silent skip: that is what puts
+    // the reason in front of the user instead of a plugin that boots fine and
+    // contributes nothing.
     const failure = await Effect.runPromise(Effect.flip(registerProvider({}, definition)));
 
     expect(failure).toBeInstanceOf(PluginError);

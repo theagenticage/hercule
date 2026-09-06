@@ -2,13 +2,10 @@ import type { ComponentProps, JSX } from "react";
 import { cn } from "./cn";
 
 /**
- * A boolean, as a box with its name beside it.
- *
  * The name is part of the control rather than a label stacked above it: a lone
  * box under a heading leaves the reader working out which of the two the tick
- * belongs to, and the whole row is a bigger thing to hit. It wears `Input`'s
- * border, ground and focus treatment so a form reads as one set of controls,
- * which means the platform's own box is off and the tick is drawn here.
+ * belongs to, and the whole row is a bigger thing to hit. Wearing `Input`'s
+ * border and focus means the platform's box is off and the tick is drawn here.
  */
 export function Checkbox({
   label,
