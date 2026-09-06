@@ -99,7 +99,26 @@ export {
 } from "./groups/settings";
 export { MAX_PROFILE_GRANTS, Profile } from "./groups/profile";
 export { OwnerKind, SecretRef } from "./groups/secret";
-export { ControllerInfo } from "./groups/controller";
+export { ControllerInfo, ControllerUpdateInput } from "./groups/controller";
+export {
+  MAX_RUNNER_LABELS,
+  MAX_RUNNER_LABEL_LENGTH,
+  MAX_RUNNER_NAME_LENGTH,
+  MintedJoinToken,
+  RUNNER_EDIT_FIELDS,
+  RUNNER_SORT_FIELDS,
+  RUNNER_STATES,
+  Runner,
+  RunnerCapabilities,
+  RunnerDetail,
+  RunnerFacts,
+  RunnerFilter,
+  RunnerProvider,
+  RunnerState,
+  RunnerToolchain,
+  RunnerUpdateInput,
+  RunnerWatermark,
+} from "./groups/runner";
 export {
   Label,
   MAX_FILTER_VALUES,

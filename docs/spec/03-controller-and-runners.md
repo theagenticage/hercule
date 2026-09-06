@@ -40,6 +40,8 @@ The controller authors a `SessionSpec` that carries `workspaceId` (or `null` for
 - The first exchange on every connection is `hello`. It carries, in both directions: the protocol version, the negotiated capability list (the protocol's extensibility seam: later features such as plan-shipping or OS sandboxing are advertised here and used only when both sides list them), and, from the runner, its probed facts (section 4).
 - The hello exchange settles protocol compatibility. A hard refusal happens only on protocol incompatibility; any other version skew between controller and runner is warn-don't-block (section 2.4).
 
+*(Amended 2026-09-05, [#61](https://github.com/rogierpennink/hydra/issues/61).)* The catalogue is **two tagged unions in `@hydra/protocol`, in Effect Schema**, and `PROTOCOL_VERSION` is **1**. Runner to controller: `RunnerHello { protocolVersion, capabilities, binaryVersion, nonce, facts }`, `Pong`, `FactsReport { facts }`, `WatermarkReport { watermark }`, `Goodbye`. Controller to runner: `ControllerHello { protocolVersion, capabilities, identityId, publicKey, nonce, signature }`, `Ping`, `Ack { lastAckedSeq }`. A refused hello is a WebSocket close carrying a reason, never a message. The credential rides the socket upgrade as `Authorization: Bearer`, so no hello carries one; the controller's answering signature is over the runner's id and nonce together, so a signature obtained on one connection is worthless on another.
+
 ### 2.3 Sequencing, acks and the outbox
 
 - Every runner-to-controller event carries a monotonic sequence number. The controller acknowledges sequence numbers.
@@ -48,7 +50,11 @@ The controller authors a `SessionSpec` that carries `workspaceId` (or `null` for
 - Seq/ack state is keyed by the controller's logical identity, so it survives the controller changing address (section 8).
 - Controller-to-runner traffic on the same socket includes placement commands (start, resume, fork, stop, interrupt a session; provision or tear down a workspace), input delivery (queued input flushed on `turn.completed` and steering, both controller-owned domain state riding this channel), approval decisions, probe requests, the reachability probe used during promotion (section 8.2), and the remote upgrade command (section 2.4).
 
-**Open:** the ticket material pins the hello exchange, seq/ack and the outbox, but not the full message catalogue (names, payloads, error shapes) of the controller-to-runner and runner-to-controller messages. The implementer defines it as one versioned schema in the shared `protocol` package, in Effect Schema ([ADR 0031](../adr/0031-the-backend-is-written-on-effect.md)).
+~~**Open:** the ticket material pins the hello exchange, seq/ack and the outbox, but not the full message catalogue (names, payloads, error shapes) of the controller-to-runner and runner-to-controller messages. The implementer defines it as one versioned schema in the shared `protocol` package, in Effect Schema ([ADR 0031](../adr/0031-the-backend-is-written-on-effect.md)).~~ *(Resolved 2026-09-05, [#61](https://github.com/rogierpennink/hydra/issues/61): the catalogue is written out in section 2.2 and the shapes it carries in section 4.)*
+
+*(Amended 2026-09-05, [#61](https://github.com/rogierpennink/hydra/issues/61).)* Two parts of this section are **deferred to the ticket that ships the first replayable runner event**, with the sessions work: the disk-backed outbox and its replay, and the reconnect reconciliation exchange below. Nothing a runner produces before then survives a disconnect worth replaying - facts and the watermark are latest-wins state (section 4) - so both would ship as mechanism with no consumer. What is frozen now is the wire: `Sequenced { seq }` and `Ack { lastAckedSeq }` are in the schema, and no message extends `Sequenced` yet. The rule behind the reconciliation exchange holds from the start: no per-runner command queue is persisted anywhere.
+
+*(Amended 2026-09-05, [#61](https://github.com/rogierpennink/hydra/issues/61).)* The **reconnect signal** the backoff resets on comes from one source the reconnect loop subscribes to, so a platform daemon can replace or join it later without touching the loop. v1's source is a heuristic, because no portable wake or network-change API exists: a timer scheduled for one second that fires far later means the machine slept, and a changed `os.networkInterfaces()` address set means the network changed. A connection that held past the 30 s cap also restarts the schedule.
 
 **Command delivery across a disconnect is reconciliation, not a command queue** (resolved 2026-08-31, [#43](https://github.com/rogierpennink/hydra/issues/43)). The controller's domain state *is* the intent: a Session in `starting`, a Workspace in `provisioning`, queued input rows. Commands carry an id and are idempotent. On every reconnect - the same exchange as after a runner restart (section 6.2) - the runner reports what it actually has and the controller re-issues whatever its domain state says should exist but does not; a duplicate command for work the runner already has is a no-op. There is no persisted per-runner command queue: a second queue would be a second source of truth for the same intent.
 
@@ -73,6 +79,8 @@ The fleet UI reserves an "Add machine" spot showing the join command with a fres
 
 The join token is single-use and expires after **1 hour**. Outstanding tokens are listable and revocable, and the "Add machine" spot mints a fresh one each time it is opened, so an expired token costs one page refresh.
 
+*(Amended 2026-09-05, [#61](https://github.com/rogierpennink/hydra/issues/61).)* **Listing and revoking outstanding tokens is not in v1.** Minting sweeps rows that have expired, which is what bounded the table the listing would have shown; a person who has minted a token they do not want waits an hour or mints another. It needs an operation nobody has asked for yet.
+
 ### 3.2 What the runner sets up on enrollment
 
 - A random storage directory for all its workspaces, caches and other material state, under the runner area of Hydra Home (`~/.hydra/runner/`, [15-packaging-and-operations](./15-packaging-and-operations.md)). A re-enlisted machine therefore never overwrites a previous life's folders. Legacy folders from earlier lives MAY surface very discreetly in the UI for manual recovery; Hydra never adopts them automatically.
@@ -91,6 +99,8 @@ Provider credentials are never distributed by Hydra. Hydra drives each provider'
 
 The default install starts an ordinary local runner, auto-joined at first boot, hosted as a supervised child process of the controller. It gets the same random storage directory, credential and states as any other runner ([15-packaging-and-operations](./15-packaging-and-operations.md)).
 
+*(Amended 2026-09-05, [#61](https://github.com/rogierpennink/hydra/issues/61).)* **Nothing persists which runner is local**; the child says who it is. Its first line on stdout is one JSON object: `{"runnerId": "<id>"}` when it holds a `runner.json`, `{"join": true}` when it does not. The controller writes a join token to stdin only in the second case and then closes it, holds the reported id in memory for as long as it holds the child, and never reads `runner.json`, which is the runner's. A first line of any other shape fails the boot step. The only persisted consequence of the first join is `defaultRunnerId`, taken by the fleet's first member.
+
 ## 4. Runner capabilities
 
 A Runner Capability is a fact about a runner used for placement. Two kinds:
@@ -101,6 +111,13 @@ A Runner Capability is a fact about a runner used for placement. Two kinds:
 ### 4.1 Reporting
 
 Probed facts are runner facts, not session events: they arrive in hello and in subsequent fact updates, not in a session's normalized event stream.
+
+*(Amended 2026-09-05, [#61](https://github.com/rogierpennink/hydra/issues/61).)* The two reports are **latest-wins state, sent unsequenced and never buffered**: a report older than the newest one is worthless, so one that finds no socket is dropped rather than queued. Their shapes, every size in bytes because the session-cap rule is arithmetic on them:
+
+- `RunnerFacts { os, arch, totalMemoryBytes, docker: boolean, toolchains: [{ name, version, path }], providers: [{ name, present, path? }], identityPort }`. `identityPort` is a probed fact because only the runner knows which port it got (section 5.4).
+- `RunnerWatermark { diskFreeBytes, availableMemoryBytes, acceptingPlacements: boolean }`, sent right after every hello and on the 60-second check.
+
+The controller stores each whole, as one JSON document on the runner row, and hands it back on the fleet read. A toolchain whose `--version` cannot be parsed reports the raw string; one that is absent produces no entry and no error.
 
 ### 4.2 Capability snapshots
 
@@ -262,6 +279,8 @@ Transitions (the tickets pin the five states, drain -> retire, and force-retirin
 - `retired` is terminal. Re-enlisting the same machine creates a new runner: new identity, credential, name and labels, a new storage directory, no workspace adoption. The old records stay under the retired runner.
 
 Silence threshold (resolved 2026-08-31, [#43](https://github.com/rogierpennink/hydra/issues/43)): WebSocket ping every **15 seconds**; `online -> unreachable` after **60 seconds** without a pong (four missed intervals). Reconnect backoff is section 2.3's (1 s doubling to 30 s, reset on wake or network change).
+
+*(Corrected 2026-09-05, [#61](https://github.com/rogierpennink/hydra/issues/61).)* The 15 seconds and the 60 are a **protocol `Ping`/`Pong` pair, not a WebSocket control frame.* A runtime answers a control-frame ping for its process, so a control frame proves the machine is up rather than that the runner is; and the server-owned socket the upgrade yields has no ping to send. The controller sends `Ping`, the runner answers `Pong`, and only a `Pong` advances what the silence window is measured from.
 
 ## 8. Promotion and portability
 

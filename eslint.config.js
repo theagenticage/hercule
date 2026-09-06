@@ -83,6 +83,8 @@ export default tseslint.config(
       "**/node_modules/**",
       // Agent worktrees are whole copies of this repository.
       ".claude/**",
+      // A plan folder is one ticket's local working state, never part of the tree.
+      "docs/plans/**",
       "packages/home/src/version.ts",
       "apps/controller/src/http/bundle.ts",
       "apps/web/src/routeTree.gen.ts",

@@ -16,13 +16,13 @@ import { Route as ShellIndexRouteImport } from './routes/_shell/index'
 import { Route as ShellSplatRouteImport } from './routes/_shell/$'
 import { Route as ShellCheckInRouteImport } from './routes/_shell/check-in'
 import { Route as ShellConnectionsRouteImport } from './routes/_shell/connections'
-import { Route as ShellFleetRouteImport } from './routes/_shell/fleet'
 import { Route as ShellIntakeRouteImport } from './routes/_shell/intake'
 import { Route as ShellNotificationsRouteImport } from './routes/_shell/notifications'
 import { Route as ShellRunsRouteImport } from './routes/_shell/runs'
 import { Route as ShellSettingsRouteImport } from './routes/_shell/settings'
 import { Route as ShellWorkflowsRouteImport } from './routes/_shell/workflows'
 import { Route as OnboardingTimezoneRouteImport } from './routes/onboarding/timezone'
+import { Route as ShellFleetIndexRouteImport } from './routes/_shell/fleet/index'
 import { Route as ShellSettingsIndexRouteImport } from './routes/_shell/settings/index'
 import { Route as ShellSettingsAssistantsRouteImport } from './routes/_shell/settings/assistants'
 import { Route as ShellSettingsBoundsRouteImport } from './routes/_shell/settings/bounds'
@@ -69,11 +69,6 @@ const ShellConnectionsRoute = ShellConnectionsRouteImport.update({
   path: '/connections',
   getParentRoute: () => ShellRoute,
 } as any)
-const ShellFleetRoute = ShellFleetRouteImport.update({
-  id: '/fleet',
-  path: '/fleet',
-  getParentRoute: () => ShellRoute,
-} as any)
 const ShellIntakeRoute = ShellIntakeRouteImport.update({
   id: '/intake',
   path: '/intake',
@@ -103,6 +98,11 @@ const OnboardingTimezoneRoute = OnboardingTimezoneRouteImport.update({
   id: '/onboarding/timezone',
   path: '/onboarding/timezone',
   getParentRoute: () => rootRouteImport,
+} as any)
+const ShellFleetIndexRoute = ShellFleetIndexRouteImport.update({
+  id: '/fleet/',
+  path: '/fleet/',
+  getParentRoute: () => ShellRoute,
 } as any)
 const ShellSettingsIndexRoute = ShellSettingsIndexRouteImport.update({
   id: '/',
@@ -168,7 +168,6 @@ export interface FileRoutesByFullPath {
   '/$': typeof ShellSplatRoute
   '/check-in': typeof ShellCheckInRoute
   '/connections': typeof ShellConnectionsRoute
-  '/fleet': typeof ShellFleetRoute
   '/intake': typeof ShellIntakeRoute
   '/notifications': typeof ShellNotificationsRoute
   '/runs': typeof ShellRunsRoute
@@ -184,6 +183,7 @@ export interface FileRoutesByFullPath {
   '/settings/secrets': typeof ShellSettingsSecretsRoute
   '/settings/system': typeof ShellSettingsSystemRoute
   '/settings/threads': typeof ShellSettingsThreadsRoute
+  '/fleet/': typeof ShellFleetIndexRoute
   '/settings/': typeof ShellSettingsIndexRoute
   '/tasks/': typeof ShellTasksIndexRoute
 }
@@ -193,7 +193,6 @@ export interface FileRoutesByTo {
   '/$': typeof ShellSplatRoute
   '/check-in': typeof ShellCheckInRoute
   '/connections': typeof ShellConnectionsRoute
-  '/fleet': typeof ShellFleetRoute
   '/intake': typeof ShellIntakeRoute
   '/notifications': typeof ShellNotificationsRoute
   '/runs': typeof ShellRunsRoute
@@ -209,6 +208,7 @@ export interface FileRoutesByTo {
   '/settings/secrets': typeof ShellSettingsSecretsRoute
   '/settings/system': typeof ShellSettingsSystemRoute
   '/settings/threads': typeof ShellSettingsThreadsRoute
+  '/fleet': typeof ShellFleetIndexRoute
   '/settings': typeof ShellSettingsIndexRoute
   '/tasks': typeof ShellTasksIndexRoute
 }
@@ -220,7 +220,6 @@ export interface FileRoutesById {
   '/_shell/$': typeof ShellSplatRoute
   '/_shell/check-in': typeof ShellCheckInRoute
   '/_shell/connections': typeof ShellConnectionsRoute
-  '/_shell/fleet': typeof ShellFleetRoute
   '/_shell/intake': typeof ShellIntakeRoute
   '/_shell/notifications': typeof ShellNotificationsRoute
   '/_shell/runs': typeof ShellRunsRoute
@@ -237,6 +236,7 @@ export interface FileRoutesById {
   '/_shell/settings/secrets': typeof ShellSettingsSecretsRoute
   '/_shell/settings/system': typeof ShellSettingsSystemRoute
   '/_shell/settings/threads': typeof ShellSettingsThreadsRoute
+  '/_shell/fleet/': typeof ShellFleetIndexRoute
   '/_shell/settings/': typeof ShellSettingsIndexRoute
   '/_shell/tasks/': typeof ShellTasksIndexRoute
 }
@@ -249,7 +249,6 @@ export interface FileRouteTypes {
     | '/$'
     | '/check-in'
     | '/connections'
-    | '/fleet'
     | '/intake'
     | '/notifications'
     | '/runs'
@@ -265,6 +264,7 @@ export interface FileRouteTypes {
     | '/settings/secrets'
     | '/settings/system'
     | '/settings/threads'
+    | '/fleet/'
     | '/settings/'
     | '/tasks/'
   fileRoutesByTo: FileRoutesByTo
@@ -274,7 +274,6 @@ export interface FileRouteTypes {
     | '/$'
     | '/check-in'
     | '/connections'
-    | '/fleet'
     | '/intake'
     | '/notifications'
     | '/runs'
@@ -290,6 +289,7 @@ export interface FileRouteTypes {
     | '/settings/secrets'
     | '/settings/system'
     | '/settings/threads'
+    | '/fleet'
     | '/settings'
     | '/tasks'
   id:
@@ -300,7 +300,6 @@ export interface FileRouteTypes {
     | '/_shell/$'
     | '/_shell/check-in'
     | '/_shell/connections'
-    | '/_shell/fleet'
     | '/_shell/intake'
     | '/_shell/notifications'
     | '/_shell/runs'
@@ -317,6 +316,7 @@ export interface FileRouteTypes {
     | '/_shell/settings/secrets'
     | '/_shell/settings/system'
     | '/_shell/settings/threads'
+    | '/_shell/fleet/'
     | '/_shell/settings/'
     | '/_shell/tasks/'
   fileRoutesById: FileRoutesById
@@ -379,13 +379,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ShellConnectionsRouteImport
       parentRoute: typeof ShellRoute
     }
-    '/_shell/fleet': {
-      id: '/_shell/fleet'
-      path: '/fleet'
-      fullPath: '/fleet'
-      preLoaderRoute: typeof ShellFleetRouteImport
-      parentRoute: typeof ShellRoute
-    }
     '/_shell/intake': {
       id: '/_shell/intake'
       path: '/intake'
@@ -427,6 +420,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/onboarding/timezone'
       preLoaderRoute: typeof OnboardingTimezoneRouteImport
       parentRoute: typeof rootRouteImport
+    }
+    '/_shell/fleet/': {
+      id: '/_shell/fleet/'
+      path: '/fleet'
+      fullPath: '/fleet/'
+      preLoaderRoute: typeof ShellFleetIndexRouteImport
+      parentRoute: typeof ShellRoute
     }
     '/_shell/settings/': {
       id: '/_shell/settings/'
@@ -542,13 +542,13 @@ interface ShellRouteChildren {
   ShellSplatRoute: typeof ShellSplatRoute
   ShellCheckInRoute: typeof ShellCheckInRoute
   ShellConnectionsRoute: typeof ShellConnectionsRoute
-  ShellFleetRoute: typeof ShellFleetRoute
   ShellIntakeRoute: typeof ShellIntakeRoute
   ShellNotificationsRoute: typeof ShellNotificationsRoute
   ShellRunsRoute: typeof ShellRunsRoute
   ShellSettingsRoute: typeof ShellSettingsRouteWithChildren
   ShellWorkflowsRoute: typeof ShellWorkflowsRoute
   ShellIndexRoute: typeof ShellIndexRoute
+  ShellFleetIndexRoute: typeof ShellFleetIndexRoute
   ShellTasksIndexRoute: typeof ShellTasksIndexRoute
 }
 
@@ -556,13 +556,13 @@ const ShellRouteChildren: ShellRouteChildren = {
   ShellSplatRoute: ShellSplatRoute,
   ShellCheckInRoute: ShellCheckInRoute,
   ShellConnectionsRoute: ShellConnectionsRoute,
-  ShellFleetRoute: ShellFleetRoute,
   ShellIntakeRoute: ShellIntakeRoute,
   ShellNotificationsRoute: ShellNotificationsRoute,
   ShellRunsRoute: ShellRunsRoute,
   ShellSettingsRoute: ShellSettingsRouteWithChildren,
   ShellWorkflowsRoute: ShellWorkflowsRoute,
   ShellIndexRoute: ShellIndexRoute,
+  ShellFleetIndexRoute: ShellFleetIndexRoute,
   ShellTasksIndexRoute: ShellTasksIndexRoute,
 }
 

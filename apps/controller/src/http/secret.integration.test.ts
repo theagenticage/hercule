@@ -126,7 +126,7 @@ describe("controller.read", () => {
 
       expect(response.status).toBe(200);
       const body = (await response.json()) as Record<string, unknown>;
-      expect(Object.keys(body).sort()).toEqual(["id", "publicKey", "version"]);
+      expect(Object.keys(body).sort()).toEqual(["defaultRunnerId", "id", "publicKey", "version"]);
       expect(body["version"]).toBe(VERSION);
       expect(body["id"]).toEqual(expect.stringMatching(/^[0-9a-f]{8}-/));
     });

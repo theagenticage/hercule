@@ -40,6 +40,13 @@ export const AUDIT_KINDS = [
   "project.created",
   "project.updated",
   "project.deleted",
+  "runner.updated",
+  "runner.joinToken.minted",
+  "runner.joined",
+  "runner.stateChanged",
+  "runner.placementsChanged",
+  "runner.crashLooping",
+  "controller.updated",
 ] as const;
 
 export type AuditKind = (typeof AUDIT_KINDS)[number];
@@ -54,6 +61,10 @@ const RECORD_KINDS = {
   "task.created": "created",
   "task.updated": "updated",
   "task.deleted": "deleted",
+  "runner.joined": "created",
+  "runner.updated": "updated",
+  "runner.stateChanged": "updated",
+  "runner.placementsChanged": "updated",
 } as const satisfies Partial<Record<AuditKind, InvalidateKind>>;
 
 type RecordAuditKind = keyof typeof RECORD_KINDS;

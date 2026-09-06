@@ -59,6 +59,11 @@ export function credentialsFileIn(home: string): string {
   return join(home, "credentials.json");
 }
 
+/** Where the runner keeps its own material state: `runner.json`, and its storage directories. */
+export function runnerDirIn(home: string): string {
+  return join(home, "runner");
+}
+
 /** Where `setup-url` lives; known without reading any config. */
 export function setupUrlFileIn(home: string): string {
   return join(home, "setup-url");
@@ -73,7 +78,7 @@ export function homePaths(home: string, dataDir: string): HomePaths {
     credentialsFile: credentialsFileIn(home),
     dataDir: resolvedDataDir,
     databaseFile: join(resolvedDataDir, DATABASE_FILE_NAME),
-    runnerDir: join(home, "runner"),
+    runnerDir: runnerDirIn(home),
     logsDir: join(home, "logs"),
     backupsDir: join(home, "backups"),
     tlsDir: join(home, "tls"),

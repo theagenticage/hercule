@@ -25,7 +25,14 @@ export {
   type LiveWebSocketConstructor,
 } from "./live/live";
 export { queryKeys, queryKeysFor, type LiveQueryKey } from "./live/keys";
+export {
+  detectLocalRunner,
+  loopbackEndpoints,
+  IDENTITY_TIMEOUT_MS,
+  type LoopbackEndpoint,
+} from "./local-runner";
 export { nextOnboardingStep, ONBOARDING_STEPS, type OnboardingStep } from "./onboarding";
+export { formatBytes } from "./format-bytes";
 export { formatSince, formatStamp, formatTimeContext } from "./time-context";
 export {
   priorityGlyph,

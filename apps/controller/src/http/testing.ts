@@ -15,29 +15,28 @@ import * as Layer from "effect/Layer";
 import * as HttpServer from "effect/unstable/http/HttpServer";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import * as BunHttpServer from "@effect/platform-bun/BunHttpServer";
-import type { LiveTopic } from "@hydra/contract";
+import type { LiveTopic, Runner, RunnerState } from "@hydra/contract";
 import { homePaths } from "@hydra/home";
-import { AuthLayer } from "../auth";
 import { HydraHome } from "../config";
-import { ApiKeysLayer, CredentialsLayer, hashToken } from "../credentials";
+import { CredentialsLayer, hashToken } from "../credentials";
+import { nowIso } from "../db";
 import { TestDatabase } from "../db/testing";
+import { AuditLog, AuditLogLayer, type AuditKind, type AuditRow } from "../events";
+import { ControllerIdentity, controllerIdentityLayer } from "../identity";
+import { LiveTopics } from "../live";
+import { masterKeyLayer, secretsLayer } from "../secrets";
+import { PermissionProfilesLayer } from "../permissions";
+import { SettingsLayer } from "../settings";
 import {
-  AuditLog,
-  AuditLogLayer,
-  EventServiceLayer,
-  type AuditKind,
-  type AuditRow,
-} from "../events";
-import { ControllerIdentity, controllerIdentityLayer, ControllerLayer } from "../identity";
-import { LiveTopics, LiveTopicsLayer, WsTicketsLayer } from "../live";
-import { masterKeyLayer, SecretLayer, secretsLayer } from "../secrets";
-import { PermissionProfilesLayer, ProfilesLayer } from "../permissions";
-import { SettingsLayer, SettingsOperationsLayer } from "../settings";
-import { SetupLayer } from "../setup";
-import { ProjectServiceLayer } from "../projects";
-import { TaskServiceLayer } from "../tasks";
-import { PasswordCost, TEST_PASSWORD_PARAMS, UserLayer, UsersLayer } from "../users";
+  JoinTokens,
+  JoinTokensLayer,
+  RunnerPingSchedule,
+  runnerRepository,
+  type RunnerPings,
+} from "../runners";
+import { PasswordCost, TEST_PASSWORD_PARAMS, UsersLayer } from "../users";
 import { seed } from "../seed";
+import { operationLayers } from "./routes";
 import { bodyLimits, serve } from "./server";
 import type { WebBundle } from "./static";
 
@@ -48,21 +47,7 @@ export const USERNAME = "rogier";
 
 /** Every service the routes resolve, over one `:memory:` database. */
 const services = (home: string) =>
-  Layer.mergeAll(
-    SetupLayer,
-    AuthLayer,
-    ApiKeysLayer,
-    UserLayer,
-    SecretLayer,
-    ControllerLayer,
-    SettingsOperationsLayer,
-    ProfilesLayer,
-    TaskServiceLayer,
-    ProjectServiceLayer,
-    EventServiceLayer,
-    LiveTopicsLayer,
-    WsTicketsLayer,
-  ).pipe(
+  operationLayers.pipe(
     Layer.provideMerge(
       Layer.mergeAll(
         UsersLayer,
@@ -71,6 +56,7 @@ const services = (home: string) =>
         PermissionProfilesLayer,
         AuditLogLayer,
         controllerIdentityLayer,
+        JoinTokensLayer,
         PermissionProfilesLayer,
       ),
     ),
@@ -89,6 +75,25 @@ export const baseUrl = Effect.map(HttpServer.HttpServer, (server) => {
 /** Reads back what a request wrote to the audit log. */
 export type AuditReader = (kind: AuditKind) => Promise<ReadonlyArray<AuditRow>>;
 
+/**
+ * Arranges a runner row. No operation enlists a runner - joining does, over the
+ * runner protocol - so a test that needs a fleet writes one through the same
+ * repository the join will.
+ */
+export type RunnerArranger = (fields: {
+  readonly name: string;
+  readonly state?: RunnerState;
+  readonly labels?: ReadonlyArray<string>;
+  readonly maxConcurrentSessions?: number;
+}) => Promise<Runner>;
+
+/**
+ * Mints a join token. `runner.createJoinToken` is how a person gets one, but it
+ * needs a credential, and the join is reachable before anybody has one - the
+ * controller's own first boot mints for its child through this same repository.
+ */
+export type JoinTokenArranger = () => Promise<string>;
+
 /** Reads back what the controller is holding for the clients on its live socket. */
 export interface LiveReader {
   readonly subscriberCount: (topic: LiveTopic) => Promise<number>;
@@ -101,6 +106,20 @@ export interface ServerHarness {
   readonly audit: AuditReader;
   readonly sql: SqlClient.SqlClient;
   readonly live: LiveReader;
+  readonly insertRunner: RunnerArranger;
+  readonly joinToken: JoinTokenArranger;
+}
+
+/** What a test may vary about the controller it is handed. */
+export interface ServerOptions {
+  readonly bundle?: WebBundle;
+  /**
+   * How often the controller pings a runner it holds a socket with, and how
+   * long it lets one stay silent. The shipped values are counted in tens of
+   * seconds, which no test can wait for, and a real Bun listener cannot be
+   * driven by a `TestClock` - so a test about liveness hands over its own.
+   */
+  readonly pings?: RunnerPings;
 }
 
 /**
@@ -108,12 +127,14 @@ export interface ServerHarness {
  * `body`, in a temporary home that is removed afterwards.
  *
  * With no `bundle` the controller serves the API alone, which is what a
- * checkout that was never built does.
+ * checkout that was never built does. With no `pings` the shipped intervals
+ * apply.
  */
 export const withServer = (
   body: (harness: ServerHarness) => Promise<void>,
-  bundle?: WebBundle,
+  options: ServerOptions = {},
 ): Promise<void> => {
+  const bundle = options.bundle;
   const home = mkdtempSync(join(tmpdir(), "hydra-http-"));
   writeFileSync(join(home, "setup-url"), `http://127.0.0.1:4937/setup?token=${SETUP_TOKEN}\n`);
 
@@ -129,7 +150,9 @@ export const withServer = (
         // controller has.
         yield* Effect.flatMap(ControllerIdentity, (identity) => identity.ensure);
         yield* seed;
-        yield* serve(bundle);
+        yield* options.pings === undefined
+          ? serve(bundle)
+          : Effect.provideService(serve(bundle), RunnerPingSchedule, options.pings);
         const base = yield* baseUrl;
         // The log this database holds, read the way anything else reads it: a
         // request's audit row is asserted through the service that wrote it.
@@ -142,7 +165,30 @@ export const withServer = (
         const live: LiveReader = {
           subscriberCount: (topic) => Effect.runPromise(topics.subscriberCount(topic)),
         };
-        yield* Effect.promise(() => body({ base, audit, sql, live }));
+        const repository = yield* runnerRepository;
+        const insertRunner: RunnerArranger = (fields) =>
+          Effect.runPromise(
+            Effect.orDie(
+              Effect.flatMap(nowIso, (at) =>
+                repository.insert({
+                  name: fields.name,
+                  state: fields.state ?? "offline",
+                  labels: fields.labels ?? [],
+                  maxConcurrentSessions: fields.maxConcurrentSessions ?? 1,
+                  credentialHash: hashToken(crypto.randomUUID()),
+                  at,
+                }),
+              ),
+            ),
+          );
+        const tokens = yield* JoinTokens;
+        const joinToken: JoinTokenArranger = () =>
+          Effect.runPromise(
+            Effect.orDie(
+              Effect.flatMap(nowIso, (at) => Effect.map(tokens.create(at), (one) => one.token)),
+            ),
+          );
+        yield* Effect.promise(() => body({ base, audit, sql, live, insertRunner, joinToken }));
       }),
     ).pipe(
       Effect.provide(

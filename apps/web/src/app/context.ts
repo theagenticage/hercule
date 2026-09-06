@@ -7,6 +7,7 @@
  */
 import type { QueryClient } from "@tanstack/react-query";
 import type { HydraClient, Live } from "@hydra/client-core";
+import type { Runner } from "@hydra/contract";
 
 export interface RouterContext {
   readonly client: HydraClient;
@@ -17,4 +18,12 @@ export interface RouterContext {
    * about the socket reaches this app.
    */
   readonly live: Live;
+  /**
+   * Which listed runner is the one on the machine this browser is running on,
+   * or `null` when nothing on it answers for one. It reaches routes through the
+   * context because only a process outside the app can answer it: the app is
+   * handed the answer rather than the loopback fetches behind it, and a test
+   * hands it one without a network.
+   */
+  readonly detectLocalRunner: (runners: ReadonlyArray<Runner>) => Promise<string | null>;
 }

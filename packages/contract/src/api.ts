@@ -14,6 +14,7 @@ import { controller } from "./groups/controller";
 import { event } from "./groups/event";
 import { profile } from "./groups/profile";
 import { project } from "./groups/project";
+import { runner } from "./groups/runner";
 import { secret } from "./groups/secret";
 import { settings } from "./groups/settings";
 import { setup } from "./groups/setup";
@@ -21,5 +22,18 @@ import { task } from "./groups/task";
 import { user } from "./groups/user";
 
 export const api = HttpApi.make("hydra")
-  .add(setup, auth, apiKey, user, settings, profile, secret, task, project, event, controller)
+  .add(
+    setup,
+    auth,
+    apiKey,
+    user,
+    settings,
+    profile,
+    secret,
+    task,
+    project,
+    event,
+    runner,
+    controller,
+  )
   .prefix(API_PREFIX);

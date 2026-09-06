@@ -14,6 +14,7 @@ export {
   DEFAULT_HOME_NAME,
   homePaths,
   resolveHomePath,
+  runnerDirIn,
   setupUrlFileIn,
   type HomePaths,
 } from "./paths";

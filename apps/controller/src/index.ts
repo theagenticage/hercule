@@ -8,29 +8,17 @@
  * Topic, would hold that drain for ever, so the drain has a deadline and says
  * when it reaches one.
  *
- * The runner socket and the schedulers are not implemented yet; each adds a
- * step beside the listener rather than changing this shape.
+ * The schedulers are not implemented yet; each adds a step beside the listener
+ * rather than changing this shape.
  */
 import * as Effect from "effect/Effect";
 import * as Latch from "effect/Latch";
-import * as Layer from "effect/Layer";
 import type * as Scope from "effect/Scope";
 import * as BunHttpServer from "@effect/platform-bun/BunHttpServer";
 import { BootstrapConfig } from "./config";
-import { AuthLayer } from "./auth";
 import { bootWith, type BootError, type BootOutcome } from "./bootstrap";
-import { ApiKeysLayer } from "./credentials";
-import { EventServiceLayer } from "./events";
-import { bodyLimits, perimeterWarning, serve, webBundle } from "./http";
-import { ControllerLayer } from "./identity";
-import { LiveTopicsLayer, WsTicketsLayer } from "./live";
-import { SecretLayer } from "./secrets";
-import { ProfilesLayer } from "./permissions";
-import { SettingsOperationsLayer } from "./settings";
-import { SetupLayer } from "./setup";
-import { ProjectServiceLayer } from "./projects";
-import { TaskServiceLayer } from "./tasks";
-import { UserLayer } from "./users";
+import { bodyLimits, operationLayers, perimeterWarning, serve, webBundle } from "./http";
+import { LOCAL_RUNNER } from "./runners";
 
 export { boot, bootWith, hashToken, setupUrl } from "./bootstrap";
 export type { BootError, BootOptions, BootOutcome, ControllerServices } from "./bootstrap";
@@ -157,25 +145,11 @@ const listen = (outcome: BootOutcome, stopped: Effect.Effect<void>) =>
 
     yield* stopped;
     console.log("Stopping Hydra.");
-  }).pipe(
-    Effect.provide(
-      Layer.mergeAll(
-        SetupLayer,
-        AuthLayer,
-        ApiKeysLayer,
-        UserLayer,
-        SecretLayer,
-        ControllerLayer,
-        SettingsOperationsLayer,
-        ProfilesLayer,
-        TaskServiceLayer,
-        ProjectServiceLayer,
-        EventServiceLayer,
-        LiveTopicsLayer,
-        WsTicketsLayer,
-      ),
-    ),
-  );
+    // Before the listener goes: the child says goodbye over the socket it holds
+    // with this controller, and a controller that had already stopped listening
+    // would read that departure as a machine that vanished.
+    if (outcome.localRunner !== undefined) yield* outcome.localRunner.stop;
+  }).pipe(Effect.provide(operationLayers));
 
 export async function run(argv: readonly string[]): Promise<void> {
   // The signal handlers are installed outside the boot and come off only once
@@ -183,7 +157,7 @@ export async function run(argv: readonly string[]): Promise<void> {
   // still lands on Hydra rather than on Bun's default disposition.
   const program = Effect.scoped(
     Effect.flatMap(untilStopped, (stopped) =>
-      bootWith({ argv, env: process.env }, (outcome) =>
+      bootWith({ argv, env: process.env, localRunner: LOCAL_RUNNER }, (outcome) =>
         Effect.gen(function* () {
           const bootstrap = yield* BootstrapConfig;
           return yield* Effect.scoped(

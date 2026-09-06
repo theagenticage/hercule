@@ -77,8 +77,8 @@ describe("the HttpApi declaration", () => {
 });
 
 /**
- * The Task, Project and Event operations: the operation table row and the
- * endpoint that answers it.
+ * The Task, Project, Event, Runner and Controller operations: the operation
+ * table row and the endpoint that answers it.
  */
 const NEW_OPERATIONS = [
   { id: "task.query", requires: "task.read", method: "GET", path: "/api/v1/tasks" },
@@ -103,13 +103,22 @@ const NEW_OPERATIONS = [
   },
   { id: "event.query", requires: "event.read", method: "GET", path: "/api/v1/events" },
   { id: "event.read", requires: "event.read", method: "GET", path: "/api/v1/events/:id" },
+  { id: "runner.query", requires: "infra.read", method: "GET", path: "/api/v1/runners" },
+  { id: "runner.read", requires: "infra.read", method: "GET", path: "/api/v1/runners/:id" },
+  { id: "runner.update", requires: "infra.write", method: "PATCH", path: "/api/v1/runners/:id" },
+  {
+    id: "controller.update",
+    requires: "infra.write",
+    method: "PATCH",
+    path: "/api/v1/controller",
+  },
 ] as const;
 
 /** The table read by string, so a missing row is a failed assertion, not a type error. */
 const table: Record<string, { requires: string; method: string; path: string } | undefined> =
   OPERATIONS;
 
-describe("the Task, Project and Event operations", () => {
+describe("the operations with an explicit row", () => {
   it.each(NEW_OPERATIONS)("puts $id in the operation table on $method $path", (operation) => {
     expect(table[operation.id]).toEqual({
       requires: operation.requires,

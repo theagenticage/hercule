@@ -30,6 +30,7 @@ import * as HttpServerError from "effect/unstable/http/HttpServerError";
 import * as HttpServerRequest from "effect/unstable/http/HttpServerRequest";
 import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse";
 import { API_PREFIX } from "@hydra/contract";
+import { IDENTITY_PORT, IDENTITY_PORT_COUNT } from "@hydra/protocol";
 
 /**
  * The built web app: where its `index.html` is, and where every file it can
@@ -44,16 +45,38 @@ export interface WebBundle {
 }
 
 /**
+ * The ports the app may ask on the reader's own machine: the ones a runner's
+ * identity listener will settle for, and no others.
+ *
+ * Named one by one rather than as `127.0.0.1:*`, because a wildcard port would
+ * let anything that runs in this page speak to every service on the reader's
+ * machine, and the whole reason this policy exists is that such a script has to
+ * be assumed. Ten ports is not one request: the directive can name a host and a
+ * port and nothing finer, so what it grants is any method and any path on those
+ * ten, where the app itself makes one `GET /identity`.
+ */
+const IDENTITY_PORTS = Array.from(
+  { length: IDENTITY_PORT_COUNT },
+  (_, offset) => `http://127.0.0.1:${String(IDENTITY_PORT + offset)}`,
+).join(" ");
+
+/**
  * What the browser is allowed to load and where it may talk to.
  *
  * The bearer token lives in `localStorage` and agent-authored text is rendered
- * all over the app, so any script that runs can read the credential. No inline
- * script is permitted and nothing may be fetched cross-origin.
+ * all over the app, so a script that runs can read the credential. The
+ * load-bearing directive against that is `script-src 'self'` with no inline
+ * script, because it is what keeps such a script from running: a policy has no
+ * say over where a page navigates, so a script that does run can still carry
+ * the token away in an address bar. What the directives below remove is every
+ * quiet channel - a fetch, an image, a font, a frame - and the only addresses
+ * off this origin left open are the loopback ports above, where the fleet asks
+ * each runner which machine the browser is sitting on.
  */
 export const CONTENT_SECURITY_POLICY = [
   "default-src 'self'",
   "script-src 'self'",
-  "connect-src 'self'",
+  `connect-src 'self' ${IDENTITY_PORTS}`,
   "img-src 'self' data:",
   "font-src 'self'",
   "style-src 'self'",

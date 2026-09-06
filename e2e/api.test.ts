@@ -188,12 +188,23 @@ describe("the first run and everything after it", () => {
   });
 
   it("4b. reads the controller's identity and the timezone setup wrote", async () => {
-    const identity = await hydra(["controller", "read", "--json"]);
+    // The runner the controller spawned joins moments after the listener comes
+    // up, and it is another process: under load the join can land after this
+    // step would otherwise have read the setting.
+    let identity = await hydra(["controller", "read", "--json"]);
+    for (let waited = 0; waited < 10_000; waited += 100) {
+      if ((jsonOf(identity) as { defaultRunnerId: string | null }).defaultRunnerId !== null) break;
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      identity = await hydra(["controller", "read", "--json"]);
+    }
     expect(identity.code).toBe(0);
     expect(jsonOf(identity)).toEqual({
       id: expect.any(String) as string,
       publicKey: expect.any(String) as string,
       version: expect.any(String) as string,
+      // The runner this controller spawned beside itself, which is the fleet's
+      // first member and so what a placement falls back to.
+      defaultRunnerId: expect.any(String) as string,
     });
 
     const settings = await hydra(["settings", "read", "--json"]);

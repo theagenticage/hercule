@@ -12,12 +12,16 @@ import initial from "./0001-initial";
 import usersAndCredentials from "./0002-users-and-credentials";
 import tasksAndProjects from "./0003-tasks-and-projects";
 import readingTheEventLog from "./0004-reading-the-event-log";
+import runners from "./0005-runners";
+import runnerJoinTokens from "./0006-runner-join-tokens";
 
 export const migrations: ReadonlyArray<ResolvedMigration> = [
   [1, "initial", Effect.succeed(initial)],
   [2, "users-and-credentials", Effect.succeed(usersAndCredentials)],
   [3, "tasks-and-projects", Effect.succeed(tasksAndProjects)],
   [4, "reading-the-event-log", Effect.succeed(readingTheEventLog)],
+  [5, "runners", Effect.succeed(runners)],
+  [6, "runner-join-tokens", Effect.succeed(runnerJoinTokens)],
 ];
 
 /** The schema version this binary carries: the highest embedded migration id. */

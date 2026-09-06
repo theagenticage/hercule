@@ -26,18 +26,24 @@ import {
   Validation,
   type ApiError,
 } from "@hydra/contract";
-import { Auth } from "../auth";
-import { WsTickets } from "../live";
-import { ApiKeys } from "../credentials";
-import { EventService } from "../events";
-import { Controller } from "../identity";
-import { Profiles } from "../permissions";
-import { Secret } from "../secrets";
-import { SettingsOperations } from "../settings";
-import { ProjectService } from "../projects";
-import { Setup } from "../setup";
-import { TaskService } from "../tasks";
-import { User } from "../users";
+import { Auth, AuthLayer } from "../auth";
+import { LiveTopicsLayer, WsTickets, WsTicketsLayer } from "../live";
+import { ApiKeys, ApiKeysLayer } from "../credentials";
+import { EventService, EventServiceLayer } from "../events";
+import { Controller, ControllerLayer } from "../identity";
+import { Profiles, ProfilesLayer } from "../permissions";
+import { Secret, SecretLayer } from "../secrets";
+import { SettingsOperations, SettingsOperationsLayer } from "../settings";
+import { ProjectService, ProjectServiceLayer } from "../projects";
+import {
+  RunnerJoinLayer,
+  RunnerPresenceLayer,
+  RunnerService,
+  RunnerServiceLayer,
+} from "../runners";
+import { Setup, SetupLayer } from "../setup";
+import { TaskService, TaskServiceLayer } from "../tasks";
+import { User, UserLayer } from "../users";
 
 const API_ERRORS = [
   Unauthenticated,
@@ -178,11 +184,50 @@ const eventRoutes = HttpApiBuilder.group(api, "event", (handlers) =>
   }),
 );
 
+const runnerRoutes = HttpApiBuilder.group(api, "runner", (handlers) =>
+  Effect.gen(function* () {
+    const runners = yield* RunnerService;
+    return handlers
+      .handle("query", ({ query }) => operation(runners.query(query)))
+      .handle("read", ({ params }) => operation(runners.read(params)))
+      .handle("update", ({ params, payload }) =>
+        operation(runners.update({ id: params.id, ...payload })),
+      )
+      .handle("createJoinToken", () => operation(runners.createJoinToken()));
+  }),
+);
+
 const controllerRoutes = HttpApiBuilder.group(api, "controller", (handlers) =>
   Effect.gen(function* () {
     const controller = yield* Controller;
-    return handlers.handle("read", () => operation(controller.read()));
+    return handlers
+      .handle("read", () => operation(controller.read()))
+      .handle("update", ({ payload }) => operation(controller.update(payload)));
   }),
+);
+
+/**
+ * Every service an operation resolves. One list, because a controller booting
+ * with a layer this list has and its own does not is a controller missing an
+ * operation, and nothing would say so until a request asked for it.
+ */
+export const operationLayers = Layer.mergeAll(
+  SetupLayer,
+  AuthLayer,
+  ApiKeysLayer,
+  UserLayer,
+  SecretLayer,
+  ControllerLayer,
+  SettingsOperationsLayer,
+  ProfilesLayer,
+  TaskServiceLayer,
+  ProjectServiceLayer,
+  RunnerServiceLayer,
+  RunnerJoinLayer,
+  RunnerPresenceLayer,
+  EventServiceLayer,
+  LiveTopicsLayer,
+  WsTicketsLayer,
 );
 
 /** Every group's handlers. What `HttpApiBuilder.layer(api)` needs to build routes. */
@@ -198,4 +243,5 @@ export const handlerLayers = Layer.mergeAll(
   taskRoutes,
   projectRoutes,
   eventRoutes,
+  runnerRoutes,
 );

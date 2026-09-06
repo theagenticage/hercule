@@ -67,7 +67,9 @@ const keyValues = (value: Record<string, unknown>): ReadonlyArray<string> => {
   const entries = flatten(value);
   if (entries.length === 0) return ["ok"];
   const width = Math.max(...entries.map(([key]) => key.length));
-  return entries.map(([key, item]) => `${key.padEnd(width)}  ${cell(item)}`);
+  // Trimmed as the table's lines are: a key whose value is empty reads as the
+  // key, not as the key plus the padding that would have held a value.
+  return entries.map(([key, item]) => `${key.padEnd(width)}  ${cell(item)}`.trimEnd());
 };
 
 const isPage = (
