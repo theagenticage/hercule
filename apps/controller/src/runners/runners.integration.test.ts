@@ -36,6 +36,15 @@ const read = async (base: string, token: string, id: string): Promise<RunnerDeta
 const patch = (base: string, token: string, id: string, body: unknown): Promise<Response> =>
   send("PATCH", base, `/api/v1/runners/${id}`, { body, token });
 
+/** A lifecycle move, the way the runner page's buttons make one. */
+const move = (
+  base: string,
+  token: string,
+  id: string,
+  verb: string,
+  body: unknown = {},
+): Promise<Response> => send("POST", base, `/api/v1/runners/${id}/${verb}`, { body, token });
+
 const names = (page: RunnerPage): ReadonlyArray<string> =>
   page.items.map((runner) => runner.name).sort();
 
@@ -899,6 +908,174 @@ describe("how many sessions a runner will take", () => {
       expect(refused.status).toBe(400);
       expect(await refused.json()).toMatchObject({ error: { code: "validation" } });
       expect((await read(harness.base, token, runner.id)).maxConcurrentSessions).toBe(4);
+    });
+  });
+});
+
+describe("POST /runners/{id}/drain and /runners/{id}/undrain", () => {
+  it("takes a runner out of service and puts it back, recording each move", async () => {
+    await withServer(async (harness) => {
+      const token = await completeSetup(harness.base);
+      const runner = await harness.insertRunner({ name: "iris", connectivity: "online" });
+
+      const drained = await move(harness.base, token, runner.id, "drain");
+      expect(drained.status, await drained.clone().text()).toBe(200);
+      // Where the runner stands with its owner moved; whether the controller can
+      // see it did not.
+      expect(await drained.json()).toMatchObject({
+        id: runner.id,
+        lifecycle: "draining",
+        connectivity: "online",
+      });
+      expect(await read(harness.base, token, runner.id)).toMatchObject({
+        lifecycle: "draining",
+        connectivity: "online",
+      });
+
+      const drainedRows = await harness.audit("runner.drained");
+      expect(drainedRows).toHaveLength(1);
+      expect(drainedRows[0]?.actor).toBe("user");
+      expect(drainedRows[0]?.payload).toMatchObject({ runnerId: runner.id });
+
+      // A drain is a decision, not a door that locks behind you.
+      const undrained = await move(harness.base, token, runner.id, "undrain");
+      expect(undrained.status, await undrained.clone().text()).toBe(200);
+      expect(await undrained.json()).toMatchObject({ id: runner.id, lifecycle: "active" });
+      expect(await read(harness.base, token, runner.id)).toMatchObject({ lifecycle: "active" });
+
+      const undrainedRows = await harness.audit("runner.undrained");
+      expect(undrainedRows).toHaveLength(1);
+      expect(undrainedRows[0]?.actor).toBe("user");
+      expect(undrainedRows[0]?.payload).toMatchObject({ runnerId: runner.id });
+    });
+  });
+
+  it("refuses each move the runner is not standing where it needs to be for", async () => {
+    await withServer(async (harness) => {
+      const token = await completeSetup(harness.base);
+      const active = await harness.insertRunner({ name: "iris" });
+      const draining = await harness.insertRunner({ name: "atlas", lifecycle: "draining" });
+      const retired = await harness.insertRunner({ name: "vega", lifecycle: "retired" });
+
+      const refusals: ReadonlyArray<readonly [string, string]> = [
+        [draining.id, "drain"],
+        [retired.id, "drain"],
+        [active.id, "undrain"],
+        [retired.id, "undrain"],
+        [retired.id, "retire"],
+      ];
+      for (const [id, verb] of refusals) {
+        const response = await move(harness.base, token, id, verb);
+        expect(response.status, `${verb} on ${id}`).toBe(409);
+        expect(await response.json()).toMatchObject({ error: { code: "invalid_state" } });
+      }
+
+      // Nothing moved and nothing was written down.
+      expect((await read(harness.base, token, active.id)).lifecycle).toBe("active");
+      expect((await read(harness.base, token, draining.id)).lifecycle).toBe("draining");
+      expect((await read(harness.base, token, retired.id)).lifecycle).toBe("retired");
+      expect(await harness.audit("runner.drained")).toHaveLength(0);
+      expect(await harness.audit("runner.undrained")).toHaveLength(0);
+      expect(await harness.audit("runner.retired")).toHaveLength(0);
+    });
+  });
+});
+
+describe("POST /runners/{id}/retire", () => {
+  it("retires a runner the controller can still account for, drained or not", async () => {
+    await withServer(async (harness) => {
+      const token = await completeSetup(harness.base);
+      // A runner that is connected, and one that announced it was going: both
+      // have had their say about the sessions they were running.
+      const online = await harness.insertRunner({ name: "iris", connectivity: "online" });
+      const offline = await harness.insertRunner({
+        name: "atlas",
+        connectivity: "offline",
+        lifecycle: "draining",
+      });
+
+      for (const runner of [online, offline]) {
+        const response = await move(harness.base, token, runner.id, "retire");
+        expect(response.status, await response.clone().text()).toBe(200);
+        expect(await response.json()).toMatchObject({ id: runner.id, lifecycle: "retired" });
+        expect((await read(harness.base, token, runner.id)).lifecycle).toBe("retired");
+      }
+    });
+  });
+
+  it("will not retire a runner it cannot reach until it is told to force it", async () => {
+    await withServer(async (harness) => {
+      const token = await completeSetup(harness.base);
+      const active = await harness.insertRunner({ name: "iris", connectivity: "unreachable" });
+      const draining = await harness.insertRunner({
+        name: "atlas",
+        connectivity: "unreachable",
+        lifecycle: "draining",
+      });
+
+      for (const runner of [active, draining]) {
+        const refused = await move(harness.base, token, runner.id, "retire");
+        expect(refused.status, runner.name).toBe(409);
+        // A machine that is not answering cannot say its sessions have finished,
+        // so the refusal names the reachability rather than the sessions.
+        const body = (await refused.json()) as { error: { code: string; message: string } };
+        expect(body.error.code).toBe("invalid_state");
+        expect(body.error.message).toContain("unreachable");
+      }
+
+      expect(await read(harness.base, token, active.id)).toMatchObject({
+        lifecycle: "active",
+        connectivity: "unreachable",
+      });
+      expect((await read(harness.base, token, draining.id)).lifecycle).toBe("draining");
+      expect(await harness.audit("runner.retired")).toHaveLength(0);
+
+      for (const runner of [active, draining]) {
+        const forced = await move(harness.base, token, runner.id, "retire", { force: true });
+        expect(forced.status, await forced.clone().text()).toBe(200);
+        expect(await forced.json()).toMatchObject({ id: runner.id, lifecycle: "retired" });
+      }
+      expect(await harness.audit("runner.retired")).toHaveLength(2);
+    });
+  });
+});
+
+describe("what retiring a runner leaves behind", () => {
+  it("keeps the row, records the retirement, and gives up the fleet default it held", async () => {
+    await withServer(async (harness) => {
+      const token = await completeSetup(harness.base);
+      const chosen = await harness.insertRunner({ name: "iris" });
+      const other = await harness.insertRunner({ name: "atlas" });
+      expect(
+        (await patchController(harness.base, token, { defaultRunnerId: chosen.id })).status,
+      ).toBe(200);
+      const defaultRunner = async (): Promise<string | null> =>
+        (
+          (await (await get(harness.base, "/api/v1/controller", token)).json()) as {
+            defaultRunnerId: string | null;
+          }
+        ).defaultRunnerId;
+
+      // A runner that is not the default takes nothing with it.
+      expect((await move(harness.base, token, other.id, "retire")).status).toBe(200);
+      expect(await defaultRunner()).toBe(chosen.id);
+
+      expect((await move(harness.base, token, chosen.id, "retire")).status).toBe(200);
+      // An empty default is the honest answer: nothing else is promoted into it.
+      expect(await defaultRunner()).toBeNull();
+
+      // Nothing is deleted: the row and everything that will hang off it stay.
+      expect(await read(harness.base, token, chosen.id)).toMatchObject({
+        id: chosen.id,
+        name: "iris",
+        lifecycle: "retired",
+      });
+      expect(names(await list(harness.base, token))).toEqual(["atlas", "iris"]);
+
+      // The trail says the fleet lost its default, which is the part of a
+      // retirement nothing else records.
+      const entries = await harness.audit("runner.retired");
+      expect(entries.map((entry) => entry.payload["lostDefaultRunner"])).toEqual([false, true]);
     });
   });
 });

@@ -14,6 +14,20 @@ import { Schema } from "effect";
 export const PROTOCOL_VERSION = 1;
 
 /**
+ * How the controller ends a connection whose runner it has just retired, and
+ * the one close reason the runner reads. Retiring revokes the credential, so a
+ * runner told this stops rather than dialling again with something dead. The
+ * code is RFC 6455's policy violation: the connection is fine, the runner is
+ * no longer one this controller will have.
+ */
+export const RETIRED_CLOSE_CODE = 1008;
+
+export const RETIRED_CLOSE_REASON = "RETIRED";
+
+/** RFC 6455's "going away": the connection is fine, this end is done with it. */
+export const GOING_AWAY_CLOSE_CODE = 1001;
+
+/**
  * A version a peer claims. Any version that could exist decodes, ours or not,
  * so a mismatch is refused by name rather than reported as an unreadable frame.
  *

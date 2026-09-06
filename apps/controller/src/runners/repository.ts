@@ -181,6 +181,19 @@ const make = Effect.gen(function* () {
         (rows) => Option.fromNullishOr(rows[0]).pipe(Option.map((row) => uuidToString(row.id))),
       ),
 
+    /**
+     * Asked only once a credential has been refused, so a runner can be told
+     * its machine was retired rather than that nobody knows it.
+     */
+    wasRetired: (credentialHash: string): Effect.Effect<boolean, SqlError> =>
+      Effect.map(
+        sql<{ readonly id: Uint8Array }>`
+          SELECT id FROM runners
+          WHERE credential_hash = ${credentialHash} AND lifecycle = 'retired'
+        `,
+        (rows) => rows.length > 0,
+      ),
+
     connected: (): Effect.Effect<ReadonlyArray<string>, SqlError> =>
       Effect.map(
         sql<{ readonly id: Uint8Array }>`SELECT id FROM runners WHERE connectivity = 'online'`,
@@ -294,6 +307,17 @@ const make = Effect.gen(function* () {
           RETURNING id
         `,
         (rows) => rows.length > 0,
+      ),
+
+    /** Where a runner stands with its owner; the socket never writes this. */
+    setLifecycle: (
+      id: string,
+      lifecycle: RunnerLifecycle,
+      at: string,
+    ): Effect.Effect<void, SqlError> =>
+      Effect.asVoid(
+        sql`UPDATE runners SET lifecycle = ${lifecycle}, updated_at = ${at}
+            WHERE id = ${uuidFromString(id)}`,
       ),
 
     list: (request: RunnerPageRequest): Effect.Effect<Page<Runner>, CursorError | SqlError> =>

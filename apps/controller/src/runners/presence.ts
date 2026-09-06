@@ -15,6 +15,7 @@ import * as Option from "effect/Option";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import type { RunnerConnectivity, RunnerFacts, RunnerWatermark } from "@hydra/contract";
+import { GOING_AWAY_CLOSE_CODE, RETIRED_CLOSE_CODE, RETIRED_CLOSE_REASON } from "@hydra/protocol";
 import { SYSTEM_ACTOR } from "../actor";
 import { hashToken } from "../credentials";
 import { announce, nowIso, withTransaction } from "../db";
@@ -27,10 +28,16 @@ export const newConnection = (): Connection => Symbol("runner connection");
 
 export type Departure = "offline" | "unreachable";
 
+export const DISPLACED_CLOSE_REASON = "this runner opened another connection";
+
 interface Reachable {
   readonly connection: Connection;
-  /** Asks the connection to hang up: a runner holds one, not as many as it opens. */
-  readonly displace: () => void;
+  /**
+   * Asks the connection to close with a code and a reason. Only the connection
+   * can write to its own socket, and a runner holds one, not as many as it
+   * opens.
+   */
+  readonly close: (code: number, reason: string) => void;
 }
 
 const make = Effect.gen(function* () {
@@ -62,6 +69,10 @@ const make = Effect.gen(function* () {
     admits: (credential: string): Effect.Effect<Option.Option<string>, SqlError> =>
       runners.byCredential(hashToken(credential)),
 
+    /** Asked only about a credential already refused, to say why it was. */
+    wasRetired: (credential: string): Effect.Effect<boolean, SqlError> =>
+      runners.wasRetired(hashToken(credential)),
+
     /**
      * The map is written after the transaction commits, because a `Map` does not
      * roll back: a hello that failed to write would otherwise point the runner
@@ -70,7 +81,7 @@ const make = Effect.gen(function* () {
     greeted: (
       id: string,
       connection: Connection,
-      displace: () => void,
+      close: (code: number, reason: string) => void,
       hello: RunnerHelloRecord,
     ): Effect.Effect<void, SqlError> =>
       Effect.gen(function* () {
@@ -86,8 +97,20 @@ const make = Effect.gen(function* () {
           }),
         );
         const previous = reachable.get(id);
-        reachable.set(id, { connection, displace });
-        if (previous !== undefined) previous.displace();
+        reachable.set(id, { connection, close });
+        if (previous !== undefined) {
+          previous.close(GOING_AWAY_CLOSE_CODE, DISPLACED_CLOSE_REASON);
+        }
+      }),
+
+    /**
+     * Ends the connection a runner is holding, if it is holding one. Retiring
+     * revokes the credential, so a live socket outlives the row's meaning by
+     * exactly as long as it takes to say so.
+     */
+    hangUp: (id: string): Effect.Effect<void> =>
+      Effect.sync(() => {
+        reachable.get(id)?.close(RETIRED_CLOSE_CODE, RETIRED_CLOSE_REASON);
       }),
 
     /** An answer on a replaced connection is still that machine saying it is there. */

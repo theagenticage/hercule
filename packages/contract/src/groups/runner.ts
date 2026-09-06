@@ -14,7 +14,15 @@ import * as HttpApiEndpoint from "effect/unstable/httpapi/HttpApiEndpoint";
 import * as HttpApiGroup from "effect/unstable/httpapi/HttpApiGroup";
 import * as HttpApiSchema from "effect/unstable/httpapi/HttpApiSchema";
 import { closedStruct } from "../closed";
-import { Conflict, Forbidden, Internal, NotFound, Unauthenticated, Validation } from "../errors";
+import {
+  Conflict,
+  Forbidden,
+  Internal,
+  InvalidState,
+  NotFound,
+  Unauthenticated,
+  Validation,
+} from "../errors";
 import { Id, Timestamp } from "../ids";
 import { page, pageParams } from "../pagination";
 import { Authenticated } from "../security";
@@ -125,6 +133,19 @@ export const RunnerUpdateInput = closedStruct(RUNNER_EDIT_FIELDS);
 
 export type RunnerUpdateInput = Schema.Schema.Type<typeof RunnerUpdateInput>;
 
+/**
+ * Retiring a runner the controller cannot account for is refused unless the
+ * caller says to do it anyway: the machine may still be running sessions
+ * nobody can see the end of.
+ */
+export const RUNNER_RETIRE_FIELDS = {
+  force: Schema.optionalKey(Schema.Boolean),
+} as const;
+
+export const RunnerRetireInput = closedStruct(RUNNER_RETIRE_FIELDS);
+
+export type RunnerRetireInput = Schema.Schema.Type<typeof RunnerRetireInput>;
+
 /** Shown here and nowhere else: the controller keeps only its hash. */
 export const MintedJoinToken = Schema.Struct({
   token: Schema.NonEmptyString,
@@ -153,6 +174,22 @@ export const runner = HttpApiGroup.make("runner")
       payload: RunnerUpdateInput,
       success: RunnerDetail,
       error: [Unauthenticated, Forbidden, Validation, NotFound, Conflict, Internal],
+    }),
+    HttpApiEndpoint.post("drain", "/runners/:id/drain", {
+      params: { id: Id },
+      success: RunnerDetail,
+      error: [Unauthenticated, Forbidden, Validation, NotFound, InvalidState, Internal],
+    }),
+    HttpApiEndpoint.post("undrain", "/runners/:id/undrain", {
+      params: { id: Id },
+      success: RunnerDetail,
+      error: [Unauthenticated, Forbidden, Validation, NotFound, InvalidState, Internal],
+    }),
+    HttpApiEndpoint.post("retire", "/runners/:id/retire", {
+      params: { id: Id },
+      payload: RunnerRetireInput,
+      success: RunnerDetail,
+      error: [Unauthenticated, Forbidden, Validation, NotFound, InvalidState, Internal],
     }),
     HttpApiEndpoint.post("createJoinToken", "/runners/join-tokens", {
       success: HttpApiSchema.status(201)(MintedJoinToken),

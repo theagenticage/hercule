@@ -22,6 +22,7 @@ import {
   reconnect,
   reconnectSignals,
 } from "./reconnect";
+import { RunnerRetired } from "./socket";
 
 /** A connection attempt that never gets anywhere, counted. */
 const failing = (count: { at: number }) =>
@@ -307,6 +308,42 @@ describe("the reconnect source", () => {
         expect(seen.count, "an address went away").toBe(2);
 
         yield* Fiber.interrupt(fiber);
+      }),
+    );
+  });
+});
+
+describe("a runner the controller has retired", () => {
+  it("stops the loop rather than redialling with a dead credential", async () => {
+    await run(
+      Effect.gen(function* () {
+        const count = { at: 0 };
+        const attempt = Effect.suspend(() => {
+          count.at += 1;
+          return Effect.fail(
+            new RunnerRetired({
+              message: "this runner was retired; run `hydra runner join` to re-enlist",
+            }),
+          );
+        });
+        const loop = yield* Effect.forkChild(
+          Effect.result(reconnect({ attempt, signals: Stream.never })),
+        );
+
+        yield* settle;
+        // Every other ending is worth another dial; this one is the credential
+        // being gone, and no amount of waiting brings it back.
+        const ended = loop.pollUnsafe();
+        expect(ended, "the loop is still trying a controller that will not have it").toBeDefined();
+        expect(count.at).toBe(1);
+
+        const outcome =
+          ended?._tag === "Success"
+            ? (ended.value as { readonly _tag: string; readonly failure?: unknown })
+            : undefined;
+        expect(outcome?._tag).toBe("Failure");
+        // Carried out rather than logged: the daemon prints it and exits.
+        expect(outcome?.failure).toBeInstanceOf(RunnerRetired);
       }),
     );
   });

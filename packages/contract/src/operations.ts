@@ -103,6 +103,13 @@ const TABLE = {
   "runner.query": { requires: "infra.read", method: "GET", path: "/api/v1/runners" },
   "runner.read": { requires: "infra.read", method: "GET", path: "/api/v1/runners/:id" },
   "runner.update": { requires: "infra.write", method: "PATCH", path: "/api/v1/runners/:id" },
+  "runner.drain": { requires: "infra.write", method: "POST", path: "/api/v1/runners/:id/drain" },
+  "runner.undrain": {
+    requires: "infra.write",
+    method: "POST",
+    path: "/api/v1/runners/:id/undrain",
+  },
+  "runner.retire": { requires: "infra.write", method: "POST", path: "/api/v1/runners/:id/retire" },
   "runner.createJoinToken": {
     requires: "infra.write",
     method: "POST",

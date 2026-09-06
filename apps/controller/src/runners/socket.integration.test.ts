@@ -1155,3 +1155,62 @@ describe("what the controller stopping does to its local runner", () => {
     rmSync(home, { recursive: true, force: true });
   }, 60_000);
 });
+
+describe("retiring a runner the controller is holding a connection with", () => {
+  /** How the controller ends a connection it will not have back. */
+  const POLICY_VIOLATION = 1008;
+
+  const retire = (base: string, token: string, id: string): Promise<Response> =>
+    send("POST", base, `/api/v1/runners/${id}/retire`, { body: {}, token });
+
+  it("closes the live connection saying the runner was retired", async () => {
+    await withServer(async (harness) => {
+      const token = await completeSetup(harness.base);
+      const joined = await enlist(harness);
+      const { wire } = await greet(harness.base, joined.credential);
+      expect(
+        (
+          await rowWhen(
+            harness.base,
+            token,
+            joined.runnerId,
+            (one) => one.connectivity === "online",
+          )
+        ).connectivity,
+      ).toBe("online");
+
+      const response = await retire(harness.base, token, joined.runnerId);
+      expect(response.status, await response.clone().text()).toBe(200);
+
+      // Retire revokes a credential, so the machine still holding it has to be
+      // told on the connection it already has, not only at the next dial.
+      const ending = await wire.closed();
+      expect(ending.code).toBe(POLICY_VIOLATION);
+      expect(ending.reason).toBe("RETIRED");
+    });
+  });
+
+  it("refuses the retired credential at the upgrade, and says which refusal it is", async () => {
+    await withServer(async (harness) => {
+      const token = await completeSetup(harness.base);
+      const joined = await enlist(harness);
+
+      expect((await retire(harness.base, token, joined.runnerId)).status).toBe(200);
+
+      const revoked = await upgrade(harness.base, `Bearer ${joined.credential}`);
+      expect(revoked.status).toBe(401);
+      const refusal = (await revoked.json()) as { error: { code: string; message: string } };
+      expect(refusal.error.code).toBe("unauthenticated");
+      // The machine is holding a credential that was real: it needs to be sent
+      // to `join`, not left retrying a credential it thinks is merely unknown.
+      expect(refusal.error.message).toContain("retired");
+      expect(await opens(harness.base, `Bearer ${joined.credential}`)).toBe("refused");
+
+      const stranger = await upgrade(harness.base, "Bearer a-credential-nobody-was-issued");
+      expect(stranger.status).toBe(401);
+      const unknown = (await stranger.json()) as { error: { code: string; message: string } };
+      expect(unknown.error.message).toContain("unknown credential");
+      expect(unknown.error.message).not.toContain("retired");
+    });
+  });
+});

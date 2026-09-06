@@ -17,7 +17,8 @@ import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
-import * as Latch from "effect/Latch";
+import * as Deferred from "effect/Deferred";
+import * as Exit from "effect/Exit";
 import * as HttpRouter from "effect/unstable/http/HttpRouter";
 import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse";
 import * as Option from "effect/Option";
@@ -27,6 +28,7 @@ import * as Socket from "effect/unstable/socket/Socket";
 import { internal, unauthenticated } from "@hydra/contract";
 import {
   ControllerToRunner,
+  GOING_AWAY_CLOSE_CODE,
   PeerVersion,
   PROTOCOL_VERSION,
   RunnerToController,
@@ -64,18 +66,26 @@ export const RunnerPingSchedule = Context.Reference<RunnerPings>(
 
 const NO_CREDENTIAL = "the runner socket needs a runner's credential";
 
+/**
+ * A runner that was retired is told so, because its operator can act on it:
+ * re-enlist the machine. Every other refusal says the same nothing, since the
+ * difference between a credential never minted and one from another controller
+ * is a probe.
+ */
+const UNKNOWN_CREDENTIAL = "unknown credential";
+
+const RETIRED = "this runner was retired";
+
 /** Empty in v1: the seam exists, and nothing has been built to negotiate yet. */
 const CAPABILITIES: ReadonlyArray<string> = [];
 
 const UNREADABLE = "that is not a message this controller can read";
 const WRONG_VERSION = `this controller speaks runner protocol version ${String(PROTOCOL_VERSION)}`;
 const GREETED_ALREADY = "this connection has already said hello";
-const DISPLACED = "this runner opened another connection";
 
-/** The RFC 6455 close codes: a protocol error, and a peer going away. */
+/** RFC 6455's protocol error; the other codes this file writes live in the protocol. */
 const PROTOCOL_ERROR = 1002;
 
-const GOING_AWAY = 1001;
 const SILENT = "this runner stopped answering";
 
 const decodeFrame = Schema.decodeUnknownEffect(RunnerToController);
@@ -106,7 +116,8 @@ const hold = (runnerId: string, socket: Socket.Socket) =>
     let departure: Departure = "unreachable";
     let lastHeard = yield* Clock.currentTimeMillis;
 
-    const displaced = Latch.makeUnsafe(false);
+    /** Resolves with what presence asked this connection to go out with. */
+    const asked = Deferred.makeUnsafe<Socket.CloseEvent>();
 
     const refuse = (reason: string) => write(new Socket.CloseEvent(PROTOCOL_ERROR, reason));
 
@@ -130,12 +141,19 @@ const hold = (runnerId: string, socket: Socket.Socket) =>
         };
         // Before the answer goes out, so a runner told it is in is one the fleet
         // already reads as online.
-        yield* presence.greeted(runnerId, mine, () => void displaced.openUnsafe(), {
-          binaryVersion: hello.binaryVersion,
-          protocolVersion: hello.protocolVersion,
-          negotiatedCapabilities: negotiated(hello.capabilities),
-          facts: hello.facts,
-        });
+        yield* presence.greeted(
+          runnerId,
+          mine,
+          (code, reason) => {
+            Deferred.doneUnsafe(asked, Exit.succeed(new Socket.CloseEvent(code, reason)));
+          },
+          {
+            binaryVersion: hello.binaryVersion,
+            protocolVersion: hello.protocolVersion,
+            negotiatedCapabilities: negotiated(hello.capabilities),
+            facts: hello.facts,
+          },
+        );
         greeted = true;
         yield* write(asText(answer));
       });
@@ -192,16 +210,13 @@ const hold = (runnerId: string, socket: Socket.Socket) =>
       while (true) {
         yield* Effect.sleep(pings.interval);
         if ((yield* Clock.currentTimeMillis) - lastHeard > Duration.toMillis(pings.silence)) {
-          return yield* write(new Socket.CloseEvent(GOING_AWAY, SILENT));
+          return yield* write(new Socket.CloseEvent(GOING_AWAY_CLOSE_CODE, SILENT));
         }
         yield* write(asText({ _tag: "ping" }));
       }
     });
 
-    const yieldToNewer = Effect.andThen(
-      displaced.await,
-      write(new Socket.CloseEvent(GOING_AWAY, DISPLACED)),
-    );
+    const closeWhenAsked = Effect.flatMap(Deferred.await(asked), write);
 
     /**
      * A finaliser because a runner that hangs up aborts the request, and an
@@ -215,7 +230,7 @@ const hold = (runnerId: string, socket: Socket.Socket) =>
         Effect.tapCause(socket.runString(receive), (cause) =>
           Effect.logError("A runner's connection ended in an error", cause),
         ).pipe(Effect.ignore),
-        Effect.race(ask, yieldToNewer),
+        Effect.race(ask, closeWhenAsked),
       ),
       Effect.tapCause(leave, (cause) =>
         Effect.logError("A runner's row could not be moved off online", cause),
@@ -235,7 +250,12 @@ export const RunnerSocketRouteLayer = HttpRouter.add("GET", RUNNER_SOCKET_PATH, 
       Effect.as(Effect.logError("A runner's credential could not be resolved", error), undefined),
     );
     if (admitted === undefined) return responseFor(internal("something went wrong"));
-    if (Option.isNone(admitted)) return responseFor(unauthenticated(NO_CREDENTIAL));
+    if (Option.isNone(admitted)) {
+      const retired = yield* Effect.catch(presence.wasRetired(credential), (error) =>
+        Effect.as(Effect.logError("A refused credential could not be looked up", error), false),
+      );
+      return responseFor(unauthenticated(retired ? RETIRED : UNKNOWN_CREDENTIAL));
+    }
 
     const socket = yield* request.upgrade;
     // Once the connection is up there is nobody left to answer with a status.

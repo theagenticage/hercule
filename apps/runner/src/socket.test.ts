@@ -100,8 +100,8 @@ interface Stub {
   readonly connected: () => Promise<void>;
   /** Resolves once the connection has ended, however it ended. */
   readonly ended: () => Promise<boolean>;
-  /** Closes the connection from the controller's side. */
-  readonly hangUp: () => void;
+  /** Closes the connection from the controller's side, with a code and a reason when one is given. */
+  readonly hangUp: (code?: number, reason?: string) => void;
   /** Sends the runner a frame of the test's choosing. */
   readonly say: (frame: object) => void;
   readonly stop: () => void;
@@ -127,7 +127,9 @@ const stubController = async (
   const received: Array<RunnerMessage> = [];
   let open = false;
   let over = false;
-  let live: { close: () => void; send: (data: string) => unknown } | undefined;
+  let live:
+    | { close: (code?: number, reason?: string) => void; send: (data: string) => unknown }
+    | undefined;
 
   const server = Bun.serve({
     hostname: "127.0.0.1",
@@ -180,7 +182,9 @@ const stubController = async (
       expect(await waitFor(() => open), "the runner never connected").toBe(true);
     },
     ended: () => waitFor(() => over),
-    hangUp: () => live?.close(),
+    // Never `close(undefined, undefined)`: a close with no code is not the same
+    // frame as one carrying an explicit pair, and most of these want the plain one.
+    hangUp: (code, reason) => (code === undefined ? live?.close() : live?.close(code, reason)),
     say: (frame) => live?.send(JSON.stringify(frame)),
     stop: () => {
       void server.stop(true);
@@ -405,5 +409,57 @@ describe("the controller a runner is willing to talk to", () => {
     // However the end of a connection reads, it is not the controller having
     // been the wrong controller.
     expect(failureOf(settled)).not.toBeInstanceOf(ControllerNotRecognised);
+  });
+});
+
+describe("a runner whose controller has retired it", () => {
+  /** How the controller ends a connection it will not have back, and what it says. */
+  const POLICY_VIOLATION = 1008;
+  const RETIRED = "RETIRED";
+
+  /** What the operator has to read to know what to do about it. */
+  const RE_ENLIST = "this runner was retired; run `hydra runner join` to re-enlist";
+
+  it("says so, so the daemon can stop and the operator knows to re-enlist", async () => {
+    const stub = await stubController();
+    let settled: Awaited<ReturnType<typeof attempt>> | undefined;
+    const pending = attempt(pinning(stub)).then((outcome) => {
+      settled = outcome;
+    });
+
+    await stub.connected();
+    await waitUntil(() => stub.received.length >= 1);
+    stub.hangUp(POLICY_VIOLATION, RETIRED);
+    await pending;
+
+    // The credential is dead, so redialling with it is the one thing this
+    // connection ending must not lead to.
+    const failure = failureOf(settled) as { readonly message?: string } | undefined;
+    expect(failure, "a retired runner's connection ended in nothing to report").toBeDefined();
+    expect(failure?.message).toContain(RE_ENLIST);
+  });
+
+  it("reads every other close as an ordinary connection that ended", async () => {
+    // Two cases, because two things can be wrong: the reason with the retiring
+    // code, and the code with the retiring reason. Both are closes the
+    // controller really writes.
+    const closes: ReadonlyArray<readonly [number, string]> = [
+      [POLICY_VIOLATION, "this runner opened another connection"],
+      [1001, RETIRED],
+    ];
+    for (const [code, reason] of closes) {
+      const stub = await stubController();
+      let settled: Awaited<ReturnType<typeof attempt>> | undefined;
+      const pending = attempt(pinning(stub)).then((outcome) => {
+        settled = outcome;
+      });
+      await stub.connected();
+      await waitUntil(() => stub.received.length >= 1);
+      stub.hangUp(code, reason);
+      await pending;
+
+      const failure = failureOf(settled) as { readonly message?: string } | undefined;
+      expect(failure?.message ?? "", `${String(code)} ${reason}`).not.toContain(RE_ENLIST);
+    }
   });
 });

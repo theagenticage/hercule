@@ -9,7 +9,7 @@ import { identityListener } from "./identity";
 import { probeFacts, thisMachine } from "./probe";
 import { reconnect, reconnectSignals } from "./reconnect";
 import { readRunnerFile, type NotEnrolled } from "./runner-file";
-import { connect } from "./socket";
+import { connect, type RunnerRetired } from "./socket";
 import { machineHeadroom } from "./watermark";
 
 /** Sorted, so two readings can be compared. */
@@ -23,7 +23,7 @@ const addresses = (): ReadonlyArray<string> =>
  * The facts are read afresh per attempt, so a machine that gained memory between
  * two connections says so in the second hello.
  */
-export const daemon = (home: string): Effect.Effect<never, NotEnrolled> =>
+export const daemon = (home: string): Effect.Effect<never, NotEnrolled | RunnerRetired> =>
   Effect.scoped(
     Effect.gen(function* () {
       const pin = yield* readRunnerFile(home);

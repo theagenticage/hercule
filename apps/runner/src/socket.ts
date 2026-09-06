@@ -22,6 +22,8 @@ import {
   ControllerToRunner,
   PeerVersion,
   PROTOCOL_VERSION,
+  RETIRED_CLOSE_CODE,
+  RETIRED_CLOSE_REASON,
   RunnerToController,
   signedChallenge,
   type ControllerHello,
@@ -71,6 +73,17 @@ export class ControllerNotRecognised extends Schema.TaggedError<ControllerNotRec
   { message: Schema.String },
 ) {}
 
+/**
+ * Its own error because dialling again is exactly the wrong answer: the
+ * controller has retired this machine and revoked its credential, so the loop
+ * stops and the daemon says what the operator has to do about it.
+ */
+export class RunnerRetired extends Schema.TaggedError<RunnerRetired>()("RunnerRetired", {
+  message: Schema.String,
+}) {}
+
+export const RETIRED_MESSAGE = "this runner was retired; run `hydra runner join` to re-enlist";
+
 /** Its own error because an operator can act on it: upgrade the runner. */
 export class ProtocolMismatch extends Schema.TaggedError<ProtocolMismatch>()("ProtocolMismatch", {
   message: Schema.String,
@@ -94,6 +107,12 @@ const asBytes = (encoded: string): Uint8Array<ArrayBuffer> => {
 };
 
 const base64 = (bytes: Uint8Array): string => Buffer.from(bytes).toString("base64");
+
+const retiredIn = (error: unknown): boolean =>
+  error instanceof Socket.SocketError &&
+  error.reason._tag === "SocketCloseError" &&
+  error.reason.code === RETIRED_CLOSE_CODE &&
+  error.reason.closeReason === RETIRED_CLOSE_REASON;
 
 const socketUrlFor = (controllerUrl: string): string => {
   const url = new URL(SOCKET_PATH, controllerUrl);
@@ -131,7 +150,10 @@ const isOurs = (
 /** Even an ordinary close is a failure here: a disconnected runner must dial again. */
 export const connect = (
   options: ConnectOptions,
-): Effect.Effect<void, ControllerNotRecognised | ProtocolMismatch | Socket.SocketError> =>
+): Effect.Effect<
+  void,
+  ControllerNotRecognised | ProtocolMismatch | RunnerRetired | Socket.SocketError
+> =>
   Effect.gen(function* () {
     const { pin } = options;
     const url = socketUrlFor(pin.controllerUrl);
@@ -255,6 +277,11 @@ export const connect = (
       // However the connection ended, being hung up on by an impostor is the
       // more useful answer than the close that followed it.
       Effect.catch((error) => (impostor === undefined ? Effect.fail(error) : Effect.void)),
+      // The one close reason this end reads: it says the credential is gone,
+      // which no amount of dialling again will bring back.
+      Effect.catch((error) =>
+        Effect.fail(retiredIn(error) ? new RunnerRetired({ message: RETIRED_MESSAGE }) : error),
+      ),
     );
 
     if (impostor !== undefined) return yield* Effect.fail(impostor);

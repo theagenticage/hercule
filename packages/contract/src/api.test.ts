@@ -106,6 +106,24 @@ const NEW_OPERATIONS = [
   { id: "runner.query", requires: "infra.read", method: "GET", path: "/api/v1/runners" },
   { id: "runner.read", requires: "infra.read", method: "GET", path: "/api/v1/runners/:id" },
   { id: "runner.update", requires: "infra.write", method: "PATCH", path: "/api/v1/runners/:id" },
+  {
+    id: "runner.drain",
+    requires: "infra.write",
+    method: "POST",
+    path: "/api/v1/runners/:id/drain",
+  },
+  {
+    id: "runner.undrain",
+    requires: "infra.write",
+    method: "POST",
+    path: "/api/v1/runners/:id/undrain",
+  },
+  {
+    id: "runner.retire",
+    requires: "infra.write",
+    method: "POST",
+    path: "/api/v1/runners/:id/retire",
+  },
   { id: "plugin.query", requires: "infra.read", method: "GET", path: "/api/v1/plugins" },
   { id: "plugin.read", requires: "infra.read", method: "GET", path: "/api/v1/plugins/:id" },
   {

@@ -88,6 +88,18 @@ const flag = (name) => {
 const state = flag("--state");
 const record = (entry) => appendFileSync(state, JSON.stringify(entry) + "\\n");
 
+// Installed before anything else this child does: the parent stops waiting on
+// its own deadline, so a handler put in place after the announcement races the
+// signal, and a child still without one dies of it silently.
+if (flag("--deaf") === undefined) {
+  process.on("SIGTERM", () => {
+    record({ what: "sigterm", at: Date.now() });
+    process.exit(0);
+  });
+} else {
+  process.on("SIGTERM", () => record({ what: "sigterm-ignored", at: Date.now() }));
+}
+
 record({ what: "spawned", at: Date.now(), pid: process.pid, argv: Bun.argv, env: { ...process.env } });
 process.stdout.write(flag("--announce") + "\\n");
 
@@ -121,14 +133,6 @@ if (text.trim() !== "") {
   }
 }
 
-if (flag("--deaf") === undefined) {
-  process.on("SIGTERM", () => {
-    record({ what: "sigterm", at: Date.now() });
-    process.exit(0);
-  });
-} else {
-  process.on("SIGTERM", () => record({ what: "sigterm-ignored", at: Date.now() }));
-}
 await new Promise(() => {});
 `;
 

@@ -18,7 +18,9 @@ import {
   conflict,
   DEFAULT_PAGE_LIMIT,
   Id,
+  invalidState,
   notFound,
+  RUNNER_RETIRE_FIELDS,
   validation,
   RUNNER_EDIT_FIELDS,
   RUNNER_SORT_FIELDS,
@@ -26,10 +28,12 @@ import {
   validationOf,
   type Conflict,
   type Forbidden,
+  type InvalidState,
   type MintedJoinToken,
   type NotFound,
   type Runner,
   type RunnerDetail,
+  type RunnerLifecycle,
   type SortDirection,
   type Unauthenticated,
   type Validation,
@@ -39,6 +43,7 @@ import { nowIso, pageInput, refuseCursor, withTransaction } from "../db";
 import { AuditLog } from "../events";
 import { Settings, type SettingError } from "../settings";
 import { JoinTokens } from "./join-tokens";
+import { RunnerPresence } from "./presence";
 import { runnerRepository, type RunnerEdit } from "./repository";
 
 const QueryInput = Schema.Struct({
@@ -56,9 +61,14 @@ const Identified = Schema.Struct({ id: Id });
 
 export type Identified = Schema.Schema.Type<typeof Identified>;
 
+const RetireInput = Schema.Struct({ id: Id, ...RUNNER_RETIRE_FIELDS });
+
+export type RetireInput = Schema.Schema.Type<typeof RetireInput>;
+
 const decodeQuery = Schema.decodeUnknownEffect(QueryInput);
 const decodeUpdate = Schema.decodeUnknownEffect(UpdateInput);
 const decodeIdentified = Schema.decodeUnknownEffect(Identified);
+const decodeRetire = Schema.decodeUnknownEffect(RetireInput);
 
 export interface RunnerPage {
   readonly items: ReadonlyArray<Runner>;
@@ -81,10 +91,25 @@ const NAME_TAKEN = "another runner already has that name";
 const RESERVED_IS_THE_DEFAULT =
   "this is the fleet's default runner; choose another default before reserving it";
 
+const NOT_ACTIVE = "only an active runner can be drained";
+
+const NOT_DRAINING = "only a draining runner can be taken off the drain";
+
+const ALREADY_RETIRED = "that runner is already retired";
+
+const STILL_RUNNING = "sessions are still running on that runner";
+
+/** Names the reachability first, because that is the word the fleet is showing. */
+const UNREACHABLE = "that runner is unreachable, so it cannot confirm its sessions have finished";
+
 /** Alphabetical: a fleet is short, and its name is how a reader picks one out. */
 const DEFAULT_DIRECTION: SortDirection = "asc";
 
 type Edit = { -readonly [K in keyof RunnerEdit]: RunnerEdit[K] };
+
+/** What every lifecycle move can answer with. */
+type MoveError =
+  Unauthenticated | Forbidden | Validation | NotFound | InvalidState | SettingError | SqlError;
 
 /** Labels are replaced whole, so their order is part of the value. */
 const sameLabels = (left: ReadonlyArray<string>, right: ReadonlyArray<string>): boolean =>
@@ -97,6 +122,8 @@ const make = Effect.gen(function* () {
   const settings = yield* Settings;
   const audit = yield* AuditLog;
 
+  const presence = yield* RunnerPresence;
+
   const one = (id: string): Effect.Effect<RunnerDetail, NotFound | SqlError> =>
     Effect.flatMap(
       runners.read(id),
@@ -105,6 +132,53 @@ const make = Effect.gen(function* () {
         onSome: Effect.succeed,
       }),
     );
+
+  /**
+   * How many sessions are running on the runner being retired. Always zero:
+   * there is no session table yet, and the seam is here so `retire` is built
+   * against the rule it will answer to rather than gaining a `force` flag the
+   * ticket after this one has to design. #67 is what makes it count.
+   */
+  const runningSessions = (): Effect.Effect<number> => Effect.succeed(0);
+
+  /**
+   * The two moves that differ only in which lifecycle they come from, go to,
+   * and write down. Each enforces its own grant, so changing what one of them
+   * requires changes what is checked.
+   */
+  const moveLifecycle = (
+    input: Identified,
+    move: {
+      readonly operation: "runner.drain" | "runner.undrain";
+      readonly from: RunnerLifecycle;
+      readonly to: RunnerLifecycle;
+      readonly refusal: string;
+      readonly kind: "runner.drained" | "runner.undrained";
+    },
+  ): Effect.Effect<RunnerDetail, MoveError> =>
+    Effect.gen(function* () {
+      yield* requireGrant(move.operation);
+      const { id } = yield* Effect.mapError(decodeIdentified(input), validationOf);
+      return yield* withTransaction(
+        sql,
+        Effect.gen(function* () {
+          const at = yield* nowIso;
+          const before = yield* one(id);
+          if (before.lifecycle !== move.from) {
+            return yield* Effect.fail(invalidState(move.refusal));
+          }
+          yield* runners.setLifecycle(id, move.to, at);
+          yield* audit.append({
+            kind: move.kind,
+            actor: USER_ACTOR,
+            record: { topic: "runner", id },
+            payload: { runnerId: id },
+            at,
+          });
+          return yield* one(id);
+        }),
+      );
+    });
 
   return {
     query: (
@@ -213,6 +287,84 @@ const make = Effect.gen(function* () {
       }),
 
     /**
+     * Takes a runner out of service without ending it: it finishes what it is
+     * running and is given nothing new. Cancelled by `undrain`.
+     */
+    drain: (input: Identified): Effect.Effect<RunnerDetail, MoveError> =>
+      moveLifecycle(input, {
+        operation: "runner.drain",
+        from: "active",
+        to: "draining",
+        refusal: NOT_ACTIVE,
+        kind: "runner.drained",
+      }),
+
+    undrain: (input: Identified): Effect.Effect<RunnerDetail, MoveError> =>
+      moveLifecycle(input, {
+        operation: "runner.undrain",
+        from: "draining",
+        to: "active",
+        refusal: NOT_DRAINING,
+        kind: "runner.undrained",
+      }),
+
+    /**
+     * Ends a machine's membership of the fleet. The credential stops resolving
+     * the moment the row moves, and a connection live at that moment is closed
+     * so the daemon on the other end stops rather than dialling with something
+     * dead. Nothing is deleted: the row and everything that will hang off it
+     * stay, and re-enlisting writes a new runner beside this one.
+     */
+    retire: (input: RetireInput): Effect.Effect<RunnerDetail, MoveError | SettingError> =>
+      Effect.gen(function* () {
+        yield* requireGrant("runner.retire");
+        const { id, force } = yield* Effect.mapError(decodeRetire(input), validationOf);
+        // The commit and the close are one step: a client hanging up between
+        // them would leave the row retired with its daemon still holding on,
+        // pinging a controller that will never have it back.
+        return yield* Effect.uninterruptible(
+          Effect.gen(function* () {
+            const retired = yield* withTransaction(
+              sql,
+              Effect.gen(function* () {
+                const at = yield* nowIso;
+                const before = yield* one(id);
+                if (before.lifecycle === "retired") {
+                  return yield* Effect.fail(invalidState(ALREADY_RETIRED));
+                }
+                if (force !== true) {
+                  if ((yield* runningSessions()) > 0) {
+                    return yield* Effect.fail(invalidState(STILL_RUNNING));
+                  }
+                  if (before.connectivity === "unreachable") {
+                    return yield* Effect.fail(invalidState(UNREACHABLE));
+                  }
+                }
+                yield* runners.setLifecycle(id, "retired", at);
+                // A default nobody can place on is worse than no default: the
+                // fleet says so rather than promoting a runner nobody chose.
+                const wasDefault = (yield* settings.defaultRunnerId()) === id;
+                if (wasDefault) yield* settings.setDefaultRunnerId(null, at);
+                yield* audit.append({
+                  kind: "runner.retired",
+                  actor: USER_ACTOR,
+                  record: { topic: "runner", id },
+                  payload: { runnerId: id, forced: force === true, lostDefaultRunner: wasDefault },
+                  at,
+                });
+                return yield* one(id);
+              }),
+            );
+            // After the commit: a socket closed for a retirement that then
+            // rolled back would be a runner told to stop by a controller that
+            // still has it.
+            yield* presence.hangUp(id);
+            return retired;
+          }),
+        );
+      }),
+
+    /**
      * The token is in the answer and nowhere else. The fleet's "Add machine"
      * mints a fresh one each time it opens, so an expired one costs a refresh.
      */
@@ -246,5 +398,5 @@ export class RunnerService extends Context.Service<RunnerService, Effect.Success
 export const RunnerServiceLayer: Layer.Layer<
   RunnerService,
   never,
-  SqlClient.SqlClient | JoinTokens | Settings | AuditLog
+  SqlClient.SqlClient | JoinTokens | Settings | RunnerPresence | AuditLog
 > = Layer.effect(RunnerService)(make);
