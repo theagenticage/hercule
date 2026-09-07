@@ -9,12 +9,14 @@ import { describe, expect, it } from "vitest";
 import { ROOT } from "./harness";
 
 /**
- * 65 MiB today, 63 before the Agent SDK. The budget leaves room to grow while
- * staying well under what one per-platform CLI package would add, so a crossing
- * means a dependency came back rather than that the binary drifted. Raise it
- * only after looking at why it grew.
+ * One number for every target, so it has to clear the biggest one. The same
+ * source compiles to 68 MiB on darwin-arm64 and 83 MiB on both Linux targets:
+ * the Bun runtime is what differs, not anything of ours, and CI weighs the
+ * Linux build. 95 leaves room to grow and is still well under the ~107 that one
+ * per-platform CLI package coming back would make, which is the thing this is
+ * really watching for. Raise it only after looking at why it grew.
  */
-const SIZE_BUDGET_BYTES = 80 * 1024 * 1024;
+const SIZE_BUDGET_BYTES = 95 * 1024 * 1024;
 
 const binary = join(ROOT, "hydra");
 
