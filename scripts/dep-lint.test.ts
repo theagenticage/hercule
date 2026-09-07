@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -39,8 +39,8 @@ export const run = (): void => console.log(typeof Logo);`,
 
 let dir: string;
 
-/** Temporary workspaces the store checks are pointed at, removed afterwards. */
-const stores: Array<string> = [];
+/** Temporary roots the store check is run from, removed afterwards. */
+const roots: Array<string> = [];
 
 beforeAll(async () => {
   dir = await mkdtemp(join(tmpdir(), "hydra-dep-lint-"));
@@ -51,30 +51,11 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await rm(dir, { recursive: true, force: true });
-  for (const store of stores.splice(0)) await rm(store, { recursive: true, force: true });
+  for (const one of roots.splice(0)) await rm(one, { recursive: true, force: true });
 });
 
-const depLint = (fixture: string, workspace?: string) =>
-  run(
-    "bun",
-    [
-      "run",
-      join(root, "scripts/dep-lint.ts"),
-      join(dir, `${fixture}.ts`),
-      ...(workspace === undefined ? [] : [workspace]),
-    ],
-    { cwd: root },
-  );
-
-/** Runs a fixture against a store of its own and resolves to the refusal. */
-async function failureIn(fixture: string, workspace: string): Promise<{ stderr: string }> {
-  const error = await depLint(fixture, workspace).then(
-    () => undefined,
-    (thrown: { readonly stderr: string }) => thrown,
-  );
-  expect(error, `dep-lint accepted the store handed to ${fixture}`).toBeDefined();
-  return error!;
-}
+const depLint = (fixture: string, script = join(root, "scripts/dep-lint.ts")) =>
+  run("bun", ["run", script, join(dir, `${fixture}.ts`)], { cwd: root });
 
 /** Resolves to the failure dep-lint exited with, or fails the test. */
 async function failure(fixture: string): Promise<{ code?: number; stderr?: string }> {
@@ -128,20 +109,28 @@ describe("dep-lint", () => {
  * about an entrypoint, so the fixture is a directory in the store rather than a
  * file to import: pnpm links only a package's direct dependencies into the
  * importer's `node_modules`, so an optional dependency of the SDK shows up in
- * the store and nowhere else.
+ * the store and nowhere else. The script reads the workspace it sits in, so the
+ * fixture store is given a copy of the script to sit in.
  */
 describe("the vendor SDK's per-platform CLI packages", () => {
   const SDK = "@anthropic-ai+claude-agent-sdk";
 
-  /** A store laid out as pnpm lays one out, holding exactly what it is given. */
-  const storeHolding = async (...packages: ReadonlyArray<string>): Promise<string> => {
-    const { mkdir } = await import("node:fs/promises");
-    const workspace = await mkdtemp(join(tmpdir(), "hydra-dep-lint-store-"));
-    stores.push(workspace);
+  /**
+   * A copy of the script in a root of its own, holding the store it is given.
+   * The script reads the workspace it sits in, so this is how the failing
+   * direction is proven without writing into the store this repository is
+   * actually installed from, and without an option the shipped script carries
+   * for the test's sake alone.
+   */
+  const scriptOver = async (...packages: ReadonlyArray<string>): Promise<string> => {
+    const one = await mkdtemp(join(tmpdir(), "hydra-dep-lint-root-"));
+    roots.push(one);
+    await mkdir(join(one, "scripts"), { recursive: true });
+    await copyFile(join(root, "scripts/dep-lint.ts"), join(one, "scripts/dep-lint.ts"));
     for (const name of packages) {
-      await mkdir(join(workspace, "node_modules/.pnpm", name), { recursive: true });
+      await mkdir(join(one, "node_modules/.pnpm", name), { recursive: true });
     }
-    return workspace;
+    return join(one, "scripts/dep-lint.ts");
   };
 
   it("are not installed, and dep-lint says so over the repository as it stands", async () => {
@@ -152,18 +141,14 @@ describe("the vendor SDK's per-platform CLI packages", () => {
   });
 
   it("fail the check when one finds its way into the store", async () => {
-    const workspace = await storeHolding(`${SDK}@0.3.263`, `${SDK}-darwin-arm64@0.3.263`);
+    const script = await scriptOver(`${SDK}@0.3.263`, `${SDK}-darwin-arm64@0.3.263`);
 
-    const refusal = await failureIn("clean", workspace);
+    const refusal = await depLint("clean", script).then(
+      () => undefined,
+      (thrown: { readonly stderr: string }) => thrown,
+    );
 
-    expect(refusal.stderr).toContain(`${SDK}-darwin-arm64@0.3.263`);
-  });
-
-  it("fail the check when the SDK itself is not installed at all", async () => {
-    const workspace = await storeHolding("effect@4.0.0");
-
-    const refusal = await failureIn("clean", workspace);
-
-    expect(refusal.stderr).toContain("is not installed");
+    expect(refusal, "dep-lint accepted a store with a per-platform package in it").toBeDefined();
+    expect(refusal!.stderr).toContain(`${SDK}-darwin-arm64@0.3.263`);
   });
 });

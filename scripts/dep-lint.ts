@@ -22,11 +22,10 @@
  * the importer's directory and an optional dependency of the SDK would never
  * appear there.
  *
- * Usage: `bun run scripts/dep-lint.ts [entrypoint] [workspace]`. Both optional
- * arguments are what `scripts/dep-lint.test.ts` points at its fixtures: the
- * entrypoint at a file that breaks one import rule, the workspace at a store
- * with a per-platform package in it, so the failing direction is proven without
- * writing into the store this repository is actually installed from.
+ * Usage: `bun run scripts/dep-lint.ts [entrypoint]`. The optional argument is
+ * what `scripts/dep-lint.test.ts` points at a file that breaks one import rule.
+ * The workspace is always the one this script sits in, which is how the test
+ * proves the store rule too: it runs a copy of this file from a root of its own.
  */
 import { readdir, rm } from "node:fs/promises";
 import { dirname, relative, resolve } from "node:path";
@@ -34,7 +33,6 @@ import { fileURLToPath } from "node:url";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const entrypoint = process.argv[2] ?? "apps/runner/src/index.ts";
-const workspace = process.argv[3] ?? root;
 
 /**
  * Each rule names what it forbids and why; the message is the CI output.
@@ -136,7 +134,7 @@ const SDK = "@anthropic-ai/claude-agent-sdk";
 /** How pnpm names a store directory: the package with its `/` written as `+`. */
 const storeName = SDK.replace("/", "+");
 
-const store = await readdir(`${workspace}/node_modules/.pnpm`).catch(() => undefined);
+const store = await readdir(`${root}node_modules/.pnpm`).catch(() => undefined);
 if (store === undefined) {
   console.error("dep-lint: node_modules/.pnpm is not there; run `pnpm install`.");
   process.exit(1);
