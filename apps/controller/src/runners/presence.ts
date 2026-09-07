@@ -61,6 +61,22 @@ export type Request = ProbeRequest | InstallRequest | LoginStart | LoginCode;
 /** What came back for one of those, correlated by the request's own id. */
 export type Answer = ProbeReport | InstallResult | LoginUrl | LoginFailed | LoginResult;
 
+/**
+ * The facts report carries no request id: the protocol has one frame for it and
+ * a machine sends one report, so it waits under a key no request id can be.
+ */
+const FACTS_KEY = "facts";
+
+/** A facts report standing in the answer map, which is the only thing it is. */
+interface FactsReported {
+  readonly _tag: "factsReported";
+}
+
+const FACTS_REPORTED: FactsReported = { _tag: "factsReported" };
+
+/** Everything a waiter on this connection can be woken with. */
+type Reported = Answer | FactsReported;
+
 /** How presence reaches back to a connection that is holding a runner. */
 export interface Connected {
   /**
@@ -78,19 +94,17 @@ export interface Connected {
 interface Reachable extends Connected {
   readonly connection: Connection;
   /**
-   * Who is waiting for this connection's next facts report, and whether one
-   * arrived. Held here rather than per runner id so that two callers waiting at
-   * once share one request and one answer, and so that the connection ending
-   * ends the wait with it.
+   * Who is waiting for what on this connection, keyed by the id the request
+   * went out under - the facts report under `FACTS_KEY`, everything else under
+   * the controller's own request id. Held per connection rather than per runner
+   * id so that the connection ending ends every wait on it, and so that a
+   * report under an id nobody issued, which is a runner writing a row it was
+   * not asked for, wakes nothing.
+   *
+   * A key holds every caller waiting on it rather than one, because two people
+   * can press "refresh facts" at once and one report is all a machine sends.
    */
-  awaitingFacts: Deferred.Deferred<boolean> | undefined;
-  /**
-   * Who is waiting for which answer on this connection. A map rather than one
-   * slot, because probes and installs for several instances are in flight at
-   * once, and the ids are the controller's own: a report under an id nobody
-   * issued is a runner writing a row it was not asked for.
-   */
-  readonly pending: Map<string, Deferred.Deferred<Option.Option<Answer>>>;
+  readonly pending: Map<string, Set<Deferred.Deferred<Option.Option<Reported>>>>;
 }
 
 const make = Effect.gen(function* () {
@@ -101,27 +115,64 @@ const make = Effect.gen(function* () {
   const reachable = new Map<string, Reachable>();
 
   /**
-   * Ends a wait for facts, if the connection is holding one. Only the three
-   * things that really end a wait call this - the report arriving, the
-   * connection going, and the runner dialling again - so a caller that gave up
-   * leaves the wait in place for whoever is still listening.
-   */
-  const endWait = (held: Reachable | undefined, reported: boolean): void => {
-    if (held?.awaitingFacts === undefined) return;
-    Deferred.doneUnsafe(held.awaitingFacts, Exit.succeed(reported));
-    held.awaitingFacts = undefined;
-  };
-
-  /**
    * Nothing more is coming over this connection, so everybody waiting on it is
    * told now rather than at their own deadline.
    */
   const abandon = (held: Reachable | undefined): void => {
     for (const waiting of held?.pending.values() ?? []) {
-      Deferred.doneUnsafe(waiting, Exit.succeed(Option.none()));
+      for (const one of waiting) Deferred.doneUnsafe(one, Exit.succeed(Option.none()));
     }
     held?.pending.clear();
   };
+
+  /**
+   * Wakes everybody waiting under this key. A report under a key nobody is
+   * waiting on is dropped, which is what an id the controller never issued and
+   * a second report under one it did both are.
+   */
+  const woke = (held: Reachable, key: string, reported: Reported): void => {
+    const waiting = held.pending.get(key);
+    if (waiting === undefined) return;
+    held.pending.delete(key);
+    for (const one of waiting) Deferred.doneUnsafe(one, Exit.succeed(Option.some(reported)));
+  };
+
+  /**
+   * Sends one thing and waits for what comes back under `key`. `none` when the
+   * runner is holding no connection, when it ended first, or when nothing came
+   * back in time - all three of which the caller reports the same way: the
+   * machine did not say.
+   *
+   * Giving up is this caller's alone: the frame is still out there, so whoever
+   * else is waiting under the same key is still answered when it comes back.
+   */
+  const askedFor = (
+    id: string,
+    key: string,
+    send: (held: Reachable) => Effect.Effect<void>,
+    deadline: Duration.Duration,
+  ): Effect.Effect<Option.Option<Reported>> =>
+    Effect.suspend(() => {
+      const held = reachable.get(id);
+      if (held === undefined) return Effect.succeed(Option.none<Reported>());
+      const mine = Deferred.makeUnsafe<Option.Option<Reported>>();
+      const waiting = held.pending.get(key) ?? new Set();
+      waiting.add(mine);
+      held.pending.set(key, waiting);
+      return Effect.ensuring(
+        Effect.gen(function* () {
+          yield* send(held);
+          const answer = yield* Effect.timeoutOption(Deferred.await(mine), deadline);
+          return Option.getOrElse(answer, () => Option.none<Reported>());
+        }),
+        // Nobody else is listening for this one, and leaving it behind would
+        // keep the map growing for the life of the connection.
+        Effect.sync(() => {
+          waiting.delete(mine);
+          if (waiting.size === 0) held.pending.delete(key);
+        }),
+      );
+    });
 
   /**
    * A move to where the runner already is is not a move, and writes no row.
@@ -173,16 +224,10 @@ const make = Effect.gen(function* () {
           }),
         );
         const previous = reachable.get(id);
-        reachable.set(id, {
-          connection,
-          ...connected,
-          awaitingFacts: undefined,
-          pending: new Map(),
-        });
+        reachable.set(id, { connection, ...connected, pending: new Map() });
         if (previous !== undefined) {
           // Nothing more is coming over the connection being displaced, and the
           // entry that would have carried its answer is no longer the one here.
-          endWait(previous, false);
           abandon(previous);
           previous.close(GOING_AWAY_CLOSE_CODE, DISPLACED_CLOSE_REASON);
         }
@@ -205,53 +250,26 @@ const make = Effect.gen(function* () {
      */
     refreshedFacts: (id: string): Effect.Effect<boolean> =>
       Effect.gen(function* () {
-        const held = reachable.get(id);
-        if (held === undefined) return false;
-        // A caller arriving while another is already waiting joins that wait:
-        // one report answers both, and one report is all a machine sends.
-        const mine = held.awaitingFacts ?? Deferred.makeUnsafe<boolean>();
-        held.awaitingFacts = mine;
         const deadline = yield* RunnerFactsDeadline;
-        // Every call asks: a wait left behind by a caller that gave up is not
-        // evidence that a frame is still in flight, and skipping the ask would
-        // leave the button inert until the runner reconnects.
-        yield* held.askForFacts;
-        // Giving up is this caller's, not the request's: the frame is still out
-        // there, and whoever is still listening is answered when it comes back.
-        const answer = yield* Effect.timeoutOption(Deferred.await(mine), deadline);
-        return Option.isSome(answer) && answer.value;
+        // Every call asks: a wait somebody else is holding is not evidence that
+        // a frame is still in flight, and skipping the ask would leave the
+        // button inert until the runner reconnects.
+        const answer = yield* askedFor(id, FACTS_KEY, (held) => held.askForFacts, deadline);
+        return Option.isSome(answer);
       }),
 
-    /**
-     * Sends one request and waits for the answer that carries its id. `none`
-     * when the runner is holding no connection, when it ended first, or when
-     * nothing came back in time - all three of which the caller reports the
-     * same way: the machine did not say.
-     */
+    /** Sends one request and waits for the answer that carries its id. */
     asked: (
       id: string,
       request: Request,
       deadline: Duration.Duration,
     ): Effect.Effect<Option.Option<Answer>> =>
-      Effect.suspend(() => {
-        const held = reachable.get(id);
-        if (held === undefined) return Effect.succeed(Option.none<Answer>());
-        const mine = Deferred.makeUnsafe<Option.Option<Answer>>();
-        held.pending.set(request.requestId, mine);
-        return Effect.ensuring(
-          Effect.gen(function* () {
-            yield* held.ask(request);
-            const answer = yield* Effect.timeoutOption(Deferred.await(mine), deadline);
-            return Option.getOrElse(answer, () => Option.none<Answer>());
-          }),
-          // Giving up is this caller's, and nobody else is listening for this
-          // id: leaving it behind would keep the map growing for the life of
-          // the connection.
-          Effect.sync(() => {
-            held.pending.delete(request.requestId);
-          }),
-        );
-      }),
+      Effect.map(
+        askedFor(id, request.requestId, (held) => held.ask(request), deadline),
+        // The facts report answers its own key and no request id, so nothing
+        // but an answer can come back under this one.
+        Option.filter((reported): reported is Answer => reported._tag !== "factsReported"),
+      ),
 
     /**
      * An answer to something this controller asked. Under an id nobody issued,
@@ -262,10 +280,7 @@ const make = Effect.gen(function* () {
       Effect.sync(() => {
         const held = reachable.get(id);
         if (held?.connection !== connection) return;
-        const waiting = held.pending.get(answer.requestId);
-        if (waiting === undefined) return;
-        held.pending.delete(answer.requestId);
-        Deferred.doneUnsafe(waiting, Exit.succeed(Option.some(answer)));
+        woke(held, answer.requestId, answer);
       }),
 
     /** An answer on a replaced connection is still that machine saying it is there. */
@@ -292,7 +307,8 @@ const make = Effect.gen(function* () {
         );
         // After the commit, so a caller woken by this reads the facts it waited
         // for rather than the ones they replaced.
-        endWait(recorded ? reachable.get(id) : undefined, true);
+        const held = recorded ? reachable.get(id) : undefined;
+        if (held !== undefined) woke(held, FACTS_KEY, FACTS_REPORTED);
       }),
 
     /** Only the crossing is recorded, because that is the part placement acts on. */
@@ -340,11 +356,10 @@ const make = Effect.gen(function* () {
             }),
           ),
           // Nothing is coming over a connection that has gone, whether or not
-          // the row could be moved off online, so a caller waiting on this
-          // runner's facts is told now rather than at its deadline.
+          // the row could be moved off online, so everybody waiting on this one
+          // is told now rather than at their own deadline.
           Effect.sync(() => {
             if (held?.connection !== connection) return;
-            endWait(held, false);
             abandon(held);
           }),
         );
