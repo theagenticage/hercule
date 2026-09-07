@@ -217,6 +217,10 @@ export const connect = (
     // just put there rather than the one the hello knew about.
     let facts = options.facts;
     const proven = Latch.makeUnsafe(false);
+    // The deadline below is the peer's time to answer, not the network's time
+    // to connect: a dial that took most of it would otherwise leave a
+    // perfectly good controller no room to say who it is.
+    const opened = Latch.makeUnsafe(false);
     let impostor: ControllerNotRecognised | undefined;
 
     const disown = (message: string) =>
@@ -432,6 +436,7 @@ export const connect = (
      * every ten seconds for the life of the process.
      */
     const reporting = Effect.gen(function* () {
+      yield* opened.await;
       const proved = yield* Effect.raceFirst(
         Effect.as(proven.await, true),
         Effect.as(Effect.sleep(options.proofDeadline ?? PROOF_DEADLINE), false),
@@ -473,7 +478,7 @@ export const connect = (
             nonce,
             facts: options.facts,
           }),
-        ).pipe(Effect.ignore),
+        ).pipe(Effect.ignore, Effect.andThen(Effect.sync(() => opened.openUnsafe()))),
       }),
       reporting,
     ).pipe(

@@ -211,23 +211,23 @@ export const supervising = (adapters: ReadonlyArray<ProviderAdapter>) => {
 
       start: (frame: SessionStart): Effect.Effect<void> =>
         Effect.gen(function* () {
-          const holding = live.get(frame.sessionId);
-          if (holding !== undefined) {
-            // Idempotent, because the controller re-issues a command it cannot
-            // account for (spec 03 section 2.3) - and starting a session twice
-            // would take the running one's working directory away from it. The
-            // adapter is asked rather than believed: an exit published while the
-            // socket was down reached no relay, so an entry can outlive its
-            // session, and a start that is really a fresh one must not be
-            // mistaken for that.
-            const held = yield* holding.adapter.listSessions;
-            if (held.some((binding) => binding.sessionId === frame.sessionId)) return;
-            live.delete(frame.sessionId);
-            discard(holding.scratch);
-          }
           const adapter = adapters.find((one) => one.providerId === frame.providerId);
           if (adapter === undefined) {
             return yield* died(frame.sessionId, noAdapterFor(frame.providerId));
+          }
+          // The adapter is asked, never this table: a start it would refuse
+          // because it still holds the session is one the controller re-issued
+          // after a reconnect, and spec 03 section 2.3 makes that a no-op, not
+          // an error. Reporting it would end a session that is running fine.
+          const held = yield* adapter.listSessions;
+          if (held.some((binding) => binding.sessionId === frame.sessionId)) return;
+          // The other way round, an exit published while the socket was down
+          // reached no relay, so an entry here can outlive its session. That is
+          // a stale entry and its directory, not a session to keep.
+          const stale = live.get(frame.sessionId);
+          if (stale !== undefined) {
+            live.delete(frame.sessionId);
+            discard(stale.scratch);
           }
           return yield* starting(frame, adapter);
         }),

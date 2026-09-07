@@ -210,20 +210,34 @@ const pinning = (stub: Stub, overrides: Partial<ControllerPin> = {}): Controller
 });
 
 /**
- * How long these tests give a peer to prove who it is. The shipped ten seconds
- * is asserted as the exported default; waiting it out four times over would be
- * most of the suite's running time. Half a second rather than a fifth, because
- * the whole suite running at once can stall an event loop for longer than that,
- * and a stalled proof reads here as a controller that never answered.
+ * How long the two tests that are *about* the deadline give a peer to prove who
+ * it is. The shipped ten seconds is asserted as the exported default; waiting it
+ * out four times over would be most of the suite's running time.
  */
 const DEADLINE = Duration.millis(500);
+
+/**
+ * What every other test gives it: long enough that the fuse cannot fire. The
+ * whole suite running at once can stall an event loop for a good part of a
+ * second, and a stalled proof reads to the runner as a controller that never
+ * answered - which in a test about probes or retirement is a flake, not a
+ * finding. Only a test that asserts what the fuse does should carry one.
+ */
+const PATIENT = Duration.minutes(1);
+
+/** Long enough for a connection to have ended if it were going to. */
+const SETTLE = Duration.millis(300);
 
 /** Nothing here starts a session, so neither directory is ever made. */
 const PROVIDERS_DIR = "/nonexistent/hydra-runner-providers";
 const SCRATCH_DIR = "/nonexistent/hydra-runner-scratch";
 
 /** Runs one connection to its end and reports how it ended. */
-const attempt = (pin: ControllerPin, probe: Effect.Effect<RunnerFacts> = Effect.succeed(FACTS)) =>
+const attempt = (
+  pin: ControllerPin,
+  probe: Effect.Effect<RunnerFacts> = Effect.succeed(FACTS),
+  proofDeadline: Duration.Duration = PATIENT,
+) =>
   Effect.runPromise(
     Effect.result(
       connect({
@@ -233,7 +247,7 @@ const attempt = (pin: ControllerPin, probe: Effect.Effect<RunnerFacts> = Effect.
         headroom: Effect.succeed({ diskFreeBytes: 200 * 1024 ** 3, availableMemoryBytes: 1 }),
         providersDir: PROVIDERS_DIR,
         scratchDir: SCRATCH_DIR,
-        proofDeadline: DEADLINE,
+        proofDeadline,
       }),
     ),
   );
@@ -315,10 +329,12 @@ describe("the controller a runner is willing to talk to", () => {
   });
 
   it("gives up on a peer that upgrades the socket and never says who it is", async () => {
-    // A peer that answers a hello with silence, and pings to look alive.
+    // A peer that answers a hello with silence, and pings to look alive. One of
+    // the two tests that carry the short fuse, because it is the fuse firing
+    // that is under test.
     const stub = await stubController(undefined, { greet: false, ping: true });
 
-    const outcome = await attempt(pinning(stub));
+    const outcome = await attempt(pinning(stub), Effect.succeed(FACTS), DEADLINE);
 
     expect(failureOf(outcome)).toBeInstanceOf(ControllerNotRecognised);
     // And it said nothing but its own hello while it waited: a peer that has
@@ -367,7 +383,7 @@ describe("the controller a runner is willing to talk to", () => {
       nonce: "AAAA",
       signature: "AAAA",
     });
-    await delay(Duration.toMillis(DEADLINE) * 3);
+    await delay(Duration.toMillis(SETTLE));
 
     expect(settled, "a second hello is not something to hang up on").toBeUndefined();
     stub.hangUp();
@@ -406,11 +422,17 @@ describe("the controller a runner is willing to talk to", () => {
     const stub = await stubController();
 
     let settled: Awaited<ReturnType<typeof attempt>> | undefined;
-    const pending = attempt(pinning(stub)).then((outcome) => {
+    // The other test that carries the short fuse: what it asserts is that the
+    // fuse does not fire on a connection whose proof arrived.
+    const pending = attempt(pinning(stub), Effect.succeed(FACTS), DEADLINE).then((outcome) => {
       settled = outcome;
     });
 
     await stub.connected();
+    // Waited from the proof, not from the dial: the frames below the hello are
+    // only sent once the peer has proved itself, so seeing one is what says the
+    // fuse is now running against a proven connection.
+    await waitUntil(() => stub.received.some((frame) => frame._tag === "watermarkReport"));
     // Waited out past the deadline the runner gives an unproven peer, because
     // that deadline must not be what ends a connection whose proof arrived.
     await delay(Duration.toMillis(DEADLINE) * 4);
