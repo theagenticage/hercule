@@ -5,16 +5,9 @@ import type { HydraClient } from "@hydra/client-core";
 import { messageOf } from "./save-status";
 
 /**
- * Logging one provider instance in on one machine, in the vendor's own
- * paste-a-code exchange.
- *
- * The URL is shown rather than opened, because the machine running the harness
- * may have no browser at all - and the browser reading this is very often not
- * on it. A code the vendor refuses leaves the exchange standing, so the panel
- * stays open with the vendor's own words in it and the user pastes again.
- *
- * It lives here rather than beside either screen because Sessions and the
- * runner page both offer this exact action.
+ * The URL is shown rather than opened: the machine running the harness may have
+ * no browser, and this one is often not it. A refused code leaves the exchange
+ * standing, so the panel stays open for another paste.
  */
 export function ProviderLogin({
   client,
@@ -32,7 +25,6 @@ export function ProviderLogin({
   /** What is being logged in and where, as a name: "Claude Code on moss". */
   readonly subject: string;
   readonly label: string;
-  /** Quiet on a monitoring surface; the ink primary where it is the way on. */
   readonly variant?: ButtonVariant;
   readonly onLoggedIn: () => void;
 }): JSX.Element {
@@ -46,9 +38,8 @@ export function ProviderLogin({
     mutationFn: () =>
       client.provider.submitLoginCode({
         params: { id: instanceId },
-        // Trimmed once, here: a code copied out of a browser very often
-        // arrives with a space or a newline on it, and the vendor reads that
-        // as a different code.
+        // A pasted code often carries a stray space or newline, which the
+        // vendor reads as a different code.
         payload: { runnerId, code: code.trim() },
       }),
     onSuccess: () => {
@@ -78,8 +69,7 @@ export function ProviderLogin({
         {label}
       </Button>
       {start.error === null ? null : (
-        // Full width: this sits among the row's other actions, and beside them
-        // it would read as a fourth one.
+        // Full width, so the error does not read as a fourth action in the row.
         <p className="w-full pl-2 text-fine text-fail" role="alert">
           {messageOf(start.error)}
         </p>
@@ -91,9 +81,8 @@ export function ProviderLogin({
             Open this address in any browser, sign in, and paste the code it gives you back here.
           </p>
           <div className="flex flex-col items-start gap-1.5">
-            {/* Named rather than left to be picked out of the address: the
-                site is the one part of a long opaque URL a reader can check,
-                and it is worth nothing if they do not know to check it. */}
+            {/* The site is the one part of a long opaque URL a reader can
+                check, and naming it is what tells them to. */}
             <p className="text-row text-muted">
               You will sign in at <b className="font-emph text-ink">{siteOf(url)}</b>.
             </p>
@@ -108,9 +97,8 @@ export function ProviderLogin({
             <Button
               className="-ml-2"
               onClick={() => {
-                // Absent over plain HTTP on anything but localhost, which is a
-                // way Hydra is really reached; the address is on screen either
-                // way, so this is a convenience and never the only route.
+                // `clipboard` is absent over plain HTTP off localhost; the
+                // address is on screen anyway.
                 void navigator.clipboard?.writeText(url ?? "");
               }}
             >
@@ -153,7 +141,6 @@ export function ProviderLogin({
   );
 }
 
-/** Where the address goes, in the form a reader can recognise. */
 const siteOf = (url: string | undefined): string => {
   try {
     return new URL(url ?? "").host;

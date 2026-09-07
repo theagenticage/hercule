@@ -57,7 +57,6 @@ export const RunnerFactsDeadline = Context.Reference<Duration.Duration>(
   { defaultValue: (): Duration.Duration => RUNNER_FACTS_DEADLINE },
 );
 
-/** What the controller asks one runner to do, on the connection it is holding. */
 export type Request = ProbeRequest | InstallRequest | LoginStart | LoginCode;
 
 /** What came back for one of those, correlated by the request's own id. */
@@ -69,14 +68,12 @@ export type Answer = ProbeReport | InstallResult | LoginUrl | LoginFailed | Logi
  */
 const FACTS_KEY = "facts";
 
-/** A facts report standing in the answer map, which is the only thing it is. */
 interface FactsReported {
   readonly _tag: "factsReported";
 }
 
 const FACTS_REPORTED: FactsReported = { _tag: "factsReported" };
 
-/** Everything a waiter on this connection can be woken with. */
 type Reported = Answer | FactsReported;
 
 /** How presence reaches back to a connection that is holding a runner. */
@@ -96,15 +93,10 @@ export interface Connected {
 interface Reachable extends Connected {
   readonly connection: Connection;
   /**
-   * Who is waiting for what on this connection, keyed by the id the request
-   * went out under - the facts report under `FACTS_KEY`, everything else under
-   * the controller's own request id. Held per connection rather than per runner
-   * id so that the connection ending ends every wait on it, and so that a
-   * report under an id nobody issued, which is a runner writing a row it was
-   * not asked for, wakes nothing.
-   *
-   * A key holds every caller waiting on it rather than one, because two people
-   * can press "refresh facts" at once and one report is all a machine sends.
+   * Who is waiting for what, keyed by the id the request went out under. Held
+   * per connection, so the connection ending ends every wait on it and a report
+   * under an id nobody issued wakes nothing. A key holds every caller waiting
+   * on it, because one machine sends one report however many asked for it.
    */
   readonly pending: Map<string, Set<Deferred.Deferred<Option.Option<Reported>>>>;
 }
@@ -131,9 +123,9 @@ const make = Effect.gen(function* () {
   };
 
   /**
-   * Wakes everybody waiting under this key. A report under a key nobody is
-   * waiting on is dropped, which is what an id the controller never issued and
-   * a second report under one it did both are.
+   * Wakes everybody waiting under this key. A key nobody is waiting on is
+   * dropped: an id the controller never issued, or a second report under one it
+   * did.
    */
   const woke = (held: Reachable, key: string, reported: Reported): void => {
     const waiting = held.pending.get(key);
@@ -143,10 +135,9 @@ const make = Effect.gen(function* () {
   };
 
   /**
-   * Sends one thing and waits for what comes back under `key`. `none` when the
-   * runner is holding no connection, when it ended first, or when nothing came
-   * back in time - all three of which the caller reports the same way: the
-   * machine did not say.
+   * Sends one thing and waits for what comes back under `key`. `none` when
+   * there is no connection, it ended, or nothing came back in time - the caller
+   * reports all three the same way: the machine did not say.
    *
    * Giving up is this caller's alone: the frame is still out there, so whoever
    * else is waiting under the same key is still answered when it comes back.
@@ -241,8 +232,7 @@ const make = Effect.gen(function* () {
 
     /**
      * Every machine that has just said hello. What to do about an arrival is
-     * not presence's business - it holds no opinion about provider instances -
-     * so whoever has one listens here.
+     * not presence's business, so whoever has an opinion listens here.
      */
     arrivals: Stream.fromPubSub(arrivals),
 
@@ -264,14 +254,12 @@ const make = Effect.gen(function* () {
     refreshedFacts: (id: string): Effect.Effect<boolean> =>
       Effect.gen(function* () {
         const deadline = yield* RunnerFactsDeadline;
-        // Every call asks: a wait somebody else is holding is not evidence that
-        // a frame is still in flight, and skipping the ask would leave the
-        // button inert until the runner reconnects.
+        // Every call asks: another caller's wait is no evidence a frame is
+        // still in flight, and skipping the ask would leave the button inert.
         const answer = yield* askedFor(id, FACTS_KEY, (held) => held.askForFacts, deadline);
         return Option.isSome(answer);
       }),
 
-    /** Sends one request and waits for the answer that carries its id. */
     asked: (
       id: string,
       request: Request,
@@ -285,8 +273,7 @@ const make = Effect.gen(function* () {
       ),
 
     /**
-     * An answer to something this controller asked. Under an id nobody issued,
-     * or on a connection the runner has already replaced, it is dropped: either
+     * Dropped under an id nobody issued, or on a replaced connection: either
      * would let a machine write a row it was not asked to.
      */
     reportedAnswer: (id: string, connection: Connection, answer: Answer): Effect.Effect<void> =>

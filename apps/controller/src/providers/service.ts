@@ -1,20 +1,11 @@
 /**
- * Provider instances as the API sees them: `provider.query`, `read`, `create`,
- * `update` and `delete`.
- *
- * An instance is a row plus the definition behind it. `displayName` and
- * `declared` are composed here from the provider the plugin registered, never
- * copied into the row, so they cannot go stale against the build.
+ * Provider instances as the API sees them. An instance is a row plus its
+ * provider definition: `displayName` and `declared` are composed at read, never
+ * copied into the row, so they cannot go stale.
  *
  * A row whose provider this build does not carry is not listed and not
- * readable: there is no definition to describe it with, and inventing one would
- * be claiming capabilities nothing can honour. The row stays, so a build that
- * carries the provider again finds the instance where it left it.
- *
- * Config is read against the provider's own Effect Schema, so a caller reaching
- * these methods without a transport is held to the same shape a request is.
- * Every mutation writes its audit entry in the same transaction as the row, and
- * names the instance so a live subscriber refetches exactly what changed.
+ * readable, but the row stays, so a build that carries the provider again finds
+ * it.
  */
 import * as Context from "effect/Context";
 import * as Duration from "effect/Duration";
@@ -61,8 +52,8 @@ import { providerRepository, type StoredInstance, type StoredSnapshot } from "./
 import { floorFor, versionVerdict } from "./version";
 
 /**
- * How long the machine has to print the vendor's URL. The user is watching a
- * dialog, and a cold CLI reaching the vendor is what takes the time.
+ * The user is watching a dialog; a cold CLI reaching the vendor is what takes
+ * the time.
  */
 const LOGIN_DEADLINE: Duration.Duration = Duration.seconds(30);
 
@@ -73,15 +64,14 @@ export const ProviderLoginDeadline = Context.Reference<Duration.Duration>(
 );
 
 /**
- * How long the pasted code has. Longer than the URL's wait because this one
- * covers the vendor's own exchange with its server: giving up early would tell
- * the user a login failed that in fact wrote a credential.
+ * Longer than the URL's wait: it covers the vendor's own exchange, and giving
+ * up early would report a failure that in fact wrote a credential.
  */
 const LOGIN_CODE_DEADLINE: Duration.Duration = Duration.minutes(2);
 
 /**
- * The runner gives its installer five minutes; this is that plus the round trip,
- * so a machine that is still working is never cut off by the caller's end.
+ * The runner's own 5min installer budget plus the round trip, so a machine
+ * still working is not cut off here.
  */
 const HARNESS_INSTALL_DEADLINE: Duration.Duration = Duration.minutes(6);
 
@@ -94,7 +84,6 @@ const LoginCodeInput = Schema.Struct({ id: Id, ...ProviderLoginCodeInput.fields 
 
 export type LoginCodeInput = Schema.Schema.Type<typeof LoginCodeInput>;
 
-/** What identifies one instance, and what an edit does to it. */
 const UpdateInput = Schema.Struct({ id: Id, ...ProviderInstanceUpdateInput.fields });
 
 export type UpdateInput = Schema.Schema.Type<typeof UpdateInput>;
@@ -103,12 +92,10 @@ const Identified = Schema.Struct({ id: Id });
 
 export type Identified = Schema.Schema.Type<typeof Identified>;
 
-/** Which machine to ask, and about which instance. */
 const ProbeInput = Schema.Struct({ runnerId: Id, instanceId: Id });
 
 export type ProbeInput = Schema.Schema.Type<typeof ProbeInput>;
 
-/** Which machine to put a harness on, and whose. */
 const InstallInput = Schema.Struct({ runnerId: Id, providerId: Schema.String });
 
 export type InstallInput = Schema.Schema.Type<typeof InstallInput>;
@@ -131,23 +118,17 @@ type CreateError = ReadError | Validation;
 
 type WriteError = CreateError | NotFound;
 
-/** What asking a machine to do something for an instance can answer with. */
 type AskError = WriteError | InvalidState;
 
-/** What a runner answers a login frame with. */
 type LoginAnswer = LoginUrl | LoginFailed | LoginResult;
 
 const isLoginAnswer = (answer: Answer): answer is LoginAnswer =>
   answer._tag === "loginUrl" || answer._tag === "loginFailed" || answer._tag === "loginResult";
 
-/** The machine's own words for why the exchange stopped. */
 const refusalIn = (answer: LoginAnswer): string =>
   answer._tag === "loginFailed" ? answer.message : "the login did not answer with a URL";
 
-/**
- * Every issue at once, so a form can put each message under its own field, and
- * an unnamed key is refused rather than dropped.
- */
+/** All errors at once, so a form can put each message under its own field. */
 const readConfig = (
   definition: ProviderDefinition,
   config: Schema.Json,
@@ -229,7 +210,6 @@ const make = Effect.gen(function* () {
       });
     });
 
-  /** The provider a write names, or the refusal that says nothing registered it. */
   const provider = (id: string): Effect.Effect<ProviderDefinition, Validation | SqlError> =>
     Effect.flatMap(definitions, (known) => {
       const definition = known.get(id);
@@ -238,7 +218,6 @@ const make = Effect.gen(function* () {
         : Effect.succeed(definition);
     });
 
-  /** The machine a caller named, or the refusal that says there is no such one. */
   const machine = (runnerId: string): Effect.Effect<RunnerDetail, NotFound | SqlError> =>
     Effect.gen(function* () {
       const runner = yield* runners.read(runnerId);
@@ -246,11 +225,6 @@ const make = Effect.gen(function* () {
       return runner.value;
     });
 
-  /**
-   * The machine, once it is one that can run this provider at all. Which field
-   * is at fault differs: a login names the machine it was asked to run on, an
-   * install names the provider it was asked to put there.
-   */
   const drivable = (
     runnerId: string,
     providerId: string,
@@ -258,7 +232,6 @@ const make = Effect.gen(function* () {
   ): Effect.Effect<void, AskError> =>
     Effect.flatMap(machine(runnerId), (runner) => requireAdapter(runner, providerId, field));
 
-  /** One login frame out, its answer back, under the deadline a caller can wait. */
   const asked = (
     runnerId: string,
     request: LoginStart | LoginCode,
@@ -268,8 +241,7 @@ const make = Effect.gen(function* () {
       const answer = yield* presence.asked(runnerId, request, deadline);
       const login = Option.filter(answer, isLoginAnswer);
       return yield* Option.match(login, {
-        // A machine holding no connection, one that ended first and one that
-        // said nothing in time are all the same thing to the user: it did not
+        // Disconnected, gone, or silent are one thing to the user: it did not
         // answer.
         onNone: () =>
           Effect.fail(
@@ -296,9 +268,8 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * Starts the vendor's own login for this instance on one machine and hands
-     * back the URL it printed. The user opens that URL in whatever browser they
-     * are at: the machine running the harness may have none.
+     * Returns the URL the harness printed; the user opens it in their own
+     * browser, since the machine may have none.
      */
     login: (input: LoginInput): Effect.Effect<{ readonly url: string }, AskError> =>
       Effect.gen(function* () {
@@ -321,11 +292,9 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * Hands the machine the code the user pasted back. A code the vendor
-     * refuses is a refusal the user can act on by pasting again, so the login
-     * stays up and only this call fails; a login that finished is answered with
-     * a fresh snapshot, because a harness that has just been logged in has
-     * never been asked whose login it is holding.
+     * A refused code leaves the login up, so the user can paste again; only
+     * this call fails. A finished login is answered with a fresh probe, because
+     * the harness has not yet been asked whose credential it holds.
      */
     submitLoginCode: (input: LoginCodeInput): Effect.Effect<CapabilitySnapshot, AskError> =>
       Effect.gen(function* () {
@@ -345,9 +314,8 @@ const make = Effect.gen(function* () {
           const said = answer.message ?? "that code was refused";
           return yield* Effect.fail(validation([{ path: ["code"], message: said }], said));
         }
-        // The one thing this feature does that a reader of the log will want
-        // back: who put a vendor credential on which machine, and when. Never
-        // the URL or the code, which are good for this one exchange only.
+        // Who put a credential on which machine. Never the URL or the code -
+        // they are good for this exchange only.
         yield* withTransaction(
           sql,
           Effect.flatMap(nowIso, (at) =>
@@ -375,10 +343,8 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * Asks one machine about one instance now and hands back the snapshot its
-     * answer left. The fleet is swept hourly and after every hello, so this is
-     * what a button presses when somebody has just logged in or installed
-     * something outside Hydra.
+     * The fleet is swept hourly anyway; this is for when something changed
+     * outside Hydra and the user will not wait.
      */
     probe: (input: ProbeInput): Effect.Effect<CapabilitySnapshot, AskError> =>
       Effect.gen(function* () {
@@ -400,10 +366,9 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * Puts a provider's harness on a machine. The runner reports its facts
-     * before it says the install finished, so the row this answers with is the
-     * machine as it now is, and every instance on it is asked again: a harness
-     * that was just installed has never been asked anything.
+     * The runner reports its facts before it says the install finished, so the
+     * row answered with is the machine as it now is. Every instance on it is
+     * swept: a just-installed harness has never been asked anything.
      */
     installHarness: (input: InstallInput): Effect.Effect<RunnerDetail, AskError> =>
       Effect.gen(function* () {
@@ -470,9 +435,8 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * Renames an instance or gives it a new config. A patch that names no field
-     * is refused: it would move `updatedAt` and stamp an entry describing
-     * nothing.
+     * An empty patch is refused: it would move `updatedAt` and stamp an entry
+     * describing nothing.
      */
     update: (input: UpdateInput): Effect.Effect<ProviderInstance, WriteError> =>
       Effect.gen(function* () {
@@ -504,20 +468,16 @@ const make = Effect.gen(function* () {
             return yield* one(id);
           }),
         ).pipe(
-          // After the commit and without waiting for it: the config is what a
-          // probe runs under, so every machine's snapshot of this instance is
-          // now stale, and the answer to the edit is the edit.
+          // After the commit, unawaited: the edit stales every machine's
+          // snapshot, but the answer to the edit is the edit.
           Effect.tap(() => Effect.forkDetach(probes.sweepInstance(id))),
         );
       }),
 
     /**
-     * Removes an instance and everything the fleet reported about it. The next
-     * boot opens a fresh one when this was the provider's only instance.
-     *
-     * This works off the row rather than the composed instance, so a row left
-     * behind by a build that no longer carries its provider is still something
-     * the user can take away.
+     * Works off the row, not the composed instance, so an instance whose
+     * provider this build no longer carries can still be deleted. The next boot
+     * re-seeds if this was the provider's only instance.
      */
     delete: (input: Identified): Effect.Effect<Record<string, never>, WriteError> =>
       Effect.gen(function* () {

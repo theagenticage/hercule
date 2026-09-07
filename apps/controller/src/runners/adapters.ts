@@ -1,10 +1,7 @@
 /**
- * Whether a machine can be asked to do something for a provider at all.
- *
- * Two operations ask it - installing a harness and logging one in - and both
- * refuse before a frame goes out, because the runner already said in its hello
- * which providers its build carries an adapter for. Being told is better than
- * finding out by asking and failing.
+ * Whether a machine can be asked to do something for a provider at all. Install
+ * and login both refuse before a frame goes out: the runner's hello already
+ * said which providers its build carries an adapter for.
  */
 import * as Effect from "effect/Effect";
 import { invalidState, validation, type InvalidState, type Validation } from "@hydra/contract";
@@ -12,7 +9,6 @@ import type { RunnerDetail } from "@hydra/contract";
 
 const NOT_ONLINE = "that runner is not connected, so it cannot be asked anything";
 
-/** Nothing can be asked of a machine that is not holding a connection. */
 export const requireOnline = (runner: RunnerDetail): Effect.Effect<void, InvalidState> =>
   runner.connectivity === "online" ? Effect.void : Effect.fail(invalidState(NOT_ONLINE));
 

@@ -9,9 +9,8 @@ import { ProviderLogin } from "../../screens/provider-login";
 
 export const Route = createFileRoute("/_shell/")({
   staticData: { title: "Sessions" },
-  // Answered before it is shown, detection included: this screen is the
-  // guidance, and one that said "no runner has been detected" for the second it
-  // takes to ask the machine would send the reader off to start one they have.
+  // Detection is awaited: a flash of "no runner has been detected" would send
+  // the reader off to start one they already have.
   loader: async ({ context }) => {
     const [runners] = await Promise.all([
       context.queryClient.ensureQueryData(runnersQuery(context.client)),
@@ -26,12 +25,8 @@ export const Route = createFileRoute("/_shell/")({
 
 /**
  * The home screen, and the rest of onboarding: what it says is what the user
- * does next.
- *
- * Which of the four things that is comes from the machine this browser is on
- * and what it last reported, so the screen changes by itself as a runner joins,
- * a harness is installed and a login finishes. Nothing starts a thread yet, so
- * the button that would is disabled with its reason rather than hidden.
+ * does next. Nothing starts a thread yet, so the button that would is disabled
+ * with its reason rather than hidden.
  */
 function Sessions(): JSX.Element {
   const { client, queryClient, live, detectLocalRunner } = Route.useRouteContext();
@@ -49,8 +44,8 @@ function Sessions(): JSX.Element {
     void queryClient.invalidateQueries({ queryKey: queryKeys.providers() });
   };
 
-  // The first half is what tells the rest of this function that `local` is
-  // there; the state alone already says so.
+  // `local === null` is what narrows the type below; the state alone already
+  // says so.
   if (local === null || state.kind === "no-runner") {
     return (
       <Screen
@@ -115,7 +110,6 @@ function Sessions(): JSX.Element {
   );
 }
 
-/** Every state is the same screen with the disabled thread button under it. */
 function Screen({
   headline,
   lead,

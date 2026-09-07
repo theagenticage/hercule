@@ -1,13 +1,6 @@
 /**
- * The Claude Code adapter's probe, with the vendor SDK stubbed.
- *
- * The SDK is a third-party seam, so the adapter is built over one rather than
- * reaching the vendor package directly: that is what lets this file state what
- * an authenticated machine, an unauthenticated one, one whose SDK threw and one
- * that never answered all report, without any of them being a real login.
- *
- * The fixtures are the shapes captured from the real CLI at 2.1.263 and written
- * down in the SPEC's external contracts table, not shapes invented here.
+ * The Claude Code adapter's probe, with the vendor SDK stubbed. The fixtures
+ * are shapes captured from the real CLI at 2.1.263, not shapes invented here.
  */
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -19,14 +12,12 @@ import type { ProbeResult } from "@hydra/protocol";
 import { PROBE_DEADLINE, claudeCodeAdapter, type ClaudeSeam } from "./claude-code";
 import type { ProviderRunnerContext } from "./index";
 
-/** Where this instance keeps its own config directory, and what binary it drives. */
 const CONTEXT: ProviderRunnerContext = {
   home: "/var/hydra/runner/providers/0199e0e7-0000-7000-8000-00000000000a",
   binary: "/usr/local/bin/claude",
   env: { PATH: "/usr/local/bin:/usr/bin" },
 };
 
-/** What `accountInfo()` answered on a machine with a live login. */
 const AUTHENTICATED = {
   email: "rogier@example.com",
   organization: "Rogier's Org",
@@ -34,7 +25,6 @@ const AUTHENTICATED = {
   apiProvider: "firstParty",
 };
 
-/** What it answered against an empty config dir: no throw, and no identity. */
 const UNAUTHENTICATED = { tokenSource: "none", apiProvider: "firstParty" };
 
 /** Three rows of the six the CLI reported, chosen for the three option shapes. */
@@ -63,14 +53,12 @@ const MODELS = [
   },
 ];
 
-/** What the binary printed for `--version`. */
 const PRINTED = "9.9.9 (Claude Code)";
 
 interface Call {
   readonly params: { readonly options: Record<string, unknown> };
 }
 
-/** A seam that answers with what the test says, and records how it was asked. */
 const seamOver = (answers: {
   readonly accountInfo?: () => Promise<unknown>;
   readonly supportedModels?: () => Promise<ReadonlyArray<unknown>>;
@@ -117,7 +105,6 @@ const probeWith = (
   };
 };
 
-/** The option a model carries under a given id, if it carries one. */
 const optionOf = (
   models: ProbeResult["models"],
   slug: string,
@@ -136,8 +123,6 @@ describe("what the Claude adapter reports about a machine that is logged in", ()
       planLabel: "Claude Max",
       backend: "firstParty",
     });
-    // The version the machine is really running, which is what the floor is
-    // compared against.
     expect(probed.harnessVersion).toBe("9.9.9");
   });
 
@@ -151,11 +136,9 @@ describe("what the Claude adapter reports about a machine that is logged in", ()
       "claude-haiku-4-5",
     ]);
     expect(probed.models[0]).toMatchObject({ slug: "default", name: "Default (recommended)" });
-    // The one row whose value is `default` is the default; nothing else is.
     expect(probed.models[0]?.isDefault).toBe(true);
     expect(probed.models[1]?.isDefault ?? false).toBe(false);
 
-    // Effort is a select over exactly the levels the CLI listed for that model.
     expect(optionOf(probed.models, "default", "effort")).toMatchObject({
       kind: "select",
       choices: [{ value: "low" }, { value: "medium" }, { value: "high" }] as ReadonlyArray<unknown>,
@@ -166,10 +149,8 @@ describe("what the Claude adapter reports about a machine that is logged in", ()
       default: false,
     });
 
-    // A model that supports neither carries neither: the composer renders what
-    // the harness will actually accept for that model and nothing more.
+    // The composer must offer only what the harness accepts for that model.
     expect(probed.models[1]?.options).toEqual([]);
-    // And one that supports only fast mode carries only that.
     expect(probed.models[2]?.options.map((option) => option.id)).toEqual(["fastMode"]);
     // The CLI reports adaptive thinking as a fact about the model, not as a
     // choice a user makes, so it is not an option.
@@ -183,15 +164,11 @@ describe("what the Claude adapter reports about a machine that is logged in", ()
     const legacy = probed.models.filter((model) => model.isLegacy === true);
     expect(legacy.map((model) => model.slug)).toEqual(["claude-opus-4-8", "claude-fable-5"]);
     expect(legacy.map((model) => model.name)).toEqual(["Opus 4.8", "Fable 5"]);
-    // Appended, never interleaved: the probed catalogue is what the harness
-    // will list, and the overlay is what it has stopped listing.
     expect(probed.models.slice(0, 3).every((model) => model.isLegacy !== true)).toBe(true);
     expect(probed.models).toHaveLength(MODELS.length + legacy.length);
   });
 
   it("leaves a slug the CLI still lists out of the overlay, keeping the probed row", async () => {
-    // The day Anthropic puts Fable 5 back in the list, the hand-authored entry
-    // must not shadow or duplicate what the machine really reported.
     const { result } = probeWith({
       supportedModels: () =>
         Promise.resolve([
@@ -285,8 +262,6 @@ describe("how the Claude adapter asks the SDK", () => {
     await answered.result;
     expect(answered.closed()).toBe(1);
 
-    // The case that matters most: a query nobody closed after a throw is a CLI
-    // process left on the machine, one more every hour.
     const threw = probeWith({ accountInfo: () => Promise.reject(new Error("gone")) });
     await threw.result;
     expect(threw.closed()).toBe(1);

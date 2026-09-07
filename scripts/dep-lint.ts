@@ -13,19 +13,13 @@
  * (`await import("bun" + ":sqlite")`) is invisible to it. Nothing in the
  * codebase does that, and no scan short of running the code could catch it.
  *
- * One rule here is about the workspace rather than about an import graph. The
- * Claude Agent SDK ships its CLI as eight per-platform optional packages, one of
- * which is 196 MB; they are excluded at install, and the binary Hydra ships is
- * what would carry them if they came back. There is no entrypoint to check that
- * against, so the store is read directly - the store, not the runner's own
- * `node_modules`, because pnpm links only a package's direct dependencies into
- * the importer's directory and an optional dependency of the SDK would never
- * appear there.
+ * One rule is about the workspace, not an import graph: the Agent SDK's eight
+ * per-platform CLI packages (one is 196 MB) are excluded at install, and the
+ * shipped binary would carry them if they came back. The pnpm store is read
+ * directly, because pnpm links only direct dependencies into `node_modules`.
  *
- * Usage: `bun run scripts/dep-lint.ts [entrypoint]`. The optional argument is
- * what `scripts/dep-lint.test.ts` points at a file that breaks one import rule.
- * The workspace is always the one this script sits in, which is how the test
- * proves the store rule too: it runs a copy of this file from a root of its own.
+ * Usage: `bun run scripts/dep-lint.ts [entrypoint]`. The optional entrypoint
+ * is what `scripts/dep-lint.test.ts` points at its fixtures.
  */
 import { readdir, rm } from "node:fs/promises";
 import { dirname, relative, resolve } from "node:path";

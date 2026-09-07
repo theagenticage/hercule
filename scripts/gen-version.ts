@@ -7,12 +7,9 @@
  * prints it for `hydra --version` and the controller answers it from
  * `controller.read`, and neither may depend on the other.
  *
- * The Claude Code version is baked in beside it, and for the same reason. The
- * Agent SDK talks to the CLI it was built against and to anything newer, so
- * that CLI's version is both the floor a machine is held to and the newest one
- * anybody has tested. It is the SDK's own `claudeCodeVersion`, so it moves only
- * when the dependency moves - which is a deliberate, reviewed change - and it
- * is written down here and nowhere else.
+ * The Claude Code version is baked in beside it: the SDK talks to the CLI it
+ * was built against and anything newer, so its own `claudeCodeVersion` is the
+ * floor a machine is held to, written down here and nowhere else.
  */
 import { fileURLToPath } from "node:url";
 import { $ } from "bun";

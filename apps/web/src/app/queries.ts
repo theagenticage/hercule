@@ -126,11 +126,6 @@ export const pluginsQuery = (client: HydraClient) =>
     queryFn: () => client.plugin.query(),
   });
 
-/**
- * Every provider instance and what each machine last reported about it. One
- * answer: a fresh install has one instance per shipped provider, and both
- * screens that read them show every one.
- */
 export const providersQuery = (client: HydraClient) =>
   queryOptions({
     queryKey: queryKeys.providers(),

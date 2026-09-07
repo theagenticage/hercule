@@ -37,8 +37,6 @@ describe("providerRows", () => {
     const row = only(WITH_CLAUDE, instance("codex", "Codex", []));
 
     expect(row).toMatchObject({ install: "blocked", logIn: false, version: "not reported" });
-    // Dimmed with the reason: the machine already said which providers its
-    // build carries an adapter for.
     expect(row.account).toBe("no adapter in this runner build");
   });
 

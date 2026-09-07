@@ -22,7 +22,6 @@ const ONLINE: Fixture = { ...MOSS, connectivity: "online" };
 /** A machine the controller has lost: retiring it is the case that forces. */
 const LOST: Fixture = { ...MOSS, connectivity: "unreachable" };
 
-/** A machine with no coding harness on it at all. */
 const BARE: Fixture = {
   ...ONLINE,
   facts: { ...ONLINE.facts!, providers: [{ name: "claude", present: false }] },
@@ -53,7 +52,6 @@ interface Snapshot {
   readonly models: ReadonlyArray<{ slug: string; name: string; options: readonly never[] }>;
 }
 
-/** One provider instance as `GET /providers` hands it back. */
 const instance = (
   id: string,
   providerId: string,
@@ -89,7 +87,6 @@ const LOGGED_IN = snapshot({
 
 const NOT_LOGGED_IN = snapshot({ auth: { status: "unauthenticated" }, models: [] });
 
-/** What a machine whose build cannot drive a provider reports about it. */
 const NO_ADAPTER = snapshot({
   harnessVersion: null,
   versionVerdict: "unknown",
@@ -105,7 +102,6 @@ const claudeCode = (snapshots: readonly Snapshot[]) =>
 
 const CODEX = instance(CODEX_ID, "codex", "Codex", [NO_ADAPTER]);
 
-/** The two instances a fresh install opens, as this machine last reported them. */
 const INSTANCES = [claudeCode([LOGGED_IN]), CODEX];
 
 /** A controller answering for itself, for the runner given, and for its writes. */
@@ -547,13 +543,10 @@ describe("Runner > retiring", () => {
 });
 
 describe("Runner > providers", () => {
-  /** The authorize URL the vendor's CLI prints, as the login answers with it. */
   const AUTHORIZE_URL = "https://claude.ai/oauth/authorize?code=challenge";
 
-  /** What the CLI says about a code that was not pasted whole. */
   const INVALID = "Invalid code. Please make sure the full code was copied.";
 
-  /** The part of the card holding one instance and nothing of the next. */
   const row = (name: string): Promise<HTMLElement> => screen.findByRole("group", { name });
 
   const claudeRow = () => row("Claude Code");
@@ -569,7 +562,6 @@ describe("Runner > providers", () => {
     // A version the build was tested against is remarked on with nothing at all.
     expect(claude).not.toMatch(/below|above|untested/i);
 
-    // A provider this machine cannot drive says so rather than staying blank.
     expect(reading(await row("Codex"))).toContain("no adapter");
   });
 
@@ -653,7 +645,6 @@ describe("Runner > providers", () => {
     await user.type(code(), "half-a-code");
     await user.click(screen.getByRole("button", { name: /submit/i }));
 
-    // The CLI's own complaint, and another go at it: the dialog stays open.
     expect((await screen.findByText(new RegExp(INVALID))).textContent).toContain("Invalid code");
     await user.clear(code());
     await user.type(code(), "the-whole-code");
@@ -662,7 +653,6 @@ describe("Runner > providers", () => {
     await waitFor(() => {
       expect(screen.queryByLabelText("Code", { exact: true })).toBeNull();
     });
-    // The row was read again, so it says who the harness is holding now.
     await waitFor(() => {
       expect(reading()).toContain("rogier@example.com");
     });

@@ -351,10 +351,8 @@ describe("the hourly refresh", () => {
 
 describe("the adapters a runner build can drive", () => {
   it("names the one provider this build has an adapter for", async () => {
-    // A fact about the build, not about the machine: a machine with all three
-    // harnesses installed still reports the one adapter this binary carries,
-    // which is what lets the fleet page disable Install and Log in on a row
-    // instead of discovering it by failing.
+    // A fact about the build, not the machine: three harnesses installed,
+    // still one adapter.
     expect((await probe(FULL)).adapters).toEqual(["claude-code"]);
     expect((await probe({ git: GIT })).adapters).toEqual(["claude-code"]);
   });

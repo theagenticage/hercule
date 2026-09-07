@@ -1,15 +1,8 @@
 /**
- * Provider instances: one provider definition plus the config a caller gave it.
- *
- * The instance id, not the provider id, is what everything downstream routes
- * on, because one provider can hold several accounts kept apart by their own
- * config directories. The controller opens one instance per registered provider
- * at boot, so a fresh install already has something to log in to.
- *
- * `displayName`, `binaryName` and `declared` are facts of the definition rather
- * than columns of the row: they are composed at read from the plugin that
- * registered the provider, so a build that changes them changes every instance
- * at once.
+ * The instance id, not the provider id, is what everything routes on: one
+ * provider can hold several accounts kept apart by their config directories.
+ * `displayName`, `binaryName` and `declared` come from the registering plugin
+ * at read time, not from the stored row.
  */
 import { Schema } from "effect";
 import { DeclaredCapabilities, MAX_PROVIDER_NAME_LENGTH } from "@hydra/plugin-host";
@@ -39,11 +32,7 @@ const ProviderInstanceName = bounded(1, MAX_PROVIDER_INSTANCE_NAME_LENGTH);
 /** Re-exported so a reader of an instance needs only this package. */
 export { DeclaredCapabilities } from "@hydra/plugin-host";
 
-/**
- * The runner reports these on the wire and the controller hands them back
- * whole, so the public shape is the wire shape rather than a copy that can
- * drift out of step with it.
- */
+/** Re-exported rather than copied, so the public shape cannot drift from the wire shape. */
 export { ModelDescriptor, ModelOption, SnapshotAuth } from "@hydra/protocol";
 
 /**

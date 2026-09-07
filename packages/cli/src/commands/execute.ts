@@ -26,9 +26,8 @@ interface Page {
 }
 
 /**
- * A listing whose set is small and fixed - plugins, provider instances - answers
- * with the whole array rather than a page. There is nothing to follow, so it is
- * read as a single page that ends.
+ * Small fixed listings - plugins, provider instances - answer with the whole
+ * array. Nothing to follow, so it is read as a single page that ends.
  */
 const pageOf = (answer: unknown): Page =>
   Array.isArray(answer)

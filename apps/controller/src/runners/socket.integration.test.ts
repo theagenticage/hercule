@@ -92,10 +92,8 @@ const decodeFrame = (raw: unknown): ControllerMessage =>
 const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
 /**
- * Polls until what a test is waiting for is there, and answers with it. The
- * controller probes on its own schedule - after a hello, after an install,
- * after a login - so every wait in this file says what it is waiting for rather
- * than how long, and one that runs out names what never happened.
+ * The controller probes on its own schedule, so a wait says what it is waiting
+ * for rather than how long, and names what never happened when it runs out.
  */
 const until = async <A>(
   what: string,
@@ -122,14 +120,12 @@ interface Wire {
   readonly close: () => void;
 }
 
-/** Every frame of one kind the controller has sent on this connection so far. */
 const framesOf = <T extends ControllerMessage>(wire: Wire, tag: T["_tag"]): ReadonlyArray<T> =>
   wire.frames.filter((frame): frame is T => frame._tag === tag);
 
 const probeRequests = (wire: Wire): ReadonlyArray<ProbeRequest> =>
   framesOf<ProbeRequest>(wire, "probeRequest");
 
-/** The nth frame of a kind the controller sent, once it has sent it. */
 const frameOn = async <T extends ControllerMessage>(
   wire: Wire,
   tag: T["_tag"],
@@ -1503,25 +1499,16 @@ describe("refreshing a runner's facts on demand", () => {
 });
 
 /**
- * Provider instances, probed over the connection the controller is already
- * holding.
- *
- * Everything here is driven through the wire because a snapshot only exists
- * once a runner answered, and against the shipped plugin registry rather than
- * fixtures written here, so what this file says about "one request per
- * instance" is about the three providers the binary really ships. The harness
- * boots with no plugins unless a test says otherwise.
- *
- * The shipped probe deadline and the hourly re-probe are handed over the same
- * way the ping interval is: a real Bun listener cannot be driven by a
- * `TestClock`, and neither number can be waited out.
+ * Against the shipped registry, so "one request per instance" is about the
+ * three providers the binary really ships. The probe deadline and interval are
+ * handed over like the ping interval: a real Bun listener cannot be driven by a
+ * `TestClock`.
  */
 const withRegistry = (
   body: (harness: ServerHarness) => Promise<void>,
   options: Parameters<typeof withServer>[1] = {},
 ): Promise<void> => withServer(body, { ...options, plugins: registry });
 
-/** One instance as `/api/v1/providers` hands it back. */
 interface Instance {
   readonly id: string;
   readonly providerId: string;
@@ -1545,7 +1532,6 @@ const instanceOf = async (base: string, token: string, providerId: string): Prom
   return found!;
 };
 
-/** What a runner that could probe answers with. */
 const probed = (version: string): ProbeResult => ({
   harnessVersion: version,
   auth: {
@@ -1558,7 +1544,6 @@ const probed = (version: string): ProbeResult => ({
 });
 
 describe("probing a runner's provider instances", () => {
-  /** What one runner last said about one instance, once it has said anything. */
   const snapshotOf = (
     base: string,
     token: string,
@@ -1572,14 +1557,12 @@ describe("probing a runner's provider instances", () => {
       return one.snapshots.find((each) => each.runnerId === runnerId);
     });
 
-  /** Waits until the connection has been asked for at least this many probes. */
   const askedFor = (wire: Wire, count: number): Promise<ReadonlyArray<ProbeRequest>> =>
     until(`asked for ${String(count)} probes`, () => {
       const asked = probeRequests(wire);
       return asked.length >= count ? asked : undefined;
     });
 
-  /** What a runner whose build has no adapter for that provider answers with. */
   const noAdapter = (providerId: string): ProbeResult => ({
     harnessVersion: null,
     auth: { status: "error", message: `no adapter for ${providerId} in this runner build` },
@@ -1592,7 +1575,7 @@ describe("probing a runner's provider instances", () => {
   const patchInstance = (base: string, token: string, id: string, body: unknown) =>
     send("PATCH", base, `/api/v1/providers/${id}`, { body, token });
 
-  /** A deadline a test can wait out, and an interval it can wait for twice. */
+  /** Short enough that a test can wait it out. */
   const PROBE_DEADLINE = Duration.millis(200);
 
   it("asks the runner about every instance as soon as it has said hello, and keeps what it answers", async () => {
@@ -1667,8 +1650,8 @@ describe("probing a runner's provider instances", () => {
         });
         expect(patched.status, await patched.clone().text()).toBe(200);
 
-        // Every machine, not just the one somebody was looking at: the config
-        // is what the probe runs under, so every snapshot of it is now stale.
+        // The config is what the probe runs under, so every snapshot of it is
+        // now stale.
         await askedFor(one.wire, before[0]! + 1);
         await askedFor(two.wire, before[1]! + 1);
         for (const wire of [one.wire, two.wire]) {
@@ -1704,8 +1687,6 @@ describe("probing a runner's provider instances", () => {
 
         const response = await pending;
         expect(response.status, await response.clone().text()).toBe(200);
-        // The snapshot the report left behind, not the one that was there when
-        // the button was pressed.
         const answered = (await response.json()) as Instance["snapshots"][number];
         expect(answered.runnerId).toBe(joined.runnerId);
         expect(answered.harnessVersion).toBe("2.1.300");
@@ -1720,8 +1701,7 @@ describe("probing a runner's provider instances", () => {
       const token = await completeSetup(harness.base);
       const joined = await enlist(harness);
       const claude = await instanceOf(harness.base, token, "claude-code");
-      // A credential and a socket, and no hello: nothing on the other end has
-      // said it is a runner this controller can ask anything of.
+      // A socket with no hello: nothing has said it is a runner yet.
       const wire = await dial(harness.base, joined.credential);
       try {
         const response = await probeNow(harness.base, token, joined.runnerId, claude.id);
@@ -1750,8 +1730,6 @@ describe("probing a runner's provider instances", () => {
           expect(response.status, await response.clone().text()).toBe(409);
           const refusal = (await response.json()) as { error: { code: string; message: string } };
           expect(refusal.error.code).toBe("invalid_state");
-          // How long it waited, so a slow machine reads differently from a
-          // broken one - and the deadline this server is running with.
           expect(refusal.error.message).toContain(Duration.format(PROBE_DEADLINE));
         } finally {
           wire.close();
@@ -1779,8 +1757,8 @@ describe("probing a runner's provider instances", () => {
           instanceId: claude.id,
           result: probed("0.0.0-unasked"),
         });
-        // Then the answer to the request it really was asked, so the test waits
-        // for something rather than for a while.
+        // Then the real answer, so the test waits for something rather than
+        // for a while.
         wire.send({
           _tag: "probeReport",
           requestId: mine.requestId,
@@ -1805,8 +1783,6 @@ describe("probing a runner's provider instances", () => {
       const asked = await askedFor(first.wire, 3);
       const stale = asked.find((request) => request.instanceId === claude.id)!;
 
-      // The machine dialled again before answering. Its old connection's
-      // answers are about a session that is over.
       const second = await greet(harness.base, joined.credential);
       try {
         first.wire.send({
@@ -1860,7 +1836,6 @@ describe("probing a runner's provider instances", () => {
 });
 
 describe("installing a harness on a runner", () => {
-  /** A machine with no coding harness on it at all. */
   const BARE: RunnerFacts = {
     ...FACTS,
     providers: [
@@ -1870,7 +1845,6 @@ describe("installing a harness on a runner", () => {
     ],
   };
 
-  /** The machine as it is once the installer has run. */
   const INSTALLED: RunnerFacts = {
     ...BARE,
     providers: [
@@ -1912,8 +1886,7 @@ describe("installing a harness on a runner", () => {
         const row = (await response.json()) as RunnerDetail;
         expect(row.facts?.providers).toEqual(INSTALLED.providers);
 
-        // And the instance that can now be driven is probed, because a harness
-        // that was just installed has never been asked anything.
+        // A harness that was just installed has never been asked anything.
         for (let attempt = 0; attempt < 400 && probeRequests(wire).length <= before; attempt++) {
           await delay(5);
         }
@@ -1970,8 +1943,7 @@ describe("installing a harness on a runner", () => {
         const response = await installHarness(harness.base, token, joined.runnerId, "codex");
         expect(response.status, await response.clone().text()).toBe(400);
         expect(await response.json()).toMatchObject({ error: { code: "validation" } });
-        // Nothing was asked of the machine: the runner already said which
-        // adapters its build has.
+        // The runner already said which adapters its build has.
         expect(wire.frames.filter((frame) => frame._tag === "installRequest")).toEqual([]);
       } finally {
         wire.close();
@@ -1997,14 +1969,8 @@ describe("installing a harness on a runner", () => {
 });
 
 /**
- * Logging one provider instance in, over the connection the controller is
- * already holding.
- *
- * The exchange is two operations around one child process on the machine: the
- * first asks for the vendor's URL, the second hands back the code the user
- * pasted from the browser. Nothing about it is stored - the code is only good
- * for the live child's URL - so what these tests drive is the wire and the
- * refusals, not a record.
+ * Nothing about a login is stored - the code is only good for the live child's
+ * URL - so these tests drive the wire and the refusals, not a record.
  */
 describe("logging a runner's provider instance in", () => {
   const login = (base: string, token: string, instanceId: string, runnerId: string) =>
@@ -2017,7 +1983,6 @@ describe("logging a runner's provider instance in", () => {
     body: { readonly runnerId: string; readonly code: string },
   ) => send("POST", base, `/api/v1/providers/${instanceId}/login-code`, { body, token });
 
-  /** A probe request for one instance that this connection has not seen yet. */
   const probeOf = (wire: Wire, instanceId: string, after: number): Promise<ProbeRequest> =>
     until(`probed ${instanceId}`, () =>
       wire.frames
@@ -2180,9 +2145,8 @@ describe("logging a runner's provider instance in", () => {
         expect(snapshot.runnerId).toBe(joined.runnerId);
         expect(snapshot.auth).toMatchObject({ status: "ok", identity: "rogier@example.com" });
 
-        // Who put a vendor credential on which machine is the part of this a
-        // reader of the log wants back; the code and the URL are good for one
-        // exchange and are never written down.
+        // The code and the URL are good for one exchange and are never
+        // written down.
         const logged = await harness.audit("provider.loggedIn");
         expect(logged).toHaveLength(1);
         expect(logged[0]?.payload).toEqual({ instanceId: claude.id, runnerId: joined.runnerId });

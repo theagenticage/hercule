@@ -1,10 +1,7 @@
 /**
- * One machine's provider instances, as its page reads them.
- *
- * A row is a join of three things that arrive separately: the instance, what
- * this machine last reported about it, and what the machine says its own build
- * can drive. Which moves the row offers follows from those, so it is worked out
- * here rather than in the markup, where it could only be checked by rendering.
+ * A row joins the instance, this machine's last snapshot, and the adapters its
+ * runner build carries. Which moves a row offers follows from those, so it is
+ * decided here rather than in the markup.
  */
 import type { ProviderInstance, Runner } from "@hydra/contract";
 
@@ -22,7 +19,6 @@ export interface ProviderRow {
   /** Whose login the harness is holding, or why it is holding none. */
   readonly account: string;
   readonly models: string;
-  /** Whether this machine is holding a usable login for the instance. */
   readonly loggedIn: boolean;
   readonly install: Install;
   readonly logIn: boolean;
@@ -58,9 +54,8 @@ export const providerRows = (
   instances.map((instance) => {
     const snapshot = instance.snapshots.find((each) => each.runnerId === runner.id);
     const adapter = (runner.facts?.adapters ?? []).includes(instance.providerId);
-    // The machine reports what is on its `PATH` by the binary's own name, and
-    // the instance carries the name its provider drives, so the join needs no
-    // table of its own here.
+    // The name the machine reports on its `PATH` is the name the instance
+    // carries, so the join needs no table of its own.
     const present = (runner.facts?.providers ?? []).some(
       (binary) => binary.name === instance.binaryName && binary.present,
     );
@@ -73,8 +68,7 @@ export const providerRows = (
       name: instance.displayName,
       version: snapshot?.harnessVersion ?? "not reported",
       verdict: snapshot === undefined ? null : (VERDICTS[snapshot.versionVerdict] ?? null),
-      // What the machine cannot drive at all is said once, in place of whatever
-      // a stale snapshot claimed, so the row reads as one fact rather than two.
+      // Said once, in place of whatever a stale snapshot claimed.
       account: adapter ? accountIn(snapshot) : NO_ADAPTER,
       models: modelsIn(snapshot),
       loggedIn: snapshot?.auth.status === "ok",

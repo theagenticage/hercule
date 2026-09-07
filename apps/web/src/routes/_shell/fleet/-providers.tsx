@@ -7,15 +7,7 @@ import { ProviderLogin } from "../../../screens/provider-login";
 import { messageOf } from "../../../screens/save-status";
 import { providersQuery } from "../../../app/queries";
 
-/**
- * What each provider instance is on this machine, and the three things that can
- * be done about it: put the harness here, log it in, ask it again.
- *
- * Every row says its whole state - version, whose login it is holding, how many
- * models it offers - because a machine that cannot run a thread is the most
- * common thing this page is opened to find out about. A move the machine cannot
- * make is dimmed with its reason rather than hidden.
- */
+/** A move the machine cannot make is dimmed with its reason rather than hidden. */
 export function Providers({
   client,
   runner,
@@ -109,8 +101,8 @@ function Row({
   readonly onLoggedIn: () => void;
 }): JSX.Element {
   return (
-    // Named so the facts and the moves for one provider are one thing a reader
-    // - or a screen reader - can take in without the rows running together.
+    // Grouped so a screen reader takes one provider's facts and moves as one
+    // unit.
     <div
       role="group"
       aria-label={row.name}

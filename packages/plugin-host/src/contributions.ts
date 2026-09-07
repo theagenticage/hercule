@@ -32,11 +32,8 @@ export const DeclaredCapabilities = Schema.Struct({
 export type DeclaredCapabilities = Schema.Schema.Type<typeof DeclaredCapabilities>;
 
 /**
- * How long a provider's id and display name may be. Both reach columns and both
- * reach the wire: the display name is what the controller names the provider's
- * first instance, and the id is stored on every instance that routes to it. A
- * plugin that overruns either is refused at registration rather than writing a
- * row nothing can read back.
+ * Ids and display names reach both columns and the wire, so an overrun is
+ * refused at registration rather than written as a row nothing can read back.
  */
 export const MAX_PROVIDER_NAME_LENGTH = 128;
 
@@ -53,11 +50,7 @@ const ProviderName = Schema.String.check(
 export const ProviderDefinition = Schema.Struct({
   id: ProviderName,
   displayName: ProviderName,
-  /**
-   * The harness's own name on `PATH`. A machine reports which binaries it has
-   * by that name, so this is what joins a runner's facts to an instance; the
-   * provider that drives the binary is the one thing that knows it.
-   */
+  /** The harness's own name on `PATH`, which is what joins a runner's facts to an instance. */
   binaryName: ProviderName,
   /** Several accounts of one harness, kept apart by per-instance config dirs. */
   supportsMultipleInstances: Schema.Boolean,

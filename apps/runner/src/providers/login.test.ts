@@ -1,14 +1,7 @@
 /**
- * Logging a provider instance in, from the runner's side.
- *
- * The vendor's `claude auth login` is a child process that prints a URL, then
- * blocks on stdin waiting for the code the user pastes back from the browser.
- * It is reached through an injected spawn seam, so what the runner makes of a
- * child that prints a URL, complains about a code, or is left open for ever can
- * be stated without a browser, a network or an account.
- *
- * The ten-minute idle limit is asserted as the exported constant and driven on
- * a `TestClock`, which is the only way to wait it out.
+ * Logging a provider instance in, over a stubbed spawn seam. The vendor's
+ * `claude auth login` prints a URL, then blocks on stdin for the code the user
+ * pastes back from the browser.
  */
 import { describe, expect, it } from "vitest";
 import { Duration, Effect, Fiber } from "effect";
@@ -25,14 +18,11 @@ const CONTEXT: ProviderRunnerContext = {
   env: { PATH: "/usr/local/bin:/usr/bin", HOME: "/home/rogier" },
 };
 
-/** The authorize URL the CLI prints, as it prints it. */
 const URL_ONE = "https://claude.ai/oauth/authorize?code=challenge-one";
 const URL_TWO = "https://claude.ai/oauth/authorize?code=challenge-two";
 
-/** What the CLI says about a code that was not pasted whole. */
 const INVALID = "Invalid code. Please make sure the full code was copied.";
 
-/** A pipe a test pushes chunks onto, the way a child writes to one. */
 const pipe = () => {
   const chunks: Array<string> = [];
   let wake: (() => void) | undefined;
@@ -59,7 +49,6 @@ const pipe = () => {
   };
 };
 
-/** One login child, and everything a test needs to play it and read it back. */
 interface Fake {
   readonly child: LoginChild;
   readonly command: ReadonlyArray<string>;
@@ -67,13 +56,11 @@ interface Fake {
   /** What the child printed to stdout, and to stderr. */
   readonly says: (line: string) => void;
   readonly complains: (line: string) => void;
-  /** Everything written to the child's stdin, in order. */
   readonly stdin: ReadonlyArray<string>;
   readonly exit: (code: number) => void;
   readonly killed: () => boolean;
 }
 
-/** A machine whose logins are played by the test rather than really spawned. */
 const machine = () => {
   const children: Array<Fake> = [];
   const spawn: LoginSpawn = (command, env) => {
@@ -94,9 +81,9 @@ const machine = () => {
       stdout: out.stream,
       stderr: err.stream,
       write: (text) => stdin.push(text),
-      // A killed child's pipes need not reach their end before its exit does,
-      // so this fake never ends them: it is the pessimistic case, and it is
-      // what makes the driver's own wait on the exit load-bearing.
+      // A killed child's pipes may not end before its exit, so this fake never
+      // ends them - that is what makes the driver's wait on the exit
+      // load-bearing.
       kill: () => {
         killed = true;
         settle(143);
@@ -118,7 +105,6 @@ const machine = () => {
   return { spawn, children };
 };
 
-/** Runs an effect on a clock a test can move. */
 const run = <A>(effect: Effect.Effect<A>): Promise<A> =>
   Effect.runPromise(Effect.provide(effect, TestClock.layer()));
 
@@ -142,8 +128,6 @@ describe("starting a login", () => {
     const started = children[0]!;
     expect(started.command.join(" ")).toContain("auth login");
     expect(started.command[0]).toBe(CONTEXT.binary);
-    // The credential this login writes belongs to this instance and to nothing
-    // else, and the user's own `~/.claude` is never touched.
     expect(started.env["CLAUDE_CONFIG_DIR"]).toBe(CONTEXT.home);
     expect(started.env["HOME"]).toBe(CONTEXT.env["HOME"]);
     // A browser launch that succeeds makes the CLI switch to a localhost
@@ -234,7 +218,6 @@ describe("starting a login", () => {
 });
 
 describe("submitting a login code", () => {
-  /** Gets a login as far as the child prompting for the code. */
   const waiting = (driver: ReturnType<typeof logins>, children: ReadonlyArray<Fake>) =>
     Effect.gen(function* () {
       const starting = yield* Effect.forkChild(driver.start(INSTANCE, claudeCode, CONTEXT));
@@ -278,8 +261,6 @@ describe("submitting a login code", () => {
         yield* TestClock.adjust(COMPLAINT_GRACE);
         const refused = yield* Fiber.join(first);
 
-        // The child is still up and still prompting, so the user gets another
-        // go without starting the whole exchange again.
         const second = yield* Effect.forkChild(driver.submit(INSTANCE, "the-whole-code"));
         yield* TestClock.adjust(Duration.zero);
         yield* Effect.sync(() => children[0]!.exit(0));
@@ -346,7 +327,6 @@ describe("more than one login at a time", () => {
     expect(second).toEqual({ _tag: "loginUrl", url: URL_TWO });
     expect(children[1]!.killed()).toBe(false);
 
-    // And the surviving login is the one a pasted code reaches.
     const answer = await run(
       Effect.gen(function* () {
         const submitting = yield* Effect.forkChild(driver.submit(INSTANCE, "the-whole-code"));

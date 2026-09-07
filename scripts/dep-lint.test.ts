@@ -39,7 +39,6 @@ export const run = (): void => console.log(typeof Logo);`,
 
 let dir: string;
 
-/** Temporary roots the store check is run from, removed afterwards. */
 const roots: Array<string> = [];
 
 beforeAll(async () => {
@@ -101,26 +100,18 @@ describe("dep-lint", () => {
 });
 
 /**
- * The vendor SDK ships its Claude Code CLI as eight per-platform packages, one
- * of which is 196 MB. They are excluded from the install, and the check that
- * they stay excluded belongs beside the other things the runner must not carry.
- *
- * Unlike the import-graph rules this one is about the workspace rather than
- * about an entrypoint, so the fixture is a directory in the store rather than a
- * file to import: pnpm links only a package's direct dependencies into the
- * importer's `node_modules`, so an optional dependency of the SDK shows up in
- * the store and nowhere else. The script reads the workspace it sits in, so the
- * fixture store is given a copy of the script to sit in.
+ * The vendor SDK's eight per-platform CLI packages (one is 196 MB) are excluded
+ * from the install and must stay excluded. This is a workspace rule, not an
+ * import-graph one: pnpm links only direct dependencies, so an optional
+ * dependency of the SDK shows up in the store and nowhere else.
  */
 describe("the vendor SDK's per-platform CLI packages", () => {
   const SDK = "@anthropic-ai+claude-agent-sdk";
 
   /**
-   * A copy of the script in a root of its own, holding the store it is given.
-   * The script reads the workspace it sits in, so this is how the failing
-   * direction is proven without writing into the store this repository is
-   * actually installed from, and without an option the shipped script carries
-   * for the test's sake alone.
+   * The script reads the workspace it sits in, so a copy in a root of its own is
+   * how the failing direction is proven without writing into this repository's
+   * own store.
    */
   const scriptOver = async (...packages: ReadonlyArray<string>): Promise<string> => {
     const one = await mkdtemp(join(tmpdir(), "hydra-dep-lint-root-"));

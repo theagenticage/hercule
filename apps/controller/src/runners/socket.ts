@@ -208,8 +208,6 @@ const hold = (runnerId: string, socket: Socket.Socket) =>
           case "loginUrl":
           case "loginFailed":
           case "loginResult":
-            // The answer to something this controller asked, carried whole: the
-            // request id in it is what says which caller is waiting.
             if (!greeted) return;
             return yield* presence.reportedAnswer(runnerId, mine, message);
           case "goodbye":

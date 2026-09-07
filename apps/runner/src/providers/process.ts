@@ -1,14 +1,10 @@
 /**
- * How an adapter runs something on the machine it is on.
- *
- * A seam rather than a direct call, because what an adapter runs - the vendor's
- * install script above all - is the thing a test most needs to state without
- * running it.
+ * A seam so a test can state what an adapter runs - the vendor installer above
+ * all - without running it.
  */
 import * as Effect from "effect/Effect";
 import type { LoginChild, LoginSpawn } from "./login";
 
-/** How a process ended, and everything it said. */
 export interface Ran {
   readonly code: number;
   readonly stdout: string;
@@ -21,9 +17,8 @@ export type Run = (
 ) => Effect.Effect<Ran>;
 
 /**
- * A process on this machine. A command that could not be started reads as one
- * that exited badly and said why: an adapter has the same thing to report
- * either way, and a missing binary is an ordinary state of a machine.
+ * A command that could not start reads as one that exited badly and said why: a
+ * missing binary is an ordinary state.
  */
 export const runProcess: Run = (command, env) =>
   Effect.tryPromise({
@@ -50,10 +45,7 @@ export const runProcess: Run = (command, env) =>
     catch: (error) => (error instanceof Error ? error.message : String(error)),
   }).pipe(Effect.catch((message) => Effect.succeed({ code: 1, stdout: "", stderr: message })));
 
-/**
- * A login on this machine. Unlike a run, it is read and written while it lives:
- * the vendor prints a URL, waits on stdin, and only then decides how it went.
- */
+/** Unlike a run, a login is read and written while it lives. */
 export const spawnLogin: LoginSpawn = (command, env): LoginChild => {
   const child = Bun.spawn([...command], { stdin: "pipe", stdout: "pipe", stderr: "pipe", env });
   const text = (stream: ReadableStream<Uint8Array>): AsyncIterable<string> => {

@@ -218,10 +218,7 @@ const pinning = (stub: Stub, overrides: Partial<ControllerPin> = {}): Controller
  */
 const DEADLINE = Duration.millis(500);
 
-/**
- * Where instance homes would go. Nothing in this file drives an adapter that
- * has one, so no directory is ever made under it.
- */
+/** Nothing here drives an adapter with a home, so nothing is ever made under it. */
 const PROVIDERS_DIR = "/nonexistent/hydra-runner-providers";
 
 /** Runs one connection to its end and reports how it ended. */
@@ -523,11 +520,6 @@ describe("a controller asking for the machine's facts", () => {
 });
 
 describe("a controller asking a runner to probe a provider it cannot drive", () => {
-  /**
-   * The frame the controller sends, typed against the catalogue rather than
-   * written as a bare object: a rename of the frame is a compile error here
-   * rather than a request this runner silently ignores.
-   */
   const REQUEST: ProbeRequest = {
     _tag: "probeRequest",
     requestId: "01999999-0000-7000-8000-0000000000c1",
@@ -556,8 +548,6 @@ describe("a controller asking a runner to probe a provider it cannot drive", () 
     // instances can be in flight on one connection at once.
     expect(report?.requestId).toBe(REQUEST.requestId);
     expect(report?.instanceId).toBe(REQUEST.instanceId);
-    // An error the user can act on, not silence: the Fleet row says the build
-    // cannot drive this harness instead of showing a snapshot that never comes.
     expect(report?.result.auth.status).toBe("error");
     expect(report?.result.auth.message).toBe("no adapter for codex in this runner build");
     expect(report?.result.harnessVersion).toBeNull();

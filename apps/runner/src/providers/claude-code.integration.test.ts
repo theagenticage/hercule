@@ -1,16 +1,8 @@
 /**
- * The Claude Code adapter against the real vendor SDK and the real binary.
- *
- * The stubbed test beside this one says what the adapter makes of the shapes
- * the SDK hands back. Only this one says that those are still the shapes it
- * hands back: a probe is the one thing in Hydra whose whole job is to be right
- * about somebody else's CLI.
- *
- * The config directory is a fresh temporary one, so the answer is
- * `unauthenticated` on any machine - including one whose developer is logged
- * into Claude Code - and the developer's own `~/.claude` is never read or
- * written. A machine with no `claude` on its PATH skips this file rather than
- * failing it: not every checkout has the harness installed.
+ * Proves the vendor SDK still hands back the shapes the stubbed test beside
+ * this one assumes. Runs against a temporary config directory, so it never
+ * reads or writes the developer's own `~/.claude`, and skips when there is no
+ * `claude` on PATH.
  */
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -28,14 +20,12 @@ afterAll(() => {
   for (const home of homes.splice(0)) rmSync(home, { recursive: true, force: true });
 });
 
-/** An instance home nobody has ever logged into. */
 const emptyHome = (): string => {
   const home = mkdtempSync(join(tmpdir(), "hydra-claude-probe-"));
   homes.push(home);
   return home;
 };
 
-/** What `claude --version` prints on this machine, cut to the version itself. */
 const installedVersion = async (path: string): Promise<string> => {
   const child = Bun.spawn([path, "--version"], { stdout: "pipe", stderr: "ignore" });
   const printed = await new Response(child.stdout).text();

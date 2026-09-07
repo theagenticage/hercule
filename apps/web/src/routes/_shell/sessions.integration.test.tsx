@@ -1,11 +1,7 @@
 /**
- * The Sessions screen over a stubbed controller.
- *
- * On a fresh install this screen is the rest of onboarding: it is the one place
- * that tells the user what stands between them and a thread. So each state is
- * driven by the two answers it really depends on - which machine this browser
- * is on, and what that machine last said about the harnesses on it - and what
- * is asserted is the sentence the reader gets and the control beside it.
+ * The Sessions screen over a stubbed controller. On a fresh install it is the
+ * rest of onboarding: the one place that tells the user what stands between
+ * them and a thread.
  */
 import { describe, expect, it } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
@@ -17,7 +13,6 @@ const GIB = 1024 * 1024 * 1024;
 
 const ZONE = "Europe/Amsterdam";
 
-/** The machine this browser is sitting on, with the Claude harness on it. */
 const MOSS: Runner = {
   id: "01a06d02-beff-7037-9f5b-042822015952",
   name: "moss",
@@ -41,7 +36,6 @@ const MOSS: Runner = {
   lastSeenAt: "2026-09-05T09:14:00.000Z",
 };
 
-/** The same machine with nothing installed on it. */
 const BARE: Runner = {
   ...MOSS,
   facts: { ...MOSS.facts!, providers: [{ name: "claude", present: false }] },
@@ -137,7 +131,6 @@ const open = async (options: {
   return { ...app, api };
 };
 
-/** The page's text with its whitespace collapsed, the way a reader sees it. */
 const reading = (): string => (document.body.textContent ?? "").replace(/\s+/g, " ").trim();
 
 /** The button on the screen itself: the sidebar's thread list carries one too. */
@@ -227,8 +220,7 @@ describe("Sessions", () => {
     await user.type(screen.getByLabelText("Code", { exact: true }), "the-whole-code");
     await user.click(screen.getByRole("button", { name: /submit/i }));
 
-    // The screen is the onboarding step it is: finishing the login is what
-    // moves it on, without a reload.
+    // Finishing the login moves the screen on, without a reload.
     await waitFor(() => {
       expect(reading()).toContain("Claude Code is ready.");
     });

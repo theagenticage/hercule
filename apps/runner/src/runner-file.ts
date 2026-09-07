@@ -10,16 +10,14 @@ import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import { runnerDirIn } from "@hydra/home";
 
-/** The two schemes the runner socket knows how to dial. */
 export const CONTROLLER_URL_SCHEMES: ReadonlyArray<string> = ["http:", "https:"];
 
 /**
  * The controller URL is here rather than in `config.toml` because it is not a
  * bootstrap key: it is part of who this runner belongs to.
  *
- * It is a string here and dialable only where it is dialed. `set-controller` is
- * the way out of a machine pointed at an address that will not parse, so the
- * field it is about to replace must not be what stops it from reading the rest.
+ * `set-controller` is the way out of a runner pointed at an address that will
+ * not parse, so that field must not stop the rest of the file being read.
  */
 export const RunnerFile = Schema.Struct({
   runnerId: Schema.String,

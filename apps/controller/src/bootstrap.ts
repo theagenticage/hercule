@@ -252,10 +252,9 @@ export const bootWith = <A, E>(
     );
 
     /**
-     * One presence and one probe driver for the process, built here rather than
-     * beside the routes: the socket route registers connections in the same map
-     * `runner.retire` hangs up through, and the sweep after a hello writes
-     * through the same one again.
+     * One presence and one probe driver per process: the socket route,
+     * `runner.retire` and the sweep after a hello all write through the same
+     * connection map.
      */
     const withFleet = ProviderProbesLayer.pipe(Layer.provideMerge(RunnerPresenceLayer)).pipe(
       Layer.provideMerge(repositories),

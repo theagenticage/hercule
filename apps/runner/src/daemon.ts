@@ -23,8 +23,8 @@ const addresses = (): ReadonlyArray<string> =>
 
 /**
  * The one place a stored controller URL is checked: every consumer downstream
- * builds a request URL off it, so a hand-edited value surfaces here as a
- * refusal naming the file and the field rather than as a defect deep in a dial.
+ * builds a request URL off it, so a hand-edited value is refused here by name
+ * rather than failing deep in a dial.
  */
 const dialable = (home: string, controllerUrl: string): Effect.Effect<void, NotEnrolled> => {
   const url = URL.parse(controllerUrl);

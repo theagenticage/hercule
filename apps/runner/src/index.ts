@@ -64,9 +64,8 @@ const hold = async (work: Effect.Effect<void, { readonly message: string }>): Pr
       Effect.scoped(
         Effect.flatMap(untilStopped, (stopped) => Effect.raceFirst(work, stopped)),
       ).pipe(
-        // A vendor login blocked on stdin is a child of this process that will
-        // not notice the process has gone, and it is holding a prompt for a
-        // credential.
+        // A vendor login blocked on stdin would outlive this process, still
+        // holding a prompt for a credential.
         Effect.ensuring(providerLogins.stopAll),
         Effect.provideService(Logger.LogToStderr, true),
       ),

@@ -5,9 +5,8 @@
  * says about itself, and the loop that holds the connection - and the wiring is
  * the only thing here that no other test covers. What it asserts is that a
  * machine that never joined is told so by name, that one holding an address it
- * cannot dial is told which field to edit before anything is bound, and that one
- * that did dials the controller its `runner.json` points at, with the credential
- * that file holds.
+ * cannot dial is told which field to edit, and that one that did dials the
+ * controller its `runner.json` points at, with the credential that file holds.
  */
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";

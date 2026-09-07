@@ -1,15 +1,11 @@
 /**
- * Asking the fleet what it can do, and keeping the answers.
+ * Asks runners what each provider instance can do, and stores the answers.
  *
- * Probing is controller-driven: instance ids and their configs live here, so a
- * runner cannot start one on its own. Every request carries an id and is
- * answered by one report, because probes for several instances are in flight on
- * one connection at once.
+ * Probing is controller-driven: the config lives here, so a runner cannot start
+ * one. Requests carry an id because several are in flight on one connection.
  *
- * A sweep is a fact-gathering pass, not an operation: no grant reaches it and
- * every row it writes is the system's. It runs after a runner says hello, after
- * an install, when an instance's config changed, on the tick, and when somebody
- * presses the button - and only that last one has anybody waiting for it.
+ * A sweep gathers facts rather than performing an operation: no grant reaches
+ * it, and every row it writes is the system's.
  */
 import * as Context from "effect/Context";
 import * as Duration from "effect/Duration";
@@ -27,9 +23,8 @@ import { providerRepository, type StoredInstance } from "./repository";
 import { floorFor, versionVerdict } from "./version";
 
 /**
- * The runner gives its own probe fifteen seconds; this is that plus the round
- * trip, so a harness that timed out still gets its "did not answer" stored as
- * the snapshot rather than being cut off by the end that asked.
+ * The runner's own 15s probe budget plus the round trip, so its "did not
+ * answer" is stored rather than cut off here.
  */
 const PROBE_DEADLINE: Duration.Duration = Duration.seconds(20);
 
@@ -40,8 +35,8 @@ export const ProviderProbeDeadline = Context.Reference<Duration.Duration>(
 );
 
 /**
- * How often the whole fleet is asked again. A login can expire and a harness
- * can be upgraded outside Hydra, so a snapshot older than this is a guess.
+ * A login can expire and a harness be upgraded outside Hydra, so an older
+ * snapshot is a guess.
  */
 const PROBE_INTERVAL: Duration.Duration = Duration.hours(1);
 
@@ -59,10 +54,8 @@ const make = Effect.gen(function* () {
   const presence = yield* RunnerPresence;
 
   /**
-   * One instance on one runner. `none` when the machine is not holding a
-   * connection or did not answer in time; a report that arrives late is
-   * dropped rather than stored, because by then it describes a request nobody
-   * is correlating any more.
+   * A late report is dropped rather than stored: nobody is correlating that
+   * request any more.
    */
   const probeOne = (
     runnerId: string,
@@ -103,12 +96,8 @@ const make = Effect.gen(function* () {
     });
 
   /**
-   * Every pair, at once. A machine answers its instances in parallel, and one
-   * unreachable machine must not hold up the rest of the fleet.
-   *
-   * Each pair absorbs its own failure, because the alternative interrupts its
-   * siblings: one instance deleted mid-sweep would otherwise discard every
-   * snapshot the rest of the fleet had just reported.
+   * Each pair absorbs its own failure: one instance deleted mid-sweep must not
+   * discard the rest of the fleet's snapshots.
    */
   const sweep = (
     runnerIds: ReadonlyArray<string>,
@@ -129,16 +118,10 @@ const make = Effect.gen(function* () {
       Effect.logError("A provider sweep could not be started", cause),
     );
 
-  /** Everything one machine can be asked: after its hello, and after an install. */
   const sweepRunner = (runnerId: string): Effect.Effect<void> =>
     inTheBackground(Effect.flatMap(instances.list(), (all) => sweep([runnerId], all)));
 
   return {
-    /**
-     * Probes one instance on one runner for a caller that is waiting. `none`
-     * says the machine answered nothing in time, which the operation reports as
-     * a state rather than as a snapshot that is not there.
-     */
     probe: (
       runnerId: string,
       instanceId: string,
@@ -154,8 +137,8 @@ const make = Effect.gen(function* () {
     sweepRunner,
 
     /**
-     * One instance across the fleet, because its config is what the probe runs
-     * under: an edit makes every machine's snapshot of it stale at once.
+     * The config is what a probe runs under, so an edit stales every machine's
+     * snapshot at once.
      */
     sweepInstance: (instanceId: string): Effect.Effect<void> =>
       inTheBackground(
@@ -166,17 +149,10 @@ const make = Effect.gen(function* () {
         }),
       ),
 
-    /**
-     * Everything the driver does unasked: a sweep for each machine as it says
-     * hello, and one over the whole fleet on the tick. Held open for the life
-     * of the listener, so both stop when the controller does.
-     */
     driving: Effect.all(
       [
-        // Presence says a machine arrived; what an arrival is worth asking
-        // about is this domain's business, not presence's. Forked, because a
-        // machine that answers slowly must not hold up the next machine's
-        // sweep.
+        // Forked, because a machine that answers slowly must not hold up the
+        // next machine's sweep.
         Stream.runForEach(presence.arrivals, (runnerId) => Effect.forkChild(sweepRunner(runnerId))),
         Effect.gen(function* () {
           const interval = yield* ProviderProbeInterval;

@@ -1,10 +1,6 @@
 /**
- * Provider instance rows and the snapshots hanging off them. Nothing here
- * decides policy - who may write, what a config means, what gets logged - it
- * only reads and writes.
- *
- * The set is a handful of rows per install, so a listing reads the whole table
- * rather than paging it.
+ * Provider instance rows and their snapshots. A handful of rows per install, so
+ * listings read the whole table.
  */
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
@@ -24,7 +20,6 @@ export interface StoredInstance {
   readonly updatedAt: string;
 }
 
-/** Everything a new instance row holds. */
 export interface NewInstance {
   readonly providerId: string;
   readonly name: string;
@@ -62,7 +57,6 @@ const toInstance = (row: InstanceRow): Effect.Effect<StoredInstance, Schema.Sche
     updatedAt: row.updated_at,
   }));
 
-/** What one runner last said about one instance, as it is stored. */
 export interface StoredSnapshot {
   readonly instanceId: string;
   readonly runnerId: string;
@@ -89,15 +83,11 @@ const SNAPSHOT_COLUMNS =
   "instance_id, runner_id, probed_at, harness_version, auth_status, auth_identity, " +
   "auth_plan_label, auth_backend, auth_message, models";
 
-/** Decoded rather than cast, so a row this build cannot read is a typed failure. */
 const decodeModels = Schema.decodeUnknownEffect(
   Schema.fromJsonString(Schema.Array(ModelDescriptor)),
 );
 
-/**
- * A null column is an absent key rather than a null value: the wire shape these
- * rows are handed back as has no nulls in it.
- */
+/** Null column becomes an absent key: the wire shape has no nulls in it. */
 const said = (row: SnapshotRow): ProbeResult["auth"] => ({
   status: row.auth_status as ProbeResult["auth"]["status"],
   ...(row.auth_identity === null ? {} : { identity: row.auth_identity }),
@@ -145,7 +135,6 @@ const make = Effect.gen(function* () {
           }),
       ),
 
-    /** The providers that already have at least one instance. */
     providersWithInstance: (): Effect.Effect<ReadonlySet<string>, SqlError> =>
       Effect.map(
         sql<{
@@ -172,7 +161,6 @@ const make = Effect.gen(function* () {
         };
       }),
 
-    /** Applies an edit. Only the columns the edit names are written. */
     update: (id: string, edit: InstanceEdit, at: string): Effect.Effect<void, SqlError> => {
       const sets = [sql`updated_at = ${at}`];
       if (edit.name !== undefined) sets.push(sql`name = ${edit.name}`);
@@ -186,7 +174,6 @@ const make = Effect.gen(function* () {
     delete: (id: string): Effect.Effect<void, SqlError> =>
       Effect.asVoid(sql`DELETE FROM provider_instances WHERE id = ${uuidFromString(id)}`),
 
-    /** Every snapshot in the install; a listing hangs them off their instances. */
     snapshots: (): Effect.Effect<ReadonlyArray<StoredSnapshot>, SqlError | Schema.SchemaError> =>
       Effect.flatMap(
         sql<SnapshotRow>`
@@ -196,7 +183,6 @@ const make = Effect.gen(function* () {
         (rows) => Effect.forEach(rows, toSnapshot),
       ),
 
-    /** What the fleet reported about one instance. */
     snapshotsOf: (
       instanceId: string,
     ): Effect.Effect<ReadonlyArray<StoredSnapshot>, SqlError | Schema.SchemaError> =>
@@ -209,10 +195,7 @@ const make = Effect.gen(function* () {
         (rows) => Effect.forEach(rows, toSnapshot),
       ),
 
-    /**
-     * Writes what a runner just reported. Latest-wins per instance x runner:
-     * a snapshot is a cache of one machine's answer, not a history of them.
-     */
+    /** A snapshot is a cache of one machine's last answer, not a history. */
     recordSnapshot: (
       instanceId: string,
       runnerId: string,

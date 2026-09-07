@@ -1,8 +1,4 @@
-/**
- * `runner.json` as the daemon reads it before it dials anything: the file a
- * join wrote. Whether what it holds can be dialed is the daemon's to say, and
- * `daemon.test.ts` says it.
- */
+/** Whether what the file holds can be dialed is the daemon's to say; `daemon.test.ts` says it. */
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -16,7 +12,6 @@ afterEach(() => {
   for (const home of homes.splice(0)) rmSync(home, { recursive: true, force: true });
 });
 
-/** What a join leaves behind, at the shape and the mode it leaves it. */
 const ENROLLED: RunnerFile = {
   runnerId: "0199e0e7-2222-7000-8000-000000000000",
   credential: "credential-for-thalia",

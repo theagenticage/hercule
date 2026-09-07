@@ -1,17 +1,8 @@
 /**
- * The instance every registered provider starts with.
- *
- * A fresh install has to be able to offer "Log in to Claude Code" before the
- * user has ever met the instance concept, so the boot opens one instance per
- * provider with the definition's own default config. It is idempotent by "at
- * least one instance per provider": a second boot adds nothing, and a provider
- * whose only instance was deleted gets a fresh one. Seeding only on an empty
- * table was rejected because a provider added in a later release would then
- * never get its default.
- *
- * Nothing holding a credential asked for these rows, so the entry each one
- * writes says the system did: an instance the user can delete, rename and
- * reconfigure would otherwise appear in the log with no beginning.
+ * Seeds one instance per registered provider, so a fresh install can offer
+ * "Log in to Claude Code" before the user has met the instance concept.
+ * Idempotent per provider rather than "seed an empty table", so a provider
+ * added in a later release still gets its default.
  */
 import * as Effect from "effect/Effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
@@ -32,8 +23,6 @@ export const ensureProviderInstances: Effect.Effect<
   const host = yield* PluginHost;
   const audit = yield* AuditLog;
   const registered = yield* host.providers();
-  // Keyed by provider id, so two plugins contributing one provider still leave
-  // that provider with a single instance.
   const missing = new Map(registered.map((definition) => [definition.id, definition]));
   for (const providerId of yield* instances.providersWithInstance()) missing.delete(providerId);
   if (missing.size === 0) return;

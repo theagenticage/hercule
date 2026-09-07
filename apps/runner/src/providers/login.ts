@@ -1,19 +1,11 @@
 /**
- * Driving a vendor's own headless login on this machine.
+ * Driving a vendor's headless login: it prints a URL, then blocks on stdin for a
+ * code the user pastes back. A pasted code is only good for the URL its own
+ * child printed, so nothing is stored and a second login replaces the first.
  *
- * The vendor prints an authorize URL and then blocks on stdin waiting for the
- * code the user pastes back from a browser that may be on another machine
- * entirely. So the child is the whole state of the exchange: the pasted code is
- * only good for the URL that child printed, which is why nothing here is stored
- * and a second login for an instance replaces the first rather than joining it.
- *
- * Every hold is acted on by identity rather than by instance id. A caller that
- * was already waiting when its child was replaced wakes up holding the old one,
- * and killing "whatever is held for this instance" at that moment would take
- * down the login the user is halfway through.
- *
- * The child is reached through an injected spawn seam, because what the runner
- * makes of a login is the part worth stating without an account.
+ * Every hold is acted on by identity, never by instance id: a caller that was
+ * waiting when its child was replaced would otherwise kill the login the user is
+ * halfway through.
  */
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -27,7 +19,6 @@ import {
 } from "@hydra/protocol";
 import type { ProviderAdapter, ProviderRunnerContext } from "./index";
 
-/** A vendor login as it is running: two pipes, a keyboard and a way to stop it. */
 export interface LoginChild {
   readonly stdout: AsyncIterable<string>;
   readonly stderr: AsyncIterable<string>;
@@ -42,31 +33,19 @@ export type LoginSpawn = (
   env: Readonly<Record<string, string | undefined>>,
 ) => LoginChild;
 
-/** What an adapter's login is started as. */
 export interface LoginCommand {
   readonly command: ReadonlyArray<string>;
   readonly env: Readonly<Record<string, string | undefined>>;
 }
 
-/**
- * What the driver answers with: the login frames, minus the request id, which
- * belongs to the connection that asked rather than to the exchange.
- */
+/** The login frames minus the request id, which belongs to the connection. */
 export type LoginAnswer =
   Omit<LoginUrl, "requestId"> | Omit<LoginFailed, "requestId"> | Omit<LoginResult, "requestId">;
 
-/**
- * How long a login nobody finished is left holding a child. A tab closed on the
- * URL would otherwise leave the vendor blocked on stdin for the life of the
- * daemon.
- */
+/** A tab closed on the URL would otherwise block the vendor on stdin for ever. */
 export const LOGIN_IDLE: Duration.Duration = Duration.minutes(10);
 
-/**
- * How long a complaint waits to be overtaken by the child ending well. A vendor
- * writes to stderr for reasons other than refusing a code, and an exchange that
- * finished is a finished exchange whatever was said on the way out.
- */
+/** A vendor writes to stderr on its way out too, so a complaint may be overtaken. */
 export const COMPLAINT_GRACE: Duration.Duration = Duration.seconds(2);
 
 const NO_LOGIN = "no login in progress";
@@ -74,21 +53,15 @@ const NO_LOGIN = "no login in progress";
 /** Cut to what the protocol carries; one over-long line would fail the answer. */
 const fact = (value: string): string => value.slice(0, MAX_FACT_LENGTH);
 
-/**
- * What the child said, or what to say when it said nothing. The tail rather
- * than the head: whatever went wrong is the last thing a process prints, and a
- * vendor's banner is the first.
- */
+/** The tail, not the head: the failure prints last, the vendor's banner first. */
 const said = (value: string, whenSilent: string): string =>
   value.trim() === "" ? whenSilent : value.trim().slice(-MAX_FACT_LENGTH);
 
 const failed = (message: string): LoginAnswer => ({ _tag: "loginFailed", message: fact(message) });
 
 /**
- * A vendor writes for a terminal: colour, and a URL wrapped in an OSC 8
- * hyperlink whose target sits inside the escape beside the visible copy. Read
- * raw, one printed address becomes two with a control byte between them, which
- * is not something a browser can be handed.
+ * Vendors print the URL inside an OSC 8 hyperlink, so read raw one address
+ * becomes two with a control byte between them.
  */
 const CONTROL =
   // eslint-disable-next-line no-control-regex
@@ -96,7 +69,6 @@ const CONTROL =
 
 const plain = (line: string): string => line.replace(CONTROL, "");
 
-/** Splits a pipe into lines, and answers when the pipe is spent. */
 const readLines = async (
   stream: AsyncIterable<string>,
   onLine: (line: string) => void,
@@ -113,17 +85,14 @@ const readLines = async (
 
 const AUTHORIZE = /https:\/\/\S+/;
 
-/** As much of a chatty vendor's complaining as anyone will ever read. */
 const MAX_TRANSCRIPT = 4096;
 
-/** One login this machine is holding, and everything a caller can ask of it. */
 interface Held {
   readonly child: LoginChild;
   /** The first authorize URL, or nothing when the child ended without one. */
   readonly url: Promise<string | undefined>;
   /** Resolves with the child's next complaint, and never when it ends first. */
   readonly nextComplaint: () => Promise<string>;
-  /** Everything the child has complained about so far. */
   readonly transcript: () => string;
   /** Absent only between the spawn and the first turn of the clock. */
   idle: Fiber.Fiber<void> | undefined;
@@ -138,12 +107,10 @@ export const logins = (
     ctx: ProviderRunnerContext,
   ) => Effect.Effect<LoginAnswer>;
   readonly submit: (instanceId: string, code: string) => Effect.Effect<LoginAnswer>;
-  /** Ends every login this machine is holding. What shutdown owes the user. */
   readonly stopAll: Effect.Effect<void>;
 } => {
   const held = new Map<string, Held>();
 
-  /** Lets go of a login, if it is still the one this instance is holding. */
   const forget = (instanceId: string, login: Held): Effect.Effect<void> =>
     Effect.suspend(() => {
       if (held.get(instanceId) !== login) return Effect.void;
@@ -151,7 +118,6 @@ export const logins = (
       return login.idle === undefined ? Effect.void : Fiber.interrupt(login.idle);
     });
 
-  /** Ends a login that is still running, whatever it is waiting for. */
   const stop = (instanceId: string, login: Held): Effect.Effect<void> =>
     Effect.suspend(() => {
       login.child.kill();
@@ -189,9 +155,8 @@ export const logins = (
       }).catch(() => undefined);
       const login: Held = {
         child,
-        // Three ways a URL stops being possible: it arrives, stdout ends, or the
-        // child is gone. Killing a child does not always end its pipes, so
-        // without the last one a replaced login waits for ever.
+        // Killing a child does not always end its pipes, so without `exited` a
+        // replaced login waits for ever.
         url: Promise.race([
           firstUrl,
           spent.then(() => undefined),
@@ -284,7 +249,6 @@ export const logins = (
   };
 };
 
-/** What a child that ran to the end says about the login it was driving. */
 const finished = (exit: number, transcript: string): LoginAnswer =>
   exit === 0
     ? { _tag: "loginResult", ok: true }

@@ -1,15 +1,6 @@
 /**
- * What the Sessions screen has to say on a fresh install.
- *
- * The screen is the rest of onboarding: it is the one place that says what
- * stands between the user and a thread. Which of the four things that is comes
- * from two answers - which machine this browser is on, and what that machine
- * last reported about the harnesses on it - so it is decided here rather than
- * in the component, where it could only be read by rendering it.
- *
- * It reads those answers through the same join the fleet's own rows use, so a
- * login this screen offers is one the runner page would also offer, and one it
- * cannot drive is never put in front of the user.
+ * What Sessions says before a thread exists. It reads the same join the fleet
+ * rows use, so a login offered here is one the runner page would offer too.
  */
 import type { ProviderInstance, Runner } from "@hydra/contract";
 import { providerRows } from "./provider-rows";
@@ -33,10 +24,8 @@ export const sessionsEmptyState = (
   if (localRunner === null || localRunner.connectivity !== "online") return { kind: "no-runner" };
 
   const rows = providerRows(localRunner, instances);
-  // One usable harness is what this screen is about; anything else still
-  // waiting is Fleet's business, and a "log in" headline over a working install
-  // would read as broken. The first one that answered is as good a one to name
-  // as any.
+  // A logged-in harness wins: a "log in" headline over a working install would
+  // read as broken.
   const ready = rows.find((row) => row.loggedIn);
   if (ready !== undefined) return { kind: "ready", name: ready.name };
 

@@ -302,9 +302,8 @@ export const ProbeResult = Schema.Struct({
 export type ProbeResult = Schema.Schema.Type<typeof ProbeResult>;
 
 /**
- * What correlates a request with its answer. Probes and installs for several
- * instances can be in flight on one connection at once, so every exchange
- * carries one of these rather than the connection holding a single slot.
+ * Correlates a request with its answer: several exchanges can be in flight on
+ * one connection.
  */
 const RequestId = Fact;
 
@@ -341,7 +340,6 @@ export const ProbeReport = Schema.Struct({
 
 export type ProbeReport = Schema.Schema.Type<typeof ProbeReport>;
 
-/** Asks the runner to put a provider's harness on the machine it is on. */
 export const InstallRequest = Schema.Struct({
   _tag: Schema.Literal("installRequest"),
   requestId: RequestId,
@@ -367,10 +365,9 @@ export const InstallResult = Schema.Struct({
 export type InstallResult = Schema.Schema.Type<typeof InstallResult>;
 
 /**
- * An authorize URL a vendor's login printed. Longer than a fact because an
- * OAuth URL carries a challenge and a redirect, and a URL cut short is a login
- * nobody can finish - which is why the bound is exported: the runner refuses a
- * longer one rather than relaying a broken link.
+ * An authorize URL a vendor's login printed. OAuth URLs carry a challenge and a
+ * redirect; exported because the runner refuses a longer one rather than
+ * relaying a link nobody can finish.
  */
 export const MAX_AUTHORIZE_URL_LENGTH = 2048;
 
@@ -390,7 +387,6 @@ export const LoginStart = Schema.Struct({
 
 export type LoginStart = Schema.Schema.Type<typeof LoginStart>;
 
-/** Hands the runner the code the user pasted back from their browser. */
 export const LoginCode = Schema.Struct({
   _tag: Schema.Literal("loginCode"),
   requestId: RequestId,

@@ -184,9 +184,8 @@ const eventRoutes = HttpApiBuilder.group(api, "event", (handlers) =>
 const runnerRoutes = HttpApiBuilder.group(api, "runner", (handlers) =>
   Effect.gen(function* () {
     const runners = yield* RunnerService;
-    // Two of this group's operations are about a machine's provider instances
-    // rather than about the machine, and the service that owns instances is
-    // the one that can answer them.
+    // Two of this group's operations are about a machine's provider instances,
+    // which are this service's, not the runner service's.
     const providers = yield* ProviderService;
     return handlers
       .handle("query", ({ query }) => operation(runners.query(query)))
@@ -262,15 +261,9 @@ const controllerRoutes = HttpApiBuilder.group(api, "controller", (handlers) =>
  * with a layer this list has and its own does not is a controller missing an
  * operation, and nothing would say so until a request asked for it.
  *
- * Four services an operation resolves are deliberately absent. `Plugins` and
- * `ProviderService` both read a host that holds what this process made of each
- * plugin, and the boot is what filled it in, so the two must be the same
- * object: building them here would hand the routes a second host that had never
- * loaded anything. `RunnerPresence` and `ProviderProbes` are absent for the
- * neighbouring reason: `runner.retire` closes the socket the socket route
- * registered, and the sweep after a hello writes through the same map, so a
- * second instance of either would be a service acting on connections nobody
- * has. All four are built beside the boot, and reach the handlers from there.
+ * Four are deliberately absent. `Plugins`, `ProviderService`, `RunnerPresence`
+ * and `ProviderProbes` must be the instances the boot built: a second one would
+ * hold no plugins, and no connections. They reach the handlers from there.
  */
 export const operationLayers = Layer.mergeAll(
   SetupLayer,

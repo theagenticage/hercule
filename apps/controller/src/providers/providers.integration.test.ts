@@ -1,11 +1,6 @@
 /**
- * Provider instances over a real HTTP server: what a boot leaves behind for
- * every provider the plugins registered, and what the four writes do on the
- * wire.
- *
- * The registry is fixture plugins rather than the shipped ones, so what the
- * listing carries is the definitions this file wrote and not whichever
- * providers the binary happens to compile in.
+ * The registry is fixture plugins, so the listing carries the definitions
+ * written here rather than whatever providers the binary compiles in.
  */
 import { describe, expect, it } from "vitest";
 import { Effect, Fiber } from "effect";
@@ -28,14 +23,9 @@ import {
 } from "../http/testing";
 import { fixture, providerDefinition } from "../plugins/testing";
 
-/**
- * Two providers, each with a config schema that requires `token` and a default
- * config that satisfies it.
- */
 const ALPHA = providerDefinition("alpha-provider", { token: "alpha-default" });
 const BETA = providerDefinition("beta-provider", { token: "beta-default" });
 
-/** A provider that holds a single account, which none of the shipped three do. */
 const SINGLE = {
   ...providerDefinition("single-provider", { token: "the-only-one" }),
   supportsMultipleInstances: false,
@@ -49,7 +39,6 @@ const registry = (): ReadonlyArray<Plugin> => [
 const withProviders = (body: (harness: ServerHarness) => Promise<void>): Promise<void> =>
   withServer(body, { plugins: registry() });
 
-/** A provider instance as the API hands it back. */
 interface ProviderInstance {
   readonly id: string;
   readonly providerId: string;
@@ -86,13 +75,11 @@ const create = (base: string, token: string, body: unknown): Promise<Response> =
 const patch = (base: string, token: string, id: string, body: unknown): Promise<Response> =>
   send("PATCH", base, `/api/v1/providers/${id}`, { body, token });
 
-/** The instance a create answered with. */
 const created = async (response: Response): Promise<ProviderInstance> => {
   expect(response.status, await response.clone().text()).toBe(200);
   return (await response.json()) as ProviderInstance;
 };
 
-/** The error body every refusal carries. */
 interface ApiError {
   readonly error: { readonly code: string; readonly message?: string; readonly details?: unknown };
 }
@@ -102,11 +89,6 @@ const refusal = async (response: Response, status: number): Promise<ApiError> =>
   return (await response.json()) as ApiError;
 };
 
-/**
- * The audit entries about provider instances, read straight off the log so the
- * assertion is "this write was audited by a user" and not a guess at the verb
- * the implementation named.
- */
 const providerAudit = (
   sql: ServerHarness["sql"],
 ): Promise<ReadonlyArray<{ readonly kind: string; readonly actor: string | null }>> =>
@@ -117,7 +99,6 @@ const providerAudit = (
     ),
   );
 
-/** The payload of the last provider entry in the log. */
 const lastProviderPayload = (sql: ServerHarness["sql"]): Promise<Record<string, unknown>> =>
   Effect.runPromise(
     Effect.orDie(
@@ -352,9 +333,8 @@ describe("what a live subscriber is told about a provider instance", () => {
           const providers = yield* collecting(client, { topic: "provider" });
           yield* Effect.promise(() => expectHeld(harness.live, 1, "provider"));
 
-          // Each announcement is waited for before the next write is made:
-          // changes are collected for a short window before they are
-          // announced, so two writes back to back would arrive as one message.
+          // Changes are coalesced over a short window, so two writes back to
+          // back would arrive as one message.
           const instance = yield* Effect.promise(() =>
             create(harness.base, token, {
               providerId: "alpha-provider",

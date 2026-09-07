@@ -1,10 +1,6 @@
 /**
- * Installing the Claude Code harness on the machine the runner is on.
- *
- * The installer is a shell pipeline that downloads and runs somebody else's
- * script, so it is reached through the same injected process seam the probe
- * uses: this file states which command the adapter runs and what it makes of an
- * installer that failed, without either downloading or running anything.
+ * Installing the Claude Code harness, over a stubbed process seam: nothing is
+ * downloaded or run.
  */
 import { describe, expect, it } from "vitest";
 import { Effect } from "effect";
@@ -18,7 +14,6 @@ const CONTEXT: ProviderRunnerContext = {
   env: { PATH: "/usr/local/bin:/usr/bin" },
 };
 
-/** A seam whose `run` answers with an exit and records the command it was given. */
 const seamRunning = (answer: {
   readonly code: number;
   readonly stdout?: string;
@@ -40,7 +35,6 @@ const seamRunning = (answer: {
   };
 };
 
-/** The command as a shell would read it, which is what the criterion names. */
 const asWritten = (command: ReadonlyArray<string>): string => command.join(" ");
 
 const install = (seam: ClaudeSeam) =>
@@ -56,9 +50,7 @@ describe("installing the Claude Code harness", () => {
     expect(commands).toHaveLength(1);
     const written = asWritten(commands[0]!);
     expect(written).toContain("curl -fsSL https://claude.ai/install.sh");
-    // Pinned to the floor: the version the SDK in this binary was built
-    // against, never "latest", or a machine could end up on a CLI this build
-    // has never talked to.
+    // Pinned to the version this build's SDK was made for, never "latest".
     expect(written).toContain(`bash -s ${CLAUDE_CODE_VERSION}`);
   });
 
@@ -73,8 +65,6 @@ describe("installing the Claude Code harness", () => {
     const outcome = await install(seam);
 
     expect(outcome.ok).toBe(false);
-    // The operator reads the installer's own words: "the install failed" is
-    // not something anybody can act on.
     expect(outcome.message ?? "").toContain("install.sh: could not download the manifest");
   });
 });

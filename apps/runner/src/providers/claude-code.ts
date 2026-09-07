@@ -1,15 +1,8 @@
 /**
- * The Claude Code adapter: the one file in Hydra that imports the vendor SDK.
- *
- * The probe is side-effect free on purpose. It starts a query with no prompt at
- * all and then asks the control protocol two questions, because a prompt that
- * yields makes a real API call at the same instant as the init message - which
- * would bill the user's account for looking at a Fleet page. It reads and
- * writes only the instance's own config directory, never the user's `~/.claude`.
- *
- * Everything the SDK and the machine can do is reached through `ClaudeSeam`, so
- * what this adapter makes of an answer can be stated without a login, a network
- * or a binary.
+ * The one file that imports the vendor SDK. The probe runs with no prompt and
+ * asks the control protocol instead: a prompt that yields would bill the user's
+ * account for opening a Fleet page. It touches only the instance's config
+ * directory, never the user's `~/.claude`.
  */
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -32,16 +25,12 @@ export const CLAUDE_CODE = "claude-code";
 
 const CLAUDE_BINARY = "claude";
 
-/**
- * Long enough for a cold CLI to start and answer, short enough that a Fleet
- * page waiting on it does not look hung.
- */
+/** Long enough for a cold CLI, short enough that a Fleet page does not look hung. */
 export const PROBE_DEADLINE: Duration.Duration = Duration.seconds(15);
 
 /** Downloading and running somebody else's installer over a slow link. */
 export const INSTALL_DEADLINE: Duration.Duration = Duration.minutes(5);
 
-/** What the adapter asks the harness, whoever is answering. */
 export interface ClaudeSession {
   readonly accountInfo: () => Promise<unknown>;
   readonly supportedModels: () => Promise<ReadonlyArray<unknown>>;
@@ -49,20 +38,17 @@ export interface ClaudeSession {
   readonly close: () => void;
 }
 
-/** The vendor SDK and the machine, as everything below them needs them. */
 export interface ClaudeSeam {
   readonly query: (params: { readonly options: Options }) => ClaudeSession;
   readonly run: Run;
 }
 
-/** What `accountInfo()` answers with, as much of it as a snapshot carries. */
 interface Account {
   readonly email?: string;
   readonly subscriptionType?: string;
   readonly apiProvider?: string;
 }
 
-/** What one row of `supportedModels()` says. */
 interface Model {
   readonly value: string;
   readonly displayName: string;
@@ -79,10 +65,7 @@ const DEFAULT_EFFORT = "medium";
 /** Cut to what the protocol carries; one over-long value would fail the report. */
 const fact = (value: string): string => value.slice(0, MAX_FACT_LENGTH);
 
-/**
- * Whatever went wrong, in something the protocol will carry: `Fact` refuses an
- * empty string, and an `Error` with an empty message is a real thing to catch.
- */
+/** `Fact` refuses an empty string, and an `Error` can carry an empty message. */
 const describe = (error: unknown): string => {
   const said = fact(error instanceof Error ? error.message : String(error));
   return said === "" ? "the harness failed without saying why" : said;
@@ -117,9 +100,8 @@ const FAST_MODE: ModelOption = {
 };
 
 /**
- * Models the CLI has stopped listing but still forwards to the API unchanged.
- * Their options are hand-authored because there is no longer a row describing
- * them; retiring one is deleting a line here in a release.
+ * Models the CLI no longer lists but still forwards to the API. Options are
+ * hand-authored because no row describes them any more.
  */
 const LEGACY_MODELS: ReadonlyArray<ModelDescriptor> = [
   {
@@ -136,11 +118,7 @@ const LEGACY_MODELS: ReadonlyArray<ModelDescriptor> = [
   },
 ];
 
-/**
- * One row as the composer reads it. Only the choices the CLI says that model
- * accepts become options: adaptive thinking is reported as a property of the
- * model rather than as something a user picks, so it is not one.
- */
+/** Adaptive thinking is a property of the model, not a choice, so it is no option. */
 const descriptorOf = (model: Model): ModelDescriptor => {
   const options: Array<ModelOption> = [];
   const levels = model.supportedEffortLevels ?? [];
@@ -158,16 +136,11 @@ const descriptorOf = (model: Model): ModelDescriptor => {
 };
 
 /**
- * The probed catalog, then the legacy overlay for whatever it did not list. A
- * probed row always wins: it is what the harness on this machine will really
- * offer, and the overlay is only what it has stopped describing.
- *
- * Cut to what the protocol carries, because a catalog that will not encode is a
- * machine that reports nothing at all rather than one that reports a long list.
+ * A probed row wins over the overlay: it is what this machine will really offer.
+ * Cut to what the protocol carries, or the whole report fails to encode.
  */
 const catalogOf = (models: ReadonlyArray<Model>): ReadonlyArray<ModelDescriptor> => {
-  // A row the CLI named with nothing is a row nothing can select, and the
-  // protocol will not carry an empty slug or name.
+  // The protocol will not carry an empty slug or name.
   const probed = models
     .filter((model) => model.value !== "" && model.displayName !== "")
     .map(descriptorOf);
@@ -190,11 +163,7 @@ const authOf = (account: Account): ProbeResult["auth"] =>
         ...(account.apiProvider === undefined ? {} : { backend: fact(account.apiProvider) }),
       };
 
-/**
- * What every way of running the harness is started with. `HOME` is left exactly
- * as it was: overriding it points the CLI at another account's credential and
- * makes it report that one as this instance's.
- */
+/** `HOME` is left alone: overriding it makes the CLI report another account's login. */
 const envFor = (ctx: ProviderRunnerContext): Record<string, string | undefined> => ({
   ...ctx.env,
   CLAUDE_CONFIG_DIR: ctx.home,
@@ -204,11 +173,9 @@ const envFor = (ctx: ProviderRunnerContext): Record<string, string | undefined> 
 });
 
 /**
- * The one shape the SDK is started with. `settingSources: []` and
- * `strictMcpConfig` keep the user's own settings and MCP servers out of a run
- * that is only meant to read two facts, and `persistSession: false` keeps it
- * from leaving a session behind - though the CLI writes into the config
- * directory regardless, which is why that directory is the instance's own.
+ * The user's own settings and MCP servers stay out of a run that only reads two
+ * facts. The CLI writes into the config directory regardless, which is why that
+ * directory is the instance's own.
  */
 const optionsFor = (ctx: ProviderRunnerContext, binary: string): Options => ({
   pathToClaudeCodeExecutable: binary,
@@ -229,14 +196,11 @@ export const claudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
   const versionOf = (ctx: ProviderRunnerContext, binary: string): Effect.Effect<string | null> =>
     Effect.map(seam.run([binary, "--version"], envFor(ctx)), (ran) => {
       if (ran.code !== 0) return null;
-      // Whatever the binary prints is its own business, so an unrecognisable
-      // answer goes raw - but an empty one is not a version, and the protocol
-      // will not carry it.
+      // An unrecognisable version goes raw; an empty one the protocol will not carry.
       const printed = fact(SEMVER.exec(ran.stdout)?.[0] ?? ran.stdout.trim());
       return printed === "" ? null : printed;
     });
 
-  /** Both questions over one query, and the query closed however they went. */
   const ask = (
     ctx: ProviderRunnerContext,
     binary: string,
@@ -289,10 +253,8 @@ export const claudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
     },
 
     /**
-     * The vendor's paste-a-code login, against this instance's own config
-     * directory. `BROWSER` is a command that fails on purpose: a launch that
-     * succeeds makes the CLI switch to a `localhost` callback, which a browser
-     * on any other machine can never reach.
+     * `BROWSER` fails on purpose: a successful launch makes the CLI switch to a
+     * `localhost` callback, which a browser on another machine cannot reach.
      */
     login: (ctx: ProviderRunnerContext, binary: string): LoginCommand => ({
       command: [binary, "auth", "login"],
@@ -300,9 +262,8 @@ export const claudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
     }),
 
     /**
-     * The vendor's own installer, pinned to the CLI this build's SDK talks to.
-     * The script always downloads the latest binary first and then installs the
-     * version it was asked for, so a pin still needs the network.
+     * Pinned to the CLI this build's SDK talks to. The script needs the network
+     * even so.
      */
     install: (env: Readonly<Record<string, string | undefined>>): Effect.Effect<InstallOutcome> =>
       Effect.map(
@@ -331,7 +292,6 @@ export const claudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
   };
 };
 
-/** What an operator needs off a failed installer: what it was saying at the end. */
 const LAST_LINES = 5;
 
 const lastLines = (output: string): string => {
@@ -341,7 +301,6 @@ const lastLines = (output: string): string => {
     : said.slice(-MAX_INSTALL_MESSAGE_LENGTH);
 };
 
-/** The adapter as it ships: the real SDK, and real child processes. */
 export const claudeCode: ProviderAdapter = claudeCodeAdapter({
   query: ({ options }) => {
     const session: Query = sdkQuery({ prompt: noPrompt(), options });
@@ -349,10 +308,8 @@ export const claudeCode: ProviderAdapter = claudeCodeAdapter({
       accountInfo: () => session.accountInfo(),
       supportedModels: () => session.supportedModels(),
       close: () => {
-        // Ending the query waits on the CLI child, which rejects when the
-        // transport is already gone - the very case `close` runs in after a
-        // crash or a deadline. An unhandled rejection would take the whole
-        // daemon down over one bad probe.
+        // The child is usually already gone when close runs, and the rejection
+        // would take the daemon down over one bad probe.
         session.return(undefined).catch(() => undefined);
       },
     };

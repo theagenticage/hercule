@@ -1,12 +1,6 @@
 /**
- * The verdict the controller puts on a harness version a runner reported.
- *
- * The floor is a compatibility number, not a policy: the SDK compiled into this
- * binary talks to the CLI it was built against and to anything newer, so the
- * floor is that CLI's version and it is also the newest one anybody has tested.
- * It moves when the dependency moves, which is a reviewed change - so this file
- * also states that the number lives in one generated place and is written down
- * nowhere else in the source.
+ * The floor is the CLI version the compiled-in SDK was built against - the
+ * newest anybody tested, not a policy. It moves only when the dependency moves.
  */
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
@@ -17,8 +11,6 @@ const root = fileURLToPath(new URL("../../../../", import.meta.url));
 
 describe("the verdict on a harness version", () => {
   it("says nothing with no version to read, or no floor to read it against", () => {
-    // Codex and pi have no adapter in this build and no tested version, so a
-    // version they report is a fact with nothing to compare it against.
     expect(versionVerdict(null, "2.1.263")).toBe("unknown");
     expect(versionVerdict("1.2.3", null)).toBe("unknown");
     expect(versionVerdict(null, null)).toBe("unknown");
@@ -46,9 +38,6 @@ describe("the verdict on a harness version", () => {
   });
 
   it("says nothing about a version it cannot read as one", () => {
-    // What `--version` prints is the binary's business, so an answer nobody can
-    // compare is a fact with nothing to compare it against rather than a
-    // machine refused.
     expect(versionVerdict("nightly", "2.1.263")).toBe("unknown");
     expect(versionVerdict("2.1", "2.1.263")).toBe("unknown");
   });
@@ -62,10 +51,8 @@ describe("the floor each provider is held to", () => {
   });
 
   it("is written down in one generated file and nowhere else in the source", () => {
-    // A second copy is a number that silently stops matching the dependency the
-    // day the dependency moves. Fixtures, whether in a test file or in one a
-    // test reads, are not the source the rule is about, so they are excluded
-    // rather than counted.
+    // Fixtures in test files are not the source this rule is about, so they
+    // are excluded.
     const found = Bun.spawnSync({
       cmd: [
         "bash",

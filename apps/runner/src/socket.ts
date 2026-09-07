@@ -201,8 +201,7 @@ export const connect = (
     );
     const write = yield* socket.writer;
     // A probe or an install outlives the frame that asked for it, so it is
-    // forked into the connection's own scope rather than into the fiber the
-    // transport made for that frame - which ends the moment the frame is read.
+    // forked into the connection's scope, not the transport's per-frame fiber.
     const connection = yield* Effect.scope;
 
     const nonce = base64(crypto.getRandomValues(new Uint8Array(NONCE_BYTES)));
@@ -220,21 +219,16 @@ export const connect = (
         yield* write(new Socket.CloseEvent(PROTOCOL_ERROR, "unrecognised controller"));
       });
 
-    /** Probes the machine, remembers what it found and sends it. */
     const reportFacts = Effect.tap(options.probe, (probed) =>
       Effect.sync(() => {
         facts = probed;
       }),
     );
 
-    /** Where the harness a provider drives is on this machine, if it is at all. */
     const binaryOf = (binaryName: string): string | undefined =>
       facts.providers.find((provider) => provider.name === binaryName && provider.present)?.path;
 
-    /**
-     * One instance's own config directory, made on first use and readable by
-     * nobody else: it is where the harness keeps that account's credential.
-     */
+    /** The instance's private directory: where the harness keeps its credential. */
     const contextFor = (adapter: ProviderAdapter, instanceId: string): ProviderRunnerContext => {
       const home = joinPath(options.providersDir, instanceId);
       mkdirSync(home, { recursive: true, mode: 0o700 });
@@ -242,10 +236,8 @@ export const connect = (
     };
 
     /**
-     * What went wrong, in one line. A defect here - a config directory that
-     * cannot be made, a vendor library that threw where its types said it would
-     * not - is something the user can act on, and saying nothing would leave the
-     * controller waiting out its deadline for an answer this machine has.
+     * What went wrong, in one line. Saying nothing about a defect would leave
+     * the controller waiting out its deadline for an answer this machine has.
      */
     const wentWrong = (cause: Cause.Cause<unknown>): string =>
       (Cause.pretty(cause).split("\n")[0] ?? "").slice(0, MAX_FACT_LENGTH) ||
@@ -269,10 +261,9 @@ export const connect = (
             : yield* adapter.probe(contextFor(adapter, request.instanceId), request.config),
         );
       }).pipe(
-        // The encoding is inside this, not after it: a result the protocol will
-        // not carry throws in `asText`, and that must reach the controller as an
-        // error rather than as the silence it waits its whole deadline out for.
-        // Everything the fallback carries is already bounded, so it encodes.
+        // The encoding is inside the catch: a result `asText` cannot carry must
+        // reach the controller as an error, not as silence. The fallback is
+        // bounded, so it always encodes.
         Effect.catchCause((cause) => Effect.ignore(reporting(probeFailed(wentWrong(cause))))),
         // The connection is going if the write itself failed, and there is
         // nowhere left to report that to.
@@ -313,9 +304,8 @@ export const connect = (
     };
 
     /**
-     * One half of a login: the URL the vendor printed, or how the code the user
-     * pasted back went. The child holding both is the runner's rather than this
-     * connection's, so a socket that drops in between does not end the exchange.
+     * One half of a login. The child holding both belongs to the runner, not
+     * this connection, so a socket dropping in between does not end it.
      */
     const answerLogin = (requestId: string, answering: Effect.Effect<LoginAnswer>) => {
       const reporting = (answer: LoginAnswer) => write(asText({ ...answer, requestId }));
@@ -389,8 +379,6 @@ export const connect = (
           return yield* Effect.asVoid(Effect.forkIn(answerInstall(message), connection));
         }
         if (message._tag === "loginStart") {
-          // Forked for the same reason a probe is: the user is at a browser,
-          // and the connection has to keep answering while they are.
           return yield* Effect.asVoid(
             Effect.forkIn(answerLogin(message.requestId, startingLogin(message)), connection),
           );

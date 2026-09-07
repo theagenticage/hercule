@@ -1,16 +1,11 @@
 /**
- * One machine and its provider instances, for the two tests that read them.
- *
- * Test-only and not exported from the package index. Both `providerRows` and
- * `sessionsEmptyState` answer questions about the same three things - a local
- * runner, the instances it was asked about, and what it last reported - so they
- * arrange them the same way rather than each writing its own machine out.
+ * Test-only, not exported from the package index. `providerRows` and
+ * `sessionsEmptyState` read the same machine, so they share one arrangement of it.
  */
 import type { ProviderInstance, Runner } from "@hydra/contract";
 
 const GIB = 1024 * 1024 * 1024;
 
-/** The machine this browser is on, with no harness on it yet. */
 export const BARE: Runner = {
   id: "01a06d02-beff-7037-9f5b-042822015952",
   name: "moss",
@@ -38,7 +33,6 @@ export const BARE: Runner = {
   lastSeenAt: "2026-09-05T09:14:00.000Z",
 };
 
-/** The same machine with the Claude harness on it. */
 export const WITH_CLAUDE: Runner = {
   ...BARE,
   facts: {
@@ -66,7 +60,6 @@ const DECLARED: ProviderInstance["declared"] = {
   structuredOutput: "supported",
 };
 
-/** One account of a provider. One per provider is all either question needs. */
 export const instance = (
   providerId: string,
   displayName: string,
@@ -84,7 +77,7 @@ export const instance = (
   updatedAt: "2026-09-05T09:00:00.000Z",
 });
 
-/** What that machine last reported about one instance; logged in unless said. */
+/** What the machine last reported about one instance; logged in unless overridden. */
 export const snapshot = (
   fields: Partial<ProviderInstance["snapshots"][number]> = {},
 ): ProviderInstance["snapshots"][number] => ({

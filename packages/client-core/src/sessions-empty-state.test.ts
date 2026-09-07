@@ -2,15 +2,12 @@ import { describe, expect, it } from "vitest";
 import { sessionsEmptyState } from "./sessions-empty-state";
 import { BARE, instance, snapshot, WITH_CLAUDE } from "./providers.fixture";
 
-/** A machine that has the harness and has never been logged in on it. */
 const waiting = instance("claude-code", "Claude Code", [
   snapshot({ auth: { status: "unauthenticated" } }),
 ]);
 
-/** The same instance, logged in. */
 const loggedIn = instance("claude-code", "Claude Code", [snapshot()]);
 
-/** A provider this runner build cannot drive at all. */
 const undrivable = instance("codex", "Codex", [
   snapshot({
     auth: { status: "error", message: "no adapter for codex in this runner build" },
@@ -42,9 +39,8 @@ describe("sessionsEmptyState", () => {
   });
 
   it("still offers the login when the last probe of a harness that is here failed", () => {
-    // A probe that timed out says nothing about whether the harness can be
-    // logged in, and telling the user to install what is already there would
-    // send them nowhere.
+    // A failed probe does not mean the harness is missing; an install prompt
+    // would send the user nowhere.
     const stale = instance("claude-code", "Claude Code", [
       snapshot({
         auth: { status: "error", message: "the harness did not answer within 15s" },
