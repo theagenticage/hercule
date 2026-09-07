@@ -199,6 +199,8 @@ The session environment rides `ctx.env` (resolved 2026-08-31, [#43](https://gith
 
 The Hydra session id and the provider-native id are separate concepts joined explicitly by `SessionBinding`. `startSession` returns the binding once the native id is known (Claude: init message; Codex: `thread/started`; pi: session file created). The controller stores `nativeSessionId` on the Session record ([./02-domain-model.md](./02-domain-model.md)) and passes it back in `continue` for resume and fork.
 
+Amended 2026-09-07 ([#65](https://github.com/rogierpennink/hydra/issues/65)): on Claude the native id is **minted by the adapter and passed as `options.sessionId`**, not read off the init message, because the CLI in streaming-input mode emits nothing at all - `init` included - until a first turn arrives, so a `startSession` that waited for it would block until somebody sent input. The two ids stay separate concepts joined only by `SessionBinding`; only where the native one comes from changes, and Codex and pi keep reading theirs off `thread/started` and the session file.
+
 - A session is pinned to the runner where it starts (ADR 0002). Resume and fork target the same runner and the same instance.
 - `listSessions()` enumerates the adapter's live and resumable sessions after a runner restart; the runner reconciles them against the controller's Session records over the runner protocol. Sessions the runner cannot account for are marked exited with `reason: "runner_restart"`.
 - If a runner dies unrecoverably, its sessions' resumability dies with it; history survives in the controller's normalized stream. Accepted v1 trade.
