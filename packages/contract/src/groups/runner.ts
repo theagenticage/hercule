@@ -10,6 +10,7 @@
  */
 import { Schema } from "effect";
 import { Capabilities, Fact, RunnerFacts, RunnerWatermark } from "@hydra/protocol";
+import { CapabilitySnapshot } from "./provider";
 import * as HttpApiEndpoint from "effect/unstable/httpapi/HttpApiEndpoint";
 import * as HttpApiGroup from "effect/unstable/httpapi/HttpApiGroup";
 import * as HttpApiSchema from "effect/unstable/httpapi/HttpApiSchema";
@@ -206,6 +207,18 @@ export const runner = HttpApiGroup.make("runner")
     }),
     HttpApiEndpoint.post("refreshFacts", "/runners/:id/refresh-facts", {
       params: { id: Id },
+      success: RunnerDetail,
+      error: [Unauthenticated, Forbidden, Validation, NotFound, InvalidState, Internal],
+    }),
+    HttpApiEndpoint.post("probe", "/runners/:id/probe", {
+      params: { id: Id },
+      payload: Schema.Struct({ instanceId: Id }),
+      success: CapabilitySnapshot,
+      error: [Unauthenticated, Forbidden, Validation, NotFound, InvalidState, Internal],
+    }),
+    HttpApiEndpoint.post("installHarness", "/runners/:id/install-harness", {
+      params: { id: Id },
+      payload: Schema.Struct({ providerId: Schema.String }),
       success: RunnerDetail,
       error: [Unauthenticated, Forbidden, Validation, NotFound, InvalidState, Internal],
     }),

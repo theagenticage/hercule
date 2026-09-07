@@ -35,6 +35,7 @@ const HETZNER: Fixture = {
     docker: false,
     toolchains: [{ name: "git", version: "2.43.0", path: "/usr/bin/git" }],
     providers: [],
+    adapters: ["claude-code"],
     identityPort: 5000,
   },
   watermark: { diskFreeBytes: 42 * GIB, availableMemoryBytes: 4 * GIB, acceptingPlacements: false },

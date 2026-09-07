@@ -36,6 +36,7 @@ const REPORTED: Runner = {
       { name: "codex", present: false },
       { name: "pi", present: true },
     ],
+    adapters: ["claude-code"],
     identityPort: 4939,
   },
   watermark: {

@@ -57,6 +57,10 @@ export const AUDIT_KINDS = [
   "plugin.retried",
   "plugin.stateReset",
   "plugin.errored",
+  "provider.created",
+  "provider.updated",
+  "provider.deleted",
+  "provider.loggedIn",
 ] as const;
 
 export type AuditKind = (typeof AUDIT_KINDS)[number];
@@ -84,6 +88,10 @@ const RECORD_KINDS = {
   "plugin.retried": "updated",
   "plugin.stateReset": "updated",
   "plugin.errored": "updated",
+  "provider.created": "created",
+  "provider.updated": "updated",
+  "provider.deleted": "deleted",
+  "provider.loggedIn": "updated",
 } as const satisfies Partial<Record<AuditKind, InvalidateKind>>;
 
 type RecordAuditKind = keyof typeof RECORD_KINDS;

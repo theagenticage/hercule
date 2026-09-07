@@ -41,9 +41,13 @@ export interface Answer {
  */
 export type Handler = Answer | ((call: Call) => Answer | Promise<Answer>);
 
-/** The error envelope, in the shape the API sends it. */
+/** The error envelope as the API sends it; only a `validation` refusal carries issues. */
 export const envelope = (code: string, message: string): { error: unknown } => ({
-  error: { code, message },
+  error: {
+    code,
+    message,
+    ...(code === "validation" ? { details: { issues: [{ path: [], message }] } } : {}),
+  },
 });
 
 /**

@@ -47,6 +47,7 @@ import { responseFor, withEnvelope } from "./envelope";
 import { setupGate } from "./gate";
 import { AuthenticatedLayer, SetupTokenLayer } from "./middleware";
 import { LiveSocketLayer } from "../live";
+import { ProviderProbes } from "../providers";
 import { RunnerJoinRouteLayer, RunnerPresence, RunnerSocketRouteLayer } from "../runners";
 import { handlerLayers } from "./routes";
 import { withWebBundle, type WebBundle } from "./static";
@@ -181,5 +182,9 @@ export const serve = (bundle: WebBundle | undefined) =>
     // runner off `online` is the connection that put it there.
     const presence = yield* RunnerPresence;
     yield* Effect.orDie(presence.strandedByTheLastRun);
+    // Forked before the listener binds, and the arrivals replay covers the rest
+    // of the gap, so no machine says hello unheard. The tick is there because a
+    // login expires and a harness is upgraded outside Hydra.
+    yield* Effect.forkScoped(Effect.flatMap(ProviderProbes, (probes) => probes.driving));
     yield* Effect.flatMap(application(bundle), HttpServer.serveEffect());
   });

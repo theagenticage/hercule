@@ -51,6 +51,7 @@ export const MUTABLE_LIVE_TOPICS = [
   "notification",
   "runner",
   "plugin",
+  "provider",
 ] as const;
 
 /**

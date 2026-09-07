@@ -31,6 +31,7 @@ export const providerDefinition = (
 ): ProviderDefinition => ({
   id,
   displayName: `Provider ${id}`,
+  binaryName: "harness",
   supportsMultipleInstances: true,
   configSchema: Schema.Struct({ token: Schema.String }),
   defaultConfig,

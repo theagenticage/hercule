@@ -29,6 +29,7 @@ export const queryKeys = {
   runner: (id?: string): LiveQueryKey => (id === undefined ? ["runner"] : ["runner", id]),
   joinTokens: (): LiveQueryKey => ["join-tokens"],
   plugins: (): LiveQueryKey => ["plugins"],
+  providers: (): LiveQueryKey => ["providers"],
   controller: (): LiveQueryKey => ["controller"],
   /** Keyed on the loopback endpoints it asks, because that is what it depends on. */
   localRunner: (endpoints: ReadonlyArray<string>): LiveQueryKey => ["local-runner", endpoints],
@@ -60,5 +61,8 @@ export const queryKeysFor = (
   // The plugin set is fixed at build time and read as one listing, so which
   // plugin changed narrows nothing.
   if (topic === "plugin") return [queryKeys.plugins()];
+  // Provider instances are read as one listing - there is one per shipped
+  // provider - so which instance changed narrows nothing.
+  if (topic === "provider") return [queryKeys.providers()];
   return [];
 };

@@ -36,12 +36,8 @@ import { Plugins } from "../plugins";
 import { Secret, SecretLayer } from "../secrets";
 import { SettingsOperations, SettingsOperationsLayer } from "../settings";
 import { ProjectService, ProjectServiceLayer } from "../projects";
-import {
-  RunnerJoinLayer,
-  RunnerPresenceLayer,
-  RunnerService,
-  RunnerServiceLayer,
-} from "../runners";
+import { ProviderService } from "../providers";
+import { RunnerJoinLayer, RunnerService, RunnerServiceLayer } from "../runners";
 import { Setup, SetupLayer } from "../setup";
 import { TaskService, TaskServiceLayer } from "../tasks";
 import { User, UserLayer } from "../users";
@@ -188,6 +184,9 @@ const eventRoutes = HttpApiBuilder.group(api, "event", (handlers) =>
 const runnerRoutes = HttpApiBuilder.group(api, "runner", (handlers) =>
   Effect.gen(function* () {
     const runners = yield* RunnerService;
+    // Two of this group's operations are about a machine's provider instances,
+    // which are this service's, not the runner service's.
+    const providers = yield* ProviderService;
     return handlers
       .handle("query", ({ query }) => operation(runners.query(query)))
       .handle("read", ({ params }) => operation(runners.read(params)))
@@ -200,6 +199,12 @@ const runnerRoutes = HttpApiBuilder.group(api, "runner", (handlers) =>
         operation(runners.retire({ id: params.id, ...payload })),
       )
       .handle("refreshFacts", ({ params }) => operation(runners.refreshFacts(params)))
+      .handle("probe", ({ params, payload }) =>
+        operation(providers.probe({ runnerId: params.id, ...payload })),
+      )
+      .handle("installHarness", ({ params, payload }) =>
+        operation(providers.installHarness({ runnerId: params.id, ...payload })),
+      )
       .handle("createJoinToken", () => operation(runners.createJoinToken()))
       .handle("queryJoinTokens", () => operation(runners.queryJoinTokens()))
       .handle("revokeJoinToken", ({ params }) => operation(runners.revokeJoinToken(params)));
@@ -222,6 +227,26 @@ const pluginRoutes = HttpApiBuilder.group(api, "plugin", (handlers) =>
   }),
 );
 
+const providerRoutes = HttpApiBuilder.group(api, "provider", (handlers) =>
+  Effect.gen(function* () {
+    const providers = yield* ProviderService;
+    return handlers
+      .handle("query", () => operation(providers.query()))
+      .handle("read", ({ params }) => operation(providers.read(params)))
+      .handle("create", ({ payload }) => operation(providers.create(payload)))
+      .handle("update", ({ params, payload }) =>
+        operation(providers.update({ id: params.id, ...payload })),
+      )
+      .handle("delete", ({ params }) => operation(providers.delete(params)))
+      .handle("login", ({ params, payload }) =>
+        operation(providers.login({ id: params.id, ...payload })),
+      )
+      .handle("submitLoginCode", ({ params, payload }) =>
+        operation(providers.submitLoginCode({ id: params.id, ...payload })),
+      );
+  }),
+);
+
 const controllerRoutes = HttpApiBuilder.group(api, "controller", (handlers) =>
   Effect.gen(function* () {
     const controller = yield* Controller;
@@ -232,22 +257,13 @@ const controllerRoutes = HttpApiBuilder.group(api, "controller", (handlers) =>
 );
 
 /**
- * One presence, shared. `runner.retire` closes the socket the runner is holding
- * through the same per-runner map the socket route registers in, so a second
- * instance would be a service hanging up on connections nobody has.
- */
-const RunnerLayers = RunnerServiceLayer.pipe(Layer.provideMerge(RunnerPresenceLayer));
-
-/**
  * Every service an operation resolves. One list, because a controller booting
  * with a layer this list has and its own does not is a controller missing an
  * operation, and nothing would say so until a request asked for it.
  *
- * One operation service is deliberately absent. `Plugins` reads a host that
- * holds what this process made of each plugin, and the boot is what filled it
- * in, so the two must be the same object: building it here would hand the
- * routes a second host that had never loaded anything. It is built beside the
- * boot instead, and reaches the handlers from there.
+ * Four are deliberately absent. `Plugins`, `ProviderService`, `RunnerPresence`
+ * and `ProviderProbes` must be the instances the boot built: a second one would
+ * hold no plugins, and no connections. They reach the handlers from there.
  */
 export const operationLayers = Layer.mergeAll(
   SetupLayer,
@@ -260,7 +276,7 @@ export const operationLayers = Layer.mergeAll(
   ProfilesLayer,
   TaskServiceLayer,
   ProjectServiceLayer,
-  RunnerLayers,
+  RunnerServiceLayer,
   RunnerJoinLayer,
   EventServiceLayer,
   LiveTopicsLayer,
@@ -282,4 +298,5 @@ export const handlerLayers = Layer.mergeAll(
   eventRoutes,
   runnerRoutes,
   pluginRoutes,
+  providerRoutes,
 );

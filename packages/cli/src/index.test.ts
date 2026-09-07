@@ -384,6 +384,42 @@ describe("id tails", () => {
     expect(fetch.calls[0]?.path).toBe(`/api/v1/profiles/${id("aaaaaaa1")}`);
   });
 
+  it("resolves a tail against a listing that answers with the whole set", async () => {
+    // A provider instance listing is the whole set rather than a page, because
+    // there is one instance per provider and a handful of providers.
+    const instance = {
+      id: id("cccccccc"),
+      providerId: "claude-code",
+      name: "Claude Code",
+      config: {},
+      displayName: "Claude Code",
+      binaryName: "claude",
+      declared: {
+        steering: "native",
+        fork: "native",
+        modelSwitch: "in-session",
+        accessModes: {
+          "approval-required": "native",
+          "auto-accept-edits": "native",
+          auto: "native",
+          "full-access": "native",
+        },
+        mcpPassthrough: "native",
+        disallowedTools: "native",
+        structuredOutput: "supported",
+      },
+      snapshots: [],
+      createdAt: "2026-09-07T00:00:00.000Z",
+      updatedAt: "2026-09-07T00:00:00.000Z",
+    };
+    const fetch = stubFetch((request) =>
+      request.path === "/api/v1/providers" && request.method === "GET" ? [instance] : instance,
+    );
+    const stub = io(fetch);
+    expect(await main(["--home", home, "provider", "read", "cccccccc", "--json"], stub)).toBe(0);
+    expect(fetch.calls[1]?.path).toBe(`/api/v1/providers/${id("cccccccc")}`);
+  });
+
   it("reports conflict when a tail matches more than one id", async () => {
     const fetch = stubFetch(() => ({
       items: [

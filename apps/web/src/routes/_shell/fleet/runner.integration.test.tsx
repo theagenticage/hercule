@@ -7,7 +7,7 @@
  * to sending nothing until that question is answered.
  */
 import { describe, expect, it } from "vitest";
-import { screen, waitFor, within } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { formatStamp } from "@hydra/client-core";
 import { envelope, renderApp, stubApi, type Call, type Handler } from "../../../app/testing";
@@ -22,14 +22,98 @@ const ONLINE: Fixture = { ...MOSS, connectivity: "online" };
 /** A machine the controller has lost: retiring it is the case that forces. */
 const LOST: Fixture = { ...MOSS, connectivity: "unreachable" };
 
+const BARE: Fixture = {
+  ...ONLINE,
+  facts: { ...ONLINE.facts!, providers: [{ name: "claude", present: false }] },
+};
+
+/** What every provider declares about itself; none of it is this page's subject. */
+const DECLARED = {
+  steering: "native",
+  fork: "native",
+  modelSwitch: "in-session",
+  accessModes: {
+    "approval-required": "native",
+    "auto-accept-edits": "native",
+    auto: "native",
+    "full-access": "native",
+  },
+  mcpPassthrough: "native",
+  disallowedTools: "native",
+  structuredOutput: "supported",
+} as const;
+
+interface Snapshot {
+  readonly runnerId: string;
+  readonly probedAt: string;
+  readonly harnessVersion: string | null;
+  readonly versionVerdict: string;
+  readonly auth: Readonly<Record<string, string>>;
+  readonly models: ReadonlyArray<{ slug: string; name: string; options: readonly never[] }>;
+}
+
+const instance = (
+  id: string,
+  providerId: string,
+  displayName: string,
+  snapshots: readonly Snapshot[],
+) => ({
+  id,
+  providerId,
+  name: displayName,
+  config: {},
+  displayName,
+  binaryName: providerId === "claude-code" ? "claude" : providerId,
+  declared: DECLARED,
+  snapshots,
+  createdAt: "2026-09-05T09:00:00.000Z",
+  updatedAt: "2026-09-05T09:00:00.000Z",
+});
+
+const model = (slug: string, name: string) => ({ slug, name, options: [] as const });
+
+const snapshot = (fields: Partial<Snapshot> & Pick<Snapshot, "auth">): Snapshot => ({
+  runnerId: MOSS.id,
+  probedAt: "2026-09-05T09:14:00.000Z",
+  harnessVersion: "2.1.263",
+  versionVerdict: "ok",
+  models: [model("default", "Default"), model("claude-opus-4-8", "Opus 4.8")],
+  ...fields,
+});
+
+const LOGGED_IN = snapshot({
+  auth: { status: "ok", identity: "rogier@example.com", planLabel: "Claude Max" },
+});
+
+const NOT_LOGGED_IN = snapshot({ auth: { status: "unauthenticated" }, models: [] });
+
+const NO_ADAPTER = snapshot({
+  harnessVersion: null,
+  versionVerdict: "unknown",
+  auth: { status: "error", message: "no adapter for codex in this runner build" },
+  models: [],
+});
+
+const CLAUDE_ID = "01a06d02-1000-7000-8000-000000000001";
+const CODEX_ID = "01a06d02-1000-7000-8000-000000000002";
+
+const claudeCode = (snapshots: readonly Snapshot[]) =>
+  instance(CLAUDE_ID, "claude-code", "Claude Code", snapshots);
+
+const CODEX = instance(CODEX_ID, "codex", "Codex", [NO_ADAPTER]);
+
+const INSTANCES = [claudeCode([LOGGED_IN]), CODEX];
+
 /** A controller answering for itself, for the runner given, and for its writes. */
 const controller = (
   runner: Fixture,
   options: {
     readonly defaultRunnerId?: string | null;
+    readonly instances?: ReadonlyArray<ReturnType<typeof instance>>;
     readonly extra?: Readonly<Record<string, Handler>>;
   } = {},
 ): Readonly<Record<string, Handler>> => ({
+  "GET /api/v1/providers": { body: options.instances ?? INSTANCES },
   "GET /api/v1/setup": { body: { complete: true } },
   "GET /api/v1/settings": {
     body: {
@@ -53,6 +137,7 @@ const open = async (
   runner: Fixture,
   options: {
     readonly defaultRunnerId?: string | null;
+    readonly instances?: ReadonlyArray<ReturnType<typeof instance>>;
     readonly extra?: Readonly<Record<string, Handler>>;
   } = {},
 ) => {
@@ -454,5 +539,166 @@ describe("Runner > retiring", () => {
     for (const move of [/^drain$/i, /^undrain$/i, /^retire$/i, /refresh facts/i]) {
       expect(page.queryByRole("button", { name: move }), `${String(move)} is offered`).toBeNull();
     }
+  });
+});
+
+describe("Runner > providers", () => {
+  const AUTHORIZE_URL = "https://claude.ai/oauth/authorize?code=challenge";
+
+  const INVALID = "Invalid code. Please make sure the full code was copied.";
+
+  const row = (name: string): Promise<HTMLElement> => screen.findByRole("group", { name });
+
+  const claudeRow = () => row("Claude Code");
+
+  it("says what each instance last reported on this machine", async () => {
+    await open(ONLINE);
+
+    const claude = reading(await claudeRow());
+    expect(claude).toContain("2.1.263");
+    expect(claude).toContain("rogier@example.com");
+    expect(claude).toContain("Claude Max");
+    expect(claude).toMatch(/2 models/i);
+    // A version the build was tested against is remarked on with nothing at all.
+    expect(claude).not.toMatch(/below|above|untested/i);
+
+    expect(reading(await row("Codex"))).toContain("no adapter");
+  });
+
+  it("marks a harness older than the one this build talks to", async () => {
+    await open(ONLINE, {
+      instances: [
+        claudeCode([
+          snapshot({
+            harnessVersion: "2.0.9",
+            versionVerdict: "below-floor",
+            auth: LOGGED_IN.auth,
+          }),
+        ]),
+        CODEX,
+      ],
+    });
+
+    const claude = reading(await claudeRow());
+    expect(claude).toContain("2.0.9");
+    expect(claude).toMatch(/below/i);
+  });
+
+  it("offers to log in again and to re-probe a harness that is on the machine", async () => {
+    await open(ONLINE);
+
+    const claude = within(await claudeRow());
+    expect(claude.getByRole("button", { name: /log in again/i })).toBeDefined();
+    expect(claude.getByRole("button", { name: /probe now/i })).toBeDefined();
+    // Nothing to install: the machine reported the binary.
+    expect(claude.queryByRole("button", { name: /install/i })).toBeNull();
+  });
+
+  it("offers to install a harness that is missing, and cannot for a provider it has no adapter for", async () => {
+    await open(BARE, { instances: [claudeCode([]), CODEX] });
+
+    const claude = within(await claudeRow());
+    expect(claude.getByRole("button", { name: /install/i }).hasAttribute("disabled")).toBe(false);
+    // There is nothing to log in to until the harness is on the machine.
+    expect(claude.queryByRole("button", { name: /log in/i })).toBeNull();
+
+    const codexRow = await row("Codex");
+    const codex = within(codexRow);
+    expect(codex.getByRole("button", { name: /install/i }).hasAttribute("disabled")).toBe(true);
+    // Said before the user presses anything, rather than discovered by failing.
+    expect(reading(codexRow)).toMatch(/no adapter/i);
+  });
+
+  it("logs in through the dialog and shows the account the machine came back with", async () => {
+    const user = userEvent.setup();
+    let held = [claudeCode([NOT_LOGGED_IN]), CODEX];
+    const { api } = await open(ONLINE, {
+      instances: held,
+      extra: {
+        "GET /api/v1/providers": () => ({ body: held }),
+        [`POST /api/v1/providers/${CLAUDE_ID}/login`]: { body: { url: AUTHORIZE_URL } },
+        [`POST /api/v1/providers/${CLAUDE_ID}/login-code`]: (call: Call) => {
+          if ((call.body as { code: string }).code !== "the-whole-code") {
+            return { status: 400, body: envelope("validation", INVALID) };
+          }
+          held = [claudeCode([LOGGED_IN]), CODEX];
+          return { body: LOGGED_IN };
+        },
+      },
+    });
+
+    await user.click(within(await claudeRow()).getByRole("button", { name: /log in/i }));
+
+    // The user reads the URL on this screen and opens it wherever they like:
+    // the machine running the harness may have no browser at all.
+    await waitFor(() => {
+      expect(reading()).toContain(AUTHORIZE_URL);
+    });
+    // And is told which site they are about to sign in at, which is the one
+    // part of a long opaque address they can check before they do.
+    expect(reading()).toContain("You will sign in at claude.ai");
+    expect(api.calls.filter((call) => call.path.endsWith("/login"))[0]?.body).toEqual({
+      runnerId: ONLINE.id,
+    });
+
+    const code = () => screen.getByLabelText<HTMLInputElement>("Code", { exact: true });
+    await user.type(code(), "half-a-code");
+    await user.click(screen.getByRole("button", { name: /submit/i }));
+
+    expect((await screen.findByText(new RegExp(INVALID))).textContent).toContain("Invalid code");
+    await user.clear(code());
+    await user.type(code(), "the-whole-code");
+    await user.click(screen.getByRole("button", { name: /submit/i }));
+
+    await waitFor(() => {
+      expect(screen.queryByLabelText("Code", { exact: true })).toBeNull();
+    });
+    await waitFor(() => {
+      expect(reading()).toContain("rogier@example.com");
+    });
+  });
+
+  it("probes one instance on demand and shows what came back", async () => {
+    const user = userEvent.setup();
+    const fresh = snapshot({ harnessVersion: "2.1.300", auth: LOGGED_IN.auth });
+    let held = INSTANCES;
+    const { api } = await open(ONLINE, {
+      extra: {
+        "GET /api/v1/providers": () => ({ body: held }),
+        [`POST /api/v1/runners/${ONLINE.id}/probe`]: () => {
+          held = [claudeCode([fresh]), CODEX];
+          return { body: fresh };
+        },
+      },
+    });
+
+    await user.click(within(await claudeRow()).getByRole("button", { name: /probe now/i }));
+
+    await waitFor(() => {
+      expect(reading()).toContain("2.1.300");
+    });
+    const asked = api.calls.filter((call) => call.path.endsWith("/probe"));
+    // One instance, not the machine's whole set: the button is on the row.
+    expect(asked).toHaveLength(1);
+    expect(asked[0]?.body).toEqual({ instanceId: CLAUDE_ID });
+  });
+
+  it("reads the card again when a snapshot changes elsewhere", async () => {
+    let held = INSTANCES;
+    const { live } = await open(ONLINE, {
+      extra: { "GET /api/v1/providers": () => ({ body: held }) },
+    });
+
+    await waitFor(() => {
+      expect(live.topics()).toContain("provider");
+    });
+    held = [claudeCode([snapshot({ harnessVersion: "2.1.300", auth: LOGGED_IN.auth })]), CODEX];
+    act(() => {
+      live.push("provider", { _tag: "invalidate", ids: [CLAUDE_ID], kind: "updated" });
+    });
+
+    await waitFor(() => {
+      expect(reading()).toContain("2.1.300");
+    });
   });
 });

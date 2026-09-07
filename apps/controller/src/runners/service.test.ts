@@ -20,7 +20,8 @@ import { runnerRepository } from "./repository";
 import { JoinTokensLayer, RunnerPresenceLayer, RunnerService, RunnerServiceLayer } from "./index";
 
 const layer = RunnerServiceLayer.pipe(
-  Layer.provideMerge(Layer.mergeAll(JoinTokensLayer, SettingsLayer, RunnerPresenceLayer)),
+  Layer.provideMerge(Layer.mergeAll(JoinTokensLayer, SettingsLayer)),
+  Layer.provideMerge(RunnerPresenceLayer),
   Layer.provideMerge(AuditLogLayer),
   Layer.provideMerge(TestDatabase),
 );

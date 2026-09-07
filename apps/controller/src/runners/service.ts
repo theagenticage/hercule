@@ -44,6 +44,7 @@ import { requireGrant, USER_ACTOR } from "../actor";
 import { nowIso, pageInput, refuseCursor, withTransaction } from "../db";
 import { AuditLog } from "../events";
 import { Settings, type SettingError } from "../settings";
+import { requireOnline } from "./adapters";
 import { JoinTokens } from "./join-tokens";
 import { RunnerFactsDeadline, RunnerPresence } from "./presence";
 import { runnerRepository, type RunnerEdit } from "./repository";
@@ -96,8 +97,6 @@ const NAME_TAKEN = "another runner already has that name";
 const RESERVED_IS_THE_DEFAULT =
   "this is the fleet's default runner; choose another default before reserving it";
 
-const NOT_ONLINE = "that runner is not connected, so it cannot be asked anything";
-
 const NOT_ACTIVE = "only an active runner can be drained";
 
 const NOT_DRAINING = "only a draining runner can be taken off the drain";
@@ -116,7 +115,14 @@ type Edit = { -readonly [K in keyof RunnerEdit]: RunnerEdit[K] };
 
 /** What every lifecycle move can answer with. */
 type MoveError =
-  Unauthenticated | Forbidden | Validation | NotFound | InvalidState | SettingError | SqlError;
+  | Unauthenticated
+  | Forbidden
+  | Validation
+  | NotFound
+  | InvalidState
+  | SettingError
+  | SqlError
+  | Schema.SchemaError;
 
 /** Labels are replaced whole, so their order is part of the value. */
 const sameLabels = (left: ReadonlyArray<string>, right: ReadonlyArray<string>): boolean =>
@@ -382,9 +388,7 @@ const make = Effect.gen(function* () {
         yield* requireGrant("runner.refreshFacts");
         const { id } = yield* Effect.mapError(decodeIdentified(input), validationOf);
         const before = yield* one(id);
-        if (before.connectivity !== "online") {
-          return yield* Effect.fail(invalidState(NOT_ONLINE));
-        }
+        yield* requireOnline(before);
         if (!(yield* presence.refreshedFacts(id))) {
           const waited = Duration.format(yield* RunnerFactsDeadline);
           return yield* Effect.fail(

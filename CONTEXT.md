@@ -197,6 +197,10 @@ _Avoid_: harness (for the adapter itself), integration
 **Provider Definition**:
 A provider's static self-description: identity, config schema, declared capabilities. What a provider plugin registers; distinct from the running adapter.
 
+**Provider Instance**:
+One account of a provider: a row carrying the config that provider runs under, with its own isolated provider home on every runner and its own vendor login. The instance id, never the provider id, is what placement, snapshots and the composer route on, because one provider can hold several accounts. The controller opens one per registered provider at boot.
+_Avoid_: provider account, provider config (for the row), profile
+
 **Access Mode**:
 The session-level permission axis a provider adapter enforces: approval-required, auto-accept-edits, auto, or full-access. A fixed vocabulary; per-provider support is declared, and a mode a provider lacks is substituted before the session starts by a hardcoded fallback chain that only ever moves to a less permissive mode, never silently.
 _Avoid_: permission mode (vendor term), runtime mode

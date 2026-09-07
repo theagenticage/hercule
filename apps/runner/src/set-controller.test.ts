@@ -63,14 +63,20 @@ const temporaryHome = (): string => {
 const runnerFile = (home: string): string => pathJoin(home, "runner", "runner.json");
 
 /** A home a machine has already joined from, at the mode the join leaves. */
-const enrolled = (): { home: string; path: string; before: string } => {
+const enrolled = (
+  controllerUrl: string = ORIGINAL_URL,
+): {
+  home: string;
+  path: string;
+  before: string;
+} => {
   const home = temporaryHome();
   mkdirSync(pathJoin(home, "runner"), { recursive: true, mode: 0o700 });
   const path = runnerFile(home);
   const contents = {
     runnerId: "0199e0e7-2222-7000-8000-000000000000",
     credential: "credential-for-thalia",
-    controllerUrl: ORIGINAL_URL,
+    controllerUrl,
     controllerIdentityId: "0199e0e7-1111-7000-8000-000000000000",
     controllerPublicKey: "IH5nqcbHvGUYs1n9y0sBnPGSNVYA3ZfCpZKDvXH7pqA=",
     storageDirectory: "a1b2c3d4a1b2c3d4",
@@ -80,6 +86,16 @@ const enrolled = (): { home: string; path: string; before: string } => {
 };
 
 describe("hydra runner set-controller", () => {
+  it("repairs a file whose controller URL no longer reads as one", async () => {
+    const { home, path } = enrolled("127.0.0.1:4937");
+
+    await run(["--home", home, "set-controller", NEW_URL]);
+
+    expect(process.exitCode).toBe(0);
+    expect(errored).toEqual([]);
+    expect(readFileSync(path, "utf8")).toContain(NEW_URL);
+  });
+
   it("rewrites only controllerUrl, keeps the file the runner's alone, prints the new URL", async () => {
     const { home, path, before } = enrolled();
 

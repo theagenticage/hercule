@@ -19,6 +19,8 @@ import {
   signedChallenge,
   type ControllerHello,
   type RunnerFacts,
+  type ProbeReport,
+  type ProbeRequest,
   type RunnerFactsReport,
   type RunnerFactsRequest,
   type RunnerHello,
@@ -40,6 +42,7 @@ const FACTS: RunnerFacts = {
   docker: false,
   toolchains: [{ name: "git", version: "2.50.1", path: "/usr/bin/git" }],
   providers: [{ name: "claude", present: true, path: "/usr/local/bin/claude" }],
+  adapters: ["claude-code"],
   identityPort: 4939,
 };
 
@@ -209,9 +212,14 @@ const pinning = (stub: Stub, overrides: Partial<ControllerPin> = {}): Controller
 /**
  * How long these tests give a peer to prove who it is. The shipped ten seconds
  * is asserted as the exported default; waiting it out four times over would be
- * most of the suite's running time.
+ * most of the suite's running time. Half a second rather than a fifth, because
+ * the whole suite running at once can stall an event loop for longer than that,
+ * and a stalled proof reads here as a controller that never answered.
  */
-const DEADLINE = Duration.millis(200);
+const DEADLINE = Duration.millis(500);
+
+/** Nothing here drives an adapter with a home, so nothing is ever made under it. */
+const PROVIDERS_DIR = "/nonexistent/hydra-runner-providers";
 
 /** Runs one connection to its end and reports how it ended. */
 const attempt = (pin: ControllerPin, probe: Effect.Effect<RunnerFacts> = Effect.succeed(FACTS)) =>
@@ -222,6 +230,7 @@ const attempt = (pin: ControllerPin, probe: Effect.Effect<RunnerFacts> = Effect.
         facts: FACTS,
         probe,
         headroom: Effect.succeed({ diskFreeBytes: 200 * 1024 ** 3, availableMemoryBytes: 1 }),
+        providersDir: PROVIDERS_DIR,
         proofDeadline: DEADLINE,
       }),
     ),
@@ -503,6 +512,46 @@ describe("a controller asking for the machine's facts", () => {
     // not, or the operator pressing the button on a machine nothing happened to
     // would wait for a frame that never comes.
     expect(reportIn(stub)).toEqual({ _tag: "factsReport", facts: grown });
+
+    stub.hangUp();
+    await pending;
+    expect(failureOf(settled)).not.toBeInstanceOf(ControllerNotRecognised);
+  });
+});
+
+describe("a controller asking a runner to probe a provider it cannot drive", () => {
+  const REQUEST: ProbeRequest = {
+    _tag: "probeRequest",
+    requestId: "01999999-0000-7000-8000-0000000000c1",
+    instanceId: "01999999-0000-7000-8000-0000000000c2",
+    providerId: "codex",
+    config: {},
+  };
+
+  const reportIn = (stub: Stub): ProbeReport | undefined =>
+    stub.received.find((frame): frame is ProbeReport => frame._tag === "probeReport");
+
+  it("answers that this build has no adapter for it, rather than leaving the caller waiting", async () => {
+    const stub = await stubController();
+    let settled: Awaited<ReturnType<typeof attempt>> | undefined;
+    const pending = attempt(pinning(stub)).then((outcome) => {
+      settled = outcome;
+    });
+
+    await stub.connected();
+    await waitUntil(() => stub.received.length >= 1);
+    stub.say(REQUEST);
+
+    await waitUntil(() => reportIn(stub) !== undefined);
+    const report = reportIn(stub);
+    // Correlated by request id: probes, logins and installs for several
+    // instances can be in flight on one connection at once.
+    expect(report?.requestId).toBe(REQUEST.requestId);
+    expect(report?.instanceId).toBe(REQUEST.instanceId);
+    expect(report?.result.auth.status).toBe("error");
+    expect(report?.result.auth.message).toBe("no adapter for codex in this runner build");
+    expect(report?.result.harnessVersion).toBeNull();
+    expect(report?.result.models).toEqual([]);
 
     stub.hangUp();
     await pending;

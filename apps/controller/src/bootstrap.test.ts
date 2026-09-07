@@ -196,6 +196,7 @@ const bootPlugin = (id: string, failure?: string): Plugin => ({
     host.providers!.register({
       id: `${id}-provider`,
       displayName: `Provider ${id}`,
+      binaryName: "harness",
       supportsMultipleInstances: true,
       configSchema: Schema.Struct({}),
       defaultConfig: {},

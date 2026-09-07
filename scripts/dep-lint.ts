@@ -13,10 +13,15 @@
  * (`await import("bun" + ":sqlite")`) is invisible to it. Nothing in the
  * codebase does that, and no scan short of running the code could catch it.
  *
+ * One rule is about the workspace, not an import graph: the Agent SDK's eight
+ * per-platform CLI packages (one is 196 MB) are excluded at install, and the
+ * shipped binary would carry them if they came back. The pnpm store is read
+ * directly, because pnpm links only direct dependencies into `node_modules`.
+ *
  * Usage: `bun run scripts/dep-lint.ts [entrypoint]`. The optional entrypoint
  * is what `scripts/dep-lint.test.ts` points at its fixtures.
  */
-import { rm } from "node:fs/promises";
+import { readdir, rm } from "node:fs/promises";
 import { dirname, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -117,3 +122,32 @@ if (violations.length > 0) {
 }
 
 console.log(`dep-lint: ${entrypoint} is clean (${graph.length} modules in the graph).`);
+
+const SDK = "@anthropic-ai/claude-agent-sdk";
+
+/** How pnpm names a store directory: the package with its `/` written as `+`. */
+const storeName = SDK.replace("/", "+");
+
+const store = await readdir(`${root}node_modules/.pnpm`).catch(() => undefined);
+if (store === undefined) {
+  console.error("dep-lint: node_modules/.pnpm is not there; run `pnpm install`.");
+  process.exit(1);
+}
+
+if (!store.some((name) => name.startsWith(`${storeName}@`))) {
+  console.error(`dep-lint: ${SDK} is not installed; run \`pnpm install\`.`);
+  process.exit(1);
+}
+
+const platformPackages = store.filter((name) => name.startsWith(`${storeName}-`));
+if (platformPackages.length > 0) {
+  console.error(
+    `dep-lint: a per-platform CLI package of ${SDK} is installed, so 196 MB of somebody ` +
+      "else's CLI is being compiled into the binary Hydra ships:",
+  );
+  for (const name of platformPackages) console.error(`    ${name}`);
+  console.error("They are excluded by `pnpm.ignoredOptionalDependencies` in package.json.");
+  process.exit(1);
+}
+
+console.log(`dep-lint: ${SDK} is installed with no per-platform CLI package beside it.`);

@@ -9,6 +9,8 @@
  * nonce and its own id, all three: an id it recognises is not licence to trust
  * whatever key arrives beside it.
  */
+import { mkdirSync } from "node:fs";
+import { join as joinPath } from "node:path";
 import * as Cause from "effect/Cause";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -27,9 +29,24 @@ import {
   RunnerToController,
   signedChallenge,
   type ControllerHello,
+  MAX_FACT_LENGTH,
+  type InstallRequest,
+  type LoginStart,
+  type ProbeRequest,
+  type ProbeResult,
   type RunnerFacts,
 } from "@hydra/protocol";
 import { refreshFacts } from "./probe";
+import {
+  adapterFor,
+  noAdapterFor,
+  probeFailed,
+  providerLogins,
+  type InstallOutcome,
+  type ProviderAdapter,
+  type ProviderRunnerContext,
+} from "./providers";
+import type { LoginAnswer } from "./providers/login";
 import { checkWatermark, type Headroom } from "./watermark";
 
 const SOCKET_PATH = "/api/v1/runners/socket";
@@ -60,6 +77,12 @@ export interface ConnectOptions {
   readonly facts: RunnerFacts;
   readonly probe: Effect.Effect<RunnerFacts>;
   readonly headroom: Effect.Effect<Headroom, Cause.UnknownError>;
+  /**
+   * Where provider instances keep their own config directories on this machine.
+   * One per instance, so two accounts of one harness never read each other's
+   * credential, and never the user's own.
+   */
+  readonly providersDir: string;
   /** The shipped deadline unless a test says otherwise. */
   readonly proofDeadline?: Duration.Duration;
 }
@@ -177,9 +200,16 @@ export const connect = (
       ),
     );
     const write = yield* socket.writer;
+    // A probe or an install outlives the frame that asked for it, so it is
+    // forked into the connection's scope, not the transport's per-frame fiber.
+    const connection = yield* Effect.scope;
 
     const nonce = base64(crypto.getRandomValues(new Uint8Array(NONCE_BYTES)));
     let greeted = false;
+    // The machine as this connection last described it. An install changes what
+    // is on it, and the probe that follows has to reach the binary that was
+    // just put there rather than the one the hello knew about.
+    let facts = options.facts;
     const proven = Latch.makeUnsafe(false);
     let impostor: ControllerNotRecognised | undefined;
 
@@ -187,6 +217,119 @@ export const connect = (
       Effect.gen(function* () {
         impostor = new ControllerNotRecognised({ message });
         yield* write(new Socket.CloseEvent(PROTOCOL_ERROR, "unrecognised controller"));
+      });
+
+    const reportFacts = Effect.tap(options.probe, (probed) =>
+      Effect.sync(() => {
+        facts = probed;
+      }),
+    );
+
+    const binaryOf = (binaryName: string): string | undefined =>
+      facts.providers.find((provider) => provider.name === binaryName && provider.present)?.path;
+
+    /** The instance's private directory: where the harness keeps its credential. */
+    const contextFor = (adapter: ProviderAdapter, instanceId: string): ProviderRunnerContext => {
+      const home = joinPath(options.providersDir, instanceId);
+      mkdirSync(home, { recursive: true, mode: 0o700 });
+      return { home, binary: binaryOf(adapter.binaryName), env: process.env };
+    };
+
+    /**
+     * What went wrong, in one line. Saying nothing about a defect would leave
+     * the controller waiting out its deadline for an answer this machine has.
+     */
+    const wentWrong = (cause: Cause.Cause<unknown>): string =>
+      (Cause.pretty(cause).split("\n")[0] ?? "").slice(0, MAX_FACT_LENGTH) ||
+      "the runner could not answer";
+
+    const answerProbe = (request: ProbeRequest) => {
+      const reporting = (result: ProbeResult) =>
+        write(
+          asText({
+            _tag: "probeReport",
+            requestId: request.requestId,
+            instanceId: request.instanceId,
+            result,
+          }),
+        );
+      return Effect.gen(function* () {
+        const adapter = adapterFor(request.providerId);
+        return yield* reporting(
+          adapter === undefined
+            ? probeFailed(noAdapterFor(request.providerId))
+            : yield* adapter.probe(contextFor(adapter, request.instanceId), request.config),
+        );
+      }).pipe(
+        // The encoding is inside the catch: a result `asText` cannot carry must
+        // reach the controller as an error, not as silence. The fallback is
+        // bounded, so it always encodes.
+        Effect.catchCause((cause) => Effect.ignore(reporting(probeFailed(wentWrong(cause))))),
+        // The connection is going if the write itself failed, and there is
+        // nowhere left to report that to.
+        Effect.ignore,
+      );
+    };
+
+    /**
+     * The facts go first, so a controller reading the row after an `ok` reads
+     * the machine with the harness on it rather than as it was.
+     */
+    const answerInstall = (request: InstallRequest) => {
+      const reporting = (outcome: InstallOutcome) =>
+        write(
+          asText({
+            _tag: "installResult",
+            requestId: request.requestId,
+            ok: outcome.ok,
+            ...(outcome.message === undefined ? {} : { message: outcome.message }),
+          }),
+        );
+      return Effect.gen(function* () {
+        const install = adapterFor(request.providerId)?.install;
+        if (install === undefined) {
+          return yield* reporting({ ok: false, message: noAdapterFor(request.providerId) });
+        }
+        const outcome = yield* install(process.env);
+        if (outcome.ok) {
+          yield* write(asText({ _tag: "factsReport", facts: yield* reportFacts }));
+        }
+        return yield* reporting(outcome);
+      }).pipe(
+        Effect.catchCause((cause) =>
+          Effect.ignore(reporting({ ok: false, message: wentWrong(cause) })),
+        ),
+        Effect.ignore,
+      );
+    };
+
+    /**
+     * One half of a login. The child holding both belongs to the runner, not
+     * this connection, so a socket dropping in between does not end it.
+     */
+    const answerLogin = (requestId: string, answering: Effect.Effect<LoginAnswer>) => {
+      const reporting = (answer: LoginAnswer) => write(asText({ ...answer, requestId }));
+      return Effect.flatMap(answering, reporting).pipe(
+        Effect.catchCause((cause) =>
+          Effect.ignore(reporting({ _tag: "loginFailed", message: wentWrong(cause) })),
+        ),
+        Effect.ignore,
+      );
+    };
+
+    const startingLogin = (request: LoginStart): Effect.Effect<LoginAnswer> =>
+      Effect.suspend(() => {
+        const adapter = adapterFor(request.providerId);
+        return adapter === undefined
+          ? Effect.succeed<LoginAnswer>({
+              _tag: "loginFailed",
+              message: noAdapterFor(request.providerId),
+            })
+          : providerLogins.start(
+              request.instanceId,
+              adapter,
+              contextFor(adapter, request.instanceId),
+            );
       });
 
     const handle = (raw: string) =>
@@ -225,7 +368,29 @@ export const connect = (
         if (message._tag === "factsRequest") {
           // Sent whatever the probe finds, unlike the hourly report: the
           // controller asked because somebody is waiting for an answer.
-          return yield* write(asText({ _tag: "factsReport", facts: yield* options.probe }));
+          return yield* write(asText({ _tag: "factsReport", facts: yield* reportFacts }));
+        }
+        if (message._tag === "probeRequest") {
+          // Forked: a probe takes seconds, and the connection has to keep
+          // answering pings and further requests while it runs.
+          return yield* Effect.asVoid(Effect.forkIn(answerProbe(message), connection));
+        }
+        if (message._tag === "installRequest") {
+          return yield* Effect.asVoid(Effect.forkIn(answerInstall(message), connection));
+        }
+        if (message._tag === "loginStart") {
+          return yield* Effect.asVoid(
+            Effect.forkIn(answerLogin(message.requestId, startingLogin(message)), connection),
+          );
+        }
+        if (message._tag === "loginCode") {
+          const { requestId, instanceId, code } = message;
+          return yield* Effect.asVoid(
+            Effect.forkIn(
+              answerLogin(requestId, providerLogins.submit(instanceId, code)),
+              connection,
+            ),
+          );
         }
         // An ack belongs to the replayable events nothing sends yet.
       });
@@ -253,9 +418,9 @@ export const connect = (
             send: (watermark) => write(asText({ _tag: "watermarkReport", watermark })),
           }),
           refreshFacts({
-            probe: options.probe,
+            probe: reportFacts,
             reported: options.facts,
-            send: (facts) => write(asText({ _tag: "factsReport", facts })),
+            send: (probed) => write(asText({ _tag: "factsReport", facts: probed })),
           }),
         ],
         { concurrency: "unbounded" },

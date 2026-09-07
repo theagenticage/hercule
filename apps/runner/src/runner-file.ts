@@ -10,9 +10,14 @@ import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import { runnerDirIn } from "@hydra/home";
 
+export const CONTROLLER_URL_SCHEMES: ReadonlyArray<string> = ["http:", "https:"];
+
 /**
  * The controller URL is here rather than in `config.toml` because it is not a
  * bootstrap key: it is part of who this runner belongs to.
+ *
+ * `set-controller` is the way out of a runner pointed at an address that will
+ * not parse, so that field must not stop the rest of the file being read.
  */
 export const RunnerFile = Schema.Struct({
   runnerId: Schema.String,
@@ -33,8 +38,6 @@ export const runnerFileIn = (home: string): string => joinPath(runnerDirIn(home)
 export class NotEnrolled extends Schema.TaggedError<NotEnrolled>()("NotEnrolled", {
   message: Schema.String,
 }) {}
-
-const decode = Schema.decodeUnknownEffect(RunnerFile);
 
 /**
  * Written to a fresh file and renamed over the target. `mode` applies only on
@@ -68,7 +71,10 @@ export const readRunnerFile = (home: string): Effect.Effect<RunnerFile, NotEnrol
         }),
     });
     return yield* Effect.mapError(
-      decode(raw),
-      () => new NotEnrolled({ message: `${path} is not a runner's configuration` }),
+      Schema.decodeUnknownEffect(RunnerFile, { errors: "all" })(raw),
+      (error) =>
+        new NotEnrolled({
+          message: `${path} is not a runner's configuration: ${error.message}`,
+        }),
     );
   });

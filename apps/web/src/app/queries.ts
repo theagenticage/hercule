@@ -126,6 +126,12 @@ export const pluginsQuery = (client: HydraClient) =>
     queryFn: () => client.plugin.query(),
   });
 
+export const providersQuery = (client: HydraClient) =>
+  queryOptions({
+    queryKey: queryKeys.providers(),
+    queryFn: () => client.provider.query(),
+  });
+
 /**
  * The controller itself: its identity, its version and the runner work falls
  * back to. The version is what a runner's own is compared against, so it is

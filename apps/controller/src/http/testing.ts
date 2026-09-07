@@ -11,6 +11,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect } from "vitest";
+import type * as Context from "effect/Context";
 import type * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import type * as Fiber from "effect/Fiber";
@@ -45,12 +46,21 @@ import { COALESCE_WINDOW_MS, LiveTopics } from "../live";
 import { masterKeyLayer, secretsLayer } from "../secrets";
 import { PermissionProfilesLayer } from "../permissions";
 import { PluginHost, PluginHostLayer, PluginsLayer } from "../plugins";
+import {
+  ensureProviderInstances,
+  ProviderLoginDeadline,
+  ProviderProbeDeadline,
+  ProviderProbeInterval,
+  ProviderProbesLayer,
+  ProviderServiceLayer,
+} from "../providers";
 import { SettingsLayer } from "../settings";
 import {
   JoinTokens,
   JoinTokensLayer,
   RunnerFactsDeadline,
   RunnerPingSchedule,
+  RunnerPresenceLayer,
   runnerRepository,
   type RunnerPings,
 } from "../runners";
@@ -72,7 +82,13 @@ export const USERNAME = "rogier";
  * object the boot's activation pass wrote it into.
  */
 const services = (home: string) =>
-  Layer.mergeAll(operationLayers, PluginsLayer.pipe(Layer.provideMerge(PluginHostLayer))).pipe(
+  Layer.mergeAll(
+    operationLayers,
+    Layer.mergeAll(PluginsLayer, ProviderServiceLayer).pipe(Layer.provideMerge(PluginHostLayer)),
+  ).pipe(
+    // One presence and one probe driver: the socket route and every service
+    // must act through the same connection map.
+    Layer.provideMerge(ProviderProbesLayer.pipe(Layer.provideMerge(RunnerPresenceLayer))),
     Layer.provideMerge(
       Layer.mergeAll(
         UsersLayer,
@@ -122,6 +138,24 @@ export type RunnerArranger = (fields: {
  */
 export type JoinTokenArranger = () => Promise<string>;
 
+/**
+ * Runs the boot's idempotent steps again, which is what a restart does to a
+ * database already being served.
+ */
+export type RebootArranger = () => Promise<void>;
+
+/**
+ * The services are inferred rather than listed, so a step added to the boot
+ * cannot leave a stale list behind.
+ */
+const repeatable = <A, E, R>(
+  effect: Effect.Effect<A, E, R>,
+): Effect.Effect<() => Promise<A>, never, R> =>
+  Effect.map(
+    Effect.context<R>(),
+    (services) => () => Effect.runPromiseWith(services)(Effect.orDie(effect)),
+  );
+
 /** Reads back what the controller is holding for the clients on its live socket. */
 export interface LiveReader {
   readonly subscriberCount: (topic: LiveTopic) => Promise<number>;
@@ -136,6 +170,7 @@ export interface ServerHarness {
   readonly live: LiveReader;
   readonly insertRunner: RunnerArranger;
   readonly joinToken: JoinTokenArranger;
+  readonly reboot: RebootArranger;
 }
 
 /** What a test may vary about the controller it is handed. */
@@ -153,6 +188,10 @@ export interface ServerOptions {
    * facts. The shipped ten seconds is longer than a test can wait.
    */
   readonly factsDeadline?: Duration.Duration;
+  /** The shipped fifteen seconds and hour are both longer than a test can wait. */
+  readonly probeDeadline?: Duration.Duration;
+  readonly probeInterval?: Duration.Duration;
+  readonly loginDeadline?: Duration.Duration;
   /** The shipped registry is compiled in, so a test hands over its own. */
   readonly plugins?: ReadonlyArray<Plugin>;
 }
@@ -179,22 +218,26 @@ export const withServer = (
         const sql = yield* SqlClient.SqlClient;
         yield* sql`INSERT INTO setup_state (singleton, token_hash, completed_at)
                    VALUES (1, ${hashToken(SETUP_TOKEN)}, NULL)`;
-        // The boot creates the identity and seeds the shipped defaults before
-        // anything binds, so the harness does both the same way: a request sees
-        // the three shipped profiles and the controller settings a real
-        // controller has.
-        yield* Effect.flatMap(ControllerIdentity, (identity) => identity.ensure);
-        yield* seed;
-        // After the schema and the seed, as the real boot runs it: a plugin
-        // that activates may read its own state and secrets.
-        yield* Effect.flatMap(PluginHost, (host) => host.boot(options.plugins ?? []));
-        const listening =
-          options.pings === undefined
-            ? serve(bundle)
-            : Effect.provideService(serve(bundle), RunnerPingSchedule, options.pings);
-        yield* options.factsDeadline === undefined
-          ? listening
-          : Effect.provideService(listening, RunnerFactsDeadline, options.factsDeadline);
+        // The boot's steps in the boot's order, so a request sees what a real
+        // controller has. Held as one effect because reboot runs them again.
+        const bootSteps = Effect.gen(function* () {
+          yield* Effect.flatMap(ControllerIdentity, (identity) => identity.ensure);
+          yield* seed;
+          yield* Effect.flatMap(PluginHost, (host) => host.boot(options.plugins ?? []));
+          yield* ensureProviderInstances;
+        });
+        yield* bootSteps;
+        const reboot: RebootArranger = yield* repeatable(bootSteps);
+        let listening = serve(bundle);
+        const named = <A>(key: Context.Reference<A>, value: A | undefined): void => {
+          if (value !== undefined) listening = Effect.provideService(listening, key, value);
+        };
+        named(RunnerPingSchedule, options.pings);
+        named(RunnerFactsDeadline, options.factsDeadline);
+        named(ProviderProbeDeadline, options.probeDeadline);
+        named(ProviderProbeInterval, options.probeInterval);
+        named(ProviderLoginDeadline, options.loginDeadline);
+        yield* listening;
         const base = yield* baseUrl;
         // The log this database holds, read the way anything else reads it: a
         // request's audit row is asserted through the service that wrote it.
@@ -238,7 +281,9 @@ export const withServer = (
               Effect.flatMap(nowIso, (at) => Effect.map(tokens.create(at), (one) => one.token)),
             ),
           );
-        yield* Effect.promise(() => body({ base, audit, sql, live, insertRunner, joinToken }));
+        yield* Effect.promise(() =>
+          body({ base, audit, sql, live, insertRunner, joinToken, reboot }),
+        );
       }),
     ).pipe(
       Effect.provide(

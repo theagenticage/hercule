@@ -111,6 +111,12 @@ export const RunnerFacts = Schema.Struct({
   docker: Schema.Boolean,
   toolchains: Schema.Array(Toolchain).check(Schema.isMaxLength(MAX_FACT_ITEMS)),
   providers: Schema.Array(ProviderBinary).check(Schema.isMaxLength(MAX_FACT_ITEMS)),
+  /**
+   * The provider ids this runner build carries an adapter for. A fact about the
+   * binary rather than the machine, so the fleet can say "no adapter in this
+   * runner build" instead of finding out by asking and failing.
+   */
+  adapters: Schema.Array(Fact).check(Schema.isMaxLength(MAX_FACT_ITEMS)),
   /** Serves `GET /identity`, which is what resolves the "local" alias. */
   identityPort: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 65535 })),
 });
@@ -240,6 +246,190 @@ export const WatermarkReport = Schema.Struct({
 
 export type WatermarkReport = Schema.Schema.Type<typeof WatermarkReport>;
 
+/**
+ * One choice the composer offers for a model: a select over named values, or a
+ * switch. What a harness accepts per model is the harness's to say, so this is
+ * probed rather than authored.
+ */
+export const ModelOption = Schema.Struct({
+  id: Fact,
+  label: Fact,
+  kind: Schema.Literals(["select", "boolean"]),
+  choices: Schema.optionalKey(
+    Schema.Array(Schema.Struct({ value: Fact, label: Fact })).check(
+      Schema.isMaxLength(MAX_FACT_ITEMS),
+    ),
+  ),
+  default: Schema.Union([Schema.String, Schema.Boolean]),
+});
+
+export type ModelOption = Schema.Schema.Type<typeof ModelOption>;
+
+/** One model a harness offers, and the per-model choices that come with it. */
+export const ModelDescriptor = Schema.Struct({
+  slug: Fact,
+  name: Fact,
+  isDefault: Schema.optionalKey(Schema.Boolean),
+  /** A model the harness no longer lists but still forwards to the API. */
+  isLegacy: Schema.optionalKey(Schema.Boolean),
+  options: Schema.Array(ModelOption).check(Schema.isMaxLength(MAX_FACT_ITEMS)),
+});
+
+export type ModelDescriptor = Schema.Schema.Type<typeof ModelDescriptor>;
+
+/** Whether the harness reports a usable login, and whose it is. */
+export const SnapshotAuth = Schema.Struct({
+  status: Schema.Literals(["ok", "unauthenticated", "error"]),
+  identity: Schema.optionalKey(Fact),
+  planLabel: Schema.optionalKey(Fact),
+  backend: Schema.optionalKey(Fact),
+  /** Why the probe failed, so an `error` is something the user can act on. */
+  message: Schema.optionalKey(Fact),
+});
+
+export type SnapshotAuth = Schema.Schema.Type<typeof SnapshotAuth>;
+
+/**
+ * What one runner found out about one provider instance. Side-effect free: a
+ * probe reads the harness's own account and model list and makes no API call.
+ */
+export const ProbeResult = Schema.Struct({
+  harnessVersion: Schema.NullOr(Fact),
+  auth: SnapshotAuth,
+  models: Schema.Array(ModelDescriptor).check(Schema.isMaxLength(MAX_FACT_ITEMS)),
+});
+
+export type ProbeResult = Schema.Schema.Type<typeof ProbeResult>;
+
+/**
+ * Correlates a request with its answer: several exchanges can be in flight on
+ * one connection.
+ */
+const RequestId = Fact;
+
+/**
+ * A provider instance's id. Narrower than a fact because the runner makes a
+ * directory of it: the credential a login writes must land under the instance's
+ * own home and nowhere a path could climb out to.
+ */
+const InstanceId = Schema.String.check(
+  Schema.isLengthBetween(1, 64),
+  Schema.isPattern(/^[A-Za-z0-9_-]+$/, { title: "instance id", description: "an identifier" }),
+);
+
+/**
+ * Asks the runner to probe one provider instance. The instance id and its
+ * config live on the controller, so the runner cannot start this on its own.
+ */
+export const ProbeRequest = Schema.Struct({
+  _tag: Schema.Literal("probeRequest"),
+  requestId: RequestId,
+  instanceId: InstanceId,
+  providerId: Fact,
+  config: Schema.Json,
+});
+
+export type ProbeRequest = Schema.Schema.Type<typeof ProbeRequest>;
+
+export const ProbeReport = Schema.Struct({
+  _tag: Schema.Literal("probeReport"),
+  requestId: RequestId,
+  instanceId: InstanceId,
+  result: ProbeResult,
+});
+
+export type ProbeReport = Schema.Schema.Type<typeof ProbeReport>;
+
+export const InstallRequest = Schema.Struct({
+  _tag: Schema.Literal("installRequest"),
+  requestId: RequestId,
+  providerId: Fact,
+});
+
+export type InstallRequest = Schema.Schema.Type<typeof InstallRequest>;
+
+export const MAX_INSTALL_MESSAGE_LENGTH = 4096;
+
+/**
+ * How an install ended. The runner reports its facts before this, so a
+ * controller reading the row after an `ok` reads the machine as it now is.
+ */
+export const InstallResult = Schema.Struct({
+  _tag: Schema.Literal("installResult"),
+  requestId: RequestId,
+  ok: Schema.Boolean,
+  /** What the installer said when it failed, so an operator can act on it. */
+  message: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(MAX_INSTALL_MESSAGE_LENGTH))),
+});
+
+export type InstallResult = Schema.Schema.Type<typeof InstallResult>;
+
+/**
+ * An authorize URL a vendor's login printed. OAuth URLs carry a challenge and a
+ * redirect; exported because the runner refuses a longer one rather than
+ * relaying a link nobody can finish.
+ */
+export const MAX_AUTHORIZE_URL_LENGTH = 2048;
+
+const AuthorizeUrl = Schema.String.check(Schema.isLengthBetween(1, MAX_AUTHORIZE_URL_LENGTH));
+
+/**
+ * Asks the runner to start the vendor's own login for one instance. The
+ * credential lands in that instance's config directory, which is why this is
+ * routed on the instance rather than on the provider.
+ */
+export const LoginStart = Schema.Struct({
+  _tag: Schema.Literal("loginStart"),
+  requestId: RequestId,
+  instanceId: InstanceId,
+  providerId: Fact,
+});
+
+export type LoginStart = Schema.Schema.Type<typeof LoginStart>;
+
+export const LoginCode = Schema.Struct({
+  _tag: Schema.Literal("loginCode"),
+  requestId: RequestId,
+  instanceId: InstanceId,
+  code: Schema.String.check(Schema.isLengthBetween(1, MAX_FACT_LENGTH)),
+});
+
+export type LoginCode = Schema.Schema.Type<typeof LoginCode>;
+
+/** Where the user has to go to authorize, in their own browser, on any machine. */
+export const LoginUrl = Schema.Struct({
+  _tag: Schema.Literal("loginUrl"),
+  requestId: RequestId,
+  url: AuthorizeUrl,
+});
+
+export type LoginUrl = Schema.Schema.Type<typeof LoginUrl>;
+
+/**
+ * The exchange cannot go on: no URL came, or there is no login to hand a code
+ * to. Distinct from a refused code, which leaves the login standing.
+ */
+export const LoginFailed = Schema.Struct({
+  _tag: Schema.Literal("loginFailed"),
+  requestId: RequestId,
+  message: Fact,
+});
+
+export type LoginFailed = Schema.Schema.Type<typeof LoginFailed>;
+
+/**
+ * How a pasted code went. `ok: false` is the vendor's own complaint about the
+ * code, and the login is still up for another paste.
+ */
+export const LoginResult = Schema.Struct({
+  _tag: Schema.Literal("loginResult"),
+  requestId: RequestId,
+  ok: Schema.Boolean,
+  message: Schema.optionalKey(Fact),
+});
+
+export type LoginResult = Schema.Schema.Type<typeof LoginResult>;
+
 /** A deliberate departure, which is what tells `offline` from silence. */
 export const Goodbye = Schema.Struct({ _tag: Schema.Literal("goodbye") });
 
@@ -250,6 +440,11 @@ export const RunnerToController = Schema.Union([
   Pong,
   RunnerFactsReport,
   WatermarkReport,
+  ProbeReport,
+  InstallResult,
+  LoginUrl,
+  LoginFailed,
+  LoginResult,
   Goodbye,
 ]);
 
@@ -313,6 +508,15 @@ export const Ack = Schema.Struct({
 
 export type Ack = Schema.Schema.Type<typeof Ack>;
 
-export const ControllerToRunner = Schema.Union([ControllerHello, Ping, Ack, RunnerFactsRequest]);
+export const ControllerToRunner = Schema.Union([
+  ControllerHello,
+  Ping,
+  Ack,
+  RunnerFactsRequest,
+  ProbeRequest,
+  InstallRequest,
+  LoginStart,
+  LoginCode,
+]);
 
 export type ControllerToRunner = Schema.Schema.Type<typeof ControllerToRunner>;

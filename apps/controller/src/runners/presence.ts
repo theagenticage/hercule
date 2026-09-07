@@ -15,10 +15,25 @@ import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as PubSub from "effect/PubSub";
+import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import type { RunnerConnectivity, RunnerFacts, RunnerWatermark } from "@hydra/contract";
-import { GOING_AWAY_CLOSE_CODE, RETIRED_CLOSE_CODE, RETIRED_CLOSE_REASON } from "@hydra/protocol";
+import {
+  GOING_AWAY_CLOSE_CODE,
+  RETIRED_CLOSE_CODE,
+  RETIRED_CLOSE_REASON,
+  type InstallRequest,
+  type InstallResult,
+  type LoginCode,
+  type LoginFailed,
+  type LoginResult,
+  type LoginStart,
+  type LoginUrl,
+  type ProbeReport,
+  type ProbeRequest,
+} from "@hydra/protocol";
 import { SYSTEM_ACTOR } from "../actor";
 import { hashToken } from "../credentials";
 import { announce, nowIso, withTransaction } from "../db";
@@ -42,6 +57,33 @@ export const RunnerFactsDeadline = Context.Reference<Duration.Duration>(
   { defaultValue: (): Duration.Duration => RUNNER_FACTS_DEADLINE },
 );
 
+export type Request = ProbeRequest | InstallRequest | LoginStart | LoginCode;
+
+/** What came back for one of those, correlated by the request's own id. */
+export type Answer = ProbeReport | InstallResult | LoginUrl | LoginFailed | LoginResult;
+
+/**
+ * The facts report carries no request id: the protocol has one frame for it and
+ * a machine sends one report, so it waits under a key no request id can be. The
+ * empty string is that key, because a `RequestId` holds at least one character
+ * - a spelled-out word would be one a runner could send a report under.
+ */
+const FACTS_KEY = "";
+
+/**
+ * How many arrivals a driver that has not subscribed yet still sees. One is
+ * enough for the boot window; a handful covers a fleet that all dials at once.
+ */
+const ARRIVALS_REPLAY = 16;
+
+interface FactsReported {
+  readonly _tag: "factsReported";
+}
+
+const FACTS_REPORTED: FactsReported = { _tag: "factsReported" };
+
+type Reported = Answer | FactsReported;
+
 /** How presence reaches back to a connection that is holding a runner. */
 export interface Connected {
   /**
@@ -52,17 +94,19 @@ export interface Connected {
   readonly close: (code: number, reason: string) => void;
   /** Sends the runner a request for its facts. Answered by `reportedFacts`. */
   readonly askForFacts: Effect.Effect<void>;
+  /** Sends one request frame. Answered through `reportedAnswer` under the same id. */
+  readonly ask: (request: Request) => Effect.Effect<void>;
 }
 
 interface Reachable extends Connected {
   readonly connection: Connection;
   /**
-   * Who is waiting for this connection's next facts report, and whether one
-   * arrived. Held here rather than per runner id so that two callers waiting at
-   * once share one request and one answer, and so that the connection ending
-   * ends the wait with it.
+   * Who is waiting for what, keyed by the id the request went out under. Held
+   * per connection, so the connection ending ends every wait on it and a report
+   * under an id nobody issued wakes nothing. A key holds every caller waiting
+   * on it, because one machine sends one report however many asked for it.
    */
-  awaitingFacts: Deferred.Deferred<boolean> | undefined;
+  readonly pending: Map<string, Set<Deferred.Deferred<Option.Option<Reported>>>>;
 }
 
 const make = Effect.gen(function* () {
@@ -71,18 +115,74 @@ const make = Effect.gen(function* () {
   const audit = yield* AuditLog;
 
   const reachable = new Map<string, Reachable>();
+  // Unbounded, so a machine's hello is never held up by whoever is listening.
+  // It replays, because the driver subscribes on a forked fiber while the
+  // listener is already binding: without the replay a machine that dialled in
+  // that window would go unswept until the tick, an hour later.
+  const arrivals = yield* PubSub.unbounded<string>({ replay: ARRIVALS_REPLAY });
 
   /**
-   * Ends a wait for facts, if the connection is holding one. Only the three
-   * things that really end a wait call this - the report arriving, the
-   * connection going, and the runner dialling again - so a caller that gave up
-   * leaves the wait in place for whoever is still listening.
+   * Nothing more is coming over this connection, so everybody waiting on it is
+   * told now rather than at their own deadline.
    */
-  const endWait = (held: Reachable | undefined, reported: boolean): void => {
-    if (held?.awaitingFacts === undefined) return;
-    Deferred.doneUnsafe(held.awaitingFacts, Exit.succeed(reported));
-    held.awaitingFacts = undefined;
+  const abandon = (held: Reachable | undefined): void => {
+    for (const waiting of held?.pending.values() ?? []) {
+      for (const one of waiting) Deferred.doneUnsafe(one, Exit.succeed(Option.none()));
+    }
+    held?.pending.clear();
   };
+
+  /**
+   * Wakes everybody waiting under this key. A key nobody is waiting on is
+   * dropped: an id the controller never issued, or a second report under one it
+   * did.
+   */
+  const woke = (held: Reachable, key: string, reported: Reported): void => {
+    const waiting = held.pending.get(key);
+    if (waiting === undefined) return;
+    held.pending.delete(key);
+    for (const one of waiting) Deferred.doneUnsafe(one, Exit.succeed(Option.some(reported)));
+  };
+
+  /**
+   * Sends one thing and waits for what comes back under `key`. `none` when
+   * there is no connection, it ended, or nothing came back in time - the caller
+   * reports all three the same way: the machine did not say.
+   *
+   * Giving up is this caller's alone: the frame is still out there, so whoever
+   * else is waiting under the same key is still answered when it comes back.
+   */
+  const askedFor = (
+    id: string,
+    key: string,
+    send: (held: Reachable) => Effect.Effect<void>,
+    deadline: Duration.Duration,
+  ): Effect.Effect<Option.Option<Reported>> =>
+    Effect.suspend(() => {
+      const held = reachable.get(id);
+      if (held === undefined) return Effect.succeed(Option.none<Reported>());
+      const mine = Deferred.makeUnsafe<Option.Option<Reported>>();
+      const waiting = held.pending.get(key) ?? new Set();
+      waiting.add(mine);
+      held.pending.set(key, waiting);
+      return Effect.ensuring(
+        Effect.gen(function* () {
+          yield* send(held);
+          const answer = yield* Effect.timeoutOption(Deferred.await(mine), deadline);
+          return Option.getOrElse(answer, () => Option.none<Reported>());
+        }),
+        // Nobody else is listening for this one, and leaving it behind would
+        // keep the map growing for the life of the connection.
+        Effect.sync(() => {
+          waiting.delete(mine);
+          // Only if this set is still the one under the key: a report wakes
+          // callers by removing the key first, so a caller that arrives under
+          // the same key while the woken ones unwind has installed a new set,
+          // and that one is not this finalizer's to drop.
+          if (waiting.size === 0 && held.pending.get(key) === waiting) held.pending.delete(key);
+        }),
+      );
+    });
 
   /**
    * A move to where the runner already is is not a move, and writes no row.
@@ -134,14 +234,27 @@ const make = Effect.gen(function* () {
           }),
         );
         const previous = reachable.get(id);
-        reachable.set(id, { connection, ...connected, awaitingFacts: undefined });
+        reachable.set(id, { connection, ...connected, pending: new Map() });
         if (previous !== undefined) {
           // Nothing more is coming over the connection being displaced, and the
           // entry that would have carried its answer is no longer the one here.
-          endWait(previous, false);
+          abandon(previous);
           previous.close(GOING_AWAY_CLOSE_CODE, DISPLACED_CLOSE_REASON);
         }
       }),
+
+    /**
+     * Says a machine is in, once the controller's own hello has gone out: the
+     * runner drops anything that reaches it before that, so an arrival
+     * announced any earlier is one whose first request is thrown away.
+     */
+    arrived: (id: string): Effect.Effect<void> => PubSub.publish(arrivals, id).pipe(Effect.asVoid),
+
+    /**
+     * Every machine that has just said hello. What to do about an arrival is
+     * not presence's business, so whoever has an opinion listens here.
+     */
+    arrivals: Stream.fromPubSub(arrivals),
 
     /**
      * Ends the connection a runner is holding, if it is holding one. Retiring
@@ -160,21 +273,34 @@ const make = Effect.gen(function* () {
      */
     refreshedFacts: (id: string): Effect.Effect<boolean> =>
       Effect.gen(function* () {
-        const held = reachable.get(id);
-        if (held === undefined) return false;
-        // A caller arriving while another is already waiting joins that wait:
-        // one report answers both, and one report is all a machine sends.
-        const mine = held.awaitingFacts ?? Deferred.makeUnsafe<boolean>();
-        held.awaitingFacts = mine;
         const deadline = yield* RunnerFactsDeadline;
-        // Every call asks: a wait left behind by a caller that gave up is not
-        // evidence that a frame is still in flight, and skipping the ask would
-        // leave the button inert until the runner reconnects.
-        yield* held.askForFacts;
-        // Giving up is this caller's, not the request's: the frame is still out
-        // there, and whoever is still listening is answered when it comes back.
-        const answer = yield* Effect.timeoutOption(Deferred.await(mine), deadline);
-        return Option.isSome(answer) && answer.value;
+        // Every call asks: another caller's wait is no evidence a frame is
+        // still in flight, and skipping the ask would leave the button inert.
+        const answer = yield* askedFor(id, FACTS_KEY, (held) => held.askForFacts, deadline);
+        return Option.isSome(answer);
+      }),
+
+    asked: (
+      id: string,
+      request: Request,
+      deadline: Duration.Duration,
+    ): Effect.Effect<Option.Option<Answer>> =>
+      Effect.map(
+        askedFor(id, request.requestId, (held) => held.ask(request), deadline),
+        // The facts report answers its own key and no request id, so nothing
+        // but an answer can come back under this one.
+        Option.filter((reported): reported is Answer => reported._tag !== "factsReported"),
+      ),
+
+    /**
+     * Dropped under an id nobody issued, or on a replaced connection: either
+     * would let a machine write a row it was not asked to.
+     */
+    reportedAnswer: (id: string, connection: Connection, answer: Answer): Effect.Effect<void> =>
+      Effect.sync(() => {
+        const held = reachable.get(id);
+        if (held?.connection !== connection) return;
+        woke(held, answer.requestId, answer);
       }),
 
     /** An answer on a replaced connection is still that machine saying it is there. */
@@ -200,8 +326,11 @@ const make = Effect.gen(function* () {
           }),
         );
         // After the commit, so a caller woken by this reads the facts it waited
-        // for rather than the ones they replaced.
-        endWait(recorded ? reachable.get(id) : undefined, true);
+        // for rather than the ones they replaced. Still this connection's, in
+        // case the runner reconnected in between: the new connection's waiters
+        // are waiting on the new machine, and it has not spoken yet.
+        const held = recorded ? reachable.get(id) : undefined;
+        if (held?.connection === connection) woke(held, FACTS_KEY, FACTS_REPORTED);
       }),
 
     /** Only the crossing is recorded, because that is the part placement acts on. */
@@ -249,10 +378,11 @@ const make = Effect.gen(function* () {
             }),
           ),
           // Nothing is coming over a connection that has gone, whether or not
-          // the row could be moved off online, so a caller waiting on this
-          // runner's facts is told now rather than at its deadline.
+          // the row could be moved off online, so everybody waiting on this one
+          // is told now rather than at their own deadline.
           Effect.sync(() => {
-            if (held?.connection === connection) endWait(held, false);
+            if (held?.connection !== connection) return;
+            abandon(held);
           }),
         );
       }),

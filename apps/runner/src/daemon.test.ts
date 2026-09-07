@@ -4,7 +4,8 @@
  * The daemon is three parts wired together - what this machine joined, what it
  * says about itself, and the loop that holds the connection - and the wiring is
  * the only thing here that no other test covers. What it asserts is that a
- * machine that never joined is told so by name, and that one that did dials the
+ * machine that never joined is told so by name, that one holding an address it
+ * cannot dial is told which field to edit, and that one that did dials the
  * controller its `runner.json` points at, with the credential that file holds.
  */
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
@@ -55,6 +56,21 @@ describe("the runner daemon", () => {
     const message = outcome._tag === "Failure" ? outcome.failure.message : "";
     expect(message).toContain(join(runnerDirIn(home), "runner.json"));
     expect(message).toContain("hydra runner join");
+  });
+
+  it.each([
+    ["is not a URL at all", "not-a-url"],
+    ["is a scheme the socket cannot dial", "mailto:a@b.c"],
+  ])("refuses to start when the stored controllerUrl %s", async (_case, controllerUrl) => {
+    const home = enrolledAt(controllerUrl);
+
+    const outcome = await Effect.runPromise(Effect.result(daemon(home)));
+
+    expect(outcome._tag).toBe("Failure");
+    const message = outcome._tag === "Failure" ? outcome.failure.message : "";
+    expect(message).toContain("runner.json");
+    expect(message).toContain("controllerUrl");
+    expect(message).toContain("hydra runner set-controller");
   });
 
   it("dials the controller its runner.json names, with the credential it holds", async () => {

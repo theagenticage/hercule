@@ -115,6 +115,16 @@ const TABLE = {
     method: "POST",
     path: "/api/v1/runners/:id/refresh-facts",
   },
+  "runner.probe": {
+    requires: "infra.write",
+    method: "POST",
+    path: "/api/v1/runners/:id/probe",
+  },
+  "runner.installHarness": {
+    requires: "infra.write",
+    method: "POST",
+    path: "/api/v1/runners/:id/install-harness",
+  },
   "runner.createJoinToken": {
     requires: "infra.write",
     method: "POST",
@@ -153,6 +163,26 @@ const TABLE = {
     requires: "infra.write",
     method: "PUT",
     path: "/api/v1/plugins/:id/config",
+  },
+
+  "provider.query": { requires: "infra.read", method: "GET", path: "/api/v1/providers" },
+  "provider.read": { requires: "infra.read", method: "GET", path: "/api/v1/providers/:id" },
+  "provider.create": { requires: "infra.write", method: "POST", path: "/api/v1/providers" },
+  "provider.update": { requires: "infra.write", method: "PATCH", path: "/api/v1/providers/:id" },
+  "provider.login": {
+    requires: "infra.write",
+    method: "POST",
+    path: "/api/v1/providers/:id/login",
+  },
+  "provider.submitLoginCode": {
+    requires: "infra.write",
+    method: "POST",
+    path: "/api/v1/providers/:id/login-code",
+  },
+  "provider.delete": {
+    requires: "infra.write",
+    method: "DELETE",
+    path: "/api/v1/providers/:id",
   },
 
   "controller.read": { requires: "infra.read", method: "GET", path: "/api/v1/controller" },

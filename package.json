@@ -30,6 +30,9 @@
     "vitest": "4.1.11"
   },
   "pnpm": {
+    "ignoredOptionalDependencies": [
+      "@anthropic-ai/claude-agent-sdk-*"
+    ],
     "overrides": {
       "effect": "4.0.0-rc.112",
       "typescript": "5.9.3"

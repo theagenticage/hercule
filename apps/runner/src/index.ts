@@ -18,6 +18,7 @@ import { parseGlobalOptions, resolveHomePath } from "@hydra/home";
 import { daemon } from "./daemon";
 import { join } from "./join";
 import { local } from "./local";
+import { providerLogins } from "./providers";
 import { setController } from "./set-controller";
 
 /** The same vocabulary the CLI uses. */
@@ -62,7 +63,12 @@ const hold = async (work: Effect.Effect<void, { readonly message: string }>): Pr
     Effect.result(
       Effect.scoped(
         Effect.flatMap(untilStopped, (stopped) => Effect.raceFirst(work, stopped)),
-      ).pipe(Effect.provideService(Logger.LogToStderr, true)),
+      ).pipe(
+        // A vendor login blocked on stdin would outlive this process, still
+        // holding a prompt for a credential.
+        Effect.ensuring(providerLogins.stopAll),
+        Effect.provideService(Logger.LogToStderr, true),
+      ),
     ),
   );
   if (outcome._tag === "Failure") {

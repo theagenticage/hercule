@@ -154,6 +154,7 @@ const hold = (runnerId: string, socket: Socket.Socket) =>
             // A write that fails is a connection that is going; the operation
             // waiting on the answer meets that as its deadline.
             askForFacts: Effect.ignore(write(FACTS_REQUEST)),
+            ask: (request) => Effect.ignore(write(asText(request))),
           },
           {
             binaryVersion: hello.binaryVersion,
@@ -164,6 +165,10 @@ const hold = (runnerId: string, socket: Socket.Socket) =>
         );
         greeted = true;
         yield* write(asText(answer));
+        // After the answer, because the runner drops every frame that reaches
+        // it before the controller's hello: a sweep announced any earlier can
+        // have its first probe thrown away.
+        yield* presence.arrived(runnerId);
       });
 
     const handle = (raw: string) =>
@@ -202,6 +207,13 @@ const hold = (runnerId: string, socket: Socket.Socket) =>
           case "watermarkReport":
             if (!greeted) return;
             return yield* presence.reportedWatermark(runnerId, mine, message.watermark);
+          case "probeReport":
+          case "installResult":
+          case "loginUrl":
+          case "loginFailed":
+          case "loginResult":
+            if (!greeted) return;
+            return yield* presence.reportedAnswer(runnerId, mine, message);
           case "goodbye":
             departure = "offline";
             return;
