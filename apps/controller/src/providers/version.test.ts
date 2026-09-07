@@ -58,7 +58,7 @@ describe("the floor each provider is held to", () => {
         "bash",
         "-c",
         'grep -rn "2\\.1\\.[0-9]" apps packages plugins scripts --include=*.ts' +
-          ' | grep -v "/version\\.ts:" | grep -vE "\\.(test|fixture)\\.ts:" || true',
+          ' | grep -v "/version\\.ts:" | grep -vE "\\.(test|testing)\\.ts:" || true',
       ],
       cwd: root,
     }).stdout.toString();

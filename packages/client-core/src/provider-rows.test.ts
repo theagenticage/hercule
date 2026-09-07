@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { ProviderInstance, Runner } from "@hydra/contract";
 import { providerRows } from "./provider-rows";
-import { instance, snapshot, WITH_CLAUDE } from "./providers.fixture";
+import { instance, snapshot, WITH_CLAUDE } from "./providers.testing";
 
 const only = (runner: Runner, one: ProviderInstance) => providerRows(runner, [one])[0]!;
 

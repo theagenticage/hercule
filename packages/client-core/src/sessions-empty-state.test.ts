@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { sessionsEmptyState } from "./sessions-empty-state";
-import { BARE, instance, snapshot, WITH_CLAUDE } from "./providers.fixture";
+import { BARE, instance, snapshot, WITH_CLAUDE } from "./providers.testing";
 
 const waiting = instance("claude-code", "Claude Code", [
   snapshot({ auth: { status: "unauthenticated" } }),

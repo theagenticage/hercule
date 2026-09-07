@@ -131,6 +131,20 @@ describe("the vendor SDK's per-platform CLI packages", () => {
     expect(stdout).toContain("no per-platform CLI package");
   });
 
+  // Without the SDK there are no per-platform packages beside it either, so the
+  // platform check alone would call an install that never happened clean.
+  it("fail the check when the SDK itself is not installed", async () => {
+    const script = await scriptOver("effect@4.0.0");
+
+    const refusal = await depLint("clean", script).then(
+      () => undefined,
+      (thrown: { readonly stderr: string }) => thrown,
+    );
+
+    expect(refusal, "dep-lint accepted a store with no SDK in it").toBeDefined();
+    expect(refusal!.stderr).toContain("is not installed");
+  });
+
   it("fail the check when one finds its way into the store", async () => {
     const script = await scriptOver(`${SDK}@0.3.263`, `${SDK}-darwin-arm64@0.3.263`);
 
