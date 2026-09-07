@@ -6,6 +6,7 @@ export {
   ProviderProbeDeadline,
   ProviderProbeInterval,
 } from "./probes";
+export { providerRepository, type StoredInstance, type StoredSnapshot } from "./repository";
 export {
   ProviderLoginDeadline,
   ProviderService,

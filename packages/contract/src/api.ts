@@ -18,6 +18,7 @@ import { provider } from "./groups/provider";
 import { project } from "./groups/project";
 import { runner } from "./groups/runner";
 import { secret } from "./groups/secret";
+import { session } from "./groups/session";
 import { settings } from "./groups/settings";
 import { setup } from "./groups/setup";
 import { task } from "./groups/task";
@@ -38,6 +39,7 @@ export const api = HttpApi.make("hydra")
     runner,
     plugin,
     provider,
+    session,
     controller,
   )
   .prefix(API_PREFIX);

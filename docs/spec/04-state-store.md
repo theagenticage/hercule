@@ -88,7 +88,7 @@ Provider streaming deltas (`content.delta` with `streamKind` `assistant_text`, `
 
 Actively watched sessions still see tokens live: the web app's live topic passes deltas through ephemerally while a client is watching ([./14-web-app.md](./14-web-app.md)); on reconnect the client falls back to the coalesced rows. A crash mid-turn loses only the not-yet-flushed tail of the running item; the runner's provider-native transcript remains resumable ([ADR 0003](../adr/0003-sessions-run-as-bare-processes.md)).
 
-**Open:** the flush cadence within a long-running item (for example a command whose output runs for minutes) is unspecified. Ticket 9 pins message and turn boundaries only; an implementer needs a decision on whether a partial flush happens on a size or time threshold inside one item.
+**Resolved 2026-09-07 ([#65](https://github.com/rogierpennink/hydra/issues/65)):** the in-item flush cadence, which ticket 9 left open beside the message and turn boundaries, is a size threshold of **4 KiB of held delta text per (item, stream kind)**; the controller also flushes when the session exits, so a session that ends mid-item loses no tail. There is no time threshold: a stream that has stopped producing has nothing a timer would rescue.
 
 ## What is in the store and what is not
 

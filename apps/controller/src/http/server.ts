@@ -49,6 +49,7 @@ import { AuthenticatedLayer, SetupTokenLayer } from "./middleware";
 import { LiveSocketLayer } from "../live";
 import { ProviderProbes } from "../providers";
 import { RunnerJoinRouteLayer, RunnerPresence, RunnerSocketRouteLayer } from "../runners";
+import { SessionService } from "../sessions";
 import { handlerLayers } from "./routes";
 import { withWebBundle, type WebBundle } from "./static";
 
@@ -186,5 +187,8 @@ export const serve = (bundle: WebBundle | undefined) =>
     // of the gap, so no machine says hello unheard. The tick is there because a
     // login expires and a harness is upgraded outside Hydra.
     yield* Effect.forkScoped(Effect.flatMap(ProviderProbes, (probes) => probes.driving));
+    // Likewise before the listener: the queue it reads is built with the layer,
+    // so nothing a machine reports is missed while this fiber is starting.
+    yield* Effect.forkScoped(Effect.flatMap(SessionService, (sessions) => sessions.ingesting));
     yield* Effect.flatMap(application(bundle), HttpServer.serveEffect());
   });

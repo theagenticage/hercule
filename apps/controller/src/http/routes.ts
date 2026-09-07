@@ -34,6 +34,7 @@ import { Controller, ControllerLayer } from "../controller";
 import { Profiles, ProfilesLayer } from "../permissions";
 import { Plugins } from "../plugins";
 import { Secret, SecretLayer } from "../secrets";
+import { SessionService } from "../sessions";
 import { SettingsOperations, SettingsOperationsLayer } from "../settings";
 import { ProjectService, ProjectServiceLayer } from "../projects";
 import { ProviderService } from "../providers";
@@ -247,6 +248,19 @@ const providerRoutes = HttpApiBuilder.group(api, "provider", (handlers) =>
   }),
 );
 
+const sessionRoutes = HttpApiBuilder.group(api, "session", (handlers) =>
+  Effect.gen(function* () {
+    const sessions = yield* SessionService;
+    return handlers
+      .handle("query", ({ query }) => operation(sessions.query(query)))
+      .handle("read", ({ params }) => operation(sessions.read(params)))
+      .handle("spawn", ({ payload }) => operation(sessions.spawn(payload)))
+      .handle("input", ({ params, payload }) =>
+        operation(sessions.input({ id: params.id, ...payload })),
+      );
+  }),
+);
+
 const controllerRoutes = HttpApiBuilder.group(api, "controller", (handlers) =>
   Effect.gen(function* () {
     const controller = yield* Controller;
@@ -261,9 +275,10 @@ const controllerRoutes = HttpApiBuilder.group(api, "controller", (handlers) =>
  * with a layer this list has and its own does not is a controller missing an
  * operation, and nothing would say so until a request asked for it.
  *
- * Four are deliberately absent. `Plugins`, `ProviderService`, `RunnerPresence`
- * and `ProviderProbes` must be the instances the boot built: a second one would
- * hold no plugins, and no connections. They reach the handlers from there.
+ * Five are deliberately absent. `Plugins`, `ProviderService`, `SessionService`,
+ * `RunnerPresence` and `ProviderProbes` must be the instances the boot built: a
+ * second one would hold no plugins, no connections and none of the ingest state
+ * a session's stream is coalesced in. They reach the handlers from there.
  */
 export const operationLayers = Layer.mergeAll(
   SetupLayer,
@@ -299,4 +314,5 @@ export const handlerLayers = Layer.mergeAll(
   runnerRoutes,
   pluginRoutes,
   providerRoutes,
+  sessionRoutes,
 );

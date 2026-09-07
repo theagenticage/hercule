@@ -60,6 +60,7 @@ import {
   ProviderServiceLayer,
 } from "./providers";
 import { seed } from "./seed";
+import { SessionService, SessionServiceLayer } from "./sessions";
 import { Settings, SettingsLayer, type SettingError } from "./settings";
 
 /** Setup tokens are minted and stored like every other Hydra token. */
@@ -209,6 +210,7 @@ export type ControllerServices =
   | RunnerPresence
   | ProviderProbes
   | ProviderService
+  | SessionService
   | HydraHome
   | BootstrapConfig;
 
@@ -265,10 +267,11 @@ export const bootWith = <A, E>(
      * secrets and appends to the audit log, so it is layered on top of them
      * rather than merged beside them.
      */
-    const withPlugins = Layer.mergeAll(PluginsLayer, ProviderServiceLayer).pipe(
-      Layer.provideMerge(PluginHostLayer),
-      Layer.provideMerge(withFleet),
-    );
+    const withPlugins = Layer.mergeAll(
+      PluginsLayer,
+      ProviderServiceLayer,
+      SessionServiceLayer,
+    ).pipe(Layer.provideMerge(PluginHostLayer), Layer.provideMerge(withFleet));
 
     const steps = Effect.gen(function* () {
       yield* migrate({ backupsDir: paths.backupsDir, databaseExisted });

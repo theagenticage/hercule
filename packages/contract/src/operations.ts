@@ -185,6 +185,15 @@ const TABLE = {
     path: "/api/v1/providers/:id",
   },
 
+  "session.query": { requires: "session.read", method: "GET", path: "/api/v1/sessions" },
+  "session.read": { requires: "session.read", method: "GET", path: "/api/v1/sessions/:id" },
+  "session.spawn": { requires: "session.spawn", method: "POST", path: "/api/v1/sessions" },
+  "session.input": {
+    requires: "session.steer",
+    method: "POST",
+    path: "/api/v1/sessions/:id/input",
+  },
+
   "controller.read": { requires: "infra.read", method: "GET", path: "/api/v1/controller" },
   "controller.update": { requires: "infra.write", method: "PATCH", path: "/api/v1/controller" },
 } as const satisfies Record<string, { requires: Requirement; method: Method; path: string }>;

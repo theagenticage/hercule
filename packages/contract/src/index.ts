@@ -122,6 +122,18 @@ export {
   SnapshotAuth,
   VersionVerdict,
 } from "./groups/provider";
+export {
+  MAX_PROMPT_LENGTH,
+  SESSION_INPUT_FIELDS,
+  SESSION_SORT_FIELDS,
+  SESSION_STATUSES,
+  Session,
+  SessionFilter,
+  SessionInputPayload,
+  SessionInputResult,
+  SessionSpawnInput,
+  SessionStatus,
+} from "./groups/session";
 export { OwnerKind, SecretRef } from "./groups/secret";
 export { ControllerInfo, ControllerUpdateInput } from "./groups/controller";
 export {
