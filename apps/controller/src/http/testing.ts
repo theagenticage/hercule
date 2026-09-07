@@ -11,6 +11,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect } from "vitest";
+import type * as Context from "effect/Context";
 import type * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import type * as Fiber from "effect/Fiber";
@@ -239,37 +240,18 @@ export const withServer = (
         });
         yield* bootSteps;
         const reboot: RebootArranger = yield* repeatable(bootSteps);
-        // The four shipped values a test cannot wait out. Each is left alone
-        // unless the test named its own, so a server built with no options is
-        // the one that ships.
         let listening = serve(bundle);
-        if (options.pings !== undefined) {
-          listening = Effect.provideService(listening, RunnerPingSchedule, options.pings);
-        }
-        if (options.factsDeadline !== undefined) {
-          listening = Effect.provideService(listening, RunnerFactsDeadline, options.factsDeadline);
-        }
-        if (options.probeDeadline !== undefined) {
-          listening = Effect.provideService(
-            listening,
-            ProviderProbeDeadline,
-            options.probeDeadline,
-          );
-        }
-        if (options.probeInterval !== undefined) {
-          listening = Effect.provideService(
-            listening,
-            ProviderProbeInterval,
-            options.probeInterval,
-          );
-        }
-        if (options.loginDeadline !== undefined) {
-          listening = Effect.provideService(
-            listening,
-            ProviderLoginDeadline,
-            options.loginDeadline,
-          );
-        }
+        // The five shipped values a test cannot wait out. Each stands unless
+        // the test named its own, so a server built with no options is the one
+        // that ships.
+        const named = <A>(key: Context.Reference<A>, value: A | undefined): void => {
+          if (value !== undefined) listening = Effect.provideService(listening, key, value);
+        };
+        named(RunnerPingSchedule, options.pings);
+        named(RunnerFactsDeadline, options.factsDeadline);
+        named(ProviderProbeDeadline, options.probeDeadline);
+        named(ProviderProbeInterval, options.probeInterval);
+        named(ProviderLoginDeadline, options.loginDeadline);
         yield* listening;
         const base = yield* baseUrl;
         // The log this database holds, read the way anything else reads it: a
