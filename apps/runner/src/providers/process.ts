@@ -55,8 +55,6 @@ export const runProcess: Run = (command, env) =>
  * the vendor prints a URL, waits on stdin, and only then decides how it went.
  */
 export const spawnLogin: LoginSpawn = (command, env): LoginChild => {
-  // Copied because Bun's types take a mutable array, and an adapter's command
-  // is a constant it must keep.
   const child = Bun.spawn([...command], { stdin: "pipe", stdout: "pipe", stderr: "pipe", env });
   const text = (stream: ReadableStream<Uint8Array>): AsyncIterable<string> => {
     const decoder = new TextDecoder();

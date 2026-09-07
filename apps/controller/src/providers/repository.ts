@@ -130,7 +130,6 @@ const make = Effect.gen(function* () {
         (rows) => Effect.forEach(rows, toInstance),
       ),
 
-    /** One instance by id. */
     one: (
       id: string,
     ): Effect.Effect<Option.Option<StoredInstance>, SqlError | Schema.SchemaError> =>
@@ -239,5 +238,4 @@ const make = Effect.gen(function* () {
   };
 });
 
-/** Everything the provider service reads and writes. */
 export const providerRepository = make;

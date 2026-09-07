@@ -2,7 +2,7 @@ import type { JSX, ReactNode } from "react";
 import { Link, createFileRoute } from "@tanstack/react-router";
 import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { Button, EmptyState } from "@hydra/ui";
-import { providerRows, queryKeys, sessionsEmptyState } from "@hydra/client-core";
+import { queryKeys, sessionsEmptyState } from "@hydra/client-core";
 import { useLiveInvalidation } from "../../app/live-invalidation";
 import { localRunnerQuery, providersQuery, runnersQuery } from "../../app/queries";
 import { ProviderLogin } from "../../screens/provider-login";
@@ -106,13 +106,9 @@ function Sessions(): JSX.Element {
     );
   }
 
-  // Which harness is ready is what the reader wants named; the first one that
-  // answered is as good an answer as any, and there is one on a fresh install.
-  const ready = providerRows(local, instances).find((row) => row.loggedIn);
-
   return (
     <Screen
-      headline={`${ready?.name ?? "A coding harness"} is ready.`}
+      headline={`${state.name} is ready.`}
       lead="Threads are the next thing to land. Until they do, this screen is where they will start."
       fine="Starting a thread is issue #69."
     />

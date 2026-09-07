@@ -19,6 +19,7 @@ import { CLAUDE_CODE_VERSION } from "@hydra/home/version";
 import {
   MAX_FACT_ITEMS,
   MAX_FACT_LENGTH,
+  MAX_INSTALL_MESSAGE_LENGTH,
   type ModelDescriptor,
   type ModelOption,
   type ProbeResult,
@@ -29,7 +30,6 @@ import { runProcess, type Run } from "./process";
 
 export const CLAUDE_CODE = "claude-code";
 
-/** The harness binary's name on `PATH`. */
 const CLAUDE_BINARY = "claude";
 
 /**
@@ -334,12 +334,11 @@ export const claudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
 /** What an operator needs off a failed installer: what it was saying at the end. */
 const LAST_LINES = 5;
 
-/** The protocol caps this message, and an installer that said nothing still failed. */
-const MAX_INSTALL_MESSAGE = 4096;
-
 const lastLines = (output: string): string => {
   const said = output.trimEnd().split("\n").slice(-LAST_LINES).join("\n");
-  return said === "" ? "the installer failed without saying why" : said.slice(-MAX_INSTALL_MESSAGE);
+  return said === ""
+    ? "the installer failed without saying why"
+    : said.slice(-MAX_INSTALL_MESSAGE_LENGTH);
 };
 
 /** The adapter as it ships: the real SDK, and real child processes. */

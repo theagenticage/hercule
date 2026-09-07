@@ -148,7 +148,10 @@ describe("sessionsEmptyState", () => {
   });
 
   it("is ready once one instance on this machine is logged in", () => {
-    expect(sessionsEmptyState(WITH_CLAUDE, [loggedIn])).toEqual({ kind: "ready" });
+    expect(sessionsEmptyState(WITH_CLAUDE, [loggedIn])).toEqual({
+      kind: "ready",
+      name: "Claude Code",
+    });
   });
 
   it("is ready even when another instance is still waiting for a login", () => {
@@ -157,6 +160,9 @@ describe("sessionsEmptyState", () => {
     const second = instance(CODEX, "codex", "Codex", [
       snapshot(BARE.id, { status: "unauthenticated" }),
     ]);
-    expect(sessionsEmptyState(WITH_CLAUDE, [second, loggedIn])).toEqual({ kind: "ready" });
+    expect(sessionsEmptyState(WITH_CLAUDE, [second, loggedIn])).toEqual({
+      kind: "ready",
+      name: "Claude Code",
+    });
   });
 });

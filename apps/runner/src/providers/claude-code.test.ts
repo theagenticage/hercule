@@ -9,9 +9,12 @@
  * The fixtures are the shapes captured from the real CLI at 2.1.263 and written
  * down in the SPEC's external contracts table, not shapes invented here.
  */
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { Duration, Effect, Fiber } from "effect";
 import { TestClock } from "effect/testing";
+import { CLAUDE_CODE_VERSION } from "@hydra/home/version";
 import type { ProbeResult } from "@hydra/protocol";
 import { PROBE_DEADLINE, claudeCodeAdapter, type ClaudeSeam } from "./claude-code";
 import type { ProviderRunnerContext } from "./index";
@@ -302,5 +305,25 @@ describe("how the Claude adapter asks the SDK", () => {
     // and writes the wrong account's credential and reports it as this one's.
     expect(Object.keys(env)).not.toContain("HOME");
     expect(env["PATH"]).toBe(CONTEXT.env["PATH"]);
+  });
+});
+
+describe("the CLI version this build talks to", () => {
+  it("is the one the SDK beside it was built against", () => {
+    const manifest = JSON.parse(
+      readFileSync(
+        fileURLToPath(
+          new URL(
+            "../../node_modules/@anthropic-ai/claude-agent-sdk/package.json",
+            import.meta.url,
+          ),
+        ),
+        "utf8",
+      ),
+    ) as { readonly claudeCodeVersion: string };
+
+    // Baked at build rather than read at runtime: a compiled binary has no
+    // manifest on disk to read.
+    expect(CLAUDE_CODE_VERSION).toBe(manifest.claudeCodeVersion);
   });
 });

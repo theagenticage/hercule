@@ -103,6 +103,27 @@ interface Wire {
   readonly close: () => void;
 }
 
+/** Every frame of one kind the controller has sent on this connection so far. */
+const framesOf = <T extends ControllerMessage>(wire: Wire, tag: T["_tag"]): ReadonlyArray<T> =>
+  wire.frames.filter((frame): frame is T => frame._tag === tag);
+
+const probeRequests = (wire: Wire): ReadonlyArray<ProbeRequest> =>
+  framesOf<ProbeRequest>(wire, "probeRequest");
+
+/** The nth frame of a kind the controller sent, once it has sent it. */
+const frameOn = async <T extends ControllerMessage>(
+  wire: Wire,
+  tag: T["_tag"],
+  index = 0,
+): Promise<T> => {
+  for (let attempt = 0; attempt < 400; attempt++) {
+    const found = framesOf<T>(wire, tag);
+    if (found.length > index) return found[index]!;
+    await delay(5);
+  }
+  throw new Error(`the controller never sent a ${tag}`);
+};
+
 /**
  * Opens the socket with a credential, as a runner does: the credential rides
  * the upgrade request, so a connection that opens has already been let in.
@@ -1467,18 +1488,14 @@ describe("refreshing a runner's facts on demand", () => {
  * holding.
  *
  * Everything here is driven through the wire because a snapshot only exists
- * once a runner answered: the instances are the shipped registry's, so what
- * this file says about "one request per instance" is about the three providers
- * the binary really ships.
+ * once a runner answered, and against the shipped plugin registry rather than
+ * fixtures written here, so what this file says about "one request per
+ * instance" is about the three providers the binary really ships. The harness
+ * boots with no plugins unless a test says otherwise.
  *
  * The shipped probe deadline and the hourly re-probe are handed over the same
  * way the ping interval is: a real Bun listener cannot be driven by a
  * `TestClock`, and neither number can be waited out.
- */
-/**
- * The shipped plugin registry, so the instances a probe is about are the three
- * providers the binary really ships rather than fixtures written here. The
- * harness boots with no plugins unless a test says otherwise.
  */
 const withRegistry = (
   body: (harness: ServerHarness) => Promise<void>,
@@ -1540,10 +1557,6 @@ describe("probing a runner's provider instances", () => {
     }
     return undefined;
   };
-
-  /** Every probe request the controller has sent on this connection so far. */
-  const probeRequests = (wire: Wire): ReadonlyArray<ProbeRequest> =>
-    wire.frames.filter((frame): frame is ProbeRequest => frame._tag === "probeRequest");
 
   /** Waits until the connection has been asked for at least this many probes. */
   const askedFor = async (wire: Wire, count: number): Promise<ReadonlyArray<ProbeRequest>> => {
@@ -1886,21 +1899,6 @@ describe("installing a harness on a runner", () => {
   const installHarness = (base: string, token: string, id: string, providerId: string) =>
     send("POST", base, `/api/v1/runners/${id}/install-harness`, { body: { providerId }, token });
 
-  /** The install request the controller sent, once it has. */
-  const installRequestOn = async (wire: Wire): Promise<InstallRequest> => {
-    for (let attempt = 0; attempt < 400; attempt++) {
-      const found = wire.frames.find(
-        (frame): frame is InstallRequest => frame._tag === "installRequest",
-      );
-      if (found !== undefined) return found;
-      await delay(5);
-    }
-    throw new Error("the controller never asked for an install");
-  };
-
-  const probeRequestsOn = (wire: Wire): ReadonlyArray<ProbeRequest> =>
-    wire.frames.filter((frame): frame is ProbeRequest => frame._tag === "probeRequest");
-
   it("runs the installer, takes the machine's word for what it now has, and probes it", async () => {
     await withRegistry(async (harness) => {
       const token = await completeSetup(harness.base);
@@ -1915,10 +1913,10 @@ describe("installing a harness on a runner", () => {
             providerId: string;
           }>
         ).find((one) => one.providerId === "claude-code")!;
-        const before = probeRequestsOn(wire).length;
+        const before = probeRequests(wire).length;
 
         const pending = installHarness(harness.base, token, joined.runnerId, "claude-code");
-        const request = await installRequestOn(wire);
+        const request = await frameOn<InstallRequest>(wire, "installRequest");
         expect(request.providerId).toBe("claude-code");
         // The runner reports what the machine now has, then says the install
         // finished: the row must not answer with the machine as it was.
@@ -1932,11 +1930,11 @@ describe("installing a harness on a runner", () => {
 
         // And the instance that can now be driven is probed, because a harness
         // that was just installed has never been asked anything.
-        for (let attempt = 0; attempt < 400 && probeRequestsOn(wire).length <= before; attempt++) {
+        for (let attempt = 0; attempt < 400 && probeRequests(wire).length <= before; attempt++) {
           await delay(5);
         }
         expect(
-          probeRequestsOn(wire)
+          probeRequests(wire)
             .slice(before)
             .map((one) => one.instanceId),
         ).toContain(claude.id);
@@ -1955,7 +1953,7 @@ describe("installing a harness on a runner", () => {
         await rowWhen(harness.base, token, joined.runnerId, (one) => one.connectivity === "online");
 
         const pending = installHarness(harness.base, token, joined.runnerId, "claude-code");
-        const request = await installRequestOn(wire);
+        const request = await frameOn<InstallRequest>(wire, "installRequest");
         wire.send({
           _tag: "installResult",
           requestId: request.requestId,
@@ -2034,20 +2032,6 @@ describe("logging a runner's provider instance in", () => {
     instanceId: string,
     body: { readonly runnerId: string; readonly code: string },
   ) => send("POST", base, `/api/v1/providers/${instanceId}/login-code`, { body, token });
-
-  /** The nth frame of a kind the controller sent, once it has sent it. */
-  const frameOn = async <T extends ControllerMessage>(
-    wire: Wire,
-    tag: string,
-    index = 0,
-  ): Promise<T> => {
-    for (let attempt = 0; attempt < 400; attempt++) {
-      const found = wire.frames.filter((frame) => frame._tag === tag);
-      if (found.length > index) return found[index] as T;
-      await delay(5);
-    }
-    throw new Error(`the controller never sent a ${tag}`);
-  };
 
   /** A probe request for one instance that this connection has not seen yet. */
   const probeOf = async (wire: Wire, instanceId: string, after: number): Promise<ProbeRequest> => {

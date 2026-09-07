@@ -20,10 +20,7 @@ import type * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import { notFound, type CapabilitySnapshot, type NotFound } from "@hydra/contract";
-import type { ProbeResult } from "@hydra/protocol";
 import { announce, nowIso, withTransaction } from "../db";
-// The two runner modules directly rather than the domain's index: the runner
-// service reaches this one, so going through it would close a cycle.
 import { RunnerPresence } from "../runners/presence";
 import { runnerRepository } from "../runners/repository";
 import { providerRepository, type StoredInstance } from "./repository";
@@ -61,20 +58,6 @@ const make = Effect.gen(function* () {
   const runners = yield* runnerRepository;
   const presence = yield* RunnerPresence;
 
-  const snapshotOf = (
-    runnerId: string,
-    providerId: string,
-    result: ProbeResult,
-    at: string,
-  ): CapabilitySnapshot => ({
-    runnerId,
-    probedAt: at,
-    harnessVersion: result.harnessVersion,
-    versionVerdict: versionVerdict(result.harnessVersion, floorFor(providerId)),
-    auth: result.auth,
-    models: result.models,
-  });
-
   /**
    * One instance on one runner. `none` when the machine is not holding a
    * connection or did not answer in time; a report that arrives late is
@@ -107,7 +90,14 @@ const make = Effect.gen(function* () {
           // No audit row: what a machine has is not an event anyone reads back,
           // so the instance's watchers are told here instead.
           yield* announce({ _tag: "record", topic: "provider", id: instance.id, kind: "updated" });
-          return Option.some(snapshotOf(runnerId, instance.providerId, result, at));
+          return Option.some({
+            runnerId,
+            probedAt: at,
+            harnessVersion: result.harnessVersion,
+            versionVerdict: versionVerdict(result.harnessVersion, floorFor(instance.providerId)),
+            auth: result.auth,
+            models: result.models,
+          });
         }),
       );
     });

@@ -46,7 +46,7 @@ import { ProviderProbes, ProviderProbeDeadline } from "../providers";
 import { nowIso, pageInput, refuseCursor, withTransaction } from "../db";
 import { AuditLog } from "../events";
 import { Settings, type SettingError } from "../settings";
-import { NOT_ONLINE, requireAdapter } from "./adapters";
+import { requireAdapter, requireOnline } from "./adapters";
 import { JoinTokens } from "./join-tokens";
 import { RunnerFactsDeadline, RunnerPresence } from "./presence";
 import { runnerRepository, type RunnerEdit } from "./repository";
@@ -407,9 +407,7 @@ const make = Effect.gen(function* () {
         yield* requireGrant("runner.refreshFacts");
         const { id } = yield* Effect.mapError(decodeIdentified(input), validationOf);
         const before = yield* one(id);
-        if (before.connectivity !== "online") {
-          return yield* Effect.fail(invalidState(NOT_ONLINE));
-        }
+        yield* requireOnline(before);
         if (!(yield* presence.refreshedFacts(id))) {
           const waited = Duration.format(yield* RunnerFactsDeadline);
           return yield* Effect.fail(
@@ -430,7 +428,7 @@ const make = Effect.gen(function* () {
         yield* requireGrant("runner.probe");
         const { id, instanceId } = yield* Effect.mapError(decodeProbe(input), validationOf);
         const runner = yield* one(id);
-        if (runner.connectivity !== "online") return yield* Effect.fail(invalidState(NOT_ONLINE));
+        yield* requireOnline(runner);
         const snapshot = yield* probes.probe(id, instanceId);
         if (Option.isNone(snapshot)) {
           const waited = Duration.format(yield* ProviderProbeDeadline);

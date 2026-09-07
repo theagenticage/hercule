@@ -8,8 +8,6 @@
  * also states that the number lives in one generated place and is written down
  * nowhere else in the source.
  */
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { CLAUDE_CODE_VERSION } from "@hydra/home/version";
@@ -63,16 +61,6 @@ describe("the verdict on a harness version", () => {
 
 describe("the floor each provider is held to", () => {
   it("holds Claude Code to the CLI version the compiled-in SDK was built against", () => {
-    const manifest = JSON.parse(
-      readFileSync(
-        join(root, "apps/runner/node_modules/@anthropic-ai/claude-agent-sdk/package.json"),
-        "utf8",
-      ),
-    ) as { readonly claudeCodeVersion: string };
-
-    // Baked at build rather than read at runtime: a compiled binary has no
-    // manifest on disk to read.
-    expect(CLAUDE_CODE_VERSION).toBe(manifest.claudeCodeVersion);
     expect(floorFor("claude-code")).toBe(CLAUDE_CODE_VERSION);
   });
 

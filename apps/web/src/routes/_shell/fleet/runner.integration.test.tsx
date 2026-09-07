@@ -552,22 +552,10 @@ describe("Runner > providers", () => {
   /** What the CLI says about a code that was not pasted whole. */
   const INVALID = "Invalid code. Please make sure the full code was copied.";
 
-  /**
-   * The part of the card holding one instance and nothing of the next: the
-   * largest element that still has this instance's name and none of the others'.
-   */
-  const row = async (name: string, others: readonly string[]): Promise<HTMLElement> => {
-    let found: HTMLElement = await screen.findByText(new RegExp(name));
-    while (
-      found.parentElement !== null &&
-      !others.some((other) => (found.parentElement?.textContent ?? "").includes(other))
-    ) {
-      found = found.parentElement;
-    }
-    return found;
-  };
+  /** The part of the card holding one instance and nothing of the next. */
+  const row = (name: string): Promise<HTMLElement> => screen.findByRole("group", { name });
 
-  const claudeRow = () => row("Claude Code", ["Codex"]);
+  const claudeRow = () => row("Claude Code");
 
   it("says what each instance last reported on this machine", async () => {
     await open(ONLINE);
@@ -581,7 +569,7 @@ describe("Runner > providers", () => {
     expect(claude).not.toMatch(/below|above|untested/i);
 
     // A provider this machine cannot drive says so rather than staying blank.
-    expect(reading(await row("Codex", ["Claude Code"]))).toContain("no adapter");
+    expect(reading(await row("Codex"))).toContain("no adapter");
   });
 
   it("marks a harness older than the one this build talks to", async () => {
@@ -621,7 +609,7 @@ describe("Runner > providers", () => {
     // There is nothing to log in to until the harness is on the machine.
     expect(claude.queryByRole("button", { name: /log in/i })).toBeNull();
 
-    const codexRow = await row("Codex", ["Claude Code"]);
+    const codexRow = await row("Codex");
     const codex = within(codexRow);
     expect(codex.getByRole("button", { name: /install/i }).hasAttribute("disabled")).toBe(true);
     // Said before the user presses anything, rather than discovered by failing.

@@ -22,7 +22,7 @@ export type SessionsEmptyState =
   /** A harness is here and waiting for a login; these are the ones to offer. */
   | { readonly kind: "log-in"; readonly instances: ReadonlyArray<ProviderInstance> }
   /** Something on this machine is logged in and ready to run a thread. */
-  | { readonly kind: "ready" };
+  | { readonly kind: "ready"; readonly name: string };
 
 export const sessionsEmptyState = (
   localRunner: Runner | null,
@@ -35,8 +35,10 @@ export const sessionsEmptyState = (
   const rows = providerRows(localRunner, instances);
   // One usable harness is what this screen is about; anything else still
   // waiting is Fleet's business, and a "log in" headline over a working install
-  // would read as broken.
-  if (rows.some((row) => row.loggedIn)) return { kind: "ready" };
+  // would read as broken. The first one that answered is as good a one to name
+  // as any.
+  const ready = rows.find((row) => row.loggedIn);
+  if (ready !== undefined) return { kind: "ready", name: ready.name };
 
   const offered = new Set(rows.filter((row) => row.logIn).map((row) => row.id));
   const waiting = instances.filter((instance) => offered.has(instance.id));

@@ -81,7 +81,6 @@ const LoginInput = Schema.Struct({ id: Id, ...ProviderLoginInput.fields });
 
 export type LoginInput = Schema.Schema.Type<typeof LoginInput>;
 
-/** The code the user pasted back out of their browser. */
 const LoginCodeInput = Schema.Struct({ id: Id, ...ProviderLoginCodeInput.fields });
 
 export type LoginCodeInput = Schema.Schema.Type<typeof LoginCodeInput>;
@@ -461,7 +460,6 @@ const make = Effect.gen(function* () {
   };
 });
 
-/** The provider instance service. */
 export class ProviderService extends Context.Service<
   ProviderService,
   Effect.Success<typeof make>

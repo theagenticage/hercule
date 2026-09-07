@@ -145,9 +145,8 @@ export type RebootArranger = () => Promise<void>;
 
 /**
  * Hands an effect back as something a test body can run again, over the very
- * services this server was built with, so what it does a second time it does to
- * the same database. The services are inferred rather than listed, so a step
- * added to the boot cannot leave a stale list behind.
+ * services this server was built with. The services are inferred rather than
+ * listed, so a step added to the boot cannot leave a stale list behind.
  */
 const repeatable = <A, E, R>(
   effect: Effect.Effect<A, E, R>,

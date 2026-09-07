@@ -350,6 +350,8 @@ export const InstallRequest = Schema.Struct({
 
 export type InstallRequest = Schema.Schema.Type<typeof InstallRequest>;
 
+export const MAX_INSTALL_MESSAGE_LENGTH = 4096;
+
 /**
  * How an install ended. The runner reports its facts before this, so a
  * controller reading the row after an `ok` reads the machine as it now is.
@@ -359,7 +361,7 @@ export const InstallResult = Schema.Struct({
   requestId: RequestId,
   ok: Schema.Boolean,
   /** What the installer said when it failed, so an operator can act on it. */
-  message: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(4096))),
+  message: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(MAX_INSTALL_MESSAGE_LENGTH))),
 });
 
 export type InstallResult = Schema.Schema.Type<typeof InstallResult>;

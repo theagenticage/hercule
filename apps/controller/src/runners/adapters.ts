@@ -10,18 +10,24 @@ import * as Effect from "effect/Effect";
 import { invalidState, validation, type InvalidState, type Validation } from "@hydra/contract";
 import type { RunnerDetail } from "@hydra/contract";
 
-export const NOT_ONLINE = "that runner is not connected, so it cannot be asked anything";
+const NOT_ONLINE = "that runner is not connected, so it cannot be asked anything";
+
+/** Nothing can be asked of a machine that is not holding a connection. */
+export const requireOnline = (runner: RunnerDetail): Effect.Effect<void, InvalidState> =>
+  runner.connectivity === "online" ? Effect.void : Effect.fail(invalidState(NOT_ONLINE));
 
 export const noAdapterFor = (providerId: string): string =>
   `no adapter for ${providerId} in this runner build`;
 
+/** Online, and carrying an adapter for this provider. */
 export const requireAdapter = (
   runner: RunnerDetail,
   providerId: string,
   /** Which field of the caller's input is the one at fault. */
   field: string,
-): Effect.Effect<void, InvalidState | Validation> => {
-  if (runner.connectivity !== "online") return Effect.fail(invalidState(NOT_ONLINE));
-  if ((runner.facts?.adapters ?? []).includes(providerId)) return Effect.void;
-  return Effect.fail(validation([{ path: [field], message: noAdapterFor(providerId) }]));
-};
+): Effect.Effect<void, InvalidState | Validation> =>
+  Effect.flatMap(requireOnline(runner), () =>
+    (runner.facts?.adapters ?? []).includes(providerId)
+      ? Effect.void
+      : Effect.fail(validation([{ path: [field], message: noAdapterFor(providerId) }])),
+  );

@@ -109,7 +109,11 @@ function Row({
   readonly onLoggedIn: () => void;
 }): JSX.Element {
   return (
+    // Named so the facts and the moves for one provider are one thing a reader
+    // - or a screen reader - can take in without the rows running together.
     <div
+      role="group"
+      aria-label={row.name}
       className={
         first ? "flex flex-col gap-1" : "flex flex-col gap-1 border-t border-line-soft pt-3"
       }
