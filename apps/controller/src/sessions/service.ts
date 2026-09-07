@@ -130,6 +130,18 @@ const nearestSupported = (
   return undefined;
 };
 
+/**
+ * Where the provider-native id rides on the event that announces the harness.
+ * The key is `SessionBinding`'s own field name, because it is the same fact:
+ * `providerRefs` is the generic bag of native ids (spec 06 section 4.1), and a
+ * second spelling for this one would be a second vocabulary.
+ *
+ * A `session.started` that carries none leaves the id null until the machine's
+ * next sessions report, which is the other place a binding reaches here.
+ */
+const nativeIdIn = (event: ProviderEvent): string | undefined =>
+  event._tag === "session.started" ? event.providerRefs?.nativeSessionId : undefined;
+
 type ReadError = Unauthenticated | Forbidden | Validation | SqlError;
 
 type SpawnError = ReadError | InvalidState | SettingError | GrantsError | Schema.SchemaError;
@@ -316,6 +328,13 @@ const make = Effect.gen(function* () {
         Effect.gen(function* () {
           const at = yield* nowIso;
           for (const row of folded.rows) yield* sessions.append(id, row);
+          // The binding arrives on the event that announces the harness, and is
+          // written with the move that event causes: a session that reads
+          // `idle` has the provider-native id that made it so.
+          const native = nativeIdIn(event);
+          if (native !== undefined) {
+            yield* sessions.bind(id, runnerId, found.value.instanceId, native);
+          }
           // `exited` is final (spec 06 section 4.1), so a stray event after it
           // is still recorded but never brings the session back to life.
           if (folded.status === undefined || folded.status === before || before === "exited") {

@@ -243,7 +243,7 @@ const transcript = (sessionId: string): ReadonlyArray<readonly [number, Provider
   const turnId = "t1";
   const itemId = "i1";
   return [
-    [1, { ...base, _tag: "session.started" }],
+    [1, { ...base, _tag: "session.started", providerRefs: { nativeSessionId: "native-1" } }],
     [2, { ...base, _tag: "turn.started", turnId }],
     [
       3,
@@ -455,18 +455,31 @@ describe("what a machine reports", () => {
     });
   });
 
-  it("records the native id the machine bound to the session", async () => {
+  it("records the native id the harness came up under, with the move that says so", async () => {
+    await withFleet(async (arranged) => {
+      const session = await spawned(arranged, { prompt: "hello" });
+
+      report(arranged.wire, ...transcript(session.id)[0]!);
+
+      const bound = await sessionWhen(arranged, session.id, (one) => one.status === "idle");
+      // The id and the status it explains are written together, so a session
+      // reading idle is never one whose binding has not landed yet.
+      expect(bound.nativeSessionId).toBe("native-1");
+    });
+  });
+
+  it("records the native id a sessions report carries, for a session already up", async () => {
     await withFleet(async (arranged) => {
       const session = await spawned(arranged, { prompt: "hello" });
       const instanceId = instanceOf(arranged, "full-provider");
 
       arranged.wire.send({
         _tag: "sessionsReport",
-        sessions: [{ sessionId: session.id, nativeSessionId: "native-1", instanceId }],
+        sessions: [{ sessionId: session.id, nativeSessionId: "reported-1", instanceId }],
       });
 
       const bound = await sessionWhen(arranged, session.id, (one) => one.nativeSessionId !== null);
-      expect(bound.nativeSessionId).toBe("native-1");
+      expect(bound.nativeSessionId).toBe("reported-1");
     });
   });
 
