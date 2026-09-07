@@ -1,6 +1,7 @@
 /**
- * `runner.json` as the daemon reads it before it dials anything: a file a join
- * wrote, and a file a hand edit broke.
+ * `runner.json` as the daemon reads it before it dials anything: the file a
+ * join wrote. Whether what it holds can be dialed is the daemon's to say, and
+ * `daemon.test.ts` says it.
  */
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -42,24 +43,5 @@ describe("readRunnerFile", () => {
 
     expect(outcome._tag).toBe("Success");
     expect(outcome._tag === "Success" ? outcome.success : undefined).toEqual(ENROLLED);
-  });
-
-  it("refuses a controllerUrl that is not a URL, naming the file and the field", async () => {
-    const home = homeHolding({ ...ENROLLED, controllerUrl: "not-a-url" });
-
-    const outcome = await read(home);
-
-    expect(outcome._tag).toBe("Failure");
-    const message = outcome._tag === "Failure" ? outcome.failure.message : "";
-    expect(message).toContain("runner.json");
-    expect(message).toContain("controllerUrl: must be a URL");
-  });
-
-  it("refuses a URL the runner socket cannot dial, saying which schemes it can", async () => {
-    const outcome = await read(homeHolding({ ...ENROLLED, controllerUrl: "mailto:a@b.c" }));
-
-    expect(outcome._tag === "Failure" ? outcome.failure.message : "").toContain(
-      "controllerUrl: must be http or https",
-    );
   });
 });

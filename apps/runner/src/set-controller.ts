@@ -14,7 +14,7 @@ import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import {
   CONTROLLER_URL_SCHEMES,
-  readRewritableRunnerFile,
+  readRunnerFile,
   runnerFileIn,
   writeRunnerFile,
 } from "./runner-file";
@@ -45,7 +45,7 @@ export const setController = (options: {
       );
     }
     const current = yield* Effect.mapError(
-      readRewritableRunnerFile(options.home),
+      readRunnerFile(options.home),
       (error) => new SetControllerError({ message: error.message }),
     );
     const path = runnerFileIn(options.home);

@@ -10,7 +10,7 @@ import { IDENTITY_PORT } from "@hydra/protocol";
 import { identityListener } from "./identity";
 import { probeFacts, thisMachine } from "./probe";
 import { reconnect, reconnectSignals } from "./reconnect";
-import { readRunnerFile, type NotEnrolled } from "./runner-file";
+import { CONTROLLER_URL_SCHEMES, NotEnrolled, readRunnerFile, runnerFileIn } from "./runner-file";
 import { connect, type RunnerRetired } from "./socket";
 import { machineHeadroom } from "./watermark";
 
@@ -22,6 +22,29 @@ const addresses = (): ReadonlyArray<string> =>
     .sort();
 
 /**
+ * The one place a stored controller URL is checked: every consumer downstream
+ * builds a request URL off it, so a hand-edited value surfaces here as a
+ * refusal naming the file and the field rather than as a defect deep in a dial.
+ */
+const dialable = (home: string, controllerUrl: string): Effect.Effect<void, NotEnrolled> => {
+  const url = URL.parse(controllerUrl);
+  const wrong =
+    url === null
+      ? "is not a URL"
+      : CONTROLLER_URL_SCHEMES.includes(url.protocol)
+        ? undefined
+        : "is not http or https";
+  if (wrong === undefined) return Effect.void;
+  return Effect.fail(
+    new NotEnrolled({
+      message:
+        `controllerUrl in ${runnerFileIn(home)} ${wrong}: ${controllerUrl}. ` +
+        "Run `hydra runner set-controller <controller-url>` to point this machine at one it can dial.",
+    }),
+  );
+};
+
+/**
  * The facts are read afresh per attempt, so a machine that gained memory between
  * two connections says so in the second hello.
  */
@@ -29,6 +52,7 @@ export const daemon = (home: string): Effect.Effect<never, NotEnrolled | RunnerR
   Effect.scoped(
     Effect.gen(function* () {
       const pin = yield* readRunnerFile(home);
+      yield* dialable(home, pin.controllerUrl);
       // Before the first probe, so the port the facts report is the one a
       // browser will find this runner on.
       const identityPort = yield* identityListener({

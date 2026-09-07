@@ -8,35 +8,23 @@ import { readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join as joinPath } from "node:path";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
-import * as SchemaIssue from "effect/SchemaIssue";
 import { runnerDirIn } from "@hydra/home";
 
 /** The two schemes the runner socket knows how to dial. */
 export const CONTROLLER_URL_SCHEMES: ReadonlyArray<string> = ["http:", "https:"];
 
 /**
- * Checked at read rather than where it is used: every consumer builds a request
- * URL off it, and a hand-edited value would otherwise surface as a defect deep
- * in the dial instead of a refusal naming the file. The filter answers with the
- * sentence the user reads, because that is the only annotation a decode failure
- * carries out.
- */
-const ControllerUrl = Schema.String.check(
-  Schema.makeFilter((value: string) => {
-    const url = URL.parse(value);
-    if (url === null) return "must be a URL";
-    return CONTROLLER_URL_SCHEMES.includes(url.protocol) ? true : "must be http or https";
-  }),
-);
-
-/**
  * The controller URL is here rather than in `config.toml` because it is not a
  * bootstrap key: it is part of who this runner belongs to.
+ *
+ * It is a string here and dialable only where it is dialed. `set-controller` is
+ * the way out of a machine pointed at an address that will not parse, so the
+ * field it is about to replace must not be what stops it from reading the rest.
  */
 export const RunnerFile = Schema.Struct({
   runnerId: Schema.String,
   credential: Schema.String,
-  controllerUrl: ControllerUrl,
+  controllerUrl: Schema.String,
   controllerIdentityId: Schema.String,
   controllerPublicKey: Schema.String,
   /** The directory's name, not its path: the home it sits in can move. */
@@ -45,16 +33,6 @@ export const RunnerFile = Schema.Struct({
 
 export type RunnerFile = Schema.Schema.Type<typeof RunnerFile>;
 
-/**
- * The same file with the controller URL unchecked. `set-controller` is the way
- * out of a runner pointed at an address that will not parse, so the field it is
- * about to replace must not be what stops it from reading the rest.
- */
-const RewritableRunnerFile = Schema.Struct({
-  ...RunnerFile.fields,
-  controllerUrl: Schema.String,
-});
-
 const RUNNER_FILE_NAME = "runner.json";
 
 export const runnerFileIn = (home: string): string => joinPath(runnerDirIn(home), RUNNER_FILE_NAME);
@@ -62,17 +40,6 @@ export const runnerFileIn = (home: string): string => joinPath(runnerDirIn(home)
 export class NotEnrolled extends Schema.TaggedError<NotEnrolled>()("NotEnrolled", {
   message: Schema.String,
 }) {}
-
-const standardIssues = SchemaIssue.makeFormatterStandardSchemaV1();
-
-/** Which fields were wrong, so the message says what to edit rather than only where. */
-const fieldsOf = (error: Schema.SchemaError): string =>
-  standardIssues(error.issue)
-    .issues.map((issue) => {
-      const path = (issue.path ?? []).map(String).join(".");
-      return path === "" ? issue.message : `${path}: ${issue.message}`;
-    })
-    .join("; ");
 
 /**
  * Written to a fresh file and renamed over the target. `mode` applies only on
@@ -95,10 +62,7 @@ export const writeRunnerFile = (path: string, contents: RunnerFile): void => {
   }
 };
 
-const readWith = (
-  schema: typeof RunnerFile | typeof RewritableRunnerFile,
-  home: string,
-): Effect.Effect<RunnerFile, NotEnrolled> =>
+export const readRunnerFile = (home: string): Effect.Effect<RunnerFile, NotEnrolled> =>
   Effect.gen(function* () {
     const path = runnerFileIn(home);
     const raw = yield* Effect.try({
@@ -109,17 +73,10 @@ const readWith = (
         }),
     });
     return yield* Effect.mapError(
-      Schema.decodeUnknownEffect(schema, { errors: "all" })(raw),
+      Schema.decodeUnknownEffect(RunnerFile, { errors: "all" })(raw),
       (error) =>
         new NotEnrolled({
-          message: `${path} is not a runner's configuration: ${fieldsOf(error)}`,
+          message: `${path} is not a runner's configuration: ${error.message}`,
         }),
     );
   });
-
-export const readRunnerFile = (home: string): Effect.Effect<RunnerFile, NotEnrolled> =>
-  readWith(RunnerFile, home);
-
-/** For `set-controller` alone; every other reader dials what it reads. */
-export const readRewritableRunnerFile = (home: string): Effect.Effect<RunnerFile, NotEnrolled> =>
-  readWith(RewritableRunnerFile, home);
