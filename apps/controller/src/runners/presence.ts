@@ -16,6 +16,7 @@ import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as PubSub from "effect/PubSub";
+import * as Queue from "effect/Queue";
 import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
@@ -31,8 +32,11 @@ import {
   type LoginResult,
   type LoginStart,
   type LoginUrl,
+  type ControllerToRunner,
   type ProbeReport,
   type ProbeRequest,
+  type SessionEvent,
+  type SessionsReport,
 } from "@hydra/protocol";
 import { SYSTEM_ACTOR } from "../actor";
 import { hashToken } from "../credentials";
@@ -58,6 +62,17 @@ export const RunnerFactsDeadline = Context.Reference<Duration.Duration>(
 );
 
 export type Request = ProbeRequest | InstallRequest | LoginStart | LoginCode;
+
+/**
+ * What a machine said about the sessions it is hosting, and which machine said
+ * it. Presence carries it no further: what a session event means is the session
+ * domain's, and presence knowing that would put the fleet above it rather than
+ * under it.
+ */
+export interface SessionTraffic {
+  readonly runnerId: string;
+  readonly frame: SessionEvent | SessionsReport;
+}
 
 /** What came back for one of those, correlated by the request's own id. */
 export type Answer = ProbeReport | InstallResult | LoginUrl | LoginFailed | LoginResult;
@@ -94,8 +109,11 @@ export interface Connected {
   readonly close: (code: number, reason: string) => void;
   /** Sends the runner a request for its facts. Answered by `reportedFacts`. */
   readonly askForFacts: Effect.Effect<void>;
-  /** Sends one request frame. Answered through `reportedAnswer` under the same id. */
-  readonly ask: (request: Request) => Effect.Effect<void>;
+  /**
+   * Writes one frame. A request is answered through `reportedAnswer` under the
+   * same id; everything else is told, not asked.
+   */
+  readonly ask: (frame: ControllerToRunner) => Effect.Effect<void>;
 }
 
 interface Reachable extends Connected {
@@ -120,6 +138,11 @@ const make = Effect.gen(function* () {
   // listener is already binding: without the replay a machine that dialled in
   // that window would go unswept until the tick, an hour later.
   const arrivals = yield* PubSub.unbounded<string>({ replay: ARRIVALS_REPLAY });
+  // A queue rather than a pub/sub, because exactly one consumer reads it and a
+  // queue built with the layer holds what arrives before that consumer has
+  // attached. Order is the guarantee that matters: the session domain applies
+  // events in the sequence the runner numbered them.
+  const sessions = yield* Queue.unbounded<SessionTraffic>();
 
   /**
    * Nothing more is coming over this connection, so everybody waiting on it is
@@ -302,6 +325,36 @@ const make = Effect.gen(function* () {
         if (held?.connection !== connection) return;
         woke(held, answer.requestId, answer);
       }),
+
+    /**
+     * Sends one frame to a runner, with nothing to wait for. False when the
+     * machine is holding no connection, which is what a caller reports as a
+     * session it could not place.
+     */
+    tell: (id: string, frame: ControllerToRunner): Effect.Effect<boolean> =>
+      Effect.suspend(() => {
+        const held = reachable.get(id);
+        if (held === undefined) return Effect.succeed(false);
+        return Effect.as(held.ask(frame), true);
+      }),
+
+    /**
+     * Dropped on a replaced connection: yesterday's machine must not write over
+     * the session state today's is reporting.
+     */
+    reportedSession: (
+      id: string,
+      connection: Connection,
+      frame: SessionEvent | SessionsReport,
+    ): Effect.Effect<void> =>
+      Effect.suspend(() =>
+        reachable.get(id)?.connection === connection
+          ? Effect.asVoid(Queue.offer(sessions, { runnerId: id, frame }))
+          : Effect.void,
+      ),
+
+    /** Everything the fleet has said about its sessions, in arrival order. */
+    sessionTraffic: Stream.fromQueue(sessions),
 
     /** An answer on a replaced connection is still that machine saying it is there. */
     answered: (id: string): Effect.Effect<void, SqlError> =>

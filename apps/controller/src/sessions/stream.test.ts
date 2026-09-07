@@ -1,0 +1,190 @@
+/**
+ * The fold: what a reported event writes, and where it leaves the session.
+ *
+ * Everything here is about the rules rather than the rows, which is why it runs
+ * without a database. The rows themselves are asserted end to end in
+ * `sessions.integration.test.ts`, against a real socket.
+ */
+import { describe, expect, it } from "vitest";
+import type { ProviderEvent } from "@hydra/protocol";
+import { DELTA_FLUSH_BYTES, fold, track, type Folded, type Tracked } from "./stream";
+
+const SESSION = "0199e0e7-0000-7000-8000-000000000001";
+
+const TURN = "turn-1";
+
+const base = { eventId: "e", sessionId: SESSION, at: "2026-09-07T10:00:00.000Z" };
+
+const started: ProviderEvent = { ...base, _tag: "session.started" };
+
+const turnStarted: ProviderEvent = { ...base, _tag: "turn.started", turnId: TURN };
+
+const turnCompleted: ProviderEvent = {
+  ...base,
+  _tag: "turn.completed",
+  turnId: TURN,
+  state: "completed",
+};
+
+const exited: ProviderEvent = { ...base, _tag: "session.exited", reason: "stopped" };
+
+const delta = (itemId: string, text: string): ProviderEvent => ({
+  ...base,
+  _tag: "content.delta",
+  turnId: TURN,
+  itemId,
+  streamKind: "assistant_text",
+  delta: text,
+});
+
+const completedItem = (itemId: string): ProviderEvent => ({
+  ...base,
+  _tag: "item.completed",
+  turnId: TURN,
+  itemId,
+  kind: "assistant_message",
+  status: "completed",
+});
+
+/** The tags a fold wrote, in the order it wrote them. */
+const tags = (folded: Folded): ReadonlyArray<string> => folded.rows.map((row) => row.event._tag);
+
+/** The coalesced text of the one delta row a fold wrote. */
+const texts = (folded: Folded): ReadonlyArray<string> =>
+  folded.rows.flatMap((row) => (row.event._tag === "content.delta" ? [row.event.delta] : []));
+
+/** Applies a run of events, failing loudly on one the fold refused. */
+const applied = (
+  events: ReadonlyArray<readonly [number, ProviderEvent]>,
+  from: Tracked = track(0),
+): { readonly state: Tracked; readonly folds: ReadonlyArray<Folded> } => {
+  let state = from;
+  const folds: Array<Folded> = [];
+  for (const [seq, event] of events) {
+    const folded = fold(state, seq, event);
+    expect(folded, `seq ${String(seq)} was refused`).toBeDefined();
+    folds.push(folded!);
+    state = folded!.next;
+  }
+  return { state, folds };
+};
+
+describe("the status axis", () => {
+  it("moves on the four events that move it and on nothing else", () => {
+    const { folds } = applied([
+      [1, started],
+      [2, turnStarted],
+      [3, delta("i1", "hi")],
+      [4, completedItem("i1")],
+      [5, turnCompleted],
+      [6, exited],
+    ]);
+
+    expect(folds.map((one) => one.status)).toEqual([
+      "idle",
+      "busy",
+      undefined,
+      undefined,
+      "idle",
+      "exited",
+    ]);
+  });
+});
+
+describe("a sequence number already applied", () => {
+  it("writes nothing and leaves the state where it was", () => {
+    const { state } = applied([
+      [1, started],
+      [2, turnStarted],
+    ]);
+
+    expect(fold(state, 2, turnStarted)).toBeUndefined();
+    expect(fold(state, 1, started)).toBeUndefined();
+    expect(state.lastSeq).toBe(2);
+  });
+
+  it("is refused whether or not it would have been a delta", () => {
+    const { state } = applied([[1, delta("i1", "one")]]);
+
+    expect(fold(state, 1, delta("i1", "again"))).toBeUndefined();
+    // The held text is untouched, so a replayed delta cannot be counted twice.
+    const flushed = fold(state, 2, completedItem("i1"))!;
+    expect(texts(flushed)).toEqual(["one"]);
+  });
+});
+
+describe("coalescing", () => {
+  it("holds deltas and writes one row at the item boundary", () => {
+    const { folds } = applied([
+      [1, delta("i1", "Hel")],
+      [2, delta("i1", "lo")],
+      [3, completedItem("i1")],
+    ]);
+
+    expect(tags(folds[0]!)).toEqual([]);
+    expect(tags(folds[1]!)).toEqual([]);
+    // The coalesced text first, then the boundary that flushed it.
+    expect(tags(folds[2]!)).toEqual(["content.delta", "item.completed"]);
+    expect(texts(folds[2]!)).toEqual(["Hello"]);
+    // The row is idempotent on the last delta folded into it.
+    expect(folds[2]!.rows[0]?.seq).toBe(2);
+  });
+
+  it("keeps two stream kinds on one item apart", () => {
+    const { folds } = applied([
+      [1, delta("i1", "said")],
+      [2, { ...delta("i1", "thought"), streamKind: "reasoning_text" } as ProviderEvent],
+      [3, completedItem("i1")],
+    ]);
+
+    expect(texts(folds[2]!).toSorted()).toEqual(["said", "thought"]);
+  });
+
+  it("flushes only the item that ended, and everything at a turn boundary", () => {
+    const { folds } = applied([
+      [1, delta("i1", "one")],
+      [2, delta("i2", "two")],
+      [3, completedItem("i1")],
+      [4, turnCompleted],
+    ]);
+
+    expect(texts(folds[2]!)).toEqual(["one"]);
+    expect(texts(folds[3]!)).toEqual(["two"]);
+  });
+
+  it("flushes what a session that exits was still holding", () => {
+    const { folds } = applied([
+      [1, delta("i1", "tail")],
+      [2, exited],
+    ]);
+
+    expect(tags(folds[1]!)).toEqual(["content.delta", "session.exited"]);
+  });
+
+  it("writes a row of its own once the held text passes the threshold", () => {
+    const long = "x".repeat(DELTA_FLUSH_BYTES - 1);
+    const { folds, state } = applied([
+      [1, delta("i1", long)],
+      [2, delta("i1", "yz")],
+    ]);
+
+    expect(tags(folds[0]!)).toEqual([]);
+    expect(texts(folds[1]!)).toEqual([`${long}yz`]);
+    // Flushed means nothing is held: the next boundary writes no empty row.
+    expect(state.buffers.size).toBe(0);
+    expect(tags(fold(state, 3, completedItem("i1"))!)).toEqual(["item.completed"]);
+  });
+});
+
+describe("every other event", () => {
+  it("is written as its own row, verbatim", () => {
+    const usage: ProviderEvent = {
+      ...base,
+      _tag: "session.usage.updated",
+      usage: { inputTokens: 10, outputTokens: 20 },
+    };
+    const { folds } = applied([[1, usage]]);
+
+    expect(folds[0]!.rows).toEqual([{ seq: 1, at: base.at, event: usage }]);
+  });
+});

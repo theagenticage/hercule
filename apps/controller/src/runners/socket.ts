@@ -214,6 +214,12 @@ const hold = (runnerId: string, socket: Socket.Socket) =>
           case "loginResult":
             if (!greeted) return;
             return yield* presence.reportedAnswer(runnerId, mine, message);
+          case "sessionEvent":
+          case "sessionsReport":
+            // Handed on rather than handled: what a session event means belongs
+            // to the session domain, and this file's job is the wire.
+            if (!greeted) return;
+            return yield* presence.reportedSession(runnerId, mine, message);
           case "goodbye":
             departure = "offline";
             return;

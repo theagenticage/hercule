@@ -106,6 +106,14 @@ const probeResult = {
 
 const REQUEST_ID = "0199c3f4-1f2a-7c31-9f0e-6d2b8a4e5c72";
 const INSTANCE_ID = "0199c3f4-1f2a-7c31-9f0e-6d2b8a4e5c73";
+const SESSION_ID = "0199c3f4-1f2a-7c31-9f0e-6d2b8a4e5c74";
+
+const spec = {
+  instanceId: INSTANCE_ID,
+  workspaceId: null,
+  modelSelection: { model: "sonnet", options: {} },
+  accessMode: "approval-required",
+} as const;
 
 const runnerMessages: ReadonlyArray<RunnerMessage> = [
   runnerHello,
@@ -121,6 +129,20 @@ const runnerMessages: ReadonlyArray<RunnerMessage> = [
   },
   { _tag: "loginFailed", requestId: REQUEST_ID, message: "no login in progress" },
   { _tag: "loginResult", requestId: REQUEST_ID, ok: false, message: "Invalid code." },
+  {
+    _tag: "sessionEvent",
+    seq: 12,
+    event: {
+      _tag: "session.started",
+      eventId: "0199c3f4-1f2a-7c31-9f0e-6d2b8a4e5c75",
+      sessionId: SESSION_ID,
+      at: "2026-09-07T10:00:00.000Z",
+    },
+  },
+  {
+    _tag: "sessionsReport",
+    sessions: [{ sessionId: SESSION_ID, nativeSessionId: "native-1", instanceId: INSTANCE_ID }],
+  },
   { _tag: "goodbye" },
 ];
 
@@ -139,6 +161,15 @@ const controllerMessages: ReadonlyArray<ControllerMessage> = [
   { _tag: "installRequest", requestId: REQUEST_ID, providerId: "claude-code" },
   { _tag: "loginStart", requestId: REQUEST_ID, instanceId: INSTANCE_ID, providerId: "claude-code" },
   { _tag: "loginCode", requestId: REQUEST_ID, instanceId: INSTANCE_ID, code: "the-pasted-code" },
+  {
+    _tag: "sessionStart",
+    sessionId: SESSION_ID,
+    providerId: "claude-code",
+    config: {},
+    spec,
+  },
+  { _tag: "sessionStop", sessionId: SESSION_ID },
+  { _tag: "sessionInput", sessionId: SESSION_ID, input: { text: "ship it" } },
 ];
 
 describe("the protocol version", () => {
@@ -258,6 +289,11 @@ describe("the runner facts", () => {
 });
 
 describe("sequence numbers", () => {
+  it("rides the one frame that extends the envelope, and is required there", () => {
+    const event = runnerMessages.find((message) => message._tag === "sessionEvent");
+    expect(fromRunner(without(event as Record<string, unknown>, "seq"))._tag).toBe("Failure");
+  });
+
   it("takes an integer of at least one", () => {
     expect(sequenced({ seq: 1 })).toBe("Success");
     expect(sequenced({ seq: 9007199254740991 })).toBe("Success");

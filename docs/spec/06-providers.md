@@ -199,6 +199,8 @@ The session environment rides `ctx.env` (resolved 2026-08-31, [#43](https://gith
 
 The Hydra session id and the provider-native id are separate concepts joined explicitly by `SessionBinding`. `startSession` returns the binding once the native id is known (Claude: init message; Codex: `thread/started`; pi: session file created). The controller stores `nativeSessionId` on the Session record ([./02-domain-model.md](./02-domain-model.md)) and passes it back in `continue` for resume and fork.
 
+Amended 2026-09-07 ([#65](https://github.com/rogierpennink/hydra/issues/65)): on Claude the native id is **minted by the adapter and passed as `options.sessionId`**, not read off the init message, because the CLI in streaming-input mode emits nothing at all - `init` included - until a first turn arrives, so a `startSession` that waited for it would block until somebody sent input. The two ids stay separate concepts joined only by `SessionBinding`; only where the native one comes from changes, and Codex and pi keep reading theirs off `thread/started` and the session file.
+
 - A session is pinned to the runner where it starts (ADR 0002). Resume and fork target the same runner and the same instance.
 - `listSessions()` enumerates the adapter's live and resumable sessions after a runner restart; the runner reconciles them against the controller's Session records over the runner protocol. Sessions the runner cannot account for are marked exited with `reason: "runner_restart"`.
 - If a runner dies unrecoverably, its sessions' resumability dies with it; history survives in the controller's normalized stream. Accepted v1 trade.
@@ -216,7 +218,7 @@ type SessionStatus = "queued" | "starting" | "idle" | "busy" | "exited"
 ### 4.2 Lifecycle
 
 1. Controller resolves placement, fallback access mode, model selection, and mints the session token; sends `startSession` to the runner with the spec.
-2. Runner resolves `cwd`: the workspace path, or `cwd: null` for a workspace-less session. Codex alone gets a runner-provisioned scratch directory instead of `null`, because `thread/start` needs one (section 9.1); that directory is not a Workspace. The runner prepares the session environment and calls the adapter.
+2. Runner resolves `cwd`: the workspace path, or a runner-provisioned empty scratch directory for a workspace-less session; that directory is not a Workspace. The runner prepares the session environment and calls the adapter. *(Amended 2026-09-07, [#65](https://github.com/rogierpennink/hydra/issues/65): every harness gets the scratch directory, not Codex alone. This step said `cwd: null`, which section 9.1 later replaced - `null` means `process.cwd()` on the Claude Agent SDK and pi as much as it means a missing argument on Codex, and all three read instruction files out of it. `cwd: null` survives only as the controller-side "no workspace" marker.)*
 3. Adapter spawns or attaches the harness, emits `session.started`, returns the binding.
 4. Turns proceed via `sendInput`; approvals via `request.opened` / `respondToRequest`; `interrupt` ends the running turn with `state: "interrupted"`.
 5. `stopSession` ends the harness process cleanly; `session.exited { reason }` is the last event. The runner tears down ephemeral workspaces per [./03-controller-and-runners.md](./03-controller-and-runners.md).
@@ -307,11 +309,11 @@ A request stays open until `respondToRequest`; the controller surfaces it as a N
 
 ### 6.6 Usage and ops
 
-- `session.usage.updated { ... }` - a token snapshot: cumulative input / cached input / output / reasoning tokens and, where the harness exposes it, current context usage against the model's window (Claude `context_usage`, Codex `thread/tokenUsage/updated`, pi `message_end.usage`). Cadence differs per harness; the snapshot shape absorbs that. Context usage is what the assistant rotation threshold reads (section 9.2).
+- `session.usage.updated { ... }` - a cumulative token snapshot for the session, taken from Claude `context_usage`, Codex `thread/tokenUsage/updated` and pi `message_end.usage`. Cadence differs per harness; the snapshot shape absorbs that. The field set is below.
 - `runtime.warning` - retries (Claude `api_retry`, pi `auto_retry_*`), model rerouting or drift mid-turn, mirror errors.
 - `runtime.error { class }` - Codex `codexErrorInfo` is the reference class enum (`ContextWindowExceeded`, `UsageLimitExceeded`, `Unauthorized`, `SandboxError`, ...); other adapters map to the same classes where they can, else `unknown`.
 
-**Open:** the exact field set of the `session.usage.updated` snapshot is not pinned beyond "token snapshot plus context usage".
+~~**Open:** the exact field set of the `session.usage.updated` snapshot is not pinned beyond "token snapshot plus context usage".~~ *(Resolved 2026-09-07, [#65](https://github.com/rogierpennink/hydra/issues/65).)* The snapshot is `{ inputTokens, outputTokens, cacheReadTokens?, cacheWriteTokens?, costUsd? }`, cumulative for the session, with the three optional fields present only where the harness reports them. Context usage against the model's window is **not** in the v1 shape: no consumer reads it yet, and the assistant rotation threshold (section 9.2) adds the field it needs when it ships, rather than the shape carrying a number nothing checks.
 
 ### 6.7 Trimmed on purpose
 
@@ -431,7 +433,7 @@ For assistant sessions ([./12-assistants.md](./12-assistants.md)) provider-nativ
 | Codex | `model_auto_compact_token_limit` set out of reach via the instance's `config.toml` in `CODEX_HOME` |
 | pi | RPC `set_auto_compaction: false` at session start |
 
-The adapter reports context usage through `session.usage.updated`; the controller compares it against the rotation threshold (`min(0.7 x window, 200k tokens)` by default, checked after every `turn.completed`). Rotation itself (one flush turn on the dying session, then a fresh session with core memory and topic index injected) is the assistant subsystem's contract ([./12-assistants.md](./12-assistants.md)). Sessions of agents that are not assistants keep native compaction on; `context_compaction` items make it visible.
+The adapter reports context usage through `session.usage.updated`, which gains the field for it when assistants ship (section 6.6); the controller compares it against the rotation threshold (`min(0.7 x window, 200k tokens)` by default, checked after every `turn.completed`). Rotation itself (one flush turn on the dying session, then a fresh session with core memory and topic index injected) is the assistant subsystem's contract ([./12-assistants.md](./12-assistants.md)). Sessions of agents that are not assistants keep native compaction on; `context_compaction` items make it visible.
 
 **Memory injection mapping (pinned).** The controller composes `SessionSpec.systemPrompt` for an assistant session as: the agent's `systemPrompt` (persona), the hydra-as-a-tool skill (section 9.3), then a `## Memory (core)` section and a `## Memory topics` index, volatile content last. It lands in the harness's system-prompt channel on every provider:
 

@@ -2,9 +2,9 @@
  * Running one command: id tails, paging, and the call itself.
  *
  * Two behaviours live here that the wire deliberately does not have. **Id
- * tails** are resolved client-side
- * through the entity's own `query` operation, so the API only ever sees
- * canonical ids. **`--all`** follows `nextCursor` to the end, so a caller who
+ * tails** are resolved client-side through a `query` operation - the entity's
+ * own, or its owner's where the command is an owned sub-resource - so the API
+ * only ever sees canonical ids. **`--all`** follows `nextCursor` to the end, so a caller who
  * wants everything writes one flag instead of a loop.
  */
 import { ApiError, type HydraClient } from "@hydra/client-core";
@@ -35,8 +35,11 @@ const pageOf = (answer: unknown): Page =>
     : (answer as Page);
 
 /**
- * Every item of a query operation from `from` onwards, following `nextCursor`
+ * Every item of a paged operation from `from` onwards, following `nextCursor`
  * to the end. `from` absent starts at the beginning.
+ *
+ * `params` is what an operation that pages inside one record needs - a
+ * transcript is the rows of one session - and is absent for a plain listing.
  *
  * A cursor that does not move is treated as the end rather than as an infinite
  * loop: a broken server should stall the caller once, not forever.
@@ -45,19 +48,41 @@ const readAll = async (
   client: HydraClient,
   command: Command,
   query: Record<string, unknown>,
+  params: Record<string, string | number> | undefined,
   from?: string,
 ): Promise<ReadonlyArray<Record<string, unknown>>> => {
   const call = (client as unknown as Callable)[command.entity]![command.verb]!;
   const items: Array<Record<string, unknown>> = [];
   let cursor: string | undefined = from;
+  const addressed = params === undefined ? {} : { params };
 
   for (;;) {
-    const page = pageOf(await call({ query: cursor === undefined ? query : { ...query, cursor } }));
+    const page = pageOf(
+      await call({ ...addressed, query: cursor === undefined ? query : { ...query, cursor } }),
+    );
     items.push(...page.items);
     if (page.nextCursor === undefined || page.nextCursor === cursor) return items;
     cursor = page.nextCursor;
   }
 };
+
+/**
+ * The entity whose ids an owned sub-resource's `:id` holds.
+ *
+ * `transcript.read` is `GET /sessions/:id/transcript`, so the id in it is a
+ * session's and it is `session.query` that resolves a tail of it. The owner is
+ * the path noun in front of the parameter, singularized; a noun whose singular
+ * is not an entity resolves nothing, and the caller is told to give the full id
+ * exactly as it would have been before.
+ */
+const ownerOf = (path: string): string => {
+  const noun = path.slice(0, path.indexOf("/:id")).split("/").pop() ?? "";
+  return noun.endsWith("s") ? noun.slice(0, -1) : noun;
+};
+
+/** The `query` operation that resolves a tail written where this command's `id` goes. */
+export const idQueryOf = (command: Command): Command | undefined =>
+  queryCommandOf(command.entity) ?? queryCommandOf(ownerOf(command.path));
 
 /**
  * The canonical id a positional stands for.
@@ -81,7 +106,7 @@ const resolveTail = async (
     );
   }
 
-  const query = queryCommandOf(command.entity);
+  const query = idQueryOf(command);
   if (query === undefined) {
     throw new ApiError(
       "validation",
@@ -98,19 +123,19 @@ const resolveTail = async (
   const stable = query.sortFields.includes("createdAt")
     ? { sort: { field: "createdAt", direction: "asc" } }
     : {};
-  const items = await readAll(client, query, stable);
+  const items = await readAll(client, query, stable, undefined);
   const matches = items
     .map((item) => item["id"])
     .filter((id): id is string => typeof id === "string" && id.endsWith(text));
 
   if (matches.length === 1) return matches[0]!;
   if (matches.length === 0) {
-    throw new ApiError("not_found", `no ${command.entity} whose id ends with ${text}`);
+    throw new ApiError("not_found", `no ${query.entity} whose id ends with ${text}`);
   }
   const tails = matches.map((id) => id.slice(-MIN_TAIL)).join(", ");
   throw new ApiError(
     "conflict",
-    `${text} matches ${matches.length} ${command.entity} ids: ${tails}`,
+    `${text} matches ${matches.length} ${query.entity} ids: ${tails}`,
     {
       candidates: matches,
     },
@@ -150,7 +175,16 @@ export const execute = async (
   // `--cursor` with `--all` is where the sweep starts, not something to drop: a
   // caller who paged to a cursor and then asked for the rest gets the rest.
   if (args.all) {
-    return { kind: "items", items: await readAll(client, command, query, args.cursor) };
+    return {
+      kind: "items",
+      items: await readAll(
+        client,
+        command,
+        query,
+        command.positionals.length > 0 ? params : undefined,
+        args.cursor,
+      ),
+    };
   }
 
   if (args.cursor !== undefined) query["cursor"] = args.cursor;

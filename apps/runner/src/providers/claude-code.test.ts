@@ -4,15 +4,17 @@
  */
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
-import { Duration, Effect, Fiber } from "effect";
+import { describe, expect, it, vi } from "vitest";
+import { Duration, Effect, Fiber, Stream } from "effect";
 import { TestClock } from "effect/testing";
+import type { Options, SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
 import { CLAUDE_CODE_VERSION } from "@hydra/home/version";
-import type { ProbeResult } from "@hydra/protocol";
+import type { ProbeResult, ProviderEvent, SessionSpec } from "@hydra/protocol";
 import { PROBE_DEADLINE, claudeCodeAdapter, type ClaudeSeam } from "./claude-code";
-import type { ProviderRunnerContext } from "./index";
+import type { ProviderAdapter, ProviderRunnerContext } from "./index";
 
 const CONTEXT: ProviderRunnerContext = {
+  cwd: null,
   home: "/var/hydra/runner/providers/0199e0e7-0000-7000-8000-00000000000a",
   binary: "/usr/local/bin/claude",
   env: { PATH: "/usr/local/bin:/usr/bin" },
@@ -79,6 +81,9 @@ const seamOver = (answers: {
           closes += 1;
         },
       };
+    },
+    stream: () => {
+      throw new Error("probing must not start a session");
     },
     run: (command) =>
       Effect.succeed(
@@ -300,5 +305,338 @@ describe("the CLI version this build talks to", () => {
     // Baked at build rather than read at runtime: a compiled binary has no
     // manifest on disk to read.
     expect(CLAUDE_CODE_VERSION).toBe(manifest.claudeCodeVersion);
+  });
+});
+
+const SESSION = "0199e0e7-0000-7000-8000-0000000000ff";
+const SPEC: SessionSpec = {
+  instanceId: "0199e0e7-0000-7000-8000-00000000000a",
+  workspaceId: null,
+  modelSelection: { model: "claude-haiku-4-5", options: { effort: "high", fastMode: false } },
+  accessMode: "auto-accept-edits",
+};
+
+const WORKING: ProviderRunnerContext = { ...CONTEXT, cwd: "/var/hydra/runner/scratch/one" };
+
+/** The harness end of a session, driven by the test one message at a time. */
+const driving = (): {
+  readonly adapter: ProviderAdapter;
+  readonly options: Array<Options>;
+  readonly sent: Array<SDKUserMessage>;
+  readonly seen: Array<ProviderEvent>;
+  readonly say: (message: unknown) => void;
+  readonly end: () => void;
+  readonly die: (reason: Error) => void;
+  readonly closed: () => number;
+} => {
+  const options: Array<Options> = [];
+  const sent: Array<SDKUserMessage> = [];
+  const seen: Array<ProviderEvent> = [];
+  const queued: Array<unknown> = [];
+  const waiting: Array<(result: IteratorResult<unknown>) => void> = [];
+  const failing: Array<(reason: Error) => void> = [];
+  const done: IteratorResult<unknown> = { done: true, value: undefined };
+  let ended = false;
+  let closes = 0;
+
+  const adapter = claudeCodeAdapter({
+    query: () => {
+      throw new Error("a session must not probe");
+    },
+    stream: (params) => {
+      options.push(params.options);
+      // Reading the adapter's input is what a real harness does with it, and
+      // it is the only way to see the turns it was handed.
+      void (async () => {
+        for await (const message of params.input) sent.push(message);
+      })();
+      return {
+        [Symbol.asyncIterator]: () => ({
+          next: () => {
+            if (queued.length > 0) {
+              return Promise.resolve({
+                done: false,
+                value: queued.shift(),
+              } as IteratorResult<never>);
+            }
+            if (ended) return Promise.resolve(done as IteratorResult<never>);
+            return new Promise<IteratorResult<never>>((resolve, reject) => {
+              waiting.push(resolve as (result: IteratorResult<unknown>) => void);
+              failing.push(reject);
+            });
+          },
+        }),
+        close: () => {
+          closes += 1;
+          ended = true;
+          for (const wake of waiting.splice(0)) wake(done);
+        },
+      };
+    },
+    run: () => Effect.succeed({ code: 0, stdout: "", stderr: "" }),
+  });
+
+  Effect.runFork(
+    Stream.runForEach(adapter.events, (event) => Effect.sync(() => void seen.push(event))),
+  );
+
+  return {
+    adapter,
+    options,
+    sent,
+    seen,
+    say: (message) => {
+      const wake = waiting.shift();
+      if (wake === undefined) queued.push(message);
+      else wake({ done: false, value: message });
+    },
+    end: () => {
+      ended = true;
+      for (const wake of waiting.splice(0)) wake(done);
+    },
+    die: (reason) => {
+      waiting.splice(0);
+      for (const fail of failing.splice(0)) fail(reason);
+    },
+    closed: () => closes,
+  };
+};
+
+const RESULT = {
+  type: "result",
+  subtype: "success",
+  is_error: false,
+  num_turns: 1,
+  result: "ready",
+  total_cost_usd: 0.01,
+  usage: { input_tokens: 10, output_tokens: 3 },
+  modelUsage: {
+    "claude-haiku-4-5": {
+      inputTokens: 10,
+      outputTokens: 3,
+      cacheReadInputTokens: 0,
+      cacheCreationInputTokens: 0,
+      webSearchRequests: 0,
+      costUSD: 0.01,
+      contextWindow: 200000,
+      maxOutputTokens: 32000,
+    },
+  },
+  terminal_reason: "completed",
+};
+
+/**
+ * How long a wait on the adapter's pump is given. The adapter reads the harness
+ * off the event loop and publishes what it read, so how many turns of the loop
+ * that takes is a property of how busy the machine is - which is why the wait is
+ * for the event, and not for a tick.
+ */
+const WAIT_DEADLINE_MS = 10_000;
+
+/**
+ * Vitest's own budget, set from the waits rather than left at its default five
+ * seconds: a test whose waits can outlast the timeout never gets to give up,
+ * and the failure names the test rather than the event that never came. Two,
+ * because the longest case here waits for one turn to close and the next to open.
+ */
+vi.setConfig({ testTimeout: WAIT_DEADLINE_MS * 2 + 5_000 });
+
+const until = async (what: string, ready: () => boolean): Promise<void> => {
+  const deadline = Date.now() + WAIT_DEADLINE_MS;
+  while (!ready() && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 1));
+  }
+  expect(ready(), `the adapter never ${what}`).toBe(true);
+};
+
+/** Waits until the session has ended, however it ended. */
+const ends = (seen: ReadonlyArray<ProviderEvent>): Promise<void> =>
+  until("ended the session", () => seen.some((event) => event._tag === "session.exited"));
+
+const tags = (seen: ReadonlyArray<ProviderEvent>): ReadonlyArray<string> =>
+  seen.map((event) => event._tag);
+
+describe("a Claude Code session", () => {
+  it("names the native session itself, hands back the binding and says it started", async () => {
+    const run = driving();
+    const binding = await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, WORKING));
+
+    expect(binding.sessionId).toBe(SESSION);
+    expect(binding.instanceId).toBe(SPEC.instanceId);
+    // Hydra names the native session rather than waiting to be told: in
+    // streaming-input mode the CLI says nothing at all until a first turn.
+    expect(binding.nativeSessionId).not.toBe(SESSION);
+    expect(run.options[0]?.sessionId).toBe(binding.nativeSessionId);
+    await until("said it started", () => run.seen.length === 1);
+    expect(tags(run.seen)).toEqual(["session.started"]);
+    // The only place the controller can learn the native id: the report of what
+    // this runner holds is sent once, at hello.
+    expect(run.seen[0]?.providerRefs).toEqual({ nativeSessionId: binding.nativeSessionId });
+    expect(await Effect.runPromise(run.adapter.listSessions)).toEqual([binding]);
+  });
+
+  it("runs in the session's cwd, with the instance's home and no settings of the machine's", async () => {
+    const run = driving();
+    await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, WORKING));
+
+    const [options] = run.options;
+    expect(options?.cwd).toBe(WORKING.cwd);
+    expect(options?.settingSources).toEqual([]);
+    expect(options?.strictMcpConfig).toBe(true);
+    expect(options?.includePartialMessages).toBe(true);
+    expect(options?.model).toBe(SPEC.modelSelection.model);
+    expect(options?.effort).toBe("high");
+    // Spec 06 section 8.1, normative.
+    expect(options?.permissionMode).toBe("acceptEdits");
+    expect(options?.env?.["CLAUDE_CONFIG_DIR"]).toBe(WORKING.home);
+    expect(options?.env?.["CLAUDE_CODE_DISABLE_AUTO_MEMORY"]).toBe("1");
+    expect(Object.keys(options?.env ?? {})).not.toContain("HOME");
+  });
+
+  // Spec 06 section 8.1 is normative, and full-access is the row that matters.
+  const MODES: ReadonlyArray<readonly [SessionSpec["accessMode"], string, boolean | undefined]> = [
+    ["approval-required", "default", undefined],
+    ["auto-accept-edits", "acceptEdits", undefined],
+    ["auto", "auto", undefined],
+    ["full-access", "bypassPermissions", true],
+  ];
+
+  for (const [accessMode, permissionMode, dangerous] of MODES) {
+    it(`runs ${accessMode} as the harness's ${permissionMode}`, async () => {
+      const run = driving();
+      await Effect.runPromise(run.adapter.startSession(SESSION, { ...SPEC, accessMode }, WORKING));
+
+      expect(run.options[0]?.permissionMode).toBe(permissionMode);
+      expect(run.options[0]?.allowDangerouslySkipPermissions).toBe(dangerous);
+    });
+  }
+
+  it("opens a turn on an idle session and steers a busy one", async () => {
+    const run = driving();
+    await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, WORKING));
+
+    await Effect.runPromise(run.adapter.sendInput(SESSION, { text: "hello" }));
+    await Effect.runPromise(run.adapter.sendInput(SESSION, { text: "and this" }));
+
+    await until(
+      "opened one turn and passed both texts on",
+      () => run.sent.length === 2 && run.seen.length === 2,
+    );
+    expect(run.sent.map((message) => message.message.content)).toEqual(["hello", "and this"]);
+    // One turn, opened once: steering folds into the turn that is running.
+    expect(tags(run.seen)).toEqual(["session.started", "turn.started"]);
+  });
+
+  it("opens a second turn once the result closed the first", async () => {
+    const run = driving();
+    await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, WORKING));
+
+    await Effect.runPromise(run.adapter.sendInput(SESSION, { text: "hello" }));
+    run.say(RESULT);
+    await until("closed the first turn", () =>
+      run.seen.some((event) => event._tag === "turn.completed"),
+    );
+
+    await Effect.runPromise(run.adapter.sendInput(SESSION, { text: "again" }));
+    await until("opened the second turn", () => run.seen.length === 5);
+    expect(tags(run.seen)).toEqual([
+      "session.started",
+      "turn.started",
+      "session.usage.updated",
+      "turn.completed",
+      "turn.started",
+    ]);
+  });
+
+  it("exits as stopped when it was asked to, and forgets the session", async () => {
+    const run = driving();
+    await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, WORKING));
+
+    await Effect.runPromise(run.adapter.stopSession(SESSION));
+    await ends(run.seen);
+
+    expect(run.closed()).toBe(1);
+    const exited = run.seen.at(-1);
+    expect(exited?._tag === "session.exited" ? exited.reason : undefined).toBe("stopped");
+    expect(await Effect.runPromise(run.adapter.listSessions)).toEqual([]);
+  });
+
+  it("exits as a process exit when the harness stops on its own", async () => {
+    const run = driving();
+    await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, WORKING));
+
+    run.end();
+    await ends(run.seen);
+
+    const exited = run.seen.at(-1);
+    expect(exited?._tag === "session.exited" ? exited.reason : undefined).toBe("process_exit");
+  });
+
+  it("says the harness crashed, and why, when its stream throws", async () => {
+    const run = driving();
+    await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, WORKING));
+
+    run.die(new Error("the harness went away"));
+    await ends(run.seen);
+
+    const failure = run.seen.find((event) => event._tag === "runtime.error");
+    expect(failure?._tag === "runtime.error" ? failure.message : undefined).toBe(
+      "the harness went away",
+    );
+    const exited = run.seen.at(-1);
+    expect(exited?._tag === "session.exited" ? exited.reason : undefined).toBe("crash");
+  });
+
+  it("does not report an ordinary stop as a runtime error", async () => {
+    const run = driving();
+    await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, WORKING));
+
+    await Effect.runPromise(run.adapter.stopSession(SESSION));
+    run.die(new Error("Query closed before response received"));
+    await ends(run.seen);
+
+    expect(tags(run.seen)).toEqual(["session.started", "session.exited"]);
+  });
+
+  it("refuses input for a session it is not hosting", async () => {
+    const run = driving();
+    const said = await Effect.runPromise(
+      Effect.flip(run.adapter.sendInput(SESSION, { text: "hello" })),
+    );
+    expect(said).toBe(`session ${SESSION} is not running here`);
+  });
+
+  it("refuses input the moment a stop was asked for, rather than dropping it", async () => {
+    const run = driving();
+    await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, WORKING));
+
+    await Effect.runPromise(run.adapter.stopSession(SESSION));
+    const said = await Effect.runPromise(
+      Effect.flip(run.adapter.sendInput(SESSION, { text: "hello" })),
+    );
+
+    expect(said).toBe(`session ${SESSION} is not running here`);
+  });
+
+  it("will not start a second harness under a session id it already holds", async () => {
+    const run = driving();
+    await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, WORKING));
+
+    const said = await Effect.runPromise(
+      Effect.flip(run.adapter.startSession(SESSION, SPEC, WORKING)),
+    );
+
+    expect(said).toBe(`session ${SESSION} is already running here`);
+    // The one that was already running is untouched: one harness, one stream.
+    expect(run.options.length).toBe(1);
+    expect(run.closed()).toBe(0);
+  });
+
+  it("will not start without a harness on this machine", async () => {
+    const run = driving();
+    const said = await Effect.runPromise(
+      Effect.flip(run.adapter.startSession(SESSION, SPEC, { ...WORKING, binary: undefined })),
+    );
+    expect(said).toBe("no claude on this machine");
   });
 });

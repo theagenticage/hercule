@@ -200,6 +200,31 @@ const make = Effect.gen(function* () {
         (rows) => rows.map((row) => uuidToString(row.id)),
       ),
 
+    /**
+     * The machines a placement with nothing to say about where it goes may
+     * land on: online, active, not reserved, and not saying they are full.
+     *
+     * Reserved is what makes it a fallback rather than a listing (CONTEXT.md,
+     * Reserved: placement fallback never chooses one). Silence is consent
+     * throughout: a machine with no watermark, a watermark this build cannot
+     * read, or one that does not mention placements has not said no. The
+     * `CASE` is what keeps that true - `OR` does not short-circuit around a
+     * `json_extract` on a document that will not parse, so one bad row would
+     * otherwise fail every placement rather than only its own.
+     */
+    placeable: (): Effect.Effect<ReadonlySet<string>, SqlError> =>
+      Effect.map(
+        sql<{ readonly id: Uint8Array }>`
+          SELECT id FROM runners
+          WHERE connectivity = 'online' AND lifecycle = 'active' AND reserved = 0
+            AND (CASE
+                   WHEN watermark IS NULL OR json_valid(watermark) = 0 THEN 1
+                   ELSE COALESCE(json_extract(watermark, '$.acceptingPlacements'), 1)
+                 END) <> 0
+        `,
+        (rows) => new Set(rows.map((row) => uuidToString(row.id))),
+      ),
+
     /** So a joining machine can be given a free one. */
     names: (): Effect.Effect<ReadonlySet<string>, SqlError> =>
       Effect.map(

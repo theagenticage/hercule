@@ -1,5 +1,6 @@
 import { ALL_OPERATIONS, OPERATIONS } from "@hydra/contract";
 import { describe, expect, it } from "vitest";
+import { idQueryOf } from "./execute";
 import { COMMANDS, commandFor } from "./tree";
 
 describe("the command tree", () => {
@@ -67,10 +68,7 @@ describe("the command tree", () => {
   it("has a query operation for every entity that takes an id argument", () => {
     for (const command of COMMANDS) {
       if (!command.positionals.some((field) => field.name === "id")) continue;
-      expect(
-        commandFor(command.entity, "query"),
-        `${command.id} has no tail resolver`,
-      ).toBeDefined();
+      expect(idQueryOf(command), `${command.id} has no tail resolver`).toBeDefined();
     }
   });
 });

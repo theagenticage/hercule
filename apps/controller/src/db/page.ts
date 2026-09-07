@@ -75,6 +75,15 @@ export class CursorError extends Schema.TaggedError<CursorError>()("CursorError"
 const NOT_OURS = "The cursor is not one this listing issued.";
 const OTHER_ORDER = "The cursor was issued under a different sort order.";
 
+/**
+ * A cursor whose walk sorts on something else. Told apart from the direction
+ * because `field` carries what a walk's order depends on and not only a column
+ * name - the session a transcript position belongs to, the text a relevance
+ * walk searched for - so "a different sort order" would send the caller looking
+ * at `--sort` when the listing itself is the thing that changed.
+ */
+const OTHER_LISTING = "The cursor was issued for a different listing.";
+
 /** The parts a cursor carries after the walk it belongs to. */
 type Payload = ReadonlyArray<string | number>;
 
@@ -107,7 +116,8 @@ const open = <A>(
   if (!Array.isArray(parsed) || parsed.length < 4) return refuse(NOT_OURS);
   const [op, field, direction, ...payload] = parsed as ReadonlyArray<unknown>;
   if (op !== scope.op) return refuse(NOT_OURS);
-  if (field !== scope.field || direction !== scope.direction) return refuse(OTHER_ORDER);
+  if (field !== scope.field) return refuse(OTHER_LISTING);
+  if (direction !== scope.direction) return refuse(OTHER_ORDER);
   const value = shape(payload);
   return value === undefined ? refuse(NOT_OURS) : Effect.succeed(value);
 };

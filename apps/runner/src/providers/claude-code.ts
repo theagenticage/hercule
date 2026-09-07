@@ -7,19 +7,37 @@
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
-import { query as sdkQuery, type Options, type Query } from "@anthropic-ai/claude-agent-sdk";
+import * as PubSub from "effect/PubSub";
+import * as Stream from "effect/Stream";
+import {
+  query as sdkQuery,
+  type EffortLevel,
+  type Options,
+  type PermissionMode,
+  type Query,
+  type SDKMessage,
+  type SDKUserMessage,
+} from "@anthropic-ai/claude-agent-sdk";
 import { CLAUDE_CODE_VERSION } from "@hydra/home/version";
 import {
   MAX_FACT_ITEMS,
   MAX_FACT_LENGTH,
   MAX_INSTALL_MESSAGE_LENGTH,
+  type AccessMode,
+  type ExitReason,
   type ModelDescriptor,
   type ModelOption,
   type ProbeResult,
+  type ProviderEvent,
+  type SessionBinding,
+  type SessionSpec,
+  type TurnInput,
 } from "@hydra/protocol";
+import { normalize, normalizing, openTurn, type Normalizing } from "./claude-code-normalize";
 import type { InstallOutcome, ProviderAdapter, ProviderRunnerContext } from "./index";
 import type { LoginCommand } from "./login";
 import { runProcess, type Run } from "./process";
+import { now } from "../report";
 
 export const CLAUDE_CODE = "claude-code";
 
@@ -38,8 +56,21 @@ export interface ClaudeSession {
   readonly close: () => void;
 }
 
+/**
+ * One long-lived streaming `query()`: the messages it yields, and the way to
+ * end it. Its input is the stream the adapter pushes turns into, which is what
+ * makes the control methods and steering available at all (spec 06 section 10.1).
+ */
+export interface ClaudeStream extends AsyncIterable<SDKMessage> {
+  readonly close: () => void;
+}
+
 export interface ClaudeSeam {
   readonly query: (params: { readonly options: Options }) => ClaudeSession;
+  readonly stream: (params: {
+    readonly options: Options;
+    readonly input: AsyncIterable<SDKUserMessage>;
+  }) => ClaudeStream;
   readonly run: Run;
 }
 
@@ -192,7 +223,153 @@ const noPrompt = (): AsyncIterable<never> => ({
   }),
 });
 
+/**
+ * The input side of a live session: an async iterable the adapter pushes turns
+ * into and closes when the session ends. The SDK's `query()` takes the prompt
+ * as an iterable, so this is what makes a session long-lived rather than one
+ * shot (spec 06 section 10.1).
+ */
+interface Pushable<A> extends AsyncIterable<A> {
+  readonly push: (value: A) => void;
+  readonly end: () => void;
+}
+
+const pushable = <A>(): Pushable<A> => {
+  const queued: Array<A> = [];
+  const waiting: Array<(result: IteratorResult<A>) => void> = [];
+  let ended = false;
+  const done: IteratorResult<A> = { done: true, value: undefined as never };
+  return {
+    push: (value) => {
+      const wake = waiting.shift();
+      if (wake === undefined) queued.push(value);
+      else wake({ done: false, value });
+    },
+    end: () => {
+      ended = true;
+      for (const wake of waiting.splice(0)) wake(done);
+    },
+    [Symbol.asyncIterator]: () => ({
+      next: () => {
+        if (queued.length > 0) return Promise.resolve({ done: false, value: queued.shift()! });
+        if (ended) return Promise.resolve(done);
+        return new Promise<IteratorResult<A>>((resolve) => waiting.push(resolve));
+      },
+    }),
+  };
+};
+
+/**
+ * Spec 06 section 8.1, normative. `approval-required` is the SDK's default mode, whose
+ * park-and-resume seam is `canUseTool`; until approvals ship the CLI has no
+ * prompt surface, so an action that would have asked is denied rather than
+ * allowed. Refusing beats guessing.
+ */
+const PERMISSION_MODES: Readonly<Record<AccessMode, PermissionMode>> = {
+  "approval-required": "default",
+  "auto-accept-edits": "acceptEdits",
+  auto: "auto",
+  "full-access": "bypassPermissions",
+};
+
+const EFFORTS: ReadonlyArray<EffortLevel> = ["low", "medium", "high", "xhigh", "max"];
+
+/** The one per-model choice the SDK's options carry; `fastMode` has no field. */
+const effortIn = (options: SessionSpec["modelSelection"]["options"]): EffortLevel | undefined => {
+  const chosen = options["effort"];
+  return EFFORTS.find((level) => level === chosen);
+};
+
+/**
+ * A session, unlike a probe, runs the user's work: it gets the workspace as its
+ * cwd and the instance's home as its config directory. Auto memory is off and
+ * `settingSources` is empty because a Hydra session's context is Hydra's to
+ * author, never whatever files happen to sit on this runner (spec 06 section 4.2,
+ * section 10.1).
+ */
+const sessionOptionsFor = (
+  ctx: ProviderRunnerContext,
+  spec: SessionSpec,
+  binary: string,
+  nativeSessionId: string,
+): Options => {
+  const effort = effortIn(spec.modelSelection.options);
+  return {
+    pathToClaudeCodeExecutable: binary,
+    // The native id is Hydra's to name rather than the harness's to invent:
+    // the CLI in streaming-input mode says nothing at all, `init` included,
+    // until a first turn arrives, so a binding that waited for it would make
+    // `startSession` block until somebody sent input. Verified against the CLI
+    // this build's SDK is pinned to.
+    sessionId: nativeSessionId,
+    ...(ctx.cwd === null ? {} : { cwd: ctx.cwd }),
+    settingSources: [],
+    strictMcpConfig: true,
+    includePartialMessages: true,
+    model: spec.modelSelection.model,
+    ...(effort === undefined ? {} : { effort }),
+    permissionMode: PERMISSION_MODES[spec.accessMode],
+    ...(spec.accessMode === "full-access" ? { allowDangerouslySkipPermissions: true } : {}),
+    env: { ...envFor(ctx), CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1" },
+  };
+};
+
+/** One session this adapter is hosting. */
+interface Live {
+  readonly binding: SessionBinding;
+  readonly input: Pushable<SDKUserMessage>;
+  readonly stream: ClaudeStream;
+  readonly state: Normalizing;
+  /** Set by `stopSession`, so the exit reason says it was asked for. */
+  stopping: boolean;
+}
+
 export const claudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
+  // Creating an unbounded PubSub allocates and nothing more, so it is safe to
+  // run here and keeps `adapterFor` the synchronous lookup every other caller
+  // already treats it as.
+  const published = Effect.runSync(PubSub.unbounded<ProviderEvent>());
+  const live = new Map<string, Live>();
+
+  const emit = (event: ProviderEvent): void => {
+    PubSub.publishUnsafe(published, event);
+  };
+
+  /** Reads the session until the harness stops talking, and says why it did. */
+  const pump = async (sessionId: string, held: Live): Promise<void> => {
+    let reason: ExitReason = "process_exit";
+    try {
+      for await (const sdk of held.stream) {
+        for (const event of normalize(held.state, sdk)) emit(event);
+      }
+    } catch (error) {
+      reason = "crash";
+      // Ending the query rejects whatever was in flight, and an ordinary stop
+      // is not something to report as a runtime error.
+      if (!held.stopping) {
+        emit({
+          _tag: "runtime.error",
+          eventId: crypto.randomUUID(),
+          sessionId,
+          at: now(),
+          class: "unknown",
+          message: describe(error),
+        });
+      }
+    } finally {
+      // By identity: a session started again under the same id has its own
+      // entry, and this pump is not the one that owns it.
+      if (live.get(sessionId) === held) live.delete(sessionId);
+      emit({
+        _tag: "session.exited",
+        eventId: crypto.randomUUID(),
+        sessionId,
+        at: now(),
+        reason: held.stopping ? "stopped" : reason,
+      });
+    }
+  };
+
   const versionOf = (ctx: ProviderRunnerContext, binary: string): Effect.Effect<string | null> =>
     Effect.map(seam.run([binary, "--version"], envFor(ctx)), (ran) => {
       if (ran.code !== 0) return null;
@@ -225,6 +402,99 @@ export const claudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
   return {
     providerId: CLAUDE_CODE,
     binaryName: CLAUDE_BINARY,
+
+    events: Stream.fromPubSub(published),
+
+    startSession: (
+      sessionId: string,
+      spec: SessionSpec,
+      ctx: ProviderRunnerContext,
+    ): Effect.Effect<SessionBinding, string> =>
+      Effect.suspend(() => {
+        const binary = ctx.binary;
+        if (binary === undefined) {
+          return Effect.fail(`no ${CLAUDE_BINARY} on this machine`);
+        }
+        // Two harnesses under one Hydra session id would report their events,
+        // and their exit, as each other's. The second start is the mistake.
+        if (live.has(sessionId)) {
+          return Effect.fail(`session ${sessionId} is already running here`);
+        }
+        const binding: SessionBinding = {
+          sessionId,
+          nativeSessionId: crypto.randomUUID(),
+          instanceId: spec.instanceId,
+        };
+        const input = pushable<SDKUserMessage>();
+        return Effect.map(
+          Effect.try({
+            try: () =>
+              seam.stream({
+                options: sessionOptionsFor(ctx, spec, binary, binding.nativeSessionId),
+                input,
+              }),
+            catch: describe,
+          }),
+          (stream) => {
+            const held: Live = {
+              binding,
+              input,
+              stream,
+              state: normalizing(sessionId, () => crypto.randomUUID(), now),
+              stopping: false,
+            };
+            live.set(sessionId, held);
+            void pump(sessionId, held);
+            // The native id rides the event, because the controller has no
+            // other way to learn it: `sessionsReport` is sent once, at hello,
+            // and a session started after that would never be named again.
+            emit({
+              _tag: "session.started",
+              eventId: crypto.randomUUID(),
+              sessionId,
+              at: now(),
+              providerRefs: { nativeSessionId: binding.nativeSessionId },
+            });
+            return binding;
+          },
+        );
+      }),
+
+    sendInput: (sessionId: string, turn: TurnInput): Effect.Effect<void, string> =>
+      Effect.suspend(() => {
+        const held = live.get(sessionId);
+        if (held === undefined || held.stopping) {
+          return Effect.fail(`session ${sessionId} is not running here`);
+        }
+        // Steering is implicit: a turn is open exactly while the normalizer is
+        // between a `turn.started` and the `result` that ends it, so input to a
+        // busy session folds into the turn already running.
+        for (const event of openTurn(held.state).events) emit(event);
+        // Spec 06 section 6.3's `user_message { steered }` is not carried: the
+        // echoed user message is not reliably the one just sent.
+        held.input.push({
+          type: "user",
+          message: { role: "user", content: turn.text },
+          parent_tool_use_id: null,
+          session_id: held.binding.nativeSessionId,
+        });
+        return Effect.void;
+      }),
+
+    stopSession: (sessionId: string): Effect.Effect<void> =>
+      Effect.sync(() => {
+        const held = live.get(sessionId);
+        if (held === undefined) return;
+        // The entry stays until the pump winds up, so `live` remains the one
+        // register of what this adapter holds and a start under the same id is
+        // refused while the old harness is still going. `stopping` is what
+        // refuses input in the meantime.
+        held.stopping = true;
+        held.input.end();
+        held.stream.close();
+      }),
+
+    listSessions: Effect.sync(() => [...live.values()].map((held) => held.binding)),
 
     // Every shipped provider's config schema is empty, so the Claude adapter
     // takes nothing from it and does not name the argument.
@@ -302,6 +572,17 @@ const lastLines = (output: string): string => {
 };
 
 export const claudeCode: ProviderAdapter = claudeCodeAdapter({
+  stream: ({ options, input }) => {
+    const running: Query = sdkQuery({ prompt: input, options });
+    return {
+      [Symbol.asyncIterator]: () => running[Symbol.asyncIterator](),
+      close: () => {
+        // The child may already be gone, and the rejection would take the
+        // daemon down over one session ending.
+        running.return(undefined).catch(() => undefined);
+      },
+    };
+  },
   query: ({ options }) => {
     const session: Query = sdkQuery({ prompt: noPrompt(), options });
     return {

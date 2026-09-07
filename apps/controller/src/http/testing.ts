@@ -54,6 +54,7 @@ import {
   ProviderProbesLayer,
   ProviderServiceLayer,
 } from "../providers";
+import { SessionServiceLayer } from "../sessions";
 import { SettingsLayer } from "../settings";
 import {
   JoinTokens,
@@ -84,7 +85,9 @@ export const USERNAME = "rogier";
 const services = (home: string) =>
   Layer.mergeAll(
     operationLayers,
-    Layer.mergeAll(PluginsLayer, ProviderServiceLayer).pipe(Layer.provideMerge(PluginHostLayer)),
+    Layer.mergeAll(PluginsLayer, ProviderServiceLayer, SessionServiceLayer).pipe(
+      Layer.provideMerge(PluginHostLayer),
+    ),
   ).pipe(
     // One presence and one probe driver: the socket route and every service
     // must act through the same connection map.

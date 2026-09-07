@@ -129,7 +129,7 @@ const runOperation = async (
     const value = outcome.kind === "items" ? { items: outcome.items } : outcome.value;
     io.out(JSON.stringify(value, null, 2));
   } else {
-    for (const line of renderHuman(outcome)) io.out(line);
+    for (const line of renderHuman(outcome, command)) io.out(line);
   }
   return EXIT.ok;
 };
@@ -207,6 +207,23 @@ const dispatch = async (argv: readonly string[], io: Io): Promise<number> => {
     : runOperation(head, second, [...rest], home, io);
 };
 
+/**
+ * What an error envelope said about the parameters it refused, one line each.
+ *
+ * A `validation` message is deliberately generic - "the request is not valid" -
+ * because the detail is in the issues, and a human rendering that printed only
+ * the message told the caller nothing it could act on.
+ */
+const refusals = (error: ApiError): ReadonlyArray<string> => {
+  const issues = (error.details as { issues?: unknown } | undefined)?.issues;
+  if (!Array.isArray(issues)) return [];
+  return issues.map((issue) => {
+    const { path, message } = issue as { path?: ReadonlyArray<string>; message?: string };
+    const where = path === undefined || path.length === 0 ? undefined : path.join(".");
+    return where === undefined ? String(message) : `${where}: ${String(message)}`;
+  });
+};
+
 /** Turn whatever went wrong into a message and an exit code. */
 const report = (error: unknown, json: boolean, io: Io): number => {
   if (error instanceof UsageError) {
@@ -232,6 +249,10 @@ const report = (error: unknown, json: boolean, io: Io): number => {
       if (typeof grant === "string" && !error.message.includes(grant)) {
         io.err(`missing grant ${grant}`);
       }
+      // A validation envelope says which parameter it refused and why, and
+      // without this the human rendering printed only "the request is not
+      // valid" - true, and no help at all.
+      for (const line of refusals(error)) io.err(line);
     }
     return EXIT.api;
   }

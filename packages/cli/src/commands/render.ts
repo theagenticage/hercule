@@ -7,6 +7,7 @@
  * CLI accepts back as an argument.
  */
 import type { Outcome } from "./execute";
+import type { Command } from "./tree";
 
 /** A canonical lowercase UUIDv7; the only value shortened to a tail. */
 const CANONICAL_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
@@ -79,19 +80,88 @@ const isPage = (
   value !== null &&
   Array.isArray((value as { items?: unknown }).items);
 
+/**
+ * The fields of a normalized event that do not go on a transcript line. Four
+ * say nothing: the event's own id, the session every line belongs to, the
+ * instant the line already begins with, and the turn and item ids, which name
+ * nothing a reader can look up. `_tag` is left out because the line prints it
+ * as its own column. `providerRefs` and `raw` are the vendor passthrough - the
+ * escape hatch that keeps a trimmed taxonomy honest - and a line that carried
+ * them would be a JSON dump; `--json` is where they are read.
+ *
+ * What is left is the tag's own payload, which is the part that differs from
+ * line to line.
+ */
+const TRANSCRIPT_NOISE = new Set([
+  "_tag",
+  "eventId",
+  "sessionId",
+  "at",
+  "providerRefs",
+  "raw",
+  "turnId",
+  "itemId",
+]);
+
+/** How much of one field's value a transcript line shows before it is cut. */
+const TRANSCRIPT_FIELD = 100;
+
+/**
+ * One value on a transcript line: on one line, and short. A coalesced
+ * `content.delta` carries a whole assistant message or a screenful of command
+ * output, and a transcript is read for its shape - `hydra transcript read
+ * --json` is what hands back the text in full.
+ */
+const brief = (value: unknown): string => {
+  const text = cell(value).replace(/\s+/g, " ").trim();
+  return text.length > TRANSCRIPT_FIELD ? `${text.slice(0, TRANSCRIPT_FIELD)}...` : text;
+};
+
+/** `<position>  <at>  <tag>  <what that tag adds>`. */
+const transcriptLine = (row: Record<string, unknown>): string => {
+  const event = (row["event"] ?? {}) as Record<string, unknown>;
+  const said = Object.entries(event)
+    .filter(([key]) => !TRANSCRIPT_NOISE.has(key))
+    .map(([key, value]) => `${key}=${brief(value)}`);
+  return [cell(row["position"]), cell(row["at"]), cell(event["_tag"]), ...said]
+    .join("  ")
+    .trimEnd();
+};
+
+/**
+ * A transcript is a sequence, not a set of records: every row is the same three
+ * columns plus a payload whose fields differ per tag, so a table of it would be
+ * mostly empty cells. It is rendered as lines instead.
+ */
+const transcript = (rows: ReadonlyArray<Record<string, unknown>>): ReadonlyArray<string> =>
+  rows.length === 0 ? ["no results"] : rows.map(transcriptLine);
+
 /** The lines the CLI prints for a successful command, without `--json`. */
-export const renderHuman = (outcome: Outcome): ReadonlyArray<string> => {
-  if (outcome.kind === "items") return table(outcome.items);
+export const renderHuman = (outcome: Outcome, command: Command): ReadonlyArray<string> => {
+  const asLines = command.id === "transcript.read" ? transcript : table;
+
+  if (outcome.kind === "items") return asLines(outcome.items);
 
   const value = outcome.value;
   if (isPage(value)) {
-    const lines = [...table(value.items)];
+    const lines = [...asLines(value.items)];
     if (value.nextCursor !== undefined) {
       lines.push("", `more results: --cursor ${value.nextCursor}, or --all`);
     }
     return lines;
   }
-  if (typeof value === "object" && value !== null)
-    return keyValues(value as Record<string, unknown>);
+  if (typeof value === "object" && value !== null) {
+    const record = value as Record<string, unknown>;
+    const lines = [...keyValues(record)];
+    // The one teaching line this build has. Spec 11 section 8 teaches
+    // `subscribe` after a spawn; there is no subscription domain yet, so what a
+    // caller is pointed at is the transcript it can already read. This becomes
+    // the subscribe line the spec names when subscriptions land, and until then
+    // the departure is registered in docs/spec/16-open-items.md.
+    if (command.id === "session.spawn") {
+      lines.push("", `read what it says with \`hydra transcript read ${cell(record["id"])}\``);
+    }
+    return lines;
+  }
   return [cell(value)];
 };

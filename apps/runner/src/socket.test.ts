@@ -11,7 +11,7 @@
  * This package reaches no controller code, so the stub is `Bun.serve` and an
  * Ed25519 keypair made here.
  */
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { Duration, Effect, Schema } from "effect";
 import {
   PROTOCOL_VERSION,
@@ -62,11 +62,46 @@ const bytes = (encoded: string): Uint8Array<ArrayBuffer> => {
 
 const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
-/** Waits for something the stub controller saw, or gives up and says so. */
-const waitUntil = async (ready: () => boolean): Promise<void> => {
-  for (let attempt = 0; attempt < 400 && !ready(); attempt++) await delay(5);
-  expect(ready(), "the stub controller never got there").toBe(true);
+/**
+ * How long a wait on the stub controller is given. Wall clock rather than a
+ * count of attempts: an attempt takes as long as the machine is busy, so
+ * counting them makes the wait shortest exactly when the rest of the suite is
+ * running beside it.
+ */
+const WAIT_DEADLINE_MS = 10_000;
+
+/**
+ * Vitest's own budget, set from the waits rather than left at its default five
+ * seconds. A test whose waits can outlast the timeout never gets to give up:
+ * vitest kills it first, and the failure names the test rather than the frame
+ * that never came. Three, because the longest case here waits for the
+ * connection, then for the proof, then for what it asked for; the slack is for
+ * the one that waits a proof deadline out on top of those.
+ */
+vi.setConfig({ testTimeout: WAIT_DEADLINE_MS * 3 + 10_000 });
+
+/** Polls until it is true or the budget is gone, and says which. */
+const waitFor = async (ready: () => boolean): Promise<boolean> => {
+  const deadline = Date.now() + WAIT_DEADLINE_MS;
+  while (!ready() && Date.now() < deadline) await delay(5);
+  return ready();
 };
+
+const waitUntil = async (ready: () => boolean): Promise<void> => {
+  expect(await waitFor(ready), "the stub controller never got there").toBe(true);
+};
+
+/**
+ * Waits until the runner has accepted this stub as its controller.
+ *
+ * The watermark is the evidence, because it is only ever sent to a peer that
+ * proved itself. The runner's own hello is not: the stub records that frame
+ * before it has even signed its answer, so a test that sends a request on it
+ * can put the request ahead of the hello - and a peer that has not proved
+ * itself is answered with silence, whatever it asks.
+ */
+const proven = (stub: Stub): Promise<void> =>
+  waitUntil(() => stub.received.some((frame) => frame._tag === "watermarkReport"));
 
 const decodeRunnerFrame = (raw: unknown): RunnerMessage =>
   Effect.runSync(Schema.decodeUnknownEffect(RunnerToController)(raw));
@@ -173,11 +208,6 @@ const stubController = async (
     },
   });
 
-  const waitFor = async (ready: () => boolean): Promise<boolean> => {
-    for (let attempt = 0; attempt < 400 && !ready(); attempt++) await delay(5);
-    return ready();
-  };
-
   const stub: Stub = {
     url: `http://127.0.0.1:${String(server.port)}`,
     identityId: controller.id,
@@ -210,19 +240,31 @@ const pinning = (stub: Stub, overrides: Partial<ControllerPin> = {}): Controller
 });
 
 /**
- * How long these tests give a peer to prove who it is. The shipped ten seconds
- * is asserted as the exported default; waiting it out four times over would be
- * most of the suite's running time. Half a second rather than a fifth, because
- * the whole suite running at once can stall an event loop for longer than that,
- * and a stalled proof reads here as a controller that never answered.
+ * How long the two tests that are *about* the deadline give a peer to prove who
+ * it is. The shipped ten seconds is asserted as the exported default; waiting it
+ * out four times over would be most of the suite's running time.
  */
 const DEADLINE = Duration.millis(500);
 
-/** Nothing here drives an adapter with a home, so nothing is ever made under it. */
+/**
+ * What every other test gives it: long enough that the fuse cannot fire. The
+ * whole suite running at once can stall an event loop for a good part of a
+ * second, and a stalled proof reads to the runner as a controller that never
+ * answered - which in a test about probes or retirement is a flake, not a
+ * finding. Only a test that asserts what the fuse does should carry one.
+ */
+const PATIENT = Duration.minutes(1);
+
+/** Nothing here starts a session, so neither directory is ever made. */
 const PROVIDERS_DIR = "/nonexistent/hydra-runner-providers";
+const SCRATCH_DIR = "/nonexistent/hydra-runner-scratch";
 
 /** Runs one connection to its end and reports how it ended. */
-const attempt = (pin: ControllerPin, probe: Effect.Effect<RunnerFacts> = Effect.succeed(FACTS)) =>
+const attempt = (
+  pin: ControllerPin,
+  probe: Effect.Effect<RunnerFacts> = Effect.succeed(FACTS),
+  proofDeadline: Duration.Duration = PATIENT,
+) =>
   Effect.runPromise(
     Effect.result(
       connect({
@@ -231,7 +273,8 @@ const attempt = (pin: ControllerPin, probe: Effect.Effect<RunnerFacts> = Effect.
         probe,
         headroom: Effect.succeed({ diskFreeBytes: 200 * 1024 ** 3, availableMemoryBytes: 1 }),
         providersDir: PROVIDERS_DIR,
-        proofDeadline: DEADLINE,
+        scratchDir: SCRATCH_DIR,
+        proofDeadline,
       }),
     ),
   );
@@ -313,10 +356,12 @@ describe("the controller a runner is willing to talk to", () => {
   });
 
   it("gives up on a peer that upgrades the socket and never says who it is", async () => {
-    // A peer that answers a hello with silence, and pings to look alive.
+    // A peer that answers a hello with silence, and pings to look alive. One of
+    // the two tests that carry the short fuse, because it is the fuse firing
+    // that is under test.
     const stub = await stubController(undefined, { greet: false, ping: true });
 
-    const outcome = await attempt(pinning(stub));
+    const outcome = await attempt(pinning(stub), Effect.succeed(FACTS), DEADLINE);
 
     expect(failureOf(outcome)).toBeInstanceOf(ControllerNotRecognised);
     // And it said nothing but its own hello while it waited: a peer that has
@@ -353,7 +398,9 @@ describe("the controller a runner is willing to talk to", () => {
     });
 
     await stub.connected();
-    await waitUntil(() => stub.received.length >= 1);
+    // The proof, observed: the watermark is only sent to a peer that has proved
+    // itself, so it is what says the runner accepted the real hello.
+    await proven(stub);
     // A hello claiming to be somebody else, after the real one was accepted. It
     // must not be able to talk the runner out of the controller it proved.
     stub.say({
@@ -365,7 +412,13 @@ describe("the controller a runner is willing to talk to", () => {
       nonce: "AAAA",
       signature: "AAAA",
     });
-    await delay(Duration.toMillis(DEADLINE) * 3);
+    // Frames are answered one at a time, in the order they arrived, and a
+    // runner that had been talked out of its controller answers nothing at all.
+    // So a pong to a ping sent behind that hello is the proof this test needs,
+    // and waiting for it beats waiting out a clock: no length of wall time says
+    // "still talking", it only says "has not stopped yet".
+    stub.say({ _tag: "ping" });
+    await waitUntil(() => stub.received.some((frame) => frame._tag === "pong"));
 
     expect(settled, "a second hello is not something to hang up on").toBeUndefined();
     stub.hangUp();
@@ -383,9 +436,10 @@ describe("the controller a runner is willing to talk to", () => {
 
     await stub.connected();
     // Not a minute later: a runner that has just come online with an unknown
-    // disk is a runner nothing can decide to place work on.
-    await waitUntil(() => stub.received.length >= 2);
-    expect(stub.received[1]).toEqual({
+    // disk is a runner nothing can decide to place work on. By tag rather than
+    // by position: the sessions snapshot rides the same moment.
+    await proven(stub);
+    expect(stub.received.find((frame) => frame._tag === "watermarkReport")).toEqual({
       _tag: "watermarkReport",
       watermark: {
         diskFreeBytes: 200 * 1024 ** 3,
@@ -403,11 +457,17 @@ describe("the controller a runner is willing to talk to", () => {
     const stub = await stubController();
 
     let settled: Awaited<ReturnType<typeof attempt>> | undefined;
-    const pending = attempt(pinning(stub)).then((outcome) => {
+    // The other test that carries the short fuse: what it asserts is that the
+    // fuse does not fire on a connection whose proof arrived.
+    const pending = attempt(pinning(stub), Effect.succeed(FACTS), DEADLINE).then((outcome) => {
       settled = outcome;
     });
 
     await stub.connected();
+    // Waited from the proof, not from the dial: the frames below the hello are
+    // only sent once the peer has proved itself, so seeing one is what says the
+    // fuse is now running against a proven connection.
+    await proven(stub);
     // Waited out past the deadline the runner gives an unproven peer, because
     // that deadline must not be what ends a connection whose proof arrived.
     await delay(Duration.toMillis(DEADLINE) * 4);
@@ -439,7 +499,7 @@ describe("a runner whose controller has retired it", () => {
     });
 
     await stub.connected();
-    await waitUntil(() => stub.received.length >= 1);
+    await proven(stub);
     stub.hangUp(POLICY_VIOLATION, RETIRED);
     await pending;
 
@@ -465,7 +525,7 @@ describe("a runner whose controller has retired it", () => {
         settled = outcome;
       });
       await stub.connected();
-      await waitUntil(() => stub.received.length >= 1);
+      await proven(stub);
       stub.hangUp(code, reason);
       await pending;
 
@@ -504,7 +564,7 @@ describe("a controller asking for the machine's facts", () => {
     });
 
     await stub.connected();
-    await waitUntil(() => stub.received.length >= 1);
+    await proven(stub);
     stub.say(REQUEST);
 
     await waitUntil(() => reportIn(stub) !== undefined);
@@ -539,7 +599,7 @@ describe("a controller asking a runner to probe a provider it cannot drive", () 
     });
 
     await stub.connected();
-    await waitUntil(() => stub.received.length >= 1);
+    await proven(stub);
     stub.say(REQUEST);
 
     await waitUntil(() => reportIn(stub) !== undefined);

@@ -37,6 +37,7 @@ import {
   type RunnerFacts,
 } from "@hydra/protocol";
 import { refreshFacts } from "./probe";
+import { wentWrong } from "./report";
 import {
   adapterFor,
   noAdapterFor,
@@ -47,6 +48,7 @@ import {
   type ProviderRunnerContext,
 } from "./providers";
 import type { LoginAnswer } from "./providers/login";
+import { sessions } from "./sessions";
 import { checkWatermark, type Headroom } from "./watermark";
 
 const SOCKET_PATH = "/api/v1/runners/socket";
@@ -83,6 +85,11 @@ export interface ConnectOptions {
    * credential, and never the user's own.
    */
   readonly providersDir: string;
+  /**
+   * Where a workspace-less session gets its empty scratch cwd, one directory
+   * per session, removed when the session exits (spec 06 section 9.1).
+   */
+  readonly scratchDir: string;
   /** The shipped deadline unless a test says otherwise. */
   readonly proofDeadline?: Duration.Duration;
 }
@@ -211,6 +218,10 @@ export const connect = (
     // just put there rather than the one the hello knew about.
     let facts = options.facts;
     const proven = Latch.makeUnsafe(false);
+    // The deadline below is the peer's time to answer, not the network's time
+    // to connect: a dial that took most of it would otherwise leave a
+    // perfectly good controller no room to say who it is.
+    const opened = Latch.makeUnsafe(false);
     let impostor: ControllerNotRecognised | undefined;
 
     const disown = (message: string) =>
@@ -232,16 +243,23 @@ export const connect = (
     const contextFor = (adapter: ProviderAdapter, instanceId: string): ProviderRunnerContext => {
       const home = joinPath(options.providersDir, instanceId);
       mkdirSync(home, { recursive: true, mode: 0o700 });
-      return { home, binary: binaryOf(adapter.binaryName), env: process.env };
+      // Probes, logins and installs run nowhere: a cwd is a session's, and the
+      // session supervisor builds its own context (spec 06 section 4.2).
+      return { cwd: null, home, binary: binaryOf(adapter.binaryName), env: process.env };
     };
 
-    /**
-     * What went wrong, in one line. Saying nothing about a defect would leave
-     * the controller waiting out its deadline for an answer this machine has.
-     */
-    const wentWrong = (cause: Cause.Cause<unknown>): string =>
-      (Cause.pretty(cause).split("\n")[0] ?? "").slice(0, MAX_FACT_LENGTH) ||
-      "the runner could not answer";
+    // The connection lends the supervisor a way to write and the paths this
+    // machine resolved; the sessions themselves are the process's.
+    const supervisor = sessions({
+      send: (frame) => write(asText(frame)),
+      machine: {
+        providersDir: options.providersDir,
+        scratchDir: options.scratchDir,
+        controllerUrl: pin.controllerUrl,
+        baseEnv: process.env,
+        binaryOf,
+      },
+    });
 
     const answerProbe = (request: ProbeRequest) => {
       const reporting = (result: ProbeResult) =>
@@ -264,7 +282,9 @@ export const connect = (
         // The encoding is inside the catch: a result `asText` cannot carry must
         // reach the controller as an error, not as silence. The fallback is
         // bounded, so it always encodes.
-        Effect.catchCause((cause) => Effect.ignore(reporting(probeFailed(wentWrong(cause))))),
+        Effect.catchCause((cause) =>
+          Effect.ignore(reporting(probeFailed(wentWrong(cause, MAX_FACT_LENGTH)))),
+        ),
         // The connection is going if the write itself failed, and there is
         // nowhere left to report that to.
         Effect.ignore,
@@ -297,7 +317,7 @@ export const connect = (
         return yield* reporting(outcome);
       }).pipe(
         Effect.catchCause((cause) =>
-          Effect.ignore(reporting({ ok: false, message: wentWrong(cause) })),
+          Effect.ignore(reporting({ ok: false, message: wentWrong(cause, MAX_FACT_LENGTH) })),
         ),
         Effect.ignore,
       );
@@ -311,7 +331,9 @@ export const connect = (
       const reporting = (answer: LoginAnswer) => write(asText({ ...answer, requestId }));
       return Effect.flatMap(answering, reporting).pipe(
         Effect.catchCause((cause) =>
-          Effect.ignore(reporting({ _tag: "loginFailed", message: wentWrong(cause) })),
+          Effect.ignore(
+            reporting({ _tag: "loginFailed", message: wentWrong(cause, MAX_FACT_LENGTH) }),
+          ),
         ),
         Effect.ignore,
       );
@@ -392,6 +414,11 @@ export const connect = (
             ),
           );
         }
+        // Sessions run in the frame order they arrived in, unforked: input for
+        // a session started one frame ago must not overtake the start.
+        if (message._tag === "sessionStart") return yield* supervisor.start(message);
+        if (message._tag === "sessionInput") return yield* supervisor.input(message);
+        if (message._tag === "sessionStop") return yield* supervisor.stop(message);
         // An ack belongs to the replayable events nothing sends yet.
       });
 
@@ -406,11 +433,19 @@ export const connect = (
      * every ten seconds for the life of the process.
      */
     const reporting = Effect.gen(function* () {
+      yield* opened.await;
       const proved = yield* Effect.raceFirst(
         Effect.as(proven.await, true),
         Effect.as(Effect.sleep(options.proofDeadline ?? PROOF_DEADLINE), false),
       );
       if (!proved) return yield* disown("the controller did not say who it is");
+      // Not a moment earlier: a session this runner kept across a reconnect can
+      // produce events at once, and a peer that has not proved who it is reads
+      // none of them. Running the relay is what subscribes it, so anything
+      // published before this point is lost - the same gap as everything
+      // produced while the socket was down (spec 03 section 2.3).
+      yield* Effect.forkIn(supervisor.relay, connection);
+      yield* supervisor.report;
       yield* Effect.all(
         [
           checkWatermark({
@@ -440,7 +475,7 @@ export const connect = (
             nonce,
             facts: options.facts,
           }),
-        ).pipe(Effect.ignore),
+        ).pipe(Effect.ignore, Effect.andThen(Effect.sync(() => opened.openUnsafe()))),
       }),
       reporting,
     ).pipe(

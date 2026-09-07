@@ -17,6 +17,7 @@ import runnerJoinTokens from "./0006-runner-join-tokens";
 import plugins from "./0007-plugins";
 import runnerLifecycle from "./0008-runner-lifecycle";
 import providerInstances from "./0009-provider-instances";
+import sessions from "./0010-sessions";
 
 export const migrations: ReadonlyArray<ResolvedMigration> = [
   [1, "initial", Effect.succeed(initial)],
@@ -28,6 +29,7 @@ export const migrations: ReadonlyArray<ResolvedMigration> = [
   [7, "plugins", Effect.succeed(plugins)],
   [8, "runner-lifecycle", Effect.succeed(runnerLifecycle)],
   [9, "provider-instances", Effect.succeed(providerInstances)],
+  [10, "sessions", Effect.succeed(sessions)],
 ];
 
 /** The schema version this binary carries: the highest embedded migration id. */

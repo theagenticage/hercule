@@ -2,6 +2,7 @@
  * The runner daemon: `hydra runner`. Holding the connection is all it does yet;
  * hosting sessions is what the connection is for.
  */
+import { rmSync } from "node:fs";
 import { networkInterfaces } from "node:os";
 import { join as joinPath } from "node:path";
 import * as Effect from "effect/Effect";
@@ -65,9 +66,15 @@ export const daemon = (home: string): Effect.Effect<never, NotEnrolled | RunnerR
       // Under the runner's own storage directory, so re-enlisting the machine
       // leaves every provider login behind with the identity it belonged to.
       const providersDir = joinPath(runnerDirIn(home), pin.storageDirectory, "providers");
+      // Beside them, and just as disposable: what a workspace-less session gets
+      // as a cwd, one directory per session.
+      const scratchDir = joinPath(runnerDirIn(home), pin.storageDirectory, "scratch");
+      // No session survives this process, so everything under there is what the
+      // last one left behind: swept here rather than growing with every crash.
+      rmSync(scratchDir, { recursive: true, force: true });
       return yield* reconnect({
         attempt: Effect.flatMap(probe, (facts) =>
-          connect({ pin, facts, probe, headroom, providersDir }),
+          connect({ pin, facts, probe, headroom, providersDir, scratchDir }),
         ),
         signals: reconnectSignals({ now: () => Date.now(), addresses }),
       });
