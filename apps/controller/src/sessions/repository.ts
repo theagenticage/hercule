@@ -123,13 +123,14 @@ const scopeOf = (direction: SortDirection): CursorScope => ({
 });
 
 /**
- * The transcript walk. Its key is the position and nothing else: the rows of
- * one session are already scoped by the session id in the `WHERE`, and position
- * is unique within that.
+ * The transcript walk. Its key is the position, which is per session and not
+ * global, so the session is part of the walk the cursor belongs to: without it
+ * one session's cursor would be accepted on another's transcript and hide every
+ * row below that position, with nothing to say so.
  */
-const transcriptScope = (direction: SortDirection): CursorScope => ({
+const transcriptScope = (sessionId: string, direction: SortDirection): CursorScope => ({
   op: "transcript.read",
-  field: "position",
+  field: `position:${sessionId}`,
   direction,
 });
 
@@ -233,7 +234,7 @@ const make = Effect.gen(function* () {
       request: TranscriptPageRequest,
     ): Effect.Effect<Page<StoredStreamRow>, CursorError | SqlError> =>
       Effect.gen(function* () {
-        const scope = transcriptScope(request.direction);
+        const scope = transcriptScope(request.sessionId, request.direction);
         const after =
           request.cursor === undefined ? undefined : yield* decodeIdCursor(request.cursor, scope);
         const { keyset, order } = keysetOver(

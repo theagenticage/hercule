@@ -152,6 +152,34 @@ describe("the transcript walk", () => {
     expect(error).toBeInstanceOf(CursorError);
   });
 
+  it("refuses another session's cursor rather than skipping the rows below it", async () => {
+    const error = await run(
+      Effect.gen(function* () {
+        const sessions = yield* sessionRepository;
+        const mine = yield* aSession;
+        const theirs = yield* aSession;
+        yield* fill(mine, 6);
+        yield* fill(theirs, 6);
+        const theirPage = yield* sessions.transcript({
+          sessionId: theirs,
+          limit: 4,
+          cursor: undefined,
+          direction: "asc",
+        });
+        // Position is per session, so their position 4 is a boundary that means
+        // nothing here: taken at face value it would hide my first four rows.
+        return yield* sessions.transcript({
+          sessionId: mine,
+          limit: 4,
+          cursor: theirPage.nextCursor,
+          direction: "asc",
+        });
+      }).pipe(Effect.provide(TestDatabase), Effect.flip),
+    );
+
+    expect(error).toBeInstanceOf(CursorError);
+  });
+
   it("hands back the normalized event as it was written, not a summary of it", async () => {
     const items = await run(
       Effect.gen(function* () {

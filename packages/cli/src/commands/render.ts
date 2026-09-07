@@ -148,10 +148,11 @@ export const renderHuman = (outcome: Outcome, command: Command): ReadonlyArray<s
   if (typeof value === "object" && value !== null) {
     const record = value as Record<string, unknown>;
     const lines = [...keyValues(record)];
-    // The one teaching line this build has. Spec 11 section 10 teaches
+    // The one teaching line this build has. Spec 11 section 8 teaches
     // `subscribe` after a spawn; there is no subscription domain yet, so what a
     // caller is pointed at is the transcript it can already read. This becomes
-    // the subscribe line the spec names when subscriptions land.
+    // the subscribe line the spec names when subscriptions land, and until then
+    // the departure is registered in docs/spec/16-open-items.md.
     if (command.id === "session.spawn") {
       lines.push("", `read what it says with \`hydra transcript read ${cell(record["id"])}\``);
     }

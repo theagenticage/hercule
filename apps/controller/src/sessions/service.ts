@@ -424,7 +424,7 @@ const make = Effect.gen(function* () {
      */
     transcript: (input: TranscriptInput): Effect.Effect<TranscriptPage, ReadError | NotFound> =>
       Effect.gen(function* () {
-        yield* requireGrant("session.read");
+        yield* requireGrant("transcript.read");
         const { id, limit, cursor, sort } = yield* Effect.mapError(
           decodeTranscript(input),
           validationOf,

@@ -20,9 +20,10 @@ None open - every handed decision is resolved (the register above says where eac
 Not design questions. The constraint is stated where one exists.
 
 - ~~03 §2.2: the full runner-protocol message catalogue (names, payloads, error shapes) - one versioned schema in the `protocol` package.~~ Resolved 2026-09-05 by [#61](https://github.com/rogierpennink/hydra/issues/61): the catalogue is written into 03 §2.2, and the shapes it carries into 03 §4.
-- 04 §Streams: flush cadence inside one long-running item (size or time threshold); message and turn boundaries are the pinned minimum.
+- ~~04 §Streams: flush cadence inside one long-running item (size or time threshold); message and turn boundaries are the pinned minimum.~~ Resolved 2026-09-07 by [#65](https://github.com/rogierpennink/hydra/issues/65): the cadence is written into 04 §Streams as 4 KiB of held delta text per (item, stream kind), with no time threshold.
 - 06 §4.3: whether `TurnInput` carries more than text in v1 - start with text; attachments are additive.
 - ~~06 §6.4: the exact field set of `session.usage.updated` beyond tokens plus context usage.~~ Resolved 2026-09-07 by [#65](https://github.com/rogierpennink/hydra/issues/65): the shape is written into 06 §6.6, and context usage waits for the consumer that reads it.
+- 11 §8: what `hydra session spawn` teaches after the handle. Subscriptions are not built, so [#65](https://github.com/rogierpennink/hydra/issues/65) prints `hydra transcript read <id>` instead of the spec's subscribe line; it becomes the subscribe line when the subscription domain lands.
 - 13 §2.1: secrets-table column names and cipher (see also the AEAD verification below).
 - 13 §10: the exact in-context taint wrapper syntax - stable and greppable (the memory provenance line is pinned).
 - 12 §5.1: the runner's idle timeout for assistant session processes - one controller-wide default, 15 minutes as the starting value.
