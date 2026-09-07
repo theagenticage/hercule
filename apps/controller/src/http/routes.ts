@@ -184,6 +184,10 @@ const eventRoutes = HttpApiBuilder.group(api, "event", (handlers) =>
 const runnerRoutes = HttpApiBuilder.group(api, "runner", (handlers) =>
   Effect.gen(function* () {
     const runners = yield* RunnerService;
+    // Two of this group's operations are about a machine's provider instances
+    // rather than about the machine, and the service that owns instances is
+    // the one that can answer them.
+    const providers = yield* ProviderService;
     return handlers
       .handle("query", ({ query }) => operation(runners.query(query)))
       .handle("read", ({ params }) => operation(runners.read(params)))
@@ -197,10 +201,10 @@ const runnerRoutes = HttpApiBuilder.group(api, "runner", (handlers) =>
       )
       .handle("refreshFacts", ({ params }) => operation(runners.refreshFacts(params)))
       .handle("probe", ({ params, payload }) =>
-        operation(runners.probe({ id: params.id, ...payload })),
+        operation(providers.probe({ runnerId: params.id, ...payload })),
       )
       .handle("installHarness", ({ params, payload }) =>
-        operation(runners.installHarness({ id: params.id, ...payload })),
+        operation(providers.installHarness({ runnerId: params.id, ...payload })),
       )
       .handle("createJoinToken", () => operation(runners.createJoinToken()))
       .handle("queryJoinTokens", () => operation(runners.queryJoinTokens()))

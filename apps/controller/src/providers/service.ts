@@ -41,6 +41,7 @@ import {
   type InvalidState,
   type NotFound,
   type ProviderInstance,
+  type RunnerDetail,
   type Unauthenticated,
   type Validation,
 } from "@hydra/contract";
@@ -48,11 +49,13 @@ import { requireGrant, USER_ACTOR } from "../actor";
 import { nowIso, withTransaction } from "../db";
 import { AuditLog } from "../events";
 import { PluginHost } from "../plugins";
-// The two runner modules directly rather than the domain's index: the runner
-// service reaches this domain, so going through it would close a cycle.
-import { requireAdapter } from "../runners/adapters";
-import { RunnerPresence, type Answer } from "../runners/presence";
-import { runnerRepository } from "../runners/repository";
+import {
+  requireAdapter,
+  requireOnline,
+  RunnerPresence,
+  runnerRepository,
+  type Answer,
+} from "../runners";
 import { ProviderProbes, ProviderProbeDeadline } from "./probes";
 import { providerRepository, type StoredInstance, type StoredSnapshot } from "./repository";
 import { floorFor, versionVerdict } from "./version";
@@ -76,6 +79,12 @@ export const ProviderLoginDeadline = Context.Reference<Duration.Duration>(
  */
 const LOGIN_CODE_DEADLINE: Duration.Duration = Duration.minutes(2);
 
+/**
+ * The runner gives its installer five minutes; this is that plus the round trip,
+ * so a machine that is still working is never cut off by the caller's end.
+ */
+const HARNESS_INSTALL_DEADLINE: Duration.Duration = Duration.minutes(6);
+
 /** Which machine a login runs on. The credential lands on that machine alone. */
 const LoginInput = Schema.Struct({ id: Id, ...ProviderLoginInput.fields });
 
@@ -94,13 +103,27 @@ const Identified = Schema.Struct({ id: Id });
 
 export type Identified = Schema.Schema.Type<typeof Identified>;
 
+/** Which machine to ask, and about which instance. */
+const ProbeInput = Schema.Struct({ runnerId: Id, instanceId: Id });
+
+export type ProbeInput = Schema.Schema.Type<typeof ProbeInput>;
+
+/** Which machine to put a harness on, and whose. */
+const InstallInput = Schema.Struct({ runnerId: Id, providerId: Schema.String });
+
+export type InstallInput = Schema.Schema.Type<typeof InstallInput>;
+
 const decodeCreate = Schema.decodeUnknownEffect(ProviderInstanceCreateInput);
 const decodeUpdate = Schema.decodeUnknownEffect(UpdateInput);
 const decodeIdentified = Schema.decodeUnknownEffect(Identified);
 const decodeLogin = Schema.decodeUnknownEffect(LoginInput);
 const decodeLoginCode = Schema.decodeUnknownEffect(LoginCodeInput);
+const decodeProbe = Schema.decodeUnknownEffect(ProbeInput);
+const decodeInstall = Schema.decodeUnknownEffect(InstallInput);
 
 const NO_SUCH_INSTANCE = "no such provider instance";
+
+const NO_SUCH_RUNNER = "no such runner";
 
 type ReadError = Unauthenticated | Forbidden | SqlError | Schema.SchemaError;
 
@@ -108,7 +131,8 @@ type CreateError = ReadError | Validation;
 
 type WriteError = CreateError | NotFound;
 
-type LoginError = WriteError | InvalidState;
+/** What asking a machine to do something for an instance can answer with. */
+type AskError = WriteError | InvalidState;
 
 /** What a runner answers a login frame with. */
 type LoginAnswer = LoginUrl | LoginFailed | LoginResult;
@@ -214,13 +238,25 @@ const make = Effect.gen(function* () {
         : Effect.succeed(definition);
     });
 
-  /** The machine, once it is one that can run this provider's login at all. */
-  const drivable = (runnerId: string, providerId: string): Effect.Effect<void, LoginError> =>
+  /** The machine a caller named, or the refusal that says there is no such one. */
+  const machine = (runnerId: string): Effect.Effect<RunnerDetail, NotFound | SqlError> =>
     Effect.gen(function* () {
       const runner = yield* runners.read(runnerId);
-      if (Option.isNone(runner)) return yield* Effect.fail(notFound("no such runner"));
-      yield* requireAdapter(runner.value, providerId, "runnerId");
+      if (Option.isNone(runner)) return yield* Effect.fail(notFound(NO_SUCH_RUNNER));
+      return runner.value;
     });
+
+  /**
+   * The machine, once it is one that can run this provider at all. Which field
+   * is at fault differs: a login names the machine it was asked to run on, an
+   * install names the provider it was asked to put there.
+   */
+  const drivable = (
+    runnerId: string,
+    providerId: string,
+    field: string,
+  ): Effect.Effect<void, AskError> =>
+    Effect.flatMap(machine(runnerId), (runner) => requireAdapter(runner, providerId, field));
 
   /** One login frame out, its answer back, under the deadline a caller can wait. */
   const asked = (
@@ -264,12 +300,12 @@ const make = Effect.gen(function* () {
      * back the URL it printed. The user opens that URL in whatever browser they
      * are at: the machine running the harness may have none.
      */
-    login: (input: LoginInput): Effect.Effect<{ readonly url: string }, LoginError> =>
+    login: (input: LoginInput): Effect.Effect<{ readonly url: string }, AskError> =>
       Effect.gen(function* () {
         yield* requireGrant("provider.login");
         const { id, runnerId } = yield* Effect.mapError(decodeLogin(input), validationOf);
         const instance = yield* one(id);
-        yield* drivable(runnerId, instance.providerId);
+        yield* drivable(runnerId, instance.providerId, "runnerId");
         const answer = yield* asked(
           runnerId,
           {
@@ -291,12 +327,12 @@ const make = Effect.gen(function* () {
      * a fresh snapshot, because a harness that has just been logged in has
      * never been asked whose login it is holding.
      */
-    submitLoginCode: (input: LoginCodeInput): Effect.Effect<CapabilitySnapshot, LoginError> =>
+    submitLoginCode: (input: LoginCodeInput): Effect.Effect<CapabilitySnapshot, AskError> =>
       Effect.gen(function* () {
         yield* requireGrant("provider.submitLoginCode");
         const { id, runnerId, code } = yield* Effect.mapError(decodeLoginCode(input), validationOf);
         const instance = yield* one(id);
-        yield* drivable(runnerId, instance.providerId);
+        yield* drivable(runnerId, instance.providerId, "runnerId");
         const answer = yield* asked(
           runnerId,
           { _tag: "loginCode", requestId: crypto.randomUUID(), instanceId: id, code },
@@ -336,6 +372,60 @@ const make = Effect.gen(function* () {
             ),
           onSome: Effect.succeed,
         });
+      }),
+
+    /**
+     * Asks one machine about one instance now and hands back the snapshot its
+     * answer left. The fleet is swept hourly and after every hello, so this is
+     * what a button presses when somebody has just logged in or installed
+     * something outside Hydra.
+     */
+    probe: (input: ProbeInput): Effect.Effect<CapabilitySnapshot, AskError> =>
+      Effect.gen(function* () {
+        yield* requireGrant("runner.probe");
+        const { runnerId, instanceId } = yield* Effect.mapError(decodeProbe(input), validationOf);
+        yield* requireOnline(yield* machine(runnerId));
+        const snapshot = yield* probes.probe(runnerId, instanceId);
+        return yield* Option.match(snapshot, {
+          onNone: () =>
+            Effect.flatMap(ProviderProbeDeadline, (waited) =>
+              Effect.fail(
+                invalidState(
+                  `that runner did not answer the probe within ${Duration.format(waited)}`,
+                ),
+              ),
+            ),
+          onSome: Effect.succeed,
+        });
+      }),
+
+    /**
+     * Puts a provider's harness on a machine. The runner reports its facts
+     * before it says the install finished, so the row this answers with is the
+     * machine as it now is, and every instance on it is asked again: a harness
+     * that was just installed has never been asked anything.
+     */
+    installHarness: (input: InstallInput): Effect.Effect<RunnerDetail, AskError> =>
+      Effect.gen(function* () {
+        yield* requireGrant("runner.installHarness");
+        const { runnerId, providerId } = yield* Effect.mapError(decodeInstall(input), validationOf);
+        yield* drivable(runnerId, providerId, "providerId");
+        const answer = yield* presence.asked(
+          runnerId,
+          { _tag: "installRequest", requestId: crypto.randomUUID(), providerId },
+          HARNESS_INSTALL_DEADLINE,
+        );
+        if (Option.isNone(answer) || answer.value._tag !== "installResult") {
+          const waited = Duration.format(HARNESS_INSTALL_DEADLINE);
+          return yield* Effect.fail(
+            invalidState(`that runner did not finish the install within ${waited}`),
+          );
+        }
+        if (!answer.value.ok) {
+          return yield* Effect.fail(invalidState(answer.value.message ?? "the install failed"));
+        }
+        yield* Effect.forkDetach(probes.sweepRunner(runnerId));
+        return yield* machine(runnerId);
       }),
 
     /** Opens a second account on a provider, or the first on one the boot missed. */

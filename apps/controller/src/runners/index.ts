@@ -1,4 +1,5 @@
 /** Runners: the daemons that host sessions on the controller's behalf. */
+export { requireAdapter, requireOnline } from "./adapters";
 export { RunnerJoinLayer } from "./join";
 export { JoinTokens, JoinTokensLayer } from "./join-tokens";
 export {
@@ -8,7 +9,7 @@ export {
   type LocalRunner,
   type LocalRunnerOptions,
 } from "./local";
-export { RunnerFactsDeadline, RunnerPresence, RunnerPresenceLayer } from "./presence";
+export { RunnerFactsDeadline, RunnerPresence, RunnerPresenceLayer, type Answer } from "./presence";
 export { runnerRepository } from "./repository";
 export { RunnerJoinRouteLayer } from "./route";
 export { RunnerPingSchedule, RunnerSocketRouteLayer, type RunnerPings } from "./socket";

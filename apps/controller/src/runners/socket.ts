@@ -40,7 +40,6 @@ import {
 import { bearerOf } from "../http/bearer";
 import { responseFor } from "../http/envelope";
 import { ControllerIdentity } from "../identity/repository";
-import { ProviderProbes } from "../providers";
 import { newConnection, RunnerPresence, type Connection, type Departure } from "./presence";
 
 const RUNNER_SOCKET_PATH = "/api/v1/runners/socket";
@@ -111,13 +110,9 @@ const negotiated = (theirs: ReadonlyArray<string>): ReadonlyArray<string> =>
 const hold = (runnerId: string, socket: Socket.Socket) =>
   Effect.gen(function* () {
     const presence = yield* RunnerPresence;
-    const probes = yield* ProviderProbes;
     const identity = yield* ControllerIdentity;
     const pings = yield* RunnerPingSchedule;
     const write = yield* socket.writer;
-    // What a probe or an install started on this connection is scoped to: they
-    // outlive the frame that asked for them, and die with the connection.
-    const connection = yield* Effect.scope;
 
     const mine: Connection = newConnection();
     let greeted = false;
@@ -170,9 +165,6 @@ const hold = (runnerId: string, socket: Socket.Socket) =>
         );
         greeted = true;
         yield* write(asText(answer));
-        // Forked, because a machine that answers slowly must not hold up its own
-        // hello: the snapshots land as the reports come back.
-        yield* Effect.forkIn(probes.sweepRunner(runnerId), connection);
       });
 
     const handle = (raw: string) =>

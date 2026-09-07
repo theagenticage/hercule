@@ -15,6 +15,8 @@ import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as PubSub from "effect/PubSub";
+import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import type { RunnerConnectivity, RunnerFacts, RunnerWatermark } from "@hydra/contract";
@@ -113,6 +115,9 @@ const make = Effect.gen(function* () {
   const audit = yield* AuditLog;
 
   const reachable = new Map<string, Reachable>();
+  // Dropping, and unbounded: a hello nobody is listening for is a sweep nobody
+  // asked for, and the driver that listens is up before anything can dial.
+  const arrivals = yield* PubSub.unbounded<string>();
 
   /**
    * Nothing more is coming over this connection, so everybody waiting on it is
@@ -225,6 +230,7 @@ const make = Effect.gen(function* () {
         );
         const previous = reachable.get(id);
         reachable.set(id, { connection, ...connected, pending: new Map() });
+        yield* PubSub.publish(arrivals, id);
         if (previous !== undefined) {
           // Nothing more is coming over the connection being displaced, and the
           // entry that would have carried its answer is no longer the one here.
@@ -232,6 +238,13 @@ const make = Effect.gen(function* () {
           previous.close(GOING_AWAY_CLOSE_CODE, DISPLACED_CLOSE_REASON);
         }
       }),
+
+    /**
+     * Every machine that has just said hello. What to do about an arrival is
+     * not presence's business - it holds no opinion about provider instances -
+     * so whoever has one listens here.
+     */
+    arrivals: Stream.fromPubSub(arrivals),
 
     /**
      * Ends the connection a runner is holding, if it is holding one. Retiring

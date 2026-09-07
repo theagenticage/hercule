@@ -182,8 +182,9 @@ export const serve = (bundle: WebBundle | undefined) =>
     // runner off `online` is the connection that put it there.
     const presence = yield* RunnerPresence;
     yield* Effect.orDie(presence.strandedByTheLastRun);
-    // A login expires and a harness is upgraded outside Hydra, so the fleet is
-    // asked again on a tick for as long as this listener is up.
-    yield* Effect.forkScoped(Effect.flatMap(ProviderProbes, (probes) => probes.refreshing));
+    // Before anything can dial, so no machine says hello unheard: every arrival
+    // is swept, and the fleet is asked again on a tick, for as long as this
+    // listener is up. A login expires and a harness is upgraded outside Hydra.
+    yield* Effect.forkScoped(Effect.flatMap(ProviderProbes, (probes) => probes.driving));
     yield* Effect.flatMap(application(bundle), HttpServer.serveEffect());
   });

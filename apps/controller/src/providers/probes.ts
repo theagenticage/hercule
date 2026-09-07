@@ -16,13 +16,13 @@ import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Stream from "effect/Stream";
 import type * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import { notFound, type CapabilitySnapshot, type NotFound } from "@hydra/contract";
 import { announce, nowIso, withTransaction } from "../db";
-import { RunnerPresence } from "../runners/presence";
-import { runnerRepository } from "../runners/repository";
+import { RunnerPresence, runnerRepository } from "../runners";
 import { providerRepository, type StoredInstance } from "./repository";
 import { floorFor, versionVerdict } from "./version";
 
@@ -129,6 +129,10 @@ const make = Effect.gen(function* () {
       Effect.logError("A provider sweep could not be started", cause),
     );
 
+  /** Everything one machine can be asked: after its hello, and after an install. */
+  const sweepRunner = (runnerId: string): Effect.Effect<void> =>
+    inTheBackground(Effect.flatMap(instances.list(), (all) => sweep([runnerId], all)));
+
   return {
     /**
      * Probes one instance on one runner for a caller that is waiting. `none`
@@ -147,9 +151,7 @@ const make = Effect.gen(function* () {
             : probeOne(runnerId, found.value),
       ),
 
-    /** Everything one machine can be asked: after its hello, and after an install. */
-    sweepRunner: (runnerId: string): Effect.Effect<void> =>
-      inTheBackground(Effect.flatMap(instances.list(), (all) => sweep([runnerId], all))),
+    sweepRunner,
 
     /**
      * One instance across the fleet, because its config is what the probe runs
@@ -165,22 +167,33 @@ const make = Effect.gen(function* () {
       ),
 
     /**
-     * The tick. Held open for the life of the listener, so it stops when the
-     * controller does.
+     * Everything the driver does unasked: a sweep for each machine as it says
+     * hello, and one over the whole fleet on the tick. Held open for the life
+     * of the listener, so both stop when the controller does.
      */
-    refreshing: Effect.gen(function* () {
-      const interval = yield* ProviderProbeInterval;
-      while (true) {
-        yield* Effect.sleep(interval);
-        yield* inTheBackground(
-          Effect.gen(function* () {
-            const online = yield* runners.connected();
-            if (online.length === 0) return;
-            yield* sweep(online, yield* instances.list());
-          }),
-        );
-      }
-    }),
+    driving: Effect.all(
+      [
+        // Presence says a machine arrived; what an arrival is worth asking
+        // about is this domain's business, not presence's. Forked, because a
+        // machine that answers slowly must not hold up the next machine's
+        // sweep.
+        Stream.runForEach(presence.arrivals, (runnerId) => Effect.forkChild(sweepRunner(runnerId))),
+        Effect.gen(function* () {
+          const interval = yield* ProviderProbeInterval;
+          while (true) {
+            yield* Effect.sleep(interval);
+            yield* inTheBackground(
+              Effect.gen(function* () {
+                const online = yield* runners.connected();
+                if (online.length === 0) return;
+                yield* sweep(online, yield* instances.list());
+              }),
+            );
+          }
+        }),
+      ],
+      { concurrency: "unbounded", discard: true },
+    ),
   };
 });
 

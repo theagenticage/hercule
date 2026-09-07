@@ -17,11 +17,10 @@ import { AuditLog, AuditLogLayer } from "../events";
 import { TestDatabase } from "../db/testing";
 import { Settings, SettingsLayer } from "../settings";
 import { runnerRepository } from "./repository";
-import { ProviderProbesLayer } from "../providers";
 import { JoinTokensLayer, RunnerPresenceLayer, RunnerService, RunnerServiceLayer } from "./index";
 
 const layer = RunnerServiceLayer.pipe(
-  Layer.provideMerge(Layer.mergeAll(JoinTokensLayer, SettingsLayer, ProviderProbesLayer)),
+  Layer.provideMerge(Layer.mergeAll(JoinTokensLayer, SettingsLayer)),
   Layer.provideMerge(RunnerPresenceLayer),
   Layer.provideMerge(AuditLogLayer),
   Layer.provideMerge(TestDatabase),

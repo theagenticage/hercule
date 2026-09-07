@@ -33,7 +33,6 @@ import {
   type JoinTokenRef,
   type MintedJoinToken,
   type NotFound,
-  type CapabilitySnapshot,
   type Runner,
   type RunnerDetail,
   type RunnerLifecycle,
@@ -42,11 +41,10 @@ import {
   type Validation,
 } from "@hydra/contract";
 import { requireGrant, USER_ACTOR } from "../actor";
-import { ProviderProbes, ProviderProbeDeadline } from "../providers";
 import { nowIso, pageInput, refuseCursor, withTransaction } from "../db";
 import { AuditLog } from "../events";
 import { Settings, type SettingError } from "../settings";
-import { requireAdapter, requireOnline } from "./adapters";
+import { requireOnline } from "./adapters";
 import { JoinTokens } from "./join-tokens";
 import { RunnerFactsDeadline, RunnerPresence } from "./presence";
 import { runnerRepository, type RunnerEdit } from "./repository";
@@ -66,14 +64,6 @@ const Identified = Schema.Struct({ id: Id });
 
 export type Identified = Schema.Schema.Type<typeof Identified>;
 
-const ProbeInput = Schema.Struct({ id: Id, instanceId: Id });
-
-export type ProbeInput = Schema.Schema.Type<typeof ProbeInput>;
-
-const InstallInput = Schema.Struct({ id: Id, providerId: Schema.String });
-
-export type InstallInput = Schema.Schema.Type<typeof InstallInput>;
-
 const RetireInput = Schema.Struct({ id: Id, ...RUNNER_RETIRE_FIELDS });
 
 export type RetireInput = Schema.Schema.Type<typeof RetireInput>;
@@ -82,8 +72,6 @@ const decodeQuery = Schema.decodeUnknownEffect(QueryInput);
 const decodeUpdate = Schema.decodeUnknownEffect(UpdateInput);
 const decodeIdentified = Schema.decodeUnknownEffect(Identified);
 const decodeRetire = Schema.decodeUnknownEffect(RetireInput);
-const decodeProbe = Schema.decodeUnknownEffect(ProbeInput);
-const decodeInstall = Schema.decodeUnknownEffect(InstallInput);
 
 export interface RunnerPage {
   readonly items: ReadonlyArray<Runner>;
@@ -108,12 +96,6 @@ const NAME_TAKEN = "another runner already has that name";
  */
 const RESERVED_IS_THE_DEFAULT =
   "this is the fleet's default runner; choose another default before reserving it";
-
-/**
- * The runner gives its installer five minutes; this is that plus the round trip,
- * so a machine that is still working is never cut off by the caller's end.
- */
-const HARNESS_INSTALL_DEADLINE: Duration.Duration = Duration.minutes(6);
 
 const NOT_ACTIVE = "only an active runner can be drained";
 
@@ -154,7 +136,6 @@ const make = Effect.gen(function* () {
   const audit = yield* AuditLog;
 
   const presence = yield* RunnerPresence;
-  const probes = yield* ProviderProbes;
 
   const one = (id: string): Effect.Effect<RunnerDetail, NotFound | SqlError> =>
     Effect.flatMap(
@@ -418,58 +399,6 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * Asks one machine about one provider instance now and hands back the
-     * snapshot its answer left. The fleet is swept hourly and after every
-     * hello, so this is what a button presses when somebody has just logged in
-     * or installed something outside Hydra.
-     */
-    probe: (input: ProbeInput): Effect.Effect<CapabilitySnapshot, MoveError> =>
-      Effect.gen(function* () {
-        yield* requireGrant("runner.probe");
-        const { id, instanceId } = yield* Effect.mapError(decodeProbe(input), validationOf);
-        const runner = yield* one(id);
-        yield* requireOnline(runner);
-        const snapshot = yield* probes.probe(id, instanceId);
-        if (Option.isNone(snapshot)) {
-          const waited = Duration.format(yield* ProviderProbeDeadline);
-          return yield* Effect.fail(
-            invalidState(`that runner did not answer the probe within ${waited}`),
-          );
-        }
-        return snapshot.value;
-      }),
-
-    /**
-     * Puts a provider's harness on a machine. The runner reports its facts
-     * before it says the install finished, so the row this answers with is the
-     * machine as it now is, and every instance on it is asked again: a harness
-     * that was just installed has never been asked anything.
-     */
-    installHarness: (input: InstallInput): Effect.Effect<RunnerDetail, MoveError> =>
-      Effect.gen(function* () {
-        yield* requireGrant("runner.installHarness");
-        const { id, providerId } = yield* Effect.mapError(decodeInstall(input), validationOf);
-        const runner = yield* one(id);
-        yield* requireAdapter(runner, providerId, "providerId");
-        const answer = yield* presence.asked(
-          id,
-          { _tag: "installRequest", requestId: crypto.randomUUID(), providerId },
-          HARNESS_INSTALL_DEADLINE,
-        );
-        if (Option.isNone(answer) || answer.value._tag !== "installResult") {
-          const waited = Duration.format(HARNESS_INSTALL_DEADLINE);
-          return yield* Effect.fail(
-            invalidState(`that runner did not finish the install within ${waited}`),
-          );
-        }
-        if (!answer.value.ok) {
-          return yield* Effect.fail(invalidState(answer.value.message ?? "the install failed"));
-        }
-        yield* Effect.forkDetach(probes.sweepRunner(id));
-        return yield* one(id);
-      }),
-
-    /**
      * The token is in the answer and nowhere else. The fleet's "Add machine"
      * mints a fresh one each time it opens, so an expired one costs a refresh.
      */
@@ -545,5 +474,5 @@ export class RunnerService extends Context.Service<RunnerService, Effect.Success
 export const RunnerServiceLayer: Layer.Layer<
   RunnerService,
   never,
-  SqlClient.SqlClient | JoinTokens | Settings | RunnerPresence | AuditLog | ProviderProbes
+  SqlClient.SqlClient | JoinTokens | Settings | RunnerPresence | AuditLog
 > = Layer.effect(RunnerService)(make);
