@@ -257,6 +257,8 @@ const make = Effect.gen(function* () {
   const secrets = yield* Secrets;
   const audit = yield* AuditLog;
   const entries = yield* Ref.make<ReadonlyMap<string, Entry>>(new Map());
+  // Outside `gate`, unlike everything else here: registration is pure and runs
+  // only at boot, so this is settled for the life of the process.
   const providers = yield* Ref.make<ReadonlyArray<ProviderDefinition>>([]);
   /**
    * One permit for the whole host, held across a move's reads, hooks and

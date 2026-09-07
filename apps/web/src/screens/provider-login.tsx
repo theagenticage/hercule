@@ -5,6 +5,9 @@ import type { HydraClient } from "@hydra/client-core";
 import { messageOf } from "./save-status";
 
 /**
+ * A screen rather than a part of one, because Sessions and the runner page both
+ * offer this exact action.
+ *
  * The URL is shown rather than opened: the machine running the harness may have
  * no browser, and this one is often not it. A refused code leaves the exchange
  * standing, so the panel stays open for another paste.

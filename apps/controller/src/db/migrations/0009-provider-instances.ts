@@ -5,8 +5,12 @@
  * `capability_snapshots` cascades off `runners`, and a `DROP TABLE` fires that
  * cascade: a later migration rebuilding `runners` must carry these rows across.
  *
- * The 128 is `MAX_PROVIDER_NAME_LENGTH` written out - a landed migration is
- * frozen, so raising it takes a migration of its own.
+ * `config` is a JSON document because only the provider's own schema knows what
+ * is in it, and nothing here queries inside it.
+ *
+ * The bounds are CHECK constraints, which SQLite cannot add later without
+ * rebuilding the table. The 128 is `MAX_PROVIDER_NAME_LENGTH` written out - a
+ * landed migration is frozen, so raising it takes a migration of its own.
  */
 import * as Effect from "effect/Effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";

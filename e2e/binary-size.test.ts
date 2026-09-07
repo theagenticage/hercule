@@ -8,7 +8,12 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { ROOT } from "./harness";
 
-/** 65 MiB today (63 before the Agent SDK). Raise it only after looking at why it grew. */
+/**
+ * 65 MiB today, 63 before the Agent SDK. The budget leaves room to grow while
+ * staying well under what one per-platform CLI package would add, so a crossing
+ * means a dependency came back rather than that the binary drifted. Raise it
+ * only after looking at why it grew.
+ */
 const SIZE_BUDGET_BYTES = 80 * 1024 * 1024;
 
 const binary = join(ROOT, "hydra");

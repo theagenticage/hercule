@@ -23,6 +23,7 @@ export const ensureProviderInstances: Effect.Effect<
   const host = yield* PluginHost;
   const audit = yield* AuditLog;
   const registered = yield* host.providers();
+  // A map, so two plugins contributing one provider still leave it one instance.
   const missing = new Map(registered.map((definition) => [definition.id, definition]));
   for (const providerId of yield* instances.providersWithInstance()) missing.delete(providerId);
   if (missing.size === 0) return;
