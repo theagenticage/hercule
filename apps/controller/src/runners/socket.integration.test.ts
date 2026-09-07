@@ -91,6 +91,25 @@ const decodeFrame = (raw: unknown): ControllerMessage =>
 
 const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
+/**
+ * Polls until what a test is waiting for is there, and answers with it. The
+ * controller probes on its own schedule - after a hello, after an install,
+ * after a login - so every wait in this file says what it is waiting for rather
+ * than how long, and one that runs out names what never happened.
+ */
+const until = async <A>(
+  what: string,
+  look: () => A | undefined | Promise<A | undefined>,
+): Promise<A> => {
+  const deadline = Date.now() + 4000;
+  do {
+    const found = await look();
+    if (found !== undefined) return found;
+    await delay(5);
+  } while (Date.now() < deadline);
+  throw new Error(`the controller never ${what}`);
+};
+
 /** One runner's end of the socket, driven frame by frame. */
 interface Wire {
   readonly send: (message: RunnerMessage) => void;
@@ -1540,36 +1559,25 @@ const probed = (version: string): ProbeResult => ({
 
 describe("probing a runner's provider instances", () => {
   /** What one runner last said about one instance, once it has said anything. */
-  const snapshotWhen = async (
+  const snapshotOf = (
     base: string,
     token: string,
     instanceId: string,
     runnerId: string,
-    ready: (snapshot: Instance["snapshots"][number] | undefined) => boolean,
-  ): Promise<Instance["snapshots"][number] | undefined> => {
-    for (let attempt = 0; attempt < 300; attempt++) {
+  ): Promise<Instance["snapshots"][number]> =>
+    until(`recorded a snapshot of ${instanceId}`, async () => {
       const response = await get(base, `/api/v1/providers/${instanceId}`, token);
       expect(response.status, await response.clone().text()).toBe(200);
       const one = (await response.json()) as Instance;
-      const snapshot = one.snapshots.find((each) => each.runnerId === runnerId);
-      if (ready(snapshot)) return snapshot;
-      await delay(10);
-    }
-    return undefined;
-  };
+      return one.snapshots.find((each) => each.runnerId === runnerId);
+    });
 
   /** Waits until the connection has been asked for at least this many probes. */
-  const askedFor = async (wire: Wire, count: number): Promise<ReadonlyArray<ProbeRequest>> => {
-    for (let attempt = 0; attempt < 400 && probeRequests(wire).length < count; attempt++) {
-      await delay(5);
-    }
-    const asked = probeRequests(wire);
-    expect(
-      asked.length,
-      `the controller asked for ${String(asked.length)} probes`,
-    ).toBeGreaterThanOrEqual(count);
-    return asked;
-  };
+  const askedFor = (wire: Wire, count: number): Promise<ReadonlyArray<ProbeRequest>> =>
+    until(`asked for ${String(count)} probes`, () => {
+      const asked = probeRequests(wire);
+      return asked.length >= count ? asked : undefined;
+    });
 
   /** What a runner whose build has no adapter for that provider answers with. */
   const noAdapter = (providerId: string): ProbeResult => ({
@@ -1622,29 +1630,17 @@ describe("probing a runner's provider instances", () => {
         }
 
         const claude = await instanceOf(harness.base, token, "claude-code");
-        const snapshot = await snapshotWhen(
-          harness.base,
-          token,
-          claude.id,
-          joined.runnerId,
-          (one) => one !== undefined,
-        );
-        expect(snapshot?.harnessVersion).toBe("2.1.263");
-        expect(snapshot?.auth).toMatchObject({ status: "ok", identity: "rogier@example.com" });
-        expect(snapshot?.models.map((model) => model.slug)).toEqual(["default"]);
+        const snapshot = await snapshotOf(harness.base, token, claude.id, joined.runnerId);
+        expect(snapshot.harnessVersion).toBe("2.1.263");
+        expect(snapshot.auth).toMatchObject({ status: "ok", identity: "rogier@example.com" });
+        expect(snapshot.models.map((model) => model.slug)).toEqual(["default"]);
 
         // A provider this runner build cannot drive is a snapshot too: the row
         // reads why instead of staying blank for ever.
         const codex = await instanceOf(harness.base, token, "codex");
-        const refused = await snapshotWhen(
-          harness.base,
-          token,
-          codex.id,
-          joined.runnerId,
-          (one) => one !== undefined,
-        );
-        expect(refused?.auth.status).toBe("error");
-        expect(refused?.auth.message).toBe("no adapter for codex in this runner build");
+        const refused = await snapshotOf(harness.base, token, codex.id, joined.runnerId);
+        expect(refused.auth.status).toBe("error");
+        expect(refused.auth.message).toBe("no adapter for codex in this runner build");
       } finally {
         wire.close();
       }
@@ -1792,14 +1788,8 @@ describe("probing a runner's provider instances", () => {
           result: probed("2.1.263"),
         });
 
-        const snapshot = await snapshotWhen(
-          harness.base,
-          token,
-          claude.id,
-          joined.runnerId,
-          (one) => one !== undefined,
-        );
-        expect(snapshot?.harnessVersion).toBe("2.1.263");
+        const snapshot = await snapshotOf(harness.base, token, claude.id, joined.runnerId);
+        expect(snapshot.harnessVersion).toBe("2.1.263");
       } finally {
         wire.close();
       }
@@ -1835,14 +1825,8 @@ describe("probing a runner's provider instances", () => {
           result: probed("2.1.263"),
         });
 
-        const snapshot = await snapshotWhen(
-          harness.base,
-          token,
-          claude.id,
-          joined.runnerId,
-          (one) => one !== undefined,
-        );
-        expect(snapshot?.harnessVersion).toBe("2.1.263");
+        const snapshot = await snapshotOf(harness.base, token, claude.id, joined.runnerId);
+        expect(snapshot.harnessVersion).toBe("2.1.263");
       } finally {
         first.wire.close();
         second.wire.close();
@@ -2034,19 +2018,15 @@ describe("logging a runner's provider instance in", () => {
   ) => send("POST", base, `/api/v1/providers/${instanceId}/login-code`, { body, token });
 
   /** A probe request for one instance that this connection has not seen yet. */
-  const probeOf = async (wire: Wire, instanceId: string, after: number): Promise<ProbeRequest> => {
-    for (let attempt = 0; attempt < 400; attempt++) {
-      const found = wire.frames
+  const probeOf = (wire: Wire, instanceId: string, after: number): Promise<ProbeRequest> =>
+    until(`probed ${instanceId}`, () =>
+      wire.frames
         .slice(after)
         .find(
           (frame): frame is ProbeRequest =>
             frame._tag === "probeRequest" && frame.instanceId === instanceId,
-        );
-      if (found !== undefined) return found;
-      await delay(5);
-    }
-    throw new Error("the controller never probed the instance the login finished");
-  };
+        ),
+    );
 
   const AUTHORIZE_URL = "https://claude.ai/oauth/authorize?code=challenge";
 
