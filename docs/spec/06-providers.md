@@ -307,11 +307,11 @@ A request stays open until `respondToRequest`; the controller surfaces it as a N
 
 ### 6.6 Usage and ops
 
-- `session.usage.updated { ... }` - a token snapshot: cumulative input / cached input / output / reasoning tokens and, where the harness exposes it, current context usage against the model's window (Claude `context_usage`, Codex `thread/tokenUsage/updated`, pi `message_end.usage`). Cadence differs per harness; the snapshot shape absorbs that. Context usage is what the assistant rotation threshold reads (section 9.2).
+- `session.usage.updated { ... }` - a cumulative token snapshot for the session, taken from Claude `context_usage`, Codex `thread/tokenUsage/updated` and pi `message_end.usage`. Cadence differs per harness; the snapshot shape absorbs that. The field set is below.
 - `runtime.warning` - retries (Claude `api_retry`, pi `auto_retry_*`), model rerouting or drift mid-turn, mirror errors.
 - `runtime.error { class }` - Codex `codexErrorInfo` is the reference class enum (`ContextWindowExceeded`, `UsageLimitExceeded`, `Unauthorized`, `SandboxError`, ...); other adapters map to the same classes where they can, else `unknown`.
 
-**Open:** the exact field set of the `session.usage.updated` snapshot is not pinned beyond "token snapshot plus context usage".
+~~**Open:** the exact field set of the `session.usage.updated` snapshot is not pinned beyond "token snapshot plus context usage".~~ *(Resolved 2026-09-07, [#65](https://github.com/rogierpennink/hydra/issues/65).)* The snapshot is `{ inputTokens, outputTokens, cacheReadTokens?, cacheWriteTokens?, costUsd? }`, cumulative for the session, with the three optional fields present only where the harness reports them. Context usage against the model's window is **not** in the v1 shape: no consumer reads it yet, and the assistant rotation threshold (section 9.2) adds the field it needs when it ships, rather than the shape carrying a number nothing checks.
 
 ### 6.7 Trimmed on purpose
 
@@ -431,7 +431,7 @@ For assistant sessions ([./12-assistants.md](./12-assistants.md)) provider-nativ
 | Codex | `model_auto_compact_token_limit` set out of reach via the instance's `config.toml` in `CODEX_HOME` |
 | pi | RPC `set_auto_compaction: false` at session start |
 
-The adapter reports context usage through `session.usage.updated`; the controller compares it against the rotation threshold (`min(0.7 x window, 200k tokens)` by default, checked after every `turn.completed`). Rotation itself (one flush turn on the dying session, then a fresh session with core memory and topic index injected) is the assistant subsystem's contract ([./12-assistants.md](./12-assistants.md)). Sessions of agents that are not assistants keep native compaction on; `context_compaction` items make it visible.
+The adapter reports context usage through `session.usage.updated`, which gains the field for it when assistants ship (section 6.6); the controller compares it against the rotation threshold (`min(0.7 x window, 200k tokens)` by default, checked after every `turn.completed`). Rotation itself (one flush turn on the dying session, then a fresh session with core memory and topic index injected) is the assistant subsystem's contract ([./12-assistants.md](./12-assistants.md)). Sessions of agents that are not assistants keep native compaction on; `context_compaction` items make it visible.
 
 **Memory injection mapping (pinned).** The controller composes `SessionSpec.systemPrompt` for an assistant session as: the agent's `systemPrompt` (persona), the hydra-as-a-tool skill (section 9.3), then a `## Memory (core)` section and a `## Memory topics` index, volatile content last. It lands in the harness's system-prompt channel on every provider:
 

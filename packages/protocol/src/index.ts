@@ -11,6 +11,12 @@
  */
 import { Schema } from "effect";
 
+import { Fact, InstanceId, MAX_FACT_LENGTH, Seq, Sequenced } from "./primitives";
+import { SessionEvent, SessionInput, SessionsReport, SessionStart, SessionStop } from "./sessions";
+
+export * from "./sessions";
+export { Fact, InstanceId, MAX_FACT_LENGTH, Sequenced };
+
 export const PROTOCOL_VERSION = 1;
 
 /**
@@ -35,19 +41,6 @@ export const GOING_AWAY_CLOSE_CODE = 1001;
  * is why the runner sends its binary version and the controller only stores it.
  */
 const ProtocolVersion = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1));
-
-/** A position. Counting starts at one: a connection that acked nothing sends no ack. */
-const Seq = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1));
-
-/**
- * The longest a peer's statement about itself may be. Exported because the
- * producing side has to cut to it: one long fact would otherwise make a whole
- * hello unsendable.
- */
-export const MAX_FACT_LENGTH = 512;
-
-/** A name, a version or a path a peer states about itself, and never a document. */
-export const Fact = Schema.String.check(Schema.isLengthBetween(1, MAX_FACT_LENGTH));
 
 export const MAX_FACT_ITEMS = 64;
 
@@ -200,14 +193,6 @@ export const PeerVersion = Schema.Struct({ protocolVersion: ProtocolVersion });
 export type PeerVersion = Schema.Schema.Type<typeof PeerVersion>;
 
 /**
- * The envelope every replayable runner event carries. Nothing extends it yet;
- * the shape is fixed here so the wire is settled before the first event needs it.
- */
-export const Sequenced = Schema.Struct({ seq: Seq });
-
-export type Sequenced = Schema.Schema.Type<typeof Sequenced>;
-
-/**
  * The runner's opening frame. It proves nothing: the credential rode the
  * upgrade request, and this carries the nonce the controller signs back.
  */
@@ -306,16 +291,6 @@ export type ProbeResult = Schema.Schema.Type<typeof ProbeResult>;
  * one connection.
  */
 const RequestId = Fact;
-
-/**
- * A provider instance's id. Narrower than a fact because the runner makes a
- * directory of it: the credential a login writes must land under the instance's
- * own home and nowhere a path could climb out to.
- */
-const InstanceId = Schema.String.check(
-  Schema.isLengthBetween(1, 64),
-  Schema.isPattern(/^[A-Za-z0-9_-]+$/, { title: "instance id", description: "an identifier" }),
-);
 
 /**
  * Asks the runner to probe one provider instance. The instance id and its
@@ -445,6 +420,8 @@ export const RunnerToController = Schema.Union([
   LoginUrl,
   LoginFailed,
   LoginResult,
+  SessionEvent,
+  SessionsReport,
   Goodbye,
 ]);
 
@@ -517,6 +494,9 @@ export const ControllerToRunner = Schema.Union([
   InstallRequest,
   LoginStart,
   LoginCode,
+  SessionStart,
+  SessionStop,
+  SessionInput,
 ]);
 
 export type ControllerToRunner = Schema.Schema.Type<typeof ControllerToRunner>;

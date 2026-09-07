@@ -17,7 +17,7 @@
 import { Schema } from "effect";
 import * as HttpApiEndpoint from "effect/unstable/httpapi/HttpApiEndpoint";
 import * as HttpApiGroup from "effect/unstable/httpapi/HttpApiGroup";
-import { AccessMode } from "@hydra/plugin-host";
+import { AccessMode } from "@hydra/protocol";
 import { closedStruct, optional } from "../closed";
 import { Forbidden, Internal, Unauthenticated, Validation } from "../errors";
 import { Id, Timestamp } from "../ids";

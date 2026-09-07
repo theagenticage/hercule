@@ -16,7 +16,6 @@ export {
 export { configJsonSchema, UnsupportedConfigSchema } from "./config-schema";
 
 export {
-  AccessMode,
   DeclaredCapabilities,
   MAX_PROVIDER_NAME_LENGTH,
   ProviderDefinition,

@@ -1,15 +1,6 @@
 import { Schema } from "effect";
+import { AccessMode } from "@hydra/protocol";
 import { SchemaValue } from "./manifest";
-
-/** How much of a session a caller may act on without being asked. */
-export const AccessMode = Schema.Literals([
-  "approval-required",
-  "auto-accept-edits",
-  "auto",
-  "full-access",
-]);
-
-export type AccessMode = Schema.Schema.Type<typeof AccessMode>;
 
 const Support = Schema.Literals(["native", "unsupported"]);
 
