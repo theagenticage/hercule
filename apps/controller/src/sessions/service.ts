@@ -266,22 +266,34 @@ const make = Effect.gen(function* () {
   const tracking = new Map<string, Tracked>();
 
   /**
-   * Which sessions have a flush running. A flush waits on the runner, so a
-   * second one for the same session would send the rows the first is already
-   * sending; the running flush re-reads the queue before it finishes, so
-   * anything that arrived meanwhile still goes.
+   * The sessions being flushed, each counting the transitions to idle that have
+   * arrived since its flush began. A flush waits on the runner, so a second one
+   * for the same session would send the rows the first is already sending; the
+   * count is how the running flush hears about the boundaries it slept through.
    */
-  const flushing = new Set<string>();
+  const flushing = new Map<string, number>();
 
   /**
    * The inputs on the wire this moment. A row stays `queued` until its answer
-   * comes back, so the status alone cannot tell a row still waiting from one
-   * the machine already has.
+   * comes back and is written down, so the status alone cannot tell a row still
+   * waiting from one the machine already has.
    */
   const sending = new Set<string>();
 
-  /** Sessions whose transition to idle arrived while a flush was already running. */
-  const missed = new Set<string>();
+  /**
+   * Holds the claim on a row for as long as the machine has it: from the frame
+   * going out until what the machine said is committed. Released any earlier
+   * and the row is `queued` and unclaimed for a moment, which is long enough
+   * for a flush to send it a second time.
+   */
+  const claimed = <A, E>(rowId: string, effect: Effect.Effect<A, E>): Effect.Effect<A, E> =>
+    Effect.ensuring(
+      Effect.andThen(
+        Effect.sync(() => sending.add(rowId)),
+        effect,
+      ),
+      Effect.sync(() => sending.delete(rowId)),
+    );
 
   const one = (id: string): Effect.Effect<StoredSession, NotFound | SqlError> =>
     Effect.flatMap(
@@ -402,11 +414,8 @@ const make = Effect.gen(function* () {
   /**
    * Sends one stored input to the machine holding the session and waits for the
    * machine to say what it did with it. `none` where there is no connection or
-   * nothing came back in time; the wait is outside any transaction.
-   *
-   * The row is claimed for as long as it is on the wire, because it stays
-   * `queued` in the database until the answer comes back and nothing else may
-   * send it, edit it or call it off in the meantime.
+   * nothing came back in time; the wait is outside any transaction. The caller
+   * holds the row's claim around this.
    */
   const deliverTo = (
     runnerId: string,
@@ -414,22 +423,18 @@ const make = Effect.gen(function* () {
   ): Effect.Effect<Option.Option<SessionInputAnswer>> =>
     Effect.gen(function* () {
       const deadline = yield* SessionInputDeadline;
-      sending.add(row.id);
-      const answer = yield* Effect.ensuring(
-        presence.asked(
-          runnerId,
-          {
-            _tag: "sessionInput",
-            requestId: row.id,
-            sessionId: row.sessionId,
-            input: {
-              text: row.text,
-              ...(row.modelSelection === null ? {} : { modelSelection: row.modelSelection }),
-            },
+      const answer = yield* presence.asked(
+        runnerId,
+        {
+          _tag: "sessionInput",
+          requestId: row.id,
+          sessionId: row.sessionId,
+          input: {
+            text: row.text,
+            ...(row.modelSelection === null ? {} : { modelSelection: row.modelSelection }),
           },
-          deadline,
-        ),
-        Effect.sync(() => sending.delete(row.id)),
+        },
+        deadline,
       );
       return Option.filter(
         answer,
@@ -447,7 +452,7 @@ const make = Effect.gen(function* () {
         // session runs under. It sticks to the session rather than the turn, so
         // a resume or a fork carries it.
         if (delivery === "opened" && row.modelSelection !== null) {
-          yield* sessions.remodel(row.sessionId, row.modelSelection);
+          yield* sessions.selectModel(row.sessionId, row.modelSelection);
         }
         yield* announce({ _tag: "record", topic: "session", id: row.sessionId, kind: "updated" });
       }),
@@ -486,25 +491,38 @@ const make = Effect.gen(function* () {
    * that row and everything behind it queued for the session's next transition
    * to idle. Nothing resends on its own: there is no outbox yet.
    */
-  const releasing = (sessionId: string, runnerId: string): Effect.Effect<void, SqlError> =>
+  const releasing = (
+    sessionId: string,
+    runnerId: string,
+    openedAt: number | undefined,
+  ): Effect.Effect<number | undefined, SqlError> =>
     Effect.gen(function* () {
-      let opened = false;
+      let opened = openedAt;
       while (true) {
         const next = (yield* inputs.queued(sessionId)).find((row) => !sending.has(row.id));
-        if (next === undefined) return;
+        if (next === undefined) return opened;
         // A harness takes a model change only on the input that opens a turn,
         // so a row carrying one waits for a boundary of its own rather than
-        // being folded into the turn this flush just opened.
-        if (opened && next.modelSelection !== null) return;
-        const answer = yield* deliverTo(runnerId, next);
-        if (Option.isNone(answer)) return;
-        const delivery = answer.value.ok ? answer.value.delivery : undefined;
-        if (delivery === undefined) {
-          yield* recordRefusal(next, answer.value.message);
-          continue;
-        }
-        yield* recordDelivery(next, delivery);
-        if (delivery === "opened") opened = true;
+        // being folded into a turn this flush has already opened. Only a
+        // boundary arriving after that opening ends the turn it opened, which
+        // is what the count says and a flag could not.
+        if (opened === flushing.get(sessionId) && next.modelSelection !== null) return opened;
+        const outcome = yield* claimed(
+          next.id,
+          Effect.gen(function* () {
+            const answer = yield* deliverTo(runnerId, next);
+            if (Option.isNone(answer)) return undefined;
+            const delivery = answer.value.ok ? answer.value.delivery : undefined;
+            if (delivery === undefined) {
+              yield* recordRefusal(next, answer.value.message);
+              return "refused" as const;
+            }
+            yield* recordDelivery(next, delivery);
+            return delivery;
+          }),
+        );
+        if (outcome === undefined) return opened;
+        if (outcome === "opened") opened = flushing.get(sessionId);
       }
     });
 
@@ -512,29 +530,28 @@ const make = Effect.gen(function* () {
    * One flush per session at a time, because a flush waits on the runner and a
    * second would send the rows the first is already sending.
    *
-   * A transition to idle that arrives while one is running is remembered rather
-   * than dropped: it releases a turn's worth of queue of its own once the
-   * running flush is done, so nothing waits for a boundary that has been and
-   * gone.
+   * A transition to idle that arrives while one is running is counted rather
+   * than dropped: the running flush goes round again for it, so nothing waits
+   * for a boundary that has been and gone.
    */
   const flush = (sessionId: string, runnerId: string): Effect.Effect<void, SqlError> =>
     Effect.suspend(() => {
-      if (flushing.has(sessionId)) {
-        missed.add(sessionId);
+      const boundaries = flushing.get(sessionId);
+      if (boundaries !== undefined) {
+        flushing.set(sessionId, boundaries + 1);
         return Effect.void;
       }
-      flushing.add(sessionId);
+      flushing.set(sessionId, 0);
       return Effect.ensuring(
         Effect.gen(function* () {
+          let openedAt: number | undefined;
+          let ran: number;
           do {
-            missed.delete(sessionId);
-            yield* releasing(sessionId, runnerId);
-          } while (missed.has(sessionId));
+            ran = flushing.get(sessionId) ?? 0;
+            openedAt = yield* releasing(sessionId, runnerId, openedAt);
+          } while ((flushing.get(sessionId) ?? 0) !== ran);
         }),
-        Effect.sync(() => {
-          flushing.delete(sessionId);
-          missed.delete(sessionId);
-        }),
+        Effect.sync(() => flushing.delete(sessionId)),
       );
     });
 
@@ -887,18 +904,20 @@ const make = Effect.gen(function* () {
         if (hold) return { inputId: row.id, result: "queued" };
         // The claim taken with the row is released here whatever happens to
         // this request, so an abandoned one never leaves a row nothing can send.
-        const answer = yield* Effect.ensuring(
-          deliverTo(session.runnerId, row),
-          Effect.sync(() => sending.delete(row.id)),
+        return yield* claimed(
+          row.id,
+          Effect.gen(function* () {
+            const answer = yield* deliverTo(session.runnerId, row);
+            if (Option.isNone(answer)) return yield* Effect.fail(invalidState(NOT_DELIVERED));
+            const delivery = answer.value.ok ? answer.value.delivery : undefined;
+            if (delivery === undefined) {
+              yield* recordRefusal(row, answer.value.message);
+              return yield* Effect.fail(invalidState(answer.value.message ?? REFUSED));
+            }
+            yield* recordDelivery(row, delivery);
+            return { inputId: row.id, result: delivery };
+          }),
         );
-        if (Option.isNone(answer)) return yield* Effect.fail(invalidState(NOT_DELIVERED));
-        const delivery = answer.value.ok ? answer.value.delivery : undefined;
-        if (delivery === undefined) {
-          yield* recordRefusal(row, answer.value.message);
-          return yield* Effect.fail(invalidState(answer.value.message ?? REFUSED));
-        }
-        yield* recordDelivery(row, delivery);
-        return { inputId: row.id, result: delivery };
       }),
 
     /**
@@ -1045,7 +1064,7 @@ const make = Effect.gen(function* () {
           sql,
           Effect.gen(function* () {
             const row = yield* queuedInput(id, inputId);
-            yield* inputs.retext(inputId, text);
+            yield* inputs.rewrite(inputId, text);
             yield* announce({ _tag: "record", topic: "session", id, kind: "updated" });
             return { ...row, text };
           }),

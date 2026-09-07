@@ -53,6 +53,7 @@ Not design questions. The constraint is stated where one exists.
 
 ## D. Standing risks
 
+- 06 §5, [#66](https://github.com/rogierpennink/hydra/issues/66): `session.input` refuses to steer a provider that declares `steering: "unsupported"`, but the flush does not repeat the question: after the first row of a boundary opens a turn, the rest are sent into it. Claude declares `native` and is the only adapter built, so nothing reaches the gap in v1; the adapter that first declares `unsupported` closes it, by flushing one row per boundary.
 - 02 §Queued Input, [#66](https://github.com/rogierpennink/hydra/issues/66): an input the harness refuses is stored `cancelled`, which is also what a user's own `input.cancel` writes, so the listing cannot tell "the machine would not take this" from "I called it off". The reason survives only in the runner's log and in the session's stream. A `refused` status would widen a vocabulary 02 pins at `queued | delivered | cancelled`, and it wants the reader that would show it, so it waits for the web app's queued-input list ([#69](https://github.com/rogierpennink/hydra/issues/69)).
 - 06 §10.1: Claude subscription auth. Research read Anthropic's Agent SDK policy as forbidding claude.ai login for third-party products; the decisions (tickets 22, 23, charting) accept the t3-code posture: the user's own tool driving the user's own login through the unmodified vendor CLI. API-key, Bedrock and Vertex stay first-class on the same instance config as the fallback.
 

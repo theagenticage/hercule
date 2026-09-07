@@ -182,7 +182,7 @@ const make = Effect.gen(function* () {
         WHERE id = ${uuidFromString(id)} AND status = 'queued'
       `),
 
-    retext: (id: string, text: string): Effect.Effect<void, SqlError> =>
+    rewrite: (id: string, text: string): Effect.Effect<void, SqlError> =>
       Effect.asVoid(sql`
         UPDATE session_inputs SET text = ${text}
         WHERE id = ${uuidFromString(id)} AND status = 'queued'

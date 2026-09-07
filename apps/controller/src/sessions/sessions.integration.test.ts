@@ -688,13 +688,7 @@ describe("what a machine reports", () => {
       });
       await sessionWhen(arranged, session.id, (one) => one.nativeSessionId !== null);
 
-      report(arranged.wire, 1, {
-        eventId: crypto.randomUUID(),
-        sessionId: session.id,
-        at,
-        _tag: "session.exited",
-        reason: "stopped",
-      });
+      exited(arranged.wire, session.id, 1);
 
       const ended = await sessionWhen(arranged, session.id, (one) => one.status === "exited");
       expect(ended.exitedAt).not.toBeNull();
@@ -1241,10 +1235,7 @@ describe("the queue at the transition to idle", () => {
       arranged.wire.answering((frame) => (frame.input.text === "one" ? undefined : "steered"));
       const session = await spawned(arranged, { prompt: "one" });
       await framesWhen<SessionStart>(arranged.wire, "sessionStart", 1);
-      const queued = await sendInput(arranged, session.id, {
-        text: "two",
-        modelSelection: { model: "fast", options: {} },
-      });
+      const queued = await sendInput(arranged, session.id, { text: "two" });
       expect(await queued.json()).toMatchObject({ result: "queued" });
 
       const events = transcript(session.id);
@@ -1265,6 +1256,53 @@ describe("the queue at the transition to idle", () => {
     });
   });
 
+  it("holds a model change back from a turn opened after the boundary it waited for", async () => {
+    await withFleet(async (arranged) => {
+      arranged.wire.answering((frame) => (frame.input.text === "one" ? undefined : "steered"));
+      const session = await spawned(arranged, { prompt: "one" });
+      await framesWhen<SessionStart>(arranged.wire, "sessionStart", 1);
+      const queued = await sendInput(arranged, session.id, {
+        text: "two",
+        modelSelection: { model: "fast", options: {} },
+      });
+      expect(await queued.json()).toMatchObject({ result: "queued" });
+
+      const events = transcript(session.id);
+      report(arranged.wire, ...events[0]!);
+      await framesWhen<SessionInputFrame>(arranged.wire, "sessionInput", 1);
+      report(arranged.wire, ...events[1]!);
+      await sessionWhen(arranged, session.id, (one) => one.status === "busy");
+      report(arranged.wire, ...events[6]!);
+      await sessionWhen(arranged, session.id, (one) => one.status === "idle");
+
+      // The boundary above went by before the machine took the first input, so
+      // it says nothing about the turn that input has only now opened. A model
+      // change folded into that turn would be dropped by the harness.
+      arranged.wire.release("opened");
+      const rows = await until("recorded the first delivery", async () => {
+        const found = await inputsOf(arranged, session.id);
+        return found[0]!.status === "delivered" ? found : undefined;
+      });
+      expect(rows.map((row) => row.status)).toEqual(["delivered", "queued"]);
+      expect(inputFrames(arranged.wire).map((frame) => frame.input.text)).toEqual(["one"]);
+
+      // That turn ends, and the boundary it leaves behind is the one the model
+      // change was waiting for.
+      const base = { eventId: crypto.randomUUID(), sessionId: session.id, at };
+      report(arranged.wire, 8, { ...base, _tag: "turn.started", turnId: "t2" });
+      await sessionWhen(arranged, session.id, (one) => one.status === "busy");
+      report(arranged.wire, 9, {
+        ...base,
+        _tag: "turn.completed",
+        turnId: "t2",
+        state: "completed",
+      });
+
+      const sent = await framesWhen<SessionInputFrame>(arranged.wire, "sessionInput", 2);
+      expect(sent.map((frame) => frame.input.text)).toEqual(["one", "two"]);
+    });
+  });
+
   it("keeps applying another session's events while a flush waits for an answer", async () => {
     await withFleet(async (arranged) => {
       arranged.wire.answering(() => undefined);
@@ -1276,9 +1314,7 @@ describe("the queue at the transition to idle", () => {
       const other = await spawned(arranged, { prompt: "two" });
       report(arranged.wire, ...transcript(other.id)[0]!);
 
-      expect((await sessionWhen(arranged, other.id, (one) => one.status === "idle")).status).toBe(
-        "idle",
-      );
+      await sessionWhen(arranged, other.id, (one) => one.status === "idle");
       // Still waiting on an answer nothing sent, so the ingest kept going
       // beside a flush rather than after one.
       expect(await inputsOf(arranged, waiting.id)).toMatchObject([
@@ -1293,13 +1329,7 @@ describe("session.query and session.read", () => {
     await withFleet(async (arranged) => {
       const first = await spawned(arranged, { prompt: "one" });
       const second = await spawned(arranged, { prompt: "two" });
-      report(arranged.wire, 1, {
-        eventId: crypto.randomUUID(),
-        sessionId: first.id,
-        at,
-        _tag: "session.exited",
-        reason: "stopped",
-      });
+      exited(arranged.wire, first.id, 1);
       await sessionWhen(arranged, first.id, (one) => one.status === "exited");
 
       const listing = await get(arranged.harness.base, "/api/v1/sessions", arranged.token);
@@ -1312,8 +1342,8 @@ describe("session.query and session.read", () => {
         "/api/v1/sessions?status=exited",
         arranged.token,
       );
-      const exited = (await filtered.json()) as { items: ReadonlyArray<Session> };
-      expect(exited.items.map((one) => one.id)).toEqual([first.id]);
+      const gone = (await filtered.json()) as { items: ReadonlyArray<Session> };
+      expect(gone.items.map((one) => one.id)).toEqual([first.id]);
     });
   });
 
@@ -1442,9 +1472,7 @@ describe("session.interrupt", () => {
         state: "interrupted",
       });
 
-      expect((await sessionWhen(arranged, session.id, (one) => one.status === "idle")).status).toBe(
-        "idle",
-      );
+      await sessionWhen(arranged, session.id, (one) => one.status === "idle");
       const completed = await until("wrote the ended turn", async () => {
         const found = await streamOf(arranged.harness, session.id);
         return found.find((row) => row.tag === "turn.completed");

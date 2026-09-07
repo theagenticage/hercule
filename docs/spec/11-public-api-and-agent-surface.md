@@ -176,9 +176,10 @@ Semantics: [./06-providers.md](./06-providers.md), [./12-assistants.md](./12-ass
 
 - `session.input` answers `queued` as well as `opened` and `steered`. Section 5 of [./06-providers.md](./06-providers.md) requires a path that stores the input instead of sending it - a `starting` session, a busy one carrying a model change, a provider with no steering - and answering `steered` for an input that was not delivered would be the silent substitution this spec forbids everywhere else. `opened` and `steered` are the runner's own word for what it did; `queued` is the controller's, and it means the input is a stored row the caller can still edit or call off.
 - The input's text field is spelled `text`, not `content`, wherever it appears: `session.input`, `input.update` and the stored row ([./02-domain-model.md](./02-domain-model.md) Queued Input).
-- `session.continue` answers the whole new `Session`, the way `session.spawn` already does, because a caller that has just created a session needs its status and its runner as much as its id.
+- `session.continue` answers the whole new `Session`, and so does `session.spawn`, whose row above still writes the `{ sessionId }` it never shipped: a caller that has just created a session needs its status and its runner as much as its id.
+- `input.query` lists every input the session was ever given, oldest first, whatever became of each, not only the rows still queued. A queue you cannot look back through cannot tell you what was delivered.
 
-Every route in the table is built except `session.respond`: approvals are their own ticket.
+`session.respond` is not built: approvals are their own ticket.
 
 ```ts
 interface Passage { sessionId: string; turnId: string; at: string; excerpt: string }

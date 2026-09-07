@@ -354,7 +354,10 @@ const make = Effect.gen(function* () {
      * is the document the runner was told at start, and rewriting it would
      * destroy the record of what that was.
      */
-    remodel: (sessionId: string, modelSelection: ModelSelection): Effect.Effect<void, SqlError> =>
+    selectModel: (
+      sessionId: string,
+      modelSelection: ModelSelection,
+    ): Effect.Effect<void, SqlError> =>
       Effect.asVoid(sql`
         UPDATE sessions SET model_selection = ${JSON.stringify(modelSelection)}
         WHERE id = ${uuidFromString(sessionId)}
