@@ -71,14 +71,15 @@ describe("the floor each provider is held to", () => {
 
   it("is written down in one generated file and nowhere else in the source", () => {
     // A second copy is a number that silently stops matching the dependency the
-    // day the dependency moves. Fixtures in test files are not the source the
-    // rule is about, so they are excluded rather than counted.
+    // day the dependency moves. Fixtures, whether in a test file or in one a
+    // test reads, are not the source the rule is about, so they are excluded
+    // rather than counted.
     const found = Bun.spawnSync({
       cmd: [
         "bash",
         "-c",
         'grep -rn "2\\.1\\.[0-9]" apps packages plugins scripts --include=*.ts' +
-          ' | grep -v "/version\\.ts:" | grep -v "\\.test\\.ts:" || true',
+          ' | grep -v "/version\\.ts:" | grep -vE "\\.(test|fixture)\\.ts:" || true',
       ],
       cwd: root,
     }).stdout.toString();
