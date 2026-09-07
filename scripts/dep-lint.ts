@@ -13,15 +13,28 @@
  * (`await import("bun" + ":sqlite")`) is invisible to it. Nothing in the
  * codebase does that, and no scan short of running the code could catch it.
  *
- * Usage: `bun run scripts/dep-lint.ts [entrypoint]`. The optional entrypoint
- * is what `scripts/dep-lint.test.ts` points at its fixtures.
+ * One rule here is about the workspace rather than about an import graph. The
+ * Claude Agent SDK ships its CLI as eight per-platform optional packages, one of
+ * which is 196 MB; they are excluded at install, and the binary Hydra ships is
+ * what would carry them if they came back. There is no entrypoint to check that
+ * against, so the store is read directly - the store, not the runner's own
+ * `node_modules`, because pnpm links only a package's direct dependencies into
+ * the importer's directory and an optional dependency of the SDK would never
+ * appear there.
+ *
+ * Usage: `bun run scripts/dep-lint.ts [entrypoint] [workspace]`. Both optional
+ * arguments are what `scripts/dep-lint.test.ts` points at its fixtures: the
+ * entrypoint at a file that breaks one import rule, the workspace at a store
+ * with a per-platform package in it, so the failing direction is proven without
+ * writing into the store this repository is actually installed from.
  */
-import { rm } from "node:fs/promises";
+import { readdir, rm } from "node:fs/promises";
 import { dirname, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const entrypoint = process.argv[2] ?? "apps/runner/src/index.ts";
+const workspace = process.argv[3] ?? root;
 
 /**
  * Each rule names what it forbids and why; the message is the CI output.
@@ -117,3 +130,32 @@ if (violations.length > 0) {
 }
 
 console.log(`dep-lint: ${entrypoint} is clean (${graph.length} modules in the graph).`);
+
+const SDK = "@anthropic-ai/claude-agent-sdk";
+
+/** How pnpm names a store directory: the package with its `/` written as `+`. */
+const storeName = SDK.replace("/", "+");
+
+const store = await readdir(`${workspace}/node_modules/.pnpm`).catch(() => undefined);
+if (store === undefined) {
+  console.error("dep-lint: node_modules/.pnpm is not there; run `pnpm install`.");
+  process.exit(1);
+}
+
+if (!store.some((name) => name.startsWith(`${storeName}@`))) {
+  console.error(`dep-lint: ${SDK} is not installed; run \`pnpm install\`.`);
+  process.exit(1);
+}
+
+const platformPackages = store.filter((name) => name.startsWith(`${storeName}-`));
+if (platformPackages.length > 0) {
+  console.error(
+    `dep-lint: a per-platform CLI package of ${SDK} is installed, so 196 MB of somebody ` +
+      "else's CLI is being compiled into the binary Hydra ships:",
+  );
+  for (const name of platformPackages) console.error(`    ${name}`);
+  console.error("They are excluded by `pnpm.ignoredOptionalDependencies` in package.json.");
+  process.exit(1);
+}
+
+console.log(`dep-lint: ${SDK} is installed with no per-platform CLI package beside it.`);

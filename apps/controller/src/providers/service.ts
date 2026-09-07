@@ -41,7 +41,9 @@ import { requireGrant, USER_ACTOR } from "../actor";
 import { nowIso, withTransaction } from "../db";
 import { AuditLog } from "../events";
 import { PluginHost } from "../plugins";
-import { providerRepository, type StoredInstance } from "./repository";
+import { ProviderProbes } from "./probes";
+import { providerRepository, type StoredInstance, type StoredSnapshot } from "./repository";
+import { floorFor, versionVerdict } from "./version";
 
 /** What identifies one instance, and what an edit does to it. */
 const UpdateInput = Schema.Struct({ id: Id, ...ProviderInstanceUpdateInput.fields });
@@ -87,18 +89,31 @@ const make = Effect.gen(function* () {
   const instances = yield* providerRepository;
   const host = yield* PluginHost;
   const audit = yield* AuditLog;
+  const probes = yield* ProviderProbes;
 
   const definitions = Effect.map(
     host.providers(),
     (registered) => new Map(registered.map((definition) => [definition.id, definition])),
   );
 
-  const compose = (stored: StoredInstance, definition: ProviderDefinition): ProviderInstance => ({
+  const compose = (
+    stored: StoredInstance,
+    definition: ProviderDefinition,
+    snapshots: ReadonlyArray<StoredSnapshot>,
+  ): ProviderInstance => ({
     ...stored,
     displayName: definition.displayName,
     declared: definition.declared,
-    // Filled in once runners report what they found; nothing writes one yet.
-    snapshots: [],
+    snapshots: snapshots
+      .filter((snapshot) => snapshot.instanceId === stored.id)
+      .map((snapshot) => ({
+        runnerId: snapshot.runnerId,
+        probedAt: snapshot.probedAt,
+        harnessVersion: snapshot.harnessVersion,
+        versionVerdict: versionVerdict(snapshot.harnessVersion, floorFor(stored.providerId)),
+        auth: snapshot.auth,
+        models: snapshot.models,
+      })),
   });
 
   const all: Effect.Effect<
@@ -107,9 +122,10 @@ const make = Effect.gen(function* () {
   > = Effect.gen(function* () {
     const known = yield* definitions;
     const stored = yield* instances.list();
+    const snapshots = yield* instances.snapshots();
     return stored.flatMap((row) => {
       const definition = known.get(row.providerId);
-      return definition === undefined ? [] : [compose(row, definition)];
+      return definition === undefined ? [] : [compose(row, definition, snapshots)];
     });
   });
 
@@ -120,9 +136,10 @@ const make = Effect.gen(function* () {
     Effect.gen(function* () {
       const known = yield* definitions;
       const stored = yield* instances.one(id);
+      const snapshots = yield* instances.snapshotsOf(id);
       const found = Option.flatMap(stored, (row) =>
         Option.map(Option.fromNullishOr(known.get(row.providerId)), (definition) =>
-          compose(row, definition),
+          compose(row, definition, snapshots),
         ),
       );
       return yield* Option.match(found, {
@@ -190,7 +207,7 @@ const make = Effect.gen(function* () {
               record: { topic: "provider", id: stored.id },
               at,
             });
-            return compose(stored, definition);
+            return compose(stored, definition, []);
           }),
         );
       }),
@@ -229,6 +246,11 @@ const make = Effect.gen(function* () {
             // the row that was written, whatever the edit touched.
             return yield* one(id);
           }),
+        ).pipe(
+          // After the commit and without waiting for it: the config is what a
+          // probe runs under, so every machine's snapshot of this instance is
+          // now stale, and the answer to the edit is the edit.
+          Effect.tap(() => Effect.forkDetach(probes.sweepInstance(id))),
         );
       }),
 
@@ -281,5 +303,5 @@ export class ProviderService extends Context.Service<
 export const ProviderServiceLayer: Layer.Layer<
   ProviderService,
   never,
-  SqlClient.SqlClient | PluginHost | AuditLog
+  SqlClient.SqlClient | PluginHost | AuditLog | ProviderProbes
 > = Layer.effect(ProviderService)(make);

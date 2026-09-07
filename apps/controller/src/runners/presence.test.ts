@@ -115,6 +115,7 @@ const FACTS: RunnerFacts = {
   docker: false,
   toolchains: [],
   providers: [],
+  adapters: ["claude-code"],
   identityPort: 4939,
 };
 
@@ -125,7 +126,7 @@ const WATERMARK: RunnerWatermark = {
 };
 
 /** A connection this file never writes to: its subject is the row, not the wire. */
-const HELD = { close: () => undefined, askForFacts: Effect.void };
+const HELD = { close: () => undefined, askForFacts: Effect.void, ask: () => Effect.void };
 
 describe("a draining runner whose socket drops", () => {
   it("becomes unreachable without coming off the drain", async () => {

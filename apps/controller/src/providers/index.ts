@@ -1,6 +1,12 @@
 /** Provider instances: a registered provider plus the config it runs under. */
 export { ensureProviderInstances } from "./defaults";
 export {
+  ProviderProbes,
+  ProviderProbesLayer,
+  ProviderProbeDeadline,
+  ProviderProbeInterval,
+} from "./probes";
+export {
   ProviderService,
   ProviderServiceLayer,
   type Identified,

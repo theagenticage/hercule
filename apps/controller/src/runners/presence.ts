@@ -18,7 +18,15 @@ import * as Option from "effect/Option";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import type { RunnerConnectivity, RunnerFacts, RunnerWatermark } from "@hydra/contract";
-import { GOING_AWAY_CLOSE_CODE, RETIRED_CLOSE_CODE, RETIRED_CLOSE_REASON } from "@hydra/protocol";
+import {
+  GOING_AWAY_CLOSE_CODE,
+  RETIRED_CLOSE_CODE,
+  RETIRED_CLOSE_REASON,
+  type InstallRequest,
+  type InstallResult,
+  type ProbeReport,
+  type ProbeRequest,
+} from "@hydra/protocol";
 import { SYSTEM_ACTOR } from "../actor";
 import { hashToken } from "../credentials";
 import { announce, nowIso, withTransaction } from "../db";
@@ -42,6 +50,12 @@ export const RunnerFactsDeadline = Context.Reference<Duration.Duration>(
   { defaultValue: (): Duration.Duration => RUNNER_FACTS_DEADLINE },
 );
 
+/** What the controller asks one runner to do, on the connection it is holding. */
+export type Request = ProbeRequest | InstallRequest;
+
+/** What came back for one of those, correlated by the request's own id. */
+export type Answer = ProbeReport | InstallResult;
+
 /** How presence reaches back to a connection that is holding a runner. */
 export interface Connected {
   /**
@@ -52,6 +66,8 @@ export interface Connected {
   readonly close: (code: number, reason: string) => void;
   /** Sends the runner a request for its facts. Answered by `reportedFacts`. */
   readonly askForFacts: Effect.Effect<void>;
+  /** Sends one request frame. Answered through `reportedAnswer` under the same id. */
+  readonly ask: (request: Request) => Effect.Effect<void>;
 }
 
 interface Reachable extends Connected {
@@ -63,6 +79,13 @@ interface Reachable extends Connected {
    * ends the wait with it.
    */
   awaitingFacts: Deferred.Deferred<boolean> | undefined;
+  /**
+   * Who is waiting for which answer on this connection. A map rather than one
+   * slot, because probes and installs for several instances are in flight at
+   * once, and the ids are the controller's own: a report under an id nobody
+   * issued is a runner writing a row it was not asked for.
+   */
+  readonly pending: Map<string, Deferred.Deferred<Option.Option<Answer>>>;
 }
 
 const make = Effect.gen(function* () {
@@ -82,6 +105,17 @@ const make = Effect.gen(function* () {
     if (held?.awaitingFacts === undefined) return;
     Deferred.doneUnsafe(held.awaitingFacts, Exit.succeed(reported));
     held.awaitingFacts = undefined;
+  };
+
+  /**
+   * Nothing more is coming over this connection, so everybody waiting on it is
+   * told now rather than at their own deadline.
+   */
+  const abandon = (held: Reachable | undefined): void => {
+    for (const waiting of held?.pending.values() ?? []) {
+      Deferred.doneUnsafe(waiting, Exit.succeed(Option.none()));
+    }
+    held?.pending.clear();
   };
 
   /**
@@ -134,11 +168,17 @@ const make = Effect.gen(function* () {
           }),
         );
         const previous = reachable.get(id);
-        reachable.set(id, { connection, ...connected, awaitingFacts: undefined });
+        reachable.set(id, {
+          connection,
+          ...connected,
+          awaitingFacts: undefined,
+          pending: new Map(),
+        });
         if (previous !== undefined) {
           // Nothing more is coming over the connection being displaced, and the
           // entry that would have carried its answer is no longer the one here.
           endWait(previous, false);
+          abandon(previous);
           previous.close(GOING_AWAY_CLOSE_CODE, DISPLACED_CLOSE_REASON);
         }
       }),
@@ -175,6 +215,52 @@ const make = Effect.gen(function* () {
         // there, and whoever is still listening is answered when it comes back.
         const answer = yield* Effect.timeoutOption(Deferred.await(mine), deadline);
         return Option.isSome(answer) && answer.value;
+      }),
+
+    /**
+     * Sends one request and waits for the answer that carries its id. `none`
+     * when the runner is holding no connection, when it ended first, or when
+     * nothing came back in time - all three of which the caller reports the
+     * same way: the machine did not say.
+     */
+    asked: (
+      id: string,
+      request: Request,
+      deadline: Duration.Duration,
+    ): Effect.Effect<Option.Option<Answer>> =>
+      Effect.suspend(() => {
+        const held = reachable.get(id);
+        if (held === undefined) return Effect.succeed(Option.none<Answer>());
+        const mine = Deferred.makeUnsafe<Option.Option<Answer>>();
+        held.pending.set(request.requestId, mine);
+        return Effect.ensuring(
+          Effect.gen(function* () {
+            yield* held.ask(request);
+            const answer = yield* Effect.timeoutOption(Deferred.await(mine), deadline);
+            return Option.getOrElse(answer, () => Option.none<Answer>());
+          }),
+          // Giving up is this caller's, and nobody else is listening for this
+          // id: leaving it behind would keep the map growing for the life of
+          // the connection.
+          Effect.sync(() => {
+            held.pending.delete(request.requestId);
+          }),
+        );
+      }),
+
+    /**
+     * An answer to something this controller asked. Under an id nobody issued,
+     * or on a connection the runner has already replaced, it is dropped: either
+     * would let a machine write a row it was not asked to.
+     */
+    reportedAnswer: (id: string, connection: Connection, answer: Answer): Effect.Effect<void> =>
+      Effect.sync(() => {
+        const held = reachable.get(id);
+        if (held?.connection !== connection) return;
+        const waiting = held.pending.get(answer.requestId);
+        if (waiting === undefined) return;
+        held.pending.delete(answer.requestId);
+        Deferred.doneUnsafe(waiting, Exit.succeed(Option.some(answer)));
       }),
 
     /** An answer on a replaced connection is still that machine saying it is there. */
@@ -252,7 +338,9 @@ const make = Effect.gen(function* () {
           // the row could be moved off online, so a caller waiting on this
           // runner's facts is told now rather than at its deadline.
           Effect.sync(() => {
-            if (held?.connection === connection) endWait(held, false);
+            if (held?.connection !== connection) return;
+            endWait(held, false);
+            abandon(held);
           }),
         );
       }),

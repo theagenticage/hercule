@@ -12,6 +12,7 @@
  */
 import { Schema } from "effect";
 import { DeclaredCapabilities, MAX_PROVIDER_NAME_LENGTH } from "@hydra/plugin-host";
+import { ModelDescriptor, SnapshotAuth } from "@hydra/protocol";
 import * as HttpApiEndpoint from "effect/unstable/httpapi/HttpApiEndpoint";
 import * as HttpApiGroup from "effect/unstable/httpapi/HttpApiGroup";
 import { Forbidden, Internal, NotFound, Unauthenticated, Validation } from "../errors";
@@ -30,47 +31,27 @@ const ProviderInstanceName = bounded(1, MAX_PROVIDER_INSTANCE_NAME_LENGTH);
 /** Re-exported so a reader of an instance needs only this package. */
 export { DeclaredCapabilities } from "@hydra/plugin-host";
 
-/** One model a harness offers, and the per-model choices the composer renders. */
-export const ModelDescriptor = Schema.Struct({
-  slug: Schema.String,
-  name: Schema.String,
-  isDefault: Schema.optionalKey(Schema.Boolean),
-  isLegacy: Schema.optionalKey(Schema.Boolean),
-  options: Schema.Array(
-    Schema.Struct({
-      id: Schema.String,
-      label: Schema.String,
-      kind: Schema.Literals(["select", "boolean"]),
-      choices: Schema.optionalKey(
-        Schema.Array(Schema.Struct({ value: Schema.String, label: Schema.String })),
-      ),
-      default: Schema.Union([Schema.String, Schema.Boolean]),
-    }),
-  ),
-});
-
-export type ModelDescriptor = Schema.Schema.Type<typeof ModelDescriptor>;
-
-/** Whether the harness reports a usable login, and who it belongs to. */
-export const SnapshotAuth = Schema.Struct({
-  status: Schema.Literals(["ok", "unauthenticated", "error"]),
-  identity: Schema.optionalKey(Schema.String),
-  planLabel: Schema.optionalKey(Schema.String),
-  backend: Schema.optionalKey(Schema.String),
-  /** Why the probe failed, so an `error` is something the user can act on. */
-  message: Schema.optionalKey(Schema.String),
-});
-
-export type SnapshotAuth = Schema.Schema.Type<typeof SnapshotAuth>;
+/**
+ * The runner reports these on the wire and the controller hands them back
+ * whole, so the public shape is the wire shape rather than a copy that can
+ * drift out of step with it.
+ */
+export { ModelDescriptor, ModelOption, SnapshotAuth } from "@hydra/protocol";
 
 /**
- * What one runner last reported about one instance. Scope is instance x runner
- * because harness versions, logins and model catalogues differ per machine.
+ * How the harness version a runner reported stands against the version this
+ * build was tested with. `unknown` is a machine that reported nothing, or a
+ * provider nobody has pinned a floor for.
  */
+export const VersionVerdict = Schema.Literals(["unknown", "below-floor", "ok", "above-tested-max"]);
+
+export type VersionVerdict = Schema.Schema.Type<typeof VersionVerdict>;
+
 export const CapabilitySnapshot = Schema.Struct({
   runnerId: Id,
   probedAt: Timestamp,
   harnessVersion: Schema.NullOr(Schema.String),
+  versionVerdict: VersionVerdict,
   auth: SnapshotAuth,
   models: Schema.Array(ModelDescriptor),
 });

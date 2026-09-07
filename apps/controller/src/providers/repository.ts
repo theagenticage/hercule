@@ -11,6 +11,7 @@ import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
+import { ModelDescriptor, type ProbeResult } from "@hydra/protocol";
 import { mintUuid, uuidFromString, uuidToString } from "../db";
 
 /** An instance as it is stored: the definition's half is composed at read. */
@@ -59,6 +60,60 @@ const toInstance = (row: InstanceRow): Effect.Effect<StoredInstance, Schema.Sche
     config,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+  }));
+
+/** What one runner last said about one instance, as it is stored. */
+export interface StoredSnapshot {
+  readonly instanceId: string;
+  readonly runnerId: string;
+  readonly probedAt: string;
+  readonly harnessVersion: string | null;
+  readonly auth: ProbeResult["auth"];
+  readonly models: ProbeResult["models"];
+}
+
+interface SnapshotRow {
+  readonly instance_id: Uint8Array;
+  readonly runner_id: Uint8Array;
+  readonly probed_at: string;
+  readonly harness_version: string | null;
+  readonly auth_status: string;
+  readonly auth_identity: string | null;
+  readonly auth_plan_label: string | null;
+  readonly auth_backend: string | null;
+  readonly auth_message: string | null;
+  readonly models: string;
+}
+
+const SNAPSHOT_COLUMNS =
+  "instance_id, runner_id, probed_at, harness_version, auth_status, auth_identity, " +
+  "auth_plan_label, auth_backend, auth_message, models";
+
+/** Decoded rather than cast, so a row this build cannot read is a typed failure. */
+const decodeModels = Schema.decodeUnknownEffect(
+  Schema.fromJsonString(Schema.Array(ModelDescriptor)),
+);
+
+/**
+ * A null column is an absent key rather than a null value: the wire shape these
+ * rows are handed back as has no nulls in it.
+ */
+const said = (row: SnapshotRow): ProbeResult["auth"] => ({
+  status: row.auth_status as ProbeResult["auth"]["status"],
+  ...(row.auth_identity === null ? {} : { identity: row.auth_identity }),
+  ...(row.auth_plan_label === null ? {} : { planLabel: row.auth_plan_label }),
+  ...(row.auth_backend === null ? {} : { backend: row.auth_backend }),
+  ...(row.auth_message === null ? {} : { message: row.auth_message }),
+});
+
+const toSnapshot = (row: SnapshotRow): Effect.Effect<StoredSnapshot, Schema.SchemaError> =>
+  Effect.map(decodeModels(row.models), (models) => ({
+    instanceId: uuidToString(row.instance_id),
+    runnerId: uuidToString(row.runner_id),
+    probedAt: row.probed_at,
+    harnessVersion: row.harness_version,
+    auth: said(row),
+    models,
   }));
 
 const make = Effect.gen(function* () {
@@ -131,6 +186,56 @@ const make = Effect.gen(function* () {
     /** Removes the instance. Its snapshots go with it, by foreign key. */
     delete: (id: string): Effect.Effect<void, SqlError> =>
       Effect.asVoid(sql`DELETE FROM provider_instances WHERE id = ${uuidFromString(id)}`),
+
+    /** Every snapshot in the install; a listing hangs them off their instances. */
+    snapshots: (): Effect.Effect<ReadonlyArray<StoredSnapshot>, SqlError | Schema.SchemaError> =>
+      Effect.flatMap(
+        sql<SnapshotRow>`
+          SELECT ${sql.literal(SNAPSHOT_COLUMNS)} FROM capability_snapshots
+          ORDER BY instance_id, runner_id
+        `,
+        (rows) => Effect.forEach(rows, toSnapshot),
+      ),
+
+    /** What the fleet reported about one instance. */
+    snapshotsOf: (
+      instanceId: string,
+    ): Effect.Effect<ReadonlyArray<StoredSnapshot>, SqlError | Schema.SchemaError> =>
+      Effect.flatMap(
+        sql<SnapshotRow>`
+          SELECT ${sql.literal(SNAPSHOT_COLUMNS)} FROM capability_snapshots
+          WHERE instance_id = ${uuidFromString(instanceId)}
+          ORDER BY runner_id
+        `,
+        (rows) => Effect.forEach(rows, toSnapshot),
+      ),
+
+    /**
+     * Writes what a runner just reported. Latest-wins per instance x runner:
+     * a snapshot is a cache of one machine's answer, not a history of them.
+     */
+    recordSnapshot: (
+      instanceId: string,
+      runnerId: string,
+      result: ProbeResult,
+      at: string,
+    ): Effect.Effect<void, SqlError> =>
+      Effect.asVoid(sql`
+        INSERT INTO capability_snapshots (${sql.literal(SNAPSHOT_COLUMNS)})
+        VALUES (${uuidFromString(instanceId)}, ${uuidFromString(runnerId)}, ${at},
+                ${result.harnessVersion}, ${result.auth.status}, ${result.auth.identity ?? null},
+                ${result.auth.planLabel ?? null}, ${result.auth.backend ?? null},
+                ${result.auth.message ?? null}, ${JSON.stringify(result.models)})
+        ON CONFLICT (instance_id, runner_id) DO UPDATE SET
+          probed_at = excluded.probed_at,
+          harness_version = excluded.harness_version,
+          auth_status = excluded.auth_status,
+          auth_identity = excluded.auth_identity,
+          auth_plan_label = excluded.auth_plan_label,
+          auth_backend = excluded.auth_backend,
+          auth_message = excluded.auth_message,
+          models = excluded.models
+      `),
   };
 });
 

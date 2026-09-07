@@ -47,6 +47,7 @@ import { responseFor, withEnvelope } from "./envelope";
 import { setupGate } from "./gate";
 import { AuthenticatedLayer, SetupTokenLayer } from "./middleware";
 import { LiveSocketLayer } from "../live";
+import { ProviderProbes } from "../providers";
 import { RunnerJoinRouteLayer, RunnerPresence, RunnerSocketRouteLayer } from "../runners";
 import { handlerLayers } from "./routes";
 import { withWebBundle, type WebBundle } from "./static";
@@ -181,5 +182,8 @@ export const serve = (bundle: WebBundle | undefined) =>
     // runner off `online` is the connection that put it there.
     const presence = yield* RunnerPresence;
     yield* Effect.orDie(presence.strandedByTheLastRun);
+    // A login expires and a harness is upgraded outside Hydra, so the fleet is
+    // asked again on a tick for as long as this listener is up.
+    yield* Effect.forkScoped(Effect.flatMap(ProviderProbes, (probes) => probes.refreshing));
     yield* Effect.flatMap(application(bundle), HttpServer.serveEffect());
   });

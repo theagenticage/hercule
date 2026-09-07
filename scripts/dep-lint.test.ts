@@ -39,6 +39,9 @@ export const run = (): void => console.log(typeof Logo);`,
 
 let dir: string;
 
+/** Temporary workspaces the store checks are pointed at, removed afterwards. */
+const stores: Array<string> = [];
+
 beforeAll(async () => {
   dir = await mkdtemp(join(tmpdir(), "hydra-dep-lint-"));
   await Promise.all(
@@ -48,10 +51,30 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await rm(dir, { recursive: true, force: true });
+  for (const store of stores.splice(0)) await rm(store, { recursive: true, force: true });
 });
 
-const depLint = (fixture: string) =>
-  run("bun", ["run", join(root, "scripts/dep-lint.ts"), join(dir, `${fixture}.ts`)], { cwd: root });
+const depLint = (fixture: string, workspace?: string) =>
+  run(
+    "bun",
+    [
+      "run",
+      join(root, "scripts/dep-lint.ts"),
+      join(dir, `${fixture}.ts`),
+      ...(workspace === undefined ? [] : [workspace]),
+    ],
+    { cwd: root },
+  );
+
+/** Runs a fixture against a store of its own and resolves to the refusal. */
+async function failureIn(fixture: string, workspace: string): Promise<{ stderr: string }> {
+  const error = await depLint(fixture, workspace).then(
+    () => undefined,
+    (thrown: { readonly stderr: string }) => thrown,
+  );
+  expect(error, `dep-lint accepted the store handed to ${fixture}`).toBeDefined();
+  return error!;
+}
 
 /** Resolves to the failure dep-lint exited with, or fails the test. */
 async function failure(fixture: string): Promise<{ code?: number; stderr?: string }> {
@@ -93,5 +116,54 @@ describe("dep-lint", () => {
     const error = await failure("web");
     expect(error.code).toBe(1);
     expect(error.stderr).toContain("the web bundle");
+  });
+});
+
+/**
+ * The vendor SDK ships its Claude Code CLI as eight per-platform packages, one
+ * of which is 196 MB. They are excluded from the install, and the check that
+ * they stay excluded belongs beside the other things the runner must not carry.
+ *
+ * Unlike the import-graph rules this one is about the workspace rather than
+ * about an entrypoint, so the fixture is a directory in the store rather than a
+ * file to import: pnpm links only a package's direct dependencies into the
+ * importer's `node_modules`, so an optional dependency of the SDK shows up in
+ * the store and nowhere else.
+ */
+describe("the vendor SDK's per-platform CLI packages", () => {
+  const SDK = "@anthropic-ai+claude-agent-sdk";
+
+  /** A store laid out as pnpm lays one out, holding exactly what it is given. */
+  const storeHolding = async (...packages: ReadonlyArray<string>): Promise<string> => {
+    const { mkdir } = await import("node:fs/promises");
+    const workspace = await mkdtemp(join(tmpdir(), "hydra-dep-lint-store-"));
+    stores.push(workspace);
+    for (const name of packages) {
+      await mkdir(join(workspace, "node_modules/.pnpm", name), { recursive: true });
+    }
+    return workspace;
+  };
+
+  it("are not installed, and dep-lint says so over the repository as it stands", async () => {
+    const { stdout } = await run("bun", ["run", join(root, "scripts/dep-lint.ts")], { cwd: root });
+
+    expect(stdout).toContain("is clean");
+    expect(stdout).toContain("no per-platform CLI package");
+  });
+
+  it("fail the check when one finds its way into the store", async () => {
+    const workspace = await storeHolding(`${SDK}@0.3.263`, `${SDK}-darwin-arm64@0.3.263`);
+
+    const refusal = await failureIn("clean", workspace);
+
+    expect(refusal.stderr).toContain(`${SDK}-darwin-arm64@0.3.263`);
+  });
+
+  it("fail the check when the SDK itself is not installed at all", async () => {
+    const workspace = await storeHolding("effect@4.0.0");
+
+    const refusal = await failureIn("clean", workspace);
+
+    expect(refusal.stderr).toContain("is not installed");
   });
 });

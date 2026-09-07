@@ -25,6 +25,7 @@ export interface Fixture {
     readonly docker: boolean;
     readonly toolchains: readonly { name: string; version: string; path: string }[];
     readonly providers: readonly { name: string; present: boolean }[];
+    readonly adapters: readonly string[];
     readonly identityPort: number;
   } | null;
   readonly watermark: {
@@ -56,6 +57,7 @@ export const MOSS: Fixture = {
       { name: "gh", version: "2.99.0", path: "/opt/homebrew/bin/gh" },
     ],
     providers: [{ name: "claude", present: true }],
+    adapters: ["claude-code"],
     identityPort: 4939,
   },
   watermark: {

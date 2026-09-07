@@ -853,6 +853,7 @@ describe("what a runner subscription is told", () => {
     docker: false,
     toolchains: [{ name: "git", version: "2.50.1", path: "/usr/bin/git" }],
     providers: [],
+    adapters: ["claude-code"],
     identityPort: 4939,
   };
 

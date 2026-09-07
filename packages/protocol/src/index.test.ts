@@ -48,6 +48,7 @@ const facts = {
     { name: "claude", present: true, path: "/usr/local/bin/claude" },
     { name: "codex", present: false },
   ],
+  adapters: ["claude-code"],
   identityPort: 4939,
 } as const;
 
@@ -76,11 +77,43 @@ const controllerHello = {
   signature: "c2lnbmF0dXJl",
 } as const;
 
+/** What one runner found out about one instance, with every optional key set. */
+const probeResult = {
+  harnessVersion: "2.1.263",
+  auth: {
+    status: "ok",
+    identity: "rogier@example.com",
+    planLabel: "Claude Max",
+    backend: "firstParty",
+  },
+  models: [
+    {
+      slug: "default",
+      name: "Default",
+      isDefault: true,
+      options: [
+        {
+          id: "effort",
+          label: "Effort",
+          kind: "select",
+          choices: [{ value: "medium", label: "Medium" }],
+          default: "medium",
+        },
+      ],
+    },
+  ],
+} as const;
+
+const REQUEST_ID = "0199c3f4-1f2a-7c31-9f0e-6d2b8a4e5c72";
+const INSTANCE_ID = "0199c3f4-1f2a-7c31-9f0e-6d2b8a4e5c73";
+
 const runnerMessages: ReadonlyArray<RunnerMessage> = [
   runnerHello,
   { _tag: "pong" },
   { _tag: "factsReport", facts },
   { _tag: "watermarkReport", watermark },
+  { _tag: "probeReport", requestId: REQUEST_ID, instanceId: INSTANCE_ID, result: probeResult },
+  { _tag: "installResult", requestId: REQUEST_ID, ok: false, message: "curl: (22) not found" },
   { _tag: "goodbye" },
 ];
 
@@ -89,6 +122,14 @@ const controllerMessages: ReadonlyArray<ControllerMessage> = [
   { _tag: "ping" },
   { _tag: "ack", lastAckedSeq: 7 },
   { _tag: "factsRequest" },
+  {
+    _tag: "probeRequest",
+    requestId: REQUEST_ID,
+    instanceId: INSTANCE_ID,
+    providerId: "claude-code",
+    config: {},
+  },
+  { _tag: "installRequest", requestId: REQUEST_ID, providerId: "claude-code" },
 ];
 
 describe("the protocol version", () => {

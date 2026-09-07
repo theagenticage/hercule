@@ -109,11 +109,16 @@ export {
 } from "./groups/plugin";
 export { MAX_PROFILE_GRANTS, Profile } from "./groups/profile";
 export {
+  CapabilitySnapshot,
   DeclaredCapabilities,
   MAX_PROVIDER_INSTANCE_NAME_LENGTH,
+  ModelDescriptor,
+  ModelOption,
   ProviderInstance,
   ProviderInstanceCreateInput,
   ProviderInstanceUpdateInput,
+  SnapshotAuth,
+  VersionVerdict,
 } from "./groups/provider";
 export { OwnerKind, SecretRef } from "./groups/secret";
 export { ControllerInfo, ControllerUpdateInput } from "./groups/controller";

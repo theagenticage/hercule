@@ -348,3 +348,29 @@ describe("the hourly refresh", () => {
     );
   });
 });
+
+describe("the adapters a runner build can drive", () => {
+  it("names the one provider this build has an adapter for", async () => {
+    // A fact about the build, not about the machine: a machine with all three
+    // harnesses installed still reports the one adapter this binary carries,
+    // which is what lets the fleet page disable Install and Log in on a row
+    // instead of discovering it by failing.
+    expect((await probe(FULL)).adapters).toEqual(["claude-code"]);
+    expect((await probe({ git: GIT })).adapters).toEqual(["claude-code"]);
+  });
+
+  it("still reports every provider binary with its presence beside them", async () => {
+    const { codex, ...withoutCodex } = FULL;
+    expect(codex).toBeDefined();
+
+    const facts = await probe(withoutCodex);
+    expect(facts.adapters).toEqual(["claude-code"]);
+    // Adapters did not replace the binaries: a Codex row has to say both that
+    // the machine has no `codex` and that this build could not drive one.
+    expect(facts.providers).toEqual([
+      { name: "claude", present: true, path: "/usr/local/bin/claude" },
+      { name: "codex", present: false },
+      { name: "pi", present: true, path: "/usr/local/bin/pi" },
+    ]);
+  });
+});

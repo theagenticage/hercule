@@ -111,6 +111,12 @@ export const RunnerFacts = Schema.Struct({
   docker: Schema.Boolean,
   toolchains: Schema.Array(Toolchain).check(Schema.isMaxLength(MAX_FACT_ITEMS)),
   providers: Schema.Array(ProviderBinary).check(Schema.isMaxLength(MAX_FACT_ITEMS)),
+  /**
+   * The provider ids this runner build carries an adapter for. A fact about the
+   * binary rather than the machine, so the fleet can say "no adapter in this
+   * runner build" instead of finding out by asking and failing.
+   */
+  adapters: Schema.Array(Fact).check(Schema.isMaxLength(MAX_FACT_ITEMS)),
   /** Serves `GET /identity`, which is what resolves the "local" alias. */
   identityPort: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 65535 })),
 });
@@ -240,6 +246,114 @@ export const WatermarkReport = Schema.Struct({
 
 export type WatermarkReport = Schema.Schema.Type<typeof WatermarkReport>;
 
+/**
+ * One choice the composer offers for a model: a select over named values, or a
+ * switch. What a harness accepts per model is the harness's to say, so this is
+ * probed rather than authored.
+ */
+export const ModelOption = Schema.Struct({
+  id: Fact,
+  label: Fact,
+  kind: Schema.Literals(["select", "boolean"]),
+  choices: Schema.optionalKey(
+    Schema.Array(Schema.Struct({ value: Fact, label: Fact })).check(
+      Schema.isMaxLength(MAX_FACT_ITEMS),
+    ),
+  ),
+  default: Schema.Union([Schema.String, Schema.Boolean]),
+});
+
+export type ModelOption = Schema.Schema.Type<typeof ModelOption>;
+
+/** One model a harness offers, and the per-model choices that come with it. */
+export const ModelDescriptor = Schema.Struct({
+  slug: Fact,
+  name: Fact,
+  isDefault: Schema.optionalKey(Schema.Boolean),
+  /** A model the harness no longer lists but still forwards to the API. */
+  isLegacy: Schema.optionalKey(Schema.Boolean),
+  options: Schema.Array(ModelOption).check(Schema.isMaxLength(MAX_FACT_ITEMS)),
+});
+
+export type ModelDescriptor = Schema.Schema.Type<typeof ModelDescriptor>;
+
+/** Whether the harness reports a usable login, and whose it is. */
+export const SnapshotAuth = Schema.Struct({
+  status: Schema.Literals(["ok", "unauthenticated", "error"]),
+  identity: Schema.optionalKey(Fact),
+  planLabel: Schema.optionalKey(Fact),
+  backend: Schema.optionalKey(Fact),
+  /** Why the probe failed, so an `error` is something the user can act on. */
+  message: Schema.optionalKey(Fact),
+});
+
+export type SnapshotAuth = Schema.Schema.Type<typeof SnapshotAuth>;
+
+/**
+ * What one runner found out about one provider instance. Side-effect free: a
+ * probe reads the harness's own account and model list and makes no API call.
+ */
+export const ProbeResult = Schema.Struct({
+  harnessVersion: Schema.NullOr(Fact),
+  auth: SnapshotAuth,
+  models: Schema.Array(ModelDescriptor).check(Schema.isMaxLength(MAX_FACT_ITEMS)),
+});
+
+export type ProbeResult = Schema.Schema.Type<typeof ProbeResult>;
+
+/**
+ * What correlates a request with its answer. Probes and installs for several
+ * instances can be in flight on one connection at once, so every exchange
+ * carries one of these rather than the connection holding a single slot.
+ */
+const RequestId = Fact;
+
+/**
+ * Asks the runner to probe one provider instance. The instance id and its
+ * config live on the controller, so the runner cannot start this on its own.
+ */
+export const ProbeRequest = Schema.Struct({
+  _tag: Schema.Literal("probeRequest"),
+  requestId: RequestId,
+  instanceId: Fact,
+  providerId: Fact,
+  config: Schema.Json,
+});
+
+export type ProbeRequest = Schema.Schema.Type<typeof ProbeRequest>;
+
+export const ProbeReport = Schema.Struct({
+  _tag: Schema.Literal("probeReport"),
+  requestId: RequestId,
+  instanceId: Fact,
+  result: ProbeResult,
+});
+
+export type ProbeReport = Schema.Schema.Type<typeof ProbeReport>;
+
+/** Asks the runner to put a provider's harness on the machine it is on. */
+export const InstallRequest = Schema.Struct({
+  _tag: Schema.Literal("installRequest"),
+  requestId: RequestId,
+  providerId: Fact,
+});
+
+export type InstallRequest = Schema.Schema.Type<typeof InstallRequest>;
+
+/**
+ * How an install ended. The runner reports its facts before this, so a
+ * controller reading the row after an `ok` reads the machine as it now is.
+ */
+export const InstallResult = Schema.Struct({
+  _tag: Schema.Literal("installResult"),
+  requestId: RequestId,
+  ok: Schema.Boolean,
+  /** What the installer said when it failed, so an operator can act on it. */
+  message: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(4096))),
+});
+
+export type InstallResult = Schema.Schema.Type<typeof InstallResult>;
+
 /** A deliberate departure, which is what tells `offline` from silence. */
 export const Goodbye = Schema.Struct({ _tag: Schema.Literal("goodbye") });
 
@@ -250,6 +364,8 @@ export const RunnerToController = Schema.Union([
   Pong,
   RunnerFactsReport,
   WatermarkReport,
+  ProbeReport,
+  InstallResult,
   Goodbye,
 ]);
 
@@ -313,6 +429,13 @@ export const Ack = Schema.Struct({
 
 export type Ack = Schema.Schema.Type<typeof Ack>;
 
-export const ControllerToRunner = Schema.Union([ControllerHello, Ping, Ack, RunnerFactsRequest]);
+export const ControllerToRunner = Schema.Union([
+  ControllerHello,
+  Ping,
+  Ack,
+  RunnerFactsRequest,
+  ProbeRequest,
+  InstallRequest,
+]);
 
 export type ControllerToRunner = Schema.Schema.Type<typeof ControllerToRunner>;

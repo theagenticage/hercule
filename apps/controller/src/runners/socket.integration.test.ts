@@ -32,13 +32,17 @@ import {
   signedChallenge,
   type ControllerHello,
   type ControllerToRunner as ControllerMessage,
+  type InstallRequest,
   type JoinAnswer,
+  type ProbeRequest,
+  type ProbeResult,
   type RunnerFacts,
   type RunnerHello,
   type RunnerToController as RunnerMessage,
 } from "@hydra/protocol";
 import type { RunnerDetail } from "@hydra/contract";
 import { uuidFromString } from "../db";
+import { registry } from "../plugins";
 import { completeSetup, get, send, withServer, type ServerHarness } from "../http/testing";
 // The two shipped durations are read off the domain's own exports rather than
 // imported by name, so a file that is otherwise about the wire still reports
@@ -72,6 +76,7 @@ const FACTS: RunnerFacts = {
   docker: false,
   toolchains: [{ name: "git", version: "2.50.1", path: "/usr/bin/git" }],
   providers: [{ name: "claude", present: true, path: "/usr/local/bin/claude" }],
+  adapters: ["claude-code"],
   identityPort: 4939,
 };
 
@@ -1452,5 +1457,557 @@ describe("refreshing a runner's facts on demand", () => {
       },
       { factsDeadline: FACTS_DEADLINE },
     );
+  });
+});
+
+/**
+ * Provider instances, probed over the connection the controller is already
+ * holding.
+ *
+ * Everything here is driven through the wire because a snapshot only exists
+ * once a runner answered: the instances are the shipped registry's, so what
+ * this file says about "one request per instance" is about the three providers
+ * the binary really ships.
+ *
+ * The shipped probe deadline and the hourly re-probe are handed over the same
+ * way the ping interval is: a real Bun listener cannot be driven by a
+ * `TestClock`, and neither number can be waited out.
+ */
+/**
+ * The shipped plugin registry, so the instances a probe is about are the three
+ * providers the binary really ships rather than fixtures written here. The
+ * harness boots with no plugins unless a test says otherwise.
+ */
+const withRegistry = (
+  body: (harness: ServerHarness) => Promise<void>,
+  options: Parameters<typeof withServer>[1] = {},
+): Promise<void> => withServer(body, { ...options, plugins: registry });
+
+describe("probing a runner's provider instances", () => {
+  /** One instance as `/api/v1/providers` hands it back. */
+  interface Instance {
+    readonly id: string;
+    readonly providerId: string;
+    readonly snapshots: ReadonlyArray<{
+      readonly runnerId: string;
+      readonly harnessVersion: string | null;
+      readonly auth: { readonly status: string; readonly message?: string };
+      readonly models: ReadonlyArray<{ readonly slug: string }>;
+    }>;
+  }
+
+  const instances = async (base: string, token: string): Promise<ReadonlyArray<Instance>> => {
+    const response = await get(base, "/api/v1/providers", token);
+    expect(response.status, await response.clone().text()).toBe(200);
+    return (await response.json()) as ReadonlyArray<Instance>;
+  };
+
+  const instanceOf = async (base: string, token: string, providerId: string): Promise<Instance> => {
+    const found = (await instances(base, token)).find((one) => one.providerId === providerId);
+    expect(found, `no instance for ${providerId}`).toBeDefined();
+    return found!;
+  };
+
+  /** What one runner last said about one instance, once it has said anything. */
+  const snapshotWhen = async (
+    base: string,
+    token: string,
+    instanceId: string,
+    runnerId: string,
+    ready: (snapshot: Instance["snapshots"][number] | undefined) => boolean,
+  ): Promise<Instance["snapshots"][number] | undefined> => {
+    for (let attempt = 0; attempt < 300; attempt++) {
+      const response = await get(base, `/api/v1/providers/${instanceId}`, token);
+      expect(response.status, await response.clone().text()).toBe(200);
+      const one = (await response.json()) as Instance;
+      const snapshot = one.snapshots.find((each) => each.runnerId === runnerId);
+      if (ready(snapshot)) return snapshot;
+      await delay(10);
+    }
+    return undefined;
+  };
+
+  /** Every probe request the controller has sent on this connection so far. */
+  const probeRequests = (wire: Wire): ReadonlyArray<ProbeRequest> =>
+    wire.frames.filter((frame): frame is ProbeRequest => frame._tag === "probeRequest");
+
+  /** Waits until the connection has been asked for at least this many probes. */
+  const askedFor = async (wire: Wire, count: number): Promise<ReadonlyArray<ProbeRequest>> => {
+    for (let attempt = 0; attempt < 400 && probeRequests(wire).length < count; attempt++) {
+      await delay(5);
+    }
+    const asked = probeRequests(wire);
+    expect(
+      asked.length,
+      `the controller asked for ${String(asked.length)} probes`,
+    ).toBeGreaterThanOrEqual(count);
+    return asked;
+  };
+
+  /** What a runner that could probe answers with. */
+  const probed = (version: string): ProbeResult => ({
+    harnessVersion: version,
+    auth: {
+      status: "ok",
+      identity: "rogier@example.com",
+      planLabel: "Claude Max",
+      backend: "firstParty",
+    },
+    models: [{ slug: "default", name: "Default", options: [] }],
+  });
+
+  /** What a runner whose build has no adapter for that provider answers with. */
+  const noAdapter = (providerId: string): ProbeResult => ({
+    harnessVersion: null,
+    auth: { status: "error", message: `no adapter for ${providerId} in this runner build` },
+    models: [],
+  });
+
+  const probeNow = (base: string, token: string, id: string, instanceId: string) =>
+    send("POST", base, `/api/v1/runners/${id}/probe`, { body: { instanceId }, token });
+
+  const patchInstance = (base: string, token: string, id: string, body: unknown) =>
+    send("PATCH", base, `/api/v1/providers/${id}`, { body, token });
+
+  /** A deadline a test can wait out, and an interval it can wait for twice. */
+  const PROBE_DEADLINE = Duration.millis(200);
+
+  it("asks the runner about every instance as soon as it has said hello, and keeps what it answers", async () => {
+    await withRegistry(async (harness) => {
+      const token = await completeSetup(harness.base);
+      const joined = await enlist(harness);
+      const all = await instances(harness.base, token);
+      // The three shipped providers, each with the instance the boot opened.
+      expect(all.map((one) => one.providerId).sort()).toEqual(["claude-code", "codex", "pi"]);
+
+      const { wire } = await greet(harness.base, joined.credential);
+      try {
+        const asked = await askedFor(wire, all.length);
+        // One request per instance, routed on the instance id and never on the
+        // provider id: one provider can hold several accounts.
+        expect([...asked].map((request) => request.instanceId).sort()).toEqual(
+          [...all].map((one) => one.id).sort(),
+        );
+        for (const request of asked) {
+          const instance = all.find((one) => one.id === request.instanceId);
+          expect(request.providerId).toBe(instance?.providerId);
+        }
+
+        for (const request of asked) {
+          const instance = all.find((one) => one.id === request.instanceId)!;
+          wire.send({
+            _tag: "probeReport",
+            requestId: request.requestId,
+            instanceId: request.instanceId,
+            result:
+              instance.providerId === "claude-code"
+                ? probed("2.1.263")
+                : noAdapter(instance.providerId),
+          });
+        }
+
+        const claude = await instanceOf(harness.base, token, "claude-code");
+        const snapshot = await snapshotWhen(
+          harness.base,
+          token,
+          claude.id,
+          joined.runnerId,
+          (one) => one !== undefined,
+        );
+        expect(snapshot?.harnessVersion).toBe("2.1.263");
+        expect(snapshot?.auth).toMatchObject({ status: "ok", identity: "rogier@example.com" });
+        expect(snapshot?.models.map((model) => model.slug)).toEqual(["default"]);
+
+        // A provider this runner build cannot drive is a snapshot too: the row
+        // reads why instead of staying blank for ever.
+        const codex = await instanceOf(harness.base, token, "codex");
+        const refused = await snapshotWhen(
+          harness.base,
+          token,
+          codex.id,
+          joined.runnerId,
+          (one) => one !== undefined,
+        );
+        expect(refused?.auth.status).toBe("error");
+        expect(refused?.auth.message).toBe("no adapter for codex in this runner build");
+      } finally {
+        wire.close();
+      }
+    });
+  });
+
+  it("asks every online runner again when an instance's config changed", async () => {
+    await withRegistry(async (harness) => {
+      const token = await completeSetup(harness.base);
+      const first = await enlist(harness);
+      const second = await enlist(harness);
+      const all = await instances(harness.base, token);
+      const claude = all.find((one) => one.providerId === "claude-code")!;
+
+      const one = await greet(harness.base, first.credential);
+      const two = await greet(harness.base, second.credential);
+      try {
+        await askedFor(one.wire, all.length);
+        await askedFor(two.wire, all.length);
+        const before = [probeRequests(one.wire).length, probeRequests(two.wire).length];
+
+        const patched = await patchInstance(harness.base, token, claude.id, {
+          name: "work account",
+        });
+        expect(patched.status, await patched.clone().text()).toBe(200);
+
+        // Every machine, not just the one somebody was looking at: the config
+        // is what the probe runs under, so every snapshot of it is now stale.
+        await askedFor(one.wire, before[0]! + 1);
+        await askedFor(two.wire, before[1]! + 1);
+        for (const wire of [one.wire, two.wire]) {
+          expect(probeRequests(wire).at(-1)?.instanceId).toBe(claude.id);
+        }
+      } finally {
+        one.wire.close();
+        two.wire.close();
+      }
+    });
+  });
+
+  it("asks on demand and answers with the snapshot the report left behind", async () => {
+    await withRegistry(async (harness) => {
+      const token = await completeSetup(harness.base);
+      const joined = await enlist(harness);
+      const claude = await instanceOf(harness.base, token, "claude-code");
+      const { wire } = await greet(harness.base, joined.credential);
+      try {
+        const opening = await askedFor(wire, 3);
+        const already = opening.length;
+
+        const pending = probeNow(harness.base, token, joined.runnerId, claude.id);
+        const asked = await askedFor(wire, already + 1);
+        const request = asked.at(-1)!;
+        expect(request.instanceId).toBe(claude.id);
+        wire.send({
+          _tag: "probeReport",
+          requestId: request.requestId,
+          instanceId: claude.id,
+          result: probed("2.1.300"),
+        });
+
+        const response = await pending;
+        expect(response.status, await response.clone().text()).toBe(200);
+        // The snapshot the report left behind, not the one that was there when
+        // the button was pressed.
+        const answered = (await response.json()) as Instance["snapshots"][number];
+        expect(answered.runnerId).toBe(joined.runnerId);
+        expect(answered.harnessVersion).toBe("2.1.300");
+      } finally {
+        wire.close();
+      }
+    });
+  });
+
+  it("refuses to probe a runner that is not online, and sends that connection nothing", async () => {
+    await withRegistry(async (harness) => {
+      const token = await completeSetup(harness.base);
+      const joined = await enlist(harness);
+      const claude = await instanceOf(harness.base, token, "claude-code");
+      // A credential and a socket, and no hello: nothing on the other end has
+      // said it is a runner this controller can ask anything of.
+      const wire = await dial(harness.base, joined.credential);
+      try {
+        const response = await probeNow(harness.base, token, joined.runnerId, claude.id);
+        expect(response.status, await response.clone().text()).toBe(409);
+        expect(await response.json()).toMatchObject({ error: { code: "invalid_state" } });
+        expect(wire.frames).toEqual([]);
+      } finally {
+        wire.close();
+      }
+    });
+  });
+
+  it("gives up on a runner that never answers a probe, saying how long it waited", async () => {
+    await withRegistry(
+      async (harness) => {
+        const token = await completeSetup(harness.base);
+        const joined = await enlist(harness);
+        const claude = await instanceOf(harness.base, token, "claude-code");
+        const { wire } = await greet(harness.base, joined.credential);
+        try {
+          const already = (await askedFor(wire, 3)).length;
+
+          const response = await probeNow(harness.base, token, joined.runnerId, claude.id);
+          await askedFor(wire, already + 1);
+
+          expect(response.status, await response.clone().text()).toBe(409);
+          const refusal = (await response.json()) as { error: { code: string; message: string } };
+          expect(refusal.error.code).toBe("invalid_state");
+          // How long it waited, so a slow machine reads differently from a
+          // broken one - and the deadline this server is running with.
+          expect(refusal.error.message).toContain(Duration.format(PROBE_DEADLINE));
+        } finally {
+          wire.close();
+        }
+      },
+      { probeDeadline: PROBE_DEADLINE },
+    );
+  });
+
+  it("ignores a report nobody asked for", async () => {
+    await withRegistry(async (harness) => {
+      const token = await completeSetup(harness.base);
+      const joined = await enlist(harness);
+      const claude = await instanceOf(harness.base, token, "claude-code");
+      const { wire } = await greet(harness.base, joined.credential);
+      try {
+        const asked = await askedFor(wire, 3);
+        const mine = asked.find((request) => request.instanceId === claude.id)!;
+
+        // A request id this controller never issued. Storing it would let a
+        // runner write any instance's snapshot at any time.
+        wire.send({
+          _tag: "probeReport",
+          requestId: "01999999-0000-7000-8000-00000000dead",
+          instanceId: claude.id,
+          result: probed("0.0.0-unasked"),
+        });
+        // Then the answer to the request it really was asked, so the test waits
+        // for something rather than for a while.
+        wire.send({
+          _tag: "probeReport",
+          requestId: mine.requestId,
+          instanceId: claude.id,
+          result: probed("2.1.263"),
+        });
+
+        const snapshot = await snapshotWhen(
+          harness.base,
+          token,
+          claude.id,
+          joined.runnerId,
+          (one) => one !== undefined,
+        );
+        expect(snapshot?.harnessVersion).toBe("2.1.263");
+      } finally {
+        wire.close();
+      }
+    });
+  });
+
+  it("ignores a report from the connection a runner has already replaced", async () => {
+    await withRegistry(async (harness) => {
+      const token = await completeSetup(harness.base);
+      const joined = await enlist(harness);
+      const claude = await instanceOf(harness.base, token, "claude-code");
+      const first = await greet(harness.base, joined.credential);
+      const asked = await askedFor(first.wire, 3);
+      const stale = asked.find((request) => request.instanceId === claude.id)!;
+
+      // The machine dialled again before answering. Its old connection's
+      // answers are about a session that is over.
+      const second = await greet(harness.base, joined.credential);
+      try {
+        first.wire.send({
+          _tag: "probeReport",
+          requestId: stale.requestId,
+          instanceId: claude.id,
+          result: probed("0.0.0-superseded"),
+        });
+
+        const fresh = await askedFor(second.wire, 3);
+        const current = fresh.find((request) => request.instanceId === claude.id)!;
+        second.wire.send({
+          _tag: "probeReport",
+          requestId: current.requestId,
+          instanceId: claude.id,
+          result: probed("2.1.263"),
+        });
+
+        const snapshot = await snapshotWhen(
+          harness.base,
+          token,
+          claude.id,
+          joined.runnerId,
+          (one) => one !== undefined,
+        );
+        expect(snapshot?.harnessVersion).toBe("2.1.263");
+      } finally {
+        first.wire.close();
+        second.wire.close();
+      }
+    });
+  });
+
+  it("asks every instance of every online runner again on the interval", async () => {
+    const INTERVAL = Duration.millis(150);
+    await withRegistry(
+      async (harness) => {
+        const token = await completeSetup(harness.base);
+        const joined = await enlist(harness);
+        const all = await instances(harness.base, token);
+        const { wire } = await greet(harness.base, joined.credential);
+        try {
+          // The hello's round, then the tick's: the whole set again, not just
+          // whichever instance somebody last looked at.
+          await askedFor(wire, all.length * 2);
+          const second = probeRequests(wire).slice(all.length, all.length * 2);
+          expect([...second].map((request) => request.instanceId).sort()).toEqual(
+            [...all].map((one) => one.id).sort(),
+          );
+        } finally {
+          wire.close();
+        }
+      },
+      { probeInterval: INTERVAL },
+    );
+  });
+});
+
+describe("installing a harness on a runner", () => {
+  /** A machine with no coding harness on it at all. */
+  const BARE: RunnerFacts = {
+    ...FACTS,
+    providers: [
+      { name: "claude", present: false },
+      { name: "codex", present: false },
+      { name: "pi", present: false },
+    ],
+  };
+
+  /** The machine as it is once the installer has run. */
+  const INSTALLED: RunnerFacts = {
+    ...BARE,
+    providers: [
+      { name: "claude", present: true, path: "/root/.local/bin/claude" },
+      { name: "codex", present: false },
+      { name: "pi", present: false },
+    ],
+  };
+
+  const installHarness = (base: string, token: string, id: string, providerId: string) =>
+    send("POST", base, `/api/v1/runners/${id}/install-harness`, { body: { providerId }, token });
+
+  /** The install request the controller sent, once it has. */
+  const installRequestOn = async (wire: Wire): Promise<InstallRequest> => {
+    for (let attempt = 0; attempt < 400; attempt++) {
+      const found = wire.frames.find(
+        (frame): frame is InstallRequest => frame._tag === "installRequest",
+      );
+      if (found !== undefined) return found;
+      await delay(5);
+    }
+    throw new Error("the controller never asked for an install");
+  };
+
+  const probeRequestsOn = (wire: Wire): ReadonlyArray<ProbeRequest> =>
+    wire.frames.filter((frame): frame is ProbeRequest => frame._tag === "probeRequest");
+
+  it("runs the installer, takes the machine's word for what it now has, and probes it", async () => {
+    await withRegistry(async (harness) => {
+      const token = await completeSetup(harness.base);
+      const joined = await enlist(harness);
+      const { wire } = await greet(harness.base, joined.credential, { facts: BARE });
+      try {
+        await rowWhen(harness.base, token, joined.runnerId, (one) => one.connectivity === "online");
+        const providers = await get(harness.base, "/api/v1/providers", token);
+        const claude = (
+          (await providers.json()) as ReadonlyArray<{
+            id: string;
+            providerId: string;
+          }>
+        ).find((one) => one.providerId === "claude-code")!;
+        const before = probeRequestsOn(wire).length;
+
+        const pending = installHarness(harness.base, token, joined.runnerId, "claude-code");
+        const request = await installRequestOn(wire);
+        expect(request.providerId).toBe("claude-code");
+        // The runner reports what the machine now has, then says the install
+        // finished: the row must not answer with the machine as it was.
+        wire.send({ _tag: "factsReport", facts: INSTALLED });
+        wire.send({ _tag: "installResult", requestId: request.requestId, ok: true });
+
+        const response = await pending;
+        expect(response.status, await response.clone().text()).toBe(200);
+        const row = (await response.json()) as RunnerDetail;
+        expect(row.facts?.providers).toEqual(INSTALLED.providers);
+
+        // And the instance that can now be driven is probed, because a harness
+        // that was just installed has never been asked anything.
+        for (let attempt = 0; attempt < 400 && probeRequestsOn(wire).length <= before; attempt++) {
+          await delay(5);
+        }
+        expect(
+          probeRequestsOn(wire)
+            .slice(before)
+            .map((one) => one.instanceId),
+        ).toContain(claude.id);
+      } finally {
+        wire.close();
+      }
+    });
+  });
+
+  it("says what the installer said when it failed, and leaves the machine as it was", async () => {
+    await withRegistry(async (harness) => {
+      const token = await completeSetup(harness.base);
+      const joined = await enlist(harness);
+      const { wire } = await greet(harness.base, joined.credential, { facts: BARE });
+      try {
+        await rowWhen(harness.base, token, joined.runnerId, (one) => one.connectivity === "online");
+
+        const pending = installHarness(harness.base, token, joined.runnerId, "claude-code");
+        const request = await installRequestOn(wire);
+        wire.send({
+          _tag: "installResult",
+          requestId: request.requestId,
+          ok: false,
+          message: "install.sh: could not download the manifest",
+        });
+
+        const response = await pending;
+        expect(response.status, await response.clone().text()).toBe(409);
+        const refusal = (await response.json()) as { error: { code: string; message: string } };
+        expect(refusal.error.code).toBe("invalid_state");
+        // The installer's own words: "the install failed" is not something an
+        // operator can act on.
+        expect(refusal.error.message).toContain("could not download the manifest");
+        expect((await readRunner(harness.base, token, joined.runnerId)).facts).toEqual(BARE);
+      } finally {
+        wire.close();
+      }
+    });
+  });
+
+  it("refuses a harness this runner build has no adapter for, before asking the machine", async () => {
+    await withRegistry(async (harness) => {
+      const token = await completeSetup(harness.base);
+      const joined = await enlist(harness);
+      const { wire } = await greet(harness.base, joined.credential, { facts: BARE });
+      try {
+        await rowWhen(harness.base, token, joined.runnerId, (one) => one.connectivity === "online");
+
+        const response = await installHarness(harness.base, token, joined.runnerId, "codex");
+        expect(response.status, await response.clone().text()).toBe(400);
+        expect(await response.json()).toMatchObject({ error: { code: "validation" } });
+        // Nothing was asked of the machine: the runner already said which
+        // adapters its build has.
+        expect(wire.frames.filter((frame) => frame._tag === "installRequest")).toEqual([]);
+      } finally {
+        wire.close();
+      }
+    });
+  });
+
+  it("refuses to install on a runner that is not online", async () => {
+    await withRegistry(async (harness) => {
+      const token = await completeSetup(harness.base);
+      const joined = await enlist(harness);
+      const wire = await dial(harness.base, joined.credential);
+      try {
+        const response = await installHarness(harness.base, token, joined.runnerId, "claude-code");
+        expect(response.status, await response.clone().text()).toBe(409);
+        expect(await response.json()).toMatchObject({ error: { code: "invalid_state" } });
+        expect(wire.frames).toEqual([]);
+      } finally {
+        wire.close();
+      }
+    });
   });
 });

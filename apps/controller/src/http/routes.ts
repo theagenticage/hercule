@@ -37,12 +37,7 @@ import { Secret, SecretLayer } from "../secrets";
 import { SettingsOperations, SettingsOperationsLayer } from "../settings";
 import { ProjectService, ProjectServiceLayer } from "../projects";
 import { ProviderService } from "../providers";
-import {
-  RunnerJoinLayer,
-  RunnerPresenceLayer,
-  RunnerService,
-  RunnerServiceLayer,
-} from "../runners";
+import { RunnerJoinLayer, RunnerService, RunnerServiceLayer } from "../runners";
 import { Setup, SetupLayer } from "../setup";
 import { TaskService, TaskServiceLayer } from "../tasks";
 import { User, UserLayer } from "../users";
@@ -201,6 +196,12 @@ const runnerRoutes = HttpApiBuilder.group(api, "runner", (handlers) =>
         operation(runners.retire({ id: params.id, ...payload })),
       )
       .handle("refreshFacts", ({ params }) => operation(runners.refreshFacts(params)))
+      .handle("probe", ({ params, payload }) =>
+        operation(runners.probe({ id: params.id, ...payload })),
+      )
+      .handle("installHarness", ({ params, payload }) =>
+        operation(runners.installHarness({ id: params.id, ...payload })),
+      )
       .handle("createJoinToken", () => operation(runners.createJoinToken()))
       .handle("queryJoinTokens", () => operation(runners.queryJoinTokens()))
       .handle("revokeJoinToken", ({ params }) => operation(runners.revokeJoinToken(params)));
@@ -247,23 +248,19 @@ const controllerRoutes = HttpApiBuilder.group(api, "controller", (handlers) =>
 );
 
 /**
- * One presence, shared. `runner.retire` closes the socket the runner is holding
- * through the same per-runner map the socket route registers in, so a second
- * instance would be a service hanging up on connections nobody has.
- */
-const RunnerLayers = RunnerServiceLayer.pipe(Layer.provideMerge(RunnerPresenceLayer));
-
-/**
  * Every service an operation resolves. One list, because a controller booting
  * with a layer this list has and its own does not is a controller missing an
  * operation, and nothing would say so until a request asked for it.
  *
- * Two operation services are deliberately absent. `Plugins` and
+ * Four services an operation resolves are deliberately absent. `Plugins` and
  * `ProviderService` both read a host that holds what this process made of each
  * plugin, and the boot is what filled it in, so the two must be the same
  * object: building them here would hand the routes a second host that had never
- * loaded anything. They are built beside the boot instead, and reach the
- * handlers from there.
+ * loaded anything. `RunnerPresence` and `ProviderProbes` are absent for the
+ * neighbouring reason: `runner.retire` closes the socket the socket route
+ * registered, and the sweep after a hello writes through the same map, so a
+ * second instance of either would be a service acting on connections nobody
+ * has. All four are built beside the boot, and reach the handlers from there.
  */
 export const operationLayers = Layer.mergeAll(
   SetupLayer,
@@ -276,7 +273,7 @@ export const operationLayers = Layer.mergeAll(
   ProfilesLayer,
   TaskServiceLayer,
   ProjectServiceLayer,
-  RunnerLayers,
+  RunnerServiceLayer,
   RunnerJoinLayer,
   EventServiceLayer,
   LiveTopicsLayer,

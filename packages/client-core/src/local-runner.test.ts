@@ -24,6 +24,7 @@ const facts = (identityPort: number): RunnerFacts => ({
   docker: true,
   toolchains: [],
   providers: [],
+  adapters: ["claude-code"],
   identityPort,
 });
 

@@ -3,7 +3,9 @@
  * hosting sessions is what the connection is for.
  */
 import { networkInterfaces } from "node:os";
+import { join as joinPath } from "node:path";
 import * as Effect from "effect/Effect";
+import { runnerDirIn } from "@hydra/home";
 import { IDENTITY_PORT } from "@hydra/protocol";
 import { identityListener } from "./identity";
 import { probeFacts, thisMachine } from "./probe";
@@ -36,8 +38,13 @@ export const daemon = (home: string): Effect.Effect<never, NotEnrolled | RunnerR
       });
       const probe = probeFacts(thisMachine, identityPort);
       const headroom = machineHeadroom(home);
+      // Under the runner's own storage directory, so re-enlisting the machine
+      // leaves every provider login behind with the identity it belonged to.
+      const providersDir = joinPath(runnerDirIn(home), pin.storageDirectory, "providers");
       return yield* reconnect({
-        attempt: Effect.flatMap(probe, (facts) => connect({ pin, facts, probe, headroom })),
+        attempt: Effect.flatMap(probe, (facts) =>
+          connect({ pin, facts, probe, headroom, providersDir }),
+        ),
         signals: reconnectSignals({ now: () => Date.now(), addresses }),
       });
     }),

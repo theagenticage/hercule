@@ -14,6 +14,7 @@ import {
   type RunnerFacts,
   type Toolchain,
 } from "@hydra/protocol";
+import { ADAPTER_IDS } from "./providers";
 
 /** Deliberately two: anything else is installed by hand and named with a label. */
 const TOOLCHAINS = ["git", "gh"] as const;
@@ -102,6 +103,9 @@ export const probeFacts = (machine: Machine, identityPort: number): Effect.Effec
       docker: machine.locate(DOCKER) !== undefined,
       toolchains,
       providers,
+      // A fact about this build rather than about the machine: which of those
+      // binaries it could actually drive if they were there.
+      adapters: ADAPTER_IDS,
       identityPort,
     };
   });

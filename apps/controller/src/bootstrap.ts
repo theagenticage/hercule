@@ -43,6 +43,8 @@ import {
 } from "./secrets";
 import {
   JoinTokensLayer,
+  RunnerPresence,
+  RunnerPresenceLayer,
   startLocalRunner,
   type JoinTokens,
   type LocalRunner,
@@ -50,7 +52,13 @@ import {
   type LocalRunnerOptions,
 } from "./runners";
 import { PluginHost, PluginHostLayer, Plugins, PluginsLayer, registry } from "./plugins";
-import { ensureProviderInstances, ProviderService, ProviderServiceLayer } from "./providers";
+import {
+  ensureProviderInstances,
+  ProviderProbes,
+  ProviderProbesLayer,
+  ProviderService,
+  ProviderServiceLayer,
+} from "./providers";
 import { seed } from "./seed";
 import { Settings, SettingsLayer, type SettingError } from "./settings";
 
@@ -198,6 +206,8 @@ export type ControllerServices =
   | Credentials
   | JoinTokens
   | Plugins
+  | RunnerPresence
+  | ProviderProbes
   | ProviderService
   | HydraHome
   | BootstrapConfig;
@@ -242,13 +252,23 @@ export const bootWith = <A, E>(
     );
 
     /**
+     * One presence and one probe driver for the process, built here rather than
+     * beside the routes: the socket route registers connections in the same map
+     * `runner.retire` hangs up through, and the sweep after a hello writes
+     * through the same one again.
+     */
+    const withFleet = ProviderProbesLayer.pipe(Layer.provideMerge(RunnerPresenceLayer)).pipe(
+      Layer.provideMerge(repositories),
+    );
+
+    /**
      * The plugin host and its operations over those repositories: it reads
      * secrets and appends to the audit log, so it is layered on top of them
      * rather than merged beside them.
      */
     const withPlugins = Layer.mergeAll(PluginsLayer, ProviderServiceLayer).pipe(
       Layer.provideMerge(PluginHostLayer),
-      Layer.provideMerge(repositories),
+      Layer.provideMerge(withFleet),
     );
 
     const steps = Effect.gen(function* () {

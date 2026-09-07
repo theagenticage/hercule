@@ -45,13 +45,20 @@ import { COALESCE_WINDOW_MS, LiveTopics } from "../live";
 import { masterKeyLayer, secretsLayer } from "../secrets";
 import { PermissionProfilesLayer } from "../permissions";
 import { PluginHost, PluginHostLayer, PluginsLayer } from "../plugins";
-import { ensureProviderInstances, ProviderServiceLayer } from "../providers";
+import {
+  ensureProviderInstances,
+  ProviderProbeDeadline,
+  ProviderProbeInterval,
+  ProviderProbesLayer,
+  ProviderServiceLayer,
+} from "../providers";
 import { SettingsLayer } from "../settings";
 import {
   JoinTokens,
   JoinTokensLayer,
   RunnerFactsDeadline,
   RunnerPingSchedule,
+  RunnerPresenceLayer,
   runnerRepository,
   type RunnerPings,
 } from "../runners";
@@ -77,6 +84,9 @@ const services = (home: string) =>
     operationLayers,
     Layer.mergeAll(PluginsLayer, ProviderServiceLayer).pipe(Layer.provideMerge(PluginHostLayer)),
   ).pipe(
+    // One presence and one probe driver, as the boot builds them: the socket
+    // route registers connections in the same map every service acts through.
+    Layer.provideMerge(ProviderProbesLayer.pipe(Layer.provideMerge(RunnerPresenceLayer))),
     Layer.provideMerge(
       Layer.mergeAll(
         UsersLayer,
@@ -178,6 +188,13 @@ export interface ServerOptions {
    * facts. The shipped ten seconds is longer than a test can wait.
    */
   readonly factsDeadline?: Duration.Duration;
+  /**
+   * How long the controller waits for a runner to answer a probe, and how often
+   * it asks the whole fleet again. The shipped fifteen seconds and hour are
+   * both longer than a test can wait.
+   */
+  readonly probeDeadline?: Duration.Duration;
+  readonly probeInterval?: Duration.Duration;
   /** The shipped registry is compiled in, so a test hands over its own. */
   readonly plugins?: ReadonlyArray<Plugin>;
 }
@@ -221,13 +238,31 @@ export const withServer = (
         });
         yield* bootSteps;
         const reboot: RebootArranger = yield* repeatable(bootSteps);
-        const listening =
-          options.pings === undefined
-            ? serve(bundle)
-            : Effect.provideService(serve(bundle), RunnerPingSchedule, options.pings);
-        yield* options.factsDeadline === undefined
-          ? listening
-          : Effect.provideService(listening, RunnerFactsDeadline, options.factsDeadline);
+        // The four shipped values a test cannot wait out. Each is left alone
+        // unless the test named its own, so a server built with no options is
+        // the one that ships.
+        let listening = serve(bundle);
+        if (options.pings !== undefined) {
+          listening = Effect.provideService(listening, RunnerPingSchedule, options.pings);
+        }
+        if (options.factsDeadline !== undefined) {
+          listening = Effect.provideService(listening, RunnerFactsDeadline, options.factsDeadline);
+        }
+        if (options.probeDeadline !== undefined) {
+          listening = Effect.provideService(
+            listening,
+            ProviderProbeDeadline,
+            options.probeDeadline,
+          );
+        }
+        if (options.probeInterval !== undefined) {
+          listening = Effect.provideService(
+            listening,
+            ProviderProbeInterval,
+            options.probeInterval,
+          );
+        }
+        yield* listening;
         const base = yield* baseUrl;
         // The log this database holds, read the way anything else reads it: a
         // request's audit row is asserted through the service that wrote it.

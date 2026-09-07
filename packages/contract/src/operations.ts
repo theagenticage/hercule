@@ -115,6 +115,16 @@ const TABLE = {
     method: "POST",
     path: "/api/v1/runners/:id/refresh-facts",
   },
+  "runner.probe": {
+    requires: "infra.write",
+    method: "POST",
+    path: "/api/v1/runners/:id/probe",
+  },
+  "runner.installHarness": {
+    requires: "infra.write",
+    method: "POST",
+    path: "/api/v1/runners/:id/install-harness",
+  },
   "runner.createJoinToken": {
     requires: "infra.write",
     method: "POST",
