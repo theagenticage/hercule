@@ -40,30 +40,37 @@ const installedVersion = async (path: string): Promise<string> => {
 };
 
 describe.skipIf(binary === undefined)("the real Claude adapter on this machine", () => {
-  it("reports an empty config directory as not logged in, with the machine's version and models", async () => {
-    const context: ProviderRunnerContext = {
-      cwd: null,
-      home: emptyHome(),
-      binary: binary!,
-      env: { PATH: process.env["PATH"] ?? "" },
-    };
+  it(
+    "reports an empty config directory as not logged in, with the machine's version and models",
+    async () => {
+      const context: ProviderRunnerContext = {
+        cwd: null,
+        home: emptyHome(),
+        binary: binary!,
+        env: { PATH: process.env["PATH"] ?? "" },
+      };
 
-    const started = Date.now();
-    const probed = await Effect.runPromise(claudeCode.probe(context, {}));
-    const took = Date.now() - started;
+      const started = Date.now();
+      const probed = await Effect.runPromise(claudeCode.probe(context, {}));
+      const took = Date.now() - started;
 
-    // Not `error`: an empty config dir is a machine nobody has logged in on,
-    // and telling that apart from a broken harness is the whole point.
-    expect(probed.auth.status, probed.auth.message ?? "").toBe("unauthenticated");
-    expect(probed.auth.identity).toBeUndefined();
-    expect(probed.harnessVersion).toBe(await installedVersion(binary!));
-    // The catalogue is probed, never authored: an empty one would leave the
-    // composer with nothing to offer on a perfectly good machine.
-    expect(probed.models.length).toBeGreaterThan(0);
-    for (const model of probed.models) expect(model.slug).not.toBe("");
+      // Not `error`: an empty config dir is a machine nobody has logged in on,
+      // and telling that apart from a broken harness is the whole point.
+      expect(probed.auth.status, probed.auth.message ?? "").toBe("unauthenticated");
+      expect(probed.auth.identity).toBeUndefined();
+      expect(probed.harnessVersion).toBe(await installedVersion(binary!));
+      // The catalogue is probed, never authored: an empty one would leave the
+      // composer with nothing to offer on a perfectly good machine.
+      expect(probed.models.length).toBeGreaterThan(0);
+      for (const model of probed.models) expect(model.slug).not.toBe("");
 
-    expect(took).toBeLessThan(Duration.toMillis(PROBE_DEADLINE));
-  });
+      expect(took).toBeLessThan(Duration.toMillis(PROBE_DEADLINE));
+      // Vitest's own budget, aligned with the deadline under test rather than
+      // left at its default five seconds: a probe that takes its full fifteen is
+      // the failure this case exists to report, not one for vitest to cut short.
+    },
+    Duration.toMillis(PROBE_DEADLINE) * 2,
+  );
 });
 
 /**

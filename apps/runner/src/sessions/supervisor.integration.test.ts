@@ -7,7 +7,7 @@
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it, vi } from "vitest";
 import { Effect, Fiber, PubSub, Stream } from "effect";
 import type {
   ProviderEvent,
@@ -49,11 +49,25 @@ const START: SessionStart = {
 
 const at = "2026-09-07T10:00:00.000Z";
 
+/**
+ * No adapter sends this: it is published until a relay is heard from, and
+ * filtered out before one sees it.
+ */
+const MARKER: ProviderEvent = {
+  _tag: "runtime.warning",
+  eventId: "e-marker",
+  sessionId: SESSION,
+  at,
+  message: "is anybody listening",
+};
+
 /** An adapter that reports what it was handed and emits what the test asks for. */
 interface Fake {
   readonly adapter: ProviderAdapter;
   /** The context the supervisor resolved for the one session it started. */
   readonly contexts: Array<ProviderRunnerContext>;
+  /** How many markers have reached a relay, which is what says one is listening. */
+  readonly heard: () => number;
   readonly inputs: Array<TurnInput>;
   readonly emit: (event: ProviderEvent) => void;
   fails: string | undefined;
@@ -63,11 +77,13 @@ interface Fake {
 
 const faking = (): Fake => {
   const events = Effect.runSync(PubSub.unbounded<ProviderEvent>());
+  let heard = 0;
   const contexts: Array<ProviderRunnerContext> = [];
   const inputs: Array<TurnInput> = [];
   const held = new Map<string, SessionBinding>();
   const fake: Fake = {
     contexts,
+    heard: () => heard,
     inputs,
     fails: undefined,
     dies: false,
@@ -77,7 +93,18 @@ const faking = (): Fake => {
     adapter: {
       providerId: "fake",
       binaryName: "fake-harness",
-      events: Stream.fromPubSub(events),
+      /**
+       * A PubSub drops what no subscriber is on, so an event published before
+       * the relay ran is one nobody heard - the missing outbox (spec 03 section
+       * 2.3), and a race for any test that starts a session. A marker that got
+       * this far is the proof a relay is listening; it is counted and dropped
+       * here rather than passed on, so the relay under test never sees it.
+       */
+      events: Stream.filter(Stream.fromPubSub(events), (event) => {
+        if (event !== MARKER) return true;
+        heard += 1;
+        return false;
+      }),
       probe: () => Effect.die("not probed here"),
       listSessions: Effect.sync(() => [...held.values()]),
       startSession: (sessionId, _spec, ctx) =>
@@ -135,32 +162,64 @@ const connecting = (fake: Fake) => {
   return { supervisor, sent, machine, under };
 };
 
+/**
+ * How long a wait on the relay is given. Wall clock rather than a count of
+ * attempts: an attempt takes as long as the machine is busy, so counting them
+ * makes the wait shortest exactly when the rest of the suite is running beside
+ * it. Vitest's own budget is set from it, because a give-up wait longer than
+ * the test timeout never gets to say what it was waiting for.
+ */
+const WAIT_DEADLINE_MS = 10_000;
+
+/**
+ * Three, because the longest case here waits for the relay to subscribe, then
+ * for what the body did, then for the relay to have read past it: a test whose
+ * waits can outlast the timeout never gets to say what it was waiting for.
+ */
+vi.setConfig({ testTimeout: WAIT_DEADLINE_MS * 3 + 5_000 });
+
+/** Waits for something the relay has done, or gives up and says so. */
+const until = (what: string, ready: () => boolean): Effect.Effect<void> =>
+  Effect.gen(function* () {
+    const deadline = Date.now() + WAIT_DEADLINE_MS;
+    while (!ready() && Date.now() < deadline) yield* Effect.sleep(1);
+    expect(ready(), `the relay never ${what}`).toBe(true);
+  });
+
+/**
+ * Waits until a marker has reached the relay. That is the one thing that says a
+ * relay is on the PubSub - `Stream.onStart` fires before the subscription
+ * exists, so it would say so too early - and, because the relay reads the
+ * PubSub in order, nothing published before the marker can still be in flight
+ * when it arrives.
+ */
+const marked = (fake: Fake): Effect.Effect<void> =>
+  Effect.suspend(() => {
+    const before = fake.heard();
+    return until("heard a marker", () => {
+      fake.emit(MARKER);
+      return fake.heard() > before;
+    });
+  });
+
 /** The relay runs for as long as the body does, the way a connection forks it. */
 const driving = <A>(
+  fake: Fake,
   supervisor: { readonly relay: Effect.Effect<void> },
   body: Effect.Effect<A>,
 ): Promise<A> =>
   Effect.runPromise(
     Effect.gen(function* () {
       const relaying = yield* Effect.forkChild(supervisor.relay);
-      // Subscribing is what running the relay does, and an event published
-      // before it has subscribed is one nobody was there to hear - which is
-      // what the missing outbox means in general (spec 03 section 2.3).
-      yield* Effect.sleep(5);
+      // Proved, not slept through: `forkChild` hands the fiber back before it
+      // has run, so a session started here would publish its `session.started`
+      // to a PubSub nobody is on yet.
+      yield* marked(fake);
       const value = yield* body;
-      // Long enough for everything published to have been read and written.
-      yield* Effect.sleep(10);
       yield* Fiber.interrupt(relaying);
       return value;
     }),
   );
-
-/** Waits for something the relay has done, or gives up and says so. */
-const until = (ready: () => boolean): Effect.Effect<void> =>
-  Effect.gen(function* () {
-    for (let attempt = 0; attempt < 200 && !ready(); attempt++) yield* Effect.sleep(1);
-    expect(ready(), "the relay never got there").toBe(true);
-  });
 
 const eventsIn = (sent: ReadonlyArray<RunnerToController>): ReadonlyArray<SessionEvent> =>
   sent.filter((frame): frame is SessionEvent => frame._tag === "sessionEvent");
@@ -171,6 +230,7 @@ describe("one session, start to exit", () => {
     const { supervisor, sent, machine } = connecting(fake);
 
     await driving(
+      fake,
       supervisor,
       Effect.gen(function* () {
         yield* supervisor.start(START);
@@ -191,9 +251,9 @@ describe("one session, start to exit", () => {
             delta: "hello",
           }),
         );
-        yield* until(() => eventsIn(sent).length === 2);
+        yield* until("sent two events", () => eventsIn(sent).length === 2);
         yield* supervisor.stop({ _tag: "sessionStop", sessionId: SESSION });
-        yield* until(() => eventsIn(sent).length === 3);
+        yield* until("sent three events", () => eventsIn(sent).length === 3);
       }),
     );
 
@@ -221,13 +281,16 @@ describe("one session, start to exit", () => {
 
     const scratch = join(machine.scratchDir, SESSION);
     await driving(
+      fake,
       supervisor,
       Effect.gen(function* () {
         yield* supervisor.start(START);
         yield* supervisor.report;
         expect(existsSync(scratch)).toBe(true);
         yield* supervisor.stop({ _tag: "sessionStop", sessionId: SESSION });
-        yield* until(() => eventsIn(sent).some((frame) => frame.event._tag === "session.exited"));
+        yield* until("sent the exit", () =>
+          eventsIn(sent).some((frame) => frame.event._tag === "session.exited"),
+        );
         yield* supervisor.report;
       }),
     );
@@ -250,14 +313,19 @@ describe("a start the controller sends twice", () => {
     const scratch = join(machine.scratchDir, SESSION);
 
     await driving(
+      fake,
       supervisor,
       Effect.gen(function* () {
         yield* supervisor.start(START);
-        yield* until(() => eventsIn(sent).length === 1);
+        yield* until("sent the start", () => eventsIn(sent).length === 1);
         yield* Effect.sync(() => writeFileSync(join(scratch, "work.txt"), "half a turn"));
         // The controller re-issues a command it cannot account for after a
         // reconnect (spec 03 section 2.3), and this one must not be destructive.
         yield* supervisor.start(START);
+        // Read past it before counting: an event the duplicate had wrongly
+        // published would still be in the relay otherwise, and the count below
+        // would say "nothing happened" about a relay that had not looked yet.
+        yield* marked(fake);
       }),
     );
 
@@ -275,10 +343,11 @@ describe("an exit that arrives after the id was started again", () => {
     const scratch = join(machine.scratchDir, SESSION);
 
     await driving(
+      fake,
       supervisor,
       Effect.gen(function* () {
         yield* supervisor.start(START);
-        yield* until(() => eventsIn(sent).length === 1);
+        yield* until("sent the start", () => eventsIn(sent).length === 1);
         // The exit of an earlier run under the same id, still on its way
         // through the relay when the new one started. Only the adapter can
         // tell the two apart: the event carries the same session id.
@@ -291,7 +360,7 @@ describe("an exit that arrives after the id was started again", () => {
             reason: "process_exit",
           }),
         );
-        yield* until(() => eventsIn(sent).length === 2);
+        yield* until("sent two events", () => eventsIn(sent).length === 2);
         yield* supervisor.input({
           _tag: "sessionInput",
           sessionId: SESSION,
@@ -312,12 +381,24 @@ describe("a session that ended while the socket was down", () => {
     const fake = faking();
     const { supervisor, sent } = connecting(fake);
 
-    await driving(supervisor, supervisor.start(START));
+    await driving(
+      fake,
+      supervisor,
+      Effect.flatMap(supervisor.start(START), () =>
+        until("sent the start", () => eventsIn(sent).length === 1),
+      ),
+    );
     // The harness ends between connections: its exit is published to a relay
     // nobody is running, so it reaches no controller and the supervisor's own
     // entry outlives the session. Nothing replays it - there is no outbox.
     await Effect.runPromise(fake.adapter.stopSession(SESSION));
-    await driving(supervisor, supervisor.start(START));
+    await driving(
+      fake,
+      supervisor,
+      Effect.flatMap(supervisor.start(START), () =>
+        until("sent the second start", () => eventsIn(sent).length === 2),
+      ),
+    );
 
     expect(fake.contexts).toHaveLength(2);
     expect(eventsIn(sent).map((frame) => frame.event._tag)).toEqual([
@@ -333,7 +414,7 @@ describe("a session that cannot run here", () => {
     fake.fails = "no fake-harness on this machine";
     const { supervisor, sent, machine } = connecting(fake);
 
-    await driving(supervisor, supervisor.start(START));
+    await driving(fake, supervisor, supervisor.start(START));
 
     const events = eventsIn(sent).map((frame) => frame.event);
     expect(events.map((event) => event._tag)).toEqual(["runtime.error", "session.exited"]);
@@ -351,7 +432,7 @@ describe("a session that cannot run here", () => {
     const fake = faking();
     const { supervisor, sent } = connecting(fake);
 
-    await driving(supervisor, supervisor.start({ ...START, providerId: "codex" }));
+    await driving(fake, supervisor, supervisor.start({ ...START, providerId: "codex" }));
 
     const events = eventsIn(sent).map((frame) => frame.event);
     expect(events[0]).toMatchObject({ message: "no adapter for codex in this runner build" });
@@ -363,7 +444,7 @@ describe("a session that cannot run here", () => {
     const { supervisor, sent, machine } = connecting(fake);
     fake.dies = true;
 
-    await driving(supervisor, supervisor.start(START));
+    await driving(fake, supervisor, supervisor.start(START));
 
     // Every other answer on this connection catches its own defects; a session
     // that did not would leave the controller waiting in `starting` forever.
@@ -379,6 +460,7 @@ describe("a session that cannot run here", () => {
     const { supervisor, sent } = connecting(fake);
 
     await driving(
+      fake,
       supervisor,
       Effect.gen(function* () {
         yield* supervisor.input({

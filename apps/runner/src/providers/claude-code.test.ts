@@ -4,7 +4,7 @@
  */
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { Duration, Effect, Fiber, Stream } from "effect";
 import { TestClock } from "effect/testing";
 import type { Options, SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
@@ -425,8 +425,33 @@ const RESULT = {
   terminal_reason: "completed",
 };
 
-/** Lets the pump's promises run; the adapter reads the harness off the loop. */
-const settled = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
+/**
+ * How long a wait on the adapter's pump is given. The adapter reads the harness
+ * off the event loop and publishes what it read, so how many turns of the loop
+ * that takes is a property of how busy the machine is - which is why the wait is
+ * for the event, and not for a tick.
+ */
+const WAIT_DEADLINE_MS = 10_000;
+
+/**
+ * Vitest's own budget, set from the waits rather than left at its default five
+ * seconds: a test whose waits can outlast the timeout never gets to give up,
+ * and the failure names the test rather than the event that never came. Two,
+ * because the longest case here waits for one turn to close and the next to open.
+ */
+vi.setConfig({ testTimeout: WAIT_DEADLINE_MS * 2 + 5_000 });
+
+const until = async (what: string, ready: () => boolean): Promise<void> => {
+  const deadline = Date.now() + WAIT_DEADLINE_MS;
+  while (!ready() && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 1));
+  }
+  expect(ready(), `the adapter never ${what}`).toBe(true);
+};
+
+/** Waits until the session has ended, however it ended. */
+const ends = (seen: ReadonlyArray<ProviderEvent>): Promise<void> =>
+  until("ended the session", () => seen.some((event) => event._tag === "session.exited"));
 
 const tags = (seen: ReadonlyArray<ProviderEvent>): ReadonlyArray<string> =>
   seen.map((event) => event._tag);
@@ -442,7 +467,7 @@ describe("a Claude Code session", () => {
     // streaming-input mode the CLI says nothing at all until a first turn.
     expect(binding.nativeSessionId).not.toBe(SESSION);
     expect(run.options[0]?.sessionId).toBe(binding.nativeSessionId);
-    await settled();
+    await until("said it started", () => run.seen.length === 1);
     expect(tags(run.seen)).toEqual(["session.started"]);
     // The only place the controller can learn the native id: the report of what
     // this runner holds is sent once, at hello.
@@ -493,7 +518,10 @@ describe("a Claude Code session", () => {
     await Effect.runPromise(run.adapter.sendInput(SESSION, { text: "hello" }));
     await Effect.runPromise(run.adapter.sendInput(SESSION, { text: "and this" }));
 
-    await settled();
+    await until(
+      "opened one turn and passed both texts on",
+      () => run.sent.length === 2 && run.seen.length === 2,
+    );
     expect(run.sent.map((message) => message.message.content)).toEqual(["hello", "and this"]);
     // One turn, opened once: steering folds into the turn that is running.
     expect(tags(run.seen)).toEqual(["session.started", "turn.started"]);
@@ -505,9 +533,12 @@ describe("a Claude Code session", () => {
 
     await Effect.runPromise(run.adapter.sendInput(SESSION, { text: "hello" }));
     run.say(RESULT);
-    await settled();
+    await until("closed the first turn", () =>
+      run.seen.some((event) => event._tag === "turn.completed"),
+    );
 
     await Effect.runPromise(run.adapter.sendInput(SESSION, { text: "again" }));
+    await until("opened the second turn", () => run.seen.length === 5);
     expect(tags(run.seen)).toEqual([
       "session.started",
       "turn.started",
@@ -522,7 +553,7 @@ describe("a Claude Code session", () => {
     await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, WORKING));
 
     await Effect.runPromise(run.adapter.stopSession(SESSION));
-    await settled();
+    await ends(run.seen);
 
     expect(run.closed()).toBe(1);
     const exited = run.seen.at(-1);
@@ -535,7 +566,7 @@ describe("a Claude Code session", () => {
     await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, WORKING));
 
     run.end();
-    await settled();
+    await ends(run.seen);
 
     const exited = run.seen.at(-1);
     expect(exited?._tag === "session.exited" ? exited.reason : undefined).toBe("process_exit");
@@ -546,7 +577,7 @@ describe("a Claude Code session", () => {
     await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, WORKING));
 
     run.die(new Error("the harness went away"));
-    await settled();
+    await ends(run.seen);
 
     const failure = run.seen.find((event) => event._tag === "runtime.error");
     expect(failure?._tag === "runtime.error" ? failure.message : undefined).toBe(
@@ -562,7 +593,7 @@ describe("a Claude Code session", () => {
 
     await Effect.runPromise(run.adapter.stopSession(SESSION));
     run.die(new Error("Query closed before response received"));
-    await settled();
+    await ends(run.seen);
 
     expect(tags(run.seen)).toEqual(["session.started", "session.exited"]);
   });

@@ -44,6 +44,9 @@ let apiKey: string;
 /** Long enough for a cold harness to start, connect and answer one short prompt. */
 const TURN_DEADLINE_MS = 120_000;
 
+/** Long enough for a machine to have probed the instance and said it is logged in. */
+const LOGIN_DEADLINE_MS = 60_000;
+
 const asJson = <A>(ran: Ran): A => {
   expect(ran.code, `${ran.stdout}\n${ran.stderr}`).toBe(0);
   return jsonOf(ran) as A;
@@ -74,7 +77,7 @@ const instances = async (): Promise<ReadonlyArray<Instance>> => {
  * machine ever reported a usable login for it.
  */
 const loggedIn = async (): Promise<Instance | undefined> => {
-  const deadline = Date.now() + 60_000;
+  const deadline = Date.now() + LOGIN_DEADLINE_MS;
   for (;;) {
     const claude = (await instances()).find((one) => one.providerId === "claude-code");
     if (claude?.snapshots.some((snapshot) => snapshot.auth.status === "ok") === true) return claude;
@@ -201,21 +204,31 @@ describe.skipIf(!wanted)("a real Claude Code session through the binary", () => 
       expect(after.status).toBe("idle");
       expect(after.nativeSessionId).not.toBeNull();
     },
-    TURN_DEADLINE_MS + 60_000,
+    // The wait for a logged-in instance, the wait for the turn, and the CLI
+    // calls between them: a case whose timeout is only its longest wait has
+    // nothing left for the others.
+    LOGIN_DEADLINE_MS + TURN_DEADLINE_MS + 60_000,
   );
 
-  it("teaches the command that reads the session back", async (ctx) => {
-    if ((await loggedIn()) === undefined) {
-      ctx.skip("no machine reports a logged-in claude-code instance");
-      return;
-    }
+  it(
+    "teaches the command that reads the session back",
+    async (ctx) => {
+      if ((await loggedIn()) === undefined) {
+        ctx.skip("no machine reports a logged-in claude-code instance");
+        return;
+      }
 
-    const ran = await cli(
-      ["session", "spawn", "--prompt", "Reply with the single word ready. Use no tools."],
-      { home: state.home, binary },
-    );
+      const ran = await cli(
+        ["session", "spawn", "--prompt", "Reply with the single word ready. Use no tools."],
+        { home: state.home, binary },
+      );
 
-    expect(ran.code, `${ran.stdout}\n${ran.stderr}`).toBe(0);
-    expect(ran.stdout).toContain("hydra transcript read");
-  }, 60_000);
+      expect(ran.code, `${ran.stdout}\n${ran.stderr}`).toBe(0);
+      expect(ran.stdout).toContain("hydra transcript read");
+      // The wait for a logged-in instance plus the spawn behind it, not the wait
+      // alone: a case whose timeout is its own first wait has nothing left for
+      // what it is actually testing.
+    },
+    LOGIN_DEADLINE_MS + 30_000,
+  );
 });

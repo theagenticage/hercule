@@ -17,7 +17,7 @@
  * sequence number the controller has already applied writes nothing, however
  * many times it arrives.
  */
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { Effect, Schema } from "effect";
 import {
   ControllerToRunner,
@@ -81,9 +81,25 @@ const decodeFrame = (raw: unknown): ControllerMessage =>
 
 const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
+/**
+ * How long a wait on the controller is given, and vitest's own budget set from
+ * it. A give-up wait longer than the test timeout never gets to give up: vitest
+ * kills the test first, and the failure names the test rather than the thing
+ * that never happened. The slack is for the fleet each case stands up first.
+ */
+const WAIT_DEADLINE_MS = 10_000;
+
+/**
+ * Four, because the longest case here waits for the fleet to be probed and then
+ * for three moves of its own: a test whose waits can outlast the timeout never
+ * gets to give up, and the failure names the test rather than the move that
+ * never came. The slack is for the dial and the HTTP round trips between them.
+ */
+vi.setConfig({ testTimeout: WAIT_DEADLINE_MS * 4 + 10_000 });
+
 /** Waits for something the controller does on its own schedule, and names it. */
 const until = async <A>(what: string, look: () => A | undefined | Promise<A | undefined>) => {
-  const deadline = Date.now() + 4000;
+  const deadline = Date.now() + WAIT_DEADLINE_MS;
   do {
     const found = await look();
     if (found !== undefined) return found;
@@ -426,9 +442,13 @@ describe("what a machine reports", () => {
       report(arranged.wire, ...events[1]!);
       await sessionWhen(arranged, session.id, (one) => one.status === "busy");
 
-      for (const [seq, event] of events.slice(2)) report(arranged.wire, seq, event);
-      // The same frame again, as a replay after a reconnect would send it.
+      for (const [seq, event] of events.slice(2, 6)) report(arranged.wire, seq, event);
+      // The same frame again, as a replay after a reconnect would send it, and
+      // ahead of the completion the test then waits for: frames off one socket
+      // are handled in order, so a session reading idle is one whose replay has
+      // already been dealt with. Behind it, the wait would prove nothing.
       report(arranged.wire, ...events[3]!);
+      report(arranged.wire, ...events[6]!);
       await sessionWhen(arranged, session.id, (one) => one.status === "idle");
 
       const rows = await until("wrote the turn", async () => {
@@ -528,7 +548,18 @@ describe("what a machine reports", () => {
         at,
         _tag: "session.started",
       });
-      await delay(100);
+      // A second session, on the machine that really holds it, reported behind
+      // the first. Frames are read off one socket in order, so this one landing
+      // is what says the one before it has been dealt with - and waiting out a
+      // clock would only say the controller had not got to it yet.
+      const mine = await spawned(arranged, { prompt: "hello" });
+      report(arranged.wire, 2, {
+        eventId: crypto.randomUUID(),
+        sessionId: mine.id,
+        at,
+        _tag: "session.started",
+      });
+      await sessionWhen(arranged, mine.id, (one) => one.status === "idle");
 
       expect(await streamOf(arranged.harness, session.id)).toEqual([]);
       expect((await readSession(arranged, session.id)).status).toBe("starting");
@@ -543,6 +574,10 @@ describe("session.input", () => {
       const events = transcript(session.id);
       report(arranged.wire, ...events[0]!);
       await sessionWhen(arranged, session.id, (one) => one.status === "idle");
+      // The prompt's own turn is opened after the transaction that set idle has
+      // committed, so the status is not evidence that its frame was written -
+      // and the order the three inputs are asserted in below depends on it.
+      await framesWhen<SessionInputFrame>(arranged.wire, "sessionInput", 1);
 
       const opened = await post(
         arranged.harness.base,

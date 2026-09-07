@@ -11,7 +11,7 @@
  * This package reaches no controller code, so the stub is `Bun.serve` and an
  * Ed25519 keypair made here.
  */
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { Duration, Effect, Schema } from "effect";
 import {
   PROTOCOL_VERSION,
@@ -63,19 +63,45 @@ const bytes = (encoded: string): Uint8Array<ArrayBuffer> => {
 const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
 /**
- * Waits for something the stub controller saw, or gives up and says so.
- *
- * The bound is wall clock rather than a count of attempts: an attempt takes as
- * long as the machine is busy, so counting them makes the wait shorter exactly
- * when the rest of the suite is running beside it.
+ * How long a wait on the stub controller is given. Wall clock rather than a
+ * count of attempts: an attempt takes as long as the machine is busy, so
+ * counting them makes the wait shortest exactly when the rest of the suite is
+ * running beside it.
  */
 const WAIT_DEADLINE_MS = 10_000;
 
-const waitUntil = async (ready: () => boolean): Promise<void> => {
+/**
+ * Vitest's own budget, set from the waits rather than left at its default five
+ * seconds. A test whose waits can outlast the timeout never gets to give up:
+ * vitest kills it first, and the failure names the test rather than the frame
+ * that never came. Three, because the longest case here waits for the
+ * connection, then for the proof, then for what it asked for; the slack is for
+ * the one that waits a proof deadline out on top of those.
+ */
+vi.setConfig({ testTimeout: WAIT_DEADLINE_MS * 3 + 10_000 });
+
+/** Polls until it is true or the budget is gone, and says which. */
+const waitFor = async (ready: () => boolean): Promise<boolean> => {
   const deadline = Date.now() + WAIT_DEADLINE_MS;
   while (!ready() && Date.now() < deadline) await delay(5);
-  expect(ready(), "the stub controller never got there").toBe(true);
+  return ready();
 };
+
+const waitUntil = async (ready: () => boolean): Promise<void> => {
+  expect(await waitFor(ready), "the stub controller never got there").toBe(true);
+};
+
+/**
+ * Waits until the runner has accepted this stub as its controller.
+ *
+ * The watermark is the evidence, because it is only ever sent to a peer that
+ * proved itself. The runner's own hello is not: the stub records that frame
+ * before it has even signed its answer, so a test that sends a request on it
+ * can put the request ahead of the hello - and a peer that has not proved
+ * itself is answered with silence, whatever it asks.
+ */
+const proven = (stub: Stub): Promise<void> =>
+  waitUntil(() => stub.received.some((frame) => frame._tag === "watermarkReport"));
 
 const decodeRunnerFrame = (raw: unknown): RunnerMessage =>
   Effect.runSync(Schema.decodeUnknownEffect(RunnerToController)(raw));
@@ -181,11 +207,6 @@ const stubController = async (
       },
     },
   });
-
-  const waitFor = async (ready: () => boolean): Promise<boolean> => {
-    for (let attempt = 0; attempt < 400 && !ready(); attempt++) await delay(5);
-    return ready();
-  };
 
   const stub: Stub = {
     url: `http://127.0.0.1:${String(server.port)}`,
@@ -379,7 +400,7 @@ describe("the controller a runner is willing to talk to", () => {
     await stub.connected();
     // The proof, observed: the watermark is only sent to a peer that has proved
     // itself, so it is what says the runner accepted the real hello.
-    await waitUntil(() => stub.received.some((frame) => frame._tag === "watermarkReport"));
+    await proven(stub);
     // A hello claiming to be somebody else, after the real one was accepted. It
     // must not be able to talk the runner out of the controller it proved.
     stub.say({
@@ -417,7 +438,7 @@ describe("the controller a runner is willing to talk to", () => {
     // Not a minute later: a runner that has just come online with an unknown
     // disk is a runner nothing can decide to place work on. By tag rather than
     // by position: the sessions snapshot rides the same moment.
-    await waitUntil(() => stub.received.some((frame) => frame._tag === "watermarkReport"));
+    await proven(stub);
     expect(stub.received.find((frame) => frame._tag === "watermarkReport")).toEqual({
       _tag: "watermarkReport",
       watermark: {
@@ -446,7 +467,7 @@ describe("the controller a runner is willing to talk to", () => {
     // Waited from the proof, not from the dial: the frames below the hello are
     // only sent once the peer has proved itself, so seeing one is what says the
     // fuse is now running against a proven connection.
-    await waitUntil(() => stub.received.some((frame) => frame._tag === "watermarkReport"));
+    await proven(stub);
     // Waited out past the deadline the runner gives an unproven peer, because
     // that deadline must not be what ends a connection whose proof arrived.
     await delay(Duration.toMillis(DEADLINE) * 4);
@@ -478,7 +499,7 @@ describe("a runner whose controller has retired it", () => {
     });
 
     await stub.connected();
-    await waitUntil(() => stub.received.length >= 1);
+    await proven(stub);
     stub.hangUp(POLICY_VIOLATION, RETIRED);
     await pending;
 
@@ -504,7 +525,7 @@ describe("a runner whose controller has retired it", () => {
         settled = outcome;
       });
       await stub.connected();
-      await waitUntil(() => stub.received.length >= 1);
+      await proven(stub);
       stub.hangUp(code, reason);
       await pending;
 
@@ -543,7 +564,7 @@ describe("a controller asking for the machine's facts", () => {
     });
 
     await stub.connected();
-    await waitUntil(() => stub.received.length >= 1);
+    await proven(stub);
     stub.say(REQUEST);
 
     await waitUntil(() => reportIn(stub) !== undefined);
@@ -578,7 +599,7 @@ describe("a controller asking a runner to probe a provider it cannot drive", () 
     });
 
     await stub.connected();
-    await waitUntil(() => stub.received.length >= 1);
+    await proven(stub);
     stub.say(REQUEST);
 
     await waitUntil(() => reportIn(stub) !== undefined);
