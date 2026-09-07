@@ -4,11 +4,12 @@ import { useSuspenseQuery } from "@tanstack/react-query";
 import { FormCard } from "@hydra/ui";
 import { FALLBACK_TIMEZONE, isSupportedTimezone } from "@hydra/client-core";
 import { useLiveInvalidation } from "../../../app/live-invalidation";
-import { controllerQuery, runnerQuery, settingsQuery } from "../../../app/queries";
+import { controllerQuery, providersQuery, runnerQuery, settingsQuery } from "../../../app/queries";
 import { Connectivity } from "../../../screens/connectivity";
 import { EditForm } from "./-edit-form";
 import { RunnerFacts } from "./-facts";
 import { Moves } from "./-moves";
+import { Providers } from "./-providers";
 
 export const Route = createFileRoute("/_shell/fleet/$runnerId")({
   staticData: { title: "Runner" },
@@ -16,6 +17,7 @@ export const Route = createFileRoute("/_shell/fleet/$runnerId")({
     await Promise.all([
       context.queryClient.ensureQueryData(runnerQuery(context.client, params.runnerId)),
       context.queryClient.ensureQueryData(controllerQuery(context.client)),
+      context.queryClient.ensureQueryData(providersQuery(context.client)),
     ]);
   },
   component: RunnerPage,
@@ -35,6 +37,7 @@ function RunnerPage(): JSX.Element {
   const { runnerId } = Route.useParams();
 
   useLiveInvalidation(live, queryClient, "runner");
+  useLiveInvalidation(live, queryClient, "provider");
 
   const runner = useSuspenseQuery(runnerQuery(client, runnerId)).data;
   const controller = useSuspenseQuery(controllerQuery(client)).data;
@@ -64,6 +67,8 @@ function RunnerPage(): JSX.Element {
           <Moves client={client} runner={runner} defaultRunnerId={controller.defaultRunnerId} />
         )}
       </FormCard>
+
+      <Providers client={client} runner={runner} />
     </div>
   );
 }

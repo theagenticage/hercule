@@ -114,6 +114,13 @@ const runnerMessages: ReadonlyArray<RunnerMessage> = [
   { _tag: "watermarkReport", watermark },
   { _tag: "probeReport", requestId: REQUEST_ID, instanceId: INSTANCE_ID, result: probeResult },
   { _tag: "installResult", requestId: REQUEST_ID, ok: false, message: "curl: (22) not found" },
+  {
+    _tag: "loginUrl",
+    requestId: REQUEST_ID,
+    url: "https://claude.ai/oauth/authorize?code=challenge",
+  },
+  { _tag: "loginFailed", requestId: REQUEST_ID, message: "no login in progress" },
+  { _tag: "loginResult", requestId: REQUEST_ID, ok: false, message: "Invalid code." },
   { _tag: "goodbye" },
 ];
 
@@ -130,6 +137,8 @@ const controllerMessages: ReadonlyArray<ControllerMessage> = [
     config: {},
   },
   { _tag: "installRequest", requestId: REQUEST_ID, providerId: "claude-code" },
+  { _tag: "loginStart", requestId: REQUEST_ID, instanceId: INSTANCE_ID, providerId: "claude-code" },
+  { _tag: "loginCode", requestId: REQUEST_ID, instanceId: INSTANCE_ID, code: "the-pasted-code" },
 ];
 
 describe("the protocol version", () => {

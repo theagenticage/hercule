@@ -31,6 +31,7 @@ import {
   type ControllerHello,
   MAX_FACT_LENGTH,
   type InstallRequest,
+  type LoginStart,
   type ProbeRequest,
   type ProbeResult,
   type RunnerFacts,
@@ -40,10 +41,12 @@ import {
   adapterFor,
   noAdapterFor,
   probeFailed,
+  providerLogins,
   type InstallOutcome,
   type ProviderAdapter,
   type ProviderRunnerContext,
 } from "./providers";
+import type { LoginAnswer } from "./providers/login";
 import { checkWatermark, type Headroom } from "./watermark";
 
 const SOCKET_PATH = "/api/v1/runners/socket";
@@ -309,6 +312,36 @@ export const connect = (
       );
     };
 
+    /**
+     * One half of a login: the URL the vendor printed, or how the code the user
+     * pasted back went. The child holding both is the runner's rather than this
+     * connection's, so a socket that drops in between does not end the exchange.
+     */
+    const answerLogin = (requestId: string, answering: Effect.Effect<LoginAnswer>) => {
+      const reporting = (answer: LoginAnswer) => write(asText({ ...answer, requestId }));
+      return Effect.flatMap(answering, reporting).pipe(
+        Effect.catchCause((cause) =>
+          Effect.ignore(reporting({ _tag: "loginFailed", message: wentWrong(cause) })),
+        ),
+        Effect.ignore,
+      );
+    };
+
+    const startingLogin = (request: LoginStart): Effect.Effect<LoginAnswer> =>
+      Effect.suspend(() => {
+        const adapter = adapterFor(request.providerId);
+        return adapter === undefined
+          ? Effect.succeed<LoginAnswer>({
+              _tag: "loginFailed",
+              message: noAdapterFor(request.providerId),
+            })
+          : providerLogins.start(
+              request.instanceId,
+              adapter,
+              contextFor(adapter, request.instanceId),
+            );
+      });
+
     const handle = (raw: string) =>
       Effect.gen(function* () {
         if (impostor !== undefined) return;
@@ -354,6 +387,22 @@ export const connect = (
         }
         if (message._tag === "installRequest") {
           return yield* Effect.asVoid(Effect.forkIn(answerInstall(message), connection));
+        }
+        if (message._tag === "loginStart") {
+          // Forked for the same reason a probe is: the user is at a browser,
+          // and the connection has to keep answering while they are.
+          return yield* Effect.asVoid(
+            Effect.forkIn(answerLogin(message.requestId, startingLogin(message)), connection),
+          );
+        }
+        if (message._tag === "loginCode") {
+          const { requestId, instanceId, code } = message;
+          return yield* Effect.asVoid(
+            Effect.forkIn(
+              answerLogin(requestId, providerLogins.submit(instanceId, code)),
+              connection,
+            ),
+          );
         }
         // An ack belongs to the replayable events nothing sends yet.
       });

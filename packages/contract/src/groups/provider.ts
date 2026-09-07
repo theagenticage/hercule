@@ -15,7 +15,14 @@ import { DeclaredCapabilities, MAX_PROVIDER_NAME_LENGTH } from "@hydra/plugin-ho
 import { ModelDescriptor, SnapshotAuth } from "@hydra/protocol";
 import * as HttpApiEndpoint from "effect/unstable/httpapi/HttpApiEndpoint";
 import * as HttpApiGroup from "effect/unstable/httpapi/HttpApiGroup";
-import { Forbidden, Internal, NotFound, Unauthenticated, Validation } from "../errors";
+import {
+  Forbidden,
+  Internal,
+  InvalidState,
+  NotFound,
+  Unauthenticated,
+  Validation,
+} from "../errors";
 import { Id, Timestamp } from "../ids";
 import { Authenticated } from "../security";
 import { bounded } from "../strings";
@@ -89,6 +96,32 @@ export const ProviderInstanceUpdateInput = Schema.Struct({
 
 export type ProviderInstanceUpdateInput = Schema.Schema.Type<typeof ProviderInstanceUpdateInput>;
 
+/**
+ * Which machine a login runs on. A vendor credential belongs to exactly one
+ * machine, because refresh-token rotation makes two live copies of one log each
+ * other out.
+ */
+export const ProviderLoginInput = Schema.Struct({ runnerId: Id });
+
+export type ProviderLoginInput = Schema.Schema.Type<typeof ProviderLoginInput>;
+
+/**
+ * The code the user pasted back out of the browser they opened the URL in. One
+ * line by construction: it is written to the vendor's stdin, where a second
+ * line would be read as a second answer to whatever it asks next.
+ */
+export const ProviderLoginCodeInput = Schema.Struct({
+  runnerId: Id,
+  code: bounded(1, 512).check(
+    Schema.isPattern(/^[^\r\n]+$/, {
+      title: "code",
+      description: "a single line",
+    }),
+  ),
+});
+
+export type ProviderLoginCodeInput = Schema.Schema.Type<typeof ProviderLoginCodeInput>;
+
 export const provider = HttpApiGroup.make("provider")
   .add(
     HttpApiEndpoint.get("query", "/providers", {
@@ -115,6 +148,18 @@ export const provider = HttpApiGroup.make("provider")
       params: { id: Id },
       success: Schema.Struct({}),
       error: [Unauthenticated, Forbidden, Validation, NotFound, Internal],
+    }),
+    HttpApiEndpoint.post("login", "/providers/:id/login", {
+      params: { id: Id },
+      payload: ProviderLoginInput,
+      success: Schema.Struct({ url: Schema.String }),
+      error: [Unauthenticated, Forbidden, Validation, NotFound, InvalidState, Internal],
+    }),
+    HttpApiEndpoint.post("submitLoginCode", "/providers/:id/login-code", {
+      params: { id: Id },
+      payload: ProviderLoginCodeInput,
+      success: CapabilitySnapshot,
+      error: [Unauthenticated, Forbidden, Validation, NotFound, InvalidState, Internal],
     }),
   )
   .middleware(Authenticated);

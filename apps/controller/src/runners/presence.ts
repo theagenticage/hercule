@@ -24,6 +24,11 @@ import {
   RETIRED_CLOSE_REASON,
   type InstallRequest,
   type InstallResult,
+  type LoginCode,
+  type LoginFailed,
+  type LoginResult,
+  type LoginStart,
+  type LoginUrl,
   type ProbeReport,
   type ProbeRequest,
 } from "@hydra/protocol";
@@ -51,10 +56,10 @@ export const RunnerFactsDeadline = Context.Reference<Duration.Duration>(
 );
 
 /** What the controller asks one runner to do, on the connection it is holding. */
-export type Request = ProbeRequest | InstallRequest;
+export type Request = ProbeRequest | InstallRequest | LoginStart | LoginCode;
 
 /** What came back for one of those, correlated by the request's own id. */
-export type Answer = ProbeReport | InstallResult;
+export type Answer = ProbeReport | InstallResult | LoginUrl | LoginFailed | LoginResult;
 
 /** How presence reaches back to a connection that is holding a runner. */
 export interface Connected {

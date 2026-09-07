@@ -127,6 +127,17 @@ export const pluginsQuery = (client: HydraClient) =>
   });
 
 /**
+ * Every provider instance and what each machine last reported about it. One
+ * answer: a fresh install has one instance per shipped provider, and both
+ * screens that read them show every one.
+ */
+export const providersQuery = (client: HydraClient) =>
+  queryOptions({
+    queryKey: queryKeys.providers(),
+    queryFn: () => client.provider.query(),
+  });
+
+/**
  * The controller itself: its identity, its version and the runner work falls
  * back to. The version is what a runner's own is compared against, so it is
  * read rather than assumed to match.

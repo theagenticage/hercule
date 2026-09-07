@@ -6,6 +6,7 @@
  * running it.
  */
 import * as Effect from "effect/Effect";
+import type { LoginChild, LoginSpawn } from "./login";
 
 /** How a process ended, and everything it said. */
 export interface Ran {
@@ -48,3 +49,33 @@ export const runProcess: Run = (command, env) =>
     },
     catch: (error) => (error instanceof Error ? error.message : String(error)),
   }).pipe(Effect.catch((message) => Effect.succeed({ code: 1, stdout: "", stderr: message })));
+
+/**
+ * A login on this machine. Unlike a run, it is read and written while it lives:
+ * the vendor prints a URL, waits on stdin, and only then decides how it went.
+ */
+export const spawnLogin: LoginSpawn = (command, env): LoginChild => {
+  // Copied because Bun's types take a mutable array, and an adapter's command
+  // is a constant it must keep.
+  const child = Bun.spawn([...command], { stdin: "pipe", stdout: "pipe", stderr: "pipe", env });
+  const text = (stream: ReadableStream<Uint8Array>): AsyncIterable<string> => {
+    const decoder = new TextDecoder();
+    return (async function* () {
+      for await (const chunk of stream) yield decoder.decode(chunk, { stream: true });
+    })();
+  };
+  return {
+    stdout: text(child.stdout),
+    stderr: text(child.stderr),
+    write: (value) => {
+      // Written and flushed without waiting: the vendor is reading a line and
+      // the answer comes back on the pipes, not from the write.
+      void child.stdin.write(value);
+      void child.stdin.flush();
+    },
+    kill: () => {
+      child.kill();
+    },
+    exited: child.exited,
+  };
+};

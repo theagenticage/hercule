@@ -1,33 +1,140 @@
-import type { JSX } from "react";
-import { createFileRoute } from "@tanstack/react-router";
+import type { JSX, ReactNode } from "react";
+import { Link, createFileRoute } from "@tanstack/react-router";
+import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { Button, EmptyState } from "@hydra/ui";
+import { providerRows, queryKeys, sessionsEmptyState } from "@hydra/client-core";
+import { useLiveInvalidation } from "../../app/live-invalidation";
+import { localRunnerQuery, providersQuery, runnersQuery } from "../../app/queries";
+import { ProviderLogin } from "../../screens/provider-login";
 
 export const Route = createFileRoute("/_shell/")({
   staticData: { title: "Sessions" },
+  // Answered before it is shown, detection included: this screen is the
+  // guidance, and one that said "no runner has been detected" for the second it
+  // takes to ask the machine would send the reader off to start one they have.
+  loader: async ({ context }) => {
+    const [runners] = await Promise.all([
+      context.queryClient.ensureQueryData(runnersQuery(context.client)),
+      context.queryClient.ensureQueryData(providersQuery(context.client)),
+    ]);
+    await context.queryClient.ensureQueryData(
+      localRunnerQuery(context.detectLocalRunner, runners.items),
+    );
+  },
   component: Sessions,
 });
 
 /**
  * The home screen, and the rest of onboarding: what it says is what the user
- * does next. Until a runner joins there is nothing to start a thread on, so the
- * button that starts one is disabled with its reason rather than hidden.
+ * does next.
+ *
+ * Which of the four things that is comes from the machine this browser is on
+ * and what it last reported, so the screen changes by itself as a runner joins,
+ * a harness is installed and a login finishes. Nothing starts a thread yet, so
+ * the button that would is disabled with its reason rather than hidden.
  */
 function Sessions(): JSX.Element {
+  const { client, queryClient, live, detectLocalRunner } = Route.useRouteContext();
+
+  useLiveInvalidation(live, queryClient, "runner");
+  useLiveInvalidation(live, queryClient, "provider");
+
+  const runners = useSuspenseQuery(runnersQuery(client)).data.items;
+  const instances = useSuspenseQuery(providersQuery(client)).data;
+  const localId = useQuery(localRunnerQuery(detectLocalRunner, runners)).data ?? null;
+  const local = runners.find((runner) => runner.id === localId) ?? null;
+
+  const state = sessionsEmptyState(local, instances);
+  const reread = (): void => {
+    void queryClient.invalidateQueries({ queryKey: queryKeys.providers() });
+  };
+
+  // The first half is what tells the rest of this function that `local` is
+  // there; the state alone already says so.
+  if (local === null || state.kind === "no-runner") {
+    return (
+      <Screen
+        headline="No runner has been detected on this machine."
+        lead="A thread runs on a machine. Start a runner here and Hydra will look for the harnesses installed on it - Claude Code, Codex, pi - and offer to log in to them."
+        fine={
+          <>
+            Run{" "}
+            <code className="rounded-[4px] bg-line-soft px-1.5 py-px font-mono text-fine">
+              hydra runner
+            </code>{" "}
+            on this machine, or join another one from Fleet.
+          </>
+        }
+      />
+    );
+  }
+
+  if (state.kind === "no-harness") {
+    return (
+      <Screen
+        headline="No coding harness was found on this machine."
+        lead="A thread runs on a coding harness - Claude Code, Codex or pi. Install one on this machine and Hydra will offer to log in to it."
+        fine={
+          <Link to="/fleet/$runnerId" params={{ runnerId: local.id }} className="underline">
+            Install one from Fleet
+          </Link>
+        }
+      />
+    );
+  }
+
+  if (state.kind === "log-in") {
+    return (
+      <Screen
+        headline={found(state.instances.map((instance) => instance.displayName))}
+        lead="Log in to use it in Hydra. The login runs on this machine and its credential stays there."
+        fine="A thread needs a harness that is logged in, so starting one waits on this."
+      >
+        {state.instances.map((instance) => (
+          <ProviderLogin
+            key={instance.id}
+            client={client}
+            instanceId={instance.id}
+            runnerId={local.id}
+            subject={`${instance.displayName} on this machine`}
+            label={`Log in to ${instance.displayName}`}
+            variant="primary"
+            onLoggedIn={reread}
+          />
+        ))}
+      </Screen>
+    );
+  }
+
+  // Which harness is ready is what the reader wants named; the first one that
+  // answered is as good an answer as any, and there is one on a fresh install.
+  const ready = providerRows(local, instances).find((row) => row.loggedIn);
+
   return (
-    <EmptyState
-      headline="No runner has been detected on this machine."
-      lead="A thread runs on a machine. Start a runner here and Hydra will look for the harnesses installed on it - Claude Code, Codex, pi - and offer to log in to them."
-      fine={
-        <>
-          Run{" "}
-          <code className="rounded-[4px] bg-line-soft px-1.5 py-px font-mono text-fine">
-            hydra runner
-          </code>{" "}
-          on this machine, or join another one from Fleet.
-        </>
-      }
-    >
-      <div className="-ml-2 flex flex-wrap gap-0.5">
+    <Screen
+      headline={`${ready?.name ?? "A coding harness"} is ready.`}
+      lead="Threads are the next thing to land. Until they do, this screen is where they will start."
+      fine="Starting a thread is issue #69."
+    />
+  );
+}
+
+/** Every state is the same screen with the disabled thread button under it. */
+function Screen({
+  headline,
+  lead,
+  fine,
+  children,
+}: {
+  readonly headline: string;
+  readonly lead: string;
+  readonly fine?: ReactNode;
+  readonly children?: ReactNode;
+}): JSX.Element {
+  return (
+    <EmptyState headline={headline} lead={lead} fine={fine}>
+      <div className="-ml-2 flex flex-wrap items-center gap-0.5">
+        {children}
         <Button variant="primary" disabled>
           Create new thread
         </Button>
@@ -35,3 +142,9 @@ function Sessions(): JSX.Element {
     </EmptyState>
   );
 }
+
+/** The harnesses on offer, read as a sentence rather than as a list. */
+const found = (names: ReadonlyArray<string>): string =>
+  names.length < 2
+    ? `${names[0] ?? "A coding harness"} was found on this machine.`
+    : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1] ?? ""} were found on this machine.`;

@@ -213,6 +213,9 @@ const hold = (runnerId: string, socket: Socket.Socket) =>
             return yield* presence.reportedWatermark(runnerId, mine, message.watermark);
           case "probeReport":
           case "installResult":
+          case "loginUrl":
+          case "loginFailed":
+          case "loginResult":
             // The answer to something this controller asked, carried whole: the
             // request id in it is what says which caller is waiting.
             if (!greeted) return;

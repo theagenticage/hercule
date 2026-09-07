@@ -17,6 +17,7 @@
  * names the instance so a live subscriber refetches exactly what changed.
  */
 import * as Context from "effect/Context";
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
@@ -24,14 +25,20 @@ import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import type { ProviderDefinition } from "@hydra/plugin-host";
+import type { LoginCode, LoginFailed, LoginResult, LoginStart, LoginUrl } from "@hydra/protocol";
 import {
+  invalidState,
   Id,
   notFound,
   ProviderInstanceCreateInput,
   ProviderInstanceUpdateInput,
+  ProviderLoginCodeInput,
+  ProviderLoginInput,
   validation,
   validationOf,
+  type CapabilitySnapshot,
   type Forbidden,
+  type InvalidState,
   type NotFound,
   type ProviderInstance,
   type Unauthenticated,
@@ -41,9 +48,43 @@ import { requireGrant, USER_ACTOR } from "../actor";
 import { nowIso, withTransaction } from "../db";
 import { AuditLog } from "../events";
 import { PluginHost } from "../plugins";
-import { ProviderProbes } from "./probes";
+// The two runner modules directly rather than the domain's index: the runner
+// service reaches this domain, so going through it would close a cycle.
+import { requireAdapter } from "../runners/adapters";
+import { RunnerPresence, type Answer } from "../runners/presence";
+import { runnerRepository } from "../runners/repository";
+import { ProviderProbes, ProviderProbeDeadline } from "./probes";
 import { providerRepository, type StoredInstance, type StoredSnapshot } from "./repository";
 import { floorFor, versionVerdict } from "./version";
+
+/**
+ * How long the machine has to print the vendor's URL. The user is watching a
+ * dialog, and a cold CLI reaching the vendor is what takes the time.
+ */
+const LOGIN_DEADLINE: Duration.Duration = Duration.seconds(30);
+
+/** Tests hand over a deadline they can wait out. */
+export const ProviderLoginDeadline = Context.Reference<Duration.Duration>(
+  "hydra/controller/providers/ProviderLoginDeadline",
+  { defaultValue: (): Duration.Duration => LOGIN_DEADLINE },
+);
+
+/**
+ * How long the pasted code has. Longer than the URL's wait because this one
+ * covers the vendor's own exchange with its server: giving up early would tell
+ * the user a login failed that in fact wrote a credential.
+ */
+const LOGIN_CODE_DEADLINE: Duration.Duration = Duration.minutes(2);
+
+/** Which machine a login runs on. The credential lands on that machine alone. */
+const LoginInput = Schema.Struct({ id: Id, ...ProviderLoginInput.fields });
+
+export type LoginInput = Schema.Schema.Type<typeof LoginInput>;
+
+/** The code the user pasted back out of their browser. */
+const LoginCodeInput = Schema.Struct({ id: Id, ...ProviderLoginCodeInput.fields });
+
+export type LoginCodeInput = Schema.Schema.Type<typeof LoginCodeInput>;
 
 /** What identifies one instance, and what an edit does to it. */
 const UpdateInput = Schema.Struct({ id: Id, ...ProviderInstanceUpdateInput.fields });
@@ -57,6 +98,8 @@ export type Identified = Schema.Schema.Type<typeof Identified>;
 const decodeCreate = Schema.decodeUnknownEffect(ProviderInstanceCreateInput);
 const decodeUpdate = Schema.decodeUnknownEffect(UpdateInput);
 const decodeIdentified = Schema.decodeUnknownEffect(Identified);
+const decodeLogin = Schema.decodeUnknownEffect(LoginInput);
+const decodeLoginCode = Schema.decodeUnknownEffect(LoginCodeInput);
 
 const NO_SUCH_INSTANCE = "no such provider instance";
 
@@ -65,6 +108,18 @@ type ReadError = Unauthenticated | Forbidden | SqlError | Schema.SchemaError;
 type CreateError = ReadError | Validation;
 
 type WriteError = CreateError | NotFound;
+
+type LoginError = WriteError | InvalidState;
+
+/** What a runner answers a login frame with. */
+type LoginAnswer = LoginUrl | LoginFailed | LoginResult;
+
+const isLoginAnswer = (answer: Answer): answer is LoginAnswer =>
+  answer._tag === "loginUrl" || answer._tag === "loginFailed" || answer._tag === "loginResult";
+
+/** The machine's own words for why the exchange stopped. */
+const refusalIn = (answer: LoginAnswer): string =>
+  answer._tag === "loginFailed" ? answer.message : "the login did not answer with a URL";
 
 /**
  * Every issue at once, so a form can put each message under its own field, and
@@ -90,6 +145,8 @@ const make = Effect.gen(function* () {
   const host = yield* PluginHost;
   const audit = yield* AuditLog;
   const probes = yield* ProviderProbes;
+  const presence = yield* RunnerPresence;
+  const runners = yield* runnerRepository;
 
   const definitions = Effect.map(
     host.providers(),
@@ -157,6 +214,37 @@ const make = Effect.gen(function* () {
         : Effect.succeed(definition);
     });
 
+  /** The machine, once it is one that can run this provider's login at all. */
+  const drivable = (runnerId: string, providerId: string): Effect.Effect<void, LoginError> =>
+    Effect.gen(function* () {
+      const runner = yield* runners.read(runnerId);
+      if (Option.isNone(runner)) return yield* Effect.fail(notFound("no such runner"));
+      yield* requireAdapter(runner.value, providerId, "runnerId");
+    });
+
+  /** One login frame out, its answer back, under the deadline a caller can wait. */
+  const asked = (
+    runnerId: string,
+    request: LoginStart | LoginCode,
+    deadline: Duration.Duration,
+  ): Effect.Effect<LoginAnswer, InvalidState> =>
+    Effect.gen(function* () {
+      const answer = yield* presence.asked(runnerId, request, deadline);
+      const login = Option.filter(answer, isLoginAnswer);
+      return yield* Option.match(login, {
+        // A machine holding no connection, one that ended first and one that
+        // said nothing in time are all the same thing to the user: it did not
+        // answer.
+        onNone: () =>
+          Effect.fail(
+            invalidState(
+              `that runner did not answer the login within ${Duration.format(deadline)}`,
+            ),
+          ),
+        onSome: Effect.succeed,
+      });
+    });
+
   return {
     query: (): Effect.Effect<ReadonlyArray<ProviderInstance>, ReadError> =>
       Effect.gen(function* () {
@@ -169,6 +257,85 @@ const make = Effect.gen(function* () {
         yield* requireGrant("provider.read");
         const { id } = yield* Effect.mapError(decodeIdentified(input), validationOf);
         return yield* one(id);
+      }),
+
+    /**
+     * Starts the vendor's own login for this instance on one machine and hands
+     * back the URL it printed. The user opens that URL in whatever browser they
+     * are at: the machine running the harness may have none.
+     */
+    login: (input: LoginInput): Effect.Effect<{ readonly url: string }, LoginError> =>
+      Effect.gen(function* () {
+        yield* requireGrant("provider.login");
+        const { id, runnerId } = yield* Effect.mapError(decodeLogin(input), validationOf);
+        const instance = yield* one(id);
+        yield* drivable(runnerId, instance.providerId);
+        const answer = yield* asked(
+          runnerId,
+          {
+            _tag: "loginStart",
+            requestId: crypto.randomUUID(),
+            instanceId: id,
+            providerId: instance.providerId,
+          },
+          yield* ProviderLoginDeadline,
+        );
+        if (answer._tag !== "loginUrl") return yield* Effect.fail(invalidState(refusalIn(answer)));
+        return { url: answer.url };
+      }),
+
+    /**
+     * Hands the machine the code the user pasted back. A code the vendor
+     * refuses is a refusal the user can act on by pasting again, so the login
+     * stays up and only this call fails; a login that finished is answered with
+     * a fresh snapshot, because a harness that has just been logged in has
+     * never been asked whose login it is holding.
+     */
+    submitLoginCode: (input: LoginCodeInput): Effect.Effect<CapabilitySnapshot, LoginError> =>
+      Effect.gen(function* () {
+        yield* requireGrant("provider.submitLoginCode");
+        const { id, runnerId, code } = yield* Effect.mapError(decodeLoginCode(input), validationOf);
+        const instance = yield* one(id);
+        yield* drivable(runnerId, instance.providerId);
+        const answer = yield* asked(
+          runnerId,
+          { _tag: "loginCode", requestId: crypto.randomUUID(), instanceId: id, code },
+          LOGIN_CODE_DEADLINE,
+        );
+        if (answer._tag !== "loginResult") {
+          return yield* Effect.fail(invalidState(refusalIn(answer)));
+        }
+        if (!answer.ok) {
+          const said = answer.message ?? "that code was refused";
+          return yield* Effect.fail(validation([{ path: ["code"], message: said }], said));
+        }
+        // The one thing this feature does that a reader of the log will want
+        // back: who put a vendor credential on which machine, and when. Never
+        // the URL or the code, which are good for this one exchange only.
+        yield* withTransaction(
+          sql,
+          Effect.flatMap(nowIso, (at) =>
+            audit.append({
+              kind: "provider.loggedIn",
+              actor: USER_ACTOR,
+              payload: { instanceId: id, runnerId },
+              record: { topic: "provider", id },
+              at,
+            }),
+          ),
+        );
+        const snapshot = yield* probes.probe(runnerId, id);
+        return yield* Option.match(snapshot, {
+          onNone: () =>
+            Effect.flatMap(ProviderProbeDeadline, (waited) =>
+              Effect.fail(
+                invalidState(
+                  `the login finished, but that runner did not answer the probe within ${Duration.format(waited)}`,
+                ),
+              ),
+            ),
+          onSome: Effect.succeed,
+        });
       }),
 
     /** Opens a second account on a provider, or the first on one the boot missed. */
@@ -303,5 +470,5 @@ export class ProviderService extends Context.Service<
 export const ProviderServiceLayer: Layer.Layer<
   ProviderService,
   never,
-  SqlClient.SqlClient | PluginHost | AuditLog | ProviderProbes
+  SqlClient.SqlClient | PluginHost | AuditLog | ProviderProbes | RunnerPresence
 > = Layer.effect(ProviderService)(make);

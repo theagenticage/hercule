@@ -12,6 +12,8 @@ import type * as Effect from "effect/Effect";
 import type * as Schema from "effect/Schema";
 import { MAX_FACT_LENGTH, type ProbeResult } from "@hydra/protocol";
 import { CLAUDE_CODE, claudeCode } from "./claude-code";
+import { logins, type LoginCommand } from "./login";
+import { spawnLogin } from "./process";
 
 /** Where one provider instance keeps its state on this machine, and what it drives. */
 export interface ProviderRunnerContext {
@@ -47,6 +49,12 @@ export interface ProviderAdapter {
   readonly install?: (
     env: Readonly<Record<string, string | undefined>>,
   ) => Effect.Effect<InstallOutcome>;
+  /**
+   * How this vendor's headless login is started. Absent on an adapter with no
+   * login of its own. The binary is passed separately because a login can only
+   * be started on a machine that has one.
+   */
+  readonly login?: (ctx: ProviderRunnerContext, binary: string) => LoginCommand;
 }
 
 const ADAPTERS: ReadonlyMap<string, ProviderAdapter> = new Map([[CLAUDE_CODE, claudeCode]]);
@@ -56,6 +64,13 @@ export const ADAPTER_IDS: ReadonlyArray<string> = [...ADAPTERS.keys()];
 
 export const adapterFor = (providerId: string): ProviderAdapter | undefined =>
   ADAPTERS.get(providerId);
+
+/**
+ * The logins this machine is holding. One per process rather than per
+ * connection: the child outlives a socket that drops between the URL and the
+ * code the user is still pasting.
+ */
+export const providerLogins = logins(spawnLogin);
 
 /**
  * What a runner answers with when it could not probe at all. The message is

@@ -34,6 +34,8 @@ import {
   type ControllerToRunner as ControllerMessage,
   type InstallRequest,
   type JoinAnswer,
+  type LoginCode,
+  type LoginStart,
   type ProbeRequest,
   type ProbeResult,
   type RunnerFacts,
@@ -1483,31 +1485,43 @@ const withRegistry = (
   options: Parameters<typeof withServer>[1] = {},
 ): Promise<void> => withServer(body, { ...options, plugins: registry });
 
+/** One instance as `/api/v1/providers` hands it back. */
+interface Instance {
+  readonly id: string;
+  readonly providerId: string;
+  readonly snapshots: ReadonlyArray<{
+    readonly runnerId: string;
+    readonly harnessVersion: string | null;
+    readonly auth: { readonly status: string; readonly message?: string };
+    readonly models: ReadonlyArray<{ readonly slug: string }>;
+  }>;
+}
+
+const instances = async (base: string, token: string): Promise<ReadonlyArray<Instance>> => {
+  const response = await get(base, "/api/v1/providers", token);
+  expect(response.status, await response.clone().text()).toBe(200);
+  return (await response.json()) as ReadonlyArray<Instance>;
+};
+
+const instanceOf = async (base: string, token: string, providerId: string): Promise<Instance> => {
+  const found = (await instances(base, token)).find((one) => one.providerId === providerId);
+  expect(found, `no instance for ${providerId}`).toBeDefined();
+  return found!;
+};
+
+/** What a runner that could probe answers with. */
+const probed = (version: string): ProbeResult => ({
+  harnessVersion: version,
+  auth: {
+    status: "ok",
+    identity: "rogier@example.com",
+    planLabel: "Claude Max",
+    backend: "firstParty",
+  },
+  models: [{ slug: "default", name: "Default", options: [] }],
+});
+
 describe("probing a runner's provider instances", () => {
-  /** One instance as `/api/v1/providers` hands it back. */
-  interface Instance {
-    readonly id: string;
-    readonly providerId: string;
-    readonly snapshots: ReadonlyArray<{
-      readonly runnerId: string;
-      readonly harnessVersion: string | null;
-      readonly auth: { readonly status: string; readonly message?: string };
-      readonly models: ReadonlyArray<{ readonly slug: string }>;
-    }>;
-  }
-
-  const instances = async (base: string, token: string): Promise<ReadonlyArray<Instance>> => {
-    const response = await get(base, "/api/v1/providers", token);
-    expect(response.status, await response.clone().text()).toBe(200);
-    return (await response.json()) as ReadonlyArray<Instance>;
-  };
-
-  const instanceOf = async (base: string, token: string, providerId: string): Promise<Instance> => {
-    const found = (await instances(base, token)).find((one) => one.providerId === providerId);
-    expect(found, `no instance for ${providerId}`).toBeDefined();
-    return found!;
-  };
-
   /** What one runner last said about one instance, once it has said anything. */
   const snapshotWhen = async (
     base: string,
@@ -1543,18 +1557,6 @@ describe("probing a runner's provider instances", () => {
     ).toBeGreaterThanOrEqual(count);
     return asked;
   };
-
-  /** What a runner that could probe answers with. */
-  const probed = (version: string): ProbeResult => ({
-    harnessVersion: version,
-    auth: {
-      status: "ok",
-      identity: "rogier@example.com",
-      planLabel: "Claude Max",
-      backend: "firstParty",
-    },
-    models: [{ slug: "default", name: "Default", options: [] }],
-  });
 
   /** What a runner whose build has no adapter for that provider answers with. */
   const noAdapter = (providerId: string): ProbeResult => ({
@@ -2005,6 +2007,306 @@ describe("installing a harness on a runner", () => {
         expect(response.status, await response.clone().text()).toBe(409);
         expect(await response.json()).toMatchObject({ error: { code: "invalid_state" } });
         expect(wire.frames).toEqual([]);
+      } finally {
+        wire.close();
+      }
+    });
+  });
+});
+
+/**
+ * Logging one provider instance in, over the connection the controller is
+ * already holding.
+ *
+ * The exchange is two operations around one child process on the machine: the
+ * first asks for the vendor's URL, the second hands back the code the user
+ * pasted from the browser. Nothing about it is stored - the code is only good
+ * for the live child's URL - so what these tests drive is the wire and the
+ * refusals, not a record.
+ */
+describe("logging a runner's provider instance in", () => {
+  const login = (base: string, token: string, instanceId: string, runnerId: string) =>
+    send("POST", base, `/api/v1/providers/${instanceId}/login`, { body: { runnerId }, token });
+
+  const submitCode = (
+    base: string,
+    token: string,
+    instanceId: string,
+    body: { readonly runnerId: string; readonly code: string },
+  ) => send("POST", base, `/api/v1/providers/${instanceId}/login-code`, { body, token });
+
+  /** The nth frame of a kind the controller sent, once it has sent it. */
+  const frameOn = async <T extends ControllerMessage>(
+    wire: Wire,
+    tag: string,
+    index = 0,
+  ): Promise<T> => {
+    for (let attempt = 0; attempt < 400; attempt++) {
+      const found = wire.frames.filter((frame) => frame._tag === tag);
+      if (found.length > index) return found[index] as T;
+      await delay(5);
+    }
+    throw new Error(`the controller never sent a ${tag}`);
+  };
+
+  /** A probe request for one instance that this connection has not seen yet. */
+  const probeOf = async (wire: Wire, instanceId: string, after: number): Promise<ProbeRequest> => {
+    for (let attempt = 0; attempt < 400; attempt++) {
+      const found = wire.frames
+        .slice(after)
+        .find(
+          (frame): frame is ProbeRequest =>
+            frame._tag === "probeRequest" && frame.instanceId === instanceId,
+        );
+      if (found !== undefined) return found;
+      await delay(5);
+    }
+    throw new Error("the controller never probed the instance the login finished");
+  };
+
+  const AUTHORIZE_URL = "https://claude.ai/oauth/authorize?code=challenge";
+
+  /** A deadline a test can wait out. */
+  const LOGIN_DEADLINE = Duration.millis(200);
+
+  it("asks the machine to start a login and answers with the URL it printed", async () => {
+    await withRegistry(async (harness) => {
+      const token = await completeSetup(harness.base);
+      const joined = await enlist(harness);
+      const claude = await instanceOf(harness.base, token, "claude-code");
+      const { wire } = await greet(harness.base, joined.credential);
+      try {
+        const pending = login(harness.base, token, claude.id, joined.runnerId);
+        const request = await frameOn<LoginStart>(wire, "loginStart");
+        // Routed on the instance, because the config directory the credential
+        // lands in is the instance's own.
+        expect(request.instanceId).toBe(claude.id);
+        expect(request.providerId).toBe("claude-code");
+        wire.send({ _tag: "loginUrl", requestId: request.requestId, url: AUTHORIZE_URL });
+
+        const response = await pending;
+        expect(response.status, await response.clone().text()).toBe(200);
+        expect(await response.json()).toEqual({ url: AUTHORIZE_URL });
+      } finally {
+        wire.close();
+      }
+    });
+  });
+
+  it("says what the machine said when no URL came back", async () => {
+    await withRegistry(async (harness) => {
+      const token = await completeSetup(harness.base);
+      const joined = await enlist(harness);
+      const claude = await instanceOf(harness.base, token, "claude-code");
+      const { wire } = await greet(harness.base, joined.credential);
+      try {
+        const pending = login(harness.base, token, claude.id, joined.runnerId);
+        const request = await frameOn<LoginStart>(wire, "loginStart");
+        wire.send({
+          _tag: "loginFailed",
+          requestId: request.requestId,
+          message: "claude: could not reach platform.claude.com",
+        });
+
+        const response = await pending;
+        expect(response.status, await response.clone().text()).toBe(409);
+        const refusal = (await response.json()) as { error: { code: string; message: string } };
+        expect(refusal.error.code).toBe("invalid_state");
+        // The vendor's own words: a login that failed for a reason the user can
+        // act on must not read as Hydra being broken.
+        expect(refusal.error.message).toContain("could not reach platform.claude.com");
+      } finally {
+        wire.close();
+      }
+    });
+  });
+
+  it("gives up on a machine that never answers, saying how long it waited", async () => {
+    await withRegistry(
+      async (harness) => {
+        const token = await completeSetup(harness.base);
+        const joined = await enlist(harness);
+        const claude = await instanceOf(harness.base, token, "claude-code");
+        const { wire } = await greet(harness.base, joined.credential);
+        try {
+          const response = await login(harness.base, token, claude.id, joined.runnerId);
+          await frameOn<LoginStart>(wire, "loginStart");
+
+          expect(response.status, await response.clone().text()).toBe(409);
+          const refusal = (await response.json()) as { error: { code: string; message: string } };
+          expect(refusal.error.code).toBe("invalid_state");
+          expect(refusal.error.message).toContain(Duration.format(LOGIN_DEADLINE));
+        } finally {
+          wire.close();
+        }
+      },
+      { loginDeadline: LOGIN_DEADLINE },
+    );
+  });
+
+  it("refuses a provider this runner build has no adapter for, before asking the machine", async () => {
+    await withRegistry(async (harness) => {
+      const token = await completeSetup(harness.base);
+      const joined = await enlist(harness);
+      const codex = await instanceOf(harness.base, token, "codex");
+      const { wire } = await greet(harness.base, joined.credential);
+      try {
+        const response = await login(harness.base, token, codex.id, joined.runnerId);
+        expect(response.status, await response.clone().text()).toBe(400);
+        expect(await response.json()).toMatchObject({ error: { code: "validation" } });
+        expect(wire.frames.filter((frame) => frame._tag === "loginStart")).toEqual([]);
+      } finally {
+        wire.close();
+      }
+    });
+  });
+
+  it("refuses to log in on a runner that is not online, and sends that connection nothing", async () => {
+    await withRegistry(async (harness) => {
+      const token = await completeSetup(harness.base);
+      const joined = await enlist(harness);
+      const claude = await instanceOf(harness.base, token, "claude-code");
+      const wire = await dial(harness.base, joined.credential);
+      try {
+        const response = await login(harness.base, token, claude.id, joined.runnerId);
+        expect(response.status, await response.clone().text()).toBe(409);
+        expect(await response.json()).toMatchObject({ error: { code: "invalid_state" } });
+        expect(wire.frames).toEqual([]);
+      } finally {
+        wire.close();
+      }
+    });
+  });
+
+  it("hands the pasted code to the machine and answers with the snapshot it left behind", async () => {
+    await withRegistry(async (harness) => {
+      const token = await completeSetup(harness.base);
+      const joined = await enlist(harness);
+      const claude = await instanceOf(harness.base, token, "claude-code");
+      const { wire } = await greet(harness.base, joined.credential);
+      try {
+        const starting = login(harness.base, token, claude.id, joined.runnerId);
+        const started = await frameOn<LoginStart>(wire, "loginStart");
+        wire.send({ _tag: "loginUrl", requestId: started.requestId, url: AUTHORIZE_URL });
+        expect((await starting).status).toBe(200);
+        const before = wire.frames.length;
+
+        const pending = submitCode(harness.base, token, claude.id, {
+          runnerId: joined.runnerId,
+          code: "the-pasted-code",
+        });
+        const sent = await frameOn<LoginCode>(wire, "loginCode");
+        expect(sent.instanceId).toBe(claude.id);
+        expect(sent.code).toBe("the-pasted-code");
+        wire.send({ _tag: "loginResult", requestId: sent.requestId, ok: true });
+
+        // A harness that has just been logged in has never been asked who it is
+        // holding, so the answer is a fresh snapshot rather than the stale one.
+        const probe = await probeOf(wire, claude.id, before);
+        wire.send({
+          _tag: "probeReport",
+          requestId: probe.requestId,
+          instanceId: claude.id,
+          result: probed("2.1.263"),
+        });
+
+        const response = await pending;
+        expect(response.status, await response.clone().text()).toBe(200);
+        const snapshot = (await response.json()) as Instance["snapshots"][number];
+        expect(snapshot.runnerId).toBe(joined.runnerId);
+        expect(snapshot.auth).toMatchObject({ status: "ok", identity: "rogier@example.com" });
+
+        // Who put a vendor credential on which machine is the part of this a
+        // reader of the log wants back; the code and the URL are good for one
+        // exchange and are never written down.
+        const logged = await harness.audit("provider.loggedIn");
+        expect(logged).toHaveLength(1);
+        expect(logged[0]?.payload).toEqual({ instanceId: claude.id, runnerId: joined.runnerId });
+        expect(logged[0]?.actor).toBe("user");
+        expect(JSON.stringify(logged[0])).not.toContain("the-pasted-code");
+      } finally {
+        wire.close();
+      }
+    });
+  });
+
+  it("hands back what the CLI said about a bad code, and takes another", async () => {
+    await withRegistry(async (harness) => {
+      const token = await completeSetup(harness.base);
+      const joined = await enlist(harness);
+      const claude = await instanceOf(harness.base, token, "claude-code");
+      const { wire } = await greet(harness.base, joined.credential);
+      try {
+        const starting = login(harness.base, token, claude.id, joined.runnerId);
+        const started = await frameOn<LoginStart>(wire, "loginStart");
+        wire.send({ _tag: "loginUrl", requestId: started.requestId, url: AUTHORIZE_URL });
+        await starting;
+
+        const refused = submitCode(harness.base, token, claude.id, {
+          runnerId: joined.runnerId,
+          code: "half-a-code",
+        });
+        const first = await frameOn<LoginCode>(wire, "loginCode");
+        wire.send({
+          _tag: "loginResult",
+          requestId: first.requestId,
+          ok: false,
+          message: "Invalid code. Please make sure the full code was copied.",
+        });
+
+        const response = await refused;
+        // A refusal the user can act on by pasting again, not a state the
+        // exchange cannot recover from.
+        expect(response.status, await response.clone().text()).toBe(400);
+        const refusal = (await response.json()) as { error: { code: string; message: string } };
+        expect(refusal.error.code).toBe("validation");
+        expect(refusal.error.message).toContain("Invalid code");
+
+        // The child is still up, so a second paste reaches the same login.
+        const accepted = submitCode(harness.base, token, claude.id, {
+          runnerId: joined.runnerId,
+          code: "the-whole-code",
+        });
+        const second = await frameOn<LoginCode>(wire, "loginCode", 1);
+        expect(second.code).toBe("the-whole-code");
+        wire.send({ _tag: "loginResult", requestId: second.requestId, ok: true });
+        const probe = await probeOf(wire, claude.id, wire.frames.length - 1);
+        wire.send({
+          _tag: "probeReport",
+          requestId: probe.requestId,
+          instanceId: claude.id,
+          result: probed("2.1.263"),
+        });
+        expect((await accepted).status).toBe(200);
+      } finally {
+        wire.close();
+      }
+    });
+  });
+
+  it("refuses a code when no login is in progress", async () => {
+    await withRegistry(async (harness) => {
+      const token = await completeSetup(harness.base);
+      const joined = await enlist(harness);
+      const claude = await instanceOf(harness.base, token, "claude-code");
+      const { wire } = await greet(harness.base, joined.credential);
+      try {
+        const pending = submitCode(harness.base, token, claude.id, {
+          runnerId: joined.runnerId,
+          code: "a-code-nobody-asked-for",
+        });
+        const sent = await frameOn<LoginCode>(wire, "loginCode");
+        wire.send({
+          _tag: "loginFailed",
+          requestId: sent.requestId,
+          message: "no login in progress",
+        });
+
+        const response = await pending;
+        expect(response.status, await response.clone().text()).toBe(409);
+        const refusal = (await response.json()) as { error: { code: string; message: string } };
+        expect(refusal.error.code).toBe("invalid_state");
+        expect(refusal.error.message).toContain("no login in progress");
       } finally {
         wire.close();
       }

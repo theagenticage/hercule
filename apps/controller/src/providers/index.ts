@@ -7,6 +7,7 @@ export {
   ProviderProbeInterval,
 } from "./probes";
 export {
+  ProviderLoginDeadline,
   ProviderService,
   ProviderServiceLayer,
   type Identified,

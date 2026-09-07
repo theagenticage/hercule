@@ -234,7 +234,13 @@ const providerRoutes = HttpApiBuilder.group(api, "provider", (handlers) =>
       .handle("update", ({ params, payload }) =>
         operation(providers.update({ id: params.id, ...payload })),
       )
-      .handle("delete", ({ params }) => operation(providers.delete(params)));
+      .handle("delete", ({ params }) => operation(providers.delete(params)))
+      .handle("login", ({ params, payload }) =>
+        operation(providers.login({ id: params.id, ...payload })),
+      )
+      .handle("submitLoginCode", ({ params, payload }) =>
+        operation(providers.submitLoginCode({ id: params.id, ...payload })),
+      );
   }),
 );
 

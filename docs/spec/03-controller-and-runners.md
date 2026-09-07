@@ -77,6 +77,8 @@ The controller authors a `SessionSpec` that carries `workspaceId` (or `null` for
 
 The fleet UI reserves an "Add machine" spot showing the join command with a freshly minted token; fleet auto-discovery and push-install are post-v1.
 
+*(Amended 2026-09-07, [#64](https://github.com/rogierpennink/hydra/issues/64).)* Step 4 no longer installs the provider CLIs. Installing a harness is the user's decision per machine and per harness - a user with only a Claude subscription has no use for a Codex binary - so it is an **Install** action on the runner's fleet page and nothing else. Join stays prompt-free and installs nothing; a machine with no harness reports it as absent in its facts, which is what puts the Install button in front of the user.
+
 The join token is single-use and expires after **1 hour**. Outstanding tokens are listable and revocable, and the "Add machine" spot mints a fresh one each time it is opened, so an expired token costs one page refresh.
 
 ### 3.2 What the runner sets up on enrollment
@@ -87,7 +89,7 @@ The join token is single-use and expires after **1 hour**. Outstanding tokens ar
 
 ### 3.3 Provider CLIs and login
 
-Hydra installs the provider CLIs (Claude Code, Codex, pi: one command each) at join, and installs nothing else: everything else on the machine is the owner's responsibility and is probed, not installed (section 6.6).
+Hydra installs the provider CLIs (Claude Code, Codex, pi: one command each) on request from the runner's fleet page - not at join, amended 2026-09-07 in section 3.1 - and installs nothing else: everything else on the machine is the owner's responsibility and is probed, not installed (section 6.6).
 
 Provider credentials are never distributed by Hydra. Hydra drives each provider's own headless login on the runner and relays the login URL or device code to the user's browser wherever they are; the vendor CLI stores its own credential on that runner. Copying a credential file onto a runner is a bootstrap shortcut the user may take; from then on that credential belongs to exactly one runner, because refresh-token rotation with reuse detection makes shared credentials log each other out. The per-provider login flows and their fallbacks are specified in [15-packaging-and-operations §12](./15-packaging-and-operations.md); provider-home isolation (one home per provider instance) in [06-providers](./06-providers.md); findings in `research/provider-portability.md` (branch `research/provider-portability`).
 

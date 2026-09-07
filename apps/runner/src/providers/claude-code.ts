@@ -24,6 +24,7 @@ import {
   type ProbeResult,
 } from "@hydra/protocol";
 import type { InstallOutcome, ProviderAdapter, ProviderRunnerContext } from "./index";
+import type { LoginCommand } from "./login";
 import { runProcess, type Run } from "./process";
 
 export const CLAUDE_CODE = "claude-code";
@@ -286,6 +287,17 @@ export const claudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
         ),
       );
     },
+
+    /**
+     * The vendor's paste-a-code login, against this instance's own config
+     * directory. `BROWSER` is a command that fails on purpose: a launch that
+     * succeeds makes the CLI switch to a `localhost` callback, which a browser
+     * on any other machine can never reach.
+     */
+    login: (ctx: ProviderRunnerContext, binary: string): LoginCommand => ({
+      command: [binary, "auth", "login"],
+      env: { ...envFor(ctx), BROWSER: "false" },
+    }),
 
     /**
      * The vendor's own installer, pinned to the CLI this build's SDK talks to.

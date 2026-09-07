@@ -47,6 +47,7 @@ import { PermissionProfilesLayer } from "../permissions";
 import { PluginHost, PluginHostLayer, PluginsLayer } from "../plugins";
 import {
   ensureProviderInstances,
+  ProviderLoginDeadline,
   ProviderProbeDeadline,
   ProviderProbeInterval,
   ProviderProbesLayer,
@@ -195,6 +196,7 @@ export interface ServerOptions {
    */
   readonly probeDeadline?: Duration.Duration;
   readonly probeInterval?: Duration.Duration;
+  readonly loginDeadline?: Duration.Duration;
   /** The shipped registry is compiled in, so a test hands over its own. */
   readonly plugins?: ReadonlyArray<Plugin>;
 }
@@ -260,6 +262,13 @@ export const withServer = (
             listening,
             ProviderProbeInterval,
             options.probeInterval,
+          );
+        }
+        if (options.loginDeadline !== undefined) {
+          listening = Effect.provideService(
+            listening,
+            ProviderLoginDeadline,
+            options.loginDeadline,
           );
         }
         yield* listening;

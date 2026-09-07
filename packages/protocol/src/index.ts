@@ -309,13 +309,23 @@ export type ProbeResult = Schema.Schema.Type<typeof ProbeResult>;
 const RequestId = Fact;
 
 /**
+ * A provider instance's id. Narrower than a fact because the runner makes a
+ * directory of it: the credential a login writes must land under the instance's
+ * own home and nowhere a path could climb out to.
+ */
+const InstanceId = Schema.String.check(
+  Schema.isLengthBetween(1, 64),
+  Schema.isPattern(/^[A-Za-z0-9_-]+$/, { title: "instance id", description: "an identifier" }),
+);
+
+/**
  * Asks the runner to probe one provider instance. The instance id and its
  * config live on the controller, so the runner cannot start this on its own.
  */
 export const ProbeRequest = Schema.Struct({
   _tag: Schema.Literal("probeRequest"),
   requestId: RequestId,
-  instanceId: Fact,
+  instanceId: InstanceId,
   providerId: Fact,
   config: Schema.Json,
 });
@@ -325,7 +335,7 @@ export type ProbeRequest = Schema.Schema.Type<typeof ProbeRequest>;
 export const ProbeReport = Schema.Struct({
   _tag: Schema.Literal("probeReport"),
   requestId: RequestId,
-  instanceId: Fact,
+  instanceId: InstanceId,
   result: ProbeResult,
 });
 
@@ -354,6 +364,74 @@ export const InstallResult = Schema.Struct({
 
 export type InstallResult = Schema.Schema.Type<typeof InstallResult>;
 
+/**
+ * An authorize URL a vendor's login printed. Longer than a fact because an
+ * OAuth URL carries a challenge and a redirect, and a URL cut short is a login
+ * nobody can finish - which is why the bound is exported: the runner refuses a
+ * longer one rather than relaying a broken link.
+ */
+export const MAX_AUTHORIZE_URL_LENGTH = 2048;
+
+const AuthorizeUrl = Schema.String.check(Schema.isLengthBetween(1, MAX_AUTHORIZE_URL_LENGTH));
+
+/**
+ * Asks the runner to start the vendor's own login for one instance. The
+ * credential lands in that instance's config directory, which is why this is
+ * routed on the instance rather than on the provider.
+ */
+export const LoginStart = Schema.Struct({
+  _tag: Schema.Literal("loginStart"),
+  requestId: RequestId,
+  instanceId: InstanceId,
+  providerId: Fact,
+});
+
+export type LoginStart = Schema.Schema.Type<typeof LoginStart>;
+
+/** Hands the runner the code the user pasted back from their browser. */
+export const LoginCode = Schema.Struct({
+  _tag: Schema.Literal("loginCode"),
+  requestId: RequestId,
+  instanceId: InstanceId,
+  code: Schema.String.check(Schema.isLengthBetween(1, MAX_FACT_LENGTH)),
+});
+
+export type LoginCode = Schema.Schema.Type<typeof LoginCode>;
+
+/** Where the user has to go to authorize, in their own browser, on any machine. */
+export const LoginUrl = Schema.Struct({
+  _tag: Schema.Literal("loginUrl"),
+  requestId: RequestId,
+  url: AuthorizeUrl,
+});
+
+export type LoginUrl = Schema.Schema.Type<typeof LoginUrl>;
+
+/**
+ * The exchange cannot go on: no URL came, or there is no login to hand a code
+ * to. Distinct from a refused code, which leaves the login standing.
+ */
+export const LoginFailed = Schema.Struct({
+  _tag: Schema.Literal("loginFailed"),
+  requestId: RequestId,
+  message: Fact,
+});
+
+export type LoginFailed = Schema.Schema.Type<typeof LoginFailed>;
+
+/**
+ * How a pasted code went. `ok: false` is the vendor's own complaint about the
+ * code, and the login is still up for another paste.
+ */
+export const LoginResult = Schema.Struct({
+  _tag: Schema.Literal("loginResult"),
+  requestId: RequestId,
+  ok: Schema.Boolean,
+  message: Schema.optionalKey(Fact),
+});
+
+export type LoginResult = Schema.Schema.Type<typeof LoginResult>;
+
 /** A deliberate departure, which is what tells `offline` from silence. */
 export const Goodbye = Schema.Struct({ _tag: Schema.Literal("goodbye") });
 
@@ -366,6 +444,9 @@ export const RunnerToController = Schema.Union([
   WatermarkReport,
   ProbeReport,
   InstallResult,
+  LoginUrl,
+  LoginFailed,
+  LoginResult,
   Goodbye,
 ]);
 
@@ -436,6 +517,8 @@ export const ControllerToRunner = Schema.Union([
   RunnerFactsRequest,
   ProbeRequest,
   InstallRequest,
+  LoginStart,
+  LoginCode,
 ]);
 
 export type ControllerToRunner = Schema.Schema.Type<typeof ControllerToRunner>;

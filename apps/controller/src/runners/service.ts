@@ -46,6 +46,7 @@ import { ProviderProbes, ProviderProbeDeadline } from "../providers";
 import { nowIso, pageInput, refuseCursor, withTransaction } from "../db";
 import { AuditLog } from "../events";
 import { Settings, type SettingError } from "../settings";
+import { NOT_ONLINE, requireAdapter } from "./adapters";
 import { JoinTokens } from "./join-tokens";
 import { RunnerFactsDeadline, RunnerPresence } from "./presence";
 import { runnerRepository, type RunnerEdit } from "./repository";
@@ -107,8 +108,6 @@ const NAME_TAKEN = "another runner already has that name";
  */
 const RESERVED_IS_THE_DEFAULT =
   "this is the fleet's default runner; choose another default before reserving it";
-
-const NOT_ONLINE = "that runner is not connected, so it cannot be asked anything";
 
 /**
  * The runner gives its installer five minutes; this is that plus the round trip,
@@ -453,19 +452,7 @@ const make = Effect.gen(function* () {
         yield* requireGrant("runner.installHarness");
         const { id, providerId } = yield* Effect.mapError(decodeInstall(input), validationOf);
         const runner = yield* one(id);
-        if (runner.connectivity !== "online") return yield* Effect.fail(invalidState(NOT_ONLINE));
-        // Refused here rather than by asking: the runner already said which
-        // providers its build carries an adapter for.
-        if (!(runner.facts?.adapters ?? []).includes(providerId)) {
-          return yield* Effect.fail(
-            validation([
-              {
-                path: ["providerId"],
-                message: `no adapter for ${providerId} in this runner build`,
-              },
-            ]),
-          );
-        }
+        yield* requireAdapter(runner, providerId, "providerId");
         const answer = yield* presence.asked(
           id,
           { _tag: "installRequest", requestId: crypto.randomUUID(), providerId },

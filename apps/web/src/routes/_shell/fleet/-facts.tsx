@@ -8,7 +8,9 @@ const LINES: ReadonlyArray<readonly [string, keyof RunnerFactsReading]> = [
   ["Memory", "memory"],
   ["Disk free", "diskFree"],
   ["Toolchains", "toolchains"],
-  ["Providers", "providers"],
+  // Not "Providers": the card below carries that word for the instances, and
+  // this line is the binaries the machine found on its PATH.
+  ["Harnesses", "providers"],
   ["Docker", "docker"],
   ["Binary", "binary"],
 ];
