@@ -30,7 +30,9 @@ import {
   type ProviderEvent,
   type RunnerFacts,
   type RunnerToController as RunnerMessage,
+  type SessionInterrupt as SessionInterruptFrame,
   type SessionStart,
+  type SessionStop as SessionStopFrame,
   type SessionInput as SessionInputFrame,
 } from "@hydra/protocol";
 import type { Plugin, ProviderDefinition } from "@hydra/plugin-host";
@@ -455,6 +457,38 @@ const exited = (wire: Wire, sessionId: string, seq: number): void =>
     _tag: "session.exited",
     reason: "stopped",
   });
+
+/** A session ended the way a machine ends one, with its native id on the row. */
+const ends = async (arranged: Arranged, session: Session, seq: number): Promise<Session> => {
+  arranged.wire.send({
+    _tag: "sessionsReport",
+    sessions: [
+      {
+        sessionId: session.id,
+        nativeSessionId: "native-1",
+        instanceId: instanceOf(arranged, "full-provider"),
+      },
+    ],
+  });
+  await sessionWhen(arranged, session.id, (one) => one.nativeSessionId !== null);
+  exited(arranged.wire, session.id, seq);
+  return await sessionWhen(arranged, session.id, (one) => one.status === "exited");
+};
+
+/** The parent a continue asks for: exited, resumable, native id bound. */
+const ended = async (arranged: Arranged, prompt: string): Promise<Session> =>
+  ends(arranged, await started(arranged, prompt), 2);
+
+const interrupt = (arranged: Arranged, id: string): Promise<Response> =>
+  send("POST", arranged.harness.base, `/api/v1/sessions/${id}/interrupt`, {
+    token: arranged.token,
+  });
+
+const stop = (arranged: Arranged, id: string): Promise<Response> =>
+  send("POST", arranged.harness.base, `/api/v1/sessions/${id}/stop`, { token: arranged.token });
+
+const carryOn = (arranged: Arranged, id: string, body: unknown): Promise<Response> =>
+  post(arranged.harness.base, `/api/v1/sessions/${id}/continue`, body, arranged.token);
 
 describe("session.spawn", () => {
   it("builds a thread from the shipped defaults and tells the machine to start it", async () => {
@@ -1380,6 +1414,313 @@ describe("transcript.read", () => {
         arranged.token,
       );
       expect(missing.status).toBe(404);
+    });
+  });
+});
+
+describe("session.interrupt", () => {
+  it("tells the machine to end the running turn, and the turn it ends reads interrupted", async () => {
+    await withFleet(async (arranged) => {
+      const session = await started(arranged, "hello");
+      const events = transcript(session.id);
+      report(arranged.wire, ...events[1]!);
+      await sessionWhen(arranged, session.id, (one) => one.status === "busy");
+
+      const response = await interrupt(arranged, session.id);
+
+      expect(response.status, await response.clone().text()).toBe(200);
+      expect(await response.json()).toMatchObject({ id: session.id, status: "busy" });
+      const sent = await framesWhen<SessionInterruptFrame>(arranged.wire, "sessionInterrupt", 1);
+      expect(sent[0]!.sessionId).toBe(session.id);
+
+      report(arranged.wire, 3, {
+        eventId: crypto.randomUUID(),
+        sessionId: session.id,
+        at,
+        _tag: "turn.completed",
+        turnId: "t1",
+        state: "interrupted",
+      });
+
+      expect((await sessionWhen(arranged, session.id, (one) => one.status === "idle")).status).toBe(
+        "idle",
+      );
+      const completed = await until("wrote the ended turn", async () => {
+        const found = await streamOf(arranged.harness, session.id);
+        return found.find((row) => row.tag === "turn.completed");
+      });
+      expect((JSON.parse(completed.event) as { state: string }).state).toBe("interrupted");
+
+      const entries = await arranged.harness.audit("session.interrupted");
+      expect(entries).toHaveLength(1);
+      expect(entries[0]?.actor).toBe("user");
+    });
+  });
+
+  it("refuses a session with no turn running, and tells the machine nothing", async () => {
+    await withFleet(async (arranged) => {
+      const session = await spawned(arranged, { prompt: "hello" });
+      await framesWhen<SessionStart>(arranged.wire, "sessionStart", 1);
+
+      const starting = await interrupt(arranged, session.id);
+      expect(starting.status, await starting.clone().text()).toBe(409);
+
+      report(arranged.wire, 1, {
+        eventId: crypto.randomUUID(),
+        sessionId: session.id,
+        at,
+        _tag: "session.started",
+      });
+      await sessionWhen(arranged, session.id, (one) => one.status === "idle");
+      const idle = await interrupt(arranged, session.id);
+      expect(idle.status, await idle.clone().text()).toBe(409);
+
+      exited(arranged.wire, session.id, 2);
+      await sessionWhen(arranged, session.id, (one) => one.status === "exited");
+      const gone = await interrupt(arranged, session.id);
+      expect(gone.status, await gone.clone().text()).toBe(409);
+
+      expect(framesOf<SessionInterruptFrame>(arranged.wire, "sessionInterrupt")).toEqual([]);
+      expect(await arranged.harness.audit("session.interrupted")).toHaveLength(0);
+    });
+  });
+});
+
+describe("session.stop", () => {
+  it("tells the machine to stop, and the exit it reports ends the session", async () => {
+    await withFleet(async (arranged) => {
+      const session = await started(arranged, "hello");
+
+      const response = await stop(arranged, session.id);
+
+      expect(response.status, await response.clone().text()).toBe(200);
+      expect(await response.json()).toMatchObject({ id: session.id });
+      const sent = await framesWhen<SessionStopFrame>(arranged.wire, "sessionStop", 1);
+      expect(sent[0]!.sessionId).toBe(session.id);
+
+      exited(arranged.wire, session.id, 2);
+
+      const ended = await sessionWhen(arranged, session.id, (one) => one.status === "exited");
+      expect(ended.exitedAt).not.toBeNull();
+      const entries = await arranged.harness.audit("session.stopped");
+      expect(entries).toHaveLength(1);
+      expect(entries[0]?.actor).toBe("user");
+    });
+  });
+
+  it("refuses a session that has already exited, and tells the machine nothing", async () => {
+    await withFleet(async (arranged) => {
+      const session = await spawned(arranged, { prompt: "hello" });
+      exited(arranged.wire, session.id, 1);
+      await sessionWhen(arranged, session.id, (one) => one.status === "exited");
+
+      const response = await stop(arranged, session.id);
+
+      expect(response.status, await response.clone().text()).toBe(409);
+      expect(framesOf<SessionStopFrame>(arranged.wire, "sessionStop")).toEqual([]);
+      expect(await arranged.harness.audit("session.stopped")).toHaveLength(0);
+    });
+  });
+});
+
+describe("session.continue", () => {
+  it("resumes the parent's native session on a new row that copies it", async () => {
+    await withFleet(async (arranged) => {
+      const parent = await ended(arranged, "hello");
+
+      const response = await carryOn(arranged, parent.id, { mode: "resume", prompt: "carry on" });
+
+      expect(response.status, await response.clone().text()).toBe(200);
+      const child = (await response.json()) as Session;
+      expect(child.id).not.toBe(parent.id);
+      expect(child).toMatchObject({
+        status: "starting",
+        runnerId: parent.runnerId,
+        instanceId: parent.instanceId,
+        permissionProfileId: parent.permissionProfileId,
+        accessMode: parent.accessMode,
+        requestedAccessMode: parent.requestedAccessMode,
+        workspaceId: parent.workspaceId,
+        // A resume carries on the parent's own native session, so nothing
+        // branched and there is no parent to point at.
+        parentSessionId: null,
+      });
+      expect(child.modelSelection).toEqual({ model: "clever", options: {} });
+
+      const starts = await framesWhen<SessionStart>(arranged.wire, "sessionStart", 2);
+      expect(starts[1]!.sessionId).toBe(child.id);
+      expect(starts[1]!.spec.continue).toEqual({ nativeSessionId: "native-1", mode: "resume" });
+      expect(await inputsOf(arranged, child.id)).toMatchObject([
+        { text: "carry on", status: "queued" },
+      ]);
+
+      const entries = await arranged.harness.audit("session.continued");
+      expect(entries).toHaveLength(1);
+      expect(entries[0]?.actor).toBe("user");
+      expect(entries[0]?.payload).toMatchObject({
+        sessionId: child.id,
+        parentSessionId: parent.id,
+        mode: "resume",
+      });
+    });
+  });
+
+  it("refuses a second resume while the first one is still live", async () => {
+    await withFleet(async (arranged) => {
+      const parent = await ended(arranged, "hello");
+
+      const first = await carryOn(arranged, parent.id, { mode: "resume", prompt: "carry on" });
+      expect(first.status, await first.clone().text()).toBe(200);
+
+      const second = await carryOn(arranged, parent.id, { mode: "resume", prompt: "again" });
+
+      expect(second.status, await second.clone().text()).toBe(409);
+      expect(framesOf<SessionStart>(arranged.wire, "sessionStart")).toHaveLength(2);
+      // A fork writes a transcript of its own, so it is safe beside the resume.
+      const forked = await carryOn(arranged, parent.id, { mode: "fork", prompt: "elsewhere" });
+      expect(forked.status, await forked.clone().text()).toBe(200);
+    });
+  });
+
+  it("forks the parent's native session, and says which session it branched off", async () => {
+    await withFleet(async (arranged) => {
+      const parent = await ended(arranged, "hello");
+
+      const response = await carryOn(arranged, parent.id, {
+        mode: "fork",
+        prompt: "the other way",
+      });
+
+      expect(response.status, await response.clone().text()).toBe(200);
+      const child = (await response.json()) as Session;
+      expect(child.parentSessionId).toBe(parent.id);
+      const starts = await framesWhen<SessionStart>(arranged.wire, "sessionStart", 2);
+      expect(starts[1]!.spec.continue).toEqual({ nativeSessionId: "native-1", mode: "fork" });
+    });
+  });
+
+  it("refuses a parent that is live, one with no native session, and an id nobody holds", async () => {
+    await withFleet(async (arranged) => {
+      const running = await started(arranged, "hello");
+      const stillLive = await carryOn(arranged, running.id, { mode: "resume", prompt: "no" });
+      expect(stillLive.status, await stillLive.clone().text()).toBe(409);
+
+      // Exited without ever reporting a binding: there is no native session to
+      // carry on from.
+      const unbound = await spawned(arranged, { prompt: "hello" });
+      exited(arranged.wire, unbound.id, 1);
+      await sessionWhen(arranged, unbound.id, (one) => one.status === "exited");
+      const noNative = await carryOn(arranged, unbound.id, { mode: "resume", prompt: "no" });
+      expect(noNative.status, await noNative.clone().text()).toBe(409);
+
+      const missing = await carryOn(arranged, "0199e0e7-9999-7000-8000-000000000000", {
+        mode: "resume",
+        prompt: "no",
+      });
+      expect(missing.status).toBe(404);
+
+      // One start each for the two sessions above, and none for a continue.
+      expect(framesOf<SessionStart>(arranged.wire, "sessionStart")).toHaveLength(2);
+    });
+  });
+
+  it("refuses a parent whose machine can no longer resume it", async () => {
+    await withFleet(async (arranged) => {
+      const retired = await ended(arranged, "hello");
+      await Effect.runPromise(
+        Effect.orDie(
+          arranged.harness.sql`
+            UPDATE runners SET lifecycle = 'retired'
+            WHERE id = unhex(replace(${arranged.runnerId}, '-', ''))`,
+        ),
+      );
+
+      const response = await carryOn(arranged, retired.id, { mode: "resume", prompt: "no" });
+
+      expect(response.status, await response.clone().text()).toBe(409);
+      expect((await readSession(arranged, retired.id)).resumable).toBe(false);
+    });
+  });
+
+  it("refuses a parent whose machine is offline", async () => {
+    await withFleet(async (arranged) => {
+      const parent = await ended(arranged, "hello");
+      arranged.wire.close();
+      await wentAway(arranged);
+
+      const response = await carryOn(arranged, parent.id, { mode: "resume", prompt: "no" });
+
+      expect(response.status, await response.clone().text()).toBe(409);
+    });
+  });
+});
+
+describe("the model an input changed", () => {
+  it("sticks to the session, leaves the spec alone, and is carried into a continue", async () => {
+    await withFleet(async (arranged) => {
+      const session = await started(arranged, "hello");
+      const start = (await framesWhen<SessionStart>(arranged.wire, "sessionStart", 1))[0]!;
+      expect(start.spec.modelSelection).toEqual({ model: "clever", options: {} });
+
+      arranged.wire.answering(() => "opened");
+      const response = await sendInput(arranged, session.id, {
+        text: "in fast",
+        modelSelection: { model: "fast", options: {} },
+      });
+
+      expect(response.status, await response.clone().text()).toBe(200);
+      expect(await response.json()).toMatchObject({ result: "opened" });
+      expect((await readSession(arranged, session.id)).modelSelection).toEqual({
+        model: "fast",
+        options: {},
+      });
+      // The spec is what the machine was told at start, byte for byte: a model
+      // change rewrites the session, never the frozen document.
+      const [row] = await Effect.runPromise(
+        Effect.orDie(
+          arranged.harness.sql<{ readonly spec: string }>`
+            SELECT spec FROM sessions WHERE id = unhex(replace(${session.id}, '-', ''))`,
+        ),
+      );
+      expect(row?.spec).toBe(JSON.stringify(start.spec));
+
+      const parent = await ends(arranged, session, 2);
+      const carried = await carryOn(arranged, parent.id, { mode: "resume", prompt: "and again" });
+      expect(carried.status, await carried.clone().text()).toBe(200);
+      const child = (await carried.json()) as Session;
+      expect(child.modelSelection).toEqual({ model: "fast", options: {} });
+      const starts = await framesWhen<SessionStart>(arranged.wire, "sessionStart", 2);
+      expect(starts[1]!.spec.modelSelection).toEqual({ model: "fast", options: {} });
+    });
+  });
+
+  it("is written for an input the machine took before the session ended", async () => {
+    await withFleet(async (arranged) => {
+      const session = await started(arranged, "hello");
+      arranged.wire.answering(() => undefined);
+      const pending = sendInput(arranged, session.id, {
+        text: "in fast",
+        modelSelection: { model: "fast", options: {} },
+      });
+      // Two: the spawn prompt's own frame, and then this one.
+      await framesWhen<SessionInputFrame>(arranged.wire, "sessionInput", 2);
+
+      exited(arranged.wire, session.id, 2);
+      await sessionWhen(arranged, session.id, (one) => one.status === "exited");
+      arranged.wire.release("opened");
+
+      // The machine had the text, so the row says so rather than saying the
+      // input was called off, and what it asked for stands.
+      expect(await pending).toMatchObject({ status: 200 });
+      const rows = await inputsOf(arranged, session.id);
+      expect(rows.find((row) => row.text === "in fast")).toMatchObject({
+        status: "delivered",
+        delivery: "opened",
+      });
+      expect((await readSession(arranged, session.id)).modelSelection).toEqual({
+        model: "fast",
+        options: {},
+      });
     });
   });
 });

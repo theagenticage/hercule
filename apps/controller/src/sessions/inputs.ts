@@ -194,11 +194,19 @@ const make = Effect.gen(function* () {
         WHERE id = ${uuidFromString(id)} AND status = 'queued'
       `),
 
-    /** Nothing waits on a harness that is gone. */
-    cancelQueued: (sessionId: string): Effect.Effect<void, SqlError> =>
+    /**
+     * Nothing waits on a harness that is gone. An input already on the wire is
+     * left alone: the machine has its text, and recording it as called off
+     * would be the one thing this store must never say.
+     */
+    cancelQueued: (
+      sessionId: string,
+      onTheWire: ReadonlySet<string>,
+    ): Effect.Effect<void, SqlError> =>
       Effect.asVoid(sql`
         UPDATE session_inputs SET status = 'cancelled'
         WHERE session_id = ${uuidFromString(sessionId)} AND status = 'queued'
+          AND id NOT IN ${sql.in([...onTheWire].map(uuidFromString))}
       `),
   };
 });

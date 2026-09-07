@@ -257,6 +257,11 @@ const sessionRoutes = HttpApiBuilder.group(api, "session", (handlers) =>
       .handle("spawn", ({ payload }) => operation(sessions.spawn(payload)))
       .handle("input", ({ params, payload }) =>
         operation(sessions.input({ id: params.id, ...payload })),
+      )
+      .handle("interrupt", ({ params }) => operation(sessions.interrupt(params)))
+      .handle("stop", ({ params }) => operation(sessions.stop(params)))
+      .handle("continue", ({ params, payload }) =>
+        operation(sessions.continue({ id: params.id, ...payload })),
       );
   }),
 );

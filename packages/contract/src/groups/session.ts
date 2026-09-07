@@ -57,6 +57,14 @@ export const Session = Schema.Struct({
   accessMode: AccessMode,
   /** The provider-native id, once the runner has reported its binding. */
   nativeSessionId: Schema.NullOr(Schema.String),
+  /**
+   * What the session runs under now. It starts as the spec's and is rewritten
+   * by an input that changed the model, so a resume or a fork carries the
+   * model the conversation ended on rather than the one it opened with.
+   */
+  modelSelection: ModelSelection,
+  /** Set where this session was forked off another one; null for a resume. */
+  parentSessionId: Schema.NullOr(Id),
   createdAt: Timestamp,
   startedAt: Schema.NullOr(Timestamp),
   exitedAt: Schema.NullOr(Timestamp),
@@ -114,6 +122,21 @@ export const SessionInputResult = Schema.Struct({
 
 export type SessionInputResult = Schema.Schema.Type<typeof SessionInputResult>;
 
+/**
+ * Carrying a session on: `resume` continues the provider-native session the
+ * parent left behind, `fork` branches off it and leaves the parent's own
+ * history untouched. Either way the new session lands on the parent's runner
+ * and provider instance, because that is where the native state is.
+ */
+export const SESSION_CONTINUE_FIELDS = {
+  mode: Schema.Literals(["resume", "fork"]),
+  prompt: Prompt,
+} as const;
+
+export const SessionContinueInput = closedStruct(SESSION_CONTINUE_FIELDS);
+
+export type SessionContinueInput = Schema.Schema.Type<typeof SessionContinueInput>;
+
 export const SessionFilter = Schema.Struct({
   status: Schema.optionalKey(SessionStatus),
   runnerId: Schema.optionalKey(Id),
@@ -145,6 +168,22 @@ export const session = HttpApiGroup.make("session")
       params: { id: Id },
       payload: SessionInputPayload,
       success: SessionInputResult,
+      error: [Unauthenticated, Forbidden, Validation, NotFound, InvalidState, Internal],
+    }),
+    HttpApiEndpoint.post("interrupt", "/sessions/:id/interrupt", {
+      params: { id: Id },
+      success: Session,
+      error: [Unauthenticated, Forbidden, Validation, NotFound, InvalidState, Internal],
+    }),
+    HttpApiEndpoint.post("stop", "/sessions/:id/stop", {
+      params: { id: Id },
+      success: Session,
+      error: [Unauthenticated, Forbidden, Validation, NotFound, InvalidState, Internal],
+    }),
+    HttpApiEndpoint.post("continue", "/sessions/:id/continue", {
+      params: { id: Id },
+      payload: SessionContinueInput,
+      success: Session,
       error: [Unauthenticated, Forbidden, Validation, NotFound, InvalidState, Internal],
     }),
   )

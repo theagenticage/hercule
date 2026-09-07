@@ -41,6 +41,7 @@ import {
   SESSION_SORT_FIELDS,
   SessionFilter,
   SESSION_INPUT_FIELDS,
+  SESSION_CONTINUE_FIELDS,
   SessionSpawnInput,
   TRANSCRIPT_SORT_FIELDS,
   validation,
@@ -62,7 +63,7 @@ import { AuditLog } from "../events";
 import { PermissionProfiles, type GrantsError } from "../permissions";
 import { PluginHost } from "../plugins";
 import { providerRepository, type StoredInstance, type StoredSnapshot } from "../providers";
-import { RunnerPresence, runnerRepository, type SessionTraffic } from "../runners";
+import { requireOnline, RunnerPresence, runnerRepository, type SessionTraffic } from "../runners";
 import { Settings, type SettingError } from "../settings";
 import { inputRepository, type StoredInput } from "./inputs";
 import { sessionRepository, type StoredSession } from "./repository";
@@ -94,6 +95,10 @@ export type InputQueryInput = Schema.Schema.Type<typeof InputQueryInput>;
 const InputUpdate = Schema.Struct({ id: Id, inputId: Id, ...INPUT_UPDATE_FIELDS });
 
 export type InputUpdate = Schema.Schema.Type<typeof InputUpdate>;
+
+const ContinueInput = Schema.Struct({ id: Id, ...SESSION_CONTINUE_FIELDS });
+
+export type ContinueInput = Schema.Schema.Type<typeof ContinueInput>;
 
 const InputIdentified = Schema.Struct({ id: Id, inputId: Id });
 
@@ -128,6 +133,7 @@ const decodeTranscript = Schema.decodeUnknownEffect(TranscriptInput);
 const decodeInputQuery = Schema.decodeUnknownEffect(InputQueryInput);
 const decodeInputUpdate = Schema.decodeUnknownEffect(InputUpdate);
 const decodeInputIdentified = Schema.decodeUnknownEffect(InputIdentified);
+const decodeContinue = Schema.decodeUnknownEffect(ContinueInput);
 const encodeSpec = Schema.encodeUnknownSync(SessionSpec);
 
 /** Newest first: a session list is read as a history. */
@@ -163,6 +169,20 @@ const NO_SUCH_INPUT = "no such input on that session";
 const ALREADY_SENT = "that input has already gone to the machine";
 
 const REFUSED = "that session's runner would not take the input";
+
+const NOT_RUNNING = "that session has no turn running";
+
+const STILL_LIVE = "that session is still live; stop it before carrying it on";
+
+const NOTHING_NATIVE = "that session left no provider-native session to carry on from";
+
+const NOT_RESUMABLE = "that session's machine can no longer carry it on";
+
+const NO_INSTANCE = "that session's provider instance no longer exists";
+
+const ALREADY_CARRIED_ON =
+  "another session is already live against that one's provider-native session; " +
+  "stop it, or fork instead";
 
 /**
  * Both ways an input can fail to reach the harness - no connection, and no
@@ -422,6 +442,13 @@ const make = Effect.gen(function* () {
       sql,
       Effect.gen(function* () {
         yield* inputs.delivered(row.id, delivery, yield* nowIso);
+        // A harness takes a model change only on the input that opens a turn,
+        // so an opening delivery is the only one that can have changed what the
+        // session runs under. It sticks to the session rather than the turn, so
+        // a resume or a fork carries it.
+        if (delivery === "opened" && row.modelSelection !== null) {
+          yield* sessions.remodel(row.sessionId, row.modelSelection);
+        }
         yield* announce({ _tag: "record", topic: "session", id: row.sessionId, kind: "updated" });
       }),
     );
@@ -566,7 +593,7 @@ const make = Effect.gen(function* () {
           }
           yield* sessions.moved(id, folded.status, at);
           // Nothing waits on a harness that is gone, so the queue goes with it.
-          if (folded.status === "exited") yield* inputs.cancelQueued(id);
+          if (folded.status === "exited") yield* inputs.cancelQueued(id, sending);
           yield* announce({ _tag: "record", topic: "session", id, kind: "updated" });
           return folded.status;
         }),
@@ -590,6 +617,105 @@ const make = Effect.gen(function* () {
           absorbing("A session's queued input could not be sent", flush(id, runnerId)),
         );
       }
+    });
+
+  /**
+   * What it takes to open one session on a machine, whether it is the first of
+   * a conversation or the one carrying an earlier conversation on.
+   */
+  interface Opening {
+    readonly permissionProfileId: string;
+    readonly runnerId: string;
+    readonly requestedAccessMode: AccessMode;
+    /**
+     * Known only where the session carries on the native session another one
+     * left behind. A fresh session and a fork are both named by the machine.
+     */
+    readonly nativeSessionId: string | undefined;
+    readonly parentSessionId: string | undefined;
+    /** Everything the machine is told, and the source of what the row stores. */
+    readonly spec: SessionSpec;
+    readonly instance: StoredInstance;
+    readonly prompt: string;
+    readonly kind: "session.spawned" | "session.continued";
+    /** What the audit entry records beyond the new session's own id. */
+    readonly payload: Readonly<Record<string, unknown>>;
+  }
+
+  /**
+   * The row, its first input and the entry that records it, in one
+   * transaction, and then the frame that tells the machine to start it.
+   *
+   * A machine that went away between the two leaves a row nothing will ever
+   * start, so it is ended here rather than left reading `starting` for good.
+   */
+  const opening = (open: Opening): Effect.Effect<StoredSession, InvalidState | SqlError> =>
+    Effect.gen(function* () {
+      const stored = yield* withTransaction(
+        sql,
+        Effect.gen(function* () {
+          // Asked inside the write, because two callers naming one native
+          // session a moment apart would both pass a check made before it.
+          if (
+            open.nativeSessionId !== undefined &&
+            (yield* sessions.liveOn(open.nativeSessionId))
+          ) {
+            return yield* Effect.fail(invalidState(ALREADY_CARRIED_ON));
+          }
+          const at = yield* nowIso;
+          const row = yield* sessions.insert({
+            permissionProfileId: open.permissionProfileId,
+            instanceId: open.spec.instanceId,
+            runnerId: open.runnerId,
+            workspaceId: open.spec.workspaceId,
+            requestedAccessMode: open.requestedAccessMode,
+            accessMode: open.spec.accessMode,
+            // Byte for byte: the row holds the exact document the runner is
+            // told, not a re-encode of an object that resembles it.
+            spec: JSON.stringify(encodeSpec(open.spec)),
+            modelSelection: open.spec.modelSelection,
+            nativeSessionId: open.nativeSessionId,
+            parentSessionId: open.parentSessionId,
+            at,
+          });
+          // The prompt is an ordinary input, waiting with the session: it
+          // leaves when the harness comes up, and a controller restarted in
+          // that window still has it.
+          yield* inputs.insert({
+            sessionId: row.id,
+            source: "user",
+            actor: USER_ACTOR,
+            text: open.prompt,
+            modelSelection: undefined,
+            at,
+          });
+          yield* audit.append({
+            kind: open.kind,
+            actor: USER_ACTOR,
+            record: { topic: "session", id: row.id },
+            payload: { ...open.payload, sessionId: row.id },
+            at,
+          });
+          return row;
+        }),
+      );
+
+      const start: SessionStart = {
+        _tag: "sessionStart",
+        sessionId: stored.id,
+        providerId: open.instance.providerId,
+        config: open.instance.config,
+        spec: open.spec,
+      };
+      if (yield* presence.tell(open.runnerId, start)) return stored;
+      yield* withTransaction(
+        sql,
+        Effect.gen(function* () {
+          yield* sessions.moved(stored.id, "exited", yield* nowIso);
+          yield* announce({ _tag: "record", topic: "session", id: stored.id, kind: "updated" });
+        }),
+      );
+      return yield* Effect.fail(invalidState(GONE));
     });
 
   const applying = (traffic: SessionTraffic): Effect.Effect<void, SqlError> =>
@@ -702,69 +828,23 @@ const make = Effect.gen(function* () {
           accessMode,
         } satisfies SessionSpec;
 
-        const stored = yield* withTransaction(
-          sql,
-          Effect.gen(function* () {
-            const at = yield* nowIso;
-            const row = yield* sessions.insert({
-              permissionProfileId: profileId,
-              instanceId,
-              runnerId: hosting.runnerId,
-              requestedAccessMode,
-              accessMode,
-              // Byte for byte: the row holds the exact document the runner is
-              // told, not a re-encode of an object that resembles it.
-              spec: JSON.stringify(encodeSpec(spec)),
-              at,
-            });
-            // The prompt is an ordinary input, waiting with the session: it
-            // leaves when the harness comes up, and a controller restarted in
-            // that window still has it.
-            yield* inputs.insert({
-              sessionId: row.id,
-              source: "user",
-              actor: USER_ACTOR,
-              text: decoded.prompt,
-              modelSelection: undefined,
-              at,
-            });
-            yield* audit.append({
-              kind: "session.spawned",
-              actor: USER_ACTOR,
-              record: { topic: "session", id: row.id },
-              payload: {
-                sessionId: row.id,
-                instanceId,
-                runnerId: hosting.runnerId,
-                requestedAccessMode,
-                accessMode,
-              },
-              at,
-            });
-            return row;
-          }),
-        );
-
-        const start: SessionStart = {
-          _tag: "sessionStart",
-          sessionId: stored.id,
-          providerId: instance.providerId,
-          config: instance.config,
+        return yield* opening({
+          permissionProfileId: profileId,
+          runnerId: hosting.runnerId,
+          requestedAccessMode,
+          nativeSessionId: undefined,
+          parentSessionId: undefined,
           spec,
-        };
-        if (!(yield* presence.tell(hosting.runnerId, start))) {
-          // The row exists and nothing will ever start it, so it is ended here
-          // rather than left reading `starting` for good.
-          yield* withTransaction(
-            sql,
-            Effect.gen(function* () {
-              yield* sessions.moved(stored.id, "exited", yield* nowIso);
-              yield* announce({ _tag: "record", topic: "session", id: stored.id, kind: "updated" });
-            }),
-          );
-          return yield* Effect.fail(invalidState(GONE));
-        }
-        return stored;
+          instance,
+          prompt: decoded.prompt,
+          kind: "session.spawned",
+          payload: {
+            instanceId,
+            runnerId: hosting.runnerId,
+            requestedAccessMode,
+            accessMode,
+          },
+        });
       }),
 
     /**
@@ -819,6 +899,118 @@ const make = Effect.gen(function* () {
         }
         yield* recordDelivery(row, delivery);
         return { inputId: row.id, result: delivery };
+      }),
+
+    /**
+     * Ends the turn the session is running. Fire and forget: what became of the
+     * turn arrives in the session's own stream as `turn.completed`, so there is
+     * nothing to wait for here.
+     */
+    interrupt: (input: Identified): Effect.Effect<Session, InputError> =>
+      Effect.gen(function* () {
+        yield* requireGrant("session.interrupt");
+        const { id } = yield* Effect.mapError(decodeIdentified(input), validationOf);
+        const session = yield* one(id);
+        if (session.status !== "busy") return yield* Effect.fail(invalidState(NOT_RUNNING));
+        if (
+          !(yield* presence.tell(session.runnerId, { _tag: "sessionInterrupt", sessionId: id }))
+        ) {
+          return yield* Effect.fail(invalidState(GONE));
+        }
+        yield* withTransaction(
+          sql,
+          Effect.flatMap(nowIso, (at) =>
+            audit.append({
+              kind: "session.interrupted",
+              actor: USER_ACTOR,
+              payload: { sessionId: id, runnerId: session.runnerId },
+              at,
+            }),
+          ),
+        );
+        return session;
+      }),
+
+    /**
+     * Ends the harness. The session moves to `exited` when the machine reports
+     * the exit, not here: this build has no way to end a session the machine
+     * never confirms is gone.
+     */
+    stop: (input: Identified): Effect.Effect<Session, InputError> =>
+      Effect.gen(function* () {
+        yield* requireGrant("session.stop");
+        const { id } = yield* Effect.mapError(decodeIdentified(input), validationOf);
+        const session = yield* one(id);
+        if (session.status === "exited") return yield* Effect.fail(invalidState(HAS_EXITED));
+        if (!(yield* presence.tell(session.runnerId, { _tag: "sessionStop", sessionId: id }))) {
+          return yield* Effect.fail(invalidState(GONE));
+        }
+        yield* withTransaction(
+          sql,
+          Effect.flatMap(nowIso, (at) =>
+            audit.append({
+              kind: "session.stopped",
+              actor: USER_ACTOR,
+              payload: { sessionId: id, runnerId: session.runnerId },
+              at,
+            }),
+          ),
+        );
+        return session;
+      }),
+
+    /**
+     * A second session against the provider-native one the parent left behind,
+     * on the same machine and the same instance, because that is where the
+     * native state is (spec 06 section 4.1).
+     *
+     * Only an exited parent may be carried on, and a resume only where nothing
+     * else is live against that native session: two harnesses writing one
+     * native transcript is a corruption nothing here could repair. A fork
+     * writes a transcript of its own, so it is safe beside anything.
+     *
+     * It carries a Thread's profile onto a new session, so like `spawn` only
+     * the user may open one (spec 02 Thread).
+     */
+    continue: (input: ContinueInput): Effect.Effect<Session, InputError> =>
+      Effect.gen(function* () {
+        yield* currentUser("session.continue");
+        const { id, mode, prompt } = yield* Effect.mapError(decodeContinue(input), validationOf);
+        const parent = yield* one(id);
+        if (parent.status !== "exited") return yield* Effect.fail(invalidState(STILL_LIVE));
+        if (parent.nativeSessionId === null)
+          return yield* Effect.fail(invalidState(NOTHING_NATIVE));
+        const machine = yield* runners.read(parent.runnerId);
+        // Retired is gone for good and draining is a machine being emptied;
+        // neither takes a session it would then have to give up.
+        if (Option.isNone(machine) || machine.value.lifecycle !== "active") {
+          return yield* Effect.fail(invalidState(NOT_RESUMABLE));
+        }
+        yield* requireOnline(machine.value);
+        const instance = yield* instances.one(parent.instanceId);
+        if (Option.isNone(instance)) return yield* Effect.fail(invalidState(NO_INSTANCE));
+
+        return yield* opening({
+          permissionProfileId: parent.permissionProfileId,
+          runnerId: parent.runnerId,
+          requestedAccessMode: parent.requestedAccessMode,
+          // A resume is the same conversation carried on: the same native
+          // session, and so no parent to point at. Only a fork branches off
+          // one, and the machine names the branch it makes.
+          nativeSessionId: mode === "resume" ? parent.nativeSessionId : undefined,
+          parentSessionId: mode === "fork" ? parent.id : undefined,
+          spec: {
+            instanceId: parent.instanceId,
+            workspaceId: parent.workspaceId,
+            modelSelection: parent.modelSelection,
+            accessMode: parent.accessMode,
+            continue: { nativeSessionId: parent.nativeSessionId, mode },
+          },
+          instance: instance.value,
+          prompt,
+          kind: "session.continued",
+          payload: { parentSessionId: parent.id, mode },
+        });
       }),
 
     /** Every input this session was ever given, oldest first, whatever became of each. */

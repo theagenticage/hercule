@@ -124,10 +124,12 @@ export {
 } from "./groups/provider";
 export {
   MAX_PROMPT_LENGTH,
+  SESSION_CONTINUE_FIELDS,
   SESSION_INPUT_FIELDS,
   SESSION_SORT_FIELDS,
   SESSION_STATUSES,
   Session,
+  SessionContinueInput,
   SessionFilter,
   SessionInputPayload,
   SessionInputResult,

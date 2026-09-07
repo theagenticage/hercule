@@ -1,5 +1,6 @@
 /**
- * Every input a session was ever given, one row each.
+ * Every input a session was ever given, one row each, and the two things a
+ * session carries into the one that continues it.
  *
  * A row exists before the input is sent anywhere, which is what gives the
  * operation an id to answer with, gives the actor stamp somewhere to live, and
@@ -36,4 +37,25 @@ export default Effect.gen(function* () {
   `;
   // The one walk there is: a session's own inputs, oldest first.
   yield* sql`CREATE INDEX session_inputs_session ON session_inputs (session_id, created_at, id)`;
+
+  /**
+   * The model the session runs under now, which is not what `spec` says: an
+   * input may change it mid-life, and `spec` is the frozen document the runner
+   * was told at start. A resume or a fork reads this one.
+   *
+   * SQLite takes a NOT NULL column only with a default, so the empty document
+   * is there for the ALTER alone; the UPDATE below fills every row that exists
+   * and every insert since writes its own.
+   */
+  yield* sql`
+    ALTER TABLE sessions ADD COLUMN model_selection TEXT NOT NULL DEFAULT '{}'
+                                    CHECK (json_valid(model_selection))
+  `;
+  yield* sql`UPDATE sessions SET model_selection = json_extract(spec, '$.modelSelection')`;
+
+  /**
+   * Set only where the session was forked; a resume carries on the same
+   * provider-native session and so has nothing to point at.
+   */
+  yield* sql`ALTER TABLE sessions ADD COLUMN parent_session_id BLOB`;
 });

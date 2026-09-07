@@ -30,7 +30,11 @@ const aSession = Effect.gen(function* () {
     runnerId: anId(),
     requestedAccessMode: "approval-required",
     accessMode: "approval-required",
+    workspaceId: null,
     spec: "{}",
+    modelSelection: { model: "clever", options: {} },
+    nativeSessionId: undefined,
+    parentSessionId: undefined,
     at,
   });
   return stored.id;

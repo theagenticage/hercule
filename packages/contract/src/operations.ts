@@ -193,6 +193,23 @@ const TABLE = {
     method: "POST",
     path: "/api/v1/sessions/:id/input",
   },
+  "session.interrupt": {
+    requires: "session.steer",
+    method: "POST",
+    path: "/api/v1/sessions/:id/interrupt",
+  },
+  "session.stop": {
+    requires: "session.steer",
+    method: "POST",
+    path: "/api/v1/sessions/:id/stop",
+  },
+  // Opening a second session against one native transcript, so it is spawning
+  // and not steering, whatever the id in the path says.
+  "session.continue": {
+    requires: "session.spawn",
+    method: "POST",
+    path: "/api/v1/sessions/:id/continue",
+  },
 
   // Owned sub-resources of a session: the id in the path is the session's, and
   // the grant is the session's, because an input is what that session was told.
