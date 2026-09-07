@@ -444,6 +444,9 @@ describe("a Claude Code session", () => {
     expect(run.options[0]?.sessionId).toBe(binding.nativeSessionId);
     await settled();
     expect(tags(run.seen)).toEqual(["session.started"]);
+    // The only place the controller can learn the native id: the report of what
+    // this runner holds is sent once, at hello.
+    expect(run.seen[0]?.providerRefs).toEqual({ nativeSessionId: binding.nativeSessionId });
     expect(await Effect.runPromise(run.adapter.listSessions)).toEqual([binding]);
   });
 

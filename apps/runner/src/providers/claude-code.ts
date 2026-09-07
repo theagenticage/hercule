@@ -446,7 +446,16 @@ export const claudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
             };
             live.set(sessionId, held);
             void pump(sessionId, held);
-            emit({ _tag: "session.started", eventId: crypto.randomUUID(), sessionId, at: now() });
+            // The native id rides the event, because the controller has no
+            // other way to learn it: `sessionsReport` is sent once, at hello,
+            // and a session started after that would never be named again.
+            emit({
+              _tag: "session.started",
+              eventId: crypto.randomUUID(),
+              sessionId,
+              at: now(),
+              providerRefs: { nativeSessionId: binding.nativeSessionId },
+            });
             return binding;
           },
         );
