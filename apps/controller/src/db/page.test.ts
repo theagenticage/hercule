@@ -62,6 +62,14 @@ describe("keyset cursors", () => {
     expect(await refusal(cursor, { ...KEYS, direction: "asc" })).toMatch(/different sort order/);
   });
 
+  it("refuses a cursor whose walk ordered on something else, and does not call that a direction", async () => {
+    // `field` carries what a walk's order depends on and not only a column
+    // name, so a mismatch there is a different listing rather than a different
+    // direction, and the caller is not sent looking at `--sort`.
+    const cursor = encodeCursor(KEYS, "2026-09-04T09:21:33.084Z", ID);
+    expect(await refusal(cursor, { ...KEYS, field: "name" })).toMatch(/different listing/);
+  });
+
   it.each([
     ["not base64url", "not a cursor at all"],
     ["not JSON", Buffer.from("nonsense", "utf8").toString("base64url")],

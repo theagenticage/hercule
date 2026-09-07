@@ -81,11 +81,16 @@ const isPage = (
   Array.isArray((value as { items?: unknown }).items);
 
 /**
- * The fields of a normalized event that say nothing on a transcript line: the
- * event's own id, the session every line belongs to, the instant the line
- * already begins with, and the turn and item ids, which name nothing a reader
- * can look up. What is left is the tag's own payload, which is the part that
- * differs from line to line.
+ * The fields of a normalized event that do not go on a transcript line. Four
+ * say nothing: the event's own id, the session every line belongs to, the
+ * instant the line already begins with, and the turn and item ids, which name
+ * nothing a reader can look up. `_tag` is left out because the line prints it
+ * as its own column. `providerRefs` and `raw` are the vendor passthrough - the
+ * escape hatch that keeps a trimmed taxonomy honest - and a line that carried
+ * them would be a JSON dump; `--json` is where they are read.
+ *
+ * What is left is the tag's own payload, which is the part that differs from
+ * line to line.
  */
 const TRANSCRIPT_NOISE = new Set([
   "_tag",
