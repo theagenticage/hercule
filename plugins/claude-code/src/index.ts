@@ -14,6 +14,7 @@ import {
 const definition: ProviderDefinition = {
   id: "claude-code",
   displayName: "Claude Code",
+  binaryName: "claude",
   supportsMultipleInstances: true,
   configSchema: Schema.Struct({}),
   defaultConfig: {},

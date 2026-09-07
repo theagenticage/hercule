@@ -6,6 +6,7 @@ import { PluginError, registerProvider } from "./plugin";
 const definition: ProviderDefinition = {
   id: "fixture",
   displayName: "Fixture",
+  binaryName: "harness",
   supportsMultipleInstances: true,
   configSchema: Schema.Struct({}),
   defaultConfig: {},

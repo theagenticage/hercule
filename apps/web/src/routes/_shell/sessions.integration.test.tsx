@@ -79,6 +79,7 @@ const claudeCode = (snapshots: ReadonlyArray<ReturnType<typeof snapshot>>) => ({
   name: "Claude Code",
   config: {},
   displayName: "Claude Code",
+  binaryName: "claude",
   declared: DECLARED,
   snapshots,
   createdAt: "2026-09-05T09:00:00.000Z",

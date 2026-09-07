@@ -53,6 +53,12 @@ const ProviderName = Schema.String.check(
 export const ProviderDefinition = Schema.Struct({
   id: ProviderName,
   displayName: ProviderName,
+  /**
+   * The harness's own name on `PATH`. A machine reports which binaries it has
+   * by that name, so this is what joins a runner's facts to an instance; the
+   * provider that drives the binary is the one thing that knows it.
+   */
+  binaryName: ProviderName,
   /** Several accounts of one harness, kept apart by per-instance config dirs. */
   supportsMultipleInstances: Schema.Boolean,
   /** Per-instance logical settings only: environment and model defaults, never paths. */

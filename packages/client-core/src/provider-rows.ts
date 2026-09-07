@@ -8,17 +8,6 @@
  */
 import type { ProviderInstance, Runner } from "@hydra/contract";
 
-/**
- * Which binary a provider drives. The machine reports what is on its `PATH` by
- * the binary's own name, and an instance is named by its provider, so the two
- * are joined here - the one place the web knows the pairing.
- */
-const HARNESS_OF: Readonly<Record<string, string>> = {
-  "claude-code": "claude",
-  codex: "codex",
-  pi: "pi",
-};
-
 /** What an install can be on a row: offered, dimmed with its reason, or absent. */
 type Install = "offered" | "blocked" | "none";
 
@@ -69,8 +58,11 @@ export const providerRows = (
   instances.map((instance) => {
     const snapshot = instance.snapshots.find((each) => each.runnerId === runner.id);
     const adapter = (runner.facts?.adapters ?? []).includes(instance.providerId);
+    // The machine reports what is on its `PATH` by the binary's own name, and
+    // the instance carries the name its provider drives, so the join needs no
+    // table of its own here.
     const present = (runner.facts?.providers ?? []).some(
-      (binary) => binary.name === HARNESS_OF[instance.providerId] && binary.present,
+      (binary) => binary.name === instance.binaryName && binary.present,
     );
     // Every move runs on the machine, so a machine holding no connection
     // offers none of them.

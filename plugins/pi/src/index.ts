@@ -14,6 +14,7 @@ import {
 const definition: ProviderDefinition = {
   id: "pi",
   displayName: "pi",
+  binaryName: "pi",
   supportsMultipleInstances: true,
   configSchema: Schema.Struct({}),
   defaultConfig: {},

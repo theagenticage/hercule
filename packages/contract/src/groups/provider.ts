@@ -6,9 +6,10 @@
  * config directories. The controller opens one instance per registered provider
  * at boot, so a fresh install already has something to log in to.
  *
- * `displayName` and `declared` are facts of the definition rather than columns
- * of the row: they are composed at read from the plugin that registered the
- * provider, so a build that changes them changes every instance at once.
+ * `displayName`, `binaryName` and `declared` are facts of the definition rather
+ * than columns of the row: they are composed at read from the plugin that
+ * registered the provider, so a build that changes them changes every instance
+ * at once.
  */
 import { Schema } from "effect";
 import { DeclaredCapabilities, MAX_PROVIDER_NAME_LENGTH } from "@hydra/plugin-host";
@@ -71,6 +72,8 @@ export const ProviderInstance = Schema.Struct({
   name: ProviderInstanceName,
   config: Schema.Json,
   displayName: Schema.String,
+  /** The harness's name on a machine's `PATH`, which is how facts name it. */
+  binaryName: Schema.String,
   declared: DeclaredCapabilities,
   snapshots: Schema.Array(CapabilitySnapshot),
   createdAt: Timestamp,

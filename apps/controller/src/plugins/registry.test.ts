@@ -30,6 +30,7 @@ const SHIPPED = [
     definition: {
       id: "claude-code",
       displayName: "Claude Code",
+      binaryName: "claude",
       supportsMultipleInstances: true,
       configSchema: NO_SETTINGS,
       defaultConfig: {},
@@ -55,6 +56,7 @@ const SHIPPED = [
     definition: {
       id: "codex",
       displayName: "Codex",
+      binaryName: "codex",
       supportsMultipleInstances: true,
       configSchema: NO_SETTINGS,
       defaultConfig: {},
@@ -80,6 +82,7 @@ const SHIPPED = [
     definition: {
       id: "pi",
       displayName: "pi",
+      binaryName: "pi",
       supportsMultipleInstances: true,
       configSchema: NO_SETTINGS,
       defaultConfig: {},

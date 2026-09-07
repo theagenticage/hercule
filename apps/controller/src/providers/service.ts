@@ -159,6 +159,7 @@ const make = Effect.gen(function* () {
   ): ProviderInstance => ({
     ...stored,
     displayName: definition.displayName,
+    binaryName: definition.binaryName,
     declared: definition.declared,
     snapshots: snapshots
       .filter((snapshot) => snapshot.instanceId === stored.id)

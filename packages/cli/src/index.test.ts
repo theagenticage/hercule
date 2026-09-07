@@ -393,6 +393,7 @@ describe("id tails", () => {
       name: "Claude Code",
       config: {},
       displayName: "Claude Code",
+      binaryName: "claude",
       declared: {
         steering: "native",
         fork: "native",
