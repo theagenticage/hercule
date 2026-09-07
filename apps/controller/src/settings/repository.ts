@@ -48,8 +48,10 @@ export class SettingError extends Schema.TaggedError<SettingError>()("SettingErr
  *
  * It lives in the controller's settings table because there is no controller
  * table to widen, but it is not one of the settings the settings API carries:
- * `controller.update` is its only writer, so that the id is checked against the
- * fleet before it lands, and `controller.read` is where it is answered.
+ * `controller.update` is the only writer that takes the id from a caller, so
+ * the check that it names a placeable runner lives there, and `controller.read`
+ * is where it is answered. `runners/` writes the key too, when the first runner
+ * joins and when the named one retires, never from a value a caller supplied.
  *
  * `all` below leaves the key out by name rather than letting `decodeRows` drop
  * it as undeclared, because that path logs a warning, and a key deliberately

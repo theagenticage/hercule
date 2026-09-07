@@ -18,10 +18,7 @@ import { SYSTEM_ACTOR } from "../actor";
 import { hashToken, mintToken } from "../credentials";
 import { nowIso, withTransaction } from "../db";
 import { AuditLog } from "../events";
-// Taken from the identity repository rather than from that domain's index,
-// which also reaches the service that reads runners: importing through it would
-// make the two domains circular.
-import { ControllerIdentity } from "../identity/repository";
+import { ControllerIdentity } from "../identity";
 import { Settings, type SettingError } from "../settings";
 import { JoinTokens } from "./join-tokens";
 import { pickName } from "./names";

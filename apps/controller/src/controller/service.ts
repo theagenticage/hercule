@@ -8,9 +8,10 @@
  * answered; it gains its field here once it is built.
  *
  * The default runner is stored as a controller setting, because there is no
- * controller table to widen. Naming a runner nobody has is refused here rather
- * than stored, which is the whole reason the settings API does not carry the
- * key: one writer, one check.
+ * controller table to widen. `runners/` writes that key too, when the first
+ * runner joins and when the named one retires. Only this file takes the id from
+ * a caller, though, so the check that it names a placeable runner sits here
+ * alone, and that is why the settings API does not carry the key.
  *
  * The version comes from `@hydra/home/version`, which `scripts/gen-version.ts`
  * generates at build time: a compiled binary has no `package.json` on disk to
@@ -40,9 +41,9 @@ import { VERSION } from "@hydra/home/version";
 import { currentUser, USER_ACTOR } from "../actor";
 import { nowIso, withTransaction } from "../db";
 import { AuditLog } from "../events";
+import { ControllerIdentity } from "../identity";
 import { runnerRepository } from "../runners";
 import { Settings, type SettingError } from "../settings";
-import { ControllerIdentity } from "./repository";
 
 const decodeUpdate = Schema.decodeUnknownEffect(ControllerUpdateInput);
 
@@ -137,7 +138,7 @@ const make = Effect.gen(function* () {
 
 /** The controller service. */
 export class Controller extends Context.Service<Controller, Effect.Success<typeof make>>()(
-  "hydra/controller/identity/Controller",
+  "hydra/controller/controller/Controller",
 ) {}
 
 export const ControllerLayer: Layer.Layer<
