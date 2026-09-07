@@ -4,8 +4,9 @@
  * They are trimmed of long signatures and unread fields, never reshaped.
  */
 import { describe, expect, it } from "vitest";
+import { Schema } from "effect";
 import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
-import type { ProviderEvent } from "@hydra/protocol";
+import { ProviderEvent } from "@hydra/protocol";
 import { CLAUDE_SDK_MESSAGE, normalize, normalizing } from "./claude-code-normalize";
 
 const SESSION = "0199e0e7-0000-7000-8000-0000000000ff";
@@ -24,7 +25,9 @@ const state = () => {
 };
 
 /** What each event says, short enough to read a whole turn as a list. */
-const said = (event: ProviderEvent): string => {
+type Event = Schema.Schema.Type<typeof ProviderEvent>;
+
+const said = (event: Event): string => {
   switch (event._tag) {
     case "item.started":
     case "item.updated":
@@ -63,6 +66,19 @@ const MESSAGE_START = {
   event: {
     type: "message_start",
     message: { id: MESSAGE, model: "claude-haiku-4-5-20251001", role: "assistant" },
+  },
+};
+
+const MESSAGE_AFTER_TOOL = "msg_011CeoxAw86VZLxeZK3hZpRd";
+
+/** The leg after a tool result is a new model call, so a new message. */
+const MESSAGE_START_AFTER_TOOL = {
+  type: "stream_event",
+  session_id: NATIVE,
+  parent_tool_use_id: null,
+  event: {
+    type: "message_start",
+    message: { id: MESSAGE_AFTER_TOOL, model: "claude-haiku-4-5-20251001", role: "assistant" },
   },
 };
 
@@ -190,8 +206,8 @@ const RESULT = {
     cache_read_input_tokens: 14523,
     output_tokens: 151,
   },
-  // Two entries: the main loop, and the auxiliary call that titled the session.
-  // `usage` above counts only the first, and only this turn.
+  // Two entries: the auxiliary call that titled the session, and the main loop.
+  // `usage` above counts only the main loop, and only this turn.
   modelUsage: {
     "claude-haiku-4-5-20251001": {
       inputTokens: 911,
@@ -376,10 +392,13 @@ describe("one SDK message at a time", () => {
           session_id: NATIVE,
         },
       ],
+      // Compaction can happen between turns, so the turn it opens is its own
+      // to close: no `result` is coming for it.
       events: [
         "turn.started",
         "item.started context_compaction id-3",
         "item.completed context_compaction id-3 completed",
+        "turn.completed completed",
       ],
     },
   ];
@@ -391,27 +410,28 @@ describe("one SDK message at a time", () => {
   }
 });
 
-describe("a whole turn", () => {
-  const TURN = [
-    INIT,
-    STATUS,
-    MESSAGE_START,
-    THINKING_START,
-    THINKING_DELTA,
-    SIGNATURE_DELTA,
-    THINKING_STOP,
-    TOOL_START,
-    TOOL_ARGUMENT_DELTA,
-    ASSISTANT_THINKING,
-    ASSISTANT_TOOL_USE,
-    TOOL_RESULT,
-    RATE_LIMIT,
-    TEXT_START,
-    TEXT_DELTA,
-    TEXT_STOP,
-    RESULT,
-  ];
+const TURN = [
+  INIT,
+  STATUS,
+  MESSAGE_START,
+  THINKING_START,
+  THINKING_DELTA,
+  SIGNATURE_DELTA,
+  THINKING_STOP,
+  TOOL_START,
+  TOOL_ARGUMENT_DELTA,
+  ASSISTANT_THINKING,
+  ASSISTANT_TOOL_USE,
+  TOOL_RESULT,
+  RATE_LIMIT,
+  MESSAGE_START_AFTER_TOOL,
+  TEXT_START,
+  TEXT_DELTA,
+  TEXT_STOP,
+  RESULT,
+];
 
+describe("a whole turn", () => {
   it("reads as the episode it was", () => {
     expect(through(TURN)).toEqual([
       "turn.started",
@@ -420,9 +440,9 @@ describe("a whole turn", () => {
       `item.completed reasoning ${MESSAGE}#0 completed`,
       `item.started command_execution ${TOOL}`,
       `item.completed command_execution ${TOOL} completed`,
-      `item.started assistant_message ${MESSAGE}#1`,
+      `item.started assistant_message ${MESSAGE_AFTER_TOOL}#1`,
       'content.delta assistant_text "ready"',
-      `item.completed assistant_message ${MESSAGE}#1 completed`,
+      `item.completed assistant_message ${MESSAGE_AFTER_TOOL}#1 completed`,
       "session.usage.updated",
       "turn.completed completed",
     ]);
@@ -543,7 +563,9 @@ describe("what an item says about itself", () => {
     expect(opened?._tag === "item.started" ? opened.detail : undefined).toEqual({
       text: "run the tests",
     });
-    expect(through([{ ...sent, isSynthetic: true }])).toEqual(["turn.started"]);
+    // A message the taxonomy has nothing to say about does not leave a turn
+    // behind it either.
+    expect(through([{ ...sent, isSynthetic: true }])).toEqual([]);
   });
 
   it("puts the vendor payload on the unknown item, not on the turn it had to open", () => {
@@ -554,6 +576,42 @@ describe("what an item says about itself", () => {
       session_id: NATIVE,
     } as unknown as SDKMessage);
     expect(events.find((event) => event.raw !== undefined)?._tag).toBe("item.started");
+  });
+});
+
+describe("what the ops events say", () => {
+  it("says which retry it is and what the harness was retrying after", () => {
+    const running = state();
+    const events = normalize(running, {
+      type: "system",
+      subtype: "api_retry",
+      attempt: 1,
+      max_retries: 3,
+      retry_delay_ms: 1000,
+      error_status: 529,
+      error: "overloaded",
+      session_id: NATIVE,
+    } as unknown as SDKMessage);
+    const warned = events.find((event) => event._tag === "runtime.warning");
+    expect(warned?._tag === "runtime.warning" ? warned.message : undefined).toBe(
+      "retrying after overloaded: attempt 1 of 3",
+    );
+  });
+
+  it("says what a compaction did to the context", () => {
+    const running = state();
+    const events = normalize(running, {
+      type: "system",
+      subtype: "compact_boundary",
+      compact_metadata: { trigger: "auto", pre_tokens: 150000, post_tokens: 40000 },
+      session_id: NATIVE,
+    } as unknown as SDKMessage);
+    const opened = events.find((event) => event._tag === "item.started");
+    expect(opened?._tag === "item.started" ? opened.detail : undefined).toEqual({
+      trigger: "auto",
+      preTokens: 150000,
+      postTokens: 40000,
+    });
   });
 });
 
@@ -568,5 +626,92 @@ describe("what a turn reports when it was interrupted", () => {
     const done = events.find((event) => event._tag === "turn.completed");
     expect(done?._tag === "turn.completed" ? done.state : undefined).toBe("interrupted");
     expect(done?._tag === "turn.completed" ? done.error : undefined).toBeUndefined();
+  });
+});
+
+describe("what the protocol will carry", () => {
+  const encode = Schema.encodeUnknownSync(ProviderEvent);
+
+  it("encodes every event a whole turn produces", () => {
+    const running = state();
+    for (const message of TURN) {
+      for (const event of normalize(running, message as SDKMessage)) {
+        expect(() => encode(event)).not.toThrow();
+      }
+    }
+  });
+
+  it("encodes a tool result that came back with no output at all", () => {
+    const running = state();
+    const events = [
+      ASSISTANT_TOOL_USE,
+      {
+        ...TOOL_RESULT,
+        message: { role: "user", content: [{ tool_use_id: TOOL, type: "tool_result" }] },
+      },
+    ].flatMap((message) => normalize(running, message as SDKMessage));
+    const done = events.find((event) => event._tag === "item.completed");
+    expect(done?._tag === "item.completed" ? done.detail : undefined).toEqual({});
+    for (const event of events) expect(() => encode(event)).not.toThrow();
+  });
+});
+
+describe("what nothing can take the session down with", () => {
+  const broken: ReadonlyArray<readonly [string, unknown]> = [
+    ["a result with no model usage", { ...RESULT, modelUsage: undefined }],
+    ["a compaction with no metadata", { type: "system", subtype: "compact_boundary" }],
+    ["an assistant message with no content", { type: "assistant", message: { id: MESSAGE } }],
+    [
+      "an error result with no errors",
+      { ...RESULT, subtype: "error_during_execution", is_error: true },
+    ],
+  ];
+
+  for (const [name, message] of broken) {
+    it(`turns ${name} into an unknown item rather than throwing`, () => {
+      const running = state();
+      expect(() => normalize(running, message as SDKMessage)).not.toThrow();
+      const kinds = through([message]).map((event) => event.split(" ").slice(0, 2).join(" "));
+      expect(kinds).toContain("item.started unknown");
+    });
+  }
+});
+
+describe("two agents streaming at once", () => {
+  const from = (parent: string | null, event: unknown) => ({
+    type: "stream_event",
+    session_id: NATIVE,
+    parent_tool_use_id: parent,
+    event,
+  });
+
+  const opening = (id: string) => ({
+    type: "message_start",
+    message: { id, model: "claude-haiku-4-5-20251001", role: "assistant" },
+  });
+
+  const text = { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } };
+
+  it("keeps the main loop's blocks apart from a subagent's", () => {
+    expect(
+      through([
+        from(null, opening("msg_main")),
+        from(null, text),
+        from("toolu_sub", opening("msg_sub")),
+        from("toolu_sub", text),
+        from(null, {
+          type: "content_block_delta",
+          index: 0,
+          delta: { type: "text_delta", text: "from the main loop" },
+        }),
+        from(null, { type: "content_block_stop", index: 0 }),
+      ]),
+    ).toEqual([
+      "turn.started",
+      "item.started assistant_message msg_main#0",
+      "item.started assistant_message msg_sub#0",
+      'content.delta assistant_text "from the main loop"',
+      "item.completed assistant_message msg_main#0 completed",
+    ]);
   });
 });

@@ -590,6 +590,20 @@ describe("a Claude Code session", () => {
     expect(said).toBe(`session ${SESSION} is not running here`);
   });
 
+  it("will not start a second harness under a session id it already holds", async () => {
+    const run = driving();
+    await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, WORKING));
+
+    const said = await Effect.runPromise(
+      Effect.flip(run.adapter.startSession(SESSION, SPEC, WORKING)),
+    );
+
+    expect(said).toBe(`session ${SESSION} is already running here`);
+    // The one that was already running is untouched: one harness, one stream.
+    expect(run.options.length).toBe(1);
+    expect(run.closed()).toBe(0);
+  });
+
   it("will not start without a harness on this machine", async () => {
     const run = driving();
     const said = await Effect.runPromise(

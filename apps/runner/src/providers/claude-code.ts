@@ -416,6 +416,11 @@ export const claudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
         if (binary === undefined) {
           return Effect.fail(`no ${CLAUDE_BINARY} on this machine`);
         }
+        // Two harnesses under one Hydra session id would report their events,
+        // and their exit, as each other's. The second start is the mistake.
+        if (live.has(sessionId)) {
+          return Effect.fail(`session ${sessionId} is already running here`);
+        }
         const binding: SessionBinding = {
           sessionId,
           nativeSessionId: crypto.randomUUID(),
@@ -450,7 +455,9 @@ export const claudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
     sendInput: (sessionId: string, turn: TurnInput): Effect.Effect<SendResult, string> =>
       Effect.suspend(() => {
         const held = live.get(sessionId);
-        if (held === undefined) return Effect.fail(`session ${sessionId} is not running here`);
+        if (held === undefined || held.stopping) {
+          return Effect.fail(`session ${sessionId} is not running here`);
+        }
         // A turn is open exactly while the normalizer is between a `turn.started`
         // and the one `result` that ends it, so it is the steering authority.
         const steering = held.state.turnId !== undefined;
@@ -473,9 +480,10 @@ export const claudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
       Effect.sync(() => {
         const held = live.get(sessionId);
         if (held === undefined) return;
-        // Forgotten now rather than when the pump winds up, so input sent in
-        // between is refused instead of pushed into a stream nobody reads.
-        live.delete(sessionId);
+        // The entry stays until the pump winds up, so `live` remains the one
+        // register of what this adapter holds and a start under the same id is
+        // refused while the old harness is still going. `stopping` is what
+        // refuses input in the meantime.
         held.stopping = true;
         held.input.end();
         held.stream.close();

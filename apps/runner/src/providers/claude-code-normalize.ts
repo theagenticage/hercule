@@ -34,6 +34,12 @@ interface Block {
   readonly streamKind: StreamKind;
 }
 
+/** One agent's assistant message in flight: the main loop's, or a subagent's. */
+interface Streaming {
+  messageId: string;
+  readonly blocks: Map<number, Block>;
+}
+
 /**
  * What one session's normalization remembers between messages. Mutable on
  * purpose: this is a running position in a stream, not a value, and threading
@@ -47,10 +53,13 @@ export interface Normalizing {
   readonly now: () => string;
   /** The open turn, or `undefined` between turns. The adapter opens the first. */
   turnId: string | undefined;
-  /** The assistant message currently streaming; item ids are derived from it. */
-  messageId: string | undefined;
-  /** Open text and reasoning blocks by their content-block index. */
-  readonly blocks: Map<number, Block>;
+  /**
+   * What is streaming right now, per agent. Keyed by `parent_tool_use_id`,
+   * because subagents stream at the same time as the main loop and their
+   * content-block indexes are their own: one map would have them overwriting
+   * each other's open blocks.
+   */
+  readonly streams: Map<string, Streaming>;
   /**
    * Assistant messages whose blocks arrived as stream events. The CLI emits one
    * complete assistant message per finished content block, and the block's
@@ -73,8 +82,7 @@ export const normalizing = (
   mint,
   now,
   turnId: undefined,
-  messageId: undefined,
-  blocks: new Map(),
+  streams: new Map(),
   streamed: new Set(),
   tools: new Map(),
 });
@@ -111,13 +119,13 @@ const isMcp = (name: string): boolean => name.startsWith("mcp__");
  * this list still becomes an `unknown` item rather than disappearing.
  */
 const TRIMMED: ReadonlySet<string> = new Set([
-  // Top-level message types. Auth is snapshot material; the other two are the
-  // informational tail section 6.7 names by hand.
+  // Top-level message types. Auth and rate limits are snapshot material; the
+  // rest is the informational tail, two of which section 6.7 names by hand.
   "rate_limit_event",
   "auth_status",
   "tool_use_summary",
   "prompt_suggestion",
-  "files_persisted",
+  "tool_progress",
   // `system` subtypes, under the prefix the switch below asks with. Hooks are
   // dropped by name in section 6.7; the rest is progress chatter.
   "system:status",
@@ -128,11 +136,19 @@ const TRIMMED: ReadonlySet<string> = new Set([
   "system:hook_started",
   "system:hook_progress",
   "system:hook_response",
+  "system:files_persisted",
 ]);
 
 const said = (value: string): string => value.slice(0, MAX_MESSAGE_LENGTH);
 
-const json = (value: unknown): Schema.Json => value as Schema.Json;
+/**
+ * A real round-trip, not a cast. The vendor's own payload rides `raw` and its
+ * tool arguments ride `detail`, both typed `Schema.Json`, and one `undefined`
+ * property anywhere in either would be a frame the protocol refuses to encode -
+ * which costs the runner its socket and every session on it.
+ */
+const json = (value: unknown): Schema.Json =>
+  JSON.parse(JSON.stringify(value ?? null)) as Schema.Json;
 
 /** A count the protocol will carry: a whole number, never negative. */
 const count = (value: number | null | undefined): number =>
@@ -172,13 +188,17 @@ const inTurn = (state: Normalizing, out: Emit): string => {
   return turnId;
 };
 
-/** Ends the turn and everything the taxonomy was tracking inside it. */
+/**
+ * Ends the turn and the streaming it was tracking. Open tool calls are kept: an
+ * interrupted turn ends while a tool is still running, and its `tool_result`
+ * arrives afterwards still needing the kind the call gave it.
+ */
 const closeTurn = (
   state: Normalizing,
   out: Emit,
   turnId: string,
   turnState: TurnState,
-  error?: string,
+  extra: { readonly usage?: Usage; readonly error?: string } = {},
 ): void => {
   out.push({
     _tag: "turn.completed",
@@ -187,13 +207,12 @@ const closeTurn = (
     at: state.now(),
     turnId,
     state: turnState,
-    ...(error === undefined ? {} : { error }),
+    ...(extra.usage === undefined ? {} : { usage: extra.usage }),
+    ...(extra.error === undefined ? {} : { error: extra.error }),
   });
   state.turnId = undefined;
-  state.messageId = undefined;
-  state.blocks.clear();
+  state.streams.clear();
   state.streamed.clear();
-  state.tools.clear();
 };
 
 const started = (
@@ -274,30 +293,22 @@ const userMessage = (state: Normalizing, turnId: string, text: string): Emit => 
   ];
 };
 
-/**
- * The forward-compatible catch-all. It brackets its own turn when there is
- * none, because the messages that land here are the harness's informational
- * tail, which the SDK sends *after* the `result` that closed the last turn: a
- * turn opened for one would wait for a `result` that is never coming and pin
- * the session at busy.
- */
+/** The forward-compatible catch-all: an unmapped vendor message, with its raw. */
 const unknownItem = (state: Normalizing, out: Emit): void => {
-  const unsolicited = state.turnId === undefined;
   const turnId = inTurn(state, out);
   const itemId = state.mint();
   out.push(started(state, turnId, itemId, "unknown"));
   out.push(completed(state, turnId, itemId, "unknown", "completed"));
-  if (unsolicited) closeTurn(state, out, turnId, "completed");
 };
 
 type Streamed = Extract<SDKMessage, { type: "stream_event" }>["event"];
 
-const onStreamEvent = (state: Normalizing, event: Streamed, out: Emit): void => {
+const onStreamEvent = (state: Normalizing, event: Streamed, agent: string, out: Emit): void => {
+  const open = state.streams.get(agent);
   switch (event.type) {
     case "message_start": {
-      state.messageId = event.message.id;
       state.streamed.add(event.message.id);
-      state.blocks.clear();
+      state.streams.set(agent, { messageId: event.message.id, blocks: new Map() });
       return;
     }
     case "content_block_start": {
@@ -311,10 +322,10 @@ const onStreamEvent = (state: Normalizing, event: Streamed, out: Emit): void => 
           : block.type === "thinking"
             ? "reasoning"
             : undefined;
-      if (kind === undefined) return;
+      if (kind === undefined || open === undefined) return;
       const turnId = inTurn(state, out);
-      const itemId = `${state.messageId ?? "message"}#${event.index}`;
-      state.blocks.set(event.index, {
+      const itemId = `${open.messageId}#${event.index}`;
+      open.blocks.set(event.index, {
         itemId,
         kind,
         streamKind: kind === "reasoning" ? "reasoning_text" : "assistant_text",
@@ -323,7 +334,7 @@ const onStreamEvent = (state: Normalizing, event: Streamed, out: Emit): void => 
       return;
     }
     case "content_block_delta": {
-      const block = state.blocks.get(event.index);
+      const block = open?.blocks.get(event.index);
       if (block === undefined) return;
       // Signature and partial-JSON deltas are not text and carry no output.
       const text =
@@ -337,9 +348,9 @@ const onStreamEvent = (state: Normalizing, event: Streamed, out: Emit): void => 
       return;
     }
     case "content_block_stop": {
-      const block = state.blocks.get(event.index);
-      if (block === undefined) return;
-      state.blocks.delete(event.index);
+      const block = open?.blocks.get(event.index);
+      if (block === undefined || open === undefined) return;
+      open.blocks.delete(event.index);
       out.push(completed(state, inTurn(state, out), block.itemId, block.kind, "completed"));
       return;
     }
@@ -417,9 +428,11 @@ const onUser = (
       state.tools.delete(itemId);
       out.push(
         completed(state, turnId, itemId, kind, block.is_error === true ? "failed" : "completed", {
-          // A `Read` of a big file comes back here whole, and this event has to
-          // fit in one frame.
-          content: typeof block.content === "string" ? said(block.content) : block.content,
+          // A `Read` of a big file comes back here whole, and `detail` is what a
+          // transcript renders; the untouched output stays reachable on `raw`.
+          ...(block.content === undefined
+            ? {}
+            : { content: typeof block.content === "string" ? said(block.content) : block.content }),
         }),
       );
       continue;
@@ -484,21 +497,10 @@ const onResult = (
     at: state.now(),
     usage,
   });
-  out.push({
-    _tag: "turn.completed",
-    eventId: state.mint(),
-    sessionId: state.sessionId,
-    at: state.now(),
-    turnId,
-    state: turnState,
+  closeTurn(state, out, turnId, turnState, {
     usage,
     ...(turnState === "failed" ? { error: wentWrong(sdk) } : {}),
   });
-  state.turnId = undefined;
-  state.messageId = undefined;
-  state.blocks.clear();
-  state.streamed.clear();
-  state.tools.clear();
 };
 
 const onSystem = (
@@ -540,41 +542,77 @@ const onSystem = (
 };
 
 /**
- * One SDK message in, the events it means out. Raw rides the first event of
- * each complete message, so a consumer can always reach the vendor payload
- * without every delta carrying a copy of the message it came from.
+ * The message classes that arrive between turns. Claude's informational tail
+ * follows the `result` that closed the last turn, and a turn opened for one
+ * would wait for a `result` that is never coming: the session would read as
+ * busy for the rest of its life, and the next `sendInput` would report itself
+ * steered into a turn nobody is running. So a turn opened for one of these is
+ * closed by the same message that opened it (spec 06 section 6.2, synthetic
+ * turns). `assistant` and `stream_event` are not here: they are model output,
+ * and the `result` that follows them is what ends their turn.
+ */
+const SELF_CONTAINED: ReadonlySet<string> = new Set(["user", "system"]);
+
+/**
+ * One SDK message in, the events it means out. Raw rides the first event that
+ * is not the turn a message had to open, so a consumer can always reach the
+ * vendor payload without every delta carrying a copy of the message it came
+ * from.
+ *
+ * Nothing here throws. The tags this build does not know already become an
+ * `unknown` item; the guard below extends that to a message whose tag is known
+ * but whose fields have moved, because the CLI ships weekly and a `TypeError`
+ * in here would take a live session down with it.
  */
 export const normalize = (state: Normalizing, sdk: SDKMessage): ReadonlyArray<ProviderEvent> => {
   const out: Emit = [];
+  const unsolicited = state.turnId === undefined;
+  try {
+    dispatch(state, sdk, out);
+  } catch {
+    out.length = 0;
+    unknownItem(state, out);
+  }
+  if (unsolicited && state.turnId !== undefined) {
+    if (out.every((event) => event._tag === "turn.started")) {
+      // The message said nothing the taxonomy carries, so the turn it opened on
+      // the way in is not a turn at all.
+      out.length = 0;
+      state.turnId = undefined;
+    } else if (SELF_CONTAINED.has(sdk.type)) {
+      closeTurn(state, out, state.turnId, "completed");
+    }
+  }
+  // A delta already carries its text, and there are thousands of them; a copy
+  // of the message each came from on every one would double the stream.
+  if (sdk.type === "stream_event") return out;
+  const at = out.findIndex((event) => event._tag !== "turn.started");
+  const found = out[at];
+  if (found !== undefined) {
+    out[at] = { ...found, raw: { source: CLAUDE_SDK_MESSAGE, payload: json(sdk) } };
+  }
+  return out;
+};
+
+const dispatch = (state: Normalizing, sdk: SDKMessage, out: Emit): void => {
   switch (sdk.type) {
     case "system":
       onSystem(state, sdk, out);
-      break;
+      return;
     case "stream_event":
-      // Deltas are the volume on this stream, and they already carry their
-      // text: attaching the message they came from to each one would double it.
-      onStreamEvent(state, sdk.event, out);
-      return out;
+      onStreamEvent(state, sdk.event, sdk.parent_tool_use_id ?? "", out);
+      return;
     case "assistant":
       onAssistant(state, sdk, out);
-      break;
+      return;
     case "user":
       onUser(state, sdk, out);
-      break;
+      return;
     case "result":
       onResult(state, sdk, out);
-      break;
+      return;
     default:
-      if (TRIMMED.has(sdk.type)) return out;
-      unknownItem(state, out);
-      break;
+      if (!TRIMMED.has(sdk.type)) unknownItem(state, out);
+      return;
   }
-  // Never on the `turn.started` a message may have had to open first: the raw
-  // payload belongs to the item or the outcome the message actually reported.
-  const first = out.findIndex((event) => event._tag !== "turn.started");
-  const found = out[first];
-  if (found !== undefined) {
-    out[first] = { ...found, raw: { source: CLAUDE_SDK_MESSAGE, payload: json(sdk) } };
-  }
-  return out;
 };
