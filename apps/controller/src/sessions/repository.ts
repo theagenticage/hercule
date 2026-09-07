@@ -3,10 +3,8 @@
  * policy: placement, the access-mode fallback and the status axis are the
  * service's and the fold's.
  *
- * `resumable` is computed in the SELECT rather than stored, because it is a
- * fact about three things at once - the session has exited, a provider-native
- * object was bound to it, and the machine holding that object is still enlisted
- * - and a stored copy would go stale the moment a runner is retired.
+ * `resumable` is computed in the SELECT rather than stored: a stored copy would
+ * go stale the moment a runner is retired.
  */
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
@@ -84,11 +82,7 @@ interface SessionRow {
   readonly last_activity_at: string;
 }
 
-/**
- * The three conditions of spec 06 section 4.1's derived `resumable`, in one
- * expression: it has exited, something native was bound to it, and the machine
- * that holds that native state is still one of ours.
- */
+/** Spec 06 section 4.1's derived `resumable`, in one expression. */
 const RESUMABLE =
   "(status = 'exited' AND native_session_id IS NOT NULL AND EXISTS " +
   "(SELECT 1 FROM runners WHERE runners.id = sessions.runner_id " +
@@ -123,10 +117,9 @@ const scopeOf = (direction: SortDirection): CursorScope => ({
 });
 
 /**
- * The transcript walk. Its key is the position, which is per session and not
- * global, so the session is part of the walk the cursor belongs to: without it
- * one session's cursor would be accepted on another's transcript and hide every
- * row below that position, with nothing to say so.
+ * The transcript walk. Its key is the position, which is per session, so the
+ * session is part of the walk the cursor belongs to: without it one session's
+ * cursor would silently hide rows on another's transcript.
  */
 const transcriptScope = (sessionId: string, direction: SortDirection): CursorScope => ({
   op: "transcript.read",
@@ -223,12 +216,9 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * One page of a session's stream, in position order.
-     *
-     * The stored `event` is the JSON the ingest wrote, which is the normalized
-     * event as it crossed the wire: it is parsed back rather than re-decoded,
-     * because the schema it was written from has no transform in it and the
-     * document is the value.
+     * One page of a session's stream, in position order. The stored `event` is
+     * parsed back rather than re-decoded: the schema it was written from has no
+     * transform in it, so the document is the value.
      */
     transcript: (
       request: TranscriptPageRequest,
@@ -268,15 +258,13 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * The highest runner sequence already written for this session, which is
-     * where ingest resumes after a restart.
+     * The highest runner sequence already written for this session, where
+     * ingest resumes after a restart.
      *
-     * It is a high-water mark, not a contiguous prefix: a coalesced delta row
-     * carries the sequence of the last delta folded into it and is written at a
-     * boundary, so a plain event can be written under a higher sequence while
-     * text with a lower one is still only held. Nothing replays today, so
-     * nothing reads it that way - but the outbox of spec 03 section 2.3 will,
-     * and it needs a watermark this cannot give it.
+     * A high-water mark, not a contiguous prefix: a coalesced delta row carries
+     * the sequence of the last delta folded into it, so a plain event can be
+     * written under a higher sequence while lower text is still only held.
+     * Nothing replays today; the outbox of spec 03 section 2.3 will need more.
      */
     lastSeq: (sessionId: string): Effect.Effect<number, SqlError> =>
       Effect.map(
@@ -305,13 +293,11 @@ const make = Effect.gen(function* () {
 
     /**
      * Moves the session and stamps the activity. `startedAt` and `exitedAt` are
-     * written by the move that reaches them and never again, so a second
-     * `session.started` cannot rewrite when the session came up.
+     * written once, so a second `session.started` cannot rewrite when it came up.
      *
-     * `exited` is final (spec 06 section 4.1), and the WHERE clause is what
-     * makes that hold: this row has two writers - ingest and the spawn that
-     * could not reach its machine - so a status read before a transaction is no
-     * proof of the status inside it.
+     * The WHERE clause is what makes `exited` final (spec 06 section 4.1): this
+     * row has two writers - ingest, and the spawn that could not reach its
+     * machine - so a status read before a transaction proves nothing inside it.
      */
     moved: (sessionId: string, status: SessionStatus, at: string): Effect.Effect<void, SqlError> =>
       Effect.asVoid(sql`

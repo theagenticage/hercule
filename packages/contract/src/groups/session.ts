@@ -1,15 +1,9 @@
 /**
- * Sessions: one provider-backed agent conversation, as the API sees it.
- *
- * A session record is almost entirely written by the controller and by the
- * runner reporting through it. Nothing here is editable: a caller spawns a
- * session, reads it, and sends it input. What the session then says is its
- * normalized stream, which is a separate append-only concern.
+ * Sessions: one provider-backed agent conversation, as the API sees it. Nothing
+ * here is editable - a caller spawns a session, reads it, and sends it input.
  *
  * `requestedAccessMode` and `accessMode` are both on the record because the
- * downward fallback of [06-providers section 8.4] must never be silent: a
- * caller that asked for `auto` on a provider that lacks it reads back the mode
- * it actually got, beside the one it asked for.
+ * downward fallback of [06-providers section 8.4] must never be silent.
  */
 import { Schema } from "effect";
 import { AccessMode } from "@hydra/protocol";
@@ -29,11 +23,7 @@ import { page, pageParams } from "../pagination";
 import { Authenticated } from "../security";
 import { bounded } from "../strings";
 
-/**
- * The longest prompt or turn input the API takes. The same bound as a task
- * description: a prompt is a document a person wrote, and it crosses the runner
- * socket in one frame.
- */
+/** The longest prompt or turn input the API takes: it crosses the runner socket in one frame. */
 export const MAX_PROMPT_LENGTH = 64 * 1024;
 
 const Prompt = bounded(1, MAX_PROMPT_LENGTH);
@@ -77,8 +67,7 @@ export type Session = Schema.Schema.Type<typeof Session>;
 
 /**
  * Spawning a Thread: no agent, so every value comes from the user's `thread.*`
- * settings unless this call overrides it. Overrides are for this session only
- * and are never written back to the settings store.
+ * settings unless this call overrides it, for this session only.
  */
 export const SessionSpawnInput = closedStruct({
   prompt: Prompt,
@@ -92,9 +81,8 @@ export const SessionSpawnInput = closedStruct({
 export type SessionSpawnInput = Schema.Schema.Type<typeof SessionSpawnInput>;
 
 /**
- * One turn's input. Text only; attachments are an open item. Declared apart
- * from the payload so a service can spread it beside the session id and hold an
- * in-process caller to the same bound a request is held to.
+ * One turn's input. Declared apart from the payload so a service can spread it
+ * beside the session id and hold an in-process caller to the same bound.
  */
 export const SESSION_INPUT_FIELDS = { text: Prompt } as const;
 
@@ -102,10 +90,7 @@ export const SessionInputPayload = closedStruct(SESSION_INPUT_FIELDS);
 
 export type SessionInputPayload = Schema.Schema.Type<typeof SessionInputPayload>;
 
-/**
- * Whether the input opened a turn or was folded into the one already running.
- * The word for the second is steering, which is why the grant is `session.steer`.
- */
+/** Folding input into a turn already running is steering, hence the `session.steer` grant. */
 export const SessionInputResult = Schema.Struct({
   result: Schema.Literals(["opened", "steered"]),
 });
@@ -117,7 +102,6 @@ export const SessionFilter = Schema.Struct({
   runnerId: Schema.optionalKey(Id),
 });
 
-/** Newest first: a session list is read as a history. */
 export const SESSION_SORT_FIELDS = ["createdAt"] as const;
 
 export const session = HttpApiGroup.make("session")

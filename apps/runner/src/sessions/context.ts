@@ -1,8 +1,7 @@
 /**
  * What one session needs on this machine, resolved from the frame that asked
- * for it: ids in, paths out (spec 06 section 4). The controller names an
- * instance, a workspace and a model; only this file knows where any of that
- * lives on the runner, and the adapter is handed the answer.
+ * for it: ids in, paths out (spec 06 section 4). Only this file knows where an
+ * instance or a workspace lives on the runner.
  */
 import { mkdirSync, rmSync } from "node:fs";
 import { join as joinPath } from "node:path";
@@ -26,20 +25,16 @@ export interface Machine {
 
 export interface Resolved {
   readonly ctx: ProviderRunnerContext;
-  /**
-   * The directory this session owns and nothing else reads, removed when it
-   * exits. Absent for a session that runs in a workspace.
-   */
+  /** Removed when the session exits; absent for a session that has a workspace. */
   readonly scratch: string | undefined;
 }
 
 /**
  * Instance config carries "extra environment for the spawned process" (spec 06
- * section 2.1) and no path. No shipped provider declares a `configSchema` field
- * for it yet, so the shape is read leniently: what is not a string environment
- * entry is not one, rather than a session that refuses to start.
+ * section 2.1). No shipped provider declares a `configSchema` field for it yet,
+ * so the shape is read leniently rather than refusing to start the session.
  *
- * `HOME` is not one either. Relocating it makes the Claude CLI report another
+ * `HOME` is dropped: relocating it makes the Claude CLI report another
  * account's login, or none, because the macOS Keychain item is keyed by the
  * real home (spec 06 section 9.1); isolation is `CLAUDE_CONFIG_DIR`'s job.
  */
@@ -58,12 +53,9 @@ const instanceEnv = (config: unknown): Record<string, string> => {
  * section 4, in that order, so instance config can never take `HYDRA_SESSION`
  * or the API URL away from the `hydra` CLI a session calls.
  *
- * Three parts of spec 06 section 9.3 are not here, and none of them silently:
- * `HYDRA_TOKEN`, because session tokens are not minted yet and a name set to
- * nothing reads as a credential that failed; the `PATH` prepend that puts the
- * `hydra` binary in reach, which is worth nothing until a session has a token
- * to call the API with; and the git credential material, which arrives with
- * workspaces. Each comes with the feature that needs it.
+ * `HYDRA_TOKEN`, the `PATH` prepend and the git credential material of spec 06
+ * section 9.3 are absent: each arrives with the feature that needs it - session
+ * tokens, and workspaces.
  */
 const envFor = (machine: Machine, config: unknown): Record<string, string | undefined> => ({
   ...machine.baseEnv,
@@ -75,9 +67,8 @@ const envFor = (machine: Machine, config: unknown): Record<string, string | unde
 /**
  * A workspace-less session gets an empty scratch directory rather than the
  * runner's own cwd, which every harness would read instruction files out of
- * (spec 06 section 9.1). Everything the harness needs beyond it - empty setting
- * sources, auto memory off, strict MCP - is the adapter's to apply from this
- * context (spec 06 section 4.2).
+ * (spec 06 section 9.1). The rest of spec 06 section 4.2 - empty setting
+ * sources, auto memory off, strict MCP - is the adapter's to apply.
  */
 export const resolve = (
   frame: SessionStart,

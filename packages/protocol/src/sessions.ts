@@ -4,9 +4,8 @@
  * into before it leaves the machine it ran on (spec 06 sections 4 and 6).
  *
  * Normalization happens at the runner, so this file is the whole contract a
- * consumer of a session reads. Enums are open for consumers: an `unknown` item
- * kind and a `raw` passthrough exist so a vendor message nobody mapped is
- * carried rather than dropped.
+ * consumer of a session reads. An `unknown` item kind and a `raw` passthrough
+ * carry a vendor message nobody mapped rather than dropping it.
  */
 import { Schema } from "effect";
 
@@ -15,8 +14,7 @@ import { Fact, InstanceId, MAX_FACT_LENGTH, Sequenced, SessionId } from "./primi
 /**
  * How much of a session a caller may act on without being asked (spec 06
  * section 2). It rides `SessionSpec`, so the protocol owns it and the plugin
- * host re-exports it; a definition on each side would be two vocabularies that
- * drift.
+ * host re-exports it rather than declaring a second one.
  */
 export const AccessMode = Schema.Literals([
   "approval-required",
@@ -28,10 +26,9 @@ export const AccessMode = Schema.Literals([
 export type AccessMode = Schema.Schema.Type<typeof AccessMode>;
 
 /**
- * The longest piece of free text a harness may put in an event. A `Fact` is
- * wrong for these: an error body or a stack trace is a document, and one over
- * 512 bytes would be an undecodable frame, which costs the runner its socket
- * and every session on it.
+ * The longest piece of free text a harness may put in an event. A `Fact` is too
+ * short: an error body or a stack trace over 512 bytes would be an undecodable
+ * frame, which costs the runner its socket and every session on it.
  */
 export const MAX_MESSAGE_LENGTH = 4096;
 
@@ -50,10 +47,9 @@ export type ModelSelection = Schema.Schema.Type<typeof ModelSelection>;
  * The runner resolves it to a `ProviderRunnerContext` on its own machine.
  *
  * The row that stores this keeps it byte for byte, so a field is added here
- * only when something sends it: `continue`, `outputSchema`, `mcpServers`,
- * `systemPrompt` and `disallowedTools` are spec 06 section 4 fields whose
- * features (resume and fork, structured output, MCP passthrough, agents) are
- * not built yet, and each arrives with the one that needs it.
+ * only when something sends it. The rest of spec 06 section 4 - `continue`,
+ * `outputSchema`, `mcpServers`, `systemPrompt`, `disallowedTools` - arrives
+ * with the feature that needs it.
  */
 export const SessionSpec = Schema.Struct({
   instanceId: InstanceId,
@@ -78,20 +74,14 @@ export const SessionBinding = Schema.Struct({
 
 export type SessionBinding = Schema.Schema.Type<typeof SessionBinding>;
 
-/**
- * The user input for one turn. Text only: attachments are the open item in spec
- * 16 section B, and the pinned `modelSelection` of spec 06 section 4 arrives
- * with the composer that changes a model mid-thread.
- */
+/** One turn's input. Text only: attachments are the open item in spec 16 section B. */
 export const TurnInput = Schema.Struct({ text: Schema.String });
 
 export type TurnInput = Schema.Schema.Type<typeof TurnInput>;
 
 /**
- * Why a session is gone (spec 06 section 4.1). Pinned, because `resumable` and
- * the session view both read it: `stopped` was asked for, `process_exit` and
- * `crash` were not, `idle_unload` and `runner_restart` may leave native state
- * behind.
+ * Why a session is gone (spec 06 section 4.1). Pinned because the session view
+ * reads it: only `idle_unload` and `runner_restart` leave native state behind.
  */
 export const ExitReason = Schema.Literals([
   "stopped",
@@ -132,9 +122,9 @@ export const ItemStatus = Schema.Literals(["completed", "failed", "declined"]);
 export type ItemStatus = Schema.Schema.Type<typeof ItemStatus>;
 
 /**
- * The three append-only text streams. There is no fourth: where a vendor sends
- * raw and summarized reasoning separately the adapter picks one channel, raw
- * preferred, and the other stays raw-only (spec 06 section 6.4).
+ * The three append-only text streams. Where a vendor sends raw and summarized
+ * reasoning separately the adapter picks one, raw preferred, and the other
+ * stays raw-only (spec 06 section 6.4).
  */
 export const StreamKind = Schema.Literals(["assistant_text", "reasoning_text", "command_output"]);
 
@@ -145,10 +135,9 @@ const Tokens = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0));
 const Money = Schema.Number.check(Schema.isGreaterThanOrEqualTo(0));
 
 /**
- * A cumulative token snapshot for the session, not a per-turn delta; cadence
- * differs per harness and the snapshot shape absorbs that. The cache counts are
- * optional because only some harnesses report them, and `costUsd` because only
- * some price the turn (spec 06 section 6.6).
+ * A cumulative token snapshot for the session, not a per-turn delta: cadence
+ * differs per harness and the snapshot shape absorbs that. The optional fields
+ * are the ones only some harnesses report (spec 06 section 6.6).
  */
 export const Usage = Schema.Struct({
   inputTokens: Tokens,
@@ -161,14 +150,9 @@ export const Usage = Schema.Struct({
 export type Usage = Schema.Schema.Type<typeof Usage>;
 
 /**
- * The fields every normalized event carries. `raw` is the untouched vendor
- * payload under the name of the channel it came off, e.g. `claude.sdk.message`:
- * the escape hatch that keeps a trimmed taxonomy honest.
- *
- * Only the fields every member carries identically are here. `turnId` and
- * `itemId` are declared per member instead: an event about a turn or an item
- * requires its id, the rest have nothing to put in it, and a member that
- * restated a base field would be widening it rather than narrowing it.
+ * The fields every normalized event carries identically. `turnId` and `itemId`
+ * are declared per member instead, so an event about a turn or an item requires
+ * its id and the rest have no place to put one.
  */
 const base = {
   eventId: Fact,
@@ -207,10 +191,8 @@ const TurnCompleted = event("turn.completed", {
 });
 
 /**
- * `detail` is kind-specific and stays Json here: its shape is the adapter's to
- * decide per kind, a consumer that does not know a kind renders it generically,
- * and pinning twelve shapes in the protocol would freeze what each harness may
- * yet report.
+ * `detail` stays Json: its shape is the adapter's to decide per kind, and
+ * pinning twelve shapes here would freeze what each harness may yet report.
  */
 const itemFields = {
   /** Every item belongs to a turn; unsolicited output gets a synthetic one. */
@@ -222,15 +204,9 @@ const itemFields = {
 
 const ItemStarted = event("item.started", itemFields);
 
-const ItemUpdated = event("item.updated", itemFields);
-
 const ItemCompleted = event("item.completed", { ...itemFields, status: ItemStatus });
 
-/**
- * Append-only text for one (item, streamKind). Unbounded, unlike the facts a
- * peer states about itself: this is the payload, and cutting it would lose
- * output rather than refuse a claim.
- */
+/** Append-only text for one (item, streamKind). Unbounded: cutting it loses output. */
 const ContentDelta = event("content.delta", {
   turnId: Fact,
   itemId: Fact,
@@ -248,9 +224,8 @@ const RuntimeWarning = event("runtime.warning", {
 
 /**
  * `class` is the one open vocabulary here. Codex's `codexErrorInfo` enum is the
- * reference set every adapter maps into as far as it can, with `unknown` for
- * the rest; it stays a string rather than a literal union because a harness
- * naming a class this build has not heard of should still reach the user.
+ * reference set adapters map into, with `unknown` for the rest; it stays a
+ * string so a class this build has not heard of still reaches the user.
  */
 const RuntimeError = event("runtime.error", {
   turnId: Schema.optionalKey(Fact),
@@ -264,7 +239,6 @@ export const ProviderEvent = Schema.Union([
   TurnStarted,
   TurnCompleted,
   ItemStarted,
-  ItemUpdated,
   ItemCompleted,
   ContentDelta,
   SessionUsageUpdated,
@@ -303,10 +277,7 @@ export const SessionInput = Schema.Struct({
 
 export type SessionInput = Schema.Schema.Type<typeof SessionInput>;
 
-/**
- * The first replayable runner event: one normalized event, under the sequence
- * number that lets the controller insert it exactly once.
- */
+/** One normalized event, under the sequence number the controller inserts it on, once. */
 export const SessionEvent = Schema.Struct({
   _tag: Schema.Literal("sessionEvent"),
   ...Sequenced.fields,
@@ -316,9 +287,8 @@ export const SessionEvent = Schema.Struct({
 export type SessionEvent = Schema.Schema.Type<typeof SessionEvent>;
 
 /**
- * The most sessions one runner will ever report. Bounded like every other array
- * on this wire; the per-runner session cap (spec 03 section 5.3) is well under
- * it, so the limit refuses a nonsense report rather than a real one.
+ * The most sessions one runner will ever report. The per-runner cap of spec 03
+ * section 5.3 is well under it, so this refuses nonsense, not a real report.
  */
 export const MAX_SESSIONS_PER_RUNNER = 256;
 

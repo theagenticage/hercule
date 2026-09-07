@@ -490,12 +490,8 @@ describe("a Claude Code session", () => {
     const run = driving();
     await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, WORKING));
 
-    const opened = await Effect.runPromise(run.adapter.sendInput(SESSION, { text: "hello" }));
-    expect(opened.delivery).toBe("opened");
-
-    const steered = await Effect.runPromise(run.adapter.sendInput(SESSION, { text: "and this" }));
-    expect(steered.delivery).toBe("steered");
-    expect(steered.turnId).toBe(opened.turnId);
+    await Effect.runPromise(run.adapter.sendInput(SESSION, { text: "hello" }));
+    await Effect.runPromise(run.adapter.sendInput(SESSION, { text: "and this" }));
 
     await settled();
     expect(run.sent.map((message) => message.message.content)).toEqual(["hello", "and this"]);
@@ -507,13 +503,11 @@ describe("a Claude Code session", () => {
     const run = driving();
     await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, WORKING));
 
-    const first = await Effect.runPromise(run.adapter.sendInput(SESSION, { text: "hello" }));
+    await Effect.runPromise(run.adapter.sendInput(SESSION, { text: "hello" }));
     run.say(RESULT);
     await settled();
 
-    const second = await Effect.runPromise(run.adapter.sendInput(SESSION, { text: "again" }));
-    expect(second.delivery).toBe("opened");
-    expect(second.turnId).not.toBe(first.turnId);
+    await Effect.runPromise(run.adapter.sendInput(SESSION, { text: "again" }));
     expect(tags(run.seen)).toEqual([
       "session.started",
       "turn.started",

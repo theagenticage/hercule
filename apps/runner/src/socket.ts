@@ -37,6 +37,7 @@ import {
   type RunnerFacts,
 } from "@hydra/protocol";
 import { refreshFacts } from "./probe";
+import { wentWrong } from "./report";
 import {
   adapterFor,
   noAdapterFor,
@@ -260,14 +261,6 @@ export const connect = (
       },
     });
 
-    /**
-     * What went wrong, in one line. Saying nothing about a defect would leave
-     * the controller waiting out its deadline for an answer this machine has.
-     */
-    const wentWrong = (cause: Cause.Cause<unknown>): string =>
-      (Cause.pretty(cause).split("\n")[0] ?? "").slice(0, MAX_FACT_LENGTH) ||
-      "the runner could not answer";
-
     const answerProbe = (request: ProbeRequest) => {
       const reporting = (result: ProbeResult) =>
         write(
@@ -289,7 +282,9 @@ export const connect = (
         // The encoding is inside the catch: a result `asText` cannot carry must
         // reach the controller as an error, not as silence. The fallback is
         // bounded, so it always encodes.
-        Effect.catchCause((cause) => Effect.ignore(reporting(probeFailed(wentWrong(cause))))),
+        Effect.catchCause((cause) =>
+          Effect.ignore(reporting(probeFailed(wentWrong(cause, MAX_FACT_LENGTH)))),
+        ),
         // The connection is going if the write itself failed, and there is
         // nowhere left to report that to.
         Effect.ignore,
@@ -322,7 +317,7 @@ export const connect = (
         return yield* reporting(outcome);
       }).pipe(
         Effect.catchCause((cause) =>
-          Effect.ignore(reporting({ ok: false, message: wentWrong(cause) })),
+          Effect.ignore(reporting({ ok: false, message: wentWrong(cause, MAX_FACT_LENGTH) })),
         ),
         Effect.ignore,
       );
@@ -336,7 +331,9 @@ export const connect = (
       const reporting = (answer: LoginAnswer) => write(asText({ ...answer, requestId }));
       return Effect.flatMap(answering, reporting).pipe(
         Effect.catchCause((cause) =>
-          Effect.ignore(reporting({ _tag: "loginFailed", message: wentWrong(cause) })),
+          Effect.ignore(
+            reporting({ _tag: "loginFailed", message: wentWrong(cause, MAX_FACT_LENGTH) }),
+          ),
         ),
         Effect.ignore,
       );

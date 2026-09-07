@@ -2,16 +2,14 @@
  * Sessions as the API sees them, and the one place the fleet's session traffic
  * is turned into rows.
  *
- * Only a Thread can be spawned in this build: there are no Agents, so every
- * value comes from the user's `thread.*` settings plus this call's overrides,
- * and the operation is the user's alone (spec 02 Thread). When session, run and
- * plugin actors arrive, they are refused here rather than reaching the thread
- * defaults, which would make the thread profile an escalation path.
+ * Only a Thread can be spawned in this build, and only by the user: every value
+ * comes from their `thread.*` settings plus this call's overrides, so any other
+ * actor reaching those defaults would make the thread profile an escalation
+ * path (spec 02 Thread).
  *
  * `ingesting` is the driver: one fiber, reading what the fleet reported in the
  * order it arrived. Each event's stream rows and the status change they cause
- * commit together (spec 04 Truth model), and an event under a sequence number
- * this session has already applied writes nothing.
+ * commit together (spec 04 Truth model).
  */
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -121,11 +119,9 @@ const DEFAULT_PROFILE = "unrestricted";
 const DEFAULT_ACCESS_MODE: AccessMode = "approval-required";
 
 /**
- * Least permissive first. The fallback of spec 06 section 8.4 walks this list
- * downward from what was asked for and stops at the first mode the provider
- * declares native, so a substitution is never more permissive than the request.
- * It is never silent either: the row keeps both modes and every read hands back
- * both, which is where the caller sees what it actually got.
+ * Least permissive first. The fallback of spec 06 section 8.4 walks downward
+ * from what was asked for, so a substitution is never more permissive; the row
+ * keeps both modes, which is how the caller sees what it actually got.
  */
 const MODES: ReadonlyArray<AccessMode> = [
   "approval-required",
@@ -147,12 +143,8 @@ const nearestSupported = (
 
 /**
  * Where the provider-native id rides on the event that announces the harness.
- * The key is `SessionBinding`'s own field name, because it is the same fact:
- * `providerRefs` is the generic bag of native ids (spec 06 section 4.1), and a
- * second spelling for this one would be a second vocabulary.
- *
- * A `session.started` that carries none leaves the id null until the machine's
- * next sessions report, which is the other place a binding reaches here.
+ * The key is `SessionBinding`'s own field name, because it is the same fact.
+ * An event that carries none leaves the id null until the next sessions report.
  */
 const nativeIdIn = (event: ProviderEvent): string | undefined =>
   event._tag === "session.started" ? event.providerRefs?.nativeSessionId : undefined;
@@ -183,22 +175,17 @@ const make = Effect.gen(function* () {
 
   /**
    * One session's ingest state: where its sequence stands and what delta text
-   * is held for it. Process memory, like the runner's own sequence: a restart
-   * re-reads the sequence from the rows and starts holding nothing.
-   *
-   * An entry is dropped when the session exits. A session whose machine
-   * vanished never says so, and its entry is held until the restart
-   * reconciliation of spec 06 section 4.1 marks it exited - which this build
-   * does not have, so such an entry outlives the process it was made in.
+   * is held for it. Process memory - a restart re-reads the sequence from the
+   * rows and holds nothing. An entry is dropped when the session exits, so a
+   * session whose machine vanished holds one until the restart reconciliation
+   * of spec 06 section 4.1, which this build does not have.
    */
   const tracking = new Map<string, Tracked>();
 
   /**
    * The first prompt of a spawned session, waiting for its harness to come up.
-   * Held in memory only: this is the handover between `spawn` and
-   * `session.started`, not the Queued Input of spec 06 section 5, which is a
-   * row family this build does not have. A controller restarted inside that
-   * window loses the prompt and leaves the session idle with nothing to do.
+   * The handover between `spawn` and `session.started`, not the Queued Input of
+   * spec 06 section 5: a controller restarted in that window loses the prompt.
    */
   const opening = new Map<string, string>();
 
@@ -242,14 +229,9 @@ const make = Effect.gen(function* () {
     });
 
   /**
-   * Which machine hosts the session. A capability snapshot is what says a
-   * machine has this instance's harness and a usable login for it, so placement
-   * is the first such machine that is online and active.
-   *
-   * The "local" alias of spec 03 section 5.4 is the client's to resolve and
-   * reaches the controller as a named runner; naming one on spawn is not built
-   * yet, so a single-machine install places on its own machine because that is
-   * the only candidate there is.
+   * Which machine hosts the session: the first that is online and holds a
+   * capability snapshot saying it has this instance's harness and a login for
+   * it. Naming a runner on spawn (spec 03 section 5.4) is not built yet.
    */
   const placement = (
     snapshots: ReadonlyArray<StoredSnapshot>,
@@ -263,11 +245,7 @@ const make = Effect.gen(function* () {
       return found;
     });
 
-  /**
-   * The shipped thread default: the first provider instance somebody is logged
-   * in to somewhere (spec 02 Thread). It stands in only until the user has a
-   * `thread.instanceId`, which the onboarding writes.
-   */
+  /** The shipped thread default until the user has a `thread.instanceId` (spec 02 Thread). */
   const firstLoggedIn = (): Effect.Effect<string, InvalidState | SqlError | Schema.SchemaError> =>
     Effect.gen(function* () {
       for (const snapshot of yield* instances.snapshots()) {
@@ -298,8 +276,7 @@ const make = Effect.gen(function* () {
       presence.tell(runnerId, { _tag: "sessionInput", sessionId, input: { text: prompt } }),
       (sent) =>
         // The machine went in the moment between coming up and being spoken to.
-        // Said rather than swallowed: the session is idle and the user is
-        // waiting for a reply to a prompt nothing received.
+        // Said rather than swallowed: the user is waiting on a prompt nothing got.
         sent
           ? Effect.void
           : Effect.logWarning(
@@ -343,8 +320,7 @@ const make = Effect.gen(function* () {
         Effect.gen(function* () {
           const at = yield* nowIso;
           for (const row of folded.rows) yield* sessions.append(id, row);
-          // The binding arrives on the event that announces the harness, and is
-          // written with the move that event causes: a session that reads
+          // Written with the move the same event causes: a session that reads
           // `idle` has the provider-native id that made it so.
           const native = nativeIdIn(event);
           if (native !== undefined) {
@@ -354,8 +330,7 @@ const make = Effect.gen(function* () {
           // is still recorded but never brings the session back to life.
           if (folded.status === undefined || folded.status === before || before === "exited") {
             // No announce: an event that moves nothing is most of the traffic,
-            // and nudging a refetch per delta would be a firehose. The record's
-            // watchers hear about it at the next move.
+            // and a refetch per delta would be a firehose.
             yield* sessions.touched(id, at);
             return;
           }
@@ -363,13 +338,12 @@ const make = Effect.gen(function* () {
           yield* announce({ _tag: "record", topic: "session", id, kind: "updated" });
         }),
       );
-      // Only once it is durable: a transaction that failed leaves the held text
-      // and the sequence where they were, so nothing is half-applied. Nothing
-      // resends the frame either - there is no outbox yet (spec 03 section
-      // 2.3) - so what that write would have recorded is lost.
-      // On the transition and on anything after it: an event that reaches an
-      // already-exited session would otherwise put its entry back, and nothing
-      // would ever take it away again.
+      // Only once it is durable: a failed transaction leaves the held text and
+      // the sequence where they were, and nothing resends the frame, because
+      // there is no outbox yet (spec 03 section 2.3).
+      //
+      // Dropped on the transition and on anything after it: an event reaching
+      // an already-exited session would otherwise put its entry back for good.
       if (folded.status === "exited" || before === "exited") {
         tracking.delete(id);
         opening.delete(id);
@@ -416,11 +390,8 @@ const make = Effect.gen(function* () {
 
     /**
      * The session's normalized stream, in position order (spec 11 section 2).
-     *
-     * The session is read first so a transcript of nothing is told apart from a
-     * transcript of a session that does not exist: a session that has only just
-     * been placed has no rows yet, and answering `not_found` for it would be a
-     * lie the caller acts on.
+     * The session is read first so a just-placed session with no rows yet is
+     * told apart from one that does not exist.
      */
     transcript: (input: TranscriptInput): Effect.Effect<TranscriptPage, ReadError | NotFound> =>
       Effect.gen(function* () {
@@ -447,7 +418,7 @@ const make = Effect.gen(function* () {
     spawn: (input: SessionSpawnInput): Effect.Effect<Session, SpawnError> =>
       Effect.gen(function* () {
         // A Thread carries the user's own thread profile, so only the user may
-        // open one; every other actor kind is refused here (spec 02 Thread).
+        // open one (spec 02 Thread).
         const user = yield* currentUser("session.spawn");
         const decoded = yield* Effect.mapError(decodeSpawn(input), validationOf);
         if (decoded.workspaceId !== undefined && decoded.workspaceId !== null) {
@@ -460,8 +431,7 @@ const make = Effect.gen(function* () {
             ]),
           );
         }
-        // The user's thread defaults, which this call may override for this one
-        // session; an override is never written back to the store.
+        // An override is for this session only, never written back to the store.
         const defaults = yield* settings.allForUser(user.userId);
 
         const instanceId =
@@ -544,8 +514,7 @@ const make = Effect.gen(function* () {
         if (!(yield* presence.tell(hosting.runnerId, start))) {
           opening.delete(stored.id);
           // The row exists and nothing will ever start it, so it is ended here
-          // rather than left reading `starting` for good - and said, because a
-          // client was told a moment ago that a session had been created.
+          // rather than left reading `starting` for good.
           yield* withTransaction(
             sql,
             Effect.gen(function* () {
@@ -559,9 +528,9 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * One turn's input. Input to a running turn is steering, which only some
-     * providers do natively; where one does not the controller would queue it,
-     * and Queued Input is not built, so it is refused rather than dropped.
+     * One turn's input. Input to a running turn is steering; where a provider
+     * has none the controller would queue it, and Queued Input is not built,
+     * so it is refused rather than dropped.
      */
     input: (input: InputInput): Effect.Effect<SessionInputResult, InputError> =>
       Effect.gen(function* () {
@@ -593,9 +562,8 @@ const make = Effect.gen(function* () {
 
     /**
      * The ingest driver. One fiber, so a session's events are applied in the
-     * order the machine numbered them; each application absorbs its own
-     * failure, because one report that will not write must not take the whole
-     * fleet's traffic with it.
+     * order the machine numbered them; each absorbs its own failure, because
+     * one report that will not write must not stop the fleet's traffic.
      */
     ingesting: Stream.runForEach(presence.sessionTraffic, (traffic) =>
       Effect.ignore(

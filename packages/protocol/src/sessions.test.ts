@@ -70,21 +70,13 @@ const events: ReadonlyArray<Event> = [
   },
   { _tag: "item.started", ...baseFields, turnId: "t1", itemId: "i1", kind: "command_execution" },
   {
-    _tag: "item.updated",
-    ...baseFields,
-    turnId: "t1",
-    itemId: "i1",
-    kind: "tool_call",
-    detail: { kind: "mcp", name: "mcp__github__list_issues" },
-    raw: { source: "claude.sdk.message", payload: { type: "tool_use", nested: [1, null] } },
-  },
-  {
     _tag: "item.completed",
     ...baseFields,
     turnId: "t1",
     itemId: "i1",
     kind: "file_change",
     status: "declined",
+    detail: { path: "src/main.ts", nested: [1, null] },
   },
   {
     _tag: "content.delta",

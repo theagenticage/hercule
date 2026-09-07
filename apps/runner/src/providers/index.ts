@@ -35,17 +35,6 @@ export interface ProviderRunnerContext {
   readonly env: Readonly<Record<string, string | undefined>>;
 }
 
-/**
- * What one `sendInput` did. Steering is implicit: a busy session folds the
- * input into its running turn, an idle one opens a new turn. This is the only
- * authority on which happened; nobody infers it from event order (spec 06
- * section 5).
- */
-export interface SendResult {
-  readonly turnId: string;
-  readonly delivery: "opened" | "steered";
-}
-
 export interface InstallOutcome {
   readonly ok: boolean;
   readonly message?: string;
@@ -87,7 +76,7 @@ export interface ProviderAdapter {
   ) => Effect.Effect<SessionBinding, string>;
 
   /** Opens a turn on an idle session, steers a busy one. Never bounces input. */
-  readonly sendInput: (sessionId: string, input: TurnInput) => Effect.Effect<SendResult, string>;
+  readonly sendInput: (sessionId: string, input: TurnInput) => Effect.Effect<void, string>;
 
   /**
    * Ends the harness cleanly. `session.exited { reason: "stopped" }` follows on

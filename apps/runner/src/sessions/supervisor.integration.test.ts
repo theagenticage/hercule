@@ -18,7 +18,7 @@ import type {
   SessionStart,
   TurnInput,
 } from "@hydra/protocol";
-import type { ProviderAdapter, ProviderRunnerContext, SendResult } from "../providers";
+import type { ProviderAdapter, ProviderRunnerContext } from "../providers";
 import type { Machine } from "./context";
 import { supervising } from "./supervisor";
 
@@ -94,11 +94,11 @@ const faking = (): Fake => {
           fake.emit({ _tag: "session.started", eventId: "e-started", sessionId, at });
           return Effect.succeed(binding);
         }),
-      sendInput: (sessionId, input): Effect.Effect<SendResult, string> =>
+      sendInput: (sessionId, input): Effect.Effect<void, string> =>
         Effect.suspend(() => {
           if (!held.has(sessionId)) return Effect.fail(`session ${sessionId} is not running here`);
           inputs.push(input);
-          return Effect.succeed({ turnId: "t-1", delivery: "opened" });
+          return Effect.void;
         }),
       stopSession: (sessionId) =>
         Effect.sync(() => {

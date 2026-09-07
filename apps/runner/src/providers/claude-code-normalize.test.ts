@@ -30,8 +30,7 @@ type Event = Schema.Schema.Type<typeof ProviderEvent>;
 const said = (event: Event): string => {
   switch (event._tag) {
     case "item.started":
-    case "item.updated":
-      return `${event._tag} ${event.kind} ${event.itemId}`;
+      return `item.started ${event.kind} ${event.itemId}`;
     case "item.completed":
       return `item.completed ${event.kind} ${event.itemId} ${event.status}`;
     case "content.delta":

@@ -1,28 +1,20 @@
 /**
  * What one reported event does to a session: which stream rows it produces, and
- * where it leaves the status axis.
+ * where it leaves the status axis. Pure, and separate from the service, which
+ * does the two things this cannot: it writes, and it decides when to believe.
  *
- * Pure, and separate from the service, because this is the part with the rules
- * in it. The service does the two things this cannot: it writes, and it decides
- * when to believe the answer.
- *
- * Deltas are never persisted per token (spec 04 Streaming deltas are
- * coalesced). The controller holds them per (item, stream kind) and writes one
- * coalesced `content.delta` row at an item boundary, at a turn boundary, when
- * the session exits, and - the in-item cadence spec 04 left open and this build
- * pins - once the held text passes `DELTA_FLUSH_BYTES`, so a command that
- * prints for minutes is not one whole unwritten row.
- *
- * Every other event is written as its own row, verbatim.
+ * Deltas are never persisted per token (spec 04, Streaming). They are held per
+ * (item, stream kind) and flushed at an item boundary, a turn boundary, an
+ * exit, and - the in-item cadence spec 04 left open and this build pins - once
+ * the held text passes `DELTA_FLUSH_BYTES`. Every other event is its own row.
  */
 import type { ProviderEvent, StreamKind } from "@hydra/protocol";
 import type { SessionStatus } from "@hydra/contract";
 
 /**
- * How much held delta text forces a flush inside one item. Four kilobytes is
- * roughly a screenful of command output: small enough that a crash mid-item
- * loses a tail rather than a transcript, large enough that a streaming reply
- * writes a handful of rows rather than one per token.
+ * How much held delta text forces a flush inside one item. Roughly a screenful
+ * of command output: a crash mid-item loses a tail rather than a transcript,
+ * and a streaming reply writes a handful of rows rather than one per token.
  */
 export const DELTA_FLUSH_BYTES = 4 * 1024;
 
@@ -61,8 +53,7 @@ export const track = (lastSeq: number): Tracked => ({ lastSeq, buffers: new Map(
 
 /**
  * Two stream kinds on one item are two runs of text, so the key carries both.
- * The separator is a NUL, which no vendor id contains, so no pair of ids can
- * collide by spelling.
+ * The NUL separator is what no vendor id contains, so ids cannot collide.
  */
 const keyOf = (itemId: string, streamKind: StreamKind): string => `${itemId}\u0000${streamKind}`;
 
@@ -72,7 +63,6 @@ const flushed = (held: Held): StreamRow => ({
   event: { ...held.first, delta: held.text },
 });
 
-/** Where an event leaves the status axis, or `undefined` where it leaves it alone. */
 const statusAfter = (event: ProviderEvent): SessionStatus | undefined => {
   switch (event._tag) {
     case "session.started":
@@ -89,18 +79,15 @@ const statusAfter = (event: ProviderEvent): SessionStatus | undefined => {
 };
 
 /**
- * Applies one reported event. `undefined` is a sequence number this session has
- * already seen - a replayed frame, or one sent twice - and writes nothing.
- *
- * The caller keeps `next` only once the write commits, so a transaction that
- * fails leaves the held text and the sequence exactly as they were.
+ * Applies one reported event. `undefined` is a sequence this session has already
+ * seen - a replayed frame - and writes nothing. The caller keeps `next` only
+ * once the write commits, so a failed transaction leaves the state as it was.
  */
 export const fold = (tracked: Tracked, seq: number, event: ProviderEvent): Folded | undefined => {
   if (seq <= tracked.lastSeq) return undefined;
   const buffers = new Map(tracked.buffers);
   const rows: Array<StreamRow> = [];
 
-  /** Writes out what is held, for one item or for the whole session. */
   const flush = (itemId?: string): void => {
     for (const [key, held] of buffers) {
       if (itemId !== undefined && held.first.itemId !== itemId) continue;
@@ -127,10 +114,8 @@ export const fold = (tracked: Tracked, seq: number, event: ProviderEvent): Folde
     return { rows, status: undefined, next: { lastSeq: seq, buffers } };
   }
 
-  // An item that has stopped producing text, a turn that has ended, and a
-  // session that is gone are the three moments held text has nothing more
-  // coming for it.
-  if (event._tag === "item.completed" || event._tag === "item.updated") flush(event.itemId);
+  // The three moments held text has nothing more coming for it.
+  if (event._tag === "item.completed") flush(event.itemId);
   if (event._tag === "turn.completed" || event._tag === "session.exited") flush();
 
   rows.push({ seq, at: event.at, event });

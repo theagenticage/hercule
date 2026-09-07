@@ -34,9 +34,10 @@ import {
   type TurnInput,
 } from "@hydra/protocol";
 import { normalize, normalizing, openTurn, type Normalizing } from "./claude-code-normalize";
-import type { InstallOutcome, ProviderAdapter, ProviderRunnerContext, SendResult } from "./index";
+import type { InstallOutcome, ProviderAdapter, ProviderRunnerContext } from "./index";
 import type { LoginCommand } from "./login";
 import { runProcess, type Run } from "./process";
+import { now } from "../report";
 
 export const CLAUDE_CODE = "claude-code";
 
@@ -334,8 +335,6 @@ export const claudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
     PubSub.publishUnsafe(published, event);
   };
 
-  const now = (): string => new Date().toISOString();
-
   /** Reads the session until the harness stops talking, and says why it did. */
   const pump = async (sessionId: string, held: Live): Promise<void> => {
     let reason: ExitReason = "process_exit";
@@ -461,28 +460,25 @@ export const claudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
         );
       }),
 
-    sendInput: (sessionId: string, turn: TurnInput): Effect.Effect<SendResult, string> =>
+    sendInput: (sessionId: string, turn: TurnInput): Effect.Effect<void, string> =>
       Effect.suspend(() => {
         const held = live.get(sessionId);
         if (held === undefined || held.stopping) {
           return Effect.fail(`session ${sessionId} is not running here`);
         }
-        // A turn is open exactly while the normalizer is between a `turn.started`
-        // and the one `result` that ends it, so it is the steering authority.
-        const steering = held.state.turnId !== undefined;
-        const { turnId, events } = openTurn(held.state);
-        for (const event of events) emit(event);
+        // Steering is implicit: a turn is open exactly while the normalizer is
+        // between a `turn.started` and the `result` that ends it, so input to a
+        // busy session folds into the turn already running.
+        for (const event of openTurn(held.state).events) emit(event);
+        // Spec 06 section 6.3's `user_message { steered }` is not carried: the
+        // echoed user message is not reliably the one just sent.
         held.input.push({
           type: "user",
           message: { role: "user", content: turn.text },
           parent_tool_use_id: null,
           session_id: held.binding.nativeSessionId,
         });
-        // Spec 06 section 6.3 also pins `user_message { steered }`, which the
-        // normalizer cannot know and this slice does not carry: the echoed user
-        // message is not reliably the one just sent. It arrives with the
-        // controller-owned input queue that owns steering.
-        return Effect.succeed({ turnId, delivery: steering ? "steered" : "opened" });
+        return Effect.void;
       }),
 
     stopSession: (sessionId: string): Effect.Effect<void> =>

@@ -152,12 +152,11 @@ describe.skipIf(!authed)("a real Claude Code session on this machine", () => {
       // The two ids are separate concepts, joined only by this binding.
       expect(binding.nativeSessionId).not.toBe(SESSION);
 
-      const sent = await Effect.runPromise(
+      await Effect.runPromise(
         claudeCode.sendInput(SESSION, {
           text: "Reply with the single word ready. Use no tools.",
         }),
       );
-      expect(sent.delivery).toBe("opened");
 
       await until(seen, "turn.completed");
 
@@ -169,7 +168,6 @@ describe.skipIf(!authed)("a real Claude Code session on this machine", () => {
         done?._tag === "turn.completed" ? done.state : undefined,
         done?._tag === "turn.completed" ? (done.error ?? "") : "",
       ).toBe("completed");
-      expect(done?._tag === "turn.completed" ? done.turnId : undefined).toBe(sent.turnId);
       // The answer arrived as deltas, not as one lump at the end.
       expect(tags).toContain("content.delta");
       expect(tags).toContain("session.usage.updated");
