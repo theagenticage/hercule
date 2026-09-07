@@ -58,6 +58,14 @@ export const SessionSpec = Schema.Struct({
   modelSelection: ModelSelection,
   /** Post-fallback: always a mode the target provider declares native. */
   accessMode: AccessMode,
+  /**
+   * Picks the provider-native session this one carries on from, on the same
+   * runner and the same instance (spec 06 section 4.1). A resume continues that
+   * native session; a fork branches off it, leaving the original untouched.
+   */
+  continue: Schema.optionalKey(
+    Schema.Struct({ nativeSessionId: Fact, mode: Schema.Literals(["resume", "fork"]) }),
+  ),
 });
 
 export type SessionSpec = Schema.Schema.Type<typeof SessionSpec>;
@@ -74,10 +82,30 @@ export const SessionBinding = Schema.Struct({
 
 export type SessionBinding = Schema.Schema.Type<typeof SessionBinding>;
 
-/** One turn's input. Text only: attachments are the open item in spec 16 section B. */
-export const TurnInput = Schema.Struct({ text: Schema.String });
+/**
+ * One turn's input. Attachments are the open item in spec 16 section B. A model
+ * change rides the input that opens a turn, because that is the only moment a
+ * harness will take one.
+ */
+export const TurnInput = Schema.Struct({
+  text: Schema.String,
+  modelSelection: Schema.optionalKey(ModelSelection),
+});
 
 export type TurnInput = Schema.Schema.Type<typeof TurnInput>;
+
+/** Whether an input opened a turn of its own or steered one already running. */
+export const Delivery = Schema.Literals(["opened", "steered"]);
+
+export type Delivery = Schema.Schema.Type<typeof Delivery>;
+
+/**
+ * What the adapter says an input did. The only authority on it: reading it off
+ * the order events arrive in is the inference ADR 0007 rules out.
+ */
+export const SendResult = Schema.Struct({ turnId: Fact, delivery: Delivery });
+
+export type SendResult = Schema.Schema.Type<typeof SendResult>;
 
 /**
  * Why a session is gone (spec 06 section 4.1). Pinned because the session view
@@ -271,11 +299,41 @@ export type SessionStop = Schema.Schema.Type<typeof SessionStop>;
 
 export const SessionInput = Schema.Struct({
   _tag: Schema.Literal("sessionInput"),
+  /** The Queued Input row this is, which is what the answer is correlated by. */
+  requestId: Fact,
   sessionId: SessionId,
   input: TurnInput,
 });
 
 export type SessionInput = Schema.Schema.Type<typeof SessionInput>;
+
+/**
+ * Ends the running turn as `interrupted`. Fire-and-forget: the outcome arrives
+ * in the session's own stream as `turn.completed`, so a second answer channel
+ * would carry nothing.
+ */
+export const SessionInterrupt = Schema.Struct({
+  _tag: Schema.Literal("sessionInterrupt"),
+  sessionId: SessionId,
+});
+
+export type SessionInterrupt = Schema.Schema.Type<typeof SessionInterrupt>;
+
+/**
+ * What one input did, under the row id it was sent with. It carries no turn id:
+ * the turn reaches the controller on `turn.started`, and a field with no
+ * consumer is a field that will be wrong.
+ */
+export const SessionInputResult = Schema.Struct({
+  _tag: Schema.Literal("sessionInputResult"),
+  requestId: Fact,
+  ok: Schema.Boolean,
+  delivery: Schema.optionalKey(Delivery),
+  /** Why it was not delivered, so the caller reads a reason rather than a flag. */
+  message: Schema.optionalKey(Message),
+});
+
+export type SessionInputResult = Schema.Schema.Type<typeof SessionInputResult>;
 
 /** One normalized event, under the sequence number the controller inserts it on, once. */
 export const SessionEvent = Schema.Struct({

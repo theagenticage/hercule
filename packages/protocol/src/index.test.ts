@@ -139,6 +139,7 @@ const runnerMessages: ReadonlyArray<RunnerMessage> = [
       at: "2026-09-07T10:00:00.000Z",
     },
   },
+  { _tag: "sessionInputResult", requestId: REQUEST_ID, ok: true, delivery: "steered" },
   {
     _tag: "sessionsReport",
     sessions: [{ sessionId: SESSION_ID, nativeSessionId: "native-1", instanceId: INSTANCE_ID }],
@@ -169,7 +170,13 @@ const controllerMessages: ReadonlyArray<ControllerMessage> = [
     spec,
   },
   { _tag: "sessionStop", sessionId: SESSION_ID },
-  { _tag: "sessionInput", sessionId: SESSION_ID, input: { text: "ship it" } },
+  {
+    _tag: "sessionInput",
+    requestId: "0199e0e7-0000-7000-8000-00000000000e",
+    sessionId: SESSION_ID,
+    input: { text: "ship it" },
+  },
+  { _tag: "sessionInterrupt", sessionId: SESSION_ID },
 ];
 
 describe("the protocol version", () => {

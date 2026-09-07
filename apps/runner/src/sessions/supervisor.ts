@@ -17,6 +17,8 @@ import {
   type ProviderEvent,
   type RunnerToController,
   type SessionInput,
+  type SessionInputResult,
+  type SessionInterrupt,
   type SessionStart,
   type SessionStop,
 } from "@hydra/protocol";
@@ -53,6 +55,7 @@ export interface SessionSupervisor {
   readonly report: Effect.Effect<void>;
   readonly start: (frame: SessionStart) => Effect.Effect<void>;
   readonly input: (frame: SessionInput) => Effect.Effect<void>;
+  readonly interrupt: (frame: SessionInterrupt) => Effect.Effect<void>;
   readonly stop: (frame: SessionStop) => Effect.Effect<void>;
 }
 
@@ -106,7 +109,7 @@ export const supervising = (adapters: ReadonlyArray<ProviderAdapter>) => {
         }),
       );
 
-    /** What went wrong, in the session's own stream: the controller waits on nothing else. */
+    /** What went wrong, in the session's own stream, where a reader of the thread sees it. */
     const failed = (sessionId: string, message: string): Effect.Effect<void> =>
       forward({
         _tag: "runtime.error",
@@ -205,22 +208,35 @@ export const supervising = (adapters: ReadonlyArray<ProviderAdapter>) => {
           return yield* starting(frame, adapter);
         }),
 
-      /** Delivered or reported lost, never queued: queued input is the controller's (spec 06 section 5). */
+      /**
+       * Delivered or reported lost, never queued: queued input is the
+       * controller's (spec 06 section 5). The answer carries what the adapter
+       * said the input did, because that is the only authority on it, and the
+       * controller is waiting on this frame under the row's own id.
+       */
       input: (frame: SessionInput): Effect.Effect<void> => {
+        const answer = (result: Omit<SessionInputResult, "_tag" | "requestId">) =>
+          sending({ _tag: "sessionInputResult", requestId: frame.requestId, ...result });
+        // Both: the caller waiting on the answer needs the reason, and the
+        // session's own stream is where a reader of the thread sees it.
+        const refuse = (message: string): Effect.Effect<void> =>
+          Effect.flatMap(failed(frame.sessionId, message), () =>
+            answer({ ok: false, message: message.slice(0, MAX_MESSAGE_LENGTH) }),
+          );
         const held = live.get(frame.sessionId);
         if (held === undefined) {
-          return failed(
-            frame.sessionId,
-            `session ${frame.sessionId} is not running on this runner`,
-          );
+          return refuse(`session ${frame.sessionId} is not running on this runner`);
         }
         return held.adapter.sendInput(frame.sessionId, frame.input).pipe(
-          Effect.catch((message) => failed(frame.sessionId, message)),
-          Effect.catchCause((cause) =>
-            failed(frame.sessionId, wentWrong(cause, MAX_MESSAGE_LENGTH)),
-          ),
+          Effect.flatMap((sent) => answer({ ok: true, delivery: sent.delivery })),
+          Effect.catch(refuse),
+          Effect.catchCause((cause) => refuse(wentWrong(cause, MAX_MESSAGE_LENGTH))),
         );
       },
+
+      /** Idempotent: a session this runner does not hold has no turn to end. */
+      interrupt: (frame: SessionInterrupt): Effect.Effect<void> =>
+        live.get(frame.sessionId)?.adapter.interrupt(frame.sessionId) ?? Effect.void,
 
       /** Idempotent: a session this runner does not hold is already stopped. */
       stop: (frame: SessionStop): Effect.Effect<void> =>

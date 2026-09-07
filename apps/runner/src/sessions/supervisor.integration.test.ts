@@ -12,6 +12,8 @@ import { Effect, Fiber, PubSub, Stream } from "effect";
 import type {
   ProviderEvent,
   RunnerToController,
+  SendResult,
+  SessionInputResult,
   SessionBinding,
   SessionEvent,
   SessionSpec,
@@ -31,6 +33,9 @@ afterAll(() => {
 const INSTANCE = "0199e0e7-0000-7000-8000-00000000000a";
 const SESSION = "0199e0e7-0000-7000-8000-0000000000ff";
 const NATIVE = "0199e0e7-0000-7000-8000-0000000000fe";
+const TURN = "0199e0e7-0000-7000-8000-0000000000fd";
+/** The Queued Input row an input frame is sent under, and answered under. */
+const REQUEST = "0199e0e7-0000-7000-8000-0000000000fc";
 
 const SPEC: SessionSpec = {
   instanceId: INSTANCE,
@@ -69,6 +74,7 @@ interface Fake {
   /** How many markers have reached a relay, which is what says one is listening. */
   readonly heard: () => number;
   readonly inputs: Array<TurnInput>;
+  readonly interrupted: Array<string>;
   readonly emit: (event: ProviderEvent) => void;
   fails: string | undefined;
   /** A harness that throws where nothing declared it could. */
@@ -80,11 +86,13 @@ const faking = (): Fake => {
   let heard = 0;
   const contexts: Array<ProviderRunnerContext> = [];
   const inputs: Array<TurnInput> = [];
+  const interrupted: Array<string> = [];
   const held = new Map<string, SessionBinding>();
   const fake: Fake = {
     contexts,
     heard: () => heard,
     inputs,
+    interrupted,
     fails: undefined,
     dies: false,
     emit: (event) => {
@@ -121,12 +129,13 @@ const faking = (): Fake => {
           fake.emit({ _tag: "session.started", eventId: "e-started", sessionId, at });
           return Effect.succeed(binding);
         }),
-      sendInput: (sessionId, input): Effect.Effect<void, string> =>
+      sendInput: (sessionId, input): Effect.Effect<SendResult, string> =>
         Effect.suspend(() => {
           if (!held.has(sessionId)) return Effect.fail(`session ${sessionId} is not running here`);
           inputs.push(input);
-          return Effect.void;
+          return Effect.succeed({ turnId: TURN, delivery: "opened" });
         }),
+      interrupt: (sessionId) => Effect.sync(() => void interrupted.push(sessionId)),
       stopSession: (sessionId) =>
         Effect.sync(() => {
           held.delete(sessionId);
@@ -224,6 +233,9 @@ const driving = <A>(
 const eventsIn = (sent: ReadonlyArray<RunnerToController>): ReadonlyArray<SessionEvent> =>
   sent.filter((frame): frame is SessionEvent => frame._tag === "sessionEvent");
 
+const answersIn = (sent: ReadonlyArray<RunnerToController>): ReadonlyArray<SessionInputResult> =>
+  sent.filter((frame): frame is SessionInputResult => frame._tag === "sessionInputResult");
+
 describe("one session, start to exit", () => {
   it("sends every event under a sequence that only goes up", async () => {
     const fake = faking();
@@ -236,6 +248,7 @@ describe("one session, start to exit", () => {
         yield* supervisor.start(START);
         yield* supervisor.input({
           _tag: "sessionInput",
+          requestId: REQUEST,
           sessionId: SESSION,
           input: { text: "hi" },
         });
@@ -363,6 +376,7 @@ describe("an exit that arrives after the id was started again", () => {
         yield* until("sent two events", () => eventsIn(sent).length === 2);
         yield* supervisor.input({
           _tag: "sessionInput",
+          requestId: REQUEST,
           sessionId: SESSION,
           input: { text: "hi" },
         });
@@ -465,6 +479,7 @@ describe("a session that cannot run here", () => {
       Effect.gen(function* () {
         yield* supervisor.input({
           _tag: "sessionInput",
+          requestId: REQUEST,
           sessionId: SESSION,
           input: { text: "hi" },
         });
@@ -477,5 +492,57 @@ describe("a session that cannot run here", () => {
     const events = eventsIn(sent).map((frame) => frame.event);
     expect(events).toHaveLength(1);
     expect(events[0]).toMatchObject({ _tag: "runtime.error", sessionId: SESSION });
+    // The caller is waiting on the answer under the row's own id, and a reason
+    // it can report beats a bare flag.
+    expect(answersIn(sent)).toHaveLength(1);
+    expect(answersIn(sent)[0]).toMatchObject({ requestId: REQUEST, ok: false });
+    expect(answersIn(sent)[0]?.message ?? "").toContain(SESSION);
+    expect(answersIn(sent)[0]?.delivery).toBeUndefined();
+  });
+});
+
+describe("what the controller hears back about one input", () => {
+  it("answers a delivered input with what the adapter said it did", async () => {
+    const fake = faking();
+    const { supervisor, sent } = connecting(fake);
+
+    await driving(
+      fake,
+      supervisor,
+      Effect.gen(function* () {
+        yield* supervisor.start(START);
+        yield* supervisor.input({
+          _tag: "sessionInput",
+          requestId: REQUEST,
+          sessionId: SESSION,
+          input: { text: "hi" },
+        });
+      }),
+    );
+
+    expect(fake.inputs).toEqual([{ text: "hi" }]);
+    expect(answersIn(sent)).toEqual([
+      { _tag: "sessionInputResult", requestId: REQUEST, ok: true, delivery: "opened" },
+    ]);
+  });
+
+  it("ends the running turn for a session it holds, and nothing for one it does not", async () => {
+    const fake = faking();
+    const { supervisor } = connecting(fake);
+
+    await driving(
+      fake,
+      supervisor,
+      Effect.gen(function* () {
+        yield* supervisor.start(START);
+        yield* supervisor.interrupt({ _tag: "sessionInterrupt", sessionId: SESSION });
+        yield* supervisor.interrupt({
+          _tag: "sessionInterrupt",
+          sessionId: "0199e0e7-0000-7000-8000-0000000000aa",
+        });
+      }),
+    );
+
+    expect(fake.interrupted).toEqual([SESSION]);
   });
 });

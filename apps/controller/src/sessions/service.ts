@@ -273,7 +273,12 @@ const make = Effect.gen(function* () {
     if (prompt === undefined) return Effect.void;
     opening.delete(sessionId);
     return Effect.flatMap(
-      presence.tell(runnerId, { _tag: "sessionInput", sessionId, input: { text: prompt } }),
+      presence.tell(runnerId, {
+        _tag: "sessionInput",
+        requestId: crypto.randomUUID(),
+        sessionId,
+        input: { text: prompt },
+      }),
       (sent) =>
         // The machine went in the moment between coming up and being spoken to.
         // Said rather than swallowed: the user is waiting on a prompt nothing got.
@@ -553,6 +558,7 @@ const make = Effect.gen(function* () {
         }
         const sent = yield* presence.tell(session.runnerId, {
           _tag: "sessionInput",
+          requestId: crypto.randomUUID(),
           sessionId: id,
           input: { text },
         });

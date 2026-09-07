@@ -12,7 +12,15 @@
 import { Schema } from "effect";
 
 import { Fact, InstanceId, MAX_FACT_LENGTH, Seq, Sequenced } from "./primitives";
-import { SessionEvent, SessionInput, SessionsReport, SessionStart, SessionStop } from "./sessions";
+import {
+  SessionEvent,
+  SessionInput,
+  SessionInputResult,
+  SessionInterrupt,
+  SessionsReport,
+  SessionStart,
+  SessionStop,
+} from "./sessions";
 
 export * from "./sessions";
 export { Fact, InstanceId, MAX_FACT_LENGTH, Sequenced };
@@ -421,6 +429,7 @@ export const RunnerToController = Schema.Union([
   LoginFailed,
   LoginResult,
   SessionEvent,
+  SessionInputResult,
   SessionsReport,
   Goodbye,
 ]);
@@ -497,6 +506,7 @@ export const ControllerToRunner = Schema.Union([
   SessionStart,
   SessionStop,
   SessionInput,
+  SessionInterrupt,
 ]);
 
 export type ControllerToRunner = Schema.Schema.Type<typeof ControllerToRunner>;

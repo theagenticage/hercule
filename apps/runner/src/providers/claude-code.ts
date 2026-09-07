@@ -29,6 +29,7 @@ import {
   type ModelOption,
   type ProbeResult,
   type ProviderEvent,
+  type SendResult,
   type SessionBinding,
   type SessionSpec,
   type TurnInput,
@@ -49,6 +50,14 @@ export const PROBE_DEADLINE: Duration.Duration = Duration.seconds(15);
 /** Downloading and running somebody else's installer over a slow link. */
 export const INSTALL_DEADLINE: Duration.Duration = Duration.minutes(5);
 
+/**
+ * How long a control request is given. It is a write to the harness child and a
+ * wait for its answer, and the runner handles session frames in the order they
+ * arrived rather than concurrently, so one child that stops answering would
+ * otherwise hold up every session on the machine - pings included.
+ */
+export const CONTROL_DEADLINE: Duration.Duration = Duration.seconds(5);
+
 export interface ClaudeSession {
   readonly accountInfo: () => Promise<unknown>;
   readonly supportedModels: () => Promise<ReadonlyArray<unknown>>;
@@ -62,6 +71,11 @@ export interface ClaudeSession {
  * makes the control methods and steering available at all (spec 06 section 10.1).
  */
 export interface ClaudeStream extends AsyncIterable<SDKMessage> {
+  /** Ends the turn that is running; the session stays up for the next one. */
+  readonly interrupt: () => Promise<void>;
+  /** Takes effect on the next turn this session opens (spec 06 section 10.1). */
+  readonly setModel: (model: string) => Promise<void>;
+  /** Ends the query. The CLI is a child process, and it does not exit on its own. */
   readonly close: () => void;
 }
 
@@ -291,17 +305,12 @@ const sessionOptionsFor = (
   ctx: ProviderRunnerContext,
   spec: SessionSpec,
   binary: string,
-  nativeSessionId: string,
+  native: Options,
 ): Options => {
   const effort = effortIn(spec.modelSelection.options);
   return {
     pathToClaudeCodeExecutable: binary,
-    // The native id is Hydra's to name rather than the harness's to invent:
-    // the CLI in streaming-input mode says nothing at all, `init` included,
-    // until a first turn arrives, so a binding that waited for it would make
-    // `startSession` block until somebody sent input. Verified against the CLI
-    // this build's SDK is pinned to.
-    sessionId: nativeSessionId,
+    ...native,
     ...(ctx.cwd === null ? {} : { cwd: ctx.cwd }),
     settingSources: [],
     strictMcpConfig: true,
@@ -311,6 +320,34 @@ const sessionOptionsFor = (
     permissionMode: PERMISSION_MODES[spec.accessMode],
     ...(spec.accessMode === "full-access" ? { allowDangerouslySkipPermissions: true } : {}),
     env: { ...envFor(ctx), CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1" },
+  };
+};
+
+/**
+ * Which native session a start lands on, and what the CLI has to be told to get
+ * there. A resume continues the parent's own session, so there is nothing to
+ * name. A fork and a fresh start are named by Hydra rather than by the harness:
+ * in streaming-input mode the CLI says nothing at all, `init` included, until a
+ * first turn arrives, so a binding that waited for it would make `startSession`
+ * block until somebody sent input.
+ */
+const nativeSessionFor = (
+  spec: SessionSpec,
+): { readonly nativeSessionId: string; readonly options: Options } => {
+  const carried = spec.continue;
+  if (carried?.mode === "resume") {
+    return {
+      nativeSessionId: carried.nativeSessionId,
+      options: { resume: carried.nativeSessionId },
+    };
+  }
+  const nativeSessionId = crypto.randomUUID();
+  return {
+    nativeSessionId,
+    options: {
+      sessionId: nativeSessionId,
+      ...(carried === undefined ? {} : { resume: carried.nativeSessionId, forkSession: true }),
+    },
   };
 };
 
@@ -334,6 +371,31 @@ export const claudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
   const emit = (event: ProviderEvent): void => {
     PubSub.publishUnsafe(published, event);
   };
+
+  /**
+   * One control request, bounded. Answers with why it did not go through, or
+   * `undefined` where it did.
+   */
+  const controlling = (request: Promise<void>): Effect.Effect<string | undefined> =>
+    Effect.map(
+      Effect.timeoutOption(
+        Effect.match(Effect.tryPromise({ try: () => request, catch: describe }), {
+          onFailure: (why: string) => why,
+          onSuccess: () => undefined,
+        }),
+        CONTROL_DEADLINE,
+      ),
+      Option.getOrElse(() => `it did not answer within ${Duration.format(CONTROL_DEADLINE)}`),
+    );
+
+  /** The session this adapter is hosting, refusing one already on its way out. */
+  const hosting = (sessionId: string): Effect.Effect<Live, string> =>
+    Effect.suspend(() => {
+      const held = live.get(sessionId);
+      return held === undefined || held.stopping
+        ? Effect.fail(`session ${sessionId} is not running here`)
+        : Effect.succeed(held);
+    });
 
   /** Reads the session until the harness stops talking, and says why it did. */
   const pump = async (sessionId: string, held: Live): Promise<void> => {
@@ -420,9 +482,10 @@ export const claudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
         if (live.has(sessionId)) {
           return Effect.fail(`session ${sessionId} is already running here`);
         }
+        const native = nativeSessionFor(spec);
         const binding: SessionBinding = {
           sessionId,
-          nativeSessionId: crypto.randomUUID(),
+          nativeSessionId: native.nativeSessionId,
           instanceId: spec.instanceId,
         };
         const input = pushable<SDKUserMessage>();
@@ -430,7 +493,7 @@ export const claudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
           Effect.try({
             try: () =>
               seam.stream({
-                options: sessionOptionsFor(ctx, spec, binary, binding.nativeSessionId),
+                options: sessionOptionsFor(ctx, spec, binary, native.options),
                 input,
               }),
             catch: describe,
@@ -460,25 +523,65 @@ export const claudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
         );
       }),
 
-    sendInput: (sessionId: string, turn: TurnInput): Effect.Effect<void, string> =>
-      Effect.suspend(() => {
-        const held = live.get(sessionId);
-        if (held === undefined || held.stopping) {
-          return Effect.fail(`session ${sessionId} is not running here`);
+    sendInput: (sessionId: string, turn: TurnInput): Effect.Effect<SendResult, string> =>
+      Effect.gen(function* () {
+        const model = turn.modelSelection?.model;
+        const before = yield* hosting(sessionId);
+        // A model change lands only where a turn is about to open: mid-turn the
+        // harness is already answering under the model it started with. A model
+        // the harness will not take fails the input: delivering it under the old
+        // one would answer for a turn the caller did not ask for.
+        if (model !== undefined && before.state.turnId === undefined) {
+          const refused = yield* controlling(before.stream.setModel(model));
+          if (refused !== undefined) {
+            return yield* Effect.fail(`the model was not changed to ${model}: ${refused}`);
+          }
         }
-        // Steering is implicit: a turn is open exactly while the normalizer is
-        // between a `turn.started` and the `result` that ends it, so input to a
-        // busy session folds into the turn already running.
-        for (const event of openTurn(held.state).events) emit(event);
-        // Spec 06 section 6.3's `user_message { steered }` is not carried: the
-        // echoed user message is not reliably the one just sent.
+        // Asked again, because `setModel` waits on the harness and the turn may
+        // have opened, ended or the whole session gone while it did.
+        const held = yield* hosting(sessionId);
+        const { turnId, events } = openTurn(held.state);
+        for (const event of events) emit(event);
+        // Steering is implicit: a turn the adapter did not have to open is a
+        // turn already running, so the input folds into it. Read off what
+        // `openTurn` just did rather than remembered from before the wait.
+        const steered = events.length === 0;
+        // The user message is reported here rather than off the harness's echo
+        // of it, because only here is it known whether it steered: the echo
+        // cannot say which input it echoes.
+        const itemId = held.state.mint();
+        const detail = { text: turn.text, ...(steered ? { steered: true } : {}) };
+        const item = {
+          sessionId,
+          at: held.state.now(),
+          turnId,
+          itemId,
+          kind: "user_message",
+        } as const;
+        emit({ _tag: "item.started", eventId: held.state.mint(), ...item, detail });
+        emit({
+          _tag: "item.completed",
+          eventId: held.state.mint(),
+          ...item,
+          status: "completed",
+          detail,
+        });
         held.input.push({
           type: "user",
           message: { role: "user", content: turn.text },
           parent_tool_use_id: null,
           session_id: held.binding.nativeSessionId,
         });
-        return Effect.void;
+        return { turnId, delivery: steered ? "steered" : "opened" };
+      }),
+
+    interrupt: (sessionId: string): Effect.Effect<void> =>
+      Effect.suspend(() => {
+        const held = live.get(sessionId);
+        if (held === undefined) return Effect.void;
+        // The turn completing as `interrupted` is the whole report; a refusal
+        // means the harness is already gone, which is the same outcome.
+        return Effect.asVoid(controlling(held.stream.interrupt()));
       }),
 
     stopSession: (sessionId: string): Effect.Effect<void> =>
@@ -576,6 +679,8 @@ export const claudeCode: ProviderAdapter = claudeCodeAdapter({
     const running: Query = sdkQuery({ prompt: input, options });
     return {
       [Symbol.asyncIterator]: () => running[Symbol.asyncIterator](),
+      interrupt: () => running.interrupt().then(() => undefined),
+      setModel: (model) => running.setModel(model),
       close: () => {
         // The child may already be gone, and the rejection would take the
         // daemon down over one session ending.
