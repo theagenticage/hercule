@@ -47,9 +47,9 @@ export type ModelSelection = Schema.Schema.Type<typeof ModelSelection>;
  * The runner resolves it to a `ProviderRunnerContext` on its own machine.
  *
  * The row that stores this keeps it byte for byte, so a field is added here
- * only when something sends it. The rest of spec 06 section 4 - `continue`,
- * `outputSchema`, `mcpServers`, `systemPrompt`, `disallowedTools` - arrives
- * with the feature that needs it.
+ * only when something sends it. The rest of spec 06 section 4 - `outputSchema`,
+ * `mcpServers`, `systemPrompt`, `disallowedTools` - arrives with the feature
+ * that needs it.
  */
 export const SessionSpec = Schema.Struct({
   instanceId: InstanceId,

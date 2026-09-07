@@ -80,9 +80,15 @@ const ownerOf = (path: string): string => {
   return noun.endsWith("s") ? noun.slice(0, -1) : noun;
 };
 
-/** The `query` operation that resolves a tail written where this command's `id` goes. */
+/**
+ * The `query` operation that resolves a tail written where this command's `id`
+ * goes. The path's owner decides, not the command's entity: `input.update` is
+ * `PATCH /sessions/:id/inputs/:inputId`, so the `id` in it is a session's even
+ * though `input.query` exists. Falling back to the entity covers the routes
+ * whose owning noun is spelled differently from it (`/api-keys/:id`).
+ */
 export const idQueryOf = (command: Command): Command | undefined =>
-  queryCommandOf(command.entity) ?? queryCommandOf(ownerOf(command.path));
+  queryCommandOf(ownerOf(command.path)) ?? queryCommandOf(command.entity);
 
 /**
  * The canonical id a positional stands for.

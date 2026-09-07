@@ -193,6 +193,8 @@ Rules:
 
 Amended 2026-09-01 ([Prototype: the app shell and navigation](https://github.com/rogierpennink/hydra/issues/51)): `TurnInput` carries an optional `modelSelection: { model, options }` that replaces the session's selection from that turn on - Claude `setModel()` on the live `query()` before the turn, Codex the per-turn `model` on `turn/start`, pi `set_model` / `set_thinking_level`. It applies only when the input **opens** a turn; a steered turn keeps its model (the controller holds the change as Queued Input until `turn.completed`, section 5). The Session row's `modelSelection` is updated on delivery, so resume and fork carry the new value. This is the one live setting of a running thread; every other field of `SessionSpec` is fixed at start.
 
+*(Amended 2026-09-08, [#66](https://github.com/rogierpennink/hydra/issues/66).)* `sendInput` answers `SendResult { turnId, delivery }` rather than nothing, and `interrupt(sessionId)` is a method of its own; both are built on the Claude adapter, which calls the live `query()`'s `interrupt()`. The adapter emits the `user_message` item itself, out of the text it was given and the delivery it computed, instead of building it from the harness's echo of the user turn: `steered` is set from `SendResult` and never inferred (section 6.3), and the echo is the one place that fact is missing. `TurnInput.modelSelection` reaches Claude as `setModel(model)` on the live query before the input is pushed, and a `setModel` the harness refuses fails the input rather than delivering it under the old model.
+
 The session environment rides `ctx.env` (resolved 2026-08-31, [#43](https://github.com/rogierpennink/hydra/issues/43)). The adapter builds the spawned process environment as: the runner's base env, then the instance config env, then `ctx.env` - Hydra-owned keys always win, so instance config can never override `HYDRA_SESSION` or the git credential material.
 
 ### 4.1 Session identity and binding
@@ -232,6 +234,21 @@ Steering is implicit in `sendInput`: a busy session steers (input folds into the
 Vendor mechanisms: Claude appends to the streaming input of the live `query()`; Codex calls `turn/steer` with `expectedTurnId`; pi calls `steer()`. When Codex rejects `turn/steer` because the turn just ended, the adapter opens a new turn with the same input and reports `opened` - input is delivered unconditionally, never bounced. If `turn/steer` proves flaky, t3-code's approach (queue a `turn/start` and relabel it) is the documented fallback.
 
 **The input queue is controller-owned domain state.** When the user or a workflow sends input to a busy session and steering is not wanted (or the provider declares `steering: "unsupported"`), the controller stores Queued Input and flushes it with `sendInput` on `turn.completed`. Queued input is editable and cancelable until flushed; subscription deliveries to sessions arrive this way ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md)). Vendor-native queues (Codex follow-up `turn/start`, pi `followUp()`) go unused: they are process-local and uneditable. The cost is sub-second flush latency over the runner WebSocket, riding the ordinary seq/ack + outbox protocol.
+
+*(Amended 2026-09-08, [#66](https://github.com/rogierpennink/hydra/issues/66).)* The controller decides deliver-or-queue from the session's status and the input itself, and the answer names all three outcomes:
+
+| Session status | Input | Outcome |
+|---|---|---|
+| `exited` | any | refused: `invalid_state` |
+| `queued`, `starting` | any | the row stays `queued`; the answer is `queued` |
+| `idle` | any | delivered; the answer is the runner's `delivery`, which is `opened` |
+| `busy` | carries `modelSelection` | the row stays `queued`; the answer is `queued` |
+| `busy` | the provider declares `steering: "unsupported"` | the row stays `queued`; the answer is `queued` |
+| `busy` | otherwise | delivered; the answer is the runner's `delivery`, which is `steered` |
+
+On a delivered input the answer is always the value the runner reported, never the status the controller read. Where the runner answers nothing in time or its socket is gone, the operation fails and the row is left `queued` for the next flush.
+
+The flush trigger is the session's **transition to `idle`**, which covers `turn.completed` from `busy` and `session.started` from `starting` with one rule and lets a spawn's prompt be an ordinary queued row. A flush then sends the queued rows oldest first, and stops at the first row carrying a `modelSelection` once it has opened a turn - that row's model would be dropped, so it waits for the next boundary. A user who lined up three plain messages gets all three in one turn, the first opening it and the rest steering into it, each row recording the delivery the runner actually reported. The flush waits on the runner's answers outside any transaction, one flush at a time per session, and an input the machine refuses ends that row rather than being retried for ever. Delivery is a bounded request the runner answers, not the seq/ack outbox the paragraph above names: the outbox is deferred ([./03-controller-and-runners.md](./03-controller-and-runners.md) section 2.3), so an input lost to a dead socket is reported to its caller and its row stays queued for the next boundary.
 
 ## 6. Normalized event taxonomy
 
