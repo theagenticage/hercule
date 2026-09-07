@@ -22,6 +22,7 @@ import { session } from "./groups/session";
 import { settings } from "./groups/settings";
 import { setup } from "./groups/setup";
 import { task } from "./groups/task";
+import { transcript } from "./groups/transcript";
 import { user } from "./groups/user";
 
 export const api = HttpApi.make("hydra")
@@ -40,6 +41,7 @@ export const api = HttpApi.make("hydra")
     plugin,
     provider,
     session,
+    transcript,
     controller,
   )
   .prefix(API_PREFIX);

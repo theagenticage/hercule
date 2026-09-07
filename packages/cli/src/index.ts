@@ -129,7 +129,7 @@ const runOperation = async (
     const value = outcome.kind === "items" ? { items: outcome.items } : outcome.value;
     io.out(JSON.stringify(value, null, 2));
   } else {
-    for (const line of renderHuman(outcome)) io.out(line);
+    for (const line of renderHuman(outcome, command)) io.out(line);
   }
   return EXIT.ok;
 };

@@ -672,3 +672,91 @@ describe("session.query and session.read", () => {
     });
   });
 });
+
+/**
+ * The transcript over HTTP: the same rows the ingest wrote, encoded back out
+ * through the contract, in position order and a page at a time.
+ */
+describe("transcript.read", () => {
+  const transcriptOf = async (
+    arranged: Arranged,
+    id: string,
+    query = "",
+  ): Promise<{
+    items: ReadonlyArray<{ position: number; event: ProviderEvent }>;
+    nextCursor?: string;
+  }> => {
+    const response = await get(
+      arranged.harness.base,
+      `/api/v1/sessions/${id}/transcript${query}`,
+      arranged.token,
+    );
+    expect(response.status, await response.clone().text()).toBe(200);
+    return (await response.json()) as never;
+  };
+
+  it("reads the whole normalized stream back, oldest first", async () => {
+    await withFleet(async (arranged) => {
+      const session = await spawned(arranged, { prompt: "hello" });
+      for (const [seq, event] of transcript(session.id)) report(arranged.wire, seq, event);
+      await sessionWhen(arranged, session.id, (one) => one.status === "idle");
+
+      const page = await until("wrote the turn", async () => {
+        const found = await transcriptOf(arranged, session.id);
+        return found.items.some((row) => row.event._tag === "turn.completed") ? found : undefined;
+      });
+
+      expect(page.items.map((row) => row.position)).toEqual([1, 2, 3, 4, 5, 6]);
+      expect(page.items.map((row) => row.event._tag)).toEqual([
+        "session.started",
+        "turn.started",
+        "content.delta",
+        "item.completed",
+        "session.usage.updated",
+        "turn.completed",
+      ]);
+      // The event survives the round trip whole, coalesced text and all.
+      const delta = page.items.find((row) => row.event._tag === "content.delta")!.event;
+      expect(delta._tag === "content.delta" ? delta.delta : undefined).toBe("Hello");
+      expect(page.nextCursor).toBeUndefined();
+    });
+  });
+
+  it("pages with a cursor that resumes exactly where the last page stopped", async () => {
+    await withFleet(async (arranged) => {
+      const session = await spawned(arranged, { prompt: "hello" });
+      for (const [seq, event] of transcript(session.id)) report(arranged.wire, seq, event);
+      await until("wrote the turn", async () => {
+        const found = await transcriptOf(arranged, session.id);
+        return found.items.length === 6 ? found : undefined;
+      });
+
+      const first = await transcriptOf(arranged, session.id, "?limit=4");
+      expect(first.items.map((row) => row.position)).toEqual([1, 2, 3, 4]);
+      expect(first.nextCursor).toBeDefined();
+
+      const rest = await transcriptOf(
+        arranged,
+        session.id,
+        `?cursor=${encodeURIComponent(first.nextCursor!)}`,
+      );
+      expect(rest.items.map((row) => row.position)).toEqual([5, 6]);
+      expect(rest.nextCursor).toBeUndefined();
+    });
+  });
+
+  it("is an empty transcript for a session that has said nothing, and not_found for no session", async () => {
+    await withFleet(async (arranged) => {
+      const session = await spawned(arranged, { prompt: "hello" });
+
+      expect((await transcriptOf(arranged, session.id)).items).toEqual([]);
+
+      const missing = await get(
+        arranged.harness.base,
+        "/api/v1/sessions/0199e0e7-9999-7000-8000-000000000000/transcript",
+        arranged.token,
+      );
+      expect(missing.status).toBe(404);
+    });
+  });
+});

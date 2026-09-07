@@ -62,9 +62,18 @@ const bytes = (encoded: string): Uint8Array<ArrayBuffer> => {
 
 const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
-/** Waits for something the stub controller saw, or gives up and says so. */
+/**
+ * Waits for something the stub controller saw, or gives up and says so.
+ *
+ * The bound is wall clock rather than a count of attempts: an attempt takes as
+ * long as the machine is busy, so counting them makes the wait shorter exactly
+ * when the rest of the suite is running beside it.
+ */
+const WAIT_DEADLINE_MS = 10_000;
+
 const waitUntil = async (ready: () => boolean): Promise<void> => {
-  for (let attempt = 0; attempt < 400 && !ready(); attempt++) await delay(5);
+  const deadline = Date.now() + WAIT_DEADLINE_MS;
+  while (!ready() && Date.now() < deadline) await delay(5);
   expect(ready(), "the stub controller never got there").toBe(true);
 };
 

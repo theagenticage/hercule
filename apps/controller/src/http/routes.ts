@@ -261,6 +261,19 @@ const sessionRoutes = HttpApiBuilder.group(api, "session", (handlers) =>
   }),
 );
 
+/**
+ * A transcript is the session's own stream, so it is served by the session
+ * service; the group is separate because the operation is `transcript.read`.
+ */
+const transcriptRoutes = HttpApiBuilder.group(api, "transcript", (handlers) =>
+  Effect.gen(function* () {
+    const sessions = yield* SessionService;
+    return handlers.handle("read", ({ params, query }) =>
+      operation(sessions.transcript({ id: params.id, ...query })),
+    );
+  }),
+);
+
 const controllerRoutes = HttpApiBuilder.group(api, "controller", (handlers) =>
   Effect.gen(function* () {
     const controller = yield* Controller;
@@ -315,4 +328,5 @@ export const handlerLayers = Layer.mergeAll(
   pluginRoutes,
   providerRoutes,
   sessionRoutes,
+  transcriptRoutes,
 );

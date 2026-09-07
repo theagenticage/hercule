@@ -134,6 +134,7 @@ export {
   SessionSpawnInput,
   SessionStatus,
 } from "./groups/session";
+export { TRANSCRIPT_SORT_FIELDS, TranscriptRow } from "./groups/transcript";
 export { OwnerKind, SecretRef } from "./groups/secret";
 export { ControllerInfo, ControllerUpdateInput } from "./groups/controller";
 export {

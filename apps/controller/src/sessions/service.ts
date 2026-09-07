@@ -38,6 +38,7 @@ import {
   SessionFilter,
   SESSION_INPUT_FIELDS,
   SessionSpawnInput,
+  TRANSCRIPT_SORT_FIELDS,
   validation,
   validationOf,
   type Forbidden,
@@ -46,6 +47,7 @@ import {
   type Session,
   type SessionInputResult,
   type SortDirection,
+  type TranscriptRow,
   type Unauthenticated,
   type Validation,
 } from "@hydra/contract";
@@ -75,8 +77,17 @@ const InputInput = Schema.Struct({ id: Id, ...SESSION_INPUT_FIELDS });
 
 export type InputInput = Schema.Schema.Type<typeof InputInput>;
 
+const TranscriptInput = Schema.Struct({ id: Id, ...pageInput(TRANSCRIPT_SORT_FIELDS) });
+
+export type TranscriptInput = Schema.Schema.Type<typeof TranscriptInput>;
+
 export interface SessionPage {
   readonly items: ReadonlyArray<Session>;
+  readonly nextCursor?: string;
+}
+
+export interface TranscriptPage {
+  readonly items: ReadonlyArray<TranscriptRow>;
   readonly nextCursor?: string;
 }
 
@@ -84,10 +95,14 @@ const decodeQuery = Schema.decodeUnknownEffect(QueryInput);
 const decodeIdentified = Schema.decodeUnknownEffect(Identified);
 const decodeSpawn = Schema.decodeUnknownEffect(SessionSpawnInput);
 const decodeInput = Schema.decodeUnknownEffect(InputInput);
+const decodeTranscript = Schema.decodeUnknownEffect(TranscriptInput);
 const encodeSpec = Schema.encodeUnknownSync(SessionSpec);
 
 /** Newest first: a session list is read as a history. */
 const DEFAULT_DIRECTION: SortDirection = "desc";
+
+/** Oldest first: a transcript is read forwards, the way it happened. */
+const TRANSCRIPT_DIRECTION: SortDirection = "asc";
 
 const NO_SUCH_SESSION = "no such session";
 
@@ -397,6 +412,36 @@ const make = Effect.gen(function* () {
         yield* requireGrant("session.read");
         const { id } = yield* Effect.mapError(decodeIdentified(input), validationOf);
         return yield* one(id);
+      }),
+
+    /**
+     * The session's normalized stream, in position order (spec 11 section 2).
+     *
+     * The session is read first so a transcript of nothing is told apart from a
+     * transcript of a session that does not exist: a session that has only just
+     * been placed has no rows yet, and answering `not_found` for it would be a
+     * lie the caller acts on.
+     */
+    transcript: (input: TranscriptInput): Effect.Effect<TranscriptPage, ReadError | NotFound> =>
+      Effect.gen(function* () {
+        yield* requireGrant("session.read");
+        const { id, limit, cursor, sort } = yield* Effect.mapError(
+          decodeTranscript(input),
+          validationOf,
+        );
+        yield* one(id);
+        const listing = yield* refuseCursor(
+          sessions.transcript({
+            sessionId: id,
+            limit: limit ?? DEFAULT_PAGE_LIMIT,
+            cursor,
+            direction: sort?.direction ?? TRANSCRIPT_DIRECTION,
+          }),
+        );
+        return {
+          items: listing.items,
+          ...(listing.nextCursor === undefined ? {} : { nextCursor: listing.nextCursor }),
+        };
       }),
 
     spawn: (input: SessionSpawnInput): Effect.Effect<Session, SpawnError> =>

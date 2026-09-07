@@ -12,11 +12,13 @@ import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
-import type { AccessMode } from "@hydra/protocol";
+import type { AccessMode, ProviderEvent } from "@hydra/protocol";
 import type { SessionStatus, SortDirection } from "@hydra/contract";
 import {
   decodeCursor,
+  decodeIdCursor,
   encodeCursor,
+  encodeIdCursor,
   keysetOver,
   mintUuid,
   pageOf,
@@ -120,6 +122,31 @@ const scopeOf = (direction: SortDirection): CursorScope => ({
   direction,
 });
 
+/**
+ * The transcript walk. Its key is the position and nothing else: the rows of
+ * one session are already scoped by the session id in the `WHERE`, and position
+ * is unique within that.
+ */
+const transcriptScope = (direction: SortDirection): CursorScope => ({
+  op: "transcript.read",
+  field: "position",
+  direction,
+});
+
+/** One row of a session's stream, as the transcript reads it back. */
+export interface StoredStreamRow {
+  readonly position: number;
+  readonly at: string;
+  readonly event: ProviderEvent;
+}
+
+export interface TranscriptPageRequest {
+  readonly sessionId: string;
+  readonly limit: number;
+  readonly cursor: string | undefined;
+  readonly direction: SortDirection;
+}
+
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
 
@@ -191,6 +218,51 @@ const make = Effect.gen(function* () {
           request.limit,
           (found) => Effect.succeed(found.map(toSession)),
           (last) => encodeCursor(scope, last.createdAt, last.id),
+        );
+      }),
+
+    /**
+     * One page of a session's stream, in position order.
+     *
+     * The stored `event` is the JSON the ingest wrote, which is the normalized
+     * event as it crossed the wire: it is parsed back rather than re-decoded,
+     * because the schema it was written from has no transform in it and the
+     * document is the value.
+     */
+    transcript: (
+      request: TranscriptPageRequest,
+    ): Effect.Effect<Page<StoredStreamRow>, CursorError | SqlError> =>
+      Effect.gen(function* () {
+        const scope = transcriptScope(request.direction);
+        const after =
+          request.cursor === undefined ? undefined : yield* decodeIdCursor(request.cursor, scope);
+        const { keyset, order } = keysetOver(
+          sql,
+          ["position"],
+          after === undefined ? undefined : [after],
+          request.direction,
+        );
+        const rows = yield* sql<{
+          readonly position: number;
+          readonly at: string;
+          readonly event: string;
+        }>`
+          SELECT position, at, event FROM session_stream
+          WHERE session_id = ${uuidFromString(request.sessionId)} AND ${keyset}
+          ${order} LIMIT ${request.limit + 1}
+        `;
+        return yield* pageOf(
+          rows,
+          request.limit,
+          (found) =>
+            Effect.succeed(
+              found.map((row) => ({
+                position: row.position,
+                at: row.at,
+                event: JSON.parse(row.event) as ProviderEvent,
+              })),
+            ),
+          (last) => encodeIdCursor(scope, last.position),
         );
       }),
 
