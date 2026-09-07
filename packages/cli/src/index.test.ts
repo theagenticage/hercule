@@ -105,6 +105,14 @@ describe("--help", () => {
     expect(text).toContain("--grants");
   });
 
+  it("says which of a nested route's two ids takes a tail", async () => {
+    const { io, run } = cli();
+    expect(await run("input", "update", "--help")).toBe(0);
+    const text = io.stdout.join("\n");
+    expect(text).toContain("<id>       a canonical id, or an unambiguous tail");
+    expect(text).toContain("<inputId>  a canonical id, written out in full");
+  });
+
   it("documents the two-line stdin order of user setPassword", async () => {
     const { io, run } = cli();
     expect(await run("user", "setPassword", "--help")).toBe(0);
