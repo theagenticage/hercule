@@ -280,6 +280,24 @@ describe("a plugin whose register fails", () => {
     expect(errored?.message).toContain("deep-provider");
   });
 
+  it("is errored when its provider's display name overruns what an instance name takes", async () => {
+    const shouty = fixture({
+      id: "shouty",
+      definitions: [{ ...providerDefinition("shouty-provider", {}), displayName: "S".repeat(129) }],
+    });
+
+    const detail = await run(
+      Effect.gen(function* () {
+        const host = yield* PluginHost;
+        yield* host.boot([shouty.plugin]);
+        return yield* Effect.flatMap(Plugins, (plugins) => plugins.read("shouty"));
+      }),
+    );
+
+    expect(detail.status._tag).toBe("errored");
+    expect(detail.contributions).toEqual([]);
+  });
+
   it("is errored when its contribution carries a key the host does not know", async () => {
     const extra = fixture({
       id: "extra",

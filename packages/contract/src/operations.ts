@@ -155,6 +155,16 @@ const TABLE = {
     path: "/api/v1/plugins/:id/config",
   },
 
+  "provider.query": { requires: "infra.read", method: "GET", path: "/api/v1/providers" },
+  "provider.read": { requires: "infra.read", method: "GET", path: "/api/v1/providers/:id" },
+  "provider.create": { requires: "infra.write", method: "POST", path: "/api/v1/providers" },
+  "provider.update": { requires: "infra.write", method: "PATCH", path: "/api/v1/providers/:id" },
+  "provider.delete": {
+    requires: "infra.write",
+    method: "DELETE",
+    path: "/api/v1/providers/:id",
+  },
+
   "controller.read": { requires: "infra.read", method: "GET", path: "/api/v1/controller" },
   "controller.update": { requires: "infra.write", method: "PATCH", path: "/api/v1/controller" },
 } as const satisfies Record<string, { requires: Requirement; method: Method; path: string }>;

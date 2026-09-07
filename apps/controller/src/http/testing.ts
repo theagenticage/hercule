@@ -45,6 +45,7 @@ import { COALESCE_WINDOW_MS, LiveTopics } from "../live";
 import { masterKeyLayer, secretsLayer } from "../secrets";
 import { PermissionProfilesLayer } from "../permissions";
 import { PluginHost, PluginHostLayer, PluginsLayer } from "../plugins";
+import { ensureProviderInstances, ProviderServiceLayer } from "../providers";
 import { SettingsLayer } from "../settings";
 import {
   JoinTokens,
@@ -72,7 +73,10 @@ export const USERNAME = "rogier";
  * object the boot's activation pass wrote it into.
  */
 const services = (home: string) =>
-  Layer.mergeAll(operationLayers, PluginsLayer.pipe(Layer.provideMerge(PluginHostLayer))).pipe(
+  Layer.mergeAll(
+    operationLayers,
+    Layer.mergeAll(PluginsLayer, ProviderServiceLayer).pipe(Layer.provideMerge(PluginHostLayer)),
+  ).pipe(
     Layer.provideMerge(
       Layer.mergeAll(
         UsersLayer,
@@ -122,6 +126,26 @@ export type RunnerArranger = (fields: {
  */
 export type JoinTokenArranger = () => Promise<string>;
 
+/**
+ * Runs the boot's idempotent steps again against the running controller, which
+ * is what a restart does to the database this server is already serving.
+ */
+export type RebootArranger = () => Promise<void>;
+
+/**
+ * Hands an effect back as something a test body can run again, over the very
+ * services this server was built with, so what it does a second time it does to
+ * the same database. The services are inferred rather than listed, so a step
+ * added to the boot cannot leave a stale list behind.
+ */
+const repeatable = <A, E, R>(
+  effect: Effect.Effect<A, E, R>,
+): Effect.Effect<() => Promise<A>, never, R> =>
+  Effect.map(
+    Effect.context<R>(),
+    (services) => () => Effect.runPromiseWith(services)(Effect.orDie(effect)),
+  );
+
 /** Reads back what the controller is holding for the clients on its live socket. */
 export interface LiveReader {
   readonly subscriberCount: (topic: LiveTopic) => Promise<number>;
@@ -136,6 +160,7 @@ export interface ServerHarness {
   readonly live: LiveReader;
   readonly insertRunner: RunnerArranger;
   readonly joinToken: JoinTokenArranger;
+  readonly reboot: RebootArranger;
 }
 
 /** What a test may vary about the controller it is handed. */
@@ -182,12 +207,20 @@ export const withServer = (
         // The boot creates the identity and seeds the shipped defaults before
         // anything binds, so the harness does both the same way: a request sees
         // the three shipped profiles and the controller settings a real
-        // controller has.
-        yield* Effect.flatMap(ControllerIdentity, (identity) => identity.ensure);
-        yield* seed;
-        // After the schema and the seed, as the real boot runs it: a plugin
-        // that activates may read its own state and secrets.
-        yield* Effect.flatMap(PluginHost, (host) => host.boot(options.plugins ?? []));
+        // controller has. Then the plugin host, as the real boot runs it: a
+        // plugin that activates may read its own state and secrets.
+        //
+        // Held as one effect because a test asks for it a second time: every
+        // step of the boot is idempotent, and what a restart leaves behind is
+        // something a test says without a second server.
+        const bootSteps = Effect.gen(function* () {
+          yield* Effect.flatMap(ControllerIdentity, (identity) => identity.ensure);
+          yield* seed;
+          yield* Effect.flatMap(PluginHost, (host) => host.boot(options.plugins ?? []));
+          yield* ensureProviderInstances;
+        });
+        yield* bootSteps;
+        const reboot: RebootArranger = yield* repeatable(bootSteps);
         const listening =
           options.pings === undefined
             ? serve(bundle)
@@ -238,7 +271,9 @@ export const withServer = (
               Effect.flatMap(nowIso, (at) => Effect.map(tokens.create(at), (one) => one.token)),
             ),
           );
-        yield* Effect.promise(() => body({ base, audit, sql, live, insertRunner, joinToken }));
+        yield* Effect.promise(() =>
+          body({ base, audit, sql, live, insertRunner, joinToken, reboot }),
+        );
       }),
     ).pipe(
       Effect.provide(

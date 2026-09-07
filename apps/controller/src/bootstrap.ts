@@ -3,13 +3,10 @@
  *
  * On an empty home this auto-initializes with no flags and no prompts - the
  * home layout, `config.toml`, the database and its migrations, the shipped
- * defaults, the master key, the controller identity, and the one-time setup
- * URL. On every later boot it is the same sequence, and everything in it is
- * idempotent, so a restart changes nothing except the setup token.
- *
- * One step of the sequence is deliberately absent, because its subject does not
- * exist yet: one provider instance per shipped provider plugin. It belongs
- * here once it does.
+ * defaults, the master key, the controller identity, one provider instance per
+ * shipped provider plugin, and the one-time setup URL. On every later boot it is
+ * the same sequence, and everything in it is idempotent, so a restart changes
+ * nothing except the setup token.
  */
 import { existsSync, rmSync, writeFileSync } from "node:fs";
 import * as Effect from "effect/Effect";
@@ -53,6 +50,7 @@ import {
   type LocalRunnerOptions,
 } from "./runners";
 import { PluginHost, PluginHostLayer, Plugins, PluginsLayer, registry } from "./plugins";
+import { ensureProviderInstances, ProviderService, ProviderServiceLayer } from "./providers";
 import { seed } from "./seed";
 import { Settings, SettingsLayer, type SettingError } from "./settings";
 
@@ -200,6 +198,7 @@ export type ControllerServices =
   | Credentials
   | JoinTokens
   | Plugins
+  | ProviderService
   | HydraHome
   | BootstrapConfig;
 
@@ -247,7 +246,7 @@ export const bootWith = <A, E>(
      * secrets and appends to the audit log, so it is layered on top of them
      * rather than merged beside them.
      */
-    const withPlugins = PluginsLayer.pipe(
+    const withPlugins = Layer.mergeAll(PluginsLayer, ProviderServiceLayer).pipe(
       Layer.provideMerge(PluginHostLayer),
       Layer.provideMerge(repositories),
     );
@@ -263,6 +262,9 @@ export const bootWith = <A, E>(
       // read its own state and secrets, and before the runner, because the
       // catalog is what a session's provider is resolved through.
       yield* Effect.flatMap(PluginHost, (host) => host.boot(options.plugins ?? registry));
+      // After the catalog, because what a provider instance is opened for is a
+      // provider this build registered.
+      yield* ensureProviderInstances;
 
       const url = yield* ensureSetupUrl(paths, bootstrap);
 

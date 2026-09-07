@@ -108,6 +108,13 @@ export {
   PluginStatus,
 } from "./groups/plugin";
 export { MAX_PROFILE_GRANTS, Profile } from "./groups/profile";
+export {
+  DeclaredCapabilities,
+  MAX_PROVIDER_INSTANCE_NAME_LENGTH,
+  ProviderInstance,
+  ProviderInstanceCreateInput,
+  ProviderInstanceUpdateInput,
+} from "./groups/provider";
 export { OwnerKind, SecretRef } from "./groups/secret";
 export { ControllerInfo, ControllerUpdateInput } from "./groups/controller";
 export {

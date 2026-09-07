@@ -32,13 +32,27 @@ export const DeclaredCapabilities = Schema.Struct({
 export type DeclaredCapabilities = Schema.Schema.Type<typeof DeclaredCapabilities>;
 
 /**
+ * How long a provider's id and display name may be. Both reach columns and both
+ * reach the wire: the display name is what the controller names the provider's
+ * first instance, and the id is stored on every instance that routes to it. A
+ * plugin that overruns either is refused at registration rather than writing a
+ * row nothing can read back.
+ */
+export const MAX_PROVIDER_NAME_LENGTH = 128;
+
+const ProviderName = Schema.String.check(
+  Schema.isMinLength(1),
+  Schema.isMaxLength(MAX_PROVIDER_NAME_LENGTH),
+);
+
+/**
  * A provider's static self-description, which is the whole of what a provider
  * plugin contributes. `defaultConfig` is the value the plugin's own function
  * already returned: a function would not survive the crossing into the catalog.
  */
 export const ProviderDefinition = Schema.Struct({
-  id: Schema.String,
-  displayName: Schema.String,
+  id: ProviderName,
+  displayName: ProviderName,
   /** Several accounts of one harness, kept apart by per-instance config dirs. */
   supportsMultipleInstances: Schema.Boolean,
   /** Per-instance logical settings only: environment and model defaults, never paths. */

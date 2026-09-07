@@ -1,0 +1,397 @@
+/**
+ * Provider instances over a real HTTP server: what a boot leaves behind for
+ * every provider the plugins registered, and what the four writes do on the
+ * wire.
+ *
+ * The registry is fixture plugins rather than the shipped ones, so what the
+ * listing carries is the definitions this file wrote and not whichever
+ * providers the binary happens to compile in.
+ */
+import { describe, expect, it } from "vitest";
+import { Effect, Fiber } from "effect";
+import type { LiveMessage } from "@hydra/contract";
+import type { Plugin } from "@hydra/plugin-host";
+import {
+  collecting,
+  completeSetup,
+  del,
+  expectHeld,
+  get,
+  onSocket,
+  post,
+  send,
+  settleLive,
+  ticketFor,
+  withServer,
+  within,
+  type ServerHarness,
+} from "../http/testing";
+import { fixture, providerDefinition } from "../plugins/testing";
+
+/**
+ * Two providers, each with a config schema that requires `token` and a default
+ * config that satisfies it.
+ */
+const ALPHA = providerDefinition("alpha-provider", { token: "alpha-default" });
+const BETA = providerDefinition("beta-provider", { token: "beta-default" });
+
+/** A provider that holds a single account, which none of the shipped three do. */
+const SINGLE = {
+  ...providerDefinition("single-provider", { token: "the-only-one" }),
+  supportsMultipleInstances: false,
+};
+
+const registry = (): ReadonlyArray<Plugin> => [
+  fixture({ id: "alpha", definitions: [ALPHA] }).plugin,
+  fixture({ id: "beta", definitions: [BETA] }).plugin,
+];
+
+const withProviders = (body: (harness: ServerHarness) => Promise<void>): Promise<void> =>
+  withServer(body, { plugins: registry() });
+
+/** A provider instance as the API hands it back. */
+interface ProviderInstance {
+  readonly id: string;
+  readonly providerId: string;
+  readonly name: string;
+  readonly config: Record<string, unknown>;
+  readonly snapshots: ReadonlyArray<unknown>;
+  readonly declared?: Record<string, unknown>;
+}
+
+/** An id that is well-formed and belongs to nobody. */
+const UNKNOWN_ID = "0199e0e7-9999-7000-8000-000000000000";
+
+const list = async (base: string, token: string): Promise<ReadonlyArray<ProviderInstance>> => {
+  const response = await get(base, "/api/v1/providers", token);
+  expect(response.status, await response.clone().text()).toBe(200);
+  return (await response.json()) as ReadonlyArray<ProviderInstance>;
+};
+
+const byProvider = (
+  instances: ReadonlyArray<ProviderInstance>,
+  providerId: string,
+): ReadonlyArray<ProviderInstance> =>
+  instances.filter((instance) => instance.providerId === providerId);
+
+const read = async (base: string, token: string, id: string): Promise<ProviderInstance> => {
+  const response = await get(base, `/api/v1/providers/${id}`, token);
+  expect(response.status, await response.clone().text()).toBe(200);
+  return (await response.json()) as ProviderInstance;
+};
+
+const create = (base: string, token: string, body: unknown): Promise<Response> =>
+  post(base, "/api/v1/providers", body, token);
+
+const patch = (base: string, token: string, id: string, body: unknown): Promise<Response> =>
+  send("PATCH", base, `/api/v1/providers/${id}`, { body, token });
+
+/** The instance a create answered with. */
+const created = async (response: Response): Promise<ProviderInstance> => {
+  expect(response.status, await response.clone().text()).toBe(200);
+  return (await response.json()) as ProviderInstance;
+};
+
+/** The error body every refusal carries. */
+interface ApiError {
+  readonly error: { readonly code: string; readonly message?: string; readonly details?: unknown };
+}
+
+const refusal = async (response: Response, status: number): Promise<ApiError> => {
+  expect(response.status, await response.clone().text()).toBe(status);
+  return (await response.json()) as ApiError;
+};
+
+/**
+ * The audit entries about provider instances, read straight off the log so the
+ * assertion is "this write was audited by a user" and not a guess at the verb
+ * the implementation named.
+ */
+const providerAudit = (
+  sql: ServerHarness["sql"],
+): Promise<ReadonlyArray<{ readonly kind: string; readonly actor: string | null }>> =>
+  Effect.runPromise(
+    Effect.orDie(
+      sql<{ readonly kind: string; readonly actor: string | null }>`
+        SELECT kind, actor FROM events WHERE kind LIKE 'provider.%' ORDER BY id`,
+    ),
+  );
+
+/** The payload of the last provider entry in the log. */
+const lastProviderPayload = (sql: ServerHarness["sql"]): Promise<Record<string, unknown>> =>
+  Effect.runPromise(
+    Effect.orDie(
+      Effect.map(
+        sql<{ readonly payload: string }>`
+          SELECT payload FROM events WHERE kind LIKE 'provider.%' ORDER BY id DESC LIMIT 1`,
+        (rows) => JSON.parse(rows[0]!.payload) as Record<string, unknown>,
+      ),
+    ),
+  );
+
+describe("GET /providers after a boot", () => {
+  it("gives every registered provider one instance, named after it, with its default config", async () => {
+    await withProviders(async ({ base }) => {
+      const token = await completeSetup(base);
+
+      const instances = await list(base, token);
+
+      expect(instances.map((instance) => instance.providerId).sort()).toEqual([
+        "alpha-provider",
+        "beta-provider",
+      ]);
+      for (const definition of [ALPHA, BETA]) {
+        const [instance] = byProvider(instances, definition.id);
+        expect(instance?.config, definition.id).toEqual(definition.defaultConfig);
+        expect(instance?.snapshots, definition.id).toEqual([]);
+        expect(instance?.name, definition.id).toBe(definition.displayName);
+      }
+    });
+  });
+
+  it("leaves the instances exactly as they were on a second boot", async () => {
+    await withProviders(async ({ base, reboot }) => {
+      const token = await completeSetup(base);
+      const before = await list(base, token);
+
+      await reboot();
+
+      expect(await list(base, token)).toEqual(before);
+    });
+  });
+
+  it("gives a provider whose only instance was deleted a fresh one at the next boot", async () => {
+    await withProviders(async ({ base, reboot }) => {
+      const token = await completeSetup(base);
+      const [alpha] = byProvider(await list(base, token), "alpha-provider");
+      expect(alpha).toBeDefined();
+
+      expect((await del(base, `/api/v1/providers/${alpha!.id}`, token)).status).toBe(200);
+      expect((await list(base, token)).map((instance) => instance.providerId)).toEqual([
+        "beta-provider",
+      ]);
+
+      await reboot();
+
+      const after = await list(base, token);
+      expect(after.map((instance) => instance.providerId).sort()).toEqual([
+        "alpha-provider",
+        "beta-provider",
+      ]);
+      const replacement = byProvider(after, "alpha-provider");
+      expect(replacement).toHaveLength(1);
+      expect(replacement[0]?.id).not.toBe(alpha!.id);
+      expect(replacement[0]?.config).toEqual(ALPHA.defaultConfig);
+    });
+  });
+});
+
+describe("the writes on /providers", () => {
+  it("creates an instance, stamped and audited, and reads it back with the definition's declared facts", async () => {
+    await withProviders(async ({ base, sql }) => {
+      const token = await completeSetup(base);
+
+      const instance = await created(
+        await create(base, token, {
+          providerId: "alpha-provider",
+          name: "second account",
+          config: { token: "a-second-token" },
+        }),
+      );
+
+      expect(instance).toMatchObject({
+        providerId: "alpha-provider",
+        name: "second account",
+        config: { token: "a-second-token" },
+      });
+      expect(await read(base, token, instance.id)).toMatchObject({
+        id: instance.id,
+        name: "second account",
+        config: { token: "a-second-token" },
+        declared: ALPHA.declared,
+      });
+      expect(byProvider(await list(base, token), "alpha-provider")).toHaveLength(2);
+
+      // Two rows precede this one: the boot opened an instance per provider.
+      expect((await providerAudit(sql)).at(-1)).toEqual({
+        kind: "provider.created",
+        actor: "user",
+      });
+    });
+  });
+
+  it("refuses a config the provider's schema rejects, naming the field, and changes nothing", async () => {
+    await withProviders(async ({ base, sql }) => {
+      const token = await completeSetup(base);
+      const before = await list(base, token);
+      const [alpha] = byProvider(before, "alpha-provider");
+
+      const rejected = await refusal(
+        await create(base, token, {
+          providerId: "alpha-provider",
+          name: "no token",
+          config: {},
+        }),
+        400,
+      );
+      expect(rejected.error.code).toBe("validation");
+      expect(JSON.stringify(rejected.error)).toContain("token");
+
+      const patched = await refusal(
+        await patch(base, token, alpha!.id, { config: { token: 42 } }),
+        400,
+      );
+      expect(patched.error.code).toBe("validation");
+      expect(JSON.stringify(patched.error)).toContain("token");
+
+      expect(await list(base, token)).toEqual(before);
+      expect(await read(base, token, alpha!.id)).toMatchObject({ config: ALPHA.defaultConfig });
+      expect(await providerAudit(sql)).toEqual([
+        { kind: "provider.created", actor: "system" },
+        { kind: "provider.created", actor: "system" },
+      ]);
+    });
+  });
+
+  it("refuses a create for a provider no plugin registered", async () => {
+    await withProviders(async ({ base }) => {
+      const token = await completeSetup(base);
+
+      const rejected = await refusal(
+        await create(base, token, {
+          providerId: "gamma-provider",
+          name: "gamma",
+          config: { token: "t" },
+        }),
+        400,
+      );
+
+      expect(rejected.error.code).toBe("validation");
+      expect(byProvider(await list(base, token), "gamma-provider")).toEqual([]);
+    });
+  });
+
+  it("updates the name and the config", async () => {
+    await withProviders(async ({ base }) => {
+      const token = await completeSetup(base);
+      const [alpha] = byProvider(await list(base, token), "alpha-provider");
+
+      const renamed = await patch(base, token, alpha!.id, { name: "work account" });
+      expect(renamed.status, await renamed.clone().text()).toBe(200);
+      expect(await renamed.json()).toMatchObject({ id: alpha!.id, name: "work account" });
+
+      const reconfigured = await patch(base, token, alpha!.id, { config: { token: "rotated" } });
+      expect(reconfigured.status, await reconfigured.clone().text()).toBe(200);
+      expect(await read(base, token, alpha!.id)).toMatchObject({
+        name: "work account",
+        config: { token: "rotated" },
+      });
+    });
+  });
+
+  it("refuses a second account on a provider that holds one", async () => {
+    await withServer(
+      async ({ base }) => {
+        const token = await completeSetup(base);
+
+        const refused = await refusal(
+          await create(base, token, {
+            providerId: "single-provider",
+            name: "second account",
+            config: { token: "another" },
+          }),
+          400,
+        );
+
+        expect(refused.error.code).toBe("validation");
+        expect(byProvider(await list(base, token), "single-provider")).toHaveLength(1);
+      },
+      { plugins: [fixture({ id: "single", definitions: [SINGLE] }).plugin] },
+    );
+  });
+
+  it("deletes the instance, and reads not_found afterwards", async () => {
+    await withProviders(async ({ base, sql }) => {
+      const token = await completeSetup(base);
+      const [alpha] = byProvider(await list(base, token), "alpha-provider");
+
+      const deleted = await del(base, `/api/v1/providers/${alpha!.id}`, token);
+      expect(deleted.status, await deleted.clone().text()).toBe(200);
+
+      // The log is kept for months, and an instance's config is where a
+      // provider's secrets go.
+      expect(await lastProviderPayload(sql)).toEqual({
+        instanceId: alpha!.id,
+        providerId: "alpha-provider",
+        name: alpha!.name,
+      });
+
+      expect(byProvider(await list(base, token), "alpha-provider")).toEqual([]);
+      const gone = await refusal(await get(base, `/api/v1/providers/${alpha!.id}`, token), 404);
+      expect(gone.error.code).toBe("not_found");
+      const never = await refusal(await get(base, `/api/v1/providers/${UNKNOWN_ID}`, token), 404);
+      expect(never.error.code).toBe("not_found");
+    });
+  });
+});
+
+describe("what a live subscriber is told about a provider instance", () => {
+  it("names the instance once per write, whichever of the three it was", async () => {
+    await withProviders(async (harness) => {
+      const token = await completeSetup(harness.base);
+      // The boot opened an instance per provider, and that announcement is
+      // still in flight when the listener comes up.
+      await settleLive();
+      const ticket = await ticketFor(harness.base, token);
+
+      let seen: ReadonlyArray<LiveMessage> = [];
+      let subject = "";
+      await onSocket(harness.base, (client) =>
+        Effect.gen(function* () {
+          yield* client.hello({ v: 1, ticket });
+          const providers = yield* collecting(client, { topic: "provider" });
+          yield* Effect.promise(() => expectHeld(harness.live, 1, "provider"));
+
+          // Each announcement is waited for before the next write is made:
+          // changes are collected for a short window before they are
+          // announced, so two writes back to back would arrive as one message.
+          const instance = yield* Effect.promise(() =>
+            create(harness.base, token, {
+              providerId: "alpha-provider",
+              name: "second account",
+              config: { token: "a-second-token" },
+            }).then(created),
+          );
+          subject = instance.id;
+          const writes: ReadonlyArray<() => Promise<Response>> = [
+            () => patch(harness.base, token, instance.id, { name: "renamed" }),
+            () => del(harness.base, `/api/v1/providers/${instance.id}`, token),
+          ];
+          expect(
+            yield* Effect.promise(() => within(2000, () => providers.received.length > 0)),
+          ).toBe(true);
+          for (const [index, write] of writes.entries()) {
+            const response = yield* Effect.promise(write);
+            expect(response.status, yield* Effect.promise(() => response.text())).toBe(200);
+            expect(
+              yield* Effect.promise(() =>
+                within(2000, () => providers.received.length > index + 1),
+              ),
+            ).toBe(true);
+          }
+
+          seen = providers.received;
+          yield* Fiber.interrupt(providers.fiber);
+        }),
+      );
+
+      expect(seen).toHaveLength(3);
+      expect(seen.map((message) => (message as { ids: ReadonlyArray<string> }).ids)).toEqual([
+        [subject],
+        [subject],
+        [subject],
+      ]);
+      for (const message of seen) expect(message._tag).toBe("invalidate");
+    });
+  });
+});

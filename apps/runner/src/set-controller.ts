@@ -12,15 +12,17 @@
  */
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
-import { readRunnerFile, runnerFileIn, writeRunnerFile } from "./runner-file";
+import {
+  CONTROLLER_URL_SCHEMES,
+  readRewritableRunnerFile,
+  runnerFileIn,
+  writeRunnerFile,
+} from "./runner-file";
 
 export class SetControllerError extends Schema.TaggedError<SetControllerError>()(
   "SetControllerError",
   { message: Schema.String },
 ) {}
-
-/** The two schemes the runner socket knows how to dial. */
-const SCHEMES = ["http:", "https:"];
 
 export const setController = (options: {
   readonly home: string;
@@ -35,7 +37,7 @@ export const setController = (options: {
           message: `${options.controllerUrl} is not a controller URL`,
         }),
     });
-    if (!SCHEMES.includes(url.protocol)) {
+    if (!CONTROLLER_URL_SCHEMES.includes(url.protocol)) {
       return yield* Effect.fail(
         new SetControllerError({
           message: `${options.controllerUrl} is not a controller URL: it must be http or https`,
@@ -43,7 +45,7 @@ export const setController = (options: {
       );
     }
     const current = yield* Effect.mapError(
-      readRunnerFile(options.home),
+      readRewritableRunnerFile(options.home),
       (error) => new SetControllerError({ message: error.message }),
     );
     const path = runnerFileIn(options.home);

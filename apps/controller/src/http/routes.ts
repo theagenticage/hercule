@@ -36,6 +36,7 @@ import { Plugins } from "../plugins";
 import { Secret, SecretLayer } from "../secrets";
 import { SettingsOperations, SettingsOperationsLayer } from "../settings";
 import { ProjectService, ProjectServiceLayer } from "../projects";
+import { ProviderService } from "../providers";
 import {
   RunnerJoinLayer,
   RunnerPresenceLayer,
@@ -222,6 +223,20 @@ const pluginRoutes = HttpApiBuilder.group(api, "plugin", (handlers) =>
   }),
 );
 
+const providerRoutes = HttpApiBuilder.group(api, "provider", (handlers) =>
+  Effect.gen(function* () {
+    const providers = yield* ProviderService;
+    return handlers
+      .handle("query", () => operation(providers.query()))
+      .handle("read", ({ params }) => operation(providers.read(params)))
+      .handle("create", ({ payload }) => operation(providers.create(payload)))
+      .handle("update", ({ params, payload }) =>
+        operation(providers.update({ id: params.id, ...payload })),
+      )
+      .handle("delete", ({ params }) => operation(providers.delete(params)));
+  }),
+);
+
 const controllerRoutes = HttpApiBuilder.group(api, "controller", (handlers) =>
   Effect.gen(function* () {
     const controller = yield* Controller;
@@ -243,11 +258,12 @@ const RunnerLayers = RunnerServiceLayer.pipe(Layer.provideMerge(RunnerPresenceLa
  * with a layer this list has and its own does not is a controller missing an
  * operation, and nothing would say so until a request asked for it.
  *
- * One operation service is deliberately absent. `Plugins` reads a host that
- * holds what this process made of each plugin, and the boot is what filled it
- * in, so the two must be the same object: building it here would hand the
- * routes a second host that had never loaded anything. It is built beside the
- * boot instead, and reaches the handlers from there.
+ * Two operation services are deliberately absent. `Plugins` and
+ * `ProviderService` both read a host that holds what this process made of each
+ * plugin, and the boot is what filled it in, so the two must be the same
+ * object: building them here would hand the routes a second host that had never
+ * loaded anything. They are built beside the boot instead, and reach the
+ * handlers from there.
  */
 export const operationLayers = Layer.mergeAll(
   SetupLayer,
@@ -282,4 +298,5 @@ export const handlerLayers = Layer.mergeAll(
   eventRoutes,
   runnerRoutes,
   pluginRoutes,
+  providerRoutes,
 );

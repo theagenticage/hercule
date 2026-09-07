@@ -14,6 +14,7 @@ import { controller } from "./groups/controller";
 import { event } from "./groups/event";
 import { plugin } from "./groups/plugin";
 import { profile } from "./groups/profile";
+import { provider } from "./groups/provider";
 import { project } from "./groups/project";
 import { runner } from "./groups/runner";
 import { secret } from "./groups/secret";
@@ -36,6 +37,7 @@ export const api = HttpApi.make("hydra")
     event,
     runner,
     plugin,
+    provider,
     controller,
   )
   .prefix(API_PREFIX);

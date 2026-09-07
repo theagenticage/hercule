@@ -26,6 +26,16 @@ interface Page {
 }
 
 /**
+ * A listing whose set is small and fixed - plugins, provider instances - answers
+ * with the whole array rather than a page. There is nothing to follow, so it is
+ * read as a single page that ends.
+ */
+const pageOf = (answer: unknown): Page =>
+  Array.isArray(answer)
+    ? { items: answer as ReadonlyArray<Record<string, unknown>> }
+    : (answer as Page);
+
+/**
  * Every item of a query operation from `from` onwards, following `nextCursor`
  * to the end. `from` absent starts at the beginning.
  *
@@ -43,9 +53,7 @@ const readAll = async (
   let cursor: string | undefined = from;
 
   for (;;) {
-    const page = (await call({
-      query: cursor === undefined ? query : { ...query, cursor },
-    })) as Page;
+    const page = pageOf(await call({ query: cursor === undefined ? query : { ...query, cursor } }));
     items.push(...page.items);
     if (page.nextCursor === undefined || page.nextCursor === cursor) return items;
     cursor = page.nextCursor;

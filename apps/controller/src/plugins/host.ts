@@ -206,6 +206,7 @@ const inspect = (
 const registrationHost = (
   manifest: PluginManifest,
   declared: Array<NewContribution>,
+  live: Array<ProviderDefinition>,
 ): RegistrationHost => ({
   ...(manifest.capabilities.includes("providers")
     ? {
@@ -240,6 +241,10 @@ const registrationHost = (
                 id: decoded.id,
                 definition: { ...decoded, configSchema: configSchema.success },
               });
+              // The catalog cannot carry an Effect Schema, so the definition
+              // stays here too: reading an instance's config back needs the
+              // live schema the plugin authored, not the JSON Schema it maps to.
+              live.push(decoded);
             }),
         },
       }
@@ -252,6 +257,12 @@ const make = Effect.gen(function* () {
   const secrets = yield* Secrets;
   const audit = yield* AuditLog;
   const entries = yield* Ref.make<ReadonlyMap<string, Entry>>(new Map());
+  /**
+   * The provider definitions this boot registered, live schemas and all.
+   * Registration is pure and runs only at boot, so this is settled for the life
+   * of the process.
+   */
+  const providers = yield* Ref.make<ReadonlyArray<ProviderDefinition>>([]);
   /**
    * One permit for the whole host, held across a move's reads, hooks and
    * writes. Without it two moves interleave around the await inside a hook and
@@ -347,8 +358,9 @@ const make = Effect.gen(function* () {
     plugin: Plugin,
     manifest: PluginManifest,
     declared: Array<NewContribution>,
+    live: Array<ProviderDefinition>,
   ): Effect.Effect<PluginStatus> =>
-    Effect.suspend(() => plugin.register(registrationHost(manifest, declared))).pipe(
+    Effect.suspend(() => plugin.register(registrationHost(manifest, declared, live))).pipe(
       Effect.as<PluginStatus>({ _tag: "inactive" }),
       Effect.catchCause((cause) =>
         Effect.succeed<PluginStatus>({ _tag: "errored", message: messageOf(cause) }),
@@ -423,6 +435,7 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         const booted = new Map<string, Entry>();
         const catalog: Array<NewContribution> = [];
+        const registeredProviders: Array<ProviderDefinition> = [];
 
         for (const [index, plugin] of registry.entries()) {
           const manifest = yield* decodeManifest(plugin.manifest, index);
@@ -454,9 +467,13 @@ const make = Effect.gen(function* () {
           }
 
           const declared: Array<NewContribution> = [];
-          const status = yield* registerPass(plugin, manifest, declared);
+          const live: Array<ProviderDefinition> = [];
+          const status = yield* registerPass(plugin, manifest, declared, live);
           const registered = status._tag !== "errored";
-          if (registered) catalog.push(...declared);
+          if (registered) {
+            catalog.push(...declared);
+            registeredProviders.push(...live);
+          }
           booted.set(manifest.id, {
             ...facts,
             startable: registered,
@@ -474,6 +491,7 @@ const make = Effect.gen(function* () {
           }),
         );
         yield* Ref.set(entries, booted);
+        yield* Ref.set(providers, registeredProviders);
 
         yield* gate.withPermits(1)(
           Effect.forEach(
@@ -494,6 +512,9 @@ const make = Effect.gen(function* () {
     /** Every plugin the last boot loaded, in registry order. */
     loaded: (): Effect.Effect<ReadonlyArray<LoadedPlugin>> =>
       Effect.map(Ref.get(entries), (booted) => [...booted.values()].map(exposed)),
+
+    /** Every provider this boot registered, in registry order. */
+    providers: (): Effect.Effect<ReadonlyArray<ProviderDefinition>> => Ref.get(providers),
 
     refresh,
     stop,
