@@ -36,6 +36,8 @@ import {
   type ProbeReport,
   type ProbeRequest,
   type SessionEvent,
+  type SessionInput,
+  type SessionInputResult,
   type SessionsReport,
 } from "@hydra/protocol";
 import { SYSTEM_ACTOR } from "../actor";
@@ -61,7 +63,7 @@ export const RunnerFactsDeadline = Context.Reference<Duration.Duration>(
   { defaultValue: (): Duration.Duration => RUNNER_FACTS_DEADLINE },
 );
 
-export type Request = ProbeRequest | InstallRequest | LoginStart | LoginCode;
+export type Request = ProbeRequest | InstallRequest | LoginStart | LoginCode | SessionInput;
 
 /**
  * What a machine said about the sessions it is hosting, and which machine said
@@ -75,7 +77,8 @@ export interface SessionTraffic {
 }
 
 /** What came back for one of those, correlated by the request's own id. */
-export type Answer = ProbeReport | InstallResult | LoginUrl | LoginFailed | LoginResult;
+export type Answer =
+  ProbeReport | InstallResult | LoginUrl | LoginFailed | LoginResult | SessionInputResult;
 
 /**
  * The facts report carries no request id: the protocol has one frame for it and

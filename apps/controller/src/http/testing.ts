@@ -54,7 +54,7 @@ import {
   ProviderProbesLayer,
   ProviderServiceLayer,
 } from "../providers";
-import { SessionServiceLayer } from "../sessions";
+import { SessionInputDeadline, SessionServiceLayer } from "../sessions";
 import { SettingsLayer } from "../settings";
 import {
   JoinTokens,
@@ -195,6 +195,8 @@ export interface ServerOptions {
   readonly probeDeadline?: Duration.Duration;
   readonly probeInterval?: Duration.Duration;
   readonly loginDeadline?: Duration.Duration;
+  /** How long a delivered input waits for the machine to say what it did with it. */
+  readonly inputDeadline?: Duration.Duration;
   /** The shipped registry is compiled in, so a test hands over its own. */
   readonly plugins?: ReadonlyArray<Plugin>;
 }
@@ -240,6 +242,7 @@ export const withServer = (
         named(ProviderProbeDeadline, options.probeDeadline);
         named(ProviderProbeInterval, options.probeInterval);
         named(ProviderLoginDeadline, options.loginDeadline);
+        named(SessionInputDeadline, options.inputDeadline);
         yield* listening;
         const base = yield* baseUrl;
         // The log this database holds, read the way anything else reads it: a

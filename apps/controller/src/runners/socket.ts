@@ -212,6 +212,7 @@ const hold = (runnerId: string, socket: Socket.Socket) =>
           case "loginUrl":
           case "loginFailed":
           case "loginResult":
+          case "sessionInputResult":
             if (!greeted) return;
             return yield* presence.reportedAnswer(runnerId, mine, message);
           case "sessionEvent":
@@ -224,6 +225,9 @@ const hold = (runnerId: string, socket: Socket.Socket) =>
             departure = "offline";
             return;
         }
+        // Every frame the protocol declares is answered above. A new one that
+        // reaches here would otherwise be dropped in silence.
+        return message satisfies never;
       });
 
     // The transport forks a fiber per frame, so two arriving together would

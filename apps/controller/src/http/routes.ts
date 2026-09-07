@@ -262,6 +262,24 @@ const sessionRoutes = HttpApiBuilder.group(api, "session", (handlers) =>
 );
 
 /**
+ * A session's inputs are the session's own state, so they are served by the
+ * session service; the group is separate because the operations are `input.*`.
+ */
+const inputRoutes = HttpApiBuilder.group(api, "input", (handlers) =>
+  Effect.gen(function* () {
+    const sessions = yield* SessionService;
+    return handlers
+      .handle("query", ({ params, query }) =>
+        operation(sessions.queryInputs({ id: params.id, ...query })),
+      )
+      .handle("update", ({ params, payload }) =>
+        operation(sessions.updateInput({ ...params, ...payload })),
+      )
+      .handle("cancel", ({ params }) => operation(sessions.cancelInput(params)));
+  }),
+);
+
+/**
  * A transcript is the session's own stream, so it is served by the session
  * service; the group is separate because the operation is `transcript.read`.
  */
@@ -328,5 +346,6 @@ export const handlerLayers = Layer.mergeAll(
   pluginRoutes,
   providerRoutes,
   sessionRoutes,
+  inputRoutes,
   transcriptRoutes,
 );

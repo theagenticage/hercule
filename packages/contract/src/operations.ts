@@ -194,6 +194,24 @@ const TABLE = {
     path: "/api/v1/sessions/:id/input",
   },
 
+  // Owned sub-resources of a session: the id in the path is the session's, and
+  // the grant is the session's, because an input is what that session was told.
+  "input.query": {
+    requires: "session.read",
+    method: "GET",
+    path: "/api/v1/sessions/:id/inputs",
+  },
+  "input.update": {
+    requires: "session.steer",
+    method: "PATCH",
+    path: "/api/v1/sessions/:id/inputs/:inputId",
+  },
+  "input.cancel": {
+    requires: "session.steer",
+    method: "DELETE",
+    path: "/api/v1/sessions/:id/inputs/:inputId",
+  },
+
   // An owned sub-resource: the id in the path is the session's, and the grant
   // is the session's own read, because a transcript is what that session said.
   "transcript.read": {

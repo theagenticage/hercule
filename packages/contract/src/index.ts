@@ -134,6 +134,16 @@ export {
   SessionSpawnInput,
   SessionStatus,
 } from "./groups/session";
+export {
+  INPUT_SORT_FIELDS,
+  INPUT_SOURCES,
+  INPUT_UPDATE_FIELDS,
+  INPUT_STATUSES,
+  InputSource,
+  InputStatus,
+  InputUpdatePayload,
+  QueuedInput,
+} from "./groups/input";
 export { TRANSCRIPT_SORT_FIELDS, TranscriptRow } from "./groups/transcript";
 export { OwnerKind, SecretRef } from "./groups/secret";
 export { ControllerInfo, ControllerUpdateInput } from "./groups/controller";

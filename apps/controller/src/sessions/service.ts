@@ -12,6 +12,7 @@
  * commit together (spec 04 Truth model).
  */
 import * as Context from "effect/Context";
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
@@ -23,13 +24,18 @@ import type { DeclaredCapabilities, ProviderDefinition } from "@hydra/plugin-hos
 import {
   SessionSpec,
   type AccessMode,
+  type Delivery,
+  type ModelSelection,
   type ProviderEvent,
   type SessionBinding,
+  type SessionInputResult as SessionInputAnswer,
   type SessionStart,
 } from "@hydra/protocol";
 import {
   DEFAULT_PAGE_LIMIT,
   Id,
+  INPUT_SORT_FIELDS,
+  INPUT_UPDATE_FIELDS,
   invalidState,
   notFound,
   SESSION_SORT_FIELDS,
@@ -43,6 +49,7 @@ import {
   type InvalidState,
   type NotFound,
   type Session,
+  type QueuedInput,
   type SessionInputResult,
   type SortDirection,
   type TranscriptRow,
@@ -50,13 +57,14 @@ import {
   type Validation,
 } from "@hydra/contract";
 import { currentUser, requireGrant, USER_ACTOR } from "../actor";
-import { announce, nowIso, pageInput, refuseCursor, withTransaction } from "../db";
+import { announce, nowIso, pageInput, refuseCursor, withTransaction, type Page } from "../db";
 import { AuditLog } from "../events";
 import { PermissionProfiles, type GrantsError } from "../permissions";
 import { PluginHost } from "../plugins";
 import { providerRepository, type StoredInstance, type StoredSnapshot } from "../providers";
 import { RunnerPresence, runnerRepository, type SessionTraffic } from "../runners";
 import { Settings, type SettingError } from "../settings";
+import { inputRepository, type StoredInput } from "./inputs";
 import { sessionRepository, type StoredSession } from "./repository";
 import { fold, track, type Tracked } from "./stream";
 
@@ -79,6 +87,18 @@ const TranscriptInput = Schema.Struct({ id: Id, ...pageInput(TRANSCRIPT_SORT_FIE
 
 export type TranscriptInput = Schema.Schema.Type<typeof TranscriptInput>;
 
+const InputQueryInput = Schema.Struct({ id: Id, ...pageInput(INPUT_SORT_FIELDS) });
+
+export type InputQueryInput = Schema.Schema.Type<typeof InputQueryInput>;
+
+const InputUpdate = Schema.Struct({ id: Id, inputId: Id, ...INPUT_UPDATE_FIELDS });
+
+export type InputUpdate = Schema.Schema.Type<typeof InputUpdate>;
+
+const InputIdentified = Schema.Struct({ id: Id, inputId: Id });
+
+export type InputIdentified = Schema.Schema.Type<typeof InputIdentified>;
+
 export interface SessionPage {
   readonly items: ReadonlyArray<Session>;
   readonly nextCursor?: string;
@@ -89,11 +109,25 @@ export interface TranscriptPage {
   readonly nextCursor?: string;
 }
 
+export interface InputPage {
+  readonly items: ReadonlyArray<QueuedInput>;
+  readonly nextCursor?: string;
+}
+
+/** A listing as the contract hands it out: the cursor is a key, not a null. */
+const pageOut = <A>(listing: Page<A>): { items: ReadonlyArray<A>; nextCursor?: string } => ({
+  items: listing.items,
+  ...(listing.nextCursor === undefined ? {} : { nextCursor: listing.nextCursor }),
+});
+
 const decodeQuery = Schema.decodeUnknownEffect(QueryInput);
 const decodeIdentified = Schema.decodeUnknownEffect(Identified);
 const decodeSpawn = Schema.decodeUnknownEffect(SessionSpawnInput);
 const decodeInput = Schema.decodeUnknownEffect(InputInput);
 const decodeTranscript = Schema.decodeUnknownEffect(TranscriptInput);
+const decodeInputQuery = Schema.decodeUnknownEffect(InputQueryInput);
+const decodeInputUpdate = Schema.decodeUnknownEffect(InputUpdate);
+const decodeInputIdentified = Schema.decodeUnknownEffect(InputIdentified);
 const encodeSpec = Schema.encodeUnknownSync(SessionSpec);
 
 /** Newest first: a session list is read as a history. */
@@ -102,13 +136,41 @@ const DEFAULT_DIRECTION: SortDirection = "desc";
 /** Oldest first: a transcript is read forwards, the way it happened. */
 const TRANSCRIPT_DIRECTION: SortDirection = "asc";
 
-const NO_SUCH_SESSION = "no such session";
+/** Oldest first: the order the caller sent them in is the order they leave in. */
+const INPUT_DIRECTION: SortDirection = "asc";
 
-const NOT_STARTED = "that session has not started yet";
+/**
+ * How long the controller waits for a runner to say what it did with an input.
+ * Long enough for a harness to take a message, short enough that a caller
+ * blocked on the answer is not left there.
+ */
+const SESSION_INPUT_DEADLINE: Duration.Duration = Duration.seconds(10);
+
+/** Tests hand over a deadline they can wait out. */
+export const SessionInputDeadline = Context.Reference<Duration.Duration>(
+  "hydra/controller/sessions/SessionInputDeadline",
+  { defaultValue: (): Duration.Duration => SESSION_INPUT_DEADLINE },
+);
+
+const NO_SUCH_SESSION = "no such session";
 
 const HAS_EXITED = "that session has exited";
 
 const GONE = "that session's runner is no longer connected";
+
+const NO_SUCH_INPUT = "no such input on that session";
+
+const ALREADY_SENT = "that input has already gone to the machine";
+
+const REFUSED = "that session's runner would not take the input";
+
+/**
+ * Both ways an input can fail to reach the harness - no connection, and no
+ * answer in time - read the same to a caller, and the row is left where the
+ * next flush will find it either way.
+ */
+const NOT_DELIVERED =
+  "that session's runner did not take the input; it stays queued for the next turn";
 
 const NO_PLACEMENT =
   "no connected runner is logged in to that provider instance; log in on a machine first";
@@ -165,6 +227,7 @@ interface Resolved {
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const sessions = yield* sessionRepository;
+  const inputs = yield* inputRepository;
   const instances = yield* providerRepository;
   const runners = yield* runnerRepository;
   const presence = yield* RunnerPresence;
@@ -183,11 +246,22 @@ const make = Effect.gen(function* () {
   const tracking = new Map<string, Tracked>();
 
   /**
-   * The first prompt of a spawned session, waiting for its harness to come up.
-   * The handover between `spawn` and `session.started`, not the Queued Input of
-   * spec 06 section 5: a controller restarted in that window loses the prompt.
+   * Which sessions have a flush running. A flush waits on the runner, so a
+   * second one for the same session would send the rows the first is already
+   * sending; the running flush re-reads the queue before it finishes, so
+   * anything that arrived meanwhile still goes.
    */
-  const opening = new Map<string, string>();
+  const flushing = new Set<string>();
+
+  /**
+   * The inputs on the wire this moment. A row stays `queued` until its answer
+   * comes back, so the status alone cannot tell a row still waiting from one
+   * the machine already has.
+   */
+  const sending = new Set<string>();
+
+  /** Sessions whose transition to idle arrived while a flush was already running. */
+  const missed = new Set<string>();
 
   const one = (id: string): Effect.Effect<StoredSession, NotFound | SqlError> =>
     Effect.flatMap(
@@ -267,28 +341,179 @@ const make = Effect.gen(function* () {
       }),
     );
 
-  /** Sends the prompt `spawn` was given, now that there is a harness to take it. */
-  const openWith = (sessionId: string, runnerId: string): Effect.Effect<void> => {
-    const prompt = opening.get(sessionId);
-    if (prompt === undefined) return Effect.void;
-    opening.delete(sessionId);
-    return Effect.flatMap(
-      presence.tell(runnerId, {
-        _tag: "sessionInput",
-        requestId: crypto.randomUUID(),
-        sessionId,
-        input: { text: prompt },
+  /**
+   * Whether the session has to hold this input rather than take it now. A
+   * session with no harness up yet holds everything. A turn already running
+   * takes only what can be folded into it, which is neither a model change -
+   * a harness takes one only on the input that opens a turn - nor any input at
+   * all where the provider declares no steering.
+   */
+  const heldBack = (
+    session: StoredSession,
+    modelSelection: ModelSelection | undefined,
+  ): Effect.Effect<boolean, Validation | SqlError | Schema.SchemaError> =>
+    Effect.gen(function* () {
+      if (session.status !== "busy") return session.status !== "idle";
+      if (modelSelection !== undefined) return true;
+      const { definition } = yield* resolved(session.instanceId);
+      return definition.declared.steering !== "native";
+    });
+
+  /**
+   * The input a caller may still act on: one this session holds, one that has
+   * not left or been called off already, and one that is not on the wire this
+   * moment - a row the machine already has cannot be taken back, and saying it
+   * was would be the worst thing this operation could tell anyone.
+   */
+  const queuedInput = (
+    sessionId: string,
+    inputId: string,
+  ): Effect.Effect<StoredInput, NotFound | InvalidState | SqlError> =>
+    Effect.gen(function* () {
+      const found = yield* inputs.one(sessionId, inputId);
+      if (Option.isNone(found)) return yield* Effect.fail(notFound(NO_SUCH_INPUT));
+      if (found.value.status !== "queued") {
+        return yield* Effect.fail(invalidState(`that input was already ${found.value.status}`));
+      }
+      if (sending.has(inputId)) return yield* Effect.fail(invalidState(ALREADY_SENT));
+      return found.value;
+    });
+
+  /**
+   * Sends one stored input to the machine holding the session and waits for the
+   * machine to say what it did with it. `none` where there is no connection or
+   * nothing came back in time; the wait is outside any transaction.
+   *
+   * The row is claimed for as long as it is on the wire, because it stays
+   * `queued` in the database until the answer comes back and nothing else may
+   * send it, edit it or call it off in the meantime.
+   */
+  const deliverTo = (
+    runnerId: string,
+    row: StoredInput,
+  ): Effect.Effect<Option.Option<SessionInputAnswer>> =>
+    Effect.gen(function* () {
+      const deadline = yield* SessionInputDeadline;
+      sending.add(row.id);
+      const answer = yield* Effect.ensuring(
+        presence.asked(
+          runnerId,
+          {
+            _tag: "sessionInput",
+            requestId: row.id,
+            sessionId: row.sessionId,
+            input: {
+              text: row.text,
+              ...(row.modelSelection === null ? {} : { modelSelection: row.modelSelection }),
+            },
+          },
+          deadline,
+        ),
+        Effect.sync(() => sending.delete(row.id)),
+      );
+      return Option.filter(
+        answer,
+        (one): one is SessionInputAnswer => one._tag === "sessionInputResult",
+      );
+    });
+
+  const recordDelivery = (row: StoredInput, delivery: Delivery): Effect.Effect<void, SqlError> =>
+    withTransaction(
+      sql,
+      Effect.gen(function* () {
+        yield* inputs.delivered(row.id, delivery, yield* nowIso);
+        yield* announce({ _tag: "record", topic: "session", id: row.sessionId, kind: "updated" });
       }),
-      (sent) =>
-        // The machine went in the moment between coming up and being spoken to.
-        // Said rather than swallowed: the user is waiting on a prompt nothing got.
-        sent
-          ? Effect.void
-          : Effect.logWarning(
-              `The prompt for session ${sessionId} was not delivered: its runner disconnected.`,
-            ),
     );
-  };
+
+  /**
+   * A machine that says outright it will not take an input will say it again
+   * every time, so the row is ended rather than retried for ever behind an
+   * apology nobody reads. What it said is logged, because the row itself can
+   * only record that the input is not coming.
+   */
+  const recordRefusal = (row: StoredInput, message: string | undefined) =>
+    Effect.gen(function* () {
+      yield* Effect.logWarning(
+        `Input ${row.id} on session ${row.sessionId} was refused: ${message ?? "no reason given"}`,
+      );
+      yield* withTransaction(
+        sql,
+        Effect.gen(function* () {
+          yield* inputs.cancel(row.id);
+          yield* announce({ _tag: "record", topic: "session", id: row.sessionId, kind: "updated" });
+        }),
+      );
+    });
+
+  /**
+   * Sends what one transition to idle releases: every queued input, oldest
+   * first, so a user who lined three messages up gets three rather than one per
+   * turn. The first opens the turn and the rest steer into it.
+   *
+   * The queue is re-read for every row rather than taken as a snapshot, because
+   * a row waiting behind the one on the wire can be rewritten or called off
+   * while this runs, and a snapshot would send the text the caller replaced.
+   *
+   * It ends at the first input the machine could not be asked about, leaving
+   * that row and everything behind it queued for the session's next transition
+   * to idle. Nothing resends on its own: there is no outbox yet.
+   */
+  const releasing = (sessionId: string, runnerId: string): Effect.Effect<void, SqlError> =>
+    Effect.gen(function* () {
+      let opened = false;
+      while (true) {
+        const next = (yield* inputs.queued(sessionId)).find((row) => !sending.has(row.id));
+        if (next === undefined) return;
+        // A harness takes a model change only on the input that opens a turn,
+        // so a row carrying one waits for a boundary of its own rather than
+        // being folded into the turn this flush just opened.
+        if (opened && next.modelSelection !== null) return;
+        const answer = yield* deliverTo(runnerId, next);
+        if (Option.isNone(answer)) return;
+        const delivery = answer.value.ok ? answer.value.delivery : undefined;
+        if (delivery === undefined) {
+          yield* recordRefusal(next, answer.value.message);
+          continue;
+        }
+        yield* recordDelivery(next, delivery);
+        if (delivery === "opened") opened = true;
+      }
+    });
+
+  /**
+   * One flush per session at a time, because a flush waits on the runner and a
+   * second would send the rows the first is already sending.
+   *
+   * A transition to idle that arrives while one is running is remembered rather
+   * than dropped: it releases a turn's worth of queue of its own once the
+   * running flush is done, so nothing waits for a boundary that has been and
+   * gone.
+   */
+  const flush = (sessionId: string, runnerId: string): Effect.Effect<void, SqlError> =>
+    Effect.suspend(() => {
+      if (flushing.has(sessionId)) {
+        missed.add(sessionId);
+        return Effect.void;
+      }
+      flushing.add(sessionId);
+      return Effect.ensuring(
+        Effect.gen(function* () {
+          do {
+            missed.delete(sessionId);
+            yield* releasing(sessionId, runnerId);
+          } while (missed.has(sessionId));
+        }),
+        Effect.sync(() => {
+          flushing.delete(sessionId);
+          missed.delete(sessionId);
+        }),
+      );
+    });
+
+  /** A driver must not stop on one failure, so the cause is logged and dropped. */
+  const absorbing = (what: string, effect: Effect.Effect<void, SqlError>): Effect.Effect<void> =>
+    Effect.ignore(Effect.tapCause(effect, (cause) => Effect.logError(what, cause)));
 
   /** The native ids a machine reports for the sessions it is holding. */
   const bound = (
@@ -320,7 +545,7 @@ const make = Effect.gen(function* () {
       const held = tracking.get(id) ?? track(yield* sessions.lastSeq(id));
       const folded = fold(held, seq, event);
       if (folded === undefined) return;
-      yield* withTransaction(
+      const moved = yield* withTransaction(
         sql,
         Effect.gen(function* () {
           const at = yield* nowIso;
@@ -337,10 +562,13 @@ const make = Effect.gen(function* () {
             // No announce: an event that moves nothing is most of the traffic,
             // and a refetch per delta would be a firehose.
             yield* sessions.touched(id, at);
-            return;
+            return undefined;
           }
           yield* sessions.moved(id, folded.status, at);
+          // Nothing waits on a harness that is gone, so the queue goes with it.
+          if (folded.status === "exited") yield* inputs.cancelQueued(id);
           yield* announce({ _tag: "record", topic: "session", id, kind: "updated" });
+          return folded.status;
         }),
       );
       // Only once it is durable: a failed transaction leaves the held text and
@@ -351,11 +579,17 @@ const make = Effect.gen(function* () {
       // an already-exited session would otherwise put its entry back for good.
       if (folded.status === "exited" || before === "exited") {
         tracking.delete(id);
-        opening.delete(id);
       } else {
         tracking.set(id, folded.next);
       }
-      if (event._tag === "session.started") yield* openWith(id, runnerId);
+      // Forked, because a flush waits on the runner and the ingest is one fiber
+      // for the whole fleet: waiting inline would stall every other session's
+      // events for the deadline.
+      if (moved === "idle") {
+        yield* Effect.forkChild(
+          absorbing("A session's queued input could not be sent", flush(id, runnerId)),
+        );
+      }
     });
 
   const applying = (traffic: SessionTraffic): Effect.Effect<void, SqlError> =>
@@ -380,10 +614,7 @@ const make = Effect.gen(function* () {
             runnerId,
           }),
         );
-        return {
-          items: listing.items,
-          ...(listing.nextCursor === undefined ? {} : { nextCursor: listing.nextCursor }),
-        };
+        return pageOut(listing);
       }),
 
     read: (input: Identified): Effect.Effect<Session, ReadError | NotFound> =>
@@ -414,10 +645,7 @@ const make = Effect.gen(function* () {
             direction: sort?.direction ?? TRANSCRIPT_DIRECTION,
           }),
         );
-        return {
-          items: listing.items,
-          ...(listing.nextCursor === undefined ? {} : { nextCursor: listing.nextCursor }),
-        };
+        return pageOut(listing);
       }),
 
     spawn: (input: SessionSpawnInput): Effect.Effect<Session, SpawnError> =>
@@ -489,6 +717,17 @@ const make = Effect.gen(function* () {
               spec: JSON.stringify(encodeSpec(spec)),
               at,
             });
+            // The prompt is an ordinary input, waiting with the session: it
+            // leaves when the harness comes up, and a controller restarted in
+            // that window still has it.
+            yield* inputs.insert({
+              sessionId: row.id,
+              source: "user",
+              actor: USER_ACTOR,
+              text: decoded.prompt,
+              modelSelection: undefined,
+              at,
+            });
             yield* audit.append({
               kind: "session.spawned",
               actor: USER_ACTOR,
@@ -506,9 +745,6 @@ const make = Effect.gen(function* () {
           }),
         );
 
-        // After the commit, because the frame carries the session id and the
-        // machine starts reporting against it as soon as it has one.
-        opening.set(stored.id, decoded.prompt);
         const start: SessionStart = {
           _tag: "sessionStart",
           sessionId: stored.id,
@@ -517,7 +753,6 @@ const make = Effect.gen(function* () {
           spec,
         };
         if (!(yield* presence.tell(hosting.runnerId, start))) {
-          opening.delete(stored.id);
           // The row exists and nothing will ever start it, so it is ended here
           // rather than left reading `starting` for good.
           yield* withTransaction(
@@ -533,37 +768,112 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * One turn's input. Input to a running turn is steering; where a provider
-     * has none the controller would queue it, and Queued Input is not built,
-     * so it is refused rather than dropped.
+     * One turn's input. Stored first, so the answer names a row the caller can
+     * edit or cancel, and then either sent or left for the next flush.
+     *
+     * What it did is always the machine's own word for it, never the status the
+     * controller read: an input that opened a turn and one that was folded into
+     * a turn already running are told apart by the adapter alone.
      */
     input: (input: InputInput): Effect.Effect<SessionInputResult, InputError> =>
       Effect.gen(function* () {
         yield* requireGrant("session.input");
-        const { id, text } = yield* Effect.mapError(decodeInput(input), validationOf);
+        const { id, text, modelSelection } = yield* Effect.mapError(
+          decodeInput(input),
+          validationOf,
+        );
         const session = yield* one(id);
         if (session.status === "exited") return yield* Effect.fail(invalidState(HAS_EXITED));
-        if (session.status !== "idle" && session.status !== "busy") {
-          return yield* Effect.fail(invalidState(NOT_STARTED));
+        const hold = yield* heldBack(session, modelSelection);
+        const row = yield* withTransaction(
+          sql,
+          Effect.gen(function* () {
+            const created = yield* inputs.insert({
+              sessionId: id,
+              source: "user",
+              actor: USER_ACTOR,
+              text,
+              modelSelection,
+              at: yield* nowIso,
+            });
+            // Claimed before the row is visible to anything else: it stays
+            // `queued` for the whole round trip, and a flush reading the queue
+            // in that window would otherwise send it a second time.
+            if (!hold) sending.add(created.id);
+            yield* announce({ _tag: "record", topic: "session", id, kind: "updated" });
+            return created;
+          }),
+        );
+        if (hold) return { inputId: row.id, result: "queued" };
+        // The claim taken with the row is released here whatever happens to
+        // this request, so an abandoned one never leaves a row nothing can send.
+        const answer = yield* Effect.ensuring(
+          deliverTo(session.runnerId, row),
+          Effect.sync(() => sending.delete(row.id)),
+        );
+        if (Option.isNone(answer)) return yield* Effect.fail(invalidState(NOT_DELIVERED));
+        const delivery = answer.value.ok ? answer.value.delivery : undefined;
+        if (delivery === undefined) {
+          yield* recordRefusal(row, answer.value.message);
+          return yield* Effect.fail(invalidState(answer.value.message ?? REFUSED));
         }
-        if (session.status === "busy") {
-          const { definition } = yield* resolved(session.instanceId);
-          if (definition.declared.steering !== "native") {
-            return yield* Effect.fail(
-              invalidState(
-                `${definition.displayName} takes no input mid-turn, and queued input is not built yet`,
-              ),
-            );
-          }
-        }
-        const sent = yield* presence.tell(session.runnerId, {
-          _tag: "sessionInput",
-          requestId: crypto.randomUUID(),
-          sessionId: id,
-          input: { text },
-        });
-        if (!sent) return yield* Effect.fail(invalidState(GONE));
-        return { result: session.status === "busy" ? "steered" : "opened" };
+        yield* recordDelivery(row, delivery);
+        return { inputId: row.id, result: delivery };
+      }),
+
+    /** Every input this session was ever given, oldest first, whatever became of each. */
+    queryInputs: (input: InputQueryInput): Effect.Effect<InputPage, ReadError | NotFound> =>
+      Effect.gen(function* () {
+        yield* requireGrant("input.query");
+        const { id, limit, cursor, sort } = yield* Effect.mapError(
+          decodeInputQuery(input),
+          validationOf,
+        );
+        yield* one(id);
+        const listing = yield* refuseCursor(
+          inputs.list({
+            sessionId: id,
+            limit: limit ?? DEFAULT_PAGE_LIMIT,
+            cursor,
+            direction: sort?.direction ?? INPUT_DIRECTION,
+          }),
+        );
+        return pageOut(listing);
+      }),
+
+    updateInput: (input: InputUpdate): Effect.Effect<QueuedInput, InputError> =>
+      Effect.gen(function* () {
+        yield* requireGrant("input.update");
+        const { id, inputId, text } = yield* Effect.mapError(
+          decodeInputUpdate(input),
+          validationOf,
+        );
+        yield* one(id);
+        return yield* withTransaction(
+          sql,
+          Effect.gen(function* () {
+            const row = yield* queuedInput(id, inputId);
+            yield* inputs.retext(inputId, text);
+            yield* announce({ _tag: "record", topic: "session", id, kind: "updated" });
+            return { ...row, text };
+          }),
+        );
+      }),
+
+    cancelInput: (input: InputIdentified): Effect.Effect<QueuedInput, InputError> =>
+      Effect.gen(function* () {
+        yield* requireGrant("input.cancel");
+        const { id, inputId } = yield* Effect.mapError(decodeInputIdentified(input), validationOf);
+        yield* one(id);
+        return yield* withTransaction(
+          sql,
+          Effect.gen(function* () {
+            const row = yield* queuedInput(id, inputId);
+            yield* inputs.cancel(inputId);
+            yield* announce({ _tag: "record", topic: "session", id, kind: "updated" });
+            return { ...row, status: "cancelled" as const };
+          }),
+        );
       }),
 
     /**
@@ -572,11 +882,7 @@ const make = Effect.gen(function* () {
      * one report that will not write must not stop the fleet's traffic.
      */
     ingesting: Stream.runForEach(presence.sessionTraffic, (traffic) =>
-      Effect.ignore(
-        Effect.tapCause(applying(traffic), (cause) =>
-          Effect.logError("A session report could not be recorded", cause),
-        ),
-      ),
+      absorbing("A session report could not be recorded", applying(traffic)),
     ),
   };
 });

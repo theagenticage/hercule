@@ -6,7 +6,7 @@
  * downward fallback of [06-providers section 8.4] must never be silent.
  */
 import { Schema } from "effect";
-import { AccessMode } from "@hydra/protocol";
+import { AccessMode, ModelSelection } from "@hydra/protocol";
 import * as HttpApiEndpoint from "effect/unstable/httpapi/HttpApiEndpoint";
 import * as HttpApiGroup from "effect/unstable/httpapi/HttpApiGroup";
 import { closedStruct } from "../closed";
@@ -26,7 +26,7 @@ import { bounded } from "../strings";
 /** The longest prompt or turn input the API takes: it crosses the runner socket in one frame. */
 export const MAX_PROMPT_LENGTH = 64 * 1024;
 
-const Prompt = bounded(1, MAX_PROMPT_LENGTH);
+export const Prompt = bounded(1, MAX_PROMPT_LENGTH);
 
 /**
  * Where a session stands. `queued` is placement accepted with the runner full
@@ -84,15 +84,32 @@ export type SessionSpawnInput = Schema.Schema.Type<typeof SessionSpawnInput>;
  * One turn's input. Declared apart from the payload so a service can spread it
  * beside the session id and hold an in-process caller to the same bound.
  */
-export const SESSION_INPUT_FIELDS = { text: Prompt } as const;
+export const SESSION_INPUT_FIELDS = {
+  text: Prompt,
+  /**
+   * A model change rides the input that opens a turn, because that is the only
+   * moment a harness will take one; an input carrying it is held back rather
+   * than folded into a turn already running.
+   */
+  modelSelection: Schema.optionalKey(ModelSelection),
+} as const;
 
 export const SessionInputPayload = closedStruct(SESSION_INPUT_FIELDS);
 
 export type SessionInputPayload = Schema.Schema.Type<typeof SessionInputPayload>;
 
-/** Folding input into a turn already running is steering, hence the `session.steer` grant. */
+/**
+ * What one input did. `inputId` names the row it was stored as, which is what a
+ * caller edits or cancels while it is still `queued`.
+ *
+ * Folding input into a turn already running is steering, hence the
+ * `session.steer` grant. `opened` and `steered` are the runner's own words for
+ * what it did with it; `queued` is the controller's, for an input the session
+ * cannot take yet.
+ */
 export const SessionInputResult = Schema.Struct({
-  result: Schema.Literals(["opened", "steered"]),
+  inputId: Id,
+  result: Schema.Literals(["opened", "steered", "queued"]),
 });
 
 export type SessionInputResult = Schema.Schema.Type<typeof SessionInputResult>;
