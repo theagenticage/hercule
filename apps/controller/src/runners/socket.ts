@@ -165,6 +165,10 @@ const hold = (runnerId: string, socket: Socket.Socket) =>
         );
         greeted = true;
         yield* write(asText(answer));
+        // After the answer, because the runner drops every frame that reaches
+        // it before the controller's hello: a sweep announced any earlier can
+        // have its first probe thrown away.
+        yield* presence.arrived(runnerId);
       });
 
     const handle = (raw: string) =>

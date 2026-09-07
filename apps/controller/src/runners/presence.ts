@@ -64,9 +64,17 @@ export type Answer = ProbeReport | InstallResult | LoginUrl | LoginFailed | Logi
 
 /**
  * The facts report carries no request id: the protocol has one frame for it and
- * a machine sends one report, so it waits under a key no request id can be.
+ * a machine sends one report, so it waits under a key no request id can be. The
+ * empty string is that key, because a `RequestId` holds at least one character
+ * - a spelled-out word would be one a runner could send a report under.
  */
-const FACTS_KEY = "facts";
+const FACTS_KEY = "";
+
+/**
+ * How many arrivals a driver that has not subscribed yet still sees. One is
+ * enough for the boot window; a handful covers a fleet that all dials at once.
+ */
+const ARRIVALS_REPLAY = 16;
 
 interface FactsReported {
   readonly _tag: "factsReported";
@@ -107,9 +115,11 @@ const make = Effect.gen(function* () {
   const audit = yield* AuditLog;
 
   const reachable = new Map<string, Reachable>();
-  // Dropping, and unbounded: a hello nobody is listening for is a sweep nobody
-  // asked for, and the driver that listens is up before anything can dial.
-  const arrivals = yield* PubSub.unbounded<string>();
+  // Unbounded, so a machine's hello is never held up by whoever is listening.
+  // It replays, because the driver subscribes on a forked fiber while the
+  // listener is already binding: without the replay a machine that dialled in
+  // that window would go unswept until the tick, an hour later.
+  const arrivals = yield* PubSub.unbounded<string>({ replay: ARRIVALS_REPLAY });
 
   /**
    * Nothing more is coming over this connection, so everybody waiting on it is
@@ -165,7 +175,11 @@ const make = Effect.gen(function* () {
         // keep the map growing for the life of the connection.
         Effect.sync(() => {
           waiting.delete(mine);
-          if (waiting.size === 0) held.pending.delete(key);
+          // Only if this set is still the one under the key: a report wakes
+          // callers by removing the key first, so a caller that arrives under
+          // the same key while the woken ones unwind has installed a new set,
+          // and that one is not this finalizer's to drop.
+          if (waiting.size === 0 && held.pending.get(key) === waiting) held.pending.delete(key);
         }),
       );
     });
@@ -221,7 +235,6 @@ const make = Effect.gen(function* () {
         );
         const previous = reachable.get(id);
         reachable.set(id, { connection, ...connected, pending: new Map() });
-        yield* PubSub.publish(arrivals, id);
         if (previous !== undefined) {
           // Nothing more is coming over the connection being displaced, and the
           // entry that would have carried its answer is no longer the one here.
@@ -229,6 +242,13 @@ const make = Effect.gen(function* () {
           previous.close(GOING_AWAY_CLOSE_CODE, DISPLACED_CLOSE_REASON);
         }
       }),
+
+    /**
+     * Says a machine is in, once the controller's own hello has gone out: the
+     * runner drops anything that reaches it before that, so an arrival
+     * announced any earlier is one whose first request is thrown away.
+     */
+    arrived: (id: string): Effect.Effect<void> => PubSub.publish(arrivals, id).pipe(Effect.asVoid),
 
     /**
      * Every machine that has just said hello. What to do about an arrival is
@@ -306,9 +326,11 @@ const make = Effect.gen(function* () {
           }),
         );
         // After the commit, so a caller woken by this reads the facts it waited
-        // for rather than the ones they replaced.
+        // for rather than the ones they replaced. Still this connection's, in
+        // case the runner reconnected in between: the new connection's waiters
+        // are waiting on the new machine, and it has not spoken yet.
         const held = recorded ? reachable.get(id) : undefined;
-        if (held !== undefined) woke(held, FACTS_KEY, FACTS_REPORTED);
+        if (held?.connection === connection) woke(held, FACTS_KEY, FACTS_REPORTED);
       }),
 
     /** Only the crossing is recorded, because that is the part placement acts on. */

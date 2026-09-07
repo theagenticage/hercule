@@ -126,18 +126,8 @@ const framesOf = <T extends ControllerMessage>(wire: Wire, tag: T["_tag"]): Read
 const probeRequests = (wire: Wire): ReadonlyArray<ProbeRequest> =>
   framesOf<ProbeRequest>(wire, "probeRequest");
 
-const frameOn = async <T extends ControllerMessage>(
-  wire: Wire,
-  tag: T["_tag"],
-  index = 0,
-): Promise<T> => {
-  for (let attempt = 0; attempt < 400; attempt++) {
-    const found = framesOf<T>(wire, tag);
-    if (found.length > index) return found[index]!;
-    await delay(5);
-  }
-  throw new Error(`the controller never sent a ${tag}`);
-};
+const frameOn = <T extends ControllerMessage>(wire: Wire, tag: T["_tag"], index = 0): Promise<T> =>
+  until(`sent a ${tag}`, () => framesOf<T>(wire, tag)[index]);
 
 /**
  * Opens the socket with a credential, as a runner does: the credential rides
@@ -1334,6 +1324,42 @@ describe("refreshing a runner's facts on demand", () => {
     });
   });
 
+  it("is not answered by a probe report a runner spells the facts key into", async () => {
+    await withServer(
+      async (harness) => {
+        const token = await completeSetup(harness.base);
+        const joined = await enlist(harness);
+        const { wire } = await greet(harness.base, joined.credential);
+        try {
+          await rowWhen(
+            harness.base,
+            token,
+            joined.runnerId,
+            (one) => one.connectivity === "online",
+          );
+
+          const pending = refreshFacts(harness.base, token, joined.runnerId);
+          await requestOn(wire);
+          // A request id the controller never issued, spelling out what the
+          // facts wait might plausibly be keyed under. It wakes nothing, so the
+          // caller runs out its deadline: a runner does not get to answer a
+          // question it was not asked.
+          wire.send({
+            _tag: "probeReport",
+            requestId: "facts",
+            instanceId: "instance-claude-code",
+            result: { harnessVersion: null, auth: { status: "unauthenticated" }, models: [] },
+          });
+
+          expect((await pending).status).toBe(409);
+        } finally {
+          wire.close();
+        }
+      },
+      { factsDeadline: FACTS_DEADLINE },
+    );
+  });
+
   it("refuses a runner that is not online, and sends that connection nothing", async () => {
     await withServer(async (harness) => {
       const token = await completeSetup(harness.base);
@@ -1887,9 +1913,7 @@ describe("installing a harness on a runner", () => {
         expect(row.facts?.providers).toEqual(INSTALLED.providers);
 
         // A harness that was just installed has never been asked anything.
-        for (let attempt = 0; attempt < 400 && probeRequests(wire).length <= before; attempt++) {
-          await delay(5);
-        }
+        await until("probed after the install", () => probeRequests(wire)[before]);
         expect(
           probeRequests(wire)
             .slice(before)
