@@ -47,6 +47,7 @@ import {
   type ProviderRunnerContext,
 } from "./providers";
 import type { LoginAnswer } from "./providers/login";
+import { sessions } from "./sessions";
 import { checkWatermark, type Headroom } from "./watermark";
 
 const SOCKET_PATH = "/api/v1/runners/socket";
@@ -83,6 +84,11 @@ export interface ConnectOptions {
    * credential, and never the user's own.
    */
   readonly providersDir: string;
+  /**
+   * Where a workspace-less session gets its empty scratch cwd, one directory
+   * per session, removed when the session exits (spec 06 section 9.1).
+   */
+  readonly scratchDir: string;
   /** The shipped deadline unless a test says otherwise. */
   readonly proofDeadline?: Duration.Duration;
 }
@@ -236,6 +242,19 @@ export const connect = (
       // session supervisor builds its own context (spec 06 section 4.2).
       return { cwd: null, home, binary: binaryOf(adapter.binaryName), env: process.env };
     };
+
+    // The connection lends the supervisor a way to write and the paths this
+    // machine resolved; the sessions themselves are the process's.
+    const supervisor = sessions({
+      send: (frame) => write(asText(frame)),
+      machine: {
+        providersDir: options.providersDir,
+        scratchDir: options.scratchDir,
+        controllerUrl: pin.controllerUrl,
+        baseEnv: process.env,
+        binaryOf,
+      },
+    });
 
     /**
      * What went wrong, in one line. Saying nothing about a defect would leave
@@ -394,6 +413,11 @@ export const connect = (
             ),
           );
         }
+        // Sessions run in the frame order they arrived in, unforked: input for
+        // a session started one frame ago must not overtake the start.
+        if (message._tag === "sessionStart") return yield* supervisor.start(message);
+        if (message._tag === "sessionInput") return yield* supervisor.input(message);
+        if (message._tag === "sessionStop") return yield* supervisor.stop(message);
         // An ack belongs to the replayable events nothing sends yet.
       });
 
@@ -413,6 +437,13 @@ export const connect = (
         Effect.as(Effect.sleep(options.proofDeadline ?? PROOF_DEADLINE), false),
       );
       if (!proved) return yield* disown("the controller did not say who it is");
+      // Not a moment earlier: a session this runner kept across a reconnect can
+      // produce events at once, and a peer that has not proved who it is reads
+      // none of them. Running the relay is what subscribes it, so anything
+      // published before this point is lost - the same gap as everything
+      // produced while the socket was down (spec 03 section 2.3).
+      yield* Effect.forkIn(supervisor.relay, connection);
+      yield* supervisor.report;
       yield* Effect.all(
         [
           checkWatermark({

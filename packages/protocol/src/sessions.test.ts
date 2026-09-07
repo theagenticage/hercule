@@ -5,12 +5,19 @@ import {
   ProviderEvent,
   SessionBinding,
   SessionSpec,
+  SessionStart,
+  SessionStop,
   TurnInput,
   type ProviderEvent as Event,
 } from "./sessions";
 
 const decode = (
-  schema: typeof ProviderEvent | typeof SessionSpec | typeof SessionBinding,
+  schema:
+    | typeof ProviderEvent
+    | typeof SessionSpec
+    | typeof SessionBinding
+    | typeof SessionStart
+    | typeof SessionStop,
   input: unknown,
 ) => Effect.runSyncExit(Schema.decodeUnknownEffect(schema)(input));
 
@@ -35,6 +42,14 @@ const spec = {
   workspaceId: null,
   modelSelection: { model: "sonnet", options: { thinking: true, effort: "medium" } },
   accessMode: "approval-required",
+} as const;
+
+const start = {
+  _tag: "sessionStart",
+  sessionId: SESSION_ID,
+  providerId: "claude-code",
+  config: {},
+  spec,
 } as const;
 
 /**
@@ -221,6 +236,18 @@ describe("what the controller authors for a session", () => {
 
   it("refuses an access mode the vocabulary does not have", () => {
     expect(decode(SessionSpec, { ...spec, accessMode: "yolo" })._tag).toBe("Failure");
+  });
+
+  it("refuses a session id a path could climb out of", () => {
+    // The runner makes the workspace-less session's scratch directory of this
+    // id and removes that directory when the session exits, so a traversal here
+    // is an `rm -rf` somewhere nobody chose.
+    for (const sessionId of ["../../etc", "with/a/slash", ""]) {
+      expect(decode(SessionStart, { ...start, sessionId })._tag, sessionId).toBe("Failure");
+      expect(decode(SessionStop, { _tag: "sessionStop", sessionId })._tag, sessionId).toBe(
+        "Failure",
+      );
+    }
   });
 
   it("refuses an instance id a path could climb out of, on the spec and on the binding", () => {

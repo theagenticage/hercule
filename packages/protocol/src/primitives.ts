@@ -28,6 +28,17 @@ export const InstanceId = Schema.String.check(
   Schema.isPattern(/^[A-Za-z0-9_-]+$/, { title: "instance id", description: "an identifier" }),
 );
 
+/**
+ * A session's id. Narrow for the same reason an instance's is: the runner makes
+ * a directory of it for a workspace-less session and removes that directory
+ * when the session exits, so an id that could climb out of the scratch root
+ * would be a path traversal with an `rm -rf` behind it.
+ */
+export const SessionId = Schema.String.check(
+  Schema.isLengthBetween(1, 64),
+  Schema.isPattern(/^[A-Za-z0-9_-]+$/, { title: "session id", description: "an identifier" }),
+);
+
 /** A position. Counting starts at one: a connection that acked nothing sends no ack. */
 export const Seq = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1));
 

@@ -218,8 +218,9 @@ const pinning = (stub: Stub, overrides: Partial<ControllerPin> = {}): Controller
  */
 const DEADLINE = Duration.millis(500);
 
-/** Nothing here drives an adapter with a home, so nothing is ever made under it. */
+/** Nothing here starts a session, so neither directory is ever made. */
 const PROVIDERS_DIR = "/nonexistent/hydra-runner-providers";
+const SCRATCH_DIR = "/nonexistent/hydra-runner-scratch";
 
 /** Runs one connection to its end and reports how it ended. */
 const attempt = (pin: ControllerPin, probe: Effect.Effect<RunnerFacts> = Effect.succeed(FACTS)) =>
@@ -231,6 +232,7 @@ const attempt = (pin: ControllerPin, probe: Effect.Effect<RunnerFacts> = Effect.
         probe,
         headroom: Effect.succeed({ diskFreeBytes: 200 * 1024 ** 3, availableMemoryBytes: 1 }),
         providersDir: PROVIDERS_DIR,
+        scratchDir: SCRATCH_DIR,
         proofDeadline: DEADLINE,
       }),
     ),
@@ -383,9 +385,10 @@ describe("the controller a runner is willing to talk to", () => {
 
     await stub.connected();
     // Not a minute later: a runner that has just come online with an unknown
-    // disk is a runner nothing can decide to place work on.
-    await waitUntil(() => stub.received.length >= 2);
-    expect(stub.received[1]).toEqual({
+    // disk is a runner nothing can decide to place work on. By tag rather than
+    // by position: the sessions snapshot rides the same moment.
+    await waitUntil(() => stub.received.some((frame) => frame._tag === "watermarkReport"));
+    expect(stub.received.find((frame) => frame._tag === "watermarkReport")).toEqual({
       _tag: "watermarkReport",
       watermark: {
         diskFreeBytes: 200 * 1024 ** 3,

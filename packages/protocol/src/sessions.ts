@@ -10,7 +10,7 @@
  */
 import { Schema } from "effect";
 
-import { Fact, InstanceId, MAX_FACT_LENGTH, Sequenced } from "./primitives";
+import { Fact, InstanceId, MAX_FACT_LENGTH, Sequenced, SessionId } from "./primitives";
 
 /**
  * How much of a session a caller may act on without being asked (spec 06
@@ -71,7 +71,7 @@ export type SessionSpec = Schema.Schema.Type<typeof SessionSpec>;
  * behind it. The two ids are separate concepts and nothing else joins them.
  */
 export const SessionBinding = Schema.Struct({
-  sessionId: Fact,
+  sessionId: SessionId,
   nativeSessionId: Fact,
   instanceId: InstanceId,
 });
@@ -280,7 +280,7 @@ export type ProviderEvent = Schema.Schema.Type<typeof ProviderEvent>;
  */
 export const SessionStart = Schema.Struct({
   _tag: Schema.Literal("sessionStart"),
-  sessionId: Fact,
+  sessionId: SessionId,
   providerId: Fact,
   config: Schema.Json,
   spec: SessionSpec,
@@ -290,14 +290,14 @@ export type SessionStart = Schema.Schema.Type<typeof SessionStart>;
 
 export const SessionStop = Schema.Struct({
   _tag: Schema.Literal("sessionStop"),
-  sessionId: Fact,
+  sessionId: SessionId,
 });
 
 export type SessionStop = Schema.Schema.Type<typeof SessionStop>;
 
 export const SessionInput = Schema.Struct({
   _tag: Schema.Literal("sessionInput"),
-  sessionId: Fact,
+  sessionId: SessionId,
   input: TurnInput,
 });
 

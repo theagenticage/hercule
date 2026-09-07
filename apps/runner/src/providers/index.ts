@@ -27,7 +27,11 @@ export interface ProviderRunnerContext {
   /** The instance's own config directory, created 0700 and never the user's own. */
   readonly home: string;
   readonly binary: string | undefined;
-  /** Never carries a `HOME` override. */
+  /**
+   * The whole environment the harness is spawned with, layered once by the
+   * runner: its own, then the instance config's, then Hydra's own keys (spec 06
+   * section 4). Never carries a `HOME` override.
+   */
   readonly env: Readonly<Record<string, string | undefined>>;
 }
 
@@ -96,6 +100,9 @@ export interface ProviderAdapter {
 }
 
 const ADAPTERS: ReadonlyMap<string, ProviderAdapter> = new Map([[CLAUDE_CODE, claudeCode]]);
+
+/** Every adapter this build carries: what the session supervisor listens to. */
+export const adapters: ReadonlyArray<ProviderAdapter> = [...ADAPTERS.values()];
 
 export const ADAPTER_IDS: ReadonlyArray<string> = [...ADAPTERS.keys()];
 
