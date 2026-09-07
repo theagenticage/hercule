@@ -103,6 +103,22 @@ const framesOf = <T extends ControllerMessage>(wire: Wire, tag: T["_tag"]): Read
   wire.frames.filter((frame): frame is T => frame._tag === tag);
 
 /**
+ * Waits until this many frames of a kind have arrived. A request is answered as
+ * soon as the controller has written to the socket, which is before the frame
+ * has crossed it: a test that reads `wire.frames` the moment a response lands
+ * is asserting on a race rather than on an ordering.
+ */
+const framesWhen = <T extends ControllerMessage>(
+  wire: Wire,
+  tag: T["_tag"],
+  count: number,
+): Promise<ReadonlyArray<T>> =>
+  until(`sent ${String(count)} ${tag} frames`, () => {
+    const found = framesOf<T>(wire, tag);
+    return found.length >= count ? found : undefined;
+  });
+
+/**
  * Opens the socket with a credential, says hello, and answers every probe with
  * a logged-in report, which is what gives the controller something to place on.
  */
@@ -299,10 +315,7 @@ describe("session.spawn", () => {
       expect(session.nativeSessionId).toBeNull();
       expect(session.resumable).toBe(false);
 
-      const start = await until(
-        "sent a sessionStart",
-        () => framesOf<SessionStart>(arranged.wire, "sessionStart")[0],
-      );
+      const start = (await framesWhen<SessionStart>(arranged.wire, "sessionStart", 1))[0]!;
       expect(start.sessionId).toBe(session.id);
       expect(start.providerId).toBe("full-provider");
       expect(start.spec).toEqual({
@@ -319,10 +332,7 @@ describe("session.spawn", () => {
   it("stores the spec byte for byte as the frame carries it", async () => {
     await withFleet(async (arranged) => {
       const session = await spawned(arranged, { prompt: "hello", model: "fast" });
-      const start = await until(
-        "sent a sessionStart",
-        () => framesOf<SessionStart>(arranged.wire, "sessionStart")[0],
-      );
+      const start = (await framesWhen<SessionStart>(arranged.wire, "sessionStart", 1))[0]!;
 
       const [row] = await Effect.runPromise(
         Effect.orDie(
@@ -345,10 +355,7 @@ describe("session.spawn", () => {
 
       expect(session.requestedAccessMode).toBe("auto");
       expect(session.accessMode).toBe("auto-accept-edits");
-      const start = await until(
-        "sent a sessionStart",
-        () => framesOf<SessionStart>(arranged.wire, "sessionStart")[0],
-      );
+      const start = (await framesWhen<SessionStart>(arranged.wire, "sessionStart", 1))[0]!;
       // The runner is told the mode it will really run, never the request.
       expect(start.spec.accessMode).toBe("auto-accept-edits");
     });
@@ -388,10 +395,7 @@ describe("session.spawn", () => {
   it("sends the prompt as one turn's input once the harness is up", async () => {
     await withFleet(async (arranged) => {
       const session = await spawned(arranged, { prompt: "what is the time" });
-      await until(
-        "sent a sessionStart",
-        () => framesOf<SessionStart>(arranged.wire, "sessionStart")[0],
-      );
+      await framesWhen<SessionStart>(arranged.wire, "sessionStart", 1);
 
       report(arranged.wire, 1, {
         eventId: crypto.randomUUID(),
@@ -400,10 +404,7 @@ describe("session.spawn", () => {
         _tag: "session.started",
       });
 
-      const input = await until(
-        "sent the prompt",
-        () => framesOf<SessionInputFrame>(arranged.wire, "sessionInput")[0],
-      );
+      const input = (await framesWhen<SessionInputFrame>(arranged.wire, "sessionInput", 1))[0]!;
       expect(input.sessionId).toBe(session.id);
       expect(input.input).toEqual({ text: "what is the time" });
     });
@@ -414,10 +415,7 @@ describe("what a machine reports", () => {
   it("moves the status axis, coalesces the deltas, and ignores a sequence sent twice", async () => {
     await withFleet(async (arranged) => {
       const session = await spawned(arranged, { prompt: "hello" });
-      await until(
-        "sent a sessionStart",
-        () => framesOf<SessionStart>(arranged.wire, "sessionStart")[0],
-      );
+      await framesWhen<SessionStart>(arranged.wire, "sessionStart", 1);
       const events = transcript(session.id);
 
       report(arranged.wire, ...events[0]!);
@@ -566,11 +564,9 @@ describe("session.input", () => {
       );
       expect(steered.status, await steered.clone().text()).toBe(200);
       expect(await steered.json()).toEqual({ result: "steered" });
-      const sent = framesOf<SessionInputFrame>(arranged.wire, "sessionInput").map(
-        (frame) => frame.input.text,
-      );
+      const sent = await framesWhen<SessionInputFrame>(arranged.wire, "sessionInput", 3);
       // The spawn's own prompt went first, when the harness came up.
-      expect(sent).toEqual(["hello", "again", "and this"]);
+      expect(sent.map((frame) => frame.input.text)).toEqual(["hello", "again", "and this"]);
     });
   });
 
