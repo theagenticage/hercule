@@ -4,17 +4,42 @@
  */
 import type * as Effect from "effect/Effect";
 import type * as Schema from "effect/Schema";
-import { MAX_FACT_LENGTH, type ProbeResult } from "@hydra/protocol";
+import type * as Stream from "effect/Stream";
+import {
+  MAX_FACT_LENGTH,
+  type ProbeResult,
+  type ProviderEvent,
+  type SessionBinding,
+  type SessionSpec,
+  type TurnInput,
+} from "@hydra/protocol";
 import { CLAUDE_CODE, claudeCode } from "./claude-code";
 import { logins, type LoginCommand } from "./login";
 import { spawnLogin } from "./process";
 
 export interface ProviderRunnerContext {
+  /**
+   * Where a session runs: the workspace path, or the scratch directory the
+   * runner made for a workspace-less one. `null` only where nothing runs - a
+   * probe, an install, a login (spec 06 section 4).
+   */
+  readonly cwd: string | null;
   /** The instance's own config directory, created 0700 and never the user's own. */
   readonly home: string;
   readonly binary: string | undefined;
   /** Never carries a `HOME` override. */
   readonly env: Readonly<Record<string, string | undefined>>;
+}
+
+/**
+ * What one `sendInput` did. Steering is implicit: a busy session folds the
+ * input into its running turn, an idle one opens a new turn. This is the only
+ * authority on which happened; nobody infers it from event order (spec 06
+ * section 5).
+ */
+export interface SendResult {
+  readonly turnId: string;
+  readonly delivery: "opened" | "steered";
 }
 
 export interface InstallOutcome {
@@ -34,6 +59,40 @@ export interface ProviderAdapter {
   ) => Effect.Effect<InstallOutcome>;
   /** The binary is passed separately: a login needs a machine that already has one. */
   readonly login?: (ctx: ProviderRunnerContext, binary: string) => LoginCommand;
+
+  /**
+   * The one output channel: every session this adapter hosts, normalized, on
+   * one stream keyed by `sessionId` (spec 06 section 4). Unbounded and without
+   * replay, so a subscriber that starts after a session did misses what it
+   * missed; the runner subscribes once, at startup.
+   */
+  readonly events: Stream.Stream<ProviderEvent>;
+
+  /**
+   * Starts one session and answers with the binding. The Hydra session id is
+   * passed in because it is the controller's, not the harness's; the binding is
+   * what joins the two (spec 06 section 4.1). Where the native id comes from is
+   * the adapter's business: spec 06 section 4.1 says Claude's arrives on the
+   * init message, but the CLI sends none until a first turn does, so the Claude
+   * adapter names the native session itself instead.
+   */
+  readonly startSession: (
+    sessionId: string,
+    spec: SessionSpec,
+    ctx: ProviderRunnerContext,
+  ) => Effect.Effect<SessionBinding, string>;
+
+  /** Opens a turn on an idle session, steers a busy one. Never bounces input. */
+  readonly sendInput: (sessionId: string, input: TurnInput) => Effect.Effect<SendResult, string>;
+
+  /**
+   * Ends the harness cleanly. `session.exited { reason: "stopped" }` follows on
+   * `events`; a session this adapter does not hold is already stopped.
+   */
+  readonly stopSession: (sessionId: string) => Effect.Effect<void>;
+
+  /** What this adapter is hosting right now, as bindings. */
+  readonly listSessions: Effect.Effect<ReadonlyArray<SessionBinding>>;
 }
 
 const ADAPTERS: ReadonlyMap<string, ProviderAdapter> = new Map([[CLAUDE_CODE, claudeCode]]);

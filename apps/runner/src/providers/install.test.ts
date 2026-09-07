@@ -9,6 +9,7 @@ import { claudeCodeAdapter, type ClaudeSeam } from "./claude-code";
 import type { ProviderRunnerContext } from "./index";
 
 const CONTEXT: ProviderRunnerContext = {
+  cwd: null,
   home: "/var/hydra/runner/providers/0199e0e7-0000-7000-8000-00000000000a",
   binary: "/usr/local/bin/claude",
   env: { PATH: "/usr/local/bin:/usr/bin" },
@@ -25,6 +26,9 @@ const seamRunning = (answer: {
     seam: {
       query: () => {
         throw new Error("installing must not start a query");
+      },
+      stream: () => {
+        throw new Error("installing must not start a session");
       },
       run: (command: ReadonlyArray<string>) =>
         Effect.sync(() => {

@@ -13,6 +13,7 @@ import type { ProviderRunnerContext } from "./index";
 const INSTANCE = "0199e0e7-0000-7000-8000-00000000000a";
 
 const CONTEXT: ProviderRunnerContext = {
+  cwd: null,
   home: `/var/hydra/runner/providers/${INSTANCE}`,
   binary: "/usr/local/bin/claude",
   env: { PATH: "/usr/local/bin:/usr/bin", HOME: "/home/rogier" },

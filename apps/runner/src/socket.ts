@@ -232,7 +232,9 @@ export const connect = (
     const contextFor = (adapter: ProviderAdapter, instanceId: string): ProviderRunnerContext => {
       const home = joinPath(options.providersDir, instanceId);
       mkdirSync(home, { recursive: true, mode: 0o700 });
-      return { home, binary: binaryOf(adapter.binaryName), env: process.env };
+      // Probes, logins and installs run nowhere: a cwd is a session's, and the
+      // session supervisor builds its own context (spec 06 section 4.2).
+      return { cwd: null, home, binary: binaryOf(adapter.binaryName), env: process.env };
     };
 
     /**
