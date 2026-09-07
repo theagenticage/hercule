@@ -30,7 +30,7 @@ import { Auth, AuthLayer } from "../auth";
 import { LiveTopicsLayer, WsTickets, WsTicketsLayer } from "../live";
 import { ApiKeys, ApiKeysLayer } from "../credentials";
 import { EventService, EventServiceLayer } from "../events";
-import { Controller, ControllerLayer } from "../identity";
+import { Controller, ControllerLayer } from "../controller";
 import { Profiles, ProfilesLayer } from "../permissions";
 import { Plugins } from "../plugins";
 import { Secret, SecretLayer } from "../secrets";

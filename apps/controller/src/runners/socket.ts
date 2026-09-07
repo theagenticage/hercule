@@ -39,7 +39,7 @@ import {
 } from "@hydra/protocol";
 import { bearerOf } from "../http/bearer";
 import { responseFor } from "../http/envelope";
-import { ControllerIdentity } from "../identity/repository";
+import { ControllerIdentity } from "../identity";
 import { newConnection, RunnerPresence, type Connection, type Departure } from "./presence";
 
 const RUNNER_SOCKET_PATH = "/api/v1/runners/socket";

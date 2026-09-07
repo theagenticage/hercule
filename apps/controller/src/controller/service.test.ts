@@ -8,9 +8,9 @@ import { CurrentActor, type Actor } from "../actor";
 import { homePaths, HydraHome } from "../config";
 import { TestDatabase } from "../db/testing";
 import { AuditLogLayer } from "../events";
+import { ControllerIdentity, controllerIdentityLayer } from "../identity";
 import { masterKeyLayer, secretsLayer } from "../secrets";
 import { SettingsLayer } from "../settings";
-import { ControllerIdentity, controllerIdentityLayer } from "./repository";
 import { Controller, ControllerLayer } from "./service";
 
 const USER: Actor = {
