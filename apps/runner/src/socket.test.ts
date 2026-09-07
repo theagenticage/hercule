@@ -225,9 +225,6 @@ const DEADLINE = Duration.millis(500);
  */
 const PATIENT = Duration.minutes(1);
 
-/** Long enough for a connection to have ended if it were going to. */
-const SETTLE = Duration.millis(300);
-
 /** Nothing here starts a session, so neither directory is ever made. */
 const PROVIDERS_DIR = "/nonexistent/hydra-runner-providers";
 const SCRATCH_DIR = "/nonexistent/hydra-runner-scratch";
@@ -371,7 +368,9 @@ describe("the controller a runner is willing to talk to", () => {
     });
 
     await stub.connected();
-    await waitUntil(() => stub.received.length >= 1);
+    // The proof, observed: the watermark is only sent to a peer that has proved
+    // itself, so it is what says the runner accepted the real hello.
+    await waitUntil(() => stub.received.some((frame) => frame._tag === "watermarkReport"));
     // A hello claiming to be somebody else, after the real one was accepted. It
     // must not be able to talk the runner out of the controller it proved.
     stub.say({
@@ -383,7 +382,13 @@ describe("the controller a runner is willing to talk to", () => {
       nonce: "AAAA",
       signature: "AAAA",
     });
-    await delay(Duration.toMillis(SETTLE));
+    // Frames are answered one at a time, in the order they arrived, and a
+    // runner that had been talked out of its controller answers nothing at all.
+    // So a pong to a ping sent behind that hello is the proof this test needs,
+    // and waiting for it beats waiting out a clock: no length of wall time says
+    // "still talking", it only says "has not stopped yet".
+    stub.say({ _tag: "ping" });
+    await waitUntil(() => stub.received.some((frame) => frame._tag === "pong"));
 
     expect(settled, "a second hello is not something to hang up on").toBeUndefined();
     stub.hangUp();

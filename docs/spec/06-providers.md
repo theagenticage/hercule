@@ -218,7 +218,7 @@ type SessionStatus = "queued" | "starting" | "idle" | "busy" | "exited"
 ### 4.2 Lifecycle
 
 1. Controller resolves placement, fallback access mode, model selection, and mints the session token; sends `startSession` to the runner with the spec.
-2. Runner resolves `cwd`: the workspace path, or `cwd: null` for a workspace-less session. Codex alone gets a runner-provisioned scratch directory instead of `null`, because `thread/start` needs one (section 9.1); that directory is not a Workspace. The runner prepares the session environment and calls the adapter.
+2. Runner resolves `cwd`: the workspace path, or a runner-provisioned empty scratch directory for a workspace-less session; that directory is not a Workspace. The runner prepares the session environment and calls the adapter. *(Amended 2026-09-07, [#65](https://github.com/rogierpennink/hydra/issues/65): every harness gets the scratch directory, not Codex alone. This step said `cwd: null`, which section 9.1 later replaced - `null` means `process.cwd()` on the Claude Agent SDK and pi as much as it means a missing argument on Codex, and all three read instruction files out of it. `cwd: null` survives only as the controller-side "no workspace" marker.)*
 3. Adapter spawns or attaches the harness, emits `session.started`, returns the binding.
 4. Turns proceed via `sendInput`; approvals via `request.opened` / `respondToRequest`; `interrupt` ends the running turn with `state: "interrupted"`.
 5. `stopSession` ends the harness process cleanly; `session.exited { reason }` is the last event. The runner tears down ephemeral workspaces per [./03-controller-and-runners.md](./03-controller-and-runners.md).
