@@ -4,9 +4,10 @@
  * The transcript is a separate entity from the session record ([11-public-api
  * section 2]): the record says where a session stands, the transcript says what
  * it did. It is append-only and keyed by a per-session position, so reading it
- * is a keyset walk over that position and nothing else - there is no filter, no
- * search and no second order. `transcript.query`, the full-text search over
- * every session, is a different operation and is not built yet.
+ * is a keyset walk over that position and nothing else: there is no filter and
+ * no search, and the only choice a caller has is which end to start from.
+ * `transcript.query`, the full-text search over every session, is a different
+ * operation and is not built yet.
  *
  * A row carries the normalized `ProviderEvent` verbatim, which is the same
  * document the runner reported except for `content.delta`, where the controller
