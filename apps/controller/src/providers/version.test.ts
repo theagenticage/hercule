@@ -16,13 +16,10 @@ import { floorFor, versionVerdict } from "./version";
 const root = fileURLToPath(new URL("../../../../", import.meta.url));
 
 describe("the verdict on a harness version", () => {
-  it("says nothing about a machine that never reported a version", () => {
-    expect(versionVerdict(null, "2.1.263")).toBe("unknown");
-  });
-
-  it("says nothing about a provider nobody has pinned a floor for", () => {
+  it("says nothing with no version to read, or no floor to read it against", () => {
     // Codex and pi have no adapter in this build and no tested version, so a
     // version they report is a fact with nothing to compare it against.
+    expect(versionVerdict(null, "2.1.263")).toBe("unknown");
     expect(versionVerdict("1.2.3", null)).toBe("unknown");
     expect(versionVerdict(null, null)).toBe("unknown");
   });
@@ -31,6 +28,8 @@ describe("the verdict on a harness version", () => {
     expect(versionVerdict("2.1.262", "2.1.263")).toBe("below-floor");
     expect(versionVerdict("2.0.999", "2.1.263")).toBe("below-floor");
     expect(versionVerdict("1.9.9", "2.1.263")).toBe("below-floor");
+    // Numbers rather than text, so 10 comes after 9.
+    expect(versionVerdict("2.1.9", "2.1.10")).toBe("below-floor");
   });
 
   it("reads the floor itself as the version to be on", () => {
@@ -43,6 +42,7 @@ describe("the verdict on a harness version", () => {
     expect(versionVerdict("2.1.264", "2.1.263")).toBe("above-tested-max");
     expect(versionVerdict("2.2.0", "2.1.263")).toBe("above-tested-max");
     expect(versionVerdict("3.0.0", "2.1.263")).toBe("above-tested-max");
+    expect(versionVerdict("2.10.0", "2.9.0")).toBe("above-tested-max");
   });
 
   it("says nothing about a version it cannot read as one", () => {
@@ -52,19 +52,11 @@ describe("the verdict on a harness version", () => {
     expect(versionVerdict("nightly", "2.1.263")).toBe("unknown");
     expect(versionVerdict("2.1", "2.1.263")).toBe("unknown");
   });
-
-  it("compares numbers rather than text, so 10 comes after 9", () => {
-    expect(versionVerdict("2.1.9", "2.1.10")).toBe("below-floor");
-    expect(versionVerdict("2.10.0", "2.9.0")).toBe("above-tested-max");
-  });
 });
 
 describe("the floor each provider is held to", () => {
-  it("holds Claude Code to the CLI version the compiled-in SDK was built against", () => {
+  it("holds Claude Code to the SDK's CLI version, and a provider with no adapter to none", () => {
     expect(floorFor("claude-code")).toBe(CLAUDE_CODE_VERSION);
-  });
-
-  it("holds the providers with no adapter to nothing", () => {
     expect(floorFor("codex")).toBeNull();
     expect(floorFor("pi")).toBeNull();
   });
