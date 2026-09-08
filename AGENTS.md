@@ -53,6 +53,7 @@ These come from the spec and ADRs; restated here because violating them is expen
 - **No repo-local Hydra config.** The controller's state is the single source of truth; repositories hold no Hydra configuration.
 - **Never edit generated files by hand** (derived clients, OpenAPI documents, lockfiles).
 - **Never silently substitute behaviour.** Access-mode fallback, trigger pauses, dropped events: the system tells the user; so do you.
+- **Never touch `~/.hydra`.** That is the user's live Hydra Home: its database, credentials, runner state and backups. Any run you start (a proof run, an e2e check, a migration try-out, a `hydra` command that writes) uses a throwaway home: `HYDRA_HOME=<scratch dir>` or `--home <scratch dir>`, created for that run and deleted after. Reading `~/.hydra/config.toml` to learn a port is fine; running a controller, runner, or migration against it is not, even when you believe the change is additive. A migration edited in place is the standing example: the live database already ran the old version and would break on the new one.
 
 ## Working conventions
 
