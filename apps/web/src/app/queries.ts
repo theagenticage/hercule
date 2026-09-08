@@ -14,7 +14,7 @@
  */
 import { infiniteQueryOptions, queryOptions } from "@tanstack/react-query";
 import { loopbackEndpoints, queryKeys, type HydraClient } from "@hydra/client-core";
-import { MAX_PAGE_LIMIT, type Runner, type TaskFilter } from "@hydra/contract";
+import { MAX_PAGE_LIMIT, type Runner, type TaskFilter, type TranscriptRow } from "@hydra/contract";
 
 /** Whether first run has been completed. Reachable without a token. */
 export const setupQuery = (client: HydraClient) =>
@@ -104,6 +104,50 @@ export const runnerQuery = (client: HydraClient, id: string) =>
     queryKey: queryKeys.runner(id),
     queryFn: () => client.runner.read({ params: { id } }),
     retry: false,
+  });
+
+/**
+ * One session on its own, which is what a thread page reads. A refusal is
+ * answered at once rather than retried: a session that is not there answers
+ * 404 for good.
+ */
+export const sessionQuery = (client: HydraClient, id: string) =>
+  queryOptions({
+    queryKey: queryKeys.session(id),
+    queryFn: () => client.session.read({ params: { id } }),
+    retry: false,
+  });
+
+/**
+ * A session's whole transcript, oldest first - every row is fetched rather
+ * than a page of them, because the thread surface renders every turn it
+ * covers. `session:<id>:stream` appends straight to this cache entry as new
+ * rows are written, and a `reset` refetches it; neither is TanStack Query's
+ * own staleness knowing anything happened, so this entry never goes stale on
+ * its own and is never refetched behind those two - a background refetch
+ * racing a live append could otherwise win with an answer older than what the
+ * append just wrote.
+ */
+export const transcriptQuery = (client: HydraClient, sessionId: string) =>
+  queryOptions({
+    queryKey: queryKeys.transcript(sessionId),
+    queryFn: async () => {
+      const rows: TranscriptRow[] = [];
+      let cursor: string | undefined;
+      for (;;) {
+        const page = await client.transcript.read({
+          params: { id: sessionId },
+          query:
+            cursor === undefined ? { limit: MAX_PAGE_LIMIT } : { limit: MAX_PAGE_LIMIT, cursor },
+        });
+        rows.push(...page.items);
+        cursor = page.nextCursor;
+        if (cursor === undefined) break;
+      }
+      return rows;
+    },
+    staleTime: Infinity,
+    refetchOnWindowFocus: false,
   });
 
 /**

@@ -27,6 +27,10 @@ export const queryKeys = {
   projects: (): LiveQueryKey => ["projects"],
   runners: (): LiveQueryKey => ["runners"],
   runner: (id?: string): LiveQueryKey => (id === undefined ? ["runner"] : ["runner", id]),
+  sessions: (): LiveQueryKey => ["sessions"],
+  session: (id?: string): LiveQueryKey => (id === undefined ? ["session"] : ["session", id]),
+  /** The whole transcript, ascending; a `:stream` delta appends straight to this entry. */
+  transcript: (sessionId: string): LiveQueryKey => ["transcript", sessionId],
   joinTokens: (): LiveQueryKey => ["join-tokens"],
   plugins: (): LiveQueryKey => ["plugins"],
   providers: (): LiveQueryKey => ["providers"],
@@ -57,6 +61,15 @@ export const queryKeysFor = (
     return ids.length === 0
       ? [queryKeys.runners(), queryKeys.runner()]
       : [queryKeys.runners(), ...ids.map((id) => queryKeys.runner(id))];
+  }
+  // The sidebar and All sessions reread the listing whichever session moved;
+  // a session's own thread page is reread only when the push names it, or
+  // when it names none. The transcript is not here: it never invalidates,
+  // only appends, from the `:stream` topic's own deltas.
+  if (topic === "session") {
+    return ids.length === 0
+      ? [queryKeys.sessions(), queryKeys.session()]
+      : [queryKeys.sessions(), ...ids.map((id) => queryKeys.session(id))];
   }
   // The plugin set is fixed at build time and read as one listing, so which
   // plugin changed narrows nothing.
