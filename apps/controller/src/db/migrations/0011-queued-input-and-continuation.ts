@@ -31,7 +31,15 @@ export default Effect.gen(function* () {
       status TEXT NOT NULL CHECK (status IN ('queued', 'delivered', 'cancelled')),
       delivery TEXT CHECK (delivery IS NULL OR delivery IN ('opened', 'steered')),
       created_at TEXT NOT NULL,
-      delivered_at TEXT
+      delivered_at TEXT,
+      -- Set while the frame is out and unanswered; null once answered or never
+      -- sent. A row is waiting (queued, null), on the wire (queued, set),
+      -- delivered or cancelled - one of four states, not three.
+      sent_at TEXT,
+      -- Why a delivery did not go through, in the runner's or the
+      -- controller's own words: set on a row still queued (until it is sent
+      -- again) or on one a failed delivery ended instead of resending.
+      message TEXT
     )
   `;
   // The one walk there is: a session's own inputs, oldest first.

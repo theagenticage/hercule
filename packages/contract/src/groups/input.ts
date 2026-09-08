@@ -61,6 +61,10 @@ export const Input = Schema.Struct({
   delivery: Schema.NullOr(Delivery),
   createdAt: Timestamp,
   deliveredAt: Schema.NullOr(Timestamp),
+  /** Set while the row is out on the wire and unanswered; null otherwise. */
+  sentAt: Schema.NullOr(Timestamp),
+  /** Why a delivery did not go through, on a row still queued or ended by one; null otherwise. */
+  message: Schema.NullOr(Schema.String),
 });
 
 export type Input = Schema.Schema.Type<typeof Input>;

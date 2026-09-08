@@ -34,6 +34,10 @@ export interface StoredInput {
   readonly delivery: Delivery | null;
   readonly createdAt: string;
   readonly deliveredAt: string | null;
+  /** Set while the row is out on the wire and unanswered; null otherwise. */
+  readonly sentAt: string | null;
+  /** Why a delivery did not go through, on a row still queued or ended by one; null otherwise. */
+  readonly message: string | null;
 }
 
 export interface NewInput {
@@ -61,9 +65,12 @@ interface InputRow {
   readonly delivery: string | null;
   readonly created_at: string;
   readonly delivered_at: string | null;
+  readonly sent_at: string | null;
+  readonly message: string | null;
 }
 
-const COLUMNS = "id, session_id, source, actor, text, status, delivery, created_at, delivered_at";
+const COLUMNS =
+  "id, session_id, source, actor, text, status, delivery, created_at, delivered_at, sent_at, message";
 
 const toInput = (row: InputRow): StoredInput => ({
   id: uuidToString(row.id),
@@ -75,6 +82,8 @@ const toInput = (row: InputRow): StoredInput => ({
   delivery: row.delivery as Delivery | null,
   createdAt: row.created_at,
   deliveredAt: row.delivered_at,
+  sentAt: row.sent_at,
+  message: row.message,
 });
 
 /**
@@ -110,6 +119,8 @@ const make = Effect.gen(function* () {
           delivery: null,
           createdAt: input.at,
           deliveredAt: null,
+          sentAt: null,
+          message: null,
         };
       }),
 
@@ -149,15 +160,33 @@ const make = Effect.gen(function* () {
         );
       }),
 
-    /** What a flush sends: everything still waiting on this session, oldest first. */
-    queued: (sessionId: string): Effect.Effect<ReadonlyArray<StoredInput>, SqlError> =>
+    /** What a flush sends next: the oldest row still waiting, if any. */
+    oldestWaiting: (sessionId: string): Effect.Effect<Option.Option<StoredInput>, SqlError> =>
       Effect.map(
         sql<InputRow>`
           SELECT ${sql.literal(COLUMNS)} FROM session_inputs
-          WHERE session_id = ${uuidFromString(sessionId)} AND status = 'queued'
-          ORDER BY created_at, id
+          WHERE session_id = ${uuidFromString(sessionId)} AND status = 'queued' AND sent_at IS NULL
+          ORDER BY created_at, id LIMIT 1
         `,
-        (rows) => rows.map(toInput),
+        (rows) => Option.map(Option.fromNullishOr(rows[0]), toInput),
+      ),
+
+    /**
+     * Marks a row on the wire, the moment before its frame goes out to the
+     * machine, and hands back the row as this claim actually found it - never
+     * a snapshot taken before it, which a rewrite landing in between could
+     * have already changed. `none` when it was already on the wire, already
+     * answered, or already called off - the only outcome a second claimant
+     * racing the same row can get.
+     */
+    claim: (id: string, at: string): Effect.Effect<Option.Option<StoredInput>, SqlError> =>
+      Effect.map(
+        sql<InputRow>`
+          UPDATE session_inputs SET sent_at = ${at}, message = NULL
+          WHERE id = ${uuidFromString(id)} AND status = 'queued' AND sent_at IS NULL
+          RETURNING ${sql.literal(COLUMNS)}
+        `,
+        (rows) => Option.map(Option.fromNullishOr(rows[0]), toInput),
       ),
 
     /**
@@ -167,35 +196,64 @@ const make = Effect.gen(function* () {
     delivered: (id: string, delivery: Delivery, at: string): Effect.Effect<void, SqlError> =>
       Effect.asVoid(sql`
         UPDATE session_inputs SET status = 'delivered', delivery = ${delivery},
-                                  delivered_at = ${at}
+                                  delivered_at = ${at}, sent_at = NULL
+        WHERE id = ${uuidFromString(id)} AND status = 'queued'
+      `),
+
+    /**
+     * Puts a row a delivery could not finish back to waiting, with the reason
+     * on it: the next transition to idle or a hand steer tries again, and the
+     * message is what a caller sees until one of them does.
+     */
+    requeue: (id: string, message: string): Effect.Effect<void, SqlError> =>
+      Effect.asVoid(sql`
+        UPDATE session_inputs SET sent_at = NULL, message = ${message}
         WHERE id = ${uuidFromString(id)} AND status = 'queued'
       `),
 
     rewrite: (id: string, text: string): Effect.Effect<void, SqlError> =>
       Effect.asVoid(sql`
         UPDATE session_inputs SET text = ${text}
-        WHERE id = ${uuidFromString(id)} AND status = 'queued'
+        WHERE id = ${uuidFromString(id)} AND status = 'queued' AND sent_at IS NULL
       `),
 
     cancel: (id: string): Effect.Effect<void, SqlError> =>
       Effect.asVoid(sql`
         UPDATE session_inputs SET status = 'cancelled'
+        WHERE id = ${uuidFromString(id)} AND status = 'queued' AND sent_at IS NULL
+      `),
+
+    /**
+     * Ends a row whose session is gone by the time an answer for it arrives:
+     * nothing waits on a harness that has exited, and the reason is kept so a
+     * caller reading the row's history can see why it never went through.
+     */
+    cancelWithReason: (id: string, message: string): Effect.Effect<void, SqlError> =>
+      Effect.asVoid(sql`
+        UPDATE session_inputs SET status = 'cancelled', sent_at = NULL, message = ${message}
         WHERE id = ${uuidFromString(id)} AND status = 'queued'
       `),
 
     /**
-     * Nothing waits on a harness that is gone. An input already on the wire is
-     * left alone: the machine has its text, and recording it as called off
-     * would be the one thing this store must never say.
+     * Nothing waits on a harness that is gone. A row on the wire is left
+     * alone: the machine has its text, and recording it as called off would
+     * be the one thing this store must never say.
      */
-    cancelQueued: (
-      sessionId: string,
-      onTheWire: ReadonlySet<string>,
-    ): Effect.Effect<void, SqlError> =>
+    cancelQueued: (sessionId: string): Effect.Effect<void, SqlError> =>
       Effect.asVoid(sql`
         UPDATE session_inputs SET status = 'cancelled'
-        WHERE session_id = ${uuidFromString(sessionId)} AND status = 'queued'
-          AND id NOT IN ${sql.in([...onTheWire].map(uuidFromString))}
+        WHERE session_id = ${uuidFromString(sessionId)} AND status = 'queued' AND sent_at IS NULL
+      `),
+
+    /**
+     * Ends every row a restart caught on the wire: whether the harness took it
+     * before the connection dropped is unknown, so it is neither delivered nor
+     * resent - resending risks the message reaching the harness twice.
+     */
+    cancelStranded: (message: string): Effect.Effect<void, SqlError> =>
+      Effect.asVoid(sql`
+        UPDATE session_inputs SET status = 'cancelled', sent_at = NULL, message = ${message}
+        WHERE status = 'queued' AND sent_at IS NOT NULL
       `),
   };
 });

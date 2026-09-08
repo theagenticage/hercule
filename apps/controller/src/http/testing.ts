@@ -54,7 +54,7 @@ import {
   ProviderProbesLayer,
   ProviderServiceLayer,
 } from "../providers";
-import { SessionInputDeadline, SessionServiceLayer } from "../sessions";
+import { cancelStrandedInputs, SessionInputDeadline, SessionServiceLayer } from "../sessions";
 import { SettingsLayer } from "../settings";
 import {
   JoinTokens,
@@ -226,6 +226,7 @@ export const withServer = (
         // The boot's steps in the boot's order, so a request sees what a real
         // controller has. Held as one effect because reboot runs them again.
         const bootSteps = Effect.gen(function* () {
+          yield* cancelStrandedInputs;
           yield* Effect.flatMap(ControllerIdentity, (identity) => identity.ensure);
           yield* seed;
           yield* Effect.flatMap(PluginHost, (host) => host.boot(options.plugins ?? []));
