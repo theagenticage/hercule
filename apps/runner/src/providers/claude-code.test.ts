@@ -643,10 +643,16 @@ describe("a Claude Code session", () => {
     expect(opened(run.seen)[1]).toBe(again.turnId);
   });
 
-  it("ends the running turn when asked, and has nothing to end for a session it lost", async () => {
+  it("ends the running turn when asked, and asks nothing where no turn is running", async () => {
     const run = driving();
     await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, WORKING));
 
+    // Idle: the harness is not asked at all, because a control request waits on
+    // it and the connection handles session frames one at a time.
+    await Effect.runPromise(run.adapter.interrupt(SESSION));
+    expect(run.interrupted()).toBe(0);
+
+    await Effect.runPromise(run.adapter.sendInput(SESSION, { text: "hello" }));
     await Effect.runPromise(run.adapter.interrupt(SESSION));
     expect(run.interrupted()).toBe(1);
 

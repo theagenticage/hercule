@@ -45,7 +45,12 @@ export const InputStatus = Schema.Literals(INPUT_STATUSES);
 
 export type InputStatus = Schema.Schema.Type<typeof InputStatus>;
 
-export const QueuedInput = Schema.Struct({
+/**
+ * One input a session was given, whatever became of it. Queued Input is only
+ * the rows still `queued` (CONTEXT.md), which is a state of this row and not a
+ * kind of its own.
+ */
+export const SessionInput = Schema.Struct({
   id: Id,
   sessionId: Id,
   source: InputSource,
@@ -59,7 +64,7 @@ export const QueuedInput = Schema.Struct({
   deliveredAt: Schema.NullOr(Timestamp),
 });
 
-export type QueuedInput = Schema.Schema.Type<typeof QueuedInput>;
+export type SessionInput = Schema.Schema.Type<typeof SessionInput>;
 
 /** Declared apart from the payload so a service can spread it beside the two ids. */
 export const INPUT_UPDATE_FIELDS = { text: Prompt } as const;
@@ -76,18 +81,18 @@ export const input = HttpApiGroup.make("input")
     HttpApiEndpoint.get("query", "/sessions/:id/inputs", {
       params: { id: Id },
       query: pageParams(INPUT_SORT_FIELDS),
-      success: page(QueuedInput),
+      success: page(SessionInput),
       error: [Unauthenticated, Forbidden, Validation, NotFound, Internal],
     }),
     HttpApiEndpoint.patch("update", "/sessions/:id/inputs/:inputId", {
       params: { id: Id, inputId: Id },
       payload: InputUpdatePayload,
-      success: QueuedInput,
+      success: SessionInput,
       error: [Unauthenticated, Forbidden, Validation, NotFound, InvalidState, Internal],
     }),
     HttpApiEndpoint.delete("cancel", "/sessions/:id/inputs/:inputId", {
       params: { id: Id, inputId: Id },
-      success: QueuedInput,
+      success: SessionInput,
       error: [Unauthenticated, Forbidden, Validation, NotFound, InvalidState, Internal],
     }),
   )

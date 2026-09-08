@@ -131,8 +131,8 @@ export {
   Session,
   SessionContinueInput,
   SessionFilter,
+  SessionInputOutcome,
   SessionInputPayload,
-  SessionInputResult,
   SessionSpawnInput,
   SessionStatus,
 } from "./groups/session";
@@ -144,7 +144,7 @@ export {
   InputSource,
   InputStatus,
   InputUpdatePayload,
-  QueuedInput,
+  SessionInput,
 } from "./groups/input";
 export { TRANSCRIPT_SORT_FIELDS, TranscriptRow } from "./groups/transcript";
 export { OwnerKind, SecretRef } from "./groups/secret";

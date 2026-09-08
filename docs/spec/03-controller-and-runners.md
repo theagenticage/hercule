@@ -284,6 +284,8 @@ A runner carries two independent axes. **Connectivity** (`online | offline | unr
 | `draining` | user-initiated: no new placements, running sessions finish | refused | run to completion |
 | `retired` | terminal: credential revoked, workspaces marked lost, session records preserved but unresumable | refused | none |
 
+*(Amended 2026-09-08, [#66](https://github.com/rogierpennink/hydra/issues/66).)* `session.continue` is the one exception to "no new placements" on a `draining` runner: it is not a placement decision at all, because the parent's provider-native state lives on that machine and nowhere else, so a refusal loses the session rather than moving it. `retired` still refuses it, through the derived `resumable` ([./06-providers.md](./06-providers.md) section 4.1).
+
 Transitions (the tickets pin the two axes, drain -> retire, drain -> active (`runner.undrain`), and force-retiring an unreachable runner; the rest of this list is this spec's consolidation):
 
 - `online -> offline` on an announced shutdown; `offline -> online` on reconnect (outbox replays).

@@ -115,12 +115,12 @@ export type SessionInputPayload = Schema.Schema.Type<typeof SessionInputPayload>
  * what it did with it; `queued` is the controller's, for an input the session
  * cannot take yet.
  */
-export const SessionInputResult = Schema.Struct({
+export const SessionInputOutcome = Schema.Struct({
   inputId: Id,
   result: Schema.Literals(["opened", "steered", "queued"]),
 });
 
-export type SessionInputResult = Schema.Schema.Type<typeof SessionInputResult>;
+export type SessionInputOutcome = Schema.Schema.Type<typeof SessionInputOutcome>;
 
 /**
  * Carrying a session on: `resume` continues the provider-native session the
@@ -167,7 +167,7 @@ export const session = HttpApiGroup.make("session")
     HttpApiEndpoint.post("input", "/sessions/:id/input", {
       params: { id: Id },
       payload: SessionInputPayload,
-      success: SessionInputResult,
+      success: SessionInputOutcome,
       error: [Unauthenticated, Forbidden, Validation, NotFound, InvalidState, Internal],
     }),
     HttpApiEndpoint.post("interrupt", "/sessions/:id/interrupt", {

@@ -578,7 +578,9 @@ export const claudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
     interrupt: (sessionId: string): Effect.Effect<void> =>
       Effect.suspend(() => {
         const held = live.get(sessionId);
-        if (held === undefined) return Effect.void;
+        // Nothing to end, so nothing is asked of the harness: a control request
+        // waits on it, and this frame is handled in the connection's own order.
+        if (held === undefined || held.state.turnId === undefined) return Effect.void;
         // The turn completing as `interrupted` is the whole report; a refusal
         // means the harness is already gone, which is the same outcome.
         return Effect.asVoid(controlling(held.stream.interrupt()));

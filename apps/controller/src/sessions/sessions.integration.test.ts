@@ -835,7 +835,7 @@ describe("session.input", () => {
     });
   });
 
-  it("fails and leaves the row queued when the machine's connection is gone", async () => {
+  it("calls the row off when an idle session's machine is gone", async () => {
     await withFleet(async (arranged) => {
       const session = await started(arranged, "hello");
       arranged.wire.close();
@@ -844,15 +844,17 @@ describe("session.input", () => {
       const response = await sendInput(arranged, session.id, { text: "into the void" });
 
       expect(response.status).toBe(409);
+      // Nothing brings an idle session back to idle, so a row left queued here
+      // would wait for a boundary that never comes.
       expect((await inputsOf(arranged, session.id)).at(-1)).toMatchObject({
         text: "into the void",
-        status: "queued",
+        status: "cancelled",
         delivery: null,
       });
     });
   });
 
-  it("fails and leaves the row queued when the machine never answers", async () => {
+  it("calls the row off when an idle session's machine never answers", async () => {
     await withFleet(async (arranged) => {
       const session = await started(arranged, "hello");
       arranged.wire.answering(() => undefined);
@@ -862,7 +864,50 @@ describe("session.input", () => {
       expect(response.status).toBe(409);
       expect((await inputsOf(arranged, session.id)).at(-1)).toMatchObject({
         text: "into the silence",
+        status: "cancelled",
+        delivery: null,
+      });
+    });
+  });
+
+  it("leaves a busy session's row queued when the machine never answers", async () => {
+    await withFleet(async (arranged) => {
+      const session = await started(arranged, "hello");
+      report(arranged.wire, ...transcript(session.id)[1]!);
+      await sessionWhen(arranged, session.id, (one) => one.status === "busy");
+      arranged.wire.answering(() => undefined);
+
+      const response = await sendInput(arranged, session.id, { text: "mid-turn" });
+
+      expect(response.status).toBe(409);
+      // `turn.completed` is still ahead of this one, and it is what flushes it.
+      expect((await inputsOf(arranged, session.id)).at(-1)).toMatchObject({
+        text: "mid-turn",
         status: "queued",
+        delivery: null,
+      });
+    });
+  });
+
+  it("calls the row off when the boundary it was waiting for passes while it is on the wire", async () => {
+    await withFleet(async (arranged) => {
+      const session = await started(arranged, "hello");
+      const events = transcript(session.id);
+      report(arranged.wire, ...events[1]!);
+      await sessionWhen(arranged, session.id, (one) => one.status === "busy");
+      arranged.wire.answering(() => undefined);
+
+      const answering = sendInput(arranged, session.id, { text: "mid-turn" });
+      await framesWhen<SessionInputFrame>(arranged.wire, "sessionInput", 2);
+      // The turn this row was queued behind ends while the row is on the wire,
+      // so the boundary that would have flushed it has been and gone.
+      report(arranged.wire, ...events[6]!);
+      await sessionWhen(arranged, session.id, (one) => one.status === "idle");
+
+      expect((await answering).status).toBe(409);
+      expect((await inputsOf(arranged, session.id)).at(-1)).toMatchObject({
+        text: "mid-turn",
+        status: "cancelled",
         delivery: null,
       });
     });
@@ -1485,13 +1530,16 @@ describe("session.interrupt", () => {
     });
   });
 
-  it("refuses a session with no turn running, and tells the machine nothing", async () => {
+  it("tells the machine to interrupt whatever the status the controller holds says", async () => {
     await withFleet(async (arranged) => {
       const session = await spawned(arranged, { prompt: "hello" });
       await framesWhen<SessionStart>(arranged.wire, "sessionStart", 1);
 
+      // The controller's status lags the machine's own stream, and only the
+      // adapter knows whether a turn is open; its interrupt is a no-op where
+      // there is none.
       const starting = await interrupt(arranged, session.id);
-      expect(starting.status, await starting.clone().text()).toBe(409);
+      expect(starting.status, await starting.clone().text()).toBe(200);
 
       report(arranged.wire, 1, {
         eventId: crypto.randomUUID(),
@@ -1501,13 +1549,24 @@ describe("session.interrupt", () => {
       });
       await sessionWhen(arranged, session.id, (one) => one.status === "idle");
       const idle = await interrupt(arranged, session.id);
-      expect(idle.status, await idle.clone().text()).toBe(409);
+      expect(idle.status, await idle.clone().text()).toBe(200);
 
-      exited(arranged.wire, session.id, 2);
+      const sent = await framesWhen<SessionInterruptFrame>(arranged.wire, "sessionInterrupt", 2);
+      expect(sent.map((frame) => frame.sessionId)).toEqual([session.id, session.id]);
+      expect(await arranged.harness.audit("session.interrupted")).toHaveLength(2);
+    });
+  });
+
+  it("refuses a session that has exited, and tells the machine nothing", async () => {
+    await withFleet(async (arranged) => {
+      const session = await spawned(arranged, { prompt: "hello" });
+      exited(arranged.wire, session.id, 1);
       await sessionWhen(arranged, session.id, (one) => one.status === "exited");
-      const gone = await interrupt(arranged, session.id);
-      expect(gone.status, await gone.clone().text()).toBe(409);
 
+      const response = await interrupt(arranged, session.id);
+
+      expect(response.status, await response.clone().text()).toBe(409);
+      expect(await response.text()).toContain("has exited");
       expect(framesOf<SessionInterruptFrame>(arranged.wire, "sessionInterrupt")).toEqual([]);
       expect(await arranged.harness.audit("session.interrupted")).toHaveLength(0);
     });
@@ -1667,6 +1726,47 @@ describe("session.continue", () => {
 
       expect(response.status, await response.clone().text()).toBe(409);
       expect((await readSession(arranged, retired.id)).resumable).toBe(false);
+    });
+  });
+
+  it("carries on any parent whose row reads resumable, on a machine that is online", async () => {
+    await withFleet(async (arranged) => {
+      const parent = await ended(arranged, "hello");
+      // Draining is a machine being emptied, not one that has lost the native
+      // state: `resumable` is what the caller reads off the row, and it is the
+      // whole rule.
+      await Effect.runPromise(
+        Effect.orDie(
+          arranged.harness.sql`
+            UPDATE runners SET lifecycle = 'draining'
+            WHERE id = unhex(replace(${arranged.runnerId}, '-', ''))`,
+        ),
+      );
+      expect((await readSession(arranged, parent.id)).resumable).toBe(true);
+
+      const response = await carryOn(arranged, parent.id, { mode: "resume", prompt: "carry on" });
+
+      expect(response.status, await response.clone().text()).toBe(200);
+      await framesWhen<SessionStart>(arranged.wire, "sessionStart", 2);
+    });
+  });
+
+  it("refuses a parent whose machine is not logged in to its provider instance", async () => {
+    await withFleet(async (arranged) => {
+      const parent = await ended(arranged, "hello");
+      await Effect.runPromise(
+        Effect.orDie(
+          arranged.harness.sql`
+            UPDATE capability_snapshots SET auth_status = 'unauthenticated'
+            WHERE runner_id = unhex(replace(${arranged.runnerId}, '-', ''))`,
+        ),
+      );
+
+      const response = await carryOn(arranged, parent.id, { mode: "resume", prompt: "no" });
+
+      expect(response.status, await response.clone().text()).toBe(409);
+      expect(await response.text()).toContain("logged in");
+      expect(framesOf<SessionStart>(arranged.wire, "sessionStart")).toHaveLength(1);
     });
   });
 

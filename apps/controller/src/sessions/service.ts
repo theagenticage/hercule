@@ -28,7 +28,7 @@ import {
   type ModelSelection,
   type ProviderEvent,
   type SessionBinding,
-  type SessionInputResult as SessionInputAnswer,
+  type SessionInputResult,
   type SessionStart,
 } from "@hydra/protocol";
 import {
@@ -50,8 +50,8 @@ import {
   type InvalidState,
   type NotFound,
   type Session,
-  type QueuedInput,
-  type SessionInputResult,
+  type SessionInput,
+  type SessionInputOutcome,
   type SortDirection,
   type TranscriptRow,
   type Unauthenticated,
@@ -115,7 +115,7 @@ export interface TranscriptPage {
 }
 
 export interface InputPage {
-  readonly items: ReadonlyArray<QueuedInput>;
+  readonly items: ReadonlyArray<SessionInput>;
   readonly nextCursor?: string;
 }
 
@@ -170,15 +170,9 @@ const ALREADY_SENT = "that input has already gone to the machine";
 
 const REFUSED = "that session's runner would not take the input";
 
-const NOT_RUNNING = "that session has no turn running";
-
-const STILL_LIVE = "that session is still live; stop it before carrying it on";
-
-const NOTHING_NATIVE = "that session left no provider-native session to carry on from";
-
-const NOT_RESUMABLE = "that session's machine can no longer carry it on";
-
-const NO_INSTANCE = "that session's provider instance no longer exists";
+const NOT_RESUMABLE =
+  "that session is not resumable: it is still live, it left no provider-native session, " +
+  "or its machine is gone";
 
 const ALREADY_CARRIED_ON =
   "another session is already live against that one's provider-native session; " +
@@ -191,6 +185,13 @@ const ALREADY_CARRIED_ON =
  */
 const NOT_DELIVERED =
   "that session's runner did not take the input; it stays queued for the next turn";
+
+/**
+ * The same two failures on a session with no turn to come back from: there is
+ * no next boundary to flush the row at, so it is called off rather than left
+ * waiting for one.
+ */
+const NOT_SENT = "that session's runner did not take the input; it was called off";
 
 const NO_PLACEMENT =
   "no connected runner is logged in to that provider instance; log in on a machine first";
@@ -222,6 +223,12 @@ const nearestSupported = (
   }
   return undefined;
 };
+
+/**
+ * A machine's own word that it can run this instance: the stored capability
+ * snapshot saying it is logged in. Read, never probed.
+ */
+const loggedIn = (snapshot: StoredSnapshot): boolean => snapshot.auth.status === "ok";
 
 /**
  * Where the provider-native id rides on the event that announces the harness.
@@ -345,7 +352,7 @@ const make = Effect.gen(function* () {
     Effect.gen(function* () {
       const placeable = yield* runners.placeable();
       const found = snapshots.find(
-        (snapshot) => snapshot.auth.status === "ok" && placeable.has(snapshot.runnerId),
+        (snapshot) => loggedIn(snapshot) && placeable.has(snapshot.runnerId),
       );
       if (found === undefined) return yield* Effect.fail(invalidState(NO_PLACEMENT));
       return found;
@@ -355,7 +362,7 @@ const make = Effect.gen(function* () {
   const firstLoggedIn = (): Effect.Effect<string, InvalidState | SqlError | Schema.SchemaError> =>
     Effect.gen(function* () {
       for (const snapshot of yield* instances.snapshots()) {
-        if (snapshot.auth.status === "ok") return snapshot.instanceId;
+        if (loggedIn(snapshot)) return snapshot.instanceId;
       }
       return yield* Effect.fail(
         invalidState("no provider instance has a logged-in machine; log in on one first"),
@@ -420,7 +427,7 @@ const make = Effect.gen(function* () {
   const deliverTo = (
     runnerId: string,
     row: StoredInput,
-  ): Effect.Effect<Option.Option<SessionInputAnswer>> =>
+  ): Effect.Effect<Option.Option<SessionInputResult>> =>
     Effect.gen(function* () {
       const deadline = yield* SessionInputDeadline;
       const answer = yield* presence.asked(
@@ -438,7 +445,7 @@ const make = Effect.gen(function* () {
       );
       return Option.filter(
         answer,
-        (one): one is SessionInputAnswer => one._tag === "sessionInputResult",
+        (one): one is SessionInputResult => one._tag === "sessionInputResult",
       );
     });
 
@@ -458,6 +465,16 @@ const make = Effect.gen(function* () {
       }),
     );
 
+  /** Ends a row that is not going to be delivered, and says the session changed. */
+  const recordCancel = (row: StoredInput): Effect.Effect<void, SqlError> =>
+    withTransaction(
+      sql,
+      Effect.gen(function* () {
+        yield* inputs.cancel(row.id);
+        yield* announce({ _tag: "record", topic: "session", id: row.sessionId, kind: "updated" });
+      }),
+    );
+
   /**
    * A machine that says outright it will not take an input will say it again
    * every time, so the row is ended rather than retried for ever behind an
@@ -469,13 +486,7 @@ const make = Effect.gen(function* () {
       yield* Effect.logWarning(
         `Input ${row.id} on session ${row.sessionId} was refused: ${message ?? "no reason given"}`,
       );
-      yield* withTransaction(
-        sql,
-        Effect.gen(function* () {
-          yield* inputs.cancel(row.id);
-          yield* announce({ _tag: "record", topic: "session", id: row.sessionId, kind: "updated" });
-        }),
-      );
+      yield* recordCancel(row);
     });
 
   /**
@@ -872,7 +883,7 @@ const make = Effect.gen(function* () {
      * controller read: an input that opened a turn and one that was folded into
      * a turn already running are told apart by the adapter alone.
      */
-    input: (input: InputInput): Effect.Effect<SessionInputResult, InputError> =>
+    input: (input: InputInput): Effect.Effect<SessionInputOutcome, InputError> =>
       Effect.gen(function* () {
         yield* requireGrant("session.input");
         const { id, text, modelSelection } = yield* Effect.mapError(
@@ -908,7 +919,17 @@ const make = Effect.gen(function* () {
           row.id,
           Effect.gen(function* () {
             const answer = yield* deliverTo(session.runnerId, row);
-            if (Option.isNone(answer)) return yield* Effect.fail(invalidState(NOT_DELIVERED));
+            if (Option.isNone(answer)) {
+              // Read again rather than trusted from before the wait: what
+              // decides is whether a boundary is still to come, and a turn can
+              // open, end or the session exit while the row is on the wire.
+              const now = yield* one(id);
+              if (now.status === "busy") return yield* Effect.fail(invalidState(NOT_DELIVERED));
+              // Nothing else brings the session to idle, so a row left queued
+              // here would wait for a boundary that never comes.
+              yield* recordCancel(row);
+              return yield* Effect.fail(invalidState(NOT_SENT));
+            }
             const delivery = answer.value.ok ? answer.value.delivery : undefined;
             if (delivery === undefined) {
               yield* recordRefusal(row, answer.value.message);
@@ -924,13 +945,18 @@ const make = Effect.gen(function* () {
      * Ends the turn the session is running. Fire and forget: what became of the
      * turn arrives in the session's own stream as `turn.completed`, so there is
      * nothing to wait for here.
+     *
+     * Only a session whose harness is gone refuses. The status the controller
+     * holds lags the machine's own stream, so "no turn is running" here is a
+     * guess about a moment that has already passed; the adapter knows, and its
+     * interrupt is a no-op where there is nothing to end.
      */
     interrupt: (input: Identified): Effect.Effect<Session, InputError> =>
       Effect.gen(function* () {
         yield* requireGrant("session.interrupt");
         const { id } = yield* Effect.mapError(decodeIdentified(input), validationOf);
         const session = yield* one(id);
-        if (session.status !== "busy") return yield* Effect.fail(invalidState(NOT_RUNNING));
+        if (session.status === "exited") return yield* Effect.fail(invalidState(HAS_EXITED));
         if (
           !(yield* presence.tell(session.runnerId, { _tag: "sessionInterrupt", sessionId: id }))
         ) {
@@ -996,18 +1022,21 @@ const make = Effect.gen(function* () {
         yield* currentUser("session.continue");
         const { id, mode, prompt } = yield* Effect.mapError(decodeContinue(input), validationOf);
         const parent = yield* one(id);
-        if (parent.status !== "exited") return yield* Effect.fail(invalidState(STILL_LIVE));
-        if (parent.nativeSessionId === null)
-          return yield* Effect.fail(invalidState(NOTHING_NATIVE));
-        const machine = yield* runners.read(parent.runnerId);
-        // Retired is gone for good and draining is a machine being emptied;
-        // neither takes a session it would then have to give up.
-        if (Option.isNone(machine) || machine.value.lifecycle !== "active") {
+        // The one rule, and the one a caller reads off the row before asking:
+        // exited, with a native session, on a machine that still exists.
+        if (!parent.resumable || parent.nativeSessionId === null) {
           return yield* Effect.fail(invalidState(NOT_RESUMABLE));
         }
+        const machine = yield* runners.read(parent.runnerId);
+        if (Option.isNone(machine)) return yield* Effect.fail(invalidState(NOT_RESUMABLE));
         yield* requireOnline(machine.value);
-        const instance = yield* instances.one(parent.instanceId);
-        if (Option.isNone(instance)) return yield* Effect.fail(invalidState(NO_INSTANCE));
+        const { instance, snapshots } = yield* resolved(parent.instanceId);
+        // The login half of what `spawn` asks placement for, of the one machine
+        // that holds the native state rather than of the fleet: the stored
+        // snapshot's word that this machine can run this instance.
+        if (!snapshots.some((one) => loggedIn(one) && one.runnerId === parent.runnerId)) {
+          return yield* Effect.fail(invalidState(NO_PLACEMENT));
+        }
 
         return yield* opening({
           permissionProfileId: parent.permissionProfileId,
@@ -1025,7 +1054,7 @@ const make = Effect.gen(function* () {
             accessMode: parent.accessMode,
             continue: { nativeSessionId: parent.nativeSessionId, mode },
           },
-          instance: instance.value,
+          instance,
           prompt,
           kind: "session.continued",
           payload: { parentSessionId: parent.id, mode },
@@ -1052,7 +1081,7 @@ const make = Effect.gen(function* () {
         return pageOut(listing);
       }),
 
-    updateInput: (input: InputUpdate): Effect.Effect<QueuedInput, InputError> =>
+    updateInput: (input: InputUpdate): Effect.Effect<SessionInput, InputError> =>
       Effect.gen(function* () {
         yield* requireGrant("input.update");
         const { id, inputId, text } = yield* Effect.mapError(
@@ -1071,7 +1100,7 @@ const make = Effect.gen(function* () {
         );
       }),
 
-    cancelInput: (input: InputIdentified): Effect.Effect<QueuedInput, InputError> =>
+    cancelInput: (input: InputIdentified): Effect.Effect<SessionInput, InputError> =>
       Effect.gen(function* () {
         yield* requireGrant("input.cancel");
         const { id, inputId } = yield* Effect.mapError(decodeInputIdentified(input), validationOf);
