@@ -39,7 +39,7 @@ export default Effect.gen(function* () {
       -- Why a delivery did not go through, in the runner's or the
       -- controller's own words: set on a row still queued (until it is sent
       -- again) or on one a failed delivery ended instead of resending.
-      message TEXT
+      reason TEXT
     )
   `;
   // The one walk there is: a session's own inputs, oldest first.

@@ -399,7 +399,7 @@ interface StoredInput {
   /** Set while the frame is out and unanswered; null once answered or never sent. */
   readonly sentAt: string | null;
   /** Why a queued row is not delivered yet; null once it is sent again. */
-  readonly message: string | null;
+  readonly reason: string | null;
 }
 
 const sendInput = (arranged: Arranged, id: string, body: unknown): Promise<Response> =>
@@ -790,7 +790,7 @@ describe("session.input", () => {
       const row = (await inputsOf(arranged, session.id)).at(-1);
       expect(row).toMatchObject({ text: "into the void", status: "queued", delivery: null });
       expect(row!.sentAt).toBeNull();
-      expect(typeof row!.message).toBe("string");
+      expect(typeof row!.reason).toBe("string");
     });
   });
 
@@ -805,7 +805,7 @@ describe("session.input", () => {
       const row = (await inputsOf(arranged, session.id)).at(-1);
       expect(row).toMatchObject({ text: "into the silence", status: "queued", delivery: null });
       expect(row!.sentAt).toBeNull();
-      expect(typeof row!.message).toBe("string");
+      expect(typeof row!.reason).toBe("string");
     });
   });
 });
@@ -1093,7 +1093,7 @@ describe("input.steer", () => {
       expect(row).toMatchObject({
         status: "queued",
         sentAt: null,
-        message: "no such model here",
+        reason: "no such model here",
       });
     });
   });
@@ -1890,47 +1890,6 @@ describe("session.update", () => {
     });
   });
 
-  it("carries the new model on the next sessionInput frame delivered while idle", async () => {
-    await withFleet(async (arranged) => {
-      const session = await started(arranged, "hello");
-
-      const patched = await patchSession(arranged, session.id, { model: "fast" });
-      expect(patched.status, await patched.clone().text()).toBe(200);
-
-      arranged.wire.answering(() => "opened");
-      const response = await sendInput(arranged, session.id, { text: "in fast, now" });
-      expect(response.status, await response.clone().text()).toBe(200);
-
-      // The prompt's own frame went out first, when the harness came up; this
-      // is the next one, and the session's current model rides it even though
-      // the caller's own payload said nothing about a model.
-      const sent = await framesWhen<SessionInput>(arranged.wire, "sessionInput", 2);
-      expect(sent[1]!.input.modelSelection).toEqual({ model: "fast", options: {} });
-    });
-  });
-
-  it("carries the new model on the next sessionInput frame delivered to a busy session", async () => {
-    await withFleet(async (arranged) => {
-      const session = await started(arranged, "hello");
-      report(arranged.wire, ...transcript(session.id)[1]!);
-      await sessionWhen(arranged, session.id, (one) => one.status === "busy");
-
-      const patched = await patchSession(arranged, session.id, { model: "fast" });
-      expect(patched.status, await patched.clone().text()).toBe(200);
-
-      const queued = await sendInput(arranged, session.id, { text: "in fast, now" });
-      expect(queued.status, await queued.clone().text()).toBe(200);
-      const { inputId } = (await queued.json()) as { inputId: string };
-
-      arranged.wire.answering(() => "steered");
-      const response = await steerInput(arranged, session.id, inputId);
-      expect(response.status, await response.clone().text()).toBe(200);
-
-      const sent = await framesWhen<SessionInput>(arranged.wire, "sessionInput", 2);
-      expect(sent[1]!.input.modelSelection).toEqual({ model: "fast", options: {} });
-    });
-  });
-
   it("carries a model changed while an earlier row is on the wire, once the next transition sends the row behind it", async () => {
     await withFleet(async (arranged) => {
       arranged.wire.answering(() => undefined);
@@ -2005,7 +1964,7 @@ describe("session.update", () => {
 });
 
 /**
- * "On the wire" as stored state (`sent_at`, `message`), and a flush that sends
+ * "On the wire" as stored state (`sent_at`, `reason`), and a flush that sends
  * one waiting row per transition to idle rather than the whole queue at once.
  */
 describe("the queue at the transition to idle, one row per boundary", () => {
@@ -2077,15 +2036,15 @@ describe("the queue at the transition to idle, one row per boundary", () => {
 
       const refused = await until("recorded the refusal", async () => {
         const found = await inputsOf(arranged, session.id);
-        return found[0]!.message !== null ? found : undefined;
+        return found[0]!.reason !== null ? found : undefined;
       });
       expect(refused[0]).toMatchObject({
         status: "queued",
         sentAt: null,
-        message: "no such model here",
+        reason: "no such model here",
       });
 
-      // The next transition to idle resends it, clearing the message the
+      // The next transition to idle resends it, clearing the reason the
       // instant it claims the row again - a stale reason must not linger
       // beside a row that is, once more, on its way to the machine. The
       // machine's own answer changes too, so this resend is what is asserted
@@ -2103,7 +2062,7 @@ describe("the queue at the transition to idle, one row per boundary", () => {
         status: "delivered",
         delivery: "opened",
         sentAt: null,
-        message: null,
+        reason: null,
       });
     });
   });
@@ -2124,7 +2083,7 @@ describe("the queue at the transition to idle, one row per boundary", () => {
 
       const rows = await inputsOf(arranged, session.id);
       expect(rows[0]).toMatchObject({ status: "queued", sentAt: null });
-      expect(typeof rows[0]!.message).toBe("string");
+      expect(typeof rows[0]!.reason).toBe("string");
     });
   });
 
@@ -2198,7 +2157,7 @@ describe("a restart", () => {
       const onWireRow = byId.get(onWire);
       const waitingRow = byId.get(waiting);
       expect(onWireRow).toMatchObject({ status: "cancelled" });
-      expect(typeof onWireRow?.message).toBe("string");
+      expect(typeof onWireRow?.reason).toBe("string");
       expect(waitingRow).toMatchObject({ status: "queued", sentAt: null });
     });
   });

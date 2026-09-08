@@ -174,6 +174,9 @@ const NO_SUCH_INPUT = "no such input on that session";
 
 const ALREADY_SENT = "that input has already gone to the machine";
 
+const NOT_WAITING =
+  "that input is no longer waiting: it was sent, delivered or cancelled in the meantime";
+
 const REFUSED = "that session's runner would not take the input";
 
 const NOT_BUSY = "only a busy session can be steered";
@@ -377,24 +380,6 @@ const make = Effect.gen(function* () {
     });
 
   /**
-   * What a lost claim actually means, read fresh rather than assumed: the row
-   * a moment ago was waiting, but a claim that did not take it means
-   * something else touched it in between - on the wire already, or ended by
-   * the same caller that would otherwise be told a lie about its own cancel.
-   */
-  const claimFailure = (
-    sessionId: string,
-    inputId: string,
-  ): Effect.Effect<InvalidState, SqlError> =>
-    Effect.map(inputs.one(sessionId, inputId), (found) =>
-      invalidState(
-        Option.isSome(found) && found.value.status !== "queued"
-          ? `that input was already ${found.value.status}`
-          : ALREADY_SENT,
-      ),
-    );
-
-  /**
    * Sends one stored input to the machine holding the session and waits for the
    * machine to say what it did with it. `none` where there is no connection or
    * nothing came back in time; the wait is outside any transaction. The caller
@@ -437,24 +422,19 @@ const make = Effect.gen(function* () {
     );
 
   /**
-   * Settles a row a delivery could not finish: back to waiting, with the
-   * reason on it, unless the session has since exited - which leaves no
-   * boundary for a waiting row to be tried at again, so the row ends instead.
-   * The session is read inside the same transaction as the write, so an exit
-   * landing right on top of this cannot leave the row in neither state: the
-   * two transactions serialize, and whichever writes last is what a reader
-   * sees - a row this one leaves waiting is a row `session.exited`'s own
-   * cancel will still catch if it runs after.
+   * Settles a row a delivery could not finish: back to waiting with the
+   * reason, or cancelled if the session exited meanwhile. Read inside this
+   * transaction so it serializes with `session.exited`'s own write.
    */
-  const settleFailure = (row: StoredInput, message: string): Effect.Effect<void, SqlError> =>
+  const settleFailure = (row: StoredInput, reason: string): Effect.Effect<void, SqlError> =>
     withTransaction(
       sql,
       Effect.gen(function* () {
         const now = yield* sessions.one(row.sessionId);
         if (Option.isSome(now) && now.value.status === "exited") {
-          yield* inputs.cancelWithReason(row.id, message);
+          yield* inputs.cancelWithReason(row.id, reason);
         } else {
-          yield* inputs.requeue(row.id, message);
+          yield* inputs.requeue(row.id, reason);
         }
         yield* announce({ _tag: "record", topic: "session", id: row.sessionId, kind: "updated" });
       }),
@@ -483,9 +463,9 @@ const make = Effect.gen(function* () {
         yield* recordDelivery(row, delivery);
         return { inputId: row.id, result: delivery };
       }
-      const message = Option.isSome(answer) ? (answer.value.message ?? REFUSED) : NOT_DELIVERED;
-      yield* settleFailure(row, message);
-      return yield* Effect.fail(invalidState(message));
+      const reason = Option.isSome(answer) ? (answer.value.message ?? REFUSED) : NOT_DELIVERED;
+      yield* settleFailure(row, reason);
+      return yield* Effect.fail(invalidState(reason));
     });
 
   /**
@@ -842,9 +822,11 @@ const make = Effect.gen(function* () {
 
     /**
      * One turn's input. Stored first, so the answer names a row the caller can
-     * edit or cancel. An idle session has no transition to idle coming, so it
-     * is delivered here rather than left for a flush that will never run;
-     * every other status queues, and steering one is `input.steer`'s to do.
+     * edit or cancel. An idle session has no transition to idle coming, so its
+     * row is inserted already claimed - on the wire the instant it exists,
+     * never visible to a cancel or a flush as merely waiting - and delivered
+     * here rather than left for a flush that will never run; every other
+     * status queues, and steering one is `input.steer`'s to do.
      *
      * What it did is always the machine's own word for it, never the status the
      * controller read: an input that opened a turn and one that was folded into
@@ -856,28 +838,25 @@ const make = Effect.gen(function* () {
         const { id, text } = yield* Effect.mapError(decodeInput(input), validationOf);
         const session = yield* one(id);
         if (session.status === "exited") return yield* Effect.fail(invalidState(HAS_EXITED));
-        const hold = session.status !== "idle";
+        const idle = session.status === "idle";
         const row = yield* withTransaction(
           sql,
           Effect.gen(function* () {
+            const at = yield* nowIso;
             const created = yield* inputs.insert({
               sessionId: id,
               source: "user",
               actor: USER_ACTOR,
               text,
-              at: yield* nowIso,
+              at,
+              ...(idle ? { sentAt: at } : {}),
             });
             yield* announce({ _tag: "record", topic: "session", id, kind: "updated" });
             return created;
           }),
         );
-        if (hold) return { inputId: row.id, result: "queued" };
-        // The row is visible - and cancellable - the moment the insert above
-        // commits, so the claim can still lose: a cancel racing this exact
-        // window must stop the send, not just go unnoticed.
-        const claimed = yield* inputs.claim(row.id, yield* nowIso);
-        if (Option.isNone(claimed)) return yield* Effect.fail(yield* claimFailure(id, row.id));
-        return yield* deliverClaimed(session.runnerId, claimed.value);
+        if (!idle) return { inputId: row.id, result: "queued" };
+        return yield* deliverClaimed(session.runnerId, row);
       }),
 
     /**
@@ -907,7 +886,7 @@ const make = Effect.gen(function* () {
         // answer, not that stale read, is what gets sent, in case a rewrite
         // landed in between.
         const claimed = yield* inputs.claim(row.id, yield* nowIso);
-        if (Option.isNone(claimed)) return yield* Effect.fail(yield* claimFailure(id, inputId));
+        if (Option.isNone(claimed)) return yield* Effect.fail(invalidState(NOT_WAITING));
         return yield* deliverClaimed(session.runnerId, claimed.value);
       }),
 

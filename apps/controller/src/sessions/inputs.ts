@@ -37,7 +37,7 @@ export interface StoredInput {
   /** Set while the row is out on the wire and unanswered; null otherwise. */
   readonly sentAt: string | null;
   /** Why a delivery did not go through, on a row still queued or ended by one; null otherwise. */
-  readonly message: string | null;
+  readonly reason: string | null;
 }
 
 export interface NewInput {
@@ -46,6 +46,12 @@ export interface NewInput {
   readonly actor: string;
   readonly text: string;
   readonly at: string;
+  /**
+   * Set to claim the row inside this same insert, for an input reaching an
+   * idle session: there is no separate claim to lose a race to, because
+   * nothing else can see the row before this transaction commits.
+   */
+  readonly sentAt?: string;
 }
 
 export interface InputPageRequest {
@@ -66,11 +72,11 @@ interface InputRow {
   readonly created_at: string;
   readonly delivered_at: string | null;
   readonly sent_at: string | null;
-  readonly message: string | null;
+  readonly reason: string | null;
 }
 
 const COLUMNS =
-  "id, session_id, source, actor, text, status, delivery, created_at, delivered_at, sent_at, message";
+  "id, session_id, source, actor, text, status, delivery, created_at, delivered_at, sent_at, reason";
 
 const toInput = (row: InputRow): StoredInput => ({
   id: uuidToString(row.id),
@@ -83,7 +89,7 @@ const toInput = (row: InputRow): StoredInput => ({
   createdAt: row.created_at,
   deliveredAt: row.delivered_at,
   sentAt: row.sent_at,
-  message: row.message,
+  reason: row.reason,
 });
 
 /**
@@ -104,10 +110,11 @@ const make = Effect.gen(function* () {
     insert: (input: NewInput): Effect.Effect<StoredInput, SqlError> =>
       Effect.gen(function* () {
         const id = mintUuid();
+        const sentAt = input.sentAt ?? null;
         yield* sql`
-          INSERT INTO session_inputs (id, session_id, source, actor, text, status, created_at)
+          INSERT INTO session_inputs (id, session_id, source, actor, text, status, created_at, sent_at)
           VALUES (${id}, ${uuidFromString(input.sessionId)}, ${input.source}, ${input.actor},
-                  ${input.text}, 'queued', ${input.at})
+                  ${input.text}, 'queued', ${input.at}, ${sentAt})
         `;
         return {
           id: uuidToString(id),
@@ -119,8 +126,8 @@ const make = Effect.gen(function* () {
           delivery: null,
           createdAt: input.at,
           deliveredAt: null,
-          sentAt: null,
-          message: null,
+          sentAt,
+          reason: null,
         };
       }),
 
@@ -182,7 +189,7 @@ const make = Effect.gen(function* () {
     claim: (id: string, at: string): Effect.Effect<Option.Option<StoredInput>, SqlError> =>
       Effect.map(
         sql<InputRow>`
-          UPDATE session_inputs SET sent_at = ${at}, message = NULL
+          UPDATE session_inputs SET sent_at = ${at}, reason = NULL
           WHERE id = ${uuidFromString(id)} AND status = 'queued' AND sent_at IS NULL
           RETURNING ${sql.literal(COLUMNS)}
         `,
@@ -203,11 +210,11 @@ const make = Effect.gen(function* () {
     /**
      * Puts a row a delivery could not finish back to waiting, with the reason
      * on it: the next transition to idle or a hand steer tries again, and the
-     * message is what a caller sees until one of them does.
+     * reason is what a caller sees until one of them does.
      */
-    requeue: (id: string, message: string): Effect.Effect<void, SqlError> =>
+    requeue: (id: string, reason: string): Effect.Effect<void, SqlError> =>
       Effect.asVoid(sql`
-        UPDATE session_inputs SET sent_at = NULL, message = ${message}
+        UPDATE session_inputs SET sent_at = NULL, reason = ${reason}
         WHERE id = ${uuidFromString(id)} AND status = 'queued'
       `),
 
@@ -228,9 +235,9 @@ const make = Effect.gen(function* () {
      * nothing waits on a harness that has exited, and the reason is kept so a
      * caller reading the row's history can see why it never went through.
      */
-    cancelWithReason: (id: string, message: string): Effect.Effect<void, SqlError> =>
+    cancelWithReason: (id: string, reason: string): Effect.Effect<void, SqlError> =>
       Effect.asVoid(sql`
-        UPDATE session_inputs SET status = 'cancelled', sent_at = NULL, message = ${message}
+        UPDATE session_inputs SET status = 'cancelled', sent_at = NULL, reason = ${reason}
         WHERE id = ${uuidFromString(id)} AND status = 'queued'
       `),
 
@@ -250,9 +257,9 @@ const make = Effect.gen(function* () {
      * before the connection dropped is unknown, so it is neither delivered nor
      * resent - resending risks the message reaching the harness twice.
      */
-    cancelStranded: (message: string): Effect.Effect<void, SqlError> =>
+    cancelStranded: (reason: string): Effect.Effect<void, SqlError> =>
       Effect.asVoid(sql`
-        UPDATE session_inputs SET status = 'cancelled', sent_at = NULL, message = ${message}
+        UPDATE session_inputs SET status = 'cancelled', sent_at = NULL, reason = ${reason}
         WHERE status = 'queued' AND sent_at IS NOT NULL
       `),
   };
