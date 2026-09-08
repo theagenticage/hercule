@@ -22,9 +22,13 @@
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
-import type { InvalidateKind, MutableLiveTopic } from "@hydra/contract";
+import type { InvalidateKind, MutableLiveTopic, TapItem } from "@hydra/contract";
 
-/** One thing a committed transaction changed. */
+/**
+ * One thing a committed transaction changed, or - for `tap` - one thing that
+ * was never a transaction at all: a token delta is announced the instant it is
+ * reported, because it is never written anywhere for a commit to make durable.
+ */
 export type Change =
   | {
       readonly _tag: "record";
@@ -32,7 +36,9 @@ export type Change =
       readonly id: string;
       readonly kind: InvalidateKind;
     }
-  | { readonly _tag: "event" };
+  | { readonly _tag: "event" }
+  | { readonly _tag: "transcript"; readonly sessionId: string }
+  | { readonly _tag: "tap"; readonly sessionId: string; readonly item: TapItem };
 
 /** Whoever wants to hear what the last transaction changed. */
 export interface AfterCommitListener {

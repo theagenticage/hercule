@@ -576,11 +576,29 @@ const make = Effect.gen(function* () {
       const held = tracking.get(id) ?? track(yield* sessions.lastSeq(id));
       const folded = fold(held, seq, event);
       if (folded === undefined) return;
+      // Ahead of the transaction that may or may not follow, and never inside
+      // one: a delta is not written until it flushes, but a watched session's
+      // tap has to see it the instant it is reported, coalesced row or not.
+      if (event._tag === "content.delta") {
+        yield* announce({
+          _tag: "tap",
+          sessionId: id,
+          item: {
+            turnId: event.turnId,
+            itemId: event.itemId,
+            streamKind: event.streamKind,
+            delta: event.delta,
+          },
+        });
+      }
       const moved = yield* withTransaction(
         sql,
         Effect.gen(function* () {
           const at = yield* nowIso;
           for (const row of folded.rows) yield* sessions.append(id, row);
+          if (folded.rows.length > 0) {
+            yield* announce({ _tag: "transcript", sessionId: id });
+          }
           // Written with the move the same event causes: a session that reads
           // `idle` has the provider-native id that made it so.
           const native = nativeIdIn(event);

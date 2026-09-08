@@ -33,6 +33,9 @@ import {
   type LiveMessage,
   type LiveTopic,
   type MutableLiveTopic,
+  type NotFound,
+  type TapItem,
+  type TranscriptRow,
   type Unauthenticated,
   type Validation,
 } from "@hydra/contract";
@@ -86,7 +89,7 @@ export type LiveInvalidateHandler = (keys: ReadonlyArray<LiveQueryKey>) => void;
  */
 export interface LiveDelta {
   readonly cursor: string | null;
-  readonly items: ReadonlyArray<Event>;
+  readonly items: ReadonlyArray<Event | TranscriptRow | TapItem>;
   readonly reset: boolean;
 }
 
@@ -132,7 +135,7 @@ interface Subscription {
 
 /** What a subscription's stream can fail with: a refusal, or the transport. */
 type LiveFailure =
-  Unauthenticated | Forbidden | Validation | CapExceeded | Internal | RpcClientError;
+  Unauthenticated | Forbidden | Validation | NotFound | CapExceeded | Internal | RpcClientError;
 
 /** The contract group's own client, as one connection hands it over. */
 type LiveClient = RpcClient.RpcClient<RpcGroup.Rpcs<typeof liveGroup>, RpcClientError>;
@@ -211,7 +214,7 @@ export const createLive = (options: LiveOptions): Live => {
       if (message._tag === "delta") {
         subscription.cursor = message.cursor;
         (subscription.handler as LiveDeltaHandler)({
-          cursor: message.cursor,
+          cursor: message.cursor ?? null,
           items: message.items,
           reset: false,
         });

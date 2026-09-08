@@ -19,17 +19,10 @@
  * not be sent yet waits in the session's queue until it moves back to idle.
  */
 import { describe, expect, it, vi } from "vitest";
-import { Duration, Effect, Fiber, Schema } from "effect";
+import { Duration, Effect, Fiber } from "effect";
 import {
-  ControllerToRunner,
-  PROTOCOL_VERSION,
-  type ControllerToRunner as ControllerMessage,
-  type Delivery,
-  type JoinAnswer,
-  type ProbeRequest,
   type ProviderEvent,
   type RunnerFacts,
-  type RunnerToController as RunnerMessage,
   type SessionInterrupt as SessionInterruptFrame,
   type SessionStart,
   type SessionStop as SessionStopFrame,
@@ -39,20 +32,28 @@ import type { Plugin, ProviderDefinition } from "@hydra/plugin-host";
 import type { Profile, Runner, Session } from "@hydra/contract";
 import {
   collecting,
-  completeSetup,
   get,
   onSocket,
   post,
   send,
   settleLive,
   ticketFor,
-  withServer,
   within,
   type ServerHarness,
 } from "../http/testing";
 import { fixture, providerDefinition } from "../plugins/testing";
-
-const SOCKET_PATH = "/api/v1/runners/socket";
+import {
+  framesOf,
+  framesWhen,
+  report,
+  spawn,
+  spawned,
+  until,
+  WAIT_DEADLINE_MS,
+  withFleet as sharedWithFleet,
+  type Arranged,
+  type Wire,
+} from "./testing";
 
 /** Everything native: the instance a plain spawn lands on. */
 const FULL = providerDefinition("full-provider", { token: "t" });
@@ -92,18 +93,7 @@ const MODELS = [
   { slug: "clever", name: "Clever", isDefault: true, options: [] },
 ];
 
-const decodeFrame = (raw: unknown): ControllerMessage =>
-  Effect.runSync(Schema.decodeUnknownEffect(ControllerToRunner)(raw));
-
 const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
-
-/**
- * How long a wait on the controller is given, and vitest's own budget set from
- * it. A give-up wait longer than the test timeout never gets to give up: vitest
- * kills the test first, and the failure names the test rather than the thing
- * that never happened. The slack is for the fleet each case stands up first.
- */
-const WAIT_DEADLINE_MS = 10_000;
 
 /**
  * Four, because the longest case here waits for the fleet to be probed and then
@@ -120,184 +110,19 @@ vi.setConfig({ testTimeout: WAIT_DEADLINE_MS * 4 + 10_000 });
  */
 const INPUT_DEADLINE = Duration.seconds(2);
 
-/** Waits for something the controller does on its own schedule, and names it. */
-const until = async <A>(what: string, look: () => A | undefined | Promise<A | undefined>) => {
-  const deadline = Date.now() + WAIT_DEADLINE_MS;
-  do {
-    const found = await look();
-    if (found !== undefined) return found;
-    await delay(5);
-  } while (Date.now() < deadline);
-  throw new Error(`the controller never ${what}`);
-};
-
-type Answered = Delivery | { readonly message: string } | undefined;
-
-/** One machine's end of the socket, answering probes on its own. */
-interface Wire {
-  readonly send: (message: RunnerMessage) => void;
-  readonly frames: ReadonlyArray<ControllerMessage>;
-  readonly close: () => void;
-  /**
-   * What this machine reports an input frame did: a delivery, a refusal with a
-   * reason, or `undefined` to leave the frame unanswered, which is what a
-   * machine that has gone quiet does.
-   */
-  readonly answering: (delivery: (frame: SessionInput) => Answered) => void;
-  /** Answers every input frame this machine has been holding back, at last. */
-  readonly release: (delivery: Delivery) => void;
-}
-
-const framesOf = <T extends ControllerMessage>(wire: Wire, tag: T["_tag"]): ReadonlyArray<T> =>
-  wire.frames.filter((frame): frame is T => frame._tag === tag);
-
-/**
- * Waits until this many frames of a kind have arrived. A request is answered as
- * soon as the controller has written to the socket, which is before the frame
- * has crossed it: a test that reads `wire.frames` the moment a response lands
- * is asserting on a race rather than on an ordering.
- */
-const framesWhen = <T extends ControllerMessage>(
-  wire: Wire,
-  tag: T["_tag"],
-  count: number,
-): Promise<ReadonlyArray<T>> =>
-  until(`sent ${String(count)} ${tag} frames`, () => {
-    const found = framesOf<T>(wire, tag);
-    return found.length >= count ? found : undefined;
-  });
-
-/**
- * Opens the socket with a credential, says hello, and answers every probe with
- * a logged-in report, which is what gives the controller something to place on.
- */
-const dial = (base: string, credential: string): Promise<Wire> =>
-  new Promise((resolve, reject) => {
-    const socket = new WebSocket(`${base.replace(/^http:/, "ws:")}${SOCKET_PATH}`, {
-      headers: { authorization: `Bearer ${credential}` },
-    });
-    const frames: Array<ControllerMessage> = [];
-    let delivery: (frame: SessionInput) => Answered = () => "opened";
-    const withheld: Array<SessionInput> = [];
-    const write = (message: RunnerMessage): void => socket.send(JSON.stringify(message));
-    socket.onmessage = (event) => {
-      const frame = decodeFrame(JSON.parse(String(event.data)) as unknown);
-      frames.push(frame);
-      if (frame._tag === "ping") write({ _tag: "pong" });
-      if (frame._tag === "sessionInput") {
-        const answer = delivery(frame);
-        if (typeof answer === "string") {
-          write({
-            _tag: "sessionInputResult",
-            requestId: frame.requestId,
-            ok: true,
-            delivery: answer,
-          });
-        } else if (answer !== undefined) {
-          write({ _tag: "sessionInputResult", requestId: frame.requestId, ok: false, ...answer });
-        } else {
-          withheld.push(frame);
-        }
-      }
-      if (frame._tag === "probeRequest") {
-        const request = frame satisfies ProbeRequest;
-        write({
-          _tag: "probeReport",
-          requestId: request.requestId,
-          instanceId: request.instanceId,
-          result: { harnessVersion: "1.0.0", auth: { status: "ok" }, models: MODELS },
-        });
-      }
-    };
-    socket.onopen = () => {
-      write({
-        _tag: "runnerHello",
-        protocolVersion: PROTOCOL_VERSION,
-        capabilities: [],
-        binaryVersion: "0.1.0",
-        nonce: Buffer.from(crypto.getRandomValues(new Uint8Array(16))).toString("base64"),
-        facts: FACTS,
-      });
-      resolve({
-        frames,
-        send: write,
-        close: () => socket.close(),
-        answering: (next) => {
-          delivery = next;
-        },
-        release: (answer) => {
-          for (const held of withheld.splice(0)) {
-            write({
-              _tag: "sessionInputResult",
-              requestId: held.requestId,
-              ok: true,
-              delivery: answer,
-            });
-          }
-        },
-      });
-    };
-    socket.onerror = () => reject(new Error("the controller refused the upgrade"));
-    setTimeout(() => reject(new Error("the controller never upgraded the connection")), 3000);
-  });
-
-interface ProviderInstance {
-  readonly id: string;
-  readonly providerId: string;
-  readonly snapshots: ReadonlyArray<unknown>;
-}
-
-/** The instances, once every one of them has been probed on this machine. */
-const probed = async (base: string, token: string): Promise<ReadonlyArray<ProviderInstance>> =>
-  until("probed every instance", async () => {
-    const response = await get(base, "/api/v1/providers", token);
-    const instances = (await response.json()) as ReadonlyArray<ProviderInstance>;
-    return instances.every((instance) => instance.snapshots.length === 1) ? instances : undefined;
-  });
-
-interface Arranged {
-  readonly harness: ServerHarness;
-  readonly token: string;
-  readonly wire: Wire;
-  readonly instances: ReadonlyArray<ProviderInstance>;
-  readonly runnerId: string;
-}
-
-/** A controller with one enlisted, connected, logged-in machine on it. */
+/** A controller with one enlisted, connected, logged-in machine on it, on this suite's own fleet. */
 const withFleet = (body: (arranged: Arranged) => Promise<void>): Promise<void> =>
-  withServer(
-    async (harness) => {
-      const token = await completeSetup(harness.base);
-      const joined = await send("POST", harness.base, "/api/v1/runners/join", {
-        body: {},
-        token: await harness.joinToken(),
-      });
-      expect(joined.status, await joined.clone().text()).toBe(201);
-      const answer = (await joined.json()) as JoinAnswer;
-      const wire = await dial(harness.base, answer.credential);
-      const instances = await probed(harness.base, token);
-      try {
-        await body({ harness, token, wire, instances, runnerId: answer.runnerId });
-      } finally {
-        wire.close();
-      }
-    },
-    { plugins: registry(), inputDeadline: INPUT_DEADLINE },
-  );
+  sharedWithFleet(body, {
+    plugins: registry(),
+    facts: FACTS,
+    models: MODELS,
+    inputDeadline: INPUT_DEADLINE,
+  });
 
 const instanceOf = (arranged: Arranged, providerId: string): string => {
   const found = arranged.instances.find((instance) => instance.providerId === providerId);
   expect(found, providerId).toBeDefined();
   return found!.id;
-};
-
-const spawn = async (arranged: Arranged, body: unknown): Promise<Response> =>
-  post(arranged.harness.base, "/api/v1/sessions", body, arranged.token);
-
-const spawned = async (arranged: Arranged, body: unknown): Promise<Session> => {
-  const response = await spawn(arranged, body);
-  expect(response.status, await response.clone().text()).toBe(200);
-  return (await response.json()) as Session;
 };
 
 const readSession = async (arranged: Arranged, id: string): Promise<Session> => {
@@ -381,9 +206,6 @@ const transcript = (sessionId: string): ReadonlyArray<readonly [number, Provider
     [7, { ...base, _tag: "turn.completed", turnId, state: "completed" }],
   ];
 };
-
-const report = (wire: Wire, seq: number, event: ProviderEvent): void =>
-  wire.send({ _tag: "sessionEvent", seq, event });
 
 /** One stored input, as the API hands it back. */
 interface StoredInput {
