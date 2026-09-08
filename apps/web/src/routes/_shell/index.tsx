@@ -5,6 +5,7 @@ import { Button, EmptyState } from "@hydra/ui";
 import { queryKeys, sessionsEmptyState } from "@hydra/client-core";
 import { useLiveInvalidation } from "../../app/live-invalidation";
 import { localRunnerQuery, providersQuery, runnersQuery } from "../../app/queries";
+import { CreateThreadLink } from "../../screens/create-thread-link";
 import { ProviderLogin } from "../../screens/provider-login";
 
 export const Route = createFileRoute("/_shell/")({
@@ -104,8 +105,8 @@ function Sessions(): JSX.Element {
   return (
     <Screen
       headline={`${state.name} is ready.`}
-      lead="Threads are the next thing to land. Until they do, this screen is where they will start."
-      fine="Starting a thread is issue #69."
+      lead="Create a thread and type a prompt to get started."
+      ready
     />
   );
 }
@@ -114,20 +115,27 @@ function Screen({
   headline,
   lead,
   fine,
+  ready = false,
   children,
 }: {
   readonly headline: string;
   readonly lead: string;
   readonly fine?: ReactNode;
+  /** Whether a thread can actually be started from here yet. */
+  readonly ready?: boolean;
   readonly children?: ReactNode;
 }): JSX.Element {
   return (
     <EmptyState headline={headline} lead={lead} fine={fine}>
       <div className="-ml-2 flex flex-wrap items-center gap-0.5">
         {children}
-        <Button variant="primary" disabled>
-          Create new thread
-        </Button>
+        {ready ? (
+          <CreateThreadLink />
+        ) : (
+          <Button variant="primary" disabled>
+            Create new thread
+          </Button>
+        )}
       </div>
     </EmptyState>
   );

@@ -45,5 +45,9 @@ export const headlineOf = (sessions: readonly Session[], now: Date): string => {
   if (idle > 0) segments.push(`${String(idle)} idle`);
   if (settled > 0) segments.push(`${String(settled)} settled this week`);
 
-  return segments.length === 0 ? "No sessions yet" : segments.join(" · ");
+  if (segments.length > 0) return segments.join(" · ");
+  // Nothing at all reads as "No sessions yet"; sessions that exist but count
+  // toward nothing this sentence names (an old exit, an exit with no
+  // `exitedAt`) read as merely quiet rather than as if there were none.
+  return sessions.length === 0 ? "No sessions yet" : "Nothing active this week";
 };

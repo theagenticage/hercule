@@ -133,6 +133,27 @@ export const providersQuery = (client: HydraClient) =>
   });
 
 /**
+ * Every session, as one page. The sidebar and All sessions both read the whole
+ * set - the point at which a fleet's threads outgrow one page is the point at
+ * which this grows a listing of its own, same as the fleet above.
+ */
+export const sessionsQuery = (client: HydraClient) =>
+  queryOptions({
+    queryKey: queryKeys.sessions(),
+    queryFn: () => client.session.query({ query: { limit: MAX_PAGE_LIMIT } }),
+  });
+
+/**
+ * The permission profiles, for the Settings > Threads profile field. Not a
+ * live topic, so nothing but this browser's own write ever moves it.
+ */
+export const profilesQuery = (client: HydraClient) =>
+  queryOptions({
+    queryKey: queryKeys.profiles(),
+    queryFn: () => client.profile.query({ query: { limit: MAX_PAGE_LIMIT } }),
+  });
+
+/**
  * The controller itself: its identity, its version and the runner work falls
  * back to. The version is what a runner's own is compared against, so it is
  * read rather than assumed to match.

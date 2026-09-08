@@ -46,7 +46,11 @@ export const SETTINGS_NAV: readonly { readonly to: string; readonly label: strin
 ];
 
 /**
- * The face a screen shows itself on. Sessions is the threads side; everything
- * else is orchestration, so the segmented switch is what puts threads back.
+ * The face a screen shows itself on: Sessions, a thread, and All sessions are
+ * the threads side; everything else is orchestration, so the segmented switch
+ * is what puts threads back.
  */
-export const faceForPath = (pathname: string): Face => (pathname === "/" ? "threads" : "hydra");
+export const faceForPath = (pathname: string): Face =>
+  pathname === "/" || pathname === "/sessions" || pathname.startsWith("/threads/")
+    ? "threads"
+    : "hydra";

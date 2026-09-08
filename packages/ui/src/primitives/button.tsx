@@ -36,6 +36,15 @@ const variants = {
 
 export type ButtonVariant = keyof typeof variants;
 
+/** The look every button-shaped thing wears, `Button` and `ButtonLink` alike. */
+const buttonClassName = (variant: ButtonVariant, className: string | undefined): string =>
+  cn(
+    "inline-flex cursor-pointer items-center gap-2 rounded-control px-2 py-1 text-row leading-none font-emph",
+    "focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-live",
+    variants[variant],
+    className,
+  );
+
 export function Button({
   variant = "quiet",
   type = "button",
@@ -46,13 +55,21 @@ export function Button({
     <button
       type={type}
       data-variant={variant}
-      className={cn(
-        "inline-flex cursor-pointer items-center gap-2 rounded-control px-2 py-1 text-row leading-none font-emph",
-        "focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-live",
-        variants[variant],
-        className,
-      )}
+      className={buttonClassName(variant, className)}
       {...props}
     />
   );
+}
+
+/**
+ * A button-shaped navigation: an affordance that goes somewhere rather than
+ * commits something. `disabled:`/`enabled:` in a variant's classes are simply
+ * inert here - a link is never disabled, it is offered or it is not offered.
+ */
+export function ButtonLink({
+  variant = "quiet",
+  className,
+  ...props
+}: ComponentProps<"a"> & { variant?: ButtonVariant }): JSX.Element {
+  return <a data-variant={variant} className={buttonClassName(variant, className)} {...props} />;
 }

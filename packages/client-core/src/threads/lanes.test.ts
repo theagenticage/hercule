@@ -108,10 +108,19 @@ describe("headlineOf", () => {
   it("does not count an exited session with no exitedAt as settled", () => {
     const sessions = [session({ id: "x", status: "exited", exitedAt: null })];
 
-    expect(headlineOf(sessions, now)).toBe("No sessions yet");
+    expect(headlineOf(sessions, now)).toBe("Nothing active this week");
   });
 
-  it("reads as No sessions yet when there is nothing at all", () => {
+  it("reads as Nothing active this week when every exit is more than seven days old", () => {
+    const sessions = [
+      session({ id: "old1", status: "exited", exitedAt: "2026-08-01T00:00:00.000Z" }),
+      session({ id: "old2", status: "exited", exitedAt: "2026-07-01T00:00:00.000Z" }),
+    ];
+
+    expect(headlineOf(sessions, now)).toBe("Nothing active this week");
+  });
+
+  it("reads as No sessions yet only when there is nothing at all", () => {
     expect(headlineOf([], now)).toBe("No sessions yet");
   });
 });

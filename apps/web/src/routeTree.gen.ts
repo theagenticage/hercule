@@ -24,6 +24,7 @@ import { Route as ShellWorkflowsRouteImport } from './routes/_shell/workflows'
 import { Route as OnboardingTimezoneRouteImport } from './routes/onboarding/timezone'
 import { Route as ShellFleetIndexRouteImport } from './routes/_shell/fleet/index'
 import { Route as ShellFleetRunnerIdRouteImport } from './routes/_shell/fleet/$runnerId'
+import { Route as ShellSessionsIndexRouteImport } from './routes/_shell/sessions/index'
 import { Route as ShellSettingsIndexRouteImport } from './routes/_shell/settings/index'
 import { Route as ShellSettingsAssistantsRouteImport } from './routes/_shell/settings/assistants'
 import { Route as ShellSettingsBoundsRouteImport } from './routes/_shell/settings/bounds'
@@ -110,6 +111,11 @@ const ShellFleetRunnerIdRoute = ShellFleetRunnerIdRouteImport.update({
   path: '/fleet/$runnerId',
   getParentRoute: () => ShellRoute,
 } as any)
+const ShellSessionsIndexRoute = ShellSessionsIndexRouteImport.update({
+  id: '/sessions/',
+  path: '/sessions/',
+  getParentRoute: () => ShellRoute,
+} as any)
 const ShellSettingsIndexRoute = ShellSettingsIndexRouteImport.update({
   id: '/',
   path: '/',
@@ -191,6 +197,7 @@ export interface FileRoutesByFullPath {
   '/settings/system': typeof ShellSettingsSystemRoute
   '/settings/threads': typeof ShellSettingsThreadsRoute
   '/fleet/': typeof ShellFleetIndexRoute
+  '/sessions/': typeof ShellSessionsIndexRoute
   '/settings/': typeof ShellSettingsIndexRoute
   '/tasks/': typeof ShellTasksIndexRoute
 }
@@ -217,6 +224,7 @@ export interface FileRoutesByTo {
   '/settings/system': typeof ShellSettingsSystemRoute
   '/settings/threads': typeof ShellSettingsThreadsRoute
   '/fleet': typeof ShellFleetIndexRoute
+  '/sessions': typeof ShellSessionsIndexRoute
   '/settings': typeof ShellSettingsIndexRoute
   '/tasks': typeof ShellTasksIndexRoute
 }
@@ -246,6 +254,7 @@ export interface FileRoutesById {
   '/_shell/settings/system': typeof ShellSettingsSystemRoute
   '/_shell/settings/threads': typeof ShellSettingsThreadsRoute
   '/_shell/fleet/': typeof ShellFleetIndexRoute
+  '/_shell/sessions/': typeof ShellSessionsIndexRoute
   '/_shell/settings/': typeof ShellSettingsIndexRoute
   '/_shell/tasks/': typeof ShellTasksIndexRoute
 }
@@ -275,6 +284,7 @@ export interface FileRouteTypes {
     | '/settings/system'
     | '/settings/threads'
     | '/fleet/'
+    | '/sessions/'
     | '/settings/'
     | '/tasks/'
   fileRoutesByTo: FileRoutesByTo
@@ -301,6 +311,7 @@ export interface FileRouteTypes {
     | '/settings/system'
     | '/settings/threads'
     | '/fleet'
+    | '/sessions'
     | '/settings'
     | '/tasks'
   id:
@@ -329,6 +340,7 @@ export interface FileRouteTypes {
     | '/_shell/settings/system'
     | '/_shell/settings/threads'
     | '/_shell/fleet/'
+    | '/_shell/sessions/'
     | '/_shell/settings/'
     | '/_shell/tasks/'
   fileRoutesById: FileRoutesById
@@ -445,6 +457,13 @@ declare module '@tanstack/react-router' {
       path: '/fleet/$runnerId'
       fullPath: '/fleet/$runnerId'
       preLoaderRoute: typeof ShellFleetRunnerIdRouteImport
+      parentRoute: typeof ShellRoute
+    }
+    '/_shell/sessions/': {
+      id: '/_shell/sessions/'
+      path: '/sessions'
+      fullPath: '/sessions/'
+      preLoaderRoute: typeof ShellSessionsIndexRouteImport
       parentRoute: typeof ShellRoute
     }
     '/_shell/settings/': {
@@ -569,6 +588,7 @@ interface ShellRouteChildren {
   ShellIndexRoute: typeof ShellIndexRoute
   ShellFleetRunnerIdRoute: typeof ShellFleetRunnerIdRoute
   ShellFleetIndexRoute: typeof ShellFleetIndexRoute
+  ShellSessionsIndexRoute: typeof ShellSessionsIndexRoute
   ShellTasksIndexRoute: typeof ShellTasksIndexRoute
 }
 
@@ -584,6 +604,7 @@ const ShellRouteChildren: ShellRouteChildren = {
   ShellIndexRoute: ShellIndexRoute,
   ShellFleetRunnerIdRoute: ShellFleetRunnerIdRoute,
   ShellFleetIndexRoute: ShellFleetIndexRoute,
+  ShellSessionsIndexRoute: ShellSessionsIndexRoute,
   ShellTasksIndexRoute: ShellTasksIndexRoute,
 }
 

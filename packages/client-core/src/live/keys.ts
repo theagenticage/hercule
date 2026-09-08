@@ -27,6 +27,9 @@ export const queryKeys = {
   projects: (): LiveQueryKey => ["projects"],
   runners: (): LiveQueryKey => ["runners"],
   runner: (id?: string): LiveQueryKey => (id === undefined ? ["runner"] : ["runner", id]),
+  sessions: (): LiveQueryKey => ["sessions"],
+  /** Not a live topic: profiles change only through this browser's own writes. */
+  profiles: (): LiveQueryKey => ["profiles"],
   joinTokens: (): LiveQueryKey => ["join-tokens"],
   plugins: (): LiveQueryKey => ["plugins"],
   providers: (): LiveQueryKey => ["providers"],
@@ -58,6 +61,9 @@ export const queryKeysFor = (
       ? [queryKeys.runners(), queryKeys.runner()]
       : [queryKeys.runners(), ...ids.map((id) => queryKeys.runner(id))];
   }
+  // The sidebar and All sessions read the listing; a session's own detail and
+  // its transcript are a later slice's case to add here.
+  if (topic === "session") return [queryKeys.sessions()];
   // The plugin set is fixed at build time and read as one listing, so which
   // plugin changed narrows nothing.
   if (topic === "plugin") return [queryKeys.plugins()];

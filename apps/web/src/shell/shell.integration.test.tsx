@@ -1,17 +1,84 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { screen, waitFor, within } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import type { Session } from "@hydra/contract";
+import { ageOf } from "@hydra/client-core";
 import { renderApp, stubApi, type Handler } from "../app/testing";
+
+const ZONE = "Europe/Amsterdam";
 
 const settings = (user: Record<string, unknown>) => ({
   "GET /api/v1/setup": { body: { complete: true } },
   "GET /api/v1/settings": {
     body: { controller: {}, user: { "onboarding.completedSteps": ["timezone"], ...user } },
   },
+  // The Threads face reads the session list on every path it mounts on; a
+  // test that cares about actual sessions overrides this with its own list.
+  "GET /api/v1/sessions": { body: { items: [] } },
 });
 
 const inShell = (user: Record<string, unknown> = {}): Readonly<Record<string, Handler>> =>
-  settings({ timezone: "Europe/Amsterdam", ...user });
+  settings({ timezone: ZONE, ...user });
+
+const BASE_SESSION: Session = {
+  id: "01a06d02-2000-7000-8000-000000000001",
+  title: "Fix the login bug",
+  status: "idle",
+  resumable: false,
+  permissionProfileId: "01a06d02-3000-7000-8000-000000000001",
+  instanceId: "01a06d02-1000-7000-8000-000000000001",
+  runnerId: "01a06d02-beff-7037-9f5b-042822015952",
+  workspaceId: null,
+  requestedAccessMode: "approval-required",
+  accessMode: "approval-required",
+  nativeSessionId: null,
+  modelSelection: { model: "claude-sonnet-5", options: {} },
+  parentSessionId: null,
+  createdAt: "2026-09-04T09:00:00.000Z",
+  startedAt: "2026-09-04T09:00:00.000Z",
+  exitedAt: null,
+  lastActivityAt: "2026-09-04T09:05:00.000Z",
+};
+
+const session = (overrides: Partial<Session> & { id: string }): Session => ({
+  ...BASE_SESSION,
+  ...overrides,
+});
+
+/** Three sessions, deliberately out of `lastActivityAt` order in the fixture. */
+const THREE_SESSIONS: readonly Session[] = [
+  session({
+    id: "01a06d02-2000-7000-8000-000000000001",
+    title: "Fix the login bug",
+    status: "busy",
+    modelSelection: { model: "claude-sonnet-5", options: {} },
+    lastActivityAt: "2026-09-05T09:05:00.000Z",
+  }),
+  session({
+    id: "01a06d02-2000-7000-8000-000000000002",
+    title: "Write the changelog",
+    status: "idle",
+    modelSelection: { model: "claude-opus-5", options: {} },
+    lastActivityAt: "2026-09-06T10:00:00.000Z",
+  }),
+  session({
+    id: "01a06d02-2000-7000-8000-000000000003",
+    title: "Investigate the flaky test",
+    status: "exited",
+    modelSelection: { model: "claude-haiku-5", options: {} },
+    lastActivityAt: "2026-09-04T08:00:00.000Z",
+    exitedAt: "2026-09-04T08:10:00.000Z",
+  }),
+];
+
+/** The same handlers as `inShell`, with a real session list. */
+const withThreads = (
+  sessions: readonly Session[],
+  user: Record<string, unknown> = {},
+): Readonly<Record<string, Handler>> => ({
+  ...inShell(user),
+  "GET /api/v1/sessions": { body: { items: sessions } },
+});
 
 const hydraNav = () => within(screen.getByRole("navigation", { name: "Hydra" }));
 
@@ -57,12 +124,10 @@ describe("the two-face sidebar", () => {
   it("shows the Threads face on Sessions", async () => {
     await renderApp({ path: "/", api: stubApi(inShell()).fetch, token: "held" });
 
-    expect(
-      threadsNav()
-        .getByRole("button", { name: /Create new thread/ })
-        .hasAttribute("disabled"),
-    ).toBe(true);
-    expect(threadsNav().getByText("No threads yet")).toBeDefined();
+    // Create new thread is a real navigation now, not a disabled placeholder.
+    const create = await threadsNav().findByRole("link", { name: /create new thread/i });
+    expect(create.getAttribute("href")).toBe("/threads/new");
+    expect(await threadsNav().findByText("No threads yet")).toBeDefined();
     expect(screen.queryByRole("navigation", { name: "Hydra" })).toBeNull();
   });
 
@@ -88,7 +153,7 @@ describe("the two-face sidebar", () => {
     expect(navLabels()[0]).toBe("Intake");
 
     await user.click(screen.getByRole("radio", { name: "Threads" }));
-    expect(threadsNav().getByText("No threads yet")).toBeDefined();
+    expect(await threadsNav().findByText("No threads yet")).toBeDefined();
   });
 
   it("reads the thread-row density from the settings store", async () => {
@@ -98,15 +163,15 @@ describe("the two-face sidebar", () => {
       token: "held",
     });
 
-    expect(threadsNav().getByText("No threads yet").parentElement?.dataset.threadRows).toBe(
-      "plain",
-    );
+    const empty = await threadsNav().findByText("No threads yet");
+    expect(empty.parentElement?.dataset.threadRows).toBe("plain");
   });
 
   it("defaults the thread-row density to meta", async () => {
     await renderApp({ path: "/", api: stubApi(inShell()).fetch, token: "held" });
 
-    expect(threadsNav().getByText("No threads yet").parentElement?.dataset.threadRows).toBe("meta");
+    const empty = await threadsNav().findByText("No threads yet");
+    expect(empty.parentElement?.dataset.threadRows).toBe("meta");
   });
 
   it("opens the marks legend on ?", async () => {
@@ -118,6 +183,127 @@ describe("the two-face sidebar", () => {
 
     expect(await screen.findByLabelText("Marks legend")).toBeDefined();
   });
+});
+
+describe("the Threads face's session rows", () => {
+  /** Every row link the face renders for a session, in DOM order. */
+  const rowLinks = (): HTMLElement[] =>
+    threadsNav()
+      .getAllByRole("link")
+      .filter((link) => {
+        const href = link.getAttribute("href") ?? "";
+        return href.startsWith("/threads/") && href !== "/threads/new";
+      });
+
+  it("lists the sessions as rows linking to their thread, under Create new thread", async () => {
+    await renderApp({ path: "/", api: stubApi(withThreads(THREE_SESSIONS)).fetch, token: "held" });
+
+    for (const s of THREE_SESSIONS) {
+      const row = await threadsNav().findByRole("link", { name: new RegExp(s.title) });
+      expect(row.getAttribute("href")).toBe(`/threads/${s.id}`);
+    }
+    // Create new thread still comes before the rows.
+    const create = threadsNav().getByRole("link", { name: /create new thread/i });
+    const links = threadsNav().getAllByRole("link");
+    expect(links.indexOf(create)).toBeLessThan(links.indexOf(rowLinks()[0]!));
+  });
+
+  it("carries the age read with ageOf, and the model slug in meta mode", async () => {
+    await renderApp({ path: "/", api: stubApi(withThreads(THREE_SESSIONS)).fetch, token: "held" });
+
+    const first = THREE_SESSIONS[0]!;
+    const row = await threadsNav().findByRole("link", { name: new RegExp(first.title) });
+    // Read right beside the assertion, the same instant the row itself reads
+    // from: `ageOf`'s coarsest unit is a minute, so the two reads agree unless
+    // this line and the render it followed straddle a minute boundary.
+    expect(row.textContent).toContain(ageOf(first.lastActivityAt, new Date()));
+    expect(row.textContent).toContain(first.modelSelection.model);
+  });
+
+  it("selects the row of the thread currently open, and no other", async () => {
+    const current = THREE_SESSIONS[1]!;
+    await renderApp({
+      path: `/threads/${current.id}`,
+      api: stubApi(withThreads(THREE_SESSIONS)).fetch,
+      token: "held",
+    });
+
+    const currentRow = await threadsNav().findByRole("link", { name: new RegExp(current.title) });
+    expect(currentRow.getAttribute("aria-current")).toBe("page");
+
+    for (const s of THREE_SESSIONS) {
+      if (s.id === current.id) continue;
+      const row = threadsNav().getByRole("link", { name: new RegExp(s.title) });
+      expect(row.getAttribute("aria-current")).not.toBe("page");
+    }
+  });
+
+  it("shows the model slug in meta mode and hides it in plain mode", async () => {
+    const target = THREE_SESSIONS[0]!;
+
+    const metaRender = await renderApp({
+      path: "/",
+      api: stubApi(withThreads(THREE_SESSIONS, { "ui.threadRows": "meta" })).fetch,
+      token: "held",
+    });
+    const metaRow = await threadsNav().findByRole("link", { name: new RegExp(target.title) });
+    expect(metaRow.textContent).toContain(target.modelSelection.model);
+    metaRender.unmount();
+
+    await renderApp({
+      path: "/",
+      api: stubApi(withThreads(THREE_SESSIONS, { "ui.threadRows": "plain" })).fetch,
+      token: "held",
+    });
+    const plainRow = await threadsNav().findByRole("link", { name: new RegExp(target.title) });
+    expect(plainRow.textContent).not.toContain(target.modelSelection.model);
+  });
+
+  it("carries an All sessions link to /sessions, after the rows", async () => {
+    await renderApp({ path: "/", api: stubApi(withThreads(THREE_SESSIONS)).fetch, token: "held" });
+    await threadsNav().findByRole("link", { name: new RegExp(THREE_SESSIONS[0]!.title) });
+
+    const allSessions = threadsNav().getByRole("link", { name: /All sessions/i });
+    expect(allSessions.getAttribute("href")).toBe("/sessions");
+  });
+
+  it("refetches the list on a session invalidation nudge", async () => {
+    const api = stubApi(withThreads(THREE_SESSIONS));
+    const { live } = await renderApp({ path: "/", api: api.fetch, token: "held" });
+    await threadsNav().findByRole("link", { name: new RegExp(THREE_SESSIONS[0]!.title) });
+
+    await waitFor(() => {
+      expect(live.topics()).toContain("session");
+    });
+    const before = api.calls.filter((call) => call.path === "/api/v1/sessions").length;
+
+    act(() => {
+      live.push("session", { _tag: "invalidate", ids: [], kind: "updated" });
+    });
+
+    await waitFor(() => {
+      const after = api.calls.filter((call) => call.path === "/api/v1/sessions").length;
+      expect(after).toBeGreaterThan(before);
+    });
+  });
+
+  it("offers Create new thread as a link to /threads/new, not a disabled button", async () => {
+    await renderApp({ path: "/", api: stubApi(withThreads(THREE_SESSIONS)).fetch, token: "held" });
+
+    const create = await threadsNav().findByRole("link", { name: /create new thread/i });
+    expect(create.getAttribute("href")).toBe("/threads/new");
+    expect(threadsNav().queryByRole("button", { name: /create new thread/i })).toBeNull();
+  });
+
+  it.each(["/", "/threads/s1", "/sessions"])(
+    "shows the Threads face, not Hydra, on %s",
+    async (path) => {
+      await renderApp({ path, api: stubApi(inShell()).fetch, token: "held" });
+
+      expect(screen.getByRole("navigation", { name: "Threads" })).toBeDefined();
+      expect(screen.queryByRole("navigation", { name: "Hydra" })).toBeNull();
+    },
+  );
 });
 
 describe("the pulse at the sidebar foot", () => {
