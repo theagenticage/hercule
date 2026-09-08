@@ -233,6 +233,11 @@ const TABLE = {
     method: "DELETE",
     path: "/api/v1/sessions/:id/inputs/:inputId",
   },
+  "input.steer": {
+    requires: "session.steer",
+    method: "POST",
+    path: "/api/v1/sessions/:id/inputs/:inputId/steer",
+  },
 
   // An owned sub-resource: the id in the path is the session's, and the grant
   // is the session's own read, because a transcript is what that session said.

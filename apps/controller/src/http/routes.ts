@@ -283,7 +283,8 @@ const inputRoutes = HttpApiBuilder.group(api, "input", (handlers) =>
       .handle("update", ({ params, payload }) =>
         operation(sessions.updateInput({ ...params, ...payload })),
       )
-      .handle("cancel", ({ params }) => operation(sessions.cancelInput(params)));
+      .handle("cancel", ({ params }) => operation(sessions.cancelInput(params)))
+      .handle("steer", ({ params }) => operation(sessions.steer(params)));
   }),
 );
 

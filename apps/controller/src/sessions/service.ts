@@ -176,6 +176,11 @@ const ALREADY_SENT = "that input has already gone to the machine";
 
 const REFUSED = "that session's runner would not take the input";
 
+const NOT_BUSY = "only a busy session can be steered";
+
+const STEERING_UNSUPPORTED =
+  "that session's provider does not support steering into a running turn";
+
 const NOT_RESUMABLE =
   "that session is not resumable: it is still live, it left no provider-native session, " +
   "or its machine is gone";
@@ -389,21 +394,6 @@ const make = Effect.gen(function* () {
     );
 
   /**
-   * Whether the session has to hold this input rather than take it now. A
-   * session with no harness up yet holds everything. A turn already running
-   * takes only what can be folded into it, which is nothing where the
-   * provider declares no steering.
-   */
-  const heldBack = (
-    session: StoredSession,
-  ): Effect.Effect<boolean, Validation | SqlError | Schema.SchemaError> =>
-    Effect.gen(function* () {
-      if (session.status !== "busy") return session.status !== "idle";
-      const { definition } = yield* resolved(session.instanceId);
-      return definition.declared.steering !== "native";
-    });
-
-  /**
    * The input a caller may still act on: one this session holds, one that has
    * not left or been called off already, and one that is not on the wire this
    * moment - a row the machine already has cannot be taken back, and saying it
@@ -490,6 +480,45 @@ const make = Effect.gen(function* () {
     });
 
   /**
+   * Sends one row and waits for it, for a caller who is the row itself: an
+   * idle delivery and a steer both stand on one HTTP request until the
+   * machine answers, so both turn `deliverTo`'s answer into either the
+   * outcome or the reason nothing came back - the same translation the flush
+   * does not need, because nothing there is waiting on it.
+   *
+   * Claiming is the caller's: each one has its own moment where nothing else
+   * can also have passed the row's on-the-wire check, and only the caller
+   * knows where that moment is.
+   */
+  const deliverForCaller = (
+    sessionId: string,
+    runnerId: string,
+    row: StoredInput,
+    modelSelection: ModelSelection,
+  ): Effect.Effect<SessionInputOutcome, NotFound | InvalidState | SqlError> =>
+    Effect.gen(function* () {
+      const answer = yield* deliverTo(runnerId, row, modelSelection);
+      if (Option.isNone(answer)) {
+        // Read again rather than trusted from before the wait: what decides
+        // is whether a boundary is still to come, and a turn can open, end
+        // or the session exit while the row is on the wire.
+        const now = yield* one(sessionId);
+        if (now.status === "busy") return yield* Effect.fail(invalidState(NOT_DELIVERED));
+        // Nothing else brings the session to idle, so a row left queued
+        // here would wait for a boundary that never comes.
+        yield* recordCancel(row);
+        return yield* Effect.fail(invalidState(NOT_SENT));
+      }
+      const delivery = answer.value.ok ? answer.value.delivery : undefined;
+      if (delivery === undefined) {
+        yield* recordRefusal(row, answer.value.message);
+        return yield* Effect.fail(invalidState(answer.value.message ?? REFUSED));
+      }
+      yield* recordDelivery(row, delivery);
+      return { inputId: row.id, result: delivery };
+    });
+
+  /**
    * Sends what one transition to idle releases: every queued input, oldest
    * first, so a user who lined three messages up gets three rather than one per
    * turn. The first opens the turn and the rest steer into it.
@@ -507,14 +536,17 @@ const make = Effect.gen(function* () {
       while (true) {
         const next = (yield* inputs.queued(sessionId)).find((row) => !sending.has(row.id));
         if (next === undefined) return;
-        // Read fresh for every row, the same as the queue itself: a model
-        // change can land on the session while an earlier row in this flush
-        // is still on the wire.
-        const found = yield* sessions.one(sessionId);
-        if (Option.isNone(found)) return;
+        // Claimed the instant the queue read clears it, with nothing awaited
+        // in between: a steer racing this same row must find the claim
+        // already taken, not the opening this filter just found.
         const outcome = yield* claimed(
           next.id,
           Effect.gen(function* () {
+            // Read fresh for every row, the same as the queue itself: a model
+            // change can land on the session while an earlier row in this
+            // flush is still on the wire.
+            const found = yield* sessions.one(sessionId);
+            if (Option.isNone(found)) return "gone" as const;
             const answer = yield* deliverTo(runnerId, next, found.value.modelSelection);
             if (Option.isNone(answer)) return undefined;
             const delivery = answer.value.ok ? answer.value.delivery : undefined;
@@ -526,7 +558,7 @@ const make = Effect.gen(function* () {
             return delivery;
           }),
         );
-        if (outcome === undefined) return;
+        if (outcome === undefined || outcome === "gone") return;
       }
     });
 
@@ -890,7 +922,9 @@ const make = Effect.gen(function* () {
 
     /**
      * One turn's input. Stored first, so the answer names a row the caller can
-     * edit or cancel, and then either sent or left for the next flush.
+     * edit or cancel. An idle session has no transition to idle coming, so it
+     * is delivered here rather than left for a flush that will never run;
+     * every other status queues, and steering one is `input.steer`'s to do.
      *
      * What it did is always the machine's own word for it, never the status the
      * controller read: an input that opened a turn and one that was folded into
@@ -902,7 +936,7 @@ const make = Effect.gen(function* () {
         const { id, text } = yield* Effect.mapError(decodeInput(input), validationOf);
         const session = yield* one(id);
         if (session.status === "exited") return yield* Effect.fail(invalidState(HAS_EXITED));
-        const hold = yield* heldBack(session);
+        const hold = session.status !== "idle";
         const row = yield* withTransaction(
           sql,
           Effect.gen(function* () {
@@ -922,30 +956,43 @@ const make = Effect.gen(function* () {
           }),
         );
         if (hold) return { inputId: row.id, result: "queued" };
-        // The claim taken with the row is released here whatever happens to
-        // this request, so an abandoned one never leaves a row nothing can send.
+        // Claimed already, inside the insert above, for exactly this wait.
+        return yield* claimed(
+          row.id,
+          deliverForCaller(id, session.runnerId, row, session.modelSelection),
+        );
+      }),
+
+    /**
+     * Folds a still-queued row into the turn a busy session is already
+     * running, reusing the same delivery `session.input`'s idle path uses. A
+     * row that is not there to steer - on another session, already left, on
+     * the wire, or behind a provider that cannot fold a turn open - is refused
+     * before anything is sent.
+     */
+    steer: (input: InputIdentified): Effect.Effect<SessionInputOutcome, InputError> =>
+      Effect.gen(function* () {
+        yield* requireGrant("input.steer");
+        const { id, inputId } = yield* Effect.mapError(decodeInputIdentified(input), validationOf);
+        const session = yield* one(id);
+        // The row is looked up before the session's own status is judged, so an
+        // id belonging to another session reads not_found rather than whatever
+        // this session's status happens to be.
+        const row = yield* queuedInput(id, inputId);
+        // Claimed the instant `queuedInput`'s own on-the-wire check clears it,
+        // with nothing awaited in between: a second steer or the flush racing
+        // this one must find the claim already taken, not the same opening
+        // `queuedInput` just found. Everything after this can fail without
+        // sending anything - `claimed` releases the row either way.
         return yield* claimed(
           row.id,
           Effect.gen(function* () {
-            const answer = yield* deliverTo(session.runnerId, row, session.modelSelection);
-            if (Option.isNone(answer)) {
-              // Read again rather than trusted from before the wait: what
-              // decides is whether a boundary is still to come, and a turn can
-              // open, end or the session exit while the row is on the wire.
-              const now = yield* one(id);
-              if (now.status === "busy") return yield* Effect.fail(invalidState(NOT_DELIVERED));
-              // Nothing else brings the session to idle, so a row left queued
-              // here would wait for a boundary that never comes.
-              yield* recordCancel(row);
-              return yield* Effect.fail(invalidState(NOT_SENT));
+            if (session.status !== "busy") return yield* Effect.fail(invalidState(NOT_BUSY));
+            const { definition } = yield* resolved(session.instanceId);
+            if (definition.declared.steering !== "native") {
+              return yield* Effect.fail(invalidState(STEERING_UNSUPPORTED));
             }
-            const delivery = answer.value.ok ? answer.value.delivery : undefined;
-            if (delivery === undefined) {
-              yield* recordRefusal(row, answer.value.message);
-              return yield* Effect.fail(invalidState(answer.value.message ?? REFUSED));
-            }
-            yield* recordDelivery(row, delivery);
-            return { inputId: row.id, result: delivery };
+            return yield* deliverForCaller(id, session.runnerId, row, session.modelSelection);
           }),
         );
       }),

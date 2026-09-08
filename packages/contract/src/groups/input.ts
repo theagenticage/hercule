@@ -25,7 +25,7 @@ import {
 import { Id, Timestamp } from "../ids";
 import { page, pageParams } from "../pagination";
 import { Authenticated } from "../security";
-import { Prompt } from "./session";
+import { Prompt, SessionInputOutcome } from "./session";
 
 /**
  * Where an input came from. Only `user` is written in this build; the rest are
@@ -92,6 +92,11 @@ export const input = HttpApiGroup.make("input")
     HttpApiEndpoint.delete("cancel", "/sessions/:id/inputs/:inputId", {
       params: { id: Id, inputId: Id },
       success: Input,
+      error: [Unauthenticated, Forbidden, Validation, NotFound, InvalidState, Internal],
+    }),
+    HttpApiEndpoint.post("steer", "/sessions/:id/inputs/:inputId/steer", {
+      params: { id: Id, inputId: Id },
+      success: SessionInputOutcome,
       error: [Unauthenticated, Forbidden, Validation, NotFound, InvalidState, Internal],
     }),
   )
