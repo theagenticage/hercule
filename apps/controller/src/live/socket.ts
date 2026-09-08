@@ -41,11 +41,13 @@ import {
   live,
   LIVE_PROTOCOL_VERSION,
   LiveTopic,
+  parseSessionTopic,
   unauthenticated,
   validation,
   validationOf,
   type Internal,
   type Unauthenticated,
+  type Validation,
 } from "@hydra/contract";
 import { VERSION } from "@hydra/home/version";
 import { CurrentActor, requireGrant, type Actor } from "../actor";
@@ -69,8 +71,24 @@ const TICKET_REFUSED = "the ticket is not valid";
 const CREDENTIAL_GONE = "the credential this connection was opened with is no longer valid";
 const UNREADABLE = "the credential behind this connection could not be checked";
 
-/** A position in the log, as a client hands one back: a decimal, and nothing else. */
+/** A position in a log, as a client hands one back: a decimal, and nothing else. */
 const CURSOR = /^\d+$/;
+
+/**
+ * A cursor from the wire, decoded to the position it names - `undefined` for
+ * one not given, which is what asks to follow from the head. Shared by `event`
+ * and `session:<id>:stream`, the two topics a position means anything on.
+ */
+const parsePosition = (raw: string | undefined): Effect.Effect<number | undefined, Validation> => {
+  if (raw === undefined) return Effect.succeed(undefined);
+  const cursor = Number(raw);
+  if (!CURSOR.test(raw) || !Number.isSafeInteger(cursor)) {
+    return Effect.fail(
+      validation([{ path: ["cursor"], message: "a position in the log is a whole number" }]),
+    );
+  }
+  return Effect.succeed(cursor);
+};
 
 /**
  * What the controller holds for one greeted connection: who it is, and what it
@@ -94,7 +112,16 @@ interface Connection {
  */
 class Greeted extends Context.Service<Greeted, Connection>()("hydra/controller/live/Greeted") {}
 
-const decodeTopic = Schema.decodeUnknownEffect(LiveTopic);
+const decodeSchemaTopic = Schema.decodeUnknownEffect(LiveTopic);
+
+/**
+ * The schema only proves the wire shape - a flat literal or `session:<id>:kind`
+ * - and a pattern check cannot itself carry the literal precision `LiveTopic`
+ * is typed with, so a value that decoded is asserted into it here, the one
+ * place a session topic's string is trusted to be the shape it matched.
+ */
+const decodeTopic = (raw: unknown) =>
+  Effect.map(decodeSchemaTopic(raw), (topic) => topic as LiveTopic);
 
 const handlers = live.toLayer(
   Effect.gen(function* () {
@@ -263,6 +290,33 @@ const handlers = live.toLayer(
         Effect.gen(function* () {
           const { connection, actor } = yield* caller(options.client);
           const topic = yield* Effect.mapError(decodeTopic(payload.topic), validationOf);
+          const session = parseSessionTopic(topic);
+
+          if (session?.kind === "tap") {
+            if (payload.cursor !== undefined) {
+              return yield* Effect.fail(
+                validation([
+                  {
+                    path: ["cursor"],
+                    message: `${topic} never replays, so there is nothing to resume from`,
+                  },
+                ]),
+              );
+            }
+            // The tap is the session's own live output, so it needs what
+            // reading the session over HTTP needs.
+            yield* Effect.provideService(requireGrant("session.read"), CurrentActor, actor);
+            return yield* held(connection, topics.tapSession(topic, session.sessionId));
+          }
+
+          if (session?.kind === "stream") {
+            const cursor = yield* parsePosition(payload.cursor);
+            // The transcript's deltas are the transcript, so this stream needs
+            // what reading it over HTTP needs.
+            yield* Effect.provideService(requireGrant("transcript.read"), CurrentActor, actor);
+            return yield* held(connection, topics.followSession(topic, session.sessionId, cursor));
+          }
+
           if (!isAppendOnlyLiveTopic(topic)) {
             if (payload.cursor !== undefined) {
               return yield* Effect.fail(
@@ -278,17 +332,7 @@ const handlers = live.toLayer(
             // of what it asks for.
             return yield* held(connection, topics.subscribe(topic));
           }
-          const cursor = payload.cursor === undefined ? undefined : Number(payload.cursor);
-          if (
-            payload.cursor !== undefined &&
-            (!CURSOR.test(payload.cursor) || !Number.isSafeInteger(cursor))
-          ) {
-            return yield* Effect.fail(
-              validation([
-                { path: ["cursor"], message: "a position in the log is a whole number" },
-              ]),
-            );
-          }
+          const cursor = yield* parsePosition(payload.cursor);
           // The log's deltas are the log, so this stream needs what reading the
           // log over HTTP needs.
           yield* Effect.provideService(requireGrant("event.query"), CurrentActor, actor);
