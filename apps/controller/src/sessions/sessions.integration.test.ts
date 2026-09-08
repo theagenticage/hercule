@@ -392,7 +392,6 @@ interface StoredInput {
   readonly source: string;
   readonly actor: string;
   readonly text: string;
-  readonly modelSelection: { readonly model: string } | null;
   readonly status: "queued" | "delivered" | "cancelled";
   readonly delivery: "opened" | "steered" | null;
   readonly createdAt: string;
@@ -594,7 +593,11 @@ describe("session.spawn", () => {
 
       const input = (await framesWhen<SessionInput>(arranged.wire, "sessionInput", 1))[0]!;
       expect(input.sessionId).toBe(session.id);
-      expect(input.input).toEqual({ text: "what is the time" });
+      // The session's current model rides every frame, starting as the spec's.
+      expect(input.input).toEqual({
+        text: "what is the time",
+        modelSelection: session.modelSelection,
+      });
     });
   });
 });
@@ -778,29 +781,6 @@ describe("session.input", () => {
     });
   });
 
-  it("queues an input that carries a model change while a turn is running", async () => {
-    await withFleet(async (arranged) => {
-      const session = await started(arranged, "hello");
-      report(arranged.wire, ...transcript(session.id)[1]!);
-      await sessionWhen(arranged, session.id, (one) => one.status === "busy");
-
-      const response = await sendInput(arranged, session.id, {
-        text: "in fast",
-        modelSelection: { model: "fast", options: {} },
-      });
-
-      expect(response.status, await response.clone().text()).toBe(200);
-      expect(await response.json()).toMatchObject({ result: "queued" });
-      // Only the prompt's own frame, which went out when the harness came up.
-      expect(inputFrames(arranged.wire)).toHaveLength(1);
-      expect((await inputsOf(arranged, session.id)).at(-1)).toMatchObject({
-        text: "in fast",
-        status: "queued",
-        modelSelection: { model: "fast" },
-      });
-    });
-  });
-
   it("queues an input a provider cannot fold into a running turn", async () => {
     await withFleet(async (arranged) => {
       const session = await spawned(arranged, {
@@ -933,15 +913,19 @@ describe("the inputs a session holds", () => {
 
   /** A session with one delivered input, one still queued, and one cancelled. */
   const withInputs = async (arranged: Arranged): Promise<Session> => {
-    const session = await started(arranged, "hello");
-    report(arranged.wire, ...transcript(session.id)[1]!);
+    const session = await spawned(arranged, {
+      prompt: "hello",
+      instanceId: instanceOf(arranged, "limited-provider"),
+    });
+    const events = transcript(session.id);
+    report(arranged.wire, ...events[0]!);
+    await sessionWhen(arranged, session.id, (one) => one.status === "idle");
+    await framesWhen<SessionInput>(arranged.wire, "sessionInput", 1);
+    report(arranged.wire, ...events[1]!);
     await sessionWhen(arranged, session.id, (one) => one.status === "busy");
-    // A model change is held back for the next turn, so both of these queue.
+    // The provider declares no steering, so both of these queue.
     for (const text of ["second", "third"]) {
-      const queued = await sendInput(arranged, session.id, {
-        text,
-        modelSelection: { model: "fast", options: {} },
-      });
+      const queued = await sendInput(arranged, session.id, { text });
       expect(queued.status, await queued.clone().text()).toBe(200);
     }
     const rows = await inputsOf(arranged, session.id);
@@ -965,7 +949,6 @@ describe("the inputs a session holds", () => {
       expect(typeof rows[0]!.createdAt).toBe("string");
       expect(typeof rows[0]!.deliveredAt).toBe("string");
       expect(rows[1]!.deliveredAt).toBeNull();
-      expect(rows[1]!.modelSelection).toMatchObject({ model: "fast" });
     });
   });
 
@@ -1189,36 +1172,6 @@ describe("the queue at the transition to idle", () => {
     });
   });
 
-  it("holds a queued model change back from the turn a flush has just opened", async () => {
-    await withFleet(async (arranged) => {
-      arranged.wire.answering((frame) => (frame.input.text === "one" ? "opened" : "steered"));
-      const session = await spawned(arranged, { prompt: "one" });
-      await framesWhen<SessionStart>(arranged.wire, "sessionStart", 1);
-      const queued = await sendInput(arranged, session.id, {
-        text: "two",
-        modelSelection: { model: "fast", options: {} },
-      });
-      expect(await queued.json()).toMatchObject({ result: "queued" });
-
-      report(arranged.wire, ...transcript(session.id)[0]!);
-      await framesWhen<SessionInput>(arranged.wire, "sessionInput", 1);
-      report(arranged.wire, ...transcript(session.id)[1]!);
-      await sessionWhen(arranged, session.id, (one) => one.status === "busy");
-
-      // A harness takes a model change only on the input that opens a turn, so
-      // this one waits for a boundary of its own rather than being steered in
-      // and having its model quietly dropped.
-      expect(await inputsOf(arranged, session.id)).toMatchObject([
-        { text: "one", status: "delivered" },
-        { text: "two", status: "queued" },
-      ]);
-
-      report(arranged.wire, ...transcript(session.id)[6]!);
-      const sent = await framesWhen<SessionInput>(arranged.wire, "sessionInput", 2);
-      expect(sent.map((frame) => frame.input.text)).toEqual(["one", "two"]);
-    });
-  });
-
   it("refuses to call off an input the machine already has", async () => {
     await withFleet(async (arranged) => {
       arranged.wire.answering(() => undefined);
@@ -1295,53 +1248,6 @@ describe("the queue at the transition to idle", () => {
       await sessionWhen(arranged, session.id, (one) => one.status === "idle");
 
       arranged.wire.release("opened");
-
-      const sent = await framesWhen<SessionInput>(arranged.wire, "sessionInput", 2);
-      expect(sent.map((frame) => frame.input.text)).toEqual(["one", "two"]);
-    });
-  });
-
-  it("holds a model change back from a turn opened after the boundary it waited for", async () => {
-    await withFleet(async (arranged) => {
-      arranged.wire.answering((frame) => (frame.input.text === "one" ? undefined : "steered"));
-      const session = await spawned(arranged, { prompt: "one" });
-      await framesWhen<SessionStart>(arranged.wire, "sessionStart", 1);
-      const queued = await sendInput(arranged, session.id, {
-        text: "two",
-        modelSelection: { model: "fast", options: {} },
-      });
-      expect(await queued.json()).toMatchObject({ result: "queued" });
-
-      const events = transcript(session.id);
-      report(arranged.wire, ...events[0]!);
-      await framesWhen<SessionInput>(arranged.wire, "sessionInput", 1);
-      report(arranged.wire, ...events[1]!);
-      await sessionWhen(arranged, session.id, (one) => one.status === "busy");
-      report(arranged.wire, ...events[6]!);
-      await sessionWhen(arranged, session.id, (one) => one.status === "idle");
-
-      // The boundary above went by before the machine took the first input, so
-      // it says nothing about the turn that input has only now opened. A model
-      // change folded into that turn would be dropped by the harness.
-      arranged.wire.release("opened");
-      const rows = await until("recorded the first delivery", async () => {
-        const found = await inputsOf(arranged, session.id);
-        return found[0]!.status === "delivered" ? found : undefined;
-      });
-      expect(rows.map((row) => row.status)).toEqual(["delivered", "queued"]);
-      expect(inputFrames(arranged.wire).map((frame) => frame.input.text)).toEqual(["one"]);
-
-      // That turn ends, and the boundary it leaves behind is the one the model
-      // change was waiting for.
-      const base = { eventId: crypto.randomUUID(), sessionId: session.id, at };
-      report(arranged.wire, 8, { ...base, _tag: "turn.started", turnId: "t2" });
-      await sessionWhen(arranged, session.id, (one) => one.status === "busy");
-      report(arranged.wire, 9, {
-        ...base,
-        _tag: "turn.completed",
-        turnId: "t2",
-        state: "completed",
-      });
 
       const sent = await framesWhen<SessionInput>(arranged.wire, "sessionInput", 2);
       expect(sent.map((frame) => frame.input.text)).toEqual(["one", "two"]);
@@ -1785,72 +1691,180 @@ describe("session.continue", () => {
   });
 });
 
-describe("the model an input changed", () => {
-  it("sticks to the session, leaves the spec alone, and is carried into a continue", async () => {
+/** `session.update`: the model is plain session state, changed by `PATCH /api/v1/sessions/:id { model }`. */
+describe("session.update", () => {
+  const patchSession = (arranged: Arranged, id: string, body: unknown): Promise<Response> =>
+    send("PATCH", arranged.harness.base, `/api/v1/sessions/${id}`, {
+      body,
+      token: arranged.token,
+    });
+
+  it("rewrites modelSelection.model, leaves options alone, and GET agrees", async () => {
+    await withFleet(async (arranged) => {
+      const session = await started(arranged, "hello");
+      expect(session.modelSelection).toEqual({ model: "clever", options: {} });
+
+      const patched = await patchSession(arranged, session.id, { model: "fast" });
+
+      expect(patched.status, await patched.clone().text()).toBe(200);
+      const body = (await patched.json()) as Session;
+      expect(body.modelSelection).toEqual({ model: "fast", options: {} });
+
+      const read = await readSession(arranged, session.id);
+      expect(read.modelSelection).toEqual({ model: "fast", options: {} });
+    });
+  });
+
+  it("leaves the stored spec byte-identical to what the machine was started with", async () => {
     await withFleet(async (arranged) => {
       const session = await started(arranged, "hello");
       const start = (await framesWhen<SessionStart>(arranged.wire, "sessionStart", 1))[0]!;
-      expect(start.spec.modelSelection).toEqual({ model: "clever", options: {} });
 
-      arranged.wire.answering(() => "opened");
-      const response = await sendInput(arranged, session.id, {
-        text: "in fast",
-        modelSelection: { model: "fast", options: {} },
-      });
+      const patched = await patchSession(arranged, session.id, { model: "fast" });
+      expect(patched.status, await patched.clone().text()).toBe(200);
 
-      expect(response.status, await response.clone().text()).toBe(200);
-      expect(await response.json()).toMatchObject({ result: "opened" });
-      expect((await readSession(arranged, session.id)).modelSelection).toEqual({
-        model: "fast",
-        options: {},
-      });
-      // The spec is what the machine was told at start, byte for byte: a model
-      // change rewrites the session, never the frozen document.
       const [row] = await Effect.runPromise(
         Effect.orDie(
           arranged.harness.sql<{ readonly spec: string }>`
             SELECT spec FROM sessions WHERE id = unhex(replace(${session.id}, '-', ''))`,
         ),
       );
+      // The change lands on the session's own row, never on the frozen spec the
+      // machine was started with.
       expect(row?.spec).toBe(JSON.stringify(start.spec));
+    });
+  });
+
+  it("announces the session record topic on the live socket", async () => {
+    await withFleet(async (arranged) => {
+      const session = await started(arranged, "hello");
+      const ticket = await ticketFor(arranged.harness.base, arranged.token);
+
+      await onSocket(arranged.harness.base, (client) =>
+        Effect.gen(function* () {
+          yield* client.hello({ v: 1, ticket });
+          const announced = yield* collecting(client, { topic: "session" });
+          yield* Effect.promise(() => settleLive());
+
+          const patched = yield* Effect.promise(() =>
+            patchSession(arranged, session.id, { model: "fast" }),
+          );
+          expect(patched.status, yield* Effect.promise(() => patched.clone().text())).toBe(200);
+
+          const heard = yield* Effect.promise(() =>
+            within(2000, () =>
+              announced.received.some((message) =>
+                (message as { ids?: ReadonlyArray<string> }).ids?.includes(session.id),
+              ),
+            ),
+          );
+          expect(heard).toBe(true);
+          yield* Fiber.interrupt(announced.fiber);
+        }),
+      );
+    });
+  });
+
+  it("carries the new model on the next sessionInput frame delivered while idle", async () => {
+    await withFleet(async (arranged) => {
+      const session = await started(arranged, "hello");
+
+      const patched = await patchSession(arranged, session.id, { model: "fast" });
+      expect(patched.status, await patched.clone().text()).toBe(200);
+
+      arranged.wire.answering(() => "opened");
+      const response = await sendInput(arranged, session.id, { text: "in fast, now" });
+      expect(response.status, await response.clone().text()).toBe(200);
+
+      // The prompt's own frame went out first, when the harness came up; this
+      // is the next one, and the session's current model rides it even though
+      // the caller's own payload said nothing about a model.
+      const sent = await framesWhen<SessionInput>(arranged.wire, "sessionInput", 2);
+      expect(sent[1]!.input.modelSelection).toEqual({ model: "fast", options: {} });
+    });
+  });
+
+  it("carries the new model on the next sessionInput frame delivered to a busy session", async () => {
+    await withFleet(async (arranged) => {
+      const session = await started(arranged, "hello");
+      report(arranged.wire, ...transcript(session.id)[1]!);
+      await sessionWhen(arranged, session.id, (one) => one.status === "busy");
+
+      const patched = await patchSession(arranged, session.id, { model: "fast" });
+      expect(patched.status, await patched.clone().text()).toBe(200);
+
+      arranged.wire.answering(() => "steered");
+      const response = await sendInput(arranged, session.id, { text: "in fast, now" });
+      expect(response.status, await response.clone().text()).toBe(200);
+
+      const sent = await framesWhen<SessionInput>(arranged.wire, "sessionInput", 2);
+      expect(sent[1]!.input.modelSelection).toEqual({ model: "fast", options: {} });
+    });
+  });
+
+  it("carries a model changed while an earlier row in the same flush is still on the wire", async () => {
+    await withFleet(async (arranged) => {
+      arranged.wire.answering(() => undefined);
+      const session = await spawned(arranged, { prompt: "one" });
+      await framesWhen<SessionStart>(arranged.wire, "sessionStart", 1);
+      const queued = await sendInput(arranged, session.id, { text: "two" });
+      expect(await queued.json()).toMatchObject({ result: "queued" });
+
+      report(arranged.wire, ...transcript(session.id)[0]!);
+      await framesWhen<SessionInput>(arranged.wire, "sessionInput", 1);
+
+      const patched = await patchSession(arranged, session.id, { model: "fast" });
+      expect(patched.status, await patched.clone().text()).toBe(200);
+
+      // The prompt's own row is still on the wire, unanswered; releasing it
+      // lets the flush go on to the second row, which reads the model fresh
+      // rather than the one the flush started with.
+      arranged.wire.release("opened");
+      const sent = await framesWhen<SessionInput>(arranged.wire, "sessionInput", 2);
+      expect(sent[1]!.input.modelSelection).toEqual({ model: "fast", options: {} });
+    });
+  });
+
+  it("is carried into a continue's spec after the session exits", async () => {
+    await withFleet(async (arranged) => {
+      const session = await started(arranged, "hello");
+
+      const patched = await patchSession(arranged, session.id, { model: "fast" });
+      expect(patched.status, await patched.clone().text()).toBe(200);
 
       const parent = await ends(arranged, session, 2);
       const carried = await carryOn(arranged, parent.id, { mode: "resume", prompt: "and again" });
       expect(carried.status, await carried.clone().text()).toBe(200);
       const child = (await carried.json()) as Session;
       expect(child.modelSelection).toEqual({ model: "fast", options: {} });
+
       const starts = await framesWhen<SessionStart>(arranged.wire, "sessionStart", 2);
       expect(starts[1]!.spec.modelSelection).toEqual({ model: "fast", options: {} });
     });
   });
 
-  it("is written for an input the machine took before the session ended", async () => {
+  it("refuses a session that has exited", async () => {
+    await withFleet(async (arranged) => {
+      const session = await spawned(arranged, { prompt: "hello" });
+      exited(arranged.wire, session.id, 1);
+      await sessionWhen(arranged, session.id, (one) => one.status === "exited");
+
+      const response = await patchSession(arranged, session.id, { model: "fast" });
+
+      expect(response.status, await response.clone().text()).toBe(409);
+      expect(await response.text()).toContain("has exited");
+    });
+  });
+
+  it("fails validation on an empty payload and on an empty model", async () => {
     await withFleet(async (arranged) => {
       const session = await started(arranged, "hello");
-      arranged.wire.answering(() => undefined);
-      const pending = sendInput(arranged, session.id, {
-        text: "in fast",
-        modelSelection: { model: "fast", options: {} },
-      });
-      // Two: the spawn prompt's own frame, and then this one.
-      await framesWhen<SessionInput>(arranged.wire, "sessionInput", 2);
 
-      exited(arranged.wire, session.id, 2);
-      await sessionWhen(arranged, session.id, (one) => one.status === "exited");
-      arranged.wire.release("opened");
+      const empty = await patchSession(arranged, session.id, {});
+      expect(empty.status, await empty.clone().text()).toBe(400);
 
-      // The machine had the text, so the row says so rather than saying the
-      // input was called off, and what it asked for stands.
-      expect(await pending).toMatchObject({ status: 200 });
-      const rows = await inputsOf(arranged, session.id);
-      expect(rows.find((row) => row.text === "in fast")).toMatchObject({
-        status: "delivered",
-        delivery: "opened",
-      });
-      expect((await readSession(arranged, session.id)).modelSelection).toEqual({
-        model: "fast",
-        options: {},
-      });
+      const blank = await patchSession(arranged, session.id, { model: "" });
+      expect(blank.status, await blank.clone().text()).toBe(400);
     });
   });
 });

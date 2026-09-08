@@ -42,6 +42,7 @@ import {
   SessionFilter,
   SESSION_INPUT_FIELDS,
   SESSION_CONTINUE_FIELDS,
+  SESSION_UPDATE_FIELDS,
   SessionSpawnInput,
   TRANSCRIPT_SORT_FIELDS,
   validation,
@@ -83,6 +84,10 @@ export type Identified = Schema.Schema.Type<typeof Identified>;
 const InputInput = Schema.Struct({ id: Id, ...SESSION_INPUT_FIELDS });
 
 export type InputInput = Schema.Schema.Type<typeof InputInput>;
+
+const UpdateInput = Schema.Struct({ id: Id, ...SESSION_UPDATE_FIELDS });
+
+export type UpdateInput = Schema.Schema.Type<typeof UpdateInput>;
 
 const TranscriptInput = Schema.Struct({ id: Id, ...pageInput(TRANSCRIPT_SORT_FIELDS) });
 
@@ -129,6 +134,7 @@ const decodeQuery = Schema.decodeUnknownEffect(QueryInput);
 const decodeIdentified = Schema.decodeUnknownEffect(Identified);
 const decodeSpawn = Schema.decodeUnknownEffect(SessionSpawnInput);
 const decodeInput = Schema.decodeUnknownEffect(InputInput);
+const decodeUpdate = Schema.decodeUnknownEffect(UpdateInput);
 const decodeTranscript = Schema.decodeUnknownEffect(TranscriptInput);
 const decodeInputQuery = Schema.decodeUnknownEffect(InputQueryInput);
 const decodeInputUpdate = Schema.decodeUnknownEffect(InputUpdate);
@@ -385,17 +391,14 @@ const make = Effect.gen(function* () {
   /**
    * Whether the session has to hold this input rather than take it now. A
    * session with no harness up yet holds everything. A turn already running
-   * takes only what can be folded into it, which is neither a model change -
-   * a harness takes one only on the input that opens a turn - nor any input at
-   * all where the provider declares no steering.
+   * takes only what can be folded into it, which is nothing where the
+   * provider declares no steering.
    */
   const heldBack = (
     session: StoredSession,
-    modelSelection: ModelSelection | undefined,
   ): Effect.Effect<boolean, Validation | SqlError | Schema.SchemaError> =>
     Effect.gen(function* () {
       if (session.status !== "busy") return session.status !== "idle";
-      if (modelSelection !== undefined) return true;
       const { definition } = yield* resolved(session.instanceId);
       return definition.declared.steering !== "native";
     });
@@ -425,10 +428,15 @@ const make = Effect.gen(function* () {
    * machine to say what it did with it. `none` where there is no connection or
    * nothing came back in time; the wait is outside any transaction. The caller
    * holds the row's claim around this.
+   *
+   * The session's current model rides every frame: only the adapter knows
+   * whether the input about to be sent opens a turn, which is the only moment
+   * a harness will take a model change.
    */
   const deliverTo = (
     runnerId: string,
     row: StoredInput,
+    modelSelection: ModelSelection,
   ): Effect.Effect<Option.Option<SessionInputResult>> =>
     Effect.gen(function* () {
       const deadline = yield* SessionInputDeadline;
@@ -438,10 +446,7 @@ const make = Effect.gen(function* () {
           _tag: "sessionInput",
           requestId: row.id,
           sessionId: row.sessionId,
-          input: {
-            text: row.text,
-            ...(row.modelSelection === null ? {} : { modelSelection: row.modelSelection }),
-          },
+          input: { text: row.text, modelSelection },
         },
         deadline,
       );
@@ -456,13 +461,6 @@ const make = Effect.gen(function* () {
       sql,
       Effect.gen(function* () {
         yield* inputs.delivered(row.id, delivery, yield* nowIso);
-        // A harness takes a model change only on the input that opens a turn,
-        // so an opening delivery is the only one that can have changed what the
-        // session runs under. It sticks to the session rather than the turn, so
-        // a resume or a fork carries it.
-        if (delivery === "opened" && row.modelSelection !== null) {
-          yield* sessions.selectModel(row.sessionId, row.modelSelection);
-        }
         yield* announce({ _tag: "record", topic: "session", id: row.sessionId, kind: "updated" });
       }),
     );
@@ -504,26 +502,20 @@ const make = Effect.gen(function* () {
    * that row and everything behind it queued for the session's next transition
    * to idle. Nothing resends on its own: there is no outbox yet.
    */
-  const releasing = (
-    sessionId: string,
-    runnerId: string,
-    openedAt: number | undefined,
-  ): Effect.Effect<number | undefined, SqlError> =>
+  const releasing = (sessionId: string, runnerId: string): Effect.Effect<void, SqlError> =>
     Effect.gen(function* () {
-      let opened = openedAt;
       while (true) {
         const next = (yield* inputs.queued(sessionId)).find((row) => !sending.has(row.id));
-        if (next === undefined) return opened;
-        // A harness takes a model change only on the input that opens a turn,
-        // so a row carrying one waits for a boundary of its own rather than
-        // being folded into a turn this flush has already opened. Only a
-        // boundary arriving after that opening ends the turn it opened, which
-        // is what the count says and a flag could not.
-        if (opened === flushing.get(sessionId) && next.modelSelection !== null) return opened;
+        if (next === undefined) return;
+        // Read fresh for every row, the same as the queue itself: a model
+        // change can land on the session while an earlier row in this flush
+        // is still on the wire.
+        const found = yield* sessions.one(sessionId);
+        if (Option.isNone(found)) return;
         const outcome = yield* claimed(
           next.id,
           Effect.gen(function* () {
-            const answer = yield* deliverTo(runnerId, next);
+            const answer = yield* deliverTo(runnerId, next, found.value.modelSelection);
             if (Option.isNone(answer)) return undefined;
             const delivery = answer.value.ok ? answer.value.delivery : undefined;
             if (delivery === undefined) {
@@ -534,8 +526,7 @@ const make = Effect.gen(function* () {
             return delivery;
           }),
         );
-        if (outcome === undefined) return opened;
-        if (outcome === "opened") opened = flushing.get(sessionId);
+        if (outcome === undefined) return;
       }
     });
 
@@ -557,11 +548,10 @@ const make = Effect.gen(function* () {
       flushing.set(sessionId, 0);
       return Effect.ensuring(
         Effect.gen(function* () {
-          let openedAt: number | undefined;
           let ran: number;
           do {
             ran = flushing.get(sessionId) ?? 0;
-            openedAt = yield* releasing(sessionId, runnerId, openedAt);
+            yield* releasing(sessionId, runnerId);
           } while ((flushing.get(sessionId) ?? 0) !== ran);
         }),
         Effect.sync(() => flushing.delete(sessionId)),
@@ -716,7 +706,6 @@ const make = Effect.gen(function* () {
             source: "user",
             actor: USER_ACTOR,
             text: open.prompt,
-            modelSelection: undefined,
             at,
           });
           yield* audit.append({
@@ -878,6 +867,28 @@ const make = Effect.gen(function* () {
       }),
 
     /**
+     * What the session runs under from here on. The stored `spec` is left
+     * alone: it is the document the runner was started with, and a resume or
+     * a fork reads the session's own `modelSelection` instead.
+     */
+    update: (input: UpdateInput): Effect.Effect<Session, InputError> =>
+      Effect.gen(function* () {
+        yield* requireGrant("session.update");
+        const { id, model } = yield* Effect.mapError(decodeUpdate(input), validationOf);
+        const session = yield* one(id);
+        if (session.status === "exited") return yield* Effect.fail(invalidState(HAS_EXITED));
+        const modelSelection = { model, options: session.modelSelection.options };
+        yield* withTransaction(
+          sql,
+          Effect.gen(function* () {
+            yield* sessions.selectModel(id, modelSelection);
+            yield* announce({ _tag: "record", topic: "session", id, kind: "updated" });
+          }),
+        );
+        return { ...session, modelSelection };
+      }),
+
+    /**
      * One turn's input. Stored first, so the answer names a row the caller can
      * edit or cancel, and then either sent or left for the next flush.
      *
@@ -888,13 +899,10 @@ const make = Effect.gen(function* () {
     input: (input: InputInput): Effect.Effect<SessionInputOutcome, InputError> =>
       Effect.gen(function* () {
         yield* requireGrant("session.input");
-        const { id, text, modelSelection } = yield* Effect.mapError(
-          decodeInput(input),
-          validationOf,
-        );
+        const { id, text } = yield* Effect.mapError(decodeInput(input), validationOf);
         const session = yield* one(id);
         if (session.status === "exited") return yield* Effect.fail(invalidState(HAS_EXITED));
-        const hold = yield* heldBack(session, modelSelection);
+        const hold = yield* heldBack(session);
         const row = yield* withTransaction(
           sql,
           Effect.gen(function* () {
@@ -903,7 +911,6 @@ const make = Effect.gen(function* () {
               source: "user",
               actor: USER_ACTOR,
               text,
-              modelSelection,
               at: yield* nowIso,
             });
             // Claimed before the row is visible to anything else: it stays
@@ -920,7 +927,7 @@ const make = Effect.gen(function* () {
         return yield* claimed(
           row.id,
           Effect.gen(function* () {
-            const answer = yield* deliverTo(session.runnerId, row);
+            const answer = yield* deliverTo(session.runnerId, row, session.modelSelection);
             if (Option.isNone(answer)) {
               // Read again rather than trusted from before the wait: what
               // decides is whether a boundary is still to come, and a turn can

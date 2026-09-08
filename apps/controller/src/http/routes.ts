@@ -255,6 +255,9 @@ const sessionRoutes = HttpApiBuilder.group(api, "session", (handlers) =>
       .handle("query", ({ query }) => operation(sessions.query(query)))
       .handle("read", ({ params }) => operation(sessions.read(params)))
       .handle("spawn", ({ payload }) => operation(sessions.spawn(payload)))
+      .handle("update", ({ params, payload }) =>
+        operation(sessions.update({ id: params.id, ...payload })),
+      )
       .handle("input", ({ params, payload }) =>
         operation(sessions.input({ id: params.id, ...payload })),
       )

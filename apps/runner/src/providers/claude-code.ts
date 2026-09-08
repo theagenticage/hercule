@@ -359,6 +359,8 @@ interface Live {
   readonly state: Normalizing;
   /** Set by `stopSession`, so the exit reason says it was asked for. */
   stopping: boolean;
+  /** The model the harness is running under, starting as the spec's. */
+  model: string;
 }
 
 export const claudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
@@ -505,6 +507,7 @@ export const claudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
               stream,
               state: normalizing(sessionId, () => crypto.randomUUID(), now),
               stopping: false,
+              model: spec.modelSelection.model,
             };
             live.set(sessionId, held);
             void pump(sessionId, held);
@@ -528,14 +531,17 @@ export const claudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
         const model = turn.modelSelection?.model;
         const before = yield* hosting(sessionId);
         // A model change lands only where a turn is about to open: mid-turn the
-        // harness is already answering under the model it started with. A model
-        // the harness will not take fails the input: delivering it under the old
+        // harness is already answering under the model it started with. Asked
+        // only where it differs from what was last applied, so a session with
+        // no change to make never waits on the harness for one. A model the
+        // harness will not take fails the input: delivering it under the old
         // one would answer for a turn the caller did not ask for.
-        if (model !== undefined && before.state.turnId === undefined) {
+        if (model !== undefined && model !== before.model && before.state.turnId === undefined) {
           const refused = yield* controlling(before.stream.setModel(model));
           if (refused !== undefined) {
             return yield* Effect.fail(`the model was not changed to ${model}: ${refused}`);
           }
+          before.model = model;
         }
         // Asked again, because `setModel` waits on the harness and the turn may
         // have opened, ended or the whole session gone while it did.

@@ -28,7 +28,6 @@ export default Effect.gen(function* () {
       source TEXT NOT NULL CHECK (source IN ('user', 'subscription', 'heartbeat', 'reminder')),
       actor TEXT NOT NULL,
       text TEXT NOT NULL,
-      model_selection TEXT CHECK (model_selection IS NULL OR json_valid(model_selection)),
       status TEXT NOT NULL CHECK (status IN ('queued', 'delivered', 'cancelled')),
       delivery TEXT CHECK (delivery IS NULL OR delivery IN ('opened', 'steered')),
       created_at TEXT NOT NULL,

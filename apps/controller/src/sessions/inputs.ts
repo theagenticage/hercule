@@ -9,7 +9,7 @@ import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
-import type { Delivery, ModelSelection } from "@hydra/protocol";
+import type { Delivery } from "@hydra/protocol";
 import type { InputSource, InputStatus, SortDirection } from "@hydra/contract";
 import {
   decodeCursor,
@@ -30,7 +30,6 @@ export interface StoredInput {
   readonly source: InputSource;
   readonly actor: string;
   readonly text: string;
-  readonly modelSelection: ModelSelection | null;
   readonly status: InputStatus;
   readonly delivery: Delivery | null;
   readonly createdAt: string;
@@ -42,7 +41,6 @@ export interface NewInput {
   readonly source: InputSource;
   readonly actor: string;
   readonly text: string;
-  readonly modelSelection: ModelSelection | undefined;
   readonly at: string;
 }
 
@@ -59,16 +57,13 @@ interface InputRow {
   readonly source: string;
   readonly actor: string;
   readonly text: string;
-  readonly model_selection: string | null;
   readonly status: string;
   readonly delivery: string | null;
   readonly created_at: string;
   readonly delivered_at: string | null;
 }
 
-const COLUMNS =
-  "id, session_id, source, actor, text, model_selection, status, delivery, " +
-  "created_at, delivered_at";
+const COLUMNS = "id, session_id, source, actor, text, status, delivery, created_at, delivered_at";
 
 const toInput = (row: InputRow): StoredInput => ({
   id: uuidToString(row.id),
@@ -76,8 +71,6 @@ const toInput = (row: InputRow): StoredInput => ({
   source: row.source as InputSource,
   actor: row.actor,
   text: row.text,
-  modelSelection:
-    row.model_selection === null ? null : (JSON.parse(row.model_selection) as ModelSelection),
   status: row.status as InputStatus,
   delivery: row.delivery as Delivery | null,
   createdAt: row.created_at,
@@ -102,13 +95,10 @@ const make = Effect.gen(function* () {
     insert: (input: NewInput): Effect.Effect<StoredInput, SqlError> =>
       Effect.gen(function* () {
         const id = mintUuid();
-        const modelSelection =
-          input.modelSelection === undefined ? null : JSON.stringify(input.modelSelection);
         yield* sql`
-          INSERT INTO session_inputs (id, session_id, source, actor, text, model_selection,
-                                      status, created_at)
+          INSERT INTO session_inputs (id, session_id, source, actor, text, status, created_at)
           VALUES (${id}, ${uuidFromString(input.sessionId)}, ${input.source}, ${input.actor},
-                  ${input.text}, ${modelSelection}, 'queued', ${input.at})
+                  ${input.text}, 'queued', ${input.at})
         `;
         return {
           id: uuidToString(id),
@@ -116,7 +106,6 @@ const make = Effect.gen(function* () {
           source: input.source,
           actor: input.actor,
           text: input.text,
-          modelSelection: input.modelSelection ?? null,
           status: "queued",
           delivery: null,
           createdAt: input.at,

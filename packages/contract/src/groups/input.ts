@@ -10,7 +10,7 @@
  * in `:inputId` is the row's.
  */
 import { Schema } from "effect";
-import { Delivery, ModelSelection } from "@hydra/protocol";
+import { Delivery } from "@hydra/protocol";
 import * as HttpApiEndpoint from "effect/unstable/httpapi/HttpApiEndpoint";
 import * as HttpApiGroup from "effect/unstable/httpapi/HttpApiGroup";
 import { closedStruct } from "../closed";
@@ -56,7 +56,6 @@ export const Input = Schema.Struct({
   source: InputSource,
   actor: Schema.String,
   text: Schema.String,
-  modelSelection: Schema.NullOr(ModelSelection),
   status: InputStatus,
   /** What the runner reported this input did, once it was delivered. */
   delivery: Schema.NullOr(Delivery),
