@@ -66,6 +66,12 @@ export {
   type PriorityReading,
 } from "./task-display";
 export { THREAD_ROWS_DEFAULT, threadRowsMode } from "./thread-rows";
+export { accessModeMenu, type AccessModeMenuItem } from "./threads/access-modes";
+export { headlineOf, lanesOf, type Lane, type LaneKind } from "./threads/lanes";
+export { modelMenu, type ModelMenuGroup, type ModelMenuModelRow } from "./threads/model-menu";
+export { threadRows, type ThreadRow } from "./threads/rows";
+export { runnerMenu, type RunnerMenu, type RunnerMenuRow } from "./threads/runner-menu";
+export { turnsOf, type ThreadItem, type ThreadTurn } from "./threads/turns";
 export {
   browserTimezone,
   FALLBACK_TIMEZONE,
