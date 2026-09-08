@@ -209,7 +209,8 @@ const row = (position: number, event: TranscriptRow["event"]): TranscriptRow => 
 });
 
 const TOOL_DETAIL = { name: "Bash", input: { command: "ls -la" } };
-const TOOL_TARGET = JSON.stringify(TOOL_DETAIL);
+/** `summarize`'s own summary of `TOOL_DETAIL`: the command, not the row's raw JSON. */
+const TOOL_TARGET = "ls -la";
 
 /**
  * Two completed turns: the first opens with a tool call (a divider to
@@ -554,9 +555,7 @@ describe("Thread: the live turn (AC-12)", () => {
     // own internal delays do not get on with a fully frozen fake clock.
     fireEvent.click(divider);
     await settle();
-    expect(reading()).toContain(
-      `command · ${JSON.stringify({ name: "Bash", input: { command: "pnpm test" } })} · running`,
-    );
+    expect(reading()).toContain("command · pnpm test · running");
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(1000);
@@ -1028,6 +1027,87 @@ describe("Thread: live subscriptions", () => {
   });
 });
 
+describe("Thread: auto-scroll follows new content", () => {
+  /**
+   * jsdom computes no layout, so the geometry `useStickToBottom` reads is set
+   * by hand on the document's own scrolling element - the thread has no
+   * scroll region of its own, the whole page does.
+   */
+  const scrollElement = (): Element => document.scrollingElement ?? document.documentElement;
+
+  const setGeometry = (values: {
+    scrollTop: number;
+    scrollHeight: number;
+    clientHeight: number;
+  }): void => {
+    const el = scrollElement();
+    Object.defineProperty(el, "scrollTop", {
+      value: values.scrollTop,
+      writable: true,
+      configurable: true,
+    });
+    Object.defineProperty(el, "scrollHeight", { value: values.scrollHeight, configurable: true });
+    Object.defineProperty(el, "clientHeight", { value: values.clientHeight, configurable: true });
+  };
+
+  afterEach(() => {
+    const el = scrollElement();
+    delete (el as { scrollTop?: number }).scrollTop;
+    delete (el as { scrollHeight?: number }).scrollHeight;
+    delete (el as { clientHeight?: number }).clientHeight;
+  });
+
+  const newRow = (): TranscriptRow =>
+    row(16, {
+      _tag: "turn.started",
+      eventId: "e16",
+      sessionId: SESSION_ID,
+      at: "2026-09-08T10:02:00.000Z",
+      turnId: "t3",
+    });
+
+  it("rejoins the tail on a :stream delta when the reader was at the bottom", async () => {
+    const { live } = await open(session({ status: "idle" }), twoCompletedTurns());
+    await waitFor(() => {
+      expect(live.topics()).toContain(sessionStreamTopic(SESSION_ID));
+    });
+
+    setGeometry({ scrollTop: 900, scrollHeight: 1000, clientHeight: 100 });
+    fireEvent.scroll(window);
+    await settle();
+
+    // A real browser's scrollHeight would already reflect the new row by the
+    // time the layout effect after this delta's commit runs.
+    setGeometry({ scrollTop: 900, scrollHeight: 1200, clientHeight: 100 });
+    act(() => {
+      live.push(sessionStreamTopic(SESSION_ID), { _tag: "delta", items: [newRow()], cursor: "16" });
+    });
+
+    await waitFor(() => {
+      expect(scrollElement().scrollTop).toBe(1200 - 100);
+    });
+  });
+
+  it("leaves the scroll position on a :stream delta when the reader had scrolled up", async () => {
+    const { live } = await open(session({ status: "idle" }), twoCompletedTurns());
+    await waitFor(() => {
+      expect(live.topics()).toContain(sessionStreamTopic(SESSION_ID));
+    });
+
+    setGeometry({ scrollTop: 0, scrollHeight: 1000, clientHeight: 100 });
+    fireEvent.scroll(window);
+    await settle();
+
+    setGeometry({ scrollTop: 0, scrollHeight: 1200, clientHeight: 100 });
+    act(() => {
+      live.push(sessionStreamTopic(SESSION_ID), { _tag: "delta", items: [newRow()], cursor: "16" });
+    });
+    await settle();
+
+    expect(scrollElement().scrollTop).toBe(0);
+  });
+});
+
 describe("Thread: top bar (AC-23)", () => {
   it("shows the thread's title and a mono thread · <short id> crumb instead of the screen title", async () => {
     await open(session({ status: "idle", title: "Fix the login bug" }), twoCompletedTurns());
@@ -1037,6 +1117,20 @@ describe("Thread: top bar (AC-23)", () => {
     });
     const crumb = screen.getByText("thread · 01a06d02");
     expect(crumb.className).toContain("font-mono");
+  });
+
+  it("truncates a long title with an ellipsis rather than pushing the crumb and clock out of place", async () => {
+    const longTitle =
+      "Fix the login bug for real this time and also the logout bug and the signup bug";
+    await open(session({ status: "idle", title: longTitle }), twoCompletedTurns());
+
+    const heading = await waitFor(() => screen.getByRole("heading", { level: 1 }));
+    expect(heading.className).toContain("truncate");
+    expect(heading.className).toContain("min-w-0");
+    expect(heading.className).not.toContain("shrink-0");
+
+    // The crumb and the clock still render in full - only the title gave way.
+    expect(screen.getByText("thread · 01a06d02").className).toContain("shrink-0");
   });
 });
 

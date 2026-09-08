@@ -1,5 +1,5 @@
 export { cn } from "./primitives/cn";
-export { Button, ButtonLink, type ButtonVariant } from "./primitives/button";
+export { Button, buttonClassName, type ButtonVariant } from "./primitives/button";
 export { Checkbox } from "./primitives/checkbox";
 export { Drawer } from "./primitives/drawer";
 export { Input } from "./primitives/input";

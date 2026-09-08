@@ -1,7 +1,8 @@
 import type { JSX } from "react";
 import { Checkbox, ListRow, SegmentedControl, SegmentedControlItem } from "@hydra/ui";
-import type { ModelMenuGroup } from "@hydra/client-core";
+import type { HydraClient, ModelMenuGroup } from "@hydra/client-core";
 import type { ModelOption } from "@hydra/contract";
+import { ProviderLogin } from "../provider-login";
 import { MenuRow } from "./menu-row";
 
 /**
@@ -11,6 +12,11 @@ import { MenuRow } from "./menu-row";
  * `select` option as a segmented row, a `boolean` one as a checkbox, no
  * free-text entry anywhere. A group already dimmed by `modelMenu` itself, or
  * forced dimmed by the caller once a thread has started, is never clickable.
+ *
+ * The expanded group's own dimmed reason (not logged in on this runner, or
+ * found nowhere yet) shows the same way a collapsed group's does, spec 14's
+ * `found, not logged in · Log in`; `Log in` opens the app's own login flow on
+ * `loginRunner` when there is one to log in on, else it is plain text.
  *
  * `onOptionChange` absent means the options are read-only: a started thread
  * has no way to change one in this build, so its own current values are
@@ -23,6 +29,9 @@ export function ModelMenuContent({
   options,
   selectedOptions,
   onOptionChange,
+  client,
+  loginRunner,
+  onLoggedIn,
 }: {
   readonly groups: readonly ModelMenuGroup[];
   readonly onPickModel: (slug: string) => void;
@@ -31,6 +40,10 @@ export function ModelMenuContent({
   readonly options: readonly ModelOption[];
   readonly selectedOptions: Readonly<Record<string, string | boolean>>;
   readonly onOptionChange?: ((id: string, value: string | boolean) => void) | undefined;
+  readonly client: HydraClient;
+  /** The machine a "Log in" logs in on; absent when there is no runner to log in on at all. */
+  readonly loginRunner: { readonly id: string; readonly name: string } | undefined;
+  readonly onLoggedIn: () => void;
 }): JSX.Element {
   return (
     <div className="flex flex-col gap-2">
@@ -42,7 +55,25 @@ export function ModelMenuContent({
                 <div className="truncate text-ink">
                   {group.displayName} · {group.name}
                 </div>
-                {group.identity === null && group.planLabel === null ? null : (
+                {group.dimmed !== null ? (
+                  <div className="flex items-center gap-1 truncate">
+                    <span>{group.dimmed}</span>
+                    <span>·</span>
+                    {loginRunner === undefined ? (
+                      <span>Log in</span>
+                    ) : (
+                      <ProviderLogin
+                        client={client}
+                        instanceId={group.instanceId}
+                        runnerId={loginRunner.id}
+                        subject={`${group.displayName} on ${loginRunner.name}`}
+                        label="Log in"
+                        variant="quiet"
+                        onLoggedIn={onLoggedIn}
+                      />
+                    )}
+                  </div>
+                ) : group.identity === null && group.planLabel === null ? null : (
                   <div className="truncate">
                     {group.identity}{" "}
                     {group.identity !== null && group.planLabel !== null ? "· " : ""}

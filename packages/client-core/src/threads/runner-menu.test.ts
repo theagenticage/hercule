@@ -5,7 +5,7 @@
  */
 import { describe, expect, it } from "vitest";
 import type { Runner } from "@hydra/contract";
-import { runnerMenu } from "./runner-menu";
+import { referenceRunner, runnerMenu } from "./runner-menu";
 import { BARE, instance, snapshot } from "../providers.testing";
 
 const runner = (overrides: Partial<Runner> & { id: string }): Runner => ({
@@ -158,5 +158,33 @@ describe("runnerMenu", () => {
     const claude = instance("claude-code", "Claude Code", []);
 
     expect(runnerMenu([offline, draining], null, claude).defaultRunnerId).toBeNull();
+  });
+});
+
+describe("referenceRunner", () => {
+  it("picks the selected runner when one is selected, dimmed or not", () => {
+    const a = runner({ id: "r-a", name: "a", connectivity: "offline" });
+    const b = runner({ id: "r-b", name: "b" });
+
+    expect(referenceRunner([a, b], "r-a", "r-b")).toBe(a);
+  });
+
+  it("falls back to the local runner when nothing is selected", () => {
+    const a = runner({ id: "r-a", name: "a" });
+    const b = runner({ id: "r-b", name: "b" });
+
+    expect(referenceRunner([a, b], "", "r-b")).toBe(b);
+  });
+
+  it("falls back to the first runner in the list when nothing is selected and there is no local runner", () => {
+    const a = runner({ id: "r-a", name: "a" });
+    const b = runner({ id: "r-b", name: "b" });
+
+    expect(referenceRunner([a, b], "", null)).toBe(a);
+    expect(referenceRunner([a, b], "not-a-runner-id", "also-not-one")).toBe(a);
+  });
+
+  it("has nothing to name when there are no runners at all", () => {
+    expect(referenceRunner([], "", null)).toBeUndefined();
   });
 });

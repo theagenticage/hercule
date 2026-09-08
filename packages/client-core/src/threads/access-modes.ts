@@ -1,24 +1,20 @@
 /**
- * The four access modes, in the one order they are ever shown, with the
- * downward-only fallback of spec 06 §8.4. `approval-required` sits at the
- * floor of that chain, so it is the fallback everything else lands on and
- * never dims itself, whatever a provider declares about it.
+ * The four access modes, in the one order they are ever shown, dimmed by the
+ * same downward-only fallback the controller spawns on (`nearestSupportedAccessMode`,
+ * spec 06 §8.4) - so a mode this menu shows as available is a mode the
+ * controller will actually grant.
  */
-import type { AccessMode, DeclaredCapabilities } from "@hydra/contract";
+import {
+  nearestSupportedAccessMode,
+  type AccessMode,
+  type DeclaredCapabilities,
+} from "@hydra/contract";
 
 export interface AccessModeMenuItem {
   readonly mode: AccessMode;
   readonly meaning: string;
   readonly dimmed: string | null;
 }
-
-/** Least to most permissive - the order the fallback walks down. */
-const CHAIN: readonly AccessMode[] = [
-  "approval-required",
-  "auto-accept-edits",
-  "auto",
-  "full-access",
-];
 
 const MEANINGS: Readonly<Record<AccessMode, string>> = {
   "approval-required": "asks for every side-effecting action",
@@ -30,17 +26,9 @@ const MEANINGS: Readonly<Record<AccessMode, string>> = {
 export const accessModeMenu = (
   declared: DeclaredCapabilities["accessModes"],
 ): readonly AccessModeMenuItem[] =>
-  CHAIN.map((mode, rank) => {
-    if (mode === "approval-required" || declared[mode] === "native") {
-      return { mode, meaning: MEANINGS[mode], dimmed: null };
-    }
-    let fallback: AccessMode = "approval-required";
-    for (let below = rank - 1; below >= 0; below--) {
-      const candidate = CHAIN[below]!;
-      if (candidate === "approval-required" || declared[candidate] === "native") {
-        fallback = candidate;
-        break;
-      }
-    }
-    return { mode, meaning: MEANINGS[mode], dimmed: `runs as ${fallback} on this provider` };
+  (["approval-required", "auto-accept-edits", "auto", "full-access"] as const).map((mode) => {
+    const fallback = nearestSupportedAccessMode(mode, declared);
+    const dimmed =
+      fallback === undefined || fallback === mode ? null : `runs as ${fallback} on this provider`;
+    return { mode, meaning: MEANINGS[mode], dimmed };
   });

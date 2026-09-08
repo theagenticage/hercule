@@ -59,4 +59,14 @@ describe("modelPillLabel", () => {
       "Claude Code · personal · claude-sonnet-5 · on",
     );
   });
+
+  it("drops an empty slug rather than leaving a dangling separator, when the instance offers no model yet", () => {
+    expect(modelPillLabel(INSTANCE, "", [], {})).toBe("Claude Code · personal");
+  });
+
+  it("joins only the parts it has when both the slug and the effort are missing", () => {
+    expect(modelPillLabel({ displayName: "Claude Code", name: "" }, "", [], {})).toBe(
+      "Claude Code",
+    );
+  });
 });

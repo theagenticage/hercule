@@ -1,4 +1,5 @@
 import type { JSX } from "react";
+import { Link } from "@tanstack/react-router";
 import type { ThreadRow } from "@hydra/client-core";
 import { DoneMark, WorkingMark, cn } from "@hydra/ui";
 
@@ -7,28 +8,26 @@ import { DoneMark, WorkingMark, cn } from "@hydra/ui";
  * output this way, differing only in what they pass as the second line (a
  * model slug in the sidebar's meta mode, a provider display name on All
  * sessions) and whether a row can be the open thread.
- *
- * `/threads/$id` is a route another slice of this ticket builds in its own
- * worktree, so the link is a path string rather than a typed `Link`.
  */
 export function ThreadRowView({
   mark,
   title,
   age,
   secondLine = null,
-  href,
+  sessionId,
   selected = false,
 }: {
   readonly mark: ThreadRow["mark"];
   readonly title: string;
   readonly age: string;
   readonly secondLine?: string | null;
-  readonly href: string;
+  readonly sessionId: string;
   readonly selected?: boolean;
 }): JSX.Element {
   return (
-    <a
-      href={href}
+    <Link
+      to="/threads/$sessionId"
+      params={{ sessionId }}
       aria-current={selected ? "page" : undefined}
       className={cn(
         "flex flex-col gap-px rounded-control px-2.5 py-[7px] text-row",
@@ -52,6 +51,6 @@ export function ThreadRowView({
       {secondLine === null ? null : (
         <span className="truncate pl-5 font-mono text-fine text-faint">{secondLine}</span>
       )}
-    </a>
+    </Link>
   );
 }

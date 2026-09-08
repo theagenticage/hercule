@@ -130,6 +130,19 @@ const INSTANCE_B = instance("01a06d02-1000-7000-8000-000000000002", "work", "Cla
   ]),
 ]);
 
+/**
+ * The real first-run state: the instance exists (spec 06 §2, one per shipped
+ * provider) but nothing has logged in on the one runner yet, so there is no
+ * snapshot at all - `runnerMenu`'s only row dims "not logged in" and its
+ * `defaultRunnerId` is null.
+ */
+const INSTANCE_FRESH = instance(
+  "01a06d02-1000-7000-8000-000000000003",
+  "Claude Code",
+  "Claude Code",
+  [],
+);
+
 const PROFILE_UNRESTRICTED: Profile = {
   id: "01a06d02-3000-7000-8000-000000000001",
   name: "unrestricted",
@@ -254,6 +267,36 @@ describe("Composer: new-thread defaults (AC-15)", () => {
     });
     expect(screen.getByRole("button", { name: /^auto$/i })).toBeDefined();
     expect(screen.getByText(PROFILE_WORKER.name)).toBeDefined();
+  });
+});
+
+describe("Composer: a fresh install, nothing logged in on the one runner yet", () => {
+  it("shows the pill with only the parts it has, never a dangling separator, when there is no model to offer", async () => {
+    await open([INSTANCE_FRESH]);
+
+    // No model, so no third segment and no dangling " ·" left over from one.
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Claude Code · Claude Code" })).toBeDefined();
+    });
+  });
+
+  it("names the runner in its own trigger, dimmed with its reason, instead of the bare word Runner", async () => {
+    await open([INSTANCE_FRESH]);
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: `${RUNNER.name} · not logged in` })).toBeDefined();
+    });
+    expect(screen.queryByRole("button", { name: "Runner" })).toBeNull();
+  });
+
+  it("shows the current instance's own dimmed reason in the model menu, with Log in beside it", async () => {
+    const user = userEvent.setup();
+    await open([INSTANCE_FRESH]);
+
+    await user.click(await screen.findByRole("button", { name: "Claude Code · Claude Code" }));
+
+    expect(await screen.findByText("found, not logged in")).toBeDefined();
+    expect(screen.getByRole("button", { name: "Log in" })).toBeDefined();
   });
 });
 

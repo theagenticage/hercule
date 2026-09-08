@@ -109,9 +109,7 @@ const openThreadId = (pathname: string): string | null =>
  * The threads face: the thread list and the one button that starts a thread.
  *
  * The row density is the seam the thread list is built on: what a row shows is
- * this setting's to say, and the list reads it from here. `/threads/new` and
- * `/threads/$id` are routes another slice of this ticket builds in its own
- * worktree, so both link by path rather than a typed `Link`.
+ * this setting's to say, and the list reads it from here.
  */
 function ThreadsFace({
   rows,
@@ -133,13 +131,13 @@ function ThreadsFace({
 
   return (
     <nav aria-label="Threads" className="flex min-h-0 flex-col">
-      <a
-        href="/threads/new"
+      <Link
+        to="/threads/new"
         className="mb-2.5 flex w-full items-center gap-2 rounded-control border border-line bg-raised px-2.5 py-1.5 text-left text-row font-emph text-ink shadow-card hover:bg-line-soft"
       >
         <span className="font-mono text-row text-faint">+</span>
         Create new thread
-      </a>
+      </Link>
       <div data-thread-rows={rows} className="min-h-0 flex-1 overflow-auto">
         {list.length === 0 ? (
           <>
@@ -156,7 +154,7 @@ function ThreadsFace({
               title={row.title}
               age={ageOf(row.activityAt, new Date())}
               secondLine={row.secondLine}
-              href={`/threads/${row.id}`}
+              sessionId={row.id}
               selected={row.id === currentId}
             />
           ))

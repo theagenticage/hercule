@@ -134,6 +134,25 @@ describe("modelMenu", () => {
     });
   });
 
+  it("speaks without naming a machine when the runner has no name - no runner exists at all", () => {
+    const groups = modelMenu(
+      [claudeCode, freshInstall],
+      { id: "", name: "" },
+      {
+        instanceId: claudeCode.id,
+        model: "claude-haiku-5",
+      },
+    );
+
+    expect(groups.find((group) => group.instanceId === freshInstall.id)).toMatchObject({
+      dimmed: "found, not logged in",
+    });
+    const missingRow = groups
+      .find((group) => group.instanceId === claudeCode.id)!
+      .models.find((model) => model.slug === "claude-haiku-5");
+    expect(missingRow).toMatchObject({ dimmed: "not offered on this runner" });
+  });
+
   it("carries the current model's option descriptors through verbatim", () => {
     const groups = modelMenu([claudeCode], RUNNER, {
       instanceId: claudeCode.id,

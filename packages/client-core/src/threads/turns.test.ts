@@ -228,6 +228,141 @@ describe("turnsOf", () => {
     ]);
   });
 
+  it("joins two distinct assistant_message items in one turn with a blank line, not a run-on sentence", () => {
+    const rows: TranscriptRow[] = [
+      row({
+        _tag: "turn.started",
+        eventId: nextId(),
+        sessionId: SESSION_ID,
+        at: "2026-09-08T10:00:00.000Z",
+        turnId: "t1",
+      }),
+      row({
+        _tag: "content.delta",
+        eventId: nextId(),
+        sessionId: SESSION_ID,
+        at: "2026-09-08T10:00:01.000Z",
+        turnId: "t1",
+        itemId: "a1",
+        streamKind: "assistant_text",
+        delta: "Sleep 1 ",
+      }),
+      row({
+        _tag: "content.delta",
+        eventId: nextId(),
+        sessionId: SESSION_ID,
+        at: "2026-09-08T10:00:01.500Z",
+        turnId: "t1",
+        itemId: "a1",
+        streamKind: "assistant_text",
+        delta: "of 4 finished.",
+      }),
+      row({
+        _tag: "content.delta",
+        eventId: nextId(),
+        sessionId: SESSION_ID,
+        at: "2026-09-08T10:00:02.000Z",
+        turnId: "t1",
+        itemId: "a2",
+        streamKind: "assistant_text",
+        delta: "Sleep 2 of 4 finished.",
+      }),
+    ];
+
+    const turns = turnsOf(rows);
+
+    expect(turns[0]!.assistantText).toBe("Sleep 1 of 4 finished.\n\nSleep 2 of 4 finished.");
+  });
+
+  it("summarizes a command item's target to the command it ran, not the row's raw JSON", () => {
+    // The real Claude adapter's shape for a shell item (spec 06 §6.3's
+    // command_execution): `{ name, input: { command, description } }`.
+    const rows: TranscriptRow[] = [
+      row({
+        _tag: "turn.started",
+        eventId: nextId(),
+        sessionId: SESSION_ID,
+        at: "2026-09-08T10:00:00.000Z",
+        turnId: "t1",
+      }),
+      row({
+        _tag: "item.started",
+        eventId: nextId(),
+        sessionId: SESSION_ID,
+        at: "2026-09-08T10:00:00.100Z",
+        turnId: "t1",
+        itemId: "tool1",
+        kind: "command_execution",
+        detail: {
+          name: "Bash",
+          input: { command: "ls -la", description: "List files" },
+        },
+      }),
+    ];
+
+    const turns = turnsOf(rows);
+
+    expect(turns[0]!.items[0]!.target).toBe("ls -la");
+  });
+
+  it("falls back down summarize's chain: file_path, then description, then name, then raw JSON", () => {
+    const fileChange = turnsOf([
+      row({
+        _tag: "item.started",
+        eventId: nextId(),
+        sessionId: SESSION_ID,
+        at: "2026-09-08T10:00:00.000Z",
+        turnId: "t-path",
+        itemId: "t-path",
+        kind: "file_change",
+        detail: { input: { file_path: "src/auth.ts" } },
+      }),
+    ]);
+    expect(fileChange[0]!.items[0]!.target).toBe("src/auth.ts");
+
+    const described = turnsOf([
+      row({
+        _tag: "item.started",
+        eventId: nextId(),
+        sessionId: SESSION_ID,
+        at: "2026-09-08T10:00:00.000Z",
+        turnId: "t-desc",
+        itemId: "t-desc",
+        kind: "file_change",
+        detail: { input: { description: "Search the web" } },
+      }),
+    ]);
+    expect(described[0]!.items[0]!.target).toBe("Search the web");
+
+    const named = turnsOf([
+      row({
+        _tag: "item.started",
+        eventId: nextId(),
+        sessionId: SESSION_ID,
+        at: "2026-09-08T10:00:00.000Z",
+        turnId: "t-name",
+        itemId: "t-name",
+        kind: "file_change",
+        detail: { name: "some_mcp_tool" },
+      }),
+    ]);
+    expect(named[0]!.items[0]!.target).toBe("some_mcp_tool");
+
+    const bare = turnsOf([
+      row({
+        _tag: "item.started",
+        eventId: nextId(),
+        sessionId: SESSION_ID,
+        at: "2026-09-08T10:00:00.000Z",
+        turnId: "t-json",
+        itemId: "t-json",
+        kind: "file_change",
+        detail: { foo: "bar" },
+      }),
+    ]);
+    expect(bare[0]!.items[0]!.target).toBe(JSON.stringify({ foo: "bar" }));
+  });
+
   it("leaves duration null and marks the still-open item running while a turn has no turn.completed yet", () => {
     const rows: TranscriptRow[] = [
       row({

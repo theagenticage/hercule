@@ -60,3 +60,18 @@ export const runnerMenu = (
 
   return { rows, defaultRunnerId };
 };
+
+/**
+ * The runner the composer names when it has to speak about one but none is
+ * selectable - a dimmed reason, the model menu's catalog: the selected runner
+ * when there is one, else the local machine, else the first runner in the
+ * list, else no runner exists at all to name.
+ */
+export const referenceRunner = (
+  runners: readonly Runner[],
+  selectedRunnerId: string,
+  localRunnerId: string | null,
+): Runner | undefined =>
+  runners.find((runner) => runner.id === selectedRunnerId) ??
+  runners.find((runner) => runner.id === localRunnerId) ??
+  runners[0];

@@ -50,10 +50,37 @@ const verbOf = (kind: ItemKind): string => VERBS[kind] ?? "unknown";
 /** Long enough to read as a summary, short enough that a whole file body never lands in a row. */
 const MAX_TARGET_LENGTH = 200;
 
+const asRecord = (value: unknown): Record<string, unknown> | undefined =>
+  typeof value === "object" && value !== null ? (value as Record<string, unknown>) : undefined;
+
+/**
+ * The one field of an item's `detail` a reader actually wants in a row: the
+ * command a shell item ran, the path a file item touched, or the description
+ * a tool call carried - never the row's own raw JSON when one of those exists.
+ * `detail` is adapter-owned Json (spec 06 §6.3), so every field is read
+ * optionally; the fallback is the same JSON dump this always fell back to.
+ */
+const textOf = (detail: Record<string, unknown>): string | undefined => {
+  const input = asRecord(detail.input);
+  const candidate =
+    input?.command ??
+    detail.command ??
+    input?.file_path ??
+    detail.path ??
+    input?.description ??
+    detail.description ??
+    detail.name;
+  return typeof candidate === "string" ? candidate : undefined;
+};
+
 /** `detail` is adapter-owned Json; a plain string speaks for itself, anything else is compact JSON. */
 const summarize = (detail: unknown): string => {
   if (detail === undefined || detail === null) return "";
-  const line = typeof detail === "string" ? (detail.split("\n")[0] ?? "") : JSON.stringify(detail);
+  const text =
+    typeof detail === "string"
+      ? detail
+      : (textOf(asRecord(detail) ?? {}) ?? JSON.stringify(detail));
+  const line = text.split("\n")[0] ?? "";
   return line.length > MAX_TARGET_LENGTH ? `${line.slice(0, MAX_TARGET_LENGTH)}…` : line;
 };
 
@@ -65,6 +92,8 @@ interface Building {
   items: ThreadItem[];
   itemIndex: Map<string, number>;
   assistantText: string;
+  /** Which item `assistantText`'s last delta belonged to - a turn's own paragraph break. */
+  lastAssistantItemId: string | null;
 }
 
 export const turnsOf = (rows: readonly TranscriptRow[]): readonly ThreadTurn[] => {
@@ -81,6 +110,7 @@ export const turnsOf = (rows: readonly TranscriptRow[]): readonly ThreadTurn[] =
       items: [],
       itemIndex: new Map(),
       assistantText: "",
+      lastAssistantItemId: null,
     };
     turns.set(turnId, made);
     return made;
@@ -127,7 +157,16 @@ export const turnsOf = (rows: readonly TranscriptRow[]): readonly ThreadTurn[] =
       }
       case "content.delta": {
         if (event.streamKind !== "assistant_text") break;
-        turnOf(event.turnId, event.at).assistantText += event.delta;
+        const turn = turnOf(event.turnId, event.at);
+        // A turn holds any number of model calls (spec 06 §6.2), so its
+        // assistant text can carry more than one assistant_message item; a
+        // new item's first delta after another's is a paragraph break, not a
+        // continuation, so the two never run together as one sentence.
+        if (turn.lastAssistantItemId !== null && turn.lastAssistantItemId !== event.itemId) {
+          turn.assistantText += "\n\n";
+        }
+        turn.assistantText += event.delta;
+        turn.lastAssistantItemId = event.itemId;
         break;
       }
       default:

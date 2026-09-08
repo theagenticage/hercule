@@ -68,6 +68,7 @@ export {
 export { THREAD_ROWS_DEFAULT, threadRowsMode } from "./thread-rows";
 export { accessModeMenu, type AccessModeMenuItem } from "./threads/access-modes";
 export { ageOf } from "./threads/age";
+export { defaultInstanceId } from "./threads/default-instance";
 export { headlineOf, lanesOf, type Lane, type LaneKind } from "./threads/lanes";
 export { modelMenu, type ModelMenuGroup, type ModelMenuModelRow } from "./threads/model-menu";
 export { modelPillLabel } from "./threads/model-pill";
@@ -79,7 +80,12 @@ export {
 export { formatDuration } from "./threads/duration";
 export { openItemOf } from "./threads/open-item";
 export { threadRows, type ThreadRow } from "./threads/rows";
-export { runnerMenu, type RunnerMenu, type RunnerMenuRow } from "./threads/runner-menu";
+export {
+  referenceRunner,
+  runnerMenu,
+  type RunnerMenu,
+  type RunnerMenuRow,
+} from "./threads/runner-menu";
 export { turnsOf, type ThreadItem, type ThreadTurn } from "./threads/turns";
 export {
   browserTimezone,

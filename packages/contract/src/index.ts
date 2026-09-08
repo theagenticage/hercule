@@ -62,6 +62,8 @@ export {
   sortParam,
 } from "./pagination";
 
+export { ACCESS_MODE_CHAIN, nearestSupportedAccessMode } from "./access-modes";
+
 export {
   MAX_PASSWORD_LENGTH,
   MAX_TIMEZONE_LENGTH,

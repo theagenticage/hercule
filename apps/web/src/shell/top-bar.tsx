@@ -46,13 +46,13 @@ export function TopBar({ settings }: { readonly settings: SettingsState }): JSX.
 
   return (
     <header className="flex items-baseline gap-3.5 px-8 pt-[22px]">
-      <h1 className="shrink-0 truncate text-title font-emph tracking-[-0.015em] text-ink">
+      <h1 className="min-w-0 truncate text-title font-emph tracking-[-0.015em] text-ink">
         {title}
       </h1>
       {isRouteCrumb(crumb) ? (
         <span className="shrink-0 font-mono text-fine text-faint tabular-nums">{crumb.crumb}</span>
       ) : null}
-      <span className="whitespace-nowrap text-[13px] text-muted">
+      <span className="shrink-0 whitespace-nowrap text-[13px] text-muted">
         {since ?? formatTimeContext(now, timezone)}
       </span>
       {known ? null : (

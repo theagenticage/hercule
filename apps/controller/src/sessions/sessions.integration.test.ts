@@ -516,6 +516,28 @@ describe("session.spawn with an explicit runner or profile", () => {
     });
   });
 
+  it("refuses a named runner that is retired, and says that - not draining", async () => {
+    await withFleet(async (arranged) => {
+      await Effect.runPromise(
+        Effect.orDie(
+          arranged.harness.sql`
+            UPDATE runners SET lifecycle = 'retired'
+            WHERE id = unhex(replace(${arranged.runnerId}, '-', ''))`,
+        ),
+      );
+
+      const response = await spawn(arranged, { prompt: "hello", runnerId: arranged.runnerId });
+
+      expect(response.status, await response.clone().text()).toBe(409);
+      const text = await response.text();
+      expect(text).toContain("retired");
+      expect(text).not.toContain("draining");
+      const listing = await get(arranged.harness.base, "/api/v1/sessions", arranged.token);
+      const page = (await listing.json()) as { items: ReadonlyArray<Session> };
+      expect(page.items).toEqual([]);
+    });
+  });
+
   it("refuses a named runner that is online but not logged in to the instance, and says that is why", async () => {
     await withFleet(async (arranged) => {
       await Effect.runPromise(

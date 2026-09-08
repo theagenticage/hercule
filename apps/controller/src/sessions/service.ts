@@ -20,7 +20,7 @@ import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
-import type { DeclaredCapabilities, ProviderDefinition } from "@hydra/plugin-host";
+import type { ProviderDefinition } from "@hydra/plugin-host";
 import {
   SessionSpec,
   type AccessMode,
@@ -38,6 +38,7 @@ import {
   INPUT_UPDATE_FIELDS,
   InvalidState,
   invalidState,
+  nearestSupportedAccessMode,
   NotFound,
   notFound,
   SESSION_SORT_FIELDS,
@@ -190,6 +191,7 @@ const NOT_RESUMABLE =
 
 /** Read at any runner named directly: for a session to continue on, and for one to spawn on. */
 const DRAINING = "that runner is draining and takes no new sessions";
+const RETIRED = "that runner is retired";
 
 const ALREADY_CARRIED_ON =
   "another session is already live against that one's provider-native session; " +
@@ -214,29 +216,6 @@ const NO_SUCH_PROFILE = "no such permission profile";
 const DEFAULT_PROFILE = "unrestricted";
 
 const DEFAULT_ACCESS_MODE: AccessMode = "approval-required";
-
-/**
- * Least permissive first. The fallback of spec 06 section 8.4 walks downward
- * from what was asked for, so a substitution is never more permissive; the row
- * keeps both modes, which is how the caller sees what it actually got.
- */
-const MODES: ReadonlyArray<AccessMode> = [
-  "approval-required",
-  "auto-accept-edits",
-  "auto",
-  "full-access",
-];
-
-const nearestSupported = (
-  requested: AccessMode,
-  declared: DeclaredCapabilities,
-): AccessMode | undefined => {
-  for (let index = MODES.indexOf(requested); index >= 0; index -= 1) {
-    const mode = MODES[index]!;
-    if (declared.accessModes[mode] === "native") return mode;
-  }
-  return undefined;
-};
 
 /**
  * A machine's own word that it can run this instance: the stored capability
@@ -371,7 +350,11 @@ const make = Effect.gen(function* () {
         return yield* Effect.fail(validation([{ path: ["runnerId"], message: NO_SUCH_RUNNER }]));
       }
       const runner = found.value;
-      if (runner.lifecycle !== "active") return yield* Effect.fail(invalidState(DRAINING));
+      if (runner.lifecycle !== "active") {
+        return yield* Effect.fail(
+          invalidState(runner.lifecycle === "retired" ? RETIRED : DRAINING),
+        );
+      }
       yield* requireOnline(runner);
       const snapshot = snapshots.find((one) => one.runnerId === runnerId && loggedIn(one));
       if (snapshot === undefined) return yield* Effect.fail(invalidState(NO_PLACEMENT));
@@ -824,7 +807,10 @@ const make = Effect.gen(function* () {
 
         const requestedAccessMode =
           decoded.accessMode ?? defaults["thread.accessMode"] ?? DEFAULT_ACCESS_MODE;
-        const accessMode = nearestSupported(requestedAccessMode, definition.declared);
+        const accessMode = nearestSupportedAccessMode(
+          requestedAccessMode,
+          definition.declared.accessModes,
+        );
         if (accessMode === undefined) {
           return yield* Effect.fail(
             invalidState(
@@ -1057,7 +1043,9 @@ const make = Effect.gen(function* () {
         // one takes none (spec 03 section 7). `resumable` says the transcript
         // is still there; this says the machine will not open it.
         if (machine.value.lifecycle !== "active") {
-          return yield* Effect.fail(invalidState(DRAINING));
+          return yield* Effect.fail(
+            invalidState(machine.value.lifecycle === "retired" ? RETIRED : DRAINING),
+          );
         }
         yield* requireOnline(machine.value);
         const { instance, snapshots } = yield* resolved(parent.instanceId);

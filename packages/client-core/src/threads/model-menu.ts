@@ -31,8 +31,12 @@ export const modelMenu = (
   instances: readonly ProviderInstance[],
   runner: Pick<Runner, "id" | "name">,
   current: { readonly instanceId: string; readonly model: string },
-): readonly ModelMenuGroup[] =>
-  instances.map((instance) => {
+): readonly ModelMenuGroup[] => {
+  // An unnamed runner is the caller's word that there is no machine to name -
+  // no runner exists at all - not an invitation to print a dangling "on ".
+  const runnerName = runner.name === "" ? "this runner" : runner.name;
+
+  return instances.map((instance) => {
     const snapshot = instance.snapshots.find((each) => each.runnerId === runner.id);
     const expanded = instance.id === current.instanceId;
 
@@ -53,7 +57,7 @@ export const modelMenu = (
         isDefault: false,
         isLegacy: false,
         current: true,
-        dimmed: `not offered on ${runner.name}`,
+        dimmed: `not offered on ${runnerName}`,
         options: [],
       });
     }
@@ -63,7 +67,7 @@ export const modelMenu = (
         ? "found, not logged in"
         : snapshot.auth.status === "ok"
           ? null
-          : `not logged in on ${runner.name}`;
+          : `not logged in on ${runnerName}`;
 
     return {
       instanceId: instance.id,
@@ -76,3 +80,4 @@ export const modelMenu = (
       models,
     };
   });
+};

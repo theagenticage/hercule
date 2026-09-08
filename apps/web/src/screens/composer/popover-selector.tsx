@@ -7,6 +7,11 @@ import { Popover, PopoverContent, PopoverTrigger, cn } from "@hydra/ui";
  * `onOpenChange` rather than owned here - so opening one closes whatever else
  * was open; Esc and an outside click are Radix's own `Popover` behaviour, free
  * once the pair is wired through like this.
+ *
+ * `avoidCollisions={false}` because AD-2 pins every selector's menu above its
+ * trigger, unconditionally - a selector sitting close to the bottom of the
+ * viewport (the setup bar) has less room below than above, and Radix's own
+ * collision avoidance would otherwise flip exactly that one to the bottom.
  */
 export function PopoverSelector({
   open,
@@ -41,6 +46,7 @@ export function PopoverSelector({
       <PopoverContent
         side="top"
         align="start"
+        avoidCollisions={false}
         className={cn("flex w-72 flex-col gap-1", contentClassName)}
       >
         {children}

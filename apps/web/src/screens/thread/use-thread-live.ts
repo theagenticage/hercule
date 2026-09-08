@@ -29,6 +29,8 @@ export const useThreadLive = (
   queryClient: QueryClient,
   sessionId: string,
   rows: readonly TranscriptRow[],
+  /** Called after a tap flush paints text - the one growth path no React render follows. */
+  onTapFlush: () => void,
 ): RefObject<HTMLSpanElement | null> => {
   const tailRef = useRef<HTMLSpanElement | null>(null);
   const bufferRef = useRef("");
@@ -47,7 +49,8 @@ export const useThreadLive = (
 
   const flushTail = useCallback(() => {
     if (tailRef.current !== null) tailRef.current.textContent = bufferRef.current;
-  }, []);
+    onTapFlush();
+  }, [onTapFlush]);
 
   const clearTail = useCallback(() => {
     if (frameRef.current !== null) {

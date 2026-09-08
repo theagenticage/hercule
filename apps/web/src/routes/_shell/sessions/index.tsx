@@ -68,7 +68,7 @@ function AllSessions(): JSX.Element {
                   secondLine={
                     instanceId === undefined ? null : (providerNames.get(instanceId) ?? null)
                   }
-                  href={`/threads/${row.id}`}
+                  sessionId={row.id}
                 />
               );
             })}

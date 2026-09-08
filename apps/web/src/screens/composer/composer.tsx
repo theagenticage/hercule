@@ -14,9 +14,11 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import {
   accessModeMenu,
+  defaultInstanceId,
   modelMenu,
   modelPillLabel,
   queryKeys,
+  referenceRunner,
   runnerMenu,
   threadModelField,
   type HydraClient,
@@ -37,19 +39,13 @@ import { MenuRow } from "./menu-row";
 import { ModelMenuContent } from "./model-menu-content";
 import { PopoverSelector } from "./popover-selector";
 import { QueuedInputs } from "./queued-inputs";
+import { SetupField } from "./setup-field";
 
 type SelectorKey =
   "workspace" | "checkout" | "branch" | "runner" | "profile" | "accessMode" | "model";
 
 const DEFAULT_PROFILE_NAME = "unrestricted";
 const DEFAULT_ACCESS_MODE: AccessMode = "approval-required";
-
-/** The shipped default until `thread.instanceId` is set: the first instance logged in anywhere. */
-const firstLoggedInInstanceId = (instances: readonly ProviderInstance[]): string =>
-  instances.find((instance) => instance.snapshots.some((snapshot) => snapshot.auth.status === "ok"))
-    ?.id ??
-  instances[0]?.id ??
-  "";
 
 /** The spawn defaults a new thread prefills from: `thread.*` settings, else the shipped ones. */
 const resolveDefaults = (
@@ -65,7 +61,7 @@ const resolveDefaults = (
   readonly runnerId: string;
   readonly profileId: string;
 } => {
-  const instanceId = settingsUser["thread.instanceId"] ?? firstLoggedInInstanceId(instances);
+  const instanceId = settingsUser["thread.instanceId"] ?? defaultInstanceId(instances);
   const instance = instances.find((each) => each.id === instanceId);
   const modelField =
     instance === undefined
@@ -99,6 +95,7 @@ export function Composer({
   localRunnerId,
   settingsUser,
   session,
+  onSend,
 }: {
   readonly client: HydraClient;
   readonly live: Live;
@@ -110,6 +107,8 @@ export function Composer({
   readonly settingsUser: SettingsState["user"];
   /** Undefined is new-thread mode; a Session is a started thread. */
   readonly session?: Session;
+  /** A started thread's own way to rejoin the transcript's tail the moment a message goes out. */
+  readonly onSend?: () => void;
 }): JSX.Element {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
@@ -159,7 +158,17 @@ export function Composer({
   };
 
   const instance = instances.find((each) => each.id === instanceId);
-  const pickedRunner = runners.find((each) => each.id === runnerId);
+  const accessModeItems =
+    instance === undefined ? [] : accessModeMenu(instance.declared.accessModes);
+  const runnerRows =
+    instance === undefined ? [] : runnerMenu(runners, localRunnerId, instance).rows;
+  // The runner the model menu and the runner selector's own trigger speak
+  // about when nothing is actually selectable: the selection itself when
+  // there is one, else the local machine, else the first runner at all -
+  // never the empty, unnamed runner a plain lookup on `runnerId` would leave
+  // when no runner is picked.
+  const pickedRunner = referenceRunner(runners, runnerId, localRunnerId);
+  const pickedRunnerRow = runnerRows.find((row) => row.runnerId === pickedRunner?.id);
   const pickedProfile = profiles.find((each) => each.id === profileId);
 
   const rawGroups =
@@ -194,10 +203,19 @@ export function Composer({
       ? model
       : modelPillLabel(instance, model, currentOptions, selectedOptions);
 
-  const accessModeItems =
-    instance === undefined ? [] : accessModeMenu(instance.declared.accessModes);
-  const runnerRows =
-    instance === undefined ? [] : runnerMenu(runners, localRunnerId, instance).rows;
+  // Once a thread starts the runner is a plain committed fact, never dimmed
+  // in its own right - the reason only matters while it is still a live pick.
+  const runnerLabel =
+    pickedRunner === undefined
+      ? "Runner"
+      : started || pickedRunnerRow?.dimmed == null
+        ? pickedRunner.name
+        : `${pickedRunner.name} · ${pickedRunnerRow.dimmed}`;
+
+  const rereadProviders = (): void => {
+    void queryClient.invalidateQueries({ queryKey: queryKeys.providers() });
+  };
+
   // Read only where `started` already guards it, so the mutations below never
   // reach for a session that is not there.
   const sessionId = session?.id ?? "";
@@ -238,8 +256,12 @@ export function Composer({
 
   const send = (): void => {
     if (prompt.trim() === "") return;
-    if (started) sendInput.mutate(prompt);
-    else spawn.mutate();
+    if (started) {
+      sendInput.mutate(prompt);
+      onSend?.();
+    } else {
+      spawn.mutate();
+    }
   };
 
   const exited = started && session.status === "exited";
@@ -339,6 +361,9 @@ export function Composer({
                   ? undefined
                   : (id, value) => setModelOptions((prev) => ({ ...prev, [id]: value }))
               }
+              client={client}
+              loginRunner={pickedRunner}
+              onLoggedIn={rereadProviders}
             />
           </PopoverSelector>
 
@@ -377,93 +402,83 @@ export function Composer({
 
       <div className="flex items-center justify-between text-fine text-faint">
         <div className="flex items-center gap-1">
-          {started ? (
-            <span className="px-2 py-1">No workspace</span>
-          ) : (
-            <PopoverSelector
-              open={openSelector === "workspace"}
-              onOpenChange={toggle("workspace")}
-              trigger="No workspace"
-            >
-              <MenuRow label="No workspace" selected onClick={() => setOpenSelector(null)} />
-              <MenuRow label="Adopt a folder on this machine…" dimmed="not built yet" />
-              <MenuRow label="Add a repo →" dimmed="not built yet" />
-            </PopoverSelector>
-          )}
-          {started ? (
-            <span className="px-2 py-1">—</span>
-          ) : (
-            <PopoverSelector
-              open={openSelector === "checkout"}
-              onOpenChange={toggle("checkout")}
-              trigger="Checkout"
-            >
-              <ListRow dimmed disabled>
-                <span className="truncate text-fine text-faint">no workspace</span>
-              </ListRow>
-            </PopoverSelector>
-          )}
-          {started ? (
-            <span className="px-2 py-1">—</span>
-          ) : (
-            <PopoverSelector
-              open={openSelector === "branch"}
-              onOpenChange={toggle("branch")}
-              trigger="Branch"
-            >
-              <ListRow dimmed disabled>
-                <span className="truncate text-fine text-faint">no workspace</span>
-              </ListRow>
-            </PopoverSelector>
-          )}
+          <SetupField
+            started={started}
+            lockedText="No workspace"
+            open={openSelector === "workspace"}
+            onOpenChange={toggle("workspace")}
+            trigger="No workspace"
+          >
+            <MenuRow label="No workspace" selected onClick={() => setOpenSelector(null)} />
+            <MenuRow label="Adopt a folder on this machine…" dimmed="not built yet" />
+            <MenuRow label="Add a repo →" dimmed="not built yet" />
+          </SetupField>
+          <SetupField
+            started={started}
+            lockedText="—"
+            open={openSelector === "checkout"}
+            onOpenChange={toggle("checkout")}
+            trigger="Checkout"
+          >
+            <ListRow dimmed disabled>
+              <span className="truncate text-fine text-faint">no workspace</span>
+            </ListRow>
+          </SetupField>
+          <SetupField
+            started={started}
+            lockedText="—"
+            open={openSelector === "branch"}
+            onOpenChange={toggle("branch")}
+            trigger="Branch"
+          >
+            <ListRow dimmed disabled>
+              <span className="truncate text-fine text-faint">no workspace</span>
+            </ListRow>
+          </SetupField>
         </div>
         <div className="flex items-center gap-1">
-          {started ? (
-            <span className="px-2 py-1">{pickedRunner?.name ?? ""}</span>
-          ) : (
-            <PopoverSelector
-              open={openSelector === "runner"}
-              onOpenChange={toggle("runner")}
-              trigger={pickedRunner?.name ?? "Runner"}
-            >
-              {runnerRows.map((row) => (
-                <MenuRow
-                  key={row.runnerId}
-                  label={row.name}
-                  secondLine={[row.identity, row.planLabel]
-                    .filter((each) => each !== null)
-                    .join(" · ")}
-                  dimmed={row.dimmed}
-                  selected={row.runnerId === runnerId}
-                  onClick={() => {
-                    setDraftRunnerId(row.runnerId);
-                    setOpenSelector(null);
-                  }}
-                />
-              ))}
-            </PopoverSelector>
-          )}
-          {started ? (
-            <span className="px-2 py-1">{pickedProfile?.name ?? ""}</span>
-          ) : (
-            <PopoverSelector
-              open={openSelector === "profile"}
-              onOpenChange={toggle("profile")}
-              trigger={pickedProfile?.name ?? "Profile"}
-            >
-              {profiles.map((each) => (
-                <MenuRow
-                  key={each.id}
-                  label={each.name}
-                  selected={each.id === profileId}
-                  onClick={() => {
-                    setDraftProfileId(each.id);
-                    setOpenSelector(null);
-                  }}
-                />
-              ))}
-            </PopoverSelector>
-          )}
+          <SetupField
+            started={started}
+            lockedText={pickedRunner?.name ?? ""}
+            open={openSelector === "runner"}
+            onOpenChange={toggle("runner")}
+            trigger={runnerLabel}
+          >
+            {runnerRows.map((row) => (
+              <MenuRow
+                key={row.runnerId}
+                label={row.name}
+                secondLine={[row.identity, row.planLabel]
+                  .filter((each) => each !== null)
+                  .join(" · ")}
+                dimmed={row.dimmed}
+                selected={row.runnerId === runnerId}
+                onClick={() => {
+                  setDraftRunnerId(row.runnerId);
+                  setOpenSelector(null);
+                }}
+              />
+            ))}
+          </SetupField>
+          <SetupField
+            started={started}
+            lockedText={pickedProfile?.name ?? ""}
+            open={openSelector === "profile"}
+            onOpenChange={toggle("profile")}
+            trigger={pickedProfile?.name ?? "Profile"}
+          >
+            {profiles.map((each) => (
+              <MenuRow
+                key={each.id}
+                label={each.name}
+                selected={each.id === profileId}
+                onClick={() => {
+                  setDraftProfileId(each.id);
+                  setOpenSelector(null);
+                }}
+              />
+            ))}
+          </SetupField>
         </div>
       </div>
     </div>

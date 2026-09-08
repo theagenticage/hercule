@@ -1,7 +1,7 @@
 import type { JSX } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
-import { threadModelField, threadRowsMode } from "@hydra/client-core";
+import { defaultInstanceId, threadModelField, threadRowsMode } from "@hydra/client-core";
 import type { AccessMode, ProviderInstance, ThreadRows } from "@hydra/contract";
 import { FormCard, Row, SegmentedControl, SegmentedControlItem, Select } from "@hydra/ui";
 import {
@@ -56,8 +56,11 @@ function Threads(): JSX.Element {
   // A stored id naming an instance that no longer exists falls back the same
   // way an unset one does, so the model field always has a picked instance to
   // read - never the empty, unexplained field a stale id would otherwise leave.
+  // The fallback is the same rule the composer prefills a new thread from.
+  const fallbackInstanceId = defaultInstanceId(instances);
   const instance =
-    instances.find((each) => each.id === settings.user["thread.instanceId"]) ?? instances[0];
+    instances.find((each) => each.id === settings.user["thread.instanceId"]) ??
+    instances.find((each) => each.id === fallbackInstanceId);
   const instanceId = instance?.id ?? "";
   const modelField =
     instance === undefined
