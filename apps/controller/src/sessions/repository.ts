@@ -31,6 +31,7 @@ import type { StreamRow } from "./stream";
 /** A session as it is stored. `resumable` is derived at read; see above. */
 export interface StoredSession {
   readonly id: string;
+  readonly title: string;
   readonly permissionProfileId: string;
   readonly instanceId: string;
   readonly runnerId: string;
@@ -49,6 +50,7 @@ export interface StoredSession {
 }
 
 export interface NewSession {
+  readonly title: string;
   readonly permissionProfileId: string;
   readonly instanceId: string;
   readonly runnerId: string;
@@ -78,6 +80,7 @@ export interface SessionPageRequest {
 
 interface SessionRow {
   readonly id: Uint8Array;
+  readonly title: string;
   readonly permission_profile_id: Uint8Array;
   readonly instance_id: Uint8Array;
   readonly runner_id: Uint8Array;
@@ -102,13 +105,14 @@ const RESUMABLE =
   "AND runners.lifecycle <> 'retired')) AS resumable";
 
 const COLUMNS =
-  "id, permission_profile_id, instance_id, runner_id, workspace_id, requested_access_mode, " +
+  "id, title, permission_profile_id, instance_id, runner_id, workspace_id, requested_access_mode, " +
   `access_mode, native_session_id, model_selection, parent_session_id, status, ` +
   `created_at, started_at, exited_at, ` +
   `last_activity_at, ${RESUMABLE}`;
 
 const toSession = (row: SessionRow): StoredSession => ({
   id: uuidToString(row.id),
+  title: row.title,
   permissionProfileId: uuidToString(row.permission_profile_id),
   instanceId: uuidToString(row.instance_id),
   runnerId: uuidToString(row.runner_id),
@@ -168,11 +172,11 @@ const make = Effect.gen(function* () {
           session.parentSessionId === undefined ? null : uuidFromString(session.parentSessionId);
         const workspace = session.workspaceId === null ? null : uuidFromString(session.workspaceId);
         yield* sql`
-          INSERT INTO sessions (id, permission_profile_id, instance_id, runner_id, workspace_id,
-                                requested_access_mode, access_mode, spec, model_selection,
-                                native_session_id, parent_session_id, status, created_at,
-                                last_activity_at)
-          VALUES (${id}, ${uuidFromString(session.permissionProfileId)},
+          INSERT INTO sessions (id, title, permission_profile_id, instance_id, runner_id,
+                                workspace_id, requested_access_mode, access_mode, spec,
+                                model_selection, native_session_id, parent_session_id, status,
+                                created_at, last_activity_at)
+          VALUES (${id}, ${session.title}, ${uuidFromString(session.permissionProfileId)},
                   ${uuidFromString(session.instanceId)}, ${uuidFromString(session.runnerId)},
                   ${workspace}, ${session.requestedAccessMode}, ${session.accessMode},
                   ${session.spec}, ${JSON.stringify(session.modelSelection)},
@@ -181,6 +185,7 @@ const make = Effect.gen(function* () {
         `;
         return {
           id: uuidToString(id),
+          title: session.title,
           permissionProfileId: session.permissionProfileId,
           instanceId: session.instanceId,
           runnerId: session.runnerId,

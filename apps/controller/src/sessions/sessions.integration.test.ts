@@ -36,7 +36,7 @@ import {
   type SessionInput,
 } from "@hydra/protocol";
 import type { Plugin, ProviderDefinition } from "@hydra/plugin-host";
-import type { Runner, Session } from "@hydra/contract";
+import type { Profile, Runner, Session } from "@hydra/contract";
 import {
   collecting,
   completeSetup,
@@ -623,6 +623,186 @@ describe("session.spawn", () => {
         text: "what is the time",
         modelSelection: session.modelSelection,
       });
+    });
+  });
+});
+
+/**
+ * Naming a runner or a profile is for this one call: the tests above cover
+ * what a caller gets by naming neither.
+ */
+describe("session.spawn with an explicit runner or profile", () => {
+  it("places the session on the runner an explicit runnerId names", async () => {
+    await withFleet(async (arranged) => {
+      const session = await spawned(arranged, { prompt: "hello", runnerId: arranged.runnerId });
+
+      expect(session.runnerId).toBe(arranged.runnerId);
+      const start = (await framesWhen<SessionStart>(arranged.wire, "sessionStart", 1))[0]!;
+      expect(start.sessionId).toBe(session.id);
+    });
+  });
+
+  it("honours an explicit runnerId even when that runner is reserved", async () => {
+    await withFleet(async (arranged) => {
+      // Reserved is set on the row rather than through `runner.update`, which
+      // refuses to reserve the fleet's default - and the one machine here is it.
+      await Effect.runPromise(
+        Effect.orDie(
+          arranged.harness.sql`
+            UPDATE runners SET reserved = 1
+            WHERE id = unhex(replace(${arranged.runnerId}, '-', ''))`,
+        ),
+      );
+
+      const session = await spawned(arranged, { prompt: "hello", runnerId: arranged.runnerId });
+
+      expect(session.runnerId).toBe(arranged.runnerId);
+    });
+  });
+
+  it("refuses a named runner that has gone offline, and writes no session row", async () => {
+    await withFleet(async (arranged) => {
+      arranged.wire.close();
+      await wentAway(arranged);
+
+      const response = await spawn(arranged, { prompt: "hello", runnerId: arranged.runnerId });
+
+      expect(response.status, await response.clone().text()).toBe(409);
+      const listing = await get(arranged.harness.base, "/api/v1/sessions", arranged.token);
+      const page = (await listing.json()) as { items: ReadonlyArray<Session> };
+      expect(page.items).toEqual([]);
+    });
+  });
+
+  it("refuses a named runner that is draining, and says that is why", async () => {
+    await withFleet(async (arranged) => {
+      await Effect.runPromise(
+        Effect.orDie(
+          arranged.harness.sql`
+            UPDATE runners SET lifecycle = 'draining'
+            WHERE id = unhex(replace(${arranged.runnerId}, '-', ''))`,
+        ),
+      );
+
+      const response = await spawn(arranged, { prompt: "hello", runnerId: arranged.runnerId });
+
+      expect(response.status, await response.clone().text()).toBe(409);
+      expect(await response.text()).toContain("draining");
+      const listing = await get(arranged.harness.base, "/api/v1/sessions", arranged.token);
+      const page = (await listing.json()) as { items: ReadonlyArray<Session> };
+      expect(page.items).toEqual([]);
+    });
+  });
+
+  it("refuses a named runner that is online but not logged in to the instance, and says that is why", async () => {
+    await withFleet(async (arranged) => {
+      await Effect.runPromise(
+        Effect.orDie(
+          arranged.harness.sql`
+            UPDATE capability_snapshots SET auth_status = 'unauthenticated'
+            WHERE runner_id = unhex(replace(${arranged.runnerId}, '-', ''))`,
+        ),
+      );
+
+      const response = await spawn(arranged, {
+        prompt: "hello",
+        instanceId: instanceOf(arranged, "full-provider"),
+        runnerId: arranged.runnerId,
+      });
+
+      expect(response.status, await response.clone().text()).toBe(409);
+      expect(await response.text()).toContain("logged in");
+      const listing = await get(arranged.harness.base, "/api/v1/sessions", arranged.token);
+      const page = (await listing.json()) as { items: ReadonlyArray<Session> };
+      expect(page.items).toEqual([]);
+    });
+  });
+
+  it("treats a runnerId naming no runner as validation, not a state conflict", async () => {
+    await withFleet(async (arranged) => {
+      const response = await spawn(arranged, {
+        prompt: "hello",
+        runnerId: "0199e0e7-9999-7000-8000-000000000000",
+      });
+
+      expect(response.status, await response.clone().text()).toBe(400);
+    });
+  });
+
+  it("puts the session under the profile an explicit profileId names", async () => {
+    await withFleet(async (arranged) => {
+      const listing = await get(arranged.harness.base, "/api/v1/profiles", arranged.token);
+      const body = await listing.clone().text();
+      const worker = ((await listing.json()) as { items: ReadonlyArray<Profile> }).items.find(
+        (one) => one.name === "worker",
+      );
+      expect(worker, body).toBeDefined();
+
+      const session = await spawned(arranged, { prompt: "hello", profileId: worker!.id });
+
+      expect(session.permissionProfileId).toBe(worker!.id);
+    });
+  });
+
+  it("fails validation on a profileId naming no profile", async () => {
+    await withFleet(async (arranged) => {
+      const response = await spawn(arranged, {
+        prompt: "hello",
+        profileId: "0199e0e7-9999-7000-8000-000000000000",
+      });
+
+      expect(response.status, await response.clone().text()).toBe(400);
+    });
+  });
+});
+
+/** The title a Thread shows in the sidebar, set once from the prompt that started it. */
+describe("session.spawn: the title a prompt leaves on the session", () => {
+  it("takes the prompt's first line, trimmed, as the title", async () => {
+    await withFleet(async (arranged) => {
+      const session = await spawned(arranged, { prompt: "  Fix the login bug\n\nDetails..." });
+
+      expect((session as unknown as { title: string }).title).toBe("Fix the login bug");
+      const read = await readSession(arranged, session.id);
+      expect((read as unknown as { title: string }).title).toBe("Fix the login bug");
+    });
+  });
+
+  it("cuts a first line over 80 characters down to exactly 80", async () => {
+    await withFleet(async (arranged) => {
+      const longLine =
+        "the bug is somewhere in the login flow and nobody can pin down exactly where it is";
+      expect(longLine.length).toBeGreaterThan(80);
+
+      const session = await spawned(arranged, { prompt: `${longLine}\nmore detail below` });
+
+      const title = (session as unknown as { title: string }).title;
+      expect(title).toBe(longLine.slice(0, 80));
+      expect(title).toHaveLength(80);
+    });
+  });
+
+  it("skips leading blank lines and takes the first line with content", async () => {
+    await withFleet(async (arranged) => {
+      const session = await spawned(arranged, {
+        prompt: "\n   \n\nActually, start here\nand then this",
+      });
+
+      expect((session as unknown as { title: string }).title).toBe("Actually, start here");
+    });
+  });
+
+  it("carries the title on the sessions list, not only on a single read", async () => {
+    await withFleet(async (arranged) => {
+      const session = await spawned(arranged, { prompt: "Fix the login bug\n\nDetails..." });
+
+      const listing = await get(arranged.harness.base, "/api/v1/sessions", arranged.token);
+      const page = (await listing.json()) as {
+        items: ReadonlyArray<Session & { title?: string }>;
+      };
+      const row = page.items.find((one) => one.id === session.id);
+
+      expect(row?.title).toBe("Fix the login bug");
     });
   });
 });

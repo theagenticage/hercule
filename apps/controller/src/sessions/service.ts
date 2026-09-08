@@ -188,7 +188,8 @@ const NOT_RESUMABLE =
   "that session is not resumable: it is still live, it left no provider-native session, " +
   "or its machine is gone";
 
-const DRAINING = "that session's runner is draining and takes no new sessions";
+/** Read at any runner named directly: for a session to continue on, and for one to spawn on. */
+const DRAINING = "that runner is draining and takes no new sessions";
 
 const ALREADY_CARRIED_ON =
   "another session is already live against that one's provider-native session; " +
@@ -204,6 +205,10 @@ const NOT_DELIVERED =
 
 const NO_PLACEMENT =
   "no connected runner is logged in to that provider instance; log in on a machine first";
+
+const NO_SUCH_RUNNER = "no such runner";
+
+const NO_SUCH_PROFILE = "no such permission profile";
 
 /** The shipped profile a thread takes when the user has chosen none (spec 02 Thread). */
 const DEFAULT_PROFILE = "unrestricted";
@@ -246,6 +251,19 @@ const loggedIn = (snapshot: StoredSnapshot): boolean => snapshot.auth.status ===
  */
 const nativeIdIn = (event: ProviderEvent): string | undefined =>
   event._tag === "session.started" ? event.providerRefs?.nativeSessionId : undefined;
+
+/** How long a sidebar row's title may run before it is cut. */
+const MAX_TITLE_LENGTH = 80;
+
+/**
+ * A short label for a session, read off its opening prompt rather than typed
+ * separately: the first line that is not blank, trimmed and capped, so a
+ * sidebar row has something to show without reading the transcript.
+ */
+const titleOf = (prompt: string): string => {
+  const line = prompt.split("\n").find((one) => one.trim().length > 0) ?? "";
+  return line.trim().slice(0, MAX_TITLE_LENGTH);
+};
 
 type ReadError = Unauthenticated | Forbidden | Validation | SqlError;
 
@@ -321,9 +339,9 @@ const make = Effect.gen(function* () {
     });
 
   /**
-   * Which machine hosts the session: the first that is online and holds a
-   * capability snapshot saying it has this instance's harness and a login for
-   * it. Naming a runner on spawn (spec 03 section 5.4) is not built yet.
+   * Which machine hosts the session, where the caller left it to placement:
+   * the first that is online and holds a capability snapshot saying it has
+   * this instance's harness and a login for it.
    */
   const placement = (
     snapshots: ReadonlyArray<StoredSnapshot>,
@@ -335,6 +353,40 @@ const make = Effect.gen(function* () {
       );
       if (found === undefined) return yield* Effect.fail(invalidState(NO_PLACEMENT));
       return found;
+    });
+
+  /**
+   * The one machine a caller named directly, honoured even where it is
+   * reserved or full: read and checked on its own, the way `continue` checks
+   * the one machine it is pinned to, rather than filtered through
+   * `placeable`, which exists only for the automatic fallback above.
+   */
+  const explicitRunner = (
+    runnerId: string,
+    snapshots: ReadonlyArray<StoredSnapshot>,
+  ): Effect.Effect<StoredSnapshot, InvalidState | Validation | SqlError> =>
+    Effect.gen(function* () {
+      const found = yield* runners.read(runnerId);
+      if (Option.isNone(found)) {
+        return yield* Effect.fail(validation([{ path: ["runnerId"], message: NO_SUCH_RUNNER }]));
+      }
+      const runner = found.value;
+      if (runner.lifecycle !== "active") return yield* Effect.fail(invalidState(DRAINING));
+      yield* requireOnline(runner);
+      const snapshot = snapshots.find((one) => one.runnerId === runnerId && loggedIn(one));
+      if (snapshot === undefined) return yield* Effect.fail(invalidState(NO_PLACEMENT));
+      return snapshot;
+    });
+
+  /** Refuses a profileId naming no profile, before it is trusted as this session's. */
+  const requireProfile = (
+    profileId: string,
+  ): Effect.Effect<void, Validation | GrantsError | SqlError> =>
+    Effect.gen(function* () {
+      const found = yield* profiles.getById(profileId);
+      if (Option.isNone(found)) {
+        return yield* Effect.fail(validation([{ path: ["profileId"], message: NO_SUCH_PROFILE }]));
+      }
     });
 
   /** The shipped thread default until the user has a `thread.instanceId` (spec 02 Thread). */
@@ -616,6 +668,7 @@ const make = Effect.gen(function* () {
           }
           const at = yield* nowIso;
           const row = yield* sessions.insert({
+            title: titleOf(open.prompt),
             permissionProfileId: open.permissionProfileId,
             instanceId: open.spec.instanceId,
             runnerId: open.runnerId,
@@ -747,7 +800,9 @@ const make = Effect.gen(function* () {
         const instanceId =
           decoded.instanceId ?? defaults["thread.instanceId"] ?? (yield* firstLoggedIn());
         const { instance, definition, snapshots } = yield* resolved(instanceId);
-        const hosting = yield* placement(snapshots);
+        const hosting = yield* decoded.runnerId === undefined
+          ? placement(snapshots)
+          : explicitRunner(decoded.runnerId, snapshots);
 
         const requestedAccessMode =
           decoded.accessMode ?? defaults["thread.accessMode"] ?? DEFAULT_ACCESS_MODE;
@@ -770,7 +825,9 @@ const make = Effect.gen(function* () {
           );
         }
 
-        const profileId = defaults["thread.profileId"] ?? (yield* threadProfile());
+        if (decoded.profileId !== undefined) yield* requireProfile(decoded.profileId);
+        const profileId =
+          decoded.profileId ?? defaults["thread.profileId"] ?? (yield* threadProfile());
 
         const spec = {
           instanceId,
