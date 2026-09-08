@@ -35,3 +35,23 @@ declare module "@tanstack/react-router" {
     readonly sinceMarker?: "lastChecked.intake";
   }
 }
+
+/**
+ * What a screen hands the shell about itself through its loader, for a title
+ * `staticData` cannot carry because it names one record rather than the
+ * screen: a thread's own title and its `thread · <id>` crumb (spec 14 §App
+ * shell, "On a thread: `project / title`, a `thread · <short id>` crumb").
+ * The top bar reads this in place of the static title wherever a route's
+ * loader returns one, so it stays generic to every such route rather than
+ * knowing about threads specifically.
+ */
+export interface RouteCrumb {
+  readonly title: string;
+  readonly crumb: string;
+}
+
+export const isRouteCrumb = (data: unknown): data is RouteCrumb =>
+  typeof data === "object" &&
+  data !== null &&
+  typeof (data as Partial<RouteCrumb>).title === "string" &&
+  typeof (data as Partial<RouteCrumb>).crumb === "string";

@@ -258,10 +258,42 @@
   animation: hydra-live-pulse 2.4s ease-in-out infinite;
 }
 
+/* The thread surface's live turn: a slow band of light sweeping through the
+   "Working for" divider's text, in the live hue throughout. Reduced motion
+   keeps the hue and drops the sweep, below. */
+@keyframes hydra-thread-shimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+.hydra-thread-shimmer {
+  background-image: linear-gradient(
+    90deg,
+    var(--live) 0%,
+    color-mix(in oklch, var(--live) 45%, var(--ink)) 50%,
+    var(--live) 100%
+  );
+  background-size: 200% 100%;
+  background-clip: text;
+  color: transparent;
+  animation: hydra-thread-shimmer 2.4s linear infinite;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .hydra-equalizer rect,
   .hydra-drawer,
-  .hydra-live-dot {
+  .hydra-live-dot,
+  .hydra-thread-shimmer {
     animation: none;
+  }
+
+  .hydra-thread-shimmer {
+    background-image: none;
+    background-clip: initial;
+    color: var(--live);
   }
 }

@@ -117,6 +117,10 @@ const validationFailure = {
   },
 };
 
+const notFoundFailure = {
+  error: { code: "not_found", message: "no session s_gone" },
+};
+
 const event = (id: number): Event => ({
   id,
   source: "platform",
@@ -478,6 +482,65 @@ describe("createLive", () => {
     assert.strictEqual(last?.cursor, "11");
     assert.deepStrictEqual(last?.items, [event(11)]);
     assert.strictEqual(last?.reset, false);
+  });
+
+  it("starts an append-only subscription from a cursor the caller already holds, not from the head", async () => {
+    // A caller that fetched a page over HTTP before subscribing has already
+    // read everything up to some position; starting the subscription from the
+    // head would miss whatever was written between that fetch and this call.
+    const { fetch } = ticketServer();
+    const { live: started, socket } = await connected(fetch);
+
+    started.subscribe("event", () => {}, "41");
+    await settle();
+
+    const call = socket.calls("subscribe")[0];
+    assert.deepStrictEqual(call?.payload, { topic: "event", cursor: "41" });
+  });
+
+  it("tells an append-only subscriber its topic is gone and stops retrying it, leaving the connection and other subscriptions untouched", async () => {
+    const { fetch } = ticketServer();
+    const { live: started, socket } = await connected(fetch);
+
+    const streamDeltas: Array<LiveDelta> = [];
+    const invalidations: Array<ReadonlyArray<LiveQueryKey>> = [];
+    started.subscribe("session:s_gone:stream", (delta) => streamDeltas.push(delta));
+    started.subscribe("task", (keys) => invalidations.push(keys));
+    await settle();
+
+    const streamCall = socket
+      .calls("subscribe")
+      .find((call) =>
+        call.payload === undefined
+          ? false
+          : (call.payload as { topic: string }).topic === "session:s_gone:stream",
+      );
+    assert.isDefined(streamCall);
+    socket.fail(streamCall?.id, notFoundFailure);
+    await settle();
+
+    assert.isTrue(
+      streamDeltas.some((delta) => delta.gone),
+      "the handler was never told the topic was gone",
+    );
+
+    // Nothing retries it: no second `subscribe` call for that topic appears,
+    // even after the backoff a transient refusal would wait out.
+    await vi.advanceTimersByTimeAsync(30_000);
+    await settle();
+    const streamCalls = socket
+      .calls("subscribe")
+      .filter(
+        (call) =>
+          (call.payload as { topic: string } | undefined)?.topic === "session:s_gone:stream",
+      );
+    assert.strictEqual(streamCalls.length, 1);
+
+    // The connection itself, and the other subscription on it, are unaffected.
+    assert.strictEqual(socket.readyState, 1);
+    socket.push("task", { _tag: "invalidate", ids: ["t1"], kind: "updated" });
+    await settle();
+    assert.isTrue(invalidations.length > 0, "the unrelated subscription stopped receiving pushes");
   });
 
   it("tells a capped reader to read everything again, and waits before asking again", async () => {

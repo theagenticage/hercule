@@ -36,6 +36,7 @@ import { Route as ShellSettingsSecretsRouteImport } from './routes/_shell/settin
 import { Route as ShellSettingsSystemRouteImport } from './routes/_shell/settings/system'
 import { Route as ShellSettingsThreadsRouteImport } from './routes/_shell/settings/threads'
 import { Route as ShellTasksIndexRouteImport } from './routes/_shell/tasks/index'
+import { Route as ShellThreadsSessionIdRouteImport } from './routes/_shell/threads/$sessionId'
 
 const ShellRoute = ShellRouteImport.update({
   id: '/_shell',
@@ -172,6 +173,11 @@ const ShellTasksIndexRoute = ShellTasksIndexRouteImport.update({
   path: '/tasks/',
   getParentRoute: () => ShellRoute,
 } as any)
+const ShellThreadsSessionIdRoute = ShellThreadsSessionIdRouteImport.update({
+  id: '/threads/$sessionId',
+  path: '/threads/$sessionId',
+  getParentRoute: () => ShellRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof ShellIndexRoute
@@ -196,6 +202,7 @@ export interface FileRoutesByFullPath {
   '/settings/secrets': typeof ShellSettingsSecretsRoute
   '/settings/system': typeof ShellSettingsSystemRoute
   '/settings/threads': typeof ShellSettingsThreadsRoute
+  '/threads/$sessionId': typeof ShellThreadsSessionIdRoute
   '/fleet/': typeof ShellFleetIndexRoute
   '/sessions/': typeof ShellSessionsIndexRoute
   '/settings/': typeof ShellSettingsIndexRoute
@@ -223,6 +230,7 @@ export interface FileRoutesByTo {
   '/settings/secrets': typeof ShellSettingsSecretsRoute
   '/settings/system': typeof ShellSettingsSystemRoute
   '/settings/threads': typeof ShellSettingsThreadsRoute
+  '/threads/$sessionId': typeof ShellThreadsSessionIdRoute
   '/fleet': typeof ShellFleetIndexRoute
   '/sessions': typeof ShellSessionsIndexRoute
   '/settings': typeof ShellSettingsIndexRoute
@@ -253,6 +261,7 @@ export interface FileRoutesById {
   '/_shell/settings/secrets': typeof ShellSettingsSecretsRoute
   '/_shell/settings/system': typeof ShellSettingsSystemRoute
   '/_shell/settings/threads': typeof ShellSettingsThreadsRoute
+  '/_shell/threads/$sessionId': typeof ShellThreadsSessionIdRoute
   '/_shell/fleet/': typeof ShellFleetIndexRoute
   '/_shell/sessions/': typeof ShellSessionsIndexRoute
   '/_shell/settings/': typeof ShellSettingsIndexRoute
@@ -283,6 +292,7 @@ export interface FileRouteTypes {
     | '/settings/secrets'
     | '/settings/system'
     | '/settings/threads'
+    | '/threads/$sessionId'
     | '/fleet/'
     | '/sessions/'
     | '/settings/'
@@ -310,6 +320,7 @@ export interface FileRouteTypes {
     | '/settings/secrets'
     | '/settings/system'
     | '/settings/threads'
+    | '/threads/$sessionId'
     | '/fleet'
     | '/sessions'
     | '/settings'
@@ -339,6 +350,7 @@ export interface FileRouteTypes {
     | '/_shell/settings/secrets'
     | '/_shell/settings/system'
     | '/_shell/settings/threads'
+    | '/_shell/threads/$sessionId'
     | '/_shell/fleet/'
     | '/_shell/sessions/'
     | '/_shell/settings/'
@@ -543,6 +555,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ShellTasksIndexRouteImport
       parentRoute: typeof ShellRoute
     }
+    '/_shell/threads/$sessionId': {
+      id: '/_shell/threads/$sessionId'
+      path: '/threads/$sessionId'
+      fullPath: '/threads/$sessionId'
+      preLoaderRoute: typeof ShellThreadsSessionIdRouteImport
+      parentRoute: typeof ShellRoute
+    }
   }
 }
 
@@ -587,6 +606,7 @@ interface ShellRouteChildren {
   ShellWorkflowsRoute: typeof ShellWorkflowsRoute
   ShellIndexRoute: typeof ShellIndexRoute
   ShellFleetRunnerIdRoute: typeof ShellFleetRunnerIdRoute
+  ShellThreadsSessionIdRoute: typeof ShellThreadsSessionIdRoute
   ShellFleetIndexRoute: typeof ShellFleetIndexRoute
   ShellSessionsIndexRoute: typeof ShellSessionsIndexRoute
   ShellTasksIndexRoute: typeof ShellTasksIndexRoute
@@ -603,6 +623,7 @@ const ShellRouteChildren: ShellRouteChildren = {
   ShellWorkflowsRoute: ShellWorkflowsRoute,
   ShellIndexRoute: ShellIndexRoute,
   ShellFleetRunnerIdRoute: ShellFleetRunnerIdRoute,
+  ShellThreadsSessionIdRoute: ShellThreadsSessionIdRoute,
   ShellFleetIndexRoute: ShellFleetIndexRoute,
   ShellSessionsIndexRoute: ShellSessionsIndexRoute,
   ShellTasksIndexRoute: ShellTasksIndexRoute,

@@ -75,6 +75,8 @@ export {
   type ThreadModelField,
   type ThreadModelFieldOption,
 } from "./threads/model-field";
+export { formatDuration } from "./threads/duration";
+export { openItemOf } from "./threads/open-item";
 export { threadRows, type ThreadRow } from "./threads/rows";
 export { runnerMenu, type RunnerMenu, type RunnerMenuRow } from "./threads/runner-menu";
 export { turnsOf, type ThreadItem, type ThreadTurn } from "./threads/turns";
