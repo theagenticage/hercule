@@ -1,12 +1,13 @@
 /**
- * The thread surface: a centered 800px column of turns, streaming live. The
- * composer that belongs under it is a later piece of work; this leaves its
- * shape rather than any of its behaviour.
+ * The thread surface: a centered 800px column of turns, streaming live, the
+ * composer floating at the foot (spec 14 §The thread surface).
  */
 import type { JSX } from "react";
 import { useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { turnsOf, type HydraClient, type Live } from "@hydra/client-core";
-import { transcriptQuery } from "../../app/queries";
+import type { Profile, ProviderInstance, Runner, SettingsState } from "@hydra/contract";
+import { sessionQuery, transcriptQuery } from "../../app/queries";
+import { Composer } from "../composer/composer";
 import { useThreadLive } from "./use-thread-live";
 import { Turn } from "./turn";
 
@@ -15,13 +16,24 @@ export function ThreadScreen({
   live,
   sessionId,
   timezone,
+  instances,
+  runners,
+  profiles,
+  localRunnerId,
+  settingsUser,
 }: {
   readonly client: HydraClient;
   readonly live: Live;
   readonly sessionId: string;
   readonly timezone: string;
+  readonly instances: readonly ProviderInstance[];
+  readonly runners: readonly Runner[];
+  readonly profiles: readonly Profile[];
+  readonly localRunnerId: string | null;
+  readonly settingsUser: SettingsState["user"];
 }): JSX.Element {
   const queryClient = useQueryClient();
+  const session = useSuspenseQuery(sessionQuery(client, sessionId)).data;
   const rows = useSuspenseQuery(transcriptQuery(client, sessionId)).data;
   const turns = turnsOf(rows);
   const tailRef = useThreadLive(live, queryClient, sessionId, rows);
@@ -47,9 +59,16 @@ export function ThreadScreen({
           />
         );
       })}
-      <div className="sticky bottom-0 mt-auto rounded-card border border-line-soft bg-surface px-4 py-6 text-fine text-faint">
-        The composer arrives in the next slice.
-      </div>
+      <Composer
+        client={client}
+        live={live}
+        instances={instances}
+        runners={runners}
+        profiles={profiles}
+        localRunnerId={localRunnerId}
+        settingsUser={settingsUser}
+        session={session}
+      />
     </div>
   );
 }

@@ -70,6 +70,7 @@ export { accessModeMenu, type AccessModeMenuItem } from "./threads/access-modes"
 export { ageOf } from "./threads/age";
 export { headlineOf, lanesOf, type Lane, type LaneKind } from "./threads/lanes";
 export { modelMenu, type ModelMenuGroup, type ModelMenuModelRow } from "./threads/model-menu";
+export { modelPillLabel } from "./threads/model-pill";
 export {
   threadModelField,
   type ThreadModelField,
