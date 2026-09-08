@@ -163,14 +163,23 @@ Semantics: [./06-providers.md](./06-providers.md), [./12-assistants.md](./12-ass
 | `session.query` | `{ status?, agentId?, thread?, assistantId?, runnerId?, runId?, actor?, since?, until? }` (`thread: true` = sessions with no agent) | `session.read` | `GET /sessions` |
 | `session.read` | `{ sessionId }` (the record: status, agent, runner, workspace, usage) | `session.read` | `GET /sessions/{id}` |
 | `session.spawn` | `{ agentId?, prompt, instanceId?, model?, accessMode?, workspace? }` -> `{ sessionId }`; without `agentId` the session is a Thread built from the `thread.*` settings plus the overrides given, allowed for actor `user` only (`forbidden` otherwise; [./02-domain-model.md](./02-domain-model.md) Thread) | `session.spawn` | `POST /sessions` |
-| `session.continue` | `{ sessionId, mode: "resume" \| "fork", prompt }` -> `{ sessionId }` | `session.spawn` | `POST /sessions/{id}/continue` |
-| `session.input` | `{ sessionId, content }` -> `{ inputId, result: "opened" \| "steered" }` | `session.steer` | `POST /sessions/{id}/input` |
+| `session.continue` | `{ sessionId, mode: "resume" \| "fork", prompt }` -> the new `Session` | `session.spawn` | `POST /sessions/{id}/continue` |
+| `session.input` | `{ sessionId, text, modelSelection? }` -> `{ inputId, result: "opened" \| "steered" \| "queued" }` | `session.steer` | `POST /sessions/{id}/input` |
 | `session.interrupt` / `session.stop` | `{ sessionId }` | `session.steer` | `POST /sessions/{id}/interrupt` / `.../stop` |
 | `session.respond` | `{ sessionId, requestId, decision: "allow" \| "allow_always" \| "deny" \| "cancel" }` | `session.steer` | `POST /sessions/{id}/respond` |
 | `input.query` | `{ sessionId }` (the controller-owned queue) | `session.read` | `GET /sessions/{id}/inputs` |
-| `input.update` / `input.cancel` | `{ inputId, content }` / `{ inputId }` | `session.steer` | `PATCH` / `DELETE /sessions/{id}/inputs/{inputId}` |
+| `input.update` / `input.cancel` | `{ sessionId, inputId, text }` / `{ sessionId, inputId }`, each answering the row | `session.steer` | `PATCH` / `DELETE /sessions/{id}/inputs/{inputId}` |
 | `transcript.read` | `{ sessionId, cursor? }` -> the normalized transcript | `session.read` | `GET /sessions/{id}/transcript` |
 | `transcript.query` | `{ text, sessionId?, agentId?, assistantId?, actor?, since?, until? }` -> `items: Passage[]` | `session.read` | `GET /transcripts` |
+
+*(Amended 2026-09-08, [#66](https://github.com/rogierpennink/hydra/issues/66).)* Three rows changed to match what shipped, rather than the code churning to match the table.
+
+- `session.input` answers `queued` as well as `opened` and `steered`. Section 5 of [./06-providers.md](./06-providers.md) requires a path that stores the input instead of sending it - a `starting` session, a busy one carrying a model change, a provider with no steering - and answering `steered` for an input that was not delivered would be the silent substitution this spec forbids everywhere else. `opened` and `steered` are the runner's own word for what it did; `queued` is the controller's, and it means the input is a stored row the caller can still edit or call off.
+- The input's text field is spelled `text`, not `content`, wherever it appears: `session.input`, `input.update` and the stored row ([./02-domain-model.md](./02-domain-model.md) Queued Input).
+- `session.continue` answers the whole new `Session`, and so does `session.spawn`, whose row above still writes the `{ sessionId }` it never shipped: a caller that has just created a session needs its status and its runner as much as its id.
+- `input.query` lists every input the session was ever given, oldest first, whatever became of each, not only the rows still queued. A queue you cannot look back through cannot tell you what was delivered.
+
+`session.respond` is not built: approvals are their own ticket.
 
 ```ts
 interface Passage { sessionId: string; turnId: string; at: string; excerpt: string }

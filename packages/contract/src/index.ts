@@ -124,16 +124,28 @@ export {
 } from "./groups/provider";
 export {
   MAX_PROMPT_LENGTH,
+  SESSION_CONTINUE_FIELDS,
   SESSION_INPUT_FIELDS,
   SESSION_SORT_FIELDS,
   SESSION_STATUSES,
   Session,
+  SessionContinueInput,
   SessionFilter,
+  SessionInputOutcome,
   SessionInputPayload,
-  SessionInputResult,
   SessionSpawnInput,
   SessionStatus,
 } from "./groups/session";
+export {
+  INPUT_SORT_FIELDS,
+  INPUT_SOURCES,
+  INPUT_UPDATE_FIELDS,
+  INPUT_STATUSES,
+  Input,
+  InputSource,
+  InputStatus,
+  InputUpdatePayload,
+} from "./groups/input";
 export { TRANSCRIPT_SORT_FIELDS, TranscriptRow } from "./groups/transcript";
 export { OwnerKind, SecretRef } from "./groups/secret";
 export { ControllerInfo, ControllerUpdateInput } from "./groups/controller";

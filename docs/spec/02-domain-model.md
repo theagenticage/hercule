@@ -168,6 +168,7 @@ Fields (pinned across [#6](https://github.com/rogierpennink/hydra/issues/6), [#7
 | `workspaceId` | optional; `null` is a workspace-less session |
 | `requestedAccessMode` | the access mode asked for by the user or the agent step |
 | `accessMode` | the effective mode after the hardcoded downward fallback; equals `spec.accessMode` |
+| `modelSelection` | the model and options in force now; seeded from `spec` at spawn and rewritten when a delivered input carries a new one, so resume and fork carry it |
 | `spec` | the controller-authored `SessionSpec`, stored byte-for-byte; fields owned by [06-providers.md](./06-providers.md) section 4 |
 | `nativeSessionId` | from the Session Binding, below |
 | `taskId`, `runId` + `stepId`, `conversationId` | all optional; a session may belong to none |
@@ -175,6 +176,8 @@ Fields (pinned across [#6](https://github.com/rogierpennink/hydra/issues/6), [#7
 | timestamps | `createdAt`, `startedAt`, `exitedAt`, `lastActivityAt` (inactivity and absolute timeouts themselves are runner-owned) |
 
 Session-only grants approved through a Permission Request attach to the Session (see Grant).
+
+*(Amended 2026-09-08, [#66](https://github.com/rogierpennink/hydra/issues/66).)* `modelSelection` is a field of its own rather than a read through `spec`, because the two would contradict each other: `spec` is the document the runner was sent and is never rewritten. `parentSessionId` stays null on a resume, which carries on the parent's own provider-native session and so has no second lineage to record.
 
 Status axis (consolidated from pinned lifecycle facts, owned by [06-providers.md](./06-providers.md)): `queued` (placement accepted but the runner is at its session cap) | `starting` | `idle` | `busy` (a turn is running; decides whether `sendInput` opens or steers) | `exited`. `resumable` is derived: `exited` and the runner still holds the provider-native state; it becomes false when that runner is retired or wiped.
 
@@ -195,6 +198,8 @@ Fields (from the normalized stream, [06-providers.md](./06-providers.md)): `id` 
 Purpose: controller-owned input waiting for the session's running turn to complete.
 
 Fields: `sessionId`, `content` (text; for subscription deliveries also the structured event payload alongside rendered text), `source` (user input, subscription delivery, heartbeat, reminder), `createdAt`, `deliveredAt?`. Editable and cancelable until the controller flushes it on `turn.completed`; delivery rides the runner protocol's seq/ack outbox. Status axis (spec-consolidated from "editable and cancelable until delivered"): `queued` -> `delivered` | `cancelled`.
+
+*(Amended 2026-09-08, [#66](https://github.com/rogierpennink/hydra/issues/66).)* Every input is one stored row, not only the ones that wait: an input delivered straight away is a row that goes `queued` -> `delivered` within the operation, which is what gives `session.input` an id to answer with and the actor stamp somewhere to live. The row is `{ id, sessionId, source, actor, text, modelSelection, status, delivery, createdAt, deliveredAt }`, with `modelSelection`, `delivery` and `deliveredAt` null rather than absent while there is nothing to say; the text field is spelled `text` (see [11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md) section 2), and a delivered row records the `delivery` the runner reported. The `content` above was the stale spelling. The flush trigger is the session's transition to `idle`, which covers both `turn.completed` and the `session.started` that ends `starting`, so a spawn's prompt is an ordinary queued row rather than state held in memory. `session.exited` cancels every row still `queued` except one the runner already has, which is answered on its own terms. Delivery does not ride the outbox the line above names: the outbox is not built ([03-controller-and-runners.md](./03-controller-and-runners.md) section 2.3), and an input is sent as a bounded request the runner answers.
 
 #### Session Binding
 

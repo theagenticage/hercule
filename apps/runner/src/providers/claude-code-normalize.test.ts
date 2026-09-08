@@ -549,22 +549,26 @@ describe("what an item says about itself", () => {
     });
   });
 
-  it("carries the user's own text, and drops what the harness synthesised", () => {
-    const running = state();
-    const sent = {
+  /**
+   * Spec 06 section 6.3 pins `steered` as read from `SendResult` and never
+   * inferred, and the echo cannot say which input it echoes. So the adapter is
+   * the one that reports a user message, and the normalizer reports none.
+   */
+  it("makes no user_message item out of the harness's echo of what was sent", () => {
+    const echoed = (content: unknown) => ({
       type: "user",
       session_id: NATIVE,
       parent_tool_use_id: null,
-      message: { role: "user", content: "run the tests" },
-    };
-    const events = normalize(running, sent as unknown as SDKMessage);
-    const opened = events.find((event) => event._tag === "item.started");
-    expect(opened?._tag === "item.started" ? opened.detail : undefined).toEqual({
-      text: "run the tests",
+      message: { role: "user", content },
     });
-    // A message the taxonomy has nothing to say about does not leave a turn
-    // behind it either.
-    expect(through([{ ...sent, isSynthetic: true }])).toEqual([]);
+
+    for (const content of ["run the tests", [{ type: "text", text: "run the tests" }]]) {
+      const running = state();
+      const events = normalize(running, echoed(content) as unknown as SDKMessage);
+      // Nothing at all: not the item, and not the turn the message opened on
+      // its way in either.
+      expect(events).toEqual([]);
+    }
   });
 
   it("puts the vendor payload on the unknown item, not on the turn it had to open", () => {

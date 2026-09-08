@@ -8,9 +8,9 @@
  * directory, so it cannot be copied into a temporary one. That test therefore
  * uses the developer's own login, spends a few tokens of it, and is opt-in.
  */
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { Duration, Effect, Stream } from "effect";
 import type { ProviderEvent, SessionSpec } from "@hydra/protocol";
@@ -186,5 +186,163 @@ describe.skipIf(!authed)("a real Claude Code session on this machine", () => {
       expect(await Effect.runPromise(claudeCode.listSessions)).toEqual([]);
     },
     Duration.toMillis(TURN_DEADLINE) * 2,
+  );
+});
+
+/**
+ * The one fact about the CLI this build could not read out of the SDK's types:
+ * whether `options.sessionId` is honoured together with `resume` and
+ * `forkSession: true`, which is what lets Hydra name a forked session the way it
+ * names a fresh one. If it is not, the fork's binding has to wait for the CLI's
+ * own `init` message instead, and this test's failure message says so.
+ *
+ * The cwd is a temporary directory, so the transcripts this test writes land in
+ * a `projects/<encoded-cwd>/` folder of their own and nothing of the
+ * developer's is read or rewritten. The config directory has to be the
+ * developer's own: on macOS a login is a Keychain item keyed by the config
+ * directory, so a temporary one never holds one and this would only ever skip.
+ */
+const PROJECTS = join(CONFIG_DIR, "projects");
+
+/** Every transcript under the instance home, wherever the CLI filed it. */
+const transcripts = (): ReadonlyArray<string> =>
+  !existsSync(PROJECTS)
+    ? []
+    : readdirSync(PROJECTS, { withFileTypes: true })
+        .filter((entry) => entry.isDirectory())
+        .flatMap((entry) =>
+          readdirSync(join(PROJECTS, entry.name))
+            .filter((name) => name.endsWith(".jsonl"))
+            .map((name) => join(PROJECTS, entry.name, name)),
+        );
+
+const transcriptOf = (nativeSessionId: string): string | undefined =>
+  transcripts().find((path) => basename(path) === `${nativeSessionId}.jsonl`);
+
+/**
+ * The CLI writes the transcript as it goes, so a file that is not there the
+ * instant a turn completed is waited for rather than declared missing.
+ */
+const untilTranscript = async (nativeSessionId: string): Promise<string | undefined> => {
+  const deadline = Date.now() + Duration.toMillis(TURN_DEADLINE);
+  for (;;) {
+    const found = transcriptOf(nativeSessionId);
+    if (found !== undefined || Date.now() > deadline) return found;
+    await new Promise((resolve) => setTimeout(resolve, 200));
+  }
+};
+
+/** A fresh subscriber per session: the stream is unbounded and never replays. */
+const watching = (): Array<ProviderEvent> => {
+  const seen: Array<ProviderEvent> = [];
+  Effect.runFork(
+    Stream.runForEach(claudeCode.events, (event) => Effect.sync(() => void seen.push(event))),
+  );
+  return seen;
+};
+
+const PARENT = "0199e0e7-0000-7000-8000-00000000ff01";
+const FORKED = "0199e0e7-0000-7000-8000-00000000ff02";
+const RESUMED = "0199e0e7-0000-7000-8000-00000000ff03";
+
+describe.skipIf(!authed)("a real Claude Code session continued on this machine", () => {
+  it(
+    "forks under the native id Hydra minted, and resumes under the parent's own",
+    async () => {
+      const cwd = emptyHome();
+      const context: ProviderRunnerContext = {
+        cwd,
+        home: CONFIG_DIR,
+        binary: binary!,
+        env: {
+          PATH: process.env["PATH"] ?? "",
+          HOME: homedir(),
+          ...(process.env["ANTHROPIC_API_KEY"] === undefined
+            ? {}
+            : { ANTHROPIC_API_KEY: process.env["ANTHROPIC_API_KEY"] }),
+        },
+      };
+
+      /** Reads back out of a transcript, so a fork can be told from a fresh session. */
+      const marker = `hydra-fork-probe-${crypto.randomUUID().slice(0, 8)}`;
+      const asking = (text: string) => `Reply with the single word ready. Use no tools. ${text}`;
+
+      /** One session: start it, say one thing, wait the turn out, stop it. */
+      const oneTurn = async (
+        sessionId: string,
+        spec: SessionSpec,
+        text: string,
+      ): Promise<string> => {
+        const seen = watching();
+        const binding = await Effect.runPromise(claudeCode.startSession(sessionId, spec, context));
+        await Effect.runPromise(claudeCode.sendInput(sessionId, { text }));
+        await until(seen, "turn.completed");
+        await Effect.runPromise(claudeCode.stopSession(sessionId));
+        await until(seen, "session.exited");
+        return binding.nativeSessionId;
+      };
+
+      const parent = await oneTurn(PARENT, SPEC, asking(marker));
+      const parentFile = await untilTranscript(parent);
+      expect(
+        parentFile,
+        `no transcript for the parent session ${parent} under ${PROJECTS}`,
+      ).not.toBe(undefined);
+      const before = readFileSync(parentFile!, "utf8");
+      expect(before).toContain(marker);
+      const known = new Set(transcripts());
+
+      // Hydra names the forked session itself, because in streaming-input mode
+      // the CLI says nothing at all until a first turn arrives.
+      const forkSeen = watching();
+      const minted = await Effect.runPromise(
+        claudeCode.startSession(
+          FORKED,
+          { ...SPEC, continue: { nativeSessionId: parent, mode: "fork" } },
+          context,
+        ),
+      );
+      expect(minted.nativeSessionId).not.toBe(parent);
+      await Effect.runPromise(claudeCode.sendInput(FORKED, { text: asking("second") }));
+      await until(forkSeen, "turn.completed");
+      await Effect.runPromise(claudeCode.stopSession(FORKED));
+      await until(forkSeen, "session.exited");
+
+      const forkedFile = await untilTranscript(minted.nativeSessionId);
+      const appeared = transcripts().filter((path) => !known.has(path));
+      expect(
+        forkedFile,
+        `this CLI ignored options.sessionId beside resume + forkSession: true. Hydra minted ` +
+          `${minted.nativeSessionId}; the transcripts that appeared instead were ` +
+          `[${appeared.map((path) => basename(path)).join(", ")}]. Bind the fork from the CLI's ` +
+          `own init message and emit session.started there instead.`,
+      ).not.toBe(undefined);
+      // A fork carries the parent's history; a fresh session under a new name
+      // would pass every check above and none of this one.
+      expect(
+        readFileSync(forkedFile!, "utf8"),
+        `the fork under ${minted.nativeSessionId} does not carry the parent's history: ` +
+          `spec.continue reached the CLI as a fresh session, not as resume + forkSession.`,
+      ).toContain(marker);
+      // A fork that wrote into its parent would corrupt history nothing can repair.
+      expect(readFileSync(parentFile!, "utf8")).toBe(before);
+      expect(dirname(forkedFile!)).toBe(dirname(parentFile!));
+
+      // The resume. There is nothing to name: it continues the same native session.
+      const resumed = await oneTurn(
+        RESUMED,
+        { ...SPEC, continue: { nativeSessionId: parent, mode: "resume" } },
+        asking("third"),
+      );
+      expect(resumed).toBe(parent);
+      const after = readFileSync(parentFile!, "utf8");
+      expect(after.startsWith(before), "a resume rewrote the transcript instead of appending").toBe(
+        true,
+      );
+      expect(after.length).toBeGreaterThan(before.length);
+
+      expect(await Effect.runPromise(claudeCode.listSessions)).toEqual([]);
+    },
+    Duration.toMillis(TURN_DEADLINE) * 6,
   );
 });

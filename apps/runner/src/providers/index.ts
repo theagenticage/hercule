@@ -9,6 +9,7 @@ import {
   MAX_FACT_LENGTH,
   type ProbeResult,
   type ProviderEvent,
+  type SendResult,
   type SessionBinding,
   type SessionSpec,
   type TurnInput,
@@ -75,8 +76,18 @@ export interface ProviderAdapter {
     ctx: ProviderRunnerContext,
   ) => Effect.Effect<SessionBinding, string>;
 
-  /** Opens a turn on an idle session, steers a busy one. Never bounces input. */
-  readonly sendInput: (sessionId: string, input: TurnInput) => Effect.Effect<void, string>;
+  /**
+   * Opens a turn on an idle session, steers a busy one, and says which it did.
+   * The adapter is the only authority on that: nothing downstream may read it
+   * off the order events arrive in (ADR 0007). Never bounces input.
+   */
+  readonly sendInput: (sessionId: string, input: TurnInput) => Effect.Effect<SendResult, string>;
+
+  /**
+   * Ends the running turn. It completes as `interrupted` on `events`, which is
+   * the only report; a session this adapter does not hold has no turn to end.
+   */
+  readonly interrupt: (sessionId: string) => Effect.Effect<void>;
 
   /**
    * Ends the harness cleanly. `session.exited { reason: "stopped" }` follows on

@@ -270,15 +270,6 @@ const wholeItem = (
   completed(state, turnId, itemId, kind, "completed"),
 ];
 
-/** A user message has no stream kind of its own, so its text rides `detail`. */
-const userMessage = (state: Normalizing, turnId: string, text: string): Emit => {
-  const itemId = state.mint();
-  return [
-    started(state, turnId, itemId, "user_message", { text }),
-    completed(state, turnId, itemId, "user_message", "completed", { text }),
-  ];
-};
-
 /** The forward-compatible catch-all: an unmapped vendor message, with its raw. */
 const unknownItem = (state: Normalizing, out: Emit): void => {
   const turnId = inTurn(state, out);
@@ -395,17 +386,21 @@ const onAssistant = (
   }
 };
 
+/**
+ * A user message the harness sends back is its echo of what Hydra pushed, and
+ * an echo cannot say which input it echoes - which is what `user_message`
+ * carries as `steered` (spec 06 section 6.3). The adapter holds both, so it
+ * reports the user's own messages and nothing is read out of the echo. What is
+ * left here is the `tool_result` that closes the tool item one message later.
+ */
 const onUser = (
   state: Normalizing,
   sdk: Extract<SDKMessage, { type: "user" }>,
   out: Emit,
 ): void => {
-  const turnId = inTurn(state, out);
   const content = sdk.message.content;
-  if (typeof content === "string") {
-    if (sdk.isSynthetic !== true) out.push(...userMessage(state, turnId, content));
-    return;
-  }
+  if (typeof content === "string") return;
+  const turnId = inTurn(state, out);
   for (const block of content) {
     if (block.type === "tool_result") {
       const itemId = block.tool_use_id === "" ? state.mint() : block.tool_use_id;
@@ -419,10 +414,6 @@ const onUser = (
             : { content: typeof block.content === "string" ? said(block.content) : block.content }),
         }),
       );
-      continue;
-    }
-    if (block.type === "text" && sdk.isSynthetic !== true) {
-      out.push(...userMessage(state, turnId, block.text));
     }
   }
 };

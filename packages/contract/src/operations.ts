@@ -193,6 +193,41 @@ const TABLE = {
     method: "POST",
     path: "/api/v1/sessions/:id/input",
   },
+  "session.interrupt": {
+    requires: "session.steer",
+    method: "POST",
+    path: "/api/v1/sessions/:id/interrupt",
+  },
+  "session.stop": {
+    requires: "session.steer",
+    method: "POST",
+    path: "/api/v1/sessions/:id/stop",
+  },
+  // Opening a second session against one native transcript, so it is spawning
+  // and not steering, whatever the id in the path says.
+  "session.continue": {
+    requires: "session.spawn",
+    method: "POST",
+    path: "/api/v1/sessions/:id/continue",
+  },
+
+  // Owned sub-resources of a session: the id in the path is the session's, and
+  // the grant is the session's, because an input is what that session was told.
+  "input.query": {
+    requires: "session.read",
+    method: "GET",
+    path: "/api/v1/sessions/:id/inputs",
+  },
+  "input.update": {
+    requires: "session.steer",
+    method: "PATCH",
+    path: "/api/v1/sessions/:id/inputs/:inputId",
+  },
+  "input.cancel": {
+    requires: "session.steer",
+    method: "DELETE",
+    path: "/api/v1/sessions/:id/inputs/:inputId",
+  },
 
   // An owned sub-resource: the id in the path is the session's, and the grant
   // is the session's own read, because a transcript is what that session said.

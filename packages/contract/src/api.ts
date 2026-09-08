@@ -12,6 +12,7 @@ import { apiKey } from "./groups/api-key";
 import { auth } from "./groups/auth";
 import { controller } from "./groups/controller";
 import { event } from "./groups/event";
+import { input } from "./groups/input";
 import { plugin } from "./groups/plugin";
 import { profile } from "./groups/profile";
 import { provider } from "./groups/provider";
@@ -41,6 +42,7 @@ export const api = HttpApi.make("hydra")
     plugin,
     provider,
     session,
+    input,
     transcript,
     controller,
   )

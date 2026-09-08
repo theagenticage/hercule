@@ -111,9 +111,13 @@ export const commandHelp = (command: Command): ReadonlyArray<string> => {
       const what =
         field.name === "id"
           ? "a canonical id, or an unambiguous tail of 8 or more characters"
-          : field.choices !== undefined
-            ? `one of: ${field.choices.join(", ")}`
-            : "text";
+          : // Only the `id` of a route resolves a tail, so an id argument that
+            // is not it says so rather than reading as free text.
+            field.name.endsWith("Id")
+            ? "a canonical id, written out in full"
+            : field.choices !== undefined
+              ? `one of: ${field.choices.join(", ")}`
+              : "text";
       lines.push(`  ${`<${field.name}>`.padEnd(width)}  ${what}`);
     }
   }

@@ -6,7 +6,7 @@
  * downward fallback of [06-providers section 8.4] must never be silent.
  */
 import { Schema } from "effect";
-import { AccessMode } from "@hydra/protocol";
+import { AccessMode, ModelSelection } from "@hydra/protocol";
 import * as HttpApiEndpoint from "effect/unstable/httpapi/HttpApiEndpoint";
 import * as HttpApiGroup from "effect/unstable/httpapi/HttpApiGroup";
 import { closedStruct } from "../closed";
@@ -26,7 +26,7 @@ import { bounded } from "../strings";
 /** The longest prompt or turn input the API takes: it crosses the runner socket in one frame. */
 export const MAX_PROMPT_LENGTH = 64 * 1024;
 
-const Prompt = bounded(1, MAX_PROMPT_LENGTH);
+export const Prompt = bounded(1, MAX_PROMPT_LENGTH);
 
 /**
  * Where a session stands. `queued` is placement accepted with the runner full
@@ -57,6 +57,14 @@ export const Session = Schema.Struct({
   accessMode: AccessMode,
   /** The provider-native id, once the runner has reported its binding. */
   nativeSessionId: Schema.NullOr(Schema.String),
+  /**
+   * What the session runs under now. It starts as the spec's and is rewritten
+   * by an input that changed the model, so a resume or a fork carries the
+   * model the conversation ended on rather than the one it opened with.
+   */
+  modelSelection: ModelSelection,
+  /** Set where this session was forked off another one; null for a resume. */
+  parentSessionId: Schema.NullOr(Id),
   createdAt: Timestamp,
   startedAt: Schema.NullOr(Timestamp),
   exitedAt: Schema.NullOr(Timestamp),
@@ -84,18 +92,50 @@ export type SessionSpawnInput = Schema.Schema.Type<typeof SessionSpawnInput>;
  * One turn's input. Declared apart from the payload so a service can spread it
  * beside the session id and hold an in-process caller to the same bound.
  */
-export const SESSION_INPUT_FIELDS = { text: Prompt } as const;
+export const SESSION_INPUT_FIELDS = {
+  text: Prompt,
+  /**
+   * A model change rides the input that opens a turn, because that is the only
+   * moment a harness will take one; an input carrying it is held back rather
+   * than folded into a turn already running.
+   */
+  modelSelection: Schema.optionalKey(ModelSelection),
+} as const;
 
 export const SessionInputPayload = closedStruct(SESSION_INPUT_FIELDS);
 
 export type SessionInputPayload = Schema.Schema.Type<typeof SessionInputPayload>;
 
-/** Folding input into a turn already running is steering, hence the `session.steer` grant. */
-export const SessionInputResult = Schema.Struct({
-  result: Schema.Literals(["opened", "steered"]),
+/**
+ * What one input did. `inputId` names the row it was stored as, which is what a
+ * caller edits or cancels while it is still `queued`.
+ *
+ * Folding input into a turn already running is steering, hence the
+ * `session.steer` grant. `opened` and `steered` are the runner's own words for
+ * what it did with it; `queued` is the controller's, for an input the session
+ * cannot take yet.
+ */
+export const SessionInputOutcome = Schema.Struct({
+  inputId: Id,
+  result: Schema.Literals(["opened", "steered", "queued"]),
 });
 
-export type SessionInputResult = Schema.Schema.Type<typeof SessionInputResult>;
+export type SessionInputOutcome = Schema.Schema.Type<typeof SessionInputOutcome>;
+
+/**
+ * Carrying a session on: `resume` continues the provider-native session the
+ * parent left behind, `fork` branches off it and leaves the parent's own
+ * history untouched. Either way the new session lands on the parent's runner
+ * and provider instance, because that is where the native state is.
+ */
+export const SESSION_CONTINUE_FIELDS = {
+  mode: Schema.Literals(["resume", "fork"]),
+  prompt: Prompt,
+} as const;
+
+export const SessionContinueInput = closedStruct(SESSION_CONTINUE_FIELDS);
+
+export type SessionContinueInput = Schema.Schema.Type<typeof SessionContinueInput>;
 
 export const SessionFilter = Schema.Struct({
   status: Schema.optionalKey(SessionStatus),
@@ -127,7 +167,23 @@ export const session = HttpApiGroup.make("session")
     HttpApiEndpoint.post("input", "/sessions/:id/input", {
       params: { id: Id },
       payload: SessionInputPayload,
-      success: SessionInputResult,
+      success: SessionInputOutcome,
+      error: [Unauthenticated, Forbidden, Validation, NotFound, InvalidState, Internal],
+    }),
+    HttpApiEndpoint.post("interrupt", "/sessions/:id/interrupt", {
+      params: { id: Id },
+      success: Session,
+      error: [Unauthenticated, Forbidden, Validation, NotFound, InvalidState, Internal],
+    }),
+    HttpApiEndpoint.post("stop", "/sessions/:id/stop", {
+      params: { id: Id },
+      success: Session,
+      error: [Unauthenticated, Forbidden, Validation, NotFound, InvalidState, Internal],
+    }),
+    HttpApiEndpoint.post("continue", "/sessions/:id/continue", {
+      params: { id: Id },
+      payload: SessionContinueInput,
+      success: Session,
       error: [Unauthenticated, Forbidden, Validation, NotFound, InvalidState, Internal],
     }),
   )

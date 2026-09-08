@@ -10,7 +10,7 @@ import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
-import type { AccessMode, ProviderEvent } from "@hydra/protocol";
+import type { AccessMode, ModelSelection, ProviderEvent } from "@hydra/protocol";
 import type { SessionStatus, SortDirection } from "@hydra/contract";
 import {
   decodeCursor,
@@ -38,6 +38,8 @@ export interface StoredSession {
   readonly requestedAccessMode: AccessMode;
   readonly accessMode: AccessMode;
   readonly nativeSessionId: string | null;
+  readonly modelSelection: ModelSelection;
+  readonly parentSessionId: string | null;
   readonly status: SessionStatus;
   readonly resumable: boolean;
   readonly createdAt: string;
@@ -50,10 +52,19 @@ export interface NewSession {
   readonly permissionProfileId: string;
   readonly instanceId: string;
   readonly runnerId: string;
+  readonly workspaceId: string | null;
   readonly requestedAccessMode: AccessMode;
   readonly accessMode: AccessMode;
   /** The encoded `SessionSpec`, stored as the exact string that goes on the wire. */
   readonly spec: string;
+  readonly modelSelection: ModelSelection;
+  /**
+   * Known at insert only where the session resumes another one: it carries on
+   * the same provider-native session, so there is nothing to wait to be told.
+   * A fresh session and a fork are both named by the machine and bound later.
+   */
+  readonly nativeSessionId: string | undefined;
+  readonly parentSessionId: string | undefined;
   readonly at: string;
 }
 
@@ -74,6 +85,8 @@ interface SessionRow {
   readonly requested_access_mode: string;
   readonly access_mode: string;
   readonly native_session_id: string | null;
+  readonly model_selection: string;
+  readonly parent_session_id: Uint8Array | null;
   readonly status: string;
   readonly resumable: number;
   readonly created_at: string;
@@ -90,7 +103,8 @@ const RESUMABLE =
 
 const COLUMNS =
   "id, permission_profile_id, instance_id, runner_id, workspace_id, requested_access_mode, " +
-  `access_mode, native_session_id, status, created_at, started_at, exited_at, ` +
+  `access_mode, native_session_id, model_selection, parent_session_id, status, ` +
+  `created_at, started_at, exited_at, ` +
   `last_activity_at, ${RESUMABLE}`;
 
 const toSession = (row: SessionRow): StoredSession => ({
@@ -102,6 +116,8 @@ const toSession = (row: SessionRow): StoredSession => ({
   requestedAccessMode: row.requested_access_mode as AccessMode,
   accessMode: row.access_mode as AccessMode,
   nativeSessionId: row.native_session_id,
+  modelSelection: JSON.parse(row.model_selection) as ModelSelection,
+  parentSessionId: row.parent_session_id === null ? null : uuidToString(row.parent_session_id),
   status: row.status as SessionStatus,
   resumable: row.resumable === 1,
   createdAt: row.created_at,
@@ -148,13 +164,19 @@ const make = Effect.gen(function* () {
     insert: (session: NewSession): Effect.Effect<StoredSession, SqlError> =>
       Effect.gen(function* () {
         const id = mintUuid();
+        const parent =
+          session.parentSessionId === undefined ? null : uuidFromString(session.parentSessionId);
+        const workspace = session.workspaceId === null ? null : uuidFromString(session.workspaceId);
         yield* sql`
-          INSERT INTO sessions (id, permission_profile_id, instance_id, runner_id,
-                                requested_access_mode, access_mode, spec, status,
-                                created_at, last_activity_at)
+          INSERT INTO sessions (id, permission_profile_id, instance_id, runner_id, workspace_id,
+                                requested_access_mode, access_mode, spec, model_selection,
+                                native_session_id, parent_session_id, status, created_at,
+                                last_activity_at)
           VALUES (${id}, ${uuidFromString(session.permissionProfileId)},
                   ${uuidFromString(session.instanceId)}, ${uuidFromString(session.runnerId)},
-                  ${session.requestedAccessMode}, ${session.accessMode}, ${session.spec},
+                  ${workspace}, ${session.requestedAccessMode}, ${session.accessMode},
+                  ${session.spec}, ${JSON.stringify(session.modelSelection)},
+                  ${session.nativeSessionId ?? null}, ${parent},
                   'starting', ${session.at}, ${session.at})
         `;
         return {
@@ -162,10 +184,12 @@ const make = Effect.gen(function* () {
           permissionProfileId: session.permissionProfileId,
           instanceId: session.instanceId,
           runnerId: session.runnerId,
-          workspaceId: null,
+          workspaceId: session.workspaceId,
           requestedAccessMode: session.requestedAccessMode,
           accessMode: session.accessMode,
-          nativeSessionId: null,
+          nativeSessionId: session.nativeSessionId ?? null,
+          modelSelection: session.modelSelection,
+          parentSessionId: session.parentSessionId ?? null,
           status: "starting",
           resumable: false,
           createdAt: session.at,
@@ -309,6 +333,34 @@ const make = Effect.gen(function* () {
           exited_at = CASE WHEN ${status} = 'exited' AND exited_at IS NULL THEN ${at}
                            ELSE exited_at END
         WHERE id = ${uuidFromString(sessionId)} AND status <> 'exited'
+      `),
+
+    /**
+     * Whether any session is still live against this provider-native session.
+     * Two harnesses writing one native transcript corrupts it beyond anything
+     * Hydra could repair (spec 06 section 4.1), so a resume asks first.
+     */
+    liveOn: (nativeSessionId: string): Effect.Effect<boolean, SqlError> =>
+      Effect.map(
+        sql<{ readonly id: Uint8Array }>`
+          SELECT id FROM sessions
+          WHERE native_session_id = ${nativeSessionId} AND status <> 'exited' LIMIT 1
+        `,
+        (rows) => rows.length > 0,
+      ),
+
+    /**
+     * The model the session runs under from here on. `spec` is left alone: it
+     * is the document the runner was told at start, and rewriting it would
+     * destroy the record of what that was.
+     */
+    selectModel: (
+      sessionId: string,
+      modelSelection: ModelSelection,
+    ): Effect.Effect<void, SqlError> =>
+      Effect.asVoid(sql`
+        UPDATE sessions SET model_selection = ${JSON.stringify(modelSelection)}
+        WHERE id = ${uuidFromString(sessionId)}
       `),
 
     touched: (sessionId: string, at: string): Effect.Effect<void, SqlError> =>

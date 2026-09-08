@@ -418,6 +418,7 @@ export const connect = (
         // a session started one frame ago must not overtake the start.
         if (message._tag === "sessionStart") return yield* supervisor.start(message);
         if (message._tag === "sessionInput") return yield* supervisor.input(message);
+        if (message._tag === "sessionInterrupt") return yield* supervisor.interrupt(message);
         if (message._tag === "sessionStop") return yield* supervisor.stop(message);
         // An ack belongs to the replayable events nothing sends yet.
       });

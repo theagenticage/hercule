@@ -319,7 +319,7 @@ const SPEC: SessionSpec = {
 const WORKING: ProviderRunnerContext = { ...CONTEXT, cwd: "/var/hydra/runner/scratch/one" };
 
 /** The harness end of a session, driven by the test one message at a time. */
-const driving = (): {
+interface Driving {
   readonly adapter: ProviderAdapter;
   readonly options: Array<Options>;
   readonly sent: Array<SDKUserMessage>;
@@ -327,8 +327,17 @@ const driving = (): {
   readonly say: (message: unknown) => void;
   readonly end: () => void;
   readonly die: (reason: Error) => void;
+  readonly models: Array<string>;
   readonly closed: () => number;
-} => {
+  readonly interrupted: () => number;
+  /** A harness that will not take the model it was asked for. */
+  refusesModel: boolean;
+  /** A harness that takes its time over it, so a stop can land while it does. */
+  holdsModel: boolean;
+  readonly releaseModel: () => void;
+}
+
+const driving = (): Driving => {
   const options: Array<Options> = [];
   const sent: Array<SDKUserMessage> = [];
   const seen: Array<ProviderEvent> = [];
@@ -336,8 +345,11 @@ const driving = (): {
   const waiting: Array<(result: IteratorResult<unknown>) => void> = [];
   const failing: Array<(reason: Error) => void> = [];
   const done: IteratorResult<unknown> = { done: true, value: undefined };
+  const models: Array<string> = [];
   let ended = false;
   let closes = 0;
+  let interrupts = 0;
+  let releaseModel: (() => void) | undefined;
 
   const adapter = claudeCodeAdapter({
     query: () => {
@@ -366,6 +378,18 @@ const driving = (): {
             });
           },
         }),
+        interrupt: () => {
+          interrupts += 1;
+          return Promise.resolve();
+        },
+        setModel: (model) => {
+          if (harness.refusesModel) return Promise.reject(new Error(`no such model: ${model}`));
+          models.push(model);
+          if (!harness.holdsModel) return Promise.resolve();
+          return new Promise<void>((resolve) => {
+            releaseModel = resolve;
+          });
+        },
         close: () => {
           closes += 1;
           ended = true;
@@ -380,11 +404,15 @@ const driving = (): {
     Stream.runForEach(adapter.events, (event) => Effect.sync(() => void seen.push(event))),
   );
 
-  return {
+  const harness: Driving = {
     adapter,
     options,
     sent,
     seen,
+    models,
+    refusesModel: false,
+    holdsModel: false,
+    releaseModel: () => releaseModel?.(),
     say: (message) => {
       const wake = waiting.shift();
       if (wake === undefined) queued.push(message);
@@ -399,7 +427,9 @@ const driving = (): {
       for (const fail of failing.splice(0)) fail(reason);
     },
     closed: () => closes,
+    interrupted: () => interrupts,
   };
+  return harness;
 };
 
 const RESULT = {
@@ -456,6 +486,19 @@ const ends = (seen: ReadonlyArray<ProviderEvent>): Promise<void> =>
 const tags = (seen: ReadonlyArray<ProviderEvent>): ReadonlyArray<string> =>
   seen.map((event) => event._tag);
 
+/** The item events of one kind, in the order they were published. */
+const itemsOf = (
+  seen: ReadonlyArray<ProviderEvent>,
+  kind: string,
+): ReadonlyArray<Extract<ProviderEvent, { _tag: "item.started" | "item.completed" }>> =>
+  seen.filter(
+    (event): event is Extract<ProviderEvent, { _tag: "item.started" | "item.completed" }> =>
+      (event._tag === "item.started" || event._tag === "item.completed") && event.kind === kind,
+  );
+
+const opened = (seen: ReadonlyArray<ProviderEvent>): ReadonlyArray<string> =>
+  seen.flatMap((event) => (event._tag === "turn.started" ? [event.turnId] : []));
+
 describe("a Claude Code session", () => {
   it("names the native session itself, hands back the binding and says it started", async () => {
     const run = driving();
@@ -511,20 +554,74 @@ describe("a Claude Code session", () => {
     });
   }
 
-  it("opens a turn on an idle session and steers a busy one", async () => {
+  it("opens a turn on an idle session, and says so on its own authority", async () => {
     const run = driving();
     await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, WORKING));
 
-    await Effect.runPromise(run.adapter.sendInput(SESSION, { text: "hello" }));
-    await Effect.runPromise(run.adapter.sendInput(SESSION, { text: "and this" }));
+    const sent = await Effect.runPromise(run.adapter.sendInput(SESSION, { text: "hello" }));
 
+    // The delivery is the adapter's answer, not something the controller infers
+    // from the order events arrive in (ADR 0007).
+    expect(sent.delivery).toBe("opened");
     await until(
-      "opened one turn and passed both texts on",
-      () => run.sent.length === 2 && run.seen.length === 2,
+      "published the user's own message",
+      () => itemsOf(run.seen, "user_message").length === 2,
     );
-    expect(run.sent.map((message) => message.message.content)).toEqual(["hello", "and this"]);
+    // The turn it named is the turn it opened.
+    expect(opened(run.seen)).toEqual([sent.turnId]);
+    const [started, completed] = itemsOf(run.seen, "user_message");
+    expect(started?._tag).toBe("item.started");
+    expect(completed?._tag).toBe("item.completed");
+    // No `steered` key at all: an input that opened a turn did not steer one,
+    // and `steered: false` would be a third state nothing in the spec has.
+    expect(started?.detail).toEqual({ text: "hello" });
+    expect(completed?.detail).toEqual({ text: "hello" });
+    expect(started?.turnId).toBe(sent.turnId);
+    expect(run.sent.map((message) => message.message.content)).toEqual(["hello"]);
+  });
+
+  it("steers a busy one, folding the input into the turn already running", async () => {
+    const run = driving();
+    await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, WORKING));
+
+    const first = await Effect.runPromise(run.adapter.sendInput(SESSION, { text: "hello" }));
+    const second = await Effect.runPromise(run.adapter.sendInput(SESSION, { text: "and this" }));
+
+    expect(second).toEqual({ turnId: first.turnId, delivery: "steered" });
+    await until(
+      "published both user messages",
+      () => itemsOf(run.seen, "user_message").length === 4 && run.sent.length === 2,
+    );
     // One turn, opened once: steering folds into the turn that is running.
-    expect(tags(run.seen)).toEqual(["session.started", "turn.started"]);
+    expect(opened(run.seen)).toEqual([first.turnId]);
+    const [, , started, completed] = itemsOf(run.seen, "user_message");
+    expect(started?.detail).toEqual({ text: "and this", steered: true });
+    expect(completed?.detail).toEqual({ text: "and this", steered: true });
+    expect(run.sent.map((message) => message.message.content)).toEqual(["hello", "and this"]);
+  });
+
+  it("does not say the same thing twice when the harness echoes the input back", async () => {
+    const run = driving();
+    const binding = await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, WORKING));
+
+    await Effect.runPromise(run.adapter.sendInput(SESSION, { text: "hello" }));
+    await until(
+      "published the user's own message",
+      () => itemsOf(run.seen, "user_message").length === 2,
+    );
+
+    // What the CLI sends back on its own: its echo of the turn it was handed.
+    run.say({
+      type: "user",
+      session_id: binding.nativeSessionId,
+      parent_tool_use_id: null,
+      message: { role: "user", content: "hello" },
+    });
+    // The result is the marker: it can only be read after the echo before it was.
+    run.say(RESULT);
+    await until("closed the turn", () => run.seen.some((event) => event._tag === "turn.completed"));
+
+    expect(itemsOf(run.seen, "user_message")).toHaveLength(2);
   });
 
   it("opens a second turn once the result closed the first", async () => {
@@ -537,15 +634,126 @@ describe("a Claude Code session", () => {
       run.seen.some((event) => event._tag === "turn.completed"),
     );
 
-    await Effect.runPromise(run.adapter.sendInput(SESSION, { text: "again" }));
-    await until("opened the second turn", () => run.seen.length === 5);
-    expect(tags(run.seen)).toEqual([
-      "session.started",
-      "turn.started",
-      "session.usage.updated",
-      "turn.completed",
-      "turn.started",
-    ]);
+    const again = await Effect.runPromise(run.adapter.sendInput(SESSION, { text: "again" }));
+    await until("opened the second turn", () => opened(run.seen).length === 2);
+    expect(again.delivery).toBe("opened");
+    expect(
+      tags(run.seen).filter((tag) => tag.startsWith("turn.") || tag === "session.started"),
+    ).toEqual(["session.started", "turn.started", "turn.completed", "turn.started"]);
+    expect(opened(run.seen)[1]).toBe(again.turnId);
+  });
+
+  it("ends the running turn when asked, and asks nothing where no turn is running", async () => {
+    const run = driving();
+    await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, WORKING));
+
+    // Idle: the harness is not asked at all, because a control request waits on
+    // it and the connection handles session frames one at a time.
+    await Effect.runPromise(run.adapter.interrupt(SESSION));
+    expect(run.interrupted()).toBe(0);
+
+    await Effect.runPromise(run.adapter.sendInput(SESSION, { text: "hello" }));
+    await Effect.runPromise(run.adapter.interrupt(SESSION));
+    expect(run.interrupted()).toBe(1);
+
+    await Effect.runPromise(run.adapter.interrupt("0199e0e7-0000-7000-8000-0000000000aa"));
+    expect(run.interrupted()).toBe(1);
+  });
+
+  it("resumes the native session it was given, naming nothing of its own", async () => {
+    const run = driving();
+    const carried = {
+      nativeSessionId: "0199e0e7-0000-7000-8000-0000000000ab",
+      mode: "resume",
+    } as const;
+    const binding = await Effect.runPromise(
+      run.adapter.startSession(SESSION, { ...SPEC, continue: carried }, WORKING),
+    );
+
+    // A resume continues that native session, so there is nothing to name.
+    expect(binding.nativeSessionId).toBe(carried.nativeSessionId);
+    expect(run.options[0]?.resume).toBe(carried.nativeSessionId);
+    expect(run.options[0]?.forkSession).toBeUndefined();
+    expect(run.options[0]?.sessionId).toBeUndefined();
+  });
+
+  it("forks off the native session it was given, under a name of its own", async () => {
+    const run = driving();
+    const carried = {
+      nativeSessionId: "0199e0e7-0000-7000-8000-0000000000ab",
+      mode: "fork",
+    } as const;
+    const binding = await Effect.runPromise(
+      run.adapter.startSession(SESSION, { ...SPEC, continue: carried }, WORKING),
+    );
+
+    expect(binding.nativeSessionId).not.toBe(carried.nativeSessionId);
+    expect(run.options[0]?.resume).toBe(carried.nativeSessionId);
+    expect(run.options[0]?.forkSession).toBe(true);
+    // The fork is named for the same reason a fresh session is: the CLI says
+    // nothing at all until a first turn, so a binding cannot wait to be told.
+    expect(run.options[0]?.sessionId).toBe(binding.nativeSessionId);
+  });
+
+  it("changes the model on the turn an input opens, and never mid-turn", async () => {
+    const run = driving();
+    await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, WORKING));
+    const selection = { model: "claude-opus-4-8", options: {} };
+
+    await Effect.runPromise(
+      run.adapter.sendInput(SESSION, { text: "hello", modelSelection: selection }),
+    );
+    expect(run.models).toEqual(["claude-opus-4-8"]);
+
+    // The harness is already answering under the model it started the turn on.
+    await Effect.runPromise(
+      run.adapter.sendInput(SESSION, { text: "and this", modelSelection: selection }),
+    );
+    expect(run.models).toEqual(["claude-opus-4-8"]);
+  });
+
+  it("refuses the input where the harness will not take the model, naming the refusal", async () => {
+    const run = driving();
+    await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, WORKING));
+    run.refusesModel = true;
+
+    const said = await Effect.runPromise(
+      Effect.flip(
+        run.adapter.sendInput(SESSION, {
+          text: "hello",
+          modelSelection: { model: "claude-nonesuch", options: {} },
+        }),
+      ),
+    );
+
+    // Delivering it under the old model would answer for a turn nobody asked
+    // for, and the caller would never hear that the model did not take.
+    expect(said).toContain("claude-nonesuch");
+    expect(run.sent).toEqual([]);
+    expect(tags(run.seen)).toEqual(["session.started"]);
+  });
+
+  it("refuses the input where the session was stopped while the model was changing", async () => {
+    const run = driving();
+    await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, WORKING));
+    run.holdsModel = true;
+
+    const sending = Effect.runPromise(
+      Effect.flip(
+        run.adapter.sendInput(SESSION, {
+          text: "hello",
+          modelSelection: { model: "claude-opus-4-8", options: {} },
+        }),
+      ),
+    );
+    await until("asked the harness for the model", () => run.models.length === 1);
+    await Effect.runPromise(run.adapter.stopSession(SESSION));
+    run.releaseModel();
+
+    // The session the input was checked against is gone; saying it was
+    // delivered would be a message the user believes was sent and was not.
+    expect(await sending).toBe(`session ${SESSION} is not running here`);
+    expect(run.sent).toEqual([]);
   });
 
   it("exits as stopped when it was asked to, and forgets the session", async () => {
