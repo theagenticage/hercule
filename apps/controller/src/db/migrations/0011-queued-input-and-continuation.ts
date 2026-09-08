@@ -28,20 +28,27 @@ export default Effect.gen(function* () {
       source TEXT NOT NULL CHECK (source IN ('user', 'subscription', 'heartbeat', 'reminder')),
       actor TEXT NOT NULL,
       text TEXT NOT NULL,
-      model_selection TEXT CHECK (model_selection IS NULL OR json_valid(model_selection)),
       status TEXT NOT NULL CHECK (status IN ('queued', 'delivered', 'cancelled')),
       delivery TEXT CHECK (delivery IS NULL OR delivery IN ('opened', 'steered')),
       created_at TEXT NOT NULL,
-      delivered_at TEXT
+      delivered_at TEXT,
+      -- Set while the frame is out and unanswered; null once answered or never
+      -- sent. A row is waiting (queued, null), on the wire (queued, set),
+      -- delivered or cancelled - one of four states, not three.
+      sent_at TEXT,
+      -- Why a delivery did not go through, in the runner's or the
+      -- controller's own words: set on a row still queued (until it is sent
+      -- again) or on one a failed delivery ended instead of resending.
+      reason TEXT
     )
   `;
   // The one walk there is: a session's own inputs, oldest first.
   yield* sql`CREATE INDEX session_inputs_session ON session_inputs (session_id, created_at, id)`;
 
   /**
-   * The model the session runs under now, which is not what `spec` says: an
-   * input may change it mid-life, and `spec` is the frozen document the runner
-   * was told at start. A resume or a fork reads this one.
+   * The model the session runs under now, which is not what `spec` says:
+   * `session.update` can change it mid-life, and `spec` is the frozen document
+   * the runner was told at start. A resume or a fork reads this one.
    *
    * SQLite takes a NOT NULL column only with a default, so the empty document
    * is there for the ALTER alone; the UPDATE below fills every row that exists

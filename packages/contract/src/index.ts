@@ -128,6 +128,7 @@ export {
   SESSION_INPUT_FIELDS,
   SESSION_SORT_FIELDS,
   SESSION_STATUSES,
+  SESSION_UPDATE_FIELDS,
   Session,
   SessionContinueInput,
   SessionFilter,
@@ -135,6 +136,7 @@ export {
   SessionInputPayload,
   SessionSpawnInput,
   SessionStatus,
+  SessionUpdateInput,
 } from "./groups/session";
 export {
   INPUT_SORT_FIELDS,

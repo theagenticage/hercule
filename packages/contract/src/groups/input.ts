@@ -10,7 +10,7 @@
  * in `:inputId` is the row's.
  */
 import { Schema } from "effect";
-import { Delivery, ModelSelection } from "@hydra/protocol";
+import { Delivery } from "@hydra/protocol";
 import * as HttpApiEndpoint from "effect/unstable/httpapi/HttpApiEndpoint";
 import * as HttpApiGroup from "effect/unstable/httpapi/HttpApiGroup";
 import { closedStruct } from "../closed";
@@ -25,7 +25,7 @@ import {
 import { Id, Timestamp } from "../ids";
 import { page, pageParams } from "../pagination";
 import { Authenticated } from "../security";
-import { Prompt } from "./session";
+import { Prompt, SessionInputOutcome } from "./session";
 
 /**
  * Where an input came from. Only `user` is written in this build; the rest are
@@ -56,12 +56,15 @@ export const Input = Schema.Struct({
   source: InputSource,
   actor: Schema.String,
   text: Schema.String,
-  modelSelection: Schema.NullOr(ModelSelection),
   status: InputStatus,
   /** What the runner reported this input did, once it was delivered. */
   delivery: Schema.NullOr(Delivery),
   createdAt: Timestamp,
   deliveredAt: Schema.NullOr(Timestamp),
+  /** Set while the row is out on the wire and unanswered; null otherwise. */
+  sentAt: Schema.NullOr(Timestamp),
+  /** Why a delivery did not go through, on a row still queued or ended by one; null otherwise. */
+  reason: Schema.NullOr(Schema.String),
 });
 
 export type Input = Schema.Schema.Type<typeof Input>;
@@ -93,6 +96,11 @@ export const input = HttpApiGroup.make("input")
     HttpApiEndpoint.delete("cancel", "/sessions/:id/inputs/:inputId", {
       params: { id: Id, inputId: Id },
       success: Input,
+      error: [Unauthenticated, Forbidden, Validation, NotFound, InvalidState, Internal],
+    }),
+    HttpApiEndpoint.post("steer", "/sessions/:id/inputs/:inputId/steer", {
+      params: { id: Id, inputId: Id },
+      success: SessionInputOutcome,
       error: [Unauthenticated, Forbidden, Validation, NotFound, InvalidState, Internal],
     }),
   )

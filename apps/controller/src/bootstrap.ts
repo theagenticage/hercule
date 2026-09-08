@@ -60,7 +60,7 @@ import {
   ProviderServiceLayer,
 } from "./providers";
 import { seed } from "./seed";
-import { SessionService, SessionServiceLayer } from "./sessions";
+import { cancelStrandedInputs, SessionService, SessionServiceLayer } from "./sessions";
 import { Settings, SettingsLayer, type SettingError } from "./settings";
 
 /** Setup tokens are minted and stored like every other Hydra token. */
@@ -275,6 +275,11 @@ export const bootWith = <A, E>(
 
     const steps = Effect.gen(function* () {
       yield* migrate({ backupsDir: paths.backupsDir, databaseExisted });
+      // A row on the wire from before this boot cannot be asked whether the
+      // harness took it, so this ends it rather than a runner resending
+      // something it may already have. After the schema, before anything is
+      // placed on a runner.
+      yield* cancelStrandedInputs;
       yield* seed;
 
       const identity = yield* ControllerIdentity;

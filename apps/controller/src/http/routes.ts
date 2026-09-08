@@ -255,6 +255,9 @@ const sessionRoutes = HttpApiBuilder.group(api, "session", (handlers) =>
       .handle("query", ({ query }) => operation(sessions.query(query)))
       .handle("read", ({ params }) => operation(sessions.read(params)))
       .handle("spawn", ({ payload }) => operation(sessions.spawn(payload)))
+      .handle("update", ({ params, payload }) =>
+        operation(sessions.update({ id: params.id, ...payload })),
+      )
       .handle("input", ({ params, payload }) =>
         operation(sessions.input({ id: params.id, ...payload })),
       )
@@ -280,7 +283,8 @@ const inputRoutes = HttpApiBuilder.group(api, "input", (handlers) =>
       .handle("update", ({ params, payload }) =>
         operation(sessions.updateInput({ ...params, ...payload })),
       )
-      .handle("cancel", ({ params }) => operation(sessions.cancelInput(params)));
+      .handle("cancel", ({ params }) => operation(sessions.cancelInput(params)))
+      .handle("steer", ({ params }) => operation(sessions.steer(params)));
   }),
 );
 

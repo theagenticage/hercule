@@ -188,6 +188,11 @@ const TABLE = {
   "session.query": { requires: "session.read", method: "GET", path: "/api/v1/sessions" },
   "session.read": { requires: "session.read", method: "GET", path: "/api/v1/sessions/:id" },
   "session.spawn": { requires: "session.spawn", method: "POST", path: "/api/v1/sessions" },
+  "session.update": {
+    requires: "session.steer",
+    method: "PATCH",
+    path: "/api/v1/sessions/:id",
+  },
   "session.input": {
     requires: "session.steer",
     method: "POST",
@@ -227,6 +232,11 @@ const TABLE = {
     requires: "session.steer",
     method: "DELETE",
     path: "/api/v1/sessions/:id/inputs/:inputId",
+  },
+  "input.steer": {
+    requires: "session.steer",
+    method: "POST",
+    path: "/api/v1/sessions/:id/inputs/:inputId/steer",
   },
 
   // An owned sub-resource: the id in the path is the session's, and the grant

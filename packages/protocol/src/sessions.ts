@@ -83,9 +83,10 @@ export const SessionBinding = Schema.Struct({
 export type SessionBinding = Schema.Schema.Type<typeof SessionBinding>;
 
 /**
- * One turn's input. Attachments are the open item in spec 16 section B. A model
- * change rides the input that opens a turn, because that is the only moment a
- * harness will take one.
+ * One turn's input. Attachments are the open item in spec 16 section B.
+ * `modelSelection` is the session's current model, on every frame; a harness
+ * takes a model change only on the input that opens a turn, so an adapter
+ * applies it there and leaves it alone the rest of the time.
  */
 export const TurnInput = Schema.Struct({
   text: Schema.String,

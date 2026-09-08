@@ -695,44 +695,6 @@ describe("a Claude Code session", () => {
     expect(run.options[0]?.sessionId).toBe(binding.nativeSessionId);
   });
 
-  it("changes the model on the turn an input opens, and never mid-turn", async () => {
-    const run = driving();
-    await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, WORKING));
-    const selection = { model: "claude-opus-4-8", options: {} };
-
-    await Effect.runPromise(
-      run.adapter.sendInput(SESSION, { text: "hello", modelSelection: selection }),
-    );
-    expect(run.models).toEqual(["claude-opus-4-8"]);
-
-    // The harness is already answering under the model it started the turn on.
-    await Effect.runPromise(
-      run.adapter.sendInput(SESSION, { text: "and this", modelSelection: selection }),
-    );
-    expect(run.models).toEqual(["claude-opus-4-8"]);
-  });
-
-  it("refuses the input where the harness will not take the model, naming the refusal", async () => {
-    const run = driving();
-    await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, WORKING));
-    run.refusesModel = true;
-
-    const said = await Effect.runPromise(
-      Effect.flip(
-        run.adapter.sendInput(SESSION, {
-          text: "hello",
-          modelSelection: { model: "claude-nonesuch", options: {} },
-        }),
-      ),
-    );
-
-    // Delivering it under the old model would answer for a turn nobody asked
-    // for, and the caller would never hear that the model did not take.
-    expect(said).toContain("claude-nonesuch");
-    expect(run.sent).toEqual([]);
-    expect(tags(run.seen)).toEqual(["session.started"]);
-  });
-
   it("refuses the input where the session was stopped while the model was changing", async () => {
     const run = driving();
     await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, WORKING));
@@ -846,5 +808,135 @@ describe("a Claude Code session", () => {
       Effect.flip(run.adapter.startSession(SESSION, SPEC, { ...WORKING, binary: undefined })),
     );
     expect(said).toBe("no claude on this machine");
+  });
+});
+
+/**
+ * `sendInput` calls `setModel` only when the model an opening input asks for
+ * differs from the one last applied to the harness, which starts as the
+ * spec's own model from `startSession`.
+ */
+describe("the model the adapter last applied to the harness", () => {
+  it("calls setModel before the input is pushed, and answers opened", async () => {
+    const run = driving();
+    await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, WORKING));
+    run.holdsModel = true;
+
+    const sending = Effect.runPromise(
+      run.adapter.sendInput(SESSION, {
+        text: "hello",
+        modelSelection: { model: "claude-opus-4-8", options: {} },
+      }),
+    );
+    await until("asked the harness for the model", () => run.models.length === 1);
+    // The harness has not been told what to say yet - it is still deciding
+    // whether it will even take the model.
+    expect(run.sent).toEqual([]);
+    run.releaseModel();
+
+    const result = await sending;
+    expect(result.delivery).toBe("opened");
+    expect(run.sent.map((message) => message.message.content)).toEqual(["hello"]);
+  });
+
+  it("does not call setModel again for the same model on a later opening input", async () => {
+    const run = driving();
+    await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, WORKING));
+    const selection = { model: "claude-opus-4-8", options: {} };
+
+    await Effect.runPromise(
+      run.adapter.sendInput(SESSION, { text: "hello", modelSelection: selection }),
+    );
+    expect(run.models).toEqual(["claude-opus-4-8"]);
+
+    // The turn closes, so the next input opens a turn of its own rather than
+    // folding into the one already running.
+    run.say(RESULT);
+    await until("closed the first turn", () =>
+      run.seen.some((event) => event._tag === "turn.completed"),
+    );
+
+    const second = await Effect.runPromise(
+      run.adapter.sendInput(SESSION, { text: "again", modelSelection: selection }),
+    );
+
+    // Still the model last applied, so the harness is not asked a second time.
+    expect(run.models).toEqual(["claude-opus-4-8"]);
+    expect(second.delivery).toBe("opened");
+  });
+
+  it("does not call setModel when the first opening input names the spawn's own model", async () => {
+    const run = driving();
+    await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, WORKING));
+
+    // What the harness was started under, so this asks for no change at all.
+    const result = await Effect.runPromise(
+      run.adapter.sendInput(SESSION, {
+        text: "hello",
+        modelSelection: { model: SPEC.modelSelection.model, options: {} },
+      }),
+    );
+
+    expect(run.models).toEqual([]);
+    expect(result.delivery).toBe("opened");
+  });
+
+  it("does not call setModel mid-turn, whatever model the input names, and steers", async () => {
+    const run = driving();
+    await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, WORKING));
+
+    const first = await Effect.runPromise(
+      run.adapter.sendInput(SESSION, {
+        text: "hello",
+        modelSelection: { model: "claude-opus-4-8", options: {} },
+      }),
+    );
+    expect(run.models).toEqual(["claude-opus-4-8"]);
+
+    // The harness is already answering under the first model, so a second one
+    // named mid-turn folds into the turn already running rather than asking
+    // the harness for anything.
+    const second = await Effect.runPromise(
+      run.adapter.sendInput(SESSION, {
+        text: "and this",
+        modelSelection: { model: "claude-haiku-4-5", options: {} },
+      }),
+    );
+
+    expect(run.models).toEqual(["claude-opus-4-8"]);
+    expect(second).toEqual({ turnId: first.turnId, delivery: "steered" });
+  });
+
+  it("fails the input when setModel rejects, naming the model, and never pushes it", async () => {
+    const run = driving();
+    await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, WORKING));
+    run.refusesModel = true;
+
+    const said = await Effect.runPromise(
+      Effect.flip(
+        run.adapter.sendInput(SESSION, {
+          text: "hello",
+          modelSelection: { model: "claude-opus-4-8", options: {} },
+        }),
+      ),
+    );
+
+    expect(said).toContain("claude-opus-4-8");
+    expect(run.sent).toEqual([]);
+    // Delivering it under the old model would answer for a turn nobody asked
+    // for, and the caller would never hear that the model did not take.
+    expect(tags(run.seen)).toEqual(["session.started"]);
+
+    // The refusal left nothing applied, so the very next input asks again
+    // rather than treating the rejected model as though it had taken.
+    run.refusesModel = false;
+    const retried = await Effect.runPromise(
+      run.adapter.sendInput(SESSION, {
+        text: "hello",
+        modelSelection: { model: "claude-opus-4-8", options: {} },
+      }),
+    );
+    expect(run.models).toEqual(["claude-opus-4-8"]);
+    expect(retried.delivery).toBe("opened");
   });
 });

@@ -59,8 +59,8 @@ export const Session = Schema.Struct({
   nativeSessionId: Schema.NullOr(Schema.String),
   /**
    * What the session runs under now. It starts as the spec's and is rewritten
-   * by an input that changed the model, so a resume or a fork carries the
-   * model the conversation ended on rather than the one it opened with.
+   * by `session.update`, so a resume or a fork carries the model the
+   * conversation ended on rather than the one it opened with.
    */
   modelSelection: ModelSelection,
   /** Set where this session was forked off another one; null for a resume. */
@@ -94,13 +94,15 @@ export type SessionSpawnInput = Schema.Schema.Type<typeof SessionSpawnInput>;
  */
 export const SESSION_INPUT_FIELDS = {
   text: Prompt,
-  /**
-   * A model change rides the input that opens a turn, because that is the only
-   * moment a harness will take one; an input carrying it is held back rather
-   * than folded into a turn already running.
-   */
-  modelSelection: Schema.optionalKey(ModelSelection),
 } as const;
+
+export const SESSION_UPDATE_FIELDS = {
+  model: Schema.NonEmptyString,
+} as const;
+
+export const SessionUpdateInput = closedStruct(SESSION_UPDATE_FIELDS);
+
+export type SessionUpdateInput = Schema.Schema.Type<typeof SessionUpdateInput>;
 
 export const SessionInputPayload = closedStruct(SESSION_INPUT_FIELDS);
 
@@ -163,6 +165,12 @@ export const session = HttpApiGroup.make("session")
       payload: SessionSpawnInput,
       success: Session,
       error: [Unauthenticated, Forbidden, Validation, InvalidState, Internal],
+    }),
+    HttpApiEndpoint.patch("update", "/sessions/:id", {
+      params: { id: Id },
+      payload: SessionUpdateInput,
+      success: Session,
+      error: [Unauthenticated, Forbidden, Validation, NotFound, InvalidState, Internal],
     }),
     HttpApiEndpoint.post("input", "/sessions/:id/input", {
       params: { id: Id },
