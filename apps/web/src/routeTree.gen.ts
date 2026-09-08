@@ -37,6 +37,7 @@ import { Route as ShellSettingsSystemRouteImport } from './routes/_shell/setting
 import { Route as ShellSettingsThreadsRouteImport } from './routes/_shell/settings/threads'
 import { Route as ShellTasksIndexRouteImport } from './routes/_shell/tasks/index'
 import { Route as ShellThreadsSessionIdRouteImport } from './routes/_shell/threads/$sessionId'
+import { Route as ShellThreadsNewRouteImport } from './routes/_shell/threads/new'
 
 const ShellRoute = ShellRouteImport.update({
   id: '/_shell',
@@ -178,6 +179,11 @@ const ShellThreadsSessionIdRoute = ShellThreadsSessionIdRouteImport.update({
   path: '/threads/$sessionId',
   getParentRoute: () => ShellRoute,
 } as any)
+const ShellThreadsNewRoute = ShellThreadsNewRouteImport.update({
+  id: '/threads/new',
+  path: '/threads/new',
+  getParentRoute: () => ShellRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof ShellIndexRoute
@@ -203,6 +209,7 @@ export interface FileRoutesByFullPath {
   '/settings/system': typeof ShellSettingsSystemRoute
   '/settings/threads': typeof ShellSettingsThreadsRoute
   '/threads/$sessionId': typeof ShellThreadsSessionIdRoute
+  '/threads/new': typeof ShellThreadsNewRoute
   '/fleet/': typeof ShellFleetIndexRoute
   '/sessions/': typeof ShellSessionsIndexRoute
   '/settings/': typeof ShellSettingsIndexRoute
@@ -231,6 +238,7 @@ export interface FileRoutesByTo {
   '/settings/system': typeof ShellSettingsSystemRoute
   '/settings/threads': typeof ShellSettingsThreadsRoute
   '/threads/$sessionId': typeof ShellThreadsSessionIdRoute
+  '/threads/new': typeof ShellThreadsNewRoute
   '/fleet': typeof ShellFleetIndexRoute
   '/sessions': typeof ShellSessionsIndexRoute
   '/settings': typeof ShellSettingsIndexRoute
@@ -262,6 +270,7 @@ export interface FileRoutesById {
   '/_shell/settings/system': typeof ShellSettingsSystemRoute
   '/_shell/settings/threads': typeof ShellSettingsThreadsRoute
   '/_shell/threads/$sessionId': typeof ShellThreadsSessionIdRoute
+  '/_shell/threads/new': typeof ShellThreadsNewRoute
   '/_shell/fleet/': typeof ShellFleetIndexRoute
   '/_shell/sessions/': typeof ShellSessionsIndexRoute
   '/_shell/settings/': typeof ShellSettingsIndexRoute
@@ -293,6 +302,7 @@ export interface FileRouteTypes {
     | '/settings/system'
     | '/settings/threads'
     | '/threads/$sessionId'
+    | '/threads/new'
     | '/fleet/'
     | '/sessions/'
     | '/settings/'
@@ -321,6 +331,7 @@ export interface FileRouteTypes {
     | '/settings/system'
     | '/settings/threads'
     | '/threads/$sessionId'
+    | '/threads/new'
     | '/fleet'
     | '/sessions'
     | '/settings'
@@ -351,6 +362,7 @@ export interface FileRouteTypes {
     | '/_shell/settings/system'
     | '/_shell/settings/threads'
     | '/_shell/threads/$sessionId'
+    | '/_shell/threads/new'
     | '/_shell/fleet/'
     | '/_shell/sessions/'
     | '/_shell/settings/'
@@ -562,6 +574,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ShellThreadsSessionIdRouteImport
       parentRoute: typeof ShellRoute
     }
+    '/_shell/threads/new': {
+      id: '/_shell/threads/new'
+      path: '/threads/new'
+      fullPath: '/threads/new'
+      preLoaderRoute: typeof ShellThreadsNewRouteImport
+      parentRoute: typeof ShellRoute
+    }
   }
 }
 
@@ -607,6 +626,7 @@ interface ShellRouteChildren {
   ShellIndexRoute: typeof ShellIndexRoute
   ShellFleetRunnerIdRoute: typeof ShellFleetRunnerIdRoute
   ShellThreadsSessionIdRoute: typeof ShellThreadsSessionIdRoute
+  ShellThreadsNewRoute: typeof ShellThreadsNewRoute
   ShellFleetIndexRoute: typeof ShellFleetIndexRoute
   ShellSessionsIndexRoute: typeof ShellSessionsIndexRoute
   ShellTasksIndexRoute: typeof ShellTasksIndexRoute
@@ -624,6 +644,7 @@ const ShellRouteChildren: ShellRouteChildren = {
   ShellIndexRoute: ShellIndexRoute,
   ShellFleetRunnerIdRoute: ShellFleetRunnerIdRoute,
   ShellThreadsSessionIdRoute: ShellThreadsSessionIdRoute,
+  ShellThreadsNewRoute: ShellThreadsNewRoute,
   ShellFleetIndexRoute: ShellFleetIndexRoute,
   ShellSessionsIndexRoute: ShellSessionsIndexRoute,
   ShellTasksIndexRoute: ShellTasksIndexRoute,

@@ -14,9 +14,16 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { formatDuration, formatStamp } from "@hydra/client-core";
-import type { Session, TranscriptRow } from "@hydra/contract";
+import type {
+  Input,
+  Profile,
+  ProviderInstance,
+  Runner,
+  Session,
+  TranscriptRow,
+} from "@hydra/contract";
 import { sessionStreamTopic, sessionTapTopic } from "@hydra/contract";
-import { renderApp, stubApi, type Handler } from "../../../app/testing";
+import { envelope, renderApp, stubApi, type Handler } from "../../../app/testing";
 
 const SESSION_ID = "01a06d02-b100-7000-8000-000000000001";
 const ZONE = "Europe/Amsterdam";
@@ -43,6 +50,106 @@ const BASE_SESSION: Session = {
 
 const session = (overrides: Partial<Session>): Session => ({ ...BASE_SESSION, ...overrides });
 
+/**
+ * The composer's own fixtures (AC-19 to AC-21): a provider instance, a runner
+ * and a profile matching `BASE_SESSION`'s own ids, so the started thread's
+ * read-only fields and its model menu resolve against them; a second instance,
+ * runner and profile of each kind exist only to prove nothing about them ever
+ * surfaces on a started thread's read-only fields or its other-instance groups.
+ */
+const DECLARED: ProviderInstance["declared"] = {
+  steering: "native",
+  fork: "native",
+  modelSwitch: "in-session",
+  accessModes: {
+    "approval-required": "native",
+    "auto-accept-edits": "native",
+    auto: "native",
+    "full-access": "native",
+  },
+  mcpPassthrough: "native",
+  disallowedTools: "native",
+  structuredOutput: "supported",
+};
+
+const instanceSnapshot = (
+  runnerId: string,
+  identity: string,
+  planLabel: string,
+  models: ProviderInstance["snapshots"][number]["models"],
+): ProviderInstance["snapshots"][number] => ({
+  runnerId,
+  probedAt: "2026-09-08T09:50:00.000Z",
+  harnessVersion: "2.1.263",
+  versionVerdict: "ok",
+  auth: { status: "ok", identity, planLabel },
+  models,
+});
+
+const INSTANCE_STARTED: ProviderInstance = {
+  id: BASE_SESSION.instanceId,
+  providerId: "claude-code",
+  name: "personal",
+  config: {},
+  displayName: "Claude Code",
+  binaryName: "claude",
+  declared: DECLARED,
+  snapshots: [
+    instanceSnapshot(BASE_SESSION.runnerId, "rogier@example.com", "Claude Max", [
+      { slug: "claude-sonnet-5", name: "Claude Sonnet 5", isDefault: true, options: [] },
+      { slug: "claude-opus-5", name: "Claude Opus 5", options: [] },
+    ]),
+  ],
+  createdAt: "2026-09-08T09:00:00.000Z",
+  updatedAt: "2026-09-08T09:00:00.000Z",
+};
+
+const INSTANCE_OTHER: ProviderInstance = {
+  ...INSTANCE_STARTED,
+  id: "01a06d02-1000-7000-8000-000000000099",
+  name: "work",
+  snapshots: [
+    instanceSnapshot(BASE_SESSION.runnerId, "work@example.com", "Claude Pro", [
+      { slug: "claude-haiku-5", name: "Claude Haiku 5", isDefault: true, options: [] },
+    ]),
+  ],
+};
+
+const RUNNER_STARTED: Runner = {
+  id: BASE_SESSION.runnerId,
+  name: "moss",
+  connectivity: "online",
+  lifecycle: "active",
+  reserved: false,
+  version: "0.4.2",
+  labels: [],
+  facts: null,
+  watermark: null,
+  maxConcurrentSessions: 4,
+  lastSeenAt: "2026-09-08T09:50:00.000Z",
+};
+
+const RUNNER_OTHER: Runner = {
+  ...RUNNER_STARTED,
+  id: "01a06d02-3000-7000-8000-000000000099",
+  name: "cove",
+};
+
+const PROFILE_STARTED: Profile = {
+  id: BASE_SESSION.permissionProfileId,
+  name: "unrestricted",
+  grants: [],
+  shipped: true,
+  createdAt: "2026-09-08T09:00:00.000Z",
+  updatedAt: "2026-09-08T09:00:00.000Z",
+};
+
+const PROFILE_OTHER: Profile = {
+  ...PROFILE_STARTED,
+  id: "01a06d02-2000-7000-8000-000000000099",
+  name: "worker",
+};
+
 /** A controller answering for itself and for this one session's thread. */
 const controller = (
   fixture: Session,
@@ -58,6 +165,12 @@ const controller = (
   },
   [`GET /api/v1/sessions/${fixture.id}`]: { body: fixture },
   [`GET /api/v1/sessions/${fixture.id}/transcript`]: { body: { items: rows } },
+  // The composer's own reads (AC-19 to AC-21): a test that cares about
+  // specific queued inputs overrides the last one with its own `extra`.
+  "GET /api/v1/providers": { body: [INSTANCE_STARTED, INSTANCE_OTHER] },
+  "GET /api/v1/runners": { body: { items: [RUNNER_STARTED, RUNNER_OTHER] } },
+  "GET /api/v1/profiles": { body: { items: [PROFILE_STARTED, PROFILE_OTHER] } },
+  [`GET /api/v1/sessions/${fixture.id}/inputs`]: { body: { items: [] } },
   ...extra,
 });
 
@@ -919,5 +1032,312 @@ describe("Thread: top bar (AC-23)", () => {
     });
     const crumb = screen.getByText("thread · 01a06d02");
     expect(crumb.className).toContain("font-mono");
+  });
+});
+
+/**
+ * AC-19 to AC-21 (the "Web: composer" table's in-thread half): the composer at
+ * the foot of a started thread, driven only through `renderApp` and the
+ * stubbed `fetch`/`LiveStub`.
+ *
+ * Decisions made where the SPEC does not pin an exact rendering detail, the
+ * same as `new.integration.test.tsx`: a lone icon's disabled reason surfaces
+ * via `title`, and the send/Steer/Cancel/Stop controls' accessible names
+ * contain their literal AC wording ("send", "Steer", "Cancel", "Stop").
+ */
+describe("Thread: composer read-only fields and model switch (AC-19)", () => {
+  it("renders workspace, checkout, branch, runner, profile and access mode as read-only values with no menu", async () => {
+    const user = userEvent.setup();
+    await open(session({ status: "idle" }), twoCompletedTurns());
+
+    expect(reading()).toContain("No workspace");
+    expect(reading()).toContain(RUNNER_STARTED.name);
+    expect(reading()).toContain(PROFILE_STARTED.name);
+    expect(reading()).toContain("approval-required");
+
+    // None of these values ever reveals another option when interacted with -
+    // the "no menu" half of the criterion. A read-only value need not be a
+    // `<button>` to prove there is nothing behind it to open, so this checks
+    // for the other option's absence after the click rather than for the
+    // presence or absence of a particular element type.
+    await user.click(screen.getByText(RUNNER_STARTED.name));
+    expect(screen.queryByText(RUNNER_OTHER.name)).toBeNull();
+
+    await user.click(screen.getByText(PROFILE_STARTED.name));
+    expect(screen.queryByText(PROFILE_OTHER.name)).toBeNull();
+
+    await user.click(screen.getByText("No workspace"));
+    expect(screen.queryByText("Adopt a folder on this machine…")).toBeNull();
+
+    await user.click(screen.getByText("approval-required"));
+    expect(screen.queryByText("full-access")).toBeNull();
+  });
+
+  it("dims the model menu's other instance groups with switching accounts starts a new thread", async () => {
+    const user = userEvent.setup();
+    await open(session({ status: "idle" }), twoCompletedTurns());
+
+    await user.click(screen.getByRole("button", { name: /claude-sonnet-5/i }));
+
+    expect(reading()).toContain("switching accounts starts a new thread");
+    // The current instance's own other model stays selectable, unlike the
+    // other instance's group.
+    expect(screen.getByRole("button", { name: /claude opus 5/i })).toBeDefined();
+  });
+
+  it("sends PATCH /sessions/:id { model } and updates the pill from the returned Session when a model of the same instance is chosen", async () => {
+    const user = userEvent.setup();
+    const updated = session({
+      status: "idle",
+      modelSelection: { model: "claude-opus-5", options: {} },
+    });
+    const { api } = await open(session({ status: "idle" }), twoCompletedTurns(), {
+      [`PATCH /api/v1/sessions/${SESSION_ID}`]: { body: updated },
+    });
+
+    await user.click(screen.getByRole("button", { name: /claude-sonnet-5/i }));
+    await user.click(screen.getByRole("button", { name: /claude opus 5/i }));
+
+    const patch = await waitFor(() => {
+      const found = api.calls.find(
+        (call) => call.method === "PATCH" && call.path === `/api/v1/sessions/${SESSION_ID}`,
+      );
+      if (found === undefined) throw new Error("PATCH not sent yet");
+      return found;
+    });
+    expect(patch.body).toEqual({ model: "claude-opus-5" });
+
+    await waitFor(() => {
+      expect(reading()).toContain("claude-opus-5");
+    });
+  });
+});
+
+const INPUT_ID = "01a06d02-5000-7000-8000-000000000001";
+
+/** One queued input, ready for a busy thread's queued list. */
+const queuedInput = (overrides: Partial<Input> = {}): Input => ({
+  id: INPUT_ID,
+  sessionId: SESSION_ID,
+  source: "user",
+  actor: "user",
+  text: "Also check the logs",
+  status: "queued",
+  delivery: null,
+  createdAt: "2026-09-08T10:02:00.000Z",
+  deliveredAt: null,
+  sentAt: null,
+  reason: null,
+  ...overrides,
+});
+
+describe("Thread: input queue (AC-20)", () => {
+  it("sends POST /sessions/:id/input and clears the textarea once it answers opened, for an idle thread", async () => {
+    const user = userEvent.setup();
+    const { api } = await open(session({ status: "idle" }), twoCompletedTurns(), {
+      [`POST /api/v1/sessions/${SESSION_ID}/input`]: {
+        body: { inputId: INPUT_ID, result: "opened" },
+      },
+    });
+
+    await user.type(screen.getByRole("textbox"), "Also check the logs");
+    await user.click(screen.getByRole("button", { name: /send/i }));
+
+    const call = await waitFor(() => {
+      const found = api.calls.find(
+        (each) => each.method === "POST" && each.path === `/api/v1/sessions/${SESSION_ID}/input`,
+      );
+      if (found === undefined) throw new Error("input not sent yet");
+      return found;
+    });
+    expect(call.body).toEqual({ text: "Also check the logs" });
+
+    await waitFor(() => {
+      expect(screen.getByRole<HTMLTextAreaElement>("textbox").value).toBe("");
+    });
+  });
+
+  it("shows a queued answer in a list above the composer with Steer and Cancel, read from GET /sessions/:id/inputs", async () => {
+    const user = userEvent.setup();
+    const { api } = await open(session({ status: "busy" }), twoCompletedTurns(), {
+      [`POST /api/v1/sessions/${SESSION_ID}/input`]: {
+        body: { inputId: INPUT_ID, result: "queued" },
+      },
+      [`GET /api/v1/sessions/${SESSION_ID}/inputs`]: { body: { items: [queuedInput()] } },
+    });
+
+    await user.type(screen.getByRole("textbox"), "Also check the logs");
+    await user.click(screen.getByRole("button", { name: /send/i }));
+
+    await screen.findByText("Also check the logs");
+    expect(screen.getByRole("button", { name: /steer/i })).toBeDefined();
+    expect(screen.getByRole("button", { name: /cancel/i })).toBeDefined();
+    expect(
+      api.calls.some(
+        (call) => call.method === "GET" && call.path === `/api/v1/sessions/${SESSION_ID}/inputs`,
+      ),
+    ).toBe(true);
+  });
+
+  it("calls steer and the row leaves the list once it answers steered", async () => {
+    const user = userEvent.setup();
+    // Keyed on whether steer has actually landed, not on a raw call count: the
+    // live connection's own first-connect sweep (`live.ts`'s `session` -
+    // "every mutable reader ... swept ... on the first connection of a page
+    // load") refetches this list once on its own, ahead of the steer click, so
+    // a plain "second call empties it" counter would race that sweep instead
+    // of the steer this test is actually about.
+    let delivered = false;
+    const { api } = await open(session({ status: "busy" }), twoCompletedTurns(), {
+      [`GET /api/v1/sessions/${SESSION_ID}/inputs`]: () => ({
+        body: { items: delivered ? [] : [queuedInput()] },
+      }),
+      [`POST /api/v1/sessions/${SESSION_ID}/inputs/${INPUT_ID}/steer`]: () => {
+        delivered = true;
+        return { body: { inputId: INPUT_ID, result: "steered" } };
+      },
+    });
+
+    await screen.findByText("Also check the logs");
+    await user.click(screen.getByRole("button", { name: /steer/i }));
+
+    await waitFor(() => {
+      expect(
+        api.calls.some(
+          (call) =>
+            call.method === "POST" &&
+            call.path === `/api/v1/sessions/${SESSION_ID}/inputs/${INPUT_ID}/steer`,
+        ),
+      ).toBe(true);
+    });
+    await waitFor(() => {
+      expect(screen.queryByText("Also check the logs")).toBeNull();
+    });
+  });
+
+  it("calls cancel (DELETE) and the row leaves the list", async () => {
+    const user = userEvent.setup();
+    // See the steer test above: keyed on the cancel actually landing, not a
+    // raw call count, for the same reason.
+    let delivered = false;
+    const { api } = await open(session({ status: "busy" }), twoCompletedTurns(), {
+      [`GET /api/v1/sessions/${SESSION_ID}/inputs`]: () => ({
+        body: { items: delivered ? [] : [queuedInput()] },
+      }),
+      [`DELETE /api/v1/sessions/${SESSION_ID}/inputs/${INPUT_ID}`]: () => {
+        delivered = true;
+        return { body: queuedInput({ status: "cancelled" }) };
+      },
+    });
+
+    await screen.findByText("Also check the logs");
+    await user.click(screen.getByRole("button", { name: /cancel/i }));
+
+    await waitFor(() => {
+      expect(
+        api.calls.some(
+          (call) =>
+            call.method === "DELETE" &&
+            call.path === `/api/v1/sessions/${SESSION_ID}/inputs/${INPUT_ID}`,
+        ),
+      ).toBe(true);
+    });
+    await waitFor(() => {
+      expect(screen.queryByText("Also check the logs")).toBeNull();
+    });
+  });
+
+  it("shows a queued row's reason when the controller set one", async () => {
+    await open(session({ status: "busy" }), twoCompletedTurns(), {
+      [`GET /api/v1/sessions/${SESSION_ID}/inputs`]: {
+        body: { items: [queuedInput({ reason: "the runner has not answered yet" })] },
+      },
+    });
+
+    await screen.findByText("the runner has not answered yet");
+  });
+
+  it("refetches the queued list on the session invalidation nudge", async () => {
+    let inputsCalls = 0;
+    const { live } = await open(session({ status: "busy" }), twoCompletedTurns(), {
+      [`GET /api/v1/sessions/${SESSION_ID}/inputs`]: () => {
+        inputsCalls += 1;
+        return { body: { items: [queuedInput()] } };
+      },
+    });
+
+    await screen.findByText("Also check the logs");
+    const before = inputsCalls;
+
+    await waitFor(() => {
+      expect(live.topics()).toContain("session");
+    });
+    act(() => {
+      live.push("session", { _tag: "invalidate", ids: [SESSION_ID], kind: "updated" });
+    });
+
+    await waitFor(() => {
+      expect(inputsCalls).toBeGreaterThan(before);
+    });
+  });
+
+  it("shows the message and keeps the row when a steer attempt answers invalid_state", async () => {
+    const user = userEvent.setup();
+    await open(session({ status: "busy" }), twoCompletedTurns(), {
+      [`GET /api/v1/sessions/${SESSION_ID}/inputs`]: { body: { items: [queuedInput()] } },
+      [`POST /api/v1/sessions/${SESSION_ID}/inputs/${INPUT_ID}/steer`]: {
+        status: 409,
+        body: envelope("invalid_state", "the turn already finished"),
+      },
+    });
+
+    await screen.findByText("Also check the logs");
+    await user.click(screen.getByRole("button", { name: /steer/i }));
+
+    expect((await screen.findByRole("alert")).textContent).toBe("the turn already finished");
+    expect(screen.getByText("Also check the logs")).toBeDefined();
+  });
+});
+
+describe("Thread: stop control (AC-21)", () => {
+  it("shows Stop on a busy thread and calls POST /sessions/:id/interrupt", async () => {
+    const user = userEvent.setup();
+    const { api } = await open(session({ status: "busy" }), twoCompletedTurns(), {
+      [`POST /api/v1/sessions/${SESSION_ID}/interrupt`]: { body: session({ status: "idle" }) },
+    });
+
+    await user.click(screen.getByRole("button", { name: /^stop$/i }));
+
+    await waitFor(() => {
+      expect(
+        api.calls.some(
+          (call) =>
+            call.method === "POST" && call.path === `/api/v1/sessions/${SESSION_ID}/interrupt`,
+        ),
+      ).toBe(true);
+    });
+  });
+
+  it("has no Stop control on an idle thread", async () => {
+    await open(session({ status: "idle" }), twoCompletedTurns());
+    expect(screen.queryByRole("button", { name: /^stop$/i })).toBeNull();
+  });
+
+  it("has no Stop control and disables the textarea with a reason on an exited thread", async () => {
+    await open(
+      session({ status: "exited", exitedAt: "2026-09-08T10:05:00.000Z" }),
+      twoCompletedTurns(),
+    );
+
+    expect(screen.queryByRole("button", { name: /^stop$/i })).toBeNull();
+
+    const textarea = screen.getByRole<HTMLTextAreaElement>("textbox");
+    expect(textarea.disabled).toBe(true);
+    const reason = "this thread has exited";
+    const surfaced =
+      reading().includes(reason) ||
+      textarea.placeholder.includes(reason) ||
+      textarea.title.includes(reason);
+    expect(surfaced).toBe(true);
   });
 });

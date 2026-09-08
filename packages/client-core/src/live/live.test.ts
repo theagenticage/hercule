@@ -671,4 +671,19 @@ describe("queryKeysFor", () => {
     // A push naming no machine means every one of them moved.
     assert.deepStrictEqual(queryKeysFor("runner", []), [["runners"], ["runner"]]);
   });
+
+  it("maps a session push to the listing, each session's own page, and each session's queued-input list", () => {
+    assert.deepStrictEqual(queryKeysFor("session", ["s1"]), [
+      queryKeys.sessions(),
+      queryKeys.session("s1"),
+      queryKeys.inputs("s1"),
+    ]);
+
+    // A push naming no session means every one of them moved.
+    assert.deepStrictEqual(queryKeysFor("session", []), [
+      queryKeys.sessions(),
+      queryKeys.session(),
+      queryKeys.inputs(),
+    ]);
+  });
 });

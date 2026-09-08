@@ -151,6 +151,18 @@ export const transcriptQuery = (client: HydraClient, sessionId: string) =>
   });
 
 /**
+ * A session's input history, queued rows included: the composer's queued list
+ * above the textarea. One page, same as the fleet and the session listing
+ * above - a thread queues a handful of turns at most, never enough to page.
+ */
+export const inputsQuery = (client: HydraClient, sessionId: string) =>
+  queryOptions({
+    queryKey: queryKeys.inputs(sessionId),
+    queryFn: () =>
+      client.input.query({ params: { id: sessionId }, query: { limit: MAX_PAGE_LIMIT } }),
+  });
+
+/**
  * The join tokens still outstanding. A token lives an hour and is spent by one
  * machine, so this is a handful at most and the whole set is one answer.
  */
