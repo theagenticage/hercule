@@ -410,6 +410,22 @@ const steerInput = (arranged: Arranged, sessionId: string, inputId: string): Pro
     token: arranged.token,
   });
 
+const patchInput = (
+  arranged: Arranged,
+  sessionId: string,
+  inputId: string,
+  body: unknown,
+): Promise<Response> =>
+  send("PATCH", arranged.harness.base, `/api/v1/sessions/${sessionId}/inputs/${inputId}`, {
+    body,
+    token: arranged.token,
+  });
+
+const cancelInput = (arranged: Arranged, sessionId: string, inputId: string): Promise<Response> =>
+  send("DELETE", arranged.harness.base, `/api/v1/sessions/${sessionId}/inputs/${inputId}`, {
+    token: arranged.token,
+  });
+
 const inputsOf = async (arranged: Arranged, id: string): Promise<ReadonlyArray<StoredInput>> => {
   const response = await get(
     arranged.harness.base,
@@ -811,6 +827,7 @@ describe("session.input, queued by default", () => {
         text: "mid-turn",
         status: "queued",
         delivery: null,
+        sentAt: null,
       });
     });
   });
@@ -828,6 +845,7 @@ describe("session.input, queued by default", () => {
         text: "too soon",
         status: "queued",
         delivery: null,
+        sentAt: null,
       });
     });
   });
@@ -863,31 +881,6 @@ describe("session.input, queued by default", () => {
       });
 
       expect(response.status, await response.clone().text()).toBe(400);
-    });
-  });
-
-  it("reads sentAt null for a row waiting on a busy or a starting session", async () => {
-    await withFleet(async (arranged) => {
-      const session = await started(arranged, "hello");
-      report(arranged.wire, ...transcript(session.id)[1]!);
-      await sessionWhen(arranged, session.id, (one) => one.status === "busy");
-
-      const busy = await sendInput(arranged, session.id, { text: "mid-turn" });
-      expect(busy.status, await busy.clone().text()).toBe(200);
-      expect((await inputsOf(arranged, session.id)).at(-1)).toMatchObject({
-        text: "mid-turn",
-        status: "queued",
-        sentAt: null,
-      });
-
-      const starting = await spawned(arranged, { prompt: "hello" });
-      const queued = await sendInput(arranged, starting.id, { text: "too soon" });
-      expect(queued.status, await queued.clone().text()).toBe(200);
-      expect((await inputsOf(arranged, starting.id)).at(-1)).toMatchObject({
-        text: "too soon",
-        status: "queued",
-        sentAt: null,
-      });
     });
   });
 });
@@ -943,9 +936,7 @@ describe("input.steer", () => {
   });
 
   // The row is delivered already (`started` answers its own prompt), so the
-  // session being idle is what this steer must be refused for - a genuinely
-  // still-queued row cannot coexist with an idle session, since idle flushes
-  // every queued row at once.
+  // session being idle is what this steer must be refused for.
   it("refuses an idle session's row, and sends no frame", async () => {
     await withFleet(async (arranged) => {
       const session = await started(arranged, "hello");
@@ -1006,12 +997,7 @@ describe("input.steer", () => {
   it("refuses a row that has been cancelled", async () => {
     await withFleet(async (arranged) => {
       const { session, inputId } = await busyWithQueuedRow(arranged);
-      const cancelled = await send(
-        "DELETE",
-        arranged.harness.base,
-        `/api/v1/sessions/${session.id}/inputs/${inputId}`,
-        { token: arranged.token },
-      );
+      const cancelled = await cancelInput(arranged, session.id, inputId);
       expect(cancelled.status, await cancelled.clone().text()).toBe(200);
       const before = inputFrames(arranged.wire).length;
 
@@ -1022,8 +1008,7 @@ describe("input.steer", () => {
     });
   });
 
-  // "On the wire" has no status of its own to read over HTTP until the next
-  // slice stores it, so this is pinned the only way it is observable now: a
+  // Pinned by observable effect rather than the stored `sentAt` field: a
   // second steer call while the first is still out and unanswered must be
   // refused, and the runner must never see a second frame for the same row.
   it("refuses a row already on the wire, and sends it no second frame", async () => {
@@ -1115,22 +1100,6 @@ describe("input.steer", () => {
 });
 
 describe("the inputs a session holds", () => {
-  const patchInput = (
-    arranged: Arranged,
-    sessionId: string,
-    inputId: string,
-    body: unknown,
-  ): Promise<Response> =>
-    send("PATCH", arranged.harness.base, `/api/v1/sessions/${sessionId}/inputs/${inputId}`, {
-      body,
-      token: arranged.token,
-    });
-
-  const cancelInput = (arranged: Arranged, sessionId: string, inputId: string): Promise<Response> =>
-    send("DELETE", arranged.harness.base, `/api/v1/sessions/${sessionId}/inputs/${inputId}`, {
-      token: arranged.token,
-    });
-
   /** A session with one delivered input, one still queued, and one cancelled. */
   const withInputs = async (arranged: Arranged): Promise<Session> => {
     const session = await spawned(arranged, {
@@ -1347,12 +1316,7 @@ describe("the queue at the transition to idle", () => {
 
       // The row still reads `queued` - it is waiting for an answer, not for a
       // turn - so a caller told it was called off would be told a lie.
-      const response = await send(
-        "DELETE",
-        arranged.harness.base,
-        `/api/v1/sessions/${session.id}/inputs/${sent.requestId}`,
-        { token: arranged.token },
-      );
+      const response = await cancelInput(arranged, session.id, sent.requestId);
 
       expect(response.status).toBe(409);
       expect(await response.text()).toContain("already gone");
@@ -1373,12 +1337,7 @@ describe("the queue at the transition to idle", () => {
       // Waiting behind the one on the wire, so it is still the caller's to
       // take back: nothing has claimed it, and only a claimed row is out of a
       // caller's reach.
-      const gone = await send(
-        "DELETE",
-        arranged.harness.base,
-        `/api/v1/sessions/${session.id}/inputs/${inputId}`,
-        { token: arranged.token },
-      );
+      const gone = await cancelInput(arranged, session.id, inputId);
       expect(gone.status, await gone.clone().text()).toBe(200);
 
       // Answered at last, so the flush records it and looks for what is next.
@@ -2074,19 +2033,9 @@ describe("the queue at the transition to idle, one row per boundary", () => {
       ]);
 
       // On the wire, so neither a rewrite nor a cancel may take it back.
-      const patched = await send(
-        "PATCH",
-        arranged.harness.base,
-        `/api/v1/sessions/${session.id}/inputs/${onWire[0]!.id}`,
-        { body: { text: "no" }, token: arranged.token },
-      );
+      const patched = await patchInput(arranged, session.id, onWire[0]!.id, { text: "no" });
       expect(patched.status, await patched.clone().text()).toBe(409);
-      const cancelled = await send(
-        "DELETE",
-        arranged.harness.base,
-        `/api/v1/sessions/${session.id}/inputs/${onWire[0]!.id}`,
-        { token: arranged.token },
-      );
+      const cancelled = await cancelInput(arranged, session.id, onWire[0]!.id);
       expect(cancelled.status, await cancelled.clone().text()).toBe(409);
 
       arranged.wire.release("opened");

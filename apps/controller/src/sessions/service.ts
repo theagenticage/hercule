@@ -38,6 +38,7 @@ import {
   INPUT_UPDATE_FIELDS,
   InvalidState,
   invalidState,
+  NotFound,
   notFound,
   SESSION_SORT_FIELDS,
   SessionFilter,
@@ -50,7 +51,6 @@ import {
   validationOf,
   type Forbidden,
   type Input,
-  type NotFound,
   type Session,
   type SessionInputOutcome,
   type SortDirection,
@@ -466,14 +466,18 @@ const make = Effect.gen(function* () {
    * handed back; a refusal or silence is left where `settleFailure` puts it,
    * and fails with the same reason. The idle path, a steer and the flush all
    * reach the machine through this and nothing else does.
+   *
+   * The model is read here, after the row is claimed, rather than earlier by
+   * the caller: a `session.update` landing between the caller's own read and
+   * the claim would otherwise ride a frame it never applied to.
    */
   const deliverClaimed = (
     runnerId: string,
     row: StoredInput,
-    modelSelection: ModelSelection,
-  ): Effect.Effect<SessionInputOutcome, InvalidState | SqlError> =>
+  ): Effect.Effect<SessionInputOutcome, InvalidState | NotFound | SqlError> =>
     Effect.gen(function* () {
-      const answer = yield* deliverTo(runnerId, row, modelSelection);
+      const session = yield* one(row.sessionId);
+      const answer = yield* deliverTo(runnerId, row, session.modelSelection);
       const delivery = Option.isSome(answer) && answer.value.ok ? answer.value.delivery : undefined;
       if (delivery !== undefined) {
         yield* recordDelivery(row, delivery);
@@ -498,14 +502,10 @@ const make = Effect.gen(function* () {
       if (Option.isNone(next)) return;
       const claimed = yield* inputs.claim(next.value.id, yield* nowIso);
       if (Option.isNone(claimed)) return;
-      // Read the model only once the row is claimed and about to be sent, not
-      // before: a model change landing between the two would otherwise ride
-      // a frame it never applied to.
-      const found = yield* sessions.one(sessionId);
-      if (Option.isNone(found)) return;
       yield* Effect.catchIf(
-        deliverClaimed(runnerId, claimed.value, found.value.modelSelection),
-        (error): error is InvalidState => error instanceof InvalidState,
+        deliverClaimed(runnerId, claimed.value),
+        (error): error is InvalidState | NotFound =>
+          error instanceof InvalidState || error instanceof NotFound,
         () => Effect.void,
       );
     });
@@ -877,7 +877,7 @@ const make = Effect.gen(function* () {
         // window must stop the send, not just go unnoticed.
         const claimed = yield* inputs.claim(row.id, yield* nowIso);
         if (Option.isNone(claimed)) return yield* Effect.fail(yield* claimFailure(id, row.id));
-        return yield* deliverClaimed(session.runnerId, claimed.value, session.modelSelection);
+        return yield* deliverClaimed(session.runnerId, claimed.value);
       }),
 
     /**
@@ -908,7 +908,7 @@ const make = Effect.gen(function* () {
         // landed in between.
         const claimed = yield* inputs.claim(row.id, yield* nowIso);
         if (Option.isNone(claimed)) return yield* Effect.fail(yield* claimFailure(id, inputId));
-        return yield* deliverClaimed(session.runnerId, claimed.value, session.modelSelection);
+        return yield* deliverClaimed(session.runnerId, claimed.value);
       }),
 
     /**

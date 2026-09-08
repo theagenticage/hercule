@@ -695,50 +695,6 @@ describe("a Claude Code session", () => {
     expect(run.options[0]?.sessionId).toBe(binding.nativeSessionId);
   });
 
-  it("changes the model on the turn an input opens, and never mid-turn", async () => {
-    const run = driving();
-    await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, WORKING));
-
-    await Effect.runPromise(
-      run.adapter.sendInput(SESSION, {
-        text: "hello",
-        modelSelection: { model: "claude-opus-4-8", options: {} },
-      }),
-    );
-    expect(run.models).toEqual(["claude-opus-4-8"]);
-
-    // The harness is already answering under the turn's own model, so a
-    // different one named mid-turn is not asked for either.
-    await Effect.runPromise(
-      run.adapter.sendInput(SESSION, {
-        text: "and this",
-        modelSelection: { model: "claude-haiku-4-5", options: {} },
-      }),
-    );
-    expect(run.models).toEqual(["claude-opus-4-8"]);
-  });
-
-  it("refuses the input where the harness will not take the model, naming the refusal", async () => {
-    const run = driving();
-    await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, WORKING));
-    run.refusesModel = true;
-
-    const said = await Effect.runPromise(
-      Effect.flip(
-        run.adapter.sendInput(SESSION, {
-          text: "hello",
-          modelSelection: { model: "claude-nonesuch", options: {} },
-        }),
-      ),
-    );
-
-    // Delivering it under the old model would answer for a turn nobody asked
-    // for, and the caller would never hear that the model did not take.
-    expect(said).toContain("claude-nonesuch");
-    expect(run.sent).toEqual([]);
-    expect(tags(run.seen)).toEqual(["session.started"]);
-  });
-
   it("refuses the input where the session was stopped while the model was changing", async () => {
     const run = driving();
     await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, WORKING));
@@ -967,6 +923,9 @@ describe("the model the adapter last applied to the harness", () => {
 
     expect(said).toContain("claude-opus-4-8");
     expect(run.sent).toEqual([]);
+    // Delivering it under the old model would answer for a turn nobody asked
+    // for, and the caller would never hear that the model did not take.
+    expect(tags(run.seen)).toEqual(["session.started"]);
 
     // The refusal left nothing applied, so the very next input asks again
     // rather than treating the rejected model as though it had taken.
