@@ -859,12 +859,18 @@ describe("Thread: token tap (AC-13)", () => {
   });
 });
 
-describe("Thread: live subscriptions (AC-14)", () => {
+describe("Thread: live subscriptions", () => {
   it("subscribes to exactly the session's stream and tap topics while mounted, and ends them on unmount", async () => {
     const { live, router } = await open(session({ status: "idle" }), twoCompletedTurns());
 
+    // Judged among this thread's own per-session topics: the shell mounts
+    // its own subscriptions (the sidebar's `session` invalidation topic
+    // among them) regardless of which screen is open, so the assertion
+    // narrows to what starts with `session:` rather than the whole set.
+    const perSessionTopics = () => live.topics().filter((topic) => topic.startsWith("session:"));
+
     await waitFor(() => {
-      expect([...live.topics()].sort()).toEqual(
+      expect([...perSessionTopics()].sort()).toEqual(
         [sessionStreamTopic(SESSION_ID), sessionTapTopic(SESSION_ID)].sort(),
       );
     });
@@ -874,8 +880,7 @@ describe("Thread: live subscriptions (AC-14)", () => {
     });
 
     await waitFor(() => {
-      expect(live.topics()).not.toContain(sessionStreamTopic(SESSION_ID));
-      expect(live.topics()).not.toContain(sessionTapTopic(SESSION_ID));
+      expect(perSessionTopics()).toEqual([]);
     });
   });
 
