@@ -141,10 +141,10 @@ export {
   INPUT_SOURCES,
   INPUT_UPDATE_FIELDS,
   INPUT_STATUSES,
+  Input,
   InputSource,
   InputStatus,
   InputUpdatePayload,
-  SessionInput,
 } from "./groups/input";
 export { TRANSCRIPT_SORT_FIELDS, TranscriptRow } from "./groups/transcript";
 export { OwnerKind, SecretRef } from "./groups/secret";

@@ -47,10 +47,10 @@ import {
   validation,
   validationOf,
   type Forbidden,
+  type Input,
   type InvalidState,
   type NotFound,
   type Session,
-  type SessionInput,
   type SessionInputOutcome,
   type SortDirection,
   type TranscriptRow,
@@ -115,7 +115,7 @@ export interface TranscriptPage {
 }
 
 export interface InputPage {
-  readonly items: ReadonlyArray<SessionInput>;
+  readonly items: ReadonlyArray<Input>;
   readonly nextCursor?: string;
 }
 
@@ -173,6 +173,8 @@ const REFUSED = "that session's runner would not take the input";
 const NOT_RESUMABLE =
   "that session is not resumable: it is still live, it left no provider-native session, " +
   "or its machine is gone";
+
+const DRAINING = "that session's runner is draining and takes no new sessions";
 
 const ALREADY_CARRIED_ON =
   "another session is already live against that one's provider-native session; " +
@@ -1029,6 +1031,12 @@ const make = Effect.gen(function* () {
         }
         const machine = yield* runners.read(parent.runnerId);
         if (Option.isNone(machine)) return yield* Effect.fail(invalidState(NOT_RESUMABLE));
+        // A continued session is a new session on that machine, and a draining
+        // one takes none (spec 03 section 7). `resumable` says the transcript
+        // is still there; this says the machine will not open it.
+        if (machine.value.lifecycle !== "active") {
+          return yield* Effect.fail(invalidState(DRAINING));
+        }
         yield* requireOnline(machine.value);
         const { instance, snapshots } = yield* resolved(parent.instanceId);
         // The login half of what `spawn` asks placement for, of the one machine
@@ -1081,7 +1089,7 @@ const make = Effect.gen(function* () {
         return pageOut(listing);
       }),
 
-    updateInput: (input: InputUpdate): Effect.Effect<SessionInput, InputError> =>
+    updateInput: (input: InputUpdate): Effect.Effect<Input, InputError> =>
       Effect.gen(function* () {
         yield* requireGrant("input.update");
         const { id, inputId, text } = yield* Effect.mapError(
@@ -1100,7 +1108,7 @@ const make = Effect.gen(function* () {
         );
       }),
 
-    cancelInput: (input: InputIdentified): Effect.Effect<SessionInput, InputError> =>
+    cancelInput: (input: InputIdentified): Effect.Effect<Input, InputError> =>
       Effect.gen(function* () {
         yield* requireGrant("input.cancel");
         const { id, inputId } = yield* Effect.mapError(decodeInputIdentified(input), validationOf);

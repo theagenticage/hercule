@@ -33,7 +33,7 @@ import {
   type SessionInterrupt as SessionInterruptFrame,
   type SessionStart,
   type SessionStop as SessionStopFrame,
-  type SessionInput as SessionInputFrame,
+  type SessionInput,
 } from "@hydra/protocol";
 import type { Plugin, ProviderDefinition } from "@hydra/plugin-host";
 import type { Runner, Session } from "@hydra/contract";
@@ -143,7 +143,7 @@ interface Wire {
    * reason, or `undefined` to leave the frame unanswered, which is what a
    * machine that has gone quiet does.
    */
-  readonly answering: (delivery: (frame: SessionInputFrame) => Answered) => void;
+  readonly answering: (delivery: (frame: SessionInput) => Answered) => void;
   /** Answers every input frame this machine has been holding back, at last. */
   readonly release: (delivery: Delivery) => void;
 }
@@ -177,8 +177,8 @@ const dial = (base: string, credential: string): Promise<Wire> =>
       headers: { authorization: `Bearer ${credential}` },
     });
     const frames: Array<ControllerMessage> = [];
-    let delivery: (frame: SessionInputFrame) => Answered = () => "opened";
-    const withheld: Array<SessionInputFrame> = [];
+    let delivery: (frame: SessionInput) => Answered = () => "opened";
+    const withheld: Array<SessionInput> = [];
     const write = (message: RunnerMessage): void => socket.send(JSON.stringify(message));
     socket.onmessage = (event) => {
       const frame = decodeFrame(JSON.parse(String(event.data)) as unknown);
@@ -426,12 +426,12 @@ const started = async (arranged: Arranged, prompt: string): Promise<Session> => 
   // The prompt's turn is opened after the transaction that set idle committed,
   // so the status is not evidence that its frame was written - and every count
   // of input frames below is taken relative to this one.
-  await framesWhen<SessionInputFrame>(arranged.wire, "sessionInput", 1);
+  await framesWhen<SessionInput>(arranged.wire, "sessionInput", 1);
   return session;
 };
 
-const inputFrames = (wire: Wire): ReadonlyArray<SessionInputFrame> =>
-  framesOf<SessionInputFrame>(wire, "sessionInput");
+const inputFrames = (wire: Wire): ReadonlyArray<SessionInput> =>
+  framesOf<SessionInput>(wire, "sessionInput");
 
 /**
  * Waits until the controller has noticed the machine's socket go. The runner
@@ -592,7 +592,7 @@ describe("session.spawn", () => {
         _tag: "session.started",
       });
 
-      const input = (await framesWhen<SessionInputFrame>(arranged.wire, "sessionInput", 1))[0]!;
+      const input = (await framesWhen<SessionInput>(arranged.wire, "sessionInput", 1))[0]!;
       expect(input.sessionId).toBe(session.id);
       expect(input.input).toEqual({ text: "what is the time" });
     });
@@ -753,7 +753,7 @@ describe("session.input", () => {
       const answer = (await steered.json()) as { inputId: string; result: string };
       expect(answer.result).toBe("steered");
 
-      const sent = await framesWhen<SessionInputFrame>(arranged.wire, "sessionInput", 3);
+      const sent = await framesWhen<SessionInput>(arranged.wire, "sessionInput", 3);
       // The spawn's own prompt went first, when the harness came up.
       expect(sent.map((frame) => frame.input.text)).toEqual(["hello", "again", "and this"]);
       // The id the answer carries names the row the input was stored as.
@@ -810,7 +810,7 @@ describe("session.input", () => {
       const events = transcript(session.id);
       report(arranged.wire, ...events[0]!);
       await sessionWhen(arranged, session.id, (one) => one.status === "idle");
-      await framesWhen<SessionInputFrame>(arranged.wire, "sessionInput", 1);
+      await framesWhen<SessionInput>(arranged.wire, "sessionInput", 1);
       report(arranged.wire, ...events[1]!);
       await sessionWhen(arranged, session.id, (one) => one.status === "busy");
 
@@ -898,7 +898,7 @@ describe("session.input", () => {
       arranged.wire.answering(() => undefined);
 
       const answering = sendInput(arranged, session.id, { text: "mid-turn" });
-      await framesWhen<SessionInputFrame>(arranged.wire, "sessionInput", 2);
+      await framesWhen<SessionInput>(arranged.wire, "sessionInput", 2);
       // The turn this row was queued behind ends while the row is on the wire,
       // so the boundary that would have flushed it has been and gone.
       report(arranged.wire, ...events[6]!);
@@ -1052,7 +1052,7 @@ describe("the queue at the transition to idle", () => {
         _tag: "session.started",
       });
 
-      const sent = await framesWhen<SessionInputFrame>(arranged.wire, "sessionInput", 3);
+      const sent = await framesWhen<SessionInput>(arranged.wire, "sessionInput", 3);
       expect(sent.map((frame) => frame.input.text)).toEqual(["one", "two", "three"]);
       const rows = await until("recorded what the machine answered", async () => {
         const found = await inputsOf(arranged, session.id);
@@ -1098,7 +1098,7 @@ describe("the queue at the transition to idle", () => {
       const events = transcript(session.id);
 
       report(arranged.wire, ...events[0]!);
-      const first = await framesWhen<SessionInputFrame>(arranged.wire, "sessionInput", 1);
+      const first = await framesWhen<SessionInput>(arranged.wire, "sessionInput", 1);
       // The one wait on a clock here: a flush holds its row until it gives up
       // waiting for an answer, and nothing else says when it has.
       await delay(Duration.toMillis(INPUT_DEADLINE) + 1000);
@@ -1107,7 +1107,7 @@ describe("the queue at the transition to idle", () => {
       await sessionWhen(arranged, session.id, (one) => one.status === "busy");
       report(arranged.wire, ...events[6]!);
 
-      const again = await framesWhen<SessionInputFrame>(arranged.wire, "sessionInput", 2);
+      const again = await framesWhen<SessionInput>(arranged.wire, "sessionInput", 2);
       expect(again.map((frame) => frame.requestId)).toEqual([
         first[0]!.requestId,
         first[0]!.requestId,
@@ -1142,7 +1142,7 @@ describe("the queue at the transition to idle", () => {
       const events = transcript(session.id);
 
       report(arranged.wire, ...events[0]!);
-      await framesWhen<SessionInputFrame>(arranged.wire, "sessionInput", 1);
+      await framesWhen<SessionInput>(arranged.wire, "sessionInput", 1);
       report(arranged.wire, ...events[1]!);
       await sessionWhen(arranged, session.id, (one) => one.status === "busy");
       report(arranged.wire, ...events[6]!);
@@ -1153,7 +1153,7 @@ describe("the queue at the transition to idle", () => {
       // have put it on the wire ahead of this one.
       const opened = await sendInput(arranged, session.id, { text: "two" });
       expect(opened.status, await opened.clone().text()).toBe(200);
-      const sent = await framesWhen<SessionInputFrame>(arranged.wire, "sessionInput", 2);
+      const sent = await framesWhen<SessionInput>(arranged.wire, "sessionInput", 2);
       expect(sent.map((frame) => frame.input.text)).toEqual(["one", "two"]);
       // The unanswered row is still waiting, which is why a second flush had
       // something to send twice and did not.
@@ -1201,7 +1201,7 @@ describe("the queue at the transition to idle", () => {
       expect(await queued.json()).toMatchObject({ result: "queued" });
 
       report(arranged.wire, ...transcript(session.id)[0]!);
-      await framesWhen<SessionInputFrame>(arranged.wire, "sessionInput", 1);
+      await framesWhen<SessionInput>(arranged.wire, "sessionInput", 1);
       report(arranged.wire, ...transcript(session.id)[1]!);
       await sessionWhen(arranged, session.id, (one) => one.status === "busy");
 
@@ -1214,7 +1214,7 @@ describe("the queue at the transition to idle", () => {
       ]);
 
       report(arranged.wire, ...transcript(session.id)[6]!);
-      const sent = await framesWhen<SessionInputFrame>(arranged.wire, "sessionInput", 2);
+      const sent = await framesWhen<SessionInput>(arranged.wire, "sessionInput", 2);
       expect(sent.map((frame) => frame.input.text)).toEqual(["one", "two"]);
     });
   });
@@ -1225,7 +1225,7 @@ describe("the queue at the transition to idle", () => {
       const session = await spawned(arranged, { prompt: "one" });
       await framesWhen<SessionStart>(arranged.wire, "sessionStart", 1);
       report(arranged.wire, ...transcript(session.id)[0]!);
-      const sent = (await framesWhen<SessionInputFrame>(arranged.wire, "sessionInput", 1))[0]!;
+      const sent = (await framesWhen<SessionInput>(arranged.wire, "sessionInput", 1))[0]!;
 
       // The row still reads `queued` - it is waiting for an answer, not for a
       // turn - so a caller told it was called off would be told a lie.
@@ -1250,7 +1250,7 @@ describe("the queue at the transition to idle", () => {
       const { inputId } = (await queued.json()) as { inputId: string };
 
       report(arranged.wire, ...transcript(session.id)[0]!);
-      await framesWhen<SessionInputFrame>(arranged.wire, "sessionInput", 1);
+      await framesWhen<SessionInput>(arranged.wire, "sessionInput", 1);
 
       // Waiting behind the one on the wire, so it is still the caller's to
       // take back - and a flush that had read the queue up front would send it
@@ -1285,7 +1285,7 @@ describe("the queue at the transition to idle", () => {
 
       const events = transcript(session.id);
       report(arranged.wire, ...events[0]!);
-      await framesWhen<SessionInputFrame>(arranged.wire, "sessionInput", 1);
+      await framesWhen<SessionInput>(arranged.wire, "sessionInput", 1);
       // A whole turn comes and goes while the machine has still said nothing
       // about the first input, so the boundary that would release the second
       // one arrives with a flush already running.
@@ -1296,7 +1296,7 @@ describe("the queue at the transition to idle", () => {
 
       arranged.wire.release("opened");
 
-      const sent = await framesWhen<SessionInputFrame>(arranged.wire, "sessionInput", 2);
+      const sent = await framesWhen<SessionInput>(arranged.wire, "sessionInput", 2);
       expect(sent.map((frame) => frame.input.text)).toEqual(["one", "two"]);
     });
   });
@@ -1314,7 +1314,7 @@ describe("the queue at the transition to idle", () => {
 
       const events = transcript(session.id);
       report(arranged.wire, ...events[0]!);
-      await framesWhen<SessionInputFrame>(arranged.wire, "sessionInput", 1);
+      await framesWhen<SessionInput>(arranged.wire, "sessionInput", 1);
       report(arranged.wire, ...events[1]!);
       await sessionWhen(arranged, session.id, (one) => one.status === "busy");
       report(arranged.wire, ...events[6]!);
@@ -1343,7 +1343,7 @@ describe("the queue at the transition to idle", () => {
         state: "completed",
       });
 
-      const sent = await framesWhen<SessionInputFrame>(arranged.wire, "sessionInput", 2);
+      const sent = await framesWhen<SessionInput>(arranged.wire, "sessionInput", 2);
       expect(sent.map((frame) => frame.input.text)).toEqual(["one", "two"]);
     });
   });
@@ -1354,7 +1354,7 @@ describe("the queue at the transition to idle", () => {
       const waiting = await spawned(arranged, { prompt: "one" });
       await framesWhen<SessionStart>(arranged.wire, "sessionStart", 1);
       report(arranged.wire, ...transcript(waiting.id)[0]!);
-      await framesWhen<SessionInputFrame>(arranged.wire, "sessionInput", 1);
+      await framesWhen<SessionInput>(arranged.wire, "sessionInput", 1);
 
       const other = await spawned(arranged, { prompt: "two" });
       report(arranged.wire, ...transcript(other.id)[0]!);
@@ -1614,6 +1614,7 @@ describe("session.continue", () => {
   it("resumes the parent's native session on a new row that copies it", async () => {
     await withFleet(async (arranged) => {
       const parent = await ended(arranged, "hello");
+      expect(parent.resumable).toBe(true);
 
       const response = await carryOn(arranged, parent.id, { mode: "resume", prompt: "carry on" });
 
@@ -1729,12 +1730,12 @@ describe("session.continue", () => {
     });
   });
 
-  it("carries on any parent whose row reads resumable, on a machine that is online", async () => {
+  it("refuses a parent whose machine is draining, and says that is why", async () => {
     await withFleet(async (arranged) => {
       const parent = await ended(arranged, "hello");
-      // Draining is a machine being emptied, not one that has lost the native
-      // state: `resumable` is what the caller reads off the row, and it is the
-      // whole rule.
+      // The transcript is still there, so the row reads resumable; the machine
+      // is the one refusing, and it says so rather than reading as a
+      // contradiction.
       await Effect.runPromise(
         Effect.orDie(
           arranged.harness.sql`
@@ -1744,10 +1745,11 @@ describe("session.continue", () => {
       );
       expect((await readSession(arranged, parent.id)).resumable).toBe(true);
 
-      const response = await carryOn(arranged, parent.id, { mode: "resume", prompt: "carry on" });
+      const response = await carryOn(arranged, parent.id, { mode: "resume", prompt: "no" });
 
-      expect(response.status, await response.clone().text()).toBe(200);
-      await framesWhen<SessionStart>(arranged.wire, "sessionStart", 2);
+      expect(response.status, await response.clone().text()).toBe(409);
+      expect(await response.text()).toContain("draining");
+      expect(framesOf<SessionStart>(arranged.wire, "sessionStart")).toHaveLength(1);
     });
   });
 
@@ -1831,7 +1833,7 @@ describe("the model an input changed", () => {
         modelSelection: { model: "fast", options: {} },
       });
       // Two: the spawn prompt's own frame, and then this one.
-      await framesWhen<SessionInputFrame>(arranged.wire, "sessionInput", 2);
+      await framesWhen<SessionInput>(arranged.wire, "sessionInput", 2);
 
       exited(arranged.wire, session.id, 2);
       await sessionWhen(arranged, session.id, (one) => one.status === "exited");
