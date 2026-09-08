@@ -83,9 +83,11 @@ describe("the command tree", () => {
     expect(commandFor("session", "interrupt")?.requires).toBe("session.steer");
     expect(commandFor("session", "stop")?.requires).toBe("session.steer");
     expect(commandFor("session", "continue")?.requires).toBe("session.spawn");
+    expect(commandFor("session", "update")?.requires).toBe("session.steer");
     expect(commandFor("input", "query")?.requires).toBe("session.read");
     expect(commandFor("input", "update")?.requires).toBe("session.steer");
     expect(commandFor("input", "cancel")?.requires).toBe("session.steer");
+    expect(commandFor("input", "steer")?.requires).toBe("session.steer");
     expect(ENTITIES).toContain("input");
   });
 
@@ -96,7 +98,14 @@ describe("the command tree", () => {
     expect(names("query")).toEqual(["id"]);
     expect(names("update")).toEqual(["id", "inputId"]);
     expect(names("cancel")).toEqual(["id", "inputId"]);
+    expect(names("steer")).toEqual(["id", "inputId"]);
     expect(idQueryOf(commandFor("input", "update")!)?.id).toBe("session.query");
+  });
+
+  it("gives the update command on a session an id positional and a --model flag", () => {
+    const update = commandFor("session", "update")!;
+    expect(update.positionals.map((field) => field.name)).toEqual(["id"]);
+    expect(update.payload.map((field) => field.name)).toContain("model");
   });
 
   it("has a --text flag exactly where the payload carries one", () => {
@@ -104,6 +113,7 @@ describe("the command tree", () => {
       commandFor(entity, verb)?.payload.map((field) => field.name);
 
     expect(payloadNames("session", "input")).toContain("text");
+    expect(payloadNames("session", "input")).not.toContain("modelSelection");
     expect(payloadNames("input", "update")).toContain("text");
 
     expect(payloadNames("session", "interrupt")).toEqual([]);

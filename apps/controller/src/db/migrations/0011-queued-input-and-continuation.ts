@@ -46,9 +46,9 @@ export default Effect.gen(function* () {
   yield* sql`CREATE INDEX session_inputs_session ON session_inputs (session_id, created_at, id)`;
 
   /**
-   * The model the session runs under now, which is not what `spec` says: an
-   * input may change it mid-life, and `spec` is the frozen document the runner
-   * was told at start. A resume or a fork reads this one.
+   * The model the session runs under now, which is not what `spec` says:
+   * `session.update` can change it mid-life, and `spec` is the frozen document
+   * the runner was told at start. A resume or a fork reads this one.
    *
    * SQLite takes a NOT NULL column only with a default, so the empty document
    * is there for the ALTER alone; the UPDATE below fills every row that exists
