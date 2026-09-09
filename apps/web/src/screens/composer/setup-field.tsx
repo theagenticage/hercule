@@ -12,6 +12,7 @@ export function SetupField({
   open,
   onOpenChange,
   trigger,
+  align = "start",
   children,
 }: {
   readonly started: boolean;
@@ -19,11 +20,13 @@ export function SetupField({
   readonly open: boolean;
   readonly onOpenChange: (open: boolean) => void;
   readonly trigger: string;
+  /** The right-hand fields (runner, profile) stay on screen with "end"; the left group keeps the default. */
+  readonly align?: "start" | "center" | "end";
   readonly children: ReactNode;
 }): JSX.Element {
   if (started) return <span className="px-2 py-1">{lockedText}</span>;
   return (
-    <PopoverSelector open={open} onOpenChange={onOpenChange} trigger={trigger}>
+    <PopoverSelector open={open} onOpenChange={onOpenChange} trigger={trigger} align={align}>
       {children}
     </PopoverSelector>
   );

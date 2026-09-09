@@ -23,6 +23,7 @@ import {
   threadModelField,
   type HydraClient,
   type Live,
+  type RunnerMenuRow,
 } from "@hydra/client-core";
 import type {
   AccessMode,
@@ -32,7 +33,7 @@ import type {
   Session,
   SettingsState,
 } from "@hydra/contract";
-import { Button, ListRow, Textarea } from "@hydra/ui";
+import { Button, cn, ListRow, Textarea } from "@hydra/ui";
 import { useLiveInvalidation } from "../../app/live-invalidation";
 import { messageOf } from "../save-status";
 import { MenuRow } from "./menu-row";
@@ -46,6 +47,30 @@ type SelectorKey =
 
 const DEFAULT_PROFILE_NAME = "unrestricted";
 const DEFAULT_ACCESS_MODE: AccessMode = "approval-required";
+
+/** Only `online` and `unreachable` carry a doctrine hue (live, failed); the rest are neutral. */
+const RUNNER_STATE_HUE: Record<RunnerMenuRow["state"], string> = {
+  online: "text-live",
+  draining: "text-muted",
+  retired: "text-muted",
+  unreachable: "text-fail",
+  offline: "text-muted",
+};
+
+/**
+ * The runner menu's own first line: name, its state word in the state's hue,
+ * then what else is true of it. The separating " · " is a text character in
+ * every segment, not a flex gap, so the row's own text - and a test reading
+ * it - carries the same spacing the eye sees.
+ */
+const runnerRowLabel = (row: RunnerMenuRow): JSX.Element => (
+  <span className="flex min-w-0 items-center">
+    <span className="truncate">{row.name}</span>
+    <span className={cn("shrink-0", RUNNER_STATE_HUE[row.state])}>{` · ${row.state}`}</span>
+    {row.isLocal ? <span className="shrink-0 text-faint"> · this machine</span> : null}
+    {row.reserved ? <span className="shrink-0 text-faint"> · reserved</span> : null}
+  </span>
+);
 
 /** The spawn defaults a new thread prefills from: `thread.*` settings, else the shipped ones. */
 const resolveDefaults = (
@@ -443,11 +468,12 @@ export function Composer({
             open={openSelector === "runner"}
             onOpenChange={toggle("runner")}
             trigger={runnerLabel}
+            align="end"
           >
             {runnerRows.map((row) => (
               <MenuRow
                 key={row.runnerId}
-                label={row.name}
+                label={runnerRowLabel(row)}
                 secondLine={[row.identity, row.planLabel]
                   .filter((each) => each !== null)
                   .join(" · ")}
@@ -466,6 +492,7 @@ export function Composer({
             open={openSelector === "profile"}
             onOpenChange={toggle("profile")}
             trigger={pickedProfile?.name ?? "Profile"}
+            align="end"
           >
             {profiles.map((each) => (
               <MenuRow

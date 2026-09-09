@@ -114,10 +114,10 @@ export function ModelMenuContent({
       </div>
       {options.length === 0 ? null : (
         <div className="flex flex-col gap-2 border-t border-line-soft pt-2">
-          {options.map((option) => (
-            <div key={option.id} className="flex flex-col gap-1">
-              <span className="text-fine text-faint">{option.label}</span>
-              {option.kind === "select" ? (
+          {options.map((option) =>
+            option.kind === "select" ? (
+              <div key={option.id} className="flex flex-col gap-1">
+                <span className="text-fine text-faint">{option.label}</span>
                 <SegmentedControl
                   aria-label={option.label}
                   value={String(selectedOptions[option.id] ?? option.default)}
@@ -133,16 +133,19 @@ export function ModelMenuContent({
                     </SegmentedControlItem>
                   ))}
                 </SegmentedControl>
-              ) : (
-                <Checkbox
-                  label={option.label}
-                  checked={Boolean(selectedOptions[option.id] ?? option.default)}
-                  disabled={onOptionChange === undefined}
-                  onChange={(event) => onOptionChange?.(option.id, event.target.checked)}
-                />
-              )}
-            </div>
-          ))}
+              </div>
+            ) : (
+              // A boolean's own label is the checkbox's label - a heading above
+              // it would say the same word twice.
+              <Checkbox
+                key={option.id}
+                label={option.label}
+                checked={Boolean(selectedOptions[option.id] ?? option.default)}
+                disabled={onOptionChange === undefined}
+                onChange={(event) => onOptionChange?.(option.id, event.target.checked)}
+              />
+            ),
+          )}
         </div>
       )}
     </div>

@@ -368,6 +368,20 @@ describe("Composer: selector popovers (AC-16)", () => {
     await user.click(screen.getByRole("button", { name: /branch/i }));
     expect(within(await screen.findByRole("dialog")).getByText(/no workspace/i)).toBeDefined();
   });
+
+  it("opens the runner menu with the runner's state and machine on the row's first line", async () => {
+    const user = userEvent.setup();
+    await open();
+
+    await user.click(screen.getByRole("button", { name: "moss" }));
+
+    // The state word sits in its own colored span, so the row's own text
+    // spans several elements - read the dialog's whole text rather than
+    // asking for one element whose own text is the exact string.
+    const dialog = reading(await screen.findByRole("dialog"));
+    expect(dialog).toContain("moss · online · this machine");
+    expect(dialog).toContain("rogier@example.com · Claude Max");
+  });
 });
 
 describe("Composer: model menu (AC-17)", () => {

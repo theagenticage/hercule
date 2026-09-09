@@ -12,11 +12,15 @@ import { Popover, PopoverContent, PopoverTrigger, cn } from "@hydra/ui";
  * trigger, unconditionally - a selector sitting close to the bottom of the
  * viewport (the setup bar) has less room below than above, and Radix's own
  * collision avoidance would otherwise flip exactly that one to the bottom.
+ * With collisions off, a right-hand trigger needs `align="end"` of its own
+ * accord to stay on screen - Radix will not pull it back once collision
+ * avoidance is the very thing turned off.
  */
 export function PopoverSelector({
   open,
   onOpenChange,
   trigger,
+  align = "start",
   triggerClassName,
   contentClassName,
   children,
@@ -24,6 +28,7 @@ export function PopoverSelector({
   readonly open: boolean;
   readonly onOpenChange: (open: boolean) => void;
   readonly trigger: ReactNode;
+  readonly align?: "start" | "center" | "end";
   readonly triggerClassName?: string;
   readonly contentClassName?: string;
   readonly children: ReactNode;
@@ -45,7 +50,7 @@ export function PopoverSelector({
       </PopoverTrigger>
       <PopoverContent
         side="top"
-        align="start"
+        align={align}
         avoidCollisions={false}
         className={cn("flex w-72 flex-col gap-1", contentClassName)}
       >
