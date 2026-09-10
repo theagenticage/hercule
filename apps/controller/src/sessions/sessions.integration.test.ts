@@ -39,6 +39,7 @@ import {
   settleLive,
   ticketFor,
   within,
+  type Collected,
   type ServerHarness,
 } from "../http/testing";
 import { fixture, providerDefinition } from "../plugins/testing";
@@ -2490,6 +2491,164 @@ describe("session.spawn onto a runner that is short of disk", () => {
       await sessionWhen(arranged, waiting.id, (one) => one.status === "starting");
       const sent = await framesWhen<SessionStart>(arranged.wire, "sessionStart", 1);
       expect(sent[0]!.sessionId).toBe(waiting.id);
+    });
+  });
+});
+
+/**
+ * What a machine's report of what it holds says about what it does not.
+ *
+ * A runner that restarted comes back holding fewer sessions than the controller
+ * believes it has, and the report is the only place that difference shows. So
+ * what is asserted is a difference: the sessions the report leaves out end, the
+ * one it lists is untouched, and a session on another machine is nobody else's
+ * business, whatever this machine says.
+ */
+
+/**
+ * How many messages a subscription has taken once nothing has arrived for two
+ * coalescing windows. A record change is announced on a delay, so a test that
+ * takes its baseline the moment it subscribes counts the traffic it caused
+ * earlier as traffic it caused later.
+ */
+const quiet = async (announced: Collected): Promise<number> => {
+  let seen = -1;
+  while (seen !== announced.received.length) {
+    seen = announced.received.length;
+    await settleLive();
+  }
+  return seen;
+};
+
+/** Has this machine say it holds exactly these sessions, each under a native id. */
+const holds = (wire: Wire, arranged: Arranged, sessionIds: ReadonlyArray<string>): void =>
+  wire.send({
+    _tag: "sessionsReport",
+    sessions: sessionIds.map((sessionId) => ({
+      sessionId,
+      nativeSessionId: `native-${sessionId}`,
+      instanceId: instanceOf(arranged, "full-provider"),
+    })),
+  });
+
+/** The session, started and then mid-turn: what the controller reads as busy. */
+const busy = async (arranged: Arranged, prompt: string): Promise<Session> => {
+  const session = await started(arranged, prompt);
+  report(arranged.wire, 2, {
+    eventId: crypto.randomUUID(),
+    sessionId: session.id,
+    at,
+    _tag: "turn.started",
+    turnId: `turn-${session.id}`,
+  });
+  return await sessionWhen(arranged, session.id, (one) => one.status === "busy");
+};
+
+/** A session placed by name on a second machine, and reported up as busy there. */
+const busyOn = async (
+  arranged: Arranged,
+  machine: { readonly runnerId: string; readonly wire: Wire },
+  prompt: string,
+): Promise<Session> => {
+  const session = await spawned(arranged, { prompt, runnerId: machine.runnerId });
+  const base = { sessionId: session.id, at };
+  report(machine.wire, 1, {
+    ...base,
+    eventId: crypto.randomUUID(),
+    _tag: "session.started",
+    providerRefs: { nativeSessionId: `native-${session.id}` },
+  });
+  report(machine.wire, 2, {
+    ...base,
+    eventId: crypto.randomUUID(),
+    _tag: "turn.started",
+    turnId: `turn-${session.id}`,
+  });
+  return await sessionWhen(arranged, session.id, (one) => one.status === "busy");
+};
+
+describe("what a machine's report says it is no longer holding", () => {
+  it("ends the sessions the report leaves out, and leaves the listed one and another machine's alone", async () => {
+    await withFleet(async (arranged) => {
+      // This machine's three first, while it is the only one there is: an
+      // automatic placement picks a machine, and these three have to be on the
+      // one whose report is the subject.
+      const running = await busy(arranged, "mid-turn here");
+      const waiting = await started(arranged, "idle here");
+      const opening = await spawned(arranged, { prompt: "still starting" });
+      expect(opening.status).toBe("starting");
+      expect(opening.runnerId).toBe(arranged.runnerId);
+      const other = await arranged.enlist();
+      const elsewhere = await busyOn(arranged, other, "on the other machine");
+      // Every one of them has a native id before the report that ends two of
+      // them, because what an ended session's resumability rests on is that id
+      // and not the reason it stopped.
+      holds(arranged.wire, arranged, [running.id, waiting.id, opening.id]);
+      for (const id of [running.id, waiting.id, opening.id]) {
+        await sessionWhen(arranged, id, (one) => one.nativeSessionId !== null);
+      }
+
+      holds(arranged.wire, arranged, [waiting.id]);
+
+      for (const id of [running.id, opening.id]) {
+        const gone = await sessionWhen(arranged, id, (one) => one.status === "exited");
+        expect(gone.resumable, id).toBe(true);
+        expect(gone.nativeSessionId, id).toBe(`native-${id}`);
+        expect(gone.exitedAt, id).not.toBeNull();
+      }
+      expect((await readSession(arranged, waiting.id)).status).toBe("idle");
+      expect((await readSession(arranged, elsewhere.id)).status).toBe("busy");
+    });
+  });
+
+  it("announces the session topic for each session it ended", async () => {
+    await withFleet(async (arranged) => {
+      const running = await busy(arranged, "mid-turn here");
+      const opening = await spawned(arranged, { prompt: "still starting" });
+      holds(arranged.wire, arranged, [running.id, opening.id]);
+      await sessionWhen(arranged, opening.id, (one) => one.nativeSessionId !== null);
+      const ticket = await ticketFor(arranged.harness.base, arranged.token);
+
+      await onSocket(arranged.harness.base, (client) =>
+        Effect.gen(function* () {
+          yield* client.hello({ v: 1, ticket });
+          const announced = yield* collecting(client, { topic: "session" });
+          // Everything the spawns and the binding left in flight is collected
+          // first and counted, so what is asserted below is what the report
+          // caused rather than what was already on its way.
+          const before = yield* Effect.promise(() => quiet(announced));
+
+          yield* Effect.sync(() => holds(arranged.wire, arranged, []));
+
+          const announces = (id: string): boolean =>
+            announced.received
+              .slice(before)
+              .some((message) => (message as { ids?: ReadonlyArray<string> }).ids?.includes(id));
+          for (const id of [running.id, opening.id]) {
+            const heard = yield* Effect.promise(() => within(3000, () => announces(id)));
+            expect(heard, id).toBe(true);
+          }
+          yield* Fiber.interrupt(announced.fiber);
+        }),
+      );
+    });
+  });
+
+  it("changes nothing when the report still lists every session", async () => {
+    await withFleet(async (arranged) => {
+      const running = await busy(arranged, "mid-turn here");
+      const waiting = await started(arranged, "idle here");
+      const opening = await spawned(arranged, { prompt: "still starting" });
+
+      holds(arranged.wire, arranged, [running.id, waiting.id, opening.id]);
+      await sessionWhen(arranged, opening.id, (one) => one.nativeSessionId !== null);
+      // A report is applied the moment it arrives; the wait is for a move that
+      // must never come, so it is given the time one would have taken.
+      await settled();
+
+      expect((await readSession(arranged, running.id)).status).toBe("busy");
+      expect((await readSession(arranged, waiting.id)).status).toBe("idle");
+      expect((await readSession(arranged, opening.id)).status).toBe("starting");
     });
   });
 });

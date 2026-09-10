@@ -11,8 +11,11 @@
  * This package reaches no controller code, so the stub is `Bun.serve` and an
  * Ed25519 keypair made here.
  */
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { Duration, Effect, Schema } from "effect";
+import { Duration, Effect, Fiber, Queue, Schema, Stream } from "effect";
 import {
   PROTOCOL_VERSION,
   RunnerToController,
@@ -25,7 +28,12 @@ import {
   type RunnerFactsRequest,
   type RunnerHello,
   type RunnerToController as RunnerMessage,
+  type ExitReason,
+  type ProviderEvent,
+  type SessionBinding,
+  type SessionSpec,
 } from "@hydra/protocol";
+import type { ProviderAdapter } from "./providers";
 import {
   ControllerNotRecognised,
   connect,
@@ -615,5 +623,218 @@ describe("a controller asking a runner to probe a provider it cannot drive", () 
     stub.hangUp();
     await pending;
     expect(failureOf(settled)).not.toBeInstanceOf(ControllerNotRecognised);
+  });
+});
+
+/**
+ * What an announced shutdown leaves behind (AC-9, AD-6).
+ *
+ * A runner that walks away without stopping its harnesses leaves orphan
+ * processes and sessions the controller believes are busy, so what is asserted
+ * here is the order of two things on one socket: every session it holds is
+ * stopped with `runner_restart` and its exit is written, and only then does the
+ * goodbye go. The harness is a fake, because what is under test is the runner's
+ * shutdown and not any vendor's process.
+ *
+ * The shutdown is driven by interrupting the connection, which is exactly what
+ * the stop latch in `./index.ts` does to it: a SIGTERM opens the latch, the
+ * race against it ends, and the connection's scope closes.
+ */
+
+/** The instance a started session's spec names, and the ids of the two sessions. */
+const INSTANCE_ID = "0199e0e7-0000-7000-8000-00000000000a";
+const FIRST_SESSION = "0199e0e7-0000-7000-8000-0000000000f1";
+const SECOND_SESSION = "0199e0e7-0000-7000-8000-0000000000f2";
+const AT = "2026-09-07T10:00:00.000Z";
+
+const SPEC: SessionSpec = {
+  instanceId: INSTANCE_ID,
+  workspaceId: null,
+  modelSelection: { model: "claude-haiku-4-5", options: {} },
+  accessMode: "approval-required",
+  timeouts: { inactivityMs: 30 * 60 * 1000, absoluteMs: 8 * 60 * 60 * 1000 },
+};
+
+const startFrame = (sessionId: string) => ({
+  _tag: "sessionStart",
+  sessionId,
+  providerId: "fake",
+  config: {},
+  spec: SPEC,
+});
+
+/** A harness that hosts whatever it is told to, and records why it was stopped. */
+interface FakeHarness {
+  readonly adapter: ProviderAdapter;
+  /** Every `stopSession`, with the reason its caller gave it. */
+  readonly stops: ReadonlyArray<{ readonly sessionId: string; readonly reason: ExitReason }>;
+  readonly holds: () => ReadonlyArray<string>;
+}
+
+/**
+ * A queue rather than a PubSub, so an event published before the relay has
+ * subscribed is still delivered: what this test is about is not the missing
+ * outbox.
+ */
+const harnessing = (options: { readonly exitsOnStop: boolean }): FakeHarness => {
+  const events = Effect.runSync(Queue.unbounded<ProviderEvent>());
+  const stops: Array<{ sessionId: string; reason: ExitReason }> = [];
+  const held = new Map<string, SessionBinding>();
+  const publish = (event: ProviderEvent): void => void Queue.offerUnsafe(events, event);
+  return {
+    stops,
+    holds: () => [...held.keys()],
+    adapter: {
+      providerId: "fake",
+      binaryName: "fake-harness",
+      events: Stream.fromQueue(events),
+      probe: () => Effect.die("not probed here"),
+      listSessions: Effect.sync(() => [...held.values()]),
+      startSession: (sessionId) =>
+        Effect.sync(() => {
+          const binding: SessionBinding = {
+            sessionId,
+            nativeSessionId: `native-${sessionId}`,
+            instanceId: INSTANCE_ID,
+          };
+          held.set(sessionId, binding);
+          publish({
+            _tag: "session.started",
+            eventId: `e-started-${sessionId}`,
+            sessionId,
+            at: AT,
+          });
+          return binding;
+        }),
+      sendInput: () => Effect.fail("no input here"),
+      interrupt: () => Effect.void,
+      stopSession: (sessionId, reason) =>
+        Effect.sync(() => {
+          stops.push({ sessionId, reason });
+          // A harness that will not die is the second case below: the stop is
+          // recorded, and no exit ever follows it.
+          if (!options.exitsOnStop) return;
+          held.delete(sessionId);
+          publish({
+            _tag: "session.exited",
+            eventId: `e-exited-${sessionId}`,
+            sessionId,
+            at: AT,
+            reason,
+          });
+        }),
+    },
+  };
+};
+
+const scratches: Array<string> = [];
+
+afterEach(() => {
+  for (const root of scratches.splice(0)) rmSync(root, { recursive: true, force: true });
+});
+
+/**
+ * One connection held open on a fiber, the way the daemon holds one, with this
+ * test's harness on it instead of the build's own adapters.
+ */
+const holding = (stub: Stub, fake: FakeHarness) => {
+  const root = mkdtempSync(join(tmpdir(), "hydra-shutdown-"));
+  scratches.push(root);
+  return Effect.runFork(
+    Effect.result(
+      connect({
+        pin: pinning(stub),
+        facts: FACTS,
+        probe: Effect.succeed(FACTS),
+        headroom: Effect.succeed({ diskFreeBytes: 200 * 1024 ** 3, availableMemoryBytes: 1 }),
+        providersDir: join(root, "providers"),
+        scratchDir: join(root, "scratch"),
+        proofDeadline: PATIENT,
+        adapters: [fake.adapter],
+      }),
+    ),
+  );
+};
+
+/** Where a frame of this kind sits in what the stub received, or -1. */
+const positionOf = (stub: Stub, matches: (frame: RunnerMessage) => boolean): number =>
+  stub.received.findIndex(matches);
+
+const exitOf = (sessionId: string) => (frame: RunnerMessage) =>
+  frame._tag === "sessionEvent" &&
+  frame.event._tag === "session.exited" &&
+  frame.event.sessionId === sessionId;
+
+const isGoodbye = (frame: RunnerMessage): boolean => frame._tag === "goodbye";
+
+/**
+ * The most a shutdown may take here: generous next to the "few seconds" AD-6
+ * bounds the wait at, and inside the deadline the wait for the goodbye carries,
+ * so this test measures a wait that never ends rather than the exact constant
+ * the implementation chose.
+ */
+const SHUTDOWN_BUDGET_MS = 8_000;
+
+describe("what an announced shutdown does to the sessions this runner holds", () => {
+  it("stops every one of them as a restart and writes their exits before the goodbye", async () => {
+    const stub = await stubController();
+    const fake = harnessing({ exitsOnStop: true });
+    const connection = holding(stub, fake);
+    await stub.connected();
+    await proven(stub);
+    stub.say(startFrame(FIRST_SESSION));
+    stub.say(startFrame(SECOND_SESSION));
+    expect(
+      await waitFor(() => fake.holds().length === 2),
+      "the runner never started the two sessions on this test's harness",
+    ).toBe(true);
+
+    // What the stop latch does when a SIGTERM opens it.
+    await Effect.runPromise(Fiber.interrupt(connection));
+    // The frame crosses the socket after the fiber is done with it, so the
+    // goodbye is waited for rather than read in the same turn.
+    await waitFor(() => positionOf(stub, isGoodbye) >= 0);
+
+    expect([...fake.stops].sort((a, b) => a.sessionId.localeCompare(b.sessionId))).toEqual([
+      { sessionId: FIRST_SESSION, reason: "runner_restart" },
+      { sessionId: SECOND_SESSION, reason: "runner_restart" },
+    ]);
+    const goodbye = positionOf(stub, isGoodbye);
+    expect(goodbye, "the runner never said goodbye").toBeGreaterThanOrEqual(0);
+    for (const sessionId of [FIRST_SESSION, SECOND_SESSION]) {
+      const exit = positionOf(stub, exitOf(sessionId));
+      expect(exit, `${sessionId} never exited`).toBeGreaterThanOrEqual(0);
+      // The controller reads the goodbye as "this machine went away cleanly",
+      // so an exit written after it is one it may never apply.
+      expect(exit, `${sessionId} exited after the goodbye`).toBeLessThan(goodbye);
+    }
+  });
+
+  it("goes anyway when a harness will not die, rather than hanging on the way out", async () => {
+    const stub = await stubController();
+    const fake = harnessing({ exitsOnStop: false });
+    const connection = holding(stub, fake);
+    await stub.connected();
+    await proven(stub);
+    stub.say(startFrame(FIRST_SESSION));
+    stub.say(startFrame(SECOND_SESSION));
+    expect(
+      await waitFor(() => fake.holds().length === 2),
+      "the runner never started the two sessions on this test's harness",
+    ).toBe(true);
+
+    const before = Date.now();
+    await Effect.runPromise(Fiber.interrupt(connection));
+    await waitFor(() => positionOf(stub, isGoodbye) >= 0);
+    const took = Date.now() - before;
+
+    expect(fake.stops.map((stop) => stop.reason)).toEqual(["runner_restart", "runner_restart"]);
+    expect(positionOf(stub, isGoodbye), "the runner never said goodbye").toBeGreaterThanOrEqual(0);
+    // The bound is the implementation's own constant; what a shutdown may never
+    // do is wait on a harness for longer than a person would wait for the
+    // process to go.
+    expect(took, "the goodbye waited on a harness that never died").toBeLessThan(
+      SHUTDOWN_BUDGET_MS,
+    );
   });
 });
