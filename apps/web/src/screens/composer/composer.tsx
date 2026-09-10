@@ -301,6 +301,16 @@ export function Composer({
         <Textarea
           value={prompt}
           onChange={(event) => setPrompt(event.target.value)}
+          onKeyDown={(event) => {
+            // Enter sends, Shift+Enter is a newline. An IME's own Enter -
+            // the one that commits a composition - is not a send: React
+            // reports it as `isComposing`, and swallowing it would cut a
+            // Japanese or Chinese sentence off mid-word.
+            if (event.key !== "Enter" || event.shiftKey) return;
+            if (event.nativeEvent.isComposing) return;
+            event.preventDefault();
+            send();
+          }}
           disabled={exited}
           placeholder={
             exited

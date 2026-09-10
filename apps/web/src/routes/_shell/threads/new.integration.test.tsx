@@ -23,7 +23,7 @@
  *   the descriptor's `label` field.
  */
 import { describe, expect, it } from "vitest";
-import { screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ModelOption, Profile, ProviderInstance, Runner, Session } from "@hydra/contract";
 import { envelope, renderApp, stubApi, type Handler } from "../../../app/testing";
@@ -521,6 +521,48 @@ describe("Composer: sending (AC-18)", () => {
     expect(
       api.calls.some((call) => call.method === "PATCH" && call.path === "/api/v1/settings"),
     ).toBe(false);
+  });
+
+  it("sends on Enter, inserts a newline on Shift+Enter, and never sends an IME's own Enter", async () => {
+    const user = userEvent.setup();
+    const { api, router } = await open(
+      [INSTANCE_A],
+      {},
+      {
+        "POST /api/v1/sessions": { body: NEW_SESSION },
+      },
+    );
+
+    const textbox = screen.getByRole<HTMLTextAreaElement>("textbox");
+    await user.type(textbox, "First line");
+
+    // Shift+Enter is a newline, never a send.
+    await user.keyboard("{Shift>}{Enter}{/Shift}");
+    await user.type(textbox, "second line");
+    expect(textbox.value).toBe("First line\nsecond line");
+    expect(
+      api.calls.some((call) => call.method === "POST" && call.path === "/api/v1/sessions"),
+    ).toBe(false);
+
+    // The Enter that commits an IME composition is not a send either: it
+    // would cut a Japanese or Chinese sentence off mid-word. Typing one more
+    // character afterwards is what flushes the request this would have sent,
+    // so the assertion below is not just running ahead of it.
+    fireEvent.keyDown(textbox, { key: "Enter", isComposing: true });
+    await user.type(textbox, "!");
+    expect(
+      api.calls.some((call) => call.method === "POST" && call.path === "/api/v1/sessions"),
+    ).toBe(false);
+
+    await user.keyboard("{Enter}");
+
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe(`/threads/${NEW_SESSION.id}`);
+    });
+    const spawn = api.calls.find(
+      (call) => call.method === "POST" && call.path === "/api/v1/sessions",
+    );
+    expect((spawn?.body as { prompt: string }).prompt).toBe("First line\nsecond line!");
   });
 
   it("leaves send disabled while the prompt is empty", async () => {
