@@ -335,11 +335,11 @@ const make = Effect.gen(function* () {
     /**
      * A subscription to one session's transcript, replayed from `after` and
      * followed from there - `follow` above, mirrored at the session's own
-     * table. Refused `not_found` for a session that was never written, so a
+     * table. The topic is derived from the session id rather than taken, so
+     * no caller can hand in a pair that does not match. Refused `not_found` for a session that was never written, so a
      * stale sidebar tab cannot open a watcher for nothing.
      */
     followSession: (
-      topic: LiveTopic,
       sessionId: string,
       after: number | undefined,
     ): Effect.Effect<LiveQueue, Validation | NotFound | Internal, Scope.Scope> =>
@@ -351,7 +351,7 @@ const make = Effect.gen(function* () {
         ) {
           return yield* Effect.fail(notFound(NO_SUCH_SESSION));
         }
-        return yield* followLog(topic, transcriptSource(sessionId), after);
+        return yield* followLog(sessionStreamTopic(sessionId), transcriptSource(sessionId), after);
       }),
 
     /**
@@ -359,10 +359,7 @@ const make = Effect.gen(function* () {
      * mutable topic is, since there is nothing to replay, but refused
      * `not_found` the same way `followSession` is.
      */
-    tapSession: (
-      topic: LiveTopic,
-      sessionId: string,
-    ): Effect.Effect<LiveQueue, NotFound | Internal, Scope.Scope> =>
+    tapSession: (sessionId: string): Effect.Effect<LiveQueue, NotFound | Internal, Scope.Scope> =>
       Effect.gen(function* () {
         if (
           !(yield* Effect.mapError(sessionExists(sql, sessionId), () =>
@@ -371,7 +368,10 @@ const make = Effect.gen(function* () {
         ) {
           return yield* Effect.fail(notFound(NO_SUCH_SESSION));
         }
-        return yield* Effect.map(hold(topic, 0, undefined), (watcher) => watcher.queue);
+        return yield* Effect.map(
+          hold(sessionTapTopic(sessionId), 0, undefined),
+          (watcher) => watcher.queue,
+        );
       }),
 
     /** How many subscriptions this controller is holding for a topic. */

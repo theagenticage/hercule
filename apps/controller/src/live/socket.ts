@@ -303,10 +303,11 @@ const handlers = live.toLayer(
                 ]),
               );
             }
-            // The tap is the session's own live output, so it needs what
-            // reading the session over HTTP needs.
-            yield* Effect.provideService(requireGrant("session.read"), CurrentActor, actor);
-            return yield* held(connection, topics.tapSession(topic, session.sessionId));
+            // A tap is transcript content before it is a row, so it needs
+            // exactly what reading the transcript over HTTP needs - the same
+            // operation the `:stream` topic below names.
+            yield* Effect.provideService(requireGrant("transcript.read"), CurrentActor, actor);
+            return yield* held(connection, topics.tapSession(session.sessionId));
           }
 
           if (session?.kind === "stream") {
@@ -314,7 +315,7 @@ const handlers = live.toLayer(
             // The transcript's deltas are the transcript, so this stream needs
             // what reading it over HTTP needs.
             yield* Effect.provideService(requireGrant("transcript.read"), CurrentActor, actor);
-            return yield* held(connection, topics.followSession(topic, session.sessionId, cursor));
+            return yield* held(connection, topics.followSession(session.sessionId, cursor));
           }
 
           if (!isAppendOnlyLiveTopic(topic)) {
