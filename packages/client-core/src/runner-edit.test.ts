@@ -9,6 +9,8 @@ import {
   type RunnerDraft,
 } from "./runner-edit";
 
+const GIB = 1024 * 1024 * 1024;
+
 const RUNNER: Runner = {
   id: "01a06d02-beff-7037-9f5b-042822015952",
   name: "moss",
@@ -20,6 +22,7 @@ const RUNNER: Runner = {
   facts: null,
   watermark: null,
   maxConcurrentSessions: 4,
+  diskWatermarkBytes: 10 * GIB,
   lastSeenAt: null,
 };
 
@@ -61,6 +64,18 @@ describe("runnerPatch", () => {
   it("sends a cap the controller will refuse rather than swallowing it", () => {
     expect(runnerPatch(RUNNER, typed({ maxConcurrentSessions: 0 }))).toEqual({
       maxConcurrentSessions: 0,
+    });
+  });
+
+  it("carries a moved disk watermark, in bytes", () => {
+    expect(runnerPatch(RUNNER, typed({ diskWatermarkBytes: 2 * GIB }))).toEqual({
+      diskWatermarkBytes: 2 * GIB,
+    });
+  });
+
+  it("sends an emptied disk watermark the controller will refuse rather than swallowing it", () => {
+    expect(runnerPatch(RUNNER, typed({ diskWatermarkBytes: 0 }))).toEqual({
+      diskWatermarkBytes: 0,
     });
   });
 });

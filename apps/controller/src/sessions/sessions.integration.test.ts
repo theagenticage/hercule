@@ -484,20 +484,6 @@ describe("session.spawn with an explicit runner or profile", () => {
     });
   });
 
-  it("refuses a named runner that has gone offline, and writes no session row", async () => {
-    await withFleet(async (arranged) => {
-      arranged.wire.close();
-      await wentAway(arranged);
-
-      const response = await spawn(arranged, { prompt: "hello", runnerId: arranged.runnerId });
-
-      expect(response.status, await response.clone().text()).toBe(409);
-      const listing = await get(arranged.harness.base, "/api/v1/sessions", arranged.token);
-      const page = (await listing.json()) as { items: ReadonlyArray<Session> };
-      expect(page.items).toEqual([]);
-    });
-  });
-
   it("refuses a named runner that is draining, and says that is why", async () => {
     await withFleet(async (arranged) => {
       await Effect.runPromise(
@@ -1235,7 +1221,7 @@ describe("the inputs a session holds", () => {
 });
 
 describe("the queue at the transition to idle", () => {
-  it("keeps a spawn's own prompt queued when the machine is gone before it is told", async () => {
+  it("puts the session back in the queue when the machine is gone before it is told", async () => {
     await withFleet(async (arranged) => {
       arranged.wire.close();
       await wentAway(arranged);
@@ -1251,11 +1237,11 @@ describe("the queue at the transition to idle", () => {
 
       const response = await spawn(arranged, { prompt: "never sent" });
 
-      expect(response.status).toBe(409);
-      const listing = await get(arranged.harness.base, "/api/v1/sessions", arranged.token);
-      const sessions = ((await listing.json()) as { items: ReadonlyArray<Session> }).items;
-      expect(sessions[0]!.status).toBe("exited");
-      expect(await inputsOf(arranged, sessions[0]!.id)).toMatchObject([
+      expect(response.status, await response.clone().text()).toBe(200);
+      const session = (await response.json()) as Session;
+      const waiting = await sessionWhen(arranged, session.id, (one) => one.status === "queued");
+      expect(waiting.status).toBe("queued");
+      expect(await inputsOf(arranged, session.id)).toMatchObject([
         { text: "never sent", status: "queued" },
       ]);
     });
@@ -1831,18 +1817,6 @@ describe("session.continue", () => {
       expect(framesOf<SessionStart>(arranged.wire, "sessionStart")).toHaveLength(1);
     });
   });
-
-  it("refuses a parent whose machine is offline", async () => {
-    await withFleet(async (arranged) => {
-      const parent = await ended(arranged, "hello");
-      arranged.wire.close();
-      await wentAway(arranged);
-
-      const response = await carryOn(arranged, parent.id, { mode: "resume", prompt: "no" });
-
-      expect(response.status, await response.clone().text()).toBe(409);
-    });
-  });
 });
 
 /** `session.update`: the model is plain session state, changed by `PATCH /api/v1/sessions/:id { model }`. */
@@ -2234,6 +2208,288 @@ describe("the timeouts a session is started under", () => {
       const expected = { inactivityMs: 300_000, absoluteMs: 3_600_000 };
       expect(starts[0]!.spec.timeouts).toEqual(expected);
       expect(starts[1]!.spec.timeouts).toEqual(expected);
+    });
+  });
+});
+
+/**
+ * What a placement does when the machine it landed on cannot take it yet. The
+ * queue is the session rows themselves, so what is asserted is the status the
+ * caller reads back and the frames the machine did or did not get: a queued
+ * session is one the runner has never been told about.
+ */
+
+/** The one machine's cap, set the way the runner page's edit form sets it. */
+const capAt = async (arranged: Arranged, cap: number): Promise<void> => {
+  const response = await send(
+    "PATCH",
+    arranged.harness.base,
+    `/api/v1/runners/${arranged.runnerId}`,
+    {
+      body: { maxConcurrentSessions: cap },
+      token: arranged.token,
+    },
+  );
+  expect(response.status, await response.clone().text()).toBe(200);
+};
+
+/** The disk watermark override, in bytes, as `runner.update` takes it. */
+const watermarkAt = async (arranged: Arranged, bytes: number): Promise<void> => {
+  const response = await send(
+    "PATCH",
+    arranged.harness.base,
+    `/api/v1/runners/${arranged.runnerId}`,
+    {
+      body: { diskWatermarkBytes: bytes },
+      token: arranged.token,
+    },
+  );
+  expect(response.status, await response.clone().text()).toBe(200);
+};
+
+const GIB = 1024 * 1024 * 1024;
+
+/** What this machine says about its disk, on the report the controller admits on. */
+const reportsDisk = (wire: Wire, diskFreeBytes: number): void =>
+  wire.send({
+    _tag: "watermarkReport",
+    watermark: { diskFreeBytes, availableMemoryBytes: 16 * GIB },
+  });
+
+/**
+ * Long enough for a start the controller decided on to have crossed the socket.
+ * Absence of a frame cannot be waited for, so it is given the time a frame the
+ * same test does expect takes, and then asserted.
+ */
+const settled = (): Promise<void> => delay(250);
+
+const starts = (wire: Wire): ReadonlyArray<SessionStart> =>
+  framesOf<SessionStart>(wire, "sessionStart");
+
+describe("session.spawn onto a runner that is full", () => {
+  it("queues the spawn, tells the machine nothing, and starts it when a slot frees", async () => {
+    await withFleet(async (arranged) => {
+      await capAt(arranged, 1);
+      const running = await started(arranged, "hello");
+
+      const waiting = await spawned(arranged, { prompt: "after you" });
+
+      expect(waiting.status).toBe("queued");
+      expect(waiting.runnerId).toBe(arranged.runnerId);
+      await settled();
+      expect(starts(arranged.wire).map((frame) => frame.sessionId)).toEqual([running.id]);
+
+      exited(arranged.wire, running.id, 2);
+
+      await sessionWhen(arranged, waiting.id, (one) => one.status === "starting");
+      const sent = await framesWhen<SessionStart>(arranged.wire, "sessionStart", 2);
+      expect(sent[1]!.sessionId).toBe(waiting.id);
+    });
+  });
+
+  it("starts the oldest first, and never more of them than there are free slots", async () => {
+    await withFleet(async (arranged) => {
+      await capAt(arranged, 1);
+      const running = await started(arranged, "hello");
+      const first = await spawned(arranged, { prompt: "second in line" });
+      const second = await spawned(arranged, { prompt: "third in line" });
+      expect([first.status, second.status]).toEqual(["queued", "queued"]);
+
+      exited(arranged.wire, running.id, 2);
+
+      // One slot freed, so one of the two moves, and it is the one that has
+      // been waiting longest.
+      await sessionWhen(arranged, first.id, (one) => one.status === "starting");
+      await settled();
+      expect(starts(arranged.wire).map((frame) => frame.sessionId)).toEqual([running.id, first.id]);
+      expect((await readSession(arranged, second.id)).status).toBe("queued");
+
+      exited(arranged.wire, first.id, 3);
+
+      await sessionWhen(arranged, second.id, (one) => one.status === "starting");
+      expect(starts(arranged.wire).map((frame) => frame.sessionId)).toEqual([
+        running.id,
+        first.id,
+        second.id,
+      ]);
+    });
+  });
+
+  it("starts everything the raised cap has room for, at once", async () => {
+    await withFleet(async (arranged) => {
+      await capAt(arranged, 1);
+      await started(arranged, "hello");
+      const first = await spawned(arranged, { prompt: "second in line" });
+      const second = await spawned(arranged, { prompt: "third in line" });
+      expect([first.status, second.status]).toEqual(["queued", "queued"]);
+
+      await capAt(arranged, 3);
+
+      await sessionWhen(arranged, first.id, (one) => one.status === "starting");
+      await sessionWhen(arranged, second.id, (one) => one.status === "starting");
+      const sent = await framesWhen<SessionStart>(arranged.wire, "sessionStart", 3);
+      expect(sent.slice(1).map((frame) => frame.sessionId)).toEqual([first.id, second.id]);
+    });
+  });
+
+  it("starts nothing on a machine that is draining, however much room it has", async () => {
+    await withFleet(async (arranged) => {
+      await capAt(arranged, 1);
+      const running = await started(arranged, "hello");
+      const waiting = await spawned(arranged, { prompt: "after you" });
+      expect(waiting.status).toBe("queued");
+
+      const drained = await send(
+        "POST",
+        arranged.harness.base,
+        `/api/v1/runners/${arranged.runnerId}/drain`,
+        {
+          body: {},
+          token: arranged.token,
+        },
+      );
+      expect(drained.status, await drained.clone().text()).toBe(200);
+
+      exited(arranged.wire, running.id, 2);
+      await sessionWhen(arranged, running.id, (one) => one.status === "exited");
+      await settled();
+
+      expect((await readSession(arranged, waiting.id)).status).toBe("queued");
+      expect(starts(arranged.wire).map((frame) => frame.sessionId)).toEqual([running.id]);
+
+      const undrained = await send(
+        "POST",
+        arranged.harness.base,
+        `/api/v1/runners/${arranged.runnerId}/undrain`,
+        { body: {}, token: arranged.token },
+      );
+      expect(undrained.status, await undrained.clone().text()).toBe(200);
+
+      await sessionWhen(arranged, waiting.id, (one) => one.status === "starting");
+      const sent = await framesWhen<SessionStart>(arranged.wire, "sessionStart", 2);
+      expect(sent[1]!.sessionId).toBe(waiting.id);
+    });
+  });
+
+  it("ends a queued session on session.stop, without a word to the machine", async () => {
+    await withFleet(async (arranged) => {
+      await capAt(arranged, 1);
+      await started(arranged, "hello");
+      const waiting = await spawned(arranged, { prompt: "after you" });
+      expect(waiting.status).toBe("queued");
+
+      const response = await stop(arranged, waiting.id);
+
+      expect(response.status, await response.clone().text()).toBe(200);
+      const ended = await sessionWhen(arranged, waiting.id, (one) => one.status === "exited");
+      expect(ended.exitedAt).not.toBeNull();
+      await settled();
+      expect(framesOf<SessionStopFrame>(arranged.wire, "sessionStop")).toEqual([]);
+      expect(starts(arranged.wire)).toHaveLength(1);
+    });
+  });
+});
+
+describe("session.spawn and session.continue onto a runner nobody can reach", () => {
+  it("queues a spawn onto a machine that is gone, and starts it when the machine is back", async () => {
+    await withFleet(async (arranged) => {
+      arranged.wire.close();
+      await wentAway(arranged);
+
+      const response = await spawn(arranged, { prompt: "hello", runnerId: arranged.runnerId });
+
+      expect(response.status, await response.clone().text()).toBe(200);
+      const waiting = (await response.json()) as Session;
+      expect(waiting.status).toBe("queued");
+      expect(waiting.runnerId).toBe(arranged.runnerId);
+
+      const again = await arranged.reconnect();
+      again.send({ _tag: "sessionsReport", sessions: [] });
+
+      await sessionWhen(arranged, waiting.id, (one) => one.status === "starting");
+      const sent = await framesWhen<SessionStart>(again, "sessionStart", 1);
+      expect(sent[0]!.sessionId).toBe(waiting.id);
+    });
+  });
+
+  it("queues a continue onto a machine that is gone, and starts it when the machine is back", async () => {
+    await withFleet(async (arranged) => {
+      const parent = await ended(arranged, "hello");
+      arranged.wire.close();
+      await wentAway(arranged);
+
+      const response = await carryOn(arranged, parent.id, { mode: "resume", prompt: "carry on" });
+
+      expect(response.status, await response.clone().text()).toBe(200);
+      const child = (await response.json()) as Session;
+      expect(child.status).toBe("queued");
+      expect(child.runnerId).toBe(arranged.runnerId);
+
+      const again = await arranged.reconnect();
+      again.send({ _tag: "sessionsReport", sessions: [] });
+
+      await sessionWhen(arranged, child.id, (one) => one.status === "starting");
+      const sent = await framesWhen<SessionStart>(again, "sessionStart", 1);
+      expect(sent[0]!.spec.continue).toEqual({ nativeSessionId: "native-1", mode: "resume" });
+    });
+  });
+});
+
+describe("session.spawn onto a runner that is short of disk", () => {
+  it("queues under the watermark and starts on a report at or above it", async () => {
+    await withFleet(async (arranged) => {
+      // Nothing reported yet: a machine that has said nothing about its disk is
+      // taken at its word and given work.
+      const first = await spawned(arranged, { prompt: "before any report" });
+      expect(first.status).toBe("starting");
+      exited(arranged.wire, first.id, 1);
+      await sessionWhen(arranged, first.id, (one) => one.status === "exited");
+
+      reportsDisk(arranged.wire, 4 * GIB);
+      await until("stored the low reading", async () => {
+        const response = await get(
+          arranged.harness.base,
+          `/api/v1/runners/${arranged.runnerId}`,
+          arranged.token,
+        );
+        const runner = (await response.json()) as Runner;
+        return runner.watermark?.diskFreeBytes === 4 * GIB ? runner : undefined;
+      });
+
+      const waiting = await spawned(arranged, { prompt: "no room" });
+
+      expect(waiting.status).toBe("queued");
+      await settled();
+      expect(starts(arranged.wire).map((frame) => frame.sessionId)).toEqual([first.id]);
+
+      reportsDisk(arranged.wire, 40 * GIB);
+
+      await sessionWhen(arranged, waiting.id, (one) => one.status === "starting");
+      const sent = await framesWhen<SessionStart>(arranged.wire, "sessionStart", 2);
+      expect(sent[1]!.sessionId).toBe(waiting.id);
+    });
+  });
+
+  it("starts a queued session when the owner lowers the watermark under the disk it has", async () => {
+    await withFleet(async (arranged) => {
+      reportsDisk(arranged.wire, 4 * GIB);
+      await until("stored the low reading", async () => {
+        const response = await get(
+          arranged.harness.base,
+          `/api/v1/runners/${arranged.runnerId}`,
+          arranged.token,
+        );
+        const runner = (await response.json()) as Runner;
+        return runner.watermark?.diskFreeBytes === 4 * GIB ? runner : undefined;
+      });
+      const waiting = await spawned(arranged, { prompt: "no room" });
+      expect(waiting.status).toBe("queued");
+
+      await watermarkAt(arranged, 1 * GIB);
+
+      await sessionWhen(arranged, waiting.id, (one) => one.status === "starting");
+      const sent = await framesWhen<SessionStart>(arranged.wire, "sessionStart", 1);
+      expect(sent[0]!.sessionId).toBe(waiting.id);
     });
   });
 });

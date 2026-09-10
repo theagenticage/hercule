@@ -83,12 +83,16 @@ export const USERNAME = "rogier";
  * object the boot's activation pass wrote it into.
  */
 const services = (home: string) =>
-  Layer.mergeAll(
-    operationLayers,
-    Layer.mergeAll(PluginsLayer, ProviderServiceLayer, SessionServiceLayer).pipe(
-      Layer.provideMerge(PluginHostLayer),
+  // The routes' own layer reaches `SessionService` now (a runner cap or
+  // watermark move dispatches), so it is provided this block's output rather
+  // than merely merged beside it, the way the real boot's operation layers
+  // reach the services `withPlugins` built.
+  operationLayers.pipe(
+    Layer.provideMerge(
+      Layer.mergeAll(PluginsLayer, ProviderServiceLayer, SessionServiceLayer).pipe(
+        Layer.provideMerge(PluginHostLayer),
+      ),
     ),
-  ).pipe(
     // One presence and one probe driver: the socket route and every service
     // must act through the same connection map.
     Layer.provideMerge(ProviderProbesLayer.pipe(Layer.provideMerge(RunnerPresenceLayer))),

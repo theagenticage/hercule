@@ -30,6 +30,7 @@ export const BARE: Runner = {
   },
   watermark: null,
   maxConcurrentSessions: 4,
+  diskWatermarkBytes: 10 * GIB,
   lastSeenAt: "2026-09-05T09:14:00.000Z",
 };
 

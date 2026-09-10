@@ -15,6 +15,7 @@ const SILENT: Runner = {
   facts: null,
   watermark: null,
   maxConcurrentSessions: 1,
+  diskWatermarkBytes: 10 * GIB,
   lastSeenAt: null,
 };
 
@@ -42,7 +43,6 @@ const REPORTED: Runner = {
   watermark: {
     diskFreeBytes: 128 * GIB,
     availableMemoryBytes: 32 * GIB,
-    acceptingPlacements: true,
   },
 };
 

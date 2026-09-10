@@ -43,6 +43,7 @@ const runner = (
   facts: facts(identityPort),
   watermark: null,
   maxConcurrentSessions: 4,
+  diskWatermarkBytes: 10 * 1024 * 1024 * 1024,
   lastSeenAt: null,
 });
 

@@ -38,7 +38,7 @@ const HETZNER: Fixture = {
     adapters: ["claude-code"],
     identityPort: 5000,
   },
-  watermark: { diskFreeBytes: 42 * GIB, availableMemoryBytes: 4 * GIB, acceptingPlacements: false },
+  watermark: { diskFreeBytes: 42 * GIB, availableMemoryBytes: 4 * GIB },
   maxConcurrentSessions: 2,
   lastSeenAt: "2026-09-05T08:02:00.000Z",
 };

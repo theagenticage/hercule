@@ -31,9 +31,9 @@ export interface Fixture {
   readonly watermark: {
     readonly diskFreeBytes: number;
     readonly availableMemoryBytes: number;
-    readonly acceptingPlacements: boolean;
   } | null;
   readonly maxConcurrentSessions: number;
+  readonly diskWatermarkBytes: number;
   readonly lastSeenAt: string | null;
   readonly negotiatedCapabilities: unknown;
   readonly protocolVersion: number | null;
@@ -63,9 +63,9 @@ export const MOSS: Fixture = {
   watermark: {
     diskFreeBytes: 128 * GIB,
     availableMemoryBytes: 32 * GIB,
-    acceptingPlacements: true,
   },
   maxConcurrentSessions: 4,
+  diskWatermarkBytes: 10 * GIB,
   lastSeenAt: "2026-09-05T09:14:00.000Z",
   negotiatedCapabilities: null,
   protocolVersion: 1,

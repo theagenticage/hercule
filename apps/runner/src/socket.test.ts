@@ -444,7 +444,6 @@ describe("the controller a runner is willing to talk to", () => {
       watermark: {
         diskFreeBytes: 200 * 1024 ** 3,
         availableMemoryBytes: 1,
-        acceptingPlacements: true,
       },
     });
 

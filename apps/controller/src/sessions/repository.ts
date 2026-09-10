@@ -181,7 +181,7 @@ const make = Effect.gen(function* () {
                   ${workspace}, ${session.requestedAccessMode}, ${session.accessMode},
                   ${session.spec}, ${JSON.stringify(session.modelSelection)},
                   ${session.nativeSessionId ?? null}, ${parent},
-                  'starting', ${session.at}, ${session.at})
+                  'queued', ${session.at}, ${session.at})
         `;
         return {
           id: uuidToString(id),
@@ -195,7 +195,7 @@ const make = Effect.gen(function* () {
           nativeSessionId: session.nativeSessionId ?? null,
           modelSelection: session.modelSelection,
           parentSessionId: session.parentSessionId ?? null,
-          status: "starting",
+          status: "queued",
           resumable: false,
           createdAt: session.at,
           startedAt: null,
@@ -390,6 +390,80 @@ const make = Effect.gen(function* () {
         WHERE id = ${uuidFromString(sessionId)} AND runner_id = ${uuidFromString(runnerId)}
           AND instance_id = ${uuidFromString(instanceId)}
       `),
+
+    /**
+     * This runner's oldest queued sessions, up to `limit`, with what it takes
+     * to tell the machine to start each: the exact spec document it was
+     * queued with, and the provider it was opened against. Joined rather than
+     * looked up per row, so dispatch reads it in one statement.
+     */
+    oldestQueued: (
+      runnerId: string,
+      limit: number,
+    ): Effect.Effect<
+      ReadonlyArray<{
+        readonly id: string;
+        readonly spec: string;
+        readonly providerId: string;
+        readonly config: unknown;
+      }>,
+      SqlError
+    > =>
+      Effect.map(
+        sql<{
+          readonly id: Uint8Array;
+          readonly spec: string;
+          readonly provider_id: string;
+          readonly config: string;
+        }>`
+          SELECT s.id, s.spec, pi.provider_id, pi.config
+          FROM sessions s JOIN provider_instances pi ON pi.id = s.instance_id
+          WHERE s.runner_id = ${uuidFromString(runnerId)} AND s.status = 'queued'
+          ORDER BY s.created_at ASC, s.id ASC
+          LIMIT ${limit}
+        `,
+        (rows) =>
+          rows.map((row) => ({
+            id: uuidToString(row.id),
+            spec: row.spec,
+            providerId: row.provider_id,
+            config: JSON.parse(row.config) as unknown,
+          })),
+      ),
+
+    /**
+     * Ends every session this runner still holds open. `running` is what was
+     * `starting`, `idle` or `busy` before this call - read first, because the
+     * update below turns all of it into `exited` and there would be nothing
+     * left to tell apart - which is what a caller ending the runner itself
+     * still has to send a stop for; `ended` is every id this call moved,
+     * queued ones included, for the caller to cancel inputs on and announce.
+     */
+    endOnRunner: (
+      runnerId: string,
+      at: string,
+    ): Effect.Effect<
+      { readonly ended: ReadonlyArray<string>; readonly running: ReadonlyArray<string> },
+      SqlError
+    > =>
+      Effect.gen(function* () {
+        const key = uuidFromString(runnerId);
+        const runningRows = yield* sql<{ readonly id: Uint8Array }>`
+          SELECT id FROM sessions WHERE runner_id = ${key} AND status IN ('starting', 'idle', 'busy')
+        `;
+        const endedRows = yield* sql<{ readonly id: Uint8Array }>`
+          UPDATE sessions SET
+            status = 'exited',
+            last_activity_at = ${at},
+            exited_at = CASE WHEN exited_at IS NULL THEN ${at} ELSE exited_at END
+          WHERE runner_id = ${key} AND status <> 'exited'
+          RETURNING id
+        `;
+        return {
+          ended: endedRows.map((row) => uuidToString(row.id)),
+          running: runningRows.map((row) => uuidToString(row.id)),
+        };
+      }),
   };
 });
 

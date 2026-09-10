@@ -788,10 +788,9 @@ describe("the liveness check", () => {
 
 describe("what a runner reports about its machine", () => {
   /** A watermark as a runner sends one, with the disk the test wants. */
-  const watermarkOf = (diskFreeBytes: number, acceptingPlacements: boolean) => ({
+  const watermarkOf = (diskFreeBytes: number) => ({
     diskFreeBytes,
     availableMemoryBytes: 16 * 1024 * 1024 * 1024,
-    acceptingPlacements,
   });
 
   it("stores the watermark a runner reports and hands it back on the row", async () => {
@@ -811,14 +810,16 @@ describe("what a runner reports about its machine", () => {
         // disk yet.
         expect(online.watermark).toBeNull();
 
-        wire.send({ _tag: "watermarkReport", watermark: watermarkOf(200 * GIB, true) });
+        // Above the shipped ten-gibibyte watermark, so this reading is a
+        // machine still accepting work.
+        wire.send({ _tag: "watermarkReport", watermark: watermarkOf(200 * GIB) });
         const stored = await rowWhen(
           harness.base,
           token,
           joined.runnerId,
           (one) => one.watermark !== null,
         );
-        expect(stored.watermark).toEqual(watermarkOf(200 * GIB, true));
+        expect(stored.watermark).toEqual(watermarkOf(200 * GIB));
 
         const before = await harness.audit("runner.placementsChanged");
         // A machine nobody had heard from is taken to be accepting work, so a
@@ -828,30 +829,31 @@ describe("what a runner reports about its machine", () => {
         // The same reading again, then a different disk that means the same
         // thing for placement. Waiting for the second one to land is what
         // proves the first was seen and deliberately left no row.
-        wire.send({ _tag: "watermarkReport", watermark: watermarkOf(200 * GIB, true) });
-        wire.send({ _tag: "watermarkReport", watermark: watermarkOf(150 * GIB, true) });
+        wire.send({ _tag: "watermarkReport", watermark: watermarkOf(200 * GIB) });
+        wire.send({ _tag: "watermarkReport", watermark: watermarkOf(150 * GIB) });
         const again = await rowWhen(
           harness.base,
           token,
           joined.runnerId,
           (one) => one.watermark?.diskFreeBytes === 150 * GIB,
         );
-        expect(again.watermark).toEqual(watermarkOf(150 * GIB, true));
+        expect(again.watermark).toEqual(watermarkOf(150 * GIB));
         expect(
           await harness.audit("runner.placementsChanged"),
           "nothing about placement changed",
         ).toHaveLength(before.length);
 
-        // The disk filled up: this one is a change of what the fleet may do
-        // with the machine, and that is what gets recorded.
-        wire.send({ _tag: "watermarkReport", watermark: watermarkOf(4 * GIB, false) });
+        // The disk filled up, below the shipped watermark: this one is a
+        // change of what the fleet may do with the machine, and that is what
+        // gets recorded.
+        wire.send({ _tag: "watermarkReport", watermark: watermarkOf(4 * GIB) });
         const short = await rowWhen(
           harness.base,
           token,
           joined.runnerId,
-          (one) => one.watermark?.acceptingPlacements === false,
+          (one) => one.watermark?.diskFreeBytes === 4 * GIB,
         );
-        expect(short.watermark).toEqual(watermarkOf(4 * GIB, false));
+        expect(short.watermark).toEqual(watermarkOf(4 * GIB));
 
         const after = await harness.audit("runner.placementsChanged");
         expect(after).toHaveLength(before.length + 1);
@@ -894,7 +896,7 @@ describe("what a runner reports about its machine", () => {
         // Its very first reading, and the disk is full. Nothing had been heard
         // about this machine before, but a machine that cannot take work is
         // news whether or not anything was.
-        wire.send({ _tag: "watermarkReport", watermark: watermarkOf(4 * GIB, false) });
+        wire.send({ _tag: "watermarkReport", watermark: watermarkOf(4 * GIB) });
         await rowWhen(harness.base, token, joined.runnerId, (one) => one.watermark !== null);
 
         const entries = await harness.audit("runner.placementsChanged");
@@ -1019,14 +1021,14 @@ describe("what a runner reports about its machine", () => {
           ),
         );
 
-        wire.send({ _tag: "watermarkReport", watermark: watermarkOf(200 * GIB, true) });
+        wire.send({ _tag: "watermarkReport", watermark: watermarkOf(200 * GIB) });
         const stored = await rowWhen(
           harness.base,
           token,
           joined.runnerId,
           (one) => one.watermark !== null,
         );
-        expect(stored.watermark).toEqual(watermarkOf(200 * GIB, true));
+        expect(stored.watermark).toEqual(watermarkOf(200 * GIB));
         expect(stored.connectivity).toBe("online");
 
         wire.close();
@@ -1045,7 +1047,7 @@ describe("what a runner reports about its machine", () => {
         // lands there is nothing to attach a report to.
         const wire = await dial(harness.base, joined.credential);
 
-        wire.send({ _tag: "watermarkReport", watermark: watermarkOf(4 * GIB, false) });
+        wire.send({ _tag: "watermarkReport", watermark: watermarkOf(4 * GIB) });
         wire.send({ _tag: "factsReport", facts: { ...FACTS, docker: true } });
         await delay(100);
 
@@ -1103,7 +1105,7 @@ describe("what a runner reports about its machine", () => {
 
         // Long enough that a report which touched the timestamp would show it.
         await delay(50);
-        wire.send({ _tag: "watermarkReport", watermark: watermarkOf(200 * GIB, true) });
+        wire.send({ _tag: "watermarkReport", watermark: watermarkOf(200 * GIB) });
         wire.send({ _tag: "factsReport", facts: { ...FACTS, docker: true } });
 
         const reported = await rowWhen(

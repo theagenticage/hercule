@@ -35,6 +35,7 @@ import {
   type ProbeRequest,
   type ProbeResult,
   type RunnerFacts,
+  type RunnerWatermark,
 } from "@hydra/protocol";
 import { refreshFacts } from "./probe";
 import { wentWrong } from "./report";
@@ -49,7 +50,7 @@ import {
 } from "./providers";
 import type { LoginAnswer } from "./providers/login";
 import { sessions } from "./sessions";
-import { checkWatermark, type Headroom } from "./watermark";
+import { checkWatermark } from "./watermark";
 
 const SOCKET_PATH = "/api/v1/runners/socket";
 
@@ -78,7 +79,7 @@ export interface ConnectOptions {
   readonly pin: ControllerPin;
   readonly facts: RunnerFacts;
   readonly probe: Effect.Effect<RunnerFacts>;
-  readonly headroom: Effect.Effect<Headroom, Cause.UnknownError>;
+  readonly headroom: Effect.Effect<RunnerWatermark, Cause.UnknownError>;
   /**
    * Where provider instances keep their own config directories on this machine.
    * One per instance, so two accounts of one harness never read each other's

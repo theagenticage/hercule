@@ -126,6 +126,7 @@ const RUNNER_STARTED: Runner = {
   facts: null,
   watermark: null,
   maxConcurrentSessions: 4,
+  diskWatermarkBytes: 10 * 1024 * 1024 * 1024,
   lastSeenAt: "2026-09-08T09:50:00.000Z",
 };
 

@@ -7,11 +7,12 @@
 import type { Runner, RunnerUpdateInput } from "@hydra/contract";
 import { ApiError } from "./errors";
 
-/** The four fields a runner's owner writes, as a form holds them. */
+/** The five fields a runner's owner writes, as a form holds them. */
 export interface RunnerDraft {
   readonly name: string;
   readonly labels: ReadonlyArray<string>;
   readonly maxConcurrentSessions: number;
+  readonly diskWatermarkBytes: number;
   readonly reserved: boolean;
 }
 
@@ -20,6 +21,7 @@ export const runnerDraft = (runner: Runner): RunnerDraft => ({
   name: runner.name,
   labels: runner.labels,
   maxConcurrentSessions: runner.maxConcurrentSessions,
+  diskWatermarkBytes: runner.diskWatermarkBytes,
   reserved: runner.reserved,
 });
 
@@ -46,6 +48,9 @@ export const runnerPatch = (runner: Runner, draft: RunnerDraft): RunnerUpdateInp
   if (!sameLabels(draft.labels, runner.labels)) patch.labels = [...draft.labels];
   if (draft.maxConcurrentSessions !== runner.maxConcurrentSessions) {
     patch.maxConcurrentSessions = draft.maxConcurrentSessions;
+  }
+  if (draft.diskWatermarkBytes !== runner.diskWatermarkBytes) {
+    patch.diskWatermarkBytes = draft.diskWatermarkBytes;
   }
   if (draft.reserved !== runner.reserved) patch.reserved = draft.reserved;
   return patch;

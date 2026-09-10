@@ -19,6 +19,7 @@ import runnerLifecycle from "./0008-runner-lifecycle";
 import providerInstances from "./0009-provider-instances";
 import sessions from "./0010-sessions";
 import queuedInputAndContinuation from "./0011-queued-input-and-continuation";
+import diskWatermark from "./0012-disk-watermark";
 
 export const migrations: ReadonlyArray<ResolvedMigration> = [
   [1, "initial", Effect.succeed(initial)],
@@ -32,6 +33,7 @@ export const migrations: ReadonlyArray<ResolvedMigration> = [
   [9, "provider-instances", Effect.succeed(providerInstances)],
   [10, "sessions", Effect.succeed(sessions)],
   [11, "queued-input-and-continuation", Effect.succeed(queuedInputAndContinuation)],
+  [12, "disk-watermark", Effect.succeed(diskWatermark)],
 ];
 
 /** The schema version this binary carries: the highest embedded migration id. */

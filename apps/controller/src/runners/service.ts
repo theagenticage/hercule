@@ -40,9 +40,10 @@ import {
   type Unauthenticated,
   type Validation,
 } from "@hydra/contract";
-import { requireGrant, USER_ACTOR } from "../actor";
+import { requireGrant, SYSTEM_ACTOR, USER_ACTOR } from "../actor";
 import { nowIso, pageInput, refuseCursor, withTransaction } from "../db";
 import { AuditLog } from "../events";
+import { SessionService } from "../sessions";
 import { Settings, type SettingError } from "../settings";
 import { requireOnline } from "./adapters";
 import { JoinTokens } from "./join-tokens";
@@ -134,6 +135,7 @@ const make = Effect.gen(function* () {
   const joinTokens = yield* JoinTokens;
   const settings = yield* Settings;
   const audit = yield* AuditLog;
+  const sessions = yield* SessionService;
 
   const presence = yield* RunnerPresence;
 
@@ -145,14 +147,6 @@ const make = Effect.gen(function* () {
         onSome: Effect.succeed,
       }),
     );
-
-  /**
-   * How many sessions are running on the runner being retired. Always zero:
-   * there is no session table yet, and the seam is here so `retire` is built
-   * against the rule it will answer to rather than gaining a `force` flag the
-   * ticket after this one has to design. #67 is what makes it count.
-   */
-  const runningSessions = (): Effect.Effect<number> => Effect.succeed(0);
 
   /**
    * The two moves that differ only in which lifecycle they come from, go to,
@@ -247,7 +241,7 @@ const make = Effect.gen(function* () {
         if (Object.keys(patch).length === 0) {
           return yield* Effect.fail(validation([{ path: [], message: "name a field to change" }]));
         }
-        return yield* withTransaction(
+        const result = yield* withTransaction(
           sql,
           Effect.gen(function* () {
             // One clock read, so the row and the event carry the same instant.
@@ -269,12 +263,17 @@ const make = Effect.gen(function* () {
               changes.maxConcurrentSessions = { old: before.maxConcurrentSessions, new: cap };
               edit.maxConcurrentSessions = cap;
             }
+            const watermark = patch.diskWatermarkBytes;
+            if (watermark !== undefined && watermark !== before.diskWatermarkBytes) {
+              changes.diskWatermarkBytes = { old: before.diskWatermarkBytes, new: watermark };
+              edit.diskWatermarkBytes = watermark;
+            }
             if (patch.reserved !== undefined && patch.reserved !== before.reserved) {
               changes.reserved = { old: before.reserved, new: patch.reserved };
               edit.reserved = patch.reserved;
             }
 
-            if (Object.keys(changes).length === 0) return before;
+            if (Object.keys(changes).length === 0) return { detail: before, dispatch: false };
 
             // Both reads sit inside the transaction the write is in, so the
             // fleet cannot take the name, or the default, in between.
@@ -293,10 +292,33 @@ const make = Effect.gen(function* () {
               payload: { runnerId: id, changes },
               at,
             });
-            // Read back rather than merged, so the caller gets the written row.
-            return yield* one(id);
+            // The override moved the line under a disk this runner already
+            // reported: the same crossing `watermarkReport` would have found,
+            // recorded the same way.
+            if (before.watermark !== null && edit.diskWatermarkBytes !== undefined) {
+              const wasAccepting = before.watermark.diskFreeBytes >= before.diskWatermarkBytes;
+              const accepting = before.watermark.diskFreeBytes >= edit.diskWatermarkBytes;
+              if (wasAccepting !== accepting) {
+                yield* audit.append({
+                  kind: "runner.placementsChanged",
+                  actor: SYSTEM_ACTOR,
+                  record: { topic: "runner", id },
+                  payload: { runnerId: id, acceptingPlacements: accepting },
+                  at,
+                });
+              }
+            }
+            return {
+              // Read back rather than merged, so the caller gets the written row.
+              detail: yield* one(id),
+              dispatch: "maxConcurrentSessions" in changes || "diskWatermarkBytes" in changes,
+            };
           }),
         );
+        // Outside the transaction above: dispatch may tell a runner, and a
+        // transaction never spans a wait on anything outside the database.
+        if (result.dispatch) yield* sessions.dispatch(id);
+        return result.detail;
       }),
 
     /**
@@ -313,12 +335,18 @@ const make = Effect.gen(function* () {
       }),
 
     undrain: (input: Identified): Effect.Effect<RunnerDetail, MoveError> =>
-      moveLifecycle(input, {
-        operation: "runner.undrain",
-        from: "draining",
-        to: "active",
-        refusal: NOT_DRAINING,
-        kind: "runner.undrained",
+      Effect.gen(function* () {
+        const detail = yield* moveLifecycle(input, {
+          operation: "runner.undrain",
+          from: "draining",
+          to: "active",
+          refusal: NOT_DRAINING,
+          kind: "runner.undrained",
+        });
+        // Outside the transaction above: dispatch may tell a runner, and a
+        // transaction never spans a wait on anything outside the database.
+        yield* sessions.dispatch(detail.id);
+        return detail;
       }),
 
     /**
@@ -337,7 +365,7 @@ const make = Effect.gen(function* () {
         // pinging a controller that will never have it back.
         return yield* Effect.uninterruptible(
           Effect.gen(function* () {
-            const retired = yield* withTransaction(
+            const { retired, running } = yield* withTransaction(
               sql,
               Effect.gen(function* () {
                 const at = yield* nowIso;
@@ -346,7 +374,7 @@ const make = Effect.gen(function* () {
                   return yield* Effect.fail(invalidState(ALREADY_RETIRED));
                 }
                 if (force !== true) {
-                  if ((yield* runningSessions()) > 0) {
+                  if ((yield* runners.runningSessions(id)) > 0) {
                     return yield* Effect.fail(invalidState(STILL_RUNNING));
                   }
                   if (before.connectivity === "unreachable") {
@@ -354,6 +382,11 @@ const make = Effect.gen(function* () {
                   }
                 }
                 yield* runners.setLifecycle(id, "retired", at);
+                // Without `force` this ends only what is queued, since the
+                // check above already refused a running one; with it, both
+                // kinds. Either way a retired runner never dispatches again,
+                // so nothing else would ever end these.
+                const running = yield* sessions.endOnRunner(id);
                 // A default nobody can place on is worse than no default: the
                 // fleet says so rather than promoting a runner nobody chose.
                 const wasDefault = (yield* settings.defaultRunnerId()) === id;
@@ -365,12 +398,19 @@ const make = Effect.gen(function* () {
                   payload: { runnerId: id, forced: force === true, lostDefaultRunner: wasDefault },
                   at,
                 });
-                return yield* one(id);
+                return { retired: yield* one(id), running };
               }),
             );
-            // After the commit: a socket closed for a retirement that then
-            // rolled back would be a runner told to stop by a controller that
-            // still has it.
+            // After the commit: a session the row now reads exited still had
+            // a live harness on the machine, which needs its own word to stop
+            // - the queued ones never had a frame to begin with, so they get
+            // none now either.
+            for (const sessionId of running) {
+              yield* presence.tell(id, { _tag: "sessionStop", sessionId });
+            }
+            // After the commit too: a socket closed for a retirement that
+            // then rolled back would be a runner told to stop by a
+            // controller that still has it.
             yield* presence.hangUp(id);
             return retired;
           }),
@@ -474,5 +514,5 @@ export class RunnerService extends Context.Service<RunnerService, Effect.Success
 export const RunnerServiceLayer: Layer.Layer<
   RunnerService,
   never,
-  SqlClient.SqlClient | JoinTokens | Settings | RunnerPresence | AuditLog
+  SqlClient.SqlClient | JoinTokens | Settings | RunnerPresence | AuditLog | SessionService
 > = Layer.effect(RunnerService)(make);

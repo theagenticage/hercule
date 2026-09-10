@@ -61,6 +61,7 @@ export interface RunnerEdit {
   readonly name?: string;
   readonly labels?: ReadonlyArray<string>;
   readonly maxConcurrentSessions?: number;
+  readonly diskWatermarkBytes?: number;
   readonly reserved?: boolean;
 }
 
@@ -72,6 +73,7 @@ interface RunnerRow {
   readonly reserved: number;
   readonly labels: string;
   readonly max_concurrent_sessions: number | null;
+  readonly disk_watermark_bytes: number | null;
   readonly binary_version: string | null;
   readonly protocol_version: number | null;
   readonly negotiated_capabilities: string | null;
@@ -82,10 +84,14 @@ interface RunnerRow {
 
 const COLUMNS =
   "id, name, connectivity, lifecycle, reserved, labels, max_concurrent_sessions, " +
-  "binary_version, protocol_version, negotiated_capabilities, facts, watermark, last_seen_at";
+  "disk_watermark_bytes, binary_version, protocol_version, negotiated_capabilities, " +
+  "facts, watermark, last_seen_at";
 
 /** Spec 03 §5.3: roughly one session per 2 GiB, floor 1. */
 const BYTES_PER_SESSION = 2 * 1024 ** 3;
+
+/** Spec 03 §6.2: ten gibibytes, until the owner says otherwise. */
+const DEFAULT_DISK_WATERMARK_BYTES = 10 * 1024 ** 3;
 
 /**
  * The cap the fleet answers with. A machine that has not reported yet is taken
@@ -94,6 +100,10 @@ const BYTES_PER_SESSION = 2 * 1024 ** 3;
 const effectiveCap = (override: number | null, facts: RunnerFacts | null): number =>
   override ??
   (facts === null ? 1 : Math.max(1, Math.floor(facts.totalMemoryBytes / BYTES_PER_SESSION)));
+
+/** The watermark dispatch admits placements against. */
+const effectiveWatermark = (override: number | null): number =>
+  override ?? DEFAULT_DISK_WATERMARK_BYTES;
 
 const scopeOf = (direction: SortDirection): CursorScope => ({
   op: "runner.query",
@@ -141,6 +151,7 @@ const toRunner = (row: RunnerRow): Effect.Effect<Runner> =>
       facts,
       watermark: yield* watermarkIn(id, row.watermark),
       maxConcurrentSessions: effectiveCap(row.max_concurrent_sessions, facts),
+      diskWatermarkBytes: effectiveWatermark(row.disk_watermark_bytes),
       lastSeenAt: row.last_seen_at,
     };
   });
@@ -202,25 +213,18 @@ const make = Effect.gen(function* () {
 
     /**
      * The machines a placement with nothing to say about where it goes may
-     * land on: online, active, not reserved, and not saying they are full.
+     * land on: online, active, and not reserved.
      *
      * Reserved is what makes it a fallback rather than a listing (CONTEXT.md,
-     * Reserved: placement fallback never chooses one). Silence is consent
-     * throughout: a machine with no watermark, a watermark this build cannot
-     * read, or one that does not mention placements has not said no. The
-     * `CASE` is what keeps that true - `OR` does not short-circuit around a
-     * `json_extract` on a document that will not parse, so one bad row would
-     * otherwise fail every placement rather than only its own.
+     * Reserved: placement fallback never chooses one). The disk watermark is
+     * not checked here: selection picks the machine, and dispatch decides
+     * when a session placed on it actually starts.
      */
     placeable: (): Effect.Effect<ReadonlySet<string>, SqlError> =>
       Effect.map(
         sql<{ readonly id: Uint8Array }>`
           SELECT id FROM runners
           WHERE connectivity = 'online' AND lifecycle = 'active' AND reserved = 0
-            AND (CASE
-                   WHEN watermark IS NULL OR json_valid(watermark) = 0 THEN 1
-                   ELSE COALESCE(json_extract(watermark, '$.acceptingPlacements'), 1)
-                 END) <> 0
         `,
         (rows) => new Set(rows.map((row) => uuidToString(row.id))),
       ),
@@ -260,6 +264,9 @@ const make = Effect.gen(function* () {
       if (edit.maxConcurrentSessions !== undefined) {
         sets.push(sql`max_concurrent_sessions = ${edit.maxConcurrentSessions}`);
       }
+      if (edit.diskWatermarkBytes !== undefined) {
+        sets.push(sql`disk_watermark_bytes = ${edit.diskWatermarkBytes}`);
+      }
       if (edit.reserved !== undefined) sets.push(sql`reserved = ${edit.reserved ? 1 : 0}`);
       return Effect.asVoid(
         sql`UPDATE runners SET ${sql.csv(sets)} WHERE id = ${uuidFromString(id)}`,
@@ -291,26 +298,31 @@ const make = Effect.gen(function* () {
       ),
 
     /**
-     * The reading is refreshed every time, but only the crossing is acted on.
-     * The old one goes through the same tolerant decode the API answers with, so
-     * an unreadable column does not take the connection down. A machine that has
-     * said nothing is taken to be accepting work.
+     * The reading is refreshed every time, but only the crossing against the
+     * effective watermark is acted on. The old reading goes through the same
+     * tolerant decode the API answers with, so an unreadable column does not
+     * take the connection down. A machine nobody has heard from is taken to be
+     * accepting work.
      */
     recordWatermark: (
       id: string,
       watermark: RunnerWatermark,
       at: string,
-    ): Effect.Effect<boolean, SqlError> =>
+    ): Effect.Effect<{ readonly crossed: boolean; readonly accepting: boolean }, SqlError> =>
       Effect.gen(function* () {
         const key = uuidFromString(id);
         const rows = yield* sql<{
           readonly watermark: string | null;
-        }>`SELECT watermark FROM runners WHERE id = ${key}`;
+          readonly disk_watermark_bytes: number | null;
+        }>`SELECT watermark, disk_watermark_bytes FROM runners WHERE id = ${key}`;
         const was = yield* watermarkIn(id, rows[0]?.watermark ?? null);
+        const effective = effectiveWatermark(rows[0]?.disk_watermark_bytes ?? null);
         yield* sql`UPDATE runners
                    SET watermark = ${JSON.stringify(watermark)}, updated_at = ${at}
                    WHERE id = ${key}`;
-        return (was?.acceptingPlacements ?? true) !== watermark.acceptingPlacements;
+        const wasAccepting = was === null ? true : was.diskFreeBytes >= effective;
+        const accepting = watermark.diskFreeBytes >= effective;
+        return { crossed: wasAccepting !== accepting, accepting };
       }),
 
     touch: (id: string, at: string): Effect.Effect<void, SqlError> =>
@@ -343,6 +355,16 @@ const make = Effect.gen(function* () {
       Effect.asVoid(
         sql`UPDATE runners SET lifecycle = ${lifecycle}, updated_at = ${at}
             WHERE id = ${uuidFromString(id)}`,
+      ),
+
+    /** Starting, idle or busy: what a runner is actually holding right now. */
+    runningSessions: (id: string): Effect.Effect<number, SqlError> =>
+      Effect.map(
+        sql<{ readonly n: number }>`
+          SELECT COUNT(*) AS n FROM sessions
+          WHERE runner_id = ${uuidFromString(id)} AND status IN ('starting', 'idle', 'busy')
+        `,
+        (rows) => rows[0]?.n ?? 0,
       ),
 
     list: (request: RunnerPageRequest): Effect.Effect<Page<Runner>, CursorError | SqlError> =>

@@ -197,6 +197,11 @@ export interface Arranged {
   readonly wire: Wire;
   readonly instances: ReadonlyArray<ProviderInstance>;
   readonly runnerId: string;
+  /**
+   * The same machine dialling in again, as one that was restarted or lost its
+   * connection does: a second socket on the credential the join handed it.
+   */
+  readonly reconnect: () => Promise<Wire>;
 }
 
 export interface FleetOptions {
@@ -222,11 +227,17 @@ export const withFleet = (
       expect(joined.status, await joined.clone().text()).toBe(201);
       const answer = (await joined.json()) as JoinAnswer;
       const wire = await dial(harness.base, answer.credential, options.facts, options.models);
+      const wires: Array<Wire> = [wire];
+      const reconnect = async (): Promise<Wire> => {
+        const again = await dial(harness.base, answer.credential, options.facts, options.models);
+        wires.push(again);
+        return again;
+      };
       const instances = await probed(harness.base, token);
       try {
-        await body({ harness, token, wire, instances, runnerId: answer.runnerId });
+        await body({ harness, token, wire, instances, runnerId: answer.runnerId, reconnect });
       } finally {
-        wire.close();
+        for (const one of wires) one.close();
       }
     },
     options.inputDeadline === undefined
