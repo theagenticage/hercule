@@ -46,6 +46,8 @@ declare module "@tanstack/react-router" {
  * knowing about threads specifically.
  */
 export interface RouteCrumb {
+  /** Declared, not inferred: a loader returning a title and a crumb by coincidence is not one. */
+  readonly _tag: "crumb";
   readonly title: string;
   readonly crumb: string;
 }
@@ -53,5 +55,6 @@ export interface RouteCrumb {
 export const isRouteCrumb = (data: unknown): data is RouteCrumb =>
   typeof data === "object" &&
   data !== null &&
+  (data as Partial<RouteCrumb>)._tag === "crumb" &&
   typeof (data as Partial<RouteCrumb>).title === "string" &&
   typeof (data as Partial<RouteCrumb>).crumb === "string";

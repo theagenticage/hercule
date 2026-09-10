@@ -11,6 +11,7 @@ import {
   settingsQuery,
   transcriptQuery,
 } from "../../../app/queries";
+import type { RouteCrumb } from "../../../app/router";
 import { ThreadScreen } from "../../../screens/thread/thread-screen";
 
 /**
@@ -34,7 +35,11 @@ export const Route = createFileRoute("/_shell/threads/$sessionId")({
     await context.queryClient.ensureQueryData(
       localRunnerQuery(context.detectLocalRunner, runners.items),
     );
-    return { title: session.title, crumb: `thread · ${params.sessionId.slice(0, 8)}` };
+    return {
+      _tag: "crumb",
+      title: session.title,
+      crumb: `thread · ${params.sessionId.slice(0, 8)}`,
+    } satisfies RouteCrumb;
   },
   component: ThreadRoute,
 });

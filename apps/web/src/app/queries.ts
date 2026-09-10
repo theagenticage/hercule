@@ -154,6 +154,9 @@ export const transcriptQuery = (client: HydraClient, sessionId: string) =>
  * A session's input history, queued rows included: the composer's queued list
  * above the textarea. One page, same as the fleet and the session listing
  * above - a thread queues a handful of turns at most, never enough to page.
+ * The page is 500 rows ascending and its readers filter to `queued`
+ * themselves, because `input.query` has no status filter; a thread past 500
+ * inputs would stop showing its queued ones, which is when this grows one.
  */
 export const inputsQuery = (client: HydraClient, sessionId: string) =>
   queryOptions({

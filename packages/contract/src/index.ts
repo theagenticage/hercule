@@ -213,7 +213,6 @@ export {
   LiveTopic,
   MUTABLE_LIVE_TOPICS,
   parseSessionTopic,
-  SESSION_TOPIC_KINDS,
   sessionStreamTopic,
   sessionTapTopic,
   TapItem,
