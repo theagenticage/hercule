@@ -298,6 +298,39 @@ describe("Composer: a fresh install, nothing logged in on the one runner yet", (
     expect(await screen.findByText("found, not logged in")).toBeDefined();
     expect(screen.getByRole("button", { name: "Log in" })).toBeDefined();
   });
+
+  it("keeps send disabled with the reason, rather than spawning a payload of empty ids", async () => {
+    // Nothing is logged in, so `runnerMenu` offers no selectable row and the
+    // draft runner, model and profile stay null. Sending would post ids the
+    // contract's own `Id` refuses, naming fields the user never touched.
+    const user = userEvent.setup();
+    const { api } = await open([INSTANCE_FRESH]);
+
+    await user.type(screen.getByRole("textbox"), "Fix the login bug");
+
+    const send = await screen.findByRole<HTMLButtonElement>("button", { name: /send/i });
+    await waitFor(() => {
+      expect(send.disabled).toBe(true);
+    });
+    expect(send.title).toBe("no runner is logged in to Claude Code");
+    expect(reading()).toContain("no runner is logged in to Claude Code");
+    expect(
+      api.calls.some((call) => call.method === "POST" && call.path === "/api/v1/sessions"),
+    ).toBe(false);
+  });
+
+  it("keeps send disabled with the reason when no provider instance exists at all", async () => {
+    const user = userEvent.setup();
+    await open([]);
+
+    await user.type(screen.getByRole("textbox"), "Fix the login bug");
+
+    const send = screen.getByRole<HTMLButtonElement>("button", { name: /send/i });
+    await waitFor(() => {
+      expect(send.disabled).toBe(true);
+    });
+    expect(reading()).toContain("no provider instance is set up");
+  });
 });
 
 describe("Composer: selector popovers (AC-16)", () => {
@@ -481,7 +514,7 @@ describe("Composer: sending (AC-18)", () => {
       model: "claude-sonnet-5",
       accessMode: "approval-required",
       runnerId: RUNNER.id,
-      profileId: PROFILE_UNRESTRICTED.id,
+      permissionProfileId: PROFILE_UNRESTRICTED.id,
       workspaceId: null,
     });
 

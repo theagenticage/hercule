@@ -5,8 +5,8 @@
  * choice label rather than its raw value, since a pill is copy, not a slug.
  *
  * Joins only the parts it has: an instance not logged in on the reference
- * runner has no model yet, and a pill built from an empty slug is not a
- * fourth part, it is a dangling " · " at the end of the other three.
+ * runner has no model yet (`null`), and a pill built from no slug at all is
+ * not a third part, it is a dangling " · " between the other two.
  */
 import type { ModelOption } from "@hydra/contract";
 
@@ -24,7 +24,7 @@ const effortLabel = (
 
 export const modelPillLabel = (
   instance: { readonly displayName: string; readonly name: string },
-  model: string,
+  model: string | null,
   options: readonly ModelOption[],
   selected: Readonly<Record<string, string | boolean>>,
 ): string => {

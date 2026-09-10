@@ -87,7 +87,7 @@ export const SessionSpawnInput = closedStruct({
   /** Names a runner directly, a reserved one included; placement is skipped. */
   runnerId: Schema.optionalKey(Id),
   /** The Permission Profile the session's token carries, in place of the thread default. */
-  profileId: Schema.optionalKey(Id),
+  permissionProfileId: Schema.optionalKey(Id),
   /** Workspaces are not built yet, so a non-null id is refused rather than ignored. */
   workspaceId: Schema.optionalKey(Schema.NullOr(Id)),
 });

@@ -573,7 +573,7 @@ describe("session.spawn with an explicit runner or profile", () => {
     });
   });
 
-  it("puts the session under the profile an explicit profileId names", async () => {
+  it("puts the session under the profile an explicit permissionProfileId names", async () => {
     await withFleet(async (arranged) => {
       const listing = await get(arranged.harness.base, "/api/v1/profiles", arranged.token);
       const body = await listing.clone().text();
@@ -582,17 +582,20 @@ describe("session.spawn with an explicit runner or profile", () => {
       );
       expect(worker, body).toBeDefined();
 
-      const session = await spawned(arranged, { prompt: "hello", profileId: worker!.id });
+      const session = await spawned(arranged, {
+        prompt: "hello",
+        permissionProfileId: worker!.id,
+      });
 
       expect(session.permissionProfileId).toBe(worker!.id);
     });
   });
 
-  it("fails validation on a profileId naming no profile", async () => {
+  it("fails validation on a permissionProfileId naming no profile", async () => {
     await withFleet(async (arranged) => {
       const response = await spawn(arranged, {
         prompt: "hello",
-        profileId: "0199e0e7-9999-7000-8000-000000000000",
+        permissionProfileId: "0199e0e7-9999-7000-8000-000000000000",
       });
 
       expect(response.status, await response.clone().text()).toBe(400);

@@ -14,13 +14,13 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import {
   accessModeMenu,
-  defaultInstanceId,
+  instanceDefaults,
   modelMenu,
   modelPillLabel,
   queryKeys,
   referenceRunner,
   runnerMenu,
-  threadModelField,
+  threadDefaults,
   type HydraClient,
   type Live,
   type RunnerMenuRow,
@@ -45,8 +45,13 @@ import { SetupField } from "./setup-field";
 type SelectorKey =
   "workspace" | "checkout" | "branch" | "runner" | "profile" | "accessMode" | "model";
 
-const DEFAULT_PROFILE_NAME = "unrestricted";
-const DEFAULT_ACCESS_MODE: AccessMode = "approval-required";
+/**
+ * Once a thread has started, the provider instance is where its login and its
+ * User Material live - switching it would need a new thread, so every other
+ * instance's group is locked shut regardless of what `modelMenu` itself would
+ * otherwise dim it with.
+ */
+const SWITCH_LOCK_REASON = "switching accounts starts a new thread";
 
 /** Only `online` and `unreachable` carry a doctrine hue (live, failed); the rest are neutral. */
 const RUNNER_STATE_HUE: Record<RunnerMenuRow["state"], string> = {
@@ -71,45 +76,6 @@ const runnerRowLabel = (row: RunnerMenuRow): JSX.Element => (
     {row.reserved ? <span className="shrink-0 text-faint"> · reserved</span> : null}
   </span>
 );
-
-/** The spawn defaults a new thread prefills from: `thread.*` settings, else the shipped ones. */
-const resolveDefaults = (
-  settingsUser: SettingsState["user"],
-  instances: readonly ProviderInstance[],
-  runners: readonly Runner[],
-  profiles: readonly Profile[],
-  localRunnerId: string | null,
-): {
-  readonly instanceId: string;
-  readonly model: string;
-  readonly accessMode: AccessMode;
-  readonly runnerId: string;
-  readonly profileId: string;
-} => {
-  const instanceId = settingsUser["thread.instanceId"] ?? defaultInstanceId(instances);
-  const instance = instances.find((each) => each.id === instanceId);
-  const modelField =
-    instance === undefined
-      ? { options: [] }
-      : threadModelField(instance, localRunnerId, settingsUser["thread.model"]);
-  const model =
-    settingsUser["thread.model"] ??
-    modelField.options.find((option) => option.isDefault)?.slug ??
-    modelField.options[0]?.slug ??
-    "";
-  const accessMode = settingsUser["thread.accessMode"] ?? DEFAULT_ACCESS_MODE;
-  const profileId =
-    settingsUser["thread.profileId"] ??
-    profiles.find((profile) => profile.name === DEFAULT_PROFILE_NAME)?.id ??
-    profiles[0]?.id ??
-    "";
-  const runnerId =
-    instance === undefined
-      ? ""
-      : (runnerMenu(runners, localRunnerId, instance).defaultRunnerId ?? "");
-
-  return { instanceId, model, accessMode, runnerId, profileId };
-};
 
 export function Composer({
   client,
@@ -144,25 +110,33 @@ export function Composer({
   // list below the card, current.
   useLiveInvalidation(live, queryClient, "session");
 
-  const [defaults] = useState(() =>
-    resolveDefaults(settingsUser, instances, runners, profiles, localRunnerId),
-  );
   // The composer's own draft selection, live only until a thread starts - a
-  // started thread reads the same five values off `session` instead (below).
-  const [draftInstanceId, setDraftInstanceId] = useState(defaults.instanceId);
-  const [draftModel, setDraftModel] = useState(defaults.model);
-  const [draftAccessMode, setDraftAccessMode] = useState<AccessMode>(defaults.accessMode);
-  const [draftRunnerId, setDraftRunnerId] = useState(defaults.runnerId);
-  const [draftProfileId, setDraftProfileId] = useState(defaults.profileId);
+  // started thread reads the same five values off `session` instead (below)
+  // and never reads a draft, which is why the defaults are only resolved in
+  // new-thread mode. Nothing picked is `null`, never an empty string: the
+  // spawn payload below omits what is null and lets the server's own fallback
+  // decide, rather than posting an id-shaped value it would refuse.
+  const [defaults] = useState(() =>
+    session === undefined
+      ? threadDefaults(settingsUser, instances, runners, profiles, localRunnerId)
+      : null,
+  );
+  const [draftInstanceId, setDraftInstanceId] = useState(defaults?.instanceId ?? null);
+  const [draftModel, setDraftModel] = useState(defaults?.model ?? null);
+  const [draftAccessMode, setDraftAccessMode] = useState<AccessMode>(
+    defaults?.accessMode ?? "approval-required",
+  );
+  const [draftRunnerId, setDraftRunnerId] = useState(defaults?.runnerId ?? null);
+  const [draftProfileId, setDraftProfileId] = useState(defaults?.profileId ?? null);
   const [modelOptions, setModelOptions] = useState<Record<string, string | boolean>>({});
   const [openSelector, setOpenSelector] = useState<SelectorKey | null>(null);
   const [prompt, setPrompt] = useState("");
 
-  const instanceId = started ? session.instanceId : draftInstanceId;
-  const model = started ? session.modelSelection.model : draftModel;
+  const instanceId: string | null = started ? session.instanceId : draftInstanceId;
+  const model: string | null = started ? session.modelSelection.model : draftModel;
   const accessMode = started ? session.accessMode : draftAccessMode;
-  const runnerId = started ? session.runnerId : draftRunnerId;
-  const profileId = started ? session.permissionProfileId : draftProfileId;
+  const runnerId: string | null = started ? session.runnerId : draftRunnerId;
+  const profileId: string | null = started ? session.permissionProfileId : draftProfileId;
 
   const pickModel = (nextModel: string): void => {
     setModelOptions({});
@@ -172,14 +146,15 @@ export function Composer({
   const switchInstance = (nextInstanceId: string): void => {
     const next = instances.find((each) => each.id === nextInstanceId);
     if (next === undefined) return;
-    // The catalog this reads is scoped to whichever runner is currently
-    // picked, the same runner `modelMenu` below reads it for.
-    const field = threadModelField(next, draftRunnerId === "" ? null : draftRunnerId, undefined);
-    const nextModel =
-      field.options.find((option) => option.isDefault)?.slug ?? field.options[0]?.slug;
+    // A catalog is scoped instance x runner, and the runner that hosts the
+    // instance just left need not host this one - so the runner is resolved
+    // for the new instance first and the model read from that runner, the
+    // same order `threadDefaults` prefills in.
+    const forInstance = instanceDefaults(next, runners, localRunnerId);
     setDraftInstanceId(nextInstanceId);
     setModelOptions({});
-    if (nextModel !== undefined) setDraftModel(nextModel);
+    setDraftRunnerId(forInstance.runnerId);
+    setDraftModel(forInstance.model);
   };
 
   const instance = instances.find((each) => each.id === instanceId);
@@ -197,18 +172,7 @@ export function Composer({
   const pickedProfile = profiles.find((each) => each.id === profileId);
 
   const rawGroups =
-    instance === undefined
-      ? []
-      : modelMenu(
-          instances,
-          { id: pickedRunner?.id ?? "", name: pickedRunner?.name ?? "" },
-          { instanceId, model },
-        );
-  // Once a thread has started, the provider instance is where its login and
-  // its User Material live - switching it would need a new thread, so every
-  // other instance's group is locked shut regardless of what `modelMenu`
-  // itself would otherwise dim it with.
-  const SWITCH_LOCK_REASON = "switching accounts starts a new thread";
+    instance === undefined ? [] : modelMenu(instances, pickedRunner ?? null, { instanceId, model });
   const groups = started
     ? rawGroups.map((group) =>
         group.instanceId === instanceId ? group : { ...group, dimmed: SWITCH_LOCK_REASON },
@@ -225,7 +189,7 @@ export function Composer({
   const selectedOptions = started ? session.modelSelection.options : modelOptions;
   const pillText =
     instance === undefined
-      ? model
+      ? "Model"
       : modelPillLabel(instance, model, currentOptions, selectedOptions);
 
   // Once a thread starts the runner is a plain committed fact, never dimmed
@@ -233,7 +197,7 @@ export function Composer({
   const runnerLabel =
     pickedRunner === undefined
       ? "Runner"
-      : started || pickedRunnerRow?.dimmed == null
+      : started || pickedRunnerRow === undefined || pickedRunnerRow.dimmed === null
         ? pickedRunner.name
         : `${pickedRunner.name} · ${pickedRunnerRow.dimmed}`;
 
@@ -248,7 +212,17 @@ export function Composer({
   const spawn = useMutation({
     mutationFn: () =>
       client.session.spawn({
-        payload: { prompt, instanceId, model, accessMode, runnerId, profileId, workspaceId: null },
+        payload: {
+          prompt,
+          accessMode,
+          workspaceId: null,
+          // Omitted, never sent empty: the server has its own fallback for
+          // each of these, and `Id` refuses an empty string outright.
+          ...(instanceId === null ? {} : { instanceId }),
+          ...(model === null ? {} : { model }),
+          ...(runnerId === null ? {} : { runnerId }),
+          ...(profileId === null ? {} : { permissionProfileId: profileId }),
+        },
       }),
     onSuccess: (created) => {
       void navigate({ to: "/threads/$sessionId", params: { sessionId: created.id } });
@@ -279,8 +253,23 @@ export function Composer({
     },
   });
 
+  // What stops a new thread from starting at all, said in the words the user
+  // would need to fix it. A started thread has nothing to resolve, and every
+  // other field the server has a fallback for is omitted rather than blocking.
+  const blocked =
+    started || instance !== undefined
+      ? null
+      : instances.length === 0
+        ? "no provider instance is set up"
+        : "no provider instance can be resolved";
+  const noRunner =
+    started || instance === undefined || runnerRows.some((row) => row.dimmed === null)
+      ? null
+      : `no runner is logged in to ${instance.displayName}`;
+  const blockedReason = blocked ?? noRunner;
+
   const send = (): void => {
-    if (prompt.trim() === "") return;
+    if (prompt.trim() === "" || blockedReason !== null) return;
     if (started) {
       sendInput.mutate(prompt);
       onSend?.();
@@ -411,14 +400,19 @@ export function Composer({
           <Button
             variant="primary"
             aria-label="Send"
-            disabled={prompt.trim() === "" || exited || sending}
+            disabled={prompt.trim() === "" || exited || sending || blockedReason !== null}
+            title={blockedReason ?? undefined}
             onClick={send}
             className="rounded-full"
           >
             <span aria-hidden="true">↑</span>
           </Button>
         </div>
-        {composerError === null || composerError === undefined ? null : (
+        {composerError === null || composerError === undefined ? (
+          blockedReason === null ? null : (
+            <p className="mt-2 text-fine text-faint">{blockedReason}</p>
+          )
+        ) : (
           <p className="mt-2 text-fine text-fail" role="alert">
             {messageOf(composerError)}
           </p>

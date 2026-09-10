@@ -29,15 +29,16 @@ export interface ModelMenuGroup {
 
 export const modelMenu = (
   instances: readonly ProviderInstance[],
-  runner: Pick<Runner, "id" | "name">,
-  current: { readonly instanceId: string; readonly model: string },
+  /** The runner whose catalog this menu reads, or none: no runner exists at all. */
+  runner: Pick<Runner, "id" | "name"> | null,
+  current: { readonly instanceId: string | null; readonly model: string | null },
 ): readonly ModelMenuGroup[] => {
-  // An unnamed runner is the caller's word that there is no machine to name -
-  // no runner exists at all - not an invitation to print a dangling "on ".
-  const runnerName = runner.name === "" ? "this runner" : runner.name;
+  // With no runner there is no machine to name, so the copy says "this
+  // runner" rather than printing a dangling "on ".
+  const runnerName = runner?.name ?? "this runner";
 
   return instances.map((instance) => {
-    const snapshot = instance.snapshots.find((each) => each.runnerId === runner.id);
+    const snapshot = instance.snapshots.find((each) => each.runnerId === runner?.id);
     const expanded = instance.id === current.instanceId;
 
     const models: ModelMenuModelRow[] = (snapshot?.models ?? []).map((descriptor) => ({
@@ -50,7 +51,7 @@ export const modelMenu = (
       options: descriptor.options,
     }));
 
-    if (expanded && !models.some((model) => model.slug === current.model)) {
+    if (expanded && current.model !== null && !models.some((row) => row.slug === current.model)) {
       models.push({
         slug: current.model,
         name: current.model,

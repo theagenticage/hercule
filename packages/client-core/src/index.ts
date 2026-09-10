@@ -86,6 +86,7 @@ export {
   type RunnerMenu,
   type RunnerMenuRow,
 } from "./threads/runner-menu";
+export { instanceDefaults, threadDefaults, type ThreadDefaults } from "./threads/thread-defaults";
 export { turnsOf, type ThreadItem, type ThreadTurn } from "./threads/turns";
 export {
   browserTimezone,

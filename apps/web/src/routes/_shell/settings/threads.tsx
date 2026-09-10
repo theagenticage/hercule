@@ -1,8 +1,13 @@
 import type { JSX } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
-import { defaultInstanceId, threadModelField, threadRowsMode } from "@hydra/client-core";
-import type { AccessMode, ProviderInstance, ThreadRows } from "@hydra/contract";
+import {
+  instanceDefaults,
+  threadDefaults,
+  threadModelField,
+  threadRowsMode,
+} from "@hydra/client-core";
+import type { AccessMode, ThreadRows } from "@hydra/contract";
 import { FormCard, Row, SegmentedControl, SegmentedControlItem, Select } from "@hydra/ui";
 import {
   localRunnerQuery,
@@ -53,37 +58,16 @@ function Threads(): JSX.Element {
 
   const rows = threadRowsMode(settings.user["ui.threadRows"]);
 
-  // A stored id naming an instance that no longer exists falls back the same
-  // way an unset one does, so the model field always has a picked instance to
-  // read - never the empty, unexplained field a stale id would otherwise leave.
-  // The fallback is the same rule the composer prefills a new thread from.
-  const fallbackInstanceId = defaultInstanceId(instances);
-  const instance =
-    instances.find((each) => each.id === settings.user["thread.instanceId"]) ??
-    instances.find((each) => each.id === fallbackInstanceId);
-  const instanceId = instance?.id ?? "";
+  // Every default below is `threadDefaults`' answer, the same rule the
+  // composer prefills a new thread from: a stored id naming an instance that
+  // no longer exists falls back, the model is read from the runner that
+  // instance would actually be placed on, and "nothing picked" is null.
+  const defaults = threadDefaults(settings.user, instances, runners, profiles, localId);
+  const instance = instances.find((each) => each.id === defaults.instanceId);
   const modelField =
     instance === undefined
       ? { dimmed: null, options: [] }
-      : threadModelField(instance, localId, settings.user["thread.model"]);
-  // The default model of whichever instance is picked, reading the same
-  // runner-scoped snapshot rule as the field itself - what a fresh instance
-  // starts on before the user has chosen a model of its own.
-  const defaultModelOf = (target: ProviderInstance): string | undefined => {
-    const field = threadModelField(target, localId, undefined);
-    return field.options.find((option) => option.isDefault)?.slug ?? field.options[0]?.slug;
-  };
-  const model =
-    settings.user["thread.model"] ??
-    modelField.options.find((option) => option.isDefault)?.slug ??
-    modelField.options[0]?.slug ??
-    "";
-  const accessMode = settings.user["thread.accessMode"] ?? "approval-required";
-  const profileId =
-    settings.user["thread.profileId"] ??
-    profiles.find((profile) => profile.name === "unrestricted")?.id ??
-    profiles[0]?.id ??
-    "";
+      : threadModelField(instance, defaults.runnerId, settings.user["thread.model"]);
 
   return (
     <div className="flex flex-col gap-4">
@@ -98,14 +82,17 @@ function Threads(): JSX.Element {
             <Row label="Provider instance" htmlFor="thread-instance">
               <Select
                 id="thread-instance"
-                value={instanceId}
+                value={defaults.instanceId ?? ""}
                 onChange={(event) => {
                   const next = instances.find((each) => each.id === event.target.value);
-                  const nextModel = next === undefined ? undefined : defaultModelOf(next);
+                  // The model follows the instance, read from the runner that
+                  // instance would be placed on - one rule, `instanceDefaults`.
+                  const nextModel =
+                    next === undefined ? null : instanceDefaults(next, runners, localId).model;
                   save({
                     user: {
                       "thread.instanceId": event.target.value,
-                      ...(nextModel === undefined ? {} : { "thread.model": nextModel }),
+                      ...(nextModel === null ? {} : { "thread.model": nextModel }),
                     },
                   });
                 }}
@@ -123,7 +110,7 @@ function Threads(): JSX.Element {
               ) : (
                 <Select
                   id="thread-model"
-                  value={model}
+                  value={defaults.model ?? ""}
                   onChange={(event) => {
                     save({ user: { "thread.model": event.target.value } });
                   }}
@@ -141,7 +128,7 @@ function Threads(): JSX.Element {
         <Row label="Access mode">
           <SegmentedControl
             aria-label="Access mode"
-            value={accessMode}
+            value={defaults.accessMode}
             onValueChange={(next) => {
               save({ user: { "thread.accessMode": next as AccessMode } });
             }}
@@ -156,7 +143,7 @@ function Threads(): JSX.Element {
         <Row label="Profile" htmlFor="thread-profile">
           <Select
             id="thread-profile"
-            value={profileId}
+            value={defaults.profileId ?? ""}
             onChange={(event) => {
               save({ user: { "thread.profileId": event.target.value } });
             }}

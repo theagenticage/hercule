@@ -134,15 +134,11 @@ describe("modelMenu", () => {
     });
   });
 
-  it("speaks without naming a machine when the runner has no name - no runner exists at all", () => {
-    const groups = modelMenu(
-      [claudeCode, freshInstall],
-      { id: "", name: "" },
-      {
-        instanceId: claudeCode.id,
-        model: "claude-haiku-5",
-      },
-    );
+  it("speaks without naming a machine when there is no runner at all", () => {
+    const groups = modelMenu([claudeCode, freshInstall], null, {
+      instanceId: claudeCode.id,
+      model: "claude-haiku-5",
+    });
 
     expect(groups.find((group) => group.instanceId === freshInstall.id)).toMatchObject({
       dimmed: "found, not logged in",
@@ -151,6 +147,13 @@ describe("modelMenu", () => {
       .find((group) => group.instanceId === claudeCode.id)!
       .models.find((model) => model.slug === "claude-haiku-5");
     expect(missingRow).toMatchObject({ dimmed: "not offered on this runner" });
+  });
+
+  it("adds no missing row when no model is picked at all", () => {
+    const groups = modelMenu([claudeCode], RUNNER, { instanceId: claudeCode.id, model: null });
+
+    expect(groups[0]!.models.every((row) => row.dimmed === null)).toBe(true);
+    expect(groups[0]!.models.every((row) => !row.current)).toBe(true);
   });
 
   it("carries the current model's option descriptors through verbatim", () => {

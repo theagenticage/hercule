@@ -26,7 +26,7 @@ describe("defaultInstanceId", () => {
     expect(defaultInstanceId(instances)).toBe(instances[0]!.id);
   });
 
-  it("is empty when there are no instances", () => {
-    expect(defaultInstanceId([])).toBe("");
+  it("is null when there are no instances", () => {
+    expect(defaultInstanceId([])).toBeNull();
   });
 });

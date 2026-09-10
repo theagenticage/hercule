@@ -69,7 +69,7 @@ export const runnerMenu = (
  */
 export const referenceRunner = (
   runners: readonly Runner[],
-  selectedRunnerId: string,
+  selectedRunnerId: string | null,
   localRunnerId: string | null,
 ): Runner | undefined =>
   runners.find((runner) => runner.id === selectedRunnerId) ??

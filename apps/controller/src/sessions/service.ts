@@ -361,14 +361,16 @@ const make = Effect.gen(function* () {
       return snapshot;
     });
 
-  /** Refuses a profileId naming no profile, before it is trusted as this session's. */
+  /** Refuses a permissionProfileId naming no profile, before it is trusted as this session's. */
   const requireProfile = (
     profileId: string,
   ): Effect.Effect<void, Validation | GrantsError | SqlError> =>
     Effect.gen(function* () {
       const found = yield* profiles.getById(profileId);
       if (Option.isNone(found)) {
-        return yield* Effect.fail(validation([{ path: ["profileId"], message: NO_SUCH_PROFILE }]));
+        return yield* Effect.fail(
+          validation([{ path: ["permissionProfileId"], message: NO_SUCH_PROFILE }]),
+        );
       }
     });
 
@@ -829,9 +831,11 @@ const make = Effect.gen(function* () {
           );
         }
 
-        if (decoded.profileId !== undefined) yield* requireProfile(decoded.profileId);
+        if (decoded.permissionProfileId !== undefined) {
+          yield* requireProfile(decoded.permissionProfileId);
+        }
         const profileId =
-          decoded.profileId ?? defaults["thread.profileId"] ?? (yield* threadProfile());
+          decoded.permissionProfileId ?? defaults["thread.profileId"] ?? (yield* threadProfile());
 
         const spec = {
           instanceId,

@@ -173,18 +173,18 @@ describe("referenceRunner", () => {
     const a = runner({ id: "r-a", name: "a" });
     const b = runner({ id: "r-b", name: "b" });
 
-    expect(referenceRunner([a, b], "", "r-b")).toBe(b);
+    expect(referenceRunner([a, b], null, "r-b")).toBe(b);
   });
 
   it("falls back to the first runner in the list when nothing is selected and there is no local runner", () => {
     const a = runner({ id: "r-a", name: "a" });
     const b = runner({ id: "r-b", name: "b" });
 
-    expect(referenceRunner([a, b], "", null)).toBe(a);
+    expect(referenceRunner([a, b], null, null)).toBe(a);
     expect(referenceRunner([a, b], "not-a-runner-id", "also-not-one")).toBe(a);
   });
 
   it("has nothing to name when there are no runners at all", () => {
-    expect(referenceRunner([], "", null)).toBeUndefined();
+    expect(referenceRunner([], null, null)).toBeUndefined();
   });
 });
