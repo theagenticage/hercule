@@ -79,6 +79,34 @@ There are no per-record topics. A changed task never travels over the socket: th
 
 **Cursors** are opaque strings on the wire (today the decimal of the store's integer position, [./04-state-store.md](./04-state-store.md)); the client stores and echoes them and never parses them.
 
+### One token's journey
+
+The three per-session channels carry the same turn at three rates, because each has a different durability need. Following one `content.delta` from the runner:
+
+```
+runner ──ws──▶ controller  session.reported
+                 │
+                 ├─ 1. announce tap           at once, before any write   ──▶ session:<id>:tap     { turnId, itemId, streamKind, delta }
+                 │
+                 ├─ 2. fold into the open row (most deltas end here; nothing else is sent)
+                 │
+                 ├─ 3. every 4 KB, or when the item ends: write the row in a transaction
+                 │      └─ announce transcript                            ──▶ session:<id>:stream  delta { cursor, items: [TranscriptRow] }
+                 │
+                 └─ 4. only when the status moved (busy → idle, → exited)
+                        └─ announce record                                ──▶ session              invalidate { ids: [<id>], kind: "updated" }
+```
+
+| Channel | Rate | Durability | Missed while away |
+|---|---|---|---|
+| `session:<id>:tap` | one message per token | never stored, never replays | nothing lost: the stream row carries the same text |
+| `session:<id>:stream` | one row per 4 KB or per item | written to the store first, announced from inside that transaction; has a cursor | replayed from the cursor on reconnect |
+| `session` | one nudge per status move, coalesced ~50 ms | the record itself is read over HTTP | the client rereads everything it watches on reconnect |
+
+**The stream wins over the tap.** A tap delta is the head of an item's text as far as the browser has seen it; a stream row is that same text as the store holds it. When both describe one open item, the row replaces whatever the tap had painted and later taps for that item resume after it. A consumer of the tap that is not the web app (a CLI following a thread) applies the same rule: the tap is a preview, the stream is the record.
+
+**Who listens, on a thread page.** One browser holds one socket and, on `/threads/<id>`, three distinct subscriptions on it: `session` (the sidebar's thread list and the thread screen both read it; they refetch the sessions listing, the one session, and its queued inputs), `session:<id>:stream` (appended to the cached transcript, deduplicated on row position), and `session:<id>:tap` (buffered per item and painted into one DOM node once per animation frame, outside React). No other screen opens a per-session topic; a thread not on screen costs the socket nothing.
+
 **The ticket** is the value of `auth.wsTicket` ([./13-security.md](./13-security.md) section 4): a 5-minute single-use random string fetched over authenticated HTTP, because a browser cannot set headers on the WebSocket handshake and the 30-day bearer token must never ride in a URL.
 
 ## Auth in the client
