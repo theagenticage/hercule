@@ -202,6 +202,19 @@ export interface Arranged {
    * connection does: a second socket on the credential the join handed it.
    */
   readonly reconnect: () => Promise<Wire>;
+  /**
+   * A second machine on the same controller: joined on a token of its own,
+   * dialled, and probed, so a session can be placed on it by name. What it is
+   * for is the case that needs two machines to tell apart - what one machine
+   * reports says nothing about what another one holds.
+   */
+  readonly enlist: () => Promise<Enlisted>;
+}
+
+/** A second machine, and the id a placement names it by. */
+export interface Enlisted {
+  readonly runnerId: string;
+  readonly wire: Wire;
 }
 
 export interface FleetOptions {
@@ -234,8 +247,36 @@ export const withFleet = (
         return again;
       };
       const instances = await probed(harness.base, token);
+      let machines = 1;
+      const enlist = async (): Promise<Enlisted> => {
+        const second = await send("POST", harness.base, "/api/v1/runners/join", {
+          body: {},
+          token: await harness.joinToken(),
+        });
+        expect(second.status, await second.clone().text()).toBe(201);
+        const enlisted = (await second.json()) as JoinAnswer;
+        const its = await dial(harness.base, enlisted.credential, options.facts, options.models);
+        wires.push(its);
+        machines += 1;
+        // One snapshot per machine per instance, so a placement onto this one
+        // has an answer to place against only once its own probes are in.
+        await until("probed the machine it just enlisted", async () => {
+          const response = await get(harness.base, "/api/v1/providers", token);
+          const all = (await response.json()) as ReadonlyArray<ProviderInstance>;
+          return all.every((instance) => instance.snapshots.length >= machines) ? all : undefined;
+        });
+        return { runnerId: enlisted.runnerId, wire: its };
+      };
       try {
-        await body({ harness, token, wire, instances, runnerId: answer.runnerId, reconnect });
+        await body({
+          harness,
+          token,
+          wire,
+          instances,
+          runnerId: answer.runnerId,
+          reconnect,
+          enlist,
+        });
       } finally {
         for (const one of wires) one.close();
       }
