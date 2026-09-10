@@ -42,6 +42,7 @@ const spec = {
   workspaceId: null,
   modelSelection: { model: "sonnet", options: { thinking: true, effort: "medium" } },
   accessMode: "approval-required",
+  timeouts: { inactivityMs: 1_800_000, absoluteMs: 28_800_000 },
 } as const;
 
 const start = {
@@ -219,6 +220,26 @@ describe("what the controller authors for a session", () => {
     expect(decode(SessionBinding, { sessionId: SESSION_ID, instanceId: "inst-1" })._tag).toBe(
       "Failure",
     );
+  });
+
+  it("carries both timeouts on the spec, so a runner never has to pick one", () => {
+    // The runner reads its two clocks off here and holds no default of its own,
+    // so a spec missing either half is a controller bug the wire refuses.
+    expect(decode(SessionSpec, { ...spec, timeouts: { inactivityMs: 1 } })._tag).toBe("Failure");
+    expect(decode(SessionSpec, { ...spec, timeouts: { absoluteMs: 1 } })._tag).toBe("Failure");
+    expect(
+      decode(SessionSpec, { ...spec, timeouts: { inactivityMs: 1, absoluteMs: 2 } })._tag,
+    ).toBe("Success");
+  });
+
+  it("names a session ended by either of the runner's clocks", () => {
+    // The supervisor is the only thing that knows why it stopped a session, so
+    // the reason has to exist in the vocabulary the exit event carries.
+    for (const reason of ["inactivity_timeout", "absolute_timeout"]) {
+      expect(decode(ProviderEvent, { _tag: "session.exited", ...baseFields, reason })._tag).toBe(
+        "Success",
+      );
+    }
   });
 
   it("takes a workspace-less session as an explicit null, never as an absent key", () => {

@@ -357,8 +357,8 @@ interface Live {
   readonly input: Pushable<SDKUserMessage>;
   readonly stream: ClaudeStream;
   readonly state: Normalizing;
-  /** Set by `stopSession`, so the exit reason says it was asked for. */
-  stopping: boolean;
+  /** Set by `stopSession` to the reason it was given, so the exit says why. */
+  stopping: ExitReason | undefined;
   /** The model the harness is running under, starting as the spec's. */
   model: string;
 }
@@ -394,7 +394,7 @@ export const claudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
   const hosting = (sessionId: string): Effect.Effect<Live, string> =>
     Effect.suspend(() => {
       const held = live.get(sessionId);
-      return held === undefined || held.stopping
+      return held === undefined || held.stopping !== undefined
         ? Effect.fail(`session ${sessionId} is not running here`)
         : Effect.succeed(held);
     });
@@ -410,7 +410,7 @@ export const claudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
       reason = "crash";
       // Ending the query rejects whatever was in flight, and an ordinary stop
       // is not something to report as a runtime error.
-      if (!held.stopping) {
+      if (held.stopping === undefined) {
         emit({
           _tag: "runtime.error",
           eventId: crypto.randomUUID(),
@@ -429,7 +429,7 @@ export const claudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
         eventId: crypto.randomUUID(),
         sessionId,
         at: now(),
-        reason: held.stopping ? "stopped" : reason,
+        reason: held.stopping ?? reason,
       });
     }
   };
@@ -506,7 +506,7 @@ export const claudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
               input,
               stream,
               state: normalizing(sessionId, () => crypto.randomUUID(), now),
-              stopping: false,
+              stopping: undefined,
               model: spec.modelSelection.model,
             };
             live.set(sessionId, held);
@@ -592,15 +592,20 @@ export const claudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
         return Effect.asVoid(controlling(held.stream.interrupt()));
       }),
 
-    stopSession: (sessionId: string): Effect.Effect<void> =>
+    stopSession: (sessionId: string, reason: ExitReason): Effect.Effect<void> =>
       Effect.sync(() => {
         const held = live.get(sessionId);
-        if (held === undefined) return;
+        // Idempotent, and the first reason wins: a second stop (a timer racing
+        // an explicit one, say) is the harness already on its way out, and the
+        // exit should say why that first ask was made, not why the second one
+        // was.
+        if (held === undefined || held.stopping !== undefined) return;
         // The entry stays until the pump winds up, so `live` remains the one
         // register of what this adapter holds and a start under the same id is
         // refused while the old harness is still going. `stopping` is what
-        // refuses input in the meantime.
-        held.stopping = true;
+        // refuses input in the meantime, and what the exit event's reason
+        // comes from.
+        held.stopping = reason;
         held.input.end();
         held.stream.close();
       }),

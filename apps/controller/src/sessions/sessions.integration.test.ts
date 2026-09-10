@@ -359,6 +359,8 @@ describe("session.spawn", () => {
         // call named one.
         modelSelection: { model: "clever", options: {} },
         accessMode: "approval-required",
+        // Neither settings key is set, so the shipped defaults ride the spec.
+        timeouts: { inactivityMs: 1_800_000, absoluteMs: 28_800_000 },
       });
     });
   });
@@ -2186,6 +2188,52 @@ describe("a restart", () => {
       expect(onWireRow).toMatchObject({ status: "cancelled" });
       expect(typeof onWireRow?.reason).toBe("string");
       expect(waitingRow).toMatchObject({ status: "queued", sentAt: null });
+    });
+  });
+});
+
+/** Writes controller settings the way the only surface for them does. */
+const setController = async (
+  arranged: Arranged,
+  controller: Record<string, unknown>,
+): Promise<void> => {
+  const response = await send("PATCH", arranged.harness.base, "/api/v1/settings", {
+    body: { controller },
+    token: arranged.token,
+  });
+  expect(response.status, await response.clone().text()).toBe(200);
+};
+
+describe("the timeouts a session is started under", () => {
+  it("carries what the settings say, whole minutes turned into milliseconds", async () => {
+    await withFleet(async (arranged) => {
+      await setController(arranged, {
+        "session.inactivityTimeout": 5,
+        "session.absoluteTimeout": 60,
+      });
+
+      await spawned(arranged, { prompt: "hello" });
+
+      const start = (await framesWhen<SessionStart>(arranged.wire, "sessionStart", 1))[0]!;
+      expect(start.spec.timeouts).toEqual({ inactivityMs: 300_000, absoluteMs: 3_600_000 });
+    });
+  });
+
+  it("carries the same values onto a session continued from another", async () => {
+    await withFleet(async (arranged) => {
+      await setController(arranged, {
+        "session.inactivityTimeout": 5,
+        "session.absoluteTimeout": 60,
+      });
+      const parent = await ended(arranged, "hello");
+
+      const response = await carryOn(arranged, parent.id, { mode: "resume", prompt: "carry on" });
+      expect(response.status, await response.clone().text()).toBe(200);
+
+      const starts = await framesWhen<SessionStart>(arranged.wire, "sessionStart", 2);
+      const expected = { inactivityMs: 300_000, absoluteMs: 3_600_000 };
+      expect(starts[0]!.spec.timeouts).toEqual(expected);
+      expect(starts[1]!.spec.timeouts).toEqual(expected);
     });
   });
 });

@@ -7,6 +7,7 @@ import type * as Schema from "effect/Schema";
 import type * as Stream from "effect/Stream";
 import {
   MAX_FACT_LENGTH,
+  type ExitReason,
   type ProbeResult,
   type ProviderEvent,
   type SendResult,
@@ -90,10 +91,11 @@ export interface ProviderAdapter {
   readonly interrupt: (sessionId: string) => Effect.Effect<void>;
 
   /**
-   * Ends the harness cleanly. `session.exited { reason: "stopped" }` follows on
-   * `events`; a session this adapter does not hold is already stopped.
+   * Ends the harness cleanly. `session.exited { reason }` follows on `events`,
+   * carrying the reason the caller gave: the supervisor is the one that knows
+   * why. A session this adapter does not hold is already stopped.
    */
-  readonly stopSession: (sessionId: string) => Effect.Effect<void>;
+  readonly stopSession: (sessionId: string, reason: ExitReason) => Effect.Effect<void>;
 
   /** What this adapter is hosting right now, as bindings. */
   readonly listSessions: Effect.Effect<ReadonlyArray<SessionBinding>>;

@@ -41,6 +41,9 @@ export const MAX_SETTING_LIST = 256;
 /** A retention window or a snapshot count, in whole days or whole snapshots. */
 const PositiveDays = Schema.Int.check(Schema.isGreaterThan(0));
 
+/** A session timeout, in whole minutes: the wire carries the milliseconds this turns into. */
+const PositiveMinutes = Schema.Int.check(Schema.isGreaterThan(0));
+
 /** A time of day in the user timezone setting, `HH:MM` on a 24-hour clock. */
 const TimeOfDay = Schema.String.check(Schema.isPattern(/^([01]\d|2[0-3]):[0-5]\d$/));
 
@@ -69,6 +72,10 @@ export const SETTING_VALUES = {
     "backup.time": TimeOfDay,
     /** How many daily snapshots to keep. */
     "backup.keep": PositiveDays,
+    /** How long a session may sit with no event before the runner ends it. */
+    "session.inactivityTimeout": PositiveMinutes,
+    /** How long a session may run in total before the runner ends it. */
+    "session.absoluteTimeout": PositiveMinutes,
   },
   user: {
     /** The IANA zone the user reads times in, chosen during setup. */

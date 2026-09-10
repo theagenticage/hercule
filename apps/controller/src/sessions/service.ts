@@ -66,7 +66,7 @@ import { PermissionProfiles, type GrantsError } from "../permissions";
 import { PluginHost } from "../plugins";
 import { providerRepository, type StoredInstance, type StoredSnapshot } from "../providers";
 import { requireOnline, RunnerPresence, runnerRepository, type SessionTraffic } from "../runners";
-import { Settings, type SettingError } from "../settings";
+import { Settings, type ScopeSettings, type SettingError } from "../settings";
 import { inputRepository, type StoredInput } from "./inputs";
 import { sessionRepository, type StoredSession } from "./repository";
 import { fold, track, type Tracked } from "./stream";
@@ -217,6 +217,21 @@ const DEFAULT_PROFILE = "unrestricted";
 
 const DEFAULT_ACCESS_MODE: AccessMode = "approval-required";
 
+/** Applied here, controller-side, when the settings key is unset; the runner holds no default of its own. */
+const DEFAULT_INACTIVITY_TIMEOUT_MINUTES = 30;
+
+const DEFAULT_ABSOLUTE_TIMEOUT_MINUTES = 480;
+
+const MINUTE_MS = 60_000;
+
+/** The two clocks a session starts under, whole minutes turned into the milliseconds the wire carries. */
+const timeoutsFrom = (controller: ScopeSettings<"controller">): SessionSpec["timeouts"] => ({
+  inactivityMs:
+    (controller["session.inactivityTimeout"] ?? DEFAULT_INACTIVITY_TIMEOUT_MINUTES) * MINUTE_MS,
+  absoluteMs:
+    (controller["session.absoluteTimeout"] ?? DEFAULT_ABSOLUTE_TIMEOUT_MINUTES) * MINUTE_MS,
+});
+
 /**
  * A machine's own word that it can run this instance: the stored capability
  * snapshot saying it is logged in. Read, never probed.
@@ -248,7 +263,7 @@ type ReadError = Unauthenticated | Forbidden | Validation | SqlError;
 
 type SpawnError = ReadError | InvalidState | SettingError | GrantsError | Schema.SchemaError;
 
-type InputError = ReadError | NotFound | InvalidState | Schema.SchemaError;
+type InputError = ReadError | NotFound | InvalidState | SettingError | Schema.SchemaError;
 
 /** What an instance is, once the row and the provider behind it are both in hand. */
 interface Resolved {
@@ -842,6 +857,7 @@ const make = Effect.gen(function* () {
           workspaceId: null,
           modelSelection: { model, options: {} },
           accessMode,
+          timeouts: timeoutsFrom(yield* settings.all()),
         } satisfies SessionSpec;
 
         return yield* opening({
@@ -1075,6 +1091,7 @@ const make = Effect.gen(function* () {
             modelSelection: parent.modelSelection,
             accessMode: parent.accessMode,
             continue: { nativeSessionId: parent.nativeSessionId, mode },
+            timeouts: timeoutsFrom(yield* settings.all()),
           },
           instance,
           prompt,
