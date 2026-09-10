@@ -38,14 +38,24 @@ import {
   InvalidState,
   live,
   MUTABLE_LIVE_TOPICS,
+  NotFound,
   Unauthenticated,
   Validation,
   type Delta,
   type Event,
   type LiveMessage,
   type Task,
+  type TapItem,
+  type TranscriptRow,
 } from "@hydra/contract";
-import { PROTOCOL_VERSION, type JoinAnswer, type RunnerFacts } from "@hydra/protocol";
+import {
+  PROTOCOL_VERSION,
+  type JoinAnswer,
+  type RunnerFacts,
+  type SessionStart,
+} from "@hydra/protocol";
+import type { Plugin } from "@hydra/plugin-host";
+import { fixture, providerDefinition } from "../plugins/testing";
 import {
   collecting,
   completeSetup,
@@ -62,7 +72,9 @@ import {
   within,
   type Collected,
   type LiveClient,
+  type ServerHarness,
 } from "../http/testing";
+import { framesWhen, report, spawned, until, withFleet, type Arranged } from "../sessions/testing";
 
 /**
  * Whether the listener will upgrade a plain dial of the socket at all. A dial
@@ -110,6 +122,22 @@ const present = <T>(value: T | undefined): T => {
 /** The deltas a collector saw, which is every message on an append-only topic. */
 const deltas = (collected: Collected): ReadonlyArray<Delta> =>
   collected.received.filter((message): message is Delta => message._tag === "delta");
+
+/**
+ * A delta's items, narrowed to `Event`: the only one of `Delta`'s item shapes
+ * with a numeric `id`, which is what tells the three apart on a topic that only
+ * ever carries one of them.
+ */
+const eventItems = (delta: Delta): ReadonlyArray<Event> =>
+  delta.items.filter((item): item is Event => "id" in item);
+
+/** A delta's items, narrowed to `TranscriptRow`: the only shape with `position`. */
+const transcriptItems = (delta: Delta): ReadonlyArray<TranscriptRow> =>
+  delta.items.filter((item): item is TranscriptRow => "position" in item);
+
+/** A delta's items, narrowed to `TapItem`: the only shape with `streamKind`. */
+const tapItems = (delta: Delta): ReadonlyArray<TapItem> =>
+  delta.items.filter((item): item is TapItem => "streamKind" in item);
 
 const createTask = async (base: string, token: string, title: string): Promise<Task> => {
   const response = await post(base, "/api/v1/tasks", { title, description: "" }, token);
@@ -542,7 +570,7 @@ describe("what an event subscription is told", () => {
 
           const pushed = present(deltas(events)[1]);
           expect(pushed.items).toHaveLength(1);
-          const item = present(pushed.items[0]);
+          const item = present(eventItems(pushed)[0]);
           expect(item.kind).toBe("task.created");
           expect(pushed.cursor).toBe(String(item.id));
 
@@ -577,7 +605,7 @@ describe("what an event subscription is told", () => {
             true,
           );
           const caught = present(deltas(replay)[0]);
-          expect(caught.items.map((item) => item.id)).toEqual(missed.map((item) => item.id));
+          expect(eventItems(caught).map((item) => item.id)).toEqual(missed.map((item) => item.id));
           expect(caught.cursor).toBe(String(newest.id));
           yield* Fiber.interrupt(replay.fiber);
 
@@ -678,12 +706,12 @@ describe("what an event subscription is told", () => {
           // And the client can come back where it left off: what it missed is
           // still the log, replayed from its last cursor.
           const last = present(seen[seen.length - 1]);
-          const again = yield* collecting(client, { topic: "event", cursor: last.cursor });
+          const again = yield* collecting(client, { topic: "event", cursor: present(last.cursor) });
           expect(yield* Effect.promise(() => within(2000, () => again.received.length >= 1))).toBe(
             true,
           );
           const replayed = present(deltas(again)[0]);
-          expect(replayed.items[0]?.id).toBe(Number(last.cursor) + 1);
+          expect(eventItems(replayed)[0]?.id).toBe(Number(last.cursor) + 1);
           yield* Fiber.interrupt(again.fiber);
         }),
       );
@@ -1022,6 +1050,387 @@ describe("what a runner subscription is told", () => {
           second.close();
           runner.close();
           yield* Fiber.interrupt(fleet.fiber);
+        }),
+      );
+    });
+  });
+});
+
+/**
+ * A fleet minimal enough to spawn one session and drive its transcript: one
+ * provider, one machine that answers hello and probes and otherwise says
+ * nothing on its own. Placement, access modes and input are `sessions.
+ * integration.test.ts`'s business, not this suite's - all that is needed here
+ * is a session that exists and a wire to report events into it, so its two
+ * live topics have something to carry. The fleet mechanics themselves -
+ * `Wire`, `dial`, `withFleet` - are shared with that suite; only the fixture
+ * is this one's own.
+ */
+const SESSION_TOPIC_FACTS: RunnerFacts = {
+  os: "darwin",
+  arch: "arm64",
+  totalMemoryBytes: 68719476736,
+  docker: false,
+  toolchains: [],
+  providers: [{ name: "harness", present: true, path: "/usr/local/bin/harness" }],
+  adapters: ["session-topic-provider"],
+  identityPort: 4939,
+};
+
+const SESSION_TOPIC_MODELS = [{ slug: "fast", name: "Fast", isDefault: true, options: [] }];
+
+const sessionTopicRegistry = (): ReadonlyArray<Plugin> => [
+  fixture({
+    id: "session-topics",
+    definitions: [providerDefinition("session-topic-provider", { token: "t" })],
+  }).plugin,
+];
+
+const withSessionTopicFleet = (body: (arranged: Arranged) => Promise<void>): Promise<void> =>
+  withFleet(body, {
+    plugins: sessionTopicRegistry(),
+    facts: SESSION_TOPIC_FACTS,
+    models: SESSION_TOPIC_MODELS,
+  });
+
+interface StreamRow {
+  readonly position: number;
+  readonly tag: string;
+}
+
+/** `session_stream`'s own rows for one session, read the way the sessions suite does. */
+const streamOf = (harness: ServerHarness, id: string): Promise<ReadonlyArray<StreamRow>> =>
+  Effect.runPromise(
+    Effect.orDie(
+      harness.sql<StreamRow>`
+        SELECT position, json_extract(event, '$._tag') AS tag
+        FROM session_stream WHERE session_id = unhex(replace(${id}, '-', ''))
+        ORDER BY position`,
+    ),
+  );
+
+/** Waits until a session's stream holds at least this many rows. */
+const streamRowsWhen = (
+  harness: ServerHarness,
+  id: string,
+  count: number,
+): Promise<ReadonlyArray<StreamRow>> =>
+  until(`wrote ${String(count)} stream rows`, async () => {
+    const rows = await streamOf(harness, id);
+    return rows.length >= count ? rows : undefined;
+  });
+
+const AT = "2026-09-08T10:00:00.000Z";
+
+describe("what a session's stream subscription is told", () => {
+  it("opens at the empty head with no cursor, and pushes each row written after as a TranscriptRow cursored on its position", async () => {
+    await withSessionTopicFleet(async (arranged) => {
+      const session = await spawned(arranged, { prompt: "hello" });
+      await framesWhen<SessionStart>(arranged.wire, "sessionStart", 1);
+      const ticket = await ticketFor(arranged.harness.base, arranged.token);
+
+      await onSocket(arranged.harness.base, (client) =>
+        Effect.gen(function* () {
+          yield* client.hello({ v: 1, ticket });
+          const stream = yield* collecting(client, { topic: `session:${session.id}:stream` });
+
+          // No rows exist yet, so the first message positions the client at
+          // the empty head and hands it nothing - exactly what `event` does
+          // for a subscriber with no cursor.
+          expect(yield* Effect.promise(() => within(1000, () => stream.received.length >= 1))).toBe(
+            true,
+          );
+          expect(stream.received[0]).toEqual({ _tag: "delta", cursor: "0", items: [] });
+
+          report(arranged.wire, 1, {
+            eventId: crypto.randomUUID(),
+            sessionId: session.id,
+            at: AT,
+            _tag: "session.started",
+          });
+          expect(yield* Effect.promise(() => within(2000, () => stream.received.length >= 2))).toBe(
+            true,
+          );
+          const pushed = present(deltas(stream)[1]);
+          const row = present(transcriptItems(pushed)[0]);
+          expect(row.position).toBe(1);
+          expect(row.event._tag).toBe("session.started");
+          expect(pushed.cursor).toBe("1");
+
+          report(arranged.wire, 2, {
+            eventId: crypto.randomUUID(),
+            sessionId: session.id,
+            at: AT,
+            _tag: "turn.started",
+            turnId: "t1",
+          });
+          expect(yield* Effect.promise(() => within(2000, () => stream.received.length >= 3))).toBe(
+            true,
+          );
+          const second = present(deltas(stream)[2]);
+          expect(present(transcriptItems(second)[0]).event._tag).toBe("turn.started");
+          expect(second.cursor).toBe("2");
+
+          yield* Fiber.interrupt(stream.fiber);
+        }),
+      );
+    });
+  });
+
+  it("replays the rows after a cursor before following, the same as event does", async () => {
+    await withSessionTopicFleet(async (arranged) => {
+      const session = await spawned(arranged, { prompt: "hello" });
+      await framesWhen<SessionStart>(arranged.wire, "sessionStart", 1);
+
+      report(arranged.wire, 1, {
+        eventId: crypto.randomUUID(),
+        sessionId: session.id,
+        at: AT,
+        _tag: "session.started",
+      });
+      report(arranged.wire, 2, {
+        eventId: crypto.randomUUID(),
+        sessionId: session.id,
+        at: AT,
+        _tag: "turn.started",
+        turnId: "t1",
+      });
+      const rows = await streamRowsWhen(arranged.harness, session.id, 2);
+      expect(rows.map((row) => row.tag)).toEqual(["session.started", "turn.started"]);
+      const from = present(rows[0]);
+      const newest = present(rows[1]);
+
+      const ticket = await ticketFor(arranged.harness.base, arranged.token);
+      await onSocket(arranged.harness.base, (client) =>
+        Effect.gen(function* () {
+          yield* client.hello({ v: 1, ticket });
+          const replay = yield* collecting(client, {
+            topic: `session:${session.id}:stream`,
+            cursor: String(from.position),
+          });
+          expect(yield* Effect.promise(() => within(1000, () => replay.received.length >= 1))).toBe(
+            true,
+          );
+          const caught = present(deltas(replay)[0]);
+          expect(transcriptItems(caught).map((item) => item.event._tag)).toEqual(["turn.started"]);
+          expect(caught.cursor).toBe(String(newest.position));
+          yield* Fiber.interrupt(replay.fiber);
+        }),
+      );
+    });
+  });
+
+  it("refuses a position the transcript has not reached, the same way event does", async () => {
+    await withSessionTopicFleet(async (arranged) => {
+      const session = await spawned(arranged, { prompt: "hello" });
+      await framesWhen<SessionStart>(arranged.wire, "sessionStart", 1);
+      report(arranged.wire, 1, {
+        eventId: crypto.randomUUID(),
+        sessionId: session.id,
+        at: AT,
+        _tag: "session.started",
+      });
+      await streamRowsWhen(arranged.harness, session.id, 1);
+
+      const ticket = await ticketFor(arranged.harness.base, arranged.token);
+      await onSocket(arranged.harness.base, (client) =>
+        Effect.gen(function* () {
+          yield* client.hello({ v: 1, ticket });
+          const refused = yield* answer(
+            firstItem(client, { topic: `session:${session.id}:stream`, cursor: "1000" }),
+          );
+          expect(refused).toBeInstanceOf(Validation);
+          expect((refused as Validation).error.code).toBe("validation");
+        }),
+      );
+    });
+  });
+
+  it("refuses a session id that was never spawned with not_found", async () => {
+    await withServer(async ({ base }) => {
+      const token = await completeSetup(base);
+      const ticket = await ticketFor(base, token);
+      // A UUIDv7, the shape a real session id has, so this exercises the
+      // sessions table lookup rather than short-circuiting on the shape check
+      // a `crypto.randomUUID()` v4 id would fail before ever reaching it.
+      const stranger = Bun.randomUUIDv7();
+
+      await onSocket(base, (client) =>
+        Effect.gen(function* () {
+          yield* client.hello({ v: 1, ticket });
+          const refused = yield* answer(firstItem(client, { topic: `session:${stranger}:stream` }));
+          expect(refused).toBeInstanceOf(NotFound);
+          expect((refused as NotFound).error.code).toBe("not_found");
+        }),
+      );
+    });
+  });
+});
+
+describe("what a session's tap subscription is told", () => {
+  it("pushes a content delta as one TapItem before the row it eventually coalesces into exists", async () => {
+    await withSessionTopicFleet(async (arranged) => {
+      const session = await spawned(arranged, { prompt: "hello" });
+      await framesWhen<SessionStart>(arranged.wire, "sessionStart", 1);
+      report(arranged.wire, 1, {
+        eventId: crypto.randomUUID(),
+        sessionId: session.id,
+        at: AT,
+        _tag: "session.started",
+      });
+      await streamRowsWhen(arranged.harness, session.id, 1);
+
+      const ticket = await ticketFor(arranged.harness.base, arranged.token);
+      await onSocket(arranged.harness.base, (client) =>
+        Effect.gen(function* () {
+          yield* client.hello({ v: 1, ticket });
+          const tap = yield* collecting(client, { topic: `session:${session.id}:tap` });
+          yield* Effect.promise(() =>
+            expectHeld(arranged.harness.live, 1, `session:${session.id}:tap`),
+          );
+
+          report(arranged.wire, 2, {
+            eventId: crypto.randomUUID(),
+            sessionId: session.id,
+            at: AT,
+            _tag: "content.delta",
+            turnId: "t1",
+            itemId: "i1",
+            streamKind: "assistant_text",
+            delta: "He",
+          });
+
+          expect(yield* Effect.promise(() => within(1000, () => tap.received.length >= 1))).toBe(
+            true,
+          );
+          expect(tap.received[0]).toEqual({
+            _tag: "delta",
+            items: [{ turnId: "t1", itemId: "i1", streamKind: "assistant_text", delta: "He" }],
+          });
+
+          // The delta is short of the item boundary and the 4KB flush, so
+          // stream.ts's coalescing rule has written nothing for it: the row
+          // the tap's item eventually becomes does not exist yet.
+          expect(yield* Effect.promise(() => streamOf(arranged.harness, session.id))).toHaveLength(
+            1,
+          );
+
+          report(arranged.wire, 3, {
+            eventId: crypto.randomUUID(),
+            sessionId: session.id,
+            at: AT,
+            _tag: "item.completed",
+            turnId: "t1",
+            itemId: "i1",
+            kind: "assistant_message",
+            status: "completed",
+          });
+          const rows = yield* Effect.promise(() => streamRowsWhen(arranged.harness, session.id, 2));
+          expect(rows[1]!.tag).toBe("content.delta");
+
+          // The item boundary flushed the row, but that is not itself a tap:
+          // the tap saw the delta once, before the row it flushed into.
+          expect(tap.received).toHaveLength(1);
+
+          yield* Fiber.interrupt(tap.fiber);
+        }),
+      );
+    });
+  });
+
+  it("refuses a cursor on tap, which never replays", async () => {
+    await withServer(async ({ base }) => {
+      const token = await completeSetup(base);
+      const ticket = await ticketFor(base, token);
+      const stranger = crypto.randomUUID();
+
+      await onSocket(base, (client) =>
+        Effect.gen(function* () {
+          yield* client.hello({ v: 1, ticket });
+          const refused = yield* answer(
+            firstItem(client, { topic: `session:${stranger}:tap`, cursor: "1" }),
+          );
+          expect(refused).toBeInstanceOf(Validation);
+          expect((refused as Validation).error.code).toBe("validation");
+        }),
+      );
+    });
+  });
+
+  it("refuses a session id that was never spawned with not_found, the same as stream does", async () => {
+    await withServer(async ({ base }) => {
+      const token = await completeSetup(base);
+      const ticket = await ticketFor(base, token);
+      const stranger = Bun.randomUUIDv7();
+
+      await onSocket(base, (client) =>
+        Effect.gen(function* () {
+          yield* client.hello({ v: 1, ticket });
+          const refused = yield* answer(firstItem(client, { topic: `session:${stranger}:tap` }));
+          expect(refused).toBeInstanceOf(NotFound);
+          expect((refused as NotFound).error.code).toBe("not_found");
+        }),
+      );
+    });
+  });
+
+  it("writes no extra row per delta beyond what the coalescing rule in stream.ts already writes", async () => {
+    await withSessionTopicFleet(async (arranged) => {
+      const session = await spawned(arranged, { prompt: "hello" });
+      await framesWhen<SessionStart>(arranged.wire, "sessionStart", 1);
+      report(arranged.wire, 1, {
+        eventId: crypto.randomUUID(),
+        sessionId: session.id,
+        at: AT,
+        _tag: "session.started",
+      });
+      const before = await streamRowsWhen(arranged.harness, session.id, 1);
+
+      const ticket = await ticketFor(arranged.harness.base, arranged.token);
+      await onSocket(arranged.harness.base, (client) =>
+        Effect.gen(function* () {
+          yield* client.hello({ v: 1, ticket });
+          const tap = yield* collecting(client, { topic: `session:${session.id}:tap` });
+          yield* Effect.promise(() =>
+            expectHeld(arranged.harness.live, 1, `session:${session.id}:tap`),
+          );
+
+          // Five deltas on the same item, well under the 4KB flush and short of
+          // an item or turn boundary: the coalescing rule holds every one of
+          // these in its buffer and writes nothing for them.
+          for (let index = 0; index < 5; index++) {
+            report(arranged.wire, 2 + index, {
+              eventId: crypto.randomUUID(),
+              sessionId: session.id,
+              at: AT,
+              _tag: "content.delta",
+              turnId: "t1",
+              itemId: "i1",
+              streamKind: "assistant_text",
+              delta: `chunk-${String(index)}`,
+            });
+          }
+
+          expect(yield* Effect.promise(() => within(1000, () => tap.received.length >= 5))).toBe(
+            true,
+          );
+          const items = deltas(tap).flatMap(tapItems);
+          expect(items.map((item) => item.delta)).toEqual([
+            "chunk-0",
+            "chunk-1",
+            "chunk-2",
+            "chunk-3",
+            "chunk-4",
+          ]);
+
+          // Long enough that a row, if the coalescing rule were about to write
+          // one, would already be there.
+          yield* Effect.sleep("200 millis");
+          expect(yield* Effect.promise(() => streamOf(arranged.harness, session.id))).toHaveLength(
+            before.length,
+          );
+
+          yield* Fiber.interrupt(tap.fiber);
         }),
       );
     });

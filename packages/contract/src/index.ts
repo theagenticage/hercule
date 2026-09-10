@@ -62,6 +62,8 @@ export {
   sortParam,
 } from "./pagination";
 
+export { ACCESS_MODE_CHAIN, nearestSupportedAccessMode } from "./access-modes";
+
 export {
   MAX_PASSWORD_LENGTH,
   MAX_TIMEZONE_LENGTH,
@@ -210,8 +212,14 @@ export {
   LiveMessage,
   LiveTopic,
   MUTABLE_LIVE_TOPICS,
+  parseSessionTopic,
+  sessionStreamTopic,
+  sessionTapTopic,
+  TapItem,
   isAppendOnlyLiveTopic,
   live,
   type AppendOnlyLiveTopic,
   type MutableLiveTopic,
+  type SessionLiveTopic,
+  type SessionTopicKind,
 } from "./groups/live";

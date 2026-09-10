@@ -1,11 +1,12 @@
 import { useEffect, useState } from "react";
 
 /**
- * The current minute.
+ * The current minute: what anything reading a wall clock or an age down to
+ * the minute re-renders on.
  *
- * The top bar reads a wall clock down to the minute, so the tick is scheduled
- * on the minute boundary rather than every sixty seconds from mount: an
- * interval would drift and could leave the displayed time a minute stale.
+ * The tick is scheduled on the minute boundary rather than every sixty
+ * seconds from mount: an interval would drift and could leave the displayed
+ * reading a minute stale.
  */
 export function useMinuteClock(): Date {
   const [now, setNow] = useState(() => new Date());

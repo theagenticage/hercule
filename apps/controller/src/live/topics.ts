@@ -31,21 +31,31 @@ import * as Layer from "effect/Layer";
 import * as Queue from "effect/Queue";
 import type * as Scope from "effect/Scope";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
+import type { SqlError } from "effect/unstable/sql/SqlError";
 import {
   capExceeded,
   internal,
+  notFound,
+  sessionStreamTopic,
+  sessionTapTopic,
   validation,
   type CapExceeded,
+  type Delta,
+  type Event,
   type Internal,
   type InvalidateKind,
   type LiveMessage,
   type LiveTopic,
   type MutableLiveTopic,
+  type NotFound,
+  type TapItem,
+  type TranscriptRow,
   type Unauthenticated,
   type Validation,
 } from "@hydra/contract";
 import { AfterCommit, type Change } from "../db";
 import { eventsAfter, headOfLog } from "../events";
+import { headOfTranscript, sessionExists, transcriptRowsAfter } from "../sessions";
 
 /**
  * How long a burst of record changes is collected before it is announced, in
@@ -90,6 +100,10 @@ const LOG_TOPIC: LiveTopic = "event";
 const TOO_SLOW = "this subscription was not being read; open it again to start over";
 
 const LOG_UNREADABLE = "the event log could not be read";
+
+const SESSION_UNREADABLE = "the session could not be read";
+
+const NO_SUCH_SESSION = "no such session";
 
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
@@ -161,12 +175,32 @@ const make = Effect.gen(function* () {
   );
 
   /**
-   * Reads the log forward for one follower, for as long as it is subscribed.
-   * The first read is the client's replay, handed over as one message; every
-   * read after it carries the entries one at a time, each naming its own
-   * position, because that position is what the client comes back on.
+   * A log a subscription can be pumped from: the event log for `event`, one
+   * session's transcript for `session:<id>:stream`. Each has its own table and
+   * its own position column, so a follower is built from one of these rather
+   * than a table name, and the two follow - and refuse a cursor past their
+   * head - identically once each has one.
    */
-  const pump = (watcher: Watcher, doorbell: Queue.Queue<void>): Effect.Effect<void> =>
+  interface LogSource<A> {
+    readonly after: (position: number, limit: number) => Effect.Effect<ReadonlyArray<A>, SqlError>;
+    readonly positionOf: (item: A) => number;
+    readonly head: Effect.Effect<number, SqlError>;
+    /** What this log is called in a refused cursor's message: "log", "transcript". */
+    readonly noun: string;
+    readonly unreadable: string;
+  }
+
+  /**
+   * Reads a log forward for one follower, for as long as it is subscribed. The
+   * first read is the client's replay, handed over as one message; every read
+   * after it carries the entries one at a time, each naming its own position,
+   * because that position is what the client comes back on.
+   */
+  const pump = <A extends Delta["items"][number]>(
+    source: LogSource<A>,
+    watcher: Watcher,
+    doorbell: Queue.Queue<void>,
+  ): Effect.Effect<void> =>
     Effect.gen(function* () {
       // The one message that positions the client carries whatever it missed,
       // up to a page of it; everything after that is one entry at a time, so
@@ -176,9 +210,9 @@ const make = Effect.gen(function* () {
       while (true) {
         let more = true;
         while (more) {
-          const page = yield* eventsAfter(sql, watcher.cursor, REPLAY_PAGE);
+          const page = yield* source.after(watcher.cursor, REPLAY_PAGE);
           const last = page[page.length - 1];
-          if (last !== undefined) watcher.cursor = last.id;
+          if (last !== undefined) watcher.cursor = source.positionOf(last);
           if (positioning) {
             const positioned: LiveMessage = {
               _tag: "delta",
@@ -188,11 +222,11 @@ const make = Effect.gen(function* () {
             if (!(yield* offerTo(watcher, positioned))) return;
             positioning = false;
           } else {
-            for (const event of page) {
+            for (const item of page) {
               const delta: LiveMessage = {
                 _tag: "delta",
-                cursor: String(event.id),
-                items: [event],
+                cursor: String(source.positionOf(item)),
+                items: [item],
               };
               if (!(yield* offerTo(watcher, delta))) return;
             }
@@ -207,12 +241,62 @@ const make = Effect.gen(function* () {
       // rather than left holding a stream that has quietly stopped.
       Effect.catchCause((cause) =>
         Effect.gen(function* () {
-          yield* Effect.logError("a live subscription could not read the event log", cause);
+          yield* Effect.logError("a live subscription could not read its log", cause);
           drop(watcher);
-          yield* Queue.fail(watcher.queue, internal(LOG_UNREADABLE));
+          yield* Queue.fail(watcher.queue, internal(source.unreadable));
         }),
       ),
     );
+
+  const eventSource: LogSource<Event> = {
+    after: (position, limit) => eventsAfter(sql, position, limit),
+    positionOf: (item) => item.id,
+    head: headOfLog(sql),
+    noun: "log",
+    unreadable: LOG_UNREADABLE,
+  };
+
+  const transcriptSource = (sessionId: string): LogSource<TranscriptRow> => ({
+    after: (position, limit) => transcriptRowsAfter(sql, sessionId, position, limit),
+    positionOf: (item) => item.position,
+    head: headOfTranscript(sql, sessionId),
+    noun: "transcript",
+    unreadable: SESSION_UNREADABLE,
+  });
+
+  /**
+   * A subscription to a log, replayed from `after` and followed from there.
+   * With no position given it starts at the head, because a client that names
+   * none is asking for what happens next. A position the log has not reached
+   * is refused rather than accepted into silence: it belongs to a different
+   * log, and honouring it would leave the client subscribed to nothing.
+   * Shared by `follow` and `followSession`, whose only difference is which log
+   * and whether a session behind it has to exist first.
+   */
+  const followLog = <A extends Delta["items"][number]>(
+    topic: LiveTopic,
+    source: LogSource<A>,
+    after: number | undefined,
+  ): Effect.Effect<LiveQueue, Validation | Internal, Scope.Scope> =>
+    Effect.gen(function* () {
+      const head = yield* Effect.mapError(source.head, () => internal(source.unreadable));
+      if (after !== undefined && after > head) {
+        return yield* Effect.fail(
+          validation([
+            {
+              path: ["cursor"],
+              message: `this ${source.noun} has reached ${String(head)}, no further`,
+            },
+          ]),
+        );
+      }
+      const doorbell = yield* Queue.dropping<void>(1);
+      const watcher = yield* hold(topic, after ?? head, doorbell);
+      // Forked, so the client is handed its queue before the replay runs and
+      // reads what it is being sent while the rest of it is still being read.
+      yield* Effect.forkScoped(pump(source, watcher, doorbell));
+      return watcher.queue;
+    });
 
   /** Takes out a subscription for the length of the current scope. */
   const hold = (
@@ -242,31 +326,52 @@ const make = Effect.gen(function* () {
     subscribe: (topic: MutableLiveTopic): Effect.Effect<LiveQueue, never, Scope.Scope> =>
       Effect.map(hold(topic, 0, undefined), (watcher) => watcher.queue),
 
-    /**
-     * A subscription to the log, replayed from `after` and followed from there.
-     * With no position given it starts at the head, because a client that names
-     * none is asking for what happens next. A position the log has not reached
-     * is refused rather than accepted into silence: it belongs to a different
-     * log, and honouring it would leave the client subscribed to nothing.
-     */
+    /** A subscription to the event log, replayed from `after` and followed from there. */
     follow: (
       after: number | undefined,
     ): Effect.Effect<LiveQueue, Validation | Internal, Scope.Scope> =>
+      followLog(LOG_TOPIC, eventSource, after),
+
+    /**
+     * A subscription to one session's transcript, replayed from `after` and
+     * followed from there - `follow` above, mirrored at the session's own
+     * table. The topic is derived from the session id rather than taken, so
+     * no caller can hand in a pair that does not match. Refused `not_found` for a session that was never written, so a
+     * stale sidebar tab cannot open a watcher for nothing.
+     */
+    followSession: (
+      sessionId: string,
+      after: number | undefined,
+    ): Effect.Effect<LiveQueue, Validation | NotFound | Internal, Scope.Scope> =>
       Effect.gen(function* () {
-        const head = yield* Effect.mapError(headOfLog(sql), () => internal(LOG_UNREADABLE));
-        if (after !== undefined && after > head) {
-          return yield* Effect.fail(
-            validation([
-              { path: ["cursor"], message: `this log has reached ${String(head)}, no further` },
-            ]),
-          );
+        if (
+          !(yield* Effect.mapError(sessionExists(sql, sessionId), () =>
+            internal(SESSION_UNREADABLE),
+          ))
+        ) {
+          return yield* Effect.fail(notFound(NO_SUCH_SESSION));
         }
-        const doorbell = yield* Queue.dropping<void>(1);
-        const watcher = yield* hold(LOG_TOPIC, after ?? head, doorbell);
-        // Forked, so the client is handed its queue before the replay runs and
-        // reads what it is being sent while the rest of it is still being read.
-        yield* Effect.forkScoped(pump(watcher, doorbell));
-        return watcher.queue;
+        return yield* followLog(sessionStreamTopic(sessionId), transcriptSource(sessionId), after);
+      }),
+
+    /**
+     * A subscription to one session's ephemeral token taps: held exactly as a
+     * mutable topic is, since there is nothing to replay, but refused
+     * `not_found` the same way `followSession` is.
+     */
+    tapSession: (sessionId: string): Effect.Effect<LiveQueue, NotFound | Internal, Scope.Scope> =>
+      Effect.gen(function* () {
+        if (
+          !(yield* Effect.mapError(sessionExists(sql, sessionId), () =>
+            internal(SESSION_UNREADABLE),
+          ))
+        ) {
+          return yield* Effect.fail(notFound(NO_SUCH_SESSION));
+        }
+        return yield* Effect.map(
+          hold(sessionTapTopic(sessionId), 0, undefined),
+          (watcher) => watcher.queue,
+        );
       }),
 
     /** How many subscriptions this controller is holding for a topic. */
@@ -282,17 +387,30 @@ const make = Effect.gen(function* () {
       Effect.asVoid(Queue.fail(queue, reason)),
 
     /**
-     * What the last committed transaction changed, told to whoever is watching.
-     * Nothing here reads the database: a follower of the log is only told that
-     * it grew, and reads it for itself.
+     * What the last committed transaction changed, told to whoever is watching
+     * - and, for `tap`, what was never a transaction at all. Nothing here reads
+     * the database for a log topic: a follower is only told that it grew, and
+     * reads it for itself. `tap` is the one exception, because there is
+     * nothing stored for a follower to read: the item is the whole of what
+     * happened, so it rides the announcement directly, to every current
+     * subscriber, with no coalescing window - a token feels live or it does not.
      */
     publish: (changes: ReadonlyArray<Change>): Effect.Effect<void> =>
       Effect.gen(function* () {
-        let appended = false;
+        const grown = new Set<LiveTopic>();
+        const taps: Array<{ readonly sessionId: string; readonly item: TapItem }> = [];
         let collected = false;
         for (const change of changes) {
           if (change._tag === "event") {
-            appended = true;
+            grown.add(LOG_TOPIC);
+            continue;
+          }
+          if (change._tag === "transcript") {
+            grown.add(sessionStreamTopic(change.sessionId));
+            continue;
+          }
+          if (change._tag === "tap") {
+            taps.push(change);
             continue;
           }
           const kinds = pending.get(change.topic) ?? new Map<InvalidateKind, Set<string>>();
@@ -303,13 +421,21 @@ const make = Effect.gen(function* () {
           collected = true;
         }
         if (collected) yield* Queue.offer(wake, undefined);
-        if (appended) {
+        for (const topic of grown) {
           yield* Effect.forEach(
-            watchersOf(LOG_TOPIC),
+            watchersOf(topic),
             (watcher) =>
               watcher.doorbell === undefined
                 ? Effect.void
                 : Effect.asVoid(Queue.offer(watcher.doorbell, undefined)),
+            { discard: true },
+          );
+        }
+        for (const tap of taps) {
+          const message: LiveMessage = { _tag: "delta", items: [tap.item] };
+          yield* Effect.forEach(
+            watchersOf(sessionTapTopic(tap.sessionId)),
+            (watcher) => offerTo(watcher, message),
             { discard: true },
           );
         }

@@ -27,6 +27,15 @@ export const queryKeys = {
   projects: (): LiveQueryKey => ["projects"],
   runners: (): LiveQueryKey => ["runners"],
   runner: (id?: string): LiveQueryKey => (id === undefined ? ["runner"] : ["runner", id]),
+  sessions: (): LiveQueryKey => ["sessions"],
+  /** Not a live topic: profiles change only through this browser's own writes. */
+  profiles: (): LiveQueryKey => ["profiles"],
+  session: (id?: string): LiveQueryKey => (id === undefined ? ["session"] : ["session", id]),
+  /** The whole transcript, ascending; a `:stream` delta appends straight to this entry. */
+  transcript: (sessionId: string): LiveQueryKey => ["transcript", sessionId],
+  /** A session's input history, queued rows included; the composer's queued list. */
+  inputs: (sessionId?: string): LiveQueryKey =>
+    sessionId === undefined ? ["inputs"] : ["inputs", sessionId],
   joinTokens: (): LiveQueryKey => ["join-tokens"],
   plugins: (): LiveQueryKey => ["plugins"],
   providers: (): LiveQueryKey => ["providers"],
@@ -57,6 +66,20 @@ export const queryKeysFor = (
     return ids.length === 0
       ? [queryKeys.runners(), queryKeys.runner()]
       : [queryKeys.runners(), ...ids.map((id) => queryKeys.runner(id))];
+  }
+  // The sidebar and All sessions reread the listing whichever session moved;
+  // a session's own thread page - and its queued-input list, which changes
+  // whenever the session does (a delivery, a queue) - is reread only when the
+  // push names it, or when it names none. The transcript is not here: it
+  // never invalidates, only appends, from the `:stream` topic's own deltas.
+  if (topic === "session") {
+    return ids.length === 0
+      ? [queryKeys.sessions(), queryKeys.session(), queryKeys.inputs()]
+      : [
+          queryKeys.sessions(),
+          ...ids.map((id) => queryKeys.session(id)),
+          ...ids.map((id) => queryKeys.inputs(id)),
+        ];
   }
   // The plugin set is fixed at build time and read as one listing, so which
   // plugin changed narrows nothing.

@@ -16,6 +16,7 @@ const api: Readonly<Record<string, Handler>> = {
   "GET /api/v1/projects": { body: { items: [] } },
   "GET /api/v1/runners": { body: { items: [] } },
   "GET /api/v1/providers": { body: [] },
+  "GET /api/v1/profiles": { body: { items: [] } },
   "GET /api/v1/controller": {
     body: {
       id: "01a06d02-a000-7000-8000-000000000001",

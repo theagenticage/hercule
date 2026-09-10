@@ -19,40 +19,41 @@
  * not be sent yet waits in the session's queue until it moves back to idle.
  */
 import { describe, expect, it, vi } from "vitest";
-import { Duration, Effect, Fiber, Schema } from "effect";
+import { Duration, Effect, Fiber } from "effect";
 import {
-  ControllerToRunner,
-  PROTOCOL_VERSION,
-  type ControllerToRunner as ControllerMessage,
-  type Delivery,
-  type JoinAnswer,
-  type ProbeRequest,
   type ProviderEvent,
   type RunnerFacts,
-  type RunnerToController as RunnerMessage,
   type SessionInterrupt as SessionInterruptFrame,
   type SessionStart,
   type SessionStop as SessionStopFrame,
   type SessionInput,
 } from "@hydra/protocol";
 import type { Plugin, ProviderDefinition } from "@hydra/plugin-host";
-import type { Runner, Session } from "@hydra/contract";
+import type { Profile, Runner, Session } from "@hydra/contract";
 import {
   collecting,
-  completeSetup,
   get,
   onSocket,
   post,
   send,
   settleLive,
   ticketFor,
-  withServer,
   within,
   type ServerHarness,
 } from "../http/testing";
 import { fixture, providerDefinition } from "../plugins/testing";
-
-const SOCKET_PATH = "/api/v1/runners/socket";
+import {
+  framesOf,
+  framesWhen,
+  report,
+  spawn,
+  spawned,
+  until,
+  WAIT_DEADLINE_MS,
+  withFleet as sharedWithFleet,
+  type Arranged,
+  type Wire,
+} from "./testing";
 
 /** Everything native: the instance a plain spawn lands on. */
 const FULL = providerDefinition("full-provider", { token: "t" });
@@ -92,18 +93,7 @@ const MODELS = [
   { slug: "clever", name: "Clever", isDefault: true, options: [] },
 ];
 
-const decodeFrame = (raw: unknown): ControllerMessage =>
-  Effect.runSync(Schema.decodeUnknownEffect(ControllerToRunner)(raw));
-
 const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
-
-/**
- * How long a wait on the controller is given, and vitest's own budget set from
- * it. A give-up wait longer than the test timeout never gets to give up: vitest
- * kills the test first, and the failure names the test rather than the thing
- * that never happened. The slack is for the fleet each case stands up first.
- */
-const WAIT_DEADLINE_MS = 10_000;
 
 /**
  * Four, because the longest case here waits for the fleet to be probed and then
@@ -120,184 +110,19 @@ vi.setConfig({ testTimeout: WAIT_DEADLINE_MS * 4 + 10_000 });
  */
 const INPUT_DEADLINE = Duration.seconds(2);
 
-/** Waits for something the controller does on its own schedule, and names it. */
-const until = async <A>(what: string, look: () => A | undefined | Promise<A | undefined>) => {
-  const deadline = Date.now() + WAIT_DEADLINE_MS;
-  do {
-    const found = await look();
-    if (found !== undefined) return found;
-    await delay(5);
-  } while (Date.now() < deadline);
-  throw new Error(`the controller never ${what}`);
-};
-
-type Answered = Delivery | { readonly message: string } | undefined;
-
-/** One machine's end of the socket, answering probes on its own. */
-interface Wire {
-  readonly send: (message: RunnerMessage) => void;
-  readonly frames: ReadonlyArray<ControllerMessage>;
-  readonly close: () => void;
-  /**
-   * What this machine reports an input frame did: a delivery, a refusal with a
-   * reason, or `undefined` to leave the frame unanswered, which is what a
-   * machine that has gone quiet does.
-   */
-  readonly answering: (delivery: (frame: SessionInput) => Answered) => void;
-  /** Answers every input frame this machine has been holding back, at last. */
-  readonly release: (delivery: Delivery) => void;
-}
-
-const framesOf = <T extends ControllerMessage>(wire: Wire, tag: T["_tag"]): ReadonlyArray<T> =>
-  wire.frames.filter((frame): frame is T => frame._tag === tag);
-
-/**
- * Waits until this many frames of a kind have arrived. A request is answered as
- * soon as the controller has written to the socket, which is before the frame
- * has crossed it: a test that reads `wire.frames` the moment a response lands
- * is asserting on a race rather than on an ordering.
- */
-const framesWhen = <T extends ControllerMessage>(
-  wire: Wire,
-  tag: T["_tag"],
-  count: number,
-): Promise<ReadonlyArray<T>> =>
-  until(`sent ${String(count)} ${tag} frames`, () => {
-    const found = framesOf<T>(wire, tag);
-    return found.length >= count ? found : undefined;
-  });
-
-/**
- * Opens the socket with a credential, says hello, and answers every probe with
- * a logged-in report, which is what gives the controller something to place on.
- */
-const dial = (base: string, credential: string): Promise<Wire> =>
-  new Promise((resolve, reject) => {
-    const socket = new WebSocket(`${base.replace(/^http:/, "ws:")}${SOCKET_PATH}`, {
-      headers: { authorization: `Bearer ${credential}` },
-    });
-    const frames: Array<ControllerMessage> = [];
-    let delivery: (frame: SessionInput) => Answered = () => "opened";
-    const withheld: Array<SessionInput> = [];
-    const write = (message: RunnerMessage): void => socket.send(JSON.stringify(message));
-    socket.onmessage = (event) => {
-      const frame = decodeFrame(JSON.parse(String(event.data)) as unknown);
-      frames.push(frame);
-      if (frame._tag === "ping") write({ _tag: "pong" });
-      if (frame._tag === "sessionInput") {
-        const answer = delivery(frame);
-        if (typeof answer === "string") {
-          write({
-            _tag: "sessionInputResult",
-            requestId: frame.requestId,
-            ok: true,
-            delivery: answer,
-          });
-        } else if (answer !== undefined) {
-          write({ _tag: "sessionInputResult", requestId: frame.requestId, ok: false, ...answer });
-        } else {
-          withheld.push(frame);
-        }
-      }
-      if (frame._tag === "probeRequest") {
-        const request = frame satisfies ProbeRequest;
-        write({
-          _tag: "probeReport",
-          requestId: request.requestId,
-          instanceId: request.instanceId,
-          result: { harnessVersion: "1.0.0", auth: { status: "ok" }, models: MODELS },
-        });
-      }
-    };
-    socket.onopen = () => {
-      write({
-        _tag: "runnerHello",
-        protocolVersion: PROTOCOL_VERSION,
-        capabilities: [],
-        binaryVersion: "0.1.0",
-        nonce: Buffer.from(crypto.getRandomValues(new Uint8Array(16))).toString("base64"),
-        facts: FACTS,
-      });
-      resolve({
-        frames,
-        send: write,
-        close: () => socket.close(),
-        answering: (next) => {
-          delivery = next;
-        },
-        release: (answer) => {
-          for (const held of withheld.splice(0)) {
-            write({
-              _tag: "sessionInputResult",
-              requestId: held.requestId,
-              ok: true,
-              delivery: answer,
-            });
-          }
-        },
-      });
-    };
-    socket.onerror = () => reject(new Error("the controller refused the upgrade"));
-    setTimeout(() => reject(new Error("the controller never upgraded the connection")), 3000);
-  });
-
-interface ProviderInstance {
-  readonly id: string;
-  readonly providerId: string;
-  readonly snapshots: ReadonlyArray<unknown>;
-}
-
-/** The instances, once every one of them has been probed on this machine. */
-const probed = async (base: string, token: string): Promise<ReadonlyArray<ProviderInstance>> =>
-  until("probed every instance", async () => {
-    const response = await get(base, "/api/v1/providers", token);
-    const instances = (await response.json()) as ReadonlyArray<ProviderInstance>;
-    return instances.every((instance) => instance.snapshots.length === 1) ? instances : undefined;
-  });
-
-interface Arranged {
-  readonly harness: ServerHarness;
-  readonly token: string;
-  readonly wire: Wire;
-  readonly instances: ReadonlyArray<ProviderInstance>;
-  readonly runnerId: string;
-}
-
-/** A controller with one enlisted, connected, logged-in machine on it. */
+/** A controller with one enlisted, connected, logged-in machine on it, on this suite's own fleet. */
 const withFleet = (body: (arranged: Arranged) => Promise<void>): Promise<void> =>
-  withServer(
-    async (harness) => {
-      const token = await completeSetup(harness.base);
-      const joined = await send("POST", harness.base, "/api/v1/runners/join", {
-        body: {},
-        token: await harness.joinToken(),
-      });
-      expect(joined.status, await joined.clone().text()).toBe(201);
-      const answer = (await joined.json()) as JoinAnswer;
-      const wire = await dial(harness.base, answer.credential);
-      const instances = await probed(harness.base, token);
-      try {
-        await body({ harness, token, wire, instances, runnerId: answer.runnerId });
-      } finally {
-        wire.close();
-      }
-    },
-    { plugins: registry(), inputDeadline: INPUT_DEADLINE },
-  );
+  sharedWithFleet(body, {
+    plugins: registry(),
+    facts: FACTS,
+    models: MODELS,
+    inputDeadline: INPUT_DEADLINE,
+  });
 
 const instanceOf = (arranged: Arranged, providerId: string): string => {
   const found = arranged.instances.find((instance) => instance.providerId === providerId);
   expect(found, providerId).toBeDefined();
   return found!.id;
-};
-
-const spawn = async (arranged: Arranged, body: unknown): Promise<Response> =>
-  post(arranged.harness.base, "/api/v1/sessions", body, arranged.token);
-
-const spawned = async (arranged: Arranged, body: unknown): Promise<Session> => {
-  const response = await spawn(arranged, body);
-  expect(response.status, await response.clone().text()).toBe(200);
-  return (await response.json()) as Session;
 };
 
 const readSession = async (arranged: Arranged, id: string): Promise<Session> => {
@@ -381,9 +206,6 @@ const transcript = (sessionId: string): ReadonlyArray<readonly [number, Provider
     [7, { ...base, _tag: "turn.completed", turnId, state: "completed" }],
   ];
 };
-
-const report = (wire: Wire, seq: number, event: ProviderEvent): void =>
-  wire.send({ _tag: "sessionEvent", seq, event });
 
 /** One stored input, as the API hands it back. */
 interface StoredInput {
@@ -623,6 +445,211 @@ describe("session.spawn", () => {
         text: "what is the time",
         modelSelection: session.modelSelection,
       });
+    });
+  });
+});
+
+/**
+ * Naming a runner or a profile is for this one call: the tests above cover
+ * what a caller gets by naming neither.
+ */
+describe("session.spawn with an explicit runner or profile", () => {
+  it("places the session on the runner an explicit runnerId names", async () => {
+    await withFleet(async (arranged) => {
+      const session = await spawned(arranged, { prompt: "hello", runnerId: arranged.runnerId });
+
+      expect(session.runnerId).toBe(arranged.runnerId);
+      const start = (await framesWhen<SessionStart>(arranged.wire, "sessionStart", 1))[0]!;
+      expect(start.sessionId).toBe(session.id);
+    });
+  });
+
+  it("honours an explicit runnerId even when that runner is reserved", async () => {
+    await withFleet(async (arranged) => {
+      // Reserved is set on the row rather than through `runner.update`, which
+      // refuses to reserve the fleet's default - and the one machine here is it.
+      await Effect.runPromise(
+        Effect.orDie(
+          arranged.harness.sql`
+            UPDATE runners SET reserved = 1
+            WHERE id = unhex(replace(${arranged.runnerId}, '-', ''))`,
+        ),
+      );
+
+      const session = await spawned(arranged, { prompt: "hello", runnerId: arranged.runnerId });
+
+      expect(session.runnerId).toBe(arranged.runnerId);
+    });
+  });
+
+  it("refuses a named runner that has gone offline, and writes no session row", async () => {
+    await withFleet(async (arranged) => {
+      arranged.wire.close();
+      await wentAway(arranged);
+
+      const response = await spawn(arranged, { prompt: "hello", runnerId: arranged.runnerId });
+
+      expect(response.status, await response.clone().text()).toBe(409);
+      const listing = await get(arranged.harness.base, "/api/v1/sessions", arranged.token);
+      const page = (await listing.json()) as { items: ReadonlyArray<Session> };
+      expect(page.items).toEqual([]);
+    });
+  });
+
+  it("refuses a named runner that is draining, and says that is why", async () => {
+    await withFleet(async (arranged) => {
+      await Effect.runPromise(
+        Effect.orDie(
+          arranged.harness.sql`
+            UPDATE runners SET lifecycle = 'draining'
+            WHERE id = unhex(replace(${arranged.runnerId}, '-', ''))`,
+        ),
+      );
+
+      const response = await spawn(arranged, { prompt: "hello", runnerId: arranged.runnerId });
+
+      expect(response.status, await response.clone().text()).toBe(409);
+      expect(await response.text()).toContain("draining");
+      const listing = await get(arranged.harness.base, "/api/v1/sessions", arranged.token);
+      const page = (await listing.json()) as { items: ReadonlyArray<Session> };
+      expect(page.items).toEqual([]);
+    });
+  });
+
+  it("refuses a named runner that is retired, and says that - not draining", async () => {
+    await withFleet(async (arranged) => {
+      await Effect.runPromise(
+        Effect.orDie(
+          arranged.harness.sql`
+            UPDATE runners SET lifecycle = 'retired'
+            WHERE id = unhex(replace(${arranged.runnerId}, '-', ''))`,
+        ),
+      );
+
+      const response = await spawn(arranged, { prompt: "hello", runnerId: arranged.runnerId });
+
+      expect(response.status, await response.clone().text()).toBe(409);
+      const text = await response.text();
+      expect(text).toContain("retired");
+      expect(text).not.toContain("draining");
+      const listing = await get(arranged.harness.base, "/api/v1/sessions", arranged.token);
+      const page = (await listing.json()) as { items: ReadonlyArray<Session> };
+      expect(page.items).toEqual([]);
+    });
+  });
+
+  it("refuses a named runner that is online but not logged in to the instance, and says that is why", async () => {
+    await withFleet(async (arranged) => {
+      await Effect.runPromise(
+        Effect.orDie(
+          arranged.harness.sql`
+            UPDATE capability_snapshots SET auth_status = 'unauthenticated'
+            WHERE runner_id = unhex(replace(${arranged.runnerId}, '-', ''))`,
+        ),
+      );
+
+      const response = await spawn(arranged, {
+        prompt: "hello",
+        instanceId: instanceOf(arranged, "full-provider"),
+        runnerId: arranged.runnerId,
+      });
+
+      expect(response.status, await response.clone().text()).toBe(409);
+      expect(await response.text()).toContain("logged in");
+      const listing = await get(arranged.harness.base, "/api/v1/sessions", arranged.token);
+      const page = (await listing.json()) as { items: ReadonlyArray<Session> };
+      expect(page.items).toEqual([]);
+    });
+  });
+
+  it("treats a runnerId naming no runner as validation, not a state conflict", async () => {
+    await withFleet(async (arranged) => {
+      const response = await spawn(arranged, {
+        prompt: "hello",
+        runnerId: "0199e0e7-9999-7000-8000-000000000000",
+      });
+
+      expect(response.status, await response.clone().text()).toBe(400);
+    });
+  });
+
+  it("puts the session under the profile an explicit permissionProfileId names", async () => {
+    await withFleet(async (arranged) => {
+      const listing = await get(arranged.harness.base, "/api/v1/profiles", arranged.token);
+      const body = await listing.clone().text();
+      const worker = ((await listing.json()) as { items: ReadonlyArray<Profile> }).items.find(
+        (one) => one.name === "worker",
+      );
+      expect(worker, body).toBeDefined();
+
+      const session = await spawned(arranged, {
+        prompt: "hello",
+        permissionProfileId: worker!.id,
+      });
+
+      expect(session.permissionProfileId).toBe(worker!.id);
+    });
+  });
+
+  it("fails validation on a permissionProfileId naming no profile", async () => {
+    await withFleet(async (arranged) => {
+      const response = await spawn(arranged, {
+        prompt: "hello",
+        permissionProfileId: "0199e0e7-9999-7000-8000-000000000000",
+      });
+
+      expect(response.status, await response.clone().text()).toBe(400);
+    });
+  });
+});
+
+/** The title a Thread shows in the sidebar, set once from the prompt that started it. */
+describe("session.spawn: the title a prompt leaves on the session", () => {
+  it("takes the prompt's first line, trimmed, as the title", async () => {
+    await withFleet(async (arranged) => {
+      const session = await spawned(arranged, { prompt: "  Fix the login bug\n\nDetails..." });
+
+      expect((session as unknown as { title: string }).title).toBe("Fix the login bug");
+      const read = await readSession(arranged, session.id);
+      expect((read as unknown as { title: string }).title).toBe("Fix the login bug");
+    });
+  });
+
+  it("cuts a first line over 80 characters down to exactly 80", async () => {
+    await withFleet(async (arranged) => {
+      const longLine =
+        "the bug is somewhere in the login flow and nobody can pin down exactly where it is";
+      expect(longLine.length).toBeGreaterThan(80);
+
+      const session = await spawned(arranged, { prompt: `${longLine}\nmore detail below` });
+
+      const title = (session as unknown as { title: string }).title;
+      expect(title).toBe(longLine.slice(0, 80));
+      expect(title).toHaveLength(80);
+    });
+  });
+
+  it("skips leading blank lines and takes the first line with content", async () => {
+    await withFleet(async (arranged) => {
+      const session = await spawned(arranged, {
+        prompt: "\n   \n\nActually, start here\nand then this",
+      });
+
+      expect((session as unknown as { title: string }).title).toBe("Actually, start here");
+    });
+  });
+
+  it("carries the title on the sessions list, not only on a single read", async () => {
+    await withFleet(async (arranged) => {
+      const session = await spawned(arranged, { prompt: "Fix the login bug\n\nDetails..." });
+
+      const listing = await get(arranged.harness.base, "/api/v1/sessions", arranged.token);
+      const page = (await listing.json()) as {
+        items: ReadonlyArray<Session & { title?: string }>;
+      };
+      const row = page.items.find((one) => one.id === session.id);
+
+      expect(row?.title).toBe("Fix the login bug");
     });
   });
 });

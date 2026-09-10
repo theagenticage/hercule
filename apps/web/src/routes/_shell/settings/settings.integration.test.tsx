@@ -13,6 +13,11 @@ const controller = (update?: Handler): Readonly<Record<string, Handler>> => ({
   "GET /api/v1/setup": { body: { complete: true } },
   "GET /api/v1/settings": { body: stored },
   "PATCH /api/v1/settings": update ?? applyPatch,
+  // Settings > Threads' four defaults read these; empty on purpose, this
+  // describe block is about the sidebar-rows control, not the defaults.
+  "GET /api/v1/providers": { body: [] },
+  "GET /api/v1/runners": { body: { items: [] } },
+  "GET /api/v1/profiles": { body: { items: [] } },
 });
 
 const applyPatch = (call: Call) => ({

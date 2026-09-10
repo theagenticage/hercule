@@ -5,3 +5,4 @@ export {
   SessionService,
   SessionServiceLayer,
 } from "./service";
+export { headOfTranscript, sessionExists, transcriptRowsAfter } from "./transcript-log";

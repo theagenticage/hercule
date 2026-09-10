@@ -33,6 +33,9 @@ import {
   type LiveMessage,
   type LiveTopic,
   type MutableLiveTopic,
+  type NotFound,
+  type TapItem,
+  type TranscriptRow,
   type Unauthenticated,
   type Validation,
 } from "@hydra/contract";
@@ -83,11 +86,19 @@ export type LiveInvalidateHandler = (keys: ReadonlyArray<LiveQueryKey>) => void;
  * advanced: everything the reader holds is now unrelated to what follows, so it
  * reads its page again instead of appending to a gap. There is no cursor to
  * report on such a call, because there is no position.
+ *
+ * `gone` says the topic itself was refused `not_found` - the session it names
+ * was never spawned, or is gone for good - which nothing here can recover by
+ * asking again. The subscription is left exactly as `unauthenticated` leaves a
+ * connection: not retried. Unlike a dropped connection, this is a property of
+ * the topic rather than of the socket, so only this one subscription stops;
+ * the caller ends it (its own `subscribe` return value) once it has read `gone`.
  */
 export interface LiveDelta {
   readonly cursor: string | null;
-  readonly items: ReadonlyArray<Event>;
+  readonly items: ReadonlyArray<Event | TranscriptRow | TapItem>;
   readonly reset: boolean;
+  readonly gone: boolean;
 }
 
 export type LiveDeltaHandler = (delta: LiveDelta) => void;
@@ -115,7 +126,14 @@ export interface Live {
    */
   stop(): Promise<void>;
   subscribe(topic: MutableLiveTopic, handler: LiveInvalidateHandler): () => void;
-  subscribe(topic: AppendOnlyLiveTopic, handler: LiveDeltaHandler): () => void;
+  /**
+   * `cursor` seeds where an append-only subscription starts replaying from,
+   * for a caller that already holds a page fetched over HTTP before this call
+   * is made - without it, replay starts from the head, and whatever was
+   * written between that fetch and this subscription taking hold is missed
+   * for good.
+   */
+  subscribe(topic: AppendOnlyLiveTopic, handler: LiveDeltaHandler, cursor?: string): () => void;
   /** Reports where the supervisor is now, and again on every change. */
   onStatus(listener: (status: LiveStatus) => void): void;
   /** What the controller answered at the greeting, or `null` before the first one. */
@@ -132,7 +150,7 @@ interface Subscription {
 
 /** What a subscription's stream can fail with: a refusal, or the transport. */
 type LiveFailure =
-  Unauthenticated | Forbidden | Validation | CapExceeded | Internal | RpcClientError;
+  Unauthenticated | Forbidden | Validation | NotFound | CapExceeded | Internal | RpcClientError;
 
 /** The contract group's own client, as one connection hands it over. */
 type LiveClient = RpcClient.RpcClient<RpcGroup.Rpcs<typeof liveGroup>, RpcClientError>;
@@ -211,9 +229,10 @@ export const createLive = (options: LiveOptions): Live => {
       if (message._tag === "delta") {
         subscription.cursor = message.cursor;
         (subscription.handler as LiveDeltaHandler)({
-          cursor: message.cursor,
+          cursor: message.cursor ?? null,
           items: message.items,
           reset: false,
+          gone: false,
         });
         return;
       }
@@ -260,6 +279,21 @@ export const createLive = (options: LiveOptions): Live => {
           closed.openUnsafe();
           return;
         }
+        if (code === "not_found" && isAppendOnlyLiveTopic(subscription.topic)) {
+          // The topic names a record that does not exist - a session id nobody
+          // ever spawned, or one gone for good - which asking again cannot fix.
+          // Only this subscription stops; the connection and every other
+          // subscription on it are unaffected.
+          isolate(() =>
+            (subscription.handler as LiveDeltaHandler)({
+              cursor: null,
+              items: [],
+              reset: false,
+              gone: true,
+            }),
+          );
+          return;
+        }
         if (
           code === "validation" &&
           isAppendOnlyLiveTopic(subscription.topic) &&
@@ -267,7 +301,12 @@ export const createLive = (options: LiveOptions): Live => {
         ) {
           subscription.cursor = undefined;
           isolate(() =>
-            (subscription.handler as LiveDeltaHandler)({ cursor: null, items: [], reset: true }),
+            (subscription.handler as LiveDeltaHandler)({
+              cursor: null,
+              items: [],
+              reset: true,
+              gone: false,
+            }),
           );
           continue;
         }
@@ -411,8 +450,12 @@ export const createLive = (options: LiveOptions): Live => {
       setStatus("stopped");
       if (fiber !== null) await Effect.runPromise(Fiber.interrupt(fiber));
     },
-    subscribe: (topic: LiveTopic, handler: LiveInvalidateHandler | LiveDeltaHandler) => {
-      const subscription: Subscription = { topic, handler, cursor: undefined };
+    subscribe: (
+      topic: LiveTopic,
+      handler: LiveInvalidateHandler | LiveDeltaHandler,
+      cursor?: string,
+    ) => {
+      const subscription: Subscription = { topic, handler, cursor };
       subscriptions.add(subscription);
       changed.openUnsafe();
       return () => {

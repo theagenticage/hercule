@@ -20,7 +20,7 @@ import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
-import type { DeclaredCapabilities, ProviderDefinition } from "@hydra/plugin-host";
+import type { ProviderDefinition } from "@hydra/plugin-host";
 import {
   SessionSpec,
   type AccessMode,
@@ -38,6 +38,7 @@ import {
   INPUT_UPDATE_FIELDS,
   InvalidState,
   invalidState,
+  nearestSupportedAccessMode,
   NotFound,
   notFound,
   SESSION_SORT_FIELDS,
@@ -188,7 +189,9 @@ const NOT_RESUMABLE =
   "that session is not resumable: it is still live, it left no provider-native session, " +
   "or its machine is gone";
 
-const DRAINING = "that session's runner is draining and takes no new sessions";
+/** Read at any runner named directly: for a session to continue on, and for one to spawn on. */
+const DRAINING = "that runner is draining and takes no new sessions";
+const RETIRED = "that runner is retired";
 
 const ALREADY_CARRIED_ON =
   "another session is already live against that one's provider-native session; " +
@@ -205,33 +208,14 @@ const NOT_DELIVERED =
 const NO_PLACEMENT =
   "no connected runner is logged in to that provider instance; log in on a machine first";
 
+const NO_SUCH_RUNNER = "no such runner";
+
+const NO_SUCH_PROFILE = "no such permission profile";
+
 /** The shipped profile a thread takes when the user has chosen none (spec 02 Thread). */
 const DEFAULT_PROFILE = "unrestricted";
 
 const DEFAULT_ACCESS_MODE: AccessMode = "approval-required";
-
-/**
- * Least permissive first. The fallback of spec 06 section 8.4 walks downward
- * from what was asked for, so a substitution is never more permissive; the row
- * keeps both modes, which is how the caller sees what it actually got.
- */
-const MODES: ReadonlyArray<AccessMode> = [
-  "approval-required",
-  "auto-accept-edits",
-  "auto",
-  "full-access",
-];
-
-const nearestSupported = (
-  requested: AccessMode,
-  declared: DeclaredCapabilities,
-): AccessMode | undefined => {
-  for (let index = MODES.indexOf(requested); index >= 0; index -= 1) {
-    const mode = MODES[index]!;
-    if (declared.accessModes[mode] === "native") return mode;
-  }
-  return undefined;
-};
 
 /**
  * A machine's own word that it can run this instance: the stored capability
@@ -246,6 +230,19 @@ const loggedIn = (snapshot: StoredSnapshot): boolean => snapshot.auth.status ===
  */
 const nativeIdIn = (event: ProviderEvent): string | undefined =>
   event._tag === "session.started" ? event.providerRefs?.nativeSessionId : undefined;
+
+/** How long a sidebar row's title may run before it is cut. */
+const MAX_TITLE_LENGTH = 80;
+
+/**
+ * A short label for a session, read off its opening prompt rather than typed
+ * separately: the first line that is not blank, trimmed and capped, so a
+ * sidebar row has something to show without reading the transcript.
+ */
+const titleOf = (prompt: string): string => {
+  const line = prompt.split("\n").find((one) => one.trim().length > 0) ?? "";
+  return line.trim().slice(0, MAX_TITLE_LENGTH);
+};
 
 type ReadError = Unauthenticated | Forbidden | Validation | SqlError;
 
@@ -321,9 +318,9 @@ const make = Effect.gen(function* () {
     });
 
   /**
-   * Which machine hosts the session: the first that is online and holds a
-   * capability snapshot saying it has this instance's harness and a login for
-   * it. Naming a runner on spawn (spec 03 section 5.4) is not built yet.
+   * Which machine hosts the session, where the caller left it to placement:
+   * the first that is online and holds a capability snapshot saying it has
+   * this instance's harness and a login for it.
    */
   const placement = (
     snapshots: ReadonlyArray<StoredSnapshot>,
@@ -335,6 +332,46 @@ const make = Effect.gen(function* () {
       );
       if (found === undefined) return yield* Effect.fail(invalidState(NO_PLACEMENT));
       return found;
+    });
+
+  /**
+   * The one machine a caller named directly, honoured even where it is
+   * reserved or full: read and checked on its own, the way `continue` checks
+   * the one machine it is pinned to, rather than filtered through
+   * `placeable`, which exists only for the automatic fallback above.
+   */
+  const explicitRunner = (
+    runnerId: string,
+    snapshots: ReadonlyArray<StoredSnapshot>,
+  ): Effect.Effect<StoredSnapshot, InvalidState | Validation | SqlError> =>
+    Effect.gen(function* () {
+      const found = yield* runners.read(runnerId);
+      if (Option.isNone(found)) {
+        return yield* Effect.fail(validation([{ path: ["runnerId"], message: NO_SUCH_RUNNER }]));
+      }
+      const runner = found.value;
+      if (runner.lifecycle !== "active") {
+        return yield* Effect.fail(
+          invalidState(runner.lifecycle === "retired" ? RETIRED : DRAINING),
+        );
+      }
+      yield* requireOnline(runner);
+      const snapshot = snapshots.find((one) => one.runnerId === runnerId && loggedIn(one));
+      if (snapshot === undefined) return yield* Effect.fail(invalidState(NO_PLACEMENT));
+      return snapshot;
+    });
+
+  /** Refuses a permissionProfileId naming no profile, before it is trusted as this session's. */
+  const requireProfile = (
+    profileId: string,
+  ): Effect.Effect<void, Validation | GrantsError | SqlError> =>
+    Effect.gen(function* () {
+      const found = yield* profiles.getById(profileId);
+      if (Option.isNone(found)) {
+        return yield* Effect.fail(
+          validation([{ path: ["permissionProfileId"], message: NO_SUCH_PROFILE }]),
+        );
+      }
     });
 
   /** The shipped thread default until the user has a `thread.instanceId` (spec 02 Thread). */
@@ -524,11 +561,29 @@ const make = Effect.gen(function* () {
       const held = tracking.get(id) ?? track(yield* sessions.lastSeq(id));
       const folded = fold(held, seq, event);
       if (folded === undefined) return;
+      // Ahead of the transaction that may or may not follow, and never inside
+      // one: a delta is not written until it flushes, but a watched session's
+      // tap has to see it the instant it is reported, coalesced row or not.
+      if (event._tag === "content.delta") {
+        yield* announce({
+          _tag: "tap",
+          sessionId: id,
+          item: {
+            turnId: event.turnId,
+            itemId: event.itemId,
+            streamKind: event.streamKind,
+            delta: event.delta,
+          },
+        });
+      }
       const moved = yield* withTransaction(
         sql,
         Effect.gen(function* () {
           const at = yield* nowIso;
           for (const row of folded.rows) yield* sessions.append(id, row);
+          if (folded.rows.length > 0) {
+            yield* announce({ _tag: "transcript", sessionId: id });
+          }
           // Written with the move the same event causes: a session that reads
           // `idle` has the provider-native id that made it so.
           const native = nativeIdIn(event);
@@ -616,6 +671,7 @@ const make = Effect.gen(function* () {
           }
           const at = yield* nowIso;
           const row = yield* sessions.insert({
+            title: titleOf(open.prompt),
             permissionProfileId: open.permissionProfileId,
             instanceId: open.spec.instanceId,
             runnerId: open.runnerId,
@@ -747,11 +803,16 @@ const make = Effect.gen(function* () {
         const instanceId =
           decoded.instanceId ?? defaults["thread.instanceId"] ?? (yield* firstLoggedIn());
         const { instance, definition, snapshots } = yield* resolved(instanceId);
-        const hosting = yield* placement(snapshots);
+        const hosting = yield* decoded.runnerId === undefined
+          ? placement(snapshots)
+          : explicitRunner(decoded.runnerId, snapshots);
 
         const requestedAccessMode =
           decoded.accessMode ?? defaults["thread.accessMode"] ?? DEFAULT_ACCESS_MODE;
-        const accessMode = nearestSupported(requestedAccessMode, definition.declared);
+        const accessMode = nearestSupportedAccessMode(
+          requestedAccessMode,
+          definition.declared.accessModes,
+        );
         if (accessMode === undefined) {
           return yield* Effect.fail(
             invalidState(
@@ -770,7 +831,11 @@ const make = Effect.gen(function* () {
           );
         }
 
-        const profileId = defaults["thread.profileId"] ?? (yield* threadProfile());
+        if (decoded.permissionProfileId !== undefined) {
+          yield* requireProfile(decoded.permissionProfileId);
+        }
+        const profileId =
+          decoded.permissionProfileId ?? defaults["thread.profileId"] ?? (yield* threadProfile());
 
         const spec = {
           instanceId,
@@ -982,7 +1047,9 @@ const make = Effect.gen(function* () {
         // one takes none (spec 03 section 7). `resumable` says the transcript
         // is still there; this says the machine will not open it.
         if (machine.value.lifecycle !== "active") {
-          return yield* Effect.fail(invalidState(DRAINING));
+          return yield* Effect.fail(
+            invalidState(machine.value.lifecycle === "retired" ? RETIRED : DRAINING),
+          );
         }
         yield* requireOnline(machine.value);
         const { instance, snapshots } = yield* resolved(parent.instanceId);

@@ -1,8 +1,19 @@
 import { useState, type JSX } from "react";
-import { Link, useRouterState } from "@tanstack/react-router";
-import { threadRowsMode } from "@hydra/client-core";
+import { Link, useMatch, useRouterState } from "@tanstack/react-router";
+import { useQuery, type QueryClient } from "@tanstack/react-query";
+import { ageOf, threadRows, threadRowsMode, type HydraClient, type Live } from "@hydra/client-core";
 import type { SettingsState, ThreadRows } from "@hydra/contract";
-import { Logo, MarksLegend, SegmentedControl, SegmentedControlItem, cn } from "@hydra/ui";
+import {
+  Logo,
+  MarksLegend,
+  SegmentedControl,
+  SegmentedControlItem,
+  cn,
+  useMinuteClock,
+} from "@hydra/ui";
+import { useLiveInvalidation } from "../app/live-invalidation";
+import { sessionsQuery } from "../app/queries";
+import { ThreadRowView } from "../screens/thread-row";
 import { HYDRA_NAV, SEPARATOR, faceForPath, type Face, type NavItem } from "./nav";
 import { Pulse } from "./pulse";
 
@@ -99,29 +110,69 @@ function HydraFace({
 
 /**
  * The threads face: the thread list and the one button that starts a thread.
- * Neither has an operation behind it yet, so the button is disabled with its
- * reason under it rather than hidden, and the list says it is empty.
  *
  * The row density is the seam the thread list is built on: what a row shows is
  * this setting's to say, and the list reads it from here.
  */
-function ThreadsFace({ rows }: { readonly rows: ThreadRows }): JSX.Element {
+function ThreadsFace({
+  rows,
+  client,
+  queryClient,
+  live,
+}: {
+  readonly rows: ThreadRows;
+  readonly client: HydraClient;
+  readonly queryClient: QueryClient;
+  readonly live: Live;
+}): JSX.Element {
+  useLiveInvalidation(live, queryClient, "session");
+  // Ages are read against the clock, not against whenever the last
+  // invalidation happened, so "2m" becomes "3m" on its own.
+  const now = useMinuteClock();
+  const sessions = useQuery(sessionsQuery(client)).data?.items ?? [];
+  const list = threadRows(sessions, rows);
+  // The router's own answer for which thread is open, so it cannot drift
+  // from the route file the way a path pattern written out here would.
+  const currentId =
+    useMatch({ from: "/_shell/threads/$sessionId", shouldThrow: false })?.params.sessionId ?? null;
+
   return (
     <nav aria-label="Threads" className="flex min-h-0 flex-col">
-      <button
-        type="button"
-        disabled
-        className="mb-2.5 flex w-full items-center gap-2 rounded-control border border-line bg-raised px-2.5 py-1.5 text-left text-row font-emph text-ink shadow-card disabled:opacity-70"
+      <Link
+        to="/threads/new"
+        className="mb-2.5 flex w-full items-center gap-2 rounded-control border border-line bg-raised px-2.5 py-1.5 text-left text-row font-emph text-ink shadow-card hover:bg-line-soft"
       >
         <span className="font-mono text-row text-faint">+</span>
         Create new thread
-      </button>
-      <div data-thread-rows={rows} className="min-h-0 overflow-auto">
-        <p className="px-2.5 py-1 text-fine text-faint">No threads yet</p>
-        <p className="px-2.5 pt-1 text-fine text-faint">
-          A thread needs a runner with a provider login on it.
-        </p>
+      </Link>
+      <div data-thread-rows={rows} className="min-h-0 flex-1 overflow-auto">
+        {list.length === 0 ? (
+          <>
+            <p className="px-2.5 py-1 text-fine text-faint">No threads yet</p>
+            <p className="px-2.5 pt-1 text-fine text-faint">
+              A thread needs a runner with a provider login on it.
+            </p>
+          </>
+        ) : (
+          list.map((row) => (
+            <ThreadRowView
+              key={row.id}
+              mark={row.mark}
+              title={row.title}
+              age={ageOf(row.activityAt, now)}
+              secondLine={row.secondLine}
+              sessionId={row.id}
+              selected={row.id === currentId}
+            />
+          ))
+        )}
       </div>
+      <Link
+        to="/sessions"
+        className="mt-1.5 rounded-control px-2.5 py-1 text-fine text-muted hover:bg-line-soft hover:text-ink"
+      >
+        All sessions →
+      </Link>
     </nav>
   );
 }
@@ -132,7 +183,17 @@ function ThreadsFace({ rows }: { readonly rows: ThreadRows }): JSX.Element {
  * the screen back in charge. The check-in count sits on the Hydra segment so
  * the orchestration side never hides while the user works in threads.
  */
-export function Sidebar({ settings }: { readonly settings: SettingsState }): JSX.Element {
+export function Sidebar({
+  settings,
+  client,
+  queryClient,
+  live,
+}: {
+  readonly settings: SettingsState;
+  readonly client: HydraClient;
+  readonly queryClient: QueryClient;
+  readonly live: Live;
+}): JSX.Element {
   const pathname = useRouterState({ select: (state) => state.location.pathname });
   const [override, setOverride] = useState<{ path: string; face: Face } | null>(null);
 
@@ -164,7 +225,7 @@ export function Sidebar({ settings }: { readonly settings: SettingsState }): JSX
       </SegmentedControl>
 
       {face === "threads" ? (
-        <ThreadsFace rows={rows} />
+        <ThreadsFace rows={rows} client={client} queryClient={queryClient} live={live} />
       ) : (
         <HydraFace pathname={pathname} counts={NO_COUNTS} />
       )}

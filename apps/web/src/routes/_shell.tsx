@@ -17,11 +17,11 @@ export const Route = createFileRoute("/_shell")({
 });
 
 function ShellLayout(): JSX.Element {
-  const { client } = Route.useRouteContext();
+  const { client, queryClient, live } = Route.useRouteContext();
   const settings = useSuspenseQuery(settingsQuery(client)).data;
 
   return (
-    <Shell settings={settings}>
+    <Shell settings={settings} client={client} queryClient={queryClient} live={live}>
       <Outlet />
     </Shell>
   );

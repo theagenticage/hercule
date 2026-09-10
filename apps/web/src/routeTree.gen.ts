@@ -24,6 +24,7 @@ import { Route as ShellWorkflowsRouteImport } from './routes/_shell/workflows'
 import { Route as OnboardingTimezoneRouteImport } from './routes/onboarding/timezone'
 import { Route as ShellFleetIndexRouteImport } from './routes/_shell/fleet/index'
 import { Route as ShellFleetRunnerIdRouteImport } from './routes/_shell/fleet/$runnerId'
+import { Route as ShellSessionsIndexRouteImport } from './routes/_shell/sessions/index'
 import { Route as ShellSettingsIndexRouteImport } from './routes/_shell/settings/index'
 import { Route as ShellSettingsAssistantsRouteImport } from './routes/_shell/settings/assistants'
 import { Route as ShellSettingsBoundsRouteImport } from './routes/_shell/settings/bounds'
@@ -35,6 +36,8 @@ import { Route as ShellSettingsSecretsRouteImport } from './routes/_shell/settin
 import { Route as ShellSettingsSystemRouteImport } from './routes/_shell/settings/system'
 import { Route as ShellSettingsThreadsRouteImport } from './routes/_shell/settings/threads'
 import { Route as ShellTasksIndexRouteImport } from './routes/_shell/tasks/index'
+import { Route as ShellThreadsSessionIdRouteImport } from './routes/_shell/threads/$sessionId'
+import { Route as ShellThreadsNewRouteImport } from './routes/_shell/threads/new'
 
 const ShellRoute = ShellRouteImport.update({
   id: '/_shell',
@@ -110,6 +113,11 @@ const ShellFleetRunnerIdRoute = ShellFleetRunnerIdRouteImport.update({
   path: '/fleet/$runnerId',
   getParentRoute: () => ShellRoute,
 } as any)
+const ShellSessionsIndexRoute = ShellSessionsIndexRouteImport.update({
+  id: '/sessions/',
+  path: '/sessions/',
+  getParentRoute: () => ShellRoute,
+} as any)
 const ShellSettingsIndexRoute = ShellSettingsIndexRouteImport.update({
   id: '/',
   path: '/',
@@ -166,6 +174,16 @@ const ShellTasksIndexRoute = ShellTasksIndexRouteImport.update({
   path: '/tasks/',
   getParentRoute: () => ShellRoute,
 } as any)
+const ShellThreadsSessionIdRoute = ShellThreadsSessionIdRouteImport.update({
+  id: '/threads/$sessionId',
+  path: '/threads/$sessionId',
+  getParentRoute: () => ShellRoute,
+} as any)
+const ShellThreadsNewRoute = ShellThreadsNewRouteImport.update({
+  id: '/threads/new',
+  path: '/threads/new',
+  getParentRoute: () => ShellRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof ShellIndexRoute
@@ -190,7 +208,10 @@ export interface FileRoutesByFullPath {
   '/settings/secrets': typeof ShellSettingsSecretsRoute
   '/settings/system': typeof ShellSettingsSystemRoute
   '/settings/threads': typeof ShellSettingsThreadsRoute
+  '/threads/$sessionId': typeof ShellThreadsSessionIdRoute
+  '/threads/new': typeof ShellThreadsNewRoute
   '/fleet/': typeof ShellFleetIndexRoute
+  '/sessions/': typeof ShellSessionsIndexRoute
   '/settings/': typeof ShellSettingsIndexRoute
   '/tasks/': typeof ShellTasksIndexRoute
 }
@@ -216,7 +237,10 @@ export interface FileRoutesByTo {
   '/settings/secrets': typeof ShellSettingsSecretsRoute
   '/settings/system': typeof ShellSettingsSystemRoute
   '/settings/threads': typeof ShellSettingsThreadsRoute
+  '/threads/$sessionId': typeof ShellThreadsSessionIdRoute
+  '/threads/new': typeof ShellThreadsNewRoute
   '/fleet': typeof ShellFleetIndexRoute
+  '/sessions': typeof ShellSessionsIndexRoute
   '/settings': typeof ShellSettingsIndexRoute
   '/tasks': typeof ShellTasksIndexRoute
 }
@@ -245,7 +269,10 @@ export interface FileRoutesById {
   '/_shell/settings/secrets': typeof ShellSettingsSecretsRoute
   '/_shell/settings/system': typeof ShellSettingsSystemRoute
   '/_shell/settings/threads': typeof ShellSettingsThreadsRoute
+  '/_shell/threads/$sessionId': typeof ShellThreadsSessionIdRoute
+  '/_shell/threads/new': typeof ShellThreadsNewRoute
   '/_shell/fleet/': typeof ShellFleetIndexRoute
+  '/_shell/sessions/': typeof ShellSessionsIndexRoute
   '/_shell/settings/': typeof ShellSettingsIndexRoute
   '/_shell/tasks/': typeof ShellTasksIndexRoute
 }
@@ -274,7 +301,10 @@ export interface FileRouteTypes {
     | '/settings/secrets'
     | '/settings/system'
     | '/settings/threads'
+    | '/threads/$sessionId'
+    | '/threads/new'
     | '/fleet/'
+    | '/sessions/'
     | '/settings/'
     | '/tasks/'
   fileRoutesByTo: FileRoutesByTo
@@ -300,7 +330,10 @@ export interface FileRouteTypes {
     | '/settings/secrets'
     | '/settings/system'
     | '/settings/threads'
+    | '/threads/$sessionId'
+    | '/threads/new'
     | '/fleet'
+    | '/sessions'
     | '/settings'
     | '/tasks'
   id:
@@ -328,7 +361,10 @@ export interface FileRouteTypes {
     | '/_shell/settings/secrets'
     | '/_shell/settings/system'
     | '/_shell/settings/threads'
+    | '/_shell/threads/$sessionId'
+    | '/_shell/threads/new'
     | '/_shell/fleet/'
+    | '/_shell/sessions/'
     | '/_shell/settings/'
     | '/_shell/tasks/'
   fileRoutesById: FileRoutesById
@@ -447,6 +483,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ShellFleetRunnerIdRouteImport
       parentRoute: typeof ShellRoute
     }
+    '/_shell/sessions/': {
+      id: '/_shell/sessions/'
+      path: '/sessions'
+      fullPath: '/sessions/'
+      preLoaderRoute: typeof ShellSessionsIndexRouteImport
+      parentRoute: typeof ShellRoute
+    }
     '/_shell/settings/': {
       id: '/_shell/settings/'
       path: '/'
@@ -524,6 +567,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ShellTasksIndexRouteImport
       parentRoute: typeof ShellRoute
     }
+    '/_shell/threads/$sessionId': {
+      id: '/_shell/threads/$sessionId'
+      path: '/threads/$sessionId'
+      fullPath: '/threads/$sessionId'
+      preLoaderRoute: typeof ShellThreadsSessionIdRouteImport
+      parentRoute: typeof ShellRoute
+    }
+    '/_shell/threads/new': {
+      id: '/_shell/threads/new'
+      path: '/threads/new'
+      fullPath: '/threads/new'
+      preLoaderRoute: typeof ShellThreadsNewRouteImport
+      parentRoute: typeof ShellRoute
+    }
   }
 }
 
@@ -568,7 +625,10 @@ interface ShellRouteChildren {
   ShellWorkflowsRoute: typeof ShellWorkflowsRoute
   ShellIndexRoute: typeof ShellIndexRoute
   ShellFleetRunnerIdRoute: typeof ShellFleetRunnerIdRoute
+  ShellThreadsSessionIdRoute: typeof ShellThreadsSessionIdRoute
+  ShellThreadsNewRoute: typeof ShellThreadsNewRoute
   ShellFleetIndexRoute: typeof ShellFleetIndexRoute
+  ShellSessionsIndexRoute: typeof ShellSessionsIndexRoute
   ShellTasksIndexRoute: typeof ShellTasksIndexRoute
 }
 
@@ -583,7 +643,10 @@ const ShellRouteChildren: ShellRouteChildren = {
   ShellWorkflowsRoute: ShellWorkflowsRoute,
   ShellIndexRoute: ShellIndexRoute,
   ShellFleetRunnerIdRoute: ShellFleetRunnerIdRoute,
+  ShellThreadsSessionIdRoute: ShellThreadsSessionIdRoute,
+  ShellThreadsNewRoute: ShellThreadsNewRoute,
   ShellFleetIndexRoute: ShellFleetIndexRoute,
+  ShellSessionsIndexRoute: ShellSessionsIndexRoute,
   ShellTasksIndexRoute: ShellTasksIndexRoute,
 }
 

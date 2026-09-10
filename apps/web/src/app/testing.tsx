@@ -118,6 +118,21 @@ export interface LiveStub {
    * topic. Pushing to a topic nothing is watching throws.
    */
   push(topic: string, message: unknown): void;
+  /**
+   * Refuses the app's current subscription to `topic` with a typed failure, in
+   * the envelope the contract sends it: `{ error: { code, message, ... } }`.
+   * What the supervisor does next is its own reconnect logic (`live.ts`); this
+   * is only the wire event a test presses to reach it - a stale cursor
+   * refused `validation`, say. Failing a topic nothing is watching throws.
+   */
+  fail(topic: string, error: unknown): void;
+  /**
+   * The cursor the app's current subscription to `topic` was opened with, or
+   * `undefined` for one that started from the head - what a caller seeding an
+   * append-only subscription from a page it already holds sends as its first
+   * `subscribe` call. Asking about a topic nothing is watching throws.
+   */
+  cursorOf(topic: string): string | undefined;
 }
 
 /**
@@ -165,6 +180,21 @@ export const renderApp = async ({
       const socket = sockets.at(-1);
       if (socket === undefined) throw new Error("the app has not opened a socket");
       socket.push(topic, message);
+    },
+    fail: (topic, error) => {
+      const socket = sockets.at(-1);
+      if (socket === undefined) throw new Error("the app has not opened a socket");
+      const held = socket.subscriptions().find((subscription) => subscription.topic === topic);
+      if (held === undefined) throw new Error(`nothing is subscribed to ${topic}`);
+      socket.fail(held.requestId, error);
+    },
+    cursorOf: (topic) => {
+      const socket = sockets.at(-1);
+      if (socket === undefined) throw new Error("the app has not opened a socket");
+      const held = socket.subscriptions().find((subscription) => subscription.topic === topic);
+      if (held === undefined) throw new Error(`nothing is subscribed to ${topic}`);
+      const call = socket.calls("subscribe").find((frame) => frame.id === held.requestId);
+      return (call?.payload as { cursor?: string } | undefined)?.cursor;
     },
   };
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });

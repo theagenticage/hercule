@@ -133,11 +133,15 @@ const open = async (options: {
 
 const reading = (): string => (document.body.textContent ?? "").replace(/\s+/g, " ").trim();
 
-/** The button on the screen itself: the sidebar's thread list carries one too. */
+/**
+ * The screen's own control: the sidebar's thread list carries one too. It is a
+ * disabled button until the machine is ready, then a real link to the composer.
+ */
 const newThread = (): HTMLElement => {
-  const found = screen
-    .getAllByRole("button", { name: /create new thread/i })
-    .filter((button) => button.closest("nav") === null);
+  const found = [
+    ...screen.queryAllByRole("button", { name: /create new thread/i }),
+    ...screen.queryAllByRole("link", { name: /create new thread/i }),
+  ].filter((element) => element.closest("nav") === null);
   expect(found).toHaveLength(1);
   return found[0]!;
 };
@@ -181,10 +185,9 @@ describe("Sessions", () => {
     await waitFor(() => {
       expect(reading()).toContain("Claude Code is ready.");
     });
-    // Nothing starts a thread yet, and the screen says which ticket that is
-    // rather than offering a button that does nothing.
-    expect(newThread().hasAttribute("disabled")).toBe(true);
-    expect(reading()).toContain("#69");
+    // Ready means a thread actually starts from here now: a link to the
+    // composer, not a disabled placeholder.
+    expect(newThread().getAttribute("href")).toBe("/threads/new");
   });
 
   it("logs in from here, against the machine this browser is on", async () => {

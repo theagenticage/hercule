@@ -37,6 +37,9 @@ export default Effect.gen(function* () {
       requested_access_mode TEXT NOT NULL,
       access_mode TEXT NOT NULL,
       spec TEXT NOT NULL CHECK (json_valid(spec)),
+      -- The prompt's first non-empty line, capped: set once at open, so a
+      -- sidebar row has something to show without reading the transcript.
+      title TEXT NOT NULL,
       native_session_id TEXT,
       status TEXT NOT NULL
         CHECK (status IN ('queued', 'starting', 'idle', 'busy', 'exited')),

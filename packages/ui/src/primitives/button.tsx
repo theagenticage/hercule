@@ -36,6 +36,15 @@ const variants = {
 
 export type ButtonVariant = keyof typeof variants;
 
+/** The look every button-shaped thing wears - a caller that needs it on a Link reads it directly. */
+export const buttonClassName = (variant: ButtonVariant, className: string | undefined): string =>
+  cn(
+    "inline-flex cursor-pointer items-center gap-2 rounded-control px-2 py-1 text-row leading-none font-emph",
+    "focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-live",
+    variants[variant],
+    className,
+  );
+
 export function Button({
   variant = "quiet",
   type = "button",
@@ -46,12 +55,7 @@ export function Button({
     <button
       type={type}
       data-variant={variant}
-      className={cn(
-        "inline-flex cursor-pointer items-center gap-2 rounded-control px-2 py-1 text-row leading-none font-emph",
-        "focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-live",
-        variants[variant],
-        className,
-      )}
+      className={buttonClassName(variant, className)}
       {...props}
     />
   );

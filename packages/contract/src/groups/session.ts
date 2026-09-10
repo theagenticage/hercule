@@ -41,6 +41,8 @@ export type SessionStatus = Schema.Schema.Type<typeof SessionStatus>;
 
 export const Session = Schema.Struct({
   id: Id,
+  /** The opening prompt's first non-empty line, capped at 80 characters; set once and never rewritten. */
+  title: Schema.String,
   status: SessionStatus,
   /**
    * Derived, never stored: an exited session whose runner still holds the
@@ -82,6 +84,10 @@ export const SessionSpawnInput = closedStruct({
   instanceId: Schema.optionalKey(Id),
   model: Schema.optionalKey(Schema.NonEmptyString),
   accessMode: Schema.optionalKey(AccessMode),
+  /** Names a runner directly, a reserved one included; placement is skipped. */
+  runnerId: Schema.optionalKey(Id),
+  /** The Permission Profile the session's token carries, in place of the thread default. */
+  permissionProfileId: Schema.optionalKey(Id),
   /** Workspaces are not built yet, so a non-null id is refused rather than ignored. */
   workspaceId: Schema.optionalKey(Schema.NullOr(Id)),
 });

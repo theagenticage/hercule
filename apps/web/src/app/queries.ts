@@ -14,7 +14,7 @@
  */
 import { infiniteQueryOptions, queryOptions } from "@tanstack/react-query";
 import { loopbackEndpoints, queryKeys, type HydraClient } from "@hydra/client-core";
-import { MAX_PAGE_LIMIT, type Runner, type TaskFilter } from "@hydra/contract";
+import { MAX_PAGE_LIMIT, type Runner, type TaskFilter, type TranscriptRow } from "@hydra/contract";
 
 /** Whether first run has been completed. Reachable without a token. */
 export const setupQuery = (client: HydraClient) =>
@@ -107,6 +107,65 @@ export const runnerQuery = (client: HydraClient, id: string) =>
   });
 
 /**
+ * One session on its own, which is what a thread page reads. A refusal is
+ * answered at once rather than retried: a session that is not there answers
+ * 404 for good.
+ */
+export const sessionQuery = (client: HydraClient, id: string) =>
+  queryOptions({
+    queryKey: queryKeys.session(id),
+    queryFn: () => client.session.read({ params: { id } }),
+    retry: false,
+  });
+
+/**
+ * A session's whole transcript, oldest first - every row is fetched rather
+ * than a page of them, because the thread surface renders every turn it
+ * covers. `session:<id>:stream` appends straight to this cache entry as new
+ * rows are written, and a `reset` refetches it; neither is TanStack Query's
+ * own staleness knowing anything happened, so this entry never goes stale on
+ * its own and is never refetched behind those two - a background refetch
+ * racing a live append could otherwise win with an answer older than what the
+ * append just wrote.
+ */
+export const transcriptQuery = (client: HydraClient, sessionId: string) =>
+  queryOptions({
+    queryKey: queryKeys.transcript(sessionId),
+    queryFn: async () => {
+      const rows: TranscriptRow[] = [];
+      let cursor: string | undefined;
+      for (;;) {
+        const page = await client.transcript.read({
+          params: { id: sessionId },
+          query:
+            cursor === undefined ? { limit: MAX_PAGE_LIMIT } : { limit: MAX_PAGE_LIMIT, cursor },
+        });
+        rows.push(...page.items);
+        cursor = page.nextCursor;
+        if (cursor === undefined) break;
+      }
+      return rows;
+    },
+    staleTime: Infinity,
+    refetchOnWindowFocus: false,
+  });
+
+/**
+ * A session's input history, queued rows included: the composer's queued list
+ * above the textarea. One page, same as the fleet and the session listing
+ * above - a thread queues a handful of turns at most, never enough to page.
+ * The page is 500 rows ascending and its readers filter to `queued`
+ * themselves, because `input.query` has no status filter; a thread past 500
+ * inputs would stop showing its queued ones, which is when this grows one.
+ */
+export const inputsQuery = (client: HydraClient, sessionId: string) =>
+  queryOptions({
+    queryKey: queryKeys.inputs(sessionId),
+    queryFn: () =>
+      client.input.query({ params: { id: sessionId }, query: { limit: MAX_PAGE_LIMIT } }),
+  });
+
+/**
  * The join tokens still outstanding. A token lives an hour and is spent by one
  * machine, so this is a handful at most and the whole set is one answer.
  */
@@ -130,6 +189,27 @@ export const providersQuery = (client: HydraClient) =>
   queryOptions({
     queryKey: queryKeys.providers(),
     queryFn: () => client.provider.query(),
+  });
+
+/**
+ * Every session, as one page. The sidebar and All sessions both read the whole
+ * set - the point at which a fleet's threads outgrow one page is the point at
+ * which this grows a listing of its own, same as the fleet above.
+ */
+export const sessionsQuery = (client: HydraClient) =>
+  queryOptions({
+    queryKey: queryKeys.sessions(),
+    queryFn: () => client.session.query({ query: { limit: MAX_PAGE_LIMIT } }),
+  });
+
+/**
+ * The permission profiles, for the Settings > Threads profile field. Not a
+ * live topic, so nothing but this browser's own write ever moves it.
+ */
+export const profilesQuery = (client: HydraClient) =>
+  queryOptions({
+    queryKey: queryKeys.profiles(),
+    queryFn: () => client.profile.query({ query: { limit: MAX_PAGE_LIMIT } }),
   });
 
 /**

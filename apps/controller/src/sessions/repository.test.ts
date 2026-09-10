@@ -25,6 +25,7 @@ const anId = () => uuidToString(mintUuid());
 const aSession = Effect.gen(function* () {
   const sessions = yield* sessionRepository;
   const stored = yield* sessions.insert({
+    title: "a session",
     permissionProfileId: anId(),
     instanceId: anId(),
     runnerId: anId(),
