@@ -145,8 +145,18 @@ export const SessionContinueInput = closedStruct(SESSION_CONTINUE_FIELDS);
 
 export type SessionContinueInput = Schema.Schema.Type<typeof SessionContinueInput>;
 
+/**
+ * One status, or several - the runner page's "how full is this machine"
+ * needs `starting | idle | busy` in one read, everything else names one. The
+ * wire carries several as repeated `status` query keys.
+ */
+export const SessionStatusFilter = Schema.Union([
+  SessionStatus,
+  Schema.NonEmptyArray(SessionStatus),
+]);
+
 export const SessionFilter = Schema.Struct({
-  status: Schema.optionalKey(SessionStatus),
+  status: Schema.optionalKey(SessionStatusFilter),
   runnerId: Schema.optionalKey(Id),
 });
 

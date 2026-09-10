@@ -53,6 +53,7 @@ export {
   type LoopbackEndpoint,
 } from "./local-runner";
 export { refusalReason } from "./plugin-refusal";
+export { capacityLine, queuedSessions, RUNNING_STATUSES } from "./runner-capacity";
 export { providerRows, type ProviderRow } from "./provider-rows";
 export { sessionsEmptyState, type SessionsEmptyState } from "./sessions-empty-state";
 export { nextOnboardingStep, ONBOARDING_STEPS, type OnboardingStep } from "./onboarding";

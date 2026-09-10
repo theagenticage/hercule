@@ -209,6 +209,25 @@ describe("createClient", () => {
     ]);
     assert.deepStrictEqual(await sent(6).json(), { config: { model: "sonnet" } });
   });
+
+  it("sends several statuses as repeated query keys", async () => {
+    const { fetch, sent } = stubFetch(() => json({ items: [] }));
+    const client = createClient({ baseUrl: BASE, fetch });
+
+    await client.session.query({ query: { status: ["queued", "starting", "idle", "busy"] } });
+
+    const url = new URL(sent(0).url);
+    assert.deepStrictEqual(url.searchParams.getAll("status"), [
+      "queued",
+      "starting",
+      "idle",
+      "busy",
+    ]);
+
+    // One status still travels bare, which is what every other caller sends.
+    await client.session.query({ query: { status: "exited" } });
+    assert.deepStrictEqual(new URL(sent(1).url).searchParams.getAll("status"), ["exited"]);
+  });
 });
 
 /** A token store over a plain variable, so a test can read what it kept. */

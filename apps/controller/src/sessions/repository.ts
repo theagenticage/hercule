@@ -74,7 +74,7 @@ export interface SessionPageRequest {
   readonly limit: number;
   readonly cursor: string | undefined;
   readonly direction: SortDirection;
-  readonly status: SessionStatus | undefined;
+  readonly status: SessionStatus | ReadonlyArray<SessionStatus> | undefined;
   readonly runnerId: string | undefined;
 }
 
@@ -164,6 +164,14 @@ export interface TranscriptPageRequest {
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
 
+  /**
+   * One status is `=`; several - the runner page's capacity read - is `IN`.
+   * The contract requires at least one element in the array, so there is no
+   * empty case here to guard.
+   */
+  const statusClause = (status: SessionStatus | ReadonlyArray<SessionStatus>) =>
+    Array.isArray(status) ? sql`status IN ${sql.in(status)}` : sql`status = ${status}`;
+
   return {
     insert: (session: NewSession): Effect.Effect<StoredSession, SqlError> =>
       Effect.gen(function* () {
@@ -228,7 +236,7 @@ const make = Effect.gen(function* () {
           request.direction,
         );
         const clauses = [keyset];
-        if (request.status !== undefined) clauses.push(sql`status = ${request.status}`);
+        if (request.status !== undefined) clauses.push(statusClause(request.status));
         if (request.runnerId !== undefined) {
           clauses.push(sql`runner_id = ${uuidFromString(request.runnerId)}`);
         }
@@ -464,6 +472,31 @@ const make = Effect.gen(function* () {
           running: runningRows.map((row) => uuidToString(row.id)),
         };
       }),
+
+    /**
+     * Ends every session on this runner that is `starting`, `idle` or `busy`
+     * and that `held` does not name: what a sessions report says this runner
+     * no longer has. Scoped to those three statuses so a session already
+     * `exited`, or `queued` and never told to this runner, is untouched.
+     */
+    reportedGone: (
+      runnerId: string,
+      held: ReadonlyArray<string>,
+      at: string,
+    ): Effect.Effect<ReadonlyArray<string>, SqlError> =>
+      Effect.map(
+        sql<{ readonly id: Uint8Array }>`
+          UPDATE sessions SET
+            status = 'exited',
+            last_activity_at = ${at},
+            exited_at = CASE WHEN exited_at IS NULL THEN ${at} ELSE exited_at END
+          WHERE runner_id = ${uuidFromString(runnerId)}
+            AND status IN ('starting', 'idle', 'busy')
+            AND ${held.length === 0 ? sql`1 = 1` : sql`id NOT IN ${sql.in(held.map(uuidFromString))}`}
+          RETURNING id
+        `,
+        (rows) => rows.map((row) => uuidToString(row.id)),
+      ),
   };
 });
 

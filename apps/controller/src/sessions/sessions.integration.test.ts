@@ -1439,6 +1439,27 @@ describe("session.query and session.read", () => {
     });
   });
 
+  it("filters by several statuses at once, repeated on the wire", async () => {
+    // The runner page's capacity read is exactly this: `starting`, `idle` and
+    // `busy` in one page, `exited` never in it.
+    await withFleet(async (arranged) => {
+      const waiting = await spawned(arranged, { prompt: "one" });
+      const idle = await started(arranged, "two");
+      const gone = await spawned(arranged, { prompt: "three" });
+      exited(arranged.wire, gone.id, 1);
+      await sessionWhen(arranged, gone.id, (one) => one.status === "exited");
+
+      const filtered = await get(
+        arranged.harness.base,
+        "/api/v1/sessions?status=starting&status=idle",
+        arranged.token,
+      );
+      expect(filtered.status, await filtered.clone().text()).toBe(200);
+      const page = (await filtered.json()) as { items: ReadonlyArray<Session> };
+      expect(new Set(page.items.map((one) => one.id))).toEqual(new Set([waiting.id, idle.id]));
+    });
+  });
+
   it("answers not_found for an id nobody holds", async () => {
     await withFleet(async (arranged) => {
       const response = await get(

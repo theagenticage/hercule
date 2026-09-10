@@ -98,17 +98,21 @@ const BASE_SESSION: Session = {
 };
 
 /**
- * One session on the machine. A queued session has never run, so its two
- * instants are the same; `at` sets both, which is what lets a test name a
- * session's age without deciding which of the two the row reads.
+ * One session on the machine. A queued session has never run, so its
+ * `startedAt` is null and its two instants - `createdAt` and
+ * `lastActivityAt` - are the same; `at` sets both, which is what lets a test
+ * name a session's age without deciding which of the two the row reads.
  */
 export const sessionFixture = (
   overrides: Partial<Session> & { readonly id: string; readonly at?: string },
 ): Session => {
   const { at, ...fields } = overrides;
+  const queued = fields.status === "queued";
   return {
     ...BASE_SESSION,
-    ...(at === undefined ? {} : { createdAt: at, lastActivityAt: at, startedAt: at }),
+    ...(at === undefined
+      ? {}
+      : { createdAt: at, lastActivityAt: at, startedAt: queued ? null : at }),
     ...fields,
   };
 };

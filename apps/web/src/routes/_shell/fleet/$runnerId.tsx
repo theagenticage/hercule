@@ -1,15 +1,28 @@
 import type { JSX } from "react";
 import { Link, createFileRoute } from "@tanstack/react-router";
 import { useSuspenseQuery } from "@tanstack/react-query";
-import { FormCard } from "@hydra/ui";
-import { FALLBACK_TIMEZONE, isSupportedTimezone } from "@hydra/client-core";
+import { FormCard, useMinuteClock } from "@hydra/ui";
+import {
+  FALLBACK_TIMEZONE,
+  ageOf,
+  capacityLine,
+  isSupportedTimezone,
+  queuedSessions,
+} from "@hydra/client-core";
 import { useLiveInvalidation } from "../../../app/live-invalidation";
-import { controllerQuery, providersQuery, runnerQuery, settingsQuery } from "../../../app/queries";
+import {
+  controllerQuery,
+  providersQuery,
+  runnerQuery,
+  runnerSessionsQuery,
+  settingsQuery,
+} from "../../../app/queries";
 import { Connectivity } from "../../../screens/connectivity";
 import { EditForm } from "./-edit-form";
 import { RunnerFacts } from "./-facts";
 import { Moves } from "./-moves";
 import { Providers } from "./-providers";
+import { SessionQueue } from "./-queue";
 
 export const Route = createFileRoute("/_shell/fleet/$runnerId")({
   staticData: { title: "Runner" },
@@ -18,6 +31,7 @@ export const Route = createFileRoute("/_shell/fleet/$runnerId")({
       context.queryClient.ensureQueryData(runnerQuery(context.client, params.runnerId)),
       context.queryClient.ensureQueryData(controllerQuery(context.client)),
       context.queryClient.ensureQueryData(providersQuery(context.client)),
+      context.queryClient.ensureQueryData(runnerSessionsQuery(context.client, params.runnerId)),
     ]);
   },
   component: RunnerPage,
@@ -38,11 +52,16 @@ function RunnerPage(): JSX.Element {
 
   useLiveInvalidation(live, queryClient, "runner");
   useLiveInvalidation(live, queryClient, "provider");
+  useLiveInvalidation(live, queryClient, "session");
 
   const runner = useSuspenseQuery(runnerQuery(client, runnerId)).data;
   const controller = useSuspenseQuery(controllerQuery(client)).data;
   const stored = useSuspenseQuery(settingsQuery(client)).data.user.timezone ?? FALLBACK_TIMEZONE;
   const timezone = isSupportedTimezone(stored) ? stored : FALLBACK_TIMEZONE;
+  const sessions = useSuspenseQuery(runnerSessionsQuery(client, runnerId)).data.items;
+  // Ages read the clock, not the last invalidation, so a wait ticks upward on
+  // its own the same way a thread row's does.
+  const now = useMinuteClock();
 
   return (
     <div className="flex flex-col gap-4">
@@ -62,6 +81,14 @@ function RunnerPage(): JSX.Element {
         }
       >
         <RunnerFacts runner={runner} />
+        <SessionQueue
+          line={capacityLine(runner, sessions)}
+          queue={queuedSessions(sessions).map((session) => ({
+            id: session.id,
+            title: session.title,
+            age: ageOf(session.createdAt, now),
+          }))}
+        />
         <EditForm client={client} runner={runner} />
         {runner.lifecycle === "retired" ? null : (
           <Moves client={client} runner={runner} defaultRunnerId={controller.defaultRunnerId} />
