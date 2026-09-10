@@ -113,6 +113,7 @@ const spec = {
   workspaceId: null,
   modelSelection: { model: "sonnet", options: {} },
   accessMode: "approval-required",
+  timeouts: { inactivityMs: 1_800_000, absoluteMs: 28_800_000 },
 } as const;
 
 const runnerMessages: ReadonlyArray<RunnerMessage> = [

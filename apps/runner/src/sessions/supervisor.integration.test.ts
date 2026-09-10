@@ -9,7 +9,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it, vi } from "vitest";
 import { Effect, Fiber, PubSub, Stream } from "effect";
+import { TestClock } from "effect/testing";
 import type {
+  ExitReason,
   ProviderEvent,
   RunnerToController,
   SendResult,
@@ -37,11 +39,16 @@ const TURN = "0199e0e7-0000-7000-8000-0000000000fd";
 /** The Queued Input row an input frame is sent under, and answered under. */
 const REQUEST = "0199e0e7-0000-7000-8000-0000000000fc";
 
+/** The shipped defaults (spec 03 section 6.2): only the test clock can cross them. */
+const INACTIVITY_MS = 30 * 60 * 1000;
+const ABSOLUTE_MS = 8 * 60 * 60 * 1000;
+
 const SPEC: SessionSpec = {
   instanceId: INSTANCE,
   workspaceId: null,
   modelSelection: { model: "claude-haiku-4-5", options: {} },
   accessMode: "approval-required",
+  timeouts: { inactivityMs: INACTIVITY_MS, absoluteMs: ABSOLUTE_MS },
 };
 
 const START: SessionStart = {
@@ -75,6 +82,8 @@ interface Fake {
   readonly heard: () => number;
   readonly inputs: Array<TurnInput>;
   readonly interrupted: Array<string>;
+  /** Every `stopSession`, with the reason its caller gave it. */
+  readonly stops: Array<{ readonly sessionId: string; readonly reason: ExitReason }>;
   readonly emit: (event: ProviderEvent) => void;
   fails: string | undefined;
   /** A harness that throws where nothing declared it could. */
@@ -87,12 +96,14 @@ const faking = (): Fake => {
   const contexts: Array<ProviderRunnerContext> = [];
   const inputs: Array<TurnInput> = [];
   const interrupted: Array<string> = [];
+  const stops: Array<{ readonly sessionId: string; readonly reason: ExitReason }> = [];
   const held = new Map<string, SessionBinding>();
   const fake: Fake = {
     contexts,
     heard: () => heard,
     inputs,
     interrupted,
+    stops,
     fails: undefined,
     dies: false,
     emit: (event) => {
@@ -136,15 +147,21 @@ const faking = (): Fake => {
           return Effect.succeed({ turnId: TURN, delivery: "opened" });
         }),
       interrupt: (sessionId) => Effect.sync(() => void interrupted.push(sessionId)),
-      stopSession: (sessionId) =>
+      /**
+       * The reason is the caller's, not this adapter's: the supervisor is the
+       * one that knows why it stopped a session, and the exit event is the only
+       * place that reason can enter the stream.
+       */
+      stopSession: (sessionId, reason) =>
         Effect.sync(() => {
+          stops.push({ sessionId, reason });
           held.delete(sessionId);
           fake.emit({
             _tag: "session.exited",
-            eventId: "e-exited",
+            eventId: `e-exited-${String(stops.length)}`,
             sessionId,
             at,
-            reason: "stopped",
+            reason,
           });
         }),
     },
@@ -405,7 +422,7 @@ describe("a session that ended while the socket was down", () => {
     // The harness ends between connections: its exit is published to a relay
     // nobody is running, so it reaches no controller and the supervisor's own
     // entry outlives the session. Nothing replays it - there is no outbox.
-    await Effect.runPromise(fake.adapter.stopSession(SESSION));
+    await Effect.runPromise(fake.adapter.stopSession(SESSION, "stopped"));
     await driving(
       fake,
       supervisor,
@@ -544,5 +561,283 @@ describe("what the controller hears back about one input", () => {
     );
 
     expect(fake.interrupted).toEqual([SESSION]);
+  });
+});
+
+/**
+ * The same drive with the test clock in place of the wall clock. Only the two
+ * supervision timers read that clock; every wait on the relay below stays on
+ * the wall clock, because what those wait for is another fiber getting a turn,
+ * which no amount of virtual time delivers.
+ */
+const timing = <A>(
+  fake: Fake,
+  supervisor: { readonly relay: Effect.Effect<void> },
+  body: Effect.Effect<A>,
+): Promise<A> =>
+  Effect.runPromise(
+    Effect.provide(
+      Effect.gen(function* () {
+        const relaying = yield* Effect.forkChild(supervisor.relay);
+        yield* TestClock.withLive(marked(fake));
+        const value = yield* body;
+        yield* Fiber.interrupt(relaying);
+        return value;
+      }),
+      TestClock.layer(),
+    ),
+  );
+
+/** A wait on the relay, on the wall clock, while the test clock drives the timers. */
+const awaiting = (what: string, ready: () => boolean): Effect.Effect<void> =>
+  TestClock.withLive(until(what, ready));
+
+/**
+ * The event the relay has sent for a session, once it has sent one. Arming a
+ * clock and sending the event that armed it are the same pass through the
+ * relay now, so seeing the frame is enough to know the clock is set.
+ */
+const forwarded = (sent: ReadonlyArray<RunnerToController>, count: number): Effect.Effect<void> =>
+  awaiting(`sent ${String(count)} events`, () => eventsIn(sent).length >= count);
+
+const turnStarted = (fake: Fake, turnId: string): void =>
+  fake.emit({
+    _tag: "turn.started",
+    eventId: `e-${turnId}-started`,
+    sessionId: SESSION,
+    at,
+    turnId,
+  });
+
+const turnCompleted = (fake: Fake, turnId: string): void =>
+  fake.emit({
+    _tag: "turn.completed",
+    eventId: `e-${turnId}-done`,
+    sessionId: SESSION,
+    at,
+    turnId,
+    state: "completed",
+  });
+
+const delta = (fake: Fake, id: string): void =>
+  fake.emit({
+    _tag: "content.delta",
+    eventId: `e-${id}`,
+    sessionId: SESSION,
+    at,
+    turnId: "t-1",
+    itemId: "i-1",
+    streamKind: "assistant_text",
+    delta: "still here",
+  });
+
+/** The reasons the exits sent to the controller carry, in order. */
+const exitReasons = (sent: ReadonlyArray<RunnerToController>): ReadonlyArray<string> =>
+  eventsIn(sent)
+    .map((frame) => frame.event)
+    .filter((event) => event._tag === "session.exited")
+    .map((event) => (event as { readonly reason: string }).reason);
+
+describe("a harness that goes silent mid-turn", () => {
+  it("is stopped for inactivity, and the exit says that is why", async () => {
+    const fake = faking();
+    const { supervisor, sent } = connecting(fake);
+
+    await timing(
+      fake,
+      supervisor,
+      Effect.gen(function* () {
+        yield* supervisor.start(START);
+        yield* Effect.sync(() => turnStarted(fake, "t-1"));
+        // `session.started` and `turn.started`: the clock is armed by the
+        // second of them, on its way through the relay.
+        yield* forwarded(sent, 2);
+
+        yield* TestClock.adjust(INACTIVITY_MS);
+        // Waits for the exit frame itself, not merely for the adapter to have
+        // been asked: the two can be several ticks apart on the way through
+        // the relay.
+        yield* forwarded(sent, 3);
+      }),
+    );
+
+    expect(fake.stops).toEqual([{ sessionId: SESSION, reason: "inactivity_timeout" }]);
+    // The reason reaches the controller the one way it can: on the adapter's
+    // own exit event, forwarded like any other.
+    expect(exitReasons(sent)).toEqual(["inactivity_timeout"]);
+  });
+
+  it("starts the wait over on any event of that session", async () => {
+    const fake = faking();
+    const { supervisor, sent } = connecting(fake);
+
+    await timing(
+      fake,
+      supervisor,
+      Effect.gen(function* () {
+        yield* supervisor.start(START);
+        yield* Effect.sync(() => turnStarted(fake, "t-1"));
+        yield* forwarded(sent, 2);
+
+        yield* TestClock.adjust(INACTIVITY_MS - 1);
+        yield* Effect.sync(() => delta(fake, "d-1"));
+        yield* forwarded(sent, 3);
+
+        // The moment the first wait would have expired at. Nothing, because the
+        // delta a millisecond earlier started the wait over.
+        yield* TestClock.adjust(1);
+        expect(fake.stops).toEqual([]);
+
+        yield* TestClock.adjust(INACTIVITY_MS - 2);
+        expect(fake.stops).toEqual([]);
+
+        yield* TestClock.adjust(1);
+        yield* awaiting("stopped the session", () => fake.stops.length === 1);
+      }),
+    );
+
+    expect(fake.stops).toEqual([{ sessionId: SESSION, reason: "inactivity_timeout" }]);
+  });
+
+  it("is left alone once the turn has completed, however long the silence", async () => {
+    const fake = faking();
+    const { supervisor, sent } = connecting(fake);
+
+    await timing(
+      fake,
+      supervisor,
+      Effect.gen(function* () {
+        yield* supervisor.start(START);
+        yield* Effect.sync(() => turnStarted(fake, "t-1"));
+        yield* forwarded(sent, 2);
+        yield* Effect.sync(() => turnCompleted(fake, "t-1"));
+        yield* forwarded(sent, 3);
+
+        // An idle session is not a stuck one: it is waiting for its user, and
+        // the absolute clock is the only one that may end it.
+        yield* TestClock.adjust(ABSOLUTE_MS - 1);
+      }),
+    );
+
+    expect(fake.stops).toEqual([]);
+    expect(exitReasons(sent)).toEqual([]);
+  });
+
+  it("is watched again from the next turn the harness opens", async () => {
+    const fake = faking();
+    const { supervisor, sent } = connecting(fake);
+
+    await timing(
+      fake,
+      supervisor,
+      Effect.gen(function* () {
+        yield* supervisor.start(START);
+        yield* Effect.sync(() => turnStarted(fake, "t-1"));
+        yield* forwarded(sent, 2);
+        yield* Effect.sync(() => turnCompleted(fake, "t-1"));
+        yield* forwarded(sent, 3);
+        yield* TestClock.adjust(INACTIVITY_MS * 2);
+
+        yield* Effect.sync(() => turnStarted(fake, "t-2"));
+        yield* forwarded(sent, 4);
+        yield* TestClock.adjust(INACTIVITY_MS);
+        yield* forwarded(sent, 5);
+      }),
+    );
+
+    expect(fake.stops).toEqual([{ sessionId: SESSION, reason: "inactivity_timeout" }]);
+    expect(exitReasons(sent)).toEqual(["inactivity_timeout"]);
+  });
+});
+
+describe("a session that has run for as long as it may", () => {
+  it("is stopped at the absolute deadline, mid-turn and with events still arriving", async () => {
+    const fake = faking();
+    const { supervisor, sent } = connecting(fake);
+
+    await timing(
+      fake,
+      supervisor,
+      Effect.gen(function* () {
+        yield* supervisor.start(START);
+        yield* Effect.sync(() => turnStarted(fake, "t-1"));
+        yield* forwarded(sent, 2);
+
+        // A busy session, kept clear of the inactivity clock the whole way: an
+        // event every quarter of the shorter wait, until the longer one is up.
+        const step = Math.floor(INACTIVITY_MS / 2);
+        let elapsed = 0;
+        let count = 2;
+        while (elapsed + step < ABSOLUTE_MS) {
+          yield* TestClock.adjust(step);
+          elapsed += step;
+          count += 1;
+          yield* Effect.sync(() => delta(fake, `d-${String(count)}`));
+          yield* forwarded(sent, count);
+          expect(fake.stops, `at ${String(elapsed)}ms`).toEqual([]);
+        }
+
+        yield* TestClock.adjust(ABSOLUTE_MS - elapsed);
+        yield* awaiting("stopped the session", () => fake.stops.length === 1);
+      }),
+    );
+
+    expect(fake.stops).toEqual([{ sessionId: SESSION, reason: "absolute_timeout" }]);
+    expect(exitReasons(sent)).toEqual(["absolute_timeout"]);
+  });
+
+  it("is not stopped at all when it ended before the deadline", async () => {
+    const fake = faking();
+    const { supervisor, sent } = connecting(fake);
+
+    await timing(
+      fake,
+      supervisor,
+      Effect.gen(function* () {
+        yield* supervisor.start(START);
+        yield* forwarded(sent, 1);
+        yield* supervisor.stop({ _tag: "sessionStop", sessionId: SESSION });
+        yield* forwarded(sent, 2);
+
+        // Both clocks die with the session. A timer still running here would
+        // stop a session that is already gone, or the next one under its id.
+        yield* TestClock.adjust(ABSOLUTE_MS * 2);
+      }),
+    );
+
+    expect(fake.stops).toEqual([{ sessionId: SESSION, reason: "stopped" }]);
+    expect(exitReasons(sent)).toEqual(["stopped"]);
+  });
+
+  it("gives a session started again under the same id a clock of its own", async () => {
+    const fake = faking();
+    const { supervisor, sent } = connecting(fake);
+
+    await timing(
+      fake,
+      supervisor,
+      Effect.gen(function* () {
+        yield* supervisor.start(START);
+        yield* forwarded(sent, 1);
+        yield* supervisor.stop({ _tag: "sessionStop", sessionId: SESSION });
+        yield* forwarded(sent, 2);
+
+        yield* TestClock.adjust(ABSOLUTE_MS / 2);
+        yield* supervisor.start(START);
+        yield* forwarded(sent, 3);
+
+        // The first session's deadline, which this one must not inherit.
+        yield* TestClock.adjust(ABSOLUTE_MS / 2);
+        expect(fake.stops).toHaveLength(1);
+
+        yield* TestClock.adjust(ABSOLUTE_MS / 2);
+        yield* awaiting("stopped the second session", () => fake.stops.length === 2);
+      }),
+    );
+
+    expect(fake.stops).toEqual([
+      { sessionId: SESSION, reason: "stopped" },
+      { sessionId: SESSION, reason: "absolute_timeout" },
+    ]);
   });
 });

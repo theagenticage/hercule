@@ -34,6 +34,13 @@ export const MAX_MESSAGE_LENGTH = 4096;
 
 const Message = Schema.String.check(Schema.isMaxLength(MAX_MESSAGE_LENGTH));
 
+/**
+ * A duration on the wire, in milliseconds: the controller turns whole-minute
+ * settings into this so the runner never has to know the unit they were
+ * authored in, and a test can pick a value a wall clock could not sit through.
+ */
+const PositiveMillis = Schema.Int.check(Schema.isGreaterThan(0));
+
 /** The model and the per-model choices a turn runs with (spec 06 section 4). */
 export const ModelSelection = Schema.Struct({
   model: Fact,
@@ -66,6 +73,15 @@ export const SessionSpec = Schema.Struct({
   continue: Schema.optionalKey(
     Schema.Struct({ nativeSessionId: Fact, mode: Schema.Literals(["resume", "fork"]) }),
   ),
+  /**
+   * The two clocks the runner supervisor holds this session to (spec 03
+   * section 6.2). Required: a spec without it is a controller bug, not a
+   * runner choice, and the runner holds no default of its own to fall back on.
+   */
+  timeouts: Schema.Struct({
+    inactivityMs: PositiveMillis,
+    absoluteMs: PositiveMillis,
+  }),
 });
 
 export type SessionSpec = Schema.Schema.Type<typeof SessionSpec>;
@@ -118,6 +134,8 @@ export const ExitReason = Schema.Literals([
   "idle_unload",
   "runner_restart",
   "crash",
+  "inactivity_timeout",
+  "absolute_timeout",
 ]);
 
 export type ExitReason = Schema.Schema.Type<typeof ExitReason>;

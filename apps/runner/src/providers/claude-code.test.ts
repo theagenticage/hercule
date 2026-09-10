@@ -314,6 +314,7 @@ const SPEC: SessionSpec = {
   workspaceId: null,
   modelSelection: { model: "claude-haiku-4-5", options: { effort: "high", fastMode: false } },
   accessMode: "auto-accept-edits",
+  timeouts: { inactivityMs: 1_800_000, absoluteMs: 28_800_000 },
 };
 
 const WORKING: ProviderRunnerContext = { ...CONTEXT, cwd: "/var/hydra/runner/scratch/one" };
@@ -709,7 +710,7 @@ describe("a Claude Code session", () => {
       ),
     );
     await until("asked the harness for the model", () => run.models.length === 1);
-    await Effect.runPromise(run.adapter.stopSession(SESSION));
+    await Effect.runPromise(run.adapter.stopSession(SESSION, "stopped"));
     run.releaseModel();
 
     // The session the input was checked against is gone; saying it was
@@ -722,13 +723,28 @@ describe("a Claude Code session", () => {
     const run = driving();
     await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, WORKING));
 
-    await Effect.runPromise(run.adapter.stopSession(SESSION));
+    await Effect.runPromise(run.adapter.stopSession(SESSION, "stopped"));
     await ends(run.seen);
 
     expect(run.closed()).toBe(1);
     const exited = run.seen.at(-1);
     expect(exited?._tag === "session.exited" ? exited.reason : undefined).toBe("stopped");
     expect(await Effect.runPromise(run.adapter.listSessions)).toEqual([]);
+  });
+
+  it("keeps the first reason when a second stop asks for a different one", async () => {
+    const run = driving();
+    await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, WORKING));
+
+    await Effect.runPromise(run.adapter.stopSession(SESSION, "inactivity_timeout"));
+    await Effect.runPromise(run.adapter.stopSession(SESSION, "stopped"));
+    await ends(run.seen);
+
+    expect(run.closed()).toBe(1);
+    const exited = run.seen.at(-1);
+    expect(exited?._tag === "session.exited" ? exited.reason : undefined).toBe(
+      "inactivity_timeout",
+    );
   });
 
   it("exits as a process exit when the harness stops on its own", async () => {
@@ -761,7 +777,7 @@ describe("a Claude Code session", () => {
     const run = driving();
     await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, WORKING));
 
-    await Effect.runPromise(run.adapter.stopSession(SESSION));
+    await Effect.runPromise(run.adapter.stopSession(SESSION, "stopped"));
     run.die(new Error("Query closed before response received"));
     await ends(run.seen);
 
@@ -780,7 +796,7 @@ describe("a Claude Code session", () => {
     const run = driving();
     await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, WORKING));
 
-    await Effect.runPromise(run.adapter.stopSession(SESSION));
+    await Effect.runPromise(run.adapter.stopSession(SESSION, "stopped"));
     const said = await Effect.runPromise(
       Effect.flip(run.adapter.sendInput(SESSION, { text: "hello" })),
     );

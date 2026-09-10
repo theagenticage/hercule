@@ -9,7 +9,10 @@
  * an event produced while the socket is down is lost (spec 03 section 2.3).
  */
 import { rmSync } from "node:fs";
+import * as Clock from "effect/Clock";
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
 import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
 import {
@@ -33,6 +36,23 @@ import { resolve, type Machine } from "./context";
 interface Live {
   readonly adapter: ProviderAdapter;
   readonly scratch: string | undefined;
+  /** How long this session may sit with no event while a turn is open. */
+  readonly inactivityMs: number;
+  /** Clock time of the last event of this session while a turn was open. */
+  lastEventAt: number;
+  /**
+   * One fiber for as long as a turn is open, watching `lastEventAt` against
+   * `inactivityMs`; forked on `turn.started`, interrupted on `turn.completed`.
+   * Undefined whenever no turn is open, which is also when a stuck harness
+   * cannot be told from an idle one.
+   */
+  inactivity: Fiber.Fiber<void> | undefined;
+  /**
+   * Ends the session at its spec's absolute deadline; lives and dies with
+   * this entry. Undefined only in the moment between the entry being set and
+   * this fiber being forked.
+   */
+  absolute: Fiber.Fiber<void> | undefined;
 }
 
 /** What one connection lends the supervisor for as long as it is up. */
@@ -81,31 +101,88 @@ export const supervising = (adapters: ReadonlyArray<ProviderAdapter>) => {
     const sending = (frame: RunnerToController): Effect.Effect<void> =>
       Effect.ignoreCause(Effect.suspend(() => connection.send(frame)));
 
+    /** Interrupts both timer fibers of one entry and discards its scratch. */
+    const teardown = (held: Live): Effect.Effect<void> =>
+      Effect.gen(function* () {
+        if (held.inactivity !== undefined) yield* Fiber.interrupt(held.inactivity);
+        if (held.absolute !== undefined) yield* Fiber.interrupt(held.absolute);
+        discard(held.scratch);
+      });
+
     /**
      * Forgets an exited session, on the adapter's authority rather than the
      * event's: a session id started again while its old exit was still in
      * flight is a different session, and the old run must not sweep it away.
      */
     const release = (sessionId: string): Effect.Effect<void> =>
-      Effect.suspend(() => {
+      Effect.gen(function* () {
         const held = live.get(sessionId);
-        if (held === undefined) return Effect.void;
-        return Effect.map(held.adapter.listSessions, (still) => {
-          if (still.some((binding) => binding.sessionId === sessionId)) return;
-          live.delete(sessionId);
-          discard(held.scratch);
-        });
+        if (held === undefined) return;
+        const still = yield* held.adapter.listSessions;
+        if (still.some((binding) => binding.sessionId === sessionId)) return;
+        live.delete(sessionId);
+        yield* teardown(held);
       });
 
-    /** Every event leaves through here, in the order it was sequenced. */
+    /**
+     * One fiber for the life of a turn. It sleeps to `lastEventAt +
+     * inactivityMs` and rechecks rather than trusting why it woke: an event
+     * arriving mid-sleep only moves `lastEventAt` (no interrupt, no fork), so
+     * the fiber already asleep has to notice the deadline moved on its own.
+     */
+    const watchingInactivity = (held: Live, sessionId: string): Effect.Effect<void> =>
+      Effect.gen(function* () {
+        while (true) {
+          const remaining = held.lastEventAt + held.inactivityMs - (yield* Clock.currentTimeMillis);
+          if (remaining > 0) {
+            yield* Effect.sleep(Duration.millis(remaining));
+            continue;
+          }
+          held.inactivity = undefined;
+          // By identity: this entry may be someone else's, or gone, by the
+          // time the deadline is reached.
+          if (live.get(sessionId) === held) {
+            yield* held.adapter.stopSession(sessionId, "inactivity_timeout");
+          }
+          return;
+        }
+      });
+
+    /**
+     * Every event leaves through here, in the order it was sequenced. Arming
+     * or moving the inactivity clock happens first, so a caller that has seen
+     * the frame this event produced has also seen what it did to the clock.
+     */
     const forward = (event: ProviderEvent): Effect.Effect<void> =>
       sequencing.withPermits(1)(
-        Effect.suspend(() => {
+        Effect.gen(function* () {
+          const held = live.get(event.sessionId);
+          if (held !== undefined) {
+            switch (event._tag) {
+              case "turn.started":
+                held.lastEventAt = yield* Clock.currentTimeMillis;
+                held.inactivity = yield* Effect.forkDetach(
+                  watchingInactivity(held, event.sessionId),
+                );
+                break;
+              case "turn.completed": {
+                const fiber = held.inactivity;
+                held.inactivity = undefined;
+                if (fiber !== undefined) yield* Fiber.interrupt(fiber);
+                break;
+              }
+              default:
+                // Only matters while a turn is open: one between turns says
+                // nothing about a turn getting stuck, and there is no fiber
+                // to move.
+                if (held.inactivity !== undefined)
+                  held.lastEventAt = yield* Clock.currentTimeMillis;
+            }
+          }
           lastSeq += 1;
           const frame: RunnerToController = { _tag: "sessionEvent", seq: lastSeq, event };
-          return event._tag === "session.exited"
-            ? Effect.flatMap(release(event.sessionId), () => sending(frame))
-            : sending(frame);
+          if (event._tag === "session.exited") yield* release(event.sessionId);
+          yield* sending(frame);
         }),
       );
 
@@ -149,18 +226,39 @@ export const supervising = (adapters: ReadonlyArray<ProviderAdapter>) => {
         Effect.flatMap((resolved) =>
           Effect.asVoid(
             Effect.uninterruptible(
-              Effect.suspend(() => {
-                const held: Live = { adapter, scratch: resolved.scratch };
+              Effect.gen(function* () {
+                const held: Live = {
+                  adapter,
+                  scratch: resolved.scratch,
+                  inactivityMs: frame.spec.timeouts.inactivityMs,
+                  // Meaningless until turn.started sets it alongside `inactivity`.
+                  lastEventAt: 0,
+                  inactivity: undefined,
+                  absolute: undefined,
+                };
                 live.set(frame.sessionId, held);
-                return Effect.tapCause(
+                // Armed here, not on `session.started`: a spec's absolute
+                // deadline is this runner's own promise to end the session,
+                // not something the harness has to confirm first.
+                held.absolute = yield* Effect.forkDetach(
+                  Effect.andThen(
+                    Effect.sleep(Duration.millis(frame.spec.timeouts.absoluteMs)),
+                    Effect.suspend(() => {
+                      if (live.get(frame.sessionId) !== held) return Effect.void;
+                      held.absolute = undefined;
+                      return adapter.stopSession(frame.sessionId, "absolute_timeout");
+                    }),
+                  ),
+                );
+                return yield* Effect.tapCause(
                   adapter.startSession(frame.sessionId, frame.spec, resolved.ctx),
                   () =>
-                    Effect.sync(() => {
+                    Effect.gen(function* () {
                       // By identity: a start after this one owns what is there
                       // now, and this one has nothing left to take away.
                       if (live.get(frame.sessionId) !== held) return;
                       live.delete(frame.sessionId);
-                      discard(resolved.scratch);
+                      yield* teardown(held);
                     }),
                 );
               }),
@@ -203,7 +301,7 @@ export const supervising = (adapters: ReadonlyArray<ProviderAdapter>) => {
           const stale = live.get(frame.sessionId);
           if (stale !== undefined) {
             live.delete(frame.sessionId);
-            discard(stale.scratch);
+            yield* teardown(stale);
           }
           return yield* starting(frame, adapter);
         }),
@@ -240,7 +338,7 @@ export const supervising = (adapters: ReadonlyArray<ProviderAdapter>) => {
 
       /** Idempotent: a session this runner does not hold is already stopped. */
       stop: (frame: SessionStop): Effect.Effect<void> =>
-        live.get(frame.sessionId)?.adapter.stopSession(frame.sessionId) ?? Effect.void,
+        live.get(frame.sessionId)?.adapter.stopSession(frame.sessionId, "stopped") ?? Effect.void,
     };
   };
 };

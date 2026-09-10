@@ -94,6 +94,7 @@ const SPEC: SessionSpec = {
   // session's shape on the wire, not about what the model can do.
   modelSelection: { model: "claude-haiku-4-5", options: {} },
   accessMode: "approval-required",
+  timeouts: { inactivityMs: 1_800_000, absoluteMs: 28_800_000 },
 };
 
 /** Long enough for a cold CLI to start, connect and answer one short prompt. */
@@ -179,7 +180,7 @@ describe.skipIf(!authed)("a real Claude Code session on this machine", () => {
       expect(tags).toContain("content.delta");
       expect(tags).toContain("session.usage.updated");
 
-      await Effect.runPromise(claudeCode.stopSession(SESSION));
+      await Effect.runPromise(claudeCode.stopSession(SESSION, "stopped"));
       await until(seen, "session.exited");
       const exited = seen.find((event) => event._tag === "session.exited");
       expect(exited?._tag === "session.exited" ? exited.reason : undefined).toBe("stopped");
@@ -277,7 +278,7 @@ describe.skipIf(!authed)("a real Claude Code session continued on this machine",
         const binding = await Effect.runPromise(claudeCode.startSession(sessionId, spec, context));
         await Effect.runPromise(claudeCode.sendInput(sessionId, { text }));
         await until(seen, "turn.completed");
-        await Effect.runPromise(claudeCode.stopSession(sessionId));
+        await Effect.runPromise(claudeCode.stopSession(sessionId, "stopped"));
         await until(seen, "session.exited");
         return binding.nativeSessionId;
       };
@@ -305,7 +306,7 @@ describe.skipIf(!authed)("a real Claude Code session continued on this machine",
       expect(minted.nativeSessionId).not.toBe(parent);
       await Effect.runPromise(claudeCode.sendInput(FORKED, { text: asking("second") }));
       await until(forkSeen, "turn.completed");
-      await Effect.runPromise(claudeCode.stopSession(FORKED));
+      await Effect.runPromise(claudeCode.stopSession(FORKED, "stopped"));
       await until(forkSeen, "session.exited");
 
       const forkedFile = await untilTranscript(minted.nativeSessionId);
