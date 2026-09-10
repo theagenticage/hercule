@@ -189,6 +189,8 @@ Rules:
 - `outputSchema` carries the agent step's declared schema ([./07-workflows.md](./07-workflows.md)); the adapter applies it by the provider's mechanism (section 7).
 - **Deliberately absent:** `readThread` / `rollbackThread` (return with the checkpoint/revert feature; fork covers branching), a separate steer method, any queue surface, a mode-switch method (so a session's access mode locks at start; the composer shows it read-only, [./14-web-app.md](./14-web-app.md) §App shell, 2026-09-01).
 
+*(Amended 2026-09-10, [#67](https://github.com/rogierpennink/hydra/issues/67).)* `stopSession(sessionId: string): Effect<void>` becomes `stopSession(sessionId, reason: ExitReason): Effect<void>`: the caller - a controller `SessionStop`, the runner's inactivity or absolute timer, or an announced shutdown - names why, and the adapter emits exactly that reason on `session.exited`. First reason wins where a session is stopped twice.
+
 **Open:** `TurnInput` is pinned only as "the user input for one turn" (text). Whether it carries attachments or images in v1 is not decided.
 
 Amended 2026-09-01 ([Prototype: the app shell and navigation](https://github.com/rogierpennink/hydra/issues/51)): `TurnInput` carries an optional `modelSelection: { model, options }` that replaces the session's selection from that turn on - Claude `setModel()` on the live `query()` before the turn, Codex the per-turn `model` on `turn/start`, pi `set_model` / `set_thinking_level`. ~~It applies only when the input **opens** a turn; a steered turn keeps its model (the controller holds the change as Queued Input until `turn.completed`, section 5). The Session row's `modelSelection` is updated on delivery, so resume and fork carry the new value.~~ This is the one live setting of a running thread; every other field of `SessionSpec` is fixed at start.
@@ -220,6 +222,8 @@ type SessionStatus = "queued" | "starting" | "idle" | "busy" | "exited"
 ```
 
 `queued` = placement accepted, runner full or unreachable; `starting` = `startSession` sent, no `session.started` yet; `idle` = no running turn; `busy` = a turn is running (including while parked on an open request); `exited` = `session.exited` received or the runner reported it gone. `session.exited.reason` values are the spec's vocabulary: `stopped` (via `stopSession`), `process_exit`, `idle_unload` (Codex `thread/closed`), `runner_restart`, `crash`.
+
+*(Amended 2026-09-10, [#67](https://github.com/rogierpennink/hydra/issues/67).)* `session.exited.reason` gains `inactivity_timeout` and `absolute_timeout`. `runner_restart` is also what an announced shutdown reports, alongside its existing meaning of a restart the controller discovers on reconnect; both timeouts and `runner_restart` leave native state behind, so the exited session is resumable like any other. `resumable` derivation is unchanged.
 
 ### 4.2 Lifecycle
 
