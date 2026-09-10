@@ -1002,6 +1002,74 @@ describe("Thread: token tap (AC-13)", () => {
   });
 });
 
+describe("Thread: the transcript cache only ever grows forwards", () => {
+  it("appends the same :stream delta once, however many times it is delivered", async () => {
+    // The transcript log is append-only and strictly ordered, so a row at or
+    // below the last one held is one the cache already has: a replay the
+    // subscription resumed from, or one delta delivered twice. The probe is
+    // an `assistant_text` delta, because `turnsOf` concatenates those - a
+    // second copy in the cache reads as the sentence said twice.
+    const { live } = await open(session({ status: "idle" }), twoCompletedTurns());
+
+    await waitFor(() => {
+      expect(live.topics()).toContain(sessionStreamTopic(SESSION_ID));
+    });
+
+    act(() => {
+      live.push(sessionStreamTopic(SESSION_ID), {
+        _tag: "delta",
+        items: [
+          row(16, {
+            _tag: "turn.started",
+            eventId: "e16",
+            sessionId: SESSION_ID,
+            at: "2026-09-08T10:02:00.000Z",
+            turnId: "t3",
+          }),
+        ],
+        cursor: "16",
+      });
+    });
+    await settle();
+
+    const again = {
+      _tag: "delta" as const,
+      items: [
+        row(17, {
+          _tag: "content.delta" as const,
+          eventId: "e17",
+          sessionId: SESSION_ID,
+          at: "2026-09-08T10:02:01.000Z",
+          turnId: "t3",
+          itemId: "a3",
+          streamKind: "assistant_text" as const,
+          delta: "One more thing.",
+        }),
+      ],
+      cursor: "17",
+    };
+
+    act(() => {
+      live.push(sessionStreamTopic(SESSION_ID), again);
+    });
+    await settle();
+    const paragraph = (await screen.findByText("One more thing.")).closest("p");
+
+    act(() => {
+      live.push(sessionStreamTopic(SESSION_ID), again);
+    });
+    // React Query notifies its observers on a macrotask, which `settle`'s
+    // microtask turns never reach - so a re-render this delta did cause would
+    // still be pending, and the assertion below would pass by being early.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    expect(paragraph?.textContent).toBe("One more thing.");
+    expect(reading()).not.toContain("One more thing.One more thing.");
+  });
+});
+
 describe("Thread: live subscriptions", () => {
   it("subscribes to exactly the session's stream and tap topics while mounted, and ends them on unmount", async () => {
     const { live, router } = await open(session({ status: "idle" }), twoCompletedTurns());

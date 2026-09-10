@@ -37,16 +37,6 @@ export const useThreadLive = (
   const openItemIdRef = useRef<string | null>(null);
   const frameRef = useRef<number | null>(null);
 
-  // The cursor the `:stream` subscription starts from, captured once from
-  // whatever this hook first saw: computed during render (React's documented
-  // lazy-ref pattern), so the subscribing effect below needs no dependency on
-  // `rows` and does not resubscribe as the transcript grows.
-  const initialCursorRef = useRef<string | undefined>(undefined);
-  if (initialCursorRef.current === undefined) {
-    const last = rows.at(-1);
-    if (last !== undefined) initialCursorRef.current = String(last.position);
-  }
-
   const flushTail = useCallback(() => {
     if (tailRef.current !== null) tailRef.current.textContent = bufferRef.current;
     onTapFlush();
@@ -72,6 +62,15 @@ export const useThreadLive = (
   }, [openItemId, clearTail]);
 
   useEffect(() => {
+    // The cursor is read from the cache at the moment this subscribes, not
+    // from what the first render happened to see: an effect that re-runs then
+    // resumes from wherever the transcript actually stands, instead of
+    // replaying everything since the page opened into the cache a second time.
+    const held = queryClient.getQueryData<readonly TranscriptRow[]>(
+      queryKeys.transcript(sessionId),
+    );
+    const cursor = held?.at(-1);
+
     const unsubscribe = live.subscribe(
       sessionStreamTopic(sessionId),
       (delta) => {
@@ -80,6 +79,12 @@ export const useThreadLive = (
           return;
         }
         if (delta.reset) {
+          // `live.ts` re-subscribes from the head the moment it reports this,
+          // while the refetch below is still in flight - so a row written
+          // between the two is neither in the refetched answer nor delivered
+          // as a delta. Left as is: a reset needs a replaced transcript log,
+          // and closing the window would mean holding the subscription back
+          // on an HTTP read, which is exactly what the reset is escaping.
           clearTail();
           void queryClient.invalidateQueries({ queryKey: queryKeys.transcript(sessionId) });
           return;
@@ -92,12 +97,20 @@ export const useThreadLive = (
         // a row for any other item (another item starting, a turn boundary)
         // leaves the open item's own buffered tail exactly as it was.
         if (items.some((item) => itemIdOf(item.event) === openItemIdRef.current)) clearTail();
+        // Appended on `position`, never blindly: the transcript log is
+        // append-only and strictly ordered, so a row at or below the last one
+        // held is one this cache already has - a replay the subscription
+        // resumed from, or the same delta delivered twice.
         queryClient.setQueryData<readonly TranscriptRow[]>(
           queryKeys.transcript(sessionId),
-          (held) => [...(held ?? []), ...items],
+          (current) => {
+            const last = current?.at(-1)?.position ?? -1;
+            const fresh = items.filter((item) => item.position > last);
+            return fresh.length === 0 ? current : [...(current ?? []), ...fresh];
+          },
         );
       },
-      initialCursorRef.current,
+      cursor === undefined ? undefined : String(cursor.position),
     );
     return unsubscribe;
   }, [live, queryClient, sessionId, clearTail]);
