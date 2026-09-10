@@ -2,31 +2,14 @@
  * The "Worked for" / "Working for" divider: collapsed by default, expanding to
  * a quiet mono `verb · target · result` list per tool item (spec 14 §The
  * thread surface). The live reading ticks every second and carries the shimmer
- * in the live hue; `prefers-reduced-motion` drops the sweep and keeps the hue
- * (design language §Semantic encodings).
+ * in the live hue. `prefers-reduced-motion` drops the sweep and keeps the hue
+ * (design language §Semantic encodings); that rule is the stylesheet's alone -
+ * `.hydra-thread-shimmer` in `@hydra/ui` answers the media query - so there is
+ * no second copy of it here to drift from it.
  */
 import { useEffect, useState, type JSX } from "react";
 import { cn } from "@hydra/ui";
 import { formatDuration, type ThreadItem } from "@hydra/client-core";
-
-const REDUCED_MOTION_QUERY = "(prefers-reduced-motion: reduce)";
-
-const usePrefersReducedMotion = (): boolean => {
-  const [reduced, setReduced] = useState(
-    () =>
-      typeof window.matchMedia === "function" && window.matchMedia(REDUCED_MOTION_QUERY).matches,
-  );
-
-  useEffect(() => {
-    if (typeof window.matchMedia !== "function") return;
-    const query = window.matchMedia(REDUCED_MOTION_QUERY);
-    const onChange = (): void => setReduced(query.matches);
-    query.addEventListener("change", onChange);
-    return () => query.removeEventListener("change", onChange);
-  }, []);
-
-  return reduced;
-};
 
 export function TurnDivider({
   live,
@@ -46,7 +29,6 @@ export function TurnDivider({
 }): JSX.Element {
   const [open, setOpen] = useState(false);
   const [now, setNow] = useState(() => Date.now());
-  const reducedMotion = usePrefersReducedMotion();
 
   useEffect(() => {
     if (!live) return;
@@ -71,7 +53,7 @@ export function TurnDivider({
         onClick={() => setOpen((was) => !was)}
         className={cn(
           "flex items-center gap-1.5 font-mono text-fine tabular-nums",
-          live ? (reducedMotion ? "text-live" : "hydra-thread-shimmer") : "text-faint",
+          live ? "hydra-thread-shimmer" : "text-faint",
         )}
       >
         {reading}

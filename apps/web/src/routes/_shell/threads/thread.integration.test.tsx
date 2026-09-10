@@ -564,7 +564,12 @@ describe("Thread: the live turn (AC-12)", () => {
     screen.getByRole("button", { name: /^Working for 4s$/ });
   });
 
-  it("keeps the shimmer static under prefers-reduced-motion", async () => {
+  it("leaves the shimmer class in place under prefers-reduced-motion, since the stylesheet owns that rule", async () => {
+    // `.hydra-thread-shimmer` drops its own sweep and keeps the live hue
+    // inside `@media (prefers-reduced-motion: reduce)` in `@hydra/ui`. There
+    // is deliberately no JS copy of that rule, so the class the divider
+    // carries is the same either way; whether the sweep actually stops is a
+    // stylesheet question jsdom cannot answer and a manual check does.
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-09-08T11:00:03.000Z"));
     vi.stubGlobal("matchMedia", (query: string) => ({
@@ -579,8 +584,34 @@ describe("Thread: the live turn (AC-12)", () => {
     await settle();
 
     const divider = screen.getByRole("button", { name: /^Working for 3s$/ });
+    expect(divider.className).toContain("hydra-thread-shimmer");
+  });
+
+  it("reads a dangling last turn on a session that is no longer busy as settled, with no shimmer and no ticking", async () => {
+    // A runner that died mid-turn leaves no `turn.completed` row behind, so
+    // the rows alone still look live; the session's own status is what says
+    // otherwise.
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-09-08T11:00:03.000Z"));
+
+    const exited = session({
+      status: "exited",
+      exitedAt: "2026-09-08T11:00:02.000Z",
+      lastActivityAt: "2026-09-08T11:00:01.000Z",
+    });
+    await open(exited, liveTurnRows());
+    await settle();
+
+    const divider = screen.getByRole("button", { name: /^Worked for —$/ });
     expect(divider.className).not.toContain("hydra-thread-shimmer");
-    expect(divider.className).toContain("text-live");
+
+    // Nothing ticks: a minute later it still reads the same settled line.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(60_000);
+    });
+    await settle();
+    screen.getByRole("button", { name: /^Worked for —$/ });
+    expect(screen.queryByRole("button", { name: /Working for/ })).toBeNull();
   });
 
   it("switches the divider to Worked for once turn.completed arrives on :stream", async () => {

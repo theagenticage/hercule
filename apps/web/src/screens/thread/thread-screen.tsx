@@ -59,11 +59,13 @@ export function ThreadScreen({
   return (
     <div className="mx-auto flex w-full max-w-[800px] flex-1 flex-col gap-6">
       {turns.map((turn, index) => {
-        // Only the last turn can still be running: an earlier one with no
-        // `turn.completed` was abandoned by an interrupt, not left mid-turn
-        // forever, so it reads its own turn as settled with nothing to time
-        // rather than as running since whenever it was last touched.
-        const isLive = index === lastIndex && turn.duration === null;
+        // Only the last turn of a busy session can still be running: an
+        // earlier one with no `turn.completed` was abandoned by an interrupt,
+        // and a dangling last turn on a session that is idle or exited was
+        // abandoned by the runner - neither is still running, so both read as
+        // settled with nothing to time rather than as working since whenever
+        // they were last touched.
+        const isLive = session.status === "busy" && index === lastIndex && turn.duration === null;
         return (
           <Turn
             key={turn.turnId}
