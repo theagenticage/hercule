@@ -122,7 +122,6 @@ const FACTS: RunnerFacts = {
 const WATERMARK: RunnerWatermark = {
   diskFreeBytes: 200 * 1024 * 1024 * 1024,
   availableMemoryBytes: 1,
-  acceptingPlacements: true,
 };
 
 /** A connection this file never writes to: its subject is the row, not the wire. */

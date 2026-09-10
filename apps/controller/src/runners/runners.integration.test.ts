@@ -8,11 +8,22 @@
  */
 import { describe, expect, it } from "vitest";
 import { Effect } from "effect";
-import type { Runner, RunnerDetail } from "@hydra/contract";
+import type { RunnerFacts, SessionStart, SessionStop as SessionStopFrame } from "@hydra/protocol";
+import type { Runner, RunnerDetail, Session } from "@hydra/contract";
 import { uuidFromString } from "../db";
 import { hashToken } from "../credentials";
 import type { ServerHarness } from "../http/testing";
 import { SETUP_TOKEN, completeSetup, del, get, post, send, withServer } from "../http/testing";
+import { fixture, providerDefinition } from "../plugins/testing";
+import {
+  framesOf,
+  framesWhen,
+  report,
+  until,
+  WAIT_DEADLINE_MS,
+  withFleet as sharedWithFleet,
+  type Arranged,
+} from "../sessions/testing";
 
 interface RunnerPage {
   readonly items: ReadonlyArray<Runner>;
@@ -470,12 +481,17 @@ describe("PATCH /runners/{id}", () => {
     });
   });
 
-  it("refuses an empty name, a session cap below one, and a label that is not a string", async () => {
+  it("refuses an empty name, a session cap below one, a disk watermark below one, and a label that is not a string", async () => {
     await withServer(async (harness) => {
       const token = await completeSetup(harness.base);
       const runner = await harness.insertRunner({ name: "iris", labels: ["gpu"] });
 
-      for (const body of [{ name: "" }, { maxConcurrentSessions: 0 }, { labels: [7] }]) {
+      for (const body of [
+        { name: "" },
+        { maxConcurrentSessions: 0 },
+        { diskWatermarkBytes: 0 },
+        { labels: [7] },
+      ]) {
         const response = await patch(harness.base, token, runner.id, body);
         expect(response.status, JSON.stringify(body)).toBe(400);
         expect(await response.json()).toMatchObject({ error: { code: "validation" } });
@@ -1126,4 +1142,212 @@ describe("DELETE /runners/join-tokens/{id}", () => {
       expect((await join(harness.base, live.token)).status).toBe(401);
     });
   });
+});
+
+const GIB = 1024 * 1024 * 1024;
+
+describe("the disk a runner is admitted against", () => {
+  it("holds ten gibibytes until the owner says otherwise, and answers with what holds", async () => {
+    await withServer(async (harness) => {
+      const token = await completeSetup(harness.base);
+      const runner = await harness.insertRunner({ name: "iris", connectivity: "online" });
+
+      // Nobody has set one, so the row reads the shipped floor rather than
+      // nothing at all.
+      expect((await read(harness.base, token, runner.id)).diskWatermarkBytes).toBe(10 * GIB);
+
+      const set = await patch(harness.base, token, runner.id, { diskWatermarkBytes: 2 * GIB });
+      expect(set.status, await set.clone().text()).toBe(200);
+      expect(await set.json()).toMatchObject({ diskWatermarkBytes: 2 * GIB });
+      expect((await read(harness.base, token, runner.id)).diskWatermarkBytes).toBe(2 * GIB);
+
+      // A machine that has reported its disk: 4 GiB free, which is above the
+      // 2 GiB watermark just set, so it reads as accepting.
+      await Effect.runPromise(
+        Effect.orDie(
+          harness.sql`UPDATE runners SET watermark = ${JSON.stringify({
+            diskFreeBytes: 4 * GIB,
+            availableMemoryBytes: 16 * GIB,
+          })} WHERE id = ${uuidFromString(runner.id)}`,
+        ),
+      );
+      const before = await harness.audit("runner.placementsChanged");
+
+      // Raising the watermark past the disk it already reported is the same
+      // crossing a report would make, and it is recorded the same way.
+      const raised = await patch(harness.base, token, runner.id, { diskWatermarkBytes: 8 * GIB });
+      expect(raised.status, await raised.clone().text()).toBe(200);
+
+      const after = await harness.audit("runner.placementsChanged");
+      expect(after).toHaveLength(before.length + 1);
+      const flip = after[after.length - 1];
+      expect(flip?.actor).toBe("system");
+      expect(flip?.payload).toMatchObject({ runnerId: runner.id, acceptingPlacements: false });
+    });
+  });
+});
+
+/**
+ * Retiring a runner that still holds sessions. This needs a real machine on the
+ * real socket, so it stands up the shared fleet rather than an inserted row:
+ * what retire has to account for is sessions, and sessions only exist where
+ * something can be told to start them.
+ */
+const FLEET_FACTS: RunnerFacts = {
+  os: "darwin",
+  arch: "arm64",
+  totalMemoryBytes: 68719476736,
+  docker: false,
+  toolchains: [],
+  providers: [{ name: "harness", present: true, path: "/usr/local/bin/harness" }],
+  adapters: ["full-provider"],
+  identityPort: 4939,
+};
+
+/**
+ * What a case that stands up a fleet is given: the shared waits are the fleet's
+ * own, and a wait that outlasts the budget never gets to name what never came.
+ */
+const FLEET_BUDGET_MS = WAIT_DEADLINE_MS * 3 + 10_000;
+
+const withFleet = (body: (arranged: Arranged) => Promise<void>): Promise<void> =>
+  sharedWithFleet(body, {
+    plugins: [
+      fixture({
+        id: "providers",
+        definitions: [providerDefinition("full-provider", { token: "t" })],
+      }).plugin,
+    ],
+    facts: FLEET_FACTS,
+    models: [{ slug: "clever", name: "Clever", isDefault: true, options: [] }],
+  });
+
+const sessionOf = async (arranged: Arranged, id: string): Promise<Session> => {
+  const response = await get(arranged.harness.base, `/api/v1/sessions/${id}`, arranged.token);
+  expect(response.status, await response.clone().text()).toBe(200);
+  return (await response.json()) as Session;
+};
+
+const spawnOn = async (arranged: Arranged, prompt: string): Promise<Session> => {
+  const response = await post(
+    arranged.harness.base,
+    "/api/v1/sessions",
+    { prompt },
+    arranged.token,
+  );
+  expect(response.status, await response.clone().text()).toBe(200);
+  return (await response.json()) as Session;
+};
+
+/** A session the machine has confirmed it is running. */
+const running = async (arranged: Arranged): Promise<Session> => {
+  const session = await spawnOn(arranged, "hello");
+  await framesWhen<SessionStart>(arranged.wire, "sessionStart", 1);
+  report(arranged.wire, 1, {
+    eventId: crypto.randomUUID(),
+    sessionId: session.id,
+    at: "2026-09-07T10:00:00.000Z",
+    _tag: "session.started",
+  });
+  return await until("started the session", async () => {
+    const one = await sessionOf(arranged, session.id);
+    return one.status === "idle" ? one : undefined;
+  });
+};
+
+const capAt = async (arranged: Arranged, cap: number): Promise<void> => {
+  const response = await patch(arranged.harness.base, arranged.token, arranged.runnerId, {
+    maxConcurrentSessions: cap,
+  });
+  expect(response.status, await response.clone().text()).toBe(200);
+};
+
+describe("retiring a runner that still holds sessions", () => {
+  it(
+    "refuses while one is running, and forced ends the running and the queued alike",
+    async () => {
+      await withFleet(async (arranged) => {
+        await capAt(arranged, 1);
+        const live = await running(arranged);
+        const waiting = await spawnOn(arranged, "after you");
+        expect(waiting.status).toBe("queued");
+
+        const refused = await move(
+          arranged.harness.base,
+          arranged.token,
+          arranged.runnerId,
+          "retire",
+        );
+
+        expect(refused.status, await refused.clone().text()).toBe(409);
+        const body = (await refused.json()) as { error: { code: string; message: string } };
+        expect(body.error.code).toBe("invalid_state");
+        expect(body.error.message).toContain("session");
+        expect(
+          (await read(arranged.harness.base, arranged.token, arranged.runnerId)).lifecycle,
+        ).toBe("active");
+
+        const forced = await move(
+          arranged.harness.base,
+          arranged.token,
+          arranged.runnerId,
+          "retire",
+          { force: true },
+        );
+
+        expect(forced.status, await forced.clone().text()).toBe(200);
+        for (const session of [live, waiting]) {
+          const ended = await until(`ended ${session.id}`, async () => {
+            const one = await sessionOf(arranged, session.id);
+            return one.status === "exited" ? one : undefined;
+          });
+          expect(ended.status).toBe("exited");
+        }
+        // The running one had a harness to tell; the queued one never did.
+        await until("sent a sessionStop", () =>
+          framesOf<SessionStopFrame>(arranged.wire, "sessionStop").length > 0 ? true : undefined,
+        );
+        expect(
+          framesOf<SessionStopFrame>(arranged.wire, "sessionStop").map((frame) => frame.sessionId),
+        ).toEqual([live.id]);
+      });
+    },
+    FLEET_BUDGET_MS,
+  );
+
+  it(
+    "retires without being forced when everything it holds is only queued",
+    async () => {
+      await withFleet(async (arranged) => {
+        // Under the shipped watermark, so the placement lands on the runner and
+        // waits there instead of starting.
+        arranged.wire.send({
+          _tag: "watermarkReport",
+          watermark: { diskFreeBytes: 4 * GIB, availableMemoryBytes: 16 * GIB },
+        });
+        await until("stored the low reading", async () => {
+          const runner = await read(arranged.harness.base, arranged.token, arranged.runnerId);
+          return runner.watermark?.diskFreeBytes === 4 * GIB ? runner : undefined;
+        });
+        const waiting = await spawnOn(arranged, "no room");
+        expect(waiting.status).toBe("queued");
+
+        const retired = await move(
+          arranged.harness.base,
+          arranged.token,
+          arranged.runnerId,
+          "retire",
+        );
+
+        expect(retired.status, await retired.clone().text()).toBe(200);
+        expect(await retired.json()).toMatchObject({ lifecycle: "retired" });
+        const ended = await until("ended what was queued", async () => {
+          const one = await sessionOf(arranged, waiting.id);
+          return one.status === "exited" ? one : undefined;
+        });
+        expect(ended.status).toBe("exited");
+      });
+    },
+    FLEET_BUDGET_MS,
+  );
 });

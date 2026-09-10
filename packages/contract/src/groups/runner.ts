@@ -87,6 +87,8 @@ export const Runner = Schema.Struct({
   watermark: Schema.NullOr(RunnerWatermark),
   /** The effective cap: the owner's override, or the one derived from the facts. */
   maxConcurrentSessions: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)),
+  /** The effective watermark: the owner's override, or the shipped ten gibibytes. */
+  diskWatermarkBytes: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)),
   lastSeenAt: Schema.NullOr(Timestamp),
 });
 
@@ -122,6 +124,7 @@ export const RUNNER_EDIT_FIELDS = {
   name: Schema.optionalKey(RunnerName),
   labels: Schema.optionalKey(atMost(RunnerLabel, MAX_RUNNER_LABELS)),
   maxConcurrentSessions: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(1))),
+  diskWatermarkBytes: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(1))),
   reserved: Schema.optionalKey(Schema.Boolean),
 } as const;
 

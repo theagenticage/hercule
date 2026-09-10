@@ -55,7 +55,6 @@ const facts = {
 const watermark = {
   diskFreeBytes: 42949672960,
   availableMemoryBytes: 8589934592,
-  acceptingPlacements: true,
 } as const;
 
 const runnerHello = {
@@ -243,6 +242,26 @@ describe("the runner hello", () => {
       Schema.decodeUnknownEffect(RunnerToController)({ ...runnerHello, credential: "secret" }),
     );
     expect(decoded).not.toHaveProperty("credential");
+  });
+});
+
+describe("the watermark a runner reports", () => {
+  it.each(["diskFreeBytes", "availableMemoryBytes"])("refuses a report without %s", (key) => {
+    expect(fromRunner({ _tag: "watermarkReport", watermark: without(watermark, key) })._tag).toBe(
+      "Failure",
+    );
+  });
+
+  it("says nothing about placement: whether the machine may be given work is not the machine's", () => {
+    const decoded = Effect.runSync(
+      Schema.decodeUnknownEffect(RunnerToController)({
+        _tag: "watermarkReport",
+        watermark: { ...watermark, acceptingPlacements: false },
+      }),
+    ) as { readonly watermark: Record<string, unknown> };
+
+    expect(decoded.watermark).not.toHaveProperty("acceptingPlacements");
+    expect(decoded.watermark).toEqual(watermark);
   });
 });
 

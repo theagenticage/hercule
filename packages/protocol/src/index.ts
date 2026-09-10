@@ -124,11 +124,15 @@ export const RunnerFacts = Schema.Struct({
 
 export type RunnerFacts = Schema.Schema.Type<typeof RunnerFacts>;
 
-/** The fast-moving half of a runner's state. Never buffered: only the latest matters. */
+/**
+ * The fast-moving half of a runner's state. Never buffered: only the latest
+ * matters. What a reading means for placement is the controller's to decide,
+ * against the watermark it holds, so the runner reports only what the machine
+ * has left.
+ */
 export const RunnerWatermark = Schema.Struct({
   diskFreeBytes: Bytes,
   availableMemoryBytes: Bytes,
-  acceptingPlacements: Schema.Boolean,
 });
 
 export type RunnerWatermark = Schema.Schema.Type<typeof RunnerWatermark>;

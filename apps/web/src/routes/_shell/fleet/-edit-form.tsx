@@ -12,8 +12,10 @@ import {
 import type { RunnerDetail, RunnerUpdateInput } from "@hydra/contract";
 import { messageOf, SaveStatus } from "../../../screens/save-status";
 
+const GIB = 1024 * 1024 * 1024;
+
 /**
- * The four fields a machine's owner writes, saved as a patch of what moved.
+ * The five fields a machine's owner writes, saved as a patch of what moved.
  *
  * What moved is measured against the machine the form was opened with, not
  * against the machine as it now stands: a re-probe or a live push replaces the
@@ -103,6 +105,20 @@ export function EditForm({
           value={String(form.draft.maxConcurrentSessions)}
           onChange={(event) => {
             edit({ maxConcurrentSessions: Number(event.target.value) });
+          }}
+        />
+      </Field>
+      <Field id="runner-disk-watermark" label="Disk watermark (GiB)">
+        <Input
+          id="runner-disk-watermark"
+          type="number"
+          min={1}
+          step={1}
+          value={String(form.draft.diskWatermarkBytes / GIB)}
+          onChange={(event) => {
+            // Rounded, so a fraction of a GiB never turns into a byte count
+            // the contract's integer check refuses.
+            edit({ diskWatermarkBytes: Math.round(Number(event.target.value) * GIB) });
           }}
         />
       </Field>

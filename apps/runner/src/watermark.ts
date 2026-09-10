@@ -11,18 +11,10 @@ import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import type { RunnerWatermark } from "@hydra/protocol";
 
-/** Ten gibibytes: a checkout and its build, with enough left for the machine. */
-export const DISK_WATERMARK_BYTES = 10 * 1024 * 1024 * 1024;
-
 export const WATERMARK_INTERVAL: Duration.Duration = Duration.seconds(60);
 
-export interface Headroom {
-  readonly diskFreeBytes: number;
-  readonly availableMemoryBytes: number;
-}
-
 /** For the filesystem the given path sits on. */
-export const machineHeadroom = (path: string): Effect.Effect<Headroom, Cause.UnknownError> =>
+export const machineHeadroom = (path: string): Effect.Effect<RunnerWatermark, Cause.UnknownError> =>
   Effect.map(
     Effect.tryPromise(() => statfs(path)),
     (stats) => ({
@@ -32,17 +24,8 @@ export const machineHeadroom = (path: string): Effect.Effect<Headroom, Cause.Unk
     }),
   );
 
-/**
- * Only the disk decides: a machine short of memory runs fewer sessions at once,
- * which is the cap's business, but one out of disk cannot check anything out.
- */
-export const watermarkOf = (headroom: Headroom): RunnerWatermark => ({
-  ...headroom,
-  acceptingPlacements: headroom.diskFreeBytes >= DISK_WATERMARK_BYTES,
-});
-
 export interface WatermarkCheck<E> {
-  readonly read: Effect.Effect<Headroom, Cause.UnknownError>;
+  readonly read: Effect.Effect<RunnerWatermark, Cause.UnknownError>;
   readonly send: (watermark: RunnerWatermark) => Effect.Effect<void, E>;
 }
 
@@ -50,6 +33,10 @@ export interface WatermarkCheck<E> {
  * Reports at once, which keeps a runner that has just said hello from looking
  * like a machine with an unknown disk for a minute. A reading nobody could take
  * is skipped: sending zero free bytes would retire the machine over one call.
+ *
+ * Whether a reading means the machine can take work is the controller's to
+ * decide, against the watermark it holds; the runner only reports what the
+ * machine has left.
  */
 export const checkWatermark = <E>(check: WatermarkCheck<E>): Effect.Effect<never, E> =>
   Effect.gen(function* () {
@@ -59,7 +46,7 @@ export const checkWatermark = <E>(check: WatermarkCheck<E>): Effect.Effect<never
           Effect.logWarning("A runner could not read what its machine has left", cause),
         ),
       );
-      if (Option.isSome(headroom)) yield* check.send(watermarkOf(headroom.value));
+      if (Option.isSome(headroom)) yield* check.send(headroom.value);
       yield* Effect.sleep(WATERMARK_INTERVAL);
     }
   });

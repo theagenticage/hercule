@@ -400,12 +400,13 @@ const make = Effect.gen(function* () {
         Effect.gen(function* () {
           if (reachable.get(id)?.connection !== connection) return;
           const at = yield* nowIso;
-          if (!(yield* runners.recordWatermark(id, watermark, at))) return;
+          const result = yield* runners.recordWatermark(id, watermark, at);
+          if (!result.crossed) return;
           yield* audit.append({
             kind: "runner.placementsChanged",
             actor: SYSTEM_ACTOR,
             record: { topic: "runner", id },
-            payload: { runnerId: id, acceptingPlacements: watermark.acceptingPlacements },
+            payload: { runnerId: id, acceptingPlacements: result.accepting },
             at,
           });
         }),

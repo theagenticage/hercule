@@ -64,8 +64,8 @@ import { announce, nowIso, pageInput, refuseCursor, withTransaction, type Page }
 import { AuditLog } from "../events";
 import { PermissionProfiles, type GrantsError } from "../permissions";
 import { PluginHost } from "../plugins";
-import { providerRepository, type StoredInstance, type StoredSnapshot } from "../providers";
-import { requireOnline, RunnerPresence, runnerRepository, type SessionTraffic } from "../runners";
+import { providerRepository, type StoredSnapshot } from "../providers";
+import { RunnerPresence, runnerRepository, type SessionTraffic } from "../runners";
 import { Settings, type ScopeSettings, type SettingError } from "../settings";
 import { inputRepository, type StoredInput } from "./inputs";
 import { sessionRepository, type StoredSession } from "./repository";
@@ -142,6 +142,7 @@ const decodeInputUpdate = Schema.decodeUnknownEffect(InputUpdate);
 const decodeInputIdentified = Schema.decodeUnknownEffect(InputIdentified);
 const decodeContinue = Schema.decodeUnknownEffect(ContinueInput);
 const encodeSpec = Schema.encodeUnknownSync(SessionSpec);
+const decodeSpec = Schema.decodeUnknownEffect(SessionSpec);
 
 /** Newest first: a session list is read as a history. */
 const DEFAULT_DIRECTION: SortDirection = "desc";
@@ -267,7 +268,6 @@ type InputError = ReadError | NotFound | InvalidState | SettingError | Schema.Sc
 
 /** What an instance is, once the row and the provider behind it are both in hand. */
 interface Resolved {
-  readonly instance: StoredInstance;
   readonly definition: ProviderDefinition;
   readonly snapshots: ReadonlyArray<StoredSnapshot>;
 }
@@ -326,7 +326,6 @@ const make = Effect.gen(function* () {
         );
       }
       return {
-        instance: found.value,
         definition,
         snapshots: yield* instances.snapshotsOf(instanceId),
       };
@@ -351,9 +350,11 @@ const make = Effect.gen(function* () {
 
   /**
    * The one machine a caller named directly, honoured even where it is
-   * reserved or full: read and checked on its own, the way `continue` checks
-   * the one machine it is pinned to, rather than filtered through
-   * `placeable`, which exists only for the automatic fallback above.
+   * reserved, full, or unreachable this moment: read and checked on its own,
+   * the way `continue` checks the one machine it is pinned to, rather than
+   * filtered through `placeable`, which exists only for the automatic
+   * fallback above. Whether it can take the session now is dispatch's to
+   * decide; a machine that cannot yet still gets the session queued on it.
    */
   const explicitRunner = (
     runnerId: string,
@@ -370,7 +371,6 @@ const make = Effect.gen(function* () {
           invalidState(runner.lifecycle === "retired" ? RETIRED : DRAINING),
         );
       }
-      yield* requireOnline(runner);
       const snapshot = snapshots.find((one) => one.runnerId === runnerId && loggedIn(one));
       if (snapshot === undefined) return yield* Effect.fail(invalidState(NO_PLACEMENT));
       return snapshot;
@@ -561,6 +561,81 @@ const make = Effect.gen(function* () {
       ),
     );
 
+  /**
+   * Moves this runner's oldest queued sessions to `starting`, as many as its
+   * cap and its disk watermark allow, and tells the machine to start each. A
+   * start the machine does not take goes back to the queue in its own
+   * transaction, for the next thing that changes this runner's capacity to
+   * try again.
+   */
+  const dispatch = (runnerId: string): Effect.Effect<void, SqlError> =>
+    Effect.gen(function* () {
+      const ready = yield* withTransaction(
+        sql,
+        Effect.gen(function* () {
+          const found = yield* runners.read(runnerId);
+          if (Option.isNone(found)) return [];
+          const runner = found.value;
+          if (runner.connectivity !== "online" || runner.lifecycle !== "active") return [];
+          const watermark = runner.watermark;
+          // A watermark nobody has reported yet is not a machine that said no.
+          if (watermark !== null && watermark.diskFreeBytes < runner.diskWatermarkBytes) return [];
+          const room = runner.maxConcurrentSessions - (yield* runners.runningSessions(runnerId));
+          if (room <= 0) return [];
+          const queued = yield* sessions.oldestQueued(runnerId, room);
+          const at = yield* nowIso;
+          for (const row of queued) {
+            yield* sessions.moved(row.id, "starting", at);
+            yield* announce({ _tag: "record", topic: "session", id: row.id, kind: "updated" });
+          }
+          return queued;
+        }),
+      );
+      for (const row of ready) {
+        const start: SessionStart = {
+          _tag: "sessionStart",
+          sessionId: row.id,
+          providerId: row.providerId,
+          config: row.config as Schema.Json,
+          // A defect, not a typed failure: the document was encoded by this
+          // same codec at insert, so a decode failure means a spec field's
+          // codec changed underneath a row already queued with the old one.
+          spec: yield* Effect.orDie(decodeSpec(JSON.parse(row.spec))),
+        };
+        if (!(yield* presence.tell(runnerId, start))) {
+          yield* withTransaction(
+            sql,
+            Effect.gen(function* () {
+              yield* sessions.moved(row.id, "queued", yield* nowIso);
+              yield* announce({ _tag: "record", topic: "session", id: row.id, kind: "updated" });
+            }),
+          );
+        }
+      }
+    });
+
+  /**
+   * Ends every session a runner still holds open, the same way any other
+   * move to `exited` does: queued inputs cancelled, one announce per session.
+   * Runs in the caller's transaction, joining it as a savepoint. The ids of
+   * what was `starting`, `idle` or `busy` come back too, so a caller ending
+   * the runner itself can still tell the machine to stop each before it lets
+   * go of the connection.
+   */
+  const endOnRunner = (runnerId: string): Effect.Effect<ReadonlyArray<string>, SqlError> =>
+    withTransaction(
+      sql,
+      Effect.gen(function* () {
+        const at = yield* nowIso;
+        const { ended, running } = yield* sessions.endOnRunner(runnerId, at);
+        for (const id of ended) {
+          yield* inputs.cancelQueued(id);
+          yield* announce({ _tag: "record", topic: "session", id, kind: "updated" });
+        }
+        return running;
+      }),
+    );
+
   const reported = (
     runnerId: string,
     seq: number,
@@ -639,6 +714,13 @@ const make = Effect.gen(function* () {
           absorbing("A session's queued input could not be sent", flush(id, runnerId)),
         );
       }
+      // Forked for the same reason: dispatch writes to the runner's socket,
+      // and the ingest is one fiber for the whole fleet.
+      if (moved === "exited") {
+        yield* Effect.forkChild(
+          absorbing("A freed slot could not be dispatched", dispatch(runnerId)),
+        );
+      }
     });
 
   /**
@@ -657,7 +739,6 @@ const make = Effect.gen(function* () {
     readonly parentSessionId: string | undefined;
     /** Everything the machine is told, and the source of what the row stores. */
     readonly spec: SessionSpec;
-    readonly instance: StoredInstance;
     readonly prompt: string;
     readonly kind: "session.spawned" | "session.continued";
     /** What the audit entry records beyond the new session's own id. */
@@ -665,11 +746,10 @@ const make = Effect.gen(function* () {
   }
 
   /**
-   * The row, its first input and the entry that records it, in one
-   * transaction, and then the frame that tells the machine to start it.
-   *
-   * A machine that went away between the two leaves a row nothing will ever
-   * start, so it is ended here rather than left reading `starting` for good.
+   * The row and its first input, and the entry that records it, in one
+   * transaction. It always lands `queued`: `dispatch` is what decides
+   * whether this runner has room for it right now, and it is the same
+   * decision either way, so a fresh row takes it rather than a copy of it.
    */
   const opening = (open: Opening): Effect.Effect<StoredSession, InvalidState | SqlError> =>
     Effect.gen(function* () {
@@ -721,29 +801,33 @@ const make = Effect.gen(function* () {
           return row;
         }),
       );
-
-      const start: SessionStart = {
-        _tag: "sessionStart",
-        sessionId: stored.id,
-        providerId: open.instance.providerId,
-        config: open.instance.config,
-        spec: open.spec,
-      };
-      if (yield* presence.tell(open.runnerId, start)) return stored;
-      yield* withTransaction(
-        sql,
-        Effect.gen(function* () {
-          yield* sessions.moved(stored.id, "exited", yield* nowIso);
-          yield* announce({ _tag: "record", topic: "session", id: stored.id, kind: "updated" });
-        }),
-      );
-      return yield* Effect.fail(invalidState(GONE));
+      // Outside the transaction: dispatch may tell the machine, and a
+      // transaction never spans a wait on anything outside the database.
+      yield* dispatch(open.runnerId);
+      // Read back rather than returned from the insert, so the caller sees
+      // `starting` where dispatch placed it at once rather than `queued`.
+      const after = yield* sessions.one(stored.id);
+      if (Option.isNone(after)) {
+        return yield* Effect.die("a session that was just inserted could not be read back");
+      }
+      return after.value;
     });
 
   const applying = (traffic: SessionTraffic): Effect.Effect<void, SqlError> =>
-    traffic.frame._tag === "sessionsReport"
-      ? bound(traffic.runnerId, traffic.frame.sessions)
-      : reported(traffic.runnerId, traffic.frame.seq, traffic.frame.event);
+    Effect.gen(function* () {
+      if (traffic.frame._tag !== "sessionsReport") {
+        yield* reported(traffic.runnerId, traffic.frame.seq, traffic.frame.event);
+        return;
+      }
+      yield* bound(traffic.runnerId, traffic.frame.sessions);
+      // Reconciliation lands here in a later slice; dispatch already belongs
+      // after whatever this runner's report settles. Forked for the same
+      // reason a freed slot's dispatch is: it writes to the runner's socket,
+      // and the ingest is one fiber for the whole fleet.
+      yield* Effect.forkChild(
+        absorbing("A runner's report could not be dispatched", dispatch(traffic.runnerId)),
+      );
+    });
 
   return {
     query: (input: QueryInput): Effect.Effect<SessionPage, ReadError> =>
@@ -817,7 +901,7 @@ const make = Effect.gen(function* () {
 
         const instanceId =
           decoded.instanceId ?? defaults["thread.instanceId"] ?? (yield* firstLoggedIn());
-        const { instance, definition, snapshots } = yield* resolved(instanceId);
+        const { definition, snapshots } = yield* resolved(instanceId);
         const hosting = yield* decoded.runnerId === undefined
           ? placement(snapshots)
           : explicitRunner(decoded.runnerId, snapshots);
@@ -867,7 +951,6 @@ const make = Effect.gen(function* () {
           nativeSessionId: undefined,
           parentSessionId: undefined,
           spec,
-          instance,
           prompt: decoded.prompt,
           kind: "session.spawned",
           payload: {
@@ -1010,6 +1093,9 @@ const make = Effect.gen(function* () {
      * Ends the harness. The session moves to `exited` when the machine reports
      * the exit, not here: this build has no way to end a session the machine
      * never confirms is gone.
+     *
+     * A queued session has no harness to tell: it is ended directly, with
+     * nothing sent to the runner, since it was never told about it either.
      */
     stop: (input: Identified): Effect.Effect<Session, InputError> =>
       Effect.gen(function* () {
@@ -1017,6 +1103,24 @@ const make = Effect.gen(function* () {
         const { id } = yield* Effect.mapError(decodeIdentified(input), validationOf);
         const session = yield* one(id);
         if (session.status === "exited") return yield* Effect.fail(invalidState(HAS_EXITED));
+        if (session.status === "queued") {
+          return yield* withTransaction(
+            sql,
+            Effect.gen(function* () {
+              const at = yield* nowIso;
+              yield* sessions.moved(id, "exited", at);
+              yield* inputs.cancelQueued(id);
+              yield* announce({ _tag: "record", topic: "session", id, kind: "updated" });
+              yield* audit.append({
+                kind: "session.stopped",
+                actor: USER_ACTOR,
+                payload: { sessionId: id, runnerId: session.runnerId },
+                at,
+              });
+              return { ...session, status: "exited" as const, exitedAt: at };
+            }),
+          );
+        }
         if (!(yield* presence.tell(session.runnerId, { _tag: "sessionStop", sessionId: id }))) {
           return yield* Effect.fail(invalidState(GONE));
         }
@@ -1061,14 +1165,15 @@ const make = Effect.gen(function* () {
         if (Option.isNone(machine)) return yield* Effect.fail(invalidState(NOT_RESUMABLE));
         // A continued session is a new session on that machine, and a draining
         // one takes none (spec 03 section 7). `resumable` says the transcript
-        // is still there; this says the machine will not open it.
+        // is still there; this says the machine will not open it. Whether the
+        // machine can be reached right now is dispatch's to decide: unreachable
+        // queues the session rather than refusing it.
         if (machine.value.lifecycle !== "active") {
           return yield* Effect.fail(
             invalidState(machine.value.lifecycle === "retired" ? RETIRED : DRAINING),
           );
         }
-        yield* requireOnline(machine.value);
-        const { instance, snapshots } = yield* resolved(parent.instanceId);
+        const { snapshots } = yield* resolved(parent.instanceId);
         // The login half of what `spawn` asks placement for, of the one machine
         // that holds the native state rather than of the fleet: the stored
         // snapshot's word that this machine can run this instance.
@@ -1093,7 +1198,6 @@ const make = Effect.gen(function* () {
             continue: { nativeSessionId: parent.nativeSessionId, mode },
             timeouts: timeoutsFrom(yield* settings.all()),
           },
-          instance,
           prompt,
           kind: "session.continued",
           payload: { parentSessionId: parent.id, mode },
@@ -1163,6 +1267,16 @@ const make = Effect.gen(function* () {
     ingesting: Stream.runForEach(presence.sessionTraffic, (traffic) =>
       absorbing("A session report could not be recorded", applying(traffic)),
     ),
+
+    /**
+     * Reaches outside this domain: a runner's cap or watermark changing, and
+     * an undrain, are facts the runners domain holds and this domain has no
+     * other way to hear about.
+     */
+    dispatch,
+
+    /** Reached by `runner.retire`, which owns the sessions a retired machine leaves behind. */
+    endOnRunner,
   };
 });
 

@@ -40,6 +40,7 @@ import {
 import { bearerOf } from "../http/bearer";
 import { responseFor } from "../http/envelope";
 import { ControllerIdentity } from "../identity";
+import { SessionService } from "../sessions";
 import { newConnection, RunnerPresence, type Connection, type Departure } from "./presence";
 
 const RUNNER_SOCKET_PATH = "/api/v1/runners/socket";
@@ -110,6 +111,7 @@ const negotiated = (theirs: ReadonlyArray<string>): ReadonlyArray<string> =>
 const hold = (runnerId: string, socket: Socket.Socket) =>
   Effect.gen(function* () {
     const presence = yield* RunnerPresence;
+    const sessions = yield* SessionService;
     const identity = yield* ControllerIdentity;
     const pings = yield* RunnerPingSchedule;
     const write = yield* socket.writer;
@@ -206,7 +208,10 @@ const hold = (runnerId: string, socket: Socket.Socket) =>
             return yield* presence.reportedFacts(runnerId, mine, message.facts);
           case "watermarkReport":
             if (!greeted) return;
-            return yield* presence.reportedWatermark(runnerId, mine, message.watermark);
+            yield* presence.reportedWatermark(runnerId, mine, message.watermark);
+            // Outside the write above: dispatch may tell this runner, and a
+            // transaction never spans a wait on anything outside the database.
+            return yield* sessions.dispatch(runnerId);
           case "probeReport":
           case "installResult":
           case "loginUrl":

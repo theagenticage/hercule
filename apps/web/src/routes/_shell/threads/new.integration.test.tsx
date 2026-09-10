@@ -41,6 +41,7 @@ const RUNNER: Runner = {
   facts: null,
   watermark: null,
   maxConcurrentSessions: 4,
+  diskWatermarkBytes: 10 * 1024 * 1024 * 1024,
   lastSeenAt: "2026-09-05T09:14:00.000Z",
 };
 

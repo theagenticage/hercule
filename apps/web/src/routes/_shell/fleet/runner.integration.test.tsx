@@ -217,6 +217,9 @@ describe("Runner", () => {
     expect(screen.getByLabelText<HTMLInputElement>(/session/i).value).toBe(
       String(MOSS.maxConcurrentSessions),
     );
+    expect(screen.getByLabelText<HTMLInputElement>(/disk watermark/i).value).toBe(
+      String(MOSS.diskWatermarkBytes / GIB),
+    );
   });
 
   it("says a machine is the owner's own when it is", async () => {
