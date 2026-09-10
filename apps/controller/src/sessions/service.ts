@@ -1154,8 +1154,7 @@ const make = Effect.gen(function* () {
             Effect.gen(function* () {
               const at = yield* nowIso;
               yield* sessions.moved(id, "exited", at);
-              yield* inputs.cancelQueued(id);
-              yield* announce({ _tag: "record", topic: "session", id, kind: "updated" });
+              yield* ending([id]);
               yield* audit.append({
                 kind: "session.stopped",
                 actor: USER_ACTOR,
