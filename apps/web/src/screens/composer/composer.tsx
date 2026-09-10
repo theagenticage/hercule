@@ -22,7 +22,6 @@ import {
   runnerMenu,
   threadDefaults,
   type HydraClient,
-  type Live,
   type RunnerMenuRow,
 } from "@hydra/client-core";
 import type {
@@ -34,7 +33,6 @@ import type {
   SettingsState,
 } from "@hydra/contract";
 import { Button, cn, ListRow, Textarea } from "@hydra/ui";
-import { useLiveInvalidation } from "../../app/live-invalidation";
 import { messageOf } from "../save-status";
 import { MenuRow } from "./menu-row";
 import { ModelMenuContent } from "./model-menu-content";
@@ -79,7 +77,6 @@ const runnerRowLabel = (row: RunnerMenuRow): JSX.Element => (
 
 export function Composer({
   client,
-  live,
   instances,
   runners,
   profiles,
@@ -89,7 +86,6 @@ export function Composer({
   onSend,
 }: {
   readonly client: HydraClient;
-  readonly live: Live;
   readonly instances: readonly ProviderInstance[];
   readonly runners: readonly Runner[];
   readonly profiles: readonly Profile[];
@@ -104,11 +100,6 @@ export function Composer({
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const started = session !== undefined;
-
-  // A session that changed elsewhere - a queued input delivered, a turn
-  // finishing - keeps the started thread's own read of it, and the queued
-  // list below the card, current.
-  useLiveInvalidation(live, queryClient, "session");
 
   // The composer's own draft selection, live only until a thread starts - a
   // started thread reads the same five values off `session` instead (below)

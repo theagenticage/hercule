@@ -34,7 +34,7 @@ export const Route = createFileRoute("/_shell/threads/new")({
 });
 
 function NewThread(): JSX.Element {
-  const { client, live, detectLocalRunner } = Route.useRouteContext();
+  const { client, detectLocalRunner } = Route.useRouteContext();
   const instances = useSuspenseQuery(providersQuery(client)).data;
   const runners = useSuspenseQuery(runnersQuery(client)).data.items;
   const profiles = useSuspenseQuery(profilesQuery(client)).data.items;
@@ -45,7 +45,6 @@ function NewThread(): JSX.Element {
     <div className="mx-auto flex w-full max-w-[800px] flex-1 flex-col justify-end">
       <Composer
         client={client}
-        live={live}
         instances={instances}
         runners={runners}
         profiles={profiles}

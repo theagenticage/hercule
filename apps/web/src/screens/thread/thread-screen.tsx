@@ -6,6 +6,7 @@ import { useLayoutEffect, type JSX } from "react";
 import { useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { turnsOf, type HydraClient, type Live } from "@hydra/client-core";
 import type { Profile, ProviderInstance, Runner, SettingsState } from "@hydra/contract";
+import { useLiveInvalidation } from "../../app/live-invalidation";
 import { inputsQuery, sessionQuery, transcriptQuery } from "../../app/queries";
 import { Composer } from "../composer/composer";
 import { useStickToBottom } from "./use-stick-to-bottom";
@@ -34,6 +35,13 @@ export function ThreadScreen({
   readonly settingsUser: SettingsState["user"];
 }): JSX.Element {
   const queryClient = useQueryClient();
+
+  // A session that changed elsewhere - a queued input delivered, a turn
+  // finishing - keeps this screen's read of it, the composer's locked fields
+  // and the queued list below the card current. It lives here rather than in
+  // the composer because a new thread has no session to watch.
+  useLiveInvalidation(live, queryClient, "session");
+
   const session = useSuspenseQuery(sessionQuery(client, sessionId)).data;
   const rows = useSuspenseQuery(transcriptQuery(client, sessionId)).data;
   const turns = turnsOf(rows);
@@ -80,7 +88,6 @@ export function ThreadScreen({
       })}
       <Composer
         client={client}
-        live={live}
         instances={instances}
         runners={runners}
         profiles={profiles}
