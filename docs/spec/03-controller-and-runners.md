@@ -123,6 +123,8 @@ Probed facts are runner facts, not session events: they arrive in hello and in s
 
 The controller stores each whole, as one JSON document on the runner row, and hands it back on the fleet read. A toolchain whose `--version` cannot be parsed reports the raw string; one that is absent produces no entry and no error.
 
+*(Amended 2026-09-10, [#67](https://github.com/rogierpennink/hydra/issues/67).)* `RunnerWatermark` is `{ diskFreeBytes, availableMemoryBytes }`; ~~`acceptingPlacements: boolean`~~ leaves the wire. Whether a machine accepts placements is the controller's decision, made from the reported free bytes against a per-runner watermark it holds (10 GiB unless overridden by `runner.update { diskWatermarkBytes }`), checked at every placement and on every report. The `runner.placementsChanged` audit entry is recorded on the crossing, from a report or from an update.
+
 ### 4.2 Capability snapshots
 
 Per provider instance x runner, the controller keeps a `CapabilitySnapshot` (auth state, harness version, model catalog). It is probed runner-side, side-effect-free, stored in the controller DB, and re-probed on interval, on demand, on config change and when the placement target changes. Shape and probe methods in [06-providers](./06-providers.md).
@@ -154,6 +156,8 @@ No load balancing, no migration, no failover.
 - A full runner queues its placements. Queued placements are visible in the UI. Work never spills to another runner.
 - A runner below its disk-space watermark (section 6.2) also stops accepting placements; they queue the same way.
 - Placements pinned to a runner that is `offline` or `unreachable` wait for its return.
+
+*(Amended 2026-09-10, [#67](https://github.com/rogierpennink/hydra/issues/67).)* The queue is the Session rows in status `queued`, oldest first; there is no separate placement-queue table. One dispatch function per runner moves them to `starting` when the runner is online, active, above its watermark and has a free slot, and runs after a spawn, a session exit, the runner's `sessionsReport`, a watermark report, a cap or watermark change, and undrain. A spawn or continue pinned to an offline or unreachable runner ~~waits for its return~~ succeeds immediately as `queued`. Retiring a runner ends its queued sessions.
 
 ### 5.4 The "local" alias
 
@@ -195,6 +199,8 @@ The runner's session supervisor:
 There are no per-session CPU or memory caps.
 
 Defaults (resolved 2026-08-31, [#43](https://github.com/rogierpennink/hydra/issues/43)): **inactivity 30 minutes, absolute 8 hours**. Inactivity means no normalized event from the harness while a turn is running - a stuck-harness detector, not an idle-between-turns rule (idle process unloading is the assistant runtime's, [12-assistants](./12-assistants.md)). Both timeouts are about the work, so they are controller-wide defaults with a per-agent override carried on the session spec, never per runner. The disk watermark is about the machine: **10 GiB free** by default, overridable per runner, checked every 60 seconds and before each placement.
+
+*(Amended 2026-09-10, [#67](https://github.com/rogierpennink/hydra/issues/67).)* The timeouts ride the wire as `SessionSpec.timeouts { inactivityMs, absoluteMs }`, filled from controller settings `session.inactivityTimeout` and `session.absoluteTimeout` (whole minutes; 30 and 480 unset) - the runner holds no default of its own. Reconciliation on a `sessionsReport` is a status move, not a stream event: sessions on that runner in `starting | idle | busy` the report does not list go to `exited`, resumable by their native id. An announced shutdown stops every live session with reason `runner_restart` and waits, bounded, for their exits before the goodbye.
 
 ### 6.3 Workspace kinds
 
