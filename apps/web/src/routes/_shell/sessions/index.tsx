@@ -3,7 +3,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { ageOf, headlineOf, lanesOf, threadRows, type LaneKind } from "@hydra/client-core";
 import type { Session } from "@hydra/contract";
-import { Group, LaneLabel } from "@hydra/ui";
+import { Group, LaneLabel, useMinuteClock } from "@hydra/ui";
 import { useLiveInvalidation } from "../../../app/live-invalidation";
 import { providersQuery, sessionsQuery } from "../../../app/queries";
 import { CreateThreadLink } from "../../../screens/create-thread-link";
@@ -33,6 +33,9 @@ function AllSessions(): JSX.Element {
   const { client, queryClient, live } = Route.useRouteContext();
 
   useLiveInvalidation(live, queryClient, "session");
+  // The headline and every row's age read the clock, so they tick on their
+  // own rather than waiting for the next invalidation.
+  const now = useMinuteClock();
 
   const sessions = useSuspenseQuery(sessionsQuery(client)).data.items;
   const instances = useSuspenseQuery(providersQuery(client)).data;
@@ -49,7 +52,7 @@ function AllSessions(): JSX.Element {
   return (
     <div className="flex flex-col gap-6">
       <div className="flex items-center justify-between gap-3">
-        <p className="text-row text-muted">{headlineOf(sessions, new Date())}</p>
+        <p className="text-row text-muted">{headlineOf(sessions, now)}</p>
         <CreateThreadLink />
       </div>
 
@@ -64,7 +67,7 @@ function AllSessions(): JSX.Element {
                   key={row.id}
                   mark={row.mark}
                   title={row.title}
-                  age={ageOf(row.activityAt, new Date())}
+                  age={ageOf(row.activityAt, now)}
                   secondLine={
                     instanceId === undefined ? null : (providerNames.get(instanceId) ?? null)
                   }

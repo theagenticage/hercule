@@ -1,9 +1,16 @@
 import { useState, type JSX } from "react";
-import { Link, useRouterState } from "@tanstack/react-router";
+import { Link, useMatch, useRouterState } from "@tanstack/react-router";
 import { useQuery, type QueryClient } from "@tanstack/react-query";
 import { ageOf, threadRows, threadRowsMode, type HydraClient, type Live } from "@hydra/client-core";
 import type { SettingsState, ThreadRows } from "@hydra/contract";
-import { Logo, MarksLegend, SegmentedControl, SegmentedControlItem, cn } from "@hydra/ui";
+import {
+  Logo,
+  MarksLegend,
+  SegmentedControl,
+  SegmentedControlItem,
+  cn,
+  useMinuteClock,
+} from "@hydra/ui";
 import { useLiveInvalidation } from "../app/live-invalidation";
 import { sessionsQuery } from "../app/queries";
 import { ThreadRowView } from "../screens/thread-row";
@@ -101,10 +108,6 @@ function HydraFace({
   );
 }
 
-/** The session id `/threads/<id>` names, or nothing for any other path. */
-const openThreadId = (pathname: string): string | null =>
-  /^\/threads\/([^/]+)$/.exec(pathname)?.[1] ?? null;
-
 /**
  * The threads face: the thread list and the one button that starts a thread.
  *
@@ -113,21 +116,25 @@ const openThreadId = (pathname: string): string | null =>
  */
 function ThreadsFace({
   rows,
-  pathname,
   client,
   queryClient,
   live,
 }: {
   readonly rows: ThreadRows;
-  readonly pathname: string;
   readonly client: HydraClient;
   readonly queryClient: QueryClient;
   readonly live: Live;
 }): JSX.Element {
   useLiveInvalidation(live, queryClient, "session");
+  // Ages are read against the clock, not against whenever the last
+  // invalidation happened, so "2m" becomes "3m" on its own.
+  const now = useMinuteClock();
   const sessions = useQuery(sessionsQuery(client)).data?.items ?? [];
   const list = threadRows(sessions, rows);
-  const currentId = openThreadId(pathname);
+  // The router's own answer for which thread is open, so it cannot drift
+  // from the route file the way a path pattern written out here would.
+  const currentId =
+    useMatch({ from: "/_shell/threads/$sessionId", shouldThrow: false })?.params.sessionId ?? null;
 
   return (
     <nav aria-label="Threads" className="flex min-h-0 flex-col">
@@ -152,7 +159,7 @@ function ThreadsFace({
               key={row.id}
               mark={row.mark}
               title={row.title}
-              age={ageOf(row.activityAt, new Date())}
+              age={ageOf(row.activityAt, now)}
               secondLine={row.secondLine}
               sessionId={row.id}
               selected={row.id === currentId}
@@ -218,13 +225,7 @@ export function Sidebar({
       </SegmentedControl>
 
       {face === "threads" ? (
-        <ThreadsFace
-          rows={rows}
-          pathname={pathname}
-          client={client}
-          queryClient={queryClient}
-          live={live}
-        />
+        <ThreadsFace rows={rows} client={client} queryClient={queryClient} live={live} />
       ) : (
         <HydraFace pathname={pathname} counts={NO_COUNTS} />
       )}

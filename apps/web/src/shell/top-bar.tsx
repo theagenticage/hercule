@@ -7,8 +7,8 @@ import {
   isSupportedTimezone,
 } from "@hydra/client-core";
 import type { SettingsState } from "@hydra/contract";
+import { useMinuteClock } from "@hydra/ui";
 import { isRouteCrumb } from "../app/router";
-import { useMinuteClock } from "./clock";
 
 /**
  * The screen title and its time context.
