@@ -27,7 +27,8 @@ export const queryKeys = {
   projects: (): LiveQueryKey => ["projects"],
   runners: (): LiveQueryKey => ["runners"],
   runner: (id?: string): LiveQueryKey => (id === undefined ? ["runner"] : ["runner", id]),
-  sessions: (): LiveQueryKey => ["sessions"],
+  sessions: (filter?: { readonly runnerId: string }): LiveQueryKey =>
+    filter === undefined ? ["sessions"] : ["sessions", filter],
   /** Not a live topic: profiles change only through this browser's own writes. */
   profiles: (): LiveQueryKey => ["profiles"],
   session: (id?: string): LiveQueryKey => (id === undefined ? ["session"] : ["session", id]),

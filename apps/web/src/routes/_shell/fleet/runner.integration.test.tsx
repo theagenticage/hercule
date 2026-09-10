@@ -754,13 +754,15 @@ describe("Runner > sessions", () => {
   const listing = (sessions: () => readonly Session[]) => (call: Call) => {
     const asked = new URLSearchParams(call.search);
     const runnerId = asked.get("runnerId");
-    const status = asked.get("status");
+    // A status filter is one bare key or several repeated ones - the page
+    // asks for its whole running-or-queued mix in one read.
+    const statuses = asked.getAll("status");
     return {
       body: {
         items: sessions().filter(
           (each) =>
             (runnerId === null || each.runnerId === runnerId) &&
-            (status === null || each.status === status),
+            (statuses.length === 0 || statuses.includes(each.status)),
         ),
       },
     };

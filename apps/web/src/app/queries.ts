@@ -13,7 +13,12 @@
  * cache holds them under.
  */
 import { infiniteQueryOptions, queryOptions } from "@tanstack/react-query";
-import { loopbackEndpoints, queryKeys, type HydraClient } from "@hydra/client-core";
+import {
+  loopbackEndpoints,
+  queryKeys,
+  RUNNING_STATUSES,
+  type HydraClient,
+} from "@hydra/client-core";
 import { MAX_PAGE_LIMIT, type Runner, type TaskFilter, type TranscriptRow } from "@hydra/contract";
 
 /** Whether first run has been completed. Reachable without a token. */
@@ -200,6 +205,24 @@ export const sessionsQuery = (client: HydraClient) =>
   queryOptions({
     queryKey: queryKeys.sessions(),
     queryFn: () => client.session.query({ query: { limit: MAX_PAGE_LIMIT } }),
+  });
+
+/**
+ * One machine's live sessions: the runner page reads both its capacity
+ * (`starting | idle | busy`) and its queue (`queued`) from the same list, so
+ * it is fetched once rather than once per status. `exited` is never read
+ * here: a machine that has run hundreds of sessions would otherwise exceed
+ * `MAX_PAGE_LIMIT` and the running count would go wrong. Built from
+ * `RUNNING_STATUSES` rather than named again, so the fetch and the capacity
+ * line it feeds cannot drift apart.
+ */
+export const runnerSessionsQuery = (client: HydraClient, runnerId: string) =>
+  queryOptions({
+    queryKey: queryKeys.sessions({ runnerId }),
+    queryFn: () =>
+      client.session.query({
+        query: { runnerId, status: ["queued", ...RUNNING_STATUSES], limit: MAX_PAGE_LIMIT },
+      }),
   });
 
 /**
