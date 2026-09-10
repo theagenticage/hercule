@@ -1,0 +1,83 @@
+import { describe, expect, it } from "vitest";
+import type { Runner, Session, SessionStatus } from "@hydra/contract";
+import { capacityLine } from "./runner-capacity";
+
+const GIB = 1024 * 1024 * 1024;
+
+const MOSS: Runner = {
+  id: "01a06d02-beff-7037-9f5b-042822015952",
+  name: "moss",
+  connectivity: "online",
+  lifecycle: "active",
+  reserved: false,
+  version: "0.4.2",
+  labels: [],
+  facts: null,
+  watermark: null,
+  maxConcurrentSessions: 2,
+  diskWatermarkBytes: 10 * GIB,
+  lastSeenAt: "2026-09-05T09:14:00.000Z",
+};
+
+let next = 0;
+
+/** One session in the state that matters here; nothing else is read. */
+const at = (status: SessionStatus): Session => {
+  next += 1;
+  return {
+    id: `01a06d02-2000-7000-8000-00000000000${String(next)}`,
+    title: "Fix the login bug",
+    status,
+    resumable: false,
+    permissionProfileId: "01a06d02-3000-7000-8000-000000000001",
+    instanceId: "01a06d02-1000-7000-8000-000000000001",
+    runnerId: MOSS.id,
+    workspaceId: null,
+    requestedAccessMode: "approval-required",
+    accessMode: "approval-required",
+    nativeSessionId: null,
+    modelSelection: { model: "claude-sonnet-5", options: {} },
+    parentSessionId: null,
+    createdAt: "2026-09-05T09:00:00.000Z",
+    startedAt: null,
+    exitedAt: null,
+    lastActivityAt: "2026-09-05T09:00:00.000Z",
+  };
+};
+
+describe("capacityLine", () => {
+  it("says how many slots are taken and how many sessions wait for one", () => {
+    expect(capacityLine(MOSS, [at("busy"), at("queued"), at("queued")])).toBe(
+      "1 running of 2 · 2 queued",
+    );
+  });
+
+  it("says nothing about a queue that is empty", () => {
+    expect(capacityLine(MOSS, [at("busy")])).toBe("1 running of 2");
+  });
+
+  it("counts one waiting session too", () => {
+    expect(capacityLine(MOSS, [at("busy"), at("queued")])).toBe("1 running of 2 · 1 queued");
+  });
+
+  it("counts a session as running from the moment it is started until it is gone", () => {
+    // `starting` and `idle` hold a slot exactly as `busy` does: the controller
+    // admits against all three, so a line that counted only `busy` would say a
+    // full machine had room.
+    expect(capacityLine(MOSS, [at("starting"), at("idle"), at("busy")])).toBe("3 running of 2");
+  });
+
+  it("counts an exited session as neither running nor queued", () => {
+    expect(capacityLine(MOSS, [at("exited"), at("exited")])).toBe("0 running of 2");
+  });
+
+  it("reads an empty machine as empty", () => {
+    expect(capacityLine(MOSS, [])).toBe("0 running of 2");
+  });
+
+  it("reads the cap off the machine it is given", () => {
+    expect(capacityLine({ ...MOSS, maxConcurrentSessions: 7 }, [at("busy")])).toBe(
+      "1 running of 7",
+    );
+  });
+});

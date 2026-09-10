@@ -9,9 +9,17 @@
 import { describe, expect, it } from "vitest";
 import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { formatStamp } from "@hydra/client-core";
+import { ageOf, formatStamp } from "@hydra/client-core";
+import type { Session } from "@hydra/contract";
 import { envelope, renderApp, stubApi, type Call, type Handler } from "../../../app/testing";
-import { CONTROLLER_VERSION, GIB, MOSS as MACHINE, ZONE, type Fixture } from "./-fixtures";
+import {
+  CONTROLLER_VERSION,
+  GIB,
+  MOSS as MACHINE,
+  sessionFixture,
+  ZONE,
+  type Fixture,
+} from "./-fixtures";
 
 /** The machine this page is opened on, away since it was last seen. */
 const MOSS: Fixture = { ...MACHINE, connectivity: "offline", maxConcurrentSessions: 7 };
@@ -115,6 +123,9 @@ const controller = (
 ): Readonly<Record<string, Handler>> => ({
   "GET /api/v1/providers": { body: options.instances ?? INSTANCES },
   "GET /api/v1/setup": { body: { complete: true } },
+  // The shell's thread list reads this on every path it mounts on; a test
+  // about the machine's own sessions overrides it with a real list.
+  "GET /api/v1/sessions": { body: { items: [] } },
   "GET /api/v1/settings": {
     body: {
       controller: {},
@@ -703,5 +714,136 @@ describe("Runner > providers", () => {
     await waitFor(() => {
       expect(reading()).toContain("2.1.300");
     });
+  });
+});
+
+describe("Runner > sessions", () => {
+  /** A machine with two slots, which is what makes a queue possible at all. */
+  const TWO: Fixture = { ...ONLINE, maxConcurrentSessions: 2 };
+
+  const minutesAgo = (minutes: number): string =>
+    new Date(Date.now() - minutes * 60_000).toISOString();
+
+  const RUNNING = sessionFixture({
+    id: "01a06d02-2000-7000-8000-00000000000a",
+    title: "Fix the login bug",
+    status: "busy",
+    at: minutesAgo(200),
+  });
+
+  /** Queued out of order in the fixture, so an ordered reading is the page's doing. */
+  const WAITED_LESS = sessionFixture({
+    id: "01a06d02-2000-7000-8000-00000000000c",
+    title: "Write the changelog",
+    status: "queued",
+    at: minutesAgo(5),
+  });
+
+  const WAITED_LONGEST = sessionFixture({
+    id: "01a06d02-2000-7000-8000-00000000000b",
+    title: "Investigate the flaky test",
+    status: "queued",
+    at: minutesAgo(130),
+  });
+
+  /**
+   * The controller's answer to `session.query`, narrowed by whatever the page
+   * asked for. Written as a filter rather than a fixed body so the page is free
+   * to ask once for the machine's sessions or once per status.
+   */
+  const listing = (sessions: () => readonly Session[]) => (call: Call) => {
+    const asked = new URLSearchParams(call.search);
+    const runnerId = asked.get("runnerId");
+    const status = asked.get("status");
+    return {
+      body: {
+        items: sessions().filter(
+          (each) =>
+            (runnerId === null || each.runnerId === runnerId) &&
+            (status === null || each.status === status),
+        ),
+      },
+    };
+  };
+
+  /** The page itself, without the shell's own thread list beside it. */
+  const page = () => reading(screen.getByRole("main"));
+
+  /** Every reading of the session list this browser has made. */
+  const listings = (api: { readonly calls: readonly Call[] }) =>
+    api.calls.filter((call) => call.method === "GET" && call.path === "/api/v1/sessions");
+
+  const openWith = (runner: Fixture, sessions: () => readonly Session[]) =>
+    open(runner, { extra: { "GET /api/v1/sessions": listing(sessions) } });
+
+  it("says how full the machine is and lists what is waiting for a slot", async () => {
+    const held = [RUNNING, WAITED_LESS, WAITED_LONGEST];
+    await openWith(TWO, () => held);
+
+    await waitFor(() => {
+      expect(page()).toContain("1 running of 2 · 2 queued");
+    });
+
+    const shown = page();
+    // Oldest first: the session that has waited longest is the next to start,
+    // and a queue that read newest first would say the opposite.
+    expect(shown.indexOf(WAITED_LONGEST.title)).toBeGreaterThan(-1);
+    expect(shown.indexOf(WAITED_LONGEST.title)).toBeLessThan(shown.indexOf(WAITED_LESS.title));
+
+    // Each row carries how long it has been waiting, read the same way every
+    // other row in the app reads an age.
+    expect(shown).toContain(ageOf(WAITED_LONGEST.createdAt, new Date()));
+    expect(shown).toContain(ageOf(WAITED_LESS.createdAt, new Date()));
+
+    // The rows are the queue. A running session holds a slot, which the line
+    // above has already said; listing it again would read as waiting.
+    expect(shown).not.toContain(RUNNING.title);
+  });
+
+  it("has the queue in hand when the page opens", async () => {
+    // The loader reads it, so nothing below the route suspends: a reader never
+    // sees the machine's facts arrive with its capacity still blank.
+    const held = [RUNNING, WAITED_LESS, WAITED_LONGEST];
+    await openWith(TWO, () => held);
+
+    expect(page()).toContain("1 running of 2 · 2 queued");
+  });
+
+  it("says only how full the machine is when nothing is waiting", async () => {
+    const held = [RUNNING];
+    await openWith(TWO, () => held);
+
+    await waitFor(() => {
+      expect(page()).toContain("1 running of 2");
+    });
+    expect(page()).not.toMatch(/queued/i);
+    expect(page()).not.toContain(RUNNING.title);
+  });
+
+  it("reads the list again when a session moves elsewhere", async () => {
+    let held: readonly Session[] = [RUNNING, WAITED_LESS, WAITED_LONGEST];
+    const { api, live } = await openWith(TWO, () => held);
+
+    await waitFor(() => {
+      expect(page()).toContain("1 running of 2 · 2 queued");
+    });
+    await waitFor(() => {
+      expect(live.topics()).toContain("session");
+    });
+    const before = listings(api).length;
+
+    // The controller started the one that had waited longest.
+    held = [RUNNING, WAITED_LESS, { ...WAITED_LONGEST, status: "starting" }];
+    act(() => {
+      live.push("session", { _tag: "invalidate", ids: [WAITED_LONGEST.id], kind: "updated" });
+    });
+
+    await waitFor(() => {
+      expect(page()).toContain("2 running of 2 · 1 queued");
+    });
+    // The page says so because it read the list again, not because the push
+    // carried the session with it.
+    expect(listings(api).length).toBeGreaterThan(before);
+    expect(page()).not.toContain(WAITED_LONGEST.title);
   });
 });
