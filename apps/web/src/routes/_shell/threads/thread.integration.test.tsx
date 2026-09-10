@@ -788,7 +788,7 @@ describe("Thread: token tap (AC-13)", () => {
     expect(screen.queryByText(/thinking/)).toBeNull();
   });
 
-  it("lets the coalesced :stream row win over the buffer, and ignores later tap deltas for that item", async () => {
+  it("lets the coalesced :stream row win over the buffer, and later taps for an item that has completed change nothing", async () => {
     const { runFrame } = stubFrames();
     const busy = session({ status: "busy" });
     const { live } = await open(busy, openTurnRows());
@@ -859,6 +859,69 @@ describe("Thread: token tap (AC-13)", () => {
     // A later tap delta for the item the row already answered for changes
     // nothing: the whole paragraph's text, tail node included, is unchanged.
     expect(paragraph?.textContent).toBe("Hello world");
+  });
+
+  it("lets a coalesced :stream row for an item that is still open win, and keeps painting the taps after it", async () => {
+    // The 4KB flush (spec 04 §Streaming deltas are coalesced) writes a
+    // `content.delta` row inside an open item: the row wins over what the
+    // tail held, and the item goes on streaming into the same tail. Any
+    // answer longer than 4KB takes this path.
+    const { runFrame } = stubFrames();
+    const busy = session({ status: "busy" });
+    const { live } = await open(busy, openTurnRows());
+
+    await waitFor(() => {
+      expect(live.topics()).toContain(sessionTapTopic(SESSION_ID));
+    });
+    act(() => {
+      live.push(sessionTapTopic(SESSION_ID), {
+        _tag: "delta",
+        items: [{ turnId: "t4", itemId: "a4", streamKind: "assistant_text", delta: "Hello " }],
+      });
+    });
+    await settle();
+    runFrame();
+    await screen.findByText("Hello");
+
+    await waitFor(() => {
+      expect(live.topics()).toContain(sessionStreamTopic(SESSION_ID));
+    });
+    act(() => {
+      // The flush row alone: no `item.completed`, so a4 is still the open item.
+      live.push(sessionStreamTopic(SESSION_ID), {
+        _tag: "delta",
+        items: [
+          row(4, {
+            _tag: "content.delta",
+            eventId: "e4",
+            sessionId: SESSION_ID,
+            at: "2026-09-08T12:00:01.000Z",
+            turnId: "t4",
+            itemId: "a4",
+            streamKind: "assistant_text",
+            delta: "Hello world",
+          }),
+        ],
+        cursor: "4",
+      });
+    });
+    await settle();
+
+    const paragraph = (await screen.findByText("Hello world")).closest("p");
+    expect(paragraph).not.toBeNull();
+
+    act(() => {
+      live.push(sessionTapTopic(SESSION_ID), {
+        _tag: "delta",
+        items: [{ turnId: "t4", itemId: "a4", streamKind: "assistant_text", delta: ", again" }],
+      });
+    });
+    await settle();
+    runFrame();
+
+    // The row's text, then the taps that came after it - the buffer the row
+    // replaced is not repeated.
+    expect(paragraph?.textContent).toBe("Hello world, again");
   });
 
   it("leaves the open item's buffered tail alone when a :stream row for a different item arrives", async () => {
