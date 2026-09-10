@@ -21,6 +21,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { Duration, Effect, Fiber } from "effect";
 import {
+  type ProbeRequest,
   type ProviderEvent,
   type RunnerFacts,
   type SessionInterrupt as SessionInterruptFrame,
@@ -2329,6 +2330,7 @@ describe("session.spawn onto a runner that is full", () => {
       exited(arranged.wire, first.id, 3);
 
       await sessionWhen(arranged, second.id, (one) => one.status === "starting");
+      await settled();
       expect(starts(arranged.wire).map((frame) => frame.sessionId)).toEqual([
         running.id,
         first.id,
@@ -2453,6 +2455,34 @@ describe("session.spawn and session.continue onto a runner nobody can reach", ()
       await sessionWhen(arranged, child.id, (one) => one.status === "starting");
       const sent = await framesWhen<SessionStart>(again, "sessionStart", 1);
       expect(sent[0]!.spec.continue).toEqual({ nativeSessionId: "native-1", mode: "resume" });
+    });
+  });
+});
+
+describe("session.spawn between a runner's hello and its first sessions report", () => {
+  it("queues on that connection until the report lands, then starts", async () => {
+    await withFleet(async (arranged) => {
+      // A fresh connection for the same runner, the way a restart's does:
+      // hello has gone out, but nothing has said yet what this connection
+      // holds. Waited for by its own probe rather than a sleep: a probe is
+      // sent only once the controller has processed this hello and made this
+      // the runner's current connection, which an HTTP spawn racing the
+      // WebSocket handshake cannot otherwise be sure of.
+      const again = await arranged.reconnect();
+      await framesWhen<ProbeRequest>(again, "probeRequest", 1);
+
+      const response = await spawn(arranged, { prompt: "hello", runnerId: arranged.runnerId });
+      expect(response.status, await response.clone().text()).toBe(200);
+      const session = (await response.json()) as Session;
+      expect(session.status).toBe("queued");
+      expect(session.runnerId).toBe(arranged.runnerId);
+
+      again.send({ _tag: "sessionsReport", sessions: [] });
+
+      const started = await sessionWhen(arranged, session.id, (one) => one.status === "starting");
+      expect(started.status).toBe("starting");
+      const sent = await framesWhen<SessionStart>(again, "sessionStart", 1);
+      expect(sent[0]!.sessionId).toBe(session.id);
     });
   });
 });

@@ -65,7 +65,7 @@ import { AuditLog } from "../events";
 import { PermissionProfiles, type GrantsError } from "../permissions";
 import { PluginHost } from "../plugins";
 import { providerRepository, type StoredSnapshot } from "../providers";
-import { RunnerPresence, runnerRepository, type SessionTraffic } from "../runners";
+import { RunnerPresence, runnerRepository, type Connection, type SessionTraffic } from "../runners";
 import { Settings, type ScopeSettings, type SettingError } from "../settings";
 import { inputRepository, type StoredInput } from "./inputs";
 import { sessionRepository, type StoredSession } from "./repository";
@@ -546,20 +546,63 @@ const make = Effect.gen(function* () {
   const absorbing = (what: string, effect: Effect.Effect<void, SqlError>): Effect.Effect<void> =>
     Effect.ignore(Effect.tapCause(effect, (cause) => Effect.logError(what, cause)));
 
-  /** The native ids a machine reports for the sessions it is holding. */
+  /** The tail of any move to `exited`: queued inputs cancelled, one announce per session. */
+  const ending = (ids: ReadonlyArray<string>): Effect.Effect<void, SqlError> =>
+    Effect.forEach(
+      ids,
+      (id) =>
+        Effect.gen(function* () {
+          yield* inputs.cancelQueued(id);
+          yield* announce({ _tag: "record", topic: "session", id, kind: "updated" });
+        }),
+      { discard: true },
+    );
+
+  /**
+   * Applies a runner's report of what it holds: records the native id each
+   * binding gives, then ends whatever this runner is still believed to run
+   * that the report leaves out - a restart's report is the only place that
+   * gap shows, since an unannounced disconnect tells the controller nothing.
+   * One transaction, so a caller's dispatch outside it always sees the
+   * settled result.
+   *
+   * Marks the connection caught up once that transaction commits, after
+   * everything else: a `Map` does not roll back, so a runner is not
+   * dispatchable on a report that never landed, and the mark has to be the
+   * report's own last word rather than something a later step could still
+   * undo.
+   */
   const bound = (
     runnerId: string,
+    connection: Connection,
     bindings: ReadonlyArray<SessionBinding>,
   ): Effect.Effect<void, SqlError> =>
-    withTransaction(
-      sql,
-      Effect.forEach(
-        bindings,
-        (binding) =>
-          sessions.bind(binding.sessionId, runnerId, binding.instanceId, binding.nativeSessionId),
-        { discard: true },
-      ),
-    );
+    Effect.gen(function* () {
+      yield* withTransaction(
+        sql,
+        Effect.gen(function* () {
+          yield* Effect.forEach(
+            bindings,
+            (binding) =>
+              sessions.bind(
+                binding.sessionId,
+                runnerId,
+                binding.instanceId,
+                binding.nativeSessionId,
+              ),
+            { discard: true },
+          );
+          const at = yield* nowIso;
+          const gone = yield* sessions.reportedGone(
+            runnerId,
+            bindings.map((binding) => binding.sessionId),
+            at,
+          );
+          yield* ending(gone);
+        }),
+      );
+      yield* presence.markSessionsReported(runnerId, connection);
+    });
 
   /**
    * Moves this runner's oldest queued sessions to `starting`, as many as its
@@ -577,6 +620,10 @@ const make = Effect.gen(function* () {
           if (Option.isNone(found)) return [];
           const runner = found.value;
           if (runner.connectivity !== "online" || runner.lifecycle !== "active") return [];
+          // Online says the socket is up, not that this connection has said
+          // what it holds yet: a start sent before its report lands would be
+          // one this report itself then reads as exited.
+          if (!(yield* presence.hasReportedSessions(runnerId))) return [];
           const watermark = runner.watermark;
           // A watermark nobody has reported yet is not a machine that said no.
           if (watermark !== null && watermark.diskFreeBytes < runner.diskWatermarkBytes) return [];
@@ -628,10 +675,7 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         const at = yield* nowIso;
         const { ended, running } = yield* sessions.endOnRunner(runnerId, at);
-        for (const id of ended) {
-          yield* inputs.cancelQueued(id);
-          yield* announce({ _tag: "record", topic: "session", id, kind: "updated" });
-        }
+        yield* ending(ended);
         return running;
       }),
     );
@@ -689,9 +733,12 @@ const make = Effect.gen(function* () {
             return undefined;
           }
           yield* sessions.moved(id, folded.status, at);
-          // Nothing waits on a harness that is gone, so the queue goes with it.
-          if (folded.status === "exited") yield* inputs.cancelQueued(id);
-          yield* announce({ _tag: "record", topic: "session", id, kind: "updated" });
+          if (folded.status === "exited") {
+            // Nothing waits on a harness that is gone, so the queue goes with it.
+            yield* ending([id]);
+          } else {
+            yield* announce({ _tag: "record", topic: "session", id, kind: "updated" });
+          }
           return folded.status;
         }),
       );
@@ -819,11 +866,9 @@ const make = Effect.gen(function* () {
         yield* reported(traffic.runnerId, traffic.frame.seq, traffic.frame.event);
         return;
       }
-      yield* bound(traffic.runnerId, traffic.frame.sessions);
-      // Reconciliation lands here in a later slice; dispatch already belongs
-      // after whatever this runner's report settles. Forked for the same
-      // reason a freed slot's dispatch is: it writes to the runner's socket,
-      // and the ingest is one fiber for the whole fleet.
+      yield* bound(traffic.runnerId, traffic.connection, traffic.frame.sessions);
+      // Forked for the same reason a freed slot's dispatch is: it writes to
+      // the runner's socket, and the ingest is one fiber for the whole fleet.
       yield* Effect.forkChild(
         absorbing("A runner's report could not be dispatched", dispatch(traffic.runnerId)),
       );

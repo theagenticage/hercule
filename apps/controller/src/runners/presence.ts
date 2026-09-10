@@ -69,10 +69,13 @@ export type Request = ProbeRequest | InstallRequest | LoginStart | LoginCode | S
  * What a machine said about the sessions it is hosting, and which machine said
  * it. Presence carries it no further: what a session event means is the session
  * domain's, and presence knowing that would put the fleet above it rather than
- * under it.
+ * under it. The connection rides along so the session domain can mark it caught
+ * up on its own authority, the same way every other write keyed by connection
+ * identity here does.
  */
 export interface SessionTraffic {
   readonly runnerId: string;
+  readonly connection: Connection;
   readonly frame: SessionEvent | SessionsReport;
 }
 
@@ -128,6 +131,13 @@ interface Reachable extends Connected {
    * on it, because one machine sends one report however many asked for it.
    */
   readonly pending: Map<string, Set<Deferred.Deferred<Option.Option<Reported>>>>;
+  /**
+   * Whether this connection's own `sessionsReport` has been applied yet. A
+   * fresh connection starts without one: what it holds is unknown until it
+   * says so, and until then a session started here is one the controller
+   * cannot yet account for.
+   */
+  reported: boolean;
 }
 
 const make = Effect.gen(function* () {
@@ -260,7 +270,7 @@ const make = Effect.gen(function* () {
           }),
         );
         const previous = reachable.get(id);
-        reachable.set(id, { connection, ...connected, pending: new Map() });
+        reachable.set(id, { connection, ...connected, pending: new Map(), reported: false });
         if (previous !== undefined) {
           // Nothing more is coming over the connection being displaced, and the
           // entry that would have carried its answer is no longer the one here.
@@ -352,12 +362,31 @@ const make = Effect.gen(function* () {
     ): Effect.Effect<void> =>
       Effect.suspend(() =>
         reachable.get(id)?.connection === connection
-          ? Effect.asVoid(Queue.offer(sessions, { runnerId: id, frame }))
+          ? Effect.asVoid(Queue.offer(sessions, { runnerId: id, connection, frame }))
           : Effect.void,
       ),
 
     /** Everything the fleet has said about its sessions, in arrival order. */
     sessionTraffic: Stream.fromQueue(sessions),
+
+    /**
+     * Whether this runner's current connection has applied a sessions report
+     * yet. False for a runner holding no connection at all, same as any other
+     * fact this map has no entry for.
+     */
+    hasReportedSessions: (id: string): Effect.Effect<boolean> =>
+      Effect.sync(() => reachable.get(id)?.reported ?? false),
+
+    /**
+     * Marks this connection caught up, once its sessions report has been
+     * applied. Dropped on a replaced connection: a report that landed for
+     * yesterday's connection says nothing about whether today's has caught up.
+     */
+    markSessionsReported: (id: string, connection: Connection): Effect.Effect<void> =>
+      Effect.sync(() => {
+        const held = reachable.get(id);
+        if (held?.connection === connection) held.reported = true;
+      }),
 
     /** An answer on a replaced connection is still that machine saying it is there. */
     answered: (id: string): Effect.Effect<void, SqlError> =>
