@@ -3,6 +3,7 @@
  * field added to the resource cannot reach one screen's test and not the
  * other's; each test spreads over it what its own case needs.
  */
+import type { Session } from "@hydra/contract";
 
 export const CONTROLLER_VERSION = "0.4.2";
 
@@ -69,4 +70,45 @@ export const MOSS: Fixture = {
   lastSeenAt: "2026-09-05T09:14:00.000Z",
   negotiatedCapabilities: null,
   protocolVersion: 1,
+};
+
+/**
+ * A session on `MOSS`, as the API answers `session.query`. The runner page
+ * reads a handful of these fields; the rest are here because the contract has
+ * them and a screen must not be handed a half record.
+ */
+const BASE_SESSION: Session = {
+  id: "01a06d02-2000-7000-8000-000000000001",
+  title: "Fix the login bug",
+  status: "busy",
+  resumable: false,
+  permissionProfileId: "01a06d02-3000-7000-8000-000000000001",
+  instanceId: "01a06d02-1000-7000-8000-000000000001",
+  runnerId: MOSS.id,
+  workspaceId: null,
+  requestedAccessMode: "approval-required",
+  accessMode: "approval-required",
+  nativeSessionId: null,
+  modelSelection: { model: "claude-sonnet-5", options: {} },
+  parentSessionId: null,
+  createdAt: "2026-09-05T09:00:00.000Z",
+  startedAt: "2026-09-05T09:00:00.000Z",
+  exitedAt: null,
+  lastActivityAt: "2026-09-05T09:00:00.000Z",
+};
+
+/**
+ * One session on the machine. A queued session has never run, so its two
+ * instants are the same; `at` sets both, which is what lets a test name a
+ * session's age without deciding which of the two the row reads.
+ */
+export const sessionFixture = (
+  overrides: Partial<Session> & { readonly id: string; readonly at?: string },
+): Session => {
+  const { at, ...fields } = overrides;
+  return {
+    ...BASE_SESSION,
+    ...(at === undefined ? {} : { createdAt: at, lastActivityAt: at, startedAt: at }),
+    ...fields,
+  };
 };
