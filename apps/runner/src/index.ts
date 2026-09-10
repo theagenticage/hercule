@@ -19,7 +19,9 @@ import { daemon } from "./daemon";
 import { join } from "./join";
 import { local } from "./local";
 import { providerLogins } from "./providers";
+import { sessions } from "./sessions";
 import { setController } from "./set-controller";
+import { stopping } from "./stopping";
 
 /** The same vocabulary the CLI uses. */
 const EXIT = { failed: 1, usage: 2 } as const;
@@ -62,7 +64,9 @@ const hold = async (work: Effect.Effect<void, { readonly message: string }>): Pr
   const outcome = await Effect.runPromise(
     Effect.result(
       Effect.scoped(
-        Effect.flatMap(untilStopped, (stopped) => Effect.raceFirst(work, stopped)),
+        Effect.flatMap(untilStopped, (stopped) =>
+          stopping(work, Effect.andThen(stopped, sessions.shutdown("runner_restart"))),
+        ),
       ).pipe(
         // A vendor login blocked on stdin would outlive this process, still
         // holding a prompt for a credential.

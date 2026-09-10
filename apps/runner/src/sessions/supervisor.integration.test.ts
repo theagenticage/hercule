@@ -8,7 +8,7 @@ import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it, vi } from "vitest";
-import { Effect, Fiber, PubSub, Stream } from "effect";
+import { Duration, Effect, Fiber, PubSub, Stream } from "effect";
 import { TestClock } from "effect/testing";
 import type {
   ExitReason,
@@ -88,6 +88,11 @@ interface Fake {
   fails: string | undefined;
   /** A harness that throws where nothing declared it could. */
   dies: boolean;
+  /**
+   * A harness that takes the stop and never exits: the process is wedged, or
+   * ignoring the signal. Its session is only ever abandoned, never seen out.
+   */
+  stopsSilently: boolean;
 }
 
 const faking = (): Fake => {
@@ -106,6 +111,7 @@ const faking = (): Fake => {
     stops,
     fails: undefined,
     dies: false,
+    stopsSilently: false,
     emit: (event) => {
       PubSub.publishUnsafe(events, event);
     },
@@ -155,6 +161,7 @@ const faking = (): Fake => {
       stopSession: (sessionId, reason) =>
         Effect.sync(() => {
           stops.push({ sessionId, reason });
+          if (fake.stopsSilently) return;
           held.delete(sessionId);
           fake.emit({
             _tag: "session.exited",
@@ -181,12 +188,30 @@ const connecting = (fake: Fake) => {
     baseEnv: { PATH: "/usr/bin" },
     binaryOf: (name) => `/usr/local/bin/${name}`,
   };
-  const supervisor = supervising([fake.adapter])({
+  // The value `supervising` returns is the process's, and one connection's
+  // supervisor is built from it: a session outlives the socket that started it,
+  // and so does the shutdown that ends every one of them.
+  const runner = supervising([fake.adapter]);
+  const supervisor = runner({
     machine,
     send: (frame) => Effect.sync(() => sent.push(frame)),
   });
-  return { supervisor, sent, machine, under };
+  return { supervisor, runner, sent, machine, under };
 };
+
+/**
+ * The shutdown the process-wide supervisor owns, asked of the value
+ * `supervising` handed back.
+ *
+ * Assumed shape, and the one place a rename touches: the builder carries its
+ * shutdown beside it. What the tests below are about is what a shutdown does,
+ * not where it is reached from.
+ */
+const shutdownOf = (
+  runner: ReturnType<typeof supervising>,
+): ((reason: ExitReason) => Effect.Effect<void>) =>
+  (runner as unknown as { readonly shutdown: (reason: ExitReason) => Effect.Effect<void> })
+    .shutdown;
 
 /**
  * How long a wait on the relay is given. Wall clock rather than a count of
@@ -404,6 +429,79 @@ describe("an exit that arrives after the id was started again", () => {
     // Still held, so its input reached the harness rather than a runtime error.
     expect(fake.inputs).toEqual([{ text: "hi" }]);
     expect(eventsIn(sent)).toHaveLength(2);
+  });
+});
+
+describe("a stale exit's release racing a fresh start under the same id", () => {
+  it("does not tear down the fresh start's entry (F-2)", async () => {
+    const fake = faking();
+    const { supervisor, sent } = connecting(fake);
+
+    const originalListSessions = fake.adapter.listSessions;
+    const originalStartSession = fake.adapter.startSession;
+    let listCalls = 0;
+    let releaseEntered = false;
+    let resumeRelease: () => void = () => {};
+    const releaseGate = new Promise<void>((resolve) => {
+      resumeRelease = resolve;
+    });
+    let startCalls = 0;
+    let freshStartEntered = false;
+    let resumeFreshStart: () => void = () => {};
+    const freshStartGate = new Promise<void>((resolve) => {
+      resumeFreshStart = resolve;
+    });
+
+    // The second `listSessions` call is `release`'s, checking what a stale
+    // exit left behind; held open so a fresh start for the same id can run
+    // while it is still deciding. The second `startSession` call is that
+    // fresh start's; held open past `live` taking its entry but before the
+    // adapter itself has one - the exact window `release`'s gated read above
+    // has to land in for the race to matter.
+    Object.assign(fake.adapter, {
+      listSessions: Effect.suspend(() => {
+        listCalls += 1;
+        if (listCalls !== 2) return originalListSessions;
+        releaseEntered = true;
+        return Effect.andThen(
+          Effect.promise(() => releaseGate),
+          originalListSessions,
+        );
+      }),
+      startSession: (sessionId: string, spec: SessionSpec, ctx: ProviderRunnerContext) => {
+        startCalls += 1;
+        if (startCalls !== 2) return originalStartSession(sessionId, spec, ctx);
+        freshStartEntered = true;
+        return Effect.andThen(
+          Effect.promise(() => freshStartGate),
+          originalStartSession(sessionId, spec, ctx),
+        );
+      },
+    });
+
+    await driving(
+      fake,
+      supervisor,
+      Effect.gen(function* () {
+        yield* supervisor.start(START);
+        yield* until("sent the start", () => eventsIn(sent).length === 1);
+        yield* supervisor.stop({ _tag: "sessionStop", sessionId: SESSION });
+        yield* until("release began checking who is live", () => releaseEntered);
+        yield* Effect.forkChild(supervisor.start(START));
+        yield* until("the fresh start reached the harness", () => freshStartEntered);
+        resumeRelease();
+        yield* until("the stale exit reached the wire", () => eventsIn(sent).length === 2);
+        resumeFreshStart();
+        yield* until("the fresh start finished", () => fake.contexts.length === 2);
+        // If `release` tore down the fresh entry by mistake, this second stop
+        // finds nothing live and does nothing - the assertion below is what
+        // catches that.
+        yield* supervisor.stop({ _tag: "sessionStop", sessionId: SESSION });
+        yield* until("the second stop reached the harness", () => fake.stops.length === 2);
+      }),
+    );
+
+    expect(fake.stops.map((stop) => stop.reason)).toEqual(["stopped", "stopped"]);
   });
 });
 
@@ -839,5 +937,158 @@ describe("a session that has run for as long as it may", () => {
       { sessionId: SESSION, reason: "stopped" },
       { sessionId: SESSION, reason: "absolute_timeout" },
     ]);
+  });
+});
+
+/**
+ * What an announced shutdown does to what this runner is holding (AC-9, AD-6).
+ *
+ * A runner that walks away without stopping its harnesses leaves orphan
+ * processes behind and sessions the controller believes are busy, so what is
+ * asserted here is that `shutdown` does not return until every session it
+ * stopped has had its exit forwarded - the caller hangs up the moment it does -
+ * and that it returns anyway when a harness will not die.
+ */
+
+/** A second session, so a shutdown has more than one thing to see out. */
+const OTHER_SESSION = "0199e0e7-0000-7000-8000-0000000000ef";
+
+const OTHER_START: SessionStart = { ...START, sessionId: OTHER_SESSION };
+
+/**
+ * The most a shutdown may take with a harness that never exits. Generous next
+ * to the few seconds AD-6 bounds the wait at: what is under test is a wait that
+ * ends, not the constant the implementation chose.
+ */
+const SHUTDOWN_BUDGET_MS = 20_000;
+
+const stopsBySession = (fake: Fake): ReadonlyArray<{ sessionId: string; reason: ExitReason }> =>
+  [...fake.stops].sort((one, other) => one.sessionId.localeCompare(other.sessionId));
+
+describe("an announced shutdown", () => {
+  it("stops every live session as a restart, and their exits are out before it returns", async () => {
+    const fake = faking();
+    const { supervisor, runner, sent } = connecting(fake);
+
+    await driving(
+      fake,
+      supervisor,
+      Effect.gen(function* () {
+        yield* supervisor.start(START);
+        yield* supervisor.start(OTHER_START);
+        yield* until("sent both sessions' starts", () => eventsIn(sent).length === 2);
+
+        yield* shutdownOf(runner)("runner_restart");
+
+        // Read the moment it returns, not after a wait: what the caller does
+        // next is hang the socket up, and an exit still in flight then is one
+        // the controller never sees.
+        expect(exitReasons(sent)).toEqual(["runner_restart", "runner_restart"]);
+      }),
+    );
+
+    expect(stopsBySession(fake)).toEqual([
+      { sessionId: OTHER_SESSION, reason: "runner_restart" },
+      { sessionId: SESSION, reason: "runner_restart" },
+    ]);
+  });
+
+  it("goes anyway when a harness takes the stop and never exits", async () => {
+    const fake = faking();
+    const { supervisor, runner, sent } = connecting(fake);
+
+    await driving(
+      fake,
+      supervisor,
+      Effect.gen(function* () {
+        yield* supervisor.start(START);
+        yield* supervisor.start(OTHER_START);
+        yield* until("sent both sessions' starts", () => eventsIn(sent).length === 2);
+        yield* Effect.sync(() => {
+          fake.stopsSilently = true;
+        });
+
+        const returned = yield* Effect.raceFirst(
+          Effect.as(shutdownOf(runner)("runner_restart"), true),
+          Effect.as(Effect.sleep(Duration.millis(SHUTDOWN_BUDGET_MS)), false),
+        );
+
+        expect(returned, "the shutdown waited on a harness that never died").toBe(true);
+        // Abandoned, not seen out: both were asked, neither said anything back.
+        expect(exitReasons(sent)).toEqual([]);
+      }),
+    );
+
+    expect(stopsBySession(fake)).toEqual([
+      { sessionId: OTHER_SESSION, reason: "runner_restart" },
+      { sessionId: SESSION, reason: "runner_restart" },
+    ]);
+  });
+
+  it("starts nothing the controller asks for after it", async () => {
+    const fake = faking();
+    const { supervisor, runner, sent } = connecting(fake);
+
+    await driving(
+      fake,
+      supervisor,
+      Effect.gen(function* () {
+        yield* supervisor.start(START);
+        yield* until("sent the start", () => eventsIn(sent).length === 1);
+        yield* shutdownOf(runner)("runner_restart");
+
+        // A start the controller had already put on the wire when this runner
+        // began going. Spawning a harness now is one nothing will ever stop.
+        yield* supervisor.start(OTHER_START);
+      }),
+    );
+
+    expect(fake.contexts).toHaveLength(1);
+    expect(stopsBySession(fake)).toEqual([{ sessionId: SESSION, reason: "runner_restart" }]);
+  });
+});
+
+describe("a shutdown landing between a start's fence and the adapter (F-42)", () => {
+  it("never asks the adapter for the harness", async () => {
+    const fake = faking();
+    const { supervisor, runner, sent } = connecting(fake);
+
+    // Held open on the very first `listSessions` - `start`'s own check,
+    // before this session has an entry a shutdown taken in the gap could see.
+    let gateEntered = false;
+    let resumeGate: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      resumeGate = resolve;
+    });
+    const original = fake.adapter.listSessions;
+    Object.assign(fake.adapter, {
+      listSessions: Effect.suspend(() => {
+        if (gateEntered) return original;
+        gateEntered = true;
+        return Effect.andThen(
+          Effect.promise(() => gate),
+          original,
+        );
+      }),
+    });
+
+    await driving(
+      fake,
+      supervisor,
+      Effect.gen(function* () {
+        yield* Effect.forkChild(supervisor.start(START));
+        yield* until("the start reached its own fence", () => gateEntered);
+        // Nothing is live yet, so this returns at once - `stopped` is what
+        // the still-gated start has to see.
+        yield* shutdownOf(runner)("runner_restart");
+        resumeGate();
+        yield* until("the fence inside starting saw it", () =>
+          eventsIn(sent).some((frame) => frame.event._tag === "session.exited"),
+        );
+      }),
+    );
+
+    expect(fake.contexts).toHaveLength(0);
+    expect(eventsIn(sent).map((frame) => frame.event._tag)).toEqual(["session.exited"]);
   });
 });

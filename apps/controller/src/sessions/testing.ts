@@ -240,6 +240,12 @@ export const withFleet = (
       expect(joined.status, await joined.clone().text()).toBe(201);
       const answer = (await joined.json()) as JoinAnswer;
       const wire = await dial(harness.base, answer.credential, options.facts, options.models);
+      // A real runner reports what it holds right after its hello (empty, on a
+      // fresh connection); most callers want dispatch working from the first
+      // line of their test body rather than plumbing this through themselves.
+      // A test after the gap between hello and that report uses `reconnect`,
+      // which leaves the new connection to send its own.
+      wire.send({ _tag: "sessionsReport", sessions: [] });
       const wires: Array<Wire> = [wire];
       const reconnect = async (): Promise<Wire> => {
         const again = await dial(harness.base, answer.credential, options.facts, options.models);
@@ -256,6 +262,7 @@ export const withFleet = (
         expect(second.status, await second.clone().text()).toBe(201);
         const enlisted = (await second.json()) as JoinAnswer;
         const its = await dial(harness.base, enlisted.credential, options.facts, options.models);
+        its.send({ _tag: "sessionsReport", sessions: [] });
         wires.push(its);
         machines += 1;
         // One snapshot per machine per instance, so a placement onto this one

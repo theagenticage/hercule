@@ -14,6 +14,7 @@ export {
   RunnerPresence,
   RunnerPresenceLayer,
   type Answer,
+  type Connection,
   type SessionTraffic,
 } from "./presence";
 export { runnerRepository } from "./repository";

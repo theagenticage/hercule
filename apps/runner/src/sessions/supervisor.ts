@@ -10,6 +10,7 @@
  */
 import { rmSync } from "node:fs";
 import * as Clock from "effect/Clock";
+import * as Deferred from "effect/Deferred";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
@@ -17,6 +18,7 @@ import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
 import {
   MAX_MESSAGE_LENGTH,
+  type ExitReason,
   type ProviderEvent,
   type RunnerToController,
   type SessionInput,
@@ -79,16 +81,51 @@ export interface SessionSupervisor {
   readonly stop: (frame: SessionStop) => Effect.Effect<void>;
 }
 
+/**
+ * The value `supervising` hands back: the per-connection builder, and the
+ * process-wide shutdown beside it. A session outlives the socket that started
+ * it, and so does the shutdown that ends every one of them - neither belongs
+ * to one connection's `SessionSupervisor`.
+ */
+export interface Supervising {
+  (connection: Connection): SessionSupervisor;
+  /**
+   * Stops every session this runner holds and waits for each to have produced
+   * its `session.exited` through whichever connection's relay is up, bounded
+   * so a harness that will not die does not hold up the caller for ever.
+   * Fences new starts first, so nothing spawns behind the goodbye this call
+   * precedes.
+   */
+  readonly shutdown: (reason: ExitReason) => Effect.Effect<void>;
+}
+
+/**
+ * The most a shutdown waits on a harness to confirm it stopped: long enough
+ * for an ordinary exit, short enough that a stuck one does not delay the
+ * goodbye a person would notice.
+ */
+const SHUTDOWN_STOP_BOUND: Duration.Duration = Duration.seconds(5);
+
 /** Taken once, so the state below is the process's rather than a connection's. */
-export const supervising = (adapters: ReadonlyArray<ProviderAdapter>) => {
+export const supervising = (adapters: ReadonlyArray<ProviderAdapter>): Supervising => {
   const live = new Map<string, Live>();
   let lastSeq = 0;
+  /**
+   * One entry per session `shutdown` is waiting on, resolved once its
+   * `session.exited` has gone out on `sending` - not merely reached `release`,
+   * which runs first and would let the wait return before the frame crossed
+   * the socket.
+   */
+  const stopping = new Map<string, Deferred.Deferred<void>>();
   // Assigning a number and writing it are one step, on whichever fiber gets
   // here first: the relay and a frame being answered both emit, and a sequence
   // that reached the wire out of order is one the controller may never insert.
   const sequencing = Semaphore.makeUnsafe(1);
+  // Set once, by `shutdown`: the process is going, so a start the controller
+  // sent before it heard about that is one nothing would ever stop.
+  let stopped = false;
 
-  return (connection: Connection): SessionSupervisor => {
+  const builder = (connection: Connection): SessionSupervisor => {
     const discard = (scratch: string | undefined): void => {
       if (scratch !== undefined) rmSync(scratch, { recursive: true, force: true });
     };
@@ -120,6 +157,12 @@ export const supervising = (adapters: ReadonlyArray<ProviderAdapter>) => {
         if (held === undefined) return;
         const still = yield* held.adapter.listSessions;
         if (still.some((binding) => binding.sessionId === sessionId)) return;
+        // By identity, taken again after the wait above: a fresh start for
+        // this id may have already replaced the entry while this call was
+        // asking the adapter, and the adapter has not registered it yet
+        // either - `still` says nothing about that start, only about the one
+        // this exit belongs to.
+        if (live.get(sessionId) !== held) return;
         live.delete(sessionId);
         yield* teardown(held);
       });
@@ -183,6 +226,15 @@ export const supervising = (adapters: ReadonlyArray<ProviderAdapter>) => {
           const frame: RunnerToController = { _tag: "sessionEvent", seq: lastSeq, event };
           if (event._tag === "session.exited") yield* release(event.sessionId);
           yield* sending(frame);
+          // After the send, not before: a `shutdown` waiting on this deferred
+          // must see the frame already on the wire when it wakes.
+          if (event._tag === "session.exited") {
+            const waiting = stopping.get(event.sessionId);
+            if (waiting !== undefined) {
+              stopping.delete(event.sessionId);
+              yield* Deferred.succeed(waiting, undefined);
+            }
+          }
         }),
       );
 
@@ -250,7 +302,21 @@ export const supervising = (adapters: ReadonlyArray<ProviderAdapter>) => {
                     }),
                   ),
                 );
-                return yield* Effect.tapCause(
+                // A shutdown between `start`'s own fence and this entry
+                // existing would never see this session: nobody would ask the
+                // adapter for a harness that is about to be told to stop.
+                if (stopped) {
+                  live.delete(frame.sessionId);
+                  yield* teardown(held);
+                  return yield* forward({
+                    _tag: "session.exited",
+                    eventId: crypto.randomUUID(),
+                    sessionId: frame.sessionId,
+                    at: now(),
+                    reason: "runner_restart",
+                  });
+                }
+                const binding = yield* Effect.tapCause(
                   adapter.startSession(frame.sessionId, frame.spec, resolved.ctx),
                   () =>
                     Effect.gen(function* () {
@@ -261,6 +327,10 @@ export const supervising = (adapters: ReadonlyArray<ProviderAdapter>) => {
                       yield* teardown(held);
                     }),
                 );
+                // A shutdown that ran while the harness was still coming up
+                // asked nobody to stop it: it held no entry yet to find.
+                if (stopped) yield* adapter.stopSession(frame.sessionId, "runner_restart");
+                return binding;
               }),
             ),
           ),
@@ -287,6 +357,10 @@ export const supervising = (adapters: ReadonlyArray<ProviderAdapter>) => {
 
       start: (frame: SessionStart): Effect.Effect<void> =>
         Effect.gen(function* () {
+          // A start the controller had already put on the wire when a
+          // shutdown began: spawning a harness now is one nothing will ever
+          // stop, so it is dropped rather than run.
+          if (stopped) return;
           const adapter = adapters.find((one) => one.providerId === frame.providerId);
           if (adapter === undefined) {
             return yield* died(frame.sessionId, noAdapterFor(frame.providerId));
@@ -341,4 +415,31 @@ export const supervising = (adapters: ReadonlyArray<ProviderAdapter>) => {
         live.get(frame.sessionId)?.adapter.stopSession(frame.sessionId, "stopped") ?? Effect.void,
     };
   };
+
+  const shutdown = (reason: ExitReason): Effect.Effect<void> =>
+    Effect.gen(function* () {
+      stopped = true;
+      const ids = [...live.keys()];
+      if (ids.length === 0) return;
+      const waits = ids.map((id) => {
+        const deferred = Deferred.makeUnsafe<void>();
+        stopping.set(id, deferred);
+        return deferred;
+      });
+      yield* Effect.forEach(
+        ids,
+        (id) => live.get(id)?.adapter.stopSession(id, reason) ?? Effect.void,
+        { concurrency: "unbounded", discard: true },
+      );
+      yield* Effect.race(
+        Effect.forEach(waits, Deferred.await, { concurrency: "unbounded", discard: true }),
+        Effect.sleep(SHUTDOWN_STOP_BOUND),
+      );
+      // Whatever the race decided: a resolved one is already gone from here,
+      // and one that never came is not worth waiting on again, by this call
+      // or the next.
+      for (const id of ids) stopping.delete(id);
+    });
+
+  return Object.assign(builder, { shutdown });
 };
