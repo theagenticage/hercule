@@ -97,6 +97,7 @@ Source is organized **by domain**, not by type: one folder per domain, named wit
 4. `apps/web/src/app/` is wiring only: router, context, queries, entry guard, form, testing. Nothing that renders a screen.
 5. Reads are `queryOptions`, writes are `useMutation`; no component hand-rolls fetch state.
 6. Anything that interprets domain data goes to `@hydra/client-core` with its own test.
+7. A component is either presentational or orchestrating. A presentational component takes values and callbacks and reads nothing: no query cache, no router, no live connection. An orchestrating component reads the cache where it uses the data, never higher, and never forwards what it does not read; it earns its place by owning a mutation or a piece of client state, not by routing data. The route file is the first orchestrator: its loader prefetches everything the screen reads, so nothing below it suspends in practice. Interpretation of what is read is a client-core function (point 6), so two orchestrators reading one record can never disagree about what it means.
 
 ### Check commands
 
