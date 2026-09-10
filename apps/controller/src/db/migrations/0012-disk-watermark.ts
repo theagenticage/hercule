@@ -11,6 +11,6 @@ export default Effect.gen(function* () {
 
   yield* sql`
     ALTER TABLE runners ADD COLUMN disk_watermark_bytes INTEGER
-                                    CHECK (disk_watermark_bytes IS NULL OR disk_watermark_bytes >= 0)
+                                    CHECK (disk_watermark_bytes IS NULL OR disk_watermark_bytes >= 1)
   `;
 });

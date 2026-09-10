@@ -55,6 +55,14 @@ interface Live {
    * this fiber being forked.
    */
   absolute: Fiber.Fiber<void> | undefined;
+  /**
+   * Whether the adapter has confirmed this session as running yet. A stop
+   * asked for while still `starting` has nowhere to land - the adapter does
+   * not hold the session yet - so it waits as `pendingStop` instead.
+   */
+  phase: "starting" | "running";
+  /** The first reason asked for while starting, applied once it is running. */
+  pendingStop: ExitReason | undefined;
 }
 
 /** What one connection lends the supervisor for as long as it is up. */
@@ -82,13 +90,13 @@ export interface SessionSupervisor {
 }
 
 /**
- * The value `supervising` hands back: the per-connection builder, and the
- * process-wide shutdown beside it. A session outlives the socket that started
- * it, and so does the shutdown that ends every one of them - neither belongs
- * to one connection's `SessionSupervisor`.
+ * The value `supervising` hands back: a `SessionSupervisor` for a connection,
+ * and the process-wide shutdown beside it. A session outlives the socket that
+ * started it, and so does the shutdown that ends every one of them - neither
+ * belongs to one connection's `SessionSupervisor`.
  */
 export interface Supervising {
-  (connection: Connection): SessionSupervisor;
+  readonly forConnection: (connection: Connection) => SessionSupervisor;
   /**
    * Stops every session this runner holds and waits for each to have produced
    * its `session.exited` through whichever connection's relay is up, bounded
@@ -125,7 +133,20 @@ export const supervising = (adapters: ReadonlyArray<ProviderAdapter>): Supervisi
   // sent before it heard about that is one nothing would ever stop.
   let stopped = false;
 
-  const builder = (connection: Connection): SessionSupervisor => {
+  /**
+   * The one path every stop reaches the adapter through: a running session is
+   * told directly; a starting one has nowhere to send it yet - the adapter
+   * does not hold it - so the reason waits as `pendingStop` for `starting` to
+   * apply once the harness is up. First reason wins, the same as a second
+   * stop reaching the adapter directly would.
+   */
+  const requestStop = (sessionId: string, held: Live, reason: ExitReason): Effect.Effect<void> => {
+    if (held.phase === "running") return held.adapter.stopSession(sessionId, reason);
+    if (held.pendingStop === undefined) held.pendingStop = reason;
+    return Effect.void;
+  };
+
+  const forConnection = (connection: Connection): SessionSupervisor => {
     const discard = (scratch: string | undefined): void => {
       if (scratch !== undefined) rmSync(scratch, { recursive: true, force: true });
     };
@@ -185,7 +206,7 @@ export const supervising = (adapters: ReadonlyArray<ProviderAdapter>): Supervisi
           // By identity: this entry may be someone else's, or gone, by the
           // time the deadline is reached.
           if (live.get(sessionId) === held) {
-            yield* held.adapter.stopSession(sessionId, "inactivity_timeout");
+            yield* requestStop(sessionId, held, "inactivity_timeout");
           }
           return;
         }
@@ -287,24 +308,15 @@ export const supervising = (adapters: ReadonlyArray<ProviderAdapter>): Supervisi
                   lastEventAt: 0,
                   inactivity: undefined,
                   absolute: undefined,
+                  phase: "starting",
+                  pendingStop: undefined,
                 };
                 live.set(frame.sessionId, held);
-                // Armed here, not on `session.started`: a spec's absolute
-                // deadline is this runner's own promise to end the session,
-                // not something the harness has to confirm first.
-                held.absolute = yield* Effect.forkDetach(
-                  Effect.andThen(
-                    Effect.sleep(Duration.millis(frame.spec.timeouts.absoluteMs)),
-                    Effect.suspend(() => {
-                      if (live.get(frame.sessionId) !== held) return Effect.void;
-                      held.absolute = undefined;
-                      return adapter.stopSession(frame.sessionId, "absolute_timeout");
-                    }),
-                  ),
-                );
-                // A shutdown between `start`'s own fence and this entry
-                // existing would never see this session: nobody would ask the
-                // adapter for a harness that is about to be told to stop.
+                // A shutdown between `start`'s own fence and this line would
+                // never see this session - `listSessions` and `resolve` above
+                // both cross a suspension point - so it is asked here too:
+                // nobody asks the adapter for a harness about to be told to
+                // stop.
                 if (stopped) {
                   live.delete(frame.sessionId);
                   yield* teardown(held);
@@ -316,6 +328,19 @@ export const supervising = (adapters: ReadonlyArray<ProviderAdapter>): Supervisi
                     reason: "runner_restart",
                   });
                 }
+                // Armed here, not on `session.started`: a spec's absolute
+                // deadline is this runner's own promise to end the session,
+                // not something the harness has to confirm first.
+                held.absolute = yield* Effect.forkDetach(
+                  Effect.andThen(
+                    Effect.sleep(Duration.millis(frame.spec.timeouts.absoluteMs)),
+                    Effect.suspend(() => {
+                      if (live.get(frame.sessionId) !== held) return Effect.void;
+                      held.absolute = undefined;
+                      return requestStop(frame.sessionId, held, "absolute_timeout");
+                    }),
+                  ),
+                );
                 const binding = yield* Effect.tapCause(
                   adapter.startSession(frame.sessionId, frame.spec, resolved.ctx),
                   () =>
@@ -327,9 +352,18 @@ export const supervising = (adapters: ReadonlyArray<ProviderAdapter>): Supervisi
                       yield* teardown(held);
                     }),
                 );
-                // A shutdown that ran while the harness was still coming up
-                // asked nobody to stop it: it held no entry yet to find.
-                if (stopped) yield* adapter.stopSession(frame.sessionId, "runner_restart");
+                // By identity, the same guard both timers use: a start after
+                // this one owns what is there now, and a pending stop of
+                // this one's is not that start's to apply.
+                if (live.get(frame.sessionId) === held) {
+                  held.phase = "running";
+                  // A stop asked for while the harness was still coming up -
+                  // by a shutdown, a timer, or the controller - has been
+                  // waiting on this since there was nowhere else to send it.
+                  if (held.pendingStop !== undefined) {
+                    yield* requestStop(frame.sessionId, held, held.pendingStop);
+                  }
+                }
                 return binding;
               }),
             ),
@@ -411,8 +445,10 @@ export const supervising = (adapters: ReadonlyArray<ProviderAdapter>): Supervisi
         live.get(frame.sessionId)?.adapter.interrupt(frame.sessionId) ?? Effect.void,
 
       /** Idempotent: a session this runner does not hold is already stopped. */
-      stop: (frame: SessionStop): Effect.Effect<void> =>
-        live.get(frame.sessionId)?.adapter.stopSession(frame.sessionId, "stopped") ?? Effect.void,
+      stop: (frame: SessionStop): Effect.Effect<void> => {
+        const held = live.get(frame.sessionId);
+        return held === undefined ? Effect.void : requestStop(frame.sessionId, held, "stopped");
+      },
     };
   };
 
@@ -428,7 +464,10 @@ export const supervising = (adapters: ReadonlyArray<ProviderAdapter>): Supervisi
       });
       yield* Effect.forEach(
         ids,
-        (id) => live.get(id)?.adapter.stopSession(id, reason) ?? Effect.void,
+        (id) => {
+          const held = live.get(id);
+          return held === undefined ? Effect.void : requestStop(id, held, reason);
+        },
         { concurrency: "unbounded", discard: true },
       );
       yield* Effect.race(
@@ -441,5 +480,5 @@ export const supervising = (adapters: ReadonlyArray<ProviderAdapter>): Supervisi
       for (const id of ids) stopping.delete(id);
     });
 
-  return Object.assign(builder, { shutdown });
+  return { forConnection, shutdown };
 };

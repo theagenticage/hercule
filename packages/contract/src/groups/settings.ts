@@ -73,9 +73,9 @@ export const SETTING_VALUES = {
     /** How many daily snapshots to keep. */
     "backup.keep": PositiveDays,
     /** How long a session may sit with no event before the runner ends it. */
-    "session.inactivityTimeout": PositiveMinutes,
+    "session.inactivityTimeoutMinutes": PositiveMinutes,
     /** How long a session may run in total before the runner ends it. */
-    "session.absoluteTimeout": PositiveMinutes,
+    "session.absoluteTimeoutMinutes": PositiveMinutes,
   },
   user: {
     /** The IANA zone the user reads times in, chosen during setup. */

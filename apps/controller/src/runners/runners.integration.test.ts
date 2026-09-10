@@ -1310,6 +1310,16 @@ describe("retiring a runner that still holds sessions", () => {
         expect(
           framesOf<SessionStopFrame>(arranged.wire, "sessionStop").map((frame) => frame.sessionId),
         ).toEqual([live.id]);
+
+        // One row per session the retirement ended, naming why.
+        const stopped = await arranged.harness.audit("session.stopped");
+        expect(stopped.map((row) => row.payload["sessionId"]).sort()).toEqual(
+          [live.id, waiting.id].sort(),
+        );
+        for (const row of stopped) {
+          expect(row.payload["runnerId"]).toBe(arranged.runnerId);
+          expect(row.payload["reason"]).toBe("runner_retired");
+        }
       });
     },
     FLEET_BUDGET_MS,

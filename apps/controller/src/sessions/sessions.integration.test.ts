@@ -2205,8 +2205,8 @@ describe("the timeouts a session is started under", () => {
   it("carries what the settings say, whole minutes turned into milliseconds", async () => {
     await withFleet(async (arranged) => {
       await setController(arranged, {
-        "session.inactivityTimeout": 5,
-        "session.absoluteTimeout": 60,
+        "session.inactivityTimeoutMinutes": 5,
+        "session.absoluteTimeoutMinutes": 60,
       });
 
       await spawned(arranged, { prompt: "hello" });
@@ -2219,8 +2219,8 @@ describe("the timeouts a session is started under", () => {
   it("carries the same values onto a session continued from another", async () => {
     await withFleet(async (arranged) => {
       await setController(arranged, {
-        "session.inactivityTimeout": 5,
-        "session.absoluteTimeout": 60,
+        "session.inactivityTimeoutMinutes": 5,
+        "session.absoluteTimeoutMinutes": 60,
       });
       const parent = await ended(arranged, "hello");
 
@@ -2649,6 +2649,17 @@ describe("what a machine's report says it is no longer holding", () => {
       }
       expect((await readSession(arranged, waiting.id)).status).toBe("idle");
       expect((await readSession(arranged, elsewhere.id)).status).toBe("busy");
+
+      // One row per session the report ended, naming why - and none for the
+      // one left running or the one another machine holds.
+      const reconciled = await arranged.harness.audit("session.reconciled");
+      expect(reconciled.map((row) => row.payload["sessionId"]).sort()).toEqual(
+        [running.id, opening.id].sort(),
+      );
+      for (const row of reconciled) {
+        expect(row.payload["runnerId"]).toBe(arranged.runnerId);
+        expect(row.payload["reason"]).toBe("runner_restart");
+      }
     });
   });
 

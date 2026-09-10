@@ -365,7 +365,7 @@ const make = Effect.gen(function* () {
         // pinging a controller that will never have it back.
         return yield* Effect.uninterruptible(
           Effect.gen(function* () {
-            const { retired, running } = yield* withTransaction(
+            const { retired, toStop } = yield* withTransaction(
               sql,
               Effect.gen(function* () {
                 const at = yield* nowIso;
@@ -386,7 +386,7 @@ const make = Effect.gen(function* () {
                 // check above already refused a running one; with it, both
                 // kinds. Either way a retired runner never dispatches again,
                 // so nothing else would ever end these.
-                const running = yield* sessions.endOnRunner(id);
+                const toStop = yield* sessions.endOnRunner(id);
                 // A default nobody can place on is worse than no default: the
                 // fleet says so rather than promoting a runner nobody chose.
                 const wasDefault = (yield* settings.defaultRunnerId()) === id;
@@ -398,14 +398,14 @@ const make = Effect.gen(function* () {
                   payload: { runnerId: id, forced: force === true, lostDefaultRunner: wasDefault },
                   at,
                 });
-                return { retired: yield* one(id), running };
+                return { retired: yield* one(id), toStop };
               }),
             );
             // After the commit: a session the row now reads exited still had
             // a live harness on the machine, which needs its own word to stop
             // - the queued ones never had a frame to begin with, so they get
             // none now either.
-            for (const sessionId of running) {
+            for (const sessionId of toStop) {
               yield* presence.tell(id, { _tag: "sessionStop", sessionId });
             }
             // After the commit too: a socket closed for a retirement that

@@ -59,7 +59,7 @@ import {
   type Unauthenticated,
   type Validation,
 } from "@hydra/contract";
-import { currentUser, requireGrant, USER_ACTOR } from "../actor";
+import { currentUser, requireGrant, SYSTEM_ACTOR, USER_ACTOR } from "../actor";
 import { announce, nowIso, pageInput, refuseCursor, withTransaction, type Page } from "../db";
 import { AuditLog } from "../events";
 import { PermissionProfiles, type GrantsError } from "../permissions";
@@ -228,9 +228,10 @@ const MINUTE_MS = 60_000;
 /** The two clocks a session starts under, whole minutes turned into the milliseconds the wire carries. */
 const timeoutsFrom = (controller: ScopeSettings<"controller">): SessionSpec["timeouts"] => ({
   inactivityMs:
-    (controller["session.inactivityTimeout"] ?? DEFAULT_INACTIVITY_TIMEOUT_MINUTES) * MINUTE_MS,
+    (controller["session.inactivityTimeoutMinutes"] ?? DEFAULT_INACTIVITY_TIMEOUT_MINUTES) *
+    MINUTE_MS,
   absoluteMs:
-    (controller["session.absoluteTimeout"] ?? DEFAULT_ABSOLUTE_TIMEOUT_MINUTES) * MINUTE_MS,
+    (controller["session.absoluteTimeoutMinutes"] ?? DEFAULT_ABSOLUTE_TIMEOUT_MINUTES) * MINUTE_MS,
 });
 
 /**
@@ -599,6 +600,18 @@ const make = Effect.gen(function* () {
             at,
           );
           yield* ending(gone);
+          yield* Effect.forEach(
+            gone,
+            (id) =>
+              audit.append({
+                kind: "session.reconciled",
+                actor: SYSTEM_ACTOR,
+                record: { topic: "session" as const, id },
+                payload: { sessionId: id, runnerId, reason: "runner_restart" },
+                at,
+              }),
+            { discard: true },
+          );
         }),
       );
       yield* presence.markSessionsReported(runnerId, connection);
@@ -674,9 +687,20 @@ const make = Effect.gen(function* () {
       sql,
       Effect.gen(function* () {
         const at = yield* nowIso;
-        const { ended, running } = yield* sessions.endOnRunner(runnerId, at);
+        const { ended, toStop } = yield* sessions.endOnRunner(runnerId, at);
         yield* ending(ended);
-        return running;
+        yield* Effect.forEach(
+          ended,
+          (id) =>
+            audit.append({
+              kind: "session.stopped",
+              actor: SYSTEM_ACTOR,
+              payload: { sessionId: id, runnerId, reason: "runner_retired" },
+              at,
+            }),
+          { discard: true },
+        );
+        return toStop;
       }),
     );
 
