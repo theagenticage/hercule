@@ -25,17 +25,15 @@ export function SessionQueue({
     <Row label="Sessions">
       <div className="flex flex-col gap-1">
         <span className="text-row text-ink">{line}</span>
-        {queue.length === 0
-          ? null
-          : queue.map((session) => (
-              <div key={session.id} className="flex items-center gap-2 text-row">
-                <QueuedMark />
-                <span className="min-w-0 flex-1 truncate text-muted">{session.title}</span>
-                <span className="shrink-0 font-mono text-fine text-faint tabular-nums">
-                  {session.age}
-                </span>
-              </div>
-            ))}
+        {queue.map((session) => (
+          <div key={session.id} className="flex items-center gap-2 text-row">
+            <QueuedMark />
+            <span className="min-w-0 flex-1 truncate text-muted">{session.title}</span>
+            <span className="shrink-0 font-mono text-fine text-faint tabular-nums">
+              {session.age}
+            </span>
+          </div>
+        ))}
       </div>
     </Row>
   );

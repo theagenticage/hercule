@@ -251,7 +251,7 @@ export const connect = (
 
     // The connection lends the supervisor a way to write and the paths this
     // machine resolved; the sessions themselves are the process's.
-    const supervisor = sessions({
+    const supervisor = sessions.forConnection({
       send: (frame) => write(asText(frame)),
       machine: {
         providersDir: options.providersDir,

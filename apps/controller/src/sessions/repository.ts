@@ -440,7 +440,7 @@ const make = Effect.gen(function* () {
       ),
 
     /**
-     * Ends every session this runner still holds open. `running` is what was
+     * Ends every session this runner still holds open. `toStop` is what was
      * `starting`, `idle` or `busy` before this call - read first, because the
      * update below turns all of it into `exited` and there would be nothing
      * left to tell apart - which is what a caller ending the runner itself
@@ -451,12 +451,12 @@ const make = Effect.gen(function* () {
       runnerId: string,
       at: string,
     ): Effect.Effect<
-      { readonly ended: ReadonlyArray<string>; readonly running: ReadonlyArray<string> },
+      { readonly ended: ReadonlyArray<string>; readonly toStop: ReadonlyArray<string> },
       SqlError
     > =>
       Effect.gen(function* () {
         const key = uuidFromString(runnerId);
-        const runningRows = yield* sql<{ readonly id: Uint8Array }>`
+        const toStopRows = yield* sql<{ readonly id: Uint8Array }>`
           SELECT id FROM sessions WHERE runner_id = ${key} AND status IN ('starting', 'idle', 'busy')
         `;
         const endedRows = yield* sql<{ readonly id: Uint8Array }>`
@@ -469,7 +469,7 @@ const make = Effect.gen(function* () {
         `;
         return {
           ended: endedRows.map((row) => uuidToString(row.id)),
-          running: runningRows.map((row) => uuidToString(row.id)),
+          toStop: toStopRows.map((row) => uuidToString(row.id)),
         };
       }),
 

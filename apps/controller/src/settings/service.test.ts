@@ -187,21 +187,27 @@ describe("settings.update", () => {
       Effect.gen(function* () {
         const settings = yield* SettingsOperations;
         yield* settings.update({
-          controller: { "session.inactivityTimeout": 5, "session.absoluteTimeout": 60 },
+          controller: {
+            "session.inactivityTimeoutMinutes": 5,
+            "session.absoluteTimeoutMinutes": 60,
+          },
         });
         return yield* settings.read();
       }),
     );
     expect(state.controller).toEqual({
-      "session.inactivityTimeout": 5,
-      "session.absoluteTimeout": 60,
+      "session.inactivityTimeoutMinutes": 5,
+      "session.absoluteTimeoutMinutes": 60,
     });
   });
 
   it("refuses a session timeout that is zero or not a whole number of minutes", async () => {
     // A session may not be given no time at all, and a fraction of a minute is
     // not something the wire's milliseconds can be derived from honestly.
-    for (const key of ["session.inactivityTimeout", "session.absoluteTimeout"] as const) {
+    for (const key of [
+      "session.inactivityTimeoutMinutes",
+      "session.absoluteTimeoutMinutes",
+    ] as const) {
       for (const value of [0, -1, 1.5]) {
         const error = await run(
           Effect.flatMap(SettingsOperations, (settings) =>

@@ -189,29 +189,16 @@ const connecting = (fake: Fake) => {
     binaryOf: (name) => `/usr/local/bin/${name}`,
   };
   // The value `supervising` returns is the process's, and one connection's
-  // supervisor is built from it: a session outlives the socket that started it,
-  // and so does the shutdown that ends every one of them.
+  // supervisor is built from it through `forConnection`: a session outlives
+  // the socket that started it, and so does the shutdown that ends every one
+  // of them.
   const runner = supervising([fake.adapter]);
-  const supervisor = runner({
+  const supervisor = runner.forConnection({
     machine,
     send: (frame) => Effect.sync(() => sent.push(frame)),
   });
   return { supervisor, runner, sent, machine, under };
 };
-
-/**
- * The shutdown the process-wide supervisor owns, asked of the value
- * `supervising` handed back.
- *
- * Assumed shape, and the one place a rename touches: the builder carries its
- * shutdown beside it. What the tests below are about is what a shutdown does,
- * not where it is reached from.
- */
-const shutdownOf = (
-  runner: ReturnType<typeof supervising>,
-): ((reason: ExitReason) => Effect.Effect<void>) =>
-  (runner as unknown as { readonly shutdown: (reason: ExitReason) => Effect.Effect<void> })
-    .shutdown;
 
 /**
  * How long a wait on the relay is given. Wall clock rather than a count of
@@ -433,7 +420,7 @@ describe("an exit that arrives after the id was started again", () => {
 });
 
 describe("a stale exit's release racing a fresh start under the same id", () => {
-  it("does not tear down the fresh start's entry (F-2)", async () => {
+  it("does not tear down the fresh start's entry", async () => {
     const fake = faking();
     const { supervisor, sent } = connecting(fake);
 
@@ -978,7 +965,7 @@ describe("an announced shutdown", () => {
         yield* supervisor.start(OTHER_START);
         yield* until("sent both sessions' starts", () => eventsIn(sent).length === 2);
 
-        yield* shutdownOf(runner)("runner_restart");
+        yield* runner.shutdown("runner_restart");
 
         // Read the moment it returns, not after a wait: what the caller does
         // next is hang the socket up, and an exit still in flight then is one
@@ -1009,7 +996,7 @@ describe("an announced shutdown", () => {
         });
 
         const returned = yield* Effect.raceFirst(
-          Effect.as(shutdownOf(runner)("runner_restart"), true),
+          Effect.as(runner.shutdown("runner_restart"), true),
           Effect.as(Effect.sleep(Duration.millis(SHUTDOWN_BUDGET_MS)), false),
         );
 
@@ -1035,7 +1022,7 @@ describe("an announced shutdown", () => {
       Effect.gen(function* () {
         yield* supervisor.start(START);
         yield* until("sent the start", () => eventsIn(sent).length === 1);
-        yield* shutdownOf(runner)("runner_restart");
+        yield* runner.shutdown("runner_restart");
 
         // A start the controller had already put on the wire when this runner
         // began going. Spawning a harness now is one nothing will ever stop.
@@ -1048,13 +1035,57 @@ describe("an announced shutdown", () => {
   });
 });
 
-describe("a shutdown landing between a start's fence and the adapter (F-42)", () => {
+describe("a stop that arrives while a session is still starting", () => {
+  it("is applied once the harness is up, rather than lost", async () => {
+    const fake = faking();
+    const { supervisor, sent } = connecting(fake);
+
+    // Held open on the adapter's own `startSession`, so the session already
+    // has a `live` entry - `starting` - before the stop is asked for, with
+    // nowhere yet to send it but `pendingStop`.
+    let gateEntered = false;
+    let resumeGate: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      resumeGate = resolve;
+    });
+    const original = fake.adapter.startSession;
+    Object.assign(fake.adapter, {
+      startSession: (sessionId: string, spec: SessionSpec, ctx: ProviderRunnerContext) => {
+        gateEntered = true;
+        return Effect.andThen(
+          Effect.promise(() => gate),
+          original(sessionId, spec, ctx),
+        );
+      },
+    });
+
+    await driving(
+      fake,
+      supervisor,
+      Effect.gen(function* () {
+        yield* Effect.forkChild(supervisor.start(START));
+        yield* until("the harness was asked to start", () => gateEntered);
+        yield* supervisor.stop({ _tag: "sessionStop", sessionId: SESSION });
+        resumeGate();
+        yield* until("the exit reached the wire", () =>
+          eventsIn(sent).some((frame) => frame.event._tag === "session.exited"),
+        );
+      }),
+    );
+
+    expect(fake.contexts).toHaveLength(1);
+    expect(stopsBySession(fake)).toEqual([{ sessionId: SESSION, reason: "stopped" }]);
+  });
+});
+
+describe("a shutdown that lands before a start has an entry to find", () => {
   it("never asks the adapter for the harness", async () => {
     const fake = faking();
     const { supervisor, runner, sent } = connecting(fake);
 
     // Held open on the very first `listSessions` - `start`'s own check,
-    // before this session has an entry a shutdown taken in the gap could see.
+    // crossed before this session has a `live` entry a shutdown taken in the
+    // gap could see.
     let gateEntered = false;
     let resumeGate: () => void = () => {};
     const gate = new Promise<void>((resolve) => {
@@ -1079,10 +1110,10 @@ describe("a shutdown landing between a start's fence and the adapter (F-42)", ()
         yield* Effect.forkChild(supervisor.start(START));
         yield* until("the start reached its own fence", () => gateEntered);
         // Nothing is live yet, so this returns at once - `stopped` is what
-        // the still-gated start has to see.
-        yield* shutdownOf(runner)("runner_restart");
+        // the still-gated start has to see, once it resumes.
+        yield* runner.shutdown("runner_restart");
         resumeGate();
-        yield* until("the fence inside starting saw it", () =>
+        yield* until("the entry saw the shutdown as it was made", () =>
           eventsIn(sent).some((frame) => frame.event._tag === "session.exited"),
         );
       }),
