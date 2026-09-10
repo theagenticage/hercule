@@ -21,7 +21,6 @@ import { local } from "./local";
 import { providerLogins } from "./providers";
 import { sessions } from "./sessions";
 import { setController } from "./set-controller";
-import { stopping } from "./stopping";
 
 /** The same vocabulary the CLI uses. */
 const EXIT = { failed: 1, usage: 2 } as const;
@@ -65,7 +64,10 @@ const hold = async (work: Effect.Effect<void, { readonly message: string }>): Pr
     Effect.result(
       Effect.scoped(
         Effect.flatMap(untilStopped, (stopped) =>
-          stopping(work, Effect.andThen(stopped, sessions.shutdown("runner_restart"))),
+          // The shutdown runs as part of the stop branch itself, so `raceFirst`
+          // cannot call it won and interrupt `work` - closing the connection -
+          // until every session's exit has already gone out on it.
+          Effect.raceFirst(work, Effect.andThen(stopped, sessions.shutdown("runner_restart"))),
         ),
       ).pipe(
         // A vendor login blocked on stdin would outlive this process, still
