@@ -34,7 +34,7 @@ _Avoid_: link, URL (a ref is an identity, not a location)
 
 **Session**:
 One conversation with a provider-backed agent, resumable and forkable. Maps onto a Claude Code session, a Codex thread or a pi session. A session copies its configuration from an Agent at spawn and never reads through it afterwards, or has no Agent at all and is a Thread. Not required to belong to a task or workspace.
-_Avoid_: execution, chat
+_Avoid_: execution, chat; "new session on resume", "continue to resume", "exited = unrecoverable" (an exited session whose transcript is still on its runner is resumed in place, under its own id, by the next input)
 
 **Thread**:
 A session the user starts and drives by hand, with no Agent behind it: nothing outlives it, nothing about it is named or reusable. The bare word always means this; a Codex thread or a Slack thread is always qualified.

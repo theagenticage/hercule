@@ -184,6 +184,8 @@ Status axis (consolidated from pinned lifecycle facts, owned by [06-providers.md
 
 *(Amended 2026-09-10, [#67](https://github.com/rogierpennink/hydra/issues/67).)* `queued` also covers a runner that is below its disk watermark, offline, or unreachable - not only one at its session cap.
 
+*(Amended 2026-09-12, [#162](https://github.com/rogierpennink/hydra/issues/162).)* `exited` is terminal only where `resumable` is false: a resumable session is resumed in place, under its own id, by the next `session.input` ([06-providers.md](./06-providers.md) section 4.1) - the lazy process the Conversation entry above already describes. `exitedAt` records the last exit, not a final one.
+
 Relationships: requires `instanceId`, `runnerId`, `permissionProfileId`. Everything else optional, `agentId` included. Holds zero or more Subscriptions (registered by the session itself through the API, or migrated from a rotated predecessor in the same Conversation). Owns its Turns and Queued Inputs. Exactly one Session Token while alive.
 
 Identity: the Hydra session id and the provider-native id (Claude Code session id, Codex thread id, pi session) are separate concepts joined only by the Session Binding. All Hydra references (API, CLI, actor stamps, step records, subscriptions) use the Hydra id.
@@ -531,7 +533,7 @@ Resolved 2026-09-01, [Domain model residue](https://github.com/rogierpennink/hyd
 | Task | `open`, `in-progress`, `done`, `cancelled` (any-to-any) | none enforced | this document |
 | Run | `pending`, `running`, `completed`, `failed`, `cancelled` | `completed`, `failed`, `cancelled` | 07 |
 | Step record | `pending`, `running`, `completed`, `failed`, `skipped`, `cancelled` | last four | 07 |
-| Session | `queued`, `starting`, `idle`, `busy`, `exited` (+ derived `resumable`) | `exited` | 06 |
+| Session | `queued`, `starting`, `idle`, `busy`, `exited` (+ derived `resumable`) | ~~`exited`~~ `exited` only where `resumable` is false *(amended 2026-09-12, [#162](https://github.com/rogierpennink/hydra/issues/162))* | 06 |
 | Turn | `completed`, `failed`, `interrupted` | all | 06 |
 | Queued Input | `queued`, `delivered`, `cancelled` | `delivered`, `cancelled` | this document |
 | Subscription | `live`, `ended` | `ended` | this document |

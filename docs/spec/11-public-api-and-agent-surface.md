@@ -163,7 +163,7 @@ Semantics: [./06-providers.md](./06-providers.md), [./12-assistants.md](./12-ass
 | `session.query` | `{ status?, agentId?, thread?, assistantId?, runnerId?, runId?, actor?, since?, until? }` (`thread: true` = sessions with no agent) | `session.read` | `GET /sessions` |
 | `session.read` | `{ sessionId }` (the record: status, agent, runner, workspace, usage) | `session.read` | `GET /sessions/{id}` |
 | `session.spawn` | `{ agentId?, prompt, instanceId?, model?, accessMode?, workspace? }` -> `{ sessionId }`; without `agentId` the session is a Thread built from the `thread.*` settings plus the overrides given, allowed for actor `user` only (`forbidden` otherwise; [./02-domain-model.md](./02-domain-model.md) Thread) | `session.spawn` | `POST /sessions` |
-| `session.continue` | `{ sessionId, mode: "resume" \| "fork", prompt }` -> the new `Session` | `session.spawn` | `POST /sessions/{id}/continue` |
+| `session.continue` | `{ sessionId, mode: "fork", prompt }` -> the new `Session` | `session.spawn` | `POST /sessions/{id}/continue` |
 | `session.update` | `{ sessionId, model }` -> the `Session` | `session.steer` | `PATCH /sessions/{id}` |
 | `session.input` | `{ sessionId, text, model?, options? }` -> `{ inputId, result: "opened" \| "steered" \| "queued" }` | `session.steer` | `POST /sessions/{id}/input` |
 | `session.interrupt` / `session.stop` | `{ sessionId }` | `session.steer` | `POST /sessions/{id}/interrupt` / `.../stop` |
@@ -184,6 +184,8 @@ Semantics: [./06-providers.md](./06-providers.md), [./12-assistants.md](./12-ass
 - `input.query` lists every input the session was ever given, oldest first, whatever became of each, not only the rows still queued. A queue you cannot look back through cannot tell you what was delivered.
 
 *(Amended 2026-09-11, [#160](https://github.com/rogierpennink/hydra/issues/160).)* `session.input` takes the same `model` and `options` fields `session.update` takes, optional, and applies them in the transaction that stores the input row, before the row exists: a composer's submission is one operation, and no client is left to order an update ahead of an input. The input row itself still carries no model ([./06-providers.md](./06-providers.md) section 4); a queued input opens its turn on whatever the session's model is at that boundary, and cancelling the row does not undo a change the submission already made. `session.update` stays for a caller that changes the model without saying anything, and `options` lands on both with [#155](https://github.com/rogierpennink/hydra/issues/155).
+
+*(Amended 2026-09-12, [#162](https://github.com/rogierpennink/hydra/issues/162).)* `session.continue` takes `mode: "fork"` only; `resume` is dropped. Nothing justified a new session for a resume: fork branches, resume does not. An `exited` session whose provider-native transcript is still on its runner is instead resumed in place, under its own id, by the next `session.input` ([./06-providers.md](./06-providers.md) section 4.1). `session.input` therefore also resumes: on an `exited` and `resumable` session it answers `queued`, the session walks `starting` -> `idle` -> `busy`, and the stored row opens a turn on the resumed native transcript; on an `exited` session that is not resumable it is refused `invalid_state` naming why.
 
 `session.respond` is not built: approvals are their own ticket.
 
