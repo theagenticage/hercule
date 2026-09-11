@@ -64,6 +64,26 @@ _Avoid_: interrupt (that's stopping a turn), inject
 User input held by the controller for delivery when the session's running turn completes. Editable and cancelable until delivered.
 _Avoid_: follow-up (provider-native term), pending message
 
+**Draft Thread**:
+A thread the user is still composing: it does not exist on the controller yet, and its config and first message are held by the client until the first submission starts it.
+_Avoid_: new-thread mode, create form, pending thread
+
+**Active Thread**:
+A thread that exists as a Session on the controller, whatever its status. Everything a draft could set is fixed except the model and its options.
+_Avoid_: existing thread, materialized thread, live thread
+
+**Thread Config**:
+What a thread runs with: provider instance, model and its options, access mode, runner, permission profile, workspace, checkout and branch. Set by the draft at start.
+_Avoid_: settings (reserved for the settings store), spec (reserved for the session spec), setup
+
+**Message Draft**:
+The unsent content the composer holds for one thread: text today, attachments and context later. One per thread, draft or active.
+_Avoid_: prompt (the first message as the spawn carries it), composer state
+
+**Submission**:
+What the composer hands the system when the user sends: the message draft plus every config pick made since the last submission. On a draft thread it starts the thread; on an active thread it is one input, the picks applied to the session before the input is stored.
+_Avoid_: send, payload, message (bare)
+
 ### Actors
 
 **Agent**:
