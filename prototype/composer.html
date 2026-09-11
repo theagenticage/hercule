@@ -502,7 +502,8 @@ function idRowHtml() {
 }
 /* the tab strip sketch: every thread open in this workspace, and + for one more beside them */
 function tabsHtml() {
-  const s = active() ? thread.session : null; const sib = thread.sibling; if (!s && !sib) return "";
+  const s = active() ? thread.session : null; const sib = thread.sibling;
+  if (!s && !sib) { const rp = repoOf(); return `<div class="tabs"><span class="ws">${rp ? `${rp.id} · new worktree` : "no workspace"}</span><button class="tab on"><span class="mk">·</span><span>New thread</span></button><span class="ws" style="margin-left:auto">a thread can get siblings once its worktree exists</span></div>`; }
   const branch = s ? s.branch : sib.branch;
   const tabs = [{ title: "Fix flaky webhook tests", mk: s && s.status === "busy" ? "▮▮▮" : "○", live: s && s.status === "busy", on: !!s }, { title: "Write the retry runbook", mk: "○", on: false }];
   if (sib) tabs.push({ title: "New thread", mk: "·", on: true });
