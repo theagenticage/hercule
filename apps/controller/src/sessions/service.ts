@@ -47,6 +47,7 @@ import {
   SESSION_CONTINUE_FIELDS,
   SESSION_UPDATE_FIELDS,
   SessionSpawnInput,
+  type SessionSelection,
   TRANSCRIPT_SORT_FIELDS,
   validation,
   validationOf,
@@ -68,6 +69,7 @@ import { providerRepository, type StoredSnapshot } from "../providers";
 import { RunnerPresence, runnerRepository, type Connection, type SessionTraffic } from "../runners";
 import { Settings, type ScopeSettings, type SettingError } from "../settings";
 import { inputRepository, type StoredInput } from "./inputs";
+import { validatedOptions } from "./options";
 import { sessionRepository, type StoredSession } from "./repository";
 import { fold, track, type Tracked } from "./stream";
 
@@ -330,6 +332,28 @@ const make = Effect.gen(function* () {
         definition,
         snapshots: yield* instances.snapshotsOf(instanceId),
       };
+    });
+
+  /**
+   * The machine's catalog is read only where there are picks to judge against
+   * it: with none there is nothing validation could refuse, and a plain turn
+   * should not be held to a lookup it never needed. The read is the snapshot
+   * row alone, so this stays inside the transaction that writes what it decides.
+   */
+  const selectionFor = (
+    session: StoredSession,
+    given: SessionSelection,
+  ): Effect.Effect<ModelSelection, Validation | SqlError | Schema.SchemaError> =>
+    Effect.gen(function* () {
+      const model = given.model ?? session.modelSelection.model;
+      const picks = given.options ?? {};
+      if (Object.keys(picks).length > 0) {
+        const snapshots = yield* instances.snapshotsOf(session.instanceId);
+        const snapshot = snapshots.find((one) => one.runnerId === session.runnerId);
+        yield* validatedOptions(snapshot?.models ?? [], model, picks);
+      }
+      const carried = model === session.modelSelection.model ? session.modelSelection.options : {};
+      return { model, options: { ...carried, ...picks } };
     });
 
   /**
@@ -999,6 +1023,8 @@ const make = Effect.gen(function* () {
           );
         }
 
+        yield* validatedOptions(hosting.models, model, decoded.options ?? {});
+
         if (decoded.permissionProfileId !== undefined) {
           yield* requireProfile(decoded.permissionProfileId);
         }
@@ -1008,7 +1034,7 @@ const make = Effect.gen(function* () {
         const spec = {
           instanceId,
           workspaceId: null,
-          modelSelection: { model, options: {} },
+          modelSelection: { model, options: decoded.options ?? {} },
           accessMode,
           timeouts: timeoutsFrom(yield* settings.all()),
         } satisfies SessionSpec;
@@ -1039,18 +1065,18 @@ const make = Effect.gen(function* () {
     update: (input: UpdateInput): Effect.Effect<Session, InputError> =>
       Effect.gen(function* () {
         yield* requireGrant("session.update");
-        const { id, model } = yield* Effect.mapError(decodeUpdate(input), validationOf);
-        const session = yield* one(id);
-        if (session.status === "exited") return yield* Effect.fail(invalidState(HAS_EXITED));
-        const modelSelection = { model, options: session.modelSelection.options };
-        yield* withTransaction(
+        const { id, ...given } = yield* Effect.mapError(decodeUpdate(input), validationOf);
+        return yield* withTransaction(
           sql,
           Effect.gen(function* () {
-            yield* sessions.selectModel(id, modelSelection);
+            const session = yield* one(id);
+            if (session.status === "exited") return yield* Effect.fail(invalidState(HAS_EXITED));
+            const modelSelection = yield* selectionFor(session, given);
+            yield* sessions.setModelSelection(id, modelSelection);
             yield* announce({ _tag: "record", topic: "session", id, kind: "updated" });
+            return { ...session, modelSelection };
           }),
         );
-        return { ...session, modelSelection };
       }),
 
     /**
@@ -1068,27 +1094,33 @@ const make = Effect.gen(function* () {
     input: (input: InputInput): Effect.Effect<SessionInputOutcome, InputError> =>
       Effect.gen(function* () {
         yield* requireGrant("session.input");
-        const { id, text } = yield* Effect.mapError(decodeInput(input), validationOf);
-        const session = yield* one(id);
-        if (session.status === "exited") return yield* Effect.fail(invalidState(HAS_EXITED));
-        const idle = session.status === "idle";
-        const row = yield* withTransaction(
+        const { id, text, ...picks } = yield* Effect.mapError(decodeInput(input), validationOf);
+        // The row is read, the picks are judged and both writes happen in one
+        // transaction: two submissions landing together are serialised rather
+        // than merging their picks over the same stale row, and a pick the
+        // model does not offer rolls the whole thing back, leaving neither a
+        // rewritten selection nor an input row behind.
+        const { session, row } = yield* withTransaction(
           sql,
           Effect.gen(function* () {
+            const session = yield* one(id);
+            if (session.status === "exited") return yield* Effect.fail(invalidState(HAS_EXITED));
+            const modelSelection = yield* selectionFor(session, picks);
             const at = yield* nowIso;
+            yield* sessions.setModelSelection(id, modelSelection);
             const created = yield* inputs.insert({
               sessionId: id,
               source: "user",
               actor: USER_ACTOR,
               text,
               at,
-              ...(idle ? { sentAt: at } : {}),
+              ...(session.status === "idle" ? { sentAt: at } : {}),
             });
             yield* announce({ _tag: "record", topic: "session", id, kind: "updated" });
-            return created;
+            return { session, row: created };
           }),
         );
-        if (!idle) return { inputId: row.id, result: "queued" };
+        if (session.status !== "idle") return { inputId: row.id, result: "queued" };
         return yield* deliverClaimed(session.runnerId, row);
       }),
 

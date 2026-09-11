@@ -517,11 +517,54 @@ describe("Composer: sending (AC-18)", () => {
       runnerId: RUNNER.id,
       permissionProfileId: PROFILE_UNRESTRICTED.id,
       workspaceId: null,
+      // A spawn carries the option picks unconditionally, so a thread started
+      // with none reads as an empty record rather than an absent field.
+      options: {},
     });
 
     expect(
       api.calls.some((call) => call.method === "PATCH" && call.path === "/api/v1/settings"),
     ).toBe(false);
+  });
+
+  it("spawns with the model options picked in the pill (AC-5)", async () => {
+    const user = userEvent.setup();
+    const { api, router } = await open(
+      [INSTANCE_A],
+      {},
+      {
+        "POST /api/v1/sessions": { body: NEW_SESSION },
+      },
+    );
+
+    await user.type(screen.getByRole("textbox"), "Fix the login bug");
+
+    // The picks are made in the model popover: the `effort` segmented row and
+    // the `thinking` checkbox, which defaults on and is toggled off here.
+    await user.click(screen.getByRole("button", { name: /claude-sonnet-5/i }));
+    await user.click(await screen.findByRole("radio", { name: "High" }));
+    await user.click(screen.getByRole("checkbox", { name: "Extended thinking" }));
+    await user.keyboard("{Escape}");
+
+    await user.click(screen.getByRole("button", { name: /send/i }));
+
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe(`/threads/${NEW_SESSION.id}`);
+    });
+
+    const spawn = api.calls.find(
+      (call) => call.method === "POST" && call.path === "/api/v1/sessions",
+    );
+    expect(spawn?.body).toEqual({
+      prompt: "Fix the login bug",
+      instanceId: INSTANCE_A.id,
+      model: "claude-sonnet-5",
+      accessMode: "approval-required",
+      runnerId: RUNNER.id,
+      permissionProfileId: PROFILE_UNRESTRICTED.id,
+      workspaceId: null,
+      options: { effort: "high", thinking: false },
+    });
   });
 
   it("sends on Enter, inserts a newline on Shift+Enter, and never sends an IME's own Enter", async () => {
