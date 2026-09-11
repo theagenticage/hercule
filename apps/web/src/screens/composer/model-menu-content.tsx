@@ -17,10 +17,6 @@ import { MenuRow } from "./menu-row";
  * found nowhere yet) shows the same way a collapsed group's does, spec 14's
  * `found, not logged in · Log in`; `Log in` opens the app's own login flow on
  * `loginRunner` when there is one to log in on, else it is plain text.
- *
- * `onOptionChange` absent means the options are read-only: a started thread
- * has no way to change one in this build, so its own current values are
- * shown but cannot be picked.
  */
 export function ModelMenuContent({
   groups,
@@ -39,7 +35,7 @@ export function ModelMenuContent({
   /** The currently selected model's own option descriptors, verbatim. */
   readonly options: readonly ModelOption[];
   readonly selectedOptions: Readonly<Record<string, string | boolean>>;
-  readonly onOptionChange?: ((id: string, value: string | boolean) => void) | undefined;
+  readonly onOptionChange: (id: string, value: string | boolean) => void;
   readonly client: HydraClient;
   /** The machine a "Log in" logs in on; absent when there is no runner to log in on at all. */
   readonly loginRunner: { readonly id: string; readonly name: string } | undefined;
@@ -121,14 +117,10 @@ export function ModelMenuContent({
                 <SegmentedControl
                   aria-label={option.label}
                   value={String(selectedOptions[option.id] ?? option.default)}
-                  onValueChange={(value) => onOptionChange?.(option.id, value)}
+                  onValueChange={(value) => onOptionChange(option.id, value)}
                 >
                   {(option.choices ?? []).map((choice) => (
-                    <SegmentedControlItem
-                      key={choice.value}
-                      value={choice.value}
-                      disabled={onOptionChange === undefined}
-                    >
+                    <SegmentedControlItem key={choice.value} value={choice.value}>
                       {choice.label}
                     </SegmentedControlItem>
                   ))}
@@ -141,8 +133,7 @@ export function ModelMenuContent({
                 key={option.id}
                 label={option.label}
                 checked={Boolean(selectedOptions[option.id] ?? option.default)}
-                disabled={onOptionChange === undefined}
-                onChange={(event) => onOptionChange?.(option.id, event.target.checked)}
+                onChange={(event) => onOptionChange(option.id, event.target.checked)}
               />
             ),
           )}

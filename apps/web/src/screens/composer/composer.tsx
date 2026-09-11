@@ -2,7 +2,8 @@
  * The composer: the thread's own configuration, in new-thread mode (nothing
  * started yet - every selector live) and inside a started thread (workspace,
  * checkout, branch, runner, profile and access mode locked to plain values;
- * only the model stays live, within the instance it started in).
+ * only the model and its options stay live, within the instance it started
+ * in).
  *
  * One component for both, per spec 14 §The composer ("Creating a thread is
  * one step"): a started thread reads its locked fields straight off the
@@ -30,6 +31,7 @@ import type {
   ProviderInstance,
   Runner,
   Session,
+  SessionInputPayload,
   SettingsState,
 } from "@hydra/contract";
 import { Button, cn, ListRow, Textarea } from "@hydra/ui";
@@ -101,12 +103,15 @@ export function Composer({
   const navigate = useNavigate();
   const started = session !== undefined;
 
-  // The composer's own draft selection, live only until a thread starts - a
-  // started thread reads the same five values off `session` instead (below)
-  // and never reads a draft, which is why the defaults are only resolved in
-  // new-thread mode. Nothing picked is `null`, never an empty string: the
-  // spawn payload below omits what is null and lets the server's own fallback
-  // decide, rather than posting an id-shaped value it would refuse.
+  // The composer's own draft selection. The workspace, runner, profile and
+  // access mode are live only until a thread starts - a started thread reads
+  // those off `session` instead (below), which is why the defaults are only
+  // resolved in new-thread mode. The model and its options stay draft state in
+  // both modes: on a started thread they are the picks made since the last
+  // submission, and they ride that submission rather than a request of their
+  // own. Nothing picked is `null`, never an empty string: the spawn payload
+  // below omits what is null and lets the server's own fallback decide, rather
+  // than posting an id-shaped value it would refuse.
   const [defaults] = useState(() =>
     session === undefined
       ? threadDefaults(settingsUser, instances, runners, profiles, localRunnerId)
@@ -119,18 +124,18 @@ export function Composer({
   );
   const [draftRunnerId, setDraftRunnerId] = useState(defaults?.runnerId ?? null);
   const [draftProfileId, setDraftProfileId] = useState(defaults?.profileId ?? null);
-  const [modelOptions, setModelOptions] = useState<Record<string, string | boolean>>({});
+  const [draftOptions, setDraftOptions] = useState<Record<string, string | boolean>>({});
   const [openSelector, setOpenSelector] = useState<SelectorKey | null>(null);
   const [prompt, setPrompt] = useState("");
 
   const instanceId: string | null = started ? session.instanceId : draftInstanceId;
-  const model: string | null = started ? session.modelSelection.model : draftModel;
+  const model: string | null = started ? (draftModel ?? session.modelSelection.model) : draftModel;
   const accessMode = started ? session.accessMode : draftAccessMode;
   const runnerId: string | null = started ? session.runnerId : draftRunnerId;
   const profileId: string | null = started ? session.permissionProfileId : draftProfileId;
 
   const pickModel = (nextModel: string): void => {
-    setModelOptions({});
+    setDraftOptions({});
     setDraftModel(nextModel);
   };
 
@@ -143,7 +148,7 @@ export function Composer({
     // same order `threadDefaults` prefills in.
     const forInstance = instanceDefaults(next, runners, localRunnerId);
     setDraftInstanceId(nextInstanceId);
-    setModelOptions({});
+    setDraftOptions({});
     setDraftRunnerId(forInstance.runnerId);
     setDraftModel(forInstance.model);
   };
@@ -173,11 +178,16 @@ export function Composer({
     .find((group) => group.instanceId === instanceId)
     ?.models.find((row) => row.slug === model);
   const currentOptions = currentModelRow?.options ?? [];
-  // A started thread has no way to change an option in this build (only
-  // `model` rides `session.update`), so its pill and its options block both
-  // read the session's own recorded choice rather than the draft state a
-  // new thread picks from.
-  const selectedOptions = started ? session.modelSelection.options : modelOptions;
+  // A started thread's own stored choice is what an option not picked since
+  // the last submission still stands at, so the draft picks are shown over it
+  // rather than instead of it - but only while the model on show is the one
+  // the options were stored for. Options are per model, and the server drops
+  // the old model's options on a model change, so another model's block shows
+  // its own defaults.
+  const selectedOptions =
+    started && model === session.modelSelection.model
+      ? { ...session.modelSelection.options, ...draftOptions }
+      : draftOptions;
   const pillText =
     instance === undefined
       ? "Model"
@@ -213,6 +223,7 @@ export function Composer({
           ...(model === null ? {} : { model }),
           ...(runnerId === null ? {} : { runnerId }),
           ...(profileId === null ? {} : { permissionProfileId: profileId }),
+          options: draftOptions,
         },
       }),
     onSuccess: (created) => {
@@ -220,19 +231,15 @@ export function Composer({
     },
   });
 
-  const updateModel = useMutation({
-    mutationFn: (nextModel: string) =>
-      client.session.update({ params: { id: sessionId }, payload: { model: nextModel } }),
-    onSuccess: (updated) => {
-      queryClient.setQueryData(queryKeys.session(updated.id), updated);
-    },
-  });
-
   const sendInput = useMutation({
-    mutationFn: (text: string) =>
-      client.session.input({ params: { id: sessionId }, payload: { text } }),
-    onSuccess: () => {
+    mutationFn: (payload: SessionInputPayload) =>
+      client.session.input({ params: { id: sessionId }, payload }),
+    onSuccess: async () => {
+      // The picks are cleared only once the row that holds them is in the cache.
+      await queryClient.invalidateQueries({ queryKey: queryKeys.session(sessionId) });
       setPrompt("");
+      setDraftModel(null);
+      setDraftOptions({});
       void queryClient.invalidateQueries({ queryKey: queryKeys.inputs(sessionId) });
     },
   });
@@ -262,7 +269,11 @@ export function Composer({
   const send = (): void => {
     if (prompt.trim() === "" || blockedReason !== null) return;
     if (started) {
-      sendInput.mutate(prompt);
+      sendInput.mutate({
+        text: prompt,
+        model: draftModel ?? session.modelSelection.model,
+        options: draftOptions,
+      });
       onSend?.();
     } else {
       spawn.mutate();
@@ -271,7 +282,7 @@ export function Composer({
 
   const exited = started && session.status === "exited";
   const busy = started && session.status === "busy";
-  const composerError = spawn.error ?? sendInput.error ?? updateModel.error ?? interrupt.error;
+  const composerError = spawn.error ?? sendInput.error ?? interrupt.error;
   const sending = spawn.isPending || sendInput.isPending;
 
   // A click that opens selector B is also, to Radix, a click outside selector
@@ -351,31 +362,23 @@ export function Composer({
             open={openSelector === "model"}
             onOpenChange={toggle("model")}
             trigger={pillText}
+            disabled={exited}
             triggerClassName="flex-1 text-center font-emph text-ink"
             contentClassName="w-80"
           >
             <ModelMenuContent
               groups={groups}
               onPickModel={(slug) => {
-                // A model row only ever renders inside the expanded group,
-                // which is always the current instance - so there is no
-                // instance to resolve here, only the slug.
-                if (started) {
-                  if (slug !== model) updateModel.mutate(slug);
-                  return;
-                }
-                pickModel(slug);
+                // Re-picking the model on show is not a change, and would
+                // throw away the options picked under it.
+                if (slug !== model) pickModel(slug);
               }}
               onSwitchInstance={(nextInstanceId) => {
                 if (!started) switchInstance(nextInstanceId);
               }}
               options={currentOptions}
               selectedOptions={selectedOptions}
-              onOptionChange={
-                started
-                  ? undefined
-                  : (id, value) => setModelOptions((prev) => ({ ...prev, [id]: value }))
-              }
+              onOptionChange={(id, value) => setDraftOptions((prev) => ({ ...prev, [id]: value }))}
               client={client}
               loginRunner={pickedRunner}
               onLoggedIn={rereadProviders}
@@ -475,7 +478,10 @@ export function Composer({
                 dimmed={row.dimmed}
                 selected={row.runnerId === runnerId}
                 onClick={() => {
+                  // A catalog is scoped instance x runner, so an option picked
+                  // on the runner just left need not exist on this one.
                   setDraftRunnerId(row.runnerId);
+                  setDraftOptions({});
                   setOpenSelector(null);
                 }}
               />

@@ -20,6 +20,7 @@ export function PopoverSelector({
   open,
   onOpenChange,
   trigger,
+  disabled = false,
   align = "start",
   triggerClassName,
   contentClassName,
@@ -28,6 +29,8 @@ export function PopoverSelector({
   readonly open: boolean;
   readonly onOpenChange: (open: boolean) => void;
   readonly trigger: ReactNode;
+  /** A selector with nothing left to pick: the trigger is dead and reads as such. */
+  readonly disabled?: boolean;
   readonly align?: "start" | "center" | "end";
   readonly triggerClassName?: string;
   readonly contentClassName?: string;
@@ -38,9 +41,12 @@ export function PopoverSelector({
       <PopoverTrigger asChild>
         <button
           type="button"
+          disabled={disabled}
           className={cn(
             "rounded-control px-2 py-1 text-fine text-muted",
             "hover:bg-line-soft hover:text-ink",
+            "disabled:cursor-default disabled:text-faint disabled:hover:bg-transparent",
+            "disabled:hover:text-faint",
             "focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-live",
             triggerClassName,
           )}
