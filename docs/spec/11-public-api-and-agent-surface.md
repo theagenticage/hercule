@@ -165,7 +165,7 @@ Semantics: [./06-providers.md](./06-providers.md), [./12-assistants.md](./12-ass
 | `session.spawn` | `{ agentId?, prompt, instanceId?, model?, accessMode?, workspace? }` -> `{ sessionId }`; without `agentId` the session is a Thread built from the `thread.*` settings plus the overrides given, allowed for actor `user` only (`forbidden` otherwise; [./02-domain-model.md](./02-domain-model.md) Thread) | `session.spawn` | `POST /sessions` |
 | `session.continue` | `{ sessionId, mode: "resume" \| "fork", prompt }` -> the new `Session` | `session.spawn` | `POST /sessions/{id}/continue` |
 | `session.update` | `{ sessionId, model }` -> the `Session` | `session.steer` | `PATCH /sessions/{id}` |
-| `session.input` | `{ sessionId, text }` -> `{ inputId, result: "opened" \| "steered" \| "queued" }` | `session.steer` | `POST /sessions/{id}/input` |
+| `session.input` | `{ sessionId, text, model?, options? }` -> `{ inputId, result: "opened" \| "steered" \| "queued" }` | `session.steer` | `POST /sessions/{id}/input` |
 | `session.interrupt` / `session.stop` | `{ sessionId }` | `session.steer` | `POST /sessions/{id}/interrupt` / `.../stop` |
 | `session.respond` | `{ sessionId, requestId, decision: "allow" \| "allow_always" \| "deny" \| "cancel" }` | `session.steer` | `POST /sessions/{id}/respond` |
 | `input.query` | `{ sessionId }` (the controller-owned queue) | `session.read` | `GET /sessions/{id}/inputs` |
@@ -182,6 +182,8 @@ Semantics: [./06-providers.md](./06-providers.md), [./12-assistants.md](./12-ass
 - The input's text field is spelled `text`, not `content`, wherever it appears: `session.input`, `input.update` and the stored row ([./02-domain-model.md](./02-domain-model.md) Queued Input).
 - `session.continue` answers the whole new `Session`, and so does `session.spawn`, whose row above still writes the `{ sessionId }` it never shipped: a caller that has just created a session needs its status and its runner as much as its id.
 - `input.query` lists every input the session was ever given, oldest first, whatever became of each, not only the rows still queued. A queue you cannot look back through cannot tell you what was delivered.
+
+*(Amended 2026-09-11, [#160](https://github.com/rogierpennink/hydra/issues/160).)* `session.input` takes the same `model` and `options` fields `session.update` takes, optional, and applies them in the transaction that stores the input row, before the row exists: a composer's submission is one operation, and no client is left to order an update ahead of an input. The input row itself still carries no model ([./06-providers.md](./06-providers.md) section 4); a queued input opens its turn on whatever the session's model is at that boundary, and cancelling the row does not undo a change the submission already made. `session.update` stays for a caller that changes the model without saying anything, and `options` lands on both with [#155](https://github.com/rogierpennink/hydra/issues/155).
 
 `session.respond` is not built: approvals are their own ticket.
 
