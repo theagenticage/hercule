@@ -363,11 +363,11 @@ const make = Effect.gen(function* () {
       ),
 
     /**
-     * The model the session runs under from here on. `spec` is left alone: it
-     * is the document the runner was told at start, and rewriting it would
-     * destroy the record of what that was.
+     * The model and the per-model choices the session runs under from here on.
+     * `spec` is left alone: it is the document the runner was told at start,
+     * and rewriting it would destroy the record of what that was.
      */
-    selectModel: (
+    setModelSelection: (
       sessionId: string,
       modelSelection: ModelSelection,
     ): Effect.Effect<void, SqlError> =>

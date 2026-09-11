@@ -21,6 +21,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { Duration, Effect, Fiber } from "effect";
 import {
+  type ModelDescriptor,
   type ProbeRequest,
   type ProviderEvent,
   type RunnerFacts,
@@ -90,9 +91,48 @@ const FACTS: RunnerFacts = {
   identityPort: 4939,
 };
 
-const MODELS = [
-  { slug: "fast", name: "Fast", options: [] },
-  { slug: "clever", name: "Clever", isDefault: true, options: [] },
+/**
+ * Two models that do not offer the same choices: `clever` takes an effort of
+ * three and a switch, `fast` takes an effort of two and nothing else. What the
+ * pair is for is the case a single model cannot show - a pick that is valid on
+ * one model and unknown on the other.
+ */
+const MODELS: ReadonlyArray<ModelDescriptor> = [
+  {
+    slug: "fast",
+    name: "Fast",
+    options: [
+      {
+        id: "effort",
+        label: "Effort",
+        kind: "select",
+        choices: [
+          { value: "low", label: "Low" },
+          { value: "high", label: "High" },
+        ],
+        default: "high",
+      },
+    ],
+  },
+  {
+    slug: "clever",
+    name: "Clever",
+    isDefault: true,
+    options: [
+      {
+        id: "effort",
+        label: "Effort",
+        kind: "select",
+        choices: [
+          { value: "low", label: "Low" },
+          { value: "medium", label: "Medium" },
+          { value: "high", label: "High" },
+        ],
+        default: "medium",
+      },
+      { id: "fastMode", label: "Fast mode", kind: "boolean", default: false },
+    ],
+  },
 ];
 
 const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
@@ -131,6 +171,31 @@ const readSession = async (arranged: Arranged, id: string): Promise<Session> => 
   const response = await get(arranged.harness.base, `/api/v1/sessions/${id}`, arranged.token);
   expect(response.status, await response.clone().text()).toBe(200);
   return (await response.json()) as Session;
+};
+
+/** One refusal, read as the code it carries and the fields its issues name. */
+const refusal = async (
+  response: Response,
+): Promise<{ readonly code: string; readonly paths: ReadonlyArray<ReadonlyArray<string>> }> => {
+  const body = (await response.json()) as {
+    readonly error: {
+      readonly code: string;
+      readonly details?: {
+        readonly issues?: ReadonlyArray<{ readonly path: ReadonlyArray<string> }>;
+      };
+    };
+  };
+  return {
+    code: body.error.code,
+    paths: (body.error.details?.issues ?? []).map((one) => one.path),
+  };
+};
+
+/** The sessions the controller holds, which after a refused spawn must be none. */
+const sessionsOf = async (arranged: Arranged): Promise<ReadonlyArray<Session>> => {
+  const listing = await get(arranged.harness.base, "/api/v1/sessions", arranged.token);
+  expect(listing.status, await listing.clone().text()).toBe(200);
+  return ((await listing.json()) as { items: ReadonlyArray<Session> }).items;
 };
 
 /** The session once it reads the way the test is waiting for. */
@@ -449,6 +514,67 @@ describe("session.spawn", () => {
         text: "what is the time",
         modelSelection: session.modelSelection,
       });
+    });
+  });
+});
+
+/**
+ * The model options a spawn picks: validated against the snapshot the placement
+ * resolved, stored on the row, and carried on both frames the session's start
+ * writes.
+ */
+describe("session.spawn: the model options a call picks", () => {
+  it("stores the picks and carries them on the start frame and the first input frame", async () => {
+    await withFleet(async (arranged) => {
+      const session = await spawned(arranged, {
+        prompt: "hello",
+        model: "clever",
+        options: { effort: "high", fastMode: true },
+      });
+      const selection = { model: "clever", options: { effort: "high", fastMode: true } };
+
+      expect(session.modelSelection).toEqual(selection);
+      expect((await readSession(arranged, session.id)).modelSelection).toEqual(selection);
+
+      const start = (await framesWhen<SessionStart>(arranged.wire, "sessionStart", 1))[0]!;
+      expect(start.spec.modelSelection).toEqual(selection);
+
+      report(arranged.wire, 1, {
+        eventId: crypto.randomUUID(),
+        sessionId: session.id,
+        at,
+        _tag: "session.started",
+      });
+      const input = (await framesWhen<SessionInput>(arranged.wire, "sessionInput", 1))[0]!;
+      expect(input.input.modelSelection).toEqual(selection);
+    });
+  });
+
+  it("stores no options at all when the call picks none", async () => {
+    await withFleet(async (arranged) => {
+      const session = await spawned(arranged, { prompt: "hello", model: "clever" });
+
+      expect(session.modelSelection).toEqual({ model: "clever", options: {} });
+    });
+  });
+
+  // One refusal is enough here: what makes a pick wrong is `options.test.ts`'s
+  // to cover, and what this proves is the wiring - the placed machine's catalog
+  // is what the call is judged against, and a refusal spawns nothing at all.
+  it("refuses a value the placed machine's catalog does not offer, and spawns nothing", async () => {
+    await withFleet(async (arranged) => {
+      const response = await spawn(arranged, {
+        prompt: "hello",
+        model: "clever",
+        options: { effort: "extreme" },
+      });
+
+      expect(response.status, await response.clone().text()).toBe(400);
+      const refused = await refusal(response);
+      expect(refused.code).toBe("validation");
+      expect(refused.paths).toContainEqual(["options", "effort"]);
+      expect(framesOf<SessionStart>(arranged.wire, "sessionStart")).toEqual([]);
+      expect(await sessionsOf(arranged)).toEqual([]);
     });
   });
 });
@@ -898,6 +1024,130 @@ describe("session.input, queued by default", () => {
       });
 
       expect(response.status, await response.clone().text()).toBe(400);
+    });
+  });
+});
+
+/**
+ * The model options one input carries: validated against the session's own
+ * instance, merged over what the row already holds, and dropped wholesale when
+ * the input changes the model, because the choices belong to the model.
+ */
+describe("session.input: the model options a submission carries", () => {
+  /** What the session's model selection reads as now. */
+  const selectionOf = async (arranged: Arranged, id: string): Promise<unknown> =>
+    (await readSession(arranged, id)).modelSelection;
+
+  it("stores the picks and carries them on the frame delivered for that input", async () => {
+    await withFleet(async (arranged) => {
+      const session = await started(arranged, "hello");
+
+      const response = await sendInput(arranged, session.id, {
+        text: "again",
+        options: { effort: "high" },
+      });
+
+      expect(response.status, await response.clone().text()).toBe(200);
+      const { inputId } = (await response.json()) as { inputId: string };
+      expect(await selectionOf(arranged, session.id)).toEqual({
+        model: "clever",
+        options: { effort: "high" },
+      });
+      const frames = await framesWhen<SessionInput>(arranged.wire, "sessionInput", 2);
+      const sent = frames.find((frame) => frame.requestId === inputId)!;
+      expect(sent.input.modelSelection).toEqual({
+        model: "clever",
+        options: { effort: "high" },
+      });
+    });
+  });
+
+  it("merges the picks over the ones the row already holds", async () => {
+    await withFleet(async (arranged) => {
+      const session = await started(arranged, "hello");
+      const first = await sendInput(arranged, session.id, {
+        text: "again",
+        options: { effort: "high" },
+      });
+      expect(first.status, await first.clone().text()).toBe(200);
+
+      const second = await sendInput(arranged, session.id, {
+        text: "and again",
+        options: { fastMode: true },
+      });
+
+      expect(second.status, await second.clone().text()).toBe(200);
+      expect(await selectionOf(arranged, session.id)).toEqual({
+        model: "clever",
+        options: { effort: "high", fastMode: true },
+      });
+    });
+  });
+
+  it.each([
+    ["keeps only what the new model was given", { effort: "low" }, { effort: "low" }],
+    ["keeps nothing when the new model is given none", undefined, {}],
+  ])("changes the model and %s", async (_what, options, stored) => {
+    await withFleet(async (arranged) => {
+      const session = await started(arranged, "hello");
+      const first = await sendInput(arranged, session.id, {
+        text: "again",
+        options: { effort: "high", fastMode: true },
+      });
+      expect(first.status, await first.clone().text()).toBe(200);
+
+      const changed = await sendInput(arranged, session.id, {
+        text: "on the other one",
+        model: "fast",
+        ...(options === undefined ? {} : { options }),
+      });
+
+      expect(changed.status, await changed.clone().text()).toBe(200);
+      expect(await selectionOf(arranged, session.id)).toEqual({ model: "fast", options: stored });
+    });
+  });
+
+  it("leaves the options alone when the input restates the model it is already on", async () => {
+    await withFleet(async (arranged) => {
+      const session = await started(arranged, "hello");
+      const first = await sendInput(arranged, session.id, {
+        text: "again",
+        options: { effort: "high", fastMode: true },
+      });
+      expect(first.status, await first.clone().text()).toBe(200);
+
+      const restated = await sendInput(arranged, session.id, {
+        text: "and again",
+        model: "clever",
+      });
+
+      expect(restated.status, await restated.clone().text()).toBe(200);
+      expect(await selectionOf(arranged, session.id)).toEqual({
+        model: "clever",
+        options: { effort: "high", fastMode: true },
+      });
+    });
+  });
+
+  // The rules a pick is judged by are `options.test.ts`'s; what this proves is
+  // that the session's own machine is asked, and that a refusal writes neither
+  // the input row nor the selection.
+  it("refuses a value the session's model does not offer, stores no row, and leaves the selection where it was", async () => {
+    await withFleet(async (arranged) => {
+      const session = await started(arranged, "hello");
+      const before = (await inputsOf(arranged, session.id)).length;
+
+      const response = await sendInput(arranged, session.id, {
+        text: "again",
+        options: { effort: "extreme" },
+      });
+
+      expect(response.status, await response.clone().text()).toBe(400);
+      const refused = await refusal(response);
+      expect(refused.code).toBe("validation");
+      expect(refused.paths).toContainEqual(["options", "effort"]);
+      expect(await inputsOf(arranged, session.id)).toHaveLength(before);
+      expect(await selectionOf(arranged, session.id)).toEqual({ model: "clever", options: {} });
     });
   });
 });
@@ -1850,19 +2100,79 @@ describe("session.update", () => {
       token: arranged.token,
     });
 
-  it("rewrites modelSelection.model, leaves options alone, and GET agrees", async () => {
+  /** The patch's own answer and what a read of the row says after it, which must agree. */
+  const updated = async (arranged: Arranged, id: string, body: unknown): Promise<unknown> => {
+    const response = await patchSession(arranged, id, body);
+    expect(response.status, await response.clone().text()).toBe(200);
+    const answered = ((await response.json()) as Session).modelSelection;
+    expect((await readSession(arranged, id)).modelSelection).toEqual(answered);
+    return answered;
+  };
+
+  it("rewrites modelSelection.options on their own, and GET agrees", async () => {
     await withFleet(async (arranged) => {
       const session = await started(arranged, "hello");
       expect(session.modelSelection).toEqual({ model: "clever", options: {} });
 
-      const patched = await patchSession(arranged, session.id, { model: "fast" });
+      expect(await updated(arranged, session.id, { options: { effort: "high" } })).toEqual({
+        model: "clever",
+        options: { effort: "high" },
+      });
+    });
+  });
 
-      expect(patched.status, await patched.clone().text()).toBe(200);
-      const body = (await patched.json()) as Session;
-      expect(body.modelSelection).toEqual({ model: "fast", options: {} });
+  it("rewrites modelSelection.model and drops the old model's options", async () => {
+    await withFleet(async (arranged) => {
+      const session = await started(arranged, "hello");
+      await updated(arranged, session.id, { options: { effort: "high", fastMode: true } });
 
-      const read = await readSession(arranged, session.id);
-      expect(read.modelSelection).toEqual({ model: "fast", options: {} });
+      expect(await updated(arranged, session.id, { model: "fast" })).toEqual({
+        model: "fast",
+        options: {},
+      });
+    });
+  });
+
+  it("rewrites both at once, against the model the same call names", async () => {
+    await withFleet(async (arranged) => {
+      const session = await started(arranged, "hello");
+      await updated(arranged, session.id, { options: { effort: "high", fastMode: true } });
+
+      expect(
+        await updated(arranged, session.id, { model: "fast", options: { effort: "low" } }),
+      ).toEqual({ model: "fast", options: { effort: "low" } });
+    });
+  });
+
+  it("changes nothing on a payload that names neither", async () => {
+    await withFleet(async (arranged) => {
+      const session = await started(arranged, "hello");
+      await updated(arranged, session.id, { options: { effort: "high" } });
+
+      expect(await updated(arranged, session.id, {})).toEqual({
+        model: "clever",
+        options: { effort: "high" },
+      });
+    });
+  });
+
+  it("refuses a value the model does not offer, and leaves the row where it was", async () => {
+    await withFleet(async (arranged) => {
+      const session = await started(arranged, "hello");
+      await updated(arranged, session.id, { options: { effort: "high" } });
+
+      const response = await patchSession(arranged, session.id, {
+        options: { effort: "extreme" },
+      });
+
+      expect(response.status, await response.clone().text()).toBe(400);
+      const refused = await refusal(response);
+      expect(refused.code).toBe("validation");
+      expect(refused.paths).toContainEqual(["options", "effort"]);
+      expect((await readSession(arranged, session.id)).modelSelection).toEqual({
+        model: "clever",
+        options: { effort: "high" },
+      });
     });
   });
 
@@ -1976,12 +2286,9 @@ describe("session.update", () => {
     });
   });
 
-  it("fails validation on an empty payload and on an empty model", async () => {
+  it("fails validation on an empty model", async () => {
     await withFleet(async (arranged) => {
       const session = await started(arranged, "hello");
-
-      const empty = await patchSession(arranged, session.id, {});
-      expect(empty.status, await empty.clone().text()).toBe(400);
 
       const blank = await patchSession(arranged, session.id, { model: "" });
       expect(blank.status, await blank.clone().text()).toBe(400);
