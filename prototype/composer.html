@@ -31,7 +31,15 @@
       and a primary workspace can hold several too.
   States, via ?state= (key s cycles): draft · fresh (nothing logged in; Log in fills the draft) · sibling
   (a draft opened from inside hydra/run-3f1) · idle · busy · decision · exited.
-  Keys: p project hydra|ops · b threads in run-3f1 1|2 · t theme. Send on a draft starts the thread here.
+  Keys: p project webshop|ops · b threads in run-3f1 1|2 · t theme. Send on a draft starts the thread here.
+
+  Round 4b - the thread's chrome. Reaction: the header was messy and the navigation should get out of the
+  way. Now one row, t3 code's and Codex's shape: project / title at the left, the actions at the right.
+  The thread id is gone. The tab strip is gone as a row: when the workspace holds more than one thread,
+  the title itself becomes the active tab and its siblings sit beside it in the same row; with one
+  thread the row is just the title. The workspace's name is not repeated in the header, the lip has it.
+  "New thread here" is an action at the right, not a + beside the tabs.
+  The sample project is now "webshop", so it no longer reads as the app's own name.
 -->
 <!doctype html>
 <html lang="en">
@@ -97,7 +105,7 @@
   .side .foot { margin-top: auto; font-size: 12.5px; color: var(--muted); padding: 10px 8px 0; display: flex; flex-direction: column; gap: 6px; }
   main { display: flex; flex-direction: column; min-height: 0; }
   .top { display: flex; align-items: center; gap: 10px; padding: 12px 24px 8px; font-size: 16px; font-weight: var(--w-emph); }
-  .top .crumb { color: var(--faint); font-weight: 400; } .top .id { font: 11px var(--mono); color: var(--faint); margin-left: auto; }
+  .top .crumb { color: var(--faint); font-weight: 400; flex: none; }
   .tbtn { border: 1px solid var(--line); background: var(--raised); border-radius: 999px; padding: 3px 11px; font-size: 12.5px; font-weight: 400; color: var(--muted); cursor: pointer; white-space: nowrap; }
   .tbtn:hover { color: var(--ink); background: var(--line-soft); }
   .thread { flex: 1; min-height: 0; display: flex; flex-direction: column; padding: 8px 24px 64px; overflow: hidden; }
@@ -114,14 +122,16 @@
   .worked.live .wt { background: linear-gradient(90deg, var(--faint) 0%, var(--ink) 45%, var(--faint) 90%); background-size: 220% 100%; -webkit-background-clip: text; background-clip: text; color: transparent; animation: shimmer 2.4s linear infinite; }
   @keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -20% 0; } }
   @media (prefers-reduced-motion: reduce) { .worked.live .wt { animation: none; background: none; color: var(--live); } }
-  /* the tab strip: the threads in this workspace, only once there is more than one */
-  .tabs { width: 100%; max-width: 800px; margin: 0 auto 4px; display: flex; align-items: flex-end; gap: 2px; border-bottom: 1px solid var(--line-soft); font-size: 12.5px; }
-  .tabs .ws { font: 11px var(--mono); color: var(--faint); padding: 0 10px 8px 0; align-self: center; }
-  .tabs .tab { border: 1px solid transparent; border-bottom: 0; border-radius: 8px 8px 0 0; padding: 6px 12px 7px; color: var(--muted); cursor: pointer; background: none; display: inline-flex; gap: 7px; align-items: center; max-width: 220px; }
-  .tabs .tab span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .tabs .tab:hover { color: var(--ink); background: var(--line-soft); }
-  .tabs .tab.on { color: var(--ink); background: var(--raised); border-color: var(--line); margin-bottom: -1px; font-weight: var(--w-emph); }
-  .tabs .tab .mk { font-size: 10px; color: var(--faint); } .tabs .tab .mk.live { color: var(--live); } .tabs .tab .mk.q { color: var(--attn); }
+  /* the title row doubles as the tab strip once the workspace holds more than one thread */
+  .top .title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .top .ttabs { display: inline-flex; gap: 2px; min-width: 0; margin: -4px 0; }
+  .top .ttab { border: 1px solid transparent; border-radius: 8px; padding: 3px 10px; font-size: 14px; font-weight: 400; color: var(--muted); cursor: pointer; background: none; display: inline-flex; gap: 7px; align-items: center; max-width: 260px; }
+  .top .ttab span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .top .ttab:hover { color: var(--ink); background: var(--line-soft); }
+  .top .ttab.on { color: var(--ink); background: var(--raised); border-color: var(--line); font-weight: var(--w-emph); box-shadow: var(--card-shadow); }
+  .top .ttab .mk { font-size: 10px; color: var(--faint); } .top .ttab .mk.live { color: var(--live); } .top .ttab .mk.q { color: var(--attn); }
+  .top .actions { margin-left: auto; display: inline-flex; gap: 6px; align-items: center; }
+  .tbtn.icon { padding: 3px 9px; letter-spacing: 1px; }
   /* the project picker: the one step before a draft */
   .modal { position: fixed; inset: 0; z-index: 60; background: var(--scrim); display: flex; align-items: flex-start; justify-content: center; padding-top: 18vh; }
   .modal .box { width: 520px; background: var(--raised); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--lift-shadow); padding: 8px; }
@@ -234,7 +244,7 @@ const STATES = ["draft", "fresh", "sibling", "idle", "busy", "decision", "exited
 const params = () => new URLSearchParams(location.search);
 const stateKey = () => (STATES.includes(params().get("state")) ? params().get("state") : "draft");
 const peers = () => (params().get("peers") === "1" ? 1 : 2);
-const projectKey = () => (params().get("project") === "ops" ? "ops" : "hydra");
+const projectKey = () => (params().get("project") === "ops" ? "ops" : "webshop");
 function setParams(kv) { const p = params(); for (const [k, v] of Object.entries(kv)) p.set(k, v); history.replaceState(null, "", `?${p}`); boot(); }
 
 /* ============ data: catalogs, the way client-core would hand them over ============ */
@@ -274,9 +284,9 @@ const RUNNERS_BUSY = [
   { id: "pi-lab", state: "unreachable 2d", tone: "fail", cap: "0/2", off: "unreachable · a thread would wait for it" },
 ];
 /* projects and their repos: the project is picked first, so nothing outside it is on offer */
-const PROJECTS = { hydra: { repos: ["hydra"] }, ops: { repos: ["ops-infra", "ops-runbooks"] } };
+const PROJECTS = { webshop: { repos: ["webshop"] }, ops: { repos: ["ops-infra", "ops-runbooks"] } };
 const REPOS_BUSY = [
-  { id: "hydra", primary: "main", current: "main", branches: ["main", "spec/v1", "feat/runner-drain"], on: ["laptop", "macstudio-01", "hetzner-01"] },
+  { id: "webshop", primary: "main", current: "main", branches: ["main", "release/2.4", "feat/runner-drain"], on: ["laptop", "macstudio-01", "hetzner-01"] },
   { id: "ops-infra", primary: "master", current: "hetzner-migration", branches: ["master", "hetzner-migration"], on: ["laptop"] },
   { id: "ops-runbooks", primary: "main", current: "main", branches: ["main"], on: ["laptop"] },
 ];
@@ -288,7 +298,7 @@ const ACCESS = [
 ];
 const AGES = { "Fix flaky webhook tests": "12m", "Write the retry runbook": "31m", "Runner drain command": "4m", "Bump the Bun pin": "1d", "Tidy the promotion runbook": "2h", "Rotate the Hetzner backups key": "3d" };
 const MARKS = { "Runner drain command": "q", "Bump the Bun pin": "done", "Rotate the Hetzner backups key": "done" };
-const NONE = { hydra: ["Tidy the promotion runbook"], ops: [] };   // workspace-less threads per project
+const NONE = { webshop: ["Tidy the promotion runbook"], ops: [] };   // workspace-less threads per project
 let FRESH_LOGIN = false;
 const catalogs = () => stateKey() === "fresh"
   ? { instances: [{ id: "cc-personal", provider: "Claude Code", logo: "anthropic", name: "", who: "found on this machine", on: FRESH_LOGIN ? ["laptop"] : [], models: CLAUDE }],
@@ -301,19 +311,19 @@ let RECENT = [["cc-personal", "claude-opus-5"], ["codex", "gpt-5.6"]];
 /* a workspace (spec 02): primary = a repo's shared checkout on one machine; ephemeral = a worktree per repo on a new branch, named after it */
 let WS;
 const wsOf = (id) => WS.find((w) => w.id === id) || null;
-const DEFAULT_CONFIG = { instanceId: "cc-personal", model: "claude-sonnet-5", options: { effort: "medium", fast: false, thinking: "off", ctx: "200k" }, accessMode: "approval-required", runnerId: "laptop", workspace: "primary:hydra", branch: null };
+const DEFAULT_CONFIG = { instanceId: "cc-personal", model: "claude-sonnet-5", options: { effort: "medium", fast: false, thinking: "off", ctx: "200k" }, accessMode: "approval-required", runnerId: "laptop", workspace: "primary:webshop", branch: null };
 let thread, message, picks, open, transcript, FILTER = "", SHOW_LEGACY = {}, MODAL = false;
 function reset() {
   const k = stateKey(); FRESH_LOGIN = false; picks = {}; open = null; message = ""; FILTER = ""; SHOW_LEGACY = {}; MODAL = false;
   WS = [
-    { id: "hydra/run-3f1", project: "hydra", kind: "ephemeral", repos: ["hydra"], runnerId: "laptop", branch: "hydra/run-3f1", threads: peers() === 2 ? ["Fix flaky webhook tests", "Write the retry runbook"] : ["Fix flaky webhook tests"] },
-    { id: "hydra/run-8a0", project: "hydra", kind: "ephemeral", repos: ["hydra"], runnerId: "macstudio-01", branch: "hydra/run-8a0", threads: ["Runner drain command"] },
-    { id: "primary:hydra:laptop", project: "hydra", kind: "primary", repos: ["hydra"], runnerId: "laptop", branch: "main", threads: ["Bump the Bun pin"] },
+    { id: "hydra/run-3f1", project: "webshop", kind: "ephemeral", repos: ["webshop"], runnerId: "laptop", branch: "hydra/run-3f1", threads: peers() === 2 ? ["Fix flaky webhook tests", "Write the retry runbook"] : ["Fix flaky webhook tests"] },
+    { id: "hydra/run-8a0", project: "webshop", kind: "ephemeral", repos: ["webshop"], runnerId: "macstudio-01", branch: "hydra/run-8a0", threads: ["Runner drain command"] },
+    { id: "primary:webshop:laptop", project: "webshop", kind: "primary", repos: ["webshop"], runnerId: "laptop", branch: "main", threads: ["Bump the Bun pin"] },
     { id: "hydra/run-c17", project: "ops", kind: "ephemeral", repos: ["ops-infra", "ops-runbooks"], runnerId: "laptop", branch: "hydra/run-c17", threads: ["Rotate the Hetzner backups key"] },
   ];
   if (k === "draft" || k === "fresh") thread = { kind: "draft", project: projectKey(), from: null };
-  else if (k === "sibling") thread = { kind: "draft", project: "hydra", from: "hydra/run-3f1" };
-  else thread = { kind: "active", session: { ...DEFAULT_CONFIG, project: "hydra", workspace: "hydra/run-3f1", status: k === "busy" || k === "decision" ? "busy" : k === "exited" ? "exited" : "idle", title: "Fix flaky webhook tests", startedAgo: "12m", queued: k === "busy" ? ["Also tell me the current date once you finish."] : [], decision: k === "decision" } };
+  else if (k === "sibling") thread = { kind: "draft", project: "webshop", from: "hydra/run-3f1" };
+  else thread = { kind: "active", session: { ...DEFAULT_CONFIG, project: "webshop", workspace: "hydra/run-3f1", status: k === "busy" || k === "decision" ? "busy" : k === "exited" ? "exited" : "idle", title: "Fix flaky webhook tests", startedAgo: "12m", queued: k === "busy" ? ["Also tell me the current date once you finish."] : [], decision: k === "decision" } };
   transcript = thread.kind === "active" ? baseTranscript() : [];
 }
 const project = () => thread.kind === "active" ? thread.session.project : thread.project;
@@ -527,13 +537,13 @@ function dockHtml() { const s = active() ? thread.session : null; return s && s.
 function composerHtml() { return `<div class="compwrap ${dockHtml() ? "docked" : ""}">${queuedHtml()}${dockHtml()}${cardHtml()}${lipHtml()}</div>`; }
 const wsTitle = (w) => w.kind === "primary" ? `${w.repos[0]} checkout · ${w.runnerId}` : w.id;
 const markOf = (t, s) => { const on = s && s.title === t; if (on && s.status === "busy") return ["▮▮▮", "live"]; if (on && s.status === "exited") return ["–", ""]; if (MARKS[t] === "q") return ["?", "q"]; if (MARKS[t] === "done") return ["✓", ""]; return ["○", ""]; };
-/* the tab strip: every thread in this workspace, once there is more than one; the draft being written counts */
-function tabsHtml() {
-  const s = active() ? thread.session : null; const p = wsPick(config()); const ws = s ? (s.workspace ? wsOf(s.workspace) : null) : p.kind === "join" ? p.ws : null; if (!ws) return "";
-  const tabs = ws.threads.map((t) => { const [mk, cls] = markOf(t, s); return { title: t, on: s && s.title === t, mk, cls }; });
+/* the title row: the thread's title, or the threads of its workspace as tabs once there is more than one (the draft being written counts) */
+function titleHtml() {
+  const s = active() ? thread.session : null; const p = wsPick(config()); const ws = s ? (s.workspace ? wsOf(s.workspace) : null) : p.kind === "join" ? p.ws : null;
+  const tabs = ws ? ws.threads.map((t) => { const [mk, cls] = markOf(t, s); return { title: t, on: s && s.title === t, mk, cls }; }) : [];
   if (!s) tabs.push({ title: "New thread", on: true, mk: "·", cls: "" });
-  if (tabs.length < 2) return "";
-  return `<div class="tabs"><span class="ws">${wsTitle(ws)}</span>${tabs.map((t) => `<button class="tab ${t.on ? "on" : ""}"><span class="mk ${t.cls}">${t.mk}</span><span>${t.title}</span></button>`).join("")}</div>`;
+  if (tabs.length < 2) return `<span class="title">${s ? esc(s.title) : "New thread"}</span>`;
+  return `<div class="ttabs">${tabs.map((t) => `<button class="ttab ${t.on ? "on" : ""}" title="${t.on ? "" : `Open “${esc(t.title)}”`}"><span class="mk ${t.cls}">${t.mk}</span><span>${esc(t.title)}</span></button>`).join("")}</div>`;
 }
 
 /* ============ page ============ */
@@ -573,8 +583,8 @@ function render() {
   document.getElementById("side").innerHTML = `<div class="brand">Hydra <small>rogier</small></div><div class="seg"><span class="on">Threads</span><span>Hydra</span></div><button class="new" data-go="pick">+ Create new thread</button>
     ${Object.keys(PROJECTS).map(projectHtml).join("")}
     <div class="foot"><span>6 runners · 1 at cap</span><span>Marks <span class="mono" style="float:right;color:var(--faint)">?</span></span></div>`;
-  document.getElementById("top").innerHTML = `<span class="crumb">${project()} /</span> ${s ? esc(s.title) : "New thread"} ${s ? `<span class="id">thread · 9c2f41d0</span>${s.workspace ? `<button class="tbtn" data-join="${s.workspace}" title="A draft in this workspace, beside this thread">+ New thread in this workspace</button>` : ""}` : ""}`;
-  document.getElementById("thread").innerHTML = `${tabsHtml()}<div class="tcol">${s ? transcriptHtml() : heroHtml()}</div>${composerHtml()}`;
+  document.getElementById("top").innerHTML = `<span class="crumb">${project()} /</span>${titleHtml()}${s ? `<span class="actions">${s.workspace ? `<button class="tbtn" data-join="${s.workspace}" title="A draft in this workspace, beside this thread">+ New thread here</button>` : ""}<button class="tbtn icon" title="More (not built)">…</button></span>` : ""}`;
+  document.getElementById("thread").innerHTML = `<div class="tcol">${s ? transcriptHtml() : heroHtml()}</div>${composerHtml()}`;
   document.getElementById("modal").innerHTML = modalHtml();
   const ta = document.getElementById("compose"); if (ta) { grow(ta); if (!ta.disabled && document.activeElement !== ta && !open && !MODAL) ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); }
   const tcol = document.querySelector(".tcol"); if (tcol && s) tcol.scrollTop = tcol.scrollHeight;
@@ -591,7 +601,7 @@ document.addEventListener("click", (e) => {
   if (!el) { if (!e.target.closest("#pop")) { if (open) { open = null; render(); } } return; }
   if (el.dataset.bar) {
     if (el.dataset.bar === "state") return setParams({ state: STATES[(STATES.indexOf(stateKey()) + 1) % STATES.length] });
-    if (el.dataset.bar === "project") return setParams({ project: projectKey() === "ops" ? "hydra" : "ops", state: "draft" });
+    if (el.dataset.bar === "project") return setParams({ project: projectKey() === "ops" ? "webshop" : "ops", state: "draft" });
     if (el.dataset.bar === "peers") return setParams({ peers: peers() === 2 ? "1" : "2" });
     if (el.dataset.bar === "theme") { const r = document.documentElement; r.dataset.theme = r.dataset.theme === "dark" ? "light" : "dark"; return; }
   }
@@ -619,7 +629,7 @@ document.addEventListener("keydown", (e) => {
   if (MODAL && e.key === "Enter") { e.preventDefault(); return openDraft(project()); }
   if (typing) { if (e.target.id === "compose" && e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); submit(); } return; }
   if (e.key === "s") setParams({ state: STATES[(STATES.indexOf(stateKey()) + 1) % STATES.length] });
-  if (e.key === "p") setParams({ project: projectKey() === "ops" ? "hydra" : "ops", state: "draft" });
+  if (e.key === "p") setParams({ project: projectKey() === "ops" ? "webshop" : "ops", state: "draft" });
   if (e.key === "b") setParams({ peers: peers() === 2 ? "1" : "2" });
   if (e.key === "t") { const r = document.documentElement; r.dataset.theme = r.dataset.theme === "dark" ? "light" : "dark"; }
 });
