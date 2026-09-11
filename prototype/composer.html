@@ -1,0 +1,510 @@
+<!--
+  PROTOTYPE - throwaway. Ticket: https://github.com/rogierpennink/hydra/issues/160
+  Question: what makes the codexlip composer (spec 14 §The composer; prototype/app-shell.html at 96b3c40)
+  much friendlier for a human, on a draft thread and on an active one, inside docs/design-language.md?
+
+  The card shape is pinned (text · + · access mode · model pill · voice · send). What is NOT pinned is where
+  a human reads and changes the thread's setup, how the composer says what Enter will do, and how it says
+  what is blocking. Three structural answers, switchable via ?variant=A|B|C (keys ← →):
+
+    A Lip       - the setup bar under the card as pinned, refined: faint keys before values, chevrons on
+                  what is live, a foot line that says what Enter does or what blocks it, locked values
+                  muted with a tooltip after start.
+    B Sentence  - the setup bar is a sentence: "Runs in a new worktree of hydra off main, on this machine,
+                  as unrestricted." Every bold is a selector. After start it reads as a record, past tense.
+                  A blocker replaces the sentence with the reason and its action.
+    C Header    - the setup leaves the composer: it is the thread's identity row at the top of the column
+                  (WORKSPACE · CHECKOUT · BRANCH · MACHINE · PROFILE) in both states; the card keeps only
+                  what is live per turn. Re-opens a shape spec 14 rejected (strip above) in a new place;
+                  kept so the choice is on the record.
+
+  Cross-cutting, applied in every variant so the variants compare structure and not polish: display names
+  instead of slugs in the pill; the instance name only when the provider has more than one; Send labelled
+  "Start thread ⏎" then "Send ⏎"; the busy placeholder says the message will queue; the textarea grows
+  with its text (1-8 lines) and has no resize handle; ⇧⏎ is a newline; Esc closes a menu and the text
+  survives; a mic glyph for voice, never a dot; both themes.
+
+  States, via ?state= (key s cycles): draft · fresh (nothing logged in: blocked, Log in fills the draft)
+  · idle · busy (Stop, a queued row) · decision (a permission request docked on the card) · exited.
+  Theme: key t. Send on a draft starts the thread here, in memory, so the lock moment can be watched.
+-->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Hydra composer prototype</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Onest:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  :root {
+    --bg: oklch(94.5% 0.0156 265); --surface: oklch(96.7% 0.0125 265); --raised: oklch(100% 0.0078 265);
+    --ink: oklch(23% 0.0100 265); --muted: oklch(48% 0.0156 265); --faint: oklch(66% 0.0156 265);
+    --line: oklch(23% 0.0100 265 / 0.10); --line-soft: oklch(23% 0.0100 265 / 0.055);
+    --card-shadow: 0 1px 2px rgba(23,26,33,0.05);
+    --lift-shadow: 0 1px 2px rgba(23,26,33,0.06), 0 4px 14px rgba(23,26,33,0.06);
+    --attn: #8a6116; --fail: #a34e46; --ok: #48745a; --live: #48717f; --attn-soft: rgba(138,97,22,0.09);
+    --p-hydra: #7d7ab0; --p-ops: #a67f92;
+    --sans: "Onest", -apple-system, system-ui, sans-serif; --mono: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
+    --w-emph: 500; --w-urgent: 600; --side-w: 236px;
+  }
+  :root[data-theme="dark"] {
+    --bg: oklch(20% 0.0288 265); --surface: oklch(22.2% 0.0288 265); --raised: oklch(25.5% 0.0259 265);
+    --ink: oklch(90% 0.0080 265); --muted: oklch(68% 0.0288 265); --faint: oklch(50% 0.0288 265);
+    --line: oklch(90% 0.0288 265 / 0.10); --line-soft: oklch(90% 0.0288 265 / 0.06);
+    --card-shadow: 0 1px 2px rgba(0,0,0,0.35);
+    --lift-shadow: inset 0 1px 0 rgba(255,255,255,0.05), 0 1px 2px rgba(0,0,0,0.4), 0 6px 18px rgba(0,0,0,0.3);
+    --attn: #d0a147; --fail: #cf7b71; --ok: #7fae8e; --live: #7fa8b8; --attn-soft: rgba(208,161,71,0.12);
+    --p-hydra: #9490c9; --p-ops: #bd93a8;
+  }
+  * { box-sizing: border-box; } html, body { margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--ink); font: 14px/1.5 var(--sans); -webkit-font-smoothing: antialiased; }
+  a { color: inherit; } button { font: inherit; } b { font-weight: var(--w-emph); }
+  .mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+  .state.live { color: var(--live); } .state.fail { color: var(--fail); } .state.attn { color: var(--attn); }
+  .lane-label { text-transform: uppercase; letter-spacing: 0.1em; font-size: 10.5px; color: var(--faint); font-weight: var(--w-emph); }
+
+  /* ---- shell: a static sidebar and top bar, so the composer is judged beside the app ---- */
+  .app { display: grid; grid-template-columns: var(--side-w) 1fr; height: 100vh; }
+  .side { background: var(--surface); border-right: 1px solid var(--line); padding: 14px 10px; display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
+  .side .brand { font-weight: var(--w-emph); padding: 4px 8px 10px; display: flex; gap: 8px; align-items: baseline; }
+  .side .brand small { font: 11px var(--mono); color: var(--faint); }
+  .side .seg { display: flex; padding: 2px; border-radius: 7px; background: var(--line-soft); margin: 0 0 10px; }
+  .side .seg span { flex: 1; text-align: center; padding: 4px; border-radius: 5px; font-size: 12.5px; color: var(--muted); }
+  .side .seg span.on { background: var(--raised); color: var(--ink); font-weight: var(--w-emph); box-shadow: var(--card-shadow); }
+  .side .new { border: 1px solid var(--line); background: var(--raised); border-radius: 8px; padding: 7px 10px; font-weight: var(--w-emph); color: var(--ink); text-align: left; cursor: pointer; margin-bottom: 8px; box-shadow: var(--card-shadow); }
+  .side .pj { display: flex; align-items: center; gap: 7px; padding: 8px 8px 2px; font-size: 12.5px; color: var(--ink); font-weight: var(--w-emph); }
+  .side .pj i { width: 6px; height: 6px; border-radius: 1.5px; background: var(--p-hydra); } .side .pj.ops i { background: var(--p-ops); }
+  .side .row { display: grid; grid-template-columns: 14px 1fr auto; gap: 0 6px; padding: 5px 8px; border-radius: 6px; color: var(--ink); }
+  .side .row.on { background: var(--line-soft); }
+  .side .row .t { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; } .side .row .age { font: 11px var(--mono); color: var(--faint); }
+  .side .row .m { grid-column: 2 / 4; font: 11px var(--mono); color: var(--faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .side .mk { font-size: 10px; color: var(--faint); text-align: center; } .side .mk.live { color: var(--live); } .side .mk.q { color: var(--attn); }
+  .side .foot { margin-top: auto; font-size: 12.5px; color: var(--muted); padding: 6px 8px; display: flex; flex-direction: column; gap: 6px; }
+  main { display: flex; flex-direction: column; min-height: 0; }
+  .top { display: flex; align-items: baseline; gap: 10px; padding: 14px 24px 8px; font-size: 16px; font-weight: var(--w-emph); }
+  .top .crumb { color: var(--faint); font-weight: 400; } .top .id { font: 11px var(--mono); color: var(--faint); margin-left: auto; }
+  .thread { flex: 1; min-height: 0; display: flex; flex-direction: column; padding: 8px 24px 64px; overflow: hidden; }
+  .tcol { flex: 1; min-height: 0; overflow: auto; width: 100%; max-width: 800px; margin: 0 auto; display: flex; flex-direction: column; gap: 14px; padding: 4px 0 18px; }
+  .hero { margin: auto 0; text-align: center; padding: 0 0 24px; }
+  .hero h2 { font-size: 22px; font-weight: var(--w-emph); margin: 0 0 6px; } .hero h2 u { text-decoration-color: var(--p-hydra); text-underline-offset: 4px; }
+  .hero p { margin: 0; color: var(--muted); font-size: 13.5px; }
+  .stamp { font: 11px var(--mono); color: var(--faint); }
+  .umsg { align-self: flex-end; max-width: 78%; background: var(--surface); border: 1px solid var(--line-soft); border-radius: 12px 12px 4px 12px; padding: 8px 12px; white-space: pre-wrap; }
+  .amsg p { margin: 0 0 8px; } .amsg code { font: 12.5px var(--mono); }
+  .worked { display: flex; gap: 6px; align-items: center; font: 12px var(--mono); color: var(--faint); cursor: pointer; }
+  .worked.live .wt { background: linear-gradient(90deg, var(--faint) 0%, var(--ink) 45%, var(--faint) 90%); background-size: 220% 100%; -webkit-background-clip: text; background-clip: text; color: transparent; animation: shimmer 2.4s linear infinite; }
+  @keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -20% 0; } }
+  @media (prefers-reduced-motion: reduce) { .worked.live .wt { animation: none; background: none; color: var(--live); } }
+
+  /* ---- the composer ---- */
+  .compwrap { width: 100%; max-width: 800px; margin: 0 auto; display: flex; flex-direction: column; }
+  .queued { display: flex; align-items: center; gap: 10px; padding: 7px 12px; margin: 0 14px 6px; border: 1px solid var(--line-soft); background: var(--surface); border-radius: 8px; font-size: 13px; }
+  .queued .qmark { color: var(--attn); font: 12px var(--mono); flex: none; }
+  .queued .qt { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .queued .qs { font: 11px var(--mono); color: var(--faint); white-space: nowrap; }
+  .dock { border: 1px solid var(--line); border-bottom: 0; border-radius: 12px 12px 0 0; background: var(--raised); padding: 12px 16px 6px; display: flex; flex-direction: column; gap: 6px; }
+  .dock .q { display: flex; align-items: center; gap: 10px; font-size: 14px; font-weight: var(--w-emph); }
+  .dock .q .qm { color: var(--attn); font-weight: var(--w-urgent); } .dock .q .age { margin-left: auto; font: 11px var(--mono); color: var(--faint); }
+  .dock .ledger { display: flex; flex-direction: column; margin: 0 -8px; }
+  .dock .ledger button { display: grid; grid-template-columns: 140px 1fr; gap: 12px; text-align: left; border: 0; background: none; padding: 5px 8px; border-radius: 6px; cursor: pointer; color: var(--muted); font-size: 13px; }
+  .dock .ledger button:hover { background: var(--line-soft); } .dock .ledger button b { color: var(--ink); } .dock .ledger button.first b { color: var(--ink); }
+  .dock .ledger small { color: var(--faint); font-size: 12px; }
+  .card { border: 1px solid var(--line); border-radius: 14px; background: var(--raised); box-shadow: var(--lift-shadow); padding: 12px 14px 10px; display: flex; flex-direction: column; gap: 8px; position: relative; z-index: 1; }
+  .compwrap.docked .card { border-radius: 0 0 14px 14px; }
+  .card textarea { font: 14px/1.5 var(--sans); border: 0; background: none; color: var(--ink); resize: none; outline: none; width: 100%; min-height: 24px; max-height: calc(8 * 21px); padding: 0; display: block; overflow-y: auto; }
+  .card textarea::placeholder { color: var(--faint); }
+  .card textarea:disabled { color: var(--faint); }
+  .row3 { display: flex; align-items: center; gap: 6px; }
+  .plusb, .micb { width: 26px; height: 26px; border-radius: 7px; border: 0; background: none; display: inline-flex; align-items: center; justify-content: center; color: var(--muted); cursor: pointer; }
+  .plusb { font-size: 17px; } .micb { border-radius: 50%; width: 28px; height: 28px; } .micb svg { width: 16px; height: 16px; }
+  .plusb:hover, .micb:hover { background: var(--line-soft); color: var(--ink); }
+  .sel { border: 0; background: none; color: var(--muted); padding: 3px 7px; border-radius: 5px; cursor: pointer; font-size: 12.5px; display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+  .sel:hover, .sel[aria-expanded="true"] { background: var(--line-soft); color: var(--ink); }
+  .sel .k { color: var(--faint); } .sel::after { content: "▾"; color: var(--faint); font-size: 10px; }
+  .sel.ro { cursor: default; color: var(--muted); } .sel.ro::after { content: none; } .sel.ro:hover { background: none; color: var(--muted); }
+  .sepv { width: 1px; height: 12px; background: var(--line); margin: 0 3px; flex: none; }
+  .mpill { margin-left: auto; border: 1px solid var(--line); border-radius: 999px; padding: 4px 11px; font-size: 12.5px; color: var(--ink); background: var(--surface); display: inline-flex; gap: 6px; align-items: center; cursor: pointer; white-space: nowrap; }
+  .mpill .k { color: var(--faint); } .mpill::after { content: "▾"; color: var(--faint); font-size: 9px; }
+  .mpill[aria-expanded="true"] { border-color: var(--faint); }
+  .sendc { width: 28px; height: 28px; border-radius: 50%; border: 0; background: var(--ink); color: var(--bg); display: inline-flex; align-items: center; justify-content: center; font-size: 13px; cursor: pointer; flex: none; }
+  .sendc:disabled { background: var(--line); color: var(--faint); cursor: not-allowed; }
+  .sendc:focus-visible { outline: 2px solid var(--live); outline-offset: 1px; }
+  .stopb { border: 1px solid var(--line); background: none; color: var(--ink); border-radius: 999px; padding: 4px 10px; font-size: 12.5px; font-weight: var(--w-emph); cursor: pointer; display: inline-flex; gap: 6px; align-items: center; }
+  .stopb:hover { background: var(--line-soft); } .stopb i { width: 8px; height: 8px; background: currentColor; border-radius: 1.5px; display: inline-block; }
+  .hint { font: 11px var(--mono); color: var(--faint); white-space: nowrap; }
+  .hint b { color: var(--muted); font-weight: 400; }
+  .blk { font-size: 12.5px; color: var(--muted); } .blk .why { color: var(--attn); font-weight: var(--w-emph); }
+  .blk a, .blk button.link { color: var(--ink); font-weight: var(--w-emph); cursor: pointer; border: 0; background: none; padding: 0; font: inherit; text-decoration: underline; text-decoration-color: var(--line); text-underline-offset: 3px; }
+  .lip { margin: -8px 14px 0; padding: 13px 12px 5px; border: 1px solid var(--line-soft); border-top: 0; border-radius: 0 0 10px 10px; background: var(--surface); display: flex; gap: 2px; font-size: 12px; color: var(--muted); align-items: center; }
+  .lip .right { margin-left: auto; display: inline-flex; gap: 2px; align-items: center; }
+  .foot { display: flex; align-items: center; gap: 10px; padding: 7px 16px 0; min-height: 28px; }
+  .foot .right { margin-left: auto; }
+  /* B: the sentence */
+  .sent { padding: 9px 16px 0; font-size: 12.5px; color: var(--muted); line-height: 1.6; }
+  .sent .w { border: 0; background: none; padding: 1px 3px; margin: 0 -3px; border-radius: 4px; color: var(--ink); font-weight: var(--w-emph); cursor: pointer; font: inherit; }
+  .sent .w:hover, .sent .w[aria-expanded="true"] { background: var(--line-soft); } .sent .w { text-decoration: underline dotted var(--faint); text-underline-offset: 3px; }
+  .sent.ro { color: var(--muted); } .sent.ro b { color: var(--muted); font-weight: var(--w-emph); }
+  .sent .tail { color: var(--faint); font-family: var(--mono); font-size: 11px; }
+  /* C: the identity row */
+  .idrow { width: 100%; max-width: 800px; margin: 0 auto 6px; display: flex; gap: 22px; padding: 6px 0 12px; border-bottom: 1px solid var(--line-soft); flex-wrap: wrap; }
+  .idrow .f { display: flex; flex-direction: column; gap: 2px; }
+  .idrow .f .v { font-size: 13px; color: var(--ink); } .idrow .sel { padding: 1px 6px 1px 0; margin-left: 0; font-size: 13px; color: var(--ink); }
+  .idrow .sel::after { margin-left: 2px; } .idrow .sel.ro { color: var(--ink); }
+  .idrow .note { margin-left: auto; align-self: flex-end; font: 11px var(--mono); color: var(--faint); }
+  /* the popover */
+  .pop { position: fixed; z-index: 35; width: 320px; overflow: auto; background: var(--raised); border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--lift-shadow); padding: 6px; display: none; flex-direction: column; font-size: 12.5px; }
+  .pop.open { display: flex; }
+  .pop .ph { display: flex; align-items: baseline; gap: 8px; padding: 6px 8px 5px; }
+  .pop .ph .r { margin-left: auto; font: 10.5px var(--mono); color: var(--faint); white-space: nowrap; }
+  .pop .pi { display: grid; grid-template-columns: 10px minmax(0, 1fr) auto; gap: 0 8px; align-items: center; padding: 5px 8px; border-radius: 6px; cursor: pointer; color: var(--muted); text-align: left; border: 0; background: none; font: inherit; width: 100%; }
+  .pop .pi:hover { background: var(--line-soft); color: var(--ink); }
+  .pop .pi.on { color: var(--ink); font-weight: var(--w-emph); }
+  .pop .pi .dot { width: 5px; height: 5px; border-radius: 50%; background: transparent; justify-self: center; } .pop .pi.on .dot { background: var(--ink); }
+  .pop .pi .n { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .pop .pi .st { font-size: 11px; white-space: nowrap; font-weight: 400; }
+  .pop .pi .s { grid-column: 2 / 4; font-size: 11px; color: var(--faint); font-weight: 400; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .pop .pi.dim { opacity: 0.55; cursor: default; } .pop .pi.dim:hover { background: none; color: var(--muted); }
+  .pop .pi.soft { opacity: 1; } .pop .pi.soft .s { color: var(--attn); }
+  .pop .pg { margin-top: 6px; padding: 7px 8px 3px; display: flex; align-items: baseline; gap: 8px; border-top: 1px solid var(--line-soft); }
+  .pop .ph + .pg { border-top: 0; margin-top: 0; padding-top: 2px; }
+  .pop .pg b { font-size: 12px; color: var(--ink); white-space: nowrap; } .pop .pg small { font-size: 11px; color: var(--faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .pop .pg .st { margin-left: auto; font-size: 11px; color: var(--faint); white-space: nowrap; } .pop .pg .st a { color: var(--muted); cursor: pointer; }
+  .pop .pg .pdot { width: 6px; height: 6px; border-radius: 1.5px; background: var(--p-hydra); align-self: center; } .pop .pg .pdot.ops { background: var(--p-ops); }
+  .pop .pi.grp { margin-top: 4px; border-top: 1px solid var(--line-soft); border-radius: 0 0 6px 6px; padding-top: 8px; }
+  .pop .pi.grp .n { display: flex; gap: 6px; align-items: baseline; min-width: 0; } .pop .pi.grp .n b { color: var(--muted); flex: none; } .pop .pi.grp:hover .n b { color: var(--ink); }
+  .pop .pi.grp .n small { font-size: 11px; color: var(--faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pop .pi.grp.dim .st a { color: var(--muted); cursor: pointer; pointer-events: auto; }
+  .pop .opts { border-top: 1px solid var(--line-soft); margin-top: 6px; padding: 8px 8px 4px; display: grid; grid-template-columns: 68px minmax(0, 1fr); gap: 5px 10px; align-items: center; }
+  .pop .opts .ol { font-size: 10px; text-transform: uppercase; letter-spacing: 0.09em; color: var(--faint); font-weight: var(--w-emph); }
+  .segq { display: inline-flex; gap: 1px; flex-wrap: wrap; }
+  .segq button { border: 0; background: none; font: inherit; font-size: 12px; color: var(--muted); padding: 3px 8px; border-radius: 5px; cursor: pointer; }
+  .segq button:hover { background: var(--line-soft); color: var(--ink); } .segq button.on { color: var(--ink); font-weight: var(--w-emph); background: var(--line-soft); }
+  .pop .foot { border-top: 1px solid var(--line-soft); margin-top: 6px; padding: 7px 8px 3px; font-size: 11.5px; color: var(--faint); line-height: 1.45; min-height: 0; }
+  .pop .foot a { color: var(--muted); cursor: pointer; }
+  /* the prototype's own bar: not part of the design */
+  #bar { position: fixed; left: 50%; bottom: 14px; transform: translateX(-50%); z-index: 50; background: #17191f; color: #e9eaf0; border-radius: 999px; padding: 6px 8px; display: flex; align-items: center; gap: 4px; font: 12px var(--mono); box-shadow: 0 6px 24px rgba(0,0,0,0.35); }
+  #bar button { border: 0; background: none; color: inherit; font: inherit; padding: 5px 9px; border-radius: 999px; cursor: pointer; } #bar button:hover { background: rgba(255,255,255,0.1); }
+  #bar .lbl { font-family: var(--sans); font-weight: 500; padding: 0 6px; min-width: 150px; text-align: center; }
+  #note { position: fixed; right: 14px; bottom: 18px; z-index: 49; font: 10.5px var(--mono); color: var(--attn); background: var(--attn-soft); border: 1px dashed var(--attn); border-radius: 8px; padding: 4px 9px; white-space: nowrap; }
+  #note b { font-weight: 500; }
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="side" id="side"></aside>
+  <main>
+    <div class="top" id="top"></div>
+    <div class="thread" id="thread"></div>
+  </main>
+</div>
+<div class="pop" id="pop"></div>
+<div id="bar"></div>
+<div id="note"></div>
+<script>
+/* ============ url state ============ */
+const VARIANTS = { A: "Lip", B: "Sentence", C: "Header" };
+const STATES = ["draft", "fresh", "idle", "busy", "decision", "exited"];
+const params = () => new URLSearchParams(location.search);
+const variant = () => (VARIANTS[params().get("variant")] ? params().get("variant") : "A");
+const stateKey = () => (STATES.includes(params().get("state")) ? params().get("state") : "draft");
+function setParam(k, v) { const p = params(); p.set(k, v); history.replaceState(null, "", `?${p}`); boot(); }
+
+/* ============ data: catalogs, the way client-core would hand them over ============ */
+const CLAUDE = [
+  { slug: "claude-sonnet-5", name: "Sonnet 5", effort: ["low", "medium", "high"], fast: true, isDefault: true },
+  { slug: "claude-opus-5", name: "Opus 5", effort: ["low", "medium", "high", "max"], ctx: ["200k", "1M"] },
+  { slug: "claude-haiku-4-5", name: "Haiku 4.5", effort: ["low", "medium", "high"] },
+];
+const CODEX = [
+  { slug: "gpt-5.6", name: "GPT-5.6", effort: ["low", "medium", "high", "xhigh"], isDefault: true },
+  { slug: "gpt-5.6-codex", name: "GPT-5.6 Codex", effort: ["low", "medium", "high", "xhigh"] },
+];
+const INSTANCES_BUSY = [
+  { id: "cc-personal", provider: "Claude Code", name: "personal", who: "rogier@… · Max plan", on: ["laptop", "macstudio-01", "hetzner-01"], models: CLAUDE },
+  { id: "cc-work", provider: "Claude Code", name: "work", who: "rogier@acme… · Team", on: ["laptop"], models: CLAUDE },
+  { id: "codex", provider: "Codex", name: "", who: "ChatGPT Plus", on: ["laptop", "macstudio-01"], models: CODEX },
+  { id: "pi-zai", provider: "pi", name: "zai", who: "API key", on: ["laptop"], noAuto: true, models: [{ slug: "glm-5", name: "GLM-5", thinking: ["off", "on"], isDefault: true }] },
+];
+const RUNNERS_BUSY = [
+  { id: "laptop", local: true, state: "online", tone: "live", cap: "1/2", note: "this machine · reserved" },
+  { id: "macstudio-01", state: "online", tone: "live", cap: "3/4", note: "default" },
+  { id: "hetzner-01", state: "at cap · would queue", tone: "attn", cap: "4/4", note: "" },
+  { id: "macstudio-02", state: "draining", tone: "", cap: "1/4", off: "draining · takes no new sessions" },
+  { id: "pi-lab", state: "unreachable 2d", tone: "fail", cap: "0/2", off: "unreachable · a thread would wait for it" },
+];
+const REPOS_BUSY = [
+  { id: "hydra", project: "hydra", primary: "main", branches: ["main", "spec/v1"], on: ["laptop", "macstudio-01", "hetzner-01"], used: [["hydra/run-3f1", "Runner drain command"]] },
+  { id: "agentick-web", project: "hydra", primary: "main", branches: ["main"], on: ["laptop", "macstudio-01"], used: [] },
+  { id: "ops-infra", project: "ops", primary: "master", branches: ["master", "hetzner-migration"], on: ["laptop"], used: [] },
+];
+const PROFILES = [
+  { id: "unrestricted", gist: "everything the thread's token allows" },
+  { id: "worker", gist: "no fleet, credential or connection operations" },
+  { id: "assistant", gist: "read, reply and remember; nothing else" },
+];
+const ACCESS = [
+  { mode: "approval-required", meaning: "asks before every side-effecting action" },
+  { mode: "auto-accept-edits", meaning: "allows file edits, asks for the rest" },
+  { mode: "auto", meaning: "a harness-side reviewer judges routine actions" },
+  { mode: "full-access", meaning: "allows everything" },
+];
+/* the fresh install: one instance found, not logged in, one machine, no repos */
+let FRESH_LOGIN = false;
+const catalogs = () => stateKey() === "fresh"
+  ? { instances: [{ id: "cc-personal", provider: "Claude Code", name: "", who: "found on this machine", on: FRESH_LOGIN ? ["laptop"] : [], models: CLAUDE }],
+      runners: [{ id: "laptop", local: true, state: "online", tone: "live", cap: "0/4", note: "this machine" }], repos: [] }
+  : { instances: INSTANCES_BUSY, runners: RUNNERS_BUSY, repos: REPOS_BUSY };
+
+/* ============ the thread: draft or active ============ */
+const DEFAULT_CONFIG = { instanceId: "cc-personal", model: "claude-sonnet-5", options: { effort: "medium", fast: false, thinking: "off", ctx: "200k" }, accessMode: "approval-required", runnerId: "laptop", profileId: "unrestricted", repo: "hydra", checkout: "worktree", branch: "new" };
+const ACTIVE_CONFIG = { ...DEFAULT_CONFIG, branch: "hydra/run-3f1" };
+let thread, message, picks, open, transcript, sentAt;
+function reset() {
+  const k = stateKey(); FRESH_LOGIN = false; picks = {}; open = null; message = ""; sentAt = null;
+  if (k === "draft") thread = { kind: "draft" };
+  else if (k === "fresh") thread = { kind: "draft" };
+  else thread = { kind: "active", session: { ...ACTIVE_CONFIG, status: k === "busy" || k === "decision" ? "busy" : k === "exited" ? "exited" : "idle", title: "Fix flaky webhook tests", startedAgo: "12m", queued: k === "busy" ? ["Also tell me the current date once you finish."] : [], decision: k === "decision" } };
+  transcript = thread.kind === "active" ? baseTranscript() : [];
+}
+/* effective config: defaults from the catalogs, overlaid with explicit picks - recomputed every render */
+function defaults() {
+  const c = catalogs(); const inst = c.instances.find((i) => i.on.length) || c.instances[0];
+  const runner = inst && c.runners.find((r) => inst.on.includes(r.id) && !r.off);
+  const model = inst ? (inst.models.find((m) => m.isDefault) || inst.models[0]).slug : null;
+  return { ...DEFAULT_CONFIG, instanceId: inst ? inst.id : null, runnerId: runner ? runner.id : null, model, repo: c.repos.length ? "hydra" : null };
+}
+const config = () => thread.kind === "active" ? { ...thread.session, ...picks } : { ...defaults(), ...picks };
+const active = () => thread.kind === "active";
+const locked = (field) => active() && !["model", "options"].includes(field);
+const inst = (c = config()) => catalogs().instances.find((i) => i.id === c.instanceId) || null;
+const modelOf = (c = config()) => { const i = inst(c); return i ? i.models.find((m) => m.slug === c.model) || null : null; };
+const runnerOf = (c = config()) => catalogs().runners.find((r) => r.id === c.runnerId) || null;
+const repoOf = (c = config()) => catalogs().repos.find((r) => r.id === c.repo) || null;
+const instLabel = (i) => i.provider + (i.name && catalogs().instances.filter((x) => x.provider === i.provider).length > 1 ? ` · ${i.name}` : "");
+function reasoning(c = config()) { const m = modelOf(c); if (!m) return null; if (m.thinking) return `thinking ${c.options.thinking}`; if (m.effort) return c.options.effort; return null; }
+function pillParts(c = config()) { const i = inst(c), m = modelOf(c); if (!i) return { k: "", v: "No provider" }; return { k: instLabel(i), v: [m ? m.name : c.model, reasoning(c)].filter(Boolean).join(" · ") }; }
+function runnerLabel(c = config()) { const r = runnerOf(c); return r ? (r.local ? `local · ${r.id}` : r.id) : "no machine"; }
+/* what blocks a draft from starting, in the words that fix it */
+function blocker() {
+  if (active()) return null;
+  const c = config(); const i = inst(c); const r = runnerOf(c);
+  if (!i) return { why: "No provider is set up.", action: null };
+  if (!i.on.length) return { why: `${i.provider} is not logged in on this machine.`, action: { label: "Log in", go: "login" } };
+  if (!r) return { why: `No machine is logged in to ${instLabel(i)}.`, action: { label: "Pick a machine", go: "runner" } };
+  return null;
+}
+
+/* ============ picks ============ */
+function applyPick(pick) {
+  const c = config();
+  switch (pick.field) {
+    case "instance": { const i = catalogs().instances.find((x) => x.id === pick.id); const r = catalogs().runners.find((x) => i.on.includes(x.id) && !x.off); const m = i.models.find((x) => x.isDefault) || i.models[0]; picks = { ...picks, instanceId: i.id, runnerId: r ? r.id : null, model: m.slug, options: { ...c.options, effort: m.effort ? (m.effort.includes(c.options.effort) ? c.options.effort : "medium") : c.options.effort } }; break; }
+    case "model": { const m = inst().models.find((x) => x.slug === pick.slug); picks = { ...picks, model: m.slug, options: { ...c.options, effort: m.effort && !m.effort.includes(c.options.effort) ? "medium" : c.options.effort } }; break; }
+    case "option": picks = { ...picks, options: { ...c.options, [pick.id]: pick.value } }; break;
+    case "repo": picks = { ...picks, repo: pick.id, checkout: "worktree", branch: "new" }; break;
+    case "checkout": picks = { ...picks, checkout: pick.value, branch: pick.value === "primary" ? repoOf().primary : "new" }; break;
+    default: picks = { ...picks, [pick.field]: pick.value };
+  }
+}
+
+/* ============ submission ============ */
+function submit() {
+  const text = message.trim(); if (!text || blocker()) return;
+  if (thread.kind === "draft") {
+    const c = config(); thread = { kind: "active", session: { ...c, branch: c.branch === "new" ? `${c.repo}/run-9c2` : c.branch, status: "busy", title: text.split("\n")[0].slice(0, 48), startedAgo: "now", queued: [], decision: false } };
+    picks = {}; transcript = [{ kind: "stamp", t: "Thu 11 Sep · 11:52" }, { kind: "user", t: text }, { kind: "worked", live: true, t: "2s" }]; message = "";
+    setTimeout(() => { if (thread.kind === "active" && thread.session.status === "busy") { thread.session.status = "idle"; transcript[2] = { kind: "worked", t: "31s" }; transcript.push({ kind: "agent", t: "<p>Two of the three failures are one race: the retry scheduler fires before the fake clock advances. Fixing that first; the port reuse is a one-liner after.</p>" }); render(); } }, 2600);
+  } else {
+    const s = thread.session;
+    if (s.status === "busy") s.queued.push(text); else { transcript.push({ kind: "user", t: text }, { kind: "worked", live: true, t: "1s" }); s.status = "busy"; setTimeout(() => { s.status = "idle"; transcript[transcript.length - 1] = { kind: "worked", t: "8s" }; transcript.push({ kind: "agent", t: "<p>Done.</p>" }); render(); }, 2600); }
+    if (Object.keys(picks).length) { Object.assign(s, picks); picks = {}; }  // the picks ride the submission and land on the row
+    message = "";
+  }
+  render();
+}
+
+/* ============ menus ============ */
+const row = (on, dim, data, name, st = "", sub = "", cls = "") => `<button class="pi ${on ? "on" : ""} ${dim ? "dim" : ""} ${cls}" ${dim ? "" : `data-pick='${JSON.stringify(data)}'`}><span class="dot"></span><span class="n">${name}</span><span class="st">${st}</span>${sub ? `<span class="s">${sub}</span>` : ""}</button>`;
+function menuHtml(kind) {
+  const c = config(), cat = catalogs(), r = runnerOf(c), i = inst(c), m = modelOf(c);
+  const lockNote = active() ? "" : `<span class="r">locks when the thread starts</span>`;
+  if (kind === "runner") {
+    return `<div class="ph"><span class="lane-label">Machine</span>${lockNote}</div>` + cat.runners.map((x) => {
+      const off = x.off || (i && !i.on.includes(x.id) ? `not logged in to ${instLabel(i)}` : "");
+      return row(x.id === c.runnerId, !!off, { field: "runnerId", value: x.id }, x.local ? `local · ${x.id}` : x.id, `<span class="state ${x.tone}">${x.state}</span> <span class="mono" style="color:var(--faint)">${x.cap}</span>`, [x.note, off].filter(Boolean).join(" · "));
+    }).join("") + `<div class="foot">The thread runs where you say; nothing moves it later. <a>Add machine →</a></div>`;
+  }
+  if (kind === "workspace") {
+    let h = `<div class="ph"><span class="lane-label">Workspace</span>${lockNote}</div>`; const pj = {}; cat.repos.forEach((x) => (pj[x.project] = pj[x.project] || []).push(x));
+    for (const [name, list] of Object.entries(pj)) { h += `<div class="pg"><span class="pdot ${name}"></span><b>${name}</b></div>`; h += list.map((x) => { const cl = r && x.on.includes(r.id); return row(c.repo === x.id, false, { field: "repo", id: x.id }, x.id, "", cl ? `primary on ${x.primary}${x.used.length ? ` · ${x.used.length} worktree in use` : ""}` : `not cloned on ${r ? r.id : "this machine"} · clones on first use`); }).join(""); }
+    h += row(!c.repo, false, { field: "repo", id: null }, "No workspace", "", "the agent works without a checkout");
+    return h + `<div class="foot"><a>Adopt a folder on this machine…</a> · <a>Add a repo →</a></div>`;
+  }
+  if (kind === "checkout") { const rp = repoOf(c); return `<div class="ph"><span class="lane-label">Checkout</span>${lockNote}</div>` + row(c.checkout === "worktree", false, { field: "checkout", value: "worktree" }, "new worktree", "", "its own folder; the primary checkout stays untouched") + row(c.checkout === "primary", false, { field: "checkout", value: "primary" }, "primary checkout", "", `the clone itself, on ${rp.primary}`) + rp.used.map(([b, t]) => row(false, true, {}, `<span class="mono">${b}</span>`, "", `in use by “${t}”`)).join(""); }
+  if (kind === "branch") { const rp = repoOf(c); return `<div class="ph"><span class="lane-label">Branch</span>${lockNote}</div>` + row(c.branch === "new", false, { field: "branch", value: "new" }, `<span class="mono">${rp.id}/run-…</span>`, "", `new, from ${rp.primary}, named after the thread`) + rp.branches.map((b) => row(c.branch === b, false, { field: "branch", value: b }, `<span class="mono">${b}</span>`, "", c.checkout === "primary" ? "the checkout switches to it" : "")).join(""); }
+  if (kind === "profile") return `<div class="ph"><span class="lane-label">Profile</span>${lockNote}</div>` + PROFILES.map((p) => row(p.id === c.profileId, false, { field: "profileId", value: p.id }, p.id, "", p.gist)).join("");
+  if (kind === "access") return `<div class="ph"><span class="lane-label">Access mode</span>${lockNote}</div>` + ACCESS.map((a) => { const fb = a.mode === "auto" && i && i.noAuto; return row(a.mode === c.accessMode, false, { field: "accessMode", value: a.mode }, a.mode, "", fb ? `runs as auto-accept-edits on ${i.provider}` : a.meaning, fb ? "soft" : ""); }).join("");
+  if (kind === "model") {
+    let h = `<div class="ph"><span class="lane-label">Model</span><span class="r">${active() ? "live · within " + (i ? instLabel(i) : "this account") : "live after start, within the account"}</span></div>`;
+    for (const g of cat.instances) {
+      const here = g.on.includes(c.runnerId); const cur = i && g.id === i.id;
+      const dim = active() && !cur ? "switching accounts starts a new thread" : !g.on.length ? "found, not logged in" : !here ? `not logged in on ${r ? r.id : "this machine"}` : "";
+      if (cur) {
+        h += `<div class="pg"><b>${instLabel(g)}</b><small>${g.who}</small><span class="st">${dim ? `${dim} · <a data-go="login">Log in</a>` : "personal config · linked"}</span></div>`;
+        if (!dim) h += g.models.map((x) => row(x.slug === c.model, false, { field: "model", slug: x.slug }, x.name, x.isDefault ? "default" : "", "")).join("");
+      } else h += `<button class="pi grp ${dim ? "dim" : ""}" ${dim ? "" : `data-pick='${JSON.stringify({ field: "instance", id: g.id })}'`}><span class="dot"></span><span class="n"><b>${instLabel(g)}</b><small>${dim || g.who}</small></span><span class="st">${dim && !active() ? `<a data-go="login">Log in</a>` : `${g.models.length} models ›`}</span></button>`;
+    }
+    if (m && i && i.on.length) {
+      h += `<div class="opts">`;
+      if (m.effort) h += `<span class="ol">reasoning</span><span class="segq">${m.effort.map((e) => `<button class="${c.options.effort === e ? "on" : ""}" data-pick='${JSON.stringify({ field: "option", id: "effort", value: e })}'>${e}</button>`).join("")}</span>`;
+      if (m.thinking) h += `<span class="ol">thinking</span><span class="segq">${m.thinking.map((e) => `<button class="${c.options.thinking === e ? "on" : ""}" data-pick='${JSON.stringify({ field: "option", id: "thinking", value: e })}'>${e}</button>`).join("")}</span>`;
+      if (m.ctx) h += `<span class="ol">context</span><span class="segq">${m.ctx.map((e) => `<button class="${c.options.ctx === e ? "on" : ""}" data-pick='${JSON.stringify({ field: "option", id: "ctx", value: e })}'>${e}</button>`).join("")}</span>`;
+      if (m.fast) h += `<span class="ol">fast mode</span><span class="segq"><button class="${!c.options.fast ? "on" : ""}" data-pick='${JSON.stringify({ field: "option", id: "fast", value: false })}'>off</button><button class="${c.options.fast ? "on" : ""}" data-pick='${JSON.stringify({ field: "option", id: "fast", value: true })}'>on</button></span>`;
+      h += `</div>`;
+    }
+    return h;
+  }
+  return "";
+}
+function placePop() {
+  const pop = document.getElementById("pop"); const anchor = open && document.querySelector(`[data-pop="${open}"]`);
+  if (!anchor) { pop.classList.remove("open"); open = null; return; }
+  pop.innerHTML = menuHtml(open); pop.className = "pop open"; anchor.setAttribute("aria-expanded", "true");
+  const a = anchor.getBoundingClientRect(); pop.style.width = open === "runner" || open === "workspace" || open === "checkout" ? "400px" : open === "model" ? "360px" : "320px"; pop.style.maxHeight = `${a.top - 16}px`;
+  const w = pop.offsetWidth; pop.style.left = `${Math.max(8, Math.min(a.left, innerWidth - w - 8))}px`; pop.style.bottom = `${innerHeight - a.top + 6}px`;
+}
+
+/* ============ the composer, three ways ============ */
+const MIC = '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21M9 21h6"/></svg>';
+const BRANCH = '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" style="width:11px;height:11px;vertical-align:-1px;margin-right:4px"><circle cx="6" cy="5" r="2.2"/><circle cx="6" cy="19" r="2.2"/><circle cx="18" cy="8" r="2.2"/><path d="M6 7.2v9.6M18 10.2c0 4-12 2.6-12 6.6"/></svg>';
+const LOCK_TIP = 'title="fixed once the thread started"';
+function sel(kind, value, key = "", field = kind) {
+  const ro = locked(field);
+  return `<button class="sel ${ro ? "ro" : ""}" ${ro ? LOCK_TIP : `data-pop="${kind}"`}>${key ? `<span class="k">${key}</span>` : ""}<span class="v">${value}</span></button>`;
+}
+function setupValues() {
+  const c = config(), rp = repoOf(c);
+  return { ws: rp ? rp.id : "No workspace", co: rp ? (c.checkout === "primary" ? "primary checkout" : "new worktree") : null, br: rp ? `<span class="mono" style="font-size:11px">${BRANCH}${c.branch === "new" ? `${rp.id}/run-…` : c.branch}</span>` : null, brPlain: rp ? (c.branch === "new" ? `${rp.id}/run-…` : c.branch) : null, runner: runnerLabel(c), profile: c.profileId, rp };
+}
+function cardHtml() {
+  const c = config(), s = active() ? thread.session : null; const busy = s && s.status === "busy"; const exited = s && s.status === "exited"; const b = blocker();
+  const p = pillParts(c); const pill = `<button class="mpill" data-pop="model" title="${active() ? "Model and its options stay live; the account is fixed" : "Model, options and account"}"><span class="k">${p.k}</span>${p.v}</button>`;
+  const placeholder = exited ? "This thread has exited. Start a new one to continue." : busy ? "Queued until the turn finishes…" : active() ? "Reply…" : "Say what you want done…";
+  const canSend = message.trim() && !b && !exited;
+  const sendTip = active() ? "Send ⏎" : "Start thread ⏎";
+  const sendc = `<button class="sendc" data-send="1" ${canSend ? "" : "disabled"} aria-label="${sendTip}" title="${sendTip}">↑</button>`;
+  const stop = busy ? `<button class="stopb" data-stop="1" title="Stops the running turn; queued messages wait"><i></i>Stop</button>` : "";
+  return `<div class="card"><textarea id="compose" rows="1" placeholder="${placeholder}" ${exited ? "disabled" : ""}>${esc(message)}</textarea>
+    <div class="row3"><button class="plusb" aria-label="Attach" title="Attach (not built)">+</button>${sel("access", c.accessMode, "", "accessMode")}${pill}<button class="micb" aria-label="Voice" title="Dictate (not built)">${MIC}</button>${stop}${sendc}</div></div>`;
+}
+function queuedHtml() { const s = active() ? thread.session : null; return s && s.queued.length ? s.queued.map((q) => `<div class="queued"><span class="qmark">○</span><span class="qt">${esc(q)}</span><span class="qs">queued · runs next</span><button class="sel" style="padding:2px 6px">Steer</button><button class="sel" style="padding:2px 6px">Cancel</button></div>`).join("") : ""; }
+function dockHtml() { const s = active() ? thread.session : null; return s && s.decision ? `<div class="dock"><div class="q"><span class="qm">?</span>Run <code class="mono">pnpm test --filter runner</code>?<span class="age">4m</span></div><div class="ledger"><button class="first"><b>Allow</b><small>runs the command once, in the worktree</small></button><button><b>Allow always</b><small>adds it to the unrestricted profile for this thread</small></button><button><b>Deny</b><small>the agent hears no and continues</small></button></div></div>` : ""; }
+/* what Enter does, or what blocks it: the composer says it in one line */
+function guidanceHtml(cls = "hint") {
+  const b = blocker(); const s = active() ? thread.session : null;
+  if (b) return `<span class="blk"><span class="why">Can't start yet.</span> ${b.why} ${b.action ? `<button class="link" data-go="${b.action.go}">${b.action.label}</button>` : ""}</span>`;
+  if (s && s.status === "exited") return `<span class="blk">This thread has exited. <button class="link" data-go="new">Start a new thread from it</button></span>`;
+  if (s && s.status === "busy") return `<span class="${cls}"><b>⏎</b> queues for the next turn · <b>⇧⏎</b> newline</span>`;
+  if (s) return `<span class="${cls}"><b>⏎</b> sends · <b>⇧⏎</b> newline</span>`;
+  const c = config(), rp = repoOf(c);
+  return `<span class="${cls}"><b>⏎</b> starts the thread on ${runnerLabel(c)}${rp ? ` in ${c.checkout === "primary" ? "the primary checkout" : "a new worktree"} of ${rp.id}` : " without a workspace"} · <b>⇧⏎</b> newline</span>`;
+}
+const pendingNote = () => Object.keys(picks).length && active() ? `<span class="hint" style="color:var(--attn)">changed · applies on send</span>` : "";
+
+function variantA() {
+  const v = setupValues();
+  const lip = `<div class="lip">${[sel("workspace", v.ws, "workspace", "repo"), v.co ? sel("checkout", v.co, "", "checkout") : "", v.br ? sel("branch", v.br, "", "branch") : ""].filter(Boolean).join('<span class="sepv"></span>')}<span class="right">${sel("runner", v.runner, "machine", "runnerId")}<span class="sepv"></span>${sel("profile", v.profile, "profile", "profileId")}</span></div>`;
+  return `<div class="compwrap ${dockHtml() ? "docked" : ""}">${queuedHtml()}${dockHtml()}${cardHtml()}${lip}<div class="foot">${guidanceHtml()}<span class="right">${pendingNote()}</span></div></div>`;
+}
+const bMachine = (c) => { const r = runnerOf(c); return r ? (r.local ? "this machine" : r.id) : "no machine"; };
+function variantB() {
+  const c = config(), v = setupValues(), s = active() ? thread.session : null;
+  const w = (kind, text, field) => locked(field) ? `<b>${text}</b>` : `<button class="w" data-pop="${kind}">${text}</button>`;
+  let sentence;
+  if (blocker()) sentence = guidanceHtml("tail");
+  else if (s) sentence = `Started ${s.startedAgo === "now" ? "just now" : s.startedAgo + " ago"} ${v.rp ? `in ${c.checkout === "primary" ? "the primary checkout" : "a new worktree"} of <b>${v.rp.id}</b> on <b class="mono" style="font-size:11.5px">${v.brPlain}</b>` : "with <b>no workspace</b>"}, on <b>${bMachine(c)}</b>, as <b>${v.profile}</b>. &nbsp;<span class="tail">${s.status === "busy" ? "⏎ queues for the next turn" : s.status === "exited" ? "" : "⏎ sends · ⇧⏎ newline"}</span> ${pendingNote()}`;
+  else sentence = `Runs ${v.rp ? `in ${w("checkout", c.checkout === "primary" ? "the primary checkout" : "a new worktree", "checkout")} of ${w("workspace", v.rp.id, "repo")} ${c.branch === "new" ? `on ${w("branch", `a new branch from ${v.rp.primary}`, "branch")}` : `on ${w("branch", v.brPlain, "branch")}`}` : `with ${w("workspace", "no workspace", "repo")}`}, on ${w("runner", bMachine(c), "runnerId")}, as ${w("profile", v.profile, "profileId")}. <span class="tail">⏎ starts it · ⇧⏎ newline</span>`;
+  return `<div class="compwrap ${dockHtml() ? "docked" : ""}">${queuedHtml()}${dockHtml()}${cardHtml()}<div class="sent ${s ? "ro" : ""}">${sentence}</div></div>`;
+}
+function variantC() {
+  return `<div class="compwrap ${dockHtml() ? "docked" : ""}">${queuedHtml()}${dockHtml()}${cardHtml()}<div class="foot">${guidanceHtml()}<span class="right">${pendingNote()}</span></div></div>`;
+}
+function idRowHtml() {
+  const v = setupValues(), c = config(), s = active() ? thread.session : null;
+  const f = (label, html) => `<div class="f"><span class="lane-label">${label}</span>${html}</div>`;
+  return `<div class="idrow">${f("workspace", sel("workspace", v.ws, "", "repo"))}${v.co ? f("checkout", sel("checkout", v.co, "", "checkout")) : ""}${v.br ? f("branch", sel("branch", v.br, "", "branch")) : ""}${f("machine", sel("runner", v.runner, "", "runnerId"))}${f("profile", sel("profile", v.profile, "", "profileId"))}<span class="note">${s ? `started ${s.startedAgo === "now" ? "just now" : s.startedAgo + " ago"} · fixed` : "locks when the thread starts"}</span></div>`;
+}
+
+/* ============ page ============ */
+function baseTranscript() { return [{ kind: "stamp", t: "Thu 11 Sep · 09:02" }, { kind: "user", t: "The webhook retry tests fail about one run in five. Find out why and fix it without loosening the assertions." }, { kind: "worked", t: "31s" }, { kind: "agent", t: "<p>Two of the three failures are the same race: the retry scheduler fires before the fake clock advances, so the first attempt lands a tick early and the assertion on attempt count sees two.</p><p>The third failure is unrelated: <code>test/webhooks/retry.test.ts</code> reuses a port across cases. Fixing the race first; the port reuse is a one-liner after.</p>" }, { kind: "user", t: "Go ahead, race first." }, { kind: "worked", live: true, t: "12s" }]; }
+function transcriptHtml() {
+  const s = thread.session; const rows = transcript.map((r, idx) => {
+    if (r.kind === "stamp") return `<div class="stamp">${r.t}</div>`;
+    if (r.kind === "user") return `<div class="umsg">${esc(r.t)}</div>`;
+    if (r.kind === "agent") return `<div class="amsg">${r.t}</div>`;
+    const live = r.live && s.status === "busy" && idx === transcript.length - 1; return `<div class="worked ${live ? "live" : ""}"><span class="wt">${live ? "Working for" : "Worked for"} ${r.t}</span><span>›</span></div>`;
+  });
+  if (s.status === "exited") rows.push(`<div class="stamp">exited · the harness process ended 2h ago</div>`);
+  return rows.join("");
+}
+function render() {
+  const V = variant(); const s = active() ? thread.session : null;
+  document.getElementById("side").innerHTML = `<div class="brand">Hydra <small>rogier</small></div><div class="seg"><span class="on">Threads</span><span>Hydra</span></div><button class="new">+ Create new thread</button>
+    <div class="pj"><i></i>hydra</div>
+    ${s ? `<div class="row on"><span class="mk ${s.status === "busy" ? "live" : ""}">${s.status === "busy" ? "▮▮▮" : s.status === "exited" ? "–" : "○"}</span><span class="t">${esc(s.title)}</span><span class="age">${s.startedAgo}</span><span class="m">${(setupValues().brPlain || "no workspace")} · ${modelOf(s) ? modelOf(s).name : s.model}</span></div>` : `<div class="row on"><span class="mk">·</span><span class="t" style="color:var(--muted)">New thread</span><span class="age">draft</span></div>`}
+    <div class="row"><span class="mk q">?</span><span class="t">Runner drain command</span><span class="age">4m</span><span class="m">hydra/run-3f1 · Sonnet 5</span></div>
+    <div class="row"><span class="mk">○</span><span class="t">Tidy the promotion runbook</span><span class="age">2h</span><span class="m">no workspace · Sonnet 5</span></div>
+    <div class="pj ops"><i></i>ops</div>
+    <div class="row"><span class="mk">✓</span><span class="t">Rotate the Hetzner backups key</span><span class="age">3d</span><span class="m">main checkout · GPT-5.6</span></div>
+    <div class="foot"><span>6 runners · 1 at cap</span><span>Marks <span class="mono" style="float:right;color:var(--faint)">?</span></span></div>`;
+  document.getElementById("top").innerHTML = `<span class="crumb">hydra /</span> ${s ? esc(s.title) : "New thread"} ${s ? `<span class="id">thread · 9c2f41d0</span>` : ""}`;
+  const composer = V === "A" ? variantA() : V === "B" ? variantB() : variantC();
+  const hero = s ? "" : `<div class="hero"><h2>What should the agent do in <u>hydra</u>?</h2><p>${V === "C" ? "The row above is the thread's setup; it locks when you send the first message." : "The input carries the thread's setup; it locks when you send the first message."}</p></div>`;
+  document.getElementById("thread").innerHTML = `${V === "C" ? idRowHtml() : ""}<div class="tcol">${s ? transcriptHtml() : hero}</div>${composer}`;
+  const ta = document.getElementById("compose"); if (ta) { grow(ta); if (!ta.disabled && document.activeElement !== ta && !open) ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); }
+  const tcol = document.querySelector(".tcol"); if (tcol && s) tcol.scrollTop = tcol.scrollHeight;
+  placePop();
+  document.getElementById("bar").innerHTML = `<button data-bar="prev" aria-label="Previous variant">←</button><span class="lbl">${V} (${VARIANTS[V]})</span><button data-bar="next" aria-label="Next variant">→</button><button data-bar="state">state: ${stateKey()}</button><button data-bar="theme" aria-label="Toggle theme">◐</button>`;
+  document.getElementById("note").innerHTML = `<b>PROTOTYPE</b> · hydra#160 · ← → variant · s state · t theme`;
+}
+function grow(ta) { ta.style.height = "auto"; ta.style.height = `${Math.min(ta.scrollHeight, 8 * 21)}px`; }
+const esc = (s) => String(s).replace(/[&<>"]/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[ch]);
+
+/* ============ events ============ */
+document.addEventListener("click", (e) => {
+  const el = e.target.closest("[data-pop],[data-pick],[data-go],[data-send],[data-stop],[data-bar]");
+  if (!el) { if (!e.target.closest("#pop")) { if (open) { open = null; render(); } } return; }
+  if (el.dataset.bar) {
+    const keys = Object.keys(VARIANTS); const i = keys.indexOf(variant());
+    if (el.dataset.bar === "prev") return setParam("variant", keys[(i + keys.length - 1) % keys.length]);
+    if (el.dataset.bar === "next") return setParam("variant", keys[(i + 1) % keys.length]);
+    if (el.dataset.bar === "state") return setParam("state", STATES[(STATES.indexOf(stateKey()) + 1) % STATES.length]);
+    if (el.dataset.bar === "theme") { const r = document.documentElement; r.dataset.theme = r.dataset.theme === "dark" ? "light" : "dark"; return; }
+  }
+  if (el.dataset.pop) { open = open === el.dataset.pop ? null : el.dataset.pop; return render(); }
+  if (el.dataset.pick) { const pick = JSON.parse(el.dataset.pick); applyPick(pick); if (pick.field !== "option" && pick.field !== "instance") open = null; return render(); }
+  if (el.dataset.go === "login") { FRESH_LOGIN = true; catalogs().instances[0].on = ["laptop"]; open = null; return render(); }
+  if (el.dataset.go === "runner") { open = "runner"; return render(); }
+  if (el.dataset.go === "new") { return setParam("state", "draft"); }
+  if (el.dataset.send) return submit();
+  if (el.dataset.stop) { const s = thread.session; s.status = "idle"; transcript[transcript.length - 1] = { kind: "worked", t: "14s · stopped" }; return render(); }
+});
+document.addEventListener("input", (e) => { if (e.target.id === "compose") { message = e.target.value; grow(e.target); const b = document.querySelector(".sendc"); if (b) b.disabled = !(message.trim() && !blocker()); } });
+document.addEventListener("keydown", (e) => {
+  const typing = e.target.matches("input,textarea,[contenteditable]");
+  if (e.key === "Escape") { if (open) { open = null; render(); } return; }
+  if (typing) { if (e.target.id === "compose" && e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); submit(); } return; }
+  const keys = Object.keys(VARIANTS); const i = keys.indexOf(variant());
+  if (e.key === "ArrowLeft") setParam("variant", keys[(i + keys.length - 1) % keys.length]);
+  if (e.key === "ArrowRight") setParam("variant", keys[(i + 1) % keys.length]);
+  if (e.key === "s") setParam("state", STATES[(STATES.indexOf(stateKey()) + 1) % STATES.length]);
+  if (e.key === "t") { const r = document.documentElement; r.dataset.theme = r.dataset.theme === "dark" ? "light" : "dark"; }
+});
+window.addEventListener("resize", placePop);
+function boot() { reset(); render(); }
+if (params().get("theme") === "dark" || (!params().get("theme") && matchMedia("(prefers-color-scheme: dark)").matches)) document.documentElement.dataset.theme = "dark";
+boot();
+</script>
+</body>
+</html>
