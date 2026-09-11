@@ -143,7 +143,7 @@ Passkeys and 2FA are post-v1. Nothing in v1 forecloses them: the login op is the
 - The runner also sets `HYDRA_SESSION=1` in every session's environment. When that marker is present, the CLI **refuses file credentials** entirely: it uses the environment token or fails. Accidental fallback from an agent to the user's identity is therefore impossible, even on the controller machine where the user's own `hydra login` credential file exists.
 - This is accident-proof, not malice-proof. A session is a bare process under the same OS user; a process that deliberately unsets `HYDRA_SESSION` and reads the credential file can impersonate the user. That is outside the v1 threat model (§1) and is the post-v1 sandboxing item.
 
-*(Amended 2026-09-12, [#162](https://github.com/rogierpennink/hydra/issues/162).)* A resume mints a **fresh** session token for the same session id, carried on the resume frame the runner is sent; the token revoked when the session exited stays revoked. A session that is resumed in place ([./06-providers.md](./06-providers.md) section 4.1) therefore still holds exactly one live token, and a token never outlives the process it was minted for.
+*(Amended 2026-09-12, [#162](https://github.com/rogierpennink/hydra/issues/162).)* A resume mints a **fresh** session token for the same session id, carried on the `SessionStart` that carries the resume ([./03-controller-and-runners.md](./03-controller-and-runners.md) section 2); the token revoked when the session exited stays revoked. A session that is resumed in place ([./06-providers.md](./06-providers.md) section 4.1) therefore still holds exactly one live token, and a token never outlives the process it was minted for.
 
 ## 6. Permission profiles
 

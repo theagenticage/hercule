@@ -194,7 +194,7 @@ Defaults come from the Agent (resolved 2026-09-01, [Domain model residue](https:
 
 `accessMode` names one of the four fixed modes. If the provider does not support it natively, the controller substitutes the hardcoded fallback before session start, strictly downward in permissiveness; if no equal-or-less-permissive mode exists the step fails with a clear error ([./06-providers.md](./06-providers.md), [./13-security.md](./13-security.md); [ADR 0007](../adr/0007-provider-adapter-is-a-thin-interface-behind-a-normalized-event-stream.md) as amended).
 
-Runner-owned inactivity and absolute timeouts apply to the session; a session that times out or exits abnormally fails the step.
+Runner-owned inactivity and absolute timeouts apply to the session; a session that times out or exits abnormally fails the step. *(Amended 2026-09-12, [#162](https://github.com/rogierpennink/hydra/issues/162).)* A timeout while the step's turn runs fails the step; an inactivity exit between iterations does not, and the next iteration's prompt resumes the session in place ([./06-providers.md](./06-providers.md) section 4.1).
 
 Iterations: when an edge brings the graph back to an agent step (a cycle, or a signal node firing into it), the step by default sends the newly rendered prompt as the next turn of the same session, so review feedback or a failed-checks signal arrives as a follow-up in context. `freshSession: true` opts out for context-poisoning cases and starts a new session each iteration. Each iteration produces its own step record (section 7.2). A step's `outputSchema` travels on the `SessionSpec` once, and the adapter applies it to every turn of that session ([./06-providers.md](./06-providers.md) section 7), so each iteration yields a fresh structured result.
 

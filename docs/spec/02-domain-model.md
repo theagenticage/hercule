@@ -178,7 +178,7 @@ Fields (pinned across [#6](https://github.com/rogierpennink/hydra/issues/6), [#7
 
 Session-only grants approved through a Permission Request attach to the Session (see Grant).
 
-*(Amended 2026-09-08, [#66](https://github.com/rogierpennink/hydra/issues/66).)* `modelSelection` is a field of its own rather than a read through `spec`, because the two would contradict each other: `spec` is the document the runner was sent and is never rewritten. `parentSessionId` stays null on a resume, which carries on the parent's own provider-native session and so has no second lineage to record.
+*(Amended 2026-09-08, [#66](https://github.com/rogierpennink/hydra/issues/66).)* `modelSelection` is a field of its own rather than a read through `spec`, because the two would contradict each other: `spec` is the document the runner was sent and is never rewritten. ~~`parentSessionId` stays null on a resume, which carries on the parent's own provider-native session and so has no second lineage to record.~~ *(A resume mints no session, 2026-09-12, [#162](https://github.com/rogierpennink/hydra/issues/162); `parentSessionId` is set by fork only. The row's `spec` stays the spawn-time document; the `continue` a resume sends rides the frame, not the row.)*
 
 Status axis (consolidated from pinned lifecycle facts, owned by [06-providers.md](./06-providers.md)): `queued` (placement accepted but the runner is at its session cap) | `starting` | `idle` | `busy` (a turn is running; decides whether `sendInput` opens or steers) | `exited`. `resumable` is derived: `exited` and the runner still holds the provider-native state; it becomes false when that runner is retired or wiped.
 
@@ -186,7 +186,7 @@ Status axis (consolidated from pinned lifecycle facts, owned by [06-providers.md
 
 *(Amended 2026-09-12, [#162](https://github.com/rogierpennink/hydra/issues/162).)* `exited` is terminal only where `resumable` is false: a resumable session is resumed in place, under its own id, by the next `session.input` ([06-providers.md](./06-providers.md) section 4.1) - the lazy process the Conversation entry above already describes. `exitedAt` records the last exit, not a final one.
 
-Relationships: requires `instanceId`, `runnerId`, `permissionProfileId`. Everything else optional, `agentId` included. Holds zero or more Subscriptions (registered by the session itself through the API, or migrated from a rotated predecessor in the same Conversation). Owns its Turns and Queued Inputs. Exactly one Session Token while alive.
+Relationships: requires `instanceId`, `runnerId`, `permissionProfileId`. Everything else optional, `agentId` included. Holds zero or more Subscriptions (registered by the session itself through the API, or migrated from a rotated predecessor in the same Conversation). Owns its Turns and Queued Inputs. ~~Exactly one Session Token while alive.~~ *(Amended 2026-09-12, [#162](https://github.com/rogierpennink/hydra/issues/162).)* Exactly one Session Token while its process runs; none while exited.
 
 Identity: the Hydra session id and the provider-native id (Claude Code session id, Codex thread id, pi session) are separate concepts joined only by the Session Binding. All Hydra references (API, CLI, actor stamps, step records, subscriptions) use the Hydra id.
 
@@ -457,7 +457,7 @@ Purpose: a live, correlated claim on future events held by a run or a session.
 
 Fields: `id`, holder (`runId` or `sessionId`, exactly one), origin (the signal trigger in the run's plan that instantiated it, or session-registered through the API), for session-held ones the registered **target** (`run` / `session` / `ref` / `request`, [11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md) section 2), the correlation (event-side expression and run-state expression, evaluated lazily at match time against current run state; unresolved references are no-match), explicit connection selection, `createdAt`, `endedAt?`.
 
-Status axis (spec-consolidated): `live` -> `ended`. A subscription ends only when its holder reaches a terminal state or exits; there are no timeouts in v1. On assistant rotation the dying session's subscriptions move to the successor session (holder changes, subscription survives).
+Status axis (spec-consolidated): `live` -> `ended`. ~~A subscription ends only when its holder reaches a terminal state or exits; there are no timeouts in v1.~~ *(Amended 2026-09-12, [#162](https://github.com/rogierpennink/hydra/issues/162).)* A subscription ends only when its holder reaches a terminal state: a run completing, or a session exiting unresumably (an exited session that is resumable keeps its subscriptions; their deliveries are what resume it, [12-assistants.md](./12-assistants.md) section 5.1); there are no timeouts in v1. On assistant rotation the dying session's subscriptions move to the successor session (holder changes, subscription survives).
 
 Delivery is non-exclusive: one event may start new runs and signal any number of subscribers. Delivery to a run is a signal; delivery to a session is Queued Input (rendered text plus structured payload), never steering by default. Registration, listing and cancellation: [11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md).
 

@@ -33,7 +33,7 @@ A fully-qualified canonical identifier for a thing outside Hydra (`github:issue:
 _Avoid_: link, URL (a ref is an identity, not a location)
 
 **Session**:
-One conversation with a provider-backed agent, resumable and forkable. Maps onto a Claude Code session, a Codex thread or a pi session. A session copies its configuration from an Agent at spawn and never reads through it afterwards, or has no Agent at all and is a Thread. Not required to belong to a task or workspace.
+One conversation with a provider-backed agent, resumable and forkable. When its process has exited and its transcript is still on its runner it is resumed in place, under its own id, by the next input; forking mints a new session. Maps onto a Claude Code session, a Codex thread or a pi session. A session copies its configuration from an Agent at spawn and never reads through it afterwards, or has no Agent at all and is a Thread. Not required to belong to a task or workspace.
 _Avoid_: execution, chat; "new session on resume", "continue to resume", "exited = unrecoverable" (an exited session whose transcript is still on its runner is resumed in place, under its own id, by the next input)
 
 **Thread**:

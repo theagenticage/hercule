@@ -163,7 +163,7 @@ Semantics: [./06-providers.md](./06-providers.md), [./12-assistants.md](./12-ass
 | `session.query` | `{ status?, agentId?, thread?, assistantId?, runnerId?, runId?, actor?, since?, until? }` (`thread: true` = sessions with no agent) | `session.read` | `GET /sessions` |
 | `session.read` | `{ sessionId }` (the record: status, agent, runner, workspace, usage) | `session.read` | `GET /sessions/{id}` |
 | `session.spawn` | `{ agentId?, prompt, instanceId?, model?, accessMode?, workspace? }` -> `{ sessionId }`; without `agentId` the session is a Thread built from the `thread.*` settings plus the overrides given, allowed for actor `user` only (`forbidden` otherwise; [./02-domain-model.md](./02-domain-model.md) Thread) | `session.spawn` | `POST /sessions` |
-| `session.continue` | `{ sessionId, mode: "fork", prompt }` -> the new `Session` | `session.spawn` | `POST /sessions/{id}/continue` |
+| `session.continue` | `{ sessionId, mode: ~~"resume" \|~~ "fork", prompt }` -> the new `Session` | `session.spawn` | `POST /sessions/{id}/continue` |
 | `session.update` | `{ sessionId, model }` -> the `Session` | `session.steer` | `PATCH /sessions/{id}` |
 | `session.input` | `{ sessionId, text, model?, options? }` -> `{ inputId, result: "opened" \| "steered" \| "queued" }` | `session.steer` | `POST /sessions/{id}/input` |
 | `session.interrupt` / `session.stop` | `{ sessionId }` | `session.steer` | `POST /sessions/{id}/interrupt` / `.../stop` |
@@ -415,7 +415,7 @@ Two credential kinds resolve to the same actor-stamped API. Both are opaque rand
 
 - **Minting:** at session start the controller mints a session token whose subject is the Session row. The token carries no claims of its own; the session's permission profile is reached by resolution `token -> session -> profile`: the profile id was copied onto the Session at spawn ([./02-domain-model.md](./02-domain-model.md) rule 9), so a Thread (no agent) resolves the same way.
 - **Injection:** the runner injects `HYDRA_API_URL`, `HYDRA_TOKEN` and `HYDRA_SESSION=1` into the provider process environment. Nothing is written to runner disk.
-- **Lifetime:** the token dies with the session. It is revoked when the session ends. A rotated assistant conversation continues in a fresh session and therefore under a fresh token; the old session's subscriptions migrate to the successor ([./12-assistants.md](./12-assistants.md)).
+- **Lifetime:** the token dies with the session. It is revoked when the session ends. A rotated assistant conversation continues in a fresh session and therefore under a fresh token; the old session's subscriptions migrate to the successor ([./12-assistants.md](./12-assistants.md)). *(Amended 2026-09-12, [#162](https://github.com/rogierpennink/hydra/issues/162).)* "Ends" is the process exiting: the token is revoked on every exit, and a resume mints a fresh one for the same session id ([./13-security.md](./13-security.md) section 5).
 - **Latency constraint (hard rule):** resolving token to profile MUST NOT meaningfully add endpoint latency. One indexed lookup on the hashed token plus a cached or joined profile read satisfies it; a per-request chain of separate queries does not.
 - **`HYDRA_SESSION=1`:** the marker that makes the CLI refuse file-held user credentials (section 6.2 and [./13-security.md](./13-security.md)). It defends against accidental fallback to the user's identity, not against a malicious local process; sessions are bare processes as the same OS user ([ADR 0003](../adr/0003-sessions-run-as-bare-processes.md)).
 

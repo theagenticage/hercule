@@ -157,7 +157,7 @@ A conversation is backed by generational sessions: a lineage of ordinary Session
 
 - The session is *started* on the conversation's first wake, not when the conversation is created.
 - After the runner's idle timeout (runner-owned, one controller-wide default of 15 minutes; not per assistant) the runner *exits* the process. The Session stays the same incarnation, `exited` and resumable ([./06-providers.md](./06-providers.md) section 4.1).
-- The next wake (a message, a subscription delivery, a scheduled wake) *resumes* it: `continue.mode: "resume"` on the same runner, transcript intact. Cost: one process spawn per wake-after-idle.
+- The next wake (a message, a subscription delivery, a scheduled wake) *resumes* it: ~~`continue.mode: "resume"` on the same runner~~ *(amended 2026-09-12, [#162](https://github.com/rogierpennink/hydra/issues/162))* in place, under the same session id, by the `session.input` path of [./06-providers.md](./06-providers.md) section 4.1 (`SessionSpec.continue.mode: "resume"` on the runner side), on the same runner, transcript intact. Cost: one process spawn per wake-after-idle.
 - Twenty open Slack threads are twenty conversations and twenty session rows, and however many processes are mid-turn or inside their idle window. The per-runner session cap counts running processes only.
 - Scheduled wakes (section 8) do **not** reset the idle timeout: the process resumes for the wake's turn and, absent real activity, exits again at the next check. (OpenClaw's rule: heartbeats do not keep a session alive.)
 

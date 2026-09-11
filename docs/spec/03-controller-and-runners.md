@@ -46,6 +46,8 @@ The controller authors a `SessionSpec` that carries `workspaceId` (or `null` for
 
 *(Amended 2026-09-08, [#66](https://github.com/rogierpennink/hydra/issues/66).)* Sessions add two more frames and one field. Controller to runner: `SessionInterrupt { sessionId }`, which ends the running turn; and `SessionInput` gains `requestId`, which is the Queued Input row's own id ([02-domain-model.md](./02-domain-model.md) Queued Input) rather than a second identifier for the same thing. Runner to controller: `SessionInputResult { requestId, ok, delivery?, message? }`, the answer saying whether that input opened a turn or steered one - the only authority on it ([./06-providers.md](./06-providers.md) section 5). It reuses the request/response the controller already has for probes, installs and logins, and follows the `ok`-plus-optional-message shape those two answers use; it carries no turn id, because nothing on the controller reads one and the turn arrives on `turn.started` anyway. `SessionInterrupt` and `SessionStop` stay fire-and-forget: their outcome is observable in the session's own stream (`turn.completed { state: "interrupted" }`, `session.exited { reason: "stopped" }`), so a second answer channel would carry nothing.
 
+*(Amended 2026-09-12, [#162](https://github.com/rogierpennink/hydra/issues/162).)* A resume rides the existing `SessionStart` for the same `sessionId`, with `spec.continue = { nativeSessionId, mode: "resume" }`, the session's current `modelSelection`, and a fresh token; no new frame.
+
 ### 2.3 Sequencing, acks and the outbox
 
 - Every runner-to-controller event carries a monotonic sequence number. The controller acknowledges sequence numbers.
