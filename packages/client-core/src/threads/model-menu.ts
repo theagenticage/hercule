@@ -176,8 +176,13 @@ export const modelMenu = (
             planLabel: snapshot?.auth.planLabel ?? null,
             modelCount: models.length,
             dimmed,
+            // An account the thread cannot move to is not worth logging in
+            // to from here: the login would change nothing on this thread.
             login:
-              snapshot !== undefined && snapshot.auth.status !== "ok" && runner !== undefined
+              view.kind !== "active" &&
+              snapshot !== undefined &&
+              snapshot.auth.status !== "ok" &&
+              runner !== undefined
                 ? { instanceId: each.id, runnerId: runner.id, displayName: each.displayName }
                 : null,
             rows: view.kind === "active" ? [] : matched,

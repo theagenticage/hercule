@@ -170,9 +170,36 @@ describe("composerFields", () => {
   });
 });
 
+describe("composerFields: the access mode", () => {
+  it("carries the mode in force and the four rows the menu offers under it", () => {
+    const fields = composerFields(catalogs([CLAUDE]), config(), "draft");
+
+    expect(fields.accessMode.value).toBe("approval-required");
+    expect(fields.accessMode.rows.map((row) => row.mode)).toEqual([
+      "approval-required",
+      "auto-accept-edits",
+      "auto",
+      "full-access",
+    ]);
+  });
+
+  it("offers no mode at all while no instance is set up, there being no provider to ask", () => {
+    const fields = composerFields(catalogs([]), config({ instanceId: null }), "draft");
+
+    expect(fields.accessMode.rows).toEqual([]);
+  });
+});
+
 describe("composerFields: the machine", () => {
   it("names the machine the thread would be placed on", () => {
     expect(composerFields(catalogs([CLAUDE]), config(), "draft").machine.label).toBe("moss");
+  });
+
+  it("carries the fleet as rows, and which machine it speaks about", () => {
+    const fields = composerFields(catalogs([CLAUDE]), config(), "draft");
+
+    expect(fields.machine.rows.map((row) => row.runnerId)).toEqual([LOCAL.id]);
+    expect(fields.machine.referenceId).toBe(LOCAL.id);
   });
 
   it("says there is no machine to name when the fleet holds none", () => {

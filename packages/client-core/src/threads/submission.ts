@@ -5,7 +5,7 @@
  * actually made - a key that is absent is a value the session keeps.
  */
 import type { SessionInputPayload, SessionSpawnInput } from "@hydra/contract";
-import type { MessageDraft, Thread, ThreadPicks } from "./config";
+import { effectiveConfig, type MessageDraft, type Thread, type ThreadPicks } from "./config";
 
 export const submission = (
   thread: Thread,
@@ -23,7 +23,7 @@ export const submission = (
 
   // Nothing unpicked is sent as an empty string: the server has its own
   // fallback for each of these and `Id` refuses one outright.
-  const config = { ...thread.config, ...picks };
+  const config = effectiveConfig(thread.config, picks);
   return {
     prompt: message.text,
     ...(config.instanceId === null ? {} : { instanceId: config.instanceId }),

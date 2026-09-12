@@ -19,6 +19,7 @@ export function MenuRow({
   current = false,
   dimmed = null,
   trailing,
+  className,
   onPick,
 }: {
   /** What stands in the marker column; the row's own dot when nothing does. */
@@ -29,6 +30,8 @@ export function MenuRow({
   readonly current?: boolean;
   readonly dimmed?: string | null;
   readonly trailing?: ReactNode;
+  /** What this row wears beyond the row treatment: a rule above it, say. */
+  readonly className?: string;
   readonly onPick?: () => void;
 }): JSX.Element {
   const body = (
@@ -51,8 +54,11 @@ export function MenuRow({
 
   const layout = cn(
     "grid w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-2 rounded-[6px]",
-    "px-2 py-[5px] text-left text-meta",
+    // A row that carries a mark is a model row, and sits a shade taller.
+    marker === undefined ? "px-2 py-[5px]" : "px-2 py-1.5",
+    "text-left text-meta",
     current ? "font-emph text-ink" : "text-muted",
+    className,
   );
 
   if (dimmed !== null) {
@@ -96,3 +102,30 @@ export const aside = (text: string | null): ReactNode =>
       {text}
     </span>
   );
+
+/** A menu's own first row: what is being picked, and what picking it settles. */
+export function MenuHeader({
+  label,
+  note,
+}: {
+  readonly label: string;
+  readonly note?: string | undefined;
+}): JSX.Element {
+  return (
+    <div className="flex items-baseline gap-2 px-2 pt-1.5 pb-[5px]">
+      <span className="text-label font-emph tracking-[0.1em] text-faint uppercase">{label}</span>
+      {note === undefined ? null : (
+        <span className="ml-auto font-mono text-[10.5px] whitespace-nowrap text-faint">{note}</span>
+      )}
+    </div>
+  );
+}
+
+/** The fine print under a menu: what it will offer, and does not yet. */
+export function MenuFoot({ children }: { readonly children: ReactNode }): JSX.Element {
+  return (
+    <div className="mt-1.5 border-t border-line-soft px-2 pt-[7px] pb-[3px] text-[11.5px] leading-[1.45] text-faint">
+      {children}
+    </div>
+  );
+}

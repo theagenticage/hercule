@@ -33,3 +33,19 @@ export interface ThreadCatalogs {
   readonly runners: readonly Runner[];
   readonly localRunnerId: string | null;
 }
+
+/**
+ * What a thread runs with while the composer is open: its own configuration
+ * with the picks over it. The per-model choices belong to the model that
+ * offered them, so they stand over what the thread stored only while the model
+ * on show is the one it stored them for; another model shows its own defaults.
+ */
+export const effectiveConfig = (base: ThreadConfig, picks: ThreadPicks): ThreadConfig => {
+  const model = picks.model ?? base.model;
+  return {
+    ...base,
+    ...picks,
+    model,
+    options: model === base.model ? { ...base.options, ...picks.options } : { ...picks.options },
+  };
+};

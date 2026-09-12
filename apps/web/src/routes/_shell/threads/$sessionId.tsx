@@ -20,7 +20,7 @@ import { ThreadScreen } from "../../../screens/thread/thread-screen";
  * its locked fields have something to read the moment the thread does.
  */
 export const Route = createFileRoute("/_shell/threads/$sessionId")({
-  staticData: { ownsTopBar: true },
+  staticData: { title: "Thread", ownsTopBar: true },
   loader: async ({ context, params }) => {
     const [, , runners] = await Promise.all([
       context.queryClient.ensureQueryData(sessionQuery(context.client, params.sessionId)),

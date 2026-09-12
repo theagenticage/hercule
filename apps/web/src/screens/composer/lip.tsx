@@ -1,23 +1,15 @@
 import type { JSX } from "react";
-import {
-  referenceRunner,
-  runnerMenu,
-  type ComposerFields,
-  type ThreadCatalogs,
-} from "@hydra/client-core";
-import type { ProviderInstance } from "@hydra/contract";
+import type { ComposerFields } from "@hydra/client-core";
 import { MachineSelector } from "./machine-selector";
 import { WorkspaceSelector } from "./workspace-selector";
 
 /**
  * The strip tucked under the card: where the thread works at the left, which
  * machine it runs on at the right. Both are the session's placement, so both
- * are plain text once the thread has started.
+ * are plain text on an active thread.
  */
 export function Lip({
   fields,
-  catalogs,
-  instance,
   runnerId,
   open,
   onOpenChange,
@@ -25,9 +17,7 @@ export function Lip({
   onClose,
 }: {
   readonly fields: ComposerFields;
-  readonly catalogs: ThreadCatalogs;
-  /** The account the machines are judged against; none picked means no rows. */
-  readonly instance: ProviderInstance | undefined;
+  /** The machine picked, which marks its row; none picked marks no row. */
   readonly runnerId: string | null;
   readonly open: "workspace" | "machine" | null;
   readonly onOpenChange: (key: "workspace" | "machine") => (open: boolean) => void;
@@ -45,14 +35,8 @@ export function Lip({
       <span className="ml-auto">
         <MachineSelector
           name={fields.machine.label}
-          rows={
-            instance === undefined
-              ? []
-              : runnerMenu(catalogs.runners, catalogs.localRunnerId, instance).rows
-          }
-          referenceId={
-            referenceRunner(catalogs.runners, runnerId, catalogs.localRunnerId)?.id ?? null
-          }
+          rows={fields.machine.rows}
+          referenceId={fields.machine.referenceId}
           runnerId={runnerId}
           locked={fields.machine.locked}
           open={open === "machine"}

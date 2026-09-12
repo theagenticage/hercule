@@ -305,6 +305,10 @@ describe("modelMenu: the other instances", () => {
       kind: "active",
     });
 
-    expect(menu.others[0]).toMatchObject({ instanceId: CODEX.id, dimmed: "account fixed" });
+    expect(menu.others[0]).toMatchObject({
+      instanceId: CODEX.id,
+      dimmed: "account fixed",
+      login: null,
+    });
   });
 });

@@ -10,7 +10,7 @@ import {
   settingsQuery,
 } from "../../../app/queries";
 import { Composer } from "../../../screens/composer/composer";
-import { ThreadChrome } from "../../../screens/thread/thread-chrome";
+import { ThreadChrome, ThreadColumn } from "../../../screens/thread/thread-chrome";
 
 /**
  * A draft thread (spec 14 §The composer): "Creating a thread is one step." A
@@ -52,11 +52,9 @@ function NewThread(): JSX.Element {
   return (
     <div className="flex flex-1 flex-col">
       <ThreadChrome project={null} title="New thread" />
-      <div className="flex flex-1 flex-col px-6 pt-2 pb-16">
-        <div className="mx-auto flex w-full max-w-[800px] flex-1 flex-col justify-end">
-          <Composer thread={{ kind: "draft", config }} />
-        </div>
-      </div>
+      <ThreadColumn className="justify-end">
+        <Composer thread={{ kind: "draft", config }} />
+      </ThreadColumn>
     </div>
   );
 }

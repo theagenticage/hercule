@@ -1,4 +1,5 @@
 import type { JSX, ReactNode } from "react";
+import { cn } from "@hydra/ui";
 
 /**
  * The thread's chrome: the one row spec 14 §The thread surface pins - the
@@ -6,7 +7,7 @@ import type { JSX, ReactNode } from "react";
  * carries no project yet, so the crumb reads `Threads /` until one does.
  *
  * It belongs to the screen rather than to the shell: the shell's own title
- * would say the same thing one row higher (AD-6).
+ * would say the same thing one row higher.
  */
 export function ThreadChrome({
   project,
@@ -43,5 +44,22 @@ export function ChromeAction(props: {
     >
       {props.children}
     </button>
+  );
+}
+
+/** The column under the chrome: 800px centred, with the surface's own padding. */
+export function ThreadColumn({
+  className,
+  children,
+}: {
+  readonly className?: string;
+  readonly children: ReactNode;
+}): JSX.Element {
+  return (
+    <div className="flex flex-1 flex-col px-6 pt-2 pb-16">
+      <div className={cn("mx-auto flex w-full max-w-[800px] flex-1 flex-col", className)}>
+        {children}
+      </div>
+    </div>
   );
 }

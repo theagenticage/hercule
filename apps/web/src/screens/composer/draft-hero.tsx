@@ -12,7 +12,7 @@ export function DraftHero({
   blocked,
   loginSlot,
 }: {
-  /** The sentence, or nothing at all: a started thread stands under none. */
+  /** The sentence, or nothing at all: an active thread stands under none. */
   readonly lead: string | null;
   readonly blocked: ComposerBlocked | null;
   readonly loginSlot: (login: LoginTarget) => ReactNode;

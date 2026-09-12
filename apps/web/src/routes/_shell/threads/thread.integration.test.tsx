@@ -1302,19 +1302,17 @@ describe("Thread: auto-scroll follows new content", () => {
 });
 
 /**
- * AC-15 of `docs/plans/P001-composer-rebuild/SPEC.md`: the thread's chrome is
- * the screen's own first row (AD-6), and the shell's top bar steps aside on
- * this route. These tests replace the "Thread: top bar (AC-23)" pair that
- * asserted the old shell title and its `thread · <short id>` crumb.
+ * The thread's chrome is the screen's own first row, and the shell's top bar
+ * steps aside on this route. These tests replace the "Thread: top bar" pair
+ * that asserted the old shell title and its `thread · <short id>` crumb.
  *
- * Readings pinned where the SPEC names a string but not the element carrying
- * it (the implementer matches these):
+ * How the row is read here:
  * - the crumb `Threads /` and the title are separate text-bearing elements in
  *   one row, so the row is the crumb's parent element;
  * - the overflow button's accessible name is the glyph `…`, spec 14's own
  *   wording. It carries no `aria-label`; add one only by changing this test.
  */
-describe("Thread: the chrome is the screen's first row (AC-15)", () => {
+describe("Thread: the chrome is the screen's first row", () => {
   it("reads Threads / then the session title, with a disabled … button", async () => {
     await open(session({ status: "idle", title: "Fix the login bug" }), twoCompletedTurns());
 
@@ -1325,6 +1323,22 @@ describe("Thread: the chrome is the screen's first row (AC-15)", () => {
     const overflow = screen.getByRole<HTMLButtonElement>("button", { name: "…" });
     expect(chrome?.contains(overflow)).toBe(true);
     expect(overflow.disabled).toBe(true);
+  });
+
+  it("still warns about a zone this browser cannot read, the one thing the bar owes the screen", async () => {
+    await open(session({ status: "idle" }), twoCompletedTurns(), {
+      "GET /api/v1/settings": {
+        body: {
+          controller: {},
+          user: { "onboarding.completedSteps": ["timezone"], timezone: "Mars/Olympus" },
+        },
+      },
+    });
+
+    // The chrome titles the screen, but nothing else renders the warning - a
+    // thread reading its stamps in the wrong zone would say nothing at all.
+    expect(await screen.findByText(/does not know the zone Mars\/Olympus/)).toBeDefined();
+    expect(screen.queryByRole("heading", { level: 1 })).toBeNull();
   });
 
   it("renders no shell title above it: no h1 and no thread · crumb anywhere", async () => {
@@ -1962,17 +1976,15 @@ describe("Thread: an exited thread that cannot be resumed", () => {
 });
 
 /**
- * P001 (`docs/plans/P001-composer-rebuild/SPEC.md`) slice 2, the active half:
- * the pending-model note of AC-9 and the locked fields of AC-10.
+ * The composer on an active thread: the note a model pick stands under until
+ * it is sent, and the fields that locked when the thread started.
  *
- * Readings picked where the SPEC pins a string but not the element carrying
- * it (listed for the implementer to match): the model pill is the button whose
- * accessible name holds the model's *display* name ("Claude Sonnet 5"), which
- * is what AC-9 means by "the pill's new name"; a locked field is whatever
- * element carries the `title`, and the criterion's "no button" is read as that
+ * How the surface is read here: the model pill is the button whose accessible
+ * name holds the model's *display* name ("Claude Sonnet 5"); a locked field is
+ * whatever element carries the `title`, and "no button" is read as that
  * element not being one.
  */
-describe("Composer: a model pick is pending until it is sent (AC-9)", () => {
+describe("Composer: a model pick is pending until it is sent", () => {
   it("says the change applies on send, names it on the pill, and drops the note once the session carries it", async () => {
     const user = userEvent.setup();
     // The controller stores what the input carried, so the session read after
@@ -2012,7 +2024,7 @@ describe("Composer: a model pick is pending until it is sent (AC-9)", () => {
   });
 });
 
-describe("Composer: what locked at start says why (AC-10)", () => {
+describe("Composer: what locked at start says why", () => {
   it("renders the access mode, the workspace and the machine as plain text with the reason as their tooltip", async () => {
     await open(session({ status: "idle" }), twoCompletedTurns());
 

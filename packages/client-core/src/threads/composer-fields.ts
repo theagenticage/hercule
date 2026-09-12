@@ -3,12 +3,19 @@
  * A thread's placement is copied at spawn and never read through afterwards
  * (spec 02 §Session), so once a thread is active its access mode, workspace
  * and machine are facts rather than fields - only the model and its options
- * stay live, and they stay live inside the instance the thread started in.
+ * stay live, and they stay live inside the instance the thread spawned in.
  */
-import type { CapabilitySnapshot, ModelOption, ProviderInstance, Runner } from "@hydra/contract";
+import type {
+  AccessMode,
+  CapabilitySnapshot,
+  ModelOption,
+  ProviderInstance,
+  Runner,
+} from "@hydra/contract";
+import { accessModeMenu, type AccessModeMenuItem } from "./access-modes";
 import { accountName, snapshotOn } from "./catalog";
 import type { ThreadCatalogs, ThreadConfig, ThreadKind, ThreadPicks } from "./config";
-import { referenceRunner } from "./runner-menu";
+import { referenceRunner, runnerMenu, type RunnerMenuRow } from "./runner-menu";
 
 export interface ComposerField {
   /** Why this cannot be changed here, as the sentence the tooltip reads. */
@@ -37,13 +44,22 @@ export interface ComposerBlocked {
 }
 
 export interface ComposerFields {
-  readonly accessMode: ComposerField;
+  /** The mode in force, and the four the menu offers under it. */
+  readonly accessMode: ComposerField & {
+    readonly value: AccessMode;
+    readonly rows: readonly AccessModeMenuItem[];
+  };
   readonly model: ComposerField & { readonly pill: ModelPill };
   /** What the current model offers to pick under it; none means no selector. */
   readonly options: readonly ModelOption[] | null;
   readonly workspace: ComposerField;
-  /** The machine, named: the one in force, or that there is none to name. */
-  readonly machine: ComposerField & { readonly label: string };
+  /** The machine: the one in force, the fleet under it, and which row it is. */
+  readonly machine: ComposerField & {
+    readonly label: string;
+    readonly rows: readonly RunnerMenuRow[];
+    /** The machine the field speaks about while none is picked; null with no fleet. */
+    readonly referenceId: string | null;
+  };
   /** Why this draft cannot start at all; null once it can, and on a thread that has. */
   readonly blocked: ComposerBlocked | null;
 }
@@ -86,7 +102,11 @@ export const composerFields = (
   const blocked = kind === "active" ? null : blockerOf(instance, runner, snapshot);
 
   return {
-    accessMode: { locked: lockedReason(kind, "access mode") },
+    accessMode: {
+      locked: lockedReason(kind, "access mode"),
+      value: config.accessMode,
+      rows: instance === undefined ? [] : accessModeMenu(instance.declared.accessModes),
+    },
     model: {
       locked: null,
       pill: {
@@ -100,7 +120,15 @@ export const composerFields = (
     options:
       descriptor === undefined || descriptor.options.length === 0 ? null : descriptor.options,
     workspace: { locked: lockedReason(kind, "workspace") },
-    machine: { locked: lockedReason(kind, "machine"), label: runner?.name ?? "no machine" },
+    machine: {
+      locked: lockedReason(kind, "machine"),
+      label: runner?.name ?? "no machine",
+      rows:
+        instance === undefined
+          ? []
+          : runnerMenu(catalogs.runners, catalogs.localRunnerId, instance).rows,
+      referenceId: runner?.id ?? null,
+    },
     blocked,
   };
 };
@@ -109,7 +137,7 @@ export const composerFields = (
  * What the card says between a model pick and the submission that carries it.
  * A pick does not reach the session on its own (spec 14 §What locks at start:
  * the picks ride `session.input`), so the thread still runs the model it
- * started this turn with until the next message goes out.
+ * runs this turn with until the next message goes out.
  */
 export const pendingModelNote = (kind: ThreadKind, picks: ThreadPicks): string | null =>
   kind === "active" && picks.model !== undefined ? "model change applies on send" : null;

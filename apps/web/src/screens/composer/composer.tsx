@@ -2,7 +2,6 @@ import { useState, type JSX } from "react";
 import { useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { useRouteContext } from "@tanstack/react-router";
 import {
-  accessModeMenu,
   composerFields,
   modelMenu,
   optionsLabel,
@@ -19,7 +18,7 @@ import { Lip } from "./lip";
 import { loginSlot } from "./login-slot";
 import { ModelOptionsSelector } from "./model-options-selector";
 import { ModelSelector } from "./model-selector";
-import { PromptBox } from "./prompt-box";
+import { MessageBox } from "./message-box";
 import { useComposerModel } from "./use-composer-model";
 
 type SelectorKey = "accessMode" | "options" | "model" | "workspace" | "machine";
@@ -46,7 +45,6 @@ export function Composer({
   const [open, setOpen] = useState<SelectorKey | null>(null);
   const model = useComposerModel(thread, catalogs, client, onSend);
   const fields = composerFields(catalogs, model.config, model.kind);
-  const instance = instances.find((each) => each.id === model.config.instanceId);
   const pending = pendingModelNote(model.kind, model.picks);
   const login = loginSlot(client, () => {
     void queryClient.invalidateQueries({ queryKey: queryKeys.providers() });
@@ -67,7 +65,7 @@ export function Composer({
     <div className={model.lead === null ? "flex w-full flex-col" : "flex w-full flex-1 flex-col"}>
       <DraftHero lead={model.lead} blocked={fields.blocked} loginSlot={login} />
       <div className="flex flex-col gap-2 rounded-[14px] border border-line bg-raised px-3.5 pt-3 pb-2.5 shadow-lift">
-        <PromptBox
+        <MessageBox
           value={model.message}
           placeholder={model.placeholder}
           disabled={model.readOnly !== null}
@@ -79,8 +77,8 @@ export function Composer({
         <div className="flex items-center gap-1.5">
           <AttachButton />
           <AccessModeSelector
-            mode={model.config.accessMode}
-            items={instance === undefined ? [] : accessModeMenu(instance.declared.accessModes)}
+            mode={fields.accessMode.value}
+            items={fields.accessMode.rows}
             locked={fields.accessMode.locked}
             open={open === "accessMode"}
             onOpenChange={toggle("accessMode")}
@@ -127,8 +125,6 @@ export function Composer({
       </div>
       <Lip
         fields={fields}
-        catalogs={catalogs}
-        instance={instance}
         runnerId={model.config.runnerId}
         open={open === "workspace" || open === "machine" ? open : null}
         onOpenChange={toggle}

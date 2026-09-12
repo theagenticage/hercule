@@ -74,13 +74,12 @@ export {
   composerFields,
   pendingModelNote,
   type ComposerBlocked,
-  type ComposerField,
   type ComposerFields,
   type LoginTarget,
   type ModelPill,
 } from "./threads/composer-fields";
+export { effectiveConfig } from "./threads/config";
 export type {
-  MessageDraft,
   Thread,
   ThreadCatalogs,
   ThreadConfig,
@@ -95,15 +94,7 @@ export {
   type ThreadModelField,
   type ThreadModelFieldOption,
 } from "./threads/model-field";
-export {
-  modelMenu,
-  type ModelMenu,
-  type ModelMenuInstanceRow,
-  type ModelMenuLane,
-  type ModelMenuRecentRow,
-  type ModelMenuRow,
-  type ModelMenuView,
-} from "./threads/model-menu";
+export { modelMenu, type ModelMenu } from "./threads/model-menu";
 export { openItemOf } from "./threads/open-item";
 export { optionsLabel } from "./threads/options-label";
 export { pushRecent, type RecentModel } from "./threads/recent";

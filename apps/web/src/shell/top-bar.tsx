@@ -26,19 +26,32 @@ import { useMinuteClock } from "@hydra/ui";
  *
  * A screen that renders its own chrome says so with `staticData.ownsTopBar`,
  * and the bar stands down rather than titling the screen twice (spec 14 §The
- * thread surface).
+ * thread surface) - all but the zone warning, which has no other render site
+ * and would otherwise leave that screen reading its times in the wrong zone
+ * with nothing said.
  */
 export function TopBar({ settings }: { readonly settings: SettingsState }): JSX.Element | null {
   const matches = useMatches();
   const now = useMinuteClock();
-  if (ownsItsTopBar(matches)) return null;
+  const stored = settings.user.timezone ?? FALLBACK_TIMEZONE;
+  const known = isSupportedTimezone(stored);
+  const timezone = known ? stored : FALLBACK_TIMEZONE;
+  const warning = known ? null : (
+    <Link
+      to="/settings/profile"
+      className="truncate text-fine text-attn underline underline-offset-2"
+    >
+      {`This browser does not know the zone ${stored}; times read in ${FALLBACK_TIMEZONE}.`}
+    </Link>
+  );
+
+  if (ownsItsTopBar(matches)) {
+    return warning === null ? null : <header className="flex px-8 pt-[22px]">{warning}</header>;
+  }
 
   const deepest = [...matches].reverse();
   const framing = deepest.find((match) => match.staticData.title !== undefined)?.staticData;
   const title = framing?.title ?? "";
-  const stored = settings.user.timezone ?? FALLBACK_TIMEZONE;
-  const known = isSupportedTimezone(stored);
-  const timezone = known ? stored : FALLBACK_TIMEZONE;
   const marker =
     framing?.sinceMarker === undefined ? undefined : settings.user[framing.sinceMarker];
   const since = marker === undefined ? undefined : formatSince(new Date(marker), timezone);
@@ -51,14 +64,7 @@ export function TopBar({ settings }: { readonly settings: SettingsState }): JSX.
       <span className="shrink-0 whitespace-nowrap text-[13px] text-muted">
         {since ?? formatTimeContext(now, timezone)}
       </span>
-      {known ? null : (
-        <Link
-          to="/settings/profile"
-          className="truncate text-fine text-attn underline underline-offset-2"
-        >
-          {`This browser does not know the zone ${stored}; times read in ${FALLBACK_TIMEZONE}.`}
-        </Link>
-      )}
+      {warning}
     </header>
   );
 }

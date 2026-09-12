@@ -1,7 +1,7 @@
 import type { JSX } from "react";
 import type { RunnerMenuRow } from "@hydra/client-core";
 import { cn } from "@hydra/ui";
-import { MenuRow } from "./menu-row";
+import { MenuFoot, MenuHeader, MenuRow } from "./menu-row";
 import { SelectorShell } from "./selector-shell";
 
 /** Only `online` and `unreachable` carry a doctrine hue (live, failed); the rest are neutral. */
@@ -74,6 +74,7 @@ export function MachineSelector({
       align="end"
       contentClassName="w-[420px]"
     >
+      <MenuHeader label="Machine" note="locks when the thread starts" />
       {rows.map((row) => (
         <MenuRow
           key={row.runnerId}
@@ -86,6 +87,10 @@ export function MachineSelector({
           }}
         />
       ))}
+      <MenuFoot>
+        <span>Add machine →</span>
+        <span> · not built yet</span>
+      </MenuFoot>
     </SelectorShell>
   );
 }

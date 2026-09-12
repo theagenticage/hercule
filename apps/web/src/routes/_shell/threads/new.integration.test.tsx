@@ -1,5 +1,5 @@
 /**
- * The composer in new-thread mode over a stubbed controller: AC-15 to AC-18 of
+ * The composer on a draft thread over a stubbed controller: AC-15 to AC-18 of
  * `docs/plans/P009-thread-surface-and-composer/SPEC.md`, plus the AD-6 routing
  * check that `/threads/new` is a static route rather than `$sessionId` reading
  * "new" as a session id.
@@ -13,9 +13,6 @@
  *   lone-icon-button convention in this codebase to follow (`ListRow`'s
  *   "dimmed, second line" rule is for menu rows).
  * - The send control's accessible name contains "send".
- * - The checkout and branch selectors' own trigger, with no workspace picked,
- *   shows their field name ("Checkout", "Branch"); AC-16 pins their menu
- *   content ("no workspace") but not their trigger's own idle label.
  * - The model pill's effort segment is the chosen choice's `label` (e.g.
  *   "Medium"), not its `value` ("medium") - spec 14's own example
  *   ("claude-sonnet-5 · medium") is illustrative prose, not one of this
@@ -221,7 +218,7 @@ const open = async (
 const reading = (element: HTMLElement | null = document.body): string =>
   (element?.textContent ?? "").replace(/\s+/g, " ").trim();
 
-describe("Composer: new-thread defaults (AC-15)", () => {
+describe("Composer: draft defaults (AC-15)", () => {
   it("prefills from the spawn defaults when no thread.* setting is stored", async () => {
     await open([INSTANCE_A]);
 
@@ -641,19 +638,16 @@ describe("Routing: /threads/new is the static route (AD-6)", () => {
 });
 
 /**
- * P001 (`docs/plans/P001-composer-rebuild/SPEC.md`) slice 2, the draft half:
- * AC-8, AC-11, AC-12 and AC-14. Driven through `renderApp` at `/threads/new`
- * with `stubApi`, like everything above.
+ * The rebuilt composer on a draft thread, driven through `renderApp` at
+ * `/threads/new` with `stubApi`, like everything above.
  *
- * Readings picked where the SPEC pins a string but not the element carrying
- * it (listed for the implementer to match):
+ * How the surface is read here:
  * - the model pill is the button whose accessible name holds the model's
- *   *display* name ("Claude Sonnet 5"), which is what AC-8 pins the pill shows;
+ *   *display* name ("Claude Sonnet 5");
  * - the model options selector is the button whose accessible name is its
  *   label text ("medium", "high", "high ⚡");
- * - a boolean descriptor renders as a checkbox named after the descriptor's
- *   label ("Fast mode"), the rendering this suite's own AC-17 test already
- *   fixed for `thinking`;
+ * - a boolean descriptor is a segmented `off · on` row, like every other
+ *   descriptor;
  * - the older-models fold and every menu row are buttons carrying their text;
  * - a menu is the Radix popover, read as `role="dialog"`, so a query for a row
  *   is scoped to it rather than to a page that also holds the trigger.
@@ -685,7 +679,7 @@ const LOGGED_IN: ProviderInstance = {
 
 const AUTHORIZE_URL = "https://claude.ai/oauth/authorize?code=1";
 
-describe("Composer: after login the draft re-resolves (AC-8)", () => {
+describe("Composer: after login the draft re-resolves", () => {
   it("blocks the draft with the login sentence, then picks up the fresh catalog and spawns on it", async () => {
     const user = userEvent.setup();
     let held: readonly ProviderInstance[] = [LOGGED_OUT];
@@ -862,7 +856,7 @@ const openModelMenu = async (
   return screen.findByRole("dialog");
 };
 
-describe("Composer: model menu shapes (AC-11)", () => {
+describe("Composer: model menu shapes", () => {
   beforeEach(() => {
     vi.stubGlobal("localStorage", memoryStorage());
   });
@@ -989,7 +983,7 @@ describe("Composer: model menu shapes (AC-11)", () => {
   });
 });
 
-describe("Composer: Recent follows the submission home (AD-5)", () => {
+describe("Composer: Recent follows the submission home", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
   });
@@ -1048,7 +1042,7 @@ const FAST_MODE: ModelOption = {
   default: false,
 };
 
-/** One model, carrying the two descriptors AC-12 names. */
+/** One model, carrying a select descriptor and a boolean one. */
 const WITH_OPTIONS = instance("01a06d02-1000-7000-8000-000000000016", "personal", "Claude Code", [
   snapshot(RUNNER.id, "rogier@example.com", "Claude Max", [
     {
@@ -1060,7 +1054,7 @@ const WITH_OPTIONS = instance("01a06d02-1000-7000-8000-000000000016", "personal"
   ]),
 ]);
 
-describe("Composer: the model options selector's label (AC-12)", () => {
+describe("Composer: the model options selector's label", () => {
   it("reads the effort choice lower-cased, follows a pick, and appends the bolt with fast mode on", async () => {
     const user = userEvent.setup();
     await open([WITH_OPTIONS]);
@@ -1092,7 +1086,7 @@ const NO_AUTO: ProviderInstance = {
   declared: { ...DECLARED, accessModes: { ...DECLARED.accessModes, auto: "unsupported" } },
 };
 
-describe("Composer: the access mode menu (AC-14)", () => {
+describe("Composer: the access mode menu", () => {
   it("lists four modes with no header and names the fallback of one that is not native", async () => {
     const user = userEvent.setup();
     await open([NO_AUTO]);
@@ -1123,11 +1117,11 @@ describe("Composer: the access mode menu (AC-14)", () => {
 });
 
 /**
- * AC-15, the draft half: the chrome is the screen's own first row here too,
- * with no actions on it. The same readings are pinned as in
- * `thread.integration.test.tsx` (crumb and title are siblings in one row).
+ * The chrome is the screen's own first row on a draft too, with no actions on
+ * it. The same readings hold as in `thread.integration.test.tsx`: the crumb
+ * and the title are siblings in one row.
  */
-describe("Draft: the chrome is the screen's first row (AC-15)", () => {
+describe("Draft: the chrome is the screen's first row", () => {
   it("reads Threads / New thread, with no … button and no shell h1", async () => {
     await open([INSTANCE_A]);
 

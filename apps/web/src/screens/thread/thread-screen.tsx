@@ -9,7 +9,7 @@ import { useLiveInvalidation } from "../../app/live-invalidation";
 import { inputsQuery, sessionQuery, transcriptQuery } from "../../app/queries";
 import { Composer } from "../composer/composer";
 import { QueuedInputs } from "./queued-inputs";
-import { ChromeAction, ThreadChrome } from "./thread-chrome";
+import { ChromeAction, ThreadChrome, ThreadColumn } from "./thread-chrome";
 import { useStickToBottom } from "./use-stick-to-bottom";
 import { useThreadLive } from "./use-thread-live";
 import { Turn } from "./turn";
@@ -66,35 +66,32 @@ export function ThreadScreen({
           </ChromeAction>
         }
       />
-      <div className="flex flex-1 flex-col px-6 pt-2 pb-16">
-        <div className="mx-auto flex w-full max-w-[800px] flex-1 flex-col gap-6">
-          {turns.map((turn, index) => {
-            // Only the last turn of a busy session can still be running: an
-            // earlier one with no `turn.completed` was abandoned by an interrupt,
-            // and a dangling last turn on a session that is idle or exited was
-            // abandoned by the runner - neither is still running, so both read as
-            // settled with nothing to time rather than as working since whenever
-            // they were last touched.
-            const isLive =
-              session.status === "busy" && index === lastIndex && turn.duration === null;
-            return (
-              <Turn
-                key={turn.turnId}
-                turn={turn}
-                live={isLive}
-                // The tap buffer holds one item's text at a time, so only the
-                // live last turn gets the live node.
-                tailRef={isLive ? tailRef : undefined}
-                timezone={timezone}
-              />
-            );
-          })}
-          <div className="sticky bottom-0 mt-auto flex flex-col gap-2">
-            <QueuedInputs client={client} sessionId={sessionId} />
-            <Composer thread={{ kind: "active", session }} onSend={scrollToBottom} />
-          </div>
+      <ThreadColumn className="gap-6">
+        {turns.map((turn, index) => {
+          // Only the last turn of a busy session can still be running: an
+          // earlier one with no `turn.completed` was abandoned by an interrupt,
+          // and a dangling last turn on a session that is idle or exited was
+          // abandoned by the runner - neither is still running, so both read as
+          // settled with nothing to time rather than as working since whenever
+          // they were last touched.
+          const isLive = session.status === "busy" && index === lastIndex && turn.duration === null;
+          return (
+            <Turn
+              key={turn.turnId}
+              turn={turn}
+              live={isLive}
+              // The tap buffer holds one item's text at a time, so only the
+              // live last turn gets the live node.
+              tailRef={isLive ? tailRef : undefined}
+              timezone={timezone}
+            />
+          );
+        })}
+        <div className="sticky bottom-0 mt-auto flex flex-col gap-2">
+          <QueuedInputs client={client} sessionId={sessionId} />
+          <Composer thread={{ kind: "active", session }} onSend={scrollToBottom} />
         </div>
-      </div>
+      </ThreadColumn>
     </div>
   );
 }

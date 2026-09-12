@@ -9,7 +9,7 @@ const MAX_LINES = 8;
  * and then scrolls: a composer that keeps growing would push the thread it is
  * about off the screen.
  */
-export function PromptBox({
+export function MessageBox({
   value,
   placeholder,
   disabled,
@@ -53,7 +53,7 @@ export function PromptBox({
         event.preventDefault();
         onSubmit();
       }}
-      className="block max-h-[168px] w-full resize-none overflow-y-auto bg-transparent text-body leading-relaxed text-ink outline-none placeholder:text-faint disabled:text-faint"
+      className="block max-h-[168px] w-full resize-none overflow-y-auto bg-transparent text-body leading-[1.5] text-ink outline-none placeholder:text-faint disabled:text-faint"
     />
   );
 }

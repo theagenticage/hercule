@@ -1,6 +1,7 @@
 import { Fragment, type JSX } from "react";
 import type { ModelOption } from "@hydra/contract";
 import { SegmentedControl, SegmentedControlItem } from "@hydra/ui";
+import { MenuHeader } from "./menu-row";
 import { SelectorShell } from "./selector-shell";
 
 const HEADER = "Model options";
@@ -52,12 +53,7 @@ export function ModelOptionsSelector({
       align="end"
       className="ml-auto min-w-[84px] justify-between text-ink"
     >
-      <div className="flex items-baseline gap-2 px-2 pt-1.5 pb-[5px]">
-        <span className="text-label font-emph tracking-[0.1em] text-faint uppercase">{HEADER}</span>
-        <span className="ml-auto font-mono text-[10.5px] whitespace-nowrap text-faint">
-          {modelName}
-        </span>
-      </div>
+      <MenuHeader label={HEADER} note={modelName ?? undefined} />
       <div className="grid grid-cols-[68px_minmax(0,1fr)] items-center gap-x-2.5 gap-y-1.5 px-2 pt-1.5 pb-1">
         {descriptors.map((option) => {
           const value = selected[option.id] ?? option.default;

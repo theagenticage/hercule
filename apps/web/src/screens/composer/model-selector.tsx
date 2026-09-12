@@ -67,7 +67,7 @@ export function ModelSelector({
   return (
     <SelectorShell
       label={pillLabel(pill)}
-      className="rounded-full border border-line bg-surface py-1 pr-[11px] pl-[9px] text-ink hover:bg-surface aria-expanded:border-faint [&>svg]:opacity-80"
+      className="rounded-full border border-line bg-surface py-1 pr-[11px] pl-[9px] text-ink hover:bg-surface aria-expanded:border-faint aria-expanded:bg-surface [&>svg]:opacity-80"
       locked={null}
       disabled={disabled}
       open={open}
@@ -125,6 +125,7 @@ export function ModelSelector({
         instance.dimmed !== null || instance.rows.length === 0 ? (
           <MenuRow
             key={instance.instanceId}
+            className="mt-1 rounded-t-none border-t border-line-soft pt-[9px]"
             marker={markerOf(<ProviderLogo providerId={instance.providerId} />)}
             name={instance.name}
             sub={[instance.identity, instance.planLabel]

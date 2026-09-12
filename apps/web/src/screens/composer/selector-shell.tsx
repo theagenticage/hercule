@@ -24,7 +24,6 @@ export function SelectorShell({
   open,
   onOpenChange,
   align = "start",
-  variant = "field",
   className,
   contentClassName,
   onOpenAutoFocus,
@@ -39,7 +38,6 @@ export function SelectorShell({
   readonly open: boolean;
   readonly onOpenChange: (open: boolean) => void;
   readonly align?: "start" | "end";
-  readonly variant?: "field" | "pill";
   readonly className?: string;
   readonly contentClassName?: string;
   readonly onOpenAutoFocus?: ((event: Event) => void) | undefined;
@@ -77,9 +75,8 @@ export function SelectorShell({
             "inline-flex cursor-pointer items-center gap-1.5 whitespace-nowrap",
             "after:text-[10px] after:text-faint after:content-['▾']",
             "focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-live",
-            variant === "pill"
-              ? "rounded-full border border-line bg-surface py-1 pr-[11px] pl-[9px] text-meta text-ink aria-expanded:border-faint [&>svg]:opacity-80"
-              : "rounded-[5px] px-[7px] py-[3px] text-meta text-muted hover:bg-line-soft hover:text-ink aria-expanded:bg-line-soft aria-expanded:text-ink",
+            "rounded-[5px] px-[7px] py-[3px] text-meta text-muted",
+            "hover:bg-line-soft hover:text-ink aria-expanded:bg-line-soft aria-expanded:text-ink",
             className,
           )}
         >
@@ -92,7 +89,13 @@ export function SelectorShell({
         align={align}
         avoidCollisions={false}
         onOpenAutoFocus={onOpenAutoFocus}
-        className={cn("flex w-80 flex-col rounded-[10px] p-1.5 text-meta", contentClassName)}
+        // The menu opens upwards into the room above its trigger and scrolls
+        // inside it, rather than growing off the top of the window.
+        className={cn(
+          "flex max-h-[calc(var(--radix-popover-content-available-height)-16px)] w-80 flex-col",
+          "overflow-y-auto rounded-[10px] p-1.5 text-meta",
+          contentClassName,
+        )}
       >
         {children}
       </PopoverContent>

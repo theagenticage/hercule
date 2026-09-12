@@ -3,6 +3,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import {
   applyPick,
+  effectiveConfig,
   pushRecent,
   queryKeys,
   resumeBlockedReason,
@@ -55,7 +56,7 @@ export interface ComposerModel {
   readonly message: string;
   readonly placeholder: string;
   readonly sendTip: string;
-  /** The sentence a draft stands under; a started thread has none. */
+  /** The sentence a draft stands under; an active thread has none. */
   readonly lead: string | null;
   /** Why the thread can take no input at all; null when it can. */
   readonly readOnly: string | null;
@@ -92,19 +93,7 @@ export function useComposerModel(
       ? { session: null, base: thread.config }
       : { session: thread.session, base: sessionConfig(thread.session) };
 
-  // The per-model choices belong to the model that offered them: while the
-  // model on show is the one the thread runs, the picks sit over what it
-  // stored; another model shows its own defaults instead.
-  const configOf = (held: ThreadPicks): ThreadConfig => {
-    const model = held.model ?? base.model;
-    return {
-      ...base,
-      ...held,
-      model,
-      options: model === base.model ? { ...base.options, ...held.options } : { ...held.options },
-    };
-  };
-  const config = configOf(picks);
+  const config = effectiveConfig(base, picks);
   // Recent follows the submission home, and holds only what was picked.
   const remember = (): void => {
     const model = picks.model ?? null;
