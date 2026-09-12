@@ -69,17 +69,37 @@ export {
 export { THREAD_ROWS_DEFAULT, threadRowsMode } from "./thread-rows";
 export { accessModeMenu, type AccessModeMenuItem } from "./threads/access-modes";
 export { ageOf } from "./threads/age";
+export { applyPick, type ComposerPick } from "./threads/apply-pick";
+export type { LoginTarget } from "./threads/catalog";
+export {
+  composerFields,
+  pendingModelNote,
+  type ComposerBlocked,
+  type ComposerFields,
+  type MachineRow,
+  type ModelPill,
+} from "./threads/composer-fields";
+export { effectiveConfig, threadConfig } from "./threads/config";
+export type {
+  Thread,
+  ThreadCatalogs,
+  ThreadConfig,
+  ThreadKind,
+  ThreadPicks,
+} from "./threads/config";
 export { defaultInstanceId } from "./threads/default-instance";
+export { formatDuration } from "./threads/duration";
 export { headlineOf, lanesOf, type Lane, type LaneKind } from "./threads/lanes";
-export { modelMenu, type ModelMenuGroup, type ModelMenuModelRow } from "./threads/model-menu";
-export { modelPillLabel } from "./threads/model-pill";
 export {
   threadModelField,
   type ThreadModelField,
   type ThreadModelFieldOption,
 } from "./threads/model-field";
-export { formatDuration } from "./threads/duration";
+export { modelMenu, type ModelMenu } from "./threads/model-menu";
 export { openItemOf } from "./threads/open-item";
+export { optionsLabel } from "./threads/options-label";
+export { optionsMenu, type ModelOptionRow } from "./threads/options-menu";
+export { pushRecent, type RecentModel } from "./threads/recent";
 export { resumeBlockedReason } from "./threads/resume-blocked";
 export { threadRows, type ThreadRow } from "./threads/rows";
 export {
@@ -88,6 +108,7 @@ export {
   type RunnerMenu,
   type RunnerMenuRow,
 } from "./threads/runner-menu";
+export { submission, type Submission } from "./threads/submission";
 export { instanceDefaults, threadDefaults, type ThreadDefaults } from "./threads/thread-defaults";
 export { turnsOf, type ThreadItem, type ThreadTurn } from "./threads/turns";
 export {

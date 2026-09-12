@@ -31,3 +31,4 @@ export {
 } from "./marks/marks";
 export { Logo } from "./marks/logo";
 export { MarksLegend } from "./marks/marks-legend";
+export { ProviderLogo } from "./marks/provider-logo";

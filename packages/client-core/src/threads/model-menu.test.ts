@@ -1,170 +1,314 @@
 /**
- * `modelMenu(instances, runner, current)` groups a provider instance's models
- * per instance, for the composer's model selector.
+ * `modelMenu(catalogs, config, { kind, filter, recent })` is the shape the
+ * rebuilt model selector renders: a filter box only past eight models, a
+ * Recent lane, the current account's lane with its legacy models folded
+ * away, and one row per other instance.
  */
 import { describe, expect, it } from "vitest";
-import type { ModelOption } from "@hydra/contract";
-import { modelMenu } from "./model-menu";
+import type { ProviderInstance, Runner } from "@hydra/contract";
 import { BARE, instance, snapshot } from "../providers.testing";
+import type { ThreadConfig } from "./config";
+import { modelMenu } from "./model-menu";
 
-const RUNNER = { id: BARE.id, name: BARE.name };
+const runner = (overrides: Partial<Runner> & { id: string }): Runner => ({
+  ...BARE,
+  ...overrides,
+});
 
-const reasoningOption: ModelOption = {
-  id: "effort",
-  label: "Reasoning effort",
-  kind: "select",
-  choices: [
-    { value: "low", label: "Low" },
-    { value: "medium", label: "Medium" },
-    { value: "high", label: "High" },
-  ],
-  default: "medium",
+const LOCAL = runner({ id: "r-local", name: "moss" });
+
+const SONNET = { slug: "claude-sonnet-5", name: "Claude Sonnet 5", isDefault: true, options: [] };
+const OPUS = { slug: "claude-opus-5", name: "Claude Opus 5", options: [] };
+const LEGACY = { slug: "claude-sonnet-3", name: "Claude Sonnet 3", isLegacy: true, options: [] };
+const GPT = { slug: "gpt-5", name: "GPT-5", options: [] };
+
+const withModels = (
+  base: ProviderInstance,
+  id: string,
+  name: string,
+  models: ProviderInstance["snapshots"][number]["models"],
+): ProviderInstance => ({
+  ...base,
+  id,
+  name,
+  snapshots: [snapshot({ runnerId: LOCAL.id, models })],
+});
+
+/** The only instance of its provider; its own name differs from the provider's. */
+const CLAUDE: ProviderInstance = {
+  ...instance("claude-code", "Claude Code", [
+    snapshot({ runnerId: LOCAL.id, models: [SONNET, OPUS, LEGACY] }),
+  ]),
+  name: "default",
 };
 
-const claudeCode = instance("claude-code", "Claude Code", [
+const WORK = withModels(CLAUDE, "instance-claude-work", "work", [SONNET, OPUS, LEGACY]);
+const PERSONAL = withModels(CLAUDE, "instance-claude-personal", "personal", [OPUS]);
+
+const CODEX = instance("codex", "Codex", [
   snapshot({
-    runnerId: RUNNER.id,
-    auth: { status: "ok", identity: "rogier@example.com", planLabel: "Claude Max" },
-    models: [
-      {
-        slug: "claude-sonnet-5",
-        name: "Claude Sonnet 5",
-        isDefault: true,
-        options: [reasoningOption],
-      },
-      { slug: "claude-opus-5", name: "Claude Opus 5", isLegacy: true, options: [] },
-    ],
+    runnerId: LOCAL.id,
+    auth: { status: "ok", identity: "rogier@example.com", planLabel: "Pro" },
+    models: [GPT],
   }),
 ]);
 
-const codex = instance("codex", "Codex", [
-  snapshot({ runnerId: RUNNER.id, auth: { status: "unauthenticated" }, models: [] }),
+const CODEX_OUT = instance("codex", "Codex", [
+  snapshot({ runnerId: LOCAL.id, auth: { status: "unauthenticated" }, models: [] }),
 ]);
 
-const erroredInstance = instance("pi-error", "pi (stale probe)", [
-  snapshot({
-    runnerId: RUNNER.id,
-    auth: { status: "error", message: "the harness did not answer" },
-    models: [],
-  }),
-]);
+/** Found on no machine at all: no snapshot for any runner. */
+const PI = instance("pi", "pi", []);
 
-const freshInstall = instance("pi", "pi", []); // no snapshot at all on any runner
+const catalogs = (instances: readonly ProviderInstance[]) => ({
+  instances,
+  runners: [LOCAL],
+  localRunnerId: LOCAL.id,
+});
 
-describe("modelMenu", () => {
-  it("builds one group per instance, in order, with header fields from the picked runner's snapshot", () => {
-    const groups = modelMenu([claudeCode, codex], RUNNER, {
-      instanceId: claudeCode.id,
-      model: "claude-sonnet-5",
+/** The thread's config, of which this menu reads the account and the model. */
+const config = (instanceId: string, model: string): ThreadConfig => ({
+  instanceId,
+  model,
+  accessMode: "approval-required",
+  runnerId: LOCAL.id,
+  profileId: "p-unrestricted",
+  options: {},
+});
+
+const DRAFT = { kind: "draft" as const, filter: "", recent: [] };
+
+/** `count` models on one instance, so the filter threshold can be crossed. */
+const counted = (id: string, name: string, count: number): ProviderInstance =>
+  withModels(
+    CLAUDE,
+    id,
+    name,
+    Array.from({ length: count }, (_, index) => ({
+      slug: `model-${id}-${index}`,
+      name: `Model ${index}`,
+      options: [],
+    })),
+  );
+
+describe("modelMenu: filterable", () => {
+  it("offers no filter at eight models across every instance", () => {
+    const menu = modelMenu(
+      catalogs([counted("instance-a", "a", 5), counted("instance-b", "b", 3)]),
+      config("instance-a", "model-instance-a-0"),
+      DRAFT,
+    );
+
+    expect(menu.filterable).toBe(false);
+  });
+
+  it("offers a filter at nine models across every instance", () => {
+    const menu = modelMenu(
+      catalogs([counted("instance-a", "a", 5), counted("instance-b", "b", 4)]),
+      config("instance-a", "model-instance-a-0"),
+      DRAFT,
+    );
+
+    expect(menu.filterable).toBe(true);
+  });
+});
+
+describe("modelMenu: filtering", () => {
+  it("keeps the matching rows in every instance, case-insensitively, and omits instances with no match", () => {
+    const menu = modelMenu(catalogs([WORK, PERSONAL, CODEX]), config(WORK.id, SONNET.slug), {
+      ...DRAFT,
+      filter: "OPUS",
     });
 
-    expect(groups.map((group) => group.instanceId)).toEqual([claudeCode.id, codex.id]);
-    expect(groups[0]).toMatchObject({
-      displayName: "Claude Code",
-      name: "Claude Code",
+    expect(menu.current.rows.map((row) => row.slug)).toEqual([OPUS.slug]);
+    expect(menu.others.map((row) => row.instanceId)).toEqual([PERSONAL.id]);
+    expect(menu.others[0]!.rows.map((row) => row.slug)).toEqual([OPUS.slug]);
+  });
+
+  it("matches a model by its slug as well as by its display name", () => {
+    const menu = modelMenu(catalogs([WORK]), config(WORK.id, SONNET.slug), {
+      ...DRAFT,
+      filter: "sonnet-5",
+    });
+
+    expect(menu.current.rows.map((row) => row.slug)).toEqual([SONNET.slug]);
+  });
+});
+
+describe("modelMenu: recent", () => {
+  it("lists the given pairs in order, naming the account only for a provider with more than one instance", () => {
+    const menu = modelMenu(catalogs([WORK, PERSONAL, CODEX]), config(WORK.id, SONNET.slug), {
+      ...DRAFT,
+      recent: [
+        { instanceId: CODEX.id, model: GPT.slug },
+        { instanceId: PERSONAL.id, model: OPUS.slug },
+      ],
+    });
+
+    expect(menu.recent).toHaveLength(2);
+    expect(menu.recent[0]).toMatchObject({
+      instanceId: CODEX.id,
+      model: GPT.slug,
+      name: "GPT-5",
+      providerId: "codex",
+      account: null,
+    });
+    expect(menu.recent[1]).toMatchObject({
+      instanceId: PERSONAL.id,
+      model: OPUS.slug,
+      name: "Claude Opus 5",
+      providerId: "claude-code",
+      account: "personal",
+    });
+  });
+
+  it("holds at most three rows", () => {
+    const menu = modelMenu(
+      catalogs([counted("instance-a", "a", 5)]),
+      config("instance-a", "model-instance-a-0"),
+      {
+        ...DRAFT,
+        recent: [0, 1, 2, 3].map((index) => ({
+          instanceId: "instance-a",
+          model: `model-instance-a-${index}`,
+        })),
+      },
+    );
+
+    expect(menu.recent).toHaveLength(3);
+  });
+
+  it("drops a pair whose instance or model is no longer in the catalog", () => {
+    const menu = modelMenu(catalogs([WORK, CODEX]), config(WORK.id, SONNET.slug), {
+      ...DRAFT,
+      recent: [
+        { instanceId: "instance-that-went-away", model: SONNET.slug },
+        { instanceId: WORK.id, model: "claude-model-that-went-away" },
+        { instanceId: CODEX.id, model: GPT.slug },
+      ],
+    });
+
+    expect(menu.recent.map((row) => row.model)).toEqual([GPT.slug]);
+  });
+
+  it("dims a recent row on another instance with account fixed on an active thread", () => {
+    const menu = modelMenu(catalogs([WORK, PERSONAL, CODEX]), config(WORK.id, SONNET.slug), {
+      ...DRAFT,
+      kind: "active",
+      recent: [
+        { instanceId: PERSONAL.id, model: OPUS.slug },
+        { instanceId: WORK.id, model: OPUS.slug },
+      ],
+    });
+
+    expect(menu.recent[0]).toMatchObject({ instanceId: PERSONAL.id, dimmed: "account fixed" });
+    expect(menu.recent[1]).toMatchObject({ instanceId: WORK.id, dimmed: null });
+  });
+});
+
+describe("modelMenu: the current lane", () => {
+  it("labels the lane with the account name when the provider has more than one instance", () => {
+    const menu = modelMenu(catalogs([WORK, PERSONAL]), config(WORK.id, SONNET.slug), DRAFT);
+
+    expect(menu.current.label).toBe("work");
+  });
+
+  it("labels the lane with the provider's display name when it has one instance", () => {
+    const menu = modelMenu(catalogs([CLAUDE, CODEX]), config(CLAUDE.id, SONNET.slug), DRAFT);
+
+    expect(menu.current.label).toBe("Claude Code");
+  });
+
+  it("marks which row is the default and which is current", () => {
+    const menu = modelMenu(catalogs([CLAUDE]), config(CLAUDE.id, OPUS.slug), DRAFT);
+
+    expect(menu.current.rows.find((row) => row.slug === SONNET.slug)).toMatchObject({
+      isDefault: true,
+      current: false,
+    });
+    expect(menu.current.rows.find((row) => row.slug === OPUS.slug)).toMatchObject({
+      isDefault: false,
+      current: true,
+    });
+  });
+
+  it("folds legacy models into older, out of the rows", () => {
+    const menu = modelMenu(catalogs([CLAUDE]), config(CLAUDE.id, SONNET.slug), DRAFT);
+
+    expect(menu.current.rows.map((row) => row.slug)).toEqual([SONNET.slug, OPUS.slug]);
+    expect(menu.current.older.map((row) => row.slug)).toEqual([LEGACY.slug]);
+  });
+
+  it("unfolds the legacy models into the rows while filtering", () => {
+    const menu = modelMenu(catalogs([CLAUDE]), config(CLAUDE.id, SONNET.slug), {
+      ...DRAFT,
+      filter: "sonnet",
+    });
+
+    expect(menu.current.rows.map((row) => row.slug)).toEqual([SONNET.slug, LEGACY.slug]);
+    expect(menu.current.older).toEqual([]);
+  });
+});
+
+describe("modelMenu: the other instances", () => {
+  it("gives one row per remaining instance with its model count and identity", () => {
+    const menu = modelMenu(catalogs([CLAUDE, CODEX]), config(CLAUDE.id, SONNET.slug), DRAFT);
+
+    expect(menu.others).toHaveLength(1);
+    expect(menu.others[0]).toMatchObject({
+      instanceId: CODEX.id,
+      modelCount: 1,
       identity: "rogier@example.com",
-      planLabel: "Claude Max",
+      planLabel: "Pro",
       dimmed: null,
     });
   });
 
-  it("dims an instance with no usable login on this runner, unauthenticated or errored, with the runner named", () => {
-    const groups = modelMenu([claudeCode, codex, erroredInstance], RUNNER, {
-      instanceId: claudeCode.id,
-      model: "claude-sonnet-5",
-    });
+  it("dims an instance the runner has not logged in to, and carries the login it needs", () => {
+    const menu = modelMenu(catalogs([CLAUDE, CODEX_OUT]), config(CLAUDE.id, SONNET.slug), DRAFT);
 
-    expect(groups.find((group) => group.instanceId === codex.id)).toMatchObject({
-      dimmed: `not logged in on ${RUNNER.name}`,
-    });
-    expect(groups.find((group) => group.instanceId === erroredInstance.id)).toMatchObject({
-      dimmed: `not logged in on ${RUNNER.name}`,
+    expect(menu.others[0]).toMatchObject({
+      dimmed: "not logged in",
+      login: { instanceId: CODEX_OUT.id, runnerId: LOCAL.id, subject: "Codex on moss" },
     });
   });
 
-  it("dims an instance with no snapshot at all on this runner as found, not logged in", () => {
-    const groups = modelMenu([claudeCode, freshInstall], RUNNER, {
-      instanceId: claudeCode.id,
-      model: "claude-sonnet-5",
-    });
+  it("dims an instance the runner has no snapshot for, naming the machine", () => {
+    const menu = modelMenu(catalogs([CLAUDE, PI]), config(CLAUDE.id, SONNET.slug), DRAFT);
 
-    expect(groups.find((group) => group.instanceId === freshInstall.id)).toMatchObject({
-      dimmed: "found, not logged in",
-    });
+    expect(menu.others[0]).toMatchObject({ instanceId: PI.id, dimmed: "not on moss" });
   });
 
-  it("expands only the group matching current.instanceId", () => {
-    const groups = modelMenu([claudeCode, codex], RUNNER, {
-      instanceId: codex.id,
-      model: "irrelevant",
-    });
+  it("lists every other instance, however many there are - only Recent is capped", () => {
+    const others = [1, 2, 3, 4].map((n) =>
+      counted(`instance-${String(n)}`, `account ${String(n)}`, 1),
+    );
+    const menu = modelMenu(catalogs([CLAUDE, ...others]), config(CLAUDE.id, SONNET.slug), DRAFT);
 
-    expect(groups.find((group) => group.instanceId === claudeCode.id)!.expanded).toBe(false);
-    expect(groups.find((group) => group.instanceId === codex.id)!.expanded).toBe(true);
+    expect(menu.others.map((row) => row.instanceId)).toEqual(others.map((each) => each.id));
   });
 
-  it("carries isDefault and isLegacy through from the descriptor", () => {
-    const groups = modelMenu([claudeCode], RUNNER, {
-      instanceId: claudeCode.id,
-      model: "claude-sonnet-5",
+  it("offers no rows of another account while filtering on an active thread, whose account is fixed", () => {
+    const menu = modelMenu(catalogs([CLAUDE, CODEX]), config(CLAUDE.id, SONNET.slug), {
+      ...DRAFT,
+      kind: "active",
+      filter: "gpt",
     });
 
-    const models = groups[0]!.models;
-    expect(models.find((model) => model.slug === "claude-sonnet-5")).toMatchObject({
-      isDefault: true,
-      isLegacy: false,
-    });
-    expect(models.find((model) => model.slug === "claude-opus-5")).toMatchObject({
-      isDefault: false,
-      isLegacy: true,
-    });
+    expect(menu.others[0]).toMatchObject({ instanceId: CODEX.id, dimmed: "account fixed" });
+    expect(menu.others[0]?.rows).toEqual([]);
   });
 
-  it("adds a dimmed row for a current model slug the runner's snapshot does not list", () => {
-    const groups = modelMenu([claudeCode], RUNNER, {
-      instanceId: claudeCode.id,
-      model: "claude-haiku-5",
+  it("dims every other instance with account fixed on an active thread", () => {
+    const menu = modelMenu(catalogs([CLAUDE, CODEX]), config(CLAUDE.id, SONNET.slug), {
+      ...DRAFT,
+      kind: "active",
     });
 
-    const row = groups[0]!.models.find((model) => model.slug === "claude-haiku-5");
-    expect(row).toMatchObject({
-      dimmed: `not offered on ${RUNNER.name}`,
-      current: true,
-      options: [],
+    expect(menu.others[0]).toMatchObject({
+      instanceId: CODEX.id,
+      dimmed: "account fixed",
+      login: null,
     });
-  });
-
-  it("speaks without naming a machine when there is no runner at all", () => {
-    const groups = modelMenu([claudeCode, freshInstall], null, {
-      instanceId: claudeCode.id,
-      model: "claude-haiku-5",
-    });
-
-    expect(groups.find((group) => group.instanceId === freshInstall.id)).toMatchObject({
-      dimmed: "found, not logged in",
-    });
-    const missingRow = groups
-      .find((group) => group.instanceId === claudeCode.id)!
-      .models.find((model) => model.slug === "claude-haiku-5");
-    expect(missingRow).toMatchObject({ dimmed: "not offered on this runner" });
-  });
-
-  it("adds no missing row when no model is picked at all", () => {
-    const groups = modelMenu([claudeCode], RUNNER, { instanceId: claudeCode.id, model: null });
-
-    expect(groups[0]!.models.every((row) => row.dimmed === null)).toBe(true);
-    expect(groups[0]!.models.every((row) => !row.current)).toBe(true);
-  });
-
-  it("carries the current model's option descriptors through verbatim", () => {
-    const groups = modelMenu([claudeCode], RUNNER, {
-      instanceId: claudeCode.id,
-      model: "claude-sonnet-5",
-    });
-
-    const row = groups[0]!.models.find((model) => model.slug === "claude-sonnet-5");
-    expect(row!.current).toBe(true);
-    expect(row!.dimmed).toBeNull();
-    expect(row!.options).toEqual([reasoningOption]);
   });
 });

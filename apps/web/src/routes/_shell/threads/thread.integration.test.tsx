@@ -24,7 +24,7 @@ import type {
   TranscriptRow,
 } from "@hydra/contract";
 import { sessionStreamTopic, sessionTapTopic } from "@hydra/contract";
-import { envelope, renderApp, stubApi, type Handler } from "../../../app/testing";
+import { envelope, pickRow, renderApp, stubApi, type Handler } from "../../../app/testing";
 
 const SESSION_ID = "01a06d02-b100-7000-8000-000000000001";
 const ZONE = "Europe/Amsterdam";
@@ -1301,29 +1301,65 @@ describe("Thread: auto-scroll follows new content", () => {
   });
 });
 
-describe("Thread: top bar (AC-23)", () => {
-  it("shows the thread's title and a mono thread · <short id> crumb instead of the screen title", async () => {
+/**
+ * The thread's chrome is the screen's own first row, and the shell's top bar
+ * steps aside on this route. These tests replace the "Thread: top bar" pair
+ * that asserted the old shell title and its `thread · <short id>` crumb.
+ *
+ * How the row is read here:
+ * - the crumb `Threads /` and the title are separate text-bearing elements in
+ *   one row, so the row is the crumb's parent element;
+ * - the overflow button's accessible name is the glyph `…`, spec 14's own
+ *   wording. It carries no `aria-label`; add one only by changing this test.
+ */
+describe("Thread: the chrome is the screen's first row", () => {
+  it("reads Threads / then the session title, with a disabled … button", async () => {
     await open(session({ status: "idle", title: "Fix the login bug" }), twoCompletedTurns());
 
-    await waitFor(() => {
-      expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Fix the login bug");
-    });
-    const crumb = screen.getByText("thread · 01a06d02");
-    expect(crumb.className).toContain("font-mono");
+    const crumb = await waitFor(() => screen.getByText("Threads /"));
+    const chrome = crumb.parentElement;
+    expect(reading(chrome)).toMatch(/^Threads \/ Fix the login bug/);
+
+    const overflow = screen.getByRole<HTMLButtonElement>("button", { name: "…" });
+    expect(chrome?.contains(overflow)).toBe(true);
+    expect(overflow.disabled).toBe(true);
   });
 
-  it("truncates a long title with an ellipsis rather than pushing the crumb and clock out of place", async () => {
+  it("truncates a long title rather than pushing the crumb or the actions out of place", async () => {
     const longTitle =
       "Fix the login bug for real this time and also the logout bug and the signup bug";
     await open(session({ status: "idle", title: longTitle }), twoCompletedTurns());
 
-    const heading = await waitFor(() => screen.getByRole("heading", { level: 1 }));
-    expect(heading.className).toContain("truncate");
-    expect(heading.className).toContain("min-w-0");
-    expect(heading.className).not.toContain("shrink-0");
+    const crumb = await waitFor(() => screen.getByText("Threads /"));
+    expect(screen.getByText(longTitle).className).toContain("truncate");
+    // The crumb and the actions still render in full - only the title gave way.
+    expect(crumb.className).toContain("shrink-0");
+  });
 
-    // The crumb and the clock still render in full - only the title gave way.
-    expect(screen.getByText("thread · 01a06d02").className).toContain("shrink-0");
+  it("still warns about a zone this browser cannot read, the one thing the bar owes the screen", async () => {
+    await open(session({ status: "idle" }), twoCompletedTurns(), {
+      "GET /api/v1/settings": {
+        body: {
+          controller: {},
+          user: { "onboarding.completedSteps": ["timezone"], timezone: "Mars/Olympus" },
+        },
+      },
+    });
+
+    // The chrome titles the screen, but nothing else renders the warning - a
+    // thread reading its stamps in the wrong zone would say nothing at all.
+    expect(await screen.findByText(/does not know the zone Mars\/Olympus/)).toBeDefined();
+    expect(screen.queryByRole("heading", { level: 1 })).toBeNull();
+  });
+
+  it("renders no shell title above it: no h1 and no thread · crumb anywhere", async () => {
+    await open(session({ status: "idle", title: "Fix the login bug" }), twoCompletedTurns());
+
+    await waitFor(() => {
+      expect(screen.getByText("Threads /")).toBeDefined();
+    });
+    expect(reading()).not.toContain("thread · ");
+    expect(screen.queryByRole("heading", { level: 1 })).toBeNull();
   });
 });
 
@@ -1338,13 +1374,12 @@ describe("Thread: top bar (AC-23)", () => {
  * contain their literal AC wording ("send", "Steer", "Cancel", "Stop").
  */
 describe("Thread: composer read-only fields and model switch (AC-19)", () => {
-  it("renders workspace, checkout, branch, runner, profile and access mode as read-only values with no menu", async () => {
+  it("renders workspace, machine and access mode as read-only values with no menu", async () => {
     const user = userEvent.setup();
     await open(session({ status: "idle" }), twoCompletedTurns());
 
     expect(reading()).toContain("No workspace");
     expect(reading()).toContain(RUNNER_STARTED.name);
-    expect(reading()).toContain(PROFILE_STARTED.name);
     expect(reading()).toContain("approval-required");
 
     // None of these values ever reveals another option when interacted with -
@@ -1355,9 +1390,6 @@ describe("Thread: composer read-only fields and model switch (AC-19)", () => {
     await user.click(screen.getByText(RUNNER_STARTED.name));
     expect(screen.queryByText(RUNNER_OTHER.name)).toBeNull();
 
-    await user.click(screen.getByText(PROFILE_STARTED.name));
-    expect(screen.queryByText(PROFILE_OTHER.name)).toBeNull();
-
     await user.click(screen.getByText("No workspace"));
     expect(screen.queryByText("Adopt a folder on this machine…")).toBeNull();
 
@@ -1365,13 +1397,13 @@ describe("Thread: composer read-only fields and model switch (AC-19)", () => {
     expect(screen.queryByText("full-access")).toBeNull();
   });
 
-  it("dims the model menu's other instance groups with switching accounts starts a new thread", async () => {
+  it("dims the model menu's other accounts with account fixed", async () => {
     const user = userEvent.setup();
     await open(session({ status: "idle" }), twoCompletedTurns());
 
-    await user.click(screen.getByRole("button", { name: /claude-sonnet-5/i }));
+    await user.click(screen.getByRole("button", { name: /claude sonnet 5/i }));
 
-    expect(reading()).toContain("switching accounts starts a new thread");
+    expect(reading()).toContain("account fixed");
     // The current instance's own other model stays selectable, unlike the
     // other instance's group.
     expect(screen.getByRole("button", { name: /claude opus 5/i })).toBeDefined();
@@ -1383,7 +1415,7 @@ describe("Thread: composer read-only fields and model switch (AC-19)", () => {
     const user = userEvent.setup();
     const { api } = await open(session({ status: "idle" }), twoCompletedTurns());
 
-    await user.click(screen.getByRole("button", { name: /claude-sonnet-5/i }));
+    await user.click(screen.getByRole("button", { name: /claude sonnet 5/i }));
     await user.click(screen.getByRole("button", { name: /claude opus 5/i }));
 
     expect(
@@ -1392,7 +1424,7 @@ describe("Thread: composer read-only fields and model switch (AC-19)", () => {
       ),
     ).toBe(false);
     await waitFor(() => {
-      expect(reading()).toContain("claude-opus-5");
+      expect(screen.getByRole("button", { name: /claude opus 5/i })).toBeDefined();
     });
   });
 });
@@ -1434,14 +1466,10 @@ describe("Thread: input queue (AC-20)", () => {
       if (found === undefined) throw new Error("input not sent yet");
       return found;
     });
-    // An input carries the model on show and the picks made since the last
-    // submission, so an untouched composer sends the session's own model and
-    // an empty record.
-    expect(call.body).toEqual({
-      text: "Also check the logs",
-      model: "claude-sonnet-5",
-      options: {},
-    });
+    // An input carries the picks made since the last submission and nothing
+    // else, so an untouched composer sends the text alone and the session
+    // keeps what it runs with.
+    expect(call.body).toEqual({ text: "Also check the logs" });
 
     await waitFor(() => {
       expect(screen.getByRole<HTMLTextAreaElement>("textbox").value).toBe("");
@@ -1644,7 +1672,7 @@ describe("Thread: model options ride the submission (AC-6, AC-7)", () => {
       },
     });
 
-    await user.click(screen.getByRole("button", { name: /claude-sonnet-5/i }));
+    await user.click(screen.getByRole("button", { name: "medium" }));
     await user.click(await screen.findByRole("radio", { name: "High" }));
 
     // The pick itself is not a write: neither the input route nor the update
@@ -1668,7 +1696,6 @@ describe("Thread: model options ride the submission (AC-6, AC-7)", () => {
     });
     expect(call.body).toEqual({
       text: "Also check the logs",
-      model: "claude-sonnet-5",
       options: { effort: "high" },
     });
   });
@@ -1682,10 +1709,11 @@ describe("Thread: model options ride the submission (AC-6, AC-7)", () => {
       },
     });
 
-    await user.click(screen.getByRole("button", { name: /claude-sonnet-5/i }));
+    await user.click(screen.getByRole("button", { name: "medium" }));
     await user.click(await screen.findByRole("radio", { name: "High" }));
-    await user.click(screen.getByRole("button", { name: /claude opus 5/i }));
     await user.keyboard("{Escape}");
+    await user.click(screen.getByRole("button", { name: /claude sonnet 5/i }));
+    await pickRow(user, /claude opus 5/i);
 
     await user.type(screen.getByRole("textbox"), "Also check the logs");
     await user.click(screen.getByRole("button", { name: /send/i }));
@@ -1697,11 +1725,8 @@ describe("Thread: model options ride the submission (AC-6, AC-7)", () => {
       if (found === undefined) throw new Error("input not sent yet");
       return found;
     });
-    expect(call.body).toEqual({
-      text: "Also check the logs",
-      model: "claude-opus-5",
-      options: {},
-    });
+    // The options went with the model that offered them.
+    expect(call.body).toEqual({ text: "Also check the logs", model: "claude-opus-5" });
     expect(
       api.calls.some(
         (call) => call.method === "PATCH" && call.path === `/api/v1/sessions/${SESSION_ID}`,
@@ -1720,15 +1745,16 @@ describe("Thread: model options ride the submission (AC-6, AC-7)", () => {
       { "GET /api/v1/providers": providers },
     );
 
-    await user.click(screen.getByRole("button", { name: /claude-sonnet-5/i }));
-    await user.click(await screen.findByRole("button", { name: /claude opus 5/i }));
+    await user.click(screen.getByRole("button", { name: /claude sonnet 5/i }));
+    await pickRow(user, /claude opus 5/i);
+    await user.click(await screen.findByRole("button", { name: "medium" }));
 
     // The stored `high` was stored for the other model, and the server drops
     // it on a model change - so the block reads the descriptor's default.
     const medium = await screen.findByRole<HTMLButtonElement>("radio", { name: "Medium" });
     expect(medium.getAttribute("aria-checked")).toBe("true");
     expect(screen.getByRole("radio", { name: "High" }).getAttribute("aria-checked")).toBe("false");
-    expect(reading()).toContain("claude-opus-5 · Medium");
+    expect(screen.getByRole("button", { name: /claude opus 5/i })).toBeDefined();
   });
 
   it("clears the picks once the input is accepted and reads the stored options back", async () => {
@@ -1751,16 +1777,16 @@ describe("Thread: model options ride the submission (AC-6, AC-7)", () => {
       },
     });
 
-    await user.click(screen.getByRole("button", { name: /claude-sonnet-5/i }));
+    await user.click(screen.getByRole("button", { name: "medium" }));
     await user.click(await screen.findByRole("radio", { name: "High" }));
     await user.keyboard("{Escape}");
     await user.type(screen.getByRole("textbox"), "Also check the logs");
     await user.click(screen.getByRole("button", { name: /send/i }));
 
-    // The pill still reads High after the picks are cleared, which it can only
-    // do by having re-read the session the input just changed.
+    // The selector still reads high after the picks are cleared, which it can
+    // only do by having re-read the session the input just changed.
     await waitFor(() => {
-      expect(reading()).toContain("claude-sonnet-5 · High");
+      expect(screen.getByRole("button", { name: "high" })).toBeDefined();
     });
 
     // And the cleared picks show in the next submission, which carries none.
@@ -1774,11 +1800,7 @@ describe("Thread: model options ride the submission (AC-6, AC-7)", () => {
       if (found.length < 2) throw new Error("second input not sent yet");
       return found[1];
     });
-    expect(second?.body).toEqual({
-      text: "And the metrics",
-      model: "claude-sonnet-5",
-      options: {},
-    });
+    expect(second?.body).toEqual({ text: "And the metrics" });
   });
 
   it("holds the picks until the re-read lands, so a send right after one reads the fresh row", async () => {
@@ -1809,8 +1831,9 @@ describe("Thread: model options ride the submission (AC-6, AC-7)", () => {
       },
     });
 
-    await user.click(screen.getByRole("button", { name: /claude-sonnet-5/i }));
-    await user.click(await screen.findByRole("button", { name: /claude opus 5/i }));
+    await user.click(screen.getByRole("button", { name: /claude sonnet 5/i }));
+    await pickRow(user, /claude opus 5/i);
+    await user.click(await screen.findByRole("button", { name: "medium" }));
     await user.click(await screen.findByRole("radio", { name: "High" }));
     await user.keyboard("{Escape}");
     await user.type(screen.getByRole("textbox"), "Also check the logs");
@@ -1826,7 +1849,8 @@ describe("Thread: model options ride the submission (AC-6, AC-7)", () => {
       if (call === undefined) throw new Error("input not sent yet");
     });
     expect(screen.getByRole<HTMLButtonElement>("button", { name: /send/i }).disabled).toBe(true);
-    expect(reading()).toContain("claude-opus-5 · High");
+    expect(screen.getByRole("button", { name: /claude opus 5/i })).toBeDefined();
+    expect(screen.getByRole("button", { name: "high" })).toBeDefined();
 
     await act(async () => {
       release();
@@ -1836,7 +1860,8 @@ describe("Thread: model options ride the submission (AC-6, AC-7)", () => {
     await waitFor(() => {
       expect(screen.getByRole<HTMLTextAreaElement>("textbox").value).toBe("");
     });
-    expect(reading()).toContain("claude-opus-5 · High");
+    expect(screen.getByRole("button", { name: /claude opus 5/i })).toBeDefined();
+    expect(screen.getByRole("button", { name: "high" })).toBeDefined();
 
     // The picks are gone, and the next send reads the row the server stored
     // rather than the session the cache held while the read was out.
@@ -1851,11 +1876,7 @@ describe("Thread: model options ride the submission (AC-6, AC-7)", () => {
       if (found.length < 2) throw new Error("second input not sent yet");
       return found[1];
     });
-    expect(second?.body).toEqual({
-      text: "And the metrics",
-      model: "claude-opus-5",
-      options: {},
-    });
+    expect(second?.body).toEqual({ text: "And the metrics" });
   });
 
   it("shows the stored option on a fresh render: the pill's label, and the block enabled on that value (AC-7)", async () => {
@@ -1870,10 +1891,11 @@ describe("Thread: model options ride the submission (AC-6, AC-7)", () => {
     );
 
     await waitFor(() => {
-      expect(reading()).toContain("claude-sonnet-5 · High");
+      expect(screen.getByRole("button", { name: /claude sonnet 5/i })).toBeDefined();
     });
+    expect(screen.getByRole("button", { name: "high" })).toBeDefined();
 
-    await user.click(screen.getByRole("button", { name: /claude-sonnet-5/i }));
+    await user.click(screen.getByRole("button", { name: "high" }));
 
     const high = await screen.findByRole<HTMLButtonElement>("radio", { name: "High" });
     expect(high.getAttribute("aria-checked")).toBe("true");
@@ -1899,9 +1921,9 @@ describe("Thread: an exited thread that can be resumed", () => {
 
     const textarea = screen.getByRole<HTMLTextAreaElement>("textbox");
     expect(textarea.disabled).toBe(false);
-    expect(textarea.placeholder).toBe("Type a message…");
+    expect(textarea.placeholder).toBe("Reply…");
 
-    const pill = screen.getByRole<HTMLButtonElement>("button", { name: /claude-sonnet-5/i });
+    const pill = screen.getByRole<HTMLButtonElement>("button", { name: /claude sonnet 5/i });
     expect(pill.disabled).toBe(false);
 
     expect(screen.queryByRole("button", { name: /^stop$/i })).toBeNull();
@@ -1927,11 +1949,7 @@ describe("Thread: an exited thread that can be resumed", () => {
       if (found === undefined) throw new Error("input not sent yet");
       return found;
     });
-    expect(call.body).toEqual({
-      text: "Also check the logs",
-      model: "claude-sonnet-5",
-      options: {},
-    });
+    expect(call.body).toEqual({ text: "Also check the logs" });
 
     const queued = await screen.findByText("Also check the logs");
     expect(screen.getByRole("button", { name: /steer/i })).toBeDefined();
@@ -1962,8 +1980,73 @@ describe("Thread: an exited thread that cannot be resumed", () => {
     expect(textarea.disabled).toBe(true);
     expect(textarea.placeholder).toBe(`This thread can't be resumed: ${reason}.`);
 
-    const pill = screen.getByRole<HTMLButtonElement>("button", { name: /claude-sonnet-5/i });
+    const pill = screen.getByRole<HTMLButtonElement>("button", { name: /claude sonnet 5/i });
     expect(pill.disabled).toBe(true);
     expect(screen.getByRole<HTMLButtonElement>("button", { name: /send/i }).disabled).toBe(true);
+  });
+});
+
+/**
+ * The composer on an active thread: the note a model pick stands under until
+ * it is sent, and the fields that locked when the thread started.
+ *
+ * How the surface is read here: the model pill is the button whose accessible
+ * name holds the model's *display* name ("Claude Sonnet 5"); a locked field is
+ * whatever element carries the `title`, and "no button" is read as that
+ * element not being one.
+ */
+describe("Composer: a model pick is pending until it is sent", () => {
+  it("says the change applies on send, names it on the pill, and drops the note once the session carries it", async () => {
+    const user = userEvent.setup();
+    // The controller stores what the input carried, so the session read after
+    // it answers with the new model - which is what retires the note.
+    let stored = { model: "claude-sonnet-5", options: {} as Record<string, string> };
+    await open(session({ status: "idle" }), twoCompletedTurns(), {
+      [`GET /api/v1/sessions/${SESSION_ID}`]: () => ({
+        body: session({ status: "idle", modelSelection: stored }),
+      }),
+      [`POST /api/v1/sessions/${SESSION_ID}/input`]: (call) => {
+        stored = { model: (call.body as { model: string }).model, options: {} };
+        return { body: { inputId: INPUT_ID, result: "opened" } };
+      },
+    });
+
+    expect(reading()).not.toContain("model change applies on send");
+
+    await user.click(await screen.findByRole("button", { name: /claude sonnet 5/i }));
+    await pickRow(user, /claude opus 5/i);
+
+    // Unsent, so the card says so, and the pill already names what will go.
+    await waitFor(() => {
+      expect(reading()).toContain("model change applies on send");
+    });
+    expect(screen.getByRole("button", { name: /claude opus 5/i })).toBeDefined();
+
+    await user.type(screen.getByRole("textbox"), "Also check the logs");
+    await user.click(screen.getByRole("button", { name: /send/i }));
+
+    // Once the session itself carries the model there is nothing pending to
+    // warn about.
+    await waitFor(() => {
+      expect(reading()).not.toContain("model change applies on send");
+    });
+    expect(screen.getByRole("button", { name: /claude opus 5/i })).toBeDefined();
+  });
+});
+
+describe("Composer: what locked at start says why", () => {
+  it("renders the access mode, the workspace and the machine as plain text with the reason as their tooltip", async () => {
+    await open(session({ status: "idle" }), twoCompletedTurns());
+
+    for (const field of ["access mode", "workspace", "machine"]) {
+      const locked = await screen.findByTitle(`Create a new thread to change the ${field}`);
+      expect(locked.tagName).not.toBe("BUTTON");
+      expect(locked.closest("button")).toBeNull();
+    }
+
+    // And none of the three is a trigger under another name.
+    expect(screen.queryByRole("button", { name: /approval-required/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /no workspace/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: RUNNER_STARTED.name })).toBeNull();
   });
 });

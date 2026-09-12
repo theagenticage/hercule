@@ -1,517 +1,150 @@
-/**
- * The composer: the thread's own configuration, in new-thread mode (nothing
- * started yet - every selector live) and inside a started thread (workspace,
- * checkout, branch, runner, profile and access mode locked to plain values;
- * only the model and its options stay live, within the instance it started
- * in).
- *
- * One component for both, per spec 14 §The composer ("Creating a thread is
- * one step"): a started thread reads its locked fields straight off the
- * `Session` prop rather than from any state of its own, so there is nothing
- * here to keep in sync with it.
- */
 import { useState, type JSX } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useNavigate } from "@tanstack/react-router";
+import { useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
+import { useRouteContext } from "@tanstack/react-router";
 import {
-  accessModeMenu,
-  instanceDefaults,
+  composerFields,
   modelMenu,
-  modelPillLabel,
+  optionsLabel,
+  pendingModelNote,
   queryKeys,
-  referenceRunner,
-  resumeBlockedReason,
-  runnerMenu,
-  threadDefaults,
-  type HydraClient,
-  type RunnerMenuRow,
+  type Thread,
 } from "@hydra/client-core";
-import type {
-  AccessMode,
-  Profile,
-  ProviderInstance,
-  Runner,
-  Session,
-  SessionInputPayload,
-  SettingsState,
-} from "@hydra/contract";
-import { Button, cn, ListRow, Textarea } from "@hydra/ui";
+import { localRunnerQuery, providersQuery, runnersQuery } from "../../app/queries";
 import { messageOf } from "../save-status";
-import { MenuRow } from "./menu-row";
-import { ModelMenuContent } from "./model-menu-content";
-import { PopoverSelector } from "./popover-selector";
-import { QueuedInputs } from "./queued-inputs";
-import { SetupField } from "./setup-field";
+import { AccessModeSelector } from "./access-mode-selector";
+import { AttachButton, SendButton, StopButton, VoiceButton } from "./controls";
+import { DraftHero } from "./draft-hero";
+import { Lip } from "./lip";
+import { loginSlot } from "./login-slot";
+import { ModelOptionsSelector } from "./model-options-selector";
+import { ModelSelector } from "./model-selector";
+import { MessageBox } from "./message-box";
+import { useComposerModel } from "./use-composer-model";
 
-type SelectorKey =
-  "workspace" | "checkout" | "branch" | "runner" | "profile" | "accessMode" | "model";
-
-/**
- * Once a thread has started, the provider instance is where its login and its
- * User Material live - switching it would need a new thread, so every other
- * instance's group is locked shut regardless of what `modelMenu` itself would
- * otherwise dim it with.
- */
-const SWITCH_LOCK_REASON = "switching accounts starts a new thread";
-
-/** Only `online` and `unreachable` carry a doctrine hue (live, failed); the rest are neutral. */
-const RUNNER_STATE_HUE: Record<RunnerMenuRow["state"], string> = {
-  online: "text-live",
-  draining: "text-muted",
-  retired: "text-muted",
-  unreachable: "text-fail",
-  offline: "text-muted",
-};
+type SelectorKey = "accessMode" | "options" | "model" | "workspace" | "machine";
 
 /**
- * The runner menu's own first line: name, its state word in the state's hue,
- * then what else is true of it. The separating " · " is a text character in
- * every segment, not a flex gap, so the row's own text - and a test reading
- * it - carries the same spacing the eye sees.
+ * The composer: what the thread runs with, and the message about to go to it. One
+ * component for a draft and an active thread - `useComposerModel` holds the
+ * difference, and every lock, dimming and blocker comes from `composerFields`.
  */
-const runnerRowLabel = (row: RunnerMenuRow): JSX.Element => (
-  <span className="flex min-w-0 items-center">
-    <span className="truncate">{row.name}</span>
-    <span className={cn("shrink-0", RUNNER_STATE_HUE[row.state])}>{` · ${row.state}`}</span>
-    {row.isLocal ? <span className="shrink-0 text-faint"> · this machine</span> : null}
-    {row.reserved ? <span className="shrink-0 text-faint"> · reserved</span> : null}
-  </span>
-);
-
 export function Composer({
-  client,
-  instances,
-  runners,
-  profiles,
-  localRunnerId,
-  settingsUser,
-  session,
+  thread,
   onSend,
 }: {
-  readonly client: HydraClient;
-  readonly instances: readonly ProviderInstance[];
-  readonly runners: readonly Runner[];
-  readonly profiles: readonly Profile[];
-  /** Which runner is on this machine - the composer's own default, not its selection. */
-  readonly localRunnerId: string | null;
-  readonly settingsUser: SettingsState["user"];
-  /** Undefined is new-thread mode; a Session is a started thread. */
-  readonly session?: Session;
-  /** A started thread's own way to rejoin the transcript's tail the moment a message goes out. */
+  readonly thread: Thread;
+  /** An active thread's way to rejoin the tail as a message goes out. */
   readonly onSend?: () => void;
 }): JSX.Element {
+  const { client, detectLocalRunner } = useRouteContext({ from: "/_shell" });
   const queryClient = useQueryClient();
-  const navigate = useNavigate();
-  const started = session !== undefined;
-
-  // The composer's own draft selection. The workspace, runner, profile and
-  // access mode are live only until a thread starts - a started thread reads
-  // those off `session` instead (below), which is why the defaults are only
-  // resolved in new-thread mode. The model and its options stay draft state in
-  // both modes: on a started thread they are the picks made since the last
-  // submission, and they ride that submission rather than a request of their
-  // own. Nothing picked is `null`, never an empty string: the spawn payload
-  // below omits what is null and lets the server's own fallback decide, rather
-  // than posting an id-shaped value it would refuse.
-  const [defaults] = useState(() =>
-    session === undefined
-      ? threadDefaults(settingsUser, instances, runners, profiles, localRunnerId)
-      : null,
-  );
-  const [draftInstanceId, setDraftInstanceId] = useState(defaults?.instanceId ?? null);
-  const [draftModel, setDraftModel] = useState(defaults?.model ?? null);
-  const [draftAccessMode, setDraftAccessMode] = useState<AccessMode>(
-    defaults?.accessMode ?? "approval-required",
-  );
-  const [draftRunnerId, setDraftRunnerId] = useState(defaults?.runnerId ?? null);
-  const [draftProfileId, setDraftProfileId] = useState(defaults?.profileId ?? null);
-  const [draftOptions, setDraftOptions] = useState<Record<string, string | boolean>>({});
-  const [openSelector, setOpenSelector] = useState<SelectorKey | null>(null);
-  const [prompt, setPrompt] = useState("");
-
-  const instanceId: string | null = started ? session.instanceId : draftInstanceId;
-  const model: string | null = started ? (draftModel ?? session.modelSelection.model) : draftModel;
-  const accessMode = started ? session.accessMode : draftAccessMode;
-  const runnerId: string | null = started ? session.runnerId : draftRunnerId;
-  const profileId: string | null = started ? session.permissionProfileId : draftProfileId;
-
-  const pickModel = (nextModel: string): void => {
-    setDraftOptions({});
-    setDraftModel(nextModel);
-  };
-
-  const switchInstance = (nextInstanceId: string): void => {
-    const next = instances.find((each) => each.id === nextInstanceId);
-    if (next === undefined) return;
-    // A catalog is scoped instance x runner, and the runner that hosts the
-    // instance just left need not host this one - so the runner is resolved
-    // for the new instance first and the model read from that runner, the
-    // same order `threadDefaults` prefills in.
-    const forInstance = instanceDefaults(next, runners, localRunnerId);
-    setDraftInstanceId(nextInstanceId);
-    setDraftOptions({});
-    setDraftRunnerId(forInstance.runnerId);
-    setDraftModel(forInstance.model);
-  };
-
-  const instance = instances.find((each) => each.id === instanceId);
-  const accessModeItems =
-    instance === undefined ? [] : accessModeMenu(instance.declared.accessModes);
-  const runnerRows =
-    instance === undefined ? [] : runnerMenu(runners, localRunnerId, instance).rows;
-  // The runner the model menu and the runner selector's own trigger speak
-  // about when nothing is actually selectable: the selection itself when
-  // there is one, else the local machine, else the first runner at all -
-  // never the empty, unnamed runner a plain lookup on `runnerId` would leave
-  // when no runner is picked.
-  const pickedRunner = referenceRunner(runners, runnerId, localRunnerId);
-  const pickedRunnerRow = runnerRows.find((row) => row.runnerId === pickedRunner?.id);
-  const pickedProfile = profiles.find((each) => each.id === profileId);
-
-  const rawGroups =
-    instance === undefined ? [] : modelMenu(instances, pickedRunner ?? null, { instanceId, model });
-  const groups = started
-    ? rawGroups.map((group) =>
-        group.instanceId === instanceId ? group : { ...group, dimmed: SWITCH_LOCK_REASON },
-      )
-    : rawGroups;
-  const currentModelRow = groups
-    .find((group) => group.instanceId === instanceId)
-    ?.models.find((row) => row.slug === model);
-  const currentOptions = currentModelRow?.options ?? [];
-  // A started thread's own stored choice is what an option not picked since
-  // the last submission still stands at, so the draft picks are shown over it
-  // rather than instead of it - but only while the model on show is the one
-  // the options were stored for. Options are per model, and the server drops
-  // the old model's options on a model change, so another model's block shows
-  // its own defaults.
-  const selectedOptions =
-    started && model === session.modelSelection.model
-      ? { ...session.modelSelection.options, ...draftOptions }
-      : draftOptions;
-  const pillText =
-    instance === undefined
-      ? "Model"
-      : modelPillLabel(instance, model, currentOptions, selectedOptions);
-
-  // Once a thread starts the runner is a plain committed fact, never dimmed
-  // in its own right - the reason only matters while it is still a live pick.
-  const runnerLabel =
-    pickedRunner === undefined
-      ? "Runner"
-      : started || pickedRunnerRow === undefined || pickedRunnerRow.dimmed === null
-        ? pickedRunner.name
-        : `${pickedRunner.name} · ${pickedRunnerRow.dimmed}`;
-
-  const rereadProviders = (): void => {
+  const instances = useSuspenseQuery(providersQuery(client)).data;
+  const runners = useSuspenseQuery(runnersQuery(client)).data.items;
+  const localRunnerId = useQuery(localRunnerQuery(detectLocalRunner, runners)).data ?? null;
+  const catalogs = { instances, runners, localRunnerId };
+  const [open, setOpen] = useState<SelectorKey | null>(null);
+  const [filter, setFilter] = useState("");
+  const model = useComposerModel(thread, catalogs, client, onSend);
+  const fields = composerFields(catalogs, model.config, model.kind);
+  const pending = pendingModelNote(model.kind, model.picks);
+  const login = loginSlot(client, () => {
     void queryClient.invalidateQueries({ queryKey: queryKeys.providers() });
+  });
+  // A click opening B is also a click outside A, so closing clears only the selector asking to.
+  const openChange = (key: SelectorKey, next: boolean): void => {
+    setOpen((current) => (next ? key : current === key ? null : current));
+    if (key === "model" && !next) setFilter("");
   };
-
-  // Read only where `started` already guards it, so the mutations below never
-  // reach for a session that is not there.
-  const sessionId = session?.id ?? "";
-
-  const spawn = useMutation({
-    mutationFn: () =>
-      client.session.spawn({
-        payload: {
-          prompt,
-          accessMode,
-          workspaceId: null,
-          // Omitted, never sent empty: the server has its own fallback for
-          // each of these, and `Id` refuses an empty string outright.
-          ...(instanceId === null ? {} : { instanceId }),
-          ...(model === null ? {} : { model }),
-          ...(runnerId === null ? {} : { runnerId }),
-          ...(profileId === null ? {} : { permissionProfileId: profileId }),
-          options: draftOptions,
-        },
-      }),
-    onSuccess: (created) => {
-      void navigate({ to: "/threads/$sessionId", params: { sessionId: created.id } });
-    },
-  });
-
-  const sendInput = useMutation({
-    mutationFn: (payload: SessionInputPayload) =>
-      client.session.input({ params: { id: sessionId }, payload }),
-    onSuccess: async () => {
-      // The picks are cleared only once the row that holds them is in the cache.
-      await queryClient.invalidateQueries({ queryKey: queryKeys.session(sessionId) });
-      setPrompt("");
-      setDraftModel(null);
-      setDraftOptions({});
-      void queryClient.invalidateQueries({ queryKey: queryKeys.inputs(sessionId) });
-    },
-  });
-
-  const interrupt = useMutation({
-    mutationFn: () => client.session.interrupt({ params: { id: sessionId } }),
-    onSuccess: (updated) => {
-      queryClient.setQueryData(queryKeys.session(updated.id), updated);
-    },
-  });
-
-  // What stops a new thread from starting at all, said in the words the user
-  // would need to fix it. A started thread has nothing to resolve, and every
-  // other field the server has a fallback for is omitted rather than blocking.
-  const blocked =
-    started || instance !== undefined
-      ? null
-      : instances.length === 0
-        ? "no provider instance is set up"
-        : "no provider instance can be resolved";
-  const noRunner =
-    started || instance === undefined || runnerRows.some((row) => row.dimmed === null)
-      ? null
-      : `no runner is logged in to ${instance.displayName}`;
-  const blockedReason = blocked ?? noRunner;
-
-  const send = (): void => {
-    if (prompt.trim() === "" || blockedReason !== null) return;
-    if (started) {
-      sendInput.mutate({
-        text: prompt,
-        model: draftModel ?? session.modelSelection.model,
-        options: draftOptions,
-      });
-      onSend?.();
-    } else {
-      spawn.mutate();
-    }
-  };
-
-  const readOnly = started ? resumeBlockedReason(session) : null;
-  const busy = started && session.status === "busy";
-  const composerError = spawn.error ?? sendInput.error ?? interrupt.error;
-  const sending = spawn.isPending || sendInput.isPending;
-
-  // A click that opens selector B is also, to Radix, a click outside selector
-  // A - so A's own dismiss-on-outside-click fires in the same event, and can
-  // land after B's own open call in the same batch. Closing only clears the
-  // selector that is still the one asking to close, so B's open never gets
-  // clobbered by A's own dismissal racing behind it.
-  const toggle =
-    (key: SelectorKey) =>
-    (open: boolean): void =>
-      setOpenSelector((current) => (open ? key : current === key ? null : current));
-
+  // The catalog behind the model pill is worth resolving only while it is on show.
+  const menu =
+    open === "model"
+      ? modelMenu(catalogs, model.config, { kind: model.kind, filter, recent: model.recent })
+      : null;
+  const cannotSend = fields.blocked !== null || model.readOnly !== null || model.sending;
+  const canSend = !cannotSend && model.message.trim() !== "";
   return (
-    <div className="sticky bottom-0 mt-auto flex flex-col gap-2">
-      {started ? <QueuedInputs client={client} sessionId={session.id} /> : null}
-
-      <div className="rounded-card border border-line bg-raised p-3 shadow-card">
-        <Textarea
-          value={prompt}
-          onChange={(event) => setPrompt(event.target.value)}
-          onKeyDown={(event) => {
-            // Enter sends, Shift+Enter is a newline. An IME's own Enter -
-            // the one that commits a composition - is not a send: React
-            // reports it as `isComposing`, and swallowing it would cut a
-            // Japanese or Chinese sentence off mid-word.
-            if (event.key !== "Enter" || event.shiftKey) return;
-            if (event.nativeEvent.isComposing) return;
-            event.preventDefault();
-            send();
+    // A draft stands under its own sentence, which takes the room above the card.
+    <div className={fields.lead === null ? "flex w-full flex-col" : "flex w-full flex-1 flex-col"}>
+      {fields.lead === null ? null : (
+        <DraftHero lead={fields.lead} blocked={fields.blocked} loginSlot={login} />
+      )}
+      <div className="relative z-[1] flex flex-col gap-2 rounded-[14px] border border-line bg-raised px-3.5 pt-3 pb-2.5 shadow-lift">
+        <MessageBox
+          value={model.message}
+          placeholder={model.placeholder}
+          disabled={model.readOnly !== null}
+          onChange={model.setMessage}
+          onSubmit={() => {
+            if (canSend) model.submit();
           }}
-          disabled={readOnly !== null}
-          placeholder={
-            readOnly !== null
-              ? `This thread can't be resumed: ${readOnly}.`
-              : started
-                ? "Type a message…"
-                : "What should the agent do?"
-          }
         />
-        <div className="mt-2 flex items-center gap-1">
-          <button
-            type="button"
-            disabled
-            title="attachments are not built"
-            aria-label="Attach"
-            className="rounded-control px-2 py-1 text-fine text-faint"
-          >
-            +
-          </button>
-
-          {started ? (
-            <span className="rounded-control px-2 py-1 text-fine text-muted">{accessMode}</span>
-          ) : (
-            <PopoverSelector
-              open={openSelector === "accessMode"}
-              onOpenChange={toggle("accessMode")}
-              trigger={accessMode}
-            >
-              {accessModeItems.map((item) => (
-                <MenuRow
-                  key={item.mode}
-                  label={item.mode}
-                  secondLine={item.meaning}
-                  dimmed={item.dimmed}
-                  blocking={false}
-                  selected={item.mode === accessMode}
-                  onClick={() => {
-                    setDraftAccessMode(item.mode);
-                    setOpenSelector(null);
-                  }}
-                />
-              ))}
-            </PopoverSelector>
+        <div className="flex items-center gap-1.5">
+          <AttachButton />
+          <AccessModeSelector
+            mode={fields.accessMode.value}
+            items={fields.accessMode.rows}
+            locked={fields.accessMode.locked}
+            open={open === "accessMode"}
+            onOpenChange={(next) => {
+              openChange("accessMode", next);
+            }}
+            onPick={(mode) => {
+              model.pick({ kind: "accessMode", value: mode });
+            }}
+          />
+          {pending === null ? null : (
+            <span className="ml-1 font-mono text-[11px] text-attn">{pending}</span>
           )}
-
-          <PopoverSelector
-            open={openSelector === "model"}
-            onOpenChange={toggle("model")}
-            trigger={pillText}
-            disabled={readOnly !== null}
-            triggerClassName="flex-1 text-center font-emph text-ink"
-            contentClassName="w-80"
-          >
-            <ModelMenuContent
-              groups={groups}
-              onPickModel={(slug) => {
-                // Re-picking the model on show is not a change, and would
-                // throw away the options picked under it.
-                if (slug !== model) pickModel(slug);
+          <div className="ml-auto flex min-w-0 items-center gap-1.5">
+            {fields.options === null ? null : (
+              <ModelOptionsSelector
+                descriptors={fields.options}
+                selected={model.config.options}
+                label={optionsLabel(fields.options, model.config.options)}
+                modelName={fields.model.pill.name}
+                disabled={model.readOnly !== null}
+                open={open === "options"}
+                onOpenChange={(next) => {
+                  openChange("options", next);
+                }}
+                onPick={(id, value) => {
+                  model.pick({ kind: "option", id, value });
+                }}
+              />
+            )}
+            <ModelSelector
+              menu={menu}
+              filter={filter}
+              onFilter={setFilter}
+              pill={fields.model.pill}
+              disabled={model.readOnly !== null}
+              open={open === "model"}
+              onOpenChange={(next) => {
+                openChange("model", next);
               }}
-              onSwitchInstance={(nextInstanceId) => {
-                if (!started) switchInstance(nextInstanceId);
-              }}
-              options={currentOptions}
-              selectedOptions={selectedOptions}
-              onOptionChange={(id, value) => setDraftOptions((prev) => ({ ...prev, [id]: value }))}
-              client={client}
-              loginRunner={pickedRunner}
-              onLoggedIn={rereadProviders}
+              onPick={model.pick}
+              loginSlot={login}
             />
-          </PopoverSelector>
-
-          <button
-            type="button"
-            disabled
-            title="dictation is not built"
-            aria-label="Voice"
-            className="rounded-control px-2 py-1 text-fine text-faint"
-          >
-            ●
-          </button>
-
-          {busy ? (
-            <Button onClick={() => interrupt.mutate()} disabled={interrupt.isPending}>
-              Stop
-            </Button>
-          ) : null}
-
-          <Button
-            variant="primary"
-            aria-label="Send"
-            disabled={
-              prompt.trim() === "" || readOnly !== null || sending || blockedReason !== null
-            }
-            title={blockedReason ?? undefined}
-            onClick={send}
-            className="rounded-full"
-          >
-            <span aria-hidden="true">↑</span>
-          </Button>
+          </div>
+          <VoiceButton />
+          {model.busy ? <StopButton onStop={model.stop} /> : null}
+          <SendButton tip={model.sendTip} disabled={!canSend} onSend={model.submit} />
         </div>
-        {composerError === null || composerError === undefined ? (
-          blockedReason === null ? null : (
-            <p className="mt-2 text-fine text-faint">{blockedReason}</p>
-          )
-        ) : (
-          <p className="mt-2 text-fine text-fail" role="alert">
-            {messageOf(composerError)}
+        {model.error === null ? null : (
+          <p className="text-fine text-fail" role="alert">
+            {messageOf(model.error)}
           </p>
         )}
       </div>
-
-      <div className="flex items-center justify-between text-fine text-faint">
-        <div className="flex items-center gap-1">
-          <SetupField
-            started={started}
-            lockedText="No workspace"
-            open={openSelector === "workspace"}
-            onOpenChange={toggle("workspace")}
-            trigger="No workspace"
-          >
-            <MenuRow label="No workspace" selected onClick={() => setOpenSelector(null)} />
-            <MenuRow label="Adopt a folder on this machine…" dimmed="not built yet" />
-            <MenuRow label="Add a repo →" dimmed="not built yet" />
-          </SetupField>
-          <SetupField
-            started={started}
-            lockedText="—"
-            open={openSelector === "checkout"}
-            onOpenChange={toggle("checkout")}
-            trigger="Checkout"
-          >
-            <ListRow dimmed disabled>
-              <span className="truncate text-fine text-faint">no workspace</span>
-            </ListRow>
-          </SetupField>
-          <SetupField
-            started={started}
-            lockedText="—"
-            open={openSelector === "branch"}
-            onOpenChange={toggle("branch")}
-            trigger="Branch"
-          >
-            <ListRow dimmed disabled>
-              <span className="truncate text-fine text-faint">no workspace</span>
-            </ListRow>
-          </SetupField>
-        </div>
-        <div className="flex items-center gap-1">
-          <SetupField
-            started={started}
-            lockedText={pickedRunner?.name ?? ""}
-            open={openSelector === "runner"}
-            onOpenChange={toggle("runner")}
-            trigger={runnerLabel}
-            align="end"
-          >
-            {runnerRows.map((row) => (
-              <MenuRow
-                key={row.runnerId}
-                label={runnerRowLabel(row)}
-                secondLine={[row.identity, row.planLabel]
-                  .filter((each) => each !== null)
-                  .join(" · ")}
-                dimmed={row.dimmed}
-                selected={row.runnerId === runnerId}
-                onClick={() => {
-                  // A catalog is scoped instance x runner, so an option picked
-                  // on the runner just left need not exist on this one.
-                  setDraftRunnerId(row.runnerId);
-                  setDraftOptions({});
-                  setOpenSelector(null);
-                }}
-              />
-            ))}
-          </SetupField>
-          <SetupField
-            started={started}
-            lockedText={pickedProfile?.name ?? ""}
-            open={openSelector === "profile"}
-            onOpenChange={toggle("profile")}
-            trigger={pickedProfile?.name ?? "Profile"}
-            align="end"
-          >
-            {profiles.map((each) => (
-              <MenuRow
-                key={each.id}
-                label={each.name}
-                selected={each.id === profileId}
-                onClick={() => {
-                  setDraftProfileId(each.id);
-                  setOpenSelector(null);
-                }}
-              />
-            ))}
-          </SetupField>
-        </div>
-      </div>
+      <Lip
+        workspace={fields.workspace}
+        machine={fields.machine}
+        open={open === "workspace" || open === "machine" ? open : null}
+        onOpenChange={openChange}
+        onPickRunner={(runnerId) => {
+          model.pick({ kind: "runnerId", value: runnerId });
+        }}
+      />
     </div>
   );
 }

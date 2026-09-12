@@ -1,5 +1,5 @@
 import type { JSX } from "react";
-import { Link, useMatches } from "@tanstack/react-router";
+import { Link, useMatches, type StaticDataRouteOption } from "@tanstack/react-router";
 import {
   FALLBACK_TIMEZONE,
   formatSince,
@@ -8,7 +8,6 @@ import {
 } from "@hydra/client-core";
 import type { SettingsState } from "@hydra/contract";
 import { useMinuteClock } from "@hydra/ui";
-import { isRouteCrumb } from "../app/router";
 
 /**
  * The screen title and its time context.
@@ -25,21 +24,34 @@ import { isRouteCrumb } from "../app/router";
  * screen inside the shell, so it is the one place that must never be the
  * reason nothing renders.
  *
- * A route whose loader hands back a `RouteCrumb` (a thread's own title and its
- * `thread · <id>` crumb) is shown instead of the plain screen title: the deepest
- * match wins, the same rule the static title itself follows.
+ * A screen that renders its own chrome says so with `staticData.ownsTopBar`,
+ * and the bar stands down rather than titling the screen twice (spec 14 §The
+ * thread surface) - all but the zone warning, which has no other render site
+ * and would otherwise leave that screen reading its times in the wrong zone
+ * with nothing said.
  */
-export function TopBar({ settings }: { readonly settings: SettingsState }): JSX.Element {
+export function TopBar({ settings }: { readonly settings: SettingsState }): JSX.Element | null {
   const matches = useMatches();
   const now = useMinuteClock();
-
-  const deepest = [...matches].reverse();
-  const framing = deepest.find((match) => match.staticData.title !== undefined)?.staticData;
-  const crumb = deepest.find((match) => isRouteCrumb(match.loaderData))?.loaderData;
-  const title = isRouteCrumb(crumb) ? crumb.title : (framing?.title ?? "");
   const stored = settings.user.timezone ?? FALLBACK_TIMEZONE;
   const known = isSupportedTimezone(stored);
   const timezone = known ? stored : FALLBACK_TIMEZONE;
+  const warning = known ? null : (
+    <Link
+      to="/settings/profile"
+      className="truncate text-fine text-attn underline underline-offset-2"
+    >
+      {`This browser does not know the zone ${stored}; times read in ${FALLBACK_TIMEZONE}.`}
+    </Link>
+  );
+
+  if (ownsItsTopBar(matches)) {
+    return warning === null ? null : <header className="flex px-8 pt-[22px]">{warning}</header>;
+  }
+
+  const deepest = [...matches].reverse();
+  const framing = deepest.find((match) => match.staticData.title !== undefined)?.staticData;
+  const title = framing?.title ?? "";
   const marker =
     framing?.sinceMarker === undefined ? undefined : settings.user[framing.sinceMarker];
   const since = marker === undefined ? undefined : formatSince(new Date(marker), timezone);
@@ -49,20 +61,17 @@ export function TopBar({ settings }: { readonly settings: SettingsState }): JSX.
       <h1 className="min-w-0 truncate text-title font-emph tracking-[-0.015em] text-ink">
         {title}
       </h1>
-      {isRouteCrumb(crumb) ? (
-        <span className="shrink-0 font-mono text-fine text-faint tabular-nums">{crumb.crumb}</span>
-      ) : null}
       <span className="shrink-0 whitespace-nowrap text-[13px] text-muted">
         {since ?? formatTimeContext(now, timezone)}
       </span>
-      {known ? null : (
-        <Link
-          to="/settings/profile"
-          className="truncate text-fine text-attn underline underline-offset-2"
-        >
-          {`This browser does not know the zone ${stored}; times read in ${FALLBACK_TIMEZONE}.`}
-        </Link>
-      )}
+      {warning}
     </header>
   );
 }
+
+/**
+ * Whether the screen on screen renders its own chrome. The deepest match is
+ * the screen itself, so a layout above it never answers for it.
+ */
+export const ownsItsTopBar = (matches: ReadonlyArray<{ staticData: StaticDataRouteOption }>) =>
+  matches[matches.length - 1]?.staticData.ownsTopBar === true;
