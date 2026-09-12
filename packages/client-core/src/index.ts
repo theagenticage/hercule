@@ -69,17 +69,44 @@ export {
 export { THREAD_ROWS_DEFAULT, threadRowsMode } from "./thread-rows";
 export { accessModeMenu, type AccessModeMenuItem } from "./threads/access-modes";
 export { ageOf } from "./threads/age";
+export { applyPick, type ComposerPick } from "./threads/apply-pick";
+export {
+  composerFields,
+  type ComposerBlocked,
+  type ComposerField,
+  type ComposerFields,
+  type ModelPill,
+} from "./threads/composer-fields";
+export type {
+  MessageDraft,
+  Thread,
+  ThreadCatalogs,
+  ThreadConfig,
+  ThreadKind,
+  ThreadPicks,
+} from "./threads/config";
 export { defaultInstanceId } from "./threads/default-instance";
+export { formatDuration } from "./threads/duration";
 export { headlineOf, lanesOf, type Lane, type LaneKind } from "./threads/lanes";
-export { modelMenu, type ModelMenuGroup, type ModelMenuModelRow } from "./threads/model-menu";
-export { modelPillLabel } from "./threads/model-pill";
 export {
   threadModelField,
   type ThreadModelField,
   type ThreadModelFieldOption,
 } from "./threads/model-field";
-export { formatDuration } from "./threads/duration";
+export { modelGroups, type ModelGroup, type ModelGroupRow } from "./threads/model-groups";
+export {
+  modelMenu,
+  type ModelMenu,
+  type ModelMenuInstanceRow,
+  type ModelMenuLane,
+  type ModelMenuRecentRow,
+  type ModelMenuRow,
+  type ModelMenuView,
+} from "./threads/model-menu";
+export { modelPillLabel } from "./threads/model-pill";
 export { openItemOf } from "./threads/open-item";
+export { optionsLabel } from "./threads/options-label";
+export { pushRecent, type RecentModel } from "./threads/recent";
 export { resumeBlockedReason } from "./threads/resume-blocked";
 export { threadRows, type ThreadRow } from "./threads/rows";
 export {
@@ -88,6 +115,7 @@ export {
   type RunnerMenu,
   type RunnerMenuRow,
 } from "./threads/runner-menu";
+export { submission } from "./threads/submission";
 export { instanceDefaults, threadDefaults, type ThreadDefaults } from "./threads/thread-defaults";
 export { turnsOf, type ThreadItem, type ThreadTurn } from "./threads/turns";
 export {

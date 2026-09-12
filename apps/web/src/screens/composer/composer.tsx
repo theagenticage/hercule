@@ -16,7 +16,7 @@ import { useNavigate } from "@tanstack/react-router";
 import {
   accessModeMenu,
   instanceDefaults,
-  modelMenu,
+  modelGroups,
   modelPillLabel,
   queryKeys,
   referenceRunner,
@@ -49,7 +49,7 @@ type SelectorKey =
 /**
  * Once a thread has started, the provider instance is where its login and its
  * User Material live - switching it would need a new thread, so every other
- * instance's group is locked shut regardless of what `modelMenu` itself would
+ * instance's group is locked shut regardless of what `modelGroups` itself would
  * otherwise dim it with.
  */
 const SWITCH_LOCK_REASON = "switching accounts starts a new thread";
@@ -169,7 +169,9 @@ export function Composer({
   const pickedProfile = profiles.find((each) => each.id === profileId);
 
   const rawGroups =
-    instance === undefined ? [] : modelMenu(instances, pickedRunner ?? null, { instanceId, model });
+    instance === undefined
+      ? []
+      : modelGroups(instances, pickedRunner ?? null, { instanceId, model });
   const groups = started
     ? rawGroups.map((group) =>
         group.instanceId === instanceId ? group : { ...group, dimmed: SWITCH_LOCK_REASON },

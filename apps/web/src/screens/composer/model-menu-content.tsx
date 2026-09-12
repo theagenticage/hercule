@@ -1,16 +1,16 @@
 import type { JSX } from "react";
 import { Checkbox, ListRow, SegmentedControl, SegmentedControlItem } from "@hydra/ui";
-import type { HydraClient, ModelMenuGroup } from "@hydra/client-core";
+import type { HydraClient, ModelGroup } from "@hydra/client-core";
 import type { ModelOption } from "@hydra/contract";
 import { ProviderLogin } from "../provider-login";
 import { MenuRow } from "./menu-row";
 
 /**
- * The model popover: `modelMenu`'s groups, each collapsed group a single
+ * The model popover: `modelGroups`'s groups, each collapsed group a single
  * clickable summary row and each expanded group's models their own rows,
  * then the current model's options rendered straight off its descriptor - a
  * `select` option as a segmented row, a `boolean` one as a checkbox, no
- * free-text entry anywhere. A group already dimmed by `modelMenu` itself, or
+ * free-text entry anywhere. A group already dimmed by `modelGroups` itself, or
  * forced dimmed by the caller once a thread has started, is never clickable.
  *
  * The expanded group's own dimmed reason (not logged in on this runner, or
@@ -29,7 +29,7 @@ export function ModelMenuContent({
   loginRunner,
   onLoggedIn,
 }: {
-  readonly groups: readonly ModelMenuGroup[];
+  readonly groups: readonly ModelGroup[];
   readonly onPickModel: (slug: string) => void;
   readonly onSwitchInstance: (instanceId: string) => void;
   /** The currently selected model's own option descriptors, verbatim. */

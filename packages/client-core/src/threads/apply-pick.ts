@@ -1,0 +1,54 @@
+/**
+ * One selector choice folded into the picks the composer holds. Two rules:
+ * a pick that matches what is already in force is not a change, and the
+ * per-model choices belong to the model that offered them, so anything that
+ * changes the catalog underneath them - another model, another account,
+ * another machine - drops them rather than carrying a value the new catalog
+ * never offered.
+ */
+import type { AccessMode } from "@hydra/contract";
+import type { ThreadCatalogs, ThreadConfig, ThreadPicks } from "./config";
+import { instanceDefaults } from "./thread-defaults";
+
+export type ComposerPick =
+  | { readonly kind: "model"; readonly value: string }
+  | { readonly kind: "instanceId"; readonly value: string }
+  | { readonly kind: "option"; readonly id: string; readonly value: string | boolean }
+  | { readonly kind: "accessMode"; readonly value: AccessMode }
+  | { readonly kind: "runnerId"; readonly value: string };
+
+/** The picks without the choices the old model offered, since they go with it. */
+const withoutOptions = (picks: ThreadPicks): ThreadPicks =>
+  Object.fromEntries(Object.entries(picks).filter(([key]) => key !== "options"));
+
+export const applyPick = (
+  config: ThreadConfig,
+  picks: ThreadPicks,
+  pick: ComposerPick,
+  catalogs: ThreadCatalogs,
+): ThreadPicks => {
+  switch (pick.kind) {
+    case "model":
+      // A pick that changes the catalog says nothing about the choices at
+      // all, rather than saying `{}`: the session keeps what it runs with
+      // until the new model's own choices are picked.
+      return config.model === pick.value ? picks : { ...withoutOptions(picks), model: pick.value };
+    case "instanceId": {
+      const instance = catalogs.instances.find((each) => each.id === pick.value);
+      if (config.instanceId === pick.value || instance === undefined) return picks;
+      // A catalog is scoped instance x runner, and the machine that hosts the
+      // instance just left need not host this one, so the runner is resolved
+      // first and the model read from that runner's snapshot.
+      const forInstance = instanceDefaults(instance, catalogs.runners, catalogs.localRunnerId);
+      return { ...withoutOptions(picks), instanceId: pick.value, ...forInstance };
+    }
+    case "option":
+      return { ...picks, options: { ...picks.options, [pick.id]: pick.value } };
+    case "accessMode":
+      return config.accessMode === pick.value ? picks : { ...picks, accessMode: pick.value };
+    case "runnerId":
+      return config.runnerId === pick.value
+        ? picks
+        : { ...withoutOptions(picks), runnerId: pick.value };
+  }
+};
