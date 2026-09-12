@@ -23,7 +23,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ModelOption, Profile, ProviderInstance, Runner, Session } from "@hydra/contract";
-import { envelope, renderApp, stubApi, type Handler } from "../../../app/testing";
+import { envelope, pickRow, renderApp, stubApi, type Handler } from "../../../app/testing";
 
 const ZONE = "Europe/Amsterdam";
 
@@ -991,7 +991,7 @@ describe("Composer: Recent follows the submission home", () => {
 
   const pickOpusAndSend = async (user: ReturnType<typeof userEvent.setup>): Promise<void> => {
     await user.click(await screen.findByRole("button", { name: /claude sonnet 5/i }));
-    await user.click(await screen.findByRole("button", { name: /claude opus 5/i }));
+    await pickRow(user, /claude opus 5/i);
     await user.type(screen.getByRole("textbox"), "Fix the login bug");
     await user.click(screen.getByRole("button", { name: /send/i }));
   };

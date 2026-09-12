@@ -24,7 +24,7 @@ import type {
   TranscriptRow,
 } from "@hydra/contract";
 import { sessionStreamTopic, sessionTapTopic } from "@hydra/contract";
-import { envelope, renderApp, stubApi, type Handler } from "../../../app/testing";
+import { envelope, pickRow, renderApp, stubApi, type Handler } from "../../../app/testing";
 
 const SESSION_ID = "01a06d02-b100-7000-8000-000000000001";
 const ZONE = "Europe/Amsterdam";
@@ -1713,7 +1713,7 @@ describe("Thread: model options ride the submission (AC-6, AC-7)", () => {
     await user.click(await screen.findByRole("radio", { name: "High" }));
     await user.keyboard("{Escape}");
     await user.click(screen.getByRole("button", { name: /claude sonnet 5/i }));
-    await user.click(await screen.findByRole("button", { name: /claude opus 5/i }));
+    await pickRow(user, /claude opus 5/i);
 
     await user.type(screen.getByRole("textbox"), "Also check the logs");
     await user.click(screen.getByRole("button", { name: /send/i }));
@@ -1746,7 +1746,7 @@ describe("Thread: model options ride the submission (AC-6, AC-7)", () => {
     );
 
     await user.click(screen.getByRole("button", { name: /claude sonnet 5/i }));
-    await user.click(await screen.findByRole("button", { name: /claude opus 5/i }));
+    await pickRow(user, /claude opus 5/i);
     await user.click(await screen.findByRole("button", { name: "medium" }));
 
     // The stored `high` was stored for the other model, and the server drops
@@ -1832,7 +1832,7 @@ describe("Thread: model options ride the submission (AC-6, AC-7)", () => {
     });
 
     await user.click(screen.getByRole("button", { name: /claude sonnet 5/i }));
-    await user.click(await screen.findByRole("button", { name: /claude opus 5/i }));
+    await pickRow(user, /claude opus 5/i);
     await user.click(await screen.findByRole("button", { name: "medium" }));
     await user.click(await screen.findByRole("radio", { name: "High" }));
     await user.keyboard("{Escape}");
@@ -2014,8 +2014,7 @@ describe("Composer: a model pick is pending until it is sent", () => {
     expect(reading()).not.toContain("model change applies on send");
 
     await user.click(await screen.findByRole("button", { name: /claude sonnet 5/i }));
-    await user.click(await screen.findByRole("button", { name: /claude opus 5/i }));
-    await user.keyboard("{Escape}");
+    await pickRow(user, /claude opus 5/i);
 
     // Unsent, so the card says so, and the pill already names what will go.
     await waitFor(() => {

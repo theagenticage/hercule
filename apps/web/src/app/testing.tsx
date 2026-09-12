@@ -7,8 +7,9 @@
  * sequencing a browser would, and a change to a route or to the entry guard
  * shows up here rather than in a mock.
  */
-import { afterEach } from "vitest";
-import { cleanup, render } from "@testing-library/react";
+import { afterEach, expect } from "vitest";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import type userEvent from "@testing-library/user-event";
 import { RouterProvider, createMemoryHistory } from "@tanstack/react-router";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createClient, createLive, type FetchLike, type Live } from "@hydra/client-core";
@@ -147,6 +148,26 @@ afterEach(async () => {
   cleanup();
   await Promise.all(started.splice(0).map((live) => live.stop()));
 });
+
+/**
+ * Clicks a row inside the open menu - the Radix popover, read as
+ * `role="dialog"` - and waits for the menu to be gone.
+ *
+ * A pick hands its name to the trigger it changes: right after the click the
+ * row and the trigger both answer to the same name until the popover
+ * unmounts, and a query for the trigger finds two elements. Waiting for the
+ * menu to close is what makes the trigger the only match.
+ */
+export const pickRow = async (
+  user: ReturnType<typeof userEvent.setup>,
+  name: RegExp | string,
+): Promise<void> => {
+  const menu = await screen.findByRole("dialog");
+  await user.click(within(menu).getByRole("button", { name }));
+  await waitFor(() => {
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+};
 
 /** Renders the whole app at `path`, holding `token` from the start if given. */
 export const renderApp = async ({
