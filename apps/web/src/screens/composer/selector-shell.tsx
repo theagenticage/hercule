@@ -56,7 +56,7 @@ export function SelectorShell({
     return (
       <span
         title={locked}
-        className="inline-flex items-center gap-1.5 px-[7px] py-[3px] text-meta text-muted"
+        className="inline-flex items-center gap-[5px] px-[7px] py-[3px] text-meta text-muted"
       >
         {key}
         <span>{label}</span>
@@ -72,7 +72,7 @@ export function SelectorShell({
           disabled={disabled}
           className={cn(
             "disabled:cursor-default disabled:text-faint disabled:hover:bg-transparent",
-            "inline-flex cursor-pointer items-center gap-1.5 whitespace-nowrap",
+            "inline-flex cursor-pointer items-center gap-[5px] whitespace-nowrap",
             "after:text-[10px] after:text-faint after:content-['▾']",
             "focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-live",
             "rounded-[5px] px-[7px] py-[3px] text-meta text-muted",
@@ -92,7 +92,7 @@ export function SelectorShell({
         // The menu opens upwards into the room above its trigger and scrolls
         // inside it, rather than growing off the top of the window.
         className={cn(
-          "flex max-h-[calc(var(--radix-popover-content-available-height)-16px)] w-80 flex-col",
+          "flex max-h-[calc(var(--radix-popover-content-available-height)-10px)] w-80 flex-col",
           "overflow-y-auto rounded-[10px] p-1.5 text-meta",
           contentClassName,
         )}

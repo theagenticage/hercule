@@ -32,7 +32,7 @@ export function Lip({
         onOpenChange={onOpenChange("workspace")}
         onPick={onClose}
       />
-      <span className="ml-auto">
+      <span className="ml-auto inline-flex items-center gap-0.5">
         <MachineSelector
           name={fields.machine.label}
           rows={fields.machine.rows}

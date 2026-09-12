@@ -11,8 +11,9 @@ import { ProviderLogin } from "../provider-login";
  */
 export const loginSlot =
   (client: HydraClient, onLoggedIn: () => void) =>
-  (login: LoginTarget): ReactNode => (
+  (login: LoginTarget, className: string): ReactNode => (
     <ProviderLogin
+      className={className}
       client={client}
       instanceId={login.instanceId}
       runnerId={login.runnerId}

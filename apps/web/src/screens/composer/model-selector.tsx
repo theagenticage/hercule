@@ -1,22 +1,23 @@
 import { Fragment, useState, type JSX, type ReactNode } from "react";
 import type { ComposerPick, LoginTarget, ModelMenu, ModelPill } from "@hydra/client-core";
 import { ProviderLogo } from "@hydra/ui";
+import { PillLabel } from "./controls";
 import { aside, Lane, markerOf, MenuRow } from "./menu-row";
 import { SelectorShell } from "./selector-shell";
 
 type Row = ModelMenu["current"]["rows"][number];
+type Instance = ModelMenu["others"][number];
+
+/** An account's row names who is logged in and on what plan, beside the account. */
+const whoOf = (instance: Instance): string =>
+  [instance.identity, instance.planLabel].filter((each) => each !== null).join(" · ");
 
 /** With no filter to type in, focus stays on the trigger the menu opened from. */
 const holdFocus = (event: Event): void => event.preventDefault();
 
-/** The pill's face: the mark, the account where a provider has two, the model. */
-const pillLabel = (pill: ModelPill): ReactNode => (
-  <>
-    {pill.providerId === null ? null : <ProviderLogo providerId={pill.providerId} />}
-    {pill.account === null ? null : <span className="text-faint">{pill.account}</span>}{" "}
-    <span>{pill.name ?? "No model"}</span>
-  </>
-);
+/** The Log in on an account's row reads as the row's own note, not as a button. */
+const ROW_LOGIN =
+  "p-0 text-[11px] leading-normal font-normal text-muted enabled:hover:bg-transparent";
 
 /**
  * The model selector: the pill, and the catalog behind it - what was reached
@@ -39,7 +40,7 @@ export function ModelSelector({
   readonly open: boolean;
   readonly onOpenChange: (open: boolean) => void;
   readonly onPick: (...steps: readonly ComposerPick[]) => void;
-  readonly loginSlot: (login: LoginTarget) => ReactNode;
+  readonly loginSlot: (login: LoginTarget, className: string) => ReactNode;
 }): JSX.Element {
   const [filter, setFilter] = useState("");
   const [older, setOlder] = useState(false);
@@ -50,6 +51,9 @@ export function ModelSelector({
   };
   // A row carries its account: one reached through the filter or Recent
   // switches account and model together.
+  const pickModel = (instanceId: string, model: string): void => {
+    pick({ kind: "instanceId", value: instanceId }, { kind: "model", value: model });
+  };
   const modelRow = (providerId: string | null, row: Row): JSX.Element => (
     <MenuRow
       key={`${row.instanceId}:${row.slug}`}
@@ -58,7 +62,7 @@ export function ModelSelector({
       note={row.current ? "✓" : undefined}
       current={row.current}
       onPick={() => {
-        pick({ kind: "instanceId", value: row.instanceId }, { kind: "model", value: row.slug });
+        pickModel(row.instanceId, row.slug);
       }}
     />
   );
@@ -66,8 +70,8 @@ export function ModelSelector({
   const currentRow = (row: Row): JSX.Element => modelRow(menu.current.providerId, row);
   return (
     <SelectorShell
-      label={pillLabel(pill)}
-      className="rounded-full border border-line bg-surface py-1 pr-[11px] pl-[9px] text-ink hover:bg-surface aria-expanded:border-faint aria-expanded:bg-surface [&>svg]:opacity-80"
+      label={<PillLabel pill={pill} />}
+      className="gap-1.5 rounded-full border border-line bg-surface py-1 pr-[11px] pl-[9px] text-ink hover:bg-surface aria-expanded:border-faint aria-expanded:bg-surface [&>svg]:opacity-80"
       locked={null}
       disabled={disabled}
       open={open}
@@ -90,7 +94,7 @@ export function ModelSelector({
           onChange={(event) => {
             setFilter(event.target.value);
           }}
-          className="mx-0.5 mt-0.5 mb-1 rounded-[6px] border border-line bg-surface px-2.5 py-[5px] text-meta text-ink outline-none placeholder:text-faint focus:border-live"
+          className="mx-0.5 mt-0.5 mb-1 rounded-[6px] border border-line bg-surface px-[9px] py-[5px] text-meta text-ink outline-none placeholder:text-faint focus:border-live"
         />
       ) : null}
       {menu.recent.length === 0 ? null : <Lane label="Recent" />}
@@ -101,10 +105,7 @@ export function ModelSelector({
           name={[row.name, aside(row.account)]}
           dimmed={row.dimmed}
           onPick={() => {
-            pick(
-              { kind: "instanceId", value: row.instanceId },
-              { kind: "model", value: row.model },
-            );
+            pickModel(row.instanceId, row.model);
           }}
         />
       ))}
@@ -115,7 +116,7 @@ export function ModelSelector({
       ) : (
         <MenuRow
           marker={markerOf(null)}
-          name={aside(`older models (${String(menu.current.older.length)}) ›`)}
+          name={<span className="text-faint">older models ({menu.current.older.length}) ›</span>}
           onPick={() => {
             setOlder(true);
           }}
@@ -127,13 +128,10 @@ export function ModelSelector({
             key={instance.instanceId}
             className="mt-1 rounded-t-none border-t border-line-soft pt-[9px]"
             marker={markerOf(<ProviderLogo providerId={instance.providerId} />)}
-            name={instance.name}
-            sub={[instance.identity, instance.planLabel]
-              .filter((each) => each !== null)
-              .join(" · ")}
+            name={[instance.name, aside(whoOf(instance))]}
             note={instance.dimmed === null ? `${String(instance.modelCount)} models ›` : undefined}
             dimmed={instance.dimmed}
-            trailing={instance.login === null ? null : loginSlot(instance.login)}
+            trailing={instance.login === null ? null : loginSlot(instance.login, ROW_LOGIN)}
             onPick={() => {
               pick({ kind: "instanceId", value: instance.instanceId });
             }}

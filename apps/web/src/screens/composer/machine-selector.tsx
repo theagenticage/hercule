@@ -22,9 +22,11 @@ const STATE_HUE: Record<RunnerMenuRow["state"], string> = {
 const rowLabel = (row: RunnerMenuRow): JSX.Element => (
   <span className="flex min-w-0 items-center">
     <span className="truncate">{row.name}</span>
-    <span className={cn("shrink-0", STATE_HUE[row.state])}>{` · ${row.state}`}</span>
-    {row.isLocal ? <span className="shrink-0 text-faint"> · this machine</span> : null}
-    {row.reserved ? <span className="shrink-0 text-faint"> · reserved</span> : null}
+    <span className={cn("shrink-0 whitespace-pre", STATE_HUE[row.state])}>{` · ${row.state}`}</span>
+    {row.isLocal ? (
+      <span className="shrink-0 text-faint whitespace-pre"> · this machine</span>
+    ) : null}
+    {row.reserved ? <span className="shrink-0 text-faint whitespace-pre"> · reserved</span> : null}
   </span>
 );
 

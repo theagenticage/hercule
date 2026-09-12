@@ -1,8 +1,9 @@
 import type { JSX } from "react";
-import { cn } from "@hydra/ui";
+import type { ModelPill } from "@hydra/client-core";
+import { cn, ProviderLogo } from "@hydra/ui";
 
 const GLYPH =
-  "inline-flex size-[26px] shrink-0 items-center justify-center rounded-[7px] text-faint";
+  "inline-flex size-[26px] shrink-0 items-center justify-center rounded-[7px] text-muted";
 
 /** The card row's plain controls: no domain, no state, one job each. */
 export function AttachButton(): JSX.Element {
@@ -75,10 +76,21 @@ export function SendButton({
       title={tip}
       disabled={disabled}
       onClick={onSend}
-      className="inline-flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-full bg-ink text-meta text-bg focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-live disabled:cursor-default disabled:bg-line disabled:text-faint"
+      className="inline-flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-full bg-ink text-[13px] text-bg focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-live disabled:cursor-default disabled:bg-line disabled:text-faint"
     >
       <span aria-hidden="true">↑</span>
     </button>
+  );
+}
+
+/** The pill's face: the mark, the account where a provider has two, the model. */
+export function PillLabel({ pill }: { readonly pill: ModelPill }): JSX.Element {
+  return (
+    <>
+      {pill.providerId === null ? null : <ProviderLogo providerId={pill.providerId} />}
+      {pill.account === null ? null : <span className="text-faint">{pill.account}</span>}{" "}
+      <span>{pill.name ?? "No model"}</span>
+    </>
   );
 }
 

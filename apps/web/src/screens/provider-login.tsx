@@ -19,8 +19,10 @@ export function ProviderLogin({
   subject,
   label,
   variant = "quiet",
+  className,
   onLoggedIn,
 }: {
+  readonly className?: string;
   readonly client: HydraClient;
   readonly instanceId: string;
   /** The machine the credential lands on, and the only one it works on. */
@@ -64,6 +66,7 @@ export function ProviderLogin({
     <>
       <Button
         variant={variant}
+        className={className}
         disabled={start.isPending}
         onClick={() => {
           start.mutate();

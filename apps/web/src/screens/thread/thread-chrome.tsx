@@ -33,6 +33,8 @@ export function ThreadChrome({
 export function ChromeAction(props: {
   readonly title: string;
   readonly disabled?: boolean;
+  /** A glyph rather than a word: narrower, and its dots spaced out. */
+  readonly icon?: boolean;
   readonly children: ReactNode;
 }): JSX.Element {
   return (
@@ -40,7 +42,10 @@ export function ChromeAction(props: {
       type="button"
       title={props.title}
       disabled={props.disabled}
-      className="rounded-full border border-line bg-raised px-[11px] py-[3px] text-meta font-normal whitespace-nowrap text-muted enabled:cursor-pointer enabled:hover:bg-line-soft enabled:hover:text-ink"
+      className={cn(
+        "rounded-full border border-line bg-raised py-[3px] text-meta font-normal whitespace-nowrap text-muted enabled:cursor-pointer enabled:hover:bg-line-soft enabled:hover:text-ink",
+        props.icon ? "px-[9px] tracking-[1px]" : "px-[11px]",
+      )}
     >
       {props.children}
     </button>

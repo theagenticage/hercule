@@ -54,7 +54,7 @@ export function ModelOptionsSelector({
       className="ml-auto min-w-[84px] justify-between text-ink"
     >
       <MenuHeader label={HEADER} note={modelName ?? undefined} />
-      <div className="grid grid-cols-[68px_minmax(0,1fr)] items-center gap-x-2.5 gap-y-1.5 px-2 pt-1.5 pb-1">
+      <div className="mt-0.5 grid grid-cols-[68px_minmax(0,1fr)] items-center gap-x-2.5 gap-y-[5px] px-2 pt-1.5 pb-1">
         {descriptors.map((option) => {
           const value = selected[option.id] ?? option.default;
           return (
@@ -64,13 +64,18 @@ export function ModelOptionsSelector({
               </span>
               <SegmentedControl
                 aria-label={option.label}
+                className="w-auto flex-wrap gap-px rounded-none border-0 bg-transparent p-0"
                 value={option.kind === "boolean" ? (value === true ? "on" : "off") : String(value)}
                 onValueChange={(next) => {
                   onPick(option.id, option.kind === "boolean" ? next === "on" : next);
                 }}
               >
                 {choicesOf(option).map((choice) => (
-                  <SegmentedControlItem key={choice.value} value={choice.value}>
+                  <SegmentedControlItem
+                    key={choice.value}
+                    value={choice.value}
+                    className="flex-none rounded-[5px] px-2 py-[3px] text-[12px] hover:bg-line-soft data-[state=on]:bg-line-soft data-[state=on]:shadow-none"
+                  >
                     {choice.label}
                   </SegmentedControlItem>
                 ))}

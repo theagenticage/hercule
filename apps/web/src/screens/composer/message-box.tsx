@@ -53,7 +53,7 @@ export function MessageBox({
         event.preventDefault();
         onSubmit();
       }}
-      className="block max-h-[168px] w-full resize-none overflow-y-auto bg-transparent text-body leading-[1.5] text-ink outline-none placeholder:text-faint disabled:text-faint"
+      className="block max-h-[168px] min-h-6 w-full resize-none overflow-y-auto bg-transparent text-body leading-[1.5] text-ink outline-none placeholder:text-faint disabled:text-faint"
     />
   );
 }

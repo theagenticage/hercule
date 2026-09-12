@@ -64,7 +64,7 @@ export function Composer({
     // A draft stands under its own sentence, which takes the room above the card.
     <div className={model.lead === null ? "flex w-full flex-col" : "flex w-full flex-1 flex-col"}>
       <DraftHero lead={model.lead} blocked={fields.blocked} loginSlot={login} />
-      <div className="flex flex-col gap-2 rounded-[14px] border border-line bg-raised px-3.5 pt-3 pb-2.5 shadow-lift">
+      <div className="relative z-[1] flex flex-col gap-2 rounded-[14px] border border-line bg-raised px-3.5 pt-3 pb-2.5 shadow-lift">
         <MessageBox
           value={model.message}
           placeholder={model.placeholder}

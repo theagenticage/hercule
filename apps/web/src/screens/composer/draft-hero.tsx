@@ -15,24 +15,26 @@ export function DraftHero({
   /** The sentence, or nothing at all: an active thread stands under none. */
   readonly lead: string | null;
   readonly blocked: ComposerBlocked | null;
-  readonly loginSlot: (login: LoginTarget) => ReactNode;
+  readonly loginSlot: (login: LoginTarget, className: string) => ReactNode;
 }): JSX.Element | null {
   if (lead === null) return null;
   return (
-    <div className="my-auto pb-6 text-center">
+    <div className="my-auto pt-1 pb-[42px] text-center">
       <h2 className="mb-1.5 text-[22px] font-emph text-ink">What should the agent do?</h2>
-      <div className="flex items-center justify-center gap-2 text-row text-muted">
+      <p className="text-row text-muted">
         {blocked === null ? (
           lead
         ) : (
           <>
-            <span>
-              <span className="font-emph text-attn">Can&apos;t start yet.</span> {blocked.reason}.
-            </span>
-            {blocked.login === null ? null : loginSlot(blocked.login)}
+            <span className="font-emph text-attn">Can&apos;t start yet.</span> {blocked.reason}.{" "}
+            {blocked.login === null ? null : loginSlot(blocked.login, HERO_LOGIN)}
           </>
         )}
-      </div>
+      </p>
     </div>
   );
 }
+
+/** The one action that clears the blocker, set in the sentence as a link. */
+const HERO_LOGIN =
+  "p-0 text-row leading-normal text-ink underline decoration-line underline-offset-[3px] enabled:hover:bg-transparent";

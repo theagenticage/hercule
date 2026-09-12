@@ -42,22 +42,31 @@ export function MenuRow({
         </span>
       )}
       <span className="min-w-0 truncate">{name}</span>{" "}
-      <span className="flex shrink-0 items-center gap-1.5 text-[11px] whitespace-nowrap text-faint">
+      <span
+        className={cn(
+          "flex shrink-0 items-center gap-1.5 text-[11px] font-normal whitespace-nowrap",
+          marker !== undefined && current ? "text-ink" : "text-faint",
+        )}
+      >
         {note ?? dimmed}
+        {trailing === undefined || trailing === null ? null : <span>·</span>}
         {trailing}
       </span>
       {sub === undefined || sub === null ? null : (
-        <span className="col-start-2 col-end-4 truncate text-[11px] text-faint">{sub}</span>
+        <span className="col-start-2 col-end-4 truncate text-[11px] font-normal text-faint">
+          {sub}
+        </span>
       )}
     </>
   );
 
   const layout = cn(
     "grid w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-2 rounded-[6px]",
-    // A row that carries a mark is a model row, and sits a shade taller.
+    // A row that carries a mark is a model row: a shade taller, and in ink.
     marker === undefined ? "px-2 py-[5px]" : "px-2 py-1.5",
     "text-left text-meta",
-    current ? "font-emph text-ink" : "text-muted",
+    current && "font-emph",
+    current || (marker !== undefined && dimmed === null) ? "text-ink" : "text-muted",
     className,
   );
 
@@ -84,7 +93,7 @@ export function MenuRow({
 /** A lane's own heading inside a menu; the first one carries no rule above it. */
 export function Lane({ label }: { readonly label: string }): JSX.Element {
   return (
-    <div className="mt-1.5 border-t border-line-soft px-2 pt-2 pb-[3px] first:mt-0 first:border-t-0">
+    <div className="mt-1.5 border-t border-line-soft px-2 pt-2 pb-[3px] first:mt-0 first:border-t-0 first:pt-1 [input+&]:mt-0 [input+&]:border-t-0 [input+&]:pt-1">
       <span className="text-label font-emph tracking-[0.1em] text-faint uppercase">{label}</span>
     </div>
   );

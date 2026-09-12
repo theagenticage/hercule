@@ -61,7 +61,7 @@ export function ThreadScreen({
         project={null}
         title={session.title}
         actions={
-          <ChromeAction title="More (not built)" disabled>
+          <ChromeAction title="More (not built)" icon disabled>
             …
           </ChromeAction>
         }
