@@ -9,7 +9,7 @@
 import { describe, expect, it } from "vitest";
 import type { ModelOption, ProviderInstance, Runner } from "@hydra/contract";
 import { BARE, instance, snapshot } from "../providers.testing";
-import { composerFields } from "./composer-fields";
+import { composerFields, pendingModelNote } from "./composer-fields";
 
 const runner = (overrides: Partial<Runner> & { id: string }): Runner => ({
   ...BARE,
@@ -132,7 +132,7 @@ describe("composerFields", () => {
 
     expect(fields.blocked).toEqual({
       reason: "Claude Code is on moss but not logged in",
-      login: { instanceId: LOGGED_OUT.id, runnerId: LOCAL.id },
+      login: { instanceId: LOGGED_OUT.id, runnerId: LOCAL.id, displayName: "Claude Code" },
     });
   });
 
@@ -167,5 +167,37 @@ describe("composerFields", () => {
       account: "personal",
       name: "Claude Sonnet 5",
     });
+  });
+});
+
+describe("composerFields: the machine", () => {
+  it("names the machine the thread would be placed on", () => {
+    expect(composerFields(catalogs([CLAUDE]), config(), "draft").machine.label).toBe("moss");
+  });
+
+  it("says there is no machine to name when the fleet holds none", () => {
+    const fields = composerFields(
+      { instances: [CLAUDE], runners: [], localRunnerId: null },
+      config({ runnerId: null }),
+      "draft",
+    );
+
+    expect(fields.machine.label).toBe("no machine");
+  });
+});
+
+describe("pendingModelNote", () => {
+  it("says the change applies on send while an active thread holds an unsent model pick", () => {
+    expect(pendingModelNote("active", { model: "claude-opus-5" })).toBe(
+      "model change applies on send",
+    );
+  });
+
+  it("says nothing on a draft, whose picks go out with the thread's first message", () => {
+    expect(pendingModelNote("draft", { model: "claude-opus-5" })).toBeNull();
+  });
+
+  it("says nothing when only the options were picked: the model itself is not changing", () => {
+    expect(pendingModelNote("active", { options: { effort: "high" } })).toBeNull();
   });
 });

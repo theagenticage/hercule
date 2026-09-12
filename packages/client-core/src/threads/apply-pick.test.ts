@@ -62,12 +62,18 @@ describe("applyPick", () => {
     ).toEqual({ model: OPUS.slug });
   });
 
-  it("changes nothing when the model already picked is picked again", () => {
-    const picks = { model: SONNET.slug, options: { effort: "high" } };
-
-    expect(applyPick(CONFIG, picks, { kind: "model", value: SONNET.slug }, CATALOGS)).toEqual(
-      picks,
-    );
+  it("drops the pick, and the options under it, when the model in force is picked back", () => {
+    // The config is the thread's own, so picking its model after another is
+    // picking nothing: the picks are left with neither the model nor the
+    // choices made under the one just left.
+    expect(
+      applyPick(
+        CONFIG,
+        { model: OPUS.slug, options: { effort: "high" } },
+        { kind: "model", value: SONNET.slug },
+        CATALOGS,
+      ),
+    ).toEqual({});
   });
 
   it("changes nothing when the model in force is picked again, whatever the picks hold", () => {

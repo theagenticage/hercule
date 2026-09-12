@@ -8,6 +8,7 @@
  */
 import type { ModelDescriptor, ProviderInstance } from "@hydra/contract";
 import { accountName, instanceLabel, snapshotOn } from "./catalog";
+import type { LoginTarget } from "./composer-fields";
 import type { ThreadCatalogs, ThreadConfig, ThreadKind } from "./config";
 import type { RecentModel } from "./recent";
 import { referenceRunner } from "./runner-menu";
@@ -21,6 +22,8 @@ const RECENT_LIMIT = 3;
 const ACCOUNT_FIXED = "account fixed";
 
 export interface ModelMenuRow {
+  /** The account offering it, so a row picked from any lane knows where it lives. */
+  readonly instanceId: string;
   readonly slug: string;
   readonly name: string;
   readonly isDefault: boolean;
@@ -52,8 +55,10 @@ export interface ModelMenuInstanceRow {
   readonly planLabel: string | null;
   readonly modelCount: number;
   readonly dimmed: string | null;
-  readonly login: { readonly instanceId: string; readonly runnerId: string } | null;
-  /** Filled while filtering: the rows of this account the filter matched. */
+  readonly login: LoginTarget | null;
+  /** Filled while filtering on a draft: the rows of this account the filter
+   * matched. An active thread's account is fixed, so there is nothing here to
+   * pick and the row stays a row. */
   readonly rows: readonly ModelMenuRow[];
 }
 
@@ -89,6 +94,7 @@ export const modelMenu = (
     snapshotOn(instance, runner?.id)?.models ?? [];
 
   const rowOf = (instance: ProviderInstance, descriptor: ModelDescriptor): ModelMenuRow => ({
+    instanceId: instance.id,
     slug: descriptor.slug,
     name: descriptor.name,
     isDefault: descriptor.isDefault === true,
@@ -146,11 +152,11 @@ export const modelMenu = (
       .flatMap((each) => {
         const snapshot = snapshotOn(each, runner?.id);
         const models = modelsOf(each);
-        const rows =
+        const matched =
           filter === ""
             ? []
             : models.filter((descriptor) => matches(descriptor, filter)).map((d) => rowOf(each, d));
-        if (filter !== "" && rows.length === 0) return [];
+        if (filter !== "" && matched.length === 0) return [];
 
         const dimmed =
           view.kind === "active"
@@ -172,12 +178,11 @@ export const modelMenu = (
             dimmed,
             login:
               snapshot !== undefined && snapshot.auth.status !== "ok" && runner !== undefined
-                ? { instanceId: each.id, runnerId: runner.id }
+                ? { instanceId: each.id, runnerId: runner.id, displayName: each.displayName }
                 : null,
-            rows,
+            rows: view.kind === "active" ? [] : matched,
           },
         ];
-      })
-      .slice(0, RECENT_LIMIT),
+      }),
   };
 };

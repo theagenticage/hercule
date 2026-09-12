@@ -1,45 +1,98 @@
 import type { JSX, ReactNode } from "react";
-import { ListRow } from "@hydra/ui";
+import { cn } from "@hydra/ui";
 
 /**
- * One row of a composer selector's menu: a label, and a second line that is
- * either an informational detail (a runner's identity, say) or - when the row
- * cannot be picked - the reason, which is what the "dimmed with the reason,
- * never hidden" rule (spec 14 §The composer) means at the row level.
+ * One row of a composer menu: a marker column (the dot on the row in force, or
+ * a provider's mark), the name, a note at the right, and a sub-line under
+ * both.
  *
- * `blocking` is the difference between the two ways a row dims: a runner or a
- * model nobody is logged into cannot be picked at all, but a declared-unsupported
- * access mode still can be - the composer honours the choice and runs it at its
- * declared fallback rather than refusing it, so that dimming is informational
- * only and the row stays clickable.
+ * A dimmed row is not a button. It is inert - "dimmed with the reason, never
+ * hidden" (spec 14 §The composer) means the row stays on show and stops
+ * answering - and the one affordance it may still carry, a login, is a control
+ * of its own in the trailing slot, which could not be nested inside a button.
  */
 export function MenuRow({
-  label,
-  secondLine = null,
-  selected = false,
+  marker,
+  name,
+  note,
+  sub,
+  current = false,
   dimmed = null,
-  blocking = true,
-  onClick,
+  trailing,
+  onPick,
 }: {
-  readonly label: ReactNode;
-  readonly secondLine?: string | null;
-  readonly selected?: boolean;
+  /** What stands in the marker column; the row's own dot when nothing does. */
+  readonly marker?: ReactNode;
+  readonly name: ReactNode;
+  readonly note?: ReactNode;
+  readonly sub?: ReactNode;
+  readonly current?: boolean;
   readonly dimmed?: string | null;
-  readonly blocking?: boolean;
-  readonly onClick?: () => void;
+  readonly trailing?: ReactNode;
+  readonly onPick?: () => void;
 }): JSX.Element {
-  const line = dimmed ?? secondLine;
-  return (
-    <ListRow
-      selected={selected}
-      dimmed={dimmed !== null}
-      disabled={dimmed !== null && blocking}
-      onClick={onClick}
-    >
-      <span className="flex min-w-0 flex-1 flex-col">
-        <span className="truncate">{label}</span>
-        {line === null ? null : <span className="truncate text-fine text-faint">{line}</span>}
+  const body = (
+    <>
+      {marker ?? (
+        <span aria-hidden="true" className="flex w-2.5 justify-center">
+          <span className={cn("size-[5px] rounded-full", current && "bg-ink")} />
+        </span>
+      )}
+      <span className="min-w-0 truncate">{name}</span>{" "}
+      <span className="flex shrink-0 items-center gap-1.5 text-[11px] whitespace-nowrap text-faint">
+        {note ?? dimmed}
+        {trailing}
       </span>
-    </ListRow>
+      {sub === undefined || sub === null ? null : (
+        <span className="col-start-2 col-end-4 truncate text-[11px] text-faint">{sub}</span>
+      )}
+    </>
+  );
+
+  const layout = cn(
+    "grid w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-2 rounded-[6px]",
+    "px-2 py-[5px] text-left text-meta",
+    current ? "font-emph text-ink" : "text-muted",
+  );
+
+  if (dimmed !== null) {
+    return <div className={cn(layout, "opacity-50")}>{body}</div>;
+  }
+
+  return (
+    <button
+      type="button"
+      aria-current={current ? "true" : undefined}
+      onClick={onPick}
+      className={cn(
+        layout,
+        "cursor-pointer hover:bg-line-soft hover:text-ink",
+        "focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-live",
+      )}
+    >
+      {body}
+    </button>
   );
 }
+
+/** A lane's own heading inside a menu; the first one carries no rule above it. */
+export function Lane({ label }: { readonly label: string }): JSX.Element {
+  return (
+    <div className="mt-1.5 border-t border-line-soft px-2 pt-2 pb-[3px] first:mt-0 first:border-t-0">
+      <span className="text-label font-emph tracking-[0.1em] text-faint uppercase">{label}</span>
+    </div>
+  );
+}
+
+/** The marker column of a row that carries a provider's mark rather than a dot. */
+export const markerOf = (mark: ReactNode): ReactNode => (
+  <span className="flex w-4 justify-center opacity-85">{mark}</span>
+);
+
+/** The detail that rides beside a name: an account, a plan, the word "default". */
+export const aside = (text: string | null): ReactNode =>
+  text === null || text === "" ? null : (
+    <span key="aside" className="ml-1.5 text-[11px] font-normal text-faint">
+      {text}
+    </span>
+  );

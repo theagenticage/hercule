@@ -1,6 +1,7 @@
 import type { JSX } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
+import { threadDefaults } from "@hydra/client-core";
 import {
   localRunnerQuery,
   profilesQuery,
@@ -9,16 +10,16 @@ import {
   settingsQuery,
 } from "../../../app/queries";
 import { Composer } from "../../../screens/composer/composer";
+import { ThreadChrome } from "../../../screens/thread/thread-chrome";
 
 /**
- * The composer in new-thread mode (spec 14 §The composer): "Creating a thread
- * is one step." A static route, so it must resolve ahead of the param route
- * beside it (`$sessionId.tsx`) rather than reading "new" as a session id -
- * TanStack Router ranks a static segment above a param one on its own, so
- * nothing here has to arrange that.
+ * A draft thread (spec 14 §The composer): "Creating a thread is one step." A
+ * static route, so it must resolve ahead of the param route beside it
+ * (`$sessionId.tsx`) rather than reading "new" as a session id - TanStack
+ * Router ranks a static segment above a param one on its own.
  */
 export const Route = createFileRoute("/_shell/threads/new")({
-  staticData: { title: "What should the agent do?" },
+  staticData: { title: "New thread", ownsTopBar: true },
   loader: async ({ context }) => {
     const [runners] = await Promise.all([
       context.queryClient.ensureQueryData(runnersQuery(context.client)),
@@ -41,16 +42,21 @@ function NewThread(): JSX.Element {
   const settings = useSuspenseQuery(settingsQuery(client)).data;
   const localRunnerId = useQuery(localRunnerQuery(detectLocalRunner, runners)).data ?? null;
 
+  // Resolved every render rather than snapshotted: a login landing while the
+  // draft is open has to reach it, and the composer lays the picks over this.
+  const config = {
+    ...threadDefaults(settings.user, instances, runners, profiles, localRunnerId),
+    options: {},
+  };
+
   return (
-    <div className="mx-auto flex w-full max-w-[800px] flex-1 flex-col justify-end">
-      <Composer
-        client={client}
-        instances={instances}
-        runners={runners}
-        profiles={profiles}
-        localRunnerId={localRunnerId}
-        settingsUser={settings.user}
-      />
+    <div className="flex flex-1 flex-col">
+      <ThreadChrome project={null} title="New thread" />
+      <div className="flex flex-1 flex-col px-6 pt-2 pb-16">
+        <div className="mx-auto flex w-full max-w-[800px] flex-1 flex-col justify-end">
+          <Composer thread={{ kind: "draft", config }} />
+        </div>
+      </div>
     </div>
   );
 }

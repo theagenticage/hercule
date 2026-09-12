@@ -72,9 +72,11 @@ export { ageOf } from "./threads/age";
 export { applyPick, type ComposerPick } from "./threads/apply-pick";
 export {
   composerFields,
+  pendingModelNote,
   type ComposerBlocked,
   type ComposerField,
   type ComposerFields,
+  type LoginTarget,
   type ModelPill,
 } from "./threads/composer-fields";
 export type {
@@ -93,7 +95,6 @@ export {
   type ThreadModelField,
   type ThreadModelFieldOption,
 } from "./threads/model-field";
-export { modelGroups, type ModelGroup, type ModelGroupRow } from "./threads/model-groups";
 export {
   modelMenu,
   type ModelMenu,
@@ -103,7 +104,6 @@ export {
   type ModelMenuRow,
   type ModelMenuView,
 } from "./threads/model-menu";
-export { modelPillLabel } from "./threads/model-pill";
 export { openItemOf } from "./threads/open-item";
 export { optionsLabel } from "./threads/options-label";
 export { pushRecent, type RecentModel } from "./threads/recent";

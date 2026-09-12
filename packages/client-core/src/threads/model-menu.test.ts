@@ -279,6 +279,26 @@ describe("modelMenu: the other instances", () => {
     expect(menu.others[0]).toMatchObject({ instanceId: PI.id, dimmed: "not on moss" });
   });
 
+  it("lists every other instance, however many there are - only Recent is capped", () => {
+    const others = [1, 2, 3, 4].map((n) =>
+      counted(`instance-${String(n)}`, `account ${String(n)}`, 1),
+    );
+    const menu = modelMenu(catalogs([CLAUDE, ...others]), config(CLAUDE.id, SONNET.slug), DRAFT);
+
+    expect(menu.others.map((row) => row.instanceId)).toEqual(others.map((each) => each.id));
+  });
+
+  it("offers no rows of another account while filtering on an active thread, whose account is fixed", () => {
+    const menu = modelMenu(catalogs([CLAUDE, CODEX]), config(CLAUDE.id, SONNET.slug), {
+      ...DRAFT,
+      kind: "active",
+      filter: "gpt",
+    });
+
+    expect(menu.others[0]).toMatchObject({ instanceId: CODEX.id, dimmed: "account fixed" });
+    expect(menu.others[0]?.rows).toEqual([]);
+  });
+
   it("dims every other instance with account fixed on an active thread", () => {
     const menu = modelMenu(catalogs([CLAUDE, CODEX]), config(CLAUDE.id, SONNET.slug), {
       ...DRAFT,

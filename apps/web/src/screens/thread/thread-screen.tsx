@@ -5,10 +5,11 @@
 import { useLayoutEffect, type JSX } from "react";
 import { useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { turnsOf, type HydraClient, type Live } from "@hydra/client-core";
-import type { Profile, ProviderInstance, Runner, SettingsState } from "@hydra/contract";
 import { useLiveInvalidation } from "../../app/live-invalidation";
 import { inputsQuery, sessionQuery, transcriptQuery } from "../../app/queries";
 import { Composer } from "../composer/composer";
+import { QueuedInputs } from "./queued-inputs";
+import { ChromeAction, ThreadChrome } from "./thread-chrome";
 import { useStickToBottom } from "./use-stick-to-bottom";
 import { useThreadLive } from "./use-thread-live";
 import { Turn } from "./turn";
@@ -18,21 +19,11 @@ export function ThreadScreen({
   live,
   sessionId,
   timezone,
-  instances,
-  runners,
-  profiles,
-  localRunnerId,
-  settingsUser,
 }: {
   readonly client: HydraClient;
   readonly live: Live;
   readonly sessionId: string;
   readonly timezone: string;
-  readonly instances: readonly ProviderInstance[];
-  readonly runners: readonly Runner[];
-  readonly profiles: readonly Profile[];
-  readonly localRunnerId: string | null;
-  readonly settingsUser: SettingsState["user"];
 }): JSX.Element {
   const queryClient = useQueryClient();
 
@@ -65,37 +56,45 @@ export function ThreadScreen({
   }, [rows.length, queuedCount, followIfAtBottom]);
 
   return (
-    <div className="mx-auto flex w-full max-w-[800px] flex-1 flex-col gap-6">
-      {turns.map((turn, index) => {
-        // Only the last turn of a busy session can still be running: an
-        // earlier one with no `turn.completed` was abandoned by an interrupt,
-        // and a dangling last turn on a session that is idle or exited was
-        // abandoned by the runner - neither is still running, so both read as
-        // settled with nothing to time rather than as working since whenever
-        // they were last touched.
-        const isLive = session.status === "busy" && index === lastIndex && turn.duration === null;
-        return (
-          <Turn
-            key={turn.turnId}
-            turn={turn}
-            live={isLive}
-            // The tap buffer holds one item's text at a time, so only the
-            // live last turn gets the live node.
-            tailRef={isLive ? tailRef : undefined}
-            timezone={timezone}
-          />
-        );
-      })}
-      <Composer
-        client={client}
-        instances={instances}
-        runners={runners}
-        profiles={profiles}
-        localRunnerId={localRunnerId}
-        settingsUser={settingsUser}
-        session={session}
-        onSend={scrollToBottom}
+    <div className="flex flex-1 flex-col">
+      <ThreadChrome
+        project={null}
+        title={session.title}
+        actions={
+          <ChromeAction title="More (not built)" disabled>
+            …
+          </ChromeAction>
+        }
       />
+      <div className="flex flex-1 flex-col px-6 pt-2 pb-16">
+        <div className="mx-auto flex w-full max-w-[800px] flex-1 flex-col gap-6">
+          {turns.map((turn, index) => {
+            // Only the last turn of a busy session can still be running: an
+            // earlier one with no `turn.completed` was abandoned by an interrupt,
+            // and a dangling last turn on a session that is idle or exited was
+            // abandoned by the runner - neither is still running, so both read as
+            // settled with nothing to time rather than as working since whenever
+            // they were last touched.
+            const isLive =
+              session.status === "busy" && index === lastIndex && turn.duration === null;
+            return (
+              <Turn
+                key={turn.turnId}
+                turn={turn}
+                live={isLive}
+                // The tap buffer holds one item's text at a time, so only the
+                // live last turn gets the live node.
+                tailRef={isLive ? tailRef : undefined}
+                timezone={timezone}
+              />
+            );
+          })}
+          <div className="sticky bottom-0 mt-auto flex flex-col gap-2">
+            <QueuedInputs client={client} sessionId={sessionId} />
+            <Composer thread={{ kind: "active", session }} onSend={scrollToBottom} />
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

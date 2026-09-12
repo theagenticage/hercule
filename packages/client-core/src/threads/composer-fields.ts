@@ -7,7 +7,7 @@
  */
 import type { CapabilitySnapshot, ModelOption, ProviderInstance, Runner } from "@hydra/contract";
 import { accountName, snapshotOn } from "./catalog";
-import type { ThreadCatalogs, ThreadConfig, ThreadKind } from "./config";
+import type { ThreadCatalogs, ThreadConfig, ThreadKind, ThreadPicks } from "./config";
 import { referenceRunner } from "./runner-menu";
 
 export interface ComposerField {
@@ -22,10 +22,18 @@ export interface ModelPill {
   readonly name: string | null;
 }
 
+/** What a Log in would log in to: the account, the machine, and its name. */
+export interface LoginTarget {
+  readonly instanceId: string;
+  readonly runnerId: string;
+  /** What to call it while logging in, since the caller may be on another row. */
+  readonly displayName: string;
+}
+
 export interface ComposerBlocked {
   readonly reason: string;
   /** The login that would clear it, where logging in is what is missing. */
-  readonly login: { readonly instanceId: string; readonly runnerId: string } | null;
+  readonly login: LoginTarget | null;
 }
 
 export interface ComposerFields {
@@ -34,7 +42,8 @@ export interface ComposerFields {
   /** What the current model offers to pick under it; none means no selector. */
   readonly options: readonly ModelOption[] | null;
   readonly workspace: ComposerField;
-  readonly machine: ComposerField;
+  /** The machine, named: the one in force, or that there is none to name. */
+  readonly machine: ComposerField & { readonly label: string };
   /** Why this draft cannot start at all; null once it can, and on a thread that has. */
   readonly blocked: ComposerBlocked | null;
 }
@@ -56,7 +65,7 @@ const blockerOf = (
   if (snapshot.auth.status !== "ok")
     return {
       reason: `${instance.displayName} is on ${runner.name} but not logged in`,
-      login: { instanceId: instance.id, runnerId: runner.id },
+      login: { instanceId: instance.id, runnerId: runner.id, displayName: instance.displayName },
     };
   return null;
 };
@@ -91,7 +100,16 @@ export const composerFields = (
     options:
       descriptor === undefined || descriptor.options.length === 0 ? null : descriptor.options,
     workspace: { locked: lockedReason(kind, "workspace") },
-    machine: { locked: lockedReason(kind, "machine") },
+    machine: { locked: lockedReason(kind, "machine"), label: runner?.name ?? "no machine" },
     blocked,
   };
 };
+
+/**
+ * What the card says between a model pick and the submission that carries it.
+ * A pick does not reach the session on its own (spec 14 §What locks at start:
+ * the picks ride `session.input`), so the thread still runs the model it
+ * started this turn with until the next message goes out.
+ */
+export const pendingModelNote = (kind: ThreadKind, picks: ThreadPicks): string | null =>
+  kind === "active" && picks.model !== undefined ? "model change applies on send" : null;
