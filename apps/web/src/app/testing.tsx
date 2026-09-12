@@ -7,7 +7,7 @@
  * sequencing a browser would, and a change to a route or to the entry guard
  * shows up here rather than in a mock.
  */
-import { afterEach, expect } from "vitest";
+import { afterEach, expect, vi } from "vitest";
 import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import type userEvent from "@testing-library/user-event";
 import { RouterProvider, createMemoryHistory } from "@tanstack/react-router";
@@ -169,16 +169,49 @@ export const pickRow = async (
   });
 };
 
+/**
+ * A `localStorage` that lives in memory for one render.
+ *
+ * Whether this jsdom has a `localStorage` of its own depends on the Node it
+ * runs under - Node 22 exposes one and persists it across the tests in a file,
+ * later Node versions leave `window.localStorage` undefined, which is why
+ * `client-core`'s own token store reaches it through a try. A stub makes both
+ * read the same: every render starts from the seed it was given and nothing
+ * one test writes reaches the next.
+ */
+export const memoryStorage = (seed: Readonly<Record<string, string>> = {}): Storage => {
+  const held = new Map(Object.entries(seed));
+  return {
+    getItem: (key) => held.get(key) ?? null,
+    setItem: (key, value) => {
+      held.set(key, String(value));
+    },
+    removeItem: (key) => {
+      held.delete(key);
+    },
+    clear: () => {
+      held.clear();
+    },
+    key: (index) => [...held.keys()][index] ?? null,
+    get length() {
+      return held.size;
+    },
+  };
+};
+
 /** Renders the whole app at `path`, holding `token` from the start if given. */
 export const renderApp = async ({
   path,
   api,
   token = null,
   detectLocalRunner = () => Promise.resolve(null),
+  storage = {},
 }: {
   readonly path: string;
   readonly api: FetchLike;
   readonly token?: string | null;
+  /** What `localStorage` holds when the app starts. */
+  readonly storage?: Readonly<Record<string, string>>;
   /**
    * Which runner is on this machine. There is no loopback to probe in a test,
    * so the answer is handed over rather than fetched; without one, nothing on
@@ -186,6 +219,7 @@ export const renderApp = async ({
    */
   readonly detectLocalRunner?: (runners: ReadonlyArray<Runner>) => Promise<string | null>;
 }) => {
+  vi.stubGlobal("localStorage", memoryStorage(storage));
   const client = createClient({ baseUrl: BASE_URL, fetch: api, token });
   const sockets: StubSocket[] = [];
   const live = createLive({ client, baseUrl: BASE_URL, webSocket: openInto(sockets) });

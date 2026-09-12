@@ -19,7 +19,7 @@
  *   SPEC's locked ACs, and "effort label" in AC-15's own wording points at
  *   the descriptor's `label` field.
  */
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ModelOption, Profile, ProviderInstance, Runner, Session } from "@hydra/contract";
@@ -203,6 +203,7 @@ const open = async (
   instances: readonly ProviderInstance[] = [INSTANCE_A, INSTANCE_B],
   user: Record<string, unknown> = {},
   extra: Readonly<Record<string, Handler>> = {},
+  storage: Readonly<Record<string, string>> = {},
 ) => {
   const api = stubApi(controller(instances, user, extra));
   const app = await renderApp({
@@ -210,6 +211,7 @@ const open = async (
     api: api.fetch,
     token: "held",
     detectLocalRunner: () => Promise.resolve(RUNNER.id),
+    storage,
   });
   return { ...app, api };
 };
@@ -817,35 +819,10 @@ const OTHER_LOGGED_OUT: ProviderInstance = {
 
 const RECENT_KEY = "hydra.recentModels";
 
-/**
- * This jsdom has no `localStorage` at all (`window.localStorage` is
- * `undefined`, which is why `client-core`'s own token store reaches it through
- * a try), so a test that needs one hands one over - the same move `renderApp`
- * makes for `fetch` and the socket. Nothing of the repo's own is stubbed here.
- */
-const memoryStorage = (seed: Readonly<Record<string, string>> = {}): Storage => {
-  const held = new Map(Object.entries(seed));
-  return {
-    getItem: (key) => held.get(key) ?? null,
-    setItem: (key, value) => {
-      held.set(key, String(value));
-    },
-    removeItem: (key) => {
-      held.delete(key);
-    },
-    clear: () => {
-      held.clear();
-    },
-    key: (index) => [...held.keys()][index] ?? null,
-    get length() {
-      return held.size;
-    },
-  };
-};
-
-const seedRecent = (pairs: ReadonlyArray<{ instanceId: string; model: string }>): void => {
-  vi.stubGlobal("localStorage", memoryStorage({ [RECENT_KEY]: JSON.stringify(pairs) }));
-};
+/** What `localStorage` holds for a draft whose Recent lane is already written. */
+const recent = (
+  pairs: ReadonlyArray<{ instanceId: string; model: string }>,
+): Record<string, string> => ({ [RECENT_KEY]: JSON.stringify(pairs) });
 
 /** Opens the model menu by its pill and hands back the popover. */
 const openModelMenu = async (
@@ -857,14 +834,6 @@ const openModelMenu = async (
 };
 
 describe("Composer: model menu shapes", () => {
-  beforeEach(() => {
-    vi.stubGlobal("localStorage", memoryStorage());
-  });
-
-  afterEach(() => {
-    vi.unstubAllGlobals();
-  });
-
   it("(a) offers a focused filter past eight models and narrows every account to what matches", async () => {
     const user = userEvent.setup();
     await open([MANY_A, MANY_B]);
@@ -897,11 +866,15 @@ describe("Composer: model menu shapes", () => {
 
   it("(b) lists the recent pairs newest first, naming the account only where there are two", async () => {
     const user = userEvent.setup();
-    seedRecent([
-      { instanceId: CODEX.id, model: "gpt-5-codex" },
-      { instanceId: INSTANCE_A.id, model: "claude-opus-5" },
-    ]);
-    await open([INSTANCE_A, INSTANCE_B, CODEX]);
+    await open(
+      [INSTANCE_A, INSTANCE_B, CODEX],
+      {},
+      {},
+      recent([
+        { instanceId: CODEX.id, model: "gpt-5-codex" },
+        { instanceId: INSTANCE_A.id, model: "claude-opus-5" },
+      ]),
+    );
 
     const menu = await openModelMenu(user, /claude sonnet 5/i);
     const lane = reading(menu);
@@ -985,10 +958,6 @@ describe("Composer: model menu shapes", () => {
 });
 
 describe("Composer: Recent follows the submission home", () => {
-  afterEach(() => {
-    vi.unstubAllGlobals();
-  });
-
   const pickOpusAndSend = async (user: ReturnType<typeof userEvent.setup>): Promise<void> => {
     await user.click(await screen.findByRole("button", { name: /claude sonnet 5/i }));
     await pickRow(user, /claude opus 5/i);
@@ -998,8 +967,7 @@ describe("Composer: Recent follows the submission home", () => {
 
   it("writes the pair the user picked once the spawn has landed", async () => {
     const user = userEvent.setup();
-    seedRecent([]);
-    await open([INSTANCE_A], {}, { "POST /api/v1/sessions": { body: NEW_SESSION } });
+    await open([INSTANCE_A], {}, { "POST /api/v1/sessions": { body: NEW_SESSION } }, recent([]));
 
     await pickOpusAndSend(user);
 
@@ -1012,7 +980,6 @@ describe("Composer: Recent follows the submission home", () => {
 
   it("writes nothing when the spawn is refused, since nothing was reached", async () => {
     const user = userEvent.setup();
-    seedRecent([]);
     const { api } = await open(
       [INSTANCE_A],
       {},
@@ -1022,6 +989,7 @@ describe("Composer: Recent follows the submission home", () => {
           body: envelope("invalid_state", "moss is not logged in to Claude Code"),
         },
       },
+      recent([]),
     );
 
     await pickOpusAndSend(user);
