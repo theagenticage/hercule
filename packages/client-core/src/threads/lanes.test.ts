@@ -67,6 +67,22 @@ describe("lanesOf", () => {
     expect(byKind.waiting).toEqual([]);
     expect(byKind.assistants).toEqual([]);
   });
+
+  it("places an exited session that can be resumed in the idle lane, and one that cannot in settled", () => {
+    const resumable = session({
+      id: "resumable",
+      status: "exited",
+      resumable: true,
+      nativeSessionId: "n",
+    });
+    const gone = session({ id: "gone", status: "exited", resumable: false });
+
+    const lanes = lanesOf([resumable, gone]);
+    const byKind = Object.fromEntries(lanes.map((lane) => [lane.kind, lane.sessions]));
+
+    expect(byKind.idle!.map((s: Session) => s.id)).toEqual(["resumable"]);
+    expect(byKind.settled!.map((s: Session) => s.id)).toEqual(["gone"]);
+  });
 });
 
 describe("headlineOf", () => {
@@ -92,6 +108,20 @@ describe("headlineOf", () => {
     ];
 
     expect(headlineOf(sessions, now)).toBe("1 running · 1 settled this week");
+  });
+
+  it("counts an exit that can be resumed as idle rather than as settled", () => {
+    const sessions = [
+      session({
+        id: "resumable",
+        status: "exited",
+        resumable: true,
+        nativeSessionId: "n",
+        exitedAt: "2026-09-07T12:00:00.000Z",
+      }),
+    ];
+
+    expect(headlineOf(sessions, now)).toBe("1 idle");
   });
 
   it("excludes an exit more than seven days before now from the settled count", () => {

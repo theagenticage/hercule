@@ -3,8 +3,8 @@
  * `now`-free `activityAt` stays raw: formatting "how long ago" needs a clock,
  * and the caller's is the one that should ever run.
  */
-import type { Session, SessionStatus, ThreadRows } from "@hydra/contract";
-import { WORKING_STATUSES } from "./status";
+import type { Session, ThreadRows } from "@hydra/contract";
+import { isSettled, WORKING_STATUSES } from "./status";
 
 export interface ThreadRow {
   readonly id: string;
@@ -14,9 +14,11 @@ export interface ThreadRow {
   readonly secondLine: string | null;
 }
 
-const markOf = (status: SessionStatus): ThreadRow["mark"] => {
-  if (WORKING_STATUSES.has(status)) return "working";
-  if (status === "exited") return "exited";
+const markOf = (session: Session): ThreadRow["mark"] => {
+  if (WORKING_STATUSES.has(session.status)) return "working";
+  // An exit that can be resumed takes input like any idle thread, so it reads
+  // as one; only an exit that is refused reads as an ending.
+  if (isSettled(session)) return "exited";
   return "idle";
 };
 
@@ -25,7 +27,7 @@ export const threadRows = (sessions: readonly Session[], mode: ThreadRows): read
     .sort((a, b) => Date.parse(b.lastActivityAt) - Date.parse(a.lastActivityAt))
     .map((session) => ({
       id: session.id,
-      mark: markOf(session.status),
+      mark: markOf(session),
       title: session.title,
       activityAt: session.lastActivityAt,
       secondLine: mode === "meta" ? session.modelSelection.model : null,

@@ -492,6 +492,40 @@ describe("a stale exit's release racing a fresh start under the same id", () => 
   });
 });
 
+describe("a start for a session this machine tore down when it exited", () => {
+  it("starts it again under the same id, rather than refusing it as one already here", async () => {
+    const fake = faking();
+    const { supervisor, sent, machine } = connecting(fake);
+    const resumed: SessionStart = {
+      ...START,
+      spec: { ...SPEC, continue: { nativeSessionId: NATIVE, mode: "resume" } },
+    };
+
+    await driving(
+      fake,
+      supervisor,
+      Effect.gen(function* () {
+        yield* supervisor.start(START);
+        yield* until("sent the start", () => eventsIn(sent).length === 1);
+        // The harness ends on its own, the way an idle one is unloaded: it
+        // stops holding the session and says so.
+        yield* fake.adapter.stopSession(SESSION, "process_exit");
+        yield* until("sent the exit", () => eventsIn(sent).length === 2);
+        yield* supervisor.start(resumed);
+        yield* until("sent the second start", () => eventsIn(sent).length === 3);
+      }),
+    );
+
+    expect(eventsIn(sent).map((frame) => frame.event._tag)).toEqual([
+      "session.started",
+      "session.exited",
+      "session.started",
+    ]);
+    expect(fake.contexts).toHaveLength(2);
+    expect(existsSync(join(machine.scratchDir, SESSION))).toBe(true);
+  });
+});
+
 describe("a session that ended while the socket was down", () => {
   it("is started afresh rather than taken for one that is still running", async () => {
     const fake = faking();

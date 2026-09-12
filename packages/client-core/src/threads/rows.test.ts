@@ -45,6 +45,17 @@ describe("threadRows", () => {
     expect(rows[0]).toMatchObject({ id: "s1", mark });
   });
 
+  it("marks an exited session that can be resumed as idle, and one that cannot as exited", () => {
+    const resumable = threadRows(
+      [session({ id: "s1", status: "exited", resumable: true, nativeSessionId: "n" })],
+      "plain",
+    );
+    expect(resumable[0]).toMatchObject({ id: "s1", mark: "idle" });
+
+    const gone = threadRows([session({ id: "s2", status: "exited", resumable: false })], "plain");
+    expect(gone[0]).toMatchObject({ id: "s2", mark: "exited" });
+  });
+
   it("carries the session's title and lastActivityAt through as activityAt, raw and unformatted", () => {
     const rows = threadRows(
       [

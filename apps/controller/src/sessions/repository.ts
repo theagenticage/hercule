@@ -60,12 +60,6 @@ export interface NewSession {
   /** The encoded `SessionSpec`, stored as the exact string that goes on the wire. */
   readonly spec: string;
   readonly modelSelection: ModelSelection;
-  /**
-   * Known at insert only where the session resumes another one: it carries on
-   * the same provider-native session, so there is nothing to wait to be told.
-   * A fresh session and a fork are both named by the machine and bound later.
-   */
-  readonly nativeSessionId: string | undefined;
   readonly parentSessionId: string | undefined;
   readonly at: string;
 }
@@ -147,6 +141,13 @@ const transcriptScope = (sessionId: string, direction: SortDirection): CursorSco
   direction,
 });
 
+/** Where a session's ingest stands: see `ingestState`. */
+export interface IngestState {
+  readonly lastSeq: number;
+  /** Added to every sequence this session's current process reports. */
+  readonly base: number;
+}
+
 /** One row of a session's stream, as the transcript reads it back. */
 export interface StoredStreamRow {
   readonly position: number;
@@ -182,13 +183,12 @@ const make = Effect.gen(function* () {
         yield* sql`
           INSERT INTO sessions (id, title, permission_profile_id, instance_id, runner_id,
                                 workspace_id, requested_access_mode, access_mode, spec,
-                                model_selection, native_session_id, parent_session_id, status,
+                                model_selection, parent_session_id, status,
                                 created_at, last_activity_at)
           VALUES (${id}, ${session.title}, ${uuidFromString(session.permissionProfileId)},
                   ${uuidFromString(session.instanceId)}, ${uuidFromString(session.runnerId)},
                   ${workspace}, ${session.requestedAccessMode}, ${session.accessMode},
-                  ${session.spec}, ${JSON.stringify(session.modelSelection)},
-                  ${session.nativeSessionId ?? null}, ${parent},
+                  ${session.spec}, ${JSON.stringify(session.modelSelection)}, ${parent},
                   'queued', ${session.at}, ${session.at})
         `;
         return {
@@ -200,7 +200,7 @@ const make = Effect.gen(function* () {
           workspaceId: session.workspaceId,
           requestedAccessMode: session.requestedAccessMode,
           accessMode: session.accessMode,
-          nativeSessionId: session.nativeSessionId ?? null,
+          nativeSessionId: null,
           modelSelection: session.modelSelection,
           parentSessionId: session.parentSessionId ?? null,
           status: "queued",
@@ -295,21 +295,23 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * The highest runner sequence already written for this session, where
-     * ingest resumes after a restart.
+     * Where ingest stands for this session: the highest sequence already
+     * written, and what the current process's own numbers are counted from.
      *
      * A high-water mark, not a contiguous prefix: a coalesced delta row carries
      * the sequence of the last delta folded into it, so a plain event can be
      * written under a higher sequence while lower text is still only held.
      * Nothing replays today; the outbox of spec 03 section 2.3 will need more.
      */
-    lastSeq: (sessionId: string): Effect.Effect<number, SqlError> =>
+    ingestState: (sessionId: string): Effect.Effect<IngestState, SqlError> =>
       Effect.map(
-        sql<{ readonly last: number | null }>`
-          SELECT MAX(runner_seq) AS last FROM session_stream
-          WHERE session_id = ${uuidFromString(sessionId)}
+        sql<{ readonly last: number | null; readonly base: number }>`
+          SELECT (SELECT MAX(runner_seq) FROM session_stream
+                  WHERE session_id = sessions.id) AS last,
+                 stream_base AS base
+          FROM sessions WHERE id = ${uuidFromString(sessionId)}
         `,
-        (rows) => rows[0]?.last ?? 0,
+        (rows) => ({ lastSeq: rows[0]?.last ?? 0, base: rows[0]?.base ?? 0 }),
       ),
 
     /**
@@ -329,12 +331,15 @@ const make = Effect.gen(function* () {
     },
 
     /**
-     * Moves the session and stamps the activity. `startedAt` and `exitedAt` are
-     * written once, so a second `session.started` cannot rewrite when it came up.
+     * Moves the session and stamps the activity. `startedAt` is written once:
+     * it is when the conversation first came up, and a session resumed later
+     * does not get a new one. `exitedAt` is the last exit, so every move to
+     * `exited` stamps it afresh.
      *
-     * The WHERE clause is what makes `exited` final (spec 06 section 4.1): this
-     * row has two writers - ingest, and the spawn that could not reach its
-     * machine - so a status read before a transaction proves nothing inside it.
+     * The WHERE clause is what keeps an exited session where it is: this row
+     * has two writers - ingest, and the spawn that could not reach its machine
+     * - so a status read before a transaction proves nothing inside it. The
+     * one move out of `exited` is `resume` below, and nothing else.
      */
     moved: (sessionId: string, status: SessionStatus, at: string): Effect.Effect<void, SqlError> =>
       Effect.asVoid(sql`
@@ -343,29 +348,37 @@ const make = Effect.gen(function* () {
           last_activity_at = ${at},
           started_at = CASE WHEN started_at IS NULL AND ${status} IN ('idle', 'busy') THEN ${at}
                             ELSE started_at END,
-          exited_at = CASE WHEN ${status} = 'exited' AND exited_at IS NULL THEN ${at}
-                           ELSE exited_at END
+          exited_at = CASE WHEN ${status} = 'exited' THEN ${at} ELSE exited_at END
         WHERE id = ${uuidFromString(sessionId)} AND status <> 'exited'
       `),
 
     /**
-     * Whether any session is still live against this provider-native session.
-     * Two harnesses writing one native transcript corrupts it beyond anything
-     * Hydra could repair (spec 06 section 4.1), so a resume asks first.
+     * The one move out of `exited`, and so the one exception to `moved`'s rule
+     * above: the session goes back on the queue for dispatch to place, under
+     * the spec its resumed harness is to be started with. The caller's read of
+     * `resumable` inside this same transaction is the licence for the write.
+     *
+     * The base every reported sequence is counted from moves up to what the
+     * stored stream reached, unconditionally: the controller cannot tell
+     * whether the machine's process restarted and so began numbering from zero
+     * again. Moving it anyway is harmless, because `runner_seq` is only a
+     * dedupe key and the transcript reads back in `position` order.
      */
-    liveOn: (nativeSessionId: string): Effect.Effect<boolean, SqlError> =>
-      Effect.map(
-        sql<{ readonly id: Uint8Array }>`
-          SELECT id FROM sessions
-          WHERE native_session_id = ${nativeSessionId} AND status <> 'exited' LIMIT 1
-        `,
-        (rows) => rows.length > 0,
-      ),
+    resume: (sessionId: string, spec: string, at: string): Effect.Effect<void, SqlError> =>
+      Effect.asVoid(sql`
+        UPDATE sessions SET
+          status = 'queued',
+          spec = ${spec},
+          last_activity_at = ${at},
+          stream_base = (SELECT COALESCE(MAX(runner_seq), 0) FROM session_stream
+                         WHERE session_id = sessions.id)
+        WHERE id = ${uuidFromString(sessionId)}
+      `),
 
     /**
      * The model and the per-model choices the session runs under from here on.
      * `spec` is left alone: it is the document the runner was told at start,
-     * and rewriting it would destroy the record of what that was.
+     * and only `resume` above rewrites it, for the start it is about to make.
      */
     setModelSelection: (
       sessionId: string,

@@ -80,6 +80,7 @@ export {
 } from "./threads/model-field";
 export { formatDuration } from "./threads/duration";
 export { openItemOf } from "./threads/open-item";
+export { resumeBlockedReason } from "./threads/resume-blocked";
 export { threadRows, type ThreadRow } from "./threads/rows";
 export {
   referenceRunner,
