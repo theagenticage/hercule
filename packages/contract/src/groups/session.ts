@@ -37,7 +37,8 @@ const ModelOptions = ModelSelection.fields.options;
 /**
  * Where a session stands. `queued` is placement accepted with the runner full
  * or unreachable, `starting` is the start sent with no `session.started` back
- * yet, `busy` is a turn running, and `exited` is final.
+ * yet, `busy` is a turn running, and `exited` is the process gone; an exited
+ * session with `resumable` true is resumed in place by its next input.
  */
 export const SESSION_STATUSES = ["queued", "starting", "idle", "busy", "exited"] as const;
 
@@ -51,8 +52,9 @@ export const Session = Schema.Struct({
   title: Schema.String,
   status: SessionStatus,
   /**
-   * Derived, never stored: an exited session whose runner still holds the
-   * provider-native state behind it.
+   * Derived at read, never stored: the session is `exited`, has a
+   * `nativeSessionId`, and its runner is not retired. True means the next
+   * `session.input` resumes it in place.
    */
   resumable: Schema.Boolean,
   permissionProfileId: Id,
@@ -72,10 +74,11 @@ export const Session = Schema.Struct({
    * opened with.
    */
   modelSelection: ModelSelection,
-  /** Set where this session was forked off another one; null for a resume. */
+  /** Set where this session was forked off another one; null otherwise. */
   parentSessionId: Schema.NullOr(Id),
   createdAt: Timestamp,
   startedAt: Schema.NullOr(Timestamp),
+  /** The last exit: kept while the session is resumed, rewritten when it exits again. */
   exitedAt: Schema.NullOr(Timestamp),
   lastActivityAt: Timestamp,
 });
@@ -147,7 +150,7 @@ export type SessionInputPayload = Schema.Schema.Type<typeof SessionInputPayload>
  * Folding input into a turn already running is steering, hence the
  * `session.steer` grant. `opened` and `steered` are the runner's own words for
  * what it did with it; `queued` is the controller's, for an input the session
- * cannot take yet.
+ * cannot take yet - the input that resumes an exited session included.
  */
 export const SessionInputOutcome = Schema.Struct({
   inputId: Id,

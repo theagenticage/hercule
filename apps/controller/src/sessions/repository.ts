@@ -332,7 +332,7 @@ const make = Effect.gen(function* () {
 
     /**
      * Moves the session and stamps the activity. `startedAt` is written once:
-     * it is when the conversation first came up, and a session revived later
+     * it is when the conversation first came up, and a session resumed later
      * does not get a new one. `exitedAt` is the last exit, so every move to
      * `exited` stamps it afresh.
      *
@@ -355,7 +355,7 @@ const make = Effect.gen(function* () {
     /**
      * The one move out of `exited`, and so the one exception to `moved`'s rule
      * above: the session goes back on the queue for dispatch to place, under
-     * the spec its revived harness is to be started with. The caller's read of
+     * the spec its resumed harness is to be started with. The caller's read of
      * `resumable` inside this same transaction is the licence for the write.
      *
      * The base every reported sequence is counted from moves up to what the

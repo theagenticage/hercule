@@ -7,14 +7,6 @@
  */
 import type { Session } from "@hydra/contract";
 
-/**
- * An exit nothing can pick up: the thread is over for good. Every surface that
- * sorts threads asks this, rather than reading a status that says only that
- * the process is gone.
- */
-export const isSettled = (session: Session): boolean =>
-  session.status === "exited" && !session.resumable;
-
 export const resumeBlockedReason = (session: Session): string | null => {
   if (session.status !== "exited" || session.resumable) return null;
   return session.nativeSessionId === null ? "its transcript is gone" : "its runner was retired";

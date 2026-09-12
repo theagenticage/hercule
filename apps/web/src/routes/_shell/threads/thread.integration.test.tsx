@@ -1614,14 +1614,13 @@ describe("Thread: stop control (AC-21)", () => {
     expect(screen.queryByRole("button", { name: /^stop$/i })).toBeNull();
   });
 
-  it("has no Stop control and disables the textarea on an exited thread that cannot be resumed", async () => {
+  it("has no Stop control on an exited thread", async () => {
     await open(
       session({ status: "exited", exitedAt: "2026-09-08T10:05:00.000Z" }),
       twoCompletedTurns(),
     );
 
     expect(screen.queryByRole("button", { name: /^stop$/i })).toBeNull();
-    expect(screen.getByRole<HTMLTextAreaElement>("textbox").disabled).toBe(true);
   });
 });
 

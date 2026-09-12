@@ -281,7 +281,7 @@ export function Composer({
     }
   };
 
-  const noResume = started ? resumeBlockedReason(session) : null;
+  const readOnly = started ? resumeBlockedReason(session) : null;
   const busy = started && session.status === "busy";
   const composerError = spawn.error ?? sendInput.error ?? interrupt.error;
   const sending = spawn.isPending || sendInput.isPending;
@@ -314,10 +314,10 @@ export function Composer({
             event.preventDefault();
             send();
           }}
-          disabled={noResume !== null}
+          disabled={readOnly !== null}
           placeholder={
-            noResume !== null
-              ? `This thread can't be resumed: ${noResume}.`
+            readOnly !== null
+              ? `This thread can't be resumed: ${readOnly}.`
               : started
                 ? "Type a message…"
                 : "What should the agent do?"
@@ -363,7 +363,7 @@ export function Composer({
             open={openSelector === "model"}
             onOpenChange={toggle("model")}
             trigger={pillText}
-            disabled={noResume !== null}
+            disabled={readOnly !== null}
             triggerClassName="flex-1 text-center font-emph text-ink"
             contentClassName="w-80"
           >
@@ -406,7 +406,7 @@ export function Composer({
             variant="primary"
             aria-label="Send"
             disabled={
-              prompt.trim() === "" || noResume !== null || sending || blockedReason !== null
+              prompt.trim() === "" || readOnly !== null || sending || blockedReason !== null
             }
             title={blockedReason ?? undefined}
             onClick={send}

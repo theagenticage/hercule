@@ -2976,13 +2976,13 @@ describe("what a machine's report says it is no longer holding", () => {
 
 /**
  * Input into a session whose harness has gone: the row is stored, the same
- * session id is revived on the machine that still holds its transcript, and
+ * session id is resumed on the machine that still holds its transcript, and
  * what the user typed is delivered once the process says it is up. What is
  * asserted is the walk the caller can read - the status, the frames the
  * machine got, and the row - because a resume is the spawn's own path.
  */
 describe("session.input into an exited session", () => {
-  it("revives the same session on its machine and delivers the input once it is up", async () => {
+  it("resumes the same session on its machine and delivers the input once it is up", async () => {
     await withFleet(async (arranged) => {
       const session = await ended(arranged, "hello");
       const before = inputFrames(arranged.wire).length;
@@ -3026,7 +3026,7 @@ describe("session.input into an exited session", () => {
     });
   });
 
-  it("binds the session to the native session the revived process reports", async () => {
+  it("binds the session to the native session the resumed process reports", async () => {
     await withFleet(async (arranged) => {
       const session = await ended(arranged, "hello");
 
@@ -3138,7 +3138,7 @@ describe("session.input into an exited session", () => {
     });
   });
 
-  it("queues the revival while the machine is gone, and starts it when the machine is back", async () => {
+  it("queues the resume while the machine is gone, and starts it when the machine is back", async () => {
     await withFleet(async (arranged) => {
       const session = await ended(arranged, "hello");
       arranged.wire.close();
@@ -3160,7 +3160,7 @@ describe("session.input into an exited session", () => {
     });
   });
 
-  it("queues the revival while the machine is full, and starts it when a slot frees", async () => {
+  it("queues the resume while the machine is full, and starts it when a slot frees", async () => {
     await withFleet(async (arranged) => {
       const session = await ended(arranged, "hello");
       const running = await started(arranged, "busy here");
@@ -3185,7 +3185,7 @@ describe("session.input into an exited session", () => {
     });
   });
 
-  it("queues the revival under the disk watermark, and starts it when the reading clears", async () => {
+  it("queues the resume under the disk watermark, and starts it when the reading clears", async () => {
     await withFleet(async (arranged) => {
       const session = await ended(arranged, "hello");
       reportsDisk(arranged.wire, 4 * GIB);
@@ -3212,7 +3212,7 @@ describe("session.input into an exited session", () => {
     });
   });
 
-  it("calls off the waiting row when the revived process exits before it is up, and revives again on the next input", async () => {
+  it("calls off the waiting row when the resumed process exits before it is up, and resumes again on the next input", async () => {
     await withFleet(async (arranged) => {
       const session = await ended(arranged, "hello");
       const first = await sendInput(arranged, session.id, { text: "are you there" });
@@ -3225,7 +3225,7 @@ describe("session.input into an exited session", () => {
 
       const gone = await sessionWhen(arranged, session.id, (one) => one.status === "exited");
       expect(gone.resumable).toBe(true);
-      // The exit that is stamped is the last one, not the one before the revival.
+      // The exit that is stamped is the last one, not the one before the resume.
       expect(Date.parse(gone.exitedAt!)).toBeGreaterThan(Date.parse(session.exitedAt!));
       const row = await until("called the row off", async () => {
         const found = (await inputsOf(arranged, session.id)).find((one) => one.id === inputId);
@@ -3244,7 +3244,7 @@ describe("session.input into an exited session", () => {
     });
   });
 
-  it("takes the revived process's sequence from its start, however far the stored stream got", async () => {
+  it("takes the resumed process's sequence from its start, however far the stored stream got", async () => {
     await withFleet(async (arranged) => {
       const session = await spawned(arranged, { prompt: "hello" });
       for (const [seq, event] of transcript(session.id)) report(arranged.wire, seq, event);
@@ -3319,7 +3319,7 @@ describe("session.continue: the modes it takes", () => {
       const forked = await carryOn(arranged, parent.id, { mode: "fork", prompt: "the other way" });
       expect(forked.status, await forked.clone().text()).toBe(200);
 
-      // An exited session is carried on in place by its next input, so there is
+      // An exited session is resumed in place by its next input, so there is
       // no second way to ask for it here.
       const resumed = await carryOn(arranged, parent.id, { mode: "resume", prompt: "carry on" });
 

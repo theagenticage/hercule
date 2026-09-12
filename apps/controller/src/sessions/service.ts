@@ -188,18 +188,16 @@ const NOT_BUSY = "only a busy session can be steered";
 const STEERING_UNSUPPORTED =
   "that session's provider does not support steering into a running turn";
 
-const NOT_RESUMABLE =
-  "that session is not resumable: it is still live, it left no provider-native session, " +
-  "or its machine is gone";
+const STILL_LIVE = "that session is still live; stop it first";
 
 /**
- * The one way an exited session can be past carrying on that is not about its
+ * The one way an exited session can be past resuming that is not about its
  * machine: it never reported a provider-native session, so there is no
  * transcript left anywhere to pick up.
  */
 const NO_TRANSCRIPT =
   "that session left no provider-native session, so its transcript is gone and there is " +
-  "nothing to carry on";
+  "nothing to resume";
 
 /** Read at any runner named directly: for a session to continue on, and for one to spawn on. */
 const DRAINING = "that runner is draining and takes no new sessions";
@@ -482,22 +480,23 @@ const make = Effect.gen(function* () {
     });
 
   /**
-   * What an input into a session whose harness is gone has to get past, and the
-   * provider-native session it carries on once it has. Each refusal names its
-   * own reason (spec 06 section 5): the transcript, or the machine - retired,
-   * on its way out and taking no new placement even though the transcript is
-   * still there, or no longer logged in to the instance the session runs
-   * against.
+   * The one gate onto a session's transcript - resuming it in place, or forking
+   * off it - and the provider-native session that comes out of it. Each refusal
+   * names its own reason (spec 06 section 5): the session is still live, the
+   * transcript is gone, or the machine is - retired, on its way out and taking
+   * no new placement even though the transcript is still there, or no longer
+   * logged in to the instance the session runs against.
    */
-  const nativeSessionToResume = (
+  const resumableNativeSession = (
     session: StoredSession,
   ): Effect.Effect<string, InvalidState | SqlError | Schema.SchemaError> =>
     Effect.gen(function* () {
-      if (!session.resumable || session.nativeSessionId === null) {
-        return yield* Effect.fail(
-          invalidState(session.nativeSessionId === null ? NO_TRANSCRIPT : RETIRED),
-        );
-      }
+      if (session.status !== "exited") return yield* Effect.fail(invalidState(STILL_LIVE));
+      if (session.nativeSessionId === null) return yield* Effect.fail(invalidState(NO_TRANSCRIPT));
+      if (!session.resumable) return yield* Effect.fail(invalidState(RETIRED));
+      // `resumable` says the transcript is still there; this says the machine
+      // will not open it. Whether it can be reached right now is dispatch's to
+      // decide: unreachable queues the session rather than refusing it.
       const machine = yield* runners.read(session.runnerId);
       if (Option.isSome(machine) && machine.value.lifecycle !== "active") {
         return yield* Effect.fail(invalidState(DRAINING));
@@ -507,21 +506,22 @@ const make = Effect.gen(function* () {
     });
 
   /**
-   * The document a machine is told for a session that carries a provider-native
-   * one on, resumed in place or branched off: everything but the selection and
+   * The document a machine is told for a session that picks a provider-native
+   * one up, resumed in place or forked off: everything but the selection and
    * the mode comes from the session whose transcript it picks up.
    */
   const continuingSpec = (
     session: StoredSession,
     modelSelection: ModelSelection,
-    carryOn: NonNullable<SessionSpec["continue"]>,
+    nativeSessionId: string,
+    mode: NonNullable<SessionSpec["continue"]>["mode"],
   ): Effect.Effect<SessionSpec, SettingError | SqlError> =>
     Effect.map(settings.all(), (controller) => ({
       instanceId: session.instanceId,
       workspaceId: session.workspaceId,
       modelSelection,
       accessMode: session.accessMode,
-      continue: carryOn,
+      continue: { nativeSessionId, mode },
       timeouts: timeoutsFrom(controller),
     }));
 
@@ -1144,9 +1144,9 @@ const make = Effect.gen(function* () {
      * here rather than left for a flush that will never run; every other
      * status queues, and steering one is `input.steer`'s to do.
      *
-     * A session whose harness is gone but whose transcript is not is revived by
+     * A session whose harness is gone but whose transcript is not is resumed by
      * this call: the row is stored waiting, the session goes back on the queue
-     * under a spec that carries on its provider-native session, and dispatch
+     * under a spec that names its provider-native session, and dispatch
      * places it exactly as it places a spawn. What the user typed leaves at the
      * transition to idle the machine's `session.started` makes, like a spawn's
      * own prompt.
@@ -1169,15 +1169,17 @@ const make = Effect.gen(function* () {
           Effect.gen(function* () {
             const session = yield* one(id);
             const nativeSessionId =
-              session.status === "exited" ? yield* nativeSessionToResume(session) : undefined;
+              session.status === "exited" ? yield* resumableNativeSession(session) : undefined;
             const modelSelection = yield* selectionFor(session, picks);
             const at = yield* nowIso;
             yield* sessions.setModelSelection(id, modelSelection);
             if (nativeSessionId !== undefined) {
-              const spec = yield* continuingSpec(session, modelSelection, {
+              const spec = yield* continuingSpec(
+                session,
+                modelSelection,
                 nativeSessionId,
-                mode: "resume",
-              });
+                "resume",
+              );
               yield* sessions.resume(id, JSON.stringify(encodeSpec(spec)), at);
             }
             const created = yield* inputs.insert({
@@ -1193,7 +1195,7 @@ const make = Effect.gen(function* () {
           }),
         );
         if (session.status === "exited") {
-          // The revived process numbers its events from the start, so what the
+          // The resumed process numbers its events from the start, so what the
           // stored stream reached is not what they are judged against.
           tracking.delete(id);
           // Outside the transaction: dispatch may tell the machine, and a
@@ -1319,10 +1321,10 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * A second session branched off the provider-native one the parent left
+     * A second session forked off the provider-native one the parent left
      * behind, on the same machine and the same instance, because that is where
      * the native state is (spec 06 section 4.1). Only an exited parent may be
-     * branched from. Carrying the parent itself on is `session.input`'s.
+     * forked from. Resuming the parent itself is `session.input`'s.
      *
      * It carries a Thread's profile onto a new session, so like `spawn` only
      * the user may open one (spec 02 Thread).
@@ -1332,37 +1334,17 @@ const make = Effect.gen(function* () {
         yield* currentUser("session.continue");
         const { id, mode, prompt } = yield* Effect.mapError(decodeContinue(input), validationOf);
         const parent = yield* one(id);
-        // The one rule, and the one a caller reads off the row before asking:
-        // exited, with a native session, on a machine that still exists.
-        if (!parent.resumable || parent.nativeSessionId === null) {
-          return yield* Effect.fail(invalidState(NOT_RESUMABLE));
-        }
-        const machine = yield* runners.read(parent.runnerId);
-        if (Option.isNone(machine)) return yield* Effect.fail(invalidState(NOT_RESUMABLE));
-        // A continued session is a new session on that machine, and a draining
-        // one takes none (spec 03 section 7). `resumable` says the transcript
-        // is still there; this says the machine will not open it. Whether the
-        // machine can be reached right now is dispatch's to decide: unreachable
-        // queues the session rather than refusing it.
-        if (machine.value.lifecycle !== "active") {
-          return yield* Effect.fail(
-            invalidState(machine.value.lifecycle === "retired" ? RETIRED : DRAINING),
-          );
-        }
         // Read for what it refuses: an instance that is gone, or a provider this
         // build no longer carries, before the machine's snapshot is trusted.
         yield* resolved(parent.instanceId);
-        yield* requireLoggedInOn(parent.instanceId, parent.runnerId);
+        const nativeSessionId = yield* resumableNativeSession(parent);
 
         return yield* opening({
           permissionProfileId: parent.permissionProfileId,
           runnerId: parent.runnerId,
           requestedAccessMode: parent.requestedAccessMode,
           parentSessionId: parent.id,
-          spec: yield* continuingSpec(parent, parent.modelSelection, {
-            nativeSessionId: parent.nativeSessionId,
-            mode,
-          }),
+          spec: yield* continuingSpec(parent, parent.modelSelection, nativeSessionId, mode),
           prompt,
           kind: "session.continued",
           payload: { parentSessionId: parent.id, mode },

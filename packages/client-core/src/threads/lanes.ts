@@ -5,8 +5,7 @@
  * not a guess about what is populated.
  */
 import type { Session } from "@hydra/contract";
-import { isSettled } from "./resume-blocked";
-import { WORKING_STATUSES } from "./status";
+import { isSettled, WORKING_STATUSES } from "./status";
 
 export type LaneKind = "waiting" | "running" | "idle" | "assistants" | "settled";
 

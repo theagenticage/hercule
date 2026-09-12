@@ -4,8 +4,7 @@
  * and the caller's is the one that should ever run.
  */
 import type { Session, ThreadRows } from "@hydra/contract";
-import { isSettled } from "./resume-blocked";
-import { WORKING_STATUSES } from "./status";
+import { isSettled, WORKING_STATUSES } from "./status";
 
 export interface ThreadRow {
   readonly id: string;
