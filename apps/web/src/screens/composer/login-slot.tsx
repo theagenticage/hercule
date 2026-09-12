@@ -17,7 +17,7 @@ export const loginSlot =
       client={client}
       instanceId={login.instanceId}
       runnerId={login.runnerId}
-      subject={login.displayName}
+      subject={login.subject}
       label="Log in"
       onLoggedIn={onLoggedIn}
     />

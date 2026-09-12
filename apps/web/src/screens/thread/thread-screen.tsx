@@ -58,7 +58,6 @@ export function ThreadScreen({
   return (
     <div className="flex flex-1 flex-col">
       <ThreadChrome
-        project={null}
         title={session.title}
         actions={
           <ChromeAction title="More (not built)" icon disabled>

@@ -70,15 +70,16 @@ export { THREAD_ROWS_DEFAULT, threadRowsMode } from "./thread-rows";
 export { accessModeMenu, type AccessModeMenuItem } from "./threads/access-modes";
 export { ageOf } from "./threads/age";
 export { applyPick, type ComposerPick } from "./threads/apply-pick";
+export type { LoginTarget } from "./threads/catalog";
 export {
   composerFields,
   pendingModelNote,
   type ComposerBlocked,
   type ComposerFields,
-  type LoginTarget,
+  type MachineRow,
   type ModelPill,
 } from "./threads/composer-fields";
-export { effectiveConfig } from "./threads/config";
+export { effectiveConfig, threadConfig } from "./threads/config";
 export type {
   Thread,
   ThreadCatalogs,
@@ -97,6 +98,7 @@ export {
 export { modelMenu, type ModelMenu } from "./threads/model-menu";
 export { openItemOf } from "./threads/open-item";
 export { optionsLabel } from "./threads/options-label";
+export { optionsMenu, type ModelOptionRow } from "./threads/options-menu";
 export { pushRecent, type RecentModel } from "./threads/recent";
 export { resumeBlockedReason } from "./threads/resume-blocked";
 export { threadRows, type ThreadRow } from "./threads/rows";
@@ -106,7 +108,7 @@ export {
   type RunnerMenu,
   type RunnerMenuRow,
 } from "./threads/runner-menu";
-export { submission } from "./threads/submission";
+export { submission, type Submission } from "./threads/submission";
 export { instanceDefaults, threadDefaults, type ThreadDefaults } from "./threads/thread-defaults";
 export { turnsOf, type ThreadItem, type ThreadTurn } from "./threads/turns";
 export {

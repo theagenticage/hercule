@@ -8,6 +8,7 @@ import {
   queryKeys,
   resumeBlockedReason,
   submission,
+  threadConfig,
   type ComposerPick,
   type HydraClient,
   type RecentModel,
@@ -17,7 +18,7 @@ import {
   type ThreadKind,
   type ThreadPicks,
 } from "@hydra/client-core";
-import type { Session, SessionInputPayload, SessionSpawnInput } from "@hydra/contract";
+import type { SessionInputPayload, SessionSpawnInput } from "@hydra/contract";
 
 /** Where the last models picked are kept; nothing on the API carries them. */
 const RECENT_KEY = "hydra.recentModels";
@@ -38,16 +39,6 @@ const writeRecent = (recent: readonly RecentModel[]): void => {
     // A convenience; losing it is not worth a word to anyone.
   }
 };
-/** What an active thread runs with, in the shape a draft's defaults have. */
-const sessionConfig = (session: Session): ThreadConfig => ({
-  instanceId: session.instanceId,
-  model: session.modelSelection.model,
-  options: session.modelSelection.options,
-  accessMode: session.accessMode,
-  runnerId: session.runnerId,
-  profileId: session.permissionProfileId,
-});
-
 export interface ComposerModel {
   readonly kind: ThreadKind;
   readonly config: ThreadConfig;
@@ -56,8 +47,6 @@ export interface ComposerModel {
   readonly message: string;
   readonly placeholder: string;
   readonly sendTip: string;
-  /** The sentence a draft stands under; an active thread has none. */
-  readonly lead: string | null;
   /** Why the thread can take no input at all; null when it can. */
   readonly readOnly: string | null;
   readonly busy: boolean;
@@ -88,11 +77,8 @@ export function useComposerModel(
   const [picks, setPicks] = useState<ThreadPicks>({});
   const [recent, setRecent] = useState(readRecent);
 
-  const { session, base } =
-    thread.kind === "draft"
-      ? { session: null, base: thread.config }
-      : { session: thread.session, base: sessionConfig(thread.session) };
-
+  const session = thread.kind === "active" ? thread.session : null;
+  const base = threadConfig(thread);
   const config = effectiveConfig(base, picks);
   // Recent follows the submission home, and holds only what was picked.
   const remember = (): void => {
@@ -146,7 +132,6 @@ export function useComposerModel(
             ? "Say what you want done…"
             : "Reply…",
     sendTip: session === null ? "Start thread ⏎" : "Send ⏎",
-    lead: session === null ? "It works without a checkout." : null,
     readOnly,
     busy,
     sending: spawn.isPending || input.isPending,
@@ -155,12 +140,16 @@ export function useComposerModel(
     // Folded against the thread's own configuration, never against the picks
     // already made, so a pick landing back on it is not a pick at all.
     pick: (...steps) => {
-      setPicks((held) => steps.reduce((acc, step) => applyPick(base, acc, step, catalogs), held));
+      setPicks((held) => steps.reduce((acc, step) => applyPick(catalogs, base, acc, step), held));
     },
     submit: () => {
-      const payload = submission(thread, picks, { text: message });
-      if ("prompt" in payload) spawn.mutate(payload);
-      else if (session !== null) input.mutate({ id: session.id, payload });
+      const sent = submission(thread, picks, { text: message });
+      switch (sent.kind) {
+        case "spawn":
+          return spawn.mutate(sent.input);
+        case "input":
+          return input.mutate({ id: sent.sessionId, payload: sent.payload });
+      }
     },
     stop: () => {
       if (session !== null) interrupt.mutate(session.id);

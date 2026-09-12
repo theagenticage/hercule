@@ -12,7 +12,7 @@ import {
 import { localRunnerQuery, providersQuery, runnersQuery } from "../../app/queries";
 import { messageOf } from "../save-status";
 import { AccessModeSelector } from "./access-mode-selector";
-import { AttachButton, PendingNote, SendButton, StopButton, VoiceButton } from "./controls";
+import { AttachButton, SendButton, StopButton, VoiceButton } from "./controls";
 import { DraftHero } from "./draft-hero";
 import { Lip } from "./lip";
 import { loginSlot } from "./login-slot";
@@ -43,27 +43,31 @@ export function Composer({
   const localRunnerId = useQuery(localRunnerQuery(detectLocalRunner, runners)).data ?? null;
   const catalogs = { instances, runners, localRunnerId };
   const [open, setOpen] = useState<SelectorKey | null>(null);
+  const [filter, setFilter] = useState("");
   const model = useComposerModel(thread, catalogs, client, onSend);
   const fields = composerFields(catalogs, model.config, model.kind);
   const pending = pendingModelNote(model.kind, model.picks);
   const login = loginSlot(client, () => {
     void queryClient.invalidateQueries({ queryKey: queryKeys.providers() });
   });
-  // A click opening selector B is also a click outside A, whose dismissal can
-  // land after B's open - so closing clears only the selector still asking to.
-  const toggle =
-    (key: SelectorKey) =>
-    (next: boolean): void => {
-      setOpen((current) => (next ? key : current === key ? null : current));
-    };
-  const menuOf = (filter: string) =>
-    modelMenu(catalogs, model.config, { kind: model.kind, filter, recent: model.recent });
-  const blocked = fields.blocked !== null || model.readOnly !== null || model.sending;
-  const canSend = !blocked && model.message.trim() !== "";
+  // A click opening B is also a click outside A, so closing clears only the selector asking to.
+  const openChange = (key: SelectorKey, next: boolean): void => {
+    setOpen((current) => (next ? key : current === key ? null : current));
+    if (key === "model" && !next) setFilter("");
+  };
+  // The catalog behind the model pill is worth resolving only while it is on show.
+  const menu =
+    open === "model"
+      ? modelMenu(catalogs, model.config, { kind: model.kind, filter, recent: model.recent })
+      : null;
+  const cannotSend = fields.blocked !== null || model.readOnly !== null || model.sending;
+  const canSend = !cannotSend && model.message.trim() !== "";
   return (
     // A draft stands under its own sentence, which takes the room above the card.
-    <div className={model.lead === null ? "flex w-full flex-col" : "flex w-full flex-1 flex-col"}>
-      <DraftHero lead={model.lead} blocked={fields.blocked} loginSlot={login} />
+    <div className={fields.lead === null ? "flex w-full flex-col" : "flex w-full flex-1 flex-col"}>
+      {fields.lead === null ? null : (
+        <DraftHero lead={fields.lead} blocked={fields.blocked} loginSlot={login} />
+      )}
       <div className="relative z-[1] flex flex-col gap-2 rounded-[14px] border border-line bg-raised px-3.5 pt-3 pb-2.5 shadow-lift">
         <MessageBox
           value={model.message}
@@ -81,13 +85,16 @@ export function Composer({
             items={fields.accessMode.rows}
             locked={fields.accessMode.locked}
             open={open === "accessMode"}
-            onOpenChange={toggle("accessMode")}
+            onOpenChange={(next) => {
+              openChange("accessMode", next);
+            }}
             onPick={(mode) => {
               model.pick({ kind: "accessMode", value: mode });
-              setOpen(null);
             }}
           />
-          {pending === null ? null : <PendingNote note={pending} />}
+          {pending === null ? null : (
+            <span className="ml-1 font-mono text-[11px] text-attn">{pending}</span>
+          )}
           <div className="ml-auto flex min-w-0 items-center gap-1.5">
             {fields.options === null ? null : (
               <ModelOptionsSelector
@@ -97,18 +104,24 @@ export function Composer({
                 modelName={fields.model.pill.name}
                 disabled={model.readOnly !== null}
                 open={open === "options"}
-                onOpenChange={toggle("options")}
+                onOpenChange={(next) => {
+                  openChange("options", next);
+                }}
                 onPick={(id, value) => {
                   model.pick({ kind: "option", id, value });
                 }}
               />
             )}
             <ModelSelector
-              menuOf={menuOf}
+              menu={menu}
+              filter={filter}
+              onFilter={setFilter}
               pill={fields.model.pill}
               disabled={model.readOnly !== null}
               open={open === "model"}
-              onOpenChange={toggle("model")}
+              onOpenChange={(next) => {
+                openChange("model", next);
+              }}
               onPick={model.pick}
               loginSlot={login}
             />
@@ -124,16 +137,12 @@ export function Composer({
         )}
       </div>
       <Lip
-        fields={fields}
-        runnerId={model.config.runnerId}
+        workspace={fields.workspace}
+        machine={fields.machine}
         open={open === "workspace" || open === "machine" ? open : null}
-        onOpenChange={toggle}
+        onOpenChange={openChange}
         onPickRunner={(runnerId) => {
           model.pick({ kind: "runnerId", value: runnerId });
-          setOpen(null);
-        }}
-        onClose={() => {
-          setOpen(null);
         }}
       />
     </div>

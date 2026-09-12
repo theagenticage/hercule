@@ -13,7 +13,11 @@ export interface ThreadConfig extends ThreadDefaults {
   readonly options: Readonly<Record<string, string | boolean>>;
 }
 
-export type ThreadPicks = Partial<ThreadConfig>;
+/**
+ * What the user has touched since the last submission. The permission profile
+ * is not among them: nothing in the composer offers it.
+ */
+export type ThreadPicks = Partial<Omit<ThreadConfig, "profileId">>;
 
 /** The unsent content the composer holds for one thread. */
 export interface MessageDraft {
@@ -35,17 +39,36 @@ export interface ThreadCatalogs {
 }
 
 /**
+ * What the thread itself runs with, before any pick: the draft's own config,
+ * or what the session was spawned with and still carries.
+ */
+export const threadConfig = (thread: Thread): ThreadConfig =>
+  thread.kind === "draft"
+    ? thread.config
+    : {
+        instanceId: thread.session.instanceId,
+        model: thread.session.modelSelection.model,
+        options: thread.session.modelSelection.options,
+        accessMode: thread.session.accessMode,
+        runnerId: thread.session.runnerId,
+        profileId: thread.session.permissionProfileId,
+      };
+
+/**
  * What a thread runs with while the composer is open: its own configuration
  * with the picks over it. The per-model choices belong to the model that
- * offered them, so they stand over what the thread stored only while the model
- * on show is the one it stored them for; another model shows its own defaults.
+ * offered them on the account that offered it, so they stand over what the
+ * thread stored only while both are the ones it stored them for; any other
+ * pair shows its own defaults.
  */
 export const effectiveConfig = (base: ThreadConfig, picks: ThreadPicks): ThreadConfig => {
+  const instanceId = picks.instanceId ?? base.instanceId;
   const model = picks.model ?? base.model;
+  const same = instanceId === base.instanceId && model === base.model;
   return {
     ...base,
     ...picks,
     model,
-    options: model === base.model ? { ...base.options, ...picks.options } : { ...picks.options },
+    options: same ? { ...base.options, ...picks.options } : { ...picks.options },
   };
 };

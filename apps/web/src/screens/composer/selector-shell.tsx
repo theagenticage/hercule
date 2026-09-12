@@ -19,7 +19,7 @@ import { Popover, PopoverContent, PopoverTrigger, cn } from "@hydra/ui";
 export function SelectorShell({
   keyLabel,
   label,
-  locked,
+  locked = null,
   disabled = false,
   open,
   onOpenChange,
@@ -32,7 +32,8 @@ export function SelectorShell({
   /** The field's own name, shown before the value on the lip's selectors. */
   readonly keyLabel?: string;
   readonly label: ReactNode;
-  readonly locked: string | null;
+  /** Why this cannot be changed here; nothing locks a field that never locks. */
+  readonly locked?: string | null;
   /** A thread that can take no input at all can change nothing about itself. */
   readonly disabled?: boolean;
   readonly open: boolean;

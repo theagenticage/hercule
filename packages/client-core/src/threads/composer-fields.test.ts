@@ -2,7 +2,7 @@
  * `composerFields(catalogs, config, kind)` is every lock, dimming and blocker
  * the composer shows, decided once here so no component holds a reason
  * string. What matters: an active thread's fields are locked with
- * the sentence that says why, a draft that cannot start says so and carries
+ * the sentence that says why, the model is never one of them, a draft that cannot start says so and carries
  * the login it needs, and the pill names the account only when the provider
  * has more than one.
  */
@@ -75,13 +75,12 @@ const config = (overrides: Record<string, unknown> = {}) => ({
 });
 
 describe("composerFields", () => {
-  it("locks the access mode, the workspace and the machine on an active thread, and never the model", () => {
+  it("locks the access mode, the workspace and the machine on an active thread", () => {
     const fields = composerFields(catalogs([CLAUDE]), config(), "active");
 
     expect(fields.accessMode.locked).toBe("Create a new thread to change the access mode");
     expect(fields.workspace.locked).toBe("Create a new thread to change the workspace");
     expect(fields.machine.locked).toBe("Create a new thread to change the machine");
-    expect(fields.model.locked).toBeNull();
   });
 
   it("locks nothing on a draft thread", () => {
@@ -90,7 +89,6 @@ describe("composerFields", () => {
     expect(fields.accessMode.locked).toBeNull();
     expect(fields.workspace.locked).toBeNull();
     expect(fields.machine.locked).toBeNull();
-    expect(fields.model.locked).toBeNull();
   });
 
   it("blocks a draft with no provider instance set up", () => {
@@ -132,7 +130,7 @@ describe("composerFields", () => {
 
     expect(fields.blocked).toEqual({
       reason: "Claude Code is on moss but not logged in",
-      login: { instanceId: LOGGED_OUT.id, runnerId: LOCAL.id, displayName: "Claude Code" },
+      login: { instanceId: LOGGED_OUT.id, runnerId: LOCAL.id, subject: "Claude Code on moss" },
     });
   });
 
@@ -195,11 +193,23 @@ describe("composerFields: the machine", () => {
     expect(composerFields(catalogs([CLAUDE]), config(), "draft").machine.label).toBe("moss");
   });
 
-  it("carries the fleet as rows, and which machine it speaks about", () => {
+  it("carries the fleet as rows, marking the machine in force", () => {
     const fields = composerFields(catalogs([CLAUDE]), config(), "draft");
 
     expect(fields.machine.rows.map((row) => row.runnerId)).toEqual([LOCAL.id]);
-    expect(fields.machine.referenceId).toBe(LOCAL.id);
+    expect(fields.machine.rows.filter((row) => row.current).map((row) => row.runnerId)).toEqual([
+      LOCAL.id,
+    ]);
+  });
+
+  it("names the machine in force with the reason it is dimmed, since its menu is shut", () => {
+    const fields = composerFields(
+      catalogs([LOGGED_OUT]),
+      config({ instanceId: LOGGED_OUT.id }),
+      "draft",
+    );
+
+    expect(fields.machine.label).toBe("moss · not logged in");
   });
 
   it("says there is no machine to name when the fleet holds none", () => {
@@ -210,6 +220,15 @@ describe("composerFields: the machine", () => {
     );
 
     expect(fields.machine.label).toBe("no machine");
+  });
+});
+
+describe("composerFields: the lead", () => {
+  it("carries the draft's sentence, and none on a thread that has started", () => {
+    expect(composerFields(catalogs([CLAUDE]), config(), "draft").lead).toBe(
+      "It works without a checkout.",
+    );
+    expect(composerFields(catalogs([CLAUDE]), config(), "active").lead).toBeNull();
   });
 });
 

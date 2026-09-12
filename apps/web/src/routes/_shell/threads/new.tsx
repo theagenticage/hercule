@@ -51,7 +51,7 @@ function NewThread(): JSX.Element {
 
   return (
     <div className="flex flex-1 flex-col">
-      <ThreadChrome project={null} title="New thread" />
+      <ThreadChrome title="New thread" />
       <ThreadColumn className="justify-end">
         <Composer thread={{ kind: "draft", config }} />
       </ThreadColumn>

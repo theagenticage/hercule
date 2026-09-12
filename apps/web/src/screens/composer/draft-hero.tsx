@@ -12,12 +12,11 @@ export function DraftHero({
   blocked,
   loginSlot,
 }: {
-  /** The sentence, or nothing at all: an active thread stands under none. */
-  readonly lead: string | null;
+  /** The sentence this draft stands under, where nothing blocks it. */
+  readonly lead: string;
   readonly blocked: ComposerBlocked | null;
   readonly loginSlot: (login: LoginTarget, className: string) => ReactNode;
-}): JSX.Element | null {
-  if (lead === null) return null;
+}): JSX.Element {
   return (
     <div className="my-auto pt-1 pb-[42px] text-center">
       <h2 className="mb-1.5 text-[22px] font-emph text-ink">What should the agent do?</h2>

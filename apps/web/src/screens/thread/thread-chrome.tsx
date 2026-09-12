@@ -10,17 +10,15 @@ import { cn } from "@hydra/ui";
  * would say the same thing one row higher.
  */
 export function ThreadChrome({
-  project,
   title,
   actions,
 }: {
-  readonly project: string | null;
   readonly title: string;
   readonly actions?: ReactNode;
 }): JSX.Element {
   return (
     <div className="flex items-center gap-2.5 px-6 pt-3 pb-2 text-[16px] font-emph text-ink">
-      <span className="shrink-0 font-normal text-faint">{`${project ?? "Threads"} /`}</span>{" "}
+      <span className="shrink-0 font-normal text-faint">Threads /</span>{" "}
       <span className="truncate">{title}</span>
       {actions === undefined ? null : (
         <span className="ml-auto flex shrink-0 items-center gap-1.5">{actions}</span>

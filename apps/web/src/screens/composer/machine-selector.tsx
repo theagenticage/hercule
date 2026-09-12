@@ -1,11 +1,11 @@
 import type { JSX } from "react";
-import type { RunnerMenuRow } from "@hydra/client-core";
+import type { MachineRow } from "@hydra/client-core";
 import { cn } from "@hydra/ui";
-import { MenuFoot, MenuHeader, MenuRow } from "./menu-row";
+import { MenuFoot, MenuHeader, MenuRow } from "./menu";
 import { SelectorShell } from "./selector-shell";
 
 /** Only `online` and `unreachable` carry a doctrine hue (live, failed); the rest are neutral. */
-const STATE_HUE: Record<RunnerMenuRow["state"], string> = {
+const STATE_HUE: Record<MachineRow["state"], string> = {
   online: "text-live",
   draining: "text-muted",
   retired: "text-muted",
@@ -19,7 +19,7 @@ const STATE_HUE: Record<RunnerMenuRow["state"], string> = {
  * segment rather than a flex gap, so the row's own text - and a reader of it -
  * carries the spacing the eye sees.
  */
-const rowLabel = (row: RunnerMenuRow): JSX.Element => (
+const rowLabel = (row: MachineRow): JSX.Element => (
   <span className="flex min-w-0 items-center">
     <span className="truncate">{row.name}</span>
     <span className={cn("shrink-0 whitespace-pre", STATE_HUE[row.state])}>{` · ${row.state}`}</span>
@@ -32,40 +32,27 @@ const rowLabel = (row: RunnerMenuRow): JSX.Element => (
 
 /**
  * The lip's right-hand selector: which machine a new thread is placed on,
- * scoped to the instance the model selector has already picked.
- *
- * Its own trigger names the reason the picked machine is dimmed, because that
- * reason is what stops the thread from starting and the menu it is inside is
- * shut.
+ * scoped to the instance the model selector has already picked. Its own
+ * trigger carries the label the field built - the machine in force, named with
+ * the reason it is dimmed, because that reason is what stops the thread from
+ * starting and the menu it is inside is shut.
  */
 export function MachineSelector({
   rows,
-  name,
-  referenceId,
-  runnerId,
+  label,
   locked,
   open,
   onOpenChange,
   onPick,
 }: {
-  readonly rows: readonly RunnerMenuRow[];
-  /** What the machine in force is called, which is a fact of the field, not of a row. */
-  readonly name: string;
-  /** The machine the trigger speaks about when none is picked yet. */
-  readonly referenceId: string | null;
-  /** The machine picked, which marks the row; none picked marks no row. */
-  readonly runnerId: string | null;
+  readonly rows: readonly MachineRow[];
+  /** The machine in force, with the reason it is dimmed where there is one. */
+  readonly label: string;
   readonly locked: string | null;
   readonly open: boolean;
   readonly onOpenChange: (open: boolean) => void;
   readonly onPick: (runnerId: string) => void;
 }): JSX.Element {
-  // The name and the reason come off one row, never off two: a machine named
-  // with another's reason would send the user to fix the wrong thing.
-  const spoken = rows.find((row) => row.runnerId === (runnerId ?? referenceId));
-  const label =
-    spoken?.dimmed === undefined || spoken.dimmed === null ? name : `${name} · ${spoken.dimmed}`;
-
   return (
     <SelectorShell
       keyLabel="machine"
@@ -83,9 +70,10 @@ export function MachineSelector({
           name={rowLabel(row)}
           sub={[row.identity, row.planLabel].filter((each) => each !== null).join(" · ")}
           dimmed={row.dimmed}
-          current={row.runnerId === runnerId}
+          current={row.current}
           onPick={() => {
             onPick(row.runnerId);
+            onOpenChange(false);
           }}
         />
       ))}

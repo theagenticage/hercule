@@ -3,8 +3,8 @@ import { cn } from "@hydra/ui";
 
 /**
  * One row of a composer menu: a marker column (the dot on the row in force, or
- * a provider's mark), the name, a note at the right, and a sub-line under
- * both.
+ * a provider's mark), the name with its small detail beside it, a note at the
+ * right, and a sub-line under both.
  *
  * A dimmed row is not a button. It is inert - "dimmed with the reason, never
  * hidden" (spec 14 §The composer) means the row stays on show and stops
@@ -14,6 +14,7 @@ import { cn } from "@hydra/ui";
 export function MenuRow({
   marker,
   name,
+  detail,
   note,
   sub,
   current = false,
@@ -25,6 +26,8 @@ export function MenuRow({
   /** What stands in the marker column; the row's own dot when nothing does. */
   readonly marker?: ReactNode;
   readonly name: ReactNode;
+  /** The small word beside the name: an account, a plan, "default". */
+  readonly detail?: string | null;
   readonly note?: ReactNode;
   readonly sub?: ReactNode;
   readonly current?: boolean;
@@ -41,7 +44,12 @@ export function MenuRow({
           <span className={cn("size-[5px] rounded-full", current && "bg-ink")} />
         </span>
       )}
-      <span className="min-w-0 truncate">{name}</span>{" "}
+      <span className="min-w-0 truncate">
+        {name}
+        {detail === undefined || detail === null || detail === "" ? null : (
+          <span className="ml-1.5 text-[11px] font-normal text-faint">{detail}</span>
+        )}
+      </span>{" "}
       <span
         className={cn(
           "flex shrink-0 items-center gap-1.5 text-[11px] font-normal whitespace-nowrap",
@@ -103,14 +111,6 @@ export function Lane({ label }: { readonly label: string }): JSX.Element {
 export const markerOf = (mark: ReactNode): ReactNode => (
   <span className="flex w-4 justify-center opacity-85">{mark}</span>
 );
-
-/** The detail that rides beside a name: an account, a plan, the word "default". */
-export const aside = (text: string | null): ReactNode =>
-  text === null || text === "" ? null : (
-    <span key="aside" className="ml-1.5 text-[11px] font-normal text-faint">
-      {text}
-    </span>
-  );
 
 /** A menu's own first row: what is being picked, and what picking it settles. */
 export function MenuHeader({

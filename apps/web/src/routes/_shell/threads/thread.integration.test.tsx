@@ -1325,6 +1325,17 @@ describe("Thread: the chrome is the screen's first row", () => {
     expect(overflow.disabled).toBe(true);
   });
 
+  it("truncates a long title rather than pushing the crumb or the actions out of place", async () => {
+    const longTitle =
+      "Fix the login bug for real this time and also the logout bug and the signup bug";
+    await open(session({ status: "idle", title: longTitle }), twoCompletedTurns());
+
+    const crumb = await waitFor(() => screen.getByText("Threads /"));
+    expect(screen.getByText(longTitle).className).toContain("truncate");
+    // The crumb and the actions still render in full - only the title gave way.
+    expect(crumb.className).toContain("shrink-0");
+  });
+
   it("still warns about a zone this browser cannot read, the one thing the bar owes the screen", async () => {
     await open(session({ status: "idle" }), twoCompletedTurns(), {
       "GET /api/v1/settings": {

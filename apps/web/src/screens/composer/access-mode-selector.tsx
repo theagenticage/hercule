@@ -1,7 +1,7 @@
 import type { JSX } from "react";
 import type { AccessModeMenuItem } from "@hydra/client-core";
 import type { AccessMode } from "@hydra/contract";
-import { MenuRow } from "./menu-row";
+import { MenuRow } from "./menu";
 import { SelectorShell } from "./selector-shell";
 
 /**
@@ -38,6 +38,7 @@ export function AccessModeSelector({
           }
           onPick={() => {
             onPick(item.mode);
+            onOpenChange(false);
           }}
         />
       ))}

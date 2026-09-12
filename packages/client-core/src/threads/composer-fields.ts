@@ -13,7 +13,7 @@ import type {
   Runner,
 } from "@hydra/contract";
 import { accessModeMenu, type AccessModeMenuItem } from "./access-modes";
-import { accountName, snapshotOn } from "./catalog";
+import { accountName, loginTarget, snapshotOn, type LoginTarget } from "./catalog";
 import type { ThreadCatalogs, ThreadConfig, ThreadKind, ThreadPicks } from "./config";
 import { referenceRunner, runnerMenu, type RunnerMenuRow } from "./runner-menu";
 
@@ -29,18 +29,15 @@ export interface ModelPill {
   readonly name: string | null;
 }
 
-/** What a Log in would log in to: the account, the machine, and its name. */
-export interface LoginTarget {
-  readonly instanceId: string;
-  readonly runnerId: string;
-  /** What to call it while logging in, since the caller may be on another row. */
-  readonly displayName: string;
-}
-
 export interface ComposerBlocked {
   readonly reason: string;
   /** The login that would clear it, where logging in is what is missing. */
   readonly login: LoginTarget | null;
+}
+
+/** One machine the thread could be placed on, and whether it is the one in force. */
+export interface MachineRow extends RunnerMenuRow {
+  readonly current: boolean;
 }
 
 export interface ComposerFields {
@@ -49,20 +46,23 @@ export interface ComposerFields {
     readonly value: AccessMode;
     readonly rows: readonly AccessModeMenuItem[];
   };
-  readonly model: ComposerField & { readonly pill: ModelPill };
+  readonly model: { readonly pill: ModelPill };
   /** What the current model offers to pick under it; none means no selector. */
   readonly options: readonly ModelOption[] | null;
   readonly workspace: ComposerField;
-  /** The machine: the one in force, the fleet under it, and which row it is. */
+  /** The machine: the one in force, named with why it is dimmed, and the fleet. */
   readonly machine: ComposerField & {
     readonly label: string;
-    readonly rows: readonly RunnerMenuRow[];
-    /** The machine the field speaks about while none is picked; null with no fleet. */
-    readonly referenceId: string | null;
+    readonly rows: readonly MachineRow[];
   };
+  /** The sentence a draft stands under; an active thread stands under none. */
+  readonly lead: string | null;
   /** Why this draft cannot start at all; null once it can, and on a thread that has. */
   readonly blocked: ComposerBlocked | null;
 }
+
+/** What a draft says above its card while nothing stops it from starting. */
+const LEAD = "It works without a checkout.";
 
 /**
  * Why a draft cannot start, in the order the user can act on: something to
@@ -81,7 +81,7 @@ const blockerOf = (
   if (snapshot.auth.status !== "ok")
     return {
       reason: `${instance.displayName} is on ${runner.name} but not logged in`,
-      login: { instanceId: instance.id, runnerId: runner.id, displayName: instance.displayName },
+      login: loginTarget(instance, runner),
     };
   return null;
 };
@@ -99,7 +99,17 @@ export const composerFields = (
   const snapshot = instance === undefined ? undefined : snapshotOn(instance, runner?.id);
   const descriptor = snapshot?.models.find((model) => model.slug === config.model);
 
-  const blocked = kind === "active" ? null : blockerOf(instance, runner, snapshot);
+  // The name and the reason come off one machine, never off two: a machine
+  // named with another's reason would send the user to fix the wrong thing.
+  const rows: readonly MachineRow[] =
+    instance === undefined
+      ? []
+      : runnerMenu(catalogs.runners, catalogs.localRunnerId, instance).rows.map((row) => ({
+          ...row,
+          current: row.runnerId === runner?.id,
+        }));
+  const dimmed = rows.find((row) => row.current)?.dimmed ?? null;
+  const name = runner?.name ?? "no machine";
 
   return {
     accessMode: {
@@ -108,7 +118,6 @@ export const composerFields = (
       rows: instance === undefined ? [] : accessModeMenu(instance.declared.accessModes),
     },
     model: {
-      locked: null,
       pill: {
         providerId: instance?.providerId ?? null,
         account: instance === undefined ? null : accountName(catalogs.instances, instance),
@@ -122,14 +131,11 @@ export const composerFields = (
     workspace: { locked: lockedReason(kind, "workspace") },
     machine: {
       locked: lockedReason(kind, "machine"),
-      label: runner?.name ?? "no machine",
-      rows:
-        instance === undefined
-          ? []
-          : runnerMenu(catalogs.runners, catalogs.localRunnerId, instance).rows,
-      referenceId: runner?.id ?? null,
+      label: dimmed === null ? name : `${name} · ${dimmed}`,
+      rows,
     },
-    blocked,
+    lead: kind === "active" ? null : LEAD,
+    blocked: kind === "active" ? null : blockerOf(instance, runner, snapshot),
   };
 };
 

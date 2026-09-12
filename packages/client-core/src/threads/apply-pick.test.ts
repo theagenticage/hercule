@@ -1,5 +1,5 @@
 /**
- * `applyPick(config, picks, pick, catalogs)` folds one selector choice into
+ * `applyPick(catalogs, config, picks, pick)` folds one selector choice into
  * the picks the composer holds. What matters: the per-model options belong to
  * the model that offered them, so anything that changes the catalog under
  * them clears them, and picking what is already in force is not a change at
@@ -54,10 +54,10 @@ describe("applyPick", () => {
   it("sets a new model and drops the options the old model carried", () => {
     expect(
       applyPick(
+        CATALOGS,
         CONFIG,
         { model: SONNET.slug, options: { effort: "high" } },
         { kind: "model", value: OPUS.slug },
-        CATALOGS,
       ),
     ).toEqual({ model: OPUS.slug });
   });
@@ -68,10 +68,10 @@ describe("applyPick", () => {
     // choices made under the one just left.
     expect(
       applyPick(
+        CATALOGS,
         CONFIG,
         { model: OPUS.slug, options: { effort: "high" } },
         { kind: "model", value: SONNET.slug },
-        CATALOGS,
       ),
     ).toEqual({});
   });
@@ -79,7 +79,7 @@ describe("applyPick", () => {
   it("changes nothing when the model in force is picked again, whatever the picks hold", () => {
     const picks = { options: { effort: "high" } };
 
-    expect(applyPick(CONFIG, picks, { kind: "model", value: SONNET.slug }, CATALOGS)).toEqual(
+    expect(applyPick(CATALOGS, CONFIG, picks, { kind: "model", value: SONNET.slug })).toEqual(
       picks,
     );
   });
@@ -87,10 +87,10 @@ describe("applyPick", () => {
   it("takes the runner and the model from the instance's own defaults, and drops the options", () => {
     expect(
       applyPick(
+        CATALOGS,
         CONFIG,
         { model: SONNET.slug, options: { effort: "high" } },
         { kind: "instanceId", value: CODEX.id },
-        CATALOGS,
       ),
     ).toEqual({
       instanceId: CODEX.id,
@@ -102,10 +102,10 @@ describe("applyPick", () => {
   it("merges an option into the options already picked", () => {
     expect(
       applyPick(
+        CATALOGS,
         CONFIG,
         { options: { effort: "low" } },
         { kind: "option", id: "thinking", value: true },
-        CATALOGS,
       ),
     ).toEqual({ options: { effort: "low", thinking: true } });
   });
@@ -113,10 +113,10 @@ describe("applyPick", () => {
   it("overwrites an option picked before under the same id", () => {
     expect(
       applyPick(
+        CATALOGS,
         CONFIG,
         { options: { effort: "low" } },
         { kind: "option", id: "effort", value: "high" },
-        CATALOGS,
       ),
     ).toEqual({ options: { effort: "high" } });
   });
@@ -124,10 +124,10 @@ describe("applyPick", () => {
   it("sets the access mode and nothing else", () => {
     expect(
       applyPick(
+        CATALOGS,
         CONFIG,
         { model: SONNET.slug, options: { effort: "high" } },
         { kind: "accessMode", value: "full-access" },
-        CATALOGS,
       ),
     ).toEqual({ model: SONNET.slug, options: { effort: "high" }, accessMode: "full-access" });
   });
@@ -135,10 +135,10 @@ describe("applyPick", () => {
   it("sets the runner and drops the options, since a catalog is scoped instance x runner", () => {
     expect(
       applyPick(
+        CATALOGS,
         CONFIG,
         { model: SONNET.slug, options: { effort: "high" } },
         { kind: "runnerId", value: REMOTE.id },
-        CATALOGS,
       ),
     ).toEqual({ model: SONNET.slug, runnerId: REMOTE.id });
   });

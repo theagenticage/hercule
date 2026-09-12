@@ -6,37 +6,27 @@
  * carries its own name: a bolt on its own would name nothing.
  */
 import type { ModelOption } from "@hydra/contract";
+import { optionsMenu, type ModelOptionRow } from "./options-menu";
 
-type Selected = Readonly<Record<string, string | boolean>>;
-
-const valueOf = (option: ModelOption, selected: Selected): string | boolean =>
-  selected[option.id] ?? option.default;
-
-const effortLabel = (option: ModelOption, selected: Selected): string => {
-  const value = valueOf(option, selected);
-  return (
-    option.choices?.find((choice) => choice.value === value)?.label ?? String(value)
-  ).toLowerCase();
-};
+const labelOf = (row: ModelOptionRow): string =>
+  (row.choices.find((choice) => choice.value === row.value)?.label ?? row.value).toLowerCase();
 
 export const optionsLabel = (
   descriptors: readonly ModelOption[],
-  selected: Selected,
+  selected: Readonly<Record<string, string | boolean>>,
 ): string | null => {
-  const effort = descriptors.find((option) => option.id === "effort");
-  const thinking = descriptors.find((option) => option.id === "thinking");
-  const fastMode = descriptors.find((option) => option.id === "fastMode");
+  const rows = optionsMenu(descriptors, selected);
+  const rowOf = (id: string): ModelOptionRow | undefined => rows.find((row) => row.id === id);
+  const effort = rowOf("effort");
+  const thinking = rowOf("thinking");
 
   const reasoning =
     effort !== undefined
-      ? effortLabel(effort, selected)
-      : thinking !== undefined
-        ? valueOf(thinking, selected) === true
-          ? "thinking on"
-          : null
+      ? labelOf(effort)
+      : thinking !== undefined && thinking.value === "on"
+        ? "thinking on"
         : null;
   if (reasoning === null) return null;
 
-  const fast = fastMode !== undefined && valueOf(fastMode, selected) === true;
-  return fast ? `${reasoning} ⚡` : reasoning;
+  return rowOf("fastMode")?.value === "on" ? `${reasoning} ⚡` : reasoning;
 };

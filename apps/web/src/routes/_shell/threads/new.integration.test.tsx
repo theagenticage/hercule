@@ -956,8 +956,9 @@ describe("Composer: model menu shapes", () => {
     await waitFor(() => {
       expect(reading()).toContain(AUTHORIZE_URL);
     });
-    // The row logs in to the account it stands for, not to the one in force.
-    expect(screen.getByText("Log in to Codex")).toBeDefined();
+    // The row logs in to the account it stands for, not to the one in force,
+    // and on the machine the credential will land on.
+    expect(screen.getByText("Log in to Codex on moss")).toBeDefined();
     expect(api.calls.find((call) => call.path.endsWith("/login"))?.body).toEqual({
       runnerId: RUNNER.id,
     });

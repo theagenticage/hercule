@@ -93,8 +93,3 @@ export function PillLabel({ pill }: { readonly pill: ModelPill }): JSX.Element {
     </>
   );
 }
-
-/** The card's own word that a pick has not gone anywhere yet. */
-export function PendingNote({ note }: { readonly note: string }): JSX.Element {
-  return <span className="ml-1 font-mono text-[11px] text-attn">{note}</span>;
-}

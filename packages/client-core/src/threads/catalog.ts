@@ -4,7 +4,7 @@
  * on: the same instance offers a model list on one machine and nothing at all
  * on another.
  */
-import type { CapabilitySnapshot, ProviderInstance } from "@hydra/contract";
+import type { CapabilitySnapshot, ProviderInstance, Runner } from "@hydra/contract";
 
 export const snapshotOn = (
   instance: ProviderInstance,
@@ -28,3 +28,20 @@ export const instanceLabel = (
   instances: readonly ProviderInstance[],
   instance: ProviderInstance,
 ): string => accountName(instances, instance) ?? instance.displayName;
+
+/** What a Log in would log in to: the account, the machine, and what to call
+ * the pair, since the caller may be on another row and a credential lands on
+ * one machine only.
+ */
+export interface LoginTarget {
+  readonly instanceId: string;
+  readonly runnerId: string;
+  /** What the login is for, named in full: `Claude Code on atlas`. */
+  readonly subject: string;
+}
+
+export const loginTarget = (instance: ProviderInstance, runner: Runner): LoginTarget => ({
+  instanceId: instance.id,
+  runnerId: runner.id,
+  subject: `${instance.displayName} on ${runner.name}`,
+});

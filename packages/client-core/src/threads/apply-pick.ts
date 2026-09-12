@@ -19,7 +19,7 @@ export type ComposerPick =
   | { readonly kind: "accessMode"; readonly value: AccessMode }
   | { readonly kind: "runnerId"; readonly value: string };
 
-type Key = keyof ThreadConfig;
+type Key = keyof ThreadPicks;
 
 const without = (picks: ThreadPicks, ...keys: readonly Key[]): ThreadPicks =>
   Object.fromEntries(Object.entries(picks).filter(([key]) => !keys.includes(key as Key)));
@@ -36,10 +36,10 @@ const revert = (picks: ThreadPicks, key: Key, ...also: readonly Key[]): ThreadPi
   picks[key] === undefined ? picks : without(picks, key, ...also);
 
 export const applyPick = (
+  catalogs: ThreadCatalogs,
   config: ThreadConfig,
   picks: ThreadPicks,
   pick: ComposerPick,
-  catalogs: ThreadCatalogs,
 ): ThreadPicks => {
   switch (pick.kind) {
     case "model":

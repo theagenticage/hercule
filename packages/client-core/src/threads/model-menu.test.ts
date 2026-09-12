@@ -269,7 +269,7 @@ describe("modelMenu: the other instances", () => {
 
     expect(menu.others[0]).toMatchObject({
       dimmed: "not logged in",
-      login: { instanceId: CODEX_OUT.id, runnerId: LOCAL.id },
+      login: { instanceId: CODEX_OUT.id, runnerId: LOCAL.id, subject: "Codex on moss" },
     });
   });
 

@@ -1,5 +1,5 @@
 import type { JSX } from "react";
-import { MenuFoot, MenuHeader, MenuRow } from "./menu-row";
+import { MenuFoot, MenuHeader, MenuRow } from "./menu";
 import { SelectorShell } from "./selector-shell";
 
 /** Until a thread can join one, the only workspace on offer is no workspace. */
@@ -14,12 +14,10 @@ export function WorkspaceSelector({
   locked,
   open,
   onOpenChange,
-  onPick,
 }: {
   readonly locked: string | null;
   readonly open: boolean;
   readonly onOpenChange: (open: boolean) => void;
-  readonly onPick: () => void;
 }): JSX.Element {
   return (
     <SelectorShell
@@ -31,7 +29,14 @@ export function WorkspaceSelector({
       contentClassName="w-[420px]"
     >
       <MenuHeader label="Workspace" note="locks when the thread starts" />
-      <MenuRow name={NONE} sub="the agent works without a checkout" current onPick={onPick} />
+      <MenuRow
+        name={NONE}
+        sub="the agent works without a checkout"
+        current
+        onPick={() => {
+          onOpenChange(false);
+        }}
+      />
       <MenuFoot>
         <div>
           <span>Add a repo →</span>

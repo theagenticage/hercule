@@ -7,8 +7,7 @@
  * whole menu.
  */
 import type { ModelDescriptor, ProviderInstance } from "@hydra/contract";
-import { accountName, instanceLabel, snapshotOn } from "./catalog";
-import type { LoginTarget } from "./composer-fields";
+import { accountName, instanceLabel, loginTarget, snapshotOn, type LoginTarget } from "./catalog";
 import type { ThreadCatalogs, ThreadConfig, ThreadKind } from "./config";
 import type { RecentModel } from "./recent";
 import { referenceRunner } from "./runner-menu";
@@ -84,11 +83,7 @@ export const modelMenu = (
   current: ThreadConfig,
   view: ModelMenuView,
 ): ModelMenu => {
-  const runner = referenceRunner(
-    catalogs.runners,
-    current.runnerId ?? null,
-    catalogs.localRunnerId,
-  );
+  const runner = referenceRunner(catalogs.runners, current.runnerId, catalogs.localRunnerId);
   const filter = view.filter.trim().toLowerCase();
   const modelsOf = (instance: ProviderInstance): readonly ModelDescriptor[] =>
     snapshotOn(instance, runner?.id)?.models ?? [];
@@ -183,7 +178,7 @@ export const modelMenu = (
               snapshot !== undefined &&
               snapshot.auth.status !== "ok" &&
               runner !== undefined
-                ? { instanceId: each.id, runnerId: runner.id, displayName: each.displayName }
+                ? loginTarget(each, runner)
                 : null,
             rows: view.kind === "active" ? [] : matched,
           },
