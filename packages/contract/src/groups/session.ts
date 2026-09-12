@@ -157,13 +157,14 @@ export const SessionInputOutcome = Schema.Struct({
 export type SessionInputOutcome = Schema.Schema.Type<typeof SessionInputOutcome>;
 
 /**
- * Carrying a session on: `resume` continues the provider-native session the
- * parent left behind, `fork` branches off it and leaves the parent's own
- * history untouched. Either way the new session lands on the parent's runner
- * and provider instance, because that is where the native state is.
+ * Branching a session: `fork` opens a second provider-native session off the
+ * one the parent left behind, leaving the parent's own history untouched. It
+ * lands on the parent's runner and provider instance, because that is where
+ * the native state is. Carrying the parent itself on is not here: an exited
+ * session that still has its transcript is resumed in place by its next input.
  */
 export const SESSION_CONTINUE_FIELDS = {
-  mode: Schema.Literals(["resume", "fork"]),
+  mode: Schema.Literal("fork"),
   prompt: Prompt,
 } as const;
 

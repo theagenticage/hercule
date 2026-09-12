@@ -192,13 +192,22 @@ const NOT_RESUMABLE =
   "that session is not resumable: it is still live, it left no provider-native session, " +
   "or its machine is gone";
 
+/**
+ * The one way an exited session can be past carrying on that is not about its
+ * machine: it never reported a provider-native session, so there is no
+ * transcript left anywhere to pick up.
+ */
+const NO_TRANSCRIPT =
+  "that session left no provider-native session, so its transcript is gone and there is " +
+  "nothing to carry on";
+
 /** Read at any runner named directly: for a session to continue on, and for one to spawn on. */
 const DRAINING = "that runner is draining and takes no new sessions";
 const RETIRED = "that runner is retired";
 
-const ALREADY_CARRIED_ON =
-  "another session is already live against that one's provider-native session; " +
-  "stop it, or fork instead";
+/** Why a queued input never left, written on the row when its session ends. */
+const exitedWith = (reason: string): string =>
+  `that session's harness exited (${reason}) before this input was sent`;
 
 /**
  * Both ways an input can fail to reach the harness - no connection, and no
@@ -457,6 +466,66 @@ const make = Effect.gen(function* () {
     });
 
   /**
+   * The login half of what `spawn` asks placement for, asked of the one machine
+   * that holds the native state rather than of the fleet: the stored snapshot's
+   * word that this machine can run this instance.
+   */
+  const requireLoggedInOn = (
+    instanceId: string,
+    runnerId: string,
+  ): Effect.Effect<void, InvalidState | SqlError | Schema.SchemaError> =>
+    Effect.gen(function* () {
+      const snapshots = yield* instances.snapshotsOf(instanceId);
+      if (!snapshots.some((one) => loggedIn(one) && one.runnerId === runnerId)) {
+        return yield* Effect.fail(invalidState(NO_PLACEMENT));
+      }
+    });
+
+  /**
+   * What an input into a session whose harness is gone has to get past, and the
+   * provider-native session it carries on once it has. Each refusal names its
+   * own reason (spec 06 section 5): the transcript, or the machine - retired,
+   * on its way out and taking no new placement even though the transcript is
+   * still there, or no longer logged in to the instance the session runs
+   * against.
+   */
+  const nativeSessionToResume = (
+    session: StoredSession,
+  ): Effect.Effect<string, InvalidState | SqlError | Schema.SchemaError> =>
+    Effect.gen(function* () {
+      if (!session.resumable || session.nativeSessionId === null) {
+        return yield* Effect.fail(
+          invalidState(session.nativeSessionId === null ? NO_TRANSCRIPT : RETIRED),
+        );
+      }
+      const machine = yield* runners.read(session.runnerId);
+      if (Option.isSome(machine) && machine.value.lifecycle !== "active") {
+        return yield* Effect.fail(invalidState(DRAINING));
+      }
+      yield* requireLoggedInOn(session.instanceId, session.runnerId);
+      return session.nativeSessionId;
+    });
+
+  /**
+   * The document a machine is told for a session that carries a provider-native
+   * one on, resumed in place or branched off: everything but the selection and
+   * the mode comes from the session whose transcript it picks up.
+   */
+  const continuingSpec = (
+    session: StoredSession,
+    modelSelection: ModelSelection,
+    carryOn: NonNullable<SessionSpec["continue"]>,
+  ): Effect.Effect<SessionSpec, SettingError | SqlError> =>
+    Effect.map(settings.all(), (controller) => ({
+      instanceId: session.instanceId,
+      workspaceId: session.workspaceId,
+      modelSelection,
+      accessMode: session.accessMode,
+      continue: carryOn,
+      timeouts: timeoutsFrom(controller),
+    }));
+
+  /**
    * Sends one stored input to the machine holding the session and waits for the
    * machine to say what it did with it. `none` where there is no connection or
    * nothing came back in time; the wait is outside any transaction. The caller
@@ -571,13 +640,16 @@ const make = Effect.gen(function* () {
   const absorbing = (what: string, effect: Effect.Effect<void, SqlError>): Effect.Effect<void> =>
     Effect.ignore(Effect.tapCause(effect, (cause) => Effect.logError(what, cause)));
 
-  /** The tail of any move to `exited`: queued inputs cancelled, one announce per session. */
-  const ending = (ids: ReadonlyArray<string>): Effect.Effect<void, SqlError> =>
+  /**
+   * The tail of any move to `exited`: queued inputs cancelled, one announce per
+   * session. A reason is written on the rows where the machine gave one.
+   */
+  const ending = (ids: ReadonlyArray<string>, reason?: string): Effect.Effect<void, SqlError> =>
     Effect.forEach(
       ids,
       (id) =>
         Effect.gen(function* () {
-          yield* inputs.cancelQueued(id);
+          yield* inputs.cancelQueued(id, reason);
           yield* announce({ _tag: "record", topic: "session", id, kind: "updated" });
         }),
       { discard: true },
@@ -740,7 +812,7 @@ const make = Effect.gen(function* () {
       // runner reporting about a session that is not its to report.
       if (Option.isNone(found) || found.value.runnerId !== runnerId) return;
       const before = found.value.status;
-      const held = tracking.get(id) ?? track(yield* sessions.lastSeq(id));
+      const held = tracking.get(id) ?? track(yield* sessions.ingestState(id));
       const folded = fold(held, seq, event);
       if (folded === undefined) return;
       // Ahead of the transaction that may or may not follow, and never inside
@@ -781,9 +853,9 @@ const make = Effect.gen(function* () {
             return undefined;
           }
           yield* sessions.moved(id, folded.status, at);
-          if (folded.status === "exited") {
+          if (event._tag === "session.exited") {
             // Nothing waits on a harness that is gone, so the queue goes with it.
-            yield* ending([id]);
+            yield* ending([id], exitedWith(event.reason));
           } else {
             yield* announce({ _tag: "record", topic: "session", id, kind: "updated" });
           }
@@ -820,17 +892,12 @@ const make = Effect.gen(function* () {
 
   /**
    * What it takes to open one session on a machine, whether it is the first of
-   * a conversation or the one carrying an earlier conversation on.
+   * a conversation or a branch off another one's.
    */
   interface Opening {
     readonly permissionProfileId: string;
     readonly runnerId: string;
     readonly requestedAccessMode: AccessMode;
-    /**
-     * Known only where the session carries on the native session another one
-     * left behind. A fresh session and a fork are both named by the machine.
-     */
-    readonly nativeSessionId: string | undefined;
     readonly parentSessionId: string | undefined;
     /** Everything the machine is told, and the source of what the row stores. */
     readonly spec: SessionSpec;
@@ -846,19 +913,11 @@ const make = Effect.gen(function* () {
    * whether this runner has room for it right now, and it is the same
    * decision either way, so a fresh row takes it rather than a copy of it.
    */
-  const opening = (open: Opening): Effect.Effect<StoredSession, InvalidState | SqlError> =>
+  const opening = (open: Opening): Effect.Effect<StoredSession, SqlError> =>
     Effect.gen(function* () {
       const stored = yield* withTransaction(
         sql,
         Effect.gen(function* () {
-          // Asked inside the write, because two callers naming one native
-          // session a moment apart would both pass a check made before it.
-          if (
-            open.nativeSessionId !== undefined &&
-            (yield* sessions.liveOn(open.nativeSessionId))
-          ) {
-            return yield* Effect.fail(invalidState(ALREADY_CARRIED_ON));
-          }
           const at = yield* nowIso;
           const row = yield* sessions.insert({
             title: titleOf(open.prompt),
@@ -872,7 +931,6 @@ const make = Effect.gen(function* () {
             // told, not a re-encode of an object that resembles it.
             spec: JSON.stringify(encodeSpec(open.spec)),
             modelSelection: open.spec.modelSelection,
-            nativeSessionId: open.nativeSessionId,
             parentSessionId: open.parentSessionId,
             at,
           });
@@ -1043,7 +1101,6 @@ const make = Effect.gen(function* () {
           permissionProfileId: profileId,
           runnerId: hosting.runnerId,
           requestedAccessMode,
-          nativeSessionId: undefined,
           parentSessionId: undefined,
           spec,
           prompt: decoded.prompt,
@@ -1087,6 +1144,13 @@ const make = Effect.gen(function* () {
      * here rather than left for a flush that will never run; every other
      * status queues, and steering one is `input.steer`'s to do.
      *
+     * A session whose harness is gone but whose transcript is not is revived by
+     * this call: the row is stored waiting, the session goes back on the queue
+     * under a spec that carries on its provider-native session, and dispatch
+     * places it exactly as it places a spawn. What the user typed leaves at the
+     * transition to idle the machine's `session.started` makes, like a spawn's
+     * own prompt.
+     *
      * What it did is always the machine's own word for it, never the status the
      * controller read: an input that opened a turn and one that was folded into
      * a turn already running are told apart by the adapter alone.
@@ -1104,10 +1168,18 @@ const make = Effect.gen(function* () {
           sql,
           Effect.gen(function* () {
             const session = yield* one(id);
-            if (session.status === "exited") return yield* Effect.fail(invalidState(HAS_EXITED));
+            const nativeSessionId =
+              session.status === "exited" ? yield* nativeSessionToResume(session) : undefined;
             const modelSelection = yield* selectionFor(session, picks);
             const at = yield* nowIso;
             yield* sessions.setModelSelection(id, modelSelection);
+            if (nativeSessionId !== undefined) {
+              const spec = yield* continuingSpec(session, modelSelection, {
+                nativeSessionId,
+                mode: "resume",
+              });
+              yield* sessions.resume(id, JSON.stringify(encodeSpec(spec)), at);
+            }
             const created = yield* inputs.insert({
               sessionId: id,
               source: "user",
@@ -1120,6 +1192,14 @@ const make = Effect.gen(function* () {
             return { session, row: created };
           }),
         );
+        if (session.status === "exited") {
+          // The revived process numbers its events from the start, so what the
+          // stored stream reached is not what they are judged against.
+          tracking.delete(id);
+          // Outside the transaction: dispatch may tell the machine, and a
+          // transaction never spans a wait on anything outside the database.
+          yield* dispatch(session.runnerId);
+        }
         if (session.status !== "idle") return { inputId: row.id, result: "queued" };
         return yield* deliverClaimed(session.runnerId, row);
       }),
@@ -1239,14 +1319,10 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * A second session against the provider-native one the parent left behind,
-     * on the same machine and the same instance, because that is where the
-     * native state is (spec 06 section 4.1).
-     *
-     * Only an exited parent may be carried on, and a resume only where nothing
-     * else is live against that native session: two harnesses writing one
-     * native transcript is a corruption nothing here could repair. A fork
-     * writes a transcript of its own, so it is safe beside anything.
+     * A second session branched off the provider-native one the parent left
+     * behind, on the same machine and the same instance, because that is where
+     * the native state is (spec 06 section 4.1). Only an exited parent may be
+     * branched from. Carrying the parent itself on is `session.input`'s.
      *
      * It carries a Thread's profile onto a new session, so like `spawn` only
      * the user may open one (spec 02 Thread).
@@ -1273,31 +1349,20 @@ const make = Effect.gen(function* () {
             invalidState(machine.value.lifecycle === "retired" ? RETIRED : DRAINING),
           );
         }
-        const { snapshots } = yield* resolved(parent.instanceId);
-        // The login half of what `spawn` asks placement for, of the one machine
-        // that holds the native state rather than of the fleet: the stored
-        // snapshot's word that this machine can run this instance.
-        if (!snapshots.some((one) => loggedIn(one) && one.runnerId === parent.runnerId)) {
-          return yield* Effect.fail(invalidState(NO_PLACEMENT));
-        }
+        // Read for what it refuses: an instance that is gone, or a provider this
+        // build no longer carries, before the machine's snapshot is trusted.
+        yield* resolved(parent.instanceId);
+        yield* requireLoggedInOn(parent.instanceId, parent.runnerId);
 
         return yield* opening({
           permissionProfileId: parent.permissionProfileId,
           runnerId: parent.runnerId,
           requestedAccessMode: parent.requestedAccessMode,
-          // A resume is the same conversation carried on: the same native
-          // session, and so no parent to point at. Only a fork branches off
-          // one, and the machine names the branch it makes.
-          nativeSessionId: mode === "resume" ? parent.nativeSessionId : undefined,
-          parentSessionId: mode === "fork" ? parent.id : undefined,
-          spec: {
-            instanceId: parent.instanceId,
-            workspaceId: parent.workspaceId,
-            modelSelection: parent.modelSelection,
-            accessMode: parent.accessMode,
-            continue: { nativeSessionId: parent.nativeSessionId, mode },
-            timeouts: timeoutsFrom(yield* settings.all()),
-          },
+          parentSessionId: parent.id,
+          spec: yield* continuingSpec(parent, parent.modelSelection, {
+            nativeSessionId: parent.nativeSessionId,
+            mode,
+          }),
           prompt,
           kind: "session.continued",
           payload: { parentSessionId: parent.id, mode },

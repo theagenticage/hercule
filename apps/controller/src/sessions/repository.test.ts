@@ -34,7 +34,6 @@ const aSession = Effect.gen(function* () {
     workspaceId: null,
     spec: "{}",
     modelSelection: { model: "clever", options: {} },
-    nativeSessionId: undefined,
     parentSessionId: undefined,
     at,
   });

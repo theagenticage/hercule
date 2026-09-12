@@ -20,6 +20,7 @@ import {
   modelPillLabel,
   queryKeys,
   referenceRunner,
+  resumeBlockedReason,
   runnerMenu,
   threadDefaults,
   type HydraClient,
@@ -280,7 +281,7 @@ export function Composer({
     }
   };
 
-  const exited = started && session.status === "exited";
+  const noResume = started ? resumeBlockedReason(session) : null;
   const busy = started && session.status === "busy";
   const composerError = spawn.error ?? sendInput.error ?? interrupt.error;
   const sending = spawn.isPending || sendInput.isPending;
@@ -313,10 +314,10 @@ export function Composer({
             event.preventDefault();
             send();
           }}
-          disabled={exited}
+          disabled={noResume !== null}
           placeholder={
-            exited
-              ? "this thread has exited"
+            noResume !== null
+              ? `This thread can't be resumed: ${noResume}.`
               : started
                 ? "Type a message…"
                 : "What should the agent do?"
@@ -362,7 +363,7 @@ export function Composer({
             open={openSelector === "model"}
             onOpenChange={toggle("model")}
             trigger={pillText}
-            disabled={exited}
+            disabled={noResume !== null}
             triggerClassName="flex-1 text-center font-emph text-ink"
             contentClassName="w-80"
           >
@@ -404,7 +405,9 @@ export function Composer({
           <Button
             variant="primary"
             aria-label="Send"
-            disabled={prompt.trim() === "" || exited || sending || blockedReason !== null}
+            disabled={
+              prompt.trim() === "" || noResume !== null || sending || blockedReason !== null
+            }
             title={blockedReason ?? undefined}
             onClick={send}
             className="rounded-full"

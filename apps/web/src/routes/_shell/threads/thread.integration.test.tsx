@@ -1614,22 +1614,14 @@ describe("Thread: stop control (AC-21)", () => {
     expect(screen.queryByRole("button", { name: /^stop$/i })).toBeNull();
   });
 
-  it("has no Stop control and disables the textarea with a reason on an exited thread", async () => {
+  it("has no Stop control and disables the textarea on an exited thread that cannot be resumed", async () => {
     await open(
       session({ status: "exited", exitedAt: "2026-09-08T10:05:00.000Z" }),
       twoCompletedTurns(),
     );
 
     expect(screen.queryByRole("button", { name: /^stop$/i })).toBeNull();
-
-    const textarea = screen.getByRole<HTMLTextAreaElement>("textbox");
-    expect(textarea.disabled).toBe(true);
-    const reason = "this thread has exited";
-    const surfaced =
-      reading().includes(reason) ||
-      textarea.placeholder.includes(reason) ||
-      textarea.title.includes(reason);
-    expect(surfaced).toBe(true);
+    expect(screen.getByRole<HTMLTextAreaElement>("textbox").disabled).toBe(true);
   });
 });
 
@@ -1892,5 +1884,87 @@ describe("Thread: model options ride the submission (AC-6, AC-7)", () => {
     const medium = screen.getByRole<HTMLButtonElement>("radio", { name: "Medium" });
     expect(medium.getAttribute("aria-checked")).toBe("false");
     expect(medium.disabled).toBe(false);
+  });
+});
+
+describe("Thread: an exited thread that can be resumed", () => {
+  const EXITED_RESUMABLE = session({
+    status: "exited",
+    resumable: true,
+    nativeSessionId: "native-1",
+    exitedAt: "2026-09-08T10:05:00.000Z",
+  });
+
+  it("reads like an idle thread: textarea and model pill enabled, no Stop and nothing saying exited", async () => {
+    await open(EXITED_RESUMABLE, twoCompletedTurns());
+
+    const textarea = screen.getByRole<HTMLTextAreaElement>("textbox");
+    expect(textarea.disabled).toBe(false);
+    expect(textarea.placeholder).toBe("Type a message…");
+
+    const pill = screen.getByRole<HTMLButtonElement>("button", { name: /claude-sonnet-5/i });
+    expect(pill.disabled).toBe(false);
+
+    expect(screen.queryByRole("button", { name: /^stop$/i })).toBeNull();
+    expect(reading()).not.toMatch(/exited/i);
+  });
+
+  it("sends the typed text to POST /sessions/:id/input and shows the queued row above the composer", async () => {
+    const user = userEvent.setup();
+    const { api } = await open(EXITED_RESUMABLE, twoCompletedTurns(), {
+      [`POST /api/v1/sessions/${SESSION_ID}/input`]: {
+        body: { inputId: INPUT_ID, result: "queued" },
+      },
+      [`GET /api/v1/sessions/${SESSION_ID}/inputs`]: { body: { items: [queuedInput()] } },
+    });
+
+    await user.type(screen.getByRole("textbox"), "Also check the logs");
+    await user.click(screen.getByRole("button", { name: /send/i }));
+
+    const call = await waitFor(() => {
+      const found = api.calls.find(
+        (each) => each.method === "POST" && each.path === `/api/v1/sessions/${SESSION_ID}/input`,
+      );
+      if (found === undefined) throw new Error("input not sent yet");
+      return found;
+    });
+    expect(call.body).toEqual({
+      text: "Also check the logs",
+      model: "claude-sonnet-5",
+      options: {},
+    });
+
+    const queued = await screen.findByText("Also check the logs");
+    expect(screen.getByRole("button", { name: /steer/i })).toBeDefined();
+    // The list sits above the composer, in reading order.
+    expect(
+      queued.compareDocumentPosition(screen.getByRole("textbox")) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeGreaterThan(0);
+  });
+});
+
+describe("Thread: an exited thread that cannot be resumed", () => {
+  it.each<[string, string | null]>([
+    ["its transcript is gone", null],
+    ["its runner was retired", "native-1"],
+  ])("is read-only and says %s", async (reason, nativeSessionId) => {
+    await open(
+      session({
+        status: "exited",
+        resumable: false,
+        nativeSessionId,
+        exitedAt: "2026-09-08T10:05:00.000Z",
+      }),
+      twoCompletedTurns(),
+    );
+
+    const textarea = screen.getByRole<HTMLTextAreaElement>("textbox");
+    expect(textarea.disabled).toBe(true);
+    expect(textarea.placeholder).toBe(`This thread can't be resumed: ${reason}.`);
+
+    const pill = screen.getByRole<HTMLButtonElement>("button", { name: /claude-sonnet-5/i });
+    expect(pill.disabled).toBe(true);
+    expect(screen.getByRole<HTMLButtonElement>("button", { name: /send/i }).disabled).toBe(true);
   });
 });

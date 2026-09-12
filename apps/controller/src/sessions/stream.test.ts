@@ -56,7 +56,7 @@ const texts = (folded: Folded): ReadonlyArray<string> =>
 /** Applies a run of events, failing loudly on one the fold refused. */
 const applied = (
   events: ReadonlyArray<readonly [number, ProviderEvent]>,
-  from: Tracked = track(0),
+  from: Tracked = track({ lastSeq: 0, base: 0 }),
 ): { readonly state: Tracked; readonly folds: ReadonlyArray<Folded> } => {
   let state = from;
   const folds: Array<Folded> = [];

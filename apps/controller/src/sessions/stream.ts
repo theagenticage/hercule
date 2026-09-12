@@ -29,8 +29,15 @@ interface Held {
 
 /** One session's ingest state. Replaced whole, never edited in place. */
 export interface Tracked {
-  /** The highest runner sequence already applied to this session. */
+  /** The highest applied sequence, in the space `base` puts them in. */
   readonly lastSeq: number;
+  /**
+   * What this session's current process's sequence numbers are counted from.
+   * A machine numbers a session's events from zero per process, and a resumed
+   * session is a second process under the same id, so the two would otherwise
+   * collide; zero for a session that has never been resumed.
+   */
+  readonly base: number;
   readonly buffers: ReadonlyMap<string, Held>;
 }
 
@@ -49,7 +56,10 @@ export interface StreamRow {
   readonly event: ProviderEvent;
 }
 
-export const track = (lastSeq: number): Tracked => ({ lastSeq, buffers: new Map() });
+export const track = (from: Omit<Tracked, "buffers">): Tracked => ({
+  ...from,
+  buffers: new Map(),
+});
 
 /**
  * Two stream kinds on one item are two runs of text, so the key carries both.
@@ -79,11 +89,17 @@ const statusAfter = (event: ProviderEvent): SessionStatus | undefined => {
 };
 
 /**
- * Applies one reported event. `undefined` is a sequence this session has already
- * seen - a replayed frame - and writes nothing. The caller keeps `next` only
- * once the write commits, so a failed transaction leaves the state as it was.
+ * Applies one reported event, under the sequence `base` puts it at. `undefined`
+ * is a sequence this session has already seen - a replayed frame - and writes
+ * nothing. The caller keeps `next` only once the write commits, so a failed
+ * transaction leaves the state as it was.
  */
-export const fold = (tracked: Tracked, seq: number, event: ProviderEvent): Folded | undefined => {
+export const fold = (
+  tracked: Tracked,
+  reported: number,
+  event: ProviderEvent,
+): Folded | undefined => {
+  const seq = tracked.base + reported;
   if (seq <= tracked.lastSeq) return undefined;
   const buffers = new Map(tracked.buffers);
   const rows: Array<StreamRow> = [];
@@ -111,7 +127,7 @@ export const fold = (tracked: Tracked, seq: number, event: ProviderEvent): Folde
     }
     // A delta is not a boundary and moves nothing: `busy` is already where the
     // turn that produced it put the session.
-    return { rows, status: undefined, next: { lastSeq: seq, buffers } };
+    return { rows, status: undefined, next: { lastSeq: seq, base: tracked.base, buffers } };
   }
 
   // The three moments held text has nothing more coming for it.
@@ -119,5 +135,5 @@ export const fold = (tracked: Tracked, seq: number, event: ProviderEvent): Folde
   if (event._tag === "turn.completed" || event._tag === "session.exited") flush();
 
   rows.push({ seq, at: event.at, event });
-  return { rows, status: statusAfter(event), next: { lastSeq: seq, buffers } };
+  return { rows, status: statusAfter(event), next: { lastSeq: seq, base: tracked.base, buffers } };
 };

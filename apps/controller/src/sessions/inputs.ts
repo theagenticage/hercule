@@ -246,9 +246,9 @@ const make = Effect.gen(function* () {
      * alone: the machine has its text, and recording it as called off would
      * be the one thing this store must never say.
      */
-    cancelQueued: (sessionId: string): Effect.Effect<void, SqlError> =>
+    cancelQueued: (sessionId: string, reason?: string): Effect.Effect<void, SqlError> =>
       Effect.asVoid(sql`
-        UPDATE session_inputs SET status = 'cancelled'
+        UPDATE session_inputs SET status = 'cancelled', reason = COALESCE(${reason ?? null}, reason)
         WHERE session_id = ${uuidFromString(sessionId)} AND status = 'queued' AND sent_at IS NULL
       `),
 

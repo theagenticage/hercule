@@ -5,6 +5,7 @@
  * not a guess about what is populated.
  */
 import type { Session } from "@hydra/contract";
+import { isSettled } from "./resume-blocked";
 import { WORKING_STATUSES } from "./status";
 
 export type LaneKind = "waiting" | "running" | "idle" | "assistants" | "settled";
@@ -14,12 +15,20 @@ export interface Lane {
   readonly sessions: readonly Session[];
 }
 
+/**
+ * An exit that can be resumed still takes input, so it reads as idle wherever
+ * an idle thread does: what is neither working nor over for good is waiting
+ * for the user.
+ */
+const takesInput = (session: Session): boolean =>
+  !WORKING_STATUSES.has(session.status) && !isSettled(session);
+
 const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
 
 export const lanesOf = (sessions: readonly Session[]): readonly Lane[] => {
   const running = sessions.filter((session) => WORKING_STATUSES.has(session.status));
-  const idle = sessions.filter((session) => session.status === "idle");
-  const settled = sessions.filter((session) => session.status === "exited");
+  const idle = sessions.filter(takesInput);
+  const settled = sessions.filter(isSettled);
 
   return [
     { kind: "waiting", sessions: [] },
@@ -32,10 +41,10 @@ export const lanesOf = (sessions: readonly Session[]): readonly Lane[] => {
 
 export const headlineOf = (sessions: readonly Session[], now: Date): string => {
   const running = sessions.filter((session) => WORKING_STATUSES.has(session.status)).length;
-  const idle = sessions.filter((session) => session.status === "idle").length;
+  const idle = sessions.filter(takesInput).length;
   const settled = sessions.filter(
     (session) =>
-      session.status === "exited" &&
+      isSettled(session) &&
       session.exitedAt !== null &&
       now.getTime() - Date.parse(session.exitedAt) <= SEVEN_DAYS_MS,
   ).length;
