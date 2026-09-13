@@ -24,10 +24,8 @@ export {
   type ConfigValue,
 } from "./config-fields";
 export {
-  connectionIssues,
   connectionTypes,
   redirectUriFor,
-  type ConnectionIssues,
   type ConnectionType,
   type CredentialField,
   type SetupStep,

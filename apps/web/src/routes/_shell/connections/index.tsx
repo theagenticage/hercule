@@ -1,10 +1,11 @@
-import { useState, type JSX } from "react";
-import { createFileRoute } from "@tanstack/react-router";
+import { useEffect, useState, type JSX } from "react";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useSuspenseQuery } from "@tanstack/react-query";
-import { Button, EmptyState, Group, LaneLabel } from "@hydra/ui";
+import { EmptyState, Group, LaneLabel } from "@hydra/ui";
 import { connectionTypes, type ConnectionType } from "@hydra/client-core";
 import { useLiveInvalidation } from "../../../app/live-invalidation";
 import { connectionsQuery, pluginsQuery } from "../../../app/queries";
+import { ConnectRows } from "../../../screens/connect-rows";
 import { ConnectionRow } from "./-row";
 import { ConnectionSetup } from "./-setup";
 
@@ -37,7 +38,10 @@ const OAUTH_FAILURES: Readonly<Record<string, string>> = {
 const gistOf = (type: ConnectionType): string => {
   if (type.setup.some((step) => step.kind === "oauth")) return "sign in with the provider";
   if (type.setup.some((step) => step.kind === "credentials")) return "paste a token";
-  return "pair a chat account";
+  if (type.setup.some((step) => step.kind === "pairing")) return "pair a chat account";
+  // A step kind this build does not know: the type names itself rather than
+  // being described as something it may not be.
+  return type.type;
 };
 
 /**
@@ -49,9 +53,18 @@ const gistOf = (type: ConnectionType): string => {
  */
 function Connections(): JSX.Element {
   const { client, queryClient, live } = Route.useRouteContext();
-  const oauth = Route.useSearch().oauth;
+  const navigate = useNavigate();
+  // Read once, at the first render: the address is cleared below, and the
+  // notice is about the trip that just happened, not about this screen.
+  const [notice] = useState(Route.useSearch().oauth);
 
   useLiveInvalidation(live, queryClient, "connection");
+
+  // Replacing the entry that carried the outcome takes it out of the address
+  // bar and out of the back button at once, so a reload does not say it again.
+  useEffect(() => {
+    if (notice !== undefined) void navigate({ to: "/connections", search: {}, replace: true });
+  }, [notice, navigate]);
 
   const connections = useSuspenseQuery(connectionsQuery(client)).data.items;
   const types = connectionTypes(useSuspenseQuery(pluginsQuery(client)).data);
@@ -61,27 +74,15 @@ function Connections(): JSX.Element {
 
   const offers =
     chosen === undefined ? (
-      <Group>
-        {types.map((type) => (
-          <div
-            key={type.type}
-            className="flex items-center gap-2.5 rounded-control px-2.5 py-[7px] text-row"
-          >
-            <span className="min-w-0 flex-1">
-              <b className="block font-emph text-ink">{type.displayName}</b>
-              <small className="block text-fine text-muted">{gistOf(type)}</small>
-            </span>
-            <Button
-              variant="primary"
-              onClick={() => {
-                setConnecting(type.type);
-              }}
-            >
-              Connect
-            </Button>
-          </div>
-        ))}
-      </Group>
+      <ConnectRows
+        offers={types.map((type) => ({
+          name: type.displayName,
+          gist: gistOf(type),
+          onConnect: () => {
+            setConnecting(type.type);
+          },
+        }))}
+      />
     ) : (
       <ConnectionSetup
         client={client}
@@ -94,20 +95,20 @@ function Connections(): JSX.Element {
 
   return (
     <div className="flex flex-col gap-7">
-      {oauth === undefined ? null : oauth === "ok" ? (
+      {notice === undefined ? null : notice === "ok" ? (
         <p className="text-row text-live" role="status">
           The account is connected.
         </p>
       ) : (
         <p className="text-row text-fail" role="alert">
-          {OAUTH_FAILURES[oauth] ?? `The setup did not finish: ${oauth}.`}
+          {OAUTH_FAILURES[notice] ?? `The setup did not finish: ${notice}.`}
         </p>
       )}
 
       {connections.length === 0 ? (
         <EmptyState
           headline="Nothing connected yet."
-          lead="Connections are the accounts Hydra reads and speaks through. Each files its work into a topic you pick at setup."
+          lead="Connections are the accounts Hydra reads and speaks through. Events come from GitHub and Gmail; chat comes from Discord and Slack."
         >
           {offers}
         </EmptyState>

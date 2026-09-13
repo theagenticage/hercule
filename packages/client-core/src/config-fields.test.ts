@@ -236,4 +236,33 @@ describe("configIssues", () => {
   it("says nothing at all when the write was not refused", () => {
     expect(configIssues(null, fields)).toEqual({ perField: {}, rest: false });
   });
+
+  it("reads a group's own fields out of a path that names the group", () => {
+    const refusal = new ApiError("validation", "the credentials were refused", {
+      issues: [
+        { path: ["credentials", "token"], message: "that token was rejected" },
+        { path: ["config", "endpoint"], message: "must be an https URL" },
+      ],
+    });
+
+    expect(configIssues(refusal, [{ name: "token" }], "credentials")).toEqual({
+      perField: { token: "that token was rejected" },
+      // The settings issue lands on no field this form draws.
+      rest: true,
+    });
+    expect(configIssues(refusal, fields, "config")).toEqual({
+      perField: { endpoint: "must be an https URL" },
+      rest: true,
+    });
+  });
+
+  it("leaves the form to say what it draws no field for, group or not", () => {
+    const refusal = new ApiError("validation", "refused", {
+      issues: [{ path: ["config", "endpoint"], message: "must be an https URL" }],
+    });
+
+    // The type is gone, so this form draws nothing: without this the message
+    // would be filed under a field nobody can see and never shown.
+    expect(configIssues(refusal, [], "config")).toEqual({ perField: {}, rest: true });
+  });
 });

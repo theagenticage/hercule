@@ -4,8 +4,8 @@ import { Button } from "@hydra/ui";
 import {
   configDraft,
   configFields,
+  configIssues,
   configPayload,
-  connectionIssues,
   queryKeys,
   type ConfigDraft,
   type ConnectionType,
@@ -48,7 +48,11 @@ export function ConfigureConnection({
         payload: {
           label,
           labels: [topic],
-          config: configPayload(fields, draft, connection.config),
+          // A type no longer in the binary has no schema to read its settings
+          // against, so they are left exactly as they are stored.
+          ...(type === undefined
+            ? {}
+            : { config: configPayload(fields, draft, connection.config) }),
         },
       }),
     onSuccess: async () => {
@@ -59,8 +63,13 @@ export function ConfigureConnection({
 
   // A setting the type refused belongs under the setting it named; anything
   // else refused is the form's own to say.
-  const issues = connectionIssues(save.error, "config");
+  const issues = configIssues(save.error, fields, "config");
   const failure = issues.rest ? save.error : null;
+
+  // What the last save was refused for is about what was in the fields then.
+  const edit = (): void => {
+    if (!save.isIdle) save.reset();
+  };
 
   const send = (event: FormEvent): void => {
     event.preventDefault();
@@ -73,8 +82,14 @@ export function ConfigureConnection({
         idPrefix={connection.id}
         label={label}
         topic={topic}
-        onLabel={setLabel}
-        onTopic={setTopic}
+        onLabel={(next) => {
+          edit();
+          setLabel(next);
+        }}
+        onTopic={(next) => {
+          edit();
+          setTopic(next);
+        }}
       />
       {fields.map((field) => (
         <ConfigFieldRow
@@ -84,6 +99,7 @@ export function ConfigureConnection({
           value={draft[field.name] ?? ""}
           error={issues.perField[field.name]}
           onChange={(value) => {
+            edit();
             setDraft((current) => ({ ...current, [field.name]: value }));
           }}
         />

@@ -138,8 +138,20 @@ export interface ConfigIssues {
   readonly rest: boolean;
 }
 
-/** What a refused write blamed, read against the fields this form renders. */
-export const configIssues = (error: unknown, fields: ReadonlyArray<ConfigField>): ConfigIssues => {
+/**
+ * What a refused write blamed, read against the fields this form renders.
+ *
+ * A write that carries more than one set of fields - a connection's pasted
+ * credentials beside the type's own settings - names the set in the path, which
+ * is what `prefix` reads. Anything that does not land on a field this form drew
+ * is the form's own failure either way: a message under a field nobody can see
+ * is a refusal nobody is told about.
+ */
+export const configIssues = (
+  error: unknown,
+  fields: ReadonlyArray<{ readonly name: string }>,
+  prefix?: string,
+): ConfigIssues => {
   if (error === null || error === undefined) return { perField: {}, rest: false };
   if (!(error instanceof ApiError) || error.code !== "validation") {
     return { perField: {}, rest: true };
@@ -151,7 +163,8 @@ export const configIssues = (error: unknown, fields: ReadonlyArray<ConfigField>)
   const perField: Record<string, string> = {};
   let rest = false;
   for (const issue of issues as ReadonlyArray<Issue>) {
-    const field = issue.path[0];
+    const [head, next] = issue.path;
+    const field = prefix === undefined ? head : head === prefix ? next : undefined;
     if (field !== undefined && rendered.has(field)) perField[field] ??= issue.message;
     else rest = true;
   }

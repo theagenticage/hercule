@@ -263,12 +263,14 @@ describe("Connections", () => {
         false,
       );
     }
-    expect(screen.getAllByRole("button", { name: "Connect" })).toHaveLength(3);
-    // A plugin contributing to another extension point is not a type.
-    expect(reading()).not.toContain("Quiet Sink");
-    // Nor is anything the web app was once written to know about.
-    expect(reading()).not.toContain("Discord");
-    expect(reading()).not.toContain("Gmail");
+    // The rows are the catalog and nothing else: not a plugin contributing to
+    // another extension point, and not a name the web app was once written to
+    // know about. The lead above them still names GitHub, Gmail, Discord and
+    // Slack - it is a sentence about what a connection is, not a row.
+    const offered = screen
+      .getAllByRole("button", { name: "Connect" })
+      .map((connect) => reading(around(connect, "Connect").querySelector<HTMLElement>("b")));
+    expect(offered).toEqual(["Paper Trail", "Skyline", "Chatterbox"]);
   });
 
   it("says which account each connection is, where it stands and where it files", async () => {

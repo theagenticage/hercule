@@ -2,7 +2,7 @@ import { useState, type FormEvent, type JSX } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button, Field, Input } from "@hydra/ui";
 import {
-  connectionIssues,
+  configIssues,
   queryKeys,
   redirectUriFor,
   type ConnectionType,
@@ -83,13 +83,17 @@ export function ConnectionSetup({
 
   // The type answers which credential it refused, so that message belongs under
   // the field it named; anything else refused is the form's own to say.
-  const issues = connectionIssues(submit.error, "credentials");
+  const issues = configIssues(submit.error, fields, "credentials");
   const failure = issues.rest ? submit.error : null;
 
   if (!redirects && fields.length === 0) {
     return (
       <div className="flex flex-col items-start gap-1.5 text-row text-muted">
-        <p>Pairing a chat account is not built yet.</p>
+        <p>
+          {type.setup.some((step) => step.kind === "pairing")
+            ? "Pairing a chat account is not built yet."
+            : `Setting up ${type.displayName} takes a step this version of Hydra does not know.`}
+        </p>
         <Button className="-ml-2" onClick={onDone}>
           Back
         </Button>
@@ -139,6 +143,9 @@ export function ConnectionSetup({
             required
             value={pasted[field.name] ?? ""}
             onChange={(event) => {
+              // What the last try was refused for is about what was in the
+              // box, not about what is being typed now.
+              if (!submit.isIdle) submit.reset();
               const value = event.target.value;
               setPasted((current) => ({ ...current, [field.name]: value }));
             }}
