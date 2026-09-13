@@ -94,9 +94,10 @@ const statusAfter = (event: ProviderEvent): SessionStatus | undefined => {
  * `null` for one that ends it, and the request itself for one that opens it.
  *
  * A turn that completes and a harness that exits both end any park with them,
- * whether or not the answer ever arrived: the question died with the turn. A
- * resolution names its own request, so one for a park that is no longer open
- * leaves the open one alone.
+ * whether or not the answer ever arrived: the question died with the turn -
+ * but only where there was one, since a clear that changes nothing costs every
+ * client watching the session a refetch. A resolution names its own request,
+ * so one for a park that is no longer open leaves the open one alone.
  */
 export const openRequestAfter = (
   event: ProviderEvent,
@@ -109,7 +110,7 @@ export const openRequestAfter = (
       return open?.requestId === event.requestId ? null : undefined;
     case "turn.completed":
     case "session.exited":
-      return null;
+      return open === null ? undefined : null;
     default:
       return undefined;
   }

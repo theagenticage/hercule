@@ -830,12 +830,10 @@ const make = Effect.gen(function* () {
       const folded = fold(held, seq, event);
       if (folded === undefined) return;
       // What this event does to the open request, or `undefined` for nothing.
-      // A clear where nothing was parked is nothing: most turns end that way,
-      // and the write costs every client watching a refetch. An event reaching
-      // a session that has already exited never parks it again.
+      // An event reaching a session that has already exited never parks it
+      // again.
       const open = found.value.openRequest;
-      const reported = before === "exited" ? undefined : openRequestAfter(event, open);
-      const park = reported === null && open === null ? undefined : reported;
+      const park = before === "exited" ? undefined : openRequestAfter(event, open);
       // Ahead of the transaction that may or may not follow, and never inside
       // one: a delta is not written until it flushes, but a watched session's
       // tap has to see it the instant it is reported, coalesced row or not.

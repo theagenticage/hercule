@@ -1272,6 +1272,21 @@ describe("a tool call the harness has to ask about", () => {
     expect(command.endsWith("\u2026")).toBe(true);
   });
 
+  it("opens the turn the park belongs to where the harness asked before one was open", async () => {
+    const run = driving();
+    await Effect.runPromise(
+      run.adapter.startSession(SESSION, { ...SPEC, accessMode: "approval-required" }, WORKING),
+    );
+
+    const { request } = await parked(run, "Bash", { command: "ls -la" });
+
+    // The SDK can call back before the assistant message that opened the turn
+    // has been read off its stream, so the park opens the turn it belongs to
+    // rather than reporting a request no turn is waiting on.
+    expect(tags(run.seen)).toEqual(["session.started", "turn.started", "request.opened"]);
+    expect(request.itemId).toBe(TOOL_USE);
+  });
+
   it("names an item of its own where the harness named no tool-use id", async () => {
     const run = await asking();
 
@@ -1383,7 +1398,7 @@ describe("what kind of question each tool is", () => {
   });
 });
 
-describe("a park that is still open when the turn is ended", () => {
+describe("a park that is still open when the turn or the session ends", () => {
   it("is cancelled first, and the cancellation is reported before the turn closes", async () => {
     const run = await asking();
     const { park, request } = await parked(run, "Bash", { command: "ls -la" });
@@ -1416,9 +1431,9 @@ describe("a park that is still open when the turn is ended", () => {
     expect(requestsIn(run.seen)).toEqual([]);
   });
 
-  it("is failed when the session is stopped, and the exit still says why it stopped", async () => {
+  it("is withdrawn when the session is stopped, and the exit still says why it stopped", async () => {
     const run = await asking();
-    const { park } = await parked(run, "Bash", { command: "ls -la" });
+    const { park, request } = await parked(run, "Bash", { command: "ls -la" });
 
     await Effect.runPromise(run.adapter.stopSession(SESSION, "inactivity_timeout"));
     await ends(run.seen);
@@ -1426,9 +1441,35 @@ describe("a park that is still open when the turn is ended", () => {
     // A park left hanging is a promise the harness waits on for ever.
     await until("resolved the park", () => park.settled() !== undefined);
     expect(park.settled()).toMatchObject({ behavior: "deny" });
+    // A stop ends the turn, so the stream reads the same as an interrupt's.
+    expect(resolutionsIn(run.seen)).toEqual([{ requestId: request.requestId, decision: "cancel" }]);
     const exited = run.seen.at(-1);
     expect(exited?._tag === "session.exited" ? exited.reason : undefined).toBe(
       "inactivity_timeout",
     );
+  });
+
+  it("is withdrawn once when the harness stops talking on its own, before the exit", async () => {
+    const run = await asking();
+    const { park, request } = await parked(run, "Bash", { command: "ls -la" });
+
+    // Nobody asked: the harness simply reached the end of its stream with the
+    // question still open.
+    run.end();
+    await ends(run.seen);
+
+    await until("resolved the park", () => park.settled() !== undefined);
+    // The harness gets a plain deny - there is no turn left to interrupt - and
+    // the stream says the question was cancelled rather than refused.
+    expect(park.settled()).toMatchObject({ behavior: "deny" });
+    expect(denialOf(park.settled()).interrupt).toBe(false);
+    expect(resolutionsIn(run.seen)).toEqual([{ requestId: request.requestId, decision: "cancel" }]);
+    // Every exit passes through one place, so the park is ended once, and
+    // before the exit: a request still reading as open on a session that is
+    // gone leaves a card nothing can answer.
+    const closing = tags(run.seen).filter(
+      (tag) => tag === "request.resolved" || tag === "session.exited",
+    );
+    expect(closing).toEqual(["request.resolved", "session.exited"]);
   });
 });

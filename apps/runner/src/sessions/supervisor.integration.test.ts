@@ -11,6 +11,7 @@ import { afterAll, describe, expect, it, vi } from "vitest";
 import { Duration, Effect, Fiber, PubSub, Stream } from "effect";
 import { TestClock } from "effect/testing";
 import type {
+  ApprovalDecision,
   ExitReason,
   ProviderEvent,
   RunnerToController,
@@ -38,6 +39,8 @@ const NATIVE = "0199e0e7-0000-7000-8000-0000000000fe";
 const TURN = "0199e0e7-0000-7000-8000-0000000000fd";
 /** The Queued Input row an input frame is sent under, and answered under. */
 const REQUEST = "0199e0e7-0000-7000-8000-0000000000fc";
+/** The adapter's own id for the park an answer names; the controller mints none. */
+const PARK = "0199e0e7-0000-7000-8000-0000000000fb";
 
 /** The shipped defaults (spec 03 section 6.2): only the test clock can cross them. */
 const INACTIVITY_MS = 30 * 60 * 1000;
@@ -82,6 +85,8 @@ interface Fake {
   readonly heard: () => number;
   readonly inputs: Array<TurnInput>;
   readonly interrupted: Array<string>;
+  /** Every `respondToRequest`, as the positional arguments it was handed. */
+  readonly answered: Array<readonly [string, string, ApprovalDecision]>;
   /** Every `stopSession`, with the reason its caller gave it. */
   readonly stops: Array<{ readonly sessionId: string; readonly reason: ExitReason }>;
   readonly emit: (event: ProviderEvent) => void;
@@ -101,6 +106,7 @@ const faking = (): Fake => {
   const contexts: Array<ProviderRunnerContext> = [];
   const inputs: Array<TurnInput> = [];
   const interrupted: Array<string> = [];
+  const answered: Array<readonly [string, string, ApprovalDecision]> = [];
   const stops: Array<{ readonly sessionId: string; readonly reason: ExitReason }> = [];
   const held = new Map<string, SessionBinding>();
   const fake: Fake = {
@@ -108,6 +114,7 @@ const faking = (): Fake => {
     heard: () => heard,
     inputs,
     interrupted,
+    answered,
     stops,
     fails: undefined,
     dies: false,
@@ -155,9 +162,12 @@ const faking = (): Fake => {
       interrupt: (sessionId) => Effect.sync(() => void interrupted.push(sessionId)),
       /**
        * Nothing parks in this fake: the request events are emitted directly,
-       * so there is never an answer for it to carry back to a harness.
+       * so there is never an answer for it to carry back to a harness. What
+       * the answer was handed is recorded, because the frame's three fields
+       * reaching the adapter in the right order is the runner's own job.
        */
-      respondToRequest: () => Effect.void,
+      respondToRequest: (sessionId, requestId, decision) =>
+        Effect.sync(() => void answered.push([sessionId, requestId, decision])),
       /**
        * The reason is the caller's, not this adapter's: the supervisor is the
        * one that knows why it stopped a session, and the exit event is the only
@@ -685,6 +695,33 @@ describe("what the controller hears back about one input", () => {
     );
 
     expect(fake.interrupted).toEqual([SESSION]);
+  });
+
+  it("answers the park for a session it holds, and nothing for one it does not", async () => {
+    const fake = faking();
+    const { supervisor } = connecting(fake);
+
+    await driving(
+      fake,
+      supervisor,
+      Effect.gen(function* () {
+        yield* supervisor.start(START);
+        yield* supervisor.respond({
+          _tag: "sessionRespond",
+          sessionId: SESSION,
+          requestId: PARK,
+          decision: "allow_always",
+        });
+        yield* supervisor.respond({
+          _tag: "sessionRespond",
+          sessionId: "0199e0e7-0000-7000-8000-0000000000aa",
+          requestId: PARK,
+          decision: "deny",
+        });
+      }),
+    );
+
+    expect(fake.answered).toEqual([[SESSION, PARK, "allow_always"]]);
   });
 });
 

@@ -30,18 +30,6 @@ const open = async () => {
 /** The chain as spec 06 §8.4 pins it, tolerant of how the markup breaks it up. */
 const CHAIN = /approval-required\s*<\s*auto-accept-edits\s*<\s*auto\s*<\s*full-access/;
 
-/**
- * The innermost element whose reading matches, so a test can ask what that
- * text sits inside without knowing which tag the screen chose for it.
- */
-const stating = (pattern: RegExp): HTMLElement => {
-  const found = [...document.body.querySelectorAll<HTMLElement>("*")]
-    .filter((element) => pattern.test(reading(element)))
-    .at(-1);
-  if (found === undefined) throw new Error(`nothing on the screen reads ${String(pattern)}`);
-  return found;
-};
-
 describe("Settings > System: the access-mode fallback policy", () => {
   it("states the ordered chain, the downward substitution, and that it is fixed", async () => {
     await open();
@@ -66,7 +54,9 @@ describe("Settings > System: the access-mode fallback policy", () => {
     await open();
 
     // The statement is text: it is not itself a control and sits in none.
-    expect(stating(CHAIN).closest("button, input, select, textarea, [role=radio]")).toBeNull();
+    expect(
+      screen.getByText(CHAIN).closest("button, input, select, textarea, [role=radio]"),
+    ).toBeNull();
 
     // And nothing else on the screen offers to change it either.
     const controls = [

@@ -232,6 +232,13 @@ describe("the open request", () => {
     expect(openRequestAfter(resolved, null)).toBeUndefined();
   });
 
+  it("says nothing where the clear changes nothing, so no write is made for it", () => {
+    // How most turns end: nothing was parked, and a write would cost every
+    // client watching the session a refetch for no change.
+    expect(openRequestAfter(turnCompleted, null)).toBeUndefined();
+    expect(openRequestAfter(exited, null)).toBeUndefined();
+  });
+
   it("is left alone by every other event", () => {
     for (const event of [started, turnStarted, delta("i1", "hi"), completedItem("i1")]) {
       expect(openRequestAfter(event, request), event._tag).toBeUndefined();

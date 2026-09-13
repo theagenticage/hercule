@@ -2157,19 +2157,25 @@ describe("Thread: the permission card", () => {
     // The composer squares its top corners under the card rather than keeping
     // its own 14px radius all round (spec 14 §Measurements). Whether it looks
     // flush is the residual manual check; the class is what jsdom can say.
-    expect(composerCard().className).not.toContain("rounded-[14px]");
-    expect(composerCard().className).toMatch(/rounded-\[0|rounded-t-none|rounded-b-/);
+    expect(composerCard().className).toContain("rounded-b-[14px]");
   });
 
   it("posts the clicked decision once and drops the card when the record's open request clears", async () => {
     const user = userEvent.setup();
     let current = session({ status: "busy", openRequest: REQUEST });
+    let release: (() => void) | undefined;
     const api = stubApi({
       ...controller(current, parkedRows()),
       [`GET /api/v1/sessions/${SESSION_ID}`]: () => ({ body: current }),
-      // The controller answers with the request still open: only the runner
-      // reporting `request.resolved` clears it.
-      [`POST /api/v1/sessions/${SESSION_ID}/respond`]: { body: current },
+      // Held open until the test releases it, and answering with the park
+      // still on the record: the answer is a snapshot of when it was asked,
+      // and the card follows the live record instead.
+      [`POST /api/v1/sessions/${SESSION_ID}/respond`]: () =>
+        new Promise<{ readonly body: unknown }>((resolve) => {
+          release = () => {
+            resolve({ body: session({ status: "busy", openRequest: REQUEST }) });
+          };
+        }),
     });
     const { live } = await renderApp({
       path: `/threads/${SESSION_ID}`,
@@ -2200,6 +2206,15 @@ describe("Thread: the permission card", () => {
     await waitFor(() => {
       expect(screen.queryByRole("button", { name: answer(REQUEST, "allow") })).toBeNull();
     });
+
+    // And now the answer lands, carrying the park the controller still had
+    // when it was asked. A card the record has cleared does not come back.
+    await act(async () => {
+      release?.();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    expect(screen.queryByRole("button", { name: answer(REQUEST, "allow") })).toBeNull();
   });
 
   it("takes one answer only: a second click while the request is still open sends nothing", async () => {

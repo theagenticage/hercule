@@ -1,6 +1,6 @@
 import type { JSX } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { approvalCard, queryKeys, type HydraClient } from "@hydra/client-core";
+import { useMutation } from "@tanstack/react-query";
+import { approvalCard, type HydraClient } from "@hydra/client-core";
 import type { ApprovalDecision, OpenRequest } from "@hydra/contract";
 import { cn, DecisionMark } from "@hydra/ui";
 import { messageOf } from "../save-status";
@@ -24,7 +24,6 @@ export function PermissionCard({
   readonly sessionId: string;
   readonly request: OpenRequest;
 }): JSX.Element {
-  const queryClient = useQueryClient();
   const card = approvalCard(request);
   const respond = useMutation({
     mutationFn: (decision: ApprovalDecision) =>
@@ -32,9 +31,11 @@ export function PermissionCard({
         params: { id: sessionId },
         payload: { requestId: request.requestId, decision },
       }),
-    onSuccess: (updated) => {
-      queryClient.setQueryData(queryKeys.session(updated.id), updated);
-    },
+    // The answer is not written into the cache. It is a snapshot of the record
+    // as the controller had it when it was asked - the park still on it - and
+    // writing it would resurrect a card the live `session` topic has already
+    // cleared. That topic is the source of truth; until it clears the record
+    // the rows stay disabled on `isSuccess`.
   });
   // One answer per request. The card stands until the runner reports the park
   // resolved, and a second click in that window would send a decision that

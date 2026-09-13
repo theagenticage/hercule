@@ -509,6 +509,14 @@ interface Park {
   readonly decisions: ReadonlyArray<ApprovalDecision>;
   /** The harness is told the answer in its own terms and resumes. */
   readonly answer: (decision: ApprovalDecision) => void;
+  /**
+   * The question stops existing before anyone answered it: the turn was
+   * interrupted, the session stopped, the harness withdrew the ask, or the
+   * harness simply stopped talking. The stream reports it cancelled, because
+   * nothing the user did refused it, and the harness is told a plain deny,
+   * because there is no turn left to interrupt.
+   */
+  readonly withdraw: () => void;
 }
 
 /** One session this adapter is hosting. */
@@ -576,13 +584,6 @@ export const claudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
           settle(resultFor("deny", []));
           return;
         }
-        // An "allow always" is an answer about this thread, not about the
-        // user's machine: whatever the harness offered to persist is rewritten
-        // to the session so no click here edits a settings file on disk.
-        const persists = (options.suggestions ?? []).map((rule) => ({
-          ...rule,
-          destination: "session" as const,
-        }));
         // Withdrawn before it was ever asked: the turn is already being
         // interrupted, so there is nothing to put in front of the user.
         if (options.signal.aborted) {
@@ -600,9 +601,19 @@ export const claudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
           });
           return;
         }
+        // An "allow always" is an answer about this thread, not about the
+        // user's machine: whatever the harness offered to persist is rewritten
+        // to the session so no click here edits a settings file on disk.
+        const persists = (options.suggestions ?? []).map((rule) => ({
+          ...rule,
+          destination: "session" as const,
+        }));
         const requestId = crypto.randomUUID();
         // A park belongs to a turn: it is what the turn is waiting on, and the
-        // supervisor pauses the inactivity clock of an open turn for it.
+        // supervisor pauses the inactivity clock of an open turn for it. The
+        // SDK can ask before the assistant message that opened the turn has
+        // been read off its stream, so the turn is opened here where there is
+        // none yet.
         const { events } = openTurn(held.state);
         for (const event of events) emit(event);
         const request = requestFor(
@@ -630,14 +641,16 @@ export const claudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
           });
           settle(told);
         };
-        // The harness has already stopped the turn itself, so it is told a
-        // plain deny; the stream still reports the park as cancelled.
+        // Every way this question can stop existing without an answer, in one
+        // place: the harness's own withdrawal, an interrupt, a stop, and the
+        // harness reaching the end of its stream.
         const withdraw = (): void => end("cancel", resultFor("deny", []));
         options.signal.addEventListener("abort", withdraw, { once: true });
         held.park = {
           requestId,
           decisions: request.decisions,
           answer: (decision) => end(decision, resultFor(decision, persists)),
+          withdraw,
         };
         emit({
           _tag: "request.opened",
@@ -679,6 +692,11 @@ export const claudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
         });
       }
     } finally {
+      // The one place every exit passes through, and before the exit is
+      // reported: a park left hanging is a promise the harness waits on for
+      // ever, and one still reading as open on a session that is gone leaves a
+      // card nothing can answer.
+      held.park?.withdraw();
       // By identity: a session started again under the same id has its own
       // entry, and this pump is not the one that owns it.
       if (live.get(sessionId) === held) live.delete(sessionId);
@@ -850,7 +868,7 @@ export const claudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
         // question once the turn is interrupted, and a request still reading as
         // open when the turn closes leaves a card on screen for a turn that is
         // over.
-        held.park?.answer("cancel");
+        held.park?.withdraw();
         // The turn completing as `interrupted` is the whole report; a refusal
         // means the harness is already gone, which is the same outcome.
         return Effect.asVoid(controlling(held.stream.interrupt()));
@@ -870,9 +888,8 @@ export const claudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
         // refuses input in the meantime, and what the exit event's reason
         // comes from.
         held.stopping = reason;
-        // A park is a promise the harness is waiting on, and the session it
-        // belongs to is going: left hanging it would never be answered.
-        held.park?.answer("deny");
+        // The park is not ended here: closing the stream winds the pump up,
+        // and its `finally` is where every exit ends one.
         held.input.end();
         held.stream.close();
       }),

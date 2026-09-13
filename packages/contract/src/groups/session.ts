@@ -18,7 +18,6 @@ import {
   Unauthenticated,
   Validation,
 } from "../errors";
-
 import { Id, Timestamp } from "../ids";
 import { page, pageParams } from "../pagination";
 import { Authenticated } from "../security";
@@ -82,8 +81,9 @@ export const Session = Schema.Struct({
   parentSessionId: Schema.NullOr(Id),
   /**
    * The request the harness has parked on, if any: what the user has to answer
-   * before this turn goes any further. At most one is open at a time, and only
-   * the machine holding the park clears it.
+   * before this turn goes any further. At most one is open at a time, and it is
+   * cleared when the machine resolves it or when the turn or session it belongs
+   * to ends.
    */
   openRequest: Schema.NullOr(OpenRequest),
   createdAt: Timestamp,
