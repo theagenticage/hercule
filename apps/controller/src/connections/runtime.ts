@@ -99,14 +99,15 @@ const make = Effect.gen(function* () {
    */
   const permits = new Map<string, Semaphore.Semaphore>();
 
-  const refreshPermit = (connectionId: string): Effect.Effect<Semaphore.Semaphore> =>
-    Effect.gen(function* () {
-      const held = permits.get(connectionId);
-      if (held !== undefined) return held;
-      const made = yield* Semaphore.make(1);
-      permits.set(connectionId, made);
-      return made;
-    });
+  // Made synchronously: an effect between the read and the write is a point two
+  // fibers can both pass, and they would each end up holding a permit of their own.
+  const refreshPermit = (connectionId: string): Semaphore.Semaphore => {
+    const held = permits.get(connectionId);
+    if (held !== undefined) return held;
+    const made = Semaphore.makeUnsafe(1);
+    permits.set(connectionId, made);
+    return made;
+  };
 
   const runtimeFor = (pluginId: string): ConnectionsRuntime => {
     /**
@@ -237,8 +238,9 @@ const make = Effect.gen(function* () {
         const tokens = yield* storedTokens(connectionId);
         const millis = yield* Clock.currentTimeMillis;
         if (!isStale(tokens, millis)) return { accessToken: tokens.accessToken };
-        const permit = yield* refreshPermit(connectionId);
-        const fresh = yield* permit.withPermits(1)(refreshed(connectionId, oauth));
+        const fresh = yield* refreshPermit(connectionId).withPermits(1)(
+          refreshed(connectionId, oauth),
+        );
         return { accessToken: fresh.accessToken };
       });
 
