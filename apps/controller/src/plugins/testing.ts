@@ -23,7 +23,7 @@ import { TestDatabase } from "../db/testing";
 import { AuditLogLayer } from "../events";
 import { masterKeyLayer, SecretLayer, secretsLayer } from "../secrets";
 import { ConnectionTypesLayer } from "../connections";
-import { PluginHostLayer, PluginsLayer } from "./index";
+import { PluginConfigsLayer, PluginHostLayer, PluginsLayer } from "./index";
 
 /** One provider definition, the only contribution shape with a consumer. */
 export const providerDefinition = (
@@ -72,6 +72,7 @@ export const pluginStack = () => {
   return PluginsLayer.pipe(
     Layer.provideMerge(PluginHostLayer),
     Layer.provideMerge(ConnectionTypesLayer),
+    Layer.provideMerge(PluginConfigsLayer),
     Layer.provideMerge(SecretLayer),
     Layer.provideMerge(secretsLayer.pipe(Layer.provide(masterKeyLayer("file")))),
     Layer.provideMerge(AuditLogLayer),

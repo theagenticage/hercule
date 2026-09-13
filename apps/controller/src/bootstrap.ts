@@ -52,7 +52,14 @@ import {
   type LocalRunnerFailed,
   type LocalRunnerOptions,
 } from "./runners";
-import { PluginHost, PluginHostLayer, Plugins, PluginsLayer, registry } from "./plugins";
+import {
+  PluginConfigsLayer,
+  PluginHost,
+  PluginHostLayer,
+  Plugins,
+  PluginsLayer,
+  registry,
+} from "./plugins";
 import {
   ensureProviderInstances,
   ProviderProbes,
@@ -277,6 +284,7 @@ export const bootWith = <A, E>(
     ).pipe(
       Layer.provideMerge(PluginHostLayer),
       Layer.provideMerge(ConnectionTypesLayer),
+      Layer.provideMerge(PluginConfigsLayer),
       Layer.provideMerge(withFleet),
     );
 

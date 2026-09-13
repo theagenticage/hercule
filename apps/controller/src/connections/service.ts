@@ -57,7 +57,14 @@ import { mintToken } from "../credentials";
 import { nowIso, pageInput, refuseCursor, withTransaction } from "../db";
 import { AuditLog } from "../events";
 import { Secrets, type SecretNameRef, type SecretOwner } from "../secrets";
-import { exchangeCode, oauthClients, OAUTH_TOKENS, redirectUri, serializeTokens } from "./oauth";
+import {
+  exchangeCode,
+  oauthClients,
+  OAUTH_TOKENS,
+  PluginConfigs,
+  redirectUri,
+  serializeTokens,
+} from "./oauth";
 import {
   connectionRepository,
   type ConnectionSortField,
@@ -348,8 +355,11 @@ const make = Effect.gen(function* () {
       const pending = yield* Effect.orDie(withTransaction(sql, setups.consume(params.state, at)));
       if (Option.isNone(pending)) return yield* ended("expired");
       const setup = pending.value;
-      // No code means the provider turned the user away, whatever it called it.
-      if (params.code === undefined) return yield* ended("denied");
+      // The provider sent the user back with a refusal instead of a code, or
+      // with neither: either way there is nothing here to spend.
+      if (params.error !== undefined || params.code === undefined) {
+        return yield* ended("denied");
+      }
 
       const registered = (yield* types.all()).find((one) => one.contribution.type === setup.type);
       const oauth = registered?.contribution.oauth;
@@ -372,7 +382,7 @@ const make = Effect.gen(function* () {
         codeVerifier: setup.codeVerifier,
       }).pipe(
         Effect.provide(FetchHttpClient.layer),
-        Effect.catchTag("TokenRequestFailed", () => ended("exchange-failed")),
+        Effect.catch(() => ended("exchange-failed")),
       );
       const account = yield* registered.contribution
         .validate({ accessToken: tokens.accessToken })
@@ -382,7 +392,7 @@ const make = Effect.gen(function* () {
         );
 
       const credentials = { [OAUTH_TOKENS]: serializeTokens(tokens) };
-      yield* Effect.orDie(
+      const written = yield* Effect.orDie(
         withTransaction(
           sql,
           Effect.gen(function* () {
@@ -390,6 +400,11 @@ const make = Effect.gen(function* () {
             // A reconnect keeps its id, so whatever points at this connection
             // stays attached; only the account and the tokens are replaced.
             const reconnected = setup.connectionId;
+            // Deleted while the user was at the provider: read inside the
+            // transaction, so nothing is written under an id that is gone.
+            if (reconnected !== undefined && Option.isNone(yield* connections.one(reconnected))) {
+              return false;
+            }
             const id =
               reconnected === undefined
                 ? yield* Effect.map(
@@ -427,9 +442,11 @@ const make = Effect.gen(function* () {
               record: { topic: "connection", id },
               at: now,
             });
+            return true;
           }),
         ),
       );
+      if (!written) return yield* ended("expired");
       return "ok" as const;
     });
 
@@ -630,6 +647,19 @@ const make = Effect.gen(function* () {
             validation([{ path: ["connectionId"], message: NO_SUCH_CONNECTION }]),
           );
         }
+        // Reconnecting replaces one connection's tokens, so the flow has to be
+        // the one it was set up through: another type's tokens would be written
+        // under an account they say nothing about.
+        if (existing !== undefined && existing.type !== decoded.type) {
+          return yield* Effect.fail(
+            validation([
+              {
+                path: ["connectionId"],
+                message: `that connection is of the type ${existing.type}`,
+              },
+            ]),
+          );
+        }
         const label = decoded.label ?? existing?.label;
         const labels = decoded.labels ?? existing?.labels;
         if (label === undefined || labels === undefined) {
@@ -747,5 +777,5 @@ export class ConnectionService extends Context.Service<
 export const ConnectionServiceLayer: Layer.Layer<
   ConnectionService,
   never,
-  SqlClient.SqlClient | Secrets | AuditLog | ConnectionTypes
+  SqlClient.SqlClient | Secrets | AuditLog | ConnectionTypes | PluginConfigs
 > = Layer.effect(ConnectionService)(make);

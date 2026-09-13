@@ -111,11 +111,18 @@ const authServer = (): AuthServer => {
     },
   });
 
+  let stopped = false;
   return {
     base: `http://127.0.0.1:${server.port}`,
     requests,
     answers,
-    stop: () => server.stop(true),
+    // A test may close the provider to see what an unreachable one does, and
+    // the harness closes it again afterwards.
+    stop: async () => {
+      if (stopped) return;
+      stopped = true;
+      await server.stop(true);
+    },
   };
 };
 
@@ -369,6 +376,22 @@ describe("POST /oauth/start", () => {
     });
   });
 
+  it("refuses a reconnect of a connection that is of another type", async () => {
+    await withOAuth(async ({ base }, _registry, token) => {
+      const before = await connect(base, token);
+      await setClientId(base, token, "second");
+      await setClientSecret(base, token, "second");
+
+      const response = await start(base, token, {
+        type: "second-type",
+        connectionId: before.id,
+      });
+
+      expect(response.status).toBe(400);
+      expect(await errorOf(response)).toMatchObject({ code: "validation" });
+    });
+  });
+
   it("refuses a type whose setup is a pasted credential", async () => {
     await withOAuth(async ({ base }, _registry, token) => {
       await setClientId(base, token, "pasted");
@@ -426,6 +449,48 @@ describe("GET /oauth/callback", () => {
       // one place it may and under no other key.
       expect(text.split(`acct:${FIRST_TOKEN}`).join("")).not.toContain(FIRST_TOKEN);
       expect(text).not.toContain("refresh-1");
+    });
+  });
+
+  it("creates nothing when the provider sends the user back refusing", async () => {
+    await withOAuth(async ({ base }, _registry, token) => {
+      await setClientId(base, token, "oauthy");
+      await setClientSecret(base, token, "oauthy");
+      const url = await started(base, token);
+
+      const response = await callback(base, {
+        state: url.searchParams.get("state") ?? "",
+        error: "access_denied",
+      });
+
+      expect(response.status).toBe(302);
+      expect(response.headers.get("location")).toBe("/connections?oauth=denied");
+      expect(await connections(base, token)).toEqual([]);
+    });
+  });
+
+  it("writes nothing when the connection it was reconnecting is gone", async () => {
+    await withOAuth(async ({ base }, _registry, token) => {
+      const before = await connect(base, token);
+      const url = await started(base, token, { connectionId: before.id });
+      expect(
+        (await send("DELETE", base, `/api/v1/connections/${before.id}`, { token })).status,
+      ).toBe(200);
+
+      const response = await callback(base, {
+        state: url.searchParams.get("state") ?? "",
+        code: "another-code",
+      });
+
+      expect(response.status).toBe(302);
+      expect(response.headers.get("location")).toBe("/connections?oauth=expired");
+      expect(await connections(base, token)).toEqual([]);
+      const secrets = await get(
+        base,
+        `/api/v1/secrets?ownerKind=connection&ownerId=${before.id}`,
+        token,
+      );
+      expect(await secrets.json()).toEqual({ items: [] });
     });
   });
 
@@ -547,7 +612,10 @@ describe("GET /oauth/callback", () => {
 });
 
 describe("the access token a plugin asks the core for", () => {
-  /** An exchange whose token is stale by the time anything asks for it. */
+  /**
+   * An exchange whose token is not worth handing over: a second is well inside
+   * the margin the core refreshes within, so it is stale the moment it lands.
+   */
   const expiringNow = (provider: AuthServer): void => {
     provider.answers["authorization_code"] = () =>
       json({
@@ -557,9 +625,6 @@ describe("the access token a plugin asks the core for", () => {
         expires_in: 1,
       });
   };
-
-  /** Waits past a one-second lifetime, which is the only way to have a past one. */
-  const expire = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 1200));
 
   it("is handed over without asking the provider again while it is still good", async () => {
     await withOAuth(async ({ base }, registry, token, provider) => {
@@ -577,7 +642,6 @@ describe("the access token a plugin asks the core for", () => {
     await withOAuth(async ({ base }, registry, token, provider) => {
       expiringNow(provider);
       const one = await connect(base, token);
-      await expire();
       const surface = surfaceOf(registry.oauth);
 
       const refreshed = await Effect.runPromise(surface.credentials(one.id));
@@ -600,11 +664,29 @@ describe("the access token a plugin asks the core for", () => {
     });
   });
 
+  it("fails, and leaves the connection alone, when the provider cannot be reached", async () => {
+    await withOAuth(async ({ base }, registry, token, provider) => {
+      expiringNow(provider);
+      const one = await connect(base, token);
+      // Nothing is listening on that port any more, which is what a name that
+      // does not resolve and a network that drops both come back as.
+      await provider.stop();
+
+      const failure = await Effect.runPromise(
+        Effect.flip(surfaceOf(registry.oauth).credentials(one.id)),
+      );
+
+      expect(failure).toMatchObject({ _tag: "ConnectionUnavailable" });
+      // The credential was never turned down, so there is nothing to reconnect.
+      const response = await get(base, `/api/v1/connections/${one.id}`, token);
+      expect(await response.json()).toMatchObject({ status: "connected" });
+    });
+  });
+
   it("fails, and leaves the connection needing reauthentication, when the refresh is refused", async () => {
     await withOAuth(async ({ base }, registry, token, provider) => {
       expiringNow(provider);
       const one = await connect(base, token);
-      await expire();
       provider.answers["refresh_token"] = () => json({ error: "invalid_grant" }, 400);
 
       const failure = await Effect.runPromise(

@@ -18,6 +18,7 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Redacted from "effect/Redacted";
 import * as Ref from "effect/Ref";
+import * as Semaphore from "effect/Semaphore";
 import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import {
@@ -30,9 +31,10 @@ import {
   type OAuthDeclaration,
 } from "@hydra/plugin-host";
 import { announce, nowIso, withTransaction } from "../db";
-import { Secrets, type SecretOwner } from "../secrets";
+import { Secrets } from "../secrets";
 import {
   isStale,
+  PluginConfigs,
   OAUTH_TOKENS,
   oauthClients,
   parseTokens,
@@ -88,6 +90,22 @@ const make = Effect.gen(function* () {
           }),
         ),
       );
+    });
+
+  /**
+   * One permit per connection, so two callers finding the same spent token do
+   * not both spend a refresh token on it - some providers invalidate the old
+   * one, which would leave the second caller holding a set that no longer works.
+   */
+  const permits = new Map<string, Semaphore.Semaphore>();
+
+  const refreshPermit = (connectionId: string): Effect.Effect<Semaphore.Semaphore> =>
+    Effect.gen(function* () {
+      const held = permits.get(connectionId);
+      if (held !== undefined) return held;
+      const made = yield* Semaphore.make(1);
+      permits.set(connectionId, made);
+      return made;
     });
 
   const runtimeFor = (pluginId: string): ConnectionsRuntime => {
@@ -151,6 +169,61 @@ const make = Effect.gen(function* () {
               ),
       );
 
+    /** The token set a connection holds, or nothing it can be acted through with. */
+    const storedTokens = (connectionId: string): Effect.Effect<TokenSet, ConnectionUnavailable> =>
+      Effect.flatMap(
+        Effect.orDie(secrets.get({ kind: "connection", id: connectionId }, OAUTH_TOKENS)),
+        Option.match({
+          onNone: () => needsReauth(connectionId, "this connection holds no tokens"),
+          onSome: (stored) => Effect.succeed(parseTokens(Redacted.value(stored))),
+        }),
+      );
+
+    /**
+     * Trades the refresh token in for a fresh set and writes it down. Runs under
+     * this connection's permit, so the stored set is read again first: a caller
+     * that waited for another's refresh spends nothing of its own.
+     *
+     * A provider that answered and said no is a credential to reauthorise; one
+     * that could not be reached is weather, and the status stays as it was.
+     */
+    const refreshed = (
+      connectionId: string,
+      oauth: OAuthDeclaration,
+    ): Effect.Effect<TokenSet, ConnectionUnavailable> =>
+      Effect.gen(function* () {
+        const tokens = yield* storedTokens(connectionId);
+        const millis = yield* Clock.currentTimeMillis;
+        if (!isStale(tokens, millis)) return tokens;
+
+        const client = yield* Effect.orDie(clientOf(pluginId));
+        if (tokens.refreshToken === undefined || Option.isNone(client)) {
+          return yield* needsReauth(connectionId, "this connection cannot be refreshed");
+        }
+        const answer = yield* refreshAccess({
+          tokenUrl: oauth.tokenUrl,
+          client: client.value,
+          refreshToken: tokens.refreshToken,
+        }).pipe(
+          Effect.provide(FetchHttpClient.layer),
+          Effect.catchTag("TokenRefused", (error) => needsReauth(connectionId, error.message)),
+          Effect.catchTag("TokenUnreachable", (error) =>
+            Effect.fail(new ConnectionUnavailable({ message: error.message })),
+          ),
+        );
+        // A provider that hands back no refresh token means the old one stands.
+        const keep = answer.refreshToken ?? tokens.refreshToken;
+        const next: TokenSet = { ...answer, refreshToken: keep };
+        yield* Effect.orDie(
+          secrets.set(
+            { kind: "connection", id: connectionId },
+            OAUTH_TOKENS,
+            Redacted.make(serializeTokens(next)),
+          ),
+        );
+        return next;
+      });
+
     /**
      * The access token of a redirect-flow connection, refreshed first when it is
      * spent or nearly so. The refresh is the core's: a plugin asks for
@@ -161,34 +234,12 @@ const make = Effect.gen(function* () {
       oauth: OAuthDeclaration,
     ): Effect.Effect<Record<string, string>, ConnectionUnavailable> =>
       Effect.gen(function* () {
-        const owner: SecretOwner = { kind: "connection", id: connectionId };
-        const stored = yield* Effect.orDie(secrets.get(owner, OAUTH_TOKENS));
-        if (Option.isNone(stored)) {
-          return yield* needsReauth(connectionId, "this connection holds no tokens");
-        }
-        const tokens = parseTokens(Redacted.value(stored.value));
+        const tokens = yield* storedTokens(connectionId);
         const millis = yield* Clock.currentTimeMillis;
         if (!isStale(tokens, millis)) return { accessToken: tokens.accessToken };
-
-        const client = yield* Effect.orDie(clientOf(pluginId));
-        if (tokens.refreshToken === undefined || Option.isNone(client)) {
-          return yield* needsReauth(connectionId, "this connection cannot be refreshed");
-        }
-        const refreshed = yield* refreshAccess({
-          tokenUrl: oauth.tokenUrl,
-          client: client.value,
-          refreshToken: tokens.refreshToken,
-        }).pipe(
-          Effect.provide(FetchHttpClient.layer),
-          Effect.catchTag("TokenRequestFailed", (error) =>
-            needsReauth(connectionId, error.message),
-          ),
-        );
-        // A provider that hands back no refresh token means the old one stands.
-        const keep = refreshed.refreshToken ?? tokens.refreshToken;
-        const next: TokenSet = { ...refreshed, refreshToken: keep };
-        yield* Effect.orDie(secrets.set(owner, OAUTH_TOKENS, Redacted.make(serializeTokens(next))));
-        return { accessToken: next.accessToken };
+        const permit = yield* refreshPermit(connectionId);
+        const fresh = yield* permit.withPermits(1)(refreshed(connectionId, oauth));
+        return { accessToken: fresh.accessToken };
       });
 
     return {
@@ -233,5 +284,5 @@ export class ConnectionTypes extends Context.Service<
 export const ConnectionTypesLayer: Layer.Layer<
   ConnectionTypes,
   never,
-  SqlClient.SqlClient | Secrets
+  SqlClient.SqlClient | Secrets | PluginConfigs
 > = Layer.effect(ConnectionTypes)(make);

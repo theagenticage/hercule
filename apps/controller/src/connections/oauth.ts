@@ -12,18 +12,14 @@
  * there is exactly one pair per type and nothing to choose between.
  */
 import * as Clock from "effect/Clock";
+import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Redacted from "effect/Redacted";
 import * as Schema from "effect/Schema";
 import * as HttpBody from "effect/unstable/http/HttpBody";
 import * as HttpClient from "effect/unstable/http/HttpClient";
-import type * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
-// The table accessor rather than the plugins domain's boundary: the plugin host
-// reads this domain, so importing its index would close a cycle. All that is
-// wanted here is one column of one row - the client id the user configured.
-import { pluginRepository } from "../plugins/repository";
 import { Secrets } from "../secrets";
 
 /** Where the provider sends the browser back to. Appended to the browser's origin. */
@@ -55,11 +51,22 @@ export interface OAuthClient {
   readonly clientSecret: string;
 }
 
-/** The token endpoint could not be reached, refused, or answered nonsense. */
-export class TokenRequestFailed extends Schema.TaggedError<TokenRequestFailed>()(
-  "TokenRequestFailed",
-  { message: Schema.String },
-) {}
+/**
+ * The token endpoint answered, and said no. The credential it was asked about
+ * is the thing that is wrong.
+ */
+export class TokenRefused extends Schema.TaggedError<TokenRefused>()("TokenRefused", {
+  message: Schema.String,
+}) {}
+
+/**
+ * The token endpoint was not reached, or answered something unreadable. It says
+ * nothing about the credential: a name that did not resolve and a network that
+ * dropped are the provider's weather, not the user's to reauthorise.
+ */
+export class TokenUnreachable extends Schema.TaggedError<TokenUnreachable>()("TokenUnreachable", {
+  message: Schema.String,
+}) {}
 
 /** The standard token response. Anything else the provider adds is not ours to read. */
 const TokenResponse = Schema.Struct({
@@ -70,8 +77,11 @@ const TokenResponse = Schema.Struct({
 
 const decodeTokenResponse = Schema.decodeUnknownEffect(TokenResponse);
 
-const failed = (message: string): Effect.Effect<never, TokenRequestFailed> =>
-  Effect.fail(new TokenRequestFailed({ message }));
+const refused = (message: string): Effect.Effect<never, TokenRefused> =>
+  Effect.fail(new TokenRefused({ message }));
+
+const unreachable = (message: string): Effect.Effect<never, TokenUnreachable> =>
+  Effect.fail(new TokenUnreachable({ message }));
 
 /** The redirect URI the provider will send the browser back to, for this origin. */
 export const redirectUri = (origin: string): string => `${origin}${CALLBACK_PATH}`;
@@ -86,6 +96,18 @@ export const isStale = (tokens: TokenSet, nowMillis: number): boolean =>
   tokens.expiresAt !== undefined && Date.parse(tokens.expiresAt) - nowMillis <= REFRESH_MARGIN_MS;
 
 /**
+ * A plugin's stored config, as the domain that owns the plugins table reads it.
+ *
+ * A service rather than a call into that domain, because the plugin host reads
+ * this domain: everything between the two points one way, and the one column
+ * wanted here - the client id the user configured - comes back through here.
+ */
+export class PluginConfigs extends Context.Service<
+  PluginConfigs,
+  { readonly of: (pluginId: string) => Effect.Effect<Schema.Json, SqlError> }
+>()("hydra/controller/connections/PluginConfigs") {}
+
+/**
  * Reads the client credentials a plugin holds, or nothing when the user has not
  * set both. Built once and read at each call rather than at registration: the
  * user sets them in Settings long after the plugin declared its type.
@@ -93,17 +115,15 @@ export const isStale = (tokens: TokenSet, nowMillis: number): boolean =>
 export const oauthClients: Effect.Effect<
   (pluginId: string) => Effect.Effect<Option.Option<OAuthClient>, SqlError>,
   never,
-  SqlClient.SqlClient | Secrets
+  PluginConfigs | Secrets
 > = Effect.gen(function* () {
-  const plugins = yield* pluginRepository;
+  const plugins = yield* PluginConfigs;
   const secrets = yield* Secrets;
 
   return (pluginId: string) =>
     Effect.gen(function* () {
-      const state = yield* Effect.catchTag(plugins.state(pluginId), "SchemaError", Effect.die);
-      const clientId = (state.config as { readonly [key: string]: unknown } | null)?.[
-        CLIENT_ID_FIELD
-      ];
+      const config = yield* plugins.of(pluginId);
+      const clientId = (config as { readonly [key: string]: unknown } | null)?.[CLIENT_ID_FIELD];
       const secret = yield* Effect.orDie(
         secrets.get({ kind: "plugin", id: pluginId }, CLIENT_SECRET_NAME),
       );
@@ -121,17 +141,19 @@ export const oauthClients: Effect.Effect<
 const tokenRequest = (
   tokenUrl: string,
   form: Record<string, string>,
-): Effect.Effect<TokenSet, TokenRequestFailed, HttpClient.HttpClient> =>
+): Effect.Effect<TokenSet, TokenRefused | TokenUnreachable, HttpClient.HttpClient> =>
   Effect.gen(function* () {
     const response = yield* HttpClient.post(tokenUrl, {
       body: HttpBody.urlParams(form),
       acceptJson: true,
     });
     if (response.status !== 200) {
-      return yield* failed(`the token endpoint answered ${String(response.status)}`);
+      return yield* refused(`the token endpoint answered ${String(response.status)}`);
     }
     const body = yield* decodeTokenResponse(yield* response.json).pipe(
-      Effect.catchTag("SchemaError", () => failed("the token endpoint answered no access token")),
+      Effect.catchTag("SchemaError", () =>
+        unreachable("the token endpoint answered no access token"),
+      ),
     );
     const millis = yield* Clock.currentTimeMillis;
     return {
@@ -143,7 +165,7 @@ const tokenRequest = (
     };
   }).pipe(
     Effect.catchTag("HttpClientError", (error) =>
-      failed(`the token endpoint could not be reached: ${error.message}`),
+      unreachable(`the token endpoint could not be reached: ${error.message}`),
     ),
   );
 
@@ -154,7 +176,7 @@ export const exchangeCode = (request: {
   readonly code: string;
   readonly redirectUri: string;
   readonly codeVerifier: string;
-}): Effect.Effect<TokenSet, TokenRequestFailed, HttpClient.HttpClient> =>
+}): Effect.Effect<TokenSet, TokenRefused | TokenUnreachable, HttpClient.HttpClient> =>
   tokenRequest(request.tokenUrl, {
     grant_type: "authorization_code",
     code: request.code,
@@ -173,7 +195,7 @@ export const refreshAccess = (request: {
   readonly tokenUrl: string;
   readonly client: OAuthClient;
   readonly refreshToken: string;
-}): Effect.Effect<TokenSet, TokenRequestFailed, HttpClient.HttpClient> =>
+}): Effect.Effect<TokenSet, TokenRefused | TokenUnreachable, HttpClient.HttpClient> =>
   tokenRequest(request.tokenUrl, {
     grant_type: "refresh_token",
     refresh_token: request.refreshToken,

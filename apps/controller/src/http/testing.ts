@@ -46,7 +46,7 @@ import { ControllerIdentity, controllerIdentityLayer } from "../identity";
 import { COALESCE_WINDOW_MS, LiveTopics } from "../live";
 import { masterKeyLayer, secretsLayer } from "../secrets";
 import { PermissionProfilesLayer } from "../permissions";
-import { PluginHost, PluginHostLayer, PluginsLayer } from "../plugins";
+import { PluginConfigsLayer, PluginHost, PluginHostLayer, PluginsLayer } from "../plugins";
 import {
   ensureProviderInstances,
   ProviderLoginDeadline,
@@ -95,7 +95,11 @@ const services = (home: string) =>
         ProviderServiceLayer,
         SessionServiceLayer,
         ConnectionServiceLayer,
-      ).pipe(Layer.provideMerge(PluginHostLayer), Layer.provideMerge(ConnectionTypesLayer)),
+      ).pipe(
+        Layer.provideMerge(PluginHostLayer),
+        Layer.provideMerge(ConnectionTypesLayer),
+        Layer.provideMerge(PluginConfigsLayer),
+      ),
     ),
     // One presence and one probe driver: the socket route and every service
     // must act through the same connection map.

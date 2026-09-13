@@ -14,7 +14,7 @@ import { Effect, Layer } from "effect";
 import { homePaths, HydraHome } from "../config";
 import { TestDatabase } from "../db/testing";
 import { AuditLogLayer } from "../events";
-import { PluginHostLayer } from "../plugins";
+import { PluginConfigsLayer, PluginHostLayer } from "../plugins";
 import { masterKeyLayer, SecretLayer, secretsLayer } from "../secrets";
 import { ConnectionTypesLayer } from "./runtime";
 import { ConnectionService, ConnectionServiceLayer } from "./service";
@@ -33,6 +33,7 @@ const stack = () => {
   return ConnectionServiceLayer.pipe(
     Layer.provideMerge(PluginHostLayer),
     Layer.provideMerge(ConnectionTypesLayer),
+    Layer.provideMerge(PluginConfigsLayer),
     Layer.provideMerge(SecretLayer),
     Layer.provideMerge(secretsLayer.pipe(Layer.provide(masterKeyLayer("file")))),
     Layer.provideMerge(AuditLogLayer),

@@ -42,6 +42,19 @@ const ConnectionLabel = bounded(1, MAX_CONNECTION_LABEL_LENGTH);
  */
 const Topics = atMost(Label, MAX_TASK_LABELS).check(Schema.isMinLength(1));
 
+/**
+ * Where the browser is, as an origin and nothing else: scheme and host, no path
+ * and no trailing slash. The redirect URI is this with the callback path put
+ * after it, and it has to come out byte for byte as what the user registered
+ * with the provider, so the shape is pinned here rather than normalised on
+ * either side.
+ */
+const Origin = Schema.String.check(
+  Schema.isPattern(/^https?:\/\/[^/?#]+$/, {
+    message: "an origin is a scheme and a host with no path, like https://hydra.example",
+  }),
+);
+
 /** A connection's own plugin config, against the type's declared schema. */
 const Config = Schema.Record(Schema.String, Schema.Json);
 
@@ -112,7 +125,7 @@ export type ConnectionCredentialsInput = Schema.Schema.Type<typeof ConnectionCre
  */
 export const ConnectionOAuthStartInput = Schema.Struct({
   type: Schema.String,
-  origin: Schema.String,
+  origin: Origin,
   label: Schema.optionalKey(ConnectionLabel),
   labels: Schema.optionalKey(Topics),
   config: Schema.optionalKey(Config),

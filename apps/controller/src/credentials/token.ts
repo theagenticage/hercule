@@ -4,8 +4,10 @@
  *
  * Every credential Hydra issues - the setup token, a login bearer, an API key -
  * is the same thing: 32 random bytes, rendered base64url so it survives a URL,
- * a header and a JSON file. Only the hash is stored, so a copy of the database
- * hands nobody a working credential.
+ * a header and a JSON file. A credential a caller presents is stored as its
+ * hash alone (`hashToken`), so a copy of the database hands nobody a working
+ * one; a minted value that is not a credential - an OAuth `state`, a PKCE
+ * verifier - is what its own row holds, because the flow has to hand it back.
  *
  * The hash is SHA-256. A token is 256 bits of uniform randomness with nothing
  * to guess, so the slow-hash argument does not apply, and resolution stays one

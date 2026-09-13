@@ -50,7 +50,7 @@ import { Secrets, type SecretOwner } from "../secrets";
 // The types a plugin declares, and what it reaches its own connections through,
 // both live in the connections domain: everything they touch is there. This is
 // the only direction the two point in.
-import { ConnectionTypes, type RegisteredConnectionType } from "../connections";
+import { ConnectionTypes, PluginConfigs, type RegisteredConnectionType } from "../connections";
 import { pluginRepository, type NewContribution } from "./repository";
 
 /**
@@ -623,3 +623,19 @@ export const PluginHostLayer: Layer.Layer<
   never,
   SqlClient.SqlClient | Secrets | AuditLog | ConnectionTypes
 > = Layer.effect(PluginHost)(make);
+
+/**
+ * What the connections domain reads of a plugin's config, provided by the
+ * domain that owns the table. The seam is declared there, so nothing in this
+ * direction reaches back into it.
+ */
+export const PluginConfigsLayer: Layer.Layer<PluginConfigs, never, SqlClient.SqlClient> =
+  Layer.effect(PluginConfigs)(
+    Effect.map(pluginRepository, (repository) => ({
+      of: (id: string) =>
+        Effect.map(
+          Effect.catchTag(repository.state(id), "SchemaError", Effect.die),
+          (state) => state.config,
+        ),
+    })),
+  );
