@@ -24,7 +24,11 @@ import * as Schema from "effect/Schema";
 import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
-import type { ConnectionValidationFailed, OAuthDeclaration } from "@hydra/plugin-host";
+import {
+  decodeAgainst,
+  type ConnectionValidationFailed,
+  type OAuthDeclaration,
+} from "@hydra/plugin-host";
 import {
   CONNECTION_SORT_FIELDS,
   ConnectionCreateInput,
@@ -52,14 +56,14 @@ import { requireGrant, USER_ACTOR } from "../actor";
 import { mintToken } from "../credentials";
 import { nowIso, pageInput, refuseCursor, withTransaction } from "../db";
 import { AuditLog } from "../events";
-import { PluginHost, type RegisteredConnectionType } from "../plugins";
-import { Secrets, type SecretOwner } from "../secrets";
+import { Secrets, type SecretNameRef, type SecretOwner } from "../secrets";
 import { exchangeCode, oauthClients, OAUTH_TOKENS, redirectUri, serializeTokens } from "./oauth";
 import {
   connectionRepository,
   type ConnectionSortField,
   type StoredConnection,
 } from "./repository";
+import { ConnectionTypes, type RegisteredConnectionType } from "./runtime";
 import { oauthSetupRepository } from "./setups";
 
 /** What listing takes: which connections, how many, in what order. */
@@ -176,14 +180,14 @@ const make = Effect.gen(function* () {
   const setups = yield* oauthSetupRepository;
   const clientOf = yield* oauthClients;
   const secrets = yield* Secrets;
-  const host = yield* PluginHost;
+  const types = yield* ConnectionTypes;
   const audit = yield* AuditLog;
 
   const ownerOf = (id: string): SecretOwner => ({ kind: "connection", id });
 
   /** The type a request names, or the `validation` a caller can act on. */
   const typeNamed = (type: string): Effect.Effect<RegisteredConnectionType, Validation> =>
-    Effect.flatMap(host.connectionTypes(), (registered) => {
+    Effect.flatMap(types.all(), (registered) => {
       const found = registered.find((one) => one.contribution.type === type);
       return found === undefined
         ? Effect.fail(
@@ -215,17 +219,8 @@ const make = Effect.gen(function* () {
           );
     }
     return Effect.asVoid(
-      Effect.mapError(
-        // Every issue at once, and an unknown key refused rather than dropped,
-        // so a form puts each message under its own field.
-        Schema.decodeUnknownEffect(schema as Schema.Codec<unknown>, {
-          errors: "all",
-          onExcessProperty: "error",
-        })(config),
-        (error) =>
-          validation(
-            issuesOf(error).map((issue) => ({ ...issue, path: ["config", ...issue.path] })),
-          ),
+      Effect.mapError(decodeAgainst(schema, config), (error) =>
+        validation(issuesOf(error).map((issue) => ({ ...issue, path: ["config", ...issue.path] }))),
       ),
     );
   };
@@ -241,7 +236,7 @@ const make = Effect.gen(function* () {
     const declared = fieldsOf(contribution);
     const issues = [
       ...declared
-        .filter((name) => (credentials[name] ?? "") === "")
+        .filter((name) => credentials[name] === undefined)
         .map((name) => ({ path: ["credentials", name], message: "this field is required" })),
       ...Object.keys(credentials)
         .filter((name) => !declared.includes(name))
@@ -258,7 +253,8 @@ const make = Effect.gen(function* () {
   /**
    * Asks the type whether these credentials work. A refusal is shown at the
    * first credential field: it is about the credentials as a whole, and a form
-   * needs somewhere to put the message.
+   * needs somewhere to put the message. A type with no field to put it under -
+   * a redirect flow - is refused at the group itself.
    */
   const validated = (
     contribution: Contribution,
@@ -266,32 +262,44 @@ const make = Effect.gen(function* () {
   ): Effect.Effect<{ readonly displayName: string; readonly detail?: string }, Validation> =>
     Effect.mapError(
       Effect.provide(contribution.validate(credentials), FetchHttpClient.layer),
-      (failure: ConnectionValidationFailed) =>
-        validation(
-          [{ path: ["credentials", fieldsOf(contribution)[0] ?? ""], message: failure.message }],
+      (failure: ConnectionValidationFailed) => {
+        const field = fieldsOf(contribution)[0];
+        return validation(
+          [
+            {
+              path: field === undefined ? ["credentials"] : ["credentials", field],
+              message: failure.message,
+            },
+          ],
           failure.message,
-        ),
+        );
+      },
     );
 
+  /** The credential references of these connections, by connection id, in one query. */
+  const refsOf = (
+    ids: ReadonlyArray<string>,
+  ): Effect.Effect<ReadonlyMap<string, ReadonlyArray<SecretNameRef>>, SqlError> =>
+    secrets.refs("connection", ids);
+
   /** A connection as the wire sees it: the row, plus what it owns in `secrets`. */
-  const compose = (row: StoredConnection): Effect.Effect<Connection, SqlError> =>
-    Effect.map(secrets.refs(ownerOf(row.id)), (refs) => ({
-      id: row.id,
-      pluginId: row.pluginId,
-      type: row.type,
-      label: row.label,
-      displayName: row.displayName,
-      status: row.status,
-      ...(row.statusDetail === undefined ? {} : { statusDetail: row.statusDetail }),
-      labels: row.labels,
-      config: row.config,
-      credentials: refs.map((ref) => ({
-        name: ref.name,
-        ...(ref.rotatedAt === null ? {} : { rotatedAt: ref.rotatedAt }),
-      })),
-      createdAt: row.createdAt,
-      updatedAt: row.updatedAt,
-    }));
+  const compose = (row: StoredConnection, refs: ReadonlyArray<SecretNameRef>): Connection => ({
+    id: row.id,
+    pluginId: row.pluginId,
+    type: row.type,
+    label: row.label,
+    displayName: row.displayName,
+    status: row.status,
+    ...(row.statusDetail === undefined ? {} : { statusDetail: row.statusDetail }),
+    labels: row.labels,
+    config: row.config,
+    credentials: refs.map((ref) => ({
+      name: ref.name,
+      ...(ref.rotatedAt === null ? {} : { rotatedAt: ref.rotatedAt }),
+    })),
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+  });
 
   const stored = (id: string): Effect.Effect<StoredConnection, NotFound | SqlError> =>
     Effect.flatMap(
@@ -302,8 +310,11 @@ const make = Effect.gen(function* () {
       }),
     );
 
+  const composed = (row: StoredConnection): Effect.Effect<Connection, SqlError> =>
+    Effect.map(refsOf([row.id]), (refs) => compose(row, refs.get(row.id) ?? []));
+
   const one = (id: string): Effect.Effect<Connection, NotFound | SqlError> =>
-    Effect.flatMap(stored(id), compose);
+    Effect.flatMap(stored(id), composed);
 
   /**
    * Writes each pasted value under the connection's own owner scope. A field
@@ -340,9 +351,7 @@ const make = Effect.gen(function* () {
       // No code means the provider turned the user away, whatever it called it.
       if (params.code === undefined) return yield* ended("denied");
 
-      const registered = (yield* host.connectionTypes()).find(
-        (one) => one.contribution.type === setup.type,
-      );
+      const registered = (yield* types.all()).find((one) => one.contribution.type === setup.type);
       const oauth = registered?.contribution.oauth;
       const client =
         registered === undefined
@@ -448,7 +457,8 @@ const make = Effect.gen(function* () {
             ...order,
           }),
         );
-        const items = yield* Effect.forEach(listing.items, compose);
+        const refs = yield* refsOf(listing.items.map((row) => row.id));
+        const items = listing.items.map((row) => compose(row, refs.get(row.id) ?? []));
         return {
           items,
           ...(listing.nextCursor === undefined ? {} : { nextCursor: listing.nextCursor }),
@@ -513,7 +523,7 @@ const make = Effect.gen(function* () {
               record: { topic: "connection", id: row.id },
               at,
             });
-            return yield* compose(row);
+            return yield* composed(row);
           }),
         );
       }),
@@ -560,6 +570,10 @@ const make = Effect.gen(function* () {
         const decoded = yield* Effect.mapError(decodeCredentials(input), validationOf);
         const row = yield* stored(decoded.id);
         const { contribution } = yield* typeNamed(row.type);
+        if (isOAuthFlow(contribution)) {
+          const message = `the type ${row.type} is reconnected through its OAuth flow: start it with connection.startOAuth`;
+          return yield* Effect.fail(validation([{ path: ["credentials"], message }], message));
+        }
         const credentials = yield* readCredentials(contribution, decoded.credentials);
         const account = yield* validated(contribution, credentials);
 
@@ -700,7 +714,7 @@ const make = Effect.gen(function* () {
           Effect.gen(function* () {
             const at = yield* nowIso;
             const owner = ownerOf(id);
-            const names = yield* secrets.names(owner);
+            const names = (yield* refsOf([id])).get(id)?.map((ref) => ref.name) ?? [];
             yield* Effect.forEach(names, (name) => secrets.delete(owner, name), {
               discard: true,
             });
@@ -733,5 +747,5 @@ export class ConnectionService extends Context.Service<
 export const ConnectionServiceLayer: Layer.Layer<
   ConnectionService,
   never,
-  SqlClient.SqlClient | Secrets | AuditLog | PluginHost
+  SqlClient.SqlClient | Secrets | AuditLog | ConnectionTypes
 > = Layer.effect(ConnectionService)(make);

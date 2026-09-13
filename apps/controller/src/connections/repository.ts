@@ -181,17 +181,13 @@ const make = Effect.gen(function* () {
     delete: (id: string): Effect.Effect<void, SqlError> =>
       Effect.asVoid(sql`DELETE FROM connections WHERE id = ${uuidFromString(id)}`),
 
-    /** Every connection of these types, oldest first. The runtime surface's view. */
-    ofTypes: (
-      types: ReadonlyArray<string>,
-    ): Effect.Effect<ReadonlyArray<StoredConnection>, SqlError> =>
-      types.length === 0
-        ? Effect.succeed([])
-        : Effect.map(
-            sql<ConnectionRow>`SELECT ${sql.literal(COLUMNS)} FROM connections
-                               WHERE type IN ${sql.in(types)} ORDER BY created_at, id`,
-            (rows) => rows.map(toConnection),
-          ),
+    /** Every connection one plugin owns, oldest first. The runtime surface's view. */
+    ofPlugin: (pluginId: string): Effect.Effect<ReadonlyArray<StoredConnection>, SqlError> =>
+      Effect.map(
+        sql<ConnectionRow>`SELECT ${sql.literal(COLUMNS)} FROM connections
+                           WHERE plugin_id = ${pluginId} ORDER BY created_at, id`,
+        (rows) => rows.map(toConnection),
+      ),
 
     list: (
       request: ConnectionListRequest,

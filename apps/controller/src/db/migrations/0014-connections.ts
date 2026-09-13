@@ -31,6 +31,8 @@ export default Effect.gen(function* () {
       updated_at TEXT NOT NULL
     )
   `;
-  // Both listing filters, and the per-plugin scoping the runtime surface does.
-  yield* sql`CREATE INDEX connections_by_type ON connections (type)`;
+  // The scope every runtime read is taken through: a plugin reaches the
+  // connections its own id owns. The listing's own filters - type, status - run
+  // over a handful of rows and need no index of their own.
+  yield* sql`CREATE INDEX connections_by_plugin ON connections (plugin_id)`;
 });

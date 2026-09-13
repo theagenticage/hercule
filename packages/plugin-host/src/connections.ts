@@ -17,9 +17,19 @@ export const ConnectionStatus = Schema.Literals(["connected", "needs-reauth", "e
 
 export type ConnectionStatus = Schema.Schema.Type<typeof ConnectionStatus>;
 
-/** One secret the user pastes: named for the store, labelled for the form. */
+/**
+ * One secret the user pastes: named for the store, labelled for the form.
+ *
+ * The name is what the value is stored under, and the store binds a value to
+ * `<kind>|<id>|<name>`, so a name holding the separator would have two
+ * readings. It is refused here, where the plugin is told, rather than at the
+ * write, where the user would be.
+ */
 export const CredentialField = Schema.Struct({
-  name: Schema.String,
+  name: Schema.String.check(
+    Schema.isMinLength(1),
+    Schema.isPattern(/^[^|]+$/, { message: "A credential field name cannot hold a | character." }),
+  ),
   label: Schema.String,
   help: Schema.optionalKey(Schema.String),
 });
@@ -87,14 +97,7 @@ export class ConnectionUnavailable extends Schema.TaggedError<ConnectionUnavaila
  * the credentials belong to, so it needs an `HttpClient` and nothing else: the
  * host provides the live one, and a plugin test provides a stub.
  */
-export interface ConnectionTypeContribution extends Omit<ConnectionType, "setup"> {
-  /**
-   * The steps, as the plugin hands them over. Widened past {@link SetupStep}
-   * because a plugin is untyped code at the boundary: the host decodes this
-   * against the schema, and a step it does not know is refused there rather
-   * than trusted because a compiler saw it.
-   */
-  readonly setup: ReadonlyArray<SetupStep | { readonly kind: string }>;
+export interface ConnectionTypeContribution extends ConnectionType {
   readonly validate: (
     credentials: Record<string, string>,
   ) => Effect.Effect<
@@ -130,7 +133,11 @@ export interface ConnectionReport {
 /** The connections of this plugin's own types, and no others. */
 export interface ConnectionsRuntime {
   readonly list: () => Effect.Effect<ReadonlyArray<ConnectionSummary>>;
-  /** The decoded credentials, by the field names the type declared. */
+  /**
+   * Every secret the connection owns, decoded, by name: the fields the user
+   * pasted, or `{ accessToken }` for a redirect flow, refreshed first when the
+   * stored token is spent or nearly so.
+   */
   readonly credentials: (
     connectionId: string,
   ) => Effect.Effect<Record<string, string>, ConnectionUnavailable>;

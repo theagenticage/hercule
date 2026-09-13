@@ -3,6 +3,7 @@
  * credentials are core-owned; the types are plugin contributions.
  */
 export { OAuthCallbackRouteLayer } from "./route";
+export { ConnectionTypes, ConnectionTypesLayer, type RegisteredConnectionType } from "./runtime";
 export {
   ConnectionService,
   ConnectionServiceLayer,

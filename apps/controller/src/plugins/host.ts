@@ -7,34 +7,27 @@
  * `errored` is a fact about this process, and the next boot is the retry.
  */
 import * as Cause from "effect/Cause";
-import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import type * as JsonSchema from "effect/JsonSchema";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
-import * as Redacted from "effect/Redacted";
 import * as Ref from "effect/Ref";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import * as Semaphore from "effect/Semaphore";
-import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient";
 import {
   configJsonSchema,
   ConnectionType,
-  ConnectionUnavailable,
+  decodeAgainst,
   HOST_API,
   PluginError,
   PluginManifest,
   ProviderDefinition,
   type ActivationContext,
-  type ConnectionsRuntime,
-  type ConnectionStatus,
-  type ConnectionSummary,
   type ConnectionTypeContribution,
-  type OAuthDeclaration,
   type Deactivate,
   type KeyValueStore,
   type Plugin,
@@ -50,22 +43,14 @@ import {
   type PluginStatus,
   type Validation,
 } from "@hydra/contract";
-import { announce, nowIso, withTransaction } from "../db";
+import { nowIso, withTransaction } from "../db";
 import { AuditLog } from "../events";
 import { CurrentActor, SYSTEM_ACTOR, USER_ACTOR } from "../actor";
 import { Secrets, type SecretOwner } from "../secrets";
-// The repository rather than the domain's own boundary: the connection service
-// reads this host, so importing its index would close a cycle.
-import { connectionRepository, type StoredConnection } from "../connections/repository";
-import {
-  isStale,
-  OAUTH_TOKENS,
-  parseTokens,
-  oauthClients,
-  refreshAccess,
-  serializeTokens,
-  type TokenSet,
-} from "../connections/oauth";
+// The types a plugin declares, and what it reaches its own connections through,
+// both live in the connections domain: everything they touch is there. This is
+// the only direction the two point in.
+import { ConnectionTypes, type RegisteredConnectionType } from "../connections";
 import { pluginRepository, type NewContribution } from "./repository";
 
 /**
@@ -112,29 +97,6 @@ const exposed = (entry: Entry): LoadedPlugin => ({
 /** The extension points with a consumer; the column takes any name. */
 const PROVIDER = "provider";
 const CONNECTION_TYPE = "connection-type";
-
-/**
- * One type a plugin declared: the decoded catalog half, and the `validate` no
- * catalog can hold.
- */
-export interface RegisteredConnectionType {
-  readonly pluginId: string;
-  readonly contribution: ConnectionType & Pick<ConnectionTypeContribution, "validate">;
-}
-
-/**
- * Every issue at once, so the form can put each message under its own field,
- * and an unnamed key is refused rather than dropped, so a stale field is said
- * out loud. The schema crosses opaque, hence `unknown` until the plugin's hook.
- */
-const decodeConfig = (
-  schema: Schema.Top,
-  config: Schema.Json,
-): Effect.Effect<unknown, Schema.SchemaError> =>
-  Schema.decodeUnknownEffect(schema as Schema.Codec<unknown>, {
-    errors: "all",
-    onExcessProperty: "error",
-  })(config);
 
 /**
  * Cutting a plugin's unbounded text where the message is made, rather than at
@@ -241,9 +203,15 @@ const inspect = (
  * the catalog exists. A duplicate contribution id is caught against the
  * caller's array, not the primary key, where it would take every other
  * plugin's rows with it.
+ *
+ * `catalog` is what the boot has accepted from the plugins before this one:
+ * a connection type is checked against it as well as against `declared`,
+ * because a type name decides which plugin a connection belongs to and two
+ * plugins claiming one word would make that unanswerable.
  */
 const registrationHost = (
   manifest: PluginManifest,
+  catalog: ReadonlyArray<NewContribution>,
   declared: Array<NewContribution>,
   live: Array<ProviderDefinition>,
   types: Array<RegisteredConnectionType>,
@@ -300,14 +268,15 @@ const registrationHost = (
               const decoded = yield* decodeConnectionType(serializable).pipe(
                 Effect.mapError(asPluginError),
               );
-              if (
-                declared.some(
-                  (row) => row.extensionPoint === CONNECTION_TYPE && row.id === decoded.type,
-                )
-              ) {
+              const claimed = [...catalog, ...declared].find(
+                (row) => row.extensionPoint === CONNECTION_TYPE && row.id === decoded.type,
+              );
+              if (claimed !== undefined) {
                 return yield* Effect.fail(
                   new PluginError({
-                    message: `the ${CONNECTION_TYPE} contribution ${decoded.type} is registered twice`,
+                    message:
+                      `the ${CONNECTION_TYPE} contribution ${decoded.type} is already ` +
+                      `declared by the plugin ${claimed.owner}`,
                   }),
                 );
               }
@@ -347,14 +316,12 @@ const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const repository = yield* pluginRepository;
   const secrets = yield* Secrets;
-  const connections = yield* connectionRepository;
-  const clientOf = yield* oauthClients;
+  const connectionTypes = yield* ConnectionTypes;
   const audit = yield* AuditLog;
   const entries = yield* Ref.make<ReadonlyMap<string, Entry>>(new Map());
   // Outside `gate`, unlike everything else here: registration is pure and runs
   // only at boot, so this is settled for the life of the process.
   const providers = yield* Ref.make<ReadonlyArray<ProviderDefinition>>([]);
-  const connectionTypes = yield* Ref.make<ReadonlyArray<RegisteredConnectionType>>([]);
   /**
    * One permit for the whole host, held across a move's reads, hooks and
    * writes. Without it two moves interleave around the await inside a hook and
@@ -431,173 +398,9 @@ const make = Effect.gen(function* () {
           named("name", name),
           Effect.orDie(Effect.asVoid(secrets.delete(owner, name))),
         ),
-      list: () => Effect.orDie(secrets.names(owner)),
-    };
-  };
-
-  /**
-   * The connections of this plugin's own types, and no others. Which types
-   * those are is read at each call rather than captured, so a surface handed
-   * out at one activation is still right after the next boot's registration.
-   */
-  const connectionsRuntime = (pluginId: string): ConnectionsRuntime => {
-    const ownTypes = Effect.map(Ref.get(connectionTypes), (all) =>
-      all.filter((one) => one.pluginId === pluginId).map((one) => one.contribution.type),
-    );
-
-    /**
-     * One connection of this plugin's, or nothing it may know about: another
-     * plugin's row and an id nobody created are the same answer, because a
-     * plugin may not learn that the first exists.
-     */
-    const own = (id: string): Effect.Effect<StoredConnection, ConnectionUnavailable> =>
-      Effect.gen(function* () {
-        const found = yield* Effect.orDie(connections.one(id));
-        const types = yield* ownTypes;
-        return yield* Option.match(
-          Option.filter(found, (row) => types.includes(row.type)),
-          {
-            onNone: () =>
-              Effect.fail(
-                new ConnectionUnavailable({
-                  message: `no connection ${id} of this plugin's types`,
-                }),
-              ),
-            onSome: Effect.succeed,
-          },
-        );
-      });
-
-    const summary = (row: StoredConnection): ConnectionSummary => ({
-      id: row.id,
-      type: row.type,
-      label: row.label,
-      status: row.status,
-      labels: row.labels,
-      config: row.config,
-    });
-
-    /** What this plugin declared for the type this row is, if it is a redirect flow. */
-    const declaredOAuth = (row: StoredConnection): Effect.Effect<OAuthDeclaration | undefined> =>
-      Effect.map(
-        Ref.get(connectionTypes),
-        (all) =>
-          all.find((one) => one.pluginId === pluginId && one.contribution.type === row.type)
-            ?.contribution.oauth,
-      );
-
-    const setStatus = (
-      connectionId: string,
-      status: ConnectionStatus,
-      detail: string | null,
-    ): Effect.Effect<void> =>
-      Effect.gen(function* () {
-        const at = yield* nowIso;
-        yield* Effect.orDie(
-          withTransaction(
-            sql,
-            Effect.gen(function* () {
-              yield* connections.update(connectionId, { status, statusDetail: detail }, at);
-              yield* announce({
-                _tag: "record",
-                topic: "connection",
-                id: connectionId,
-                kind: "updated",
-              });
-            }),
-          ),
-        );
-      });
-
-    /** A connection the core cannot act through until the user has been back. */
-    const needsReauth = (
-      connectionId: string,
-      message: string,
-    ): Effect.Effect<never, ConnectionUnavailable> =>
-      Effect.andThen(
-        setStatus(connectionId, "needs-reauth", message),
-        Effect.fail(new ConnectionUnavailable({ message })),
-      );
-
-    /** What the user pasted, by the names the type declared. */
-    const pastedCredentials = (connectionId: string): Effect.Effect<Record<string, string>> =>
-      Effect.gen(function* () {
-        const owner: SecretOwner = { kind: "connection", id: connectionId };
-        const names = yield* Effect.orDie(secrets.names(owner));
-        const values = yield* Effect.forEach(names, (name) =>
-          Effect.map(Effect.orDie(secrets.get(owner, name)), (value) =>
-            Option.match(value, {
-              // The name came from the same table one statement ago.
-              onNone: (): [string, string] => {
-                throw new Error(`the secret ${name} disappeared while it was being read`);
-              },
-              onSome: (secret): [string, string] => [name, Redacted.value(secret)],
-            }),
-          ),
-        );
-        return Object.fromEntries(values);
-      });
-
-    /**
-     * The access token of a redirect-flow connection, refreshed first when it is
-     * spent or nearly so. The refresh is the core's: a plugin asks for
-     * credentials and is handed a token that works, or told it cannot act.
-     */
-    const accessToken = (
-      connectionId: string,
-      oauth: OAuthDeclaration,
-    ): Effect.Effect<Record<string, string>, ConnectionUnavailable> =>
-      Effect.gen(function* () {
-        const owner: SecretOwner = { kind: "connection", id: connectionId };
-        const stored = yield* Effect.orDie(secrets.get(owner, OAUTH_TOKENS));
-        if (Option.isNone(stored)) {
-          return yield* needsReauth(connectionId, "this connection holds no tokens");
-        }
-        const tokens = parseTokens(Redacted.value(stored.value));
-        const millis = yield* Clock.currentTimeMillis;
-        if (!isStale(tokens, millis)) return { accessToken: tokens.accessToken };
-
-        const client = yield* Effect.orDie(clientOf(pluginId));
-        if (tokens.refreshToken === undefined || Option.isNone(client)) {
-          return yield* needsReauth(connectionId, "this connection cannot be refreshed");
-        }
-        const refreshed = yield* refreshAccess({
-          tokenUrl: oauth.tokenUrl,
-          client: client.value,
-          refreshToken: tokens.refreshToken,
-        }).pipe(
-          Effect.provide(FetchHttpClient.layer),
-          Effect.catchTag("TokenRequestFailed", (error) =>
-            needsReauth(connectionId, error.message),
-          ),
-        );
-        // A provider that hands back no refresh token means the old one stands.
-        const keep = refreshed.refreshToken ?? tokens.refreshToken;
-        const next: TokenSet = { ...refreshed, refreshToken: keep };
-        yield* Effect.orDie(secrets.set(owner, OAUTH_TOKENS, Redacted.make(serializeTokens(next))));
-        return { accessToken: next.accessToken };
-      });
-
-    return {
       list: () =>
-        Effect.map(
-          Effect.flatMap(ownTypes, (types) => Effect.orDie(connections.ofTypes(types))),
-          (rows) => rows.map(summary),
-        ),
-
-      credentials: (connectionId) =>
-        Effect.gen(function* () {
-          const row = yield* own(connectionId);
-          const oauth = yield* declaredOAuth(row);
-          return oauth === undefined
-            ? yield* pastedCredentials(connectionId)
-            : yield* accessToken(connectionId, oauth);
-        }),
-
-      report: (connectionId, report) =>
-        Effect.andThen(
-          own(connectionId),
-          setStatus(connectionId, report.status, report.detail ?? null),
+        Effect.map(Effect.orDie(secrets.refs(owner.kind, [owner.id])), (grouped) =>
+          (grouped.get(owner.id) ?? []).map((ref) => ref.name),
         ),
     };
   };
@@ -608,7 +411,7 @@ const make = Effect.gen(function* () {
     ...(manifest.capabilities.includes("kv") ? { kv: keyValueStore(manifest.id) } : {}),
     ...(manifest.capabilities.includes("secrets") ? { secrets: pluginSecrets(manifest.id) } : {}),
     ...(manifest.capabilities.includes("connections")
-      ? { connections: connectionsRuntime(manifest.id) }
+      ? { connections: connectionTypes.runtimeFor(manifest.id) }
       : {}),
   });
 
@@ -619,11 +422,14 @@ const make = Effect.gen(function* () {
   const registerPass = (
     plugin: Plugin,
     manifest: PluginManifest,
+    catalog: ReadonlyArray<NewContribution>,
     declared: Array<NewContribution>,
     live: Array<ProviderDefinition>,
     types: Array<RegisteredConnectionType>,
   ): Effect.Effect<PluginStatus> =>
-    Effect.suspend(() => plugin.register(registrationHost(manifest, declared, live, types))).pipe(
+    Effect.suspend(() =>
+      plugin.register(registrationHost(manifest, catalog, declared, live, types)),
+    ).pipe(
       Effect.as<PluginStatus>({ _tag: "inactive" }),
       Effect.catchCause((cause) =>
         Effect.succeed<PluginStatus>({ _tag: "errored", message: messageOf(cause) }),
@@ -651,7 +457,7 @@ const make = Effect.gen(function* () {
         return;
       }
 
-      const config = yield* decodeConfig(entry.manifest.configSchema, state.config);
+      const config = yield* decodeAgainst(entry.manifest.configSchema, state.config);
       yield* Effect.suspend(() =>
         entry.plugin.activate(activationContext(entry.manifest, config)),
       ).pipe(
@@ -733,7 +539,7 @@ const make = Effect.gen(function* () {
           const declared: Array<NewContribution> = [];
           const live: Array<ProviderDefinition> = [];
           const types: Array<RegisteredConnectionType> = [];
-          const status = yield* registerPass(plugin, manifest, declared, live, types);
+          const status = yield* registerPass(plugin, manifest, catalog, declared, live, types);
           const registered = status._tag !== "errored";
           if (registered) {
             catalog.push(...declared);
@@ -758,7 +564,7 @@ const make = Effect.gen(function* () {
         );
         yield* Ref.set(entries, booted);
         yield* Ref.set(providers, registeredProviders);
-        yield* Ref.set(connectionTypes, registeredTypes);
+        yield* connectionTypes.replace(registeredTypes);
 
         yield* gate.withPermits(1)(
           Effect.forEach(
@@ -783,10 +589,6 @@ const make = Effect.gen(function* () {
     /** Every provider this boot registered, in registry order. */
     providers: (): Effect.Effect<ReadonlyArray<ProviderDefinition>> => Ref.get(providers),
 
-    /** Every connection type this boot registered, with its owning plugin. */
-    connectionTypes: (): Effect.Effect<ReadonlyArray<RegisteredConnectionType>> =>
-      Ref.get(connectionTypes),
-
     refresh,
     stop,
 
@@ -806,7 +608,7 @@ const make = Effect.gen(function* () {
         return entry === undefined
           ? Effect.die(new Error(`No plugin named ${id} was loaded.`))
           : Effect.asVoid(
-              Effect.mapError(decodeConfig(entry.manifest.configSchema, config), validationOf),
+              Effect.mapError(decodeAgainst(entry.manifest.configSchema, config), validationOf),
             );
       }),
   };
@@ -819,5 +621,5 @@ export class PluginHost extends Context.Service<PluginHost, Effect.Success<typeo
 export const PluginHostLayer: Layer.Layer<
   PluginHost,
   never,
-  SqlClient.SqlClient | Secrets | AuditLog
+  SqlClient.SqlClient | Secrets | AuditLog | ConnectionTypes
 > = Layer.effect(PluginHost)(make);

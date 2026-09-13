@@ -1,4 +1,4 @@
-import { JsonSchema, Result, Schema } from "effect";
+import { Effect, JsonSchema, Result, Schema } from "effect";
 
 /**
  * A config schema the generated settings form cannot render. Carries the reason
@@ -98,3 +98,20 @@ export const configJsonSchema = (
 
   return Result.succeed(root);
 };
+
+/**
+ * A stored config read against the live schema the plugin authored: every issue
+ * at once, so a form can put each message under its own field, and an unknown
+ * key refused rather than dropped, so a stale field is said out loud.
+ *
+ * The schema crosses the boundary opaque, so what comes back is `unknown` until
+ * the plugin's own hook is handed it.
+ */
+export const decodeAgainst = (
+  schema: Schema.Top,
+  config: Schema.Json,
+): Effect.Effect<unknown, Schema.SchemaError> =>
+  Schema.decodeUnknownEffect(schema as Schema.Codec<unknown>, {
+    errors: "all",
+    onExcessProperty: "error",
+  })(config);

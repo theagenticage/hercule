@@ -20,6 +20,9 @@ import * as HttpBody from "effect/unstable/http/HttpBody";
 import * as HttpClient from "effect/unstable/http/HttpClient";
 import type * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
+// The table accessor rather than the plugins domain's boundary: the plugin host
+// reads this domain, so importing its index would close a cycle. All that is
+// wanted here is one column of one row - the client id the user configured.
 import { pluginRepository } from "../plugins/repository";
 import { Secrets } from "../secrets";
 

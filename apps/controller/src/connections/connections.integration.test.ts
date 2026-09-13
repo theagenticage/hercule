@@ -18,6 +18,7 @@ import {
   PluginError,
   type ActivationContext,
   type Plugin,
+  type SetupStep,
 } from "@hydra/plugin-host";
 import {
   completeSetup,
@@ -83,7 +84,7 @@ const connectionPlugin = (options: {
   readonly configSchema?: Schema.Top;
 }): TestPlugin => {
   const contexts: Array<ActivationContext> = [];
-  const setup =
+  const setup: ReadonlyArray<SetupStep> =
     options.flow === "oauth"
       ? [{ kind: "oauth" }]
       : [{ kind: "credentials", fields: [{ name: "token", label: "Token" }] }];
@@ -517,5 +518,44 @@ describe("the connections surface a plugin is activated with", () => {
       expect(decoded).toMatchObject({ _tag: "ConnectionUnavailable" });
       expect(reported).toMatchObject({ _tag: "ConnectionUnavailable" });
     });
+  });
+});
+
+describe("two plugins claiming one type name", () => {
+  /** A plugin as `GET /plugins` hands it back; only what this test reads. */
+  interface PluginRow {
+    readonly id: string;
+    readonly status: { readonly _tag: string; readonly message?: string };
+    readonly contributions: ReadonlyArray<{ readonly id: string }>;
+  }
+
+  it("refuses the second, so a type always names exactly one plugin", async () => {
+    const first = connectionPlugin({ id: "first", type: "shared-type" });
+    const second = connectionPlugin({ id: "second", type: "shared-type" });
+
+    await withServer(
+      async ({ base }) => {
+        const token = await completeSetup(base);
+
+        const response = await get(base, "/api/v1/plugins", token);
+        expect(response.status, await response.clone().text()).toBe(200);
+        const listed = (await response.json()) as ReadonlyArray<PluginRow>;
+        const one = listed.find((plugin) => plugin.id === "first");
+        const two = listed.find((plugin) => plugin.id === "second");
+
+        expect(one?.status._tag).toBe("active");
+        expect(one?.contributions.map((contribution) => contribution.id)).toEqual(["shared-type"]);
+        expect(two?.status._tag).toBe("errored");
+        expect(two?.status.message).toContain("shared-type");
+        expect(two?.status.message).toContain("first");
+        // The refused plugin keeps nothing, so the catalog holds one claim.
+        expect(two?.contributions).toEqual([]);
+
+        // And the type still sets up, under the plugin that got there first.
+        const made = await created(base, token, { type: "shared-type" });
+        expect(made.pluginId).toBe("first");
+      },
+      { plugins: [first.plugin, second.plugin] },
+    );
   });
 });

@@ -12,38 +12,20 @@ import * as HttpClient from "effect/unstable/http/HttpClient";
 import * as HttpClientError from "effect/unstable/http/HttpClientError";
 import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest";
 import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse";
-import type { Plugin, RegistrationHost } from "@hydra/plugin-host";
+import type { ConnectionTypeContribution, Plugin, RegistrationHost } from "@hydra/plugin-host";
 import { github } from "./index";
-
-/** A connection type as the plugin registers it. */
-interface ConnectionTypeContribution {
-  readonly type: string;
-  readonly displayName: string;
-  readonly setup: ReadonlyArray<{
-    readonly kind: string;
-    readonly fields?: ReadonlyArray<{ readonly name: string; readonly label: string }>;
-  }>;
-  readonly oauth?: unknown;
-  readonly validate: (
-    credentials: Record<string, string>,
-  ) => Effect.Effect<
-    { readonly displayName: string },
-    { readonly message: string },
-    HttpClient.HttpClient
-  >;
-}
 
 /** Runs `register` and hands back everything the plugin contributed. */
 const registered = async (plugin: Plugin): Promise<ReadonlyArray<ConnectionTypeContribution>> => {
   const contributions: Array<ConnectionTypeContribution> = [];
-  const host = {
+  const host: RegistrationHost = {
     connections: {
-      registerType: (contribution: ConnectionTypeContribution) =>
+      registerType: (contribution) =>
         Effect.sync(() => {
           contributions.push(contribution);
         }),
     },
-  } as unknown as RegistrationHost;
+  };
   await Effect.runPromise(plugin.register(host));
   return contributions;
 };

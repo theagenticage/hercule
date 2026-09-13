@@ -24,10 +24,10 @@ const USER_AGENT = "Hydra";
 
 const refused = (message: string) => Effect.fail(new ConnectionValidationFailed({ message }));
 
-const loginOf = (body: unknown): string | undefined => {
-  const login = (body as { readonly login?: unknown } | null)?.login;
-  return typeof login === "string" ? login : undefined;
-};
+/** The one field of the answer this plugin reads; the rest of it is GitHub's. */
+const Account = Schema.Struct({ login: Schema.String });
+
+const decodeAccount = Schema.decodeUnknownEffect(Account);
 
 /**
  * Asks GitHub who the token belongs to. The login is the account name the
@@ -37,7 +37,8 @@ const validate: ConnectionTypeContribution["validate"] = (credentials) =>
   Effect.gen(function* () {
     const response = yield* HttpClient.get(USER_URL, {
       headers: {
-        authorization: `Bearer ${credentials["pat"] ?? ""}`,
+        // The host hands over exactly the fields the type declared.
+        authorization: `Bearer ${credentials["pat"]!}`,
         accept: "application/vnd.github+json",
         "user-agent": USER_AGENT,
       },
@@ -46,10 +47,10 @@ const validate: ConnectionTypeContribution["validate"] = (credentials) =>
     if (response.status !== 200) {
       return yield* refused(`GitHub answered ${String(response.status)}.`);
     }
-    const login = loginOf(yield* response.json);
-    return login === undefined
-      ? yield* refused("GitHub answered without naming an account.")
-      : { displayName: login };
+    const account = yield* decodeAccount(yield* response.json).pipe(
+      Effect.catchTag("SchemaError", () => refused("GitHub answered without naming an account.")),
+    );
+    return { displayName: account.login };
   }).pipe(
     Effect.catchTag("HttpClientError", (error) =>
       refused(`GitHub could not be reached: ${error.message}`),

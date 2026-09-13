@@ -16,6 +16,7 @@ import { TestDatabase } from "../db/testing";
 import { AuditLogLayer } from "../events";
 import { PluginHostLayer } from "../plugins";
 import { masterKeyLayer, SecretLayer, secretsLayer } from "../secrets";
+import { ConnectionTypesLayer } from "./runtime";
 import { ConnectionService, ConnectionServiceLayer } from "./service";
 
 let homes: Array<string> = [];
@@ -31,6 +32,7 @@ const stack = () => {
   homes.push(home);
   return ConnectionServiceLayer.pipe(
     Layer.provideMerge(PluginHostLayer),
+    Layer.provideMerge(ConnectionTypesLayer),
     Layer.provideMerge(SecretLayer),
     Layer.provideMerge(secretsLayer.pipe(Layer.provide(masterKeyLayer("file")))),
     Layer.provideMerge(AuditLogLayer),

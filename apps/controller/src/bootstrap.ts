@@ -28,7 +28,7 @@ import {
   type DatabaseError,
   type SchemaVersionError,
 } from "./db";
-import { ConnectionService, ConnectionServiceLayer } from "./connections";
+import { ConnectionService, ConnectionServiceLayer, ConnectionTypesLayer } from "./connections";
 import { AuditLog, AuditLogLayer } from "./events";
 import { ControllerIdentity, controllerIdentityLayer } from "./identity";
 import { Credentials, CredentialsLayer, hashToken, mintToken } from "./credentials";
@@ -274,7 +274,11 @@ export const bootWith = <A, E>(
       ProviderServiceLayer,
       SessionServiceLayer,
       ConnectionServiceLayer,
-    ).pipe(Layer.provideMerge(PluginHostLayer), Layer.provideMerge(withFleet));
+    ).pipe(
+      Layer.provideMerge(PluginHostLayer),
+      Layer.provideMerge(ConnectionTypesLayer),
+      Layer.provideMerge(withFleet),
+    );
 
     const steps = Effect.gen(function* () {
       yield* migrate({ backupsDir: paths.backupsDir, databaseExisted });
