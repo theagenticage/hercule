@@ -36,7 +36,6 @@ interface Plugin {
 
 interface Connection {
   readonly id: string;
-  readonly pluginId: string;
   readonly type: string;
   readonly label: string;
   readonly displayName: string;
@@ -53,7 +52,7 @@ const CHECKLIST = "Make a token with the repo scope, then paste it below.";
 
 /** A credentials flow: a checklist, one pasted field, and settings of its own. */
 const PAPER_TYPE = {
-  type: "paper",
+  type: "paper-trail/paper",
   displayName: "Paper Trail",
   setup: [
     { kind: "checklist", markdown: CHECKLIST },
@@ -74,7 +73,7 @@ const PAPER_TYPE = {
 
 /** A redirect flow: nothing to paste, and no settings of its own. */
 const SKY_TYPE = {
-  type: "skyline",
+  type: "skyline/mail",
   displayName: "Skyline",
   setup: [{ kind: "oauth" }],
   oauth: {
@@ -86,14 +85,16 @@ const SKY_TYPE = {
 
 /** A flow the core does not run yet. */
 const CHATTER_TYPE = {
-  type: "chatter",
+  type: "chatterbox/chatter",
   displayName: "Chatterbox",
   setup: [{ kind: "pairing" }],
 };
 
 const pluginFor = (id: string, definition: { type: string; displayName: string }): Plugin => ({
   id,
-  displayName: definition.displayName,
+  // Named apart from the type it declares, because a row shows both: the type
+  // by its display name, the plugin under it.
+  displayName: `${id} plugin`,
   hostApi: 1,
   capabilities: ["connections"],
   enabled: true,
@@ -123,8 +124,7 @@ const CATALOG: readonly Plugin[] = [
 
 const PAPER: Connection = {
   id: "0199c0ff-aaaa-7000-8000-000000000001",
-  pluginId: "paper-trail",
-  type: "paper",
+  type: "paper-trail/paper",
   label: "work",
   displayName: "acct:paper-work",
   status: "connected",
@@ -137,8 +137,7 @@ const PAPER: Connection = {
 
 const SKY: Connection = {
   id: "0199c0ff-bbbb-7000-8000-000000000002",
-  pluginId: "skyline",
-  type: "skyline",
+  type: "skyline/mail",
   label: "personal",
   displayName: "rogier@skyline.test",
   status: "needs-reauth",
@@ -271,6 +270,42 @@ describe("Connections", () => {
       .getAllByRole("button", { name: "Connect" })
       .map((connect) => reading(around(connect, "Connect").querySelector<HTMLElement>("b")));
     expect(offered).toEqual(["Paper Trail", "Skyline", "Chatterbox"]);
+    // Under each name, the plugin that declares the type: two plugins may
+    // declare one word, so the name alone does not say which this is.
+    expect(reading(await offerFor("Paper Trail"))).toContain("paper-trail plugin");
+    expect(reading(await offerFor("Skyline"))).toContain("skyline plugin");
+  });
+
+  it("offers two plugins declaring one word as two rows, told apart by the plugin under each", async () => {
+    const gmail = (id: string): Plugin => ({
+      ...pluginFor(id, { type: `${id}/gmail`, displayName: "Gmail" }),
+      contributions: [
+        {
+          extensionPoint: "connection-type",
+          id: `${id}/gmail`,
+          definition: {
+            type: `${id}/gmail`,
+            displayName: "Gmail",
+            setup: [{ kind: "credentials", fields: [{ name: "token", label: "Access token" }] }],
+          },
+        },
+      ],
+    });
+    const api = stubApi({
+      ...controller(() => []),
+      "GET /api/v1/plugins": { body: [gmail("first"), gmail("second")] },
+    });
+    await renderApp({ path: "/connections", api: api.fetch, token: "held" });
+
+    const rows = (await screen.findAllByRole("button", { name: "Connect" })).map((connect) =>
+      reading(around(connect, "Connect")),
+    );
+
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toContain("Gmail");
+    expect(rows[1]).toContain("Gmail");
+    expect(rows[0]).toContain("first plugin");
+    expect(rows[1]).toContain("second plugin");
   });
 
   it("says which account each connection is, where it stands and where it files", async () => {
@@ -282,6 +317,7 @@ describe("Connections", () => {
     expect(paper).toContain("acct:paper-work");
     expect(paper).toMatch(/connected/i);
     expect(paper).toContain("Code");
+    expect(paper).toContain("paper-trail plugin");
 
     const sky = reading(await rowFor(SKY));
     expect(sky).toContain("Skyline");
@@ -361,7 +397,7 @@ describe("Connections > setting one up", () => {
     });
     expect(writes(api)[0]).toMatchObject({ method: "POST", path: "/api/v1/connections" });
     expect(writes(api)[0]?.body).toEqual({
-      type: "paper",
+      type: "paper-trail/paper",
       label: "work",
       labels: ["Code"],
       config: {},
@@ -435,7 +471,7 @@ describe("Connections > a redirect flow", () => {
     });
     expect(writes(api)[0]).toMatchObject({ method: "POST", path: "/api/v1/oauth/start" });
     expect(writes(api)[0]?.body).toEqual({
-      type: "skyline",
+      type: "skyline/mail",
       origin: window.location.origin,
       label: "personal",
       labels: ["Business"],
@@ -512,7 +548,7 @@ describe("Connections > reconnecting and removing", () => {
     });
     expect(writes(api)[0]).toMatchObject({ method: "POST", path: "/api/v1/oauth/start" });
     expect(writes(api)[0]?.body).toMatchObject({
-      type: "skyline",
+      type: "skyline/mail",
       connectionId: SKY.id,
     });
     vi.unstubAllGlobals();

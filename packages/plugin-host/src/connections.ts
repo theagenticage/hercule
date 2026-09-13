@@ -66,7 +66,16 @@ export type OAuthDeclaration = Schema.Schema.Type<typeof OAuthDeclaration>;
  * the crossing into a JSON column.
  */
 export const ConnectionType = Schema.Struct({
-  type: Schema.String.check(Schema.isMinLength(1)),
+  /**
+   * The bare word this plugin calls the type, which the host qualifies with the
+   * plugin's id to make the identity the rest of Hydra keys on. The separator
+   * is refused here, where the plugin is told, so that the qualified string has
+   * exactly one reading.
+   */
+  type: Schema.String.check(
+    Schema.isMinLength(1),
+    Schema.isPattern(/^[^/]+$/, { message: "A connection type cannot hold a / character." }),
+  ),
   displayName: Schema.String.check(Schema.isMinLength(1)),
   setup: Schema.Array(SetupStep),
   oauth: Schema.optionalKey(OAuthDeclaration),
@@ -117,6 +126,7 @@ export interface ConnectionRegistration {
 /** One connection as its own plugin sees it. Never the credential values. */
 export interface ConnectionSummary {
   readonly id: string;
+  /** The qualified type, `<pluginId>/<word>`, not the bare word declared. */
   readonly type: string;
   readonly label: string;
   readonly status: ConnectionStatus;

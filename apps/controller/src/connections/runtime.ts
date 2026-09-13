@@ -7,9 +7,8 @@
  * refresh. The host declares types into this store at boot and asks it for a
  * plugin's surface at activation; nothing points the other way.
  *
- * Scope is the `plugin_id` column and nothing else. A type name is a plugin's
- * claim, and two builds could claim the same word; the column says whose row it
- * is, so a plugin reaches its own connections and learns of no others.
+ * Scope is the `plugin_id` column and nothing else: the column says whose row a
+ * connection is, so a plugin reaches its own and learns of no others.
  */
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
@@ -46,7 +45,8 @@ import { connectionRepository, type StoredConnection } from "./repository";
 
 /**
  * One type a plugin declared: the decoded catalog half, and the `validate` no
- * catalog can hold.
+ * catalog can hold. `contribution.type` is the qualified `<pluginId>/<word>`
+ * the host minted, which is what everything else keys on.
  */
 export interface RegisteredConnectionType {
   readonly pluginId: string;
@@ -58,7 +58,7 @@ const make = Effect.gen(function* () {
   const connections = yield* connectionRepository;
   const secrets = yield* Secrets;
   const clientOf = yield* oauthClients;
-  const declared = yield* Ref.make<ReadonlyArray<RegisteredConnectionType>>([]);
+  const declared = yield* Ref.make<ReadonlyMap<string, RegisteredConnectionType>>(new Map());
 
   const summary = (row: StoredConnection): ConnectionSummary => ({
     id: row.id,
@@ -142,14 +142,9 @@ const make = Effect.gen(function* () {
         Effect.fail(new ConnectionUnavailable({ message })),
       );
 
-    /** What this plugin declared for the type this row is, if it is a redirect flow. */
+    /** What was declared for the type this row is, if it is a redirect flow. */
     const declaredOAuth = (row: StoredConnection): Effect.Effect<OAuthDeclaration | undefined> =>
-      Effect.map(
-        Ref.get(declared),
-        (all) =>
-          all.find((one) => one.pluginId === pluginId && one.contribution.type === row.type)
-            ?.contribution.oauth,
-      );
+      Effect.map(Ref.get(declared), (all) => all.get(row.type)?.contribution.oauth);
 
     /**
      * What the user pasted, in one read of the connection's own secrets. A
@@ -271,10 +266,11 @@ const make = Effect.gen(function* () {
   return {
     /** What this boot registered, replacing what the last one did. */
     replace: (types: ReadonlyArray<RegisteredConnectionType>): Effect.Effect<void> =>
-      Ref.set(declared, types),
+      Ref.set(declared, new Map(types.map((one) => [one.contribution.type, one]))),
 
-    /** Every type this boot registered, with the plugin that owns it. */
-    all: (): Effect.Effect<ReadonlyArray<RegisteredConnectionType>> => Ref.get(declared),
+    /** The type of this qualified name, if this boot registered one. */
+    named: (type: string): Effect.Effect<Option.Option<RegisteredConnectionType>> =>
+      Effect.map(Ref.get(declared), (all) => Option.fromUndefinedOr(all.get(type))),
 
     runtimeFor,
   };

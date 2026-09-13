@@ -41,12 +41,16 @@ const GISTS = {
   pairing: "pair a chat account",
 } as const;
 
-/** How a type is set up, in the few words a row has for it. */
+/**
+ * The quiet line under a type's name: the plugin that declares it, then what
+ * setting it up takes. The plugin comes first because two plugins may each
+ * declare a type called Gmail, and the name above says nothing about which.
+ */
 const gistOf = (type: ConnectionType): string => {
   const flow = setupFlowOf(type);
   // A step kind this build does not know: the type names itself rather than
   // being described as something it may not be.
-  return flow === "unknown" ? type.type : GISTS[flow];
+  return `${type.pluginName} · ${flow === "unknown" ? type.type : GISTS[flow]}`;
 };
 
 /**

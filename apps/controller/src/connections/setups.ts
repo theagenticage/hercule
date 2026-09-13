@@ -16,7 +16,7 @@ import { uuidFromString, uuidToString } from "../db";
 /** A pending setup, with its JSON columns read. */
 export interface StoredSetup {
   readonly state: string;
-  readonly pluginId: string;
+  /** The qualified type, which names the plugin that owns the flow as well. */
   readonly type: string;
   /** Set when the flow reconnects a connection that already exists. */
   readonly connectionId: string | undefined;
@@ -35,7 +35,6 @@ export interface NewSetup extends StoredSetup {
 
 interface SetupRow {
   readonly state: string;
-  readonly plugin_id: string;
   readonly type: string;
   readonly connection_id: Uint8Array | null;
   readonly label: string;
@@ -45,15 +44,13 @@ interface SetupRow {
   readonly code_verifier: string;
 }
 
-const COLUMNS =
-  "state, plugin_id, type, connection_id, label, labels, config, origin, code_verifier";
+const COLUMNS = "state, type, connection_id, label, labels, config, origin, code_verifier";
 
 /** Written by this repository alone, so a column that does not parse is a broken database. */
 const jsonOf = <A>(text: string): A => JSON.parse(text) as A;
 
 const toSetup = (row: SetupRow): StoredSetup => ({
   state: row.state,
-  pluginId: row.plugin_id,
   type: row.type,
   connectionId: row.connection_id === null ? undefined : uuidToString(row.connection_id),
   label: row.label,
@@ -70,10 +67,10 @@ const make = Effect.gen(function* () {
     insert: (setup: NewSetup): Effect.Effect<void, SqlError> =>
       Effect.asVoid(sql`
         INSERT INTO oauth_setups
-          (state, plugin_id, type, connection_id, label, labels, config, origin, code_verifier,
+          (state, type, connection_id, label, labels, config, origin, code_verifier,
            expires_at, created_at)
         VALUES
-          (${setup.state}, ${setup.pluginId}, ${setup.type},
+          (${setup.state}, ${setup.type},
            ${setup.connectionId === undefined ? null : uuidFromString(setup.connectionId)},
            ${setup.label}, ${JSON.stringify(setup.labels)}, ${JSON.stringify(setup.config)},
            ${setup.origin}, ${setup.codeVerifier}, ${setup.expiresAt}, ${setup.at})

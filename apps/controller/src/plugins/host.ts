@@ -204,14 +204,12 @@ const inspect = (
  * caller's array, not the primary key, where it would take every other
  * plugin's rows with it.
  *
- * `catalog` is what the boot has accepted from the plugins before this one:
- * a connection type is checked against it as well as against `declared`,
- * because a type name decides which plugin a connection belongs to and two
- * plugins claiming one word would make that unanswerable.
+ * A connection type is identified by the plugin's id and the word it declared,
+ * joined: two plugins may each call a type `gmail` and still name two different
+ * things, so no plugin can claim a word out from under another.
  */
 const registrationHost = (
   manifest: PluginManifest,
-  catalog: ReadonlyArray<NewContribution>,
   declared: Array<NewContribution>,
   live: Array<ProviderDefinition>,
   types: Array<RegisteredConnectionType>,
@@ -268,15 +266,16 @@ const registrationHost = (
               const decoded = yield* decodeConnectionType(serializable).pipe(
                 Effect.mapError(asPluginError),
               );
-              const claimed = [...catalog, ...declared].find(
-                (row) => row.extensionPoint === CONNECTION_TYPE && row.id === decoded.type,
-              );
-              if (claimed !== undefined) {
+              // The identity the catalog, the stored rows and every lookup use.
+              // Nothing splits it again: the plugin a type belongs to is read
+              // from the entry registered here, never parsed back out.
+              const type = `${manifest.id}/${decoded.type}`;
+              if (
+                declared.some((row) => row.extensionPoint === CONNECTION_TYPE && row.id === type)
+              ) {
                 return yield* Effect.fail(
                   new PluginError({
-                    message:
-                      `the ${CONNECTION_TYPE} contribution ${decoded.type} is already ` +
-                      `declared by the plugin ${claimed.owner}`,
+                    message: `the ${CONNECTION_TYPE} contribution ${type} is registered twice`,
                   }),
                 );
               }
@@ -290,22 +289,26 @@ const registrationHost = (
               if (configSchema !== undefined && Result.isFailure(configSchema)) {
                 return yield* Effect.fail(
                   new PluginError({
-                    message: `the connection type ${decoded.type}: ${configSchema.failure.message}`,
+                    message: `the connection type ${type}: ${configSchema.failure.message}`,
                   }),
                 );
               }
               declared.push({
                 owner: manifest.id,
                 extensionPoint: CONNECTION_TYPE,
-                id: decoded.type,
+                id: type,
                 definition: {
                   ...decoded,
+                  type,
                   ...(configSchema === undefined ? {} : { configSchema: configSchema.success }),
                 },
               });
               // The decoded copy, so what the rest of the controller reads is
               // what the schema accepted rather than the object a plugin holds.
-              types.push({ pluginId: manifest.id, contribution: { ...decoded, validate } });
+              types.push({
+                pluginId: manifest.id,
+                contribution: { ...decoded, type, validate },
+              });
             }),
         },
       }
@@ -422,14 +425,11 @@ const make = Effect.gen(function* () {
   const registerPass = (
     plugin: Plugin,
     manifest: PluginManifest,
-    catalog: ReadonlyArray<NewContribution>,
     declared: Array<NewContribution>,
     live: Array<ProviderDefinition>,
     types: Array<RegisteredConnectionType>,
   ): Effect.Effect<PluginStatus> =>
-    Effect.suspend(() =>
-      plugin.register(registrationHost(manifest, catalog, declared, live, types)),
-    ).pipe(
+    Effect.suspend(() => plugin.register(registrationHost(manifest, declared, live, types))).pipe(
       Effect.as<PluginStatus>({ _tag: "inactive" }),
       Effect.catchCause((cause) =>
         Effect.succeed<PluginStatus>({ _tag: "errored", message: messageOf(cause) }),
@@ -539,7 +539,7 @@ const make = Effect.gen(function* () {
           const declared: Array<NewContribution> = [];
           const live: Array<ProviderDefinition> = [];
           const types: Array<RegisteredConnectionType> = [];
-          const status = yield* registerPass(plugin, manifest, catalog, declared, live, types);
+          const status = yield* registerPass(plugin, manifest, declared, live, types);
           const registered = status._tag !== "errored";
           if (registered) {
             catalog.push(...declared);

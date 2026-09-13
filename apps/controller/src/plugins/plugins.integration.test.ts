@@ -498,7 +498,7 @@ describe("the shipped registry over the routes", () => {
         const contribution = found?.contributions.find(
           (one) => one.extensionPoint === "connection-type",
         );
-        expect(contribution?.id).toBe("github");
+        expect(contribution?.id).toBe("github/github");
         expect(contribution?.definition).toMatchObject({ displayName: "GitHub" });
       },
       { plugins: shipped },

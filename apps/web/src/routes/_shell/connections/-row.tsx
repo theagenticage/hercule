@@ -85,9 +85,12 @@ export function ConnectionRow({
         </div>
       </div>
 
-      {/* The account and the topic it files into: what the connection is, under
-          what the user called it. */}
+      {/* The plugin that declares the type, the account, and the topic it files
+          into: what the connection is, under what the user called it. The
+          plugin leads, because two plugins may declare one type name and the
+          name above says nothing about which this is. */}
       <div className="flex flex-wrap items-baseline gap-x-1.5 pt-px text-fine">
+        {type === undefined ? null : <span className="text-faint">{type.pluginName} ·</span>}
         <span className="text-muted">{connection.displayName}</span>
         {connection.labels[0] === undefined ? null : (
           <span className="text-faint">· {connection.labels[0]}</span>

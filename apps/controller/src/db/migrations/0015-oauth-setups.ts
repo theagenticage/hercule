@@ -6,6 +6,9 @@
  * provider hands back. A row is deleted the moment it is presented, so a state
  * spends once, and rows nobody came back for are swept on the next start.
  *
+ * `type` is the qualified type, which names the plugin owning the flow as well,
+ * so there is no second column saying whose flow this is.
+ *
  * A pending setup is never a connection: nothing outside this table knows about
  * it, and a flow that is abandoned leaves no record and no secret behind.
  */
@@ -18,7 +21,6 @@ export default Effect.gen(function* () {
   yield* sql`
     CREATE TABLE oauth_setups (
       state TEXT PRIMARY KEY NOT NULL,
-      plugin_id TEXT NOT NULL,
       type TEXT NOT NULL,
       connection_id BLOB,
       label TEXT NOT NULL,

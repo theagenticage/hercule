@@ -4,7 +4,9 @@
  *
  * `plugin_id` and `type` are plain strings, not foreign keys: a type is a
  * plugin contribution, so a connection outlives a build that drops its plugin -
- * and its credentials have to survive with it.
+ * and its credentials have to survive with it. `type` holds the qualified
+ * `<pluginId>/<word>` the host minted, which is what every lookup keys on;
+ * `plugin_id` is the scope a plugin's runtime reads are taken through.
  *
  * `labels` and `config` are JSON documents. Nothing queries inside `config`,
  * and `labels[0]` - the default topic - is read by whoever reads the row.

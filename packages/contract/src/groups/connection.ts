@@ -6,6 +6,10 @@
  * here. What is here is the core-owned record: who the account is, where it
  * stands, and which secrets it owns.
  *
+ * A `type` anywhere below is `<pluginId>/<word>`, as the catalog lists it. It
+ * is one opaque string: a client passes back what the catalog gave it and never
+ * parses it.
+ *
  * `credentials` is references only. A value goes in on create or on a rotation
  * and is never read back, by this API or any other.
  */
@@ -71,8 +75,6 @@ export type CredentialRef = Schema.Schema.Type<typeof CredentialRef>;
 
 export const Connection = Schema.Struct({
   id: Id,
-  /** The plugin that defines the type, so a type is never ambiguous. */
-  pluginId: Schema.String,
   type: Schema.String,
   label: ConnectionLabel,
   /** The account name the type's own `validate` answered with. */

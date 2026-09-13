@@ -28,7 +28,6 @@ import { completeSetup, get, post, send, withServer, type ServerHarness } from "
 /** A connection as the API hands it back; only the fields these tests read. */
 interface ConnectionRecord {
   readonly id: string;
-  readonly pluginId: string;
   readonly type: string;
   readonly label: string;
   readonly displayName: string;
@@ -246,7 +245,7 @@ const start = (base: string, token: string, body: Record<string, unknown>): Prom
   post(
     base,
     "/api/v1/oauth/start",
-    { type: "oauth-type", origin: ORIGIN, label: "work", labels: ["Code"], ...body },
+    { type: "oauthy/oauth-type", origin: ORIGIN, label: "work", labels: ["Code"], ...body },
     token,
   );
 
@@ -365,7 +364,7 @@ describe("POST /oauth/start", () => {
     await withOAuth(async ({ base }, _registry, token) => {
       await setClientId(base, token, "second");
 
-      const response = await start(base, token, { type: "second-type" });
+      const response = await start(base, token, { type: "second/second-type" });
 
       expect(response.status).toBe(409);
       const error = await errorOf(response);
@@ -381,7 +380,7 @@ describe("POST /oauth/start", () => {
       await setClientSecret(base, token, "second");
 
       const response = await start(base, token, {
-        type: "second-type",
+        type: "second/second-type",
         connectionId: before.id,
       });
 
@@ -395,7 +394,7 @@ describe("POST /oauth/start", () => {
       await setClientId(base, token, "pasted");
       await setClientSecret(base, token, "pasted");
 
-      const response = await start(base, token, { type: "pasted-type" });
+      const response = await start(base, token, { type: "pasted/pasted-type" });
 
       expect(await errorOf(response)).toMatchObject({ code: "validation" });
     });
@@ -434,8 +433,7 @@ describe("GET /oauth/callback", () => {
       const listed = await connections(base, token);
       expect(listed).toHaveLength(1);
       expect(listed[0]).toMatchObject({
-        pluginId: "oauthy",
-        type: "oauth-type",
+        type: "oauthy/oauth-type",
         label: "work",
         labels: ["Code"],
         displayName: `acct:${FIRST_TOKEN}`,

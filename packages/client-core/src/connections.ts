@@ -37,8 +37,14 @@ export type SetupStep =
 
 /** A connection type as the screen offers it. */
 export interface ConnectionType {
+  /** `<pluginId>/<word>`, as the catalog lists it. Sent back, never parsed. */
   readonly type: string;
   readonly displayName: string;
+  /**
+   * The plugin that declares it, for the line under the name. Two plugins may
+   * each declare a type called Gmail, so the name alone does not say which.
+   */
+  readonly pluginName: string;
   readonly setup: ReadonlyArray<SetupStep>;
   readonly configSchema?: Record<string, unknown>;
 }
@@ -72,6 +78,7 @@ export const connectionTypes = (
           {
             type,
             displayName,
+            pluginName: plugin.displayName,
             setup: Array.isArray(setup) ? (setup as ReadonlyArray<SetupStep>) : [],
             ...(configSchema === undefined ? {} : { configSchema }),
           },

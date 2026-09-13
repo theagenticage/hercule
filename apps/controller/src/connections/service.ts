@@ -142,16 +142,10 @@ const make = Effect.gen(function* () {
 
   const ownerOf = (id: string): SecretOwner => ({ kind: "connection", id });
 
-  /** The registered type of this name, if this build defines one. */
-  const registeredType = (type: string): Effect.Effect<Option.Option<RegisteredConnectionType>> =>
-    Effect.map(types.all(), (registered) =>
-      Option.fromUndefinedOr(registered.find((one) => one.contribution.type === type)),
-    );
-
   /** The type a request names, or the `validation` a caller can act on. */
   const typeNamed = (type: string): Effect.Effect<RegisteredConnectionType, Validation> =>
     Effect.flatMap(
-      registeredType(type),
+      types.named(type),
       Option.match({
         onNone: () =>
           Effect.fail(
@@ -168,7 +162,7 @@ const make = Effect.gen(function* () {
    */
   const typeOf = (row: StoredConnection): Effect.Effect<RegisteredConnectionType, InvalidState> =>
     Effect.flatMap(
-      registeredType(row.type),
+      types.named(row.type),
       Option.match({
         onNone: () =>
           Effect.fail(
@@ -261,7 +255,6 @@ const make = Effect.gen(function* () {
   /** A connection as the wire sees it: the row, plus what it owns in `secrets`. */
   const compose = (row: StoredConnection, refs: ReadonlyArray<SecretNameRef>): Connection => ({
     id: row.id,
-    pluginId: row.pluginId,
     type: row.type,
     label: row.label,
     displayName: row.displayName,
@@ -332,22 +325,16 @@ const make = Effect.gen(function* () {
         return yield* ended("denied");
       }
 
-      const registered = (yield* types.all()).find((one) => one.contribution.type === setup.type);
+      const registered = Option.getOrUndefined(yield* types.named(setup.type));
       const oauth = registered?.contribution.oauth;
       const client =
         registered === undefined
           ? Option.none()
           : yield* Effect.orDie(clientOf(registered.pluginId));
-      // A build that no longer declares the type, one where the type name has
-      // moved to another plugin since the flow started, or a plugin whose
-      // credentials were cleared while the user was at the provider: the code
-      // cannot be spent in any of those, which is what the word says.
-      if (
-        registered === undefined ||
-        registered.pluginId !== setup.pluginId ||
-        oauth === undefined ||
-        Option.isNone(client)
-      ) {
+      // A build that no longer declares the type, or a plugin whose credentials
+      // were cleared while the user was at the provider: the code cannot be
+      // spent in either, which is what the word says.
+      if (registered === undefined || oauth === undefined || Option.isNone(client)) {
         return yield* ended("exchange-failed");
       }
 
@@ -646,19 +633,6 @@ const make = Effect.gen(function* () {
             ]),
           );
         }
-        // The same type name, but owned by another plugin than when the
-        // connection was made: only reachable across a rebuild that moved the
-        // contribution, and the new owner's tokens are not this account's.
-        if (existing !== undefined && existing.pluginId !== pluginId) {
-          return yield* Effect.fail(
-            validation([
-              {
-                path: ["connectionId"],
-                message: `that connection belongs to the plugin ${existing.pluginId}`,
-              },
-            ]),
-          );
-        }
         const label = decoded.label ?? existing?.label;
         const labels = decoded.labels ?? existing?.labels;
         if (label === undefined || labels === undefined) {
@@ -689,7 +663,6 @@ const make = Effect.gen(function* () {
             yield* setups.sweep(at);
             yield* setups.insert({
               state,
-              pluginId,
               type: decoded.type,
               connectionId: decoded.connectionId,
               label,
