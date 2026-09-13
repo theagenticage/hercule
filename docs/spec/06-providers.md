@@ -351,7 +351,7 @@ Item ids are native where they exist (Codex item id; Claude `tool_use` id / `mes
 
 `file_read_approval` renders as a path list, not a diff or a command (native in Codex `item/fileRead/requestApproval`). `user_input` carries structured questions in `detail` (Claude `AskUserQuestion`, Codex `item/tool/requestUserInput`); ~~it resolves with the answers~~, and the taxonomy needs no separate user-input event pair. *(Amended 2026-09-13, [#70](https://github.com/rogierpennink/hydra/issues/70).)* Answering a `user_input` with its answers is not built; until `session.respond` carries answers the request offers `deny` and `cancel`.
 
-`ApprovalDecision` scope semantics: `allow` = this call only; `allow_always` = the vendor's for-session persistence (Codex `acceptForSession`, Claude `updatedPermissions`, pi: the adapter's hook remembers the rule for the session); `deny` = refuse with a reason the model sees; `cancel` = refuse and end the turn. The four values and their vendor mappings are pinned; that `cancel` ends the turn is the spec's consolidated reading of the vendors' `cancel` options. Vendor exotics (Codex execpolicy / network amendments) are not offered; the chosen native option is recorded in `raw` / `providerRefs`.
+`ApprovalDecision` scope semantics: `allow` = this call only; `allow_always` = the vendor's for-session persistence, never persistence on disk (Codex `acceptForSession`, Claude `updatedPermissions` with every rule rewritten to `destination: "session"`, pi: the adapter's hook remembers the rule for the session); `deny` = refuse with a reason the model sees; `cancel` = refuse and end the turn. The four values and their vendor mappings are pinned; that `cancel` ends the turn is the spec's consolidated reading of the vendors' `cancel` options. Vendor exotics (Codex execpolicy / network amendments) are not offered; the chosen native option is recorded in `raw` / `providerRefs`.
 
 A request stays open until `respondToRequest`; the controller surfaces it as a Notification and in the session view ([./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md)). `interrupt` on a session with an open request resolves it as `cancel` (spec's consolidated semantics; follows from the park-and-resume abort caveat in section 8.2).
 
@@ -410,7 +410,7 @@ On Claude the callback is supplied in every mode but `full-access` - which actio
 | Decision | `PermissionResult` |
 |---|---|
 | allow | `{ behavior: "allow", decisionClassification: "user_temporary" }` |
-| allow always | `{ behavior: "allow", updatedPermissions: <the callback's own `suggestions`>, decisionClassification: "user_permanent" }`; offered only where the callback handed suggestions over |
+| allow always | `{ behavior: "allow", updatedPermissions: <the callback's own `suggestions`, every one rewritten to `destination: "session"`>, decisionClassification: "user_permanent" }`; offered only where the callback handed suggestions over. The rewrite is what keeps the answer about this thread: a click never writes a rule to the user's settings files on disk |
 | deny | `{ behavior: "deny", message, decisionClassification: "user_reject" }` |
 | cancel | the same deny with `interrupt: true`, which ends the turn with it |
 

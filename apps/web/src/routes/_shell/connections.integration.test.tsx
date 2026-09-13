@@ -15,7 +15,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { renderApp, stubApi, type Handler } from "../../app/testing";
+import { reading, renderApp, stubApi, type Handler } from "../../app/testing";
 
 interface Contribution {
   readonly extensionPoint: string;
@@ -183,10 +183,6 @@ const open = async (
     },
   };
 };
-
-/** The page's text with its whitespace collapsed, the way a reader sees it. */
-const reading = (element: HTMLElement | null = document.body): string =>
-  (element?.textContent ?? "").replace(/\s+/g, " ").trim();
 
 /**
  * The writes this screen made, in order. The shell opens a live connection on

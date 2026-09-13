@@ -11,7 +11,14 @@ import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ageOf, formatStamp } from "@hydra/client-core";
 import type { Session } from "@hydra/contract";
-import { envelope, renderApp, stubApi, type Call, type Handler } from "../../../app/testing";
+import {
+  envelope,
+  reading,
+  renderApp,
+  stubApi,
+  type Call,
+  type Handler,
+} from "../../../app/testing";
 import {
   CONTROLLER_VERSION,
   GIB,
@@ -156,10 +163,6 @@ const open = async (
   const app = await renderApp({ path: `/fleet/${runner.id}`, api: api.fetch, token: "held" });
   return { ...app, api };
 };
-
-/** The page's text with its whitespace collapsed, the way a reader sees it. */
-const reading = (element: HTMLElement | null = document.body): string =>
-  (element?.textContent ?? "").replace(/\s+/g, " ").trim();
 
 /** Everything this page sent about the runner, in order. */
 const writesTo = (api: { readonly calls: readonly Call[] }, id: string) =>

@@ -57,7 +57,7 @@ One user-visible episode of a session: from a user input until the agent goes id
 _Avoid_: exchange, round, iteration
 
 **Request**:
-A provider-held question a session is parked on until a decision arrives: an approval or a user-input ask; answered by `session.respond` with allow / allow always / deny / cancel.
+A provider-held question a session is parked on until a decision arrives: an approval or a user-input ask; surfaced as the permission card docked on the thread's composer and answered by `session.respond` with an `ApprovalDecision` - allow / allow always / deny / cancel.
 _Avoid_: permission request (reserved for grant escalation), approval prompt, tool prompt
 
 **Steering**:

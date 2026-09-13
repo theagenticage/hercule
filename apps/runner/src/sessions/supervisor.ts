@@ -330,7 +330,8 @@ export const supervising = (adapters: ReadonlyArray<ProviderAdapter>): Supervisi
                   adapter,
                   scratch: resolved.scratch,
                   inactivityMs: frame.spec.timeouts.inactivityMs,
-                  // Meaningless until turn.started sets it alongside `inactivity`.
+                  // Meaningless until the session is watched: `forward` sets
+                  // it alongside `inactivity`, on whatever event starts the watch.
                   lastEventAt: 0,
                   inactivity: undefined,
                   turnOpen: false,

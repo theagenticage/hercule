@@ -1,7 +1,7 @@
 import type { JSX } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { approvalCard, queryKeys, type HydraClient } from "@hydra/client-core";
-import type { OpenRequest } from "@hydra/contract";
+import type { ApprovalDecision, OpenRequest } from "@hydra/contract";
 import { cn, DecisionMark } from "@hydra/ui";
 import { messageOf } from "../save-status";
 
@@ -27,7 +27,7 @@ export function PermissionCard({
   const queryClient = useQueryClient();
   const card = approvalCard(request);
   const respond = useMutation({
-    mutationFn: (decision: OpenRequest["decisions"][number]) =>
+    mutationFn: (decision: ApprovalDecision) =>
       client.session.respond({
         params: { id: sessionId },
         payload: { requestId: request.requestId, decision },

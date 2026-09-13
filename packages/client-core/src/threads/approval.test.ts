@@ -19,18 +19,6 @@ const COMMAND: OpenRequest = {
   detail: { command: "ls -la" },
 };
 
-/** Every string the card carries, whichever line of it they end up on. */
-const textIn = (value: unknown): string =>
-  typeof value === "string"
-    ? value
-    : Array.isArray(value)
-      ? value.map(textIn).join(" ")
-      : typeof value === "object" && value !== null
-        ? Object.values(value).map(textIn).join(" ")
-        : "";
-
-const wording = (request: OpenRequest): string => textIn(approvalCard(request));
-
 describe("approvalCard", () => {
   it("offers one row per decision the request lists, in that order, each with its own label and describe line", () => {
     const card = approvalCard(COMMAND);
@@ -64,7 +52,6 @@ describe("approvalCard", () => {
     expect(card.subject).toEqual(["ls -la"]);
     expect(card.code).toBe(true);
     expect(card.note).toBeNull();
-    expect(wording(COMMAND)).toContain("ls -la");
   });
 
   it("names every path a file_change_approval is about, in order, as code", () => {
@@ -77,19 +64,29 @@ describe("approvalCard", () => {
 
     expect(card.subject).toEqual(["src/auth.ts", "src/auth.test.ts"]);
     expect(card.code).toBe(true);
-    expect(wording(request)).toContain("src/auth.test.ts");
   });
 
-  it("names the path a file_read_approval is about", () => {
-    expect(
-      wording({ ...COMMAND, kind: "file_read_approval", detail: { paths: ["docs/"] } }),
-    ).toContain("docs/");
+  it("names the path a file_read_approval is about, as its subject", () => {
+    const card = approvalCard({
+      ...COMMAND,
+      kind: "file_read_approval",
+      detail: { paths: ["docs/"] },
+    });
+
+    expect(card.subject).toEqual(["docs/"]);
+    expect(card.code).toBe(true);
   });
 
-  it("names the tool a tool_approval is about", () => {
-    expect(
-      wording({ ...COMMAND, kind: "tool_approval", detail: { toolName: "WebFetch" } }),
-    ).toContain("WebFetch");
+  it("names the tool a tool_approval is about, in its title", () => {
+    const card = approvalCard({
+      ...COMMAND,
+      kind: "tool_approval",
+      detail: { toolName: "WebFetch" },
+    });
+
+    // The tool names itself in the question, so there is no subject to repeat.
+    expect(card.title).toContain("WebFetch");
+    expect(card.subject).toEqual([]);
   });
 
   it("shows a user_input's questions with deny and cancel only, saying answering is not built and to reply in the thread", () => {
@@ -99,8 +96,6 @@ describe("approvalCard", () => {
       decisions: ["deny", "cancel"],
       detail: { questions: ["Which database should it use?", "Postgres or SQLite?"] },
     };
-    const text = wording(request);
-
     const card = approvalCard(request);
 
     expect(card.rows.map((row) => row.decision)).toEqual(["deny", "cancel"]);
@@ -108,12 +103,9 @@ describe("approvalCard", () => {
     // note is where the missing answer is explained.
     expect(card.subject).toEqual(["Which database should it use?", "Postgres or SQLite?"]);
     expect(card.code).toBe(false);
-    expect(card.note).not.toBeNull();
-    expect(text).toContain("Which database should it use?");
-    expect(text).toContain("Postgres or SQLite?");
-    // Conflict-1: there is nothing an allow could carry, so the card says so
-    // rather than leaving the user to guess why no Allow is offered.
-    expect(text).toMatch(/not built/i);
-    expect(text).toMatch(/reply/i);
+    // There is nothing an allow could carry, so the note says so rather than
+    // leaving the user to guess why no Allow is offered.
+    expect(card.note).toMatch(/not built/i);
+    expect(card.note).toMatch(/reply/i);
   });
 });

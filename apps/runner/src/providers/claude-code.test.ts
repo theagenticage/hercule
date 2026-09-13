@@ -1041,6 +1041,23 @@ const resolutionsIn = (
       : [],
   );
 
+/** What an allow persisted; nothing at all is what a non-allow persisted. */
+const persistedBy = (settled: PermissionResult | null | undefined): ReadonlyArray<unknown> =>
+  settled !== null && settled !== undefined && settled.behavior === "allow"
+    ? (settled.updatedPermissions ?? [])
+    : [];
+
+/**
+ * How a deny was worded and whether it ended the turn. A non-deny reads as an
+ * empty message that did end the turn, so either assertion fails on one.
+ */
+const denialOf = (
+  settled: PermissionResult | null | undefined,
+): { readonly message: string; readonly interrupt: boolean } =>
+  settled !== null && settled !== undefined && settled.behavior === "deny"
+    ? { message: settled.message, interrupt: settled.interrupt ?? false }
+    : { message: "", interrupt: true };
+
 /** A session in `approval-required` with a turn open, ready to be asked. */
 const asking = async (): Promise<Driving> => {
   const run = driving();
@@ -1129,12 +1146,7 @@ describe("a tool call the harness has to ask about", () => {
     await respond(run, request.requestId, "allow_always");
 
     await until("resolved the park", () => park.settled() !== undefined);
-    const settled = park.settled();
-    const persisted =
-      settled !== null && settled !== undefined && settled.behavior === "allow"
-        ? (settled.updatedPermissions ?? [])
-        : [];
-    expect(persisted).toEqual([
+    expect(persistedBy(park.settled())).toEqual([
       {
         type: "addRules",
         rules: [{ toolName: "Bash", ruleContent: "ls:*" }],
@@ -1161,11 +1173,7 @@ describe("a tool call the harness has to ask about", () => {
     const settled = park.settled();
     expect(settled).toMatchObject({ behavior: "allow", decisionClassification: "user_permanent" });
     // Something to persist, so the same command is not asked about again.
-    const persisted =
-      settled !== null && settled !== undefined && settled.behavior === "allow"
-        ? (settled.updatedPermissions ?? [])
-        : [];
-    expect(persisted.length).toBeGreaterThan(0);
+    expect(persistedBy(settled).length).toBeGreaterThan(0);
     expect(resolutionsIn(run.seen)).toEqual([
       { requestId: request.requestId, decision: "allow_always" },
     ]);
@@ -1181,16 +1189,8 @@ describe("a tool call the harness has to ask about", () => {
     const settled = park.settled();
     expect(settled).toMatchObject({ behavior: "deny" });
     // Required by the vendor, and it is what the harness tells the model.
-    expect(
-      settled !== null && settled !== undefined && settled.behavior === "deny"
-        ? settled.message
-        : "",
-    ).not.toBe("");
-    expect(
-      settled !== null && settled !== undefined && settled.behavior === "deny"
-        ? (settled.interrupt ?? false)
-        : true,
-    ).toBe(false);
+    expect(denialOf(settled).message).not.toBe("");
+    expect(denialOf(settled).interrupt).toBe(false);
     expect(resolutionsIn(run.seen)).toEqual([{ requestId: request.requestId, decision: "deny" }]);
   });
 
@@ -1234,53 +1234,53 @@ describe("a tool call the harness has to ask about", () => {
     await respond(run, request.requestId, "allow");
     expect(resolutionsIn(run.seen)).toEqual([{ requestId: request.requestId, decision: "deny" }]);
   });
-});
 
-it("refuses an answer the request never offered", async () => {
-  const run = await asking();
-  const { park, request } = await parked(run, "AskUserQuestion", {
-    questions: [{ question: "Which one?", header: "One", options: [], multiSelect: false }],
+  it("refuses an answer the request never offered", async () => {
+    const run = await asking();
+    const { park, request } = await parked(run, "AskUserQuestion", {
+      questions: [{ question: "Which one?", header: "One", options: [], multiSelect: false }],
+    });
+
+    // There is no answer for an allow to carry, so an allow must not reach the
+    // harness however it got this far.
+    await respond(run, request.requestId, "allow");
+
+    expect(park.settled()).toBeUndefined();
+    expect(resolutionsIn(run.seen)).toEqual([]);
   });
 
-  // There is no answer for an allow to carry, so an allow must not reach the
-  // harness however it got this far.
-  await respond(run, request.requestId, "allow");
+  it("holds one question at a time, and tells the harness to ask the rest again", async () => {
+    const run = await asking();
+    const { park: first } = await parked(run, "Bash", { command: "ls -la" });
 
-  expect(park.settled()).toBeUndefined();
-  expect(resolutionsIn(run.seen)).toEqual([]);
-});
+    const second = parks(run, "Read", { file_path: "/work/one.ts" }, { toolUseID: "toolu_two" });
 
-it("holds one question at a time, and tells the harness to ask the rest again", async () => {
-  const run = await asking();
-  const { park: first } = await parked(run, "Bash", { command: "ls -la" });
+    await until("answered the second ask", () => second.settled() !== undefined);
+    expect(second.settled()).toMatchObject({ behavior: "deny" });
+    // The card the user is looking at stays the one that is open.
+    expect(first.settled()).toBeUndefined();
+    expect(requestsIn(run.seen)).toHaveLength(1);
+  });
 
-  const second = parks(run, "Read", { file_path: "/work/one.ts" }, { toolUseID: "toolu_two" });
+  it("cuts a command to what the protocol carries, and says where it cut", async () => {
+    const run = await asking();
 
-  await until("answered the second ask", () => second.settled() !== undefined);
-  expect(second.settled()).toMatchObject({ behavior: "deny" });
-  // The card the user is looking at stays the one that is open.
-  expect(first.settled()).toBeUndefined();
-  expect(requestsIn(run.seen)).toHaveLength(1);
-});
+    const { request } = await parked(run, "Bash", { command: `echo ${"x".repeat(9_000)}` });
 
-it("cuts a command to what the protocol carries, and says where it cut", async () => {
-  const run = await asking();
+    const command = request.kind === "command_approval" ? request.detail.command : "";
+    expect(command).toHaveLength(MAX_MESSAGE_LENGTH);
+    expect(command.endsWith("\u2026")).toBe(true);
+  });
 
-  const { request } = await parked(run, "Bash", { command: `echo ${"x".repeat(9_000)}` });
+  it("names an item of its own where the harness named no tool-use id", async () => {
+    const run = await asking();
 
-  const command = request.kind === "command_approval" ? request.detail.command : "";
-  expect(command).toHaveLength(MAX_MESSAGE_LENGTH);
-  expect(command.endsWith("\u2026")).toBe(true);
-});
+    const { request } = await parked(run, "Bash", { command: "ls -la" }, { toolUseID: "" });
 
-it("names an item of its own where the harness named no tool-use id", async () => {
-  const run = await asking();
-
-  const { request } = await parked(run, "Bash", { command: "ls -la" }, { toolUseID: "" });
-
-  // An empty id is a frame the protocol refuses, and the event would be lost
-  // with the park still held.
-  expect(request.itemId).not.toBe("");
+    // An empty id is a frame the protocol refuses, and the event would be lost
+    // with the park still held.
+    expect(request.itemId).not.toBe("");
+  });
 });
 
 describe("what kind of question each tool is", () => {

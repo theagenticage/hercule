@@ -343,17 +343,6 @@ const questionsIn = (input: Record<string, unknown>): ReadonlyArray<string> => {
 };
 
 /**
- * `allow always` is offered only where the harness handed over rules to
- * persist: it omits them when no rule may be persisted for this ask, and a
- * button that would then have to invent one grants more than the user clicked.
- * An empty set is the same answer as none: there is nothing in it to persist.
- */
-const decisionsFor = (
-  canPersist: boolean,
-): readonly [ApprovalDecision, ...ReadonlyArray<ApprovalDecision>] =>
-  canPersist ? ["allow", "allow_always", "deny", "cancel"] : ["allow", "deny", "cancel"];
-
-/**
  * One tool call turned into the question a user answers. Every field is cut to
  * what the protocol carries: an over-long command or path would be a frame
  * nobody can decode, which loses the event and leaves the park hanging.
@@ -365,7 +354,6 @@ const requestFor = (
   input: Record<string, unknown>,
   canPersist: boolean,
 ): OpenRequest => {
-  const asked = { requestId, itemId, decisions: decisionsFor(canPersist) };
   if (toolName === "AskUserQuestion") {
     // Answering a question with its answers is not built, so an allow would run
     // the tool with no answer in it: the two honest answers are the only ones.
@@ -377,19 +365,32 @@ const requestFor = (
       detail: { questions: questionsIn(input) },
     };
   }
+  // `allow always` is offered only where the harness handed over rules to
+  // persist: a button that would have to invent one grants more than the user
+  // clicked, and an empty set has nothing in it to persist anyway.
+  const common = {
+    requestId,
+    itemId,
+    decisions: (canPersist
+      ? ["allow", "allow_always", "deny", "cancel"]
+      : ["allow", "deny", "cancel"]) as readonly [
+      ApprovalDecision,
+      ...ReadonlyArray<ApprovalDecision>,
+    ],
+  };
   const kind = toolKind(toolName);
   const command = input["command"];
   // A command the harness did not name has nothing for a command card to show.
   if (kind === "command_execution" && typeof command === "string") {
-    return { ...asked, kind: "command_approval", detail: { command: text(command) } };
+    return { ...common, kind: "command_approval", detail: { command: text(command) } };
   }
   if (kind === "file_change") {
-    return { ...asked, kind: "file_change_approval", detail: { paths: pathsIn(input) } };
+    return { ...common, kind: "file_change_approval", detail: { paths: pathsIn(input) } };
   }
   if (FILE_READ_TOOLS.has(toolName)) {
-    return { ...asked, kind: "file_read_approval", detail: { paths: pathsIn(input) } };
+    return { ...common, kind: "file_read_approval", detail: { paths: pathsIn(input) } };
   }
-  return { ...asked, kind: "tool_approval", detail: { toolName: fact(toolName) } };
+  return { ...common, kind: "tool_approval", detail: { toolName: fact(toolName) } };
 };
 
 /** What the model is told when the user refuses; the vendor requires a reason. */
@@ -585,7 +586,7 @@ export const claudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
         // Withdrawn before it was ever asked: the turn is already being
         // interrupted, so there is nothing to put in front of the user.
         if (options.signal.aborted) {
-          settle(resultFor("deny", persists));
+          settle(resultFor("deny", []));
           return;
         }
         // One at a time. A second question while one is held would replace the
@@ -631,7 +632,7 @@ export const claudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
         };
         // The harness has already stopped the turn itself, so it is told a
         // plain deny; the stream still reports the park as cancelled.
-        const withdraw = (): void => end("cancel", resultFor("deny", persists));
+        const withdraw = (): void => end("cancel", resultFor("deny", []));
         options.signal.addEventListener("abort", withdraw, { once: true });
         held.park = {
           requestId,

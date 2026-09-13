@@ -24,7 +24,7 @@ import type {
   TranscriptRow,
 } from "@hydra/contract";
 import { sessionStreamTopic, sessionTapTopic } from "@hydra/contract";
-import { envelope, pickRow, renderApp, stubApi, type Handler } from "../../../app/testing";
+import { envelope, pickRow, reading, renderApp, stubApi, type Handler } from "../../../app/testing";
 
 const SESSION_ID = "01a06d02-b100-7000-8000-000000000001";
 const ZONE = "Europe/Amsterdam";
@@ -215,10 +215,6 @@ const open = async (
   const app = await renderApp({ path: `/threads/${fixture.id}`, api: api.fetch, token: "held" });
   return { ...app, api };
 };
-
-/** The page's text with its whitespace collapsed, the way a reader sees it. */
-const reading = (element: HTMLElement | null = document.body): string =>
-  (element?.textContent ?? "").replace(/\s+/g, " ").trim();
 
 /**
  * `StubSocket.push` delivers over `queueMicrotask` (`socket-stub.ts`'s
@@ -2172,7 +2168,7 @@ describe("Thread: the permission card", () => {
       ...controller(current, parkedRows()),
       [`GET /api/v1/sessions/${SESSION_ID}`]: () => ({ body: current }),
       // The controller answers with the request still open: only the runner
-      // reporting `request.resolved` clears it (AC-3).
+      // reporting `request.resolved` clears it.
       [`POST /api/v1/sessions/${SESSION_ID}/respond`]: { body: current },
     });
     const { live } = await renderApp({

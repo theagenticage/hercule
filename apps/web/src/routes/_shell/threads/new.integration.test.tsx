@@ -23,7 +23,7 @@ import { describe, expect, it } from "vitest";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ModelOption, Profile, ProviderInstance, Runner, Session } from "@hydra/contract";
-import { envelope, pickRow, renderApp, stubApi, type Handler } from "../../../app/testing";
+import { envelope, pickRow, reading, renderApp, stubApi, type Handler } from "../../../app/testing";
 
 const ZONE = "Europe/Amsterdam";
 
@@ -216,10 +216,6 @@ const open = async (
   });
   return { ...app, api };
 };
-
-/** The page's text with its whitespace collapsed, the way a reader sees it. */
-const reading = (element: HTMLElement | null = document.body): string =>
-  (element?.textContent ?? "").replace(/\s+/g, " ").trim();
 
 describe("Composer: draft defaults (AC-15)", () => {
   it("prefills from the spawn defaults when no thread.* setting is stored", async () => {

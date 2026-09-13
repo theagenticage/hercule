@@ -11,7 +11,7 @@ import { describe, expect, it } from "vitest";
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { formatStamp } from "@hydra/client-core";
-import { renderApp, stubApi, type Handler } from "../../../app/testing";
+import { reading, renderApp, stubApi, type Handler } from "../../../app/testing";
 
 const ZONE = "Europe/Amsterdam";
 
@@ -103,10 +103,6 @@ const open = async (refs: readonly Ref[], extra: Readonly<Record<string, Handler
     },
   };
 };
-
-/** The page's text with its whitespace collapsed, the way a reader sees it. */
-const reading = (element: HTMLElement | null = document.body): string =>
-  (element?.textContent ?? "").replace(/\s+/g, " ").trim();
 
 /**
  * The writes this screen made, in order. The shell opens a live connection on

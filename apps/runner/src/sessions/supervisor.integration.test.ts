@@ -924,6 +924,9 @@ describe("a session parked on an open request", () => {
     [["turn.started", "request.opened"], false],
     [["turn.started", "request.opened", "request.resolved"], true],
     [["turn.started", "request.opened", "turn.completed"], false],
+    // The clock a still-open request disarmed is gone, not leaked: the next
+    // turn is watched the ordinary way and this session is stopped once.
+    [["turn.started", "request.opened", "turn.completed", "turn.started"], true],
     [["turn.started", "request.opened", "request.resolved", "turn.completed"], false],
     [["turn.started", "turn.completed", "turn.started"], true],
     // One request is open per session at a time, so a second open that replaced
@@ -966,39 +969,6 @@ describe("a session parked on an open request", () => {
       expect(exitReasons(sent)).toEqual(armed ? ["inactivity_timeout"] : []);
     });
   }
-
-  it("leaves no clock behind when the turn completes with the request still open", async () => {
-    const fake = faking();
-    const { supervisor, sent } = connecting(fake);
-
-    await timing(
-      fake,
-      supervisor,
-      Effect.gen(function* () {
-        yield* supervisor.start(START);
-        yield* Effect.sync(() => turnStarted(fake, "t-1"));
-        yield* forwarded(sent, 2);
-        yield* Effect.sync(() => requestOpened(fake, "r-1"));
-        yield* forwarded(sent, 3);
-        yield* Effect.sync(() => turnCompleted(fake, "t-1"));
-        yield* forwarded(sent, 4);
-
-        // Nothing is watching an idle session, request or no request.
-        yield* TestClock.adjust(INACTIVITY_MS * 2);
-        expect(fake.stops).toEqual([]);
-
-        // And the next turn is watched the ordinary way: a leaked clock would
-        // stop this session twice, or stop it the instant the turn opened.
-        yield* Effect.sync(() => turnStarted(fake, "t-2"));
-        yield* forwarded(sent, 5);
-        yield* TestClock.adjust(INACTIVITY_MS);
-        yield* awaiting("sent the exit", () => exitReasons(sent).length === 1);
-      }),
-    );
-
-    expect(fake.stops).toEqual([{ sessionId: SESSION, reason: "inactivity_timeout" }]);
-    expect(exitReasons(sent)).toEqual(["inactivity_timeout"]);
-  });
 });
 
 describe("a session that has run for as long as it may", () => {

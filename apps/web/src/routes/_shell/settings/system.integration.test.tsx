@@ -9,7 +9,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { screen } from "@testing-library/react";
-import { renderApp, stubApi, type Handler } from "../../../app/testing";
+import { reading, renderApp, stubApi, type Handler } from "../../../app/testing";
 
 const controller = (): Readonly<Record<string, Handler>> => ({
   "GET /api/v1/setup": { body: { complete: true } },
@@ -26,10 +26,6 @@ const open = async () => {
   const app = await renderApp({ path: "/settings/system", api: api.fetch, token: "held" });
   return { ...app, api };
 };
-
-/** The page's text with its whitespace collapsed, the way a reader sees it. */
-const reading = (element: HTMLElement | null = document.body): string =>
-  (element?.textContent ?? "").replace(/\s+/g, " ").trim();
 
 /** The chain as spec 06 §8.4 pins it, tolerant of how the markup breaks it up. */
 const CHAIN = /approval-required\s*<\s*auto-accept-edits\s*<\s*auto\s*<\s*full-access/;
