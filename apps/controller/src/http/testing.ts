@@ -37,6 +37,7 @@ import {
 import type { Plugin } from "@hydra/plugin-host";
 import { homePaths } from "@hydra/home";
 import { HydraHome } from "../config";
+import { ConnectionServiceLayer } from "../connections";
 import { CredentialsLayer, hashToken } from "../credentials";
 import { nowIso } from "../db";
 import { TestDatabase } from "../db/testing";
@@ -89,9 +90,12 @@ const services = (home: string) =>
   // reach the services `withPlugins` built.
   operationLayers.pipe(
     Layer.provideMerge(
-      Layer.mergeAll(PluginsLayer, ProviderServiceLayer, SessionServiceLayer).pipe(
-        Layer.provideMerge(PluginHostLayer),
-      ),
+      Layer.mergeAll(
+        PluginsLayer,
+        ProviderServiceLayer,
+        SessionServiceLayer,
+        ConnectionServiceLayer,
+      ).pipe(Layer.provideMerge(PluginHostLayer)),
     ),
     // One presence and one probe driver: the socket route and every service
     // must act through the same connection map.

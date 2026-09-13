@@ -16,6 +16,21 @@ export {
 export { configJsonSchema, UnsupportedConfigSchema } from "./config-schema";
 
 export {
+  ConnectionStatus,
+  ConnectionType,
+  ConnectionUnavailable,
+  ConnectionValidationFailed,
+  CredentialField,
+  OAuthDeclaration,
+  SetupStep,
+  type ConnectionRegistration,
+  type ConnectionReport,
+  type ConnectionsRuntime,
+  type ConnectionSummary,
+  type ConnectionTypeContribution,
+} from "./connections";
+
+export {
   DeclaredCapabilities,
   MAX_PROVIDER_NAME_LENGTH,
   ProviderDefinition,

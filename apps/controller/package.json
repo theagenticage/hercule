@@ -13,6 +13,7 @@
     "@hydra/home": "workspace:*",
     "@hydra/plugin-claude-code": "workspace:*",
     "@hydra/plugin-codex": "workspace:*",
+    "@hydra/plugin-github": "workspace:*",
     "@hydra/plugin-host": "workspace:*",
     "@hydra/plugin-pi": "workspace:*",
     "@hydra/protocol": "workspace:*",

@@ -30,6 +30,7 @@ import { Auth, AuthLayer } from "../auth";
 import { LiveTopicsLayer, WsTickets, WsTicketsLayer } from "../live";
 import { ApiKeys, ApiKeysLayer } from "../credentials";
 import { EventService, EventServiceLayer } from "../events";
+import { ConnectionService } from "../connections";
 import { Controller, ControllerLayer } from "../controller";
 import { Profiles, ProfilesLayer } from "../permissions";
 import { Plugins } from "../plugins";
@@ -142,6 +143,27 @@ const secretRoutes = HttpApiBuilder.group(api, "secret", (handlers) =>
         operation(secret.set({ ...params, value: payload.value })),
       )
       .handle("delete", ({ params }) => operation(secret.delete(params)));
+  }),
+);
+
+/**
+ * The connection service is not in `operationLayers`: it reads the plugin host,
+ * and the host a request must see is the one the boot registered into.
+ */
+const connectionRoutes = HttpApiBuilder.group(api, "connection", (handlers) =>
+  Effect.gen(function* () {
+    const connections = yield* ConnectionService;
+    return handlers
+      .handle("query", ({ query }) => operation(connections.query(query)))
+      .handle("read", ({ params }) => operation(connections.read(params)))
+      .handle("create", ({ payload }) => operation(connections.create(payload)))
+      .handle("update", ({ params, payload }) =>
+        operation(connections.update({ id: params.id, ...payload })),
+      )
+      .handle("delete", ({ params }) => operation(connections.delete(params)))
+      .handle("setCredentials", ({ params, payload }) =>
+        operation(connections.setCredentials({ id: params.id, ...payload })),
+      );
   }),
 );
 
@@ -350,6 +372,7 @@ export const handlerLayers = Layer.mergeAll(
   controllerRoutes,
   taskRoutes,
   projectRoutes,
+  connectionRoutes,
   eventRoutes,
   runnerRoutes,
   pluginRoutes,

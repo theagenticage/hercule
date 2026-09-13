@@ -185,6 +185,33 @@ const TABLE = {
     path: "/api/v1/providers/:id",
   },
 
+  "connection.query": { requires: "connection.read", method: "GET", path: "/api/v1/connections" },
+  "connection.read": {
+    requires: "connection.read",
+    method: "GET",
+    path: "/api/v1/connections/:id",
+  },
+  "connection.create": {
+    requires: "connection.manage",
+    method: "POST",
+    path: "/api/v1/connections",
+  },
+  "connection.update": {
+    requires: "connection.manage",
+    method: "PATCH",
+    path: "/api/v1/connections/:id",
+  },
+  "connection.delete": {
+    requires: "connection.manage",
+    method: "DELETE",
+    path: "/api/v1/connections/:id",
+  },
+  "connection.setCredentials": {
+    requires: "connection.manage",
+    method: "POST",
+    path: "/api/v1/connections/:id/credentials",
+  },
+
   "session.query": { requires: "session.read", method: "GET", path: "/api/v1/sessions" },
   "session.read": { requires: "session.read", method: "GET", path: "/api/v1/sessions/:id" },
   "session.spawn": { requires: "session.spawn", method: "POST", path: "/api/v1/sessions" },

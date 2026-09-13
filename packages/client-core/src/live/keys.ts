@@ -25,6 +25,9 @@ export const queryKeys = {
     filter === undefined ? ["tasks"] : ["tasks", filter],
   task: (id?: string): LiveQueryKey => (id === undefined ? ["task"] : ["task", id]),
   projects: (): LiveQueryKey => ["projects"],
+  connections: (): LiveQueryKey => ["connections"],
+  connection: (id?: string): LiveQueryKey =>
+    id === undefined ? ["connection"] : ["connection", id],
   runners: (): LiveQueryKey => ["runners"],
   runner: (id?: string): LiveQueryKey => (id === undefined ? ["runner"] : ["runner", id]),
   sessions: (filter?: { readonly runnerId: string }): LiveQueryKey =>
@@ -83,6 +86,13 @@ export const queryKeysFor = (
           ...ids.map((id) => queryKeys.session(id)),
           ...ids.map((id) => queryKeys.inputs(id)),
         ];
+  }
+  // A connection's own page is reread only when the push names it, or when it
+  // names none; the listing is reread whichever connection moved.
+  if (topic === "connection") {
+    return ids.length === 0
+      ? [queryKeys.connections(), queryKeys.connection()]
+      : [queryKeys.connections(), ...ids.map((id) => queryKeys.connection(id))];
   }
   // The plugin set is fixed at build time and read as one listing, so which
   // plugin changed narrows nothing.

@@ -28,6 +28,7 @@ import {
   type DatabaseError,
   type SchemaVersionError,
 } from "./db";
+import { ConnectionService, ConnectionServiceLayer } from "./connections";
 import { AuditLog, AuditLogLayer } from "./events";
 import { ControllerIdentity, controllerIdentityLayer } from "./identity";
 import { Credentials, CredentialsLayer, hashToken, mintToken } from "./credentials";
@@ -211,6 +212,7 @@ export type ControllerServices =
   | ProviderProbes
   | ProviderService
   | SessionService
+  | ConnectionService
   | HydraHome
   | BootstrapConfig;
 
@@ -271,6 +273,7 @@ export const bootWith = <A, E>(
       PluginsLayer,
       ProviderServiceLayer,
       SessionServiceLayer,
+      ConnectionServiceLayer,
     ).pipe(Layer.provideMerge(PluginHostLayer), Layer.provideMerge(withFleet));
 
     const steps = Effect.gen(function* () {

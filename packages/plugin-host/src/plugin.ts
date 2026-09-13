@@ -1,6 +1,7 @@
 import { Effect, Option, Redacted, Schema } from "effect";
 import type { PluginManifest } from "./manifest";
 import type { ProviderDefinition } from "./contributions";
+import type { ConnectionRegistration, ConnectionsRuntime } from "./connections";
 
 /** A plugin's own failure, in the words its author chose. */
 export class PluginError extends Schema.TaggedError<PluginError>()("PluginError", {
@@ -21,6 +22,7 @@ export interface ProviderRegistration {
  */
 export interface RegistrationHost {
   readonly providers?: ProviderRegistration;
+  readonly connections?: ConnectionRegistration;
 }
 
 /** The plugin's durable state, namespaced by plugin id. Values are JSON. */
@@ -47,6 +49,7 @@ export interface ActivationContext {
   readonly config: unknown;
   readonly kv?: KeyValueStore;
   readonly secrets?: PluginSecrets;
+  readonly connections?: ConnectionsRuntime;
 }
 
 export interface Plugin {

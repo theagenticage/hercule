@@ -154,6 +154,16 @@ export {
 } from "./groups/input";
 export { TRANSCRIPT_SORT_FIELDS, TranscriptRow } from "./groups/transcript";
 export { OwnerKind, SecretRef } from "./groups/secret";
+export {
+  CONNECTION_SORT_FIELDS,
+  Connection,
+  ConnectionCreateInput,
+  ConnectionCredentialsInput,
+  ConnectionStatus,
+  ConnectionUpdateInput,
+  CredentialRef,
+  MAX_CONNECTION_LABEL_LENGTH,
+} from "./groups/connection";
 export { ControllerInfo, ControllerUpdateInput } from "./groups/controller";
 export {
   JoinTokenRef,

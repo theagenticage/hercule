@@ -172,6 +172,18 @@ export class Secrets extends Context.Service<
      */
     readonly names: (owner: SecretOwner) => Effect.Effect<ReadonlyArray<string>, SqlError>;
 
+    /**
+     * The references one owner stores, by name: what an owning record hands
+     * out as its own credential list. The whole list rather than a page, for
+     * the same reason `names` is.
+     */
+    readonly refs: (
+      owner: SecretOwner,
+    ) => Effect.Effect<
+      ReadonlyArray<{ readonly name: string; readonly rotatedAt: string | null }>,
+      SqlError
+    >;
+
     /** The stored value, or `None` when this owner stores nothing under this name. */
     readonly get: (
       owner: SecretOwner,
@@ -282,6 +294,17 @@ export const secretsLayer: Layer.Layer<Secrets, never, MasterKey | SqlClient.Sql
             const plaintext = yield* decrypt(owner, name, row.nonce, row.ciphertext);
             return Option.some(Redacted.make(plaintext));
           }),
+
+        refs: (owner) =>
+          sql<{ readonly name: string; readonly rotated_at: string | null }>`
+            SELECT name, rotated_at FROM secrets
+            WHERE owner_kind = ${owner.kind} AND owner_id = ${owner.id}
+            ORDER BY name
+          `.pipe(
+            Effect.map((rows) =>
+              rows.map((row) => ({ name: row.name, rotatedAt: row.rotated_at })),
+            ),
+          ),
 
         names: (owner) =>
           sql<{ readonly name: string }>`

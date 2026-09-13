@@ -12,6 +12,7 @@ import * as Effect from "effect/Effect";
 import type * as JsonSchema from "effect/JsonSchema";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Redacted from "effect/Redacted";
 import * as Ref from "effect/Ref";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
@@ -20,11 +21,16 @@ import type { SqlError } from "effect/unstable/sql/SqlError";
 import * as Semaphore from "effect/Semaphore";
 import {
   configJsonSchema,
+  ConnectionType,
+  ConnectionUnavailable,
   HOST_API,
   PluginError,
   PluginManifest,
   ProviderDefinition,
   type ActivationContext,
+  type ConnectionsRuntime,
+  type ConnectionSummary,
+  type ConnectionTypeContribution,
   type Deactivate,
   type KeyValueStore,
   type Plugin,
@@ -40,10 +46,13 @@ import {
   type PluginStatus,
   type Validation,
 } from "@hydra/contract";
-import { nowIso, withTransaction } from "../db";
+import { announce, nowIso, withTransaction } from "../db";
 import { AuditLog } from "../events";
 import { CurrentActor, SYSTEM_ACTOR, USER_ACTOR } from "../actor";
 import { Secrets, type SecretOwner } from "../secrets";
+// The repository rather than the domain's own boundary: the connection service
+// reads this host, so importing its index would close a cycle.
+import { connectionRepository, type StoredConnection } from "../connections/repository";
 import { pluginRepository, type NewContribution } from "./repository";
 
 /**
@@ -51,7 +60,7 @@ import { pluginRepository, type NewContribution } from "./repository";
  * so a plugin written against a later build is refused by name here rather than
  * activated without the surface it asked for.
  */
-const IMPLEMENTED: ReadonlyArray<PluginCapability> = ["providers", "kv", "secrets"];
+const IMPLEMENTED: ReadonlyArray<PluginCapability> = ["providers", "kv", "secrets", "connections"];
 
 export interface LoadedPlugin {
   readonly id: string;
@@ -87,8 +96,18 @@ const exposed = (entry: Entry): LoadedPlugin => ({
   status: entry.status,
 });
 
-/** The one extension point with a consumer; the column takes any name. */
+/** The extension points with a consumer; the column takes any name. */
 const PROVIDER = "provider";
+const CONNECTION_TYPE = "connection-type";
+
+/**
+ * One type a plugin declared: the decoded catalog half, and the `validate` no
+ * catalog can hold.
+ */
+export interface RegisteredConnectionType {
+  readonly pluginId: string;
+  readonly contribution: ConnectionType & Pick<ConnectionTypeContribution, "validate">;
+}
 
 /**
  * Every issue at once, so the form can put each message under its own field,
@@ -123,6 +142,13 @@ const fieldMessage = (error: Schema.SchemaError): string =>
 // An excess key is refused rather than stripped: dropping a field the host does
 // not know would let an unserializable value look accepted.
 const decodeProvider = Schema.decodeUnknownEffect(ProviderDefinition, {
+  errors: "all",
+  onExcessProperty: "error",
+});
+
+// The serializable half of a connection type. `validate` is taken off first:
+// it is a function, and no catalog column can hold one.
+const decodeConnectionType = Schema.decodeUnknownEffect(ConnectionType, {
   errors: "all",
   onExcessProperty: "error",
 });
@@ -207,6 +233,7 @@ const registrationHost = (
   manifest: PluginManifest,
   declared: Array<NewContribution>,
   live: Array<ProviderDefinition>,
+  types: Array<RegisteredConnectionType>,
 ): RegistrationHost => ({
   ...(manifest.capabilities.includes("providers")
     ? {
@@ -249,17 +276,71 @@ const registrationHost = (
         },
       }
     : {}),
+  ...(manifest.capabilities.includes("connections")
+    ? {
+        connections: {
+          registerType: (contribution: ConnectionTypeContribution) =>
+            Effect.gen(function* () {
+              // Everything but `validate`, which no JSON column can hold and
+              // which stays in memory here instead.
+              const { validate, ...serializable } = contribution;
+              const decoded = yield* decodeConnectionType(serializable).pipe(
+                Effect.mapError(asPluginError),
+              );
+              if (
+                declared.some(
+                  (row) => row.extensionPoint === CONNECTION_TYPE && row.id === decoded.type,
+                )
+              ) {
+                return yield* Effect.fail(
+                  new PluginError({
+                    message: `the ${CONNECTION_TYPE} contribution ${decoded.type} is registered twice`,
+                  }),
+                );
+              }
+              // A declared config schema reaches the catalog as the JSON Schema
+              // the generated form is built from; the live schema stays here,
+              // where a connection's stored config is decoded against it.
+              const configSchema =
+                decoded.configSchema === undefined
+                  ? undefined
+                  : configJsonSchema(decoded.configSchema);
+              if (configSchema !== undefined && Result.isFailure(configSchema)) {
+                return yield* Effect.fail(
+                  new PluginError({
+                    message: `the connection type ${decoded.type}: ${configSchema.failure.message}`,
+                  }),
+                );
+              }
+              declared.push({
+                owner: manifest.id,
+                extensionPoint: CONNECTION_TYPE,
+                id: decoded.type,
+                definition: {
+                  ...decoded,
+                  ...(configSchema === undefined ? {} : { configSchema: configSchema.success }),
+                },
+              });
+              // The decoded copy, so what the rest of the controller reads is
+              // what the schema accepted rather than the object a plugin holds.
+              types.push({ pluginId: manifest.id, contribution: { ...decoded, validate } });
+            }),
+        },
+      }
+    : {}),
 });
 
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const repository = yield* pluginRepository;
   const secrets = yield* Secrets;
+  const connections = yield* connectionRepository;
   const audit = yield* AuditLog;
   const entries = yield* Ref.make<ReadonlyMap<string, Entry>>(new Map());
   // Outside `gate`, unlike everything else here: registration is pure and runs
   // only at boot, so this is settled for the life of the process.
   const providers = yield* Ref.make<ReadonlyArray<ProviderDefinition>>([]);
+  const connectionTypes = yield* Ref.make<ReadonlyArray<RegisteredConnectionType>>([]);
   /**
    * One permit for the whole host, held across a move's reads, hooks and
    * writes. Without it two moves interleave around the await inside a hook and
@@ -340,11 +421,108 @@ const make = Effect.gen(function* () {
     };
   };
 
+  /**
+   * The connections of this plugin's own types, and no others. Which types
+   * those are is read at each call rather than captured, so a surface handed
+   * out at one activation is still right after the next boot's registration.
+   */
+  const connectionsRuntime = (pluginId: string): ConnectionsRuntime => {
+    const ownTypes = Effect.map(Ref.get(connectionTypes), (all) =>
+      all.filter((one) => one.pluginId === pluginId).map((one) => one.contribution.type),
+    );
+
+    /**
+     * One connection of this plugin's, or nothing it may know about: another
+     * plugin's row and an id nobody created are the same answer, because a
+     * plugin may not learn that the first exists.
+     */
+    const own = (id: string): Effect.Effect<StoredConnection, ConnectionUnavailable> =>
+      Effect.gen(function* () {
+        const found = yield* Effect.orDie(connections.one(id));
+        const types = yield* ownTypes;
+        return yield* Option.match(
+          Option.filter(found, (row) => types.includes(row.type)),
+          {
+            onNone: () =>
+              Effect.fail(
+                new ConnectionUnavailable({
+                  message: `no connection ${id} of this plugin's types`,
+                }),
+              ),
+            onSome: Effect.succeed,
+          },
+        );
+      });
+
+    const summary = (row: StoredConnection): ConnectionSummary => ({
+      id: row.id,
+      type: row.type,
+      label: row.label,
+      status: row.status,
+      labels: row.labels,
+      config: row.config,
+    });
+
+    return {
+      list: () =>
+        Effect.map(
+          Effect.flatMap(ownTypes, (types) => Effect.orDie(connections.ofTypes(types))),
+          (rows) => rows.map(summary),
+        ),
+
+      credentials: (connectionId) =>
+        Effect.gen(function* () {
+          yield* own(connectionId);
+          const owner: SecretOwner = { kind: "connection", id: connectionId };
+          const names = yield* Effect.orDie(secrets.names(owner));
+          const values = yield* Effect.forEach(names, (name) =>
+            Effect.map(Effect.orDie(secrets.get(owner, name)), (value) =>
+              Option.match(value, {
+                // The name came from the same table one statement ago.
+                onNone: (): [string, string] => {
+                  throw new Error(`the secret ${name} disappeared while it was being read`);
+                },
+                onSome: (secret): [string, string] => [name, Redacted.value(secret)],
+              }),
+            ),
+          );
+          return Object.fromEntries(values);
+        }),
+
+      report: (connectionId, report) =>
+        Effect.gen(function* () {
+          yield* own(connectionId);
+          const at = yield* nowIso;
+          yield* Effect.orDie(
+            withTransaction(
+              sql,
+              Effect.gen(function* () {
+                yield* connections.update(
+                  connectionId,
+                  { status: report.status, statusDetail: report.detail ?? null },
+                  at,
+                );
+                yield* announce({
+                  _tag: "record",
+                  topic: "connection",
+                  id: connectionId,
+                  kind: "updated",
+                });
+              }),
+            ),
+          );
+        }),
+    };
+  };
+
   /** The runtime surfaces of the capabilities this manifest asked for, and no others. */
   const activationContext = (manifest: PluginManifest, config: unknown): ActivationContext => ({
     config,
     ...(manifest.capabilities.includes("kv") ? { kv: keyValueStore(manifest.id) } : {}),
     ...(manifest.capabilities.includes("secrets") ? { secrets: pluginSecrets(manifest.id) } : {}),
+    ...(manifest.capabilities.includes("connections")
+      ? { connections: connectionsRuntime(manifest.id) }
+      : {}),
   });
 
   /**
@@ -356,8 +534,9 @@ const make = Effect.gen(function* () {
     manifest: PluginManifest,
     declared: Array<NewContribution>,
     live: Array<ProviderDefinition>,
+    types: Array<RegisteredConnectionType>,
   ): Effect.Effect<PluginStatus> =>
-    Effect.suspend(() => plugin.register(registrationHost(manifest, declared, live))).pipe(
+    Effect.suspend(() => plugin.register(registrationHost(manifest, declared, live, types))).pipe(
       Effect.as<PluginStatus>({ _tag: "inactive" }),
       Effect.catchCause((cause) =>
         Effect.succeed<PluginStatus>({ _tag: "errored", message: messageOf(cause) }),
@@ -433,6 +612,7 @@ const make = Effect.gen(function* () {
         const booted = new Map<string, Entry>();
         const catalog: Array<NewContribution> = [];
         const registeredProviders: Array<ProviderDefinition> = [];
+        const registeredTypes: Array<RegisteredConnectionType> = [];
 
         for (const [index, plugin] of registry.entries()) {
           const manifest = yield* decodeManifest(plugin.manifest, index);
@@ -465,11 +645,13 @@ const make = Effect.gen(function* () {
 
           const declared: Array<NewContribution> = [];
           const live: Array<ProviderDefinition> = [];
-          const status = yield* registerPass(plugin, manifest, declared, live);
+          const types: Array<RegisteredConnectionType> = [];
+          const status = yield* registerPass(plugin, manifest, declared, live, types);
           const registered = status._tag !== "errored";
           if (registered) {
             catalog.push(...declared);
             registeredProviders.push(...live);
+            registeredTypes.push(...types);
           }
           booted.set(manifest.id, {
             ...facts,
@@ -489,6 +671,7 @@ const make = Effect.gen(function* () {
         );
         yield* Ref.set(entries, booted);
         yield* Ref.set(providers, registeredProviders);
+        yield* Ref.set(connectionTypes, registeredTypes);
 
         yield* gate.withPermits(1)(
           Effect.forEach(
@@ -512,6 +695,10 @@ const make = Effect.gen(function* () {
 
     /** Every provider this boot registered, in registry order. */
     providers: (): Effect.Effect<ReadonlyArray<ProviderDefinition>> => Ref.get(providers),
+
+    /** Every connection type this boot registered, with its owning plugin. */
+    connectionTypes: (): Effect.Effect<ReadonlyArray<RegisteredConnectionType>> =>
+      Ref.get(connectionTypes),
 
     refresh,
     stop,
