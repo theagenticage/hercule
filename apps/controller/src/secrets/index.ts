@@ -9,6 +9,7 @@ export {
   Secrets,
   secretsLayer,
   type SecretNameError,
+  type SecretNameRef,
   type SecretOwner,
   type SecretOwnerKind,
 } from "./repository";

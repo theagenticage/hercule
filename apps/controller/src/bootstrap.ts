@@ -28,6 +28,7 @@ import {
   type DatabaseError,
   type SchemaVersionError,
 } from "./db";
+import { ConnectionService, ConnectionServiceLayer, ConnectionTypesLayer } from "./connections";
 import { AuditLog, AuditLogLayer } from "./events";
 import { ControllerIdentity, controllerIdentityLayer } from "./identity";
 import { Credentials, CredentialsLayer, hashToken, mintToken } from "./credentials";
@@ -51,7 +52,14 @@ import {
   type LocalRunnerFailed,
   type LocalRunnerOptions,
 } from "./runners";
-import { PluginHost, PluginHostLayer, Plugins, PluginsLayer, registry } from "./plugins";
+import {
+  PluginConfigsLayer,
+  PluginHost,
+  PluginHostLayer,
+  Plugins,
+  PluginsLayer,
+  registry,
+} from "./plugins";
 import {
   ensureProviderInstances,
   ProviderProbes,
@@ -211,6 +219,7 @@ export type ControllerServices =
   | ProviderProbes
   | ProviderService
   | SessionService
+  | ConnectionService
   | HydraHome
   | BootstrapConfig;
 
@@ -271,7 +280,13 @@ export const bootWith = <A, E>(
       PluginsLayer,
       ProviderServiceLayer,
       SessionServiceLayer,
-    ).pipe(Layer.provideMerge(PluginHostLayer), Layer.provideMerge(withFleet));
+      ConnectionServiceLayer,
+    ).pipe(
+      Layer.provideMerge(PluginHostLayer),
+      Layer.provideMerge(ConnectionTypesLayer),
+      Layer.provideMerge(PluginConfigsLayer),
+      Layer.provideMerge(withFleet),
+    );
 
     const steps = Effect.gen(function* () {
       yield* migrate({ backupsDir: paths.backupsDir, databaseExisted });

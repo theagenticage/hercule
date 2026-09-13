@@ -7,6 +7,7 @@
 import type { Plugin } from "@hydra/plugin-host";
 import { claudeCode } from "@hydra/plugin-claude-code";
 import { codex } from "@hydra/plugin-codex";
+import { github } from "@hydra/plugin-github";
 import { pi } from "@hydra/plugin-pi";
 
-export const registry: ReadonlyArray<Plugin> = [claudeCode, codex, pi];
+export const registry: ReadonlyArray<Plugin> = [claudeCode, codex, pi, github];

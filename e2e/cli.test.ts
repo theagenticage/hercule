@@ -145,7 +145,7 @@ describe("tasks, projects, the log and the plugins through the binary", () => {
     }
   }, 30_000);
 
-  it("lists the three shipped provider plugins, each one active", async () => {
+  it("lists the four shipped plugins, each one active", async () => {
     // No CLI command for plugins, so the route is called the way the web app
     // does: the key the login above minted, straight over the wire.
     const response = await fetch(`${url}/api/v1/plugins`, {
@@ -155,12 +155,15 @@ describe("tasks, projects, the log and the plugins through the binary", () => {
 
     const plugins = (await response.json()) as ReadonlyArray<{
       id: string;
+      capabilities: ReadonlyArray<string>;
       status: { _tag: string };
     }>;
-    expect(plugins.map((plugin) => plugin.id)).toEqual(["claude-code", "codex", "pi"]);
+    expect(plugins.map((plugin) => plugin.id)).toEqual(["claude-code", "codex", "pi", "github"]);
     for (const plugin of plugins) {
       expect(plugin.status, plugin.id).toEqual({ _tag: "active" });
     }
+    // The three harnesses are providers; github is the connection type.
+    expect(plugins.at(-1)?.capabilities).toEqual(["connections"]);
   }, 30_000);
 
   it("lists the five task verbs in help, with no CLI code behind them", async () => {

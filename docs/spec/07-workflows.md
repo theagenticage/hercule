@@ -153,7 +153,7 @@ interface StepBase {
 
 interface ActionStep extends StepBase {
   kind: "action"
-  action: string                       // contribution id, e.g. "task.create", "github.create-pr"
+  action: string                       // contribution id, e.g. "task.create", "github/pr.create"
   params: Record<string, Literal | CelExpression>  // validated against the contribution's input schema
 }
 

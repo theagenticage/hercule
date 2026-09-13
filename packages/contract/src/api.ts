@@ -10,6 +10,7 @@ import * as HttpApi from "effect/unstable/httpapi/HttpApi";
 import { API_PREFIX } from "./operations";
 import { apiKey } from "./groups/api-key";
 import { auth } from "./groups/auth";
+import { connection } from "./groups/connection";
 import { controller } from "./groups/controller";
 import { event } from "./groups/event";
 import { input } from "./groups/input";
@@ -41,6 +42,7 @@ export const api = HttpApi.make("hydra")
     runner,
     plugin,
     provider,
+    connection,
     session,
     input,
     transcript,

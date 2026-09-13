@@ -37,6 +37,7 @@ import {
 import type { Plugin } from "@hydra/plugin-host";
 import { homePaths } from "@hydra/home";
 import { HydraHome } from "../config";
+import { ConnectionServiceLayer, ConnectionTypesLayer } from "../connections";
 import { CredentialsLayer, hashToken } from "../credentials";
 import { nowIso } from "../db";
 import { TestDatabase } from "../db/testing";
@@ -45,7 +46,7 @@ import { ControllerIdentity, controllerIdentityLayer } from "../identity";
 import { COALESCE_WINDOW_MS, LiveTopics } from "../live";
 import { masterKeyLayer, secretsLayer } from "../secrets";
 import { PermissionProfilesLayer } from "../permissions";
-import { PluginHost, PluginHostLayer, PluginsLayer } from "../plugins";
+import { PluginConfigsLayer, PluginHost, PluginHostLayer, PluginsLayer } from "../plugins";
 import {
   ensureProviderInstances,
   ProviderLoginDeadline,
@@ -89,8 +90,15 @@ const services = (home: string) =>
   // reach the services `withPlugins` built.
   operationLayers.pipe(
     Layer.provideMerge(
-      Layer.mergeAll(PluginsLayer, ProviderServiceLayer, SessionServiceLayer).pipe(
+      Layer.mergeAll(
+        PluginsLayer,
+        ProviderServiceLayer,
+        SessionServiceLayer,
+        ConnectionServiceLayer,
+      ).pipe(
         Layer.provideMerge(PluginHostLayer),
+        Layer.provideMerge(ConnectionTypesLayer),
+        Layer.provideMerge(PluginConfigsLayer),
       ),
     ),
     // One presence and one probe driver: the socket route and every service

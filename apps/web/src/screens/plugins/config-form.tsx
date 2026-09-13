@@ -86,8 +86,12 @@ function Description({ field }: { readonly field: ConfigField }): JSX.Element | 
 /**
  * One setting, as the widget its kind asks for. A boolean carries its own name
  * beside the box, so it is the one kind not stacked under a label.
+ *
+ * Exported because a connection's settings are the same generated fields inside
+ * a form of their own: one form there holds the label and the topic beside
+ * them, so it renders the rows rather than a whole second form.
  */
-function ConfigFieldRow({
+export function ConfigFieldRow({
   inputId,
   field,
   value,

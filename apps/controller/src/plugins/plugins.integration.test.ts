@@ -23,6 +23,7 @@ import {
   within,
   type ServerHarness,
 } from "../http/testing";
+import { registry as shipped } from "./registry";
 import { fixture, providerDefinition } from "./testing";
 
 /** A plugin as the API hands it back. */
@@ -476,5 +477,47 @@ describe("a move the plugin's state does not allow", () => {
       }
       expect(await audit("plugin.configured")).toHaveLength(0);
     });
+  });
+});
+
+/**
+ * The registry a release ships, over the same routes. Every test above boots a
+ * registry of fixtures; this one boots what the binary boots, because what it
+ * asserts is that a shipped plugin arrives whole.
+ */
+describe("the shipped registry over the routes", () => {
+  it("carries the github plugin with its connections capability and its connection type", async () => {
+    await withServer(
+      async ({ base }) => {
+        const token = await completeSetup(base);
+
+        const found = (await list(base, token)).find((plugin) => plugin.id === "github");
+
+        expect(found).toBeDefined();
+        expect(found?.capabilities).toContain("connections");
+        const contribution = found?.contributions.find(
+          (one) => one.extensionPoint === "connection-type",
+        );
+        expect(contribution?.id).toBe("github/github");
+        expect(contribution?.definition).toMatchObject({ displayName: "GitHub" });
+      },
+      { plugins: shipped },
+    );
+  });
+
+  it("loads a plugin whose manifest asks for connections, rather than turning it away", async () => {
+    const asking = fixture({ id: "asking", capabilities: ["providers", "connections"] });
+
+    await withServer(
+      async ({ base }) => {
+        const token = await completeSetup(base);
+
+        expect(await read(base, token, "asking")).toMatchObject({
+          capabilities: ["providers", "connections"],
+          status: { _tag: "active" },
+        });
+      },
+      { plugins: [asking.plugin] },
+    );
   });
 });

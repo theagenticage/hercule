@@ -79,6 +79,12 @@ export interface SecretRef {
   readonly rotatedAt: string | null;
 }
 
+/** One stored secret as its owner lists it: the name, and when it was replaced. */
+export interface SecretNameRef {
+  readonly name: string;
+  readonly rotatedAt: string | null;
+}
+
 /** What a listing asks for: which owner, plus the shared keyset parameters. */
 export interface SecretListRequest extends PageRequest {
   readonly ownerKind: SecretOwnerKind | undefined;
@@ -166,11 +172,28 @@ export class Secrets extends Context.Service<
     ) => Effect.Effect<boolean, SqlError | SecretNameError>;
 
     /**
-     * Every name one owner stores, by name. The whole list rather than a page,
-     * because its caller is a scoped view over one owner rather than a listing
-     * anyone browses.
+     * The references these owners store, by name, grouped by owner id: what an
+     * owning record hands out as its own credential list. Many owners at once,
+     * because the caller is usually a page of records and one query is what
+     * keeps it one query. The whole list rather than a page, because its caller
+     * is a scoped view over one owner rather than a listing anyone browses.
      */
-    readonly names: (owner: SecretOwner) => Effect.Effect<ReadonlyArray<string>, SqlError>;
+    readonly refs: (
+      kind: SecretOwnerKind,
+      ids: ReadonlyArray<string>,
+    ) => Effect.Effect<ReadonlyMap<string, ReadonlyArray<SecretNameRef>>, SqlError>;
+
+    /**
+     * Everything one owner stores, decrypted, in one query. The only batch read
+     * that decrypts, and it exists because a plugin asks for a connection's
+     * credentials as a whole rather than field by field.
+     */
+    readonly values: (
+      owner: SecretOwner,
+    ) => Effect.Effect<
+      ReadonlyArray<{ readonly name: string; readonly value: Redacted.Redacted<string> }>,
+      SqlError | SecretDecryptError
+    >;
 
     /** The stored value, or `None` when this owner stores nothing under this name. */
     readonly get: (
@@ -283,12 +306,47 @@ export const secretsLayer: Layer.Layer<Secrets, never, MasterKey | SqlClient.Sql
             return Option.some(Redacted.make(plaintext));
           }),
 
-        names: (owner) =>
-          sql<{ readonly name: string }>`
-            SELECT name FROM secrets
-            WHERE owner_kind = ${owner.kind} AND owner_id = ${owner.id}
-            ORDER BY name
-          `.pipe(Effect.map((rows) => rows.map((row) => row.name))),
+        refs: (kind, ids) =>
+          ids.length === 0
+            ? Effect.succeed(new Map())
+            : sql<{
+                readonly owner_id: string;
+                readonly name: string;
+                readonly rotated_at: string | null;
+              }>`
+                SELECT owner_id, name, rotated_at FROM secrets
+                WHERE owner_kind = ${kind} AND owner_id IN ${sql.in(ids)}
+                ORDER BY owner_id, name
+              `.pipe(
+                Effect.map((rows) => {
+                  const grouped = new Map<string, Array<SecretNameRef>>();
+                  for (const row of rows) {
+                    const held = grouped.get(row.owner_id) ?? [];
+                    held.push({ name: row.name, rotatedAt: row.rotated_at });
+                    grouped.set(row.owner_id, held);
+                  }
+                  return grouped;
+                }),
+              ),
+
+        values: (owner) =>
+          Effect.gen(function* () {
+            const rows = yield* sql<{
+              readonly name: string;
+              readonly nonce: Bytes;
+              readonly ciphertext: Bytes;
+            }>`
+              SELECT name, nonce, ciphertext FROM secrets
+              WHERE owner_kind = ${owner.kind} AND owner_id = ${owner.id}
+              ORDER BY name
+            `;
+            return yield* Effect.forEach(rows, (row) =>
+              Effect.map(decrypt(owner, row.name, row.nonce, row.ciphertext), (plaintext) => ({
+                name: row.name,
+                value: Redacted.make(plaintext),
+              })),
+            );
+          }),
 
         list: (request) =>
           Effect.gen(function* () {

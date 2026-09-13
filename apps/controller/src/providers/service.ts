@@ -15,7 +15,7 @@ import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
-import type { ProviderDefinition } from "@hydra/plugin-host";
+import { decodeAgainst, type ProviderDefinition } from "@hydra/plugin-host";
 import type { LoginCode, LoginFailed, LoginResult, LoginStart, LoginUrl } from "@hydra/protocol";
 import {
   invalidState,
@@ -133,15 +133,7 @@ const readConfig = (
   definition: ProviderDefinition,
   config: Schema.Json,
 ): Effect.Effect<void, Validation> =>
-  Effect.asVoid(
-    Effect.mapError(
-      Schema.decodeUnknownEffect(definition.configSchema as Schema.Codec<unknown>, {
-        errors: "all",
-        onExcessProperty: "error",
-      })(config),
-      validationOf,
-    ),
-  );
+  Effect.asVoid(Effect.mapError(decodeAgainst(definition.configSchema, config), validationOf));
 
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;

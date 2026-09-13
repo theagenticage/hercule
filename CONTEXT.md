@@ -247,7 +247,11 @@ A typed slot plugins contribute into. The v1 set is fixed: provider, channel, ev
 _Avoid_: hook
 
 **Contribution**:
-A named thing a plugin provides into an extension point, referenced by id across the system: a workflow step names an action contribution, an assistant binds to a channel contribution. Registered in code, never listed in the manifest.
+A named thing a plugin provides into an extension point, referenced by its qualified id across the system: a workflow step names an action contribution, an assistant binds to a channel contribution. Registered in code, never listed in the manifest.
+
+**Qualified Id**:
+The identity of a catalog contribution: `<pluginId>/<word>`, where the plugin declares the bare word and the host prefixes its plugin id (`github/github`, `github/pr.merge`, `discord/discord`). Unique by construction, so two plugins may declare the same word; never parsed to find the owner. Not an event kind (`github.issue.opened`) and not an operation (`task.create`), which are namespaced their own way.
+_Avoid_: namespaced id, fully-qualified id (reserved for External Ref), type (bare)
 
 **Plugin Capability**:
 A named slice of the host API a plugin requests in its manifest and is granted at load, scope-style. What a plugin may *call*, as opposed to a contribution, which is what it *provides*.
@@ -262,7 +266,7 @@ A plugin's static self-description: identity, host API version, requested plugin
 ### Automation
 
 **Connection**:
-A core-owned, named link to one external account: a plugin-defined type plus label, credentials, and status (e.g. `gmail`/"work"). Event ingest runs per connection, every event is stamped with its connection, and outbound actions name the connection they act as.
+A core-owned, named link to one external account: a plugin-defined type, by its qualified id, plus label, credentials, and status (e.g. `gmail/gmail`/"work"). Event ingest runs per connection, every event is stamped with its connection, and outbound actions name the connection they act as.
 _Avoid_: account (reserved for a future Hydra user concept), instance
 
 **Event Source**:

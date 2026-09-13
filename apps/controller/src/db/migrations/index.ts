@@ -21,6 +21,8 @@ import sessions from "./0010-sessions";
 import queuedInputAndContinuation from "./0011-queued-input-and-continuation";
 import diskWatermark from "./0012-disk-watermark";
 import resumedSessionStreams from "./0013-resumed-session-streams";
+import connections from "./0014-connections";
+import oauthSetups from "./0015-oauth-setups";
 
 export const migrations: ReadonlyArray<ResolvedMigration> = [
   [1, "initial", Effect.succeed(initial)],
@@ -36,6 +38,8 @@ export const migrations: ReadonlyArray<ResolvedMigration> = [
   [11, "queued-input-and-continuation", Effect.succeed(queuedInputAndContinuation)],
   [12, "disk-watermark", Effect.succeed(diskWatermark)],
   [13, "resumed-session-streams", Effect.succeed(resumedSessionStreams)],
+  [14, "connections", Effect.succeed(connections)],
+  [15, "oauth-setups", Effect.succeed(oauthSetups)],
 ];
 
 /** The schema version this binary carries: the highest embedded migration id. */

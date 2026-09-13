@@ -13,7 +13,22 @@ export {
   SchemaValue,
 } from "./manifest";
 
-export { configJsonSchema, UnsupportedConfigSchema } from "./config-schema";
+export { configJsonSchema, decodeAgainst, UnsupportedConfigSchema } from "./config-schema";
+
+export {
+  ConnectionStatus,
+  ConnectionType,
+  ConnectionUnavailable,
+  ConnectionValidationFailed,
+  CredentialField,
+  OAuthDeclaration,
+  SetupStep,
+  type ConnectionRegistration,
+  type ConnectionReport,
+  type ConnectionsRuntime,
+  type ConnectionSummary,
+  type ConnectionTypeContribution,
+} from "./connections";
 
 export {
   DeclaredCapabilities,
@@ -23,6 +38,7 @@ export {
 
 export {
   PluginError,
+  registerConnectionType,
   registerProvider,
   type ActivationContext,
   type Deactivate,

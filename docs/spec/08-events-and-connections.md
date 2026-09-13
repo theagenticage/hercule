@@ -88,7 +88,7 @@ GitHub and Gmail are event-source plugins. Cron, manual, and platform events are
 
 ### 5.1 GitHub (plugin)
 
-- **Auth and Connection type:** `github`, credential = a personal access token (section 9.3).
+- **Auth and Connection type:** `github/github`, credential = a personal access token (section 9.3).
 - **Ingest:** three declared feeds per Connection ([./05-plugins.md](./05-plugins.md) section 4.3):
   - **`notifications`** (default 60 s; `poll()` floors the interval with `X-Poll-Interval`): the Notifications API (`GET /notifications`, `If-Modified-Since`; 304s cost no quota) - what notifies the user: mentions, assignments, review requests, state changes on subscribed threads.
   - **`repos`** (default 120 s): watched-repo polling for issue and PR lifecycle on the Connection's watch list, conditional requests (ETags), diffed against Connection-scoped state.
@@ -108,9 +108,9 @@ The workflow-action roster is pinned in [./05-plugins.md](./05-plugins.md) secti
 
 ### 5.2 Gmail (plugin)
 
-- **Auth and Connection type:** `gmail`, credential = OAuth refresh token from a BYO Google client (section 9.2).
+- **Auth and Connection type:** `gmail/gmail`, credential = OAuth refresh token from a BYO Google client (section 9.2).
 - **Ingest:** one declared feed, `messages`, default 30 s with the standard per-Connection per-feed override ([./05-plugins.md](./05-plugins.md) section 4.3), polling `users.history.list` from the stored `historyId`. Quota is negligible (2 units per `history.list`, 20 per `messages.get`, against 6,000 units/min/user).
-- **V1 kind:** exactly one, `gmail.message.received`, payload `{messageId, threadId, labelIds, from, to, subject, snippet, isFirstInThread}`. No kinds for label changes, archiving or sent mail: everything else is a filter over this kind, or an action. Bodies are never ingested; a workflow fetches them on demand through `gmail.message.read` / `gmail.thread.read` ([./05-plugins.md](./05-plugins.md) section 4.4). Mid-session mailbox queries by an agent use the gmail actions plus the session's MCP passthrough; this is the first named consumer of the post-v1 agent-tools extension point.
+- **V1 kind:** exactly one, `gmail.message.received`, payload `{messageId, threadId, labelIds, from, to, subject, snippet, isFirstInThread}`. No kinds for label changes, archiving or sent mail: everything else is a filter over this kind, or an action. Bodies are never ingested; a workflow fetches them on demand through `gmail/message.read` / `gmail/thread.read` ([./05-plugins.md](./05-plugins.md) section 4.4). Mid-session mailbox queries by an agent use the gmail actions plus the session's MCP passthrough; this is the first named consumer of the post-v1 agent-tools extension point.
 - **Refs:** `gmail:thread:<id>` and `gmail:message:<id>`; `url` = the Gmail web URL of the message.
 - **Sender rules** stamp `system` at emit: a shipped sender-domain map (`*@sentry.io -> sentry`, `*@tailscale.com -> tailscale`, `*@hetzner.com -> hetzner`, `*@github.com -> github`), user-extendable per Connection. Sender rules stamp `system` only; extracting refs and URLs from a mail body is the triage agent's job (section 2; ref ownership in [./09-tasks.md](./09-tasks.md)).
 - **Push-agnostic interface:** the plugin's emit path does not depend on polling, so the Pub/Sub pull upgrade (Post-v1) changes the loop, not the contract.
@@ -193,7 +193,7 @@ A Connection is a core-owned record naming one external account. The core owns s
 | Field | Notes |
 |---|---|
 | `id` | |
-| `type` | Plugin-defined and plugin-namespaced: `github`, `gmail`, `discord`, `slack`. Two plugins wanting the same service each define their own type; the user authenticates twice (accepted cost, ADR 0010). |
+| `type` | The **qualified id** of a plugin-declared connection type, `<pluginId>/<word>`: `github/github`, `gmail/gmail`, `discord/discord`, `slack/slack`. The record carries no separate plugin id; the type names its plugin ([ADR 0034](../adr/0034-a-catalog-contribution-is-identified-by-its-qualified-id.md)). Two plugins wanting the same service each define their own type; the user authenticates twice (accepted cost, ADR 0010). |
 | `label` | User-given: "work", "personal". |
 | `credentials` | References into the secrets table, owner scope `connection` ([./13-security.md](./13-security.md)). Never returned by the API; references only. |
 | `status` | `connected | needs-reauth | error | disabled` (the v1 enum, consolidated from pinned lifecycle facts: plugins report expiring tokens, disabled Connections stop ingest). Ingest runs only in `connected`. |
@@ -236,7 +236,7 @@ Device flow is a dead end: Google's limited-input device flow excludes Gmail sco
 
 1. Serve Hydra on an HTTPS tailnet origin: enable MagicDNS and HTTPS in Tailscale, run `tailscale cert`, serve at `https://<node>.<tailnet>.ts.net`. Google validates the redirect URI *string* (HTTPS, not a raw IP, host under a public-suffix domain - `ts.net` qualifies), not reachability. Private LAN IPs and `.local` / `.internal` names are rejected.
 2. Create a GCP project, enable the Gmail API, configure the consent screen with user type External, and **publish it to production without verification** (sanctioned for personal use under 100 users). Workspace accounts choose Internal instead and skip the warning. Staying in "Testing" yields 7-day refresh tokens and is unacceptable for an always-on controller.
-3. Add the authorized domain and the redirect URI Hydra displays (`https://<node>.<tailnet>.ts.net/oauth/callback`), create a Web application client, paste client id and secret into the Gmail plugin's settings (client id = plugin config, client secret = plugin-owned secret; one client serves every `gmail` Connection, [./05-plugins.md](./05-plugins.md)).
+3. Add the authorized domain and the redirect URI Hydra displays (`https://<node>.<tailnet>.ts.net/oauth/callback`), create a Web application client, paste client id and secret into the Gmail plugin's settings (client id = plugin config, client secret = plugin-owned secret; one client serves every `gmail/gmail` Connection, [./05-plugins.md](./05-plugins.md)).
 4. Connect; click through the "unverified app" warning once (Advanced > Go to app). Result: a non-expiring refresh token.
 
 **Localhost fallback:** `http://localhost:<port>` / `http://127.0.0.1:<port>` are exempt from Google's HTTPS rule but resolve on the *browser's* machine, so they work only when the user browses from the controller host. Hydra documents this as a same-machine fallback, never the default.
@@ -295,5 +295,6 @@ ADRs:
 - [ADR 0016 - Git credentials derive from Connections](../adr/0016-git-credentials-derive-from-connections.md)
 - [ADR 0025 - Enrichment re-matches one event, idempotently](../adr/0025-enrichment-re-matches-one-event-idempotently.md)
 - [ADR 0004 - Controller state lives in one SQLite database](../adr/0004-controller-state-lives-in-one-sqlite-database.md)
+- [ADR 0034 - A catalog contribution is identified by its qualified id](../adr/0034-a-catalog-contribution-is-identified-by-its-qualified-id.md)
 
 Research: research/event-ingress.md (branch `research/event-ingress`), research/connection-setup-ux.md (branch `research/connection-setup-ux`), research/expression-language.md (branch `research/expression-language`).

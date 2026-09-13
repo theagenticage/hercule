@@ -256,11 +256,11 @@ Semantics: [./08-events-and-connections.md](./08-events-and-connections.md).
 
 | Operation | Input | Grant | Route |
 |---|---|---|---|
-| `connection.query` / `connection.read` | `{ type?, status? }` / `{ connectionId }` (status, labels, credential *references*) | `connection.read` | `GET /connections[/{id}]` |
+| `connection.query` / `connection.read` | `{ type?, status? }` (`type` is the qualified id, `github/github`) / `{ connectionId }` (status, labels, credential *references*) | `connection.read` | `GET /connections[/{id}]` |
 | `connection.create` / `update` / `delete` | record fields incl. labels and default topic | `connection.manage` | `POST` / `PATCH` / `DELETE /connections[/{id}]` |
 | `connection.setCredentials` | `{ connectionId, ... }` (values in, references out) | `connection.manage` | `POST /connections/{id}/credentials` |
 
-`connection.use` is a grant, not an operation: it is what a plugin-contributed action (`github.merge`) requires when it names the Connection it acts as. In v1 nothing a session token calls directly requires it (sessions cannot invoke plugin actions outside a run), so it is dormant until the Hydra MCP server or the agent-tools extension point lands.
+`connection.use` is a grant, not an operation: it is what a plugin-contributed action (`github/pr.merge`) requires when it names the Connection it acts as. In v1 nothing a session token calls directly requires it (sessions cannot invoke plugin actions outside a run), so it is dormant until the Hydra MCP server or the agent-tools extension point lands.
 
 ### runner, plugin, provider, controller (grant family `infra`)
 
@@ -405,7 +405,7 @@ The actor is derived from the credential or the in-process caller, never supplie
 
 ### 3.2 Bound Notification actions
 
-A decision Notification may bind an operation (for example "Start Bugfix" = `workflow.run` with workflow X and task Y; "Merge dev bumps" = `github.merge` over three PRs; "Event-sourced" = `session.input` replying to the session that asked). Pinned by ticket 37 ([ADR 0022](../adr/0022-proposing-is-not-doing.md)): **proposing is not doing.** The producer - a session, a run's `notify` step, a plugin or the core - declares the operation, and it is not checked against the producer's permission profile. The operation executes through `notification.act` when the user decides, as actor `user` under full parity; the event log entry records the notification id, its producer and, for a channel click, the connection it came through. Two guardrails replace the profile check: the `bindable` flag withholds the credential/secret/infra/permission families, `connection.manage` and bulk-destructive operations from non-core producers, and every operation's `describe(input)` line is rendered by the core on every answer. An answer may carry `operation: null` - decide and do nothing ("Dismiss" on an offer, "Neither" on an agent question). Record shape, execution, failure and channel-click rules: [./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md) section 7.4.
+A decision Notification may bind an operation (for example "Start Bugfix" = `workflow.run` with workflow X and task Y; "Merge dev bumps" = `github/pr.merge` over three PRs; "Event-sourced" = `session.input` replying to the session that asked). Pinned by ticket 37 ([ADR 0022](../adr/0022-proposing-is-not-doing.md)): **proposing is not doing.** The producer - a session, a run's `notify` step, a plugin or the core - declares the operation, and it is not checked against the producer's permission profile. The operation executes through `notification.act` when the user decides, as actor `user` under full parity; the event log entry records the notification id, its producer and, for a channel click, the connection it came through. Two guardrails replace the profile check: the `bindable` flag withholds the credential/secret/infra/permission families, `connection.manage` and bulk-destructive operations from non-core producers, and every operation's `describe(input)` line is rendered by the core on every answer. An answer may carry `operation: null` - decide and do nothing ("Dismiss" on an offer, "Neither" on an agent question). Record shape, execution, failure and channel-click rules: [./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md) section 7.4.
 
 ## 4. Credentials
 
