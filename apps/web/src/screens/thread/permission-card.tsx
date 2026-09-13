@@ -52,49 +52,53 @@ export function PermissionCard({
   return (
     // Behind the card rather than in front of it: the card is `z-[1]`, so the
     // 8px this dock tucks under it is covered rather than drawn over.
-    <div className="mx-3.5 -mb-2 flex flex-col rounded-t-[10px] border border-b-0 border-line-soft bg-surface px-3 pt-[5px] pb-[13px] text-fine text-muted">
-      <span className="flex items-baseline gap-1.5">
-        <DecisionMark className="translate-y-[2px]" />
+    <div className="mx-3.5 -mb-2 grid grid-cols-[18px_minmax(0,1fr)] rounded-t-[10px] border border-b-0 border-line-soft bg-surface px-3 pt-[5px] pb-[13px] text-fine text-muted">
+      {/* The mark hangs alone in its own column at the dock's inner edge, so
+          the title, the subject, the note and the answers' labels all start on
+          one left edge in the column beside it. */}
+      <DecisionMark className="mt-[3px]" />
+      <div className="flex min-w-0 flex-col">
         <span className="text-meta font-emph text-ink">{card.title}</span>
-      </span>
-      {/* A 4096-character command or forty paths scroll here rather than
-          pushing the composer off the screen. */}
-      <div className="flex max-h-36 flex-col overflow-y-auto">
-        {card.subject.map((line, index) => (
-          <span
-            key={index}
-            className={cn("break-all", card.code ? "font-mono text-[11px]" : "text-fine")}
-          >
-            {line}
-          </span>
-        ))}
+        {/* A 4096-character command or forty paths scroll here rather than
+            pushing the composer off the screen. */}
+        <div className="flex max-h-36 flex-col overflow-y-auto">
+          {card.subject.map((line, index) => (
+            <span
+              key={index}
+              className={cn("break-all", card.code ? "font-mono text-[11px]" : "text-fine")}
+            >
+              {line}
+            </span>
+          ))}
+        </div>
+        {/* A little air, or the note reads as one more question. */}
+        {card.note === null ? null : <p className="mt-1">{card.note}</p>}
+        {/* A row bleeds 8px past this column on each side, so a hover
+            background has room around its label without crossing the edge the
+            head shares with it. The 13px bottom padding is what keeps the last
+            one clear of the card above. */}
+        <div className="mt-1 flex flex-col">
+          {card.rows.map((row) => (
+            <button
+              key={row.decision}
+              type="button"
+              disabled={answered}
+              onClick={() => respond.mutate(row.decision)}
+              className="-mx-2 grid grid-cols-[140px_minmax(0,1fr)] items-baseline gap-3 rounded-control px-2 py-[5px] text-left enabled:cursor-pointer enabled:hover:bg-line-soft focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-live"
+            >
+              <span className="text-meta font-emph text-ink">{row.label}</span>
+              {/* `--muted`, not `--faint`: 12px `--faint` on `--surface` is
+                  about 2.9:1 in dark and 2.4:1 in light, which is not text. */}
+              <span className="text-fine text-muted">{row.describe}</span>
+            </button>
+          ))}
+        </div>
+        {respond.error === null ? null : (
+          <p className="mt-1 text-fail" role="alert">
+            {messageOf(respond.error)}
+          </p>
+        )}
       </div>
-      {/* A little air, or the note reads as one more question. */}
-      {card.note === null ? null : <p className="mt-1">{card.note}</p>}
-      {/* The rows bleed 8px each side, so a hover background reaches the
-          dock's inner edge the way a popover row's does. The 13px bottom
-          padding is what keeps the last one clear of the card above. */}
-      <div className="mt-1 flex flex-col">
-        {card.rows.map((row) => (
-          <button
-            key={row.decision}
-            type="button"
-            disabled={answered}
-            onClick={() => respond.mutate(row.decision)}
-            className="-mx-2 grid grid-cols-[140px_minmax(0,1fr)] items-baseline gap-3 rounded-control px-2 py-[5px] text-left enabled:cursor-pointer enabled:hover:bg-line-soft focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-live"
-          >
-            <span className="text-meta font-emph text-ink">{row.label}</span>
-            {/* `--muted`, not `--faint`: 12px `--faint` on `--surface` is
-                about 2.9:1 in dark and 2.4:1 in light, which is not text. */}
-            <span className="text-fine text-muted">{row.describe}</span>
-          </button>
-        ))}
-      </div>
-      {respond.error === null ? null : (
-        <p className="mt-1 text-fail" role="alert">
-          {messageOf(respond.error)}
-        </p>
-      )}
     </div>
   );
 }
