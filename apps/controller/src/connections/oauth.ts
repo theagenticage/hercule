@@ -2,17 +2,18 @@
  * The core's OAuth2 client: the parts of an authorization-code flow that are
  * the same for every provider, so a plugin declaring a type writes none of it.
  *
- * What is here is what talks to a token endpoint and what a token set is worth
- * once it is stored. The flow itself - the start, the callback, the connection
- * it creates - is the connection service's, and the refresh a plugin triggers
- * is the plugin host's; both call in here.
+ * What is here is the protocol: the authorization request, what the browser
+ * comes back with, what talks to a token endpoint, and what a token set is
+ * worth once it is stored. The flow itself - deciding a start, spending a
+ * callback, writing the connection it creates - is the connection service's,
+ * and the refresh a plugin triggers is the plugin host's; both call in here.
  *
  * Client credentials are the owning plugin's: the id is a field of its config
  * and the secret is one it owns, under fixed names. A type is one plugin's, so
  * there is exactly one pair per type and nothing to choose between.
  */
+import { createHash } from "node:crypto";
 import * as Clock from "effect/Clock";
-import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Redacted from "effect/Redacted";
@@ -20,13 +21,65 @@ import * as Schema from "effect/Schema";
 import * as HttpBody from "effect/unstable/http/HttpBody";
 import * as HttpClient from "effect/unstable/http/HttpClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
+import type { OAuthDeclaration } from "@hydra/plugin-host";
 import { Secrets } from "../secrets";
+import { PluginConfigs } from "./plugin-configs";
 
 /** Where the provider sends the browser back to. Appended to the browser's origin. */
 export const CALLBACK_PATH = "/oauth/callback";
 
 /** The one secret an OAuth connection owns: its whole token set, as JSON. */
 export const OAUTH_TOKENS = "oauth.tokens";
+
+/** Long enough to read a provider's consent screen, short enough to be worth sweeping. */
+export const SETUP_LIFETIME_MS = 10 * 60 * 1000;
+
+/**
+ * How a redirect flow ended, in the words the Connections screen reads. The set
+ * is closed: what the user is told is one of these five and never a provider's
+ * own message, which is not ours to put in a URL.
+ */
+export type Outcome = "ok" | "denied" | "expired" | "exchange-failed" | "rejected";
+
+/** What the browser arrives at the callback with, straight off the query string. */
+const CallbackQuery = Schema.Struct({
+  state: Schema.optionalKey(Schema.String),
+  code: Schema.optionalKey(Schema.String),
+  error: Schema.optionalKey(Schema.String),
+});
+
+export const decodeCallback = Schema.decodeUnknownEffect(CallbackQuery);
+
+/** The PKCE challenge: the verifier, hashed the way the provider will hash it. */
+export const challengeFor = (verifier: string): string =>
+  createHash("sha256").update(verifier).digest("base64url");
+
+/** The authorization request, as RFC 6749 and RFC 7636 spell it. */
+export const authorizationUrl = (
+  oauth: OAuthDeclaration,
+  parts: {
+    readonly clientId: string;
+    readonly redirectUri: string;
+    readonly state: string;
+    readonly challenge: string;
+  },
+): string => {
+  const url = new URL(oauth.authorizationUrl);
+  const query: Record<string, string> = {
+    // The type's own extras first, so nothing it asks for can displace a
+    // parameter the protocol itself is carried by.
+    ...(oauth.extraParams ?? {}),
+    response_type: "code",
+    client_id: parts.clientId,
+    redirect_uri: parts.redirectUri,
+    scope: oauth.scopes.join(" "),
+    state: parts.state,
+    code_challenge: parts.challenge,
+    code_challenge_method: "S256",
+  };
+  for (const [name, value] of Object.entries(query)) url.searchParams.set(name, value);
+  return url.toString();
+};
 
 /** The plugin config field and the plugin-owned secret that hold the client credentials. */
 const CLIENT_ID_FIELD = "clientId";
@@ -94,18 +147,6 @@ export const serializeTokens = (tokens: TokenSet): string => JSON.stringify(toke
 /** Whether this token is too close to running out to be worth handing over. */
 export const isStale = (tokens: TokenSet, nowMillis: number): boolean =>
   tokens.expiresAt !== undefined && Date.parse(tokens.expiresAt) - nowMillis <= REFRESH_MARGIN_MS;
-
-/**
- * A plugin's stored config, as the domain that owns the plugins table reads it.
- *
- * A service rather than a call into that domain, because the plugin host reads
- * this domain: everything between the two points one way, and the one column
- * wanted here - the client id the user configured - comes back through here.
- */
-export class PluginConfigs extends Context.Service<
-  PluginConfigs,
-  { readonly of: (pluginId: string) => Effect.Effect<Schema.Json, SqlError> }
->()("hydra/controller/connections/PluginConfigs") {}
 
 /**
  * Reads the client credentials a plugin holds, or nothing when the user has not

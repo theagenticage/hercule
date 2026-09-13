@@ -457,6 +457,14 @@ describe("Connections > a redirect flow", () => {
 
     expect(reading(await screen.findByRole("alert"))).toContain("denied");
   });
+
+  it("does not echo a word it does not know back onto the screen", async () => {
+    await open([PAPER], {}, "/connections?oauth=%3Cscript%3Eboom%3C%2Fscript%3E");
+
+    const alert = reading(await screen.findByRole("alert"));
+    expect(alert).toBe("The setup did not finish.");
+    expect(alert).not.toContain("boom");
+  });
 });
 
 describe("Connections > reconnecting and removing", () => {

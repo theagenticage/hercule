@@ -34,7 +34,6 @@ import { announce, nowIso, withTransaction } from "../db";
 import { Secrets } from "../secrets";
 import {
   isStale,
-  PluginConfigs,
   OAUTH_TOKENS,
   oauthClients,
   parseTokens,
@@ -42,6 +41,7 @@ import {
   serializeTokens,
   type TokenSet,
 } from "./oauth";
+import { PluginConfigs } from "./plugin-configs";
 import { connectionRepository, type StoredConnection } from "./repository";
 
 /**
@@ -96,6 +96,9 @@ const make = Effect.gen(function* () {
    * One permit per connection, so two callers finding the same spent token do
    * not both spend a refresh token on it - some providers invalidate the old
    * one, which would leave the second caller holding a set that no longer works.
+   *
+   * Never pruned: the map is bounded by the connections this process ever saw,
+   * and dropping an entry on delete would race a refresh still holding it.
    */
   const permits = new Map<string, Semaphore.Semaphore>();
 

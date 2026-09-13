@@ -121,7 +121,7 @@ export interface ConnectionSummary {
   readonly label: string;
   readonly status: ConnectionStatus;
   readonly labels: ReadonlyArray<string>;
-  readonly config: Schema.Json;
+  readonly config: Readonly<Record<string, Schema.Json>>;
 }
 
 /** What a plugin reports about a connection it has just used. */

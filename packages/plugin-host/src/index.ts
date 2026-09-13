@@ -38,6 +38,7 @@ export {
 
 export {
   PluginError,
+  registerConnectionType,
   registerProvider,
   type ActivationContext,
   type Deactivate,

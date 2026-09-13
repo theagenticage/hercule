@@ -14,7 +14,6 @@
  * Credentials go into the one secrets table under owner `connection/<id>`. What
  * comes back out is references: a name and, once it has been replaced, when.
  */
-import { createHash } from "node:crypto";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -24,11 +23,7 @@ import * as Schema from "effect/Schema";
 import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
-import {
-  decodeAgainst,
-  type ConnectionValidationFailed,
-  type OAuthDeclaration,
-} from "@hydra/plugin-host";
+import { decodeAgainst, type ConnectionValidationFailed } from "@hydra/plugin-host";
 import {
   CONNECTION_SORT_FIELDS,
   ConnectionCreateInput,
@@ -58,13 +53,18 @@ import { nowIso, pageInput, refuseCursor, withTransaction } from "../db";
 import { AuditLog } from "../events";
 import { Secrets, type SecretNameRef, type SecretOwner } from "../secrets";
 import {
+  authorizationUrl,
+  challengeFor,
+  decodeCallback,
   exchangeCode,
   oauthClients,
   OAUTH_TOKENS,
-  PluginConfigs,
   redirectUri,
   serializeTokens,
+  SETUP_LIFETIME_MS,
+  type Outcome,
 } from "./oauth";
+import { PluginConfigs } from "./plugin-configs";
 import {
   connectionRepository,
   type ConnectionSortField,
@@ -128,58 +128,8 @@ const isOAuthFlow = (contribution: Contribution): boolean =>
 
 const decodeStart = Schema.decodeUnknownEffect(ConnectionOAuthStartInput);
 
-/** What the browser arrives at the callback with, straight off the query string. */
-const CallbackQuery = Schema.Struct({
-  state: Schema.optionalKey(Schema.String),
-  code: Schema.optionalKey(Schema.String),
-  error: Schema.optionalKey(Schema.String),
-});
-
-const decodeCallback = Schema.decodeUnknownEffect(CallbackQuery);
-
-/**
- * How a redirect flow ended, in the words the Connections screen reads. The set
- * is closed: what the user is told is one of these five and never a provider's
- * own message, which is not ours to put in a URL.
- */
-type Outcome = "ok" | "denied" | "expired" | "exchange-failed" | "rejected";
-
 /** A flow that ended before it made a connection, carrying what to say about it. */
 const ended = (outcome: Outcome): Effect.Effect<never, Outcome> => Effect.fail(outcome);
-
-/** Long enough to read a provider's consent screen, short enough to be worth sweeping. */
-const SETUP_LIFETIME_MS = 10 * 60 * 1000;
-
-/** The PKCE challenge: the verifier, hashed the way the provider will hash it. */
-const challengeFor = (verifier: string): string =>
-  createHash("sha256").update(verifier).digest("base64url");
-
-/** The authorization request, as RFC 6749 and RFC 7636 spell it. */
-const authorizationUrl = (
-  oauth: OAuthDeclaration,
-  parts: {
-    readonly clientId: string;
-    readonly redirectUri: string;
-    readonly state: string;
-    readonly challenge: string;
-  },
-): string => {
-  const url = new URL(oauth.authorizationUrl);
-  const query: Record<string, string> = {
-    // The type's own extras first, so nothing it asks for can displace a
-    // parameter the protocol itself is carried by.
-    ...(oauth.extraParams ?? {}),
-    response_type: "code",
-    client_id: parts.clientId,
-    redirect_uri: parts.redirectUri,
-    scope: oauth.scopes.join(" "),
-    state: parts.state,
-    code_challenge: parts.challenge,
-    code_challenge_method: "S256",
-  };
-  for (const [name, value] of Object.entries(query)) url.searchParams.set(name, value);
-  return url.toString();
-};
 
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
@@ -192,16 +142,41 @@ const make = Effect.gen(function* () {
 
   const ownerOf = (id: string): SecretOwner => ({ kind: "connection", id });
 
+  /** The registered type of this name, if this build defines one. */
+  const registeredType = (type: string): Effect.Effect<Option.Option<RegisteredConnectionType>> =>
+    Effect.map(types.all(), (registered) =>
+      Option.fromUndefinedOr(registered.find((one) => one.contribution.type === type)),
+    );
+
   /** The type a request names, or the `validation` a caller can act on. */
   const typeNamed = (type: string): Effect.Effect<RegisteredConnectionType, Validation> =>
-    Effect.flatMap(types.all(), (registered) => {
-      const found = registered.find((one) => one.contribution.type === type);
-      return found === undefined
-        ? Effect.fail(
+    Effect.flatMap(
+      registeredType(type),
+      Option.match({
+        onNone: () =>
+          Effect.fail(
             validation([{ path: ["type"], message: `no plugin defines the type ${type}` }]),
-          )
-        : Effect.succeed(found);
-    });
+          ),
+        onSome: Effect.succeed,
+      }),
+    );
+
+  /**
+   * The type a stored connection names. A row's type was registered when the
+   * row was written, so a build that no longer defines it is the build's to fix
+   * and nothing the caller can correct by sending something else.
+   */
+  const typeOf = (row: StoredConnection): Effect.Effect<RegisteredConnectionType, InvalidState> =>
+    Effect.flatMap(
+      registeredType(row.type),
+      Option.match({
+        onNone: () =>
+          Effect.fail(
+            invalidState(`the plugin that defines the type ${row.type} is not in this build`),
+          ),
+        onSome: Effect.succeed,
+      }),
+    );
 
   /**
    * The type's own verdict on a config. A type that declared no schema takes
@@ -283,12 +258,6 @@ const make = Effect.gen(function* () {
       },
     );
 
-  /** The credential references of these connections, by connection id, in one query. */
-  const refsOf = (
-    ids: ReadonlyArray<string>,
-  ): Effect.Effect<ReadonlyMap<string, ReadonlyArray<SecretNameRef>>, SqlError> =>
-    secrets.refs("connection", ids);
-
   /** A connection as the wire sees it: the row, plus what it owns in `secrets`. */
   const compose = (row: StoredConnection, refs: ReadonlyArray<SecretNameRef>): Connection => ({
     id: row.id,
@@ -318,7 +287,9 @@ const make = Effect.gen(function* () {
     );
 
   const composed = (row: StoredConnection): Effect.Effect<Connection, SqlError> =>
-    Effect.map(refsOf([row.id]), (refs) => compose(row, refs.get(row.id) ?? []));
+    Effect.map(secrets.refs("connection", [row.id]), (refs) =>
+      compose(row, refs.get(row.id) ?? []),
+    );
 
   const one = (id: string): Effect.Effect<Connection, NotFound | SqlError> =>
     Effect.flatMap(stored(id), composed);
@@ -367,10 +338,16 @@ const make = Effect.gen(function* () {
         registered === undefined
           ? Option.none()
           : yield* Effect.orDie(clientOf(registered.pluginId));
-      // A build that no longer declares the type, or a plugin whose credentials
-      // were cleared while the user was at the provider: the code cannot be
-      // spent either way, which is what the word says.
-      if (registered === undefined || oauth === undefined || Option.isNone(client)) {
+      // A build that no longer declares the type, one where the type name has
+      // moved to another plugin since the flow started, or a plugin whose
+      // credentials were cleared while the user was at the provider: the code
+      // cannot be spent in any of those, which is what the word says.
+      if (
+        registered === undefined ||
+        registered.pluginId !== setup.pluginId ||
+        oauth === undefined ||
+        Option.isNone(client)
+      ) {
         return yield* ended("exchange-failed");
       }
 
@@ -474,7 +451,10 @@ const make = Effect.gen(function* () {
             ...order,
           }),
         );
-        const refs = yield* refsOf(listing.items.map((row) => row.id));
+        const refs = yield* secrets.refs(
+          "connection",
+          listing.items.map((row) => row.id),
+        );
         const items = listing.items.map((row) => compose(row, refs.get(row.id) ?? []));
         return {
           items,
@@ -548,13 +528,16 @@ const make = Effect.gen(function* () {
     /** Changes what the user chose. The account and the status are not that. */
     update: (
       input: UpdateInput,
-    ): Effect.Effect<Connection, Unauthenticated | Forbidden | Validation | NotFound | SqlError> =>
+    ): Effect.Effect<
+      Connection,
+      Unauthenticated | Forbidden | Validation | NotFound | InvalidState | SqlError
+    > =>
       Effect.gen(function* () {
         yield* requireGrant("connection.update");
         const { id, ...patch } = yield* Effect.mapError(decodeUpdate(input), validationOf);
         const row = yield* stored(id);
         if (patch.config !== undefined) {
-          const { contribution } = yield* typeNamed(row.type);
+          const { contribution } = yield* typeOf(row);
           yield* readConfig(contribution, patch.config);
         }
         return yield* withTransaction(
@@ -581,12 +564,15 @@ const make = Effect.gen(function* () {
      */
     setCredentials: (
       input: CredentialsInput,
-    ): Effect.Effect<Connection, Unauthenticated | Forbidden | Validation | NotFound | SqlError> =>
+    ): Effect.Effect<
+      Connection,
+      Unauthenticated | Forbidden | Validation | NotFound | InvalidState | SqlError
+    > =>
       Effect.gen(function* () {
         yield* requireGrant("connection.setCredentials");
         const decoded = yield* Effect.mapError(decodeCredentials(input), validationOf);
         const row = yield* stored(decoded.id);
-        const { contribution } = yield* typeNamed(row.type);
+        const { contribution } = yield* typeOf(row);
         if (isOAuthFlow(contribution)) {
           const message = `the type ${row.type} is reconnected through its OAuth flow: start it with connection.startOAuth`;
           return yield* Effect.fail(validation([{ path: ["credentials"], message }], message));
@@ -656,6 +642,19 @@ const make = Effect.gen(function* () {
               {
                 path: ["connectionId"],
                 message: `that connection is of the type ${existing.type}`,
+              },
+            ]),
+          );
+        }
+        // The same type name, but owned by another plugin than when the
+        // connection was made: only reachable across a rebuild that moved the
+        // contribution, and the new owner's tokens are not this account's.
+        if (existing !== undefined && existing.pluginId !== pluginId) {
+          return yield* Effect.fail(
+            validation([
+              {
+                path: ["connectionId"],
+                message: `that connection belongs to the plugin ${existing.pluginId}`,
               },
             ]),
           );
@@ -744,7 +743,8 @@ const make = Effect.gen(function* () {
           Effect.gen(function* () {
             const at = yield* nowIso;
             const owner = ownerOf(id);
-            const names = (yield* refsOf([id])).get(id)?.map((ref) => ref.name) ?? [];
+            const names =
+              (yield* secrets.refs("connection", [id])).get(id)?.map((ref) => ref.name) ?? [];
             yield* Effect.forEach(names, (name) => secrets.delete(owner, name), {
               discard: true,
             });

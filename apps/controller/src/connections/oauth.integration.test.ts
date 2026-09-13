@@ -19,7 +19,7 @@ import * as Schema from "effect/Schema";
 import {
   ConnectionValidationFailed,
   HOST_API,
-  PluginError,
+  registerConnectionType,
   type ActivationContext,
   type Plugin,
 } from "@hydra/plugin-host";
@@ -156,32 +156,30 @@ const typePlugin = (options: {
       configSchema: Schema.Struct({ clientId: Schema.optionalKey(Schema.String) }),
     },
     register: (host) =>
-      host.connections === undefined
-        ? Effect.fail(new PluginError({ message: "the connections capability was not granted" }))
-        : host.connections.registerType({
-            type: options.type,
-            displayName: `Type ${options.type}`,
-            setup:
-              provider === undefined
-                ? [{ kind: "credentials", fields: [{ name: "token", label: "Token" }] }]
-                : [{ kind: "oauth" }],
-            ...(provider === undefined
-              ? {}
-              : {
-                  oauth: {
-                    authorizationUrl: `${provider.base}/authorize`,
-                    tokenUrl: `${provider.base}/token`,
-                    scopes: ["read", "write"],
-                    extraParams: { access_type: "offline", prompt: "consent" },
-                  },
-                }),
-            validate: (credentials: Record<string, string>) => {
-              const value = credentials[provider === undefined ? "token" : "accessToken"] ?? "";
-              return value.startsWith("good-")
-                ? Effect.succeed({ displayName: `acct:${value}` })
-                : Effect.fail(new ConnectionValidationFailed({ message: REJECTED }));
-            },
-          }),
+      registerConnectionType(host, {
+        type: options.type,
+        displayName: `Type ${options.type}`,
+        setup:
+          provider === undefined
+            ? [{ kind: "credentials", fields: [{ name: "token", label: "Token" }] }]
+            : [{ kind: "oauth" }],
+        ...(provider === undefined
+          ? {}
+          : {
+              oauth: {
+                authorizationUrl: `${provider.base}/authorize`,
+                tokenUrl: `${provider.base}/token`,
+                scopes: ["read", "write"],
+                extraParams: { access_type: "offline", prompt: "consent" },
+              },
+            }),
+        validate: (credentials: Record<string, string>) => {
+          const value = credentials[provider === undefined ? "token" : "accessToken"] ?? "";
+          return value.startsWith("good-")
+            ? Effect.succeed({ displayName: `acct:${value}` })
+            : Effect.fail(new ConnectionValidationFailed({ message: REJECTED }));
+        },
+      }),
     activate: (ctx) =>
       Effect.sync(() => {
         contexts.push(ctx);
@@ -661,6 +659,29 @@ describe("the access token a plugin asks the core for", () => {
         accessToken: REFRESHED_TOKEN,
       });
       expect(provider.requests).toHaveLength(asked);
+    });
+  });
+
+  it("is refreshed once when two callers find the same spent token at the same moment", async () => {
+    await withOAuth(async ({ base }, registry, token, provider) => {
+      expiringNow(provider);
+      const one = await connect(base, token);
+      const surface = surfaceOf(registry.oauth);
+
+      const both = await Effect.runPromise(
+        Effect.all([surface.credentials(one.id), surface.credentials(one.id)], {
+          concurrency: "unbounded",
+        }),
+      );
+
+      // A provider that rotates its refresh token invalidates the old one, so a
+      // second refresh with the same token would leave one caller holding a set
+      // that no longer works.
+      expect(
+        provider.requests.filter((form) => form["grant_type"] === "refresh_token"),
+      ).toHaveLength(1);
+      expect(both[0]).toMatchObject({ accessToken: REFRESHED_TOKEN });
+      expect(both[1]).toMatchObject({ accessToken: REFRESHED_TOKEN });
     });
   });
 

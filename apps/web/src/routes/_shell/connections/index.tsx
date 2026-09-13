@@ -2,7 +2,7 @@ import { useEffect, useState, type JSX } from "react";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { EmptyState, Group, LaneLabel } from "@hydra/ui";
-import { connectionTypes, type ConnectionType } from "@hydra/client-core";
+import { connectionTypes, setupFlowOf, type ConnectionType } from "@hydra/client-core";
 import { useLiveInvalidation } from "../../../app/live-invalidation";
 import { connectionsQuery, pluginsQuery } from "../../../app/queries";
 import { ConnectRows } from "../../../screens/connect-rows";
@@ -34,14 +34,19 @@ const OAUTH_FAILURES: Readonly<Record<string, string>> = {
   rejected: "The provider signed in, but the account was turned down.",
 };
 
+/** What each way of setting a type up is called, in the few words a row has. */
+const GISTS = {
+  oauth: "sign in with the provider",
+  credentials: "paste a token",
+  pairing: "pair a chat account",
+} as const;
+
 /** How a type is set up, in the few words a row has for it. */
 const gistOf = (type: ConnectionType): string => {
-  if (type.setup.some((step) => step.kind === "oauth")) return "sign in with the provider";
-  if (type.setup.some((step) => step.kind === "credentials")) return "paste a token";
-  if (type.setup.some((step) => step.kind === "pairing")) return "pair a chat account";
+  const flow = setupFlowOf(type);
   // A step kind this build does not know: the type names itself rather than
   // being described as something it may not be.
-  return type.type;
+  return flow === "unknown" ? type.type : GISTS[flow];
 };
 
 /**
@@ -101,7 +106,9 @@ function Connections(): JSX.Element {
         </p>
       ) : (
         <p className="text-row text-fail" role="alert">
-          {OAUTH_FAILURES[notice] ?? `The setup did not finish: ${notice}.`}
+          {/* A word this build does not know is not echoed back: whatever is in
+              the address bar is not ours to put on the screen. */}
+          {OAUTH_FAILURES[notice] ?? "The setup did not finish."}
         </p>
       )}
 

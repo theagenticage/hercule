@@ -15,7 +15,7 @@ import * as Schema from "effect/Schema";
 import {
   ConnectionValidationFailed,
   HOST_API,
-  PluginError,
+  registerConnectionType,
   type ActivationContext,
   type Plugin,
   type SetupStep,
@@ -98,29 +98,27 @@ const connectionPlugin = (options: {
       configSchema: Schema.Struct({}),
     },
     register: (host) =>
-      host.connections === undefined
-        ? Effect.fail(new PluginError({ message: "the connections capability was not granted" }))
-        : host.connections.registerType({
-            type: options.type,
-            displayName: `Type ${options.type}`,
-            setup,
-            ...(options.flow === "oauth"
-              ? {
-                  oauth: {
-                    authorizationUrl: "https://provider.test/authorize",
-                    tokenUrl: "https://provider.test/token",
-                    scopes: ["read"],
-                  },
-                }
-              : {}),
-            ...(options.configSchema === undefined ? {} : { configSchema: options.configSchema }),
-            validate: (credentials: Record<string, string>) => {
-              const token = credentials["token"] ?? "";
-              return token.startsWith("good-")
-                ? Effect.succeed({ displayName: `acct:${token}` })
-                : Effect.fail(new ConnectionValidationFailed({ message: REJECTED }));
-            },
-          }),
+      registerConnectionType(host, {
+        type: options.type,
+        displayName: `Type ${options.type}`,
+        setup,
+        ...(options.flow === "oauth"
+          ? {
+              oauth: {
+                authorizationUrl: "https://provider.test/authorize",
+                tokenUrl: "https://provider.test/token",
+                scopes: ["read"],
+              },
+            }
+          : {}),
+        ...(options.configSchema === undefined ? {} : { configSchema: options.configSchema }),
+        validate: (credentials: Record<string, string>) => {
+          const token = credentials["token"] ?? "";
+          return token.startsWith("good-")
+            ? Effect.succeed({ displayName: `acct:${token}` })
+            : Effect.fail(new ConnectionValidationFailed({ message: REJECTED }));
+        },
+      }),
     activate: (ctx) =>
       Effect.sync(() => {
         contexts.push(ctx);
@@ -378,6 +376,22 @@ describe("PATCH /connections/:id", () => {
       expect(wrong.details?.issues).toContainEqual(
         expect.objectContaining({ path: ["config", "watch"] }),
       );
+    });
+  });
+
+  it("answers invalid_state for a row whose type no plugin in this build defines", async () => {
+    await withConnections(async ({ base, sql }, _registry, token) => {
+      const one = await created(base, token, { type: "main-type" });
+      // A build that dropped the plugin that defined the type, arranged the one
+      // way a running controller cannot reach: the row outlives the catalog.
+      await Effect.runPromise(
+        sql`UPDATE connections SET type = 'gone-type' WHERE type = 'main-type'`.pipe(Effect.orDie),
+      );
+
+      const refused = await errorOf(await patch(base, token, one.id, { config: {} }));
+
+      expect(refused.code).toBe("invalid_state");
+      expect(refused.message).toContain("gone-type");
     });
   });
 

@@ -11,7 +11,7 @@ import * as HttpClient from "effect/unstable/http/HttpClient";
 import {
   ConnectionValidationFailed,
   HOST_API,
-  PluginError,
+  registerConnectionType,
   type ConnectionTypeContribution,
   type Plugin,
 } from "@hydra/plugin-host";
@@ -83,10 +83,7 @@ export const github: Plugin = {
     capabilities: ["connections"],
     configSchema: Schema.Struct({}),
   },
-  register: (host) =>
-    host.connections === undefined
-      ? Effect.fail(new PluginError({ message: "the connections capability was not granted" }))
-      : host.connections.registerType(connectionType),
+  register: (host) => registerConnectionType(host, connectionType),
   // Nothing runs on the controller yet: the ingest loop belongs to the event
   // source ticket.
   activate: () => Effect.succeed(Effect.void),

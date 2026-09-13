@@ -78,3 +78,23 @@ export const connectionTypes = (
         ];
       }),
   );
+
+/**
+ * How a type is set up, as one word. A setup is a list of steps and only one of
+ * them decides how the credential is obtained, so every screen that branches on
+ * a setup branches on this rather than scanning the steps for itself. A catalog
+ * from a newer host can carry a step kind this build cannot render, which is
+ * what `unknown` is: a screen says so rather than guessing.
+ */
+export const setupFlowOf = (
+  type: ConnectionType,
+): "oauth" | "credentials" | "pairing" | "unknown" => {
+  if (type.setup.some((step) => step.kind === "oauth")) return "oauth";
+  if (type.setup.some((step) => step.kind === "credentials")) return "credentials";
+  if (type.setup.some((step) => step.kind === "pairing")) return "pairing";
+  return "unknown";
+};
+
+/** The secrets this type's setup asks the user to paste, in the order declared. */
+export const credentialFieldsOf = (type: ConnectionType): ReadonlyArray<CredentialField> =>
+  type.setup.flatMap((step) => (step.kind === "credentials" ? [...step.fields] : []));

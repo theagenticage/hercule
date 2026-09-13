@@ -3,19 +3,16 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button, Field, Input, LaneLabel } from "@hydra/ui";
 import {
   configIssues,
+  credentialFieldsOf,
   queryKeys,
   redirectUriFor,
+  setupFlowOf,
   type ConnectionType,
-  type CredentialField,
   type HydraClient,
-  type SetupStep,
 } from "@hydra/client-core";
 import type { Connection } from "@hydra/contract";
 import { SaveStatus, messageOf } from "../../../screens/save-status";
 import { Naming } from "./-naming";
-
-const credentialFields = (setup: ReadonlyArray<SetupStep>): ReadonlyArray<CredentialField> =>
-  setup.flatMap((step) => (step.kind === "credentials" ? [...step.fields] : []));
 
 /**
  * Setting up one connection, whether it is the first or a fresh credential for
@@ -40,8 +37,9 @@ export function ConnectionSetup({
   readonly onDone: () => void;
 }): JSX.Element {
   const queryClient = useQueryClient();
-  const fields = credentialFields(type.setup);
-  const redirects = type.setup.some((step) => step.kind === "oauth");
+  const flow = setupFlowOf(type);
+  const fields = credentialFieldsOf(type);
+  const redirects = flow === "oauth";
 
   const [pasted, setPasted] = useState<Readonly<Record<string, string>>>({});
   const [label, setLabel] = useState(connection?.label ?? "");
@@ -96,7 +94,7 @@ export function ConnectionSetup({
       <div className={`flex flex-col items-start gap-1.5 text-row text-muted ${column}`}>
         <LaneLabel>{heading}</LaneLabel>
         <p>
-          {type.setup.some((step) => step.kind === "pairing")
+          {flow === "pairing"
             ? "Pairing a chat account is not built yet."
             : `Setting up ${type.displayName} takes a step this version of Hydra does not know.`}
         </p>

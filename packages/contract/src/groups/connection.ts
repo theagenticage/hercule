@@ -167,7 +167,9 @@ export const connection = HttpApiGroup.make("connection")
       params: { id: Id },
       payload: ConnectionUpdateInput,
       success: Connection,
-      error: [Unauthenticated, Forbidden, Validation, NotFound, Internal],
+      // `invalid_state`: the stored row names a type this build no longer
+      // defines, which is the build's to fix and not the request's.
+      error: [Unauthenticated, Forbidden, Validation, NotFound, InvalidState, Internal],
     }),
     HttpApiEndpoint.delete("delete", "/connections/:id", {
       params: { id: Id },
@@ -178,7 +180,9 @@ export const connection = HttpApiGroup.make("connection")
       params: { id: Id },
       payload: ConnectionCredentialsInput,
       success: Connection,
-      error: [Unauthenticated, Forbidden, Validation, NotFound, Internal],
+      // `invalid_state`: as on `update`, a row whose type this build no longer
+      // defines.
+      error: [Unauthenticated, Forbidden, Validation, NotFound, InvalidState, Internal],
     }),
     // Not under `/connections`: what it starts is a setup, and a setup is not a
     // connection until the provider sends the browser back.

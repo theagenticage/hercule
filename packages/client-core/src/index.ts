@@ -25,7 +25,9 @@ export {
 } from "./config-fields";
 export {
   connectionTypes,
+  credentialFieldsOf,
   redirectUriFor,
+  setupFlowOf,
   type ConnectionType,
   type CredentialField,
   type SetupStep,

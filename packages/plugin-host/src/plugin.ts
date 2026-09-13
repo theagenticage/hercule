@@ -1,7 +1,11 @@
 import { Effect, Option, Redacted, Schema } from "effect";
 import type { PluginManifest } from "./manifest";
 import type { ProviderDefinition } from "./contributions";
-import type { ConnectionRegistration, ConnectionsRuntime } from "./connections";
+import type {
+  ConnectionRegistration,
+  ConnectionsRuntime,
+  ConnectionTypeContribution,
+} from "./connections";
 
 /** A plugin's own failure, in the words its author chose. */
 export class PluginError extends Schema.TaggedError<PluginError>()("PluginError", {
@@ -77,3 +81,11 @@ export const registerProvider = (
   host.providers === undefined
     ? Effect.fail(new PluginError({ message: "the providers capability was not granted" }))
     : host.providers.register(definition);
+
+export const registerConnectionType = (
+  host: RegistrationHost,
+  contribution: ConnectionTypeContribution,
+): Effect.Effect<void, PluginError> =>
+  host.connections === undefined
+    ? Effect.fail(new PluginError({ message: "the connections capability was not granted" }))
+    : host.connections.registerType(contribution);
