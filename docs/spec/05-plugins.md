@@ -8,8 +8,8 @@ Hydra has one plugin concept. A plugin is a container that requests plugin capab
 - One plugin may contribute several things that share one configuration and one set of credentials. The `github` plugin contributes an event source and workflow actions; the `gmail` plugin likewise.
 - **Plugin capabilities** are what a plugin may *call*: named slices of the host API requested in the manifest and granted at load (section 5). **Contributions** are what a plugin *provides*: named things registered into extension points through the granted capability APIs (section 4). The manifest lists capabilities, never contributions.
 - The v1 extension points are fixed at four: **provider**, **channel**, **event source**, **workflow action**. Plugins cannot define new extension points. The notification sink is not a fifth point: it is an optional facet of a channel contribution (section 11).
-- Contribution ids are globally unique and qualified by the owning plugin. The tickets use dotted ids (`github.merge`); built-in core actions use the same form without a plugin prefix (`task.create`). A workflow step names an action contribution by id; an assistant binding names a channel contribution by id.
-- Everything a plugin defines that names things outside Hydra is namespaced by the plugin: connection types (`gmail`, `github`) and External Ref canonicalization (`github:issue:owner/repo#42`) are owned by the defining plugin ([ADR 0010](../adr/0010-external-accounts-are-core-owned-connections.md); Task provenance in [./09-tasks.md](./09-tasks.md)).
+- Contribution ids are globally unique and qualified by the owning plugin. A catalog contribution is identified by its **qualified id**, `<pluginId>/<word>`: the plugin declares the bare word, the host mints the qualified form at registration, and that is the identity everywhere downstream ([ADR 0034](../adr/0034-a-catalog-contribution-is-identified-by-its-qualified-id.md)). Workflow action ids keep the dotted spelling the tickets use (`github.merge`); built-in core actions use that form without a plugin prefix (`task.create`). A workflow step names an action contribution by id; an assistant binding names a channel contribution by id.
+- Everything a plugin defines that names things outside Hydra is namespaced by the plugin: connection types (declared `gmail`, `github`; identified `gmail/gmail`, `github/github`) and External Ref canonicalization (`github:issue:owner/repo#42`) are owned by the defining plugin ([ADR 0010](../adr/0010-external-accounts-are-core-owned-connections.md); Task provenance in [./09-tasks.md](./09-tasks.md)).
 
 ## 2. Manifest
 
@@ -17,7 +17,7 @@ The manifest is deliberately coarse. It carries exactly four things:
 
 | Part | Content |
 |---|---|
-| Identity | plugin id (stable, used as the namespace for KV, secrets, connection types, contribution ids), display name |
+| Identity | plugin id (stable, used as the namespace for KV, secrets, and the qualified ids of connection types and contributions), display name |
 | `hostApi` | one integer naming the core host contract the plugin was built against; checked at load |
 | Plugin capabilities | the list of capability names the plugin requests, scope-style ("the channels API", "the notifications API") |
 | Config schema | an Effect Schema for the plugin's own configuration, persisted as the JSON Schema derived from it; the web app generates the plugin's settings form from that ([./14-web-app.md](./14-web-app.md)) |
@@ -120,7 +120,7 @@ An event-source contribution ingests external facts ([ADR 0009](../adr/0009-all-
 ```ts
 interface EventSourceContribution {
   id: string                                   // "github", "gmail"
-  connectionType: string                       // the Connection type it ingests for
+  connectionType: string                       // the qualified id of the Connection type it ingests for
   kinds: Record<string, KindDeclaration>       // "github.issue.opened" -> payload schema + description
   feeds?: Record<string, FeedDeclaration>      // named poll feeds; absent for purely push-driven sources
   connectionConfigSchema?: Schema              // per-Connection config (the GitHub watch list)
@@ -291,7 +291,7 @@ Failure handling:
 
 Connections are core-owned; plugins define types and drive setup. The full Connection model, credential kinds, setup flows and the labels/topic rule are in [./08-events-and-connections.md](./08-events-and-connections.md). The plugin-side facts ([ADR 0010](../adr/0010-external-accounts-are-core-owned-connections.md)):
 
-- A plugin **declares the connection types it services** through the `connections` capability. Types are namespaced by the defining plugin; two plugins wanting the same external service each define their own type and the user authenticates twice. Deduping on OAuth identity is post-v1.
+- A plugin **declares the connection types it services** through the `connections` capability. The plugin declares a bare word; the host mints the qualified id `<pluginId>/<word>` and that is the type everywhere downstream, so two plugins may declare the same word and both load ([ADR 0034](../adr/0034-a-catalog-contribution-is-identified-by-its-qualified-id.md)). Two plugins wanting the same external service each define their own type and the user authenticates twice. Deduping on OAuth identity is post-v1.
 - The plugin **drives the flow that establishes a connection**: paste-a-token (GitHub PAT, Slack and Discord bot tokens) or a BYO-OAuth-client redirect flow to the controller's own origin (Google). Policy is pinned in [./13-security.md](./13-security.md): BYO OAuth client where the provider demands one, no Hydra-hosted relay, paste-a-token as the universal fallback. The controller displays the exact redirect URI derived from the origin the user's browser is using.
 - The **core owns** storage, listing, status, the single connected-accounts UI, and the credential secrets. The plugin reads a connection's decoded credentials and per-connection config through the `connections` capability and reports status (for example "token expiring") back through it.
 - **Ingest is per connection**: one loop per enabled connection, every event stamped with its `connectionId`. Triggers select connections explicitly; outbound actions name their connection.
@@ -303,7 +303,7 @@ A connection type is declared in `register()` with its setup flow as **catalog d
 
 ```ts
 interface ConnectionTypeContribution {
-  type: string                                 // "github", "gmail", "discord", "slack"
+  type: string                                 // the bare word: "github", "gmail", "discord", "slack"; the host qualifies it to `<pluginId>/<word>`. No `/` in the word
   displayName: string
   setup: SetupStep[]
   validate(credentials: unknown, ctx: ValidateContext): Effect<{ displayName: string; detail?: string }>
@@ -325,7 +325,7 @@ interface OAuthDeclaration {
 ```
 
 - **The core runs the OAuth dance.** One generic authorization-code client (PKCE, token exchange, refresh) lives in the core, parameterised by the plugin's `OAuthDeclaration`; the plugin writes no OAuth code and never touches the client secret. Refreshed access tokens are what `ctx.connection.credentials` hands the plugin at poll or execute time; a refresh failure sets `needs-reauth` uniformly.
-- **Callback routing**: the core mints an opaque `state` referencing a pending-setup row `{pluginId, type, connectionId?, expiresAt}` and serves `/oauth/callback` itself; the row, not the plugin, is what the callback resolves. The plugin is never routed a request.
+- **Callback routing**: the core mints an opaque `state` referencing a pending-setup row `{type, connectionId?, expiresAt}` (the qualified type names its plugin) and serves `/oauth/callback` itself; the row, not the plugin, is what the callback resolves. The plugin is never routed a request.
 - **A pending setup is not a Connection.** The Connection record exists once `validate()` has passed; `validate` names the account (`displayName`: the GitHub login, the Gmail address) for the Connections screen. The status enum stays `connected | needs-reauth | error | disabled` ([./08-events-and-connections.md](./08-events-and-connections.md) section 8.1).
 - **Reconnect reuses the Connection id**, so triggers and Resources stay attached ([./08-events-and-connections.md](./08-events-and-connections.md) section 8.4).
 
@@ -345,10 +345,10 @@ Rationale and the full Notification model: [ADR 0012](../adr/0012-notifications-
 
 | Plugin | Contributions | Connection types | Notes |
 |---|---|---|---|
-| `github` | event source (watched-repo polling: issue and PR lifecycle, notifications); workflow actions | `github` (PAT paste; BYO OAuth app + device flow optional) | per-connection watch list seeded from repo Resources; git credentials for runners derive from these Connections ([ADR 0016](../adr/0016-git-credentials-derive-from-connections.md)) |
-| `gmail` | event source (`history.list` polling: headers, subject, snippet, ids); workflow actions (body fetch on demand) | `gmail` (BYO Google OAuth client, redirect flow) | emits `system` enrichment where a sender rule recognises the originating system |
-| `discord` | channel (+ notification sink) | `discord` (bot token paste) | conversation container = channel or DM |
-| `slack` | channel (+ notification sink) | `slack` (bot token paste) | conversation container = thread |
+| `github` | event source (watched-repo polling: issue and PR lifecycle, notifications); workflow actions | `github/github` (PAT paste; BYO OAuth app + device flow optional) | per-connection watch list seeded from repo Resources; git credentials for runners derive from these Connections ([ADR 0016](../adr/0016-git-credentials-derive-from-connections.md)) |
+| `gmail` | event source (`history.list` polling: headers, subject, snippet, ids); workflow actions (body fetch on demand) | `gmail/gmail` (BYO Google OAuth client, redirect flow) | emits `system` enrichment where a sender rule recognises the originating system |
+| `discord` | channel (+ notification sink) | `discord/discord` (bot token paste) | conversation container = channel or DM |
+| `slack` | channel (+ notification sink) | `slack/slack` (bot token paste) | conversation container = thread |
 | `claude-code` | provider definition | none | adapter built into the runner |
 | `codex` | provider definition | none | adapter built into the runner |
 | `pi` | provider definition | none | adapter built into the runner; child process per session |
@@ -375,7 +375,7 @@ All of these travel the same pipeline and the same catalog-facing surfaces as th
 - **Webhook ingress core service** (a capability plugins request; unlocks GitHub push and Actions triggers): post-v1, strongly desired. V1 keeps: push-agnostic event-source boundary.
 - **Gmail Pub/Sub pull**: post-v1 latency upgrade behind the same boundary.
 - **Presence-aware notification routing**: post-v1 router upgrade; V1 keeps: additive sink contract.
-- **Connection dedupe on OAuth identity** across plugin-namespaced types: later nicety.
+- **Connection dedupe on OAuth identity** across qualified types: later nicety.
 - **Per-Connection OAuth client override**: the additive fix for mixed-client account sets (section 7); v1 ships one BYO client per plugin.
 - **Manifest review / trust gating** for third-party plugins: with dynamic loading.
 
@@ -409,3 +409,4 @@ ADRs:
 - [ADR 0016 - Git credentials derive from Connections](../adr/0016-git-credentials-derive-from-connections.md)
 - [ADR 0026 - Workflow actions may call the public API as the run](../adr/0026-workflow-actions-may-call-the-public-api-as-the-run.md)
 - [ADR 0031 - The backend is written on Effect](../adr/0031-the-backend-is-written-on-effect.md)
+- [ADR 0034 - A catalog contribution is identified by its qualified id](../adr/0034-a-catalog-contribution-is-identified-by-its-qualified-id.md)

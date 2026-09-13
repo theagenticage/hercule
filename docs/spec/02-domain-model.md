@@ -425,7 +425,7 @@ Relationships: registered by a provider Plugin; referenced by Agents and Session
 
 Purpose: a core-owned link to one external account ([ADR 0010](../adr/0010-external-accounts-are-core-owned-connections.md)).
 
-Fields (pinned; record owned by [08-events-and-connections.md](./08-events-and-connections.md) section 8.1): `id`, `type` (plugin-namespaced, e.g. `gmail`, `github`, `discord`, `slack`), `label` (user-facing name, e.g. "work"), `credentials` (secret references, owner `connection`), `status`, `config` (per-connection plugin config against the plugin's schema, e.g. the GitHub watched-repo list seeded from repo Resources), `labels[]` including the **default topic** chosen at setup, and for channel-type connections the user's notification-delivery toggle (the ADR 0012 sink toggle). Producer-side muting of a plugin's notifications is a plugin setting, not a connection field. A connected account can play two roles: event source (ingest) and Resource (a mailbox).
+Fields (pinned; record owned by [08-events-and-connections.md](./08-events-and-connections.md) section 8.1): `id`, `type` (the connection type's qualified id, e.g. `gmail/gmail`, `github/github`, `discord/discord`, `slack/slack`), `label` (user-facing name, e.g. "work"), `credentials` (secret references, owner `connection`), `status`, `config` (per-connection plugin config against the plugin's schema, e.g. the GitHub watched-repo list seeded from repo Resources), `labels[]` including the **default topic** chosen at setup, and for channel-type connections the user's notification-delivery toggle (the ADR 0012 sink toggle). Producer-side muting of a plugin's notifications is a plugin setting, not a connection field. A connected account can play two roles: event source (ingest) and Resource (a mailbox).
 
 Status axis (mirrored from 08, the minimum set the sources imply): `connected` | `needs-reauth` | `error` | `disabled`. Ingest runs only in `connected`.
 
@@ -511,7 +511,7 @@ Per plugin (pinned): `id` (from the manifest), `enabled` flag, `config` (validat
 
 Status axis: `enabled` / `disabled`. Disabling removes the plugin's contributions from use everywhere; workflows referencing them fail validation loudly.
 
-Identity: plugin id from the manifest; contributions are referenced by id across the system (a step names an action contribution, a binding names a channel contribution, a Connection names a connection type). Connection types are namespaced by their defining plugin.
+Identity: plugin id from the manifest; contributions are referenced by id across the system (a step names an action contribution, a binding names a channel contribution, a Connection names a connection type). A contribution id is the **qualified id** `<pluginId>/<word>`, minted by the host at registration ([ADR 0034](../adr/0034-a-catalog-contribution-is-identified-by-its-qualified-id.md)).
 
 ### Secret
 
@@ -557,7 +557,7 @@ Resolved 2026-09-01, [Domain model residue](https://github.com/rogierpennink/hyd
 - **`instanceId`, not provider id,** routes sessions; a Capability Snapshot is keyed by (instance, runner).
 - **Runner identity** is per enrollment: a re-enlisted machine is a new Runner; retired runners keep their records.
 - **Controller identity** is logical (id plus key material), never an address.
-- **Connection types and contributions** are namespaced by their defining plugin; the Connection itself is a Hydra id.
+- **Connection types and contributions** are identified by their qualified id `<pluginId>/<word>`, minted by the host ([ADR 0034](../adr/0034-a-catalog-contribution-is-identified-by-its-qualified-id.md)); the Connection itself is a Hydra id.
 - **Workspace ids** are controller-side; the path behind a workspace id is a runner-owned fact.
 - **`dedupKey`** is a plugin-supplied idempotency key per Connection, not an identity.
 
@@ -643,3 +643,4 @@ ADRs:
 - [ADR 0020 Assistant memory is reached only through the API](../adr/0020-assistant-memory-is-reached-only-through-the-api.md)
 - [ADR 0030 Sessions copy their configuration, and a Thread has no Agent](../adr/0030-sessions-copy-their-configuration-and-a-thread-has-no-agent.md)
 - [ADR 0032 Threads link the user's own material, live and wholesale](../adr/0032-threads-link-the-users-own-material.md)
+- [ADR 0034 A catalog contribution is identified by its qualified id](../adr/0034-a-catalog-contribution-is-identified-by-its-qualified-id.md)

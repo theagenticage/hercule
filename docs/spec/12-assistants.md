@@ -337,7 +337,7 @@ Declared in `register()` through `host.channels.register(contribution)`; the cor
 ```ts
 interface ChannelContribution {
   id: string                                   // "discord" | "slack"; what bindings, identities and sinks name
-  connectionType: string                       // the Connection type it services (section 11.5)
+  connectionType: string                       // the qualified id of the Connection type it services (section 11.5)
   scopeModel: { group: string[]; dm: string[] }   // container levels, outermost first (section 3)
   identityKeyFormat: string                    // human-readable, shown in Settings > Identities
   open(connection: ConnectionRef, host: ChannelHost): Promise<ChannelHandle>

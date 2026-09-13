@@ -256,7 +256,7 @@ Semantics: [./08-events-and-connections.md](./08-events-and-connections.md).
 
 | Operation | Input | Grant | Route |
 |---|---|---|---|
-| `connection.query` / `connection.read` | `{ type?, status? }` / `{ connectionId }` (status, labels, credential *references*) | `connection.read` | `GET /connections[/{id}]` |
+| `connection.query` / `connection.read` | `{ type?, status? }` (`type` is the qualified id, `github/github`) / `{ connectionId }` (status, labels, credential *references*) | `connection.read` | `GET /connections[/{id}]` |
 | `connection.create` / `update` / `delete` | record fields incl. labels and default topic | `connection.manage` | `POST` / `PATCH` / `DELETE /connections[/{id}]` |
 | `connection.setCredentials` | `{ connectionId, ... }` (values in, references out) | `connection.manage` | `POST /connections/{id}/credentials` |
 
