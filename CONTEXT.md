@@ -250,7 +250,7 @@ _Avoid_: hook
 A named thing a plugin provides into an extension point, referenced by its qualified id across the system: a workflow step names an action contribution, an assistant binds to a channel contribution. Registered in code, never listed in the manifest.
 
 **Qualified Id**:
-The identity of a catalog contribution: `<pluginId>/<word>`, where the plugin declares the bare word and the host prefixes its plugin id (`github/github`, `gmail/gmail`). Unique by construction, so two plugins may declare the same word; never parsed to find the owner.
+The identity of a catalog contribution: `<pluginId>/<word>`, where the plugin declares the bare word and the host prefixes its plugin id (`github/github`, `github/pr.merge`, `discord/discord`). Unique by construction, so two plugins may declare the same word; never parsed to find the owner. Not an event kind (`github.issue.opened`) and not an operation (`task.create`), which are namespaced their own way.
 _Avoid_: namespaced id, fully-qualified id (reserved for External Ref), type (bare)
 
 **Plugin Capability**:

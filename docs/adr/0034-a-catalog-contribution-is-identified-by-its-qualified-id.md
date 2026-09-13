@@ -19,6 +19,8 @@ That only works if a word has one owner across all installed plugins, and nothin
 - **Nobody parses the string.** Every lookup keys on the qualified form, and where the owning plugin is needed it comes from the registered catalog entry, not from splitting on the slash. The format is for humans reading a row, and for nothing else.
 - **The bare word may not contain `/`**, so the qualified form is unambiguous. That is the only validation the word carries.
 - **No boot-time uniqueness check exists**, because identity is unique by construction: two plugins may declare the same word and both load. Two Gmail plugins in a marketplace are a normal, supported situation and the user sees two connection types with two owners.
+- **Every kind of catalog contribution uses it**: connection types, workflow actions (`github/pr.merge`), channel contributions (`discord/discord`), provider definitions. One spelling for one concept; the dotted plugin prefix the tickets used (`github.merge`) is retired before anything ships with it.
+- **What is not a contribution id keeps its own spelling.** Event kinds are namespaced by source and stay dotted (`github.issue.opened`, `task.updated`); so do core operation ids, which the built-in workflow actions *are* (`task.create`, `workflow.run`, [spec 11](../spec/11-public-api-and-agent-surface.md) §1). A plugin-contributed action bound to a notification answer is named by its qualified id, like anywhere else.
 - **Request bodies carry the qualified id in the one field that already exists.** `connection.create` takes `type: "github/github"`; there is no second `pluginId` field, and a Connection row carries no separate plugin id.
 
 Analogy, for a reader who wants one: npm `@scope/name` and Docker `owner/image`. The scope is part of the name, not metadata beside it.
@@ -29,7 +31,7 @@ Analogy, for a reader who wants one: npm `@scope/name` and Docker `owner/image`.
 
 **Providers follow in their own ticket.** A provider id is not only a catalog key: it travels to runners in install and login payloads and keys the version-floor policy for harness installs, so moving it to the qualified form touches the controller-runner protocol ([ADR 0028](./0028-provider-harnesses-are-runner-installed-executables.md), [spec 15](../spec/15-packaging-and-operations.md) §12). Provider ids stay bare until that ticket, and until then the last-wins bug above stands, known.
 
-Workflow action and channel contribution ids are unaffected: they already carry the owning plugin as a dotted prefix (`github.merge`), a spelling [spec 05](../spec/05-plugins.md) §1 pins from the tickets. Whether the two spellings converge is not decided here.
+**Workflow action and channel contribution ids adopt it now, in the same PR.** They already carried the owning plugin, as a dotted prefix; nothing has shipped with that spelling, so converging costs a rename in the spec and nothing else. The word a plugin declares may still contain dots - the GitHub plugin declares `pr.merge` and the action is `github/pr.merge` - so the roster's shape survives; only the plugin prefix changes separator.
 
 ## Considered options
 

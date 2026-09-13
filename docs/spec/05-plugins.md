@@ -8,7 +8,7 @@ Hydra has one plugin concept. A plugin is a container that requests plugin capab
 - One plugin may contribute several things that share one configuration and one set of credentials. The `github` plugin contributes an event source and workflow actions; the `gmail` plugin likewise.
 - **Plugin capabilities** are what a plugin may *call*: named slices of the host API requested in the manifest and granted at load (section 5). **Contributions** are what a plugin *provides*: named things registered into extension points through the granted capability APIs (section 4). The manifest lists capabilities, never contributions.
 - The v1 extension points are fixed at four: **provider**, **channel**, **event source**, **workflow action**. Plugins cannot define new extension points. The notification sink is not a fifth point: it is an optional facet of a channel contribution (section 11).
-- Contribution ids are globally unique and qualified by the owning plugin. A catalog contribution is identified by its **qualified id**, `<pluginId>/<word>`: the plugin declares the bare word, the host mints the qualified form at registration, and that is the identity everywhere downstream ([ADR 0034](../adr/0034-a-catalog-contribution-is-identified-by-its-qualified-id.md)). Workflow action ids keep the dotted spelling the tickets use (`github.merge`); built-in core actions use that form without a plugin prefix (`task.create`). A workflow step names an action contribution by id; an assistant binding names a channel contribution by id.
+- A catalog contribution is identified by its **qualified id**, `<pluginId>/<word>`: the plugin declares the bare word, the host mints the qualified form at registration, and that is the identity everywhere downstream ([ADR 0034](../adr/0034-a-catalog-contribution-is-identified-by-its-qualified-id.md)). It holds for every extension point - connection types (`github/github`), workflow actions (`github/pr.merge`), channel contributions (`discord/discord`), provider definitions - so the dotted plugin prefix the tickets use (`github.merge`) is retired. The word may contain dots (`pr.merge`) but never a `/`. Built-in core actions are operations and keep the operation id (`task.create`, [./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md) section 1); event kinds are namespaced by source, not by this rule (`github.issue.opened`). A workflow step names an action contribution by id; an assistant binding names a channel contribution by id.
 - Everything a plugin defines that names things outside Hydra is namespaced by the plugin: connection types (declared `gmail`, `github`; identified `gmail/gmail`, `github/github`) and External Ref canonicalization (`github:issue:owner/repo#42`) are owned by the defining plugin ([ADR 0010](../adr/0010-external-accounts-are-core-owned-connections.md); Task provenance in [./09-tasks.md](./09-tasks.md)).
 
 ## 2. Manifest
@@ -107,7 +107,7 @@ The contribution is the act of registering a `ProviderDefinition`: the provider'
 
 A channel contribution makes one chat platform reachable. The TypeScript interface (`ChannelContribution`, `ChannelHost`, `ChannelHandle`, the inbound and outbound message shapes, the sink facet) is pinned in [./12-assistants.md](./12-assistants.md) section 11.1; the obligations at the boundary:
 
-- **Identity**: contribution id, the connection type it services (a Discord bot-token connection; a Slack connection holding a bot token and an app-level token), and its **scope model** - the container levels, outermost first, for group containers and DMs (Discord `guild > channel > thread` / `user`; Slack `channel > thread` / `user`). The scope model is catalog data: the binding editor and the core's binding matcher read it, so bindings validate while the plugin is disabled.
+- **Identity**: the contribution's qualified id (`discord/discord`), the connection type it services (a Discord bot-token connection; a Slack connection holding a bot token and an app-level token), and its **scope model** - the container levels, outermost first, for group containers and DMs (Discord `guild > channel > thread` / `user`; Slack `channel > thread` / `user`). The scope model is catalog data: the binding editor and the core's binding matcher read it, so bindings validate while the plugin is disabled.
 - **Inbound**: for each live connection, deliver every observed message to the core through `host.message()` with its container key (`{ kind, path }` of platform ids), the platform sender identity (plugin-formatted identity key, display name, bot and self flags), the text normalized to markdown, attachment links, and the mention facts it can see (explicit platform mention, reply-to-self). The core, not the plugin, resolves bindings, evaluates wake rules and roles, stores conversation messages and decides what is context and what is instruction ([./12-assistants.md](./12-assistants.md) section 4). Inbound chat messages are not pipeline Events ([ADR 0023](../adr/0023-chat-messages-are-conversation-input-not-events.md)).
 - **Outbound**: `send` a markdown message into a named container on the core's request, converting markup and splitting at the platform limit; `activity` renders a working indicator (Discord typing, Slack reaction). Outbound sends leave the core through outbox rows with retry ([./04-state-store.md](./04-state-store.md)).
 - **Conversation container**: the plugin defines how its platform's containers map to Hydra Conversations (Discord channel, thread or DM; Slack thread, DM or group DM - a top-level Slack mention opens a thread). One container = one Conversation, never merged ([ADR 0014](../adr/0014-assistants-remember-through-distilled-memory-not-merged-sessions.md)).
@@ -119,7 +119,7 @@ An event-source contribution ingests external facts ([ADR 0009](../adr/0009-all-
 
 ```ts
 interface EventSourceContribution {
-  id: string                                   // "github", "gmail"
+  id: string                                   // the bare word "github", "gmail"; identified as "github/github"
   connectionType: string                       // the qualified id of the Connection type it ingests for
   kinds: Record<string, KindDeclaration>       // "github.issue.opened" -> payload schema + description
   feeds?: Record<string, FeedDeclaration>      // named poll feeds; absent for purely push-driven sources
@@ -159,7 +159,7 @@ A workflow action is what an action step invokes ([ADR 0008](../adr/0008-workflo
 
 ```ts
 interface WorkflowActionContribution {
-  id: string                                   // "<plugin>.<entity>.<verb>", e.g. "github.pr.merge"
+  id: string                                   // the bare word "<entity>.<verb>", e.g. "pr.merge"; identified as "github/pr.merge"
   displayName: string
   description: string                          // shown in pickers; raw material for a bound action's describe line
   input: Schema
@@ -185,14 +185,14 @@ Rules at the boundary:
 - **No blocking waits**: an action that would wait for something external is instead expressed as a subscription-holding run, not an action that sleeps ([./07-workflows.md](./07-workflows.md)). This generalises ticket 16's no-blocking rule, stated for API endpoints, to action contributions.
 - **Single-purpose is the shipped convention, not a mechanism.** The v1 rosters below each do one external thing and return output; routing decisions belong in the graph. `ctx.api` is the escape hatch for deterministic logic (fan-out bookkeeping over a list) that would otherwise demand a pointless agent step; routing written into `execute()` is the smell the review bar catches.
 
-The v1 rosters (ids follow the operation vocabulary of [./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md); the Intake prototype's `github.merge` is spelled `github.pr.merge`):
+The v1 rosters (the words follow the entity-verb shape of the operation vocabulary in [./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md); the Intake prototype's `github.merge` is spelled `github/pr.merge`):
 
 | Plugin | Actions |
 |---|---|
-| `github` | `github.issue.read`, `github.issue.comment`, `github.issue.update` (labels, assignees, state); `github.pr.read`, `github.pr.comment`, `github.pr.review` (approve / request-changes / comment), `github.pr.update` (labels, reviewers, draft/ready, base), `github.pr.merge` (method, delete-branch), `github.pr.create` (from an already-pushed branch) |
-| `gmail` | `gmail.message.read` (full body, parsed text + html), `gmail.thread.read`, `gmail.message.search` (Gmail query syntax, headers only), `gmail.message.send`, `gmail.message.reply` (in-thread), `gmail.message.modify` (add/remove labels: archive, mark read, star) |
+| `github` | `github/issue.read`, `github/issue.comment`, `github/issue.update` (labels, assignees, state); `github/pr.read`, `github/pr.comment`, `github/pr.review` (approve / request-changes / comment), `github/pr.update` (labels, reviewers, draft/ready, base), `github/pr.merge` (method, delete-branch), `github/pr.create` (from an already-pushed branch) |
+| `gmail` | `gmail/message.read` (full body, parsed text + html), `gmail/thread.read`, `gmail/message.search` (Gmail query syntax, headers only), `gmail/message.send`, `gmail/message.reply` (in-thread), `gmail/message.modify` (add/remove labels: archive, mark read, star) |
 
-Anything git (clone, push, branch) is not an action: it happens in the run's workspace. Gmail bodies stay out of ingest and are fetched on demand through `gmail.message.read` / `gmail.thread.read` ([./08-events-and-connections.md](./08-events-and-connections.md) section 5.2).
+Anything git (clone, push, branch) is not an action: it happens in the run's workspace. Gmail bodies stay out of ingest and are fetched on demand through `gmail/message.read` / `gmail/thread.read` ([./08-events-and-connections.md](./08-events-and-connections.md) section 5.2).
 
 ## 5. Host API and plugin capabilities
 
