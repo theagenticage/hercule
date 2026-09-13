@@ -70,7 +70,7 @@ function QueuedRow({
         </Button>
       </div>
       {row.reason === null ? null : <p className="text-fine text-faint">{row.reason}</p>}
-      {failure === null || failure === undefined ? null : (
+      {failure === null ? null : (
         <p className="text-fine text-fail" role="alert">
           {messageOf(failure)}
         </p>

@@ -18,6 +18,9 @@ import {
   Unauthenticated,
   Validation,
 } from "../errors";
+
+/** The request vocabulary is the protocol's; the API hands it out unchanged. */
+export { ApprovalDecision, OpenRequest };
 import { Id, Timestamp } from "../ids";
 import { page, pageParams } from "../pagination";
 import { Authenticated } from "../security";

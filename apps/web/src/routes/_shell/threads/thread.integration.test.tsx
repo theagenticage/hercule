@@ -13,7 +13,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { formatDuration, formatStamp } from "@hydra/client-core";
+import { approvalCard, formatDuration, formatStamp } from "@hydra/client-core";
 import type {
   Input,
   ModelOption,
@@ -2049,5 +2049,218 @@ describe("Composer: what locked at start says why", () => {
     expect(screen.queryByRole("button", { name: /approval-required/i })).toBeNull();
     expect(screen.queryByRole("button", { name: /no workspace/i })).toBeNull();
     expect(screen.queryByRole("button", { name: RUNNER_STARTED.name })).toBeNull();
+  });
+});
+
+/**
+ * The permission card docked above the composer (spec 14 §The thread
+ * surface, ticket #70). Every word on it comes from `approvalCard` in
+ * `client-core`, so this test reads its labels from there rather than
+ * restating copy `apps/web` does not author.
+ */
+describe("Thread: the permission card", () => {
+  const REQUEST: NonNullable<Session["openRequest"]> = {
+    requestId: "req-1",
+    itemId: "tool3",
+    kind: "command_approval",
+    decisions: ["allow", "allow_always", "deny", "cancel"],
+    detail: { command: "ls -la" },
+  };
+
+  const QUESTIONS: NonNullable<Session["openRequest"]> = {
+    requestId: "req-2",
+    itemId: "tool3",
+    kind: "user_input",
+    decisions: ["deny", "cancel"],
+    detail: { questions: ["Which database should it use?"] },
+  };
+
+  /** A live turn whose one open item is the one `REQUEST` is about. */
+  const parkedRows = (): TranscriptRow[] => [
+    row(0, {
+      _tag: "turn.started",
+      eventId: "e0",
+      sessionId: SESSION_ID,
+      at: "2026-09-08T11:00:00.000Z",
+      turnId: "t3",
+    }),
+    row(1, {
+      _tag: "item.started",
+      eventId: "e1",
+      sessionId: SESSION_ID,
+      at: "2026-09-08T11:00:00.100Z",
+      turnId: "t3",
+      itemId: "u3",
+      kind: "user_message",
+      detail: { text: "List the files" },
+    }),
+    row(2, {
+      _tag: "item.completed",
+      eventId: "e2",
+      sessionId: SESSION_ID,
+      at: "2026-09-08T11:00:00.100Z",
+      turnId: "t3",
+      itemId: "u3",
+      kind: "user_message",
+      status: "completed",
+      detail: { text: "List the files" },
+    }),
+    row(3, {
+      _tag: "item.started",
+      eventId: "e3",
+      sessionId: SESSION_ID,
+      at: "2026-09-08T11:00:01.000Z",
+      turnId: "t3",
+      itemId: "tool3",
+      kind: "command_execution",
+      detail: { name: "Bash", input: { command: "ls -la" } },
+    }),
+  ];
+
+  /** One answer row of the card, matched by the text `client-core` gave it. */
+  const answer = (
+    request: NonNullable<Session["openRequest"]>,
+    decision: string,
+  ): ((name: string) => boolean) => {
+    const found = approvalCard(request).rows.find((each) => each.decision === decision);
+    if (found === undefined) throw new Error(`the card offers no ${decision} row`);
+    return (name: string) => name.includes(found.label) && name.includes(found.describe);
+  };
+
+  /** The composer's own card: the raised box the message goes in. */
+  const composerCard = (): HTMLElement => {
+    const found = screen.getByRole("textbox").closest<HTMLElement>('[class*="bg-raised"]');
+    if (found === null) throw new Error("the composer's card was not found");
+    return found;
+  };
+
+  it("docks the card above the composer, one row per offered decision and no copy in the transcript", async () => {
+    await open(session({ status: "busy", openRequest: REQUEST }), parkedRows());
+
+    const allow = await screen.findByRole("button", { name: answer(REQUEST, "allow") });
+    // One row per offered decision, and exactly one card: the transcript does
+    // not repeat it.
+    for (const decision of REQUEST.decisions) {
+      expect(
+        screen.getAllByRole("button", { name: answer(REQUEST, decision) }),
+        `${decision} does not render exactly once`,
+      ).toHaveLength(1);
+    }
+    // The card names the command the request is about.
+    expect(reading()).toContain("ls -la");
+
+    // In the sticky foot, above the composer.
+    const foot = allow.closest<HTMLElement>('[class*="sticky"]');
+    expect(foot, "the card is not in the sticky foot").not.toBeNull();
+    expect(foot?.contains(composerCard())).toBe(true);
+    expect(
+      allow.compareDocumentPosition(composerCard()) & Node.DOCUMENT_POSITION_FOLLOWING,
+      "the composer does not follow the card",
+    ).toBeTruthy();
+
+    // The composer squares its top corners under the card rather than keeping
+    // its own 14px radius all round (spec 14 §Measurements). Whether it looks
+    // flush is the residual manual check; the class is what jsdom can say.
+    expect(composerCard().className).not.toContain("rounded-[14px]");
+    expect(composerCard().className).toMatch(/rounded-\[0|rounded-t-none|rounded-b-/);
+  });
+
+  it("posts the clicked decision once and drops the card when the record's open request clears", async () => {
+    const user = userEvent.setup();
+    let current = session({ status: "busy", openRequest: REQUEST });
+    const api = stubApi({
+      ...controller(current, parkedRows()),
+      [`GET /api/v1/sessions/${SESSION_ID}`]: () => ({ body: current }),
+      // The controller answers with the request still open: only the runner
+      // reporting `request.resolved` clears it (AC-3).
+      [`POST /api/v1/sessions/${SESSION_ID}/respond`]: { body: current },
+    });
+    const { live } = await renderApp({
+      path: `/threads/${SESSION_ID}`,
+      api: api.fetch,
+      token: "held",
+    });
+
+    await user.click(await screen.findByRole("button", { name: answer(REQUEST, "allow") }));
+
+    await waitFor(() => {
+      expect(api.calls.filter((call) => call.path.endsWith("/respond"))).toHaveLength(1);
+    });
+    expect(api.calls.find((call) => call.path.endsWith("/respond"))).toMatchObject({
+      method: "POST",
+      body: { requestId: REQUEST.requestId, decision: "allow" },
+    });
+
+    // The card goes when the record does, not when the click happens.
+    expect(screen.getByRole("button", { name: answer(REQUEST, "allow") })).toBeDefined();
+    current = session({ status: "busy", openRequest: null });
+    await waitFor(() => {
+      expect(live.topics()).toContain("session");
+    });
+    act(() => {
+      live.push("session", { _tag: "invalidate", ids: [SESSION_ID], kind: "updated" });
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByRole("button", { name: answer(REQUEST, "allow") })).toBeNull();
+    });
+  });
+
+  it("takes one answer only: a second click while the request is still open sends nothing", async () => {
+    const user = userEvent.setup();
+    const current = session({ status: "busy", openRequest: REQUEST });
+    const api = stubApi({
+      ...controller(current, parkedRows()),
+      [`POST /api/v1/sessions/${SESSION_ID}/respond`]: { body: current },
+    });
+    await renderApp({ path: `/threads/${SESSION_ID}`, api: api.fetch, token: "held" });
+
+    const allow = await screen.findByRole("button", { name: answer(REQUEST, "allow") });
+    await user.click(allow);
+    await waitFor(() => {
+      expect(api.calls.filter((call) => call.path.endsWith("/respond"))).toHaveLength(1);
+    });
+
+    // The card is still up - only the runner clears it - but it has had its
+    // answer, and a contradictory second one would be sent and audited.
+    await user.click(screen.getByRole("button", { name: answer(REQUEST, "deny") }));
+    await user.click(allow);
+
+    expect(api.calls.filter((call) => call.path.endsWith("/respond"))).toHaveLength(1);
+  });
+
+  it("reads the item the request is about as awaiting approval, in the attention hue", async () => {
+    const user = userEvent.setup();
+    await open(session({ status: "busy", openRequest: REQUEST }), parkedRows());
+
+    await user.click(await screen.findByRole("button", { name: /^Working for/ }));
+
+    const line = screen.getByText(/awaiting approval/);
+    expect(reading(line)).toBe("command · ls -la · awaiting approval");
+    expect(line.className).toContain("text-attn");
+    expect(reading()).not.toContain("· running");
+  });
+
+  it("renders no card when the record carries no open request", async () => {
+    await open(session({ status: "busy", openRequest: null }), parkedRows());
+
+    await screen.findByRole("textbox");
+    expect(screen.queryByRole("button", { name: answer(REQUEST, "allow") })).toBeNull();
+    // With nothing docked above it the composer keeps its own radius.
+    expect(composerCard().className).toContain("rounded-[14px]");
+  });
+
+  it("shows a user_input's questions with deny and cancel only, and says answering is not built", async () => {
+    await open(session({ status: "busy", openRequest: QUESTIONS }), parkedRows());
+
+    await screen.findByRole("button", { name: answer(QUESTIONS, "deny") });
+    expect(screen.getByRole("button", { name: answer(QUESTIONS, "cancel") })).toBeDefined();
+    expect(screen.queryByRole("button", { name: answer(REQUEST, "allow") })).toBeNull();
+    expect(screen.queryByRole("button", { name: answer(REQUEST, "allow_always") })).toBeNull();
+
+    const text = reading();
+    expect(text).toContain("Which database should it use?");
+    expect(text).toMatch(/not built/i);
+    expect(text).toMatch(/reply/i);
   });
 });

@@ -125,7 +125,9 @@ export {
   VersionVerdict,
 } from "./groups/provider";
 export {
+  ApprovalDecision,
   MAX_PROMPT_LENGTH,
+  OpenRequest,
   SESSION_CONTINUE_FIELDS,
   SESSION_INPUT_FIELDS,
   SESSION_RESPOND_FIELDS,

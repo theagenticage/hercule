@@ -725,3 +725,74 @@ describe("turnsOf", () => {
     expect(turns[0]!.user).toContain("Also check auth.ts");
   });
 });
+
+/**
+ * The item a session is parked on reads `awaiting approval` in place of
+ * `running`, so the transcript line for `openRequest.itemId` says what the
+ * card above the composer is asking about (ticket #70).
+ */
+describe("turnsOf: the item an open request is about", () => {
+  const parkedRows = (): TranscriptRow[] => [
+    row({
+      _tag: "turn.started",
+      eventId: nextId(),
+      sessionId: SESSION_ID,
+      at: "2026-09-08T17:00:00.000Z",
+      turnId: "t9",
+    }),
+    row({
+      _tag: "item.started",
+      eventId: nextId(),
+      sessionId: SESSION_ID,
+      at: "2026-09-08T17:00:01.000Z",
+      turnId: "t9",
+      itemId: "tool9",
+      kind: "command_execution",
+      detail: { name: "Bash", input: { command: "ls -la" } },
+    }),
+    row({
+      _tag: "item.started",
+      eventId: nextId(),
+      sessionId: SESSION_ID,
+      at: "2026-09-08T17:00:02.000Z",
+      turnId: "t9",
+      itemId: "tool10",
+      kind: "file_change",
+      detail: { input: { file_path: "src/auth.ts" } },
+    }),
+  ];
+
+  it("reads the item named by the open request as awaiting approval, and only that one", () => {
+    const items = turnsOf(parkedRows(), "tool9")[0]!.items;
+
+    expect(items.find((item) => item.itemId === "tool9")!.result).toBe("awaiting approval");
+    expect(items.find((item) => item.itemId === "tool10")!.result).toBe("running");
+  });
+
+  it("reads every open item as running when no request is open", () => {
+    const items = turnsOf(parkedRows())[0]!.items;
+
+    expect(items.map((item) => item.result)).toEqual(["running", "running"]);
+  });
+
+  it("leaves a settled item at its own status, whatever the open request names", () => {
+    const rows = [
+      ...parkedRows(),
+      row({
+        _tag: "item.completed",
+        eventId: nextId(),
+        sessionId: SESSION_ID,
+        at: "2026-09-08T17:00:03.000Z",
+        turnId: "t9",
+        itemId: "tool9",
+        kind: "command_execution",
+        status: "completed",
+        detail: { name: "Bash", input: { command: "ls -la" } },
+      }),
+    ];
+
+    expect(turnsOf(rows, "tool9")[0]!.items.find((item) => item.itemId === "tool9")!.result).toBe(
+      "completed",
+    );
+  });
+});

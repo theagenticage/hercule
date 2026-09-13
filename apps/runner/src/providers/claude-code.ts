@@ -575,7 +575,13 @@ export const claudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
           settle(resultFor("deny", []));
           return;
         }
-        const persists = options.suggestions ?? [];
+        // An "allow always" is an answer about this thread, not about the
+        // user's machine: whatever the harness offered to persist is rewritten
+        // to the session so no click here edits a settings file on disk.
+        const persists = (options.suggestions ?? []).map((rule) => ({
+          ...rule,
+          destination: "session" as const,
+        }));
         // Withdrawn before it was ever asked: the turn is already being
         // interrupted, so there is nothing to put in front of the user.
         if (options.signal.aborted) {

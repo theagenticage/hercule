@@ -1108,6 +1108,42 @@ describe("a tool call the harness has to ask about", () => {
     expect(resolutionsIn(run.seen)).toEqual([{ requestId: request.requestId, decision: "allow" }]);
   });
 
+  it("persists an allow-always rule against the session, never the user's settings files", async () => {
+    const run = await asking();
+    const { park, request } = await parked(
+      run,
+      "Bash",
+      { command: "ls -la" },
+      {
+        suggestions: [
+          {
+            type: "addRules",
+            rules: [{ toolName: "Bash", ruleContent: "ls:*" }],
+            behavior: "allow",
+            destination: "userSettings",
+          },
+        ],
+      },
+    );
+
+    await respond(run, request.requestId, "allow_always");
+
+    await until("resolved the park", () => park.settled() !== undefined);
+    const settled = park.settled();
+    const persisted =
+      settled !== null && settled !== undefined && settled.behavior === "allow"
+        ? (settled.updatedPermissions ?? [])
+        : [];
+    expect(persisted).toEqual([
+      {
+        type: "addRules",
+        rules: [{ toolName: "Bash", ruleContent: "ls:*" }],
+        behavior: "allow",
+        destination: "session",
+      },
+    ]);
+  });
+
   it("persists the harness's own rule on an allow always", async () => {
     const run = await asking();
     const { park, request } = await parked(

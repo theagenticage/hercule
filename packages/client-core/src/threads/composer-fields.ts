@@ -115,7 +115,10 @@ export const composerFields = (
     accessMode: {
       locked: lockedReason(kind, "access mode"),
       value: config.accessMode,
-      rows: instance === undefined ? [] : accessModeMenu(instance.declared.accessModes),
+      rows:
+        instance === undefined
+          ? []
+          : accessModeMenu(instance.declared.accessModes, instance.displayName),
     },
     model: {
       pill: {

@@ -78,6 +78,7 @@ export {
 export { THREAD_ROWS_DEFAULT, threadRowsMode } from "./thread-rows";
 export { accessModeMenu, type AccessModeMenuItem } from "./threads/access-modes";
 export { ageOf } from "./threads/age";
+export { approvalCard, type ApprovalRow } from "./threads/approval";
 export { applyPick, type ComposerPick } from "./threads/apply-pick";
 export type { LoginTarget } from "./threads/catalog";
 export {
