@@ -40,6 +40,14 @@ const TOKENS: Ref = {
   createdAt: "2026-09-02T09:30:00.000Z",
 };
 
+/** The controller's own key material, which no user write may touch. */
+const SIGNING_KEY: Ref = {
+  ownerKind: "core",
+  ownerId: "controller",
+  name: "controller.signing-key",
+  createdAt: "2026-08-20T06:00:00.000Z",
+};
+
 /** A plugin-owned secret: a second owner, of a second kind. */
 const CLIENT_SECRET: Ref = {
   ownerKind: "plugin",
@@ -277,6 +285,16 @@ describe("Settings > Secrets > setting one", () => {
     });
     expect(reading()).not.toContain("jt-never-shown-771");
     expect(screen.queryByDisplayValue("jt-never-shown-771")).toBeNull();
+  });
+
+  it("offers nothing to do to the controller's own key material", async () => {
+    await open([PAT, SIGNING_KEY]);
+
+    const core = await rowFor(SIGNING_KEY);
+    expect(within(core).queryByRole("button", { name: "Rotate" })).toBeNull();
+    expect(within(core).queryByRole("button", { name: "Delete" })).toBeNull();
+    // The rows that may be written still offer both.
+    expect(within(await rowFor(PAT)).getByRole("button", { name: "Rotate" })).toBeDefined();
   });
 
   it("offers the owner kinds a user may write, and not the controller's own", async () => {

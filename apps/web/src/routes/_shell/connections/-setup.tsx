@@ -1,6 +1,6 @@
 import { useState, type FormEvent, type JSX } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Button, Field, Input } from "@hydra/ui";
+import { Button, Field, Input, LaneLabel } from "@hydra/ui";
 import {
   configIssues,
   queryKeys,
@@ -86,9 +86,15 @@ export function ConnectionSetup({
   const issues = configIssues(submit.error, fields, "credentials");
   const failure = issues.rest ? submit.error : null;
 
+  // The same column the rows and the offers sit in: a form that spans the
+  // whole content width would be the one thing on the screen that does.
+  const column = "max-w-[560px]";
+  const heading = `${connection === undefined ? "Connect" : "Reconnect"} ${type.displayName}`;
+
   if (!redirects && fields.length === 0) {
     return (
-      <div className="flex flex-col items-start gap-1.5 text-row text-muted">
+      <div className={`flex flex-col items-start gap-1.5 text-row text-muted ${column}`}>
+        <LaneLabel>{heading}</LaneLabel>
         <p>
           {type.setup.some((step) => step.kind === "pairing")
             ? "Pairing a chat account is not built yet."
@@ -108,7 +114,12 @@ export function ConnectionSetup({
   };
 
   return (
-    <form className="flex flex-col gap-3" onSubmit={send}>
+    <form className={`flex flex-col gap-3 ${column}`} onSubmit={send}>
+      {/* The offers it replaced are gone, so the form says what is being set
+          up, in the same voice as the lane labels around it. */}
+      <div className="-mb-2.5">
+        <LaneLabel>{heading}</LaneLabel>
+      </div>
       {type.setup.map((step, index) =>
         step.kind === "checklist" ? (
           // A checklist is the provider's own instructions, in their words.

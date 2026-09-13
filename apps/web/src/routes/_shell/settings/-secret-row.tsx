@@ -74,26 +74,33 @@ export function SecretRow({
           {secret.rotatedAt === undefined ? "set" : "rotated"}{" "}
           {formatStamp(new Date(written), timezone) ?? written}
         </span>
-        <div className="flex items-center gap-1.5">
-          <Button
-            disabled={rotating || rotate.isPending}
-            onClick={() => {
-              remove.reset();
-              setRotating(true);
-            }}
-          >
-            Rotate
-          </Button>
-          <Button
-            disabled={confirmingDelete || remove.isPending}
-            onClick={() => {
-              rotate.reset();
-              setConfirmingDelete(true);
-            }}
-          >
-            Delete
-          </Button>
-        </div>
+        {/* The controller's own key material is written by the controller and
+            by nothing else: the service refuses both writes, so neither is
+            offered. */}
+        {secret.ownerKind === "core" ? (
+          <span className="text-fine text-faint">controller key</span>
+        ) : (
+          <div className="flex items-center gap-1.5">
+            <Button
+              disabled={rotating || rotate.isPending}
+              onClick={() => {
+                remove.reset();
+                setRotating(true);
+              }}
+            >
+              Rotate
+            </Button>
+            <Button
+              disabled={confirmingDelete || remove.isPending}
+              onClick={() => {
+                rotate.reset();
+                setConfirmingDelete(true);
+              }}
+            >
+              Delete
+            </Button>
+          </div>
+        )}
       </div>
 
       {rotating ? (

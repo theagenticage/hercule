@@ -333,6 +333,8 @@ describe("Connections > setting one up", () => {
       within(await offerFor("Paper Trail")).getByRole("button", { name: "Connect" }),
     );
 
+    // The offers it replaced are gone, so the form names what is being set up.
+    expect(reading()).toContain("Connect Paper Trail");
     expect(reading()).toContain(CHECKLIST);
     expect(screen.getByLabelText<HTMLInputElement>("Access token").type).toBe("password");
     expect(screen.getByLabelText("Label")).toBeDefined();
@@ -467,6 +469,7 @@ describe("Connections > reconnecting and removing", () => {
     });
 
     await user.click(within(await rowFor(STALE)).getByRole("button", { name: "Reconnect" }));
+    expect(reading()).toContain("Reconnect Paper Trail");
     await user.type(await screen.findByLabelText("Access token"), "pt-secret-fresh");
     await user.click(within(formWith("Access token")).getByRole("button", { name: "Connect" }));
 

@@ -38,18 +38,22 @@ function Secrets(): JSX.Element {
       ) : (
         <section>
           <LaneLabel>Stored</LaneLabel>
-          <Group>
-            <ul className="flex flex-col">
-              {secrets.map((secret) => (
-                <SecretRow
-                  key={`${secret.ownerKind}/${secret.ownerId}/${secret.name}`}
-                  client={client}
-                  secret={secret}
-                  timezone={timezone}
-                />
-              ))}
-            </ul>
-          </Group>
+          {/* Settings is a column of 520px cards, which a list of rows sits
+              in rather than beside. */}
+          <div className="max-w-[520px]">
+            <Group>
+              <ul className="flex flex-col">
+                {secrets.map((secret) => (
+                  <SecretRow
+                    key={`${secret.ownerKind}/${secret.ownerId}/${secret.name}`}
+                    client={client}
+                    secret={secret}
+                    timezone={timezone}
+                  />
+                ))}
+              </ul>
+            </Group>
+          </div>
         </section>
       )}
 

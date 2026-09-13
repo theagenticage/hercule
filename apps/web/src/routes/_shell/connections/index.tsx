@@ -129,8 +129,9 @@ function Connections(): JSX.Element {
               </ul>
             </Group>
           </section>
+          {/* While a setup is open it carries its own label, naming the type. */}
           <section>
-            <LaneLabel>Connect another</LaneLabel>
+            {chosen === undefined ? <LaneLabel>Connect another</LaneLabel> : null}
             {offers}
           </section>
         </>
