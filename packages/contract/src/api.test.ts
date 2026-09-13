@@ -77,8 +77,8 @@ describe("the HttpApi declaration", () => {
 });
 
 /**
- * The Task, Project, Event, Runner, Plugin and Controller operations: the
- * operation table row and the endpoint that answers it.
+ * The Task, Project, Event, Runner, Plugin, Session and Controller operations:
+ * the operation table row and the endpoint that answers it.
  */
 const NEW_OPERATIONS = [
   { id: "task.query", requires: "task.read", method: "GET", path: "/api/v1/tasks" },
@@ -155,6 +155,12 @@ const NEW_OPERATIONS = [
     requires: "infra.write",
     method: "PUT",
     path: "/api/v1/plugins/:id/config",
+  },
+  {
+    id: "session.respond",
+    requires: "session.steer",
+    method: "POST",
+    path: "/api/v1/sessions/:id/respond",
   },
   {
     id: "controller.update",

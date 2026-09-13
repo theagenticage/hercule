@@ -56,6 +56,10 @@ _Avoid_: recipe, definition (for this), workflow instance
 One user-visible episode of a session: from a user input until the agent goes idle. Contains any number of model calls and tool executions; ends by stopping (completed, failed, interrupted), never by replying once.
 _Avoid_: exchange, round, iteration
 
+**Request**:
+A provider-held question a session is parked on until a decision arrives: an approval or a user-input ask; answered by `session.respond` with allow / allow always / deny / cancel.
+_Avoid_: permission request (reserved for grant escalation), approval prompt, tool prompt
+
 **Steering**:
 Delivering user input into a session's running turn, folding it into that turn instead of opening a new one.
 _Avoid_: interrupt (that's stopping a turn), inject

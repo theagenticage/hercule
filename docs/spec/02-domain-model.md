@@ -174,6 +174,7 @@ Fields (pinned across [#6](https://github.com/rogierpennink/hydra/issues/6), [#7
 | `nativeSessionId` | from the Session Binding, below |
 | `taskId`, `runId` + `stepId`, `conversationId` | all optional; a session may belong to none |
 | `parentSessionId` | optional; set when the session was forked from another session (`continue.mode = fork`) |
+| `openRequest` | optional; the Request the harness is parked on - `{ requestId, itemId, kind, decisions, detail }` ([06-providers.md](./06-providers.md) section 6.5), at most one at a time; written by the normalized stream, `null` when nothing is waiting. *(Added 2026-09-13, [#70](https://github.com/rogierpennink/hydra/issues/70).)* |
 | timestamps | `createdAt`, `startedAt`, `exitedAt`, `lastActivityAt` (inactivity and absolute timeouts themselves are runner-owned) |
 
 Session-only grants approved through a Permission Request attach to the Session (see Grant).

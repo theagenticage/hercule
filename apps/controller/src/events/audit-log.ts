@@ -67,6 +67,7 @@ export const AUDIT_KINDS = [
   "provider.loggedIn",
   "session.spawned",
   "session.interrupted",
+  "session.responded",
   "session.stopped",
   "session.continued",
   "session.reconciled",

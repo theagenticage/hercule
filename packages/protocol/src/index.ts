@@ -17,6 +17,7 @@ import {
   SessionInput,
   SessionInputResult,
   SessionInterrupt,
+  SessionRespond,
   SessionsReport,
   SessionStart,
   SessionStop,
@@ -511,6 +512,7 @@ export const ControllerToRunner = Schema.Union([
   SessionStop,
   SessionInput,
   SessionInterrupt,
+  SessionRespond,
 ]);
 
 export type ControllerToRunner = Schema.Schema.Type<typeof ControllerToRunner>;

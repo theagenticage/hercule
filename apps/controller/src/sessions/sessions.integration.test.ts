@@ -29,6 +29,8 @@ import {
   type SessionStart,
   type SessionStop as SessionStopFrame,
   type SessionInput,
+  type OpenRequest,
+  type SessionRespond as SessionRespondFrame,
 } from "@hydra/protocol";
 import type { Plugin, ProviderDefinition } from "@hydra/plugin-host";
 import type { Profile, Runner, Session } from "@hydra/contract";
@@ -76,8 +78,26 @@ const LIMITED: ProviderDefinition = {
   },
 };
 
+/**
+ * A provider that declares no access mode at all: the floor of the fallback,
+ * where even `approval-required` is not native and there is nothing below the
+ * request to substitute.
+ */
+const BARE: ProviderDefinition = {
+  ...providerDefinition("bare-provider", { token: "t" }),
+  declared: {
+    ...providerDefinition("bare-provider").declared,
+    accessModes: {
+      "approval-required": "unsupported",
+      "auto-accept-edits": "unsupported",
+      auto: "unsupported",
+      "full-access": "unsupported",
+    },
+  },
+};
+
 const registry = (): ReadonlyArray<Plugin> => [
-  fixture({ id: "providers", definitions: [FULL, LIMITED] }).plugin,
+  fixture({ id: "providers", definitions: [FULL, LIMITED, BARE] }).plugin,
 ];
 
 const FACTS: RunnerFacts = {
@@ -87,7 +107,7 @@ const FACTS: RunnerFacts = {
   docker: false,
   toolchains: [],
   providers: [{ name: "harness", present: true, path: "/usr/local/bin/harness" }],
-  adapters: ["full-provider", "limited-provider"],
+  adapters: ["full-provider", "limited-provider", "bare-provider"],
   identityPort: 4939,
 };
 
@@ -461,6 +481,28 @@ describe("session.spawn", () => {
       const start = (await framesWhen<SessionStart>(arranged.wire, "sessionStart", 1))[0]!;
       // The runner is told the mode it will really run, never the request.
       expect(start.spec.accessMode).toBe("auto-accept-edits");
+    });
+  });
+
+  it("refuses the spawn where the provider supports no mode at or below the request", async () => {
+    await withFleet(async (arranged) => {
+      const response = await spawn(arranged, {
+        prompt: "hello",
+        instanceId: instanceOf(arranged, "bare-provider"),
+        accessMode: "auto",
+      });
+
+      const said = await response.clone().text();
+      expect(response.status, said).toBe(409);
+      expect((await refusal(response)).code).toBe("invalid_state");
+      // The refusal names what was asked for and who could not give it, so the
+      // user is never left guessing which of the two to change.
+      expect(said).toContain("auto");
+      expect(said).toContain("Provider bare-provider");
+      // Nothing was substituted and nothing was started.
+      expect(await sessionsOf(arranged)).toEqual([]);
+      await delay(250);
+      expect(framesOf<SessionStart>(arranged.wire, "sessionStart")).toEqual([]);
     });
   });
 
@@ -3325,6 +3367,233 @@ describe("session.continue: the modes it takes", () => {
 
       expect(resumed.status, await resumed.clone().text()).toBe(400);
       expect((await refusal(resumed)).code).toBe("validation");
+    });
+  });
+});
+
+/**
+ * The approval seam from the user's end: a machine reports a request it has
+ * parked on, the request lands on the session row the client already refetches,
+ * and the user's answer crosses the wire as one frame. It refuses every answer
+ * it cannot place: a stale request id, no request at all, an answer the request
+ * does not offer, a session that has gone, and a machine that is not there to
+ * hear it.
+ */
+const REQUEST_ID = "req-1";
+
+const DECISIONS = ["allow", "allow_always", "deny", "cancel"] as const;
+
+const respond = (arranged: Arranged, id: string, body: unknown): Promise<Response> =>
+  post(arranged.harness.base, `/api/v1/sessions/${id}/respond`, body, arranged.token);
+
+const responds = (wire: Wire): ReadonlyArray<SessionRespondFrame> =>
+  framesOf<SessionRespondFrame>(wire, "sessionRespond");
+
+/**
+ * A session inside a running turn, parked on one open command approval. The
+ * answers it offers are a parameter because a request that offers fewer is the
+ * whole of the unoffered-decision case.
+ */
+const parked = async (
+  arranged: Arranged,
+  decisions: OpenRequest["decisions"] = DECISIONS,
+): Promise<Session> => {
+  const session = await started(arranged, "hello");
+  report(arranged.wire, 2, {
+    eventId: crypto.randomUUID(),
+    sessionId: session.id,
+    at,
+    _tag: "turn.started",
+    turnId: "t1",
+  });
+  report(arranged.wire, 3, {
+    eventId: crypto.randomUUID(),
+    sessionId: session.id,
+    at,
+    _tag: "request.opened",
+    request: {
+      requestId: REQUEST_ID,
+      itemId: "i1",
+      kind: "command_approval",
+      decisions,
+      detail: { command: "ls -la" },
+    },
+  });
+  return await sessionWhen(
+    arranged,
+    session.id,
+    (one) => one.openRequest?.requestId === REQUEST_ID,
+  );
+};
+
+describe("session.respond", () => {
+  it.each(DECISIONS)(
+    "sends %s to the machine once, and leaves the request open until it says so",
+    async (decision) => {
+      await withFleet(async (arranged) => {
+        const session = await parked(arranged);
+
+        const response = await respond(arranged, session.id, {
+          requestId: REQUEST_ID,
+          decision,
+        });
+
+        expect(response.status, await response.clone().text()).toBe(200);
+        const answered = (await response.json()) as Session;
+        expect(answered.id).toBe(session.id);
+        expect(answered.openRequest).toMatchObject({ requestId: REQUEST_ID });
+
+        const sent = await framesWhen<SessionRespondFrame>(arranged.wire, "sessionRespond", 1);
+        expect(sent).toHaveLength(1);
+        expect(sent[0]).toMatchObject({
+          sessionId: session.id,
+          requestId: REQUEST_ID,
+          decision,
+        });
+
+        const entries = await arranged.harness.audit("session.responded");
+        expect(entries).toHaveLength(1);
+        expect(entries[0]?.actor).toBe("user");
+      });
+    },
+  );
+
+  it("clears the open request when the machine reports it resolved", async () => {
+    await withFleet(async (arranged) => {
+      const session = await parked(arranged);
+      const response = await respond(arranged, session.id, {
+        requestId: REQUEST_ID,
+        decision: "allow",
+      });
+      expect(response.status, await response.clone().text()).toBe(200);
+      await framesWhen<SessionRespondFrame>(arranged.wire, "sessionRespond", 1);
+
+      report(arranged.wire, 4, {
+        eventId: crypto.randomUUID(),
+        sessionId: session.id,
+        at,
+        _tag: "request.resolved",
+        requestId: REQUEST_ID,
+        decision: "allow",
+      });
+
+      const cleared = await sessionWhen(arranged, session.id, (one) => one.openRequest === null);
+      expect(cleared.openRequest).toBeNull();
+    });
+  });
+
+  it("clears the park when the machine reports it no longer holds the session", async () => {
+    await withFleet(async (arranged) => {
+      const session = await parked(arranged);
+      arranged.wire.close();
+      await wentAway(arranged);
+      const again = await arranged.reconnect();
+      again.send({ _tag: "sessionsReport", sessions: [] });
+
+      const gone = await sessionWhen(arranged, session.id, (one) => one.status === "exited");
+
+      // An answer to a park nobody holds would name a request no harness ever
+      // minted, so the request goes when the session it belonged to does.
+      expect(gone.openRequest).toBeNull();
+    });
+  });
+
+  it("refuses a request id that is not the open one, and tells the machine nothing", async () => {
+    await withFleet(async (arranged) => {
+      const session = await parked(arranged);
+
+      const response = await respond(arranged, session.id, {
+        requestId: "req-somebody-else",
+        decision: "allow",
+      });
+
+      expect(response.status, await response.clone().text()).toBe(409);
+      expect((await refusal(response)).code).toBe("invalid_state");
+      await delay(250);
+      expect(responds(arranged.wire)).toEqual([]);
+      // The request the machine is really parked on is untouched.
+      expect((await readSession(arranged, session.id)).openRequest).toMatchObject({
+        requestId: REQUEST_ID,
+      });
+      expect(await arranged.harness.audit("session.responded")).toHaveLength(0);
+    });
+  });
+
+  it("refuses an answer to a session with no open request", async () => {
+    await withFleet(async (arranged) => {
+      const session = await started(arranged, "hello");
+      expect(session.openRequest).toBeNull();
+
+      const response = await respond(arranged, session.id, {
+        requestId: REQUEST_ID,
+        decision: "allow",
+      });
+
+      expect(response.status, await response.clone().text()).toBe(409);
+      expect((await refusal(response)).code).toBe("invalid_state");
+      await delay(250);
+      expect(responds(arranged.wire)).toEqual([]);
+      expect(await arranged.harness.audit("session.responded")).toHaveLength(0);
+    });
+  });
+
+  it("refuses a decision the open request does not offer, and sends nothing", async () => {
+    await withFleet(async (arranged) => {
+      // A request that may persist no rule offers no `allow_always`: answering
+      // it as one cannot be quietly narrowed to a plain allow.
+      const session = await parked(arranged, ["allow", "deny", "cancel"]);
+
+      const response = await respond(arranged, session.id, {
+        requestId: REQUEST_ID,
+        decision: "allow_always",
+      });
+
+      expect(response.status, await response.clone().text()).toBe(400);
+      expect((await refusal(response)).code).toBe("validation");
+      await delay(250);
+      expect(responds(arranged.wire)).toEqual([]);
+      expect(await arranged.harness.audit("session.responded")).toHaveLength(0);
+      // The offered answers still stand, so the card can be answered properly.
+      expect((await readSession(arranged, session.id)).openRequest).toMatchObject({
+        decisions: ["allow", "deny", "cancel"],
+      });
+    });
+  });
+
+  it("refuses a session that has exited, and tells the machine nothing", async () => {
+    await withFleet(async (arranged) => {
+      const session = await parked(arranged);
+      exited(arranged.wire, session.id, 4);
+      await sessionWhen(arranged, session.id, (one) => one.status === "exited");
+
+      const response = await respond(arranged, session.id, {
+        requestId: REQUEST_ID,
+        decision: "deny",
+      });
+
+      expect(response.status, await response.clone().text()).toBe(409);
+      expect((await refusal(response)).code).toBe("invalid_state");
+      await delay(250);
+      expect(responds(arranged.wire)).toEqual([]);
+      expect(await arranged.harness.audit("session.responded")).toHaveLength(0);
+    });
+  });
+
+  it("refuses the answer when the machine holding the park is gone", async () => {
+    await withFleet(async (arranged) => {
+      const session = await parked(arranged);
+      arranged.wire.close();
+      await wentAway(arranged);
+
+      const response = await respond(arranged, session.id, {
+        requestId: REQUEST_ID,
+        decision: "allow",
+      });
+
+      expect(response.status, await response.clone().text()).toBe(409);
+      expect((await refusal(response)).code).toBe("invalid_state");
+      expect(responds(arranged.wire)).toEqual([]);
+      expect(await arranged.harness.audit("session.responded")).toHaveLength(0);
     });
   });
 });

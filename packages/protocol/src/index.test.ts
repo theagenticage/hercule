@@ -177,6 +177,12 @@ const controllerMessages: ReadonlyArray<ControllerMessage> = [
     input: { text: "ship it" },
   },
   { _tag: "sessionInterrupt", sessionId: SESSION_ID },
+  {
+    _tag: "sessionRespond",
+    sessionId: SESSION_ID,
+    requestId: "0199e0e7-0000-7000-8000-00000000000f",
+    decision: "allow_always",
+  },
 ];
 
 describe("the protocol version", () => {

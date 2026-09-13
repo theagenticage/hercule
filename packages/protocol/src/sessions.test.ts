@@ -94,7 +94,28 @@ const events: ReadonlyArray<Event> = [
   },
   { _tag: "runtime.warning", ...baseFields, message: "retrying after a 529" },
   { _tag: "runtime.error", ...baseFields, class: "ContextWindowExceeded", message: "too long" },
+  {
+    _tag: "request.opened",
+    ...baseFields,
+    request: {
+      requestId: "r1",
+      itemId: "i1",
+      kind: "command_approval",
+      decisions: ["allow", "allow_always", "deny", "cancel"],
+      detail: { command: "ls -la" },
+    },
+  },
+  { _tag: "request.resolved", ...baseFields, requestId: "r1", decision: "allow" },
 ];
+
+/** One detail per request kind: five closed structs, one vocabulary. */
+const requests = [
+  { kind: "command_approval", detail: { command: "ls -la" } },
+  { kind: "file_change_approval", detail: { paths: ["src/main.ts", "src/old.ts"] } },
+  { kind: "file_read_approval", detail: { paths: ["/etc/hosts"] } },
+  { kind: "tool_approval", detail: { toolName: "WebFetch" } },
+  { kind: "user_input", detail: { questions: ["Which branch should this land on?"] } },
+] as const;
 
 const tagsOf = (union: typeof ProviderEvent) =>
   union.members.map((member) => member.fields._tag.literal);
@@ -107,6 +128,15 @@ describe("the normalized event taxonomy", () => {
 
   it("holds exactly the members the round-trip cases cover", () => {
     expect(tagsOf(ProviderEvent)).toEqual(events.map((event) => event._tag));
+  });
+
+  it.each(requests)("takes a $kind request with the detail that kind carries", (request) => {
+    const opened = {
+      _tag: "request.opened",
+      ...baseFields,
+      request: { requestId: "r1", itemId: "i1", decisions: ["deny", "cancel"], ...request },
+    };
+    expect(Effect.runSync(Schema.decodeUnknownEffect(ProviderEvent)(opened))).toEqual(opened);
   });
 
   it("needs the base fields on every member", () => {
@@ -161,6 +191,21 @@ describe("the normalized event taxonomy", () => {
       })._tag,
     ).toBe("Failure");
     expect(decode(ProviderEvent, { _tag: "request.opened", ...baseFields })._tag).toBe("Failure");
+    // A detail belonging to another kind: the pair is the vocabulary, not the
+    // kind on its own, so a surface reading the kind can trust the detail.
+    expect(
+      decode(ProviderEvent, {
+        _tag: "request.opened",
+        ...baseFields,
+        request: {
+          requestId: "r1",
+          itemId: "i1",
+          kind: "command_approval",
+          decisions: ["allow"],
+          detail: { paths: ["src/main.ts"] },
+        },
+      })._tag,
+    ).toBe("Failure");
   });
 
   it("brackets a turn by an id neither end may omit", () => {

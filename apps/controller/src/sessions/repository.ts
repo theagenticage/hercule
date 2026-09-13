@@ -10,7 +10,7 @@ import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
-import type { AccessMode, ModelSelection, ProviderEvent } from "@hydra/protocol";
+import type { AccessMode, ModelSelection, OpenRequest, ProviderEvent } from "@hydra/protocol";
 import type { SessionStatus, SortDirection } from "@hydra/contract";
 import {
   decodeCursor,
@@ -43,6 +43,7 @@ export interface StoredSession {
   readonly parentSessionId: string | null;
   readonly status: SessionStatus;
   readonly resumable: boolean;
+  readonly openRequest: OpenRequest | null;
   readonly createdAt: string;
   readonly startedAt: string | null;
   readonly exitedAt: string | null;
@@ -86,6 +87,7 @@ interface SessionRow {
   readonly parent_session_id: Uint8Array | null;
   readonly status: string;
   readonly resumable: number;
+  readonly open_request: string | null;
   readonly created_at: string;
   readonly started_at: string | null;
   readonly exited_at: string | null;
@@ -101,7 +103,7 @@ const RESUMABLE =
 const COLUMNS =
   "id, title, permission_profile_id, instance_id, runner_id, workspace_id, requested_access_mode, " +
   `access_mode, native_session_id, model_selection, parent_session_id, status, ` +
-  `created_at, started_at, exited_at, ` +
+  `open_request, created_at, started_at, exited_at, ` +
   `last_activity_at, ${RESUMABLE}`;
 
 const toSession = (row: SessionRow): StoredSession => ({
@@ -118,6 +120,7 @@ const toSession = (row: SessionRow): StoredSession => ({
   parentSessionId: row.parent_session_id === null ? null : uuidToString(row.parent_session_id),
   status: row.status as SessionStatus,
   resumable: row.resumable === 1,
+  openRequest: row.open_request === null ? null : (JSON.parse(row.open_request) as OpenRequest),
   createdAt: row.created_at,
   startedAt: row.started_at,
   exitedAt: row.exited_at,
@@ -205,6 +208,7 @@ const make = Effect.gen(function* () {
           parentSessionId: session.parentSessionId ?? null,
           status: "queued",
           resumable: false,
+          openRequest: null,
           createdAt: session.at,
           startedAt: null,
           exitedAt: null,
@@ -370,6 +374,7 @@ const make = Effect.gen(function* () {
           status = 'queued',
           spec = ${spec},
           last_activity_at = ${at},
+          open_request = NULL,
           stream_base = (SELECT COALESCE(MAX(runner_seq), 0) FROM session_stream
                          WHERE session_id = sessions.id)
         WHERE id = ${uuidFromString(sessionId)}
@@ -386,6 +391,16 @@ const make = Effect.gen(function* () {
     ): Effect.Effect<void, SqlError> =>
       Effect.asVoid(sql`
         UPDATE sessions SET model_selection = ${JSON.stringify(modelSelection)}
+        WHERE id = ${uuidFromString(sessionId)}
+      `),
+
+    /** The request the machine says it is parked on, or `null` for none. */
+    setOpenRequest: (
+      sessionId: string,
+      request: OpenRequest | null,
+    ): Effect.Effect<void, SqlError> =>
+      Effect.asVoid(sql`
+        UPDATE sessions SET open_request = ${request === null ? null : JSON.stringify(request)}
         WHERE id = ${uuidFromString(sessionId)}
       `),
 
@@ -476,6 +491,7 @@ const make = Effect.gen(function* () {
           UPDATE sessions SET
             status = 'exited',
             last_activity_at = ${at},
+            open_request = NULL,
             exited_at = CASE WHEN exited_at IS NULL THEN ${at} ELSE exited_at END
           WHERE runner_id = ${key} AND status <> 'exited'
           RETURNING id
@@ -502,6 +518,7 @@ const make = Effect.gen(function* () {
           UPDATE sessions SET
             status = 'exited',
             last_activity_at = ${at},
+            open_request = NULL,
             exited_at = CASE WHEN exited_at IS NULL THEN ${at} ELSE exited_at END
           WHERE runner_id = ${uuidFromString(runnerId)}
             AND status IN ('starting', 'idle', 'busy')

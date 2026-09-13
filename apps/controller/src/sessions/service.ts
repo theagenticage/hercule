@@ -45,6 +45,7 @@ import {
   SessionFilter,
   SESSION_INPUT_FIELDS,
   SESSION_CONTINUE_FIELDS,
+  SESSION_RESPOND_FIELDS,
   SESSION_UPDATE_FIELDS,
   SessionSpawnInput,
   type SessionSelection,
@@ -71,7 +72,7 @@ import { Settings, type ScopeSettings, type SettingError } from "../settings";
 import { inputRepository, type StoredInput } from "./inputs";
 import { validatedOptions } from "./options";
 import { sessionRepository, type StoredSession } from "./repository";
-import { fold, track, type Tracked } from "./stream";
+import { fold, openRequestAfter, track, type Tracked } from "./stream";
 
 const QueryInput = Schema.Struct({
   ...SessionFilter.fields,
@@ -108,6 +109,10 @@ const ContinueInput = Schema.Struct({ id: Id, ...SESSION_CONTINUE_FIELDS });
 
 export type ContinueInput = Schema.Schema.Type<typeof ContinueInput>;
 
+const RespondInput = Schema.Struct({ id: Id, ...SESSION_RESPOND_FIELDS });
+
+export type RespondInput = Schema.Schema.Type<typeof RespondInput>;
+
 const InputIdentified = Schema.Struct({ id: Id, inputId: Id });
 
 export type InputIdentified = Schema.Schema.Type<typeof InputIdentified>;
@@ -143,6 +148,7 @@ const decodeInputQuery = Schema.decodeUnknownEffect(InputQueryInput);
 const decodeInputUpdate = Schema.decodeUnknownEffect(InputUpdate);
 const decodeInputIdentified = Schema.decodeUnknownEffect(InputIdentified);
 const decodeContinue = Schema.decodeUnknownEffect(ContinueInput);
+const decodeRespond = Schema.decodeUnknownEffect(RespondInput);
 const encodeSpec = Schema.encodeUnknownSync(SessionSpec);
 const decodeSpec = Schema.decodeUnknownEffect(SessionSpec);
 
@@ -189,6 +195,14 @@ const STEERING_UNSUPPORTED =
   "that session's provider does not support steering into a running turn";
 
 const STILL_LIVE = "that session is still live; stop it first";
+
+const NO_OPEN_REQUEST = "that session is not waiting on a decision";
+
+/**
+ * The harness has moved on: the request this answer names is not the one it is
+ * parked on, so applying it would answer a question nobody asked.
+ */
+const STALE_REQUEST = "that request is not the one this session is waiting on";
 
 /**
  * The one way an exited session can be past resuming that is not about its
@@ -815,6 +829,13 @@ const make = Effect.gen(function* () {
       const held = tracking.get(id) ?? track(yield* sessions.ingestState(id));
       const folded = fold(held, seq, event);
       if (folded === undefined) return;
+      // What this event does to the open request, or `undefined` for nothing.
+      // A clear where nothing was parked is nothing: most turns end that way,
+      // and the write costs every client watching a refetch. An event reaching
+      // a session that has already exited never parks it again.
+      const open = found.value.openRequest;
+      const reported = before === "exited" ? undefined : openRequestAfter(event, open);
+      const park = reported === null && open === null ? undefined : reported;
       // Ahead of the transaction that may or may not follow, and never inside
       // one: a delta is not written until it flushes, but a watched session's
       // tap has to see it the instant it is reported, coalesced row or not.
@@ -844,12 +865,18 @@ const make = Effect.gen(function* () {
           if (native !== undefined) {
             yield* sessions.bind(id, runnerId, found.value.instanceId, native);
           }
+          if (park !== undefined) yield* sessions.setOpenRequest(id, park);
           // `exited` is final (spec 06 section 4.1), so a stray event after it
           // is still recorded but never brings the session back to life.
           if (folded.status === undefined || folded.status === before || before === "exited") {
             // No announce: an event that moves nothing is most of the traffic,
-            // and a refetch per delta would be a firehose.
+            // and a refetch per delta would be a firehose. A request opening or
+            // closing is the exception - it moves no status and the user has to
+            // see the card.
             yield* sessions.touched(id, at);
+            if (park !== undefined) {
+              yield* announce({ _tag: "record", topic: "session", id, kind: "updated" });
+            }
             return undefined;
           }
           yield* sessions.moved(id, folded.status, at);
@@ -1265,6 +1292,60 @@ const make = Effect.gen(function* () {
               kind: "session.interrupted",
               actor: USER_ACTOR,
               payload: { sessionId: id, runnerId: session.runnerId },
+              at,
+            }),
+          ),
+        );
+        return session;
+      }),
+
+    /**
+     * Answers the request the session's harness is parked on. Fire and forget
+     * like the interrupt above.
+     *
+     * Everything is refused before anything crosses the wire, because an answer
+     * that lands on the wrong question is the one mistake this operation must
+     * never make.
+     */
+    respond: (input: RespondInput): Effect.Effect<Session, InputError> =>
+      Effect.gen(function* () {
+        yield* requireGrant("session.respond");
+        const { id, requestId, decision } = yield* Effect.mapError(
+          decodeRespond(input),
+          validationOf,
+        );
+        const session = yield* one(id);
+        if (session.status === "exited") return yield* Effect.fail(invalidState(HAS_EXITED));
+        const open = session.openRequest;
+        if (open === null) return yield* Effect.fail(invalidState(NO_OPEN_REQUEST));
+        if (open.requestId !== requestId) return yield* Effect.fail(invalidState(STALE_REQUEST));
+        if (!open.decisions.includes(decision)) {
+          return yield* Effect.fail(
+            validation([
+              {
+                path: ["decision"],
+                message: `that request takes ${open.decisions.join(", ")}`,
+              },
+            ]),
+          );
+        }
+        if (
+          !(yield* presence.tell(session.runnerId, {
+            _tag: "sessionRespond",
+            sessionId: id,
+            requestId,
+            decision,
+          }))
+        ) {
+          return yield* Effect.fail(invalidState(GONE));
+        }
+        yield* withTransaction(
+          sql,
+          Effect.flatMap(nowIso, (at) =>
+            audit.append({
+              kind: "session.responded",
+              actor: USER_ACTOR,
+              payload: { sessionId: id, runnerId: session.runnerId, requestId, decision },
               at,
             }),
           ),
