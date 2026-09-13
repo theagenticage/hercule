@@ -405,6 +405,15 @@ The runner re-validates `value` against the declared schema before routing, on e
 
 Claude and pi are park-and-resume providers: the approval seam is an awaited callback (`canUseTool`; pi's `tool_call` extension handler, awaited with no timeout, verified in source at v0.84.x) that the adapter does not return from until `respondToRequest` arrives; `undefined` / allow lets the call execute as-is, deny returns a reason the model sees. Codex is the RPC-approval provider: `item/commandExecution/requestApproval`, `item/fileChange/requestApproval`, `item/fileRead/requestApproval`, `item/tool/requestUserInput`, `mcpServer/elicitation/request` and `item/permissions/requestApproval` are server-to-client JSON-RPC requests the adapter MUST answer or the turn hangs; each maps to a `request.opened` and is answered from the decision (`accept` / `acceptForSession` / `decline` / `cancel`).
 
+On Claude the callback is supplied in every mode but `full-access` - which actions a mode asks about is the harness's own judgement, and with `allowDangerouslySkipPermissions` the SDK ignores the callback and warns once per session - and a decision maps to one `PermissionResult` (verified against `@anthropic-ai/claude-agent-sdk` 0.3.263):
+
+| Decision | `PermissionResult` |
+|---|---|
+| allow | `{ behavior: "allow", decisionClassification: "user_temporary" }` |
+| allow always | `{ behavior: "allow", updatedPermissions: <the callback's own `suggestions`>, decisionClassification: "user_permanent" }`; offered only where the callback handed suggestions over |
+| deny | `{ behavior: "deny", message, decisionClassification: "user_reject" }` |
+| cancel | the same deny with `interrupt: true`, which ends the turn with it |
+
 The earlier pi degradation (deny-with-reason and retry after approval) is withdrawn.
 
 ### 8.2 Park-and-resume build caveats

@@ -11,9 +11,12 @@ import * as PubSub from "effect/PubSub";
 import * as Stream from "effect/Stream";
 import {
   query as sdkQuery,
+  type CanUseTool,
   type EffortLevel,
   type Options,
   type PermissionMode,
+  type PermissionResult,
+  type PermissionUpdate,
   type Query,
   type SDKMessage,
   type SDKUserMessage,
@@ -23,10 +26,13 @@ import {
   MAX_FACT_ITEMS,
   MAX_FACT_LENGTH,
   MAX_INSTALL_MESSAGE_LENGTH,
+  MAX_MESSAGE_LENGTH,
   type AccessMode,
+  type ApprovalDecision,
   type ExitReason,
   type ModelDescriptor,
   type ModelOption,
+  type OpenRequest,
   type ProbeResult,
   type ProviderEvent,
   type SendResult,
@@ -34,7 +40,13 @@ import {
   type SessionSpec,
   type TurnInput,
 } from "@hydra/protocol";
-import { normalize, normalizing, openTurn, type Normalizing } from "./claude-code-normalize";
+import {
+  normalize,
+  normalizing,
+  openTurn,
+  toolKind,
+  type Normalizing,
+} from "./claude-code-normalize";
 import type { InstallOutcome, ProviderAdapter, ProviderRunnerContext } from "./index";
 import type { LoginCommand } from "./login";
 import { runProcess, type Run } from "./process";
@@ -109,6 +121,14 @@ const DEFAULT_EFFORT = "medium";
 
 /** Cut to what the protocol carries; one over-long value would fail the report. */
 const fact = (value: string): string => value.slice(0, MAX_FACT_LENGTH);
+
+/**
+ * The same cut for the longer fields: free text a harness wrote, not an id. It
+ * says where it cut, because a command read as whole is a command the user
+ * approved something else than.
+ */
+const text = (value: string): string =>
+  value.length > MAX_MESSAGE_LENGTH ? `${value.slice(0, MAX_MESSAGE_LENGTH - 1)}\u2026` : value;
 
 /** `Fact` refuses an empty string, and an `Error` can carry an empty message. */
 const describe = (error: unknown): string => {
@@ -274,16 +294,138 @@ const pushable = <A>(): Pushable<A> => {
 };
 
 /**
- * Spec 06 section 8.1, normative. `approval-required` is the SDK's default mode, whose
- * park-and-resume seam is `canUseTool`; until approvals ship the CLI has no
- * prompt surface, so an action that would have asked is denied rather than
- * allowed. Refusing beats guessing.
+ * Spec 06 section 8.1, normative. `approval-required` is the SDK's default
+ * mode, whose park-and-resume seam is `canUseTool`. The callback is supplied in
+ * every mode but `full-access`: which actions a mode asks about is the
+ * harness's own judgement, and a mode that asks about nothing simply never
+ * calls back.
  */
 const PERMISSION_MODES: Readonly<Record<AccessMode, PermissionMode>> = {
   "approval-required": "default",
   "auto-accept-edits": "acceptEdits",
   auto: "auto",
   "full-access": "bypassPermissions",
+};
+
+/**
+ * Which tools a read is asked about. The command and file-change families come
+ * off the item kind the normalizer already gives a tool, so the two never
+ * disagree; reading has no item kind of its own to read it from.
+ */
+const FILE_READ_TOOLS: ReadonlySet<string> = new Set(["Read", "Glob", "Grep"]);
+
+/**
+ * The input fields a tool names a path in. A tool may name none of them - a
+ * `Glob` without a directory searches the workspace - so an empty list is an
+ * honest answer, not a failure to look.
+ */
+const PATH_KEYS: ReadonlyArray<string> = ["file_path", "notebook_path", "path"];
+
+const pathsIn = (input: Record<string, unknown>): ReadonlyArray<string> =>
+  PATH_KEYS.flatMap((key) => {
+    const found = input[key];
+    return typeof found === "string" && found !== "" ? [fact(found)] : [];
+  });
+
+/**
+ * The question text of each ask and nothing else: its options would render as
+ * buttons, and until an answer can travel back with the decision there is
+ * nothing for them to do.
+ */
+const questionsIn = (input: Record<string, unknown>): ReadonlyArray<string> => {
+  const asked = input["questions"];
+  if (!Array.isArray(asked)) return [];
+  return asked.flatMap((one: unknown) => {
+    if (typeof one !== "object" || one === null) return [];
+    const question = (one as { readonly question?: unknown }).question;
+    return typeof question === "string" && question !== "" ? [text(question)] : [];
+  });
+};
+
+/**
+ * `allow always` is offered only where the harness handed over rules to
+ * persist: it omits them when no rule may be persisted for this ask, and a
+ * button that would then have to invent one grants more than the user clicked.
+ * An empty set is the same answer as none: there is nothing in it to persist.
+ */
+const decisionsFor = (
+  canPersist: boolean,
+): readonly [ApprovalDecision, ...ReadonlyArray<ApprovalDecision>] =>
+  canPersist ? ["allow", "allow_always", "deny", "cancel"] : ["allow", "deny", "cancel"];
+
+/**
+ * One tool call turned into the question a user answers. Every field is cut to
+ * what the protocol carries: an over-long command or path would be a frame
+ * nobody can decode, which loses the event and leaves the park hanging.
+ */
+const requestFor = (
+  requestId: string,
+  itemId: string,
+  toolName: string,
+  input: Record<string, unknown>,
+  canPersist: boolean,
+): OpenRequest => {
+  const asked = { requestId, itemId, decisions: decisionsFor(canPersist) };
+  if (toolName === "AskUserQuestion") {
+    // Answering a question with its answers is not built, so an allow would run
+    // the tool with no answer in it: the two honest answers are the only ones.
+    return {
+      requestId,
+      itemId,
+      kind: "user_input",
+      decisions: ["deny", "cancel"],
+      detail: { questions: questionsIn(input) },
+    };
+  }
+  const kind = toolKind(toolName);
+  const command = input["command"];
+  // A command the harness did not name has nothing for a command card to show.
+  if (kind === "command_execution" && typeof command === "string") {
+    return { ...asked, kind: "command_approval", detail: { command: text(command) } };
+  }
+  if (kind === "file_change") {
+    return { ...asked, kind: "file_change_approval", detail: { paths: pathsIn(input) } };
+  }
+  if (FILE_READ_TOOLS.has(toolName)) {
+    return { ...asked, kind: "file_read_approval", detail: { paths: pathsIn(input) } };
+  }
+  return { ...asked, kind: "tool_approval", detail: { toolName: fact(toolName) } };
+};
+
+/** What the model is told when the user refuses; the vendor requires a reason. */
+const REFUSED = "the user did not allow this";
+
+const CANCELLED = "the user cancelled this turn";
+
+/**
+ * A decision in the vendor's own terms. `interrupt` is what makes a cancel more
+ * than a deny: the turn ends with it rather than the model trying something
+ * else. `decisionClassification` is how the harness reports who decided, and
+ * a persisted rule is the harness's own suggestion handed straight back.
+ */
+const resultFor = (
+  decision: ApprovalDecision,
+  persists: ReadonlyArray<PermissionUpdate>,
+): PermissionResult => {
+  switch (decision) {
+    case "allow":
+      return { behavior: "allow", decisionClassification: "user_temporary" };
+    case "allow_always":
+      return {
+        behavior: "allow",
+        updatedPermissions: [...persists],
+        decisionClassification: "user_permanent",
+      };
+    case "deny":
+      return { behavior: "deny", message: REFUSED, decisionClassification: "user_reject" };
+    case "cancel":
+      return {
+        behavior: "deny",
+        message: CANCELLED,
+        interrupt: true,
+        decisionClassification: "user_reject",
+      };
+  }
 };
 
 const EFFORTS: ReadonlyArray<EffortLevel> = ["low", "medium", "high", "xhigh", "max"];
@@ -306,6 +448,7 @@ const sessionOptionsFor = (
   spec: SessionSpec,
   binary: string,
   native: Options,
+  canUseTool: CanUseTool,
 ): Options => {
   const effort = effortIn(spec.modelSelection.options);
   return {
@@ -318,7 +461,11 @@ const sessionOptionsFor = (
     model: spec.modelSelection.model,
     ...(effort === undefined ? {} : { effort }),
     permissionMode: PERMISSION_MODES[spec.accessMode],
-    ...(spec.accessMode === "full-access" ? { allowDangerouslySkipPermissions: true } : {}),
+    // Every mode but the one that asks about nothing: with permissions skipped
+    // the SDK ignores the callback and warns once per session about it.
+    ...(spec.accessMode === "full-access"
+      ? { allowDangerouslySkipPermissions: true }
+      : { canUseTool }),
     env: { ...envFor(ctx), CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1" },
   };
 };
@@ -351,12 +498,31 @@ const nativeSessionFor = (
   };
 };
 
+/**
+ * The question this adapter is holding an answer open for. The promise the
+ * harness is waiting on is inside the closure; all anyone else needs is its
+ * id, the answers it takes, and the way to end the wait.
+ */
+interface Park {
+  readonly requestId: string;
+  readonly decisions: ReadonlyArray<ApprovalDecision>;
+  /** The harness is told the answer in its own terms and resumes. */
+  readonly answer: (decision: ApprovalDecision) => void;
+}
+
 /** One session this adapter is hosting. */
 interface Live {
   readonly binding: SessionBinding;
   readonly input: Pushable<SDKUserMessage>;
   readonly stream: ClaudeStream;
   readonly state: Normalizing;
+  /**
+   * The question this session is parked on, if any. One at a time: a park
+   * serializes the tool batch, and the surfaces show one card. On the entry
+   * rather than beside it: a park is a promise inside the harness's own call,
+   * so it must die with the session that is waiting on it.
+   */
+  park: Park | undefined;
   /** Set by `stopSession` to the reason it was given, so the exit says why. */
   stopping: ExitReason | undefined;
   /** The model the harness is running under, starting as the spec's. */
@@ -389,6 +555,91 @@ export const claudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
       ),
       Option.getOrElse(() => `it did not answer within ${Duration.format(CONTROL_DEADLINE)}`),
     );
+
+  /**
+   * The seam the harness asks through (spec 06 section 8.2). The promise
+   * returned here is the park: it stays open until an answer arrives, until the
+   * harness withdraws the question by aborting the signal, or until the session
+   * goes. Held by the session's own entry, under the id the adapter mints,
+   * which is the id every answer comes back under.
+   */
+  const asking =
+    (sessionId: string): CanUseTool =>
+    (toolName, input, options) =>
+      new Promise<PermissionResult>((settle) => {
+        const held = live.get(sessionId);
+        // Fail closed, on the same test that refuses input: with no entry, or
+        // one on its way out, nobody is left to answer and the park would hold
+        // the harness for ever.
+        if (held === undefined || held.stopping !== undefined) {
+          settle(resultFor("deny", []));
+          return;
+        }
+        const persists = options.suggestions ?? [];
+        // Withdrawn before it was ever asked: the turn is already being
+        // interrupted, so there is nothing to put in front of the user.
+        if (options.signal.aborted) {
+          settle(resultFor("deny", persists));
+          return;
+        }
+        // One at a time. A second question while one is held would replace the
+        // card the user is looking at, so the harness is told to wait instead.
+        if (held.park !== undefined) {
+          settle({
+            behavior: "deny",
+            message:
+              "another approval is still waiting for the user; ask again after it is answered",
+            decisionClassification: "user_reject",
+          });
+          return;
+        }
+        const requestId = crypto.randomUUID();
+        // A park belongs to a turn: it is what the turn is waiting on, and the
+        // supervisor pauses the inactivity clock of an open turn for it.
+        const { events } = openTurn(held.state);
+        for (const event of events) emit(event);
+        const request = requestFor(
+          requestId,
+          // An id the protocol will not carry is a frame nobody can decode,
+          // which would lose the event and leave a park nothing can see.
+          options.toolUseID === "" ? held.state.mint() : fact(options.toolUseID),
+          toolName,
+          input,
+          persists.length > 0,
+        );
+        const end = (decision: ApprovalDecision, told: PermissionResult): void => {
+          // The park is this session's only one, and only while it is still
+          // this one: a second answer has nothing left to end.
+          if (held.park?.requestId !== requestId) return;
+          held.park = undefined;
+          options.signal.removeEventListener("abort", withdraw);
+          emit({
+            _tag: "request.resolved",
+            eventId: held.state.mint(),
+            sessionId,
+            at: held.state.now(),
+            requestId,
+            decision,
+          });
+          settle(told);
+        };
+        // The harness has already stopped the turn itself, so it is told a
+        // plain deny; the stream still reports the park as cancelled.
+        const withdraw = (): void => end("cancel", resultFor("deny", persists));
+        options.signal.addEventListener("abort", withdraw, { once: true });
+        held.park = {
+          requestId,
+          decisions: request.decisions,
+          answer: (decision) => end(decision, resultFor(decision, persists)),
+        };
+        emit({
+          _tag: "request.opened",
+          eventId: held.state.mint(),
+          sessionId,
+          at: held.state.now(),
+          request,
+        });
+      });
 
   /** The session this adapter is hosting, refusing one already on its way out. */
   const hosting = (sessionId: string): Effect.Effect<Live, string> =>
@@ -495,7 +746,7 @@ export const claudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
           Effect.try({
             try: () =>
               seam.stream({
-                options: sessionOptionsFor(ctx, spec, binary, native.options),
+                options: sessionOptionsFor(ctx, spec, binary, native.options, asking(sessionId)),
                 input,
               }),
             catch: describe,
@@ -506,6 +757,7 @@ export const claudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
               input,
               stream,
               state: normalizing(sessionId, () => crypto.randomUUID(), now),
+              park: undefined,
               stopping: undefined,
               model: spec.modelSelection.model,
             };
@@ -587,6 +839,11 @@ export const claudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
         // Nothing to end, so nothing is asked of the harness: a control request
         // waits on it, and this frame is handled in the connection's own order.
         if (held === undefined || held.state.turnId === undefined) return Effect.void;
+        // Before the harness is asked, not after: the CLI withdraws a pending
+        // question once the turn is interrupted, and a request still reading as
+        // open when the turn closes leaves a card on screen for a turn that is
+        // over.
+        held.park?.answer("cancel");
         // The turn completing as `interrupted` is the whole report; a refusal
         // means the harness is already gone, which is the same outcome.
         return Effect.asVoid(controlling(held.stream.interrupt()));
@@ -606,8 +863,26 @@ export const claudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
         // refuses input in the meantime, and what the exit event's reason
         // comes from.
         held.stopping = reason;
+        // A park is a promise the harness is waiting on, and the session it
+        // belongs to is going: left hanging it would never be answered.
+        held.park?.answer("deny");
         held.input.end();
         held.stream.close();
+      }),
+
+    respondToRequest: (
+      sessionId: string,
+      requestId: string,
+      decision: ApprovalDecision,
+    ): Effect.Effect<void> =>
+      Effect.sync(() => {
+        const park = live.get(sessionId)?.park;
+        if (park === undefined || park.requestId !== requestId) return;
+        // The request said which answers it takes, and it is the authority on
+        // that here too: an answer it did not offer is one the harness would
+        // have to substitute for.
+        if (!park.decisions.includes(decision)) return;
+        park.answer(decision);
       }),
 
     listSessions: Effect.sync(() => [...live.values()].map((held) => held.binding)),

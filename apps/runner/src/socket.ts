@@ -423,9 +423,7 @@ export const connect = (
           case "sessionInterrupt":
             return yield* supervisor.interrupt(message);
           case "sessionRespond":
-            // No adapter holds a park yet, so there is no answer to deliver:
-            // nothing can be parked before anything can park.
-            return;
+            return yield* supervisor.respond(message);
           case "sessionStop":
             return yield* supervisor.stop(message);
           case "ack":

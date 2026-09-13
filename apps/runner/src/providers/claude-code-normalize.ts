@@ -98,7 +98,11 @@ const TOOL_KINDS: Readonly<Record<string, ItemKind>> = {
   ExitPlanMode: "plan",
 };
 
-const toolKind = (name: string): ItemKind => TOOL_KINDS[name] ?? "tool_call";
+/**
+ * Exported because the request kinds are read off it too: which family a tool
+ * belongs to is one judgement, and two tables of tool names would disagree.
+ */
+export const toolKind = (name: string): ItemKind => TOOL_KINDS[name] ?? "tool_call";
 
 /** The naming the SDK gives an MCP tool, and the only way to tell one apart. */
 const isMcp = (name: string): boolean => name.startsWith("mcp__");
