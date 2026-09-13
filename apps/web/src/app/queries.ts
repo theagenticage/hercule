@@ -201,6 +201,17 @@ export const secretsQuery = (client: HydraClient) =>
     queryFn: () => client.secret.query({ query: { limit: MAX_PAGE_LIMIT } }),
   });
 
+/**
+ * Every connection, as one page. A connection is an account the user set up by
+ * hand, so there are a handful; the screen shows all of them, and the point at
+ * which they outgrow one page is the point at which this grows a listing.
+ */
+export const connectionsQuery = (client: HydraClient) =>
+  queryOptions({
+    queryKey: queryKeys.connections(),
+    queryFn: () => client.connection.query({ query: { limit: MAX_PAGE_LIMIT } }),
+  });
+
 export const providersQuery = (client: HydraClient) =>
   queryOptions({
     queryKey: queryKeys.providers(),

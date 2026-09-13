@@ -23,7 +23,15 @@ export {
   type ConfigJson,
   type ConfigValue,
 } from "./config-fields";
-export { redirectUriFor } from "./connections";
+export {
+  connectionIssues,
+  connectionTypes,
+  redirectUriFor,
+  type ConnectionIssues,
+  type ConnectionType,
+  type CredentialField,
+  type SetupStep,
+} from "./connections";
 export { ApiError, ConnectionError, RequestError, type ErrorEnvelope } from "./errors";
 export { ID_TAIL, idTail } from "./id-tail";
 export { joinCommand } from "./join-command";

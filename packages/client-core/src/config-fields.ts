@@ -108,7 +108,7 @@ export const configPayload = (
   fields: ReadonlyArray<ConfigField>,
   draft: ConfigDraft,
   config: unknown,
-): ConfigJson => {
+): Readonly<Record<string, ConfigJson>> => {
   const stored = asRecord(config) ?? {};
   const payload: Record<string, ConfigJson> = {};
   for (const field of fields) {

@@ -10,8 +10,8 @@ const api: Readonly<Record<string, Handler>> = {
       user: { "onboarding.completedSteps": ["timezone"], timezone: "Europe/Amsterdam" },
     },
   },
-  // Tasks, Fleet, Plugins and Secrets are the screens here that read something
-  // of their own.
+  // Tasks, Fleet, Connections, Plugins and Secrets are the screens here that
+  // read something of their own.
   "GET /api/v1/tasks": { body: { items: [] } },
   "GET /api/v1/plugins": { body: [] },
   "GET /api/v1/projects": { body: { items: [] } },
@@ -19,6 +19,7 @@ const api: Readonly<Record<string, Handler>> = {
   "GET /api/v1/providers": { body: [] },
   "GET /api/v1/profiles": { body: { items: [] } },
   "GET /api/v1/secrets": { body: { items: [] } },
+  "GET /api/v1/connections": { body: { items: [] } },
   "GET /api/v1/controller": {
     body: {
       id: "01a06d02-a000-7000-8000-000000000001",
