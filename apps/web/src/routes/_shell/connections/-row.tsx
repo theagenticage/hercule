@@ -1,4 +1,4 @@
-import { useState, type JSX } from "react";
+import { Fragment, useState, type JSX } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button, cn } from "@hydra/ui";
 import { queryKeys, type ConnectionType, type HydraClient } from "@hydra/client-core";
@@ -38,6 +38,21 @@ export function ConnectionRow({
 }): JSX.Element {
   const queryClient = useQueryClient();
   const [panel, setPanel] = useState<Panel>("none");
+
+  /**
+   * The quiet line, part by part: the plugin that declares the type, the
+   * account, and the topic it files into. The plugin leads, because two plugins
+   * may declare one type name and the name above says nothing about which this
+   * is. Assembled rather than written out so the separators are one element
+   * each, spaced by the row's own gap and never by a space inside the text.
+   */
+  const facts = [
+    ...(type === undefined ? [] : [{ key: "plugin", text: type.pluginName, tone: "text-faint" }]),
+    { key: "account", text: connection.displayName, tone: "text-muted" },
+    ...(connection.labels[0] === undefined
+      ? []
+      : [{ key: "topic", text: connection.labels[0], tone: "text-faint" }]),
+  ];
 
   const remove = useMutation({
     mutationFn: () => client.connection.delete({ params: { id: connection.id } }),
@@ -85,16 +100,13 @@ export function ConnectionRow({
         </div>
       </div>
 
-      {/* The plugin that declares the type, the account, and the topic it files
-          into: what the connection is, under what the user called it. The
-          plugin leads, because two plugins may declare one type name and the
-          name above says nothing about which this is. */}
       <div className="flex flex-wrap items-baseline gap-x-1.5 pt-px text-fine">
-        {type === undefined ? null : <span className="text-faint">{type.pluginName} ·</span>}
-        <span className="text-muted">{connection.displayName}</span>
-        {connection.labels[0] === undefined ? null : (
-          <span className="text-faint">· {connection.labels[0]}</span>
-        )}
+        {facts.map((fact, index) => (
+          <Fragment key={fact.key}>
+            {index === 0 ? null : <span className="text-faint">·</span>}
+            <span className={fact.tone}>{fact.text}</span>
+          </Fragment>
+        ))}
       </div>
 
       {connection.statusDetail === undefined ? null : (
