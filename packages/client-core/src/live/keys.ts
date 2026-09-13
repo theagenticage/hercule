@@ -39,6 +39,8 @@ export const queryKeys = {
     sessionId === undefined ? ["inputs"] : ["inputs", sessionId],
   joinTokens: (): LiveQueryKey => ["join-tokens"],
   plugins: (): LiveQueryKey => ["plugins"],
+  /** Not a live topic: secret references change only through this browser's own writes. */
+  secrets: (): LiveQueryKey => ["secrets"],
   providers: (): LiveQueryKey => ["providers"],
   controller: (): LiveQueryKey => ["controller"],
   /** Keyed on the loopback endpoints it asks, because that is what it depends on. */

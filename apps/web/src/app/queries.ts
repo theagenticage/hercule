@@ -190,6 +190,17 @@ export const pluginsQuery = (client: HydraClient) =>
     queryFn: () => client.plugin.query(),
   });
 
+/**
+ * Every secret reference, as one page. A reference is what a read carries -
+ * never a value - and there are as many of them as there are connections and
+ * plugins, so the whole set is one answer.
+ */
+export const secretsQuery = (client: HydraClient) =>
+  queryOptions({
+    queryKey: queryKeys.secrets(),
+    queryFn: () => client.secret.query({ query: { limit: MAX_PAGE_LIMIT } }),
+  });
+
 export const providersQuery = (client: HydraClient) =>
   queryOptions({
     queryKey: queryKeys.providers(),
