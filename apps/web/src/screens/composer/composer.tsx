@@ -9,7 +9,6 @@ import {
   queryKeys,
   type Thread,
 } from "@hydra/client-core";
-import { cn } from "@hydra/ui";
 import { localRunnerQuery, providersQuery, runnersQuery } from "../../app/queries";
 import { messageOf } from "../save-status";
 import { AccessModeSelector } from "./access-mode-selector";
@@ -31,12 +30,9 @@ type SelectorKey = "accessMode" | "options" | "model" | "workspace" | "machine";
  */
 export function Composer({
   thread,
-  docked = false,
   onSend,
 }: {
   readonly thread: Thread;
-  /** A permission card sits on top of the card: its top corners square under it. */
-  readonly docked?: boolean;
   /** An active thread's way to rejoin the tail as a message goes out. */
   readonly onSend?: () => void;
 }): JSX.Element {
@@ -72,14 +68,11 @@ export function Composer({
       {fields.lead === null ? null : (
         <DraftHero lead={fields.lead} blocked={fields.blocked} loginSlot={login} />
       )}
-      <div
-        className={cn(
-          "relative z-[1] flex flex-col gap-2 border border-line bg-raised px-3.5 pt-3 pb-2.5",
-          // Under a permission card the two are one box: the card carries the
-          // lift, and a second one here paints a bright rule along the seam.
-          docked ? "rounded-b-[14px]" : "rounded-[14px] shadow-lift",
-        )}
-      >
+      {/* The card is the same box whatever is docked to it: the lip below and
+          the permission dock above both tuck under it, so its own radius,
+          border and lift never change (spec 14 §Measurements, amended
+          2026-09-14). It sits above both of them. */}
+      <div className="relative z-[1] flex flex-col gap-2 rounded-[14px] border border-line bg-raised px-3.5 pt-3 pb-2.5 shadow-lift">
         <MessageBox
           value={model.message}
           placeholder={model.placeholder}

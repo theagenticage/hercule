@@ -2154,10 +2154,15 @@ describe("Thread: the permission card", () => {
       "the composer does not follow the card",
     ).toBeTruthy();
 
-    // The composer squares its top corners under the card rather than keeping
-    // its own 14px radius all round (spec 14 §Measurements). Whether it looks
-    // flush is the residual manual check; the class is what jsdom can say.
-    expect(composerCard().className).toContain("rounded-b-[14px]");
+    // The dock is the lip mirrored above the card, so the card keeps its own
+    // 14px radius in every state and the dock tucks under it (spec 14
+    // §Measurements, amended 2026-09-14). Whether it looks flush is the
+    // residual manual check; the classes are what jsdom can say.
+    expect(composerCard().className).toContain("rounded-[14px]");
+    const dock = allow.closest<HTMLElement>('[class*="rounded-t-[10px]"]');
+    expect(dock, "the dock is not the lip mirrored").not.toBeNull();
+    expect(dock?.className).toContain("bg-surface");
+    expect(dock?.className).toContain("border-line-soft");
   });
 
   it("posts the clicked decision once and drops the card when the record's open request clears", async () => {
@@ -2257,7 +2262,7 @@ describe("Thread: the permission card", () => {
 
     await screen.findByRole("textbox");
     expect(screen.queryByRole("button", { name: answer(REQUEST, "allow") })).toBeNull();
-    // With nothing docked above it the composer keeps its own radius.
+    // The composer's radius never depends on what is above it.
     expect(composerCard().className).toContain("rounded-[14px]");
   });
 

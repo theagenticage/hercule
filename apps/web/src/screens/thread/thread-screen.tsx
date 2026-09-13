@@ -104,11 +104,7 @@ export function ThreadScreen({
                 request={session.openRequest}
               />
             )}
-            <Composer
-              thread={{ kind: "active", session }}
-              docked={session.openRequest !== null}
-              onSend={scrollToBottom}
-            />
+            <Composer thread={{ kind: "active", session }} onSend={scrollToBottom} />
           </div>
         </div>
       </ThreadColumn>

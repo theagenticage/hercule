@@ -12,6 +12,13 @@ import { messageOf } from "../save-status";
  * is the button, the label in the left column and the describe line beside it
  * (spec 14 §Answers as a ledger).
  *
+ * The dock is the composer's bottom lip mirrored above the card: the same 14px
+ * inset, the same `--surface` on a `--line-soft` border, a 10px radius on the
+ * two corners facing away from the card, and 8px of it hidden under the card,
+ * which keeps its own radius, border and lift (spec 14 §Measurements, amended
+ * 2026-09-14). A second raised card would read as a second surface; a lip reads
+ * as part of the composer, which is what this is.
+ *
  * Every word on it comes from `approvalCard`, so what an answer does reads the
  * same wherever it is shown and no surface can reword or drop it.
  */
@@ -43,49 +50,48 @@ export function PermissionCard({
   const answered = respond.isPending || respond.isSuccess;
 
   return (
-    // The card and the composer under it are one box: its bottom corners stay
-    // square and its bottom border is the composer's top one.
-    <div className="relative z-[1] rounded-t-[14px] border border-b-0 border-line bg-raised shadow-lift">
-      {/* The mark hangs in a gutter of its own so the title, the subject and
-          the note all start where the answers' labels start. */}
-      <div className="grid grid-cols-[14px_minmax(0,1fr)] pt-3 pr-3.5 pb-2.5">
-        <DecisionMark className="mt-[4px] justify-self-center" />
-        <div className="flex min-w-0 flex-col gap-1">
-          <span className="text-row font-emph text-ink">{card.title}</span>
-          {/* A 4096-character command or forty paths scroll here rather than
-              pushing the composer off the screen. */}
-          <div className="flex max-h-36 flex-col overflow-y-auto">
-            {card.subject.map((line, index) => (
-              <span
-                key={index}
-                className={cn(
-                  "break-all text-muted",
-                  card.code ? "font-mono text-fine" : "text-row",
-                )}
-              >
-                {line}
-              </span>
-            ))}
-          </div>
-          {card.note === null ? null : <p className="text-fine text-muted">{card.note}</p>}
-        </div>
-      </div>
-      {card.rows.map((row) => (
-        <button
-          key={row.decision}
-          type="button"
-          disabled={answered}
-          onClick={() => respond.mutate(row.decision)}
-          className="group grid w-full grid-cols-[150px_minmax(0,1fr)] items-baseline gap-3 border-t border-line-soft px-3.5 py-2 text-left enabled:cursor-pointer enabled:hover:bg-line-soft focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-live"
-        >
-          <span className="text-row font-emph text-muted group-enabled:group-hover:text-ink">
-            {row.label}
+    // Behind the card rather than in front of it: the card is `z-[1]`, so the
+    // 8px this dock tucks under it is covered rather than drawn over.
+    <div className="mx-3.5 -mb-2 flex flex-col rounded-t-[10px] border border-b-0 border-line-soft bg-surface px-3 pt-[5px] pb-[13px] text-fine text-muted">
+      <span className="flex items-baseline gap-1.5">
+        <DecisionMark className="translate-y-[2px]" />
+        <span className="text-meta font-emph text-ink">{card.title}</span>
+      </span>
+      {/* A 4096-character command or forty paths scroll here rather than
+          pushing the composer off the screen. */}
+      <div className="flex max-h-36 flex-col overflow-y-auto">
+        {card.subject.map((line, index) => (
+          <span
+            key={index}
+            className={cn("break-all", card.code ? "font-mono text-[11px]" : "text-fine")}
+          >
+            {line}
           </span>
-          <span className="text-meta text-muted">{row.describe}</span>
-        </button>
-      ))}
+        ))}
+      </div>
+      {/* A little air, or the note reads as one more question. */}
+      {card.note === null ? null : <p className="mt-1">{card.note}</p>}
+      {/* The rows bleed 8px each side, so a hover background reaches the
+          dock's inner edge the way a popover row's does. The 13px bottom
+          padding is what keeps the last one clear of the card above. */}
+      <div className="mt-1 flex flex-col">
+        {card.rows.map((row) => (
+          <button
+            key={row.decision}
+            type="button"
+            disabled={answered}
+            onClick={() => respond.mutate(row.decision)}
+            className="-mx-2 grid grid-cols-[140px_minmax(0,1fr)] items-baseline gap-3 rounded-control px-2 py-[5px] text-left enabled:cursor-pointer enabled:hover:bg-line-soft focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-live"
+          >
+            <span className="text-meta font-emph text-ink">{row.label}</span>
+            {/* `--muted`, not `--faint`: 12px `--faint` on `--surface` is
+                about 2.9:1 in dark and 2.4:1 in light, which is not text. */}
+            <span className="text-fine text-muted">{row.describe}</span>
+          </button>
+        ))}
+      </div>
       {respond.error === null ? null : (
-        <p className="border-t border-line-soft px-3.5 py-2 text-fine text-fail" role="alert">
+        <p className="mt-1 text-fail" role="alert">
           {messageOf(respond.error)}
         </p>
       )}
