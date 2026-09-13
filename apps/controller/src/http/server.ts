@@ -13,7 +13,7 @@
  * 5. the credential gate and the static grant check (`./middleware.ts`),
  * 6. the derived route's decoding, then the one-line handler.
  *
- * Three routes are not derived from the contract's HttpApi declaration. The live
+ * Four routes are not derived from the contract's HttpApi declaration. The live
  * socket at `GET /ws` stops at step 4: it passes the pre-setup gate and then
  * authenticates itself in its own first frame, because a browser cannot put a
  * credential on a WebSocket handshake. The join at `POST /api/v1/runners/join`
@@ -21,7 +21,10 @@
  * rather than a user, and the controller's own local runner joins before
  * anybody has set Hydra up. The runner socket at `GET /api/v1/runners/socket`
  * stops there too, and for the same reason: what it presents is a runner's
- * durable credential, which no operation accepts and no grant belongs to.
+ * durable credential, which no operation accepts and no grant belongs to. The
+ * OAuth callback at `GET /oauth/callback` stops before the credential gate as
+ * well: the browser arrives there from the provider with nothing but a `state`,
+ * and what it is told is a redirect rather than an answer.
  *
  * The body cap is not in that order: it is the listener's, given to Bun as
  * `maxRequestBodySize` and, for the socket, as `maxPayloadLength`, so an
@@ -46,6 +49,7 @@ import { ALL_OPERATIONS, api, validation } from "@hydra/contract";
 import { responseFor, withEnvelope } from "./envelope";
 import { setupGate } from "./gate";
 import { AuthenticatedLayer, SetupTokenLayer } from "./middleware";
+import { OAuthCallbackRouteLayer } from "../connections";
 import { LiveSocketLayer } from "../live";
 import { ProviderProbes } from "../providers";
 import { RunnerJoinRouteLayer, RunnerPresence, RunnerSocketRouteLayer } from "../runners";
@@ -161,7 +165,13 @@ const liveLayer = LiveSocketLayer.pipe(Layer.provide(setupGate.layer));
 const application = (bundle: WebBundle | undefined) =>
   Effect.map(
     HttpRouter.toHttpEffect(
-      Layer.mergeAll(routerLayer, liveLayer, RunnerJoinRouteLayer, RunnerSocketRouteLayer),
+      Layer.mergeAll(
+        routerLayer,
+        liveLayer,
+        RunnerJoinRouteLayer,
+        RunnerSocketRouteLayer,
+        OAuthCallbackRouteLayer,
+      ),
     ),
     (routes) => withEnvelope(withWebBundle(bundle)(jsonOnly(routes))),
   );

@@ -14,7 +14,14 @@ import { ConnectionStatus } from "@hydra/plugin-host";
 import * as HttpApiEndpoint from "effect/unstable/httpapi/HttpApiEndpoint";
 import * as HttpApiGroup from "effect/unstable/httpapi/HttpApiGroup";
 import * as HttpApiSchema from "effect/unstable/httpapi/HttpApiSchema";
-import { Forbidden, Internal, NotFound, Unauthenticated, Validation } from "../errors";
+import {
+  Forbidden,
+  Internal,
+  InvalidState,
+  NotFound,
+  Unauthenticated,
+  Validation,
+} from "../errors";
 import { Id, Timestamp } from "../ids";
 import { page, pageParams } from "../pagination";
 import { Authenticated } from "../security";
@@ -95,6 +102,31 @@ export const ConnectionCredentialsInput = Schema.Struct({ credentials: Credentia
 
 export type ConnectionCredentialsInput = Schema.Schema.Type<typeof ConnectionCredentialsInput>;
 
+/**
+ * What starting a redirect flow takes. `origin` is where the browser is: the
+ * controller cannot see it, and the redirect URI built from it is what the user
+ * registered with the provider, so it has to be the browser's own.
+ *
+ * `label`, `labels` and `config` are optional because a reconnect already has
+ * them on the connection it names.
+ */
+export const ConnectionOAuthStartInput = Schema.Struct({
+  type: Schema.String,
+  origin: Schema.String,
+  label: Schema.optionalKey(ConnectionLabel),
+  labels: Schema.optionalKey(Topics),
+  config: Schema.optionalKey(Config),
+  /** Set on a reconnect: the connection whose tokens this flow replaces. */
+  connectionId: Schema.optionalKey(Id),
+});
+
+export type ConnectionOAuthStartInput = Schema.Schema.Type<typeof ConnectionOAuthStartInput>;
+
+/** Where to send the browser. The state and the verifier stay on the server. */
+export const ConnectionOAuthStart = Schema.Struct({ authorizationUrl: Schema.String });
+
+export type ConnectionOAuthStart = Schema.Schema.Type<typeof ConnectionOAuthStart>;
+
 export const connection = HttpApiGroup.make("connection")
   .add(
     HttpApiEndpoint.get("query", "/connections", {
@@ -134,6 +166,16 @@ export const connection = HttpApiGroup.make("connection")
       payload: ConnectionCredentialsInput,
       success: Connection,
       error: [Unauthenticated, Forbidden, Validation, NotFound, Internal],
+    }),
+    // Not under `/connections`: what it starts is a setup, and a setup is not a
+    // connection until the provider sends the browser back.
+    HttpApiEndpoint.post("startOAuth", "/oauth/start", {
+      payload: ConnectionOAuthStartInput,
+      success: ConnectionOAuthStart,
+      // `invalid_state`: the plugin that owns the type holds no client
+      // credentials, which is the user's to fix in Settings and not the
+      // request's.
+      error: [Unauthenticated, Forbidden, Validation, InvalidState, Internal],
     }),
   )
   .middleware(Authenticated);

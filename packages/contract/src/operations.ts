@@ -211,6 +211,11 @@ const TABLE = {
     method: "POST",
     path: "/api/v1/connections/:id/credentials",
   },
+  "connection.startOAuth": {
+    requires: "connection.manage",
+    method: "POST",
+    path: "/api/v1/oauth/start",
+  },
 
   "session.query": { requires: "session.read", method: "GET", path: "/api/v1/sessions" },
   "session.read": { requires: "session.read", method: "GET", path: "/api/v1/sessions/:id" },

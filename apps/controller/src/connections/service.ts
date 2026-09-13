@@ -14,6 +14,7 @@
  * Credentials go into the one secrets table under owner `connection/<id>`. What
  * comes back out is references: a name and, once it has been replaced, when.
  */
+import { createHash } from "node:crypto";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -23,36 +24,43 @@ import * as Schema from "effect/Schema";
 import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
-import type { ConnectionValidationFailed } from "@hydra/plugin-host";
+import type { ConnectionValidationFailed, OAuthDeclaration } from "@hydra/plugin-host";
 import {
   CONNECTION_SORT_FIELDS,
   ConnectionCreateInput,
   ConnectionCredentialsInput,
+  ConnectionOAuthStartInput,
   ConnectionStatus,
   ConnectionUpdateInput,
   DEFAULT_PAGE_LIMIT,
   Id,
+  invalidState,
   issuesOf,
   notFound,
   validation,
   validationOf,
   type Connection,
+  type ConnectionOAuthStart,
   type Forbidden,
+  type InvalidState,
   type NotFound,
   type SortDirection,
   type Unauthenticated,
   type Validation,
 } from "@hydra/contract";
 import { requireGrant, USER_ACTOR } from "../actor";
+import { mintToken } from "../credentials";
 import { nowIso, pageInput, refuseCursor, withTransaction } from "../db";
 import { AuditLog } from "../events";
 import { PluginHost, type RegisteredConnectionType } from "../plugins";
 import { Secrets, type SecretOwner } from "../secrets";
+import { exchangeCode, oauthClients, OAUTH_TOKENS, redirectUri, serializeTokens } from "./oauth";
 import {
   connectionRepository,
   type ConnectionSortField,
   type StoredConnection,
 } from "./repository";
+import { oauthSetupRepository } from "./setups";
 
 /** What listing takes: which connections, how many, in what order. */
 const QueryInput = Schema.Struct({
@@ -107,9 +115,66 @@ const fieldsOf = (contribution: Contribution): ReadonlyArray<string> =>
 const isOAuthFlow = (contribution: Contribution): boolean =>
   contribution.setup.some((step) => step.kind === "oauth");
 
+const decodeStart = Schema.decodeUnknownEffect(ConnectionOAuthStartInput);
+
+/** What the browser arrives at the callback with, straight off the query string. */
+const CallbackQuery = Schema.Struct({
+  state: Schema.optionalKey(Schema.String),
+  code: Schema.optionalKey(Schema.String),
+  error: Schema.optionalKey(Schema.String),
+});
+
+const decodeCallback = Schema.decodeUnknownEffect(CallbackQuery);
+
+/**
+ * How a redirect flow ended, in the words the Connections screen reads. The set
+ * is closed: what the user is told is one of these five and never a provider's
+ * own message, which is not ours to put in a URL.
+ */
+type Outcome = "ok" | "denied" | "expired" | "exchange-failed" | "rejected";
+
+/** A flow that ended before it made a connection, carrying what to say about it. */
+const ended = (outcome: Outcome): Effect.Effect<never, Outcome> => Effect.fail(outcome);
+
+/** Long enough to read a provider's consent screen, short enough to be worth sweeping. */
+const SETUP_LIFETIME_MS = 10 * 60 * 1000;
+
+/** The PKCE challenge: the verifier, hashed the way the provider will hash it. */
+const challengeFor = (verifier: string): string =>
+  createHash("sha256").update(verifier).digest("base64url");
+
+/** The authorization request, as RFC 6749 and RFC 7636 spell it. */
+const authorizationUrl = (
+  oauth: OAuthDeclaration,
+  parts: {
+    readonly clientId: string;
+    readonly redirectUri: string;
+    readonly state: string;
+    readonly challenge: string;
+  },
+): string => {
+  const url = new URL(oauth.authorizationUrl);
+  const query: Record<string, string> = {
+    // The type's own extras first, so nothing it asks for can displace a
+    // parameter the protocol itself is carried by.
+    ...(oauth.extraParams ?? {}),
+    response_type: "code",
+    client_id: parts.clientId,
+    redirect_uri: parts.redirectUri,
+    scope: oauth.scopes.join(" "),
+    state: parts.state,
+    code_challenge: parts.challenge,
+    code_challenge_method: "S256",
+  };
+  for (const [name, value] of Object.entries(query)) url.searchParams.set(name, value);
+  return url.toString();
+};
+
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const connections = yield* connectionRepository;
+  const setups = yield* oauthSetupRepository;
+  const clientOf = yield* oauthClients;
   const secrets = yield* Secrets;
   const host = yield* PluginHost;
   const audit = yield* AuditLog;
@@ -254,6 +319,110 @@ const make = Effect.gen(function* () {
       ([name, value]) => secrets.set(ownerOf(id), name, Redacted.make(value)),
       { discard: true },
     ).pipe(Effect.catchTag("SecretNameError", Effect.die));
+
+  /**
+   * The callback, as far as it gets. Every way it can end short of a connection
+   * is a typed failure carrying the word the user is told, so the path through
+   * here reads as the one thing that has to happen.
+   */
+  const finish = (query: unknown): Effect.Effect<Outcome, Outcome> =>
+    Effect.gen(function* () {
+      const params = yield* Effect.catchTag(decodeCallback(query), "SchemaError", () =>
+        ended("expired"),
+      );
+      if (params.state === undefined) return yield* ended("expired");
+      const at = yield* nowIso;
+      // Spent in its own transaction, before anything waits on the provider: a
+      // state presented twice must find nothing the second time.
+      const pending = yield* Effect.orDie(withTransaction(sql, setups.consume(params.state, at)));
+      if (Option.isNone(pending)) return yield* ended("expired");
+      const setup = pending.value;
+      // No code means the provider turned the user away, whatever it called it.
+      if (params.code === undefined) return yield* ended("denied");
+
+      const registered = (yield* host.connectionTypes()).find(
+        (one) => one.contribution.type === setup.type,
+      );
+      const oauth = registered?.contribution.oauth;
+      const client =
+        registered === undefined
+          ? Option.none()
+          : yield* Effect.orDie(clientOf(registered.pluginId));
+      // A build that no longer declares the type, or a plugin whose credentials
+      // were cleared while the user was at the provider: the code cannot be
+      // spent either way, which is what the word says.
+      if (registered === undefined || oauth === undefined || Option.isNone(client)) {
+        return yield* ended("exchange-failed");
+      }
+
+      const tokens = yield* exchangeCode({
+        tokenUrl: oauth.tokenUrl,
+        client: client.value,
+        code: params.code,
+        redirectUri: redirectUri(setup.origin),
+        codeVerifier: setup.codeVerifier,
+      }).pipe(
+        Effect.provide(FetchHttpClient.layer),
+        Effect.catchTag("TokenRequestFailed", () => ended("exchange-failed")),
+      );
+      const account = yield* registered.contribution
+        .validate({ accessToken: tokens.accessToken })
+        .pipe(
+          Effect.provide(FetchHttpClient.layer),
+          Effect.catchTag("ConnectionValidationFailed", () => ended("rejected")),
+        );
+
+      const credentials = { [OAUTH_TOKENS]: serializeTokens(tokens) };
+      yield* Effect.orDie(
+        withTransaction(
+          sql,
+          Effect.gen(function* () {
+            const now = yield* nowIso;
+            // A reconnect keeps its id, so whatever points at this connection
+            // stays attached; only the account and the tokens are replaced.
+            const reconnected = setup.connectionId;
+            const id =
+              reconnected === undefined
+                ? yield* Effect.map(
+                    connections.insert({
+                      pluginId: registered.pluginId,
+                      type: setup.type,
+                      label: setup.label,
+                      displayName: account.displayName,
+                      labels: setup.labels,
+                      config: setup.config,
+                      at: now,
+                    }),
+                    (row) => row.id,
+                  )
+                : yield* Effect.as(
+                    connections.update(
+                      reconnected,
+                      { displayName: account.displayName, status: "connected", statusDetail: null },
+                      now,
+                    ),
+                    reconnected,
+                  );
+            yield* writeSecrets(id, credentials);
+            yield* audit.append({
+              kind: reconnected === undefined ? "connection.created" : "connection.credentialsSet",
+              // The setup was started by a request the user made; the browser
+              // simply carries it back, with no credential to present.
+              actor: USER_ACTOR,
+              payload: {
+                connectionId: id,
+                pluginId: registered.pluginId,
+                type: setup.type,
+                credentials: [OAUTH_TOKENS],
+              },
+              record: { topic: "connection", id },
+              at: now,
+            });
+          }),
+        ),
+      );
+      return "ok" as const;
+    });
 
   return {
     /** One page of connections, narrowed by type and by status. */
@@ -415,6 +584,105 @@ const make = Effect.gen(function* () {
           }),
         );
       }),
+
+    /**
+     * Starts a redirect flow: writes down everything the callback will need and
+     * answers where to send the browser. Nothing exists as a connection yet - a
+     * flow the user abandons leaves a row that the next start sweeps away.
+     */
+    startOAuth: (
+      input: ConnectionOAuthStartInput,
+    ): Effect.Effect<
+      ConnectionOAuthStart,
+      Unauthenticated | Forbidden | Validation | InvalidState | SqlError
+    > =>
+      Effect.gen(function* () {
+        yield* requireGrant("connection.startOAuth");
+        const decoded = yield* Effect.mapError(decodeStart(input), validationOf);
+        const { pluginId, contribution } = yield* typeNamed(decoded.type);
+        const oauth = contribution.oauth;
+        if (oauth === undefined) {
+          const message = `the type ${decoded.type} is not set up through a redirect flow`;
+          return yield* Effect.fail(validation([{ path: ["type"], message }], message));
+        }
+        // A reconnect keeps what the user already chose, so the start needs
+        // neither a label nor a topic to go with it.
+        const existing =
+          decoded.connectionId === undefined
+            ? undefined
+            : Option.getOrUndefined(yield* connections.one(decoded.connectionId));
+        if (decoded.connectionId !== undefined && existing === undefined) {
+          return yield* Effect.fail(
+            validation([{ path: ["connectionId"], message: NO_SUCH_CONNECTION }]),
+          );
+        }
+        const label = decoded.label ?? existing?.label;
+        const labels = decoded.labels ?? existing?.labels;
+        if (label === undefined || labels === undefined) {
+          return yield* Effect.fail(
+            validation([
+              { path: ["label"], message: "a new connection needs a label and a topic" },
+            ]),
+          );
+        }
+        const config = decoded.config ?? existing?.config ?? {};
+        yield* readConfig(contribution, config);
+        const client = yield* clientOf(pluginId);
+        if (Option.isNone(client)) {
+          return yield* Effect.fail(
+            invalidState(
+              `the plugin ${pluginId} holds no OAuth client credentials: set its clientId ` +
+                `config field and its clientSecret secret before connecting`,
+            ),
+          );
+        }
+
+        const at = yield* nowIso;
+        const state = mintToken();
+        const codeVerifier = mintToken();
+        yield* withTransaction(
+          sql,
+          Effect.gen(function* () {
+            yield* setups.sweep(at);
+            yield* setups.insert({
+              state,
+              pluginId,
+              type: decoded.type,
+              connectionId: decoded.connectionId,
+              label,
+              labels,
+              config,
+              origin: decoded.origin,
+              codeVerifier,
+              expiresAt: new Date(Date.parse(at) + SETUP_LIFETIME_MS).toISOString(),
+              at,
+            });
+          }),
+        );
+        return {
+          authorizationUrl: authorizationUrl(oauth, {
+            clientId: client.value.clientId,
+            redirectUri: redirectUri(decoded.origin),
+            state,
+            challenge: challengeFor(codeVerifier),
+          }),
+        };
+      }),
+
+    /**
+     * Finishes the flow the browser came back from, and answers where to send
+     * it. Everything it can say is one of five words: the provider's own error
+     * text is not the user's to read off a URL.
+     *
+     * The exchange and the type's `validate` are calls to the provider, so they
+     * run outside the transaction; the pending row is spent before either, so a
+     * code presented twice buys nothing the second time.
+     */
+    completeOAuth: (query: unknown): Effect.Effect<string> =>
+      Effect.map(
+        Effect.catch(finish(query), (outcome: Outcome) => Effect.succeed(outcome)),
+        (outcome) => `/connections?oauth=${outcome}`,
+      ),
 
     /** Removes the connection and every secret it owned, in one transaction. */
     delete: (

@@ -7,6 +7,7 @@
  * `errored` is a fact about this process, and the next boot is the retry.
  */
 import * as Cause from "effect/Cause";
+import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import type * as JsonSchema from "effect/JsonSchema";
@@ -19,6 +20,7 @@ import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import * as Semaphore from "effect/Semaphore";
+import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient";
 import {
   configJsonSchema,
   ConnectionType,
@@ -29,8 +31,10 @@ import {
   ProviderDefinition,
   type ActivationContext,
   type ConnectionsRuntime,
+  type ConnectionStatus,
   type ConnectionSummary,
   type ConnectionTypeContribution,
+  type OAuthDeclaration,
   type Deactivate,
   type KeyValueStore,
   type Plugin,
@@ -53,6 +57,15 @@ import { Secrets, type SecretOwner } from "../secrets";
 // The repository rather than the domain's own boundary: the connection service
 // reads this host, so importing its index would close a cycle.
 import { connectionRepository, type StoredConnection } from "../connections/repository";
+import {
+  isStale,
+  OAUTH_TOKENS,
+  parseTokens,
+  oauthClients,
+  refreshAccess,
+  serializeTokens,
+  type TokenSet,
+} from "../connections/oauth";
 import { pluginRepository, type NewContribution } from "./repository";
 
 /**
@@ -335,6 +348,7 @@ const make = Effect.gen(function* () {
   const repository = yield* pluginRepository;
   const secrets = yield* Secrets;
   const connections = yield* connectionRepository;
+  const clientOf = yield* oauthClients;
   const audit = yield* AuditLog;
   const entries = yield* Ref.make<ReadonlyMap<string, Entry>>(new Map());
   // Outside `gate`, unlike everything else here: registration is pure and runs
@@ -463,6 +477,107 @@ const make = Effect.gen(function* () {
       config: row.config,
     });
 
+    /** What this plugin declared for the type this row is, if it is a redirect flow. */
+    const declaredOAuth = (row: StoredConnection): Effect.Effect<OAuthDeclaration | undefined> =>
+      Effect.map(
+        Ref.get(connectionTypes),
+        (all) =>
+          all.find((one) => one.pluginId === pluginId && one.contribution.type === row.type)
+            ?.contribution.oauth,
+      );
+
+    const setStatus = (
+      connectionId: string,
+      status: ConnectionStatus,
+      detail: string | null,
+    ): Effect.Effect<void> =>
+      Effect.gen(function* () {
+        const at = yield* nowIso;
+        yield* Effect.orDie(
+          withTransaction(
+            sql,
+            Effect.gen(function* () {
+              yield* connections.update(connectionId, { status, statusDetail: detail }, at);
+              yield* announce({
+                _tag: "record",
+                topic: "connection",
+                id: connectionId,
+                kind: "updated",
+              });
+            }),
+          ),
+        );
+      });
+
+    /** A connection the core cannot act through until the user has been back. */
+    const needsReauth = (
+      connectionId: string,
+      message: string,
+    ): Effect.Effect<never, ConnectionUnavailable> =>
+      Effect.andThen(
+        setStatus(connectionId, "needs-reauth", message),
+        Effect.fail(new ConnectionUnavailable({ message })),
+      );
+
+    /** What the user pasted, by the names the type declared. */
+    const pastedCredentials = (connectionId: string): Effect.Effect<Record<string, string>> =>
+      Effect.gen(function* () {
+        const owner: SecretOwner = { kind: "connection", id: connectionId };
+        const names = yield* Effect.orDie(secrets.names(owner));
+        const values = yield* Effect.forEach(names, (name) =>
+          Effect.map(Effect.orDie(secrets.get(owner, name)), (value) =>
+            Option.match(value, {
+              // The name came from the same table one statement ago.
+              onNone: (): [string, string] => {
+                throw new Error(`the secret ${name} disappeared while it was being read`);
+              },
+              onSome: (secret): [string, string] => [name, Redacted.value(secret)],
+            }),
+          ),
+        );
+        return Object.fromEntries(values);
+      });
+
+    /**
+     * The access token of a redirect-flow connection, refreshed first when it is
+     * spent or nearly so. The refresh is the core's: a plugin asks for
+     * credentials and is handed a token that works, or told it cannot act.
+     */
+    const accessToken = (
+      connectionId: string,
+      oauth: OAuthDeclaration,
+    ): Effect.Effect<Record<string, string>, ConnectionUnavailable> =>
+      Effect.gen(function* () {
+        const owner: SecretOwner = { kind: "connection", id: connectionId };
+        const stored = yield* Effect.orDie(secrets.get(owner, OAUTH_TOKENS));
+        if (Option.isNone(stored)) {
+          return yield* needsReauth(connectionId, "this connection holds no tokens");
+        }
+        const tokens = parseTokens(Redacted.value(stored.value));
+        const millis = yield* Clock.currentTimeMillis;
+        if (!isStale(tokens, millis)) return { accessToken: tokens.accessToken };
+
+        const client = yield* Effect.orDie(clientOf(pluginId));
+        if (tokens.refreshToken === undefined || Option.isNone(client)) {
+          return yield* needsReauth(connectionId, "this connection cannot be refreshed");
+        }
+        const refreshed = yield* refreshAccess({
+          tokenUrl: oauth.tokenUrl,
+          client: client.value,
+          refreshToken: tokens.refreshToken,
+        }).pipe(
+          Effect.provide(FetchHttpClient.layer),
+          Effect.catchTag("TokenRequestFailed", (error) =>
+            needsReauth(connectionId, error.message),
+          ),
+        );
+        // A provider that hands back no refresh token means the old one stands.
+        const keep = refreshed.refreshToken ?? tokens.refreshToken;
+        const next: TokenSet = { ...refreshed, refreshToken: keep };
+        yield* Effect.orDie(secrets.set(owner, OAUTH_TOKENS, Redacted.make(serializeTokens(next))));
+        return { accessToken: next.accessToken };
+      });
+
     return {
       list: () =>
         Effect.map(
@@ -472,46 +587,18 @@ const make = Effect.gen(function* () {
 
       credentials: (connectionId) =>
         Effect.gen(function* () {
-          yield* own(connectionId);
-          const owner: SecretOwner = { kind: "connection", id: connectionId };
-          const names = yield* Effect.orDie(secrets.names(owner));
-          const values = yield* Effect.forEach(names, (name) =>
-            Effect.map(Effect.orDie(secrets.get(owner, name)), (value) =>
-              Option.match(value, {
-                // The name came from the same table one statement ago.
-                onNone: (): [string, string] => {
-                  throw new Error(`the secret ${name} disappeared while it was being read`);
-                },
-                onSome: (secret): [string, string] => [name, Redacted.value(secret)],
-              }),
-            ),
-          );
-          return Object.fromEntries(values);
+          const row = yield* own(connectionId);
+          const oauth = yield* declaredOAuth(row);
+          return oauth === undefined
+            ? yield* pastedCredentials(connectionId)
+            : yield* accessToken(connectionId, oauth);
         }),
 
       report: (connectionId, report) =>
-        Effect.gen(function* () {
-          yield* own(connectionId);
-          const at = yield* nowIso;
-          yield* Effect.orDie(
-            withTransaction(
-              sql,
-              Effect.gen(function* () {
-                yield* connections.update(
-                  connectionId,
-                  { status: report.status, statusDetail: report.detail ?? null },
-                  at,
-                );
-                yield* announce({
-                  _tag: "record",
-                  topic: "connection",
-                  id: connectionId,
-                  kind: "updated",
-                });
-              }),
-            ),
-          );
-        }),
+        Effect.andThen(
+          own(connectionId),
+          setStatus(connectionId, report.status, report.detail ?? null),
+        ),
     };
   };
 

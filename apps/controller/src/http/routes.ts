@@ -163,7 +163,8 @@ const connectionRoutes = HttpApiBuilder.group(api, "connection", (handlers) =>
       .handle("delete", ({ params }) => operation(connections.delete(params)))
       .handle("setCredentials", ({ params, payload }) =>
         operation(connections.setCredentials({ id: params.id, ...payload })),
-      );
+      )
+      .handle("startOAuth", ({ payload }) => operation(connections.startOAuth(payload)));
   }),
 );
 

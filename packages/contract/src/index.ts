@@ -159,6 +159,8 @@ export {
   Connection,
   ConnectionCreateInput,
   ConnectionCredentialsInput,
+  ConnectionOAuthStart,
+  ConnectionOAuthStartInput,
   ConnectionStatus,
   ConnectionUpdateInput,
   CredentialRef,
