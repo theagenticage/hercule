@@ -203,7 +203,7 @@ describe("the theme selector", () => {
     expect(marks.compareDocumentPosition(theme) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 
     await user.click(theme);
-    await user.click(screen.getByRole("button", { name: "Dark" }));
+    await user.click(screen.getByRole("radio", { name: "Dark" }));
 
     expect(document.documentElement.dataset.theme).toBe("dark");
     expect(localStorage.getItem("hydra:theme")).toBe("dark");

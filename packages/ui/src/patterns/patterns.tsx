@@ -30,13 +30,17 @@ export function EmptyState({
 /** An uppercase lane label; the one heading style above a group of rows. */
 export function LaneLabel({
   className,
+  id,
   children,
 }: {
   readonly className?: string;
+  /** Names a group whose visible heading this is, through `aria-labelledby`. */
+  readonly id?: string;
   readonly children: ReactNode;
 }): JSX.Element {
   return (
     <div
+      id={id}
       className={cn("mb-2.5 text-label font-emph tracking-[0.1em] text-faint uppercase", className)}
     >
       {children}

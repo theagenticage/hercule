@@ -37,7 +37,7 @@ describe("ThemeSelector", () => {
     render(<ThemeSelector />);
 
     await userEvent.click(screen.getByRole("button", { name: "Theme Light" }));
-    await userEvent.click(row("Dark"));
+    await userEvent.click(option("Dark"));
 
     expect(document.documentElement.dataset.theme).toBe("dark");
     expect(held.getItem("hydra:theme")).toBe("dark");
@@ -54,7 +54,7 @@ describe("ThemeSelector", () => {
     render(<ThemeSelector />);
 
     await userEvent.click(screen.getByRole("button", { name: "Theme Dark" }));
-    await userEvent.click(row("System"));
+    await userEvent.click(option("System"));
 
     expect(document.documentElement.dataset.theme).toBeUndefined();
     expect(held.getItem("hydra:theme")).toBeNull();
@@ -63,8 +63,45 @@ describe("ThemeSelector", () => {
     });
     expect(screen.getByRole("button", { name: "Theme System" })).toBeTruthy();
   });
+
+  it("is a radio group: one option checked, and it alone in the tab order", async () => {
+    vi.stubGlobal("localStorage", memoryStorage());
+    render(<ThemeSelector />);
+
+    await userEvent.click(screen.getByRole("button", { name: "Theme System" }));
+
+    const group = screen.getByRole("radiogroup", { name: "Theme" });
+    expect(group).toBeTruthy();
+    for (const name of ["Light", "Dark", "System"]) {
+      const radio = within(group).getByRole("radio", { name });
+      expect(radio.getAttribute("aria-checked"), name).toBe(String(name === "System"));
+      expect(radio.tabIndex, name).toBe(name === "System" ? 0 : -1);
+    }
+    // Focus arrives on the checked option, so the arrow keys work at once.
+    expect(within(group).getByRole("radio", { name: "System" })).toBe(document.activeElement);
+  });
+
+  it("moves the check with the arrow keys, painting as it goes and staying open", async () => {
+    const held = memoryStorage();
+    vi.stubGlobal("localStorage", held);
+    render(<ThemeSelector />);
+
+    await userEvent.click(screen.getByRole("button", { name: "Theme System" }));
+    // Down from System wraps to Light; one more lands on Dark.
+    await userEvent.keyboard("{ArrowDown}");
+    expect(document.documentElement.dataset.theme).toBe("light");
+    await userEvent.keyboard("{ArrowDown}");
+
+    expect(document.documentElement.dataset.theme).toBe("dark");
+    expect(held.getItem("hydra:theme")).toBe("dark");
+    const dark = screen.getByRole("radio", { name: "Dark" });
+    expect(dark.getAttribute("aria-checked")).toBe("true");
+    // Focus follows the check, and the popover is still open to keep browsing.
+    expect(dark).toBe(document.activeElement);
+    expect(screen.getByRole("dialog", { name: "Theme" })).toBeTruthy();
+  });
 });
 
 /** The one option row the open popover shows under this name. */
-const row = (name: string): HTMLElement =>
-  within(screen.getByRole("dialog", { name: "Theme" })).getByRole("button", { name });
+const option = (name: string): HTMLElement =>
+  within(screen.getByRole("dialog", { name: "Theme" })).getByRole("radio", { name });

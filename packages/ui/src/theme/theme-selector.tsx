@@ -1,4 +1,4 @@
-import { useState, type JSX } from "react";
+import { useId, useRef, useState, type JSX, type KeyboardEvent } from "react";
 import { Popover, PopoverContent, PopoverTrigger } from "../primitives/popover";
 import { LaneLabel } from "../patterns/patterns";
 import { cn } from "../primitives/cn";
@@ -46,15 +46,43 @@ const applyChoice = (choice: ThemeChoice): void => {
  * opening the three ways the app can be painted. It is a this-browser choice
  * rather than a setting - a machine's operators are not one person with one
  * screen - and it changes nothing until it is clicked.
+ *
+ * The three options are a radio group in the ARIA sense as well as the visual
+ * one: one is checked, the arrow keys move the check as they go, and a click
+ * commits. Arrows browse with the popover open - the app repaints under them -
+ * while a click is the commitment that closes it.
  */
 export function ThemeSelector(): JSX.Element {
   const [choice, setChoice] = useState(choiceOfDocument);
   const [open, setOpen] = useState(false);
+  const labelId = useId();
+  const rows = useRef(new Map<ThemeChoice, HTMLButtonElement>());
 
-  const pick = (next: ThemeChoice): void => {
+  const choose = (next: ThemeChoice): void => {
     setChoice(next);
     applyChoice(next);
+  };
+
+  const pick = (next: ThemeChoice): void => {
+    choose(next);
     setOpen(false);
+  };
+
+  const onKeyDown = (event: KeyboardEvent<HTMLDivElement>): void => {
+    const offset =
+      event.key === "ArrowDown" || event.key === "ArrowRight"
+        ? 1
+        : event.key === "ArrowUp" || event.key === "ArrowLeft"
+          ? -1
+          : 0;
+    if (offset === 0) return;
+    // The arrows are the radio group's own keys; they do not scroll the page
+    // behind the popover as well.
+    event.preventDefault();
+    const next = ORDER[(ORDER.indexOf(choice) + offset + ORDER.length) % ORDER.length]!;
+    choose(next);
+    // Roving tabindex made the new choice the tab stop; focus follows it.
+    rows.current.get(next)?.focus();
   };
 
   return (
@@ -62,15 +90,39 @@ export function ThemeSelector(): JSX.Element {
       <PopoverTrigger className="flex w-full cursor-pointer items-center gap-2 rounded-control px-2.5 py-[5px] text-row text-muted hover:bg-line-soft hover:text-ink aria-expanded:bg-line-soft aria-expanded:text-ink focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-live">
         Theme <span className="ml-auto text-fine text-faint">{LABELS[choice]}</span>
       </PopoverTrigger>
-      <PopoverContent side="right" align="end" className="w-[236px]" aria-label="Theme">
-        <LaneLabel className="mb-1">Theme</LaneLabel>
-        <div className="flex flex-col gap-px">
+      <PopoverContent
+        side="right"
+        align="end"
+        className="w-[236px]"
+        aria-label="Theme"
+        // Focus lands on the checked option rather than the popover's rim, so
+        // the arrow keys work from the first keystroke.
+        onOpenAutoFocus={(event) => {
+          event.preventDefault();
+          rows.current.get(choice)?.focus();
+        }}
+      >
+        <LaneLabel className="mb-1" id={labelId}>
+          Theme
+        </LaneLabel>
+        <div
+          role="radiogroup"
+          aria-labelledby={labelId}
+          onKeyDown={onKeyDown}
+          className="flex flex-col gap-px"
+        >
           {ORDER.map((value) => (
             <button
               key={value}
               type="button"
-              aria-current={choice === value ? "true" : undefined}
+              role="radio"
+              aria-checked={choice === value}
+              tabIndex={choice === value ? 0 : -1}
               onClick={() => pick(value)}
+              ref={(element) => {
+                if (element === null) rows.current.delete(value);
+                else rows.current.set(value, element);
+              }}
               className={cn(
                 "flex w-full cursor-pointer items-center gap-2.5 rounded-control py-[2.5px] text-left text-fine",
                 "focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-live",
