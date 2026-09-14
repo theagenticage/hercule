@@ -66,7 +66,12 @@ export function Providers({
             onInstall={() => {
               install.mutate(row.providerId);
             }}
-            onLoggedIn={reread}
+            // A login writes a credential the stored snapshot knows nothing
+            // about, so the machine is asked about the instance again rather
+            // than the page re-reading what it already had.
+            onLoggedIn={() => {
+              probe.mutate(row.id);
+            }}
           />
         ))}
       </div>

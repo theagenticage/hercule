@@ -350,11 +350,11 @@ describe("the hourly refresh", () => {
 });
 
 describe("the adapters a runner build can drive", () => {
-  it("names the one provider this build has an adapter for", async () => {
+  it("names the providers this build has an adapter for", async () => {
     // A fact about the build, not the machine: three harnesses installed,
-    // still one adapter.
-    expect((await probe(FULL)).adapters).toEqual(["claude-code"]);
-    expect((await probe({ git: GIT })).adapters).toEqual(["claude-code"]);
+    // still only the two this build carries an adapter for.
+    expect((await probe(FULL)).adapters).toEqual(["claude-code", "codex"]);
+    expect((await probe({ git: GIT })).adapters).toEqual(["claude-code", "codex"]);
   });
 
   it("still reports every provider binary with its presence beside them", async () => {
@@ -362,9 +362,9 @@ describe("the adapters a runner build can drive", () => {
     expect(codex).toBeDefined();
 
     const facts = await probe(withoutCodex);
-    expect(facts.adapters).toEqual(["claude-code"]);
+    expect(facts.adapters).toEqual(["claude-code", "codex"]);
     // Adapters did not replace the binaries: a Codex row has to say both that
-    // the machine has no `codex` and that this build could not drive one.
+    // this build can drive one and that the machine has no `codex` to drive.
     expect(facts.providers).toEqual([
       { name: "claude", present: true, path: "/usr/local/bin/claude" },
       { name: "codex", present: false },

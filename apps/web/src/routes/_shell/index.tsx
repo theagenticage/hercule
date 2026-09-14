@@ -1,12 +1,13 @@
 import type { JSX, ReactNode } from "react";
 import { Link, createFileRoute } from "@tanstack/react-router";
-import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { Button, EmptyState } from "@hydra/ui";
 import { queryKeys, sessionsEmptyState } from "@hydra/client-core";
 import { useLiveInvalidation } from "../../app/live-invalidation";
 import { localRunnerQuery, providersQuery, runnersQuery } from "../../app/queries";
 import { CreateThreadLink } from "../../screens/create-thread-link";
 import { ProviderLogin } from "../../screens/provider-login";
+import { messageOf } from "../../screens/save-status";
 
 export const Route = createFileRoute("/_shell/")({
   staticData: { title: "Sessions" },
@@ -44,6 +45,16 @@ function Sessions(): JSX.Element {
   const reread = (): void => {
     void queryClient.invalidateQueries({ queryKey: queryKeys.providers() });
   };
+  // A login writes a credential the stored snapshot knows nothing about, so the
+  // machine is asked about the instance again before this screen believes it.
+  const probe = useMutation({
+    mutationFn: (asked: { readonly runnerId: string; readonly instanceId: string }) =>
+      client.runner.probe({
+        params: { id: asked.runnerId },
+        payload: { instanceId: asked.instanceId },
+      }),
+    onSuccess: reread,
+  });
 
   // `local === null` is what narrows the type below; the state alone already
   // says so.
@@ -85,6 +96,7 @@ function Sessions(): JSX.Element {
         headline={found(state.instances.map((instance) => instance.displayName))}
         lead="Log in to use it in Hydra. The login runs on this machine and its credential stays there."
         fine="A thread needs a harness that is logged in, so starting one waits on this."
+        failure={probe.error === null ? null : messageOf(probe.error)}
       >
         {state.instances.map((instance) => (
           <ProviderLogin
@@ -95,7 +107,9 @@ function Sessions(): JSX.Element {
             subject={`${instance.displayName} on this machine`}
             label={`Log in to ${instance.displayName}`}
             variant="primary"
-            onLoggedIn={reread}
+            onLoggedIn={() => {
+              probe.mutate({ runnerId: local.id, instanceId: instance.id });
+            }}
           />
         ))}
       </Screen>
@@ -116,6 +130,7 @@ function Screen({
   lead,
   fine,
   ready = false,
+  failure = null,
   children,
 }: {
   readonly headline: string;
@@ -123,6 +138,8 @@ function Screen({
   readonly fine?: ReactNode;
   /** Whether a thread can actually be started from here yet. */
   readonly ready?: boolean;
+  /** What the last move on this screen failed with, if it failed. */
+  readonly failure?: string | null;
   readonly children?: ReactNode;
 }): JSX.Element {
   return (
@@ -137,6 +154,11 @@ function Screen({
           </Button>
         )}
       </div>
+      {failure === null ? null : (
+        <p className="text-fine text-fail" role="alert">
+          {failure}
+        </p>
+      )}
     </EmptyState>
   );
 }

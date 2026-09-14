@@ -24,9 +24,6 @@ import {
 import { CLAUDE_CODE_VERSION } from "@hydra/home/version";
 import {
   MAX_FACT_ITEMS,
-  MAX_FACT_LENGTH,
-  MAX_INSTALL_MESSAGE_LENGTH,
-  MAX_MESSAGE_LENGTH,
   type AccessMode,
   type ApprovalDecision,
   type ExitReason,
@@ -47,20 +44,19 @@ import {
   toolKind,
   type Normalizing,
 } from "./claude-code-normalize";
-import type { InstallOutcome, ProviderAdapter, ProviderRunnerContext } from "./index";
+import type { ProviderAdapter, ProviderRunnerContext } from "./index";
+import { installing } from "./install";
+import { PROBE_DEADLINE, probeFailed } from "./probe";
 import type { LoginCommand } from "./login";
 import { runProcess, type Run } from "./process";
+import { fact, text } from "./text";
+import { userMessage } from "./events";
+import { questionRequest } from "./questions";
 import { now } from "../report";
 
 export const CLAUDE_CODE = "claude-code";
 
 const CLAUDE_BINARY = "claude";
-
-/** Long enough for a cold CLI, short enough that a Fleet page does not look hung. */
-export const PROBE_DEADLINE: Duration.Duration = Duration.seconds(15);
-
-/** Downloading and running somebody else's installer over a slow link. */
-export const INSTALL_DEADLINE: Duration.Duration = Duration.minutes(5);
 
 /**
  * How long a control request is given. It is a write to the harness child and a
@@ -119,28 +115,11 @@ const SEMVER = /\d+\.\d+\.\d+\S*/;
 /** The effort level the CLI starts on when nothing chose one. */
 const DEFAULT_EFFORT = "medium";
 
-/** Cut to what the protocol carries; one over-long value would fail the report. */
-const fact = (value: string): string => value.slice(0, MAX_FACT_LENGTH);
-
-/**
- * The same cut for the longer fields: free text a harness wrote, not an id. It
- * says where it cut, because a command read as whole is a command the user
- * approved something else than.
- */
-const text = (value: string): string =>
-  value.length > MAX_MESSAGE_LENGTH ? `${value.slice(0, MAX_MESSAGE_LENGTH - 1)}\u2026` : value;
-
 /** `Fact` refuses an empty string, and an `Error` can carry an empty message. */
 const describe = (error: unknown): string => {
   const said = fact(error instanceof Error ? error.message : String(error));
   return said === "" ? "the harness failed without saying why" : said;
 };
-
-const failed = (harnessVersion: string | null, message: string): ProbeResult => ({
-  harnessVersion,
-  auth: { status: "error", message },
-  models: [],
-});
 
 /** Only ever called with levels the CLI listed, or with the overlay's own. */
 function effortOver([first, ...rest]: readonly [string, ...ReadonlyArray<string>]): ModelOption {
@@ -327,60 +306,6 @@ const pathsIn = (input: Record<string, unknown>): ReadonlyArray<string> =>
     return typeof found === "string" && found !== "" ? [fact(found)] : [];
   });
 
-/** One question as the protocol carries it: the vendor's shape mapped over. */
-type Question = Extract<OpenRequest, { readonly kind: "question" }>["detail"]["questions"][number];
-
-/**
- * The options of one question, read-only for now: until an answer can travel
- * back with the decision there is no button for them to be. They are carried
- * anyway, because what each answer would have meant is what the question is
- * about, and a user reading only the prose cannot see it.
- *
- * An option the protocol has no field for - the SDK's `preview` - is left
- * behind, and one with no label has nothing to show, so it is dropped.
- */
-const optionsIn = (given: unknown): ReadonlyArray<Question["options"][number]> => {
-  if (!Array.isArray(given)) return [];
-  return given.flatMap((one: unknown) => {
-    if (typeof one !== "object" || one === null) return [];
-    const { label, description } = one as {
-      readonly label?: unknown;
-      readonly description?: unknown;
-    };
-    if (typeof label !== "string" || label === "" || typeof description !== "string") return [];
-    return [{ label: fact(label), description: text(description) }];
-  });
-};
-
-/**
- * Each question of an ask, field by field. A question missing what the card
- * reads it by - its prose or its chip - is dropped rather than guessed at: an
- * invented header is a word the agent never wrote.
- */
-const questionsIn = (input: Record<string, unknown>): ReadonlyArray<Question> => {
-  const asked = input["questions"];
-  if (!Array.isArray(asked)) return [];
-  return asked.flatMap((one: unknown) => {
-    if (typeof one !== "object" || one === null) return [];
-    const { question, header, options, multiSelect } = one as {
-      readonly question?: unknown;
-      readonly header?: unknown;
-      readonly options?: unknown;
-      readonly multiSelect?: unknown;
-    };
-    if (typeof question !== "string" || question === "") return [];
-    if (typeof header !== "string" || header === "") return [];
-    return [
-      {
-        question: text(question),
-        header: fact(header),
-        options: optionsIn(options),
-        multiSelect: multiSelect === true,
-      },
-    ];
-  });
-};
-
 /**
  * One tool call turned into the question a user answers. Every field is cut to
  * what the protocol carries: an over-long command or path would be a frame
@@ -394,28 +319,7 @@ const requestFor = (
   canPersist: boolean,
 ): OpenRequest => {
   if (toolName === "AskUserQuestion") {
-    // Answering a question with its answers is not built, so an allow would run
-    // the tool with no answer in it: the two honest answers are the only ones.
-    const [first, ...rest] = questionsIn(input);
-    return first === undefined
-      ? // Nothing decodable was asked. A `question` request carrying no
-        // question on it is a frame the controller refuses, which costs the
-        // runner its socket and leaves the park hanging; the tool call under
-        // it is still refusable.
-        {
-          requestId,
-          itemId,
-          kind: "tool_approval",
-          decisions: ["deny", "cancel"],
-          detail: { toolName: "AskUserQuestion" },
-        }
-      : {
-          requestId,
-          itemId,
-          kind: "question",
-          decisions: ["deny", "cancel"],
-          detail: { questions: [first, ...rest] },
-        };
+    return questionRequest({ requestId, itemId }, toolName, input["questions"]);
   }
   // `allow always` is offered only where the harness handed over rules to
   // persist: a button that would have to invent one grants more than the user
@@ -881,26 +785,9 @@ export const claudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
         // turn already running, so the input folds into it. Read off what
         // `openTurn` just did rather than remembered from before the wait.
         const steered = events.length === 0;
-        // The user message is reported here rather than off the harness's echo
-        // of it, because only here is it known whether it steered: the echo
-        // cannot say which input it echoes.
-        const itemId = held.state.mint();
-        const detail = { text: turn.text, ...(steered ? { steered: true } : {}) };
-        const item = {
-          sessionId,
-          at: held.state.now(),
-          turnId,
-          itemId,
-          kind: "user_message",
-        } as const;
-        emit({ _tag: "item.started", eventId: held.state.mint(), ...item, detail });
-        emit({
-          _tag: "item.completed",
-          eventId: held.state.mint(),
-          ...item,
-          status: "completed",
-          detail,
-        });
+        for (const event of userMessage({ sessionId, turnId, text: turn.text, steered })) {
+          emit(event);
+        }
         held.input.push({
           type: "user",
           message: { role: "user", content: turn.text },
@@ -968,12 +855,12 @@ export const claudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
     probe: (ctx: ProviderRunnerContext): Effect.Effect<ProbeResult> => {
       const binary = ctx.binary;
       if (binary === undefined) {
-        return Effect.succeed(failed(null, `no ${CLAUDE_BINARY} on this machine`));
+        return Effect.succeed(probeFailed(null, `no ${CLAUDE_BINARY} on this machine`));
       }
       const gather = Effect.gen(function* () {
         const harnessVersion = yield* versionOf(ctx, binary);
         return yield* Effect.match(ask(ctx, binary), {
-          onFailure: (message) => failed(harnessVersion, message),
+          onFailure: (message) => probeFailed(harnessVersion, message),
           onSuccess: ({ account, models }) => ({
             harnessVersion,
             auth: authOf(account),
@@ -984,7 +871,7 @@ export const claudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
       return Effect.map(
         Effect.timeoutOption(gather, PROBE_DEADLINE),
         Option.getOrElse(() =>
-          failed(null, `the harness did not answer within ${Duration.format(PROBE_DEADLINE)}`),
+          probeFailed(null, `the harness did not answer within ${Duration.format(PROBE_DEADLINE)}`),
         ),
       );
     },
@@ -1002,40 +889,12 @@ export const claudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
      * Pinned to the CLI this build's SDK talks to. The script needs the network
      * even so.
      */
-    install: (env: Readonly<Record<string, string | undefined>>): Effect.Effect<InstallOutcome> =>
-      Effect.map(
-        Effect.timeoutOption(
-          seam.run(
-            [
-              "bash",
-              "-c",
-              `curl -fsSL https://claude.ai/install.sh | bash -s ${CLAUDE_CODE_VERSION}`,
-            ],
-            env,
-          ),
-          INSTALL_DEADLINE,
-        ),
-        Option.match({
-          onNone: () => ({
-            ok: false,
-            message: `the installer did not finish within ${Duration.format(INSTALL_DEADLINE)}`,
-          }),
-          onSome: (ran) =>
-            ran.code === 0
-              ? { ok: true }
-              : { ok: false, message: lastLines(ran.stderr === "" ? ran.stdout : ran.stderr) },
-        }),
-      ),
+    install: installing(seam.run, [
+      "bash",
+      "-c",
+      `curl -fsSL https://claude.ai/install.sh | bash -s ${CLAUDE_CODE_VERSION}`,
+    ]),
   };
-};
-
-const LAST_LINES = 5;
-
-const lastLines = (output: string): string => {
-  const said = output.trimEnd().split("\n").slice(-LAST_LINES).join("\n");
-  return said === ""
-    ? "the installer failed without saying why"
-    : said.slice(-MAX_INSTALL_MESSAGE_LENGTH);
 };
 
 export const claudeCode: ProviderAdapter = claudeCodeAdapter({

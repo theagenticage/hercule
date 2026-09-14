@@ -353,6 +353,8 @@ Item ids are native where they exist (Codex item id; Claude `tool_use` id / `mes
 
 `ApprovalDecision` scope semantics: `allow` = this call only; `allow_always` = the vendor's for-session persistence, never persistence on disk (Codex `acceptForSession`, Claude `updatedPermissions` with every rule rewritten to `destination: "session"`, pi: the adapter's hook remembers the rule for the session); `deny` = refuse with a reason the model sees; `cancel` = refuse and end the turn. The four values and their vendor mappings are pinned; that `cancel` ends the turn is the spec's consolidated reading of the vendors' `cancel` options. Vendor exotics (Codex execpolicy / network amendments) are not offered; the chosen native option is recorded in `raw` / `providerRefs`.
 
+*(Amended 2026-09-14, [#73](https://github.com/rogierpennink/hydra/issues/73).)* No adapter emits `file_read_approval` in v1: `item/fileRead/requestApproval` is not in the app-server's ServerRequest set at codex 0.154.0, and Codex was the one provider that had it natively. The protocol kind stays as specced, for the adapter or the Codex release that first opens such a request.
+
 A request stays open until `respondToRequest`; the controller surfaces it as a Notification and in the session view ([./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md)). `interrupt` on a session with an open request resolves it as `cancel` (spec's consolidated semantics; follows from the park-and-resume abort caveat in section 8.2).
 
 ### 6.6 Usage and ops
@@ -414,6 +416,8 @@ On Claude the callback is supplied in every mode but `full-access` - which actio
 | deny | `{ behavior: "deny", message, decisionClassification: "user_reject" }` |
 | cancel | the same deny with `interrupt: true`, which ends the turn with it |
 
+*(Amended 2026-09-14, [#73](https://github.com/rogierpennink/hydra/issues/73).)* `item/fileRead/requestApproval` is not among the app-server's ServerRequests at codex 0.154.0, so the Codex adapter implements the other handlers and never emits `file_read_approval` (section 6.5).
+
 The earlier pi degradation (deny-with-reason and retry after approval) is withdrawn.
 
 ### 8.2 Park-and-resume build caveats
@@ -456,7 +460,7 @@ The instance's config dir is also where the vendor login lives, which is why the
 
 **Every workspace-less session gets an empty scratch cwd, and context-file loading is off.** "`cwd: null`" would mean `process.cwd()` on every harness (Claude Agent SDK and pi both default to it), and both read instruction files from there: pi loads `AGENTS.md` / `CLAUDE.md` from the cwd, every parent directory and `~/.pi/agent/`; the Claude SDK loads the cwd's `CLAUDE.md` whenever `settingSources` includes `project`. So a workspace-less session could silently pick up a file from the runner's install directory. Rule ([Assistant runtime](https://github.com/rogierpennink/hydra/issues/40)): the runner provisions an **empty scratch directory** (not a Workspace) as cwd for every workspace-less session on every harness, and the adapter disables context-file discovery - Claude `settingSources: []`, pi `--no-context-files`. Codex has no system-prompt parameter and takes instructions only as `AGENTS.md` in the cwd, so the Codex adapter materializes `systemPrompt` into `AGENTS.md` in *its* scratch directory; no other harness can see that directory, so nothing is duplicated. `ProviderRunnerContext.cwd` is therefore never `null` in practice; the type keeps `null` for "no workspace" semantics at the controller.
 
-**Verify at build time:** whether the Codex app-server protocol (`thread/start` `personality`, per-turn params, or a developer-instructions field) offers a proper system-prompt channel; if it does, prefer it and keep the scratch cwd only because `thread/start` requires one.
+~~**Verify at build time:** whether the Codex app-server protocol (`thread/start` `personality`, per-turn params, or a developer-instructions field) offers a proper system-prompt channel; if it does, prefer it and keep the scratch cwd only because `thread/start` requires one.~~ *(Answered 2026-09-14, [#73](https://github.com/rogierpennink/hydra/issues/73).)* It does: `thread/start`, `thread/resume` and `thread/fork` all take `developerInstructions` and `baseInstructions`. A Codex system prompt goes there when it ships and the scratch-cwd `AGENTS.md` channel is retired; the scratch cwd itself stays, because `thread/start` requires a cwd.
 
 #### User Material: what a Thread sees
 
@@ -500,6 +504,8 @@ The adapter reports context usage through `session.usage.updated`, which gains t
 | Codex | `AGENTS.md` in the session's scratch cwd (section 9.1), Codex's only instruction channel |
 | pi | the session's system prompt parameter |
 
+*(Amended 2026-09-14, [#73](https://github.com/rogierpennink/hydra/issues/73).)* The Codex row of the table above becomes `developerInstructions` on `thread/start`, `thread/resume` and `thread/fork`, which the app-server has taken all along (section 9.1); `AGENTS.md` in the scratch cwd is retired as an instruction channel.
+
 Never the first user turn: memory is standing context, and a synthetic first message would show in the conversation view as a message nobody sent.
 
 **Verify at build time:** the exact knob names above are as observed in the prototype; confirm each against the pinned harness version.
@@ -530,6 +536,7 @@ The runner injects, per session: `HYDRA_API_URL`, `HYDRA_TOKEN` (the session tok
 - **Model**: Thread > Turn > Item maps 1:1 onto Session > Turn > Item. `thread/start` (`model`, `cwd`, `approvalPolicy`, `sandbox`, `ephemeral`), `thread/resume`, `thread/fork`, `turn/start` (per-turn `model`, `outputSchema`), `turn/steer`, `turn/interrupt`. Notifications `turn/started` -> `item/started` -> deltas -> `item/completed` -> `turn/completed`; usage via `thread/tokenUsage/updated`. Unknown notifications are ignored for forward compatibility.
 - **Approvals**: server-to-client requests (section 8.1); the adapter implements every request handler even where the answer is always decline.
 - **Process ownership**: topology unpinned; suggested one app-server process per instance per runner (section 4.1). Single-writer per thread; the server unloads idle unsubscribed threads after 30 minutes and emits `thread/closed` (maps to `session.exited`, resumable).
+- **Process ownership, pinned** *(2026-09-14, [#73](https://github.com/rogierpennink/hydra/issues/73))*: one app-server host per provider instance on a runner, reference-counted over the sessions using it and shut down with its last one. A device-code login is an exception to the host's request/response rhythm: its completion is confirmed by a later probe rather than awaited, because Bun's HTTP server cuts an idle request at 10 seconds and the user needs longer than that in the browser.
 - **Errors**: `-32001` overload -> retry with exponential backoff and jitter; mid-turn `error` notifications with `codexErrorInfo` feed `runtime.error { class }`.
 - **Auth**: ChatGPT OAuth or API key via `account/*`; credentials in `$CODEX_HOME/auth.json` (file store default); tokens auto-refresh. `cli_auth_credentials_store` stays `file` on runners.
 - **Stability**: no cross-version protocol guarantee. Pin the CLI release, generate types with `codex app-server generate-ts` for that release, regenerate and re-verify on every upgrade.

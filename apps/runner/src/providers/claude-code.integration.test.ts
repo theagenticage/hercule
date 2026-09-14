@@ -14,7 +14,8 @@ import { basename, dirname, join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { Duration, Effect, Stream } from "effect";
 import type { ProviderEvent, SessionSpec } from "@hydra/protocol";
-import { PROBE_DEADLINE, claudeCode } from "./claude-code";
+import { claudeCode } from "./claude-code";
+import { PROBE_DEADLINE } from "./probe";
 import type { ProviderRunnerContext } from "./index";
 
 const binary = Bun.which("claude") ?? undefined;

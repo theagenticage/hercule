@@ -65,7 +65,9 @@ export const ProviderLoginDeadline = Context.Reference<Duration.Duration>(
 
 /**
  * Longer than the URL's wait: it covers the vendor's own exchange, and giving
- * up early would report a failure that in fact wrote a credential.
+ * up early would report a failure that in fact wrote a credential. No longer
+ * than that: the HTTP server this answer goes out on cuts a held request, so a
+ * wait measured in browser-time could never have been answered anyway.
  */
 const LOGIN_CODE_DEADLINE: Duration.Duration = Duration.minutes(2);
 
@@ -263,7 +265,9 @@ const make = Effect.gen(function* () {
      * Returns the URL the harness printed; the user opens it in their own
      * browser, since the machine may have none.
      */
-    login: (input: LoginInput): Effect.Effect<{ readonly url: string }, AskError> =>
+    login: (
+      input: LoginInput,
+    ): Effect.Effect<{ readonly url: string; readonly userCode?: string }, AskError> =>
       Effect.gen(function* () {
         yield* requireGrant("provider.login");
         const { id, runnerId } = yield* Effect.mapError(decodeLogin(input), validationOf);
@@ -280,7 +284,12 @@ const make = Effect.gen(function* () {
           yield* ProviderLoginDeadline,
         );
         if (answer._tag !== "loginUrl") return yield* Effect.fail(invalidState(refusalIn(answer)));
-        return { url: answer.url };
+        // Absent rather than empty: a code is what tells the user's browser,
+        // not this exchange, to finish the login.
+        return {
+          url: answer.url,
+          ...(answer.userCode === undefined ? {} : { userCode: answer.userCode }),
+        };
       }),
 
     /**

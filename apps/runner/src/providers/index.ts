@@ -1,12 +1,11 @@
 /**
- * The provider adapters this runner build carries. Only Claude Code exists;
- * Codex and pi get theirs with their own tickets.
+ * The provider adapters this runner build carries. Claude Code and Codex exist;
+ * pi gets its own with its own ticket.
  */
 import type * as Effect from "effect/Effect";
 import type * as Schema from "effect/Schema";
 import type * as Stream from "effect/Stream";
 import {
-  MAX_FACT_LENGTH,
   type ApprovalDecision,
   type ExitReason,
   type ProbeResult,
@@ -17,6 +16,7 @@ import {
   type TurnInput,
 } from "@hydra/protocol";
 import { CLAUDE_CODE, claudeCode } from "./claude-code";
+import { CODEX, codex } from "./codex";
 import { logins, type LoginCommand } from "./login";
 import { spawnLogin } from "./process";
 
@@ -115,7 +115,10 @@ export interface ProviderAdapter {
   readonly listSessions: Effect.Effect<ReadonlyArray<SessionBinding>>;
 }
 
-const ADAPTERS: ReadonlyMap<string, ProviderAdapter> = new Map([[CLAUDE_CODE, claudeCode]]);
+const ADAPTERS: ReadonlyMap<string, ProviderAdapter> = new Map([
+  [CLAUDE_CODE, claudeCode],
+  [CODEX, codex],
+]);
 
 /** Every adapter this build carries: what the session supervisor listens to. */
 export const adapters: ReadonlyArray<ProviderAdapter> = [...ADAPTERS.values()];
@@ -128,12 +131,7 @@ export const adapterFor = (providerId: string): ProviderAdapter | undefined =>
 /** One per process, not per connection: a child outlives a socket that drops. */
 export const providerLogins = logins(spawnLogin);
 
-/** Cut to what the protocol carries rather than failing the whole report. */
-export const probeFailed = (message: string): ProbeResult => ({
-  harnessVersion: null,
-  auth: { status: "error", message: message.slice(0, MAX_FACT_LENGTH) },
-  models: [],
-});
+export { PROBE_DEADLINE, probeFailed } from "./probe";
 
 export const noAdapterFor = (providerId: string): string =>
   `no adapter for ${providerId} in this runner build`;

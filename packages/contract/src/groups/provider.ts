@@ -144,7 +144,11 @@ export const provider = HttpApiGroup.make("provider")
     HttpApiEndpoint.post("login", "/providers/:id/login", {
       params: { id: Id },
       payload: ProviderLoginInput,
-      success: Schema.Struct({ url: Schema.String }),
+      success: Schema.Struct({
+        url: Schema.String,
+        /** Present when the harness printed a code to type in the browser. */
+        userCode: Schema.optionalKey(Schema.String),
+      }),
       error: [Unauthenticated, Forbidden, Validation, NotFound, InvalidState, Internal],
     }),
     HttpApiEndpoint.post("submitLoginCode", "/providers/:id/login-code", {

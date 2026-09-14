@@ -272,6 +272,23 @@ describe("turnsOf", () => {
     const turns = turnsOf(rows);
 
     expect(turns[0]!.assistantText).toBe("Sleep 1 of 4 finished.\n\nSleep 2 of 4 finished.");
+    // Which item that text ends in, so a surface streaming the next one's
+    // tokens can apply the same break before its row has landed.
+    expect(turns[0]!.lastAssistantItemId).toBe("a2");
+  });
+
+  it("names no last assistant item on a turn that has no assistant text yet", () => {
+    const rows: TranscriptRow[] = [
+      row({
+        _tag: "turn.started",
+        eventId: nextId(),
+        sessionId: SESSION_ID,
+        at: "2026-09-08T10:00:00.000Z",
+        turnId: "t1",
+      }),
+    ];
+
+    expect(turnsOf(rows)[0]!.lastAssistantItemId).toBeNull();
   });
 
   it("summarizes a command item's target to the command it ran, not the row's raw JSON", () => {

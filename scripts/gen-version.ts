@@ -10,9 +10,16 @@
  * The Claude Code version is baked in beside it: the SDK talks to the CLI it
  * was built against and anything newer, so its own `claudeCodeVersion` is the
  * floor a machine is held to, written down here and nowhere else.
+ *
+ * Codex has no SDK to read a version off, so its release is a literal here: a
+ * devDependency on `@openai/codex` would drag a per-platform binary into
+ * `node_modules` for one string.
  */
 import { fileURLToPath } from "node:url";
 import { $ } from "bun";
+
+/** The Codex release this build's generated types and its installer both pin. */
+const CODEX_RELEASE = "0.154.0";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const { version } = (await Bun.file(`${root}package.json`).json()) as { version: string };
@@ -28,5 +35,8 @@ export const VERSION = ${JSON.stringify(sha ? `${version}+${sha}` : version)};
 
 /** The Claude Code CLI version the Agent SDK in this build was built against. */
 export const CLAUDE_CODE_VERSION = ${JSON.stringify(claudeCodeVersion)};
+
+/** The Codex release \`scripts/gen-codex-types.ts\` generated this build's types from. */
+export const CODEX_VERSION = ${JSON.stringify(CODEX_RELEASE)};
 `,
 );

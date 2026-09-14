@@ -107,6 +107,7 @@ export {
 } from "./threads/model-field";
 export { modelMenu, type ModelMenu } from "./threads/model-menu";
 export { openItemOf } from "./threads/open-item";
+export { mergeTranscript } from "./threads/transcript";
 export { optionsLabel } from "./threads/options-label";
 export { optionsMenu, type ModelOptionRow } from "./threads/options-menu";
 export { pushRecent, type RecentModel } from "./threads/recent";

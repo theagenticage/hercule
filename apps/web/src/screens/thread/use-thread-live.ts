@@ -12,7 +12,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, type RefObject } from "react";
 import type { QueryClient } from "@tanstack/react-query";
-import { openItemOf, queryKeys, type Live } from "@hydra/client-core";
+import { mergeTranscript, openItemOf, queryKeys, type Live } from "@hydra/client-core";
 import {
   sessionStreamTopic,
   sessionTapTopic,
@@ -29,6 +29,14 @@ export const useThreadLive = (
   queryClient: QueryClient,
   sessionId: string,
   rows: readonly TranscriptRow[],
+  /**
+   * Whether the tail opens a paragraph of its own: true where the turn's
+   * committed assistant text ends in another item than the open one. A turn
+   * holds any number of assistant messages (spec 06 §6.2), and the break a new
+   * one gets when its row lands has to be there while it is still streaming,
+   * or the two run together as one sentence until it does.
+   */
+  breakBeforeTail: boolean,
   /** Called after a tap flush paints text - the one growth path no React render follows. */
   onTapFlush: () => void,
 ): RefObject<HTMLSpanElement | null> => {
@@ -37,10 +45,27 @@ export const useThreadLive = (
   const openItemIdRef = useRef<string | null>(null);
   const frameRef = useRef<number | null>(null);
 
+  // Read at flush time rather than rendered beside the text: the break belongs
+  // to text this hook writes to the DOM directly, and rendering it in React
+  // would leave a blank paragraph standing whenever the tail holds nothing -
+  // an open item that is a command, or an assistant message between its first
+  // row and its first token.
+  const breakRef = useRef(breakBeforeTail);
+
   const flushTail = useCallback(() => {
-    if (tailRef.current !== null) tailRef.current.textContent = bufferRef.current;
+    const text = bufferRef.current;
+    if (tailRef.current !== null) {
+      tailRef.current.textContent = text === "" || !breakRef.current ? text : `\n\n${text}`;
+    }
     onTapFlush();
   }, [onTapFlush]);
+
+  // Mirrored into the ref the tap handler reads synchronously, the way the
+  // open item below is, rather than written during render.
+  useEffect(() => {
+    breakRef.current = breakBeforeTail;
+    flushTail();
+  }, [breakBeforeTail, flushTail]);
 
   const clearTail = useCallback(() => {
     if (frameRef.current !== null) {
@@ -69,7 +94,16 @@ export const useThreadLive = (
     const held = queryClient.getQueryData<readonly TranscriptRow[]>(
       queryKeys.transcript(sessionId),
     );
-    const cursor = held?.at(-1);
+    // An empty cache subscribes from the start of the log, not from the head:
+    // a just-spawned session is read before its first rows exist, and "no
+    // cursor" means "whatever happens next", so every row written between that
+    // read and this subscription would be lost from a cache that is never
+    // refetched. Positions start at 1 (`session_stream`'s
+    // `COALESCE(MAX(position), 0) + 1`) and the controller replays everything
+    // strictly after the cursor, so 0 names no row and asks for all of them -
+    // it is also never past the head, which is the only cursor the controller
+    // refuses.
+    const cursor = held?.at(-1)?.position ?? 0;
 
     const unsubscribe = live.subscribe(
       sessionStreamTopic(sessionId),
@@ -97,20 +131,17 @@ export const useThreadLive = (
         // a row for any other item (another item starting, a turn boundary)
         // leaves the open item's own buffered tail exactly as it was.
         if (items.some((item) => itemIdOf(item.event) === openItemIdRef.current)) clearTail();
-        // Appended on `position`, never blindly: the transcript log is
-        // append-only and strictly ordered, so a row at or below the last one
-        // held is one this cache already has - a replay the subscription
-        // resumed from, or the same delta delivered twice.
+        // Merged on `position`, not appended after the last row held: a row
+        // this cache already has is the same row and is left alone, and one it
+        // does not is placed in order however late it arrives. Two
+        // subscriptions seeded from the same empty cache both replay from the
+        // start of the log, so the later delivery can be the earlier rows.
         queryClient.setQueryData<readonly TranscriptRow[]>(
           queryKeys.transcript(sessionId),
-          (current) => {
-            const last = current?.at(-1)?.position ?? -1;
-            const fresh = items.filter((item) => item.position > last);
-            return fresh.length === 0 ? current : [...(current ?? []), ...fresh];
-          },
+          (current) => mergeTranscript(current ?? [], items),
         );
       },
-      cursor === undefined ? undefined : String(cursor.position),
+      String(cursor),
     );
     return unsubscribe;
   }, [live, queryClient, sessionId, clearTail]);

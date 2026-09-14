@@ -583,7 +583,7 @@ describe("a controller asking a runner to probe a provider it cannot drive", () 
     _tag: "probeRequest",
     requestId: "01999999-0000-7000-8000-0000000000c1",
     instanceId: "01999999-0000-7000-8000-0000000000c2",
-    providerId: "codex",
+    providerId: "pi",
     config: {},
   };
 
@@ -608,7 +608,7 @@ describe("a controller asking a runner to probe a provider it cannot drive", () 
     expect(report?.requestId).toBe(REQUEST.requestId);
     expect(report?.instanceId).toBe(REQUEST.instanceId);
     expect(report?.result.auth.status).toBe("error");
-    expect(report?.result.auth.message).toBe("no adapter for codex in this runner build");
+    expect(report?.result.auth.message).toBe("no adapter for pi in this runner build");
     expect(report?.result.harnessVersion).toBeNull();
     expect(report?.result.models).toEqual([]);
 
