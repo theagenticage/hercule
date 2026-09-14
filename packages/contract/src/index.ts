@@ -125,9 +125,12 @@ export {
   VersionVerdict,
 } from "./groups/provider";
 export {
+  ApprovalDecision,
   MAX_PROMPT_LENGTH,
+  OpenRequest,
   SESSION_CONTINUE_FIELDS,
   SESSION_INPUT_FIELDS,
+  SESSION_RESPOND_FIELDS,
   SESSION_SELECTION_FIELDS,
   SESSION_SORT_FIELDS,
   SESSION_STATUSES,
@@ -137,6 +140,7 @@ export {
   SessionFilter,
   SessionInputOutcome,
   SessionInputPayload,
+  SessionRespondInput,
   SessionSelection,
   SessionSpawnInput,
   SessionStatus,

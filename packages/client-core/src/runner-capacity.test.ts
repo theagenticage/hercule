@@ -38,6 +38,7 @@ const at = (status: SessionStatus): Session => {
     nativeSessionId: null,
     modelSelection: { model: "claude-sonnet-5", options: {} },
     parentSessionId: null,
+    openRequest: null,
     createdAt: "2026-09-05T09:00:00.000Z",
     startedAt: null,
     exitedAt: null,

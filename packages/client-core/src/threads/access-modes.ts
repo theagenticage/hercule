@@ -25,10 +25,12 @@ const MEANINGS: Readonly<Record<AccessMode, string>> = {
 
 export const accessModeMenu = (
   declared: DeclaredCapabilities["accessModes"],
+  /** The provider's display name: the annotation names the harness that decided the fallback. */
+  providerName: string,
 ): readonly AccessModeMenuItem[] =>
   (["approval-required", "auto-accept-edits", "auto", "full-access"] as const).map((mode) => {
     const fallback = nearestSupportedAccessMode(mode, declared);
     const dimmed =
-      fallback === undefined || fallback === mode ? null : `runs as ${fallback} on this provider`;
+      fallback === undefined || fallback === mode ? null : `runs as ${fallback} on ${providerName}`;
     return { mode, meaning: MEANINGS[mode], dimmed };
   });

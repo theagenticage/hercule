@@ -94,7 +94,43 @@ const events: ReadonlyArray<Event> = [
   },
   { _tag: "runtime.warning", ...baseFields, message: "retrying after a 529" },
   { _tag: "runtime.error", ...baseFields, class: "ContextWindowExceeded", message: "too long" },
+  {
+    _tag: "request.opened",
+    ...baseFields,
+    request: {
+      requestId: "r1",
+      itemId: "i1",
+      kind: "command_approval",
+      decisions: ["allow", "allow_always", "deny", "cancel"],
+      detail: { command: "ls -la" },
+    },
+  },
+  { _tag: "request.resolved", ...baseFields, requestId: "r1", decision: "allow" },
 ];
+
+/** One detail per request kind: five closed structs, one vocabulary. */
+const requests = [
+  { kind: "command_approval", detail: { command: "ls -la" } },
+  { kind: "file_change_approval", detail: { paths: ["src/main.ts", "src/old.ts"] } },
+  { kind: "file_read_approval", detail: { paths: ["/etc/hosts"] } },
+  { kind: "tool_approval", detail: { toolName: "WebFetch" } },
+  {
+    kind: "question",
+    detail: {
+      questions: [
+        {
+          question: "Which branch should this land on?",
+          header: "Branch",
+          options: [
+            { label: "main", description: "straight onto the default branch" },
+            { label: "a branch", description: "a branch per ticket, as the conventions ask" },
+          ],
+          multiSelect: false,
+        },
+      ],
+    },
+  },
+] as const;
 
 const tagsOf = (union: typeof ProviderEvent) =>
   union.members.map((member) => member.fields._tag.literal);
@@ -107,6 +143,15 @@ describe("the normalized event taxonomy", () => {
 
   it("holds exactly the members the round-trip cases cover", () => {
     expect(tagsOf(ProviderEvent)).toEqual(events.map((event) => event._tag));
+  });
+
+  it.each(requests)("takes a $kind request with the detail that kind carries", (request) => {
+    const opened = {
+      _tag: "request.opened",
+      ...baseFields,
+      request: { requestId: "r1", itemId: "i1", decisions: ["deny", "cancel"], ...request },
+    };
+    expect(Effect.runSync(Schema.decodeUnknownEffect(ProviderEvent)(opened))).toEqual(opened);
   });
 
   it("needs the base fields on every member", () => {
@@ -161,6 +206,74 @@ describe("the normalized event taxonomy", () => {
       })._tag,
     ).toBe("Failure");
     expect(decode(ProviderEvent, { _tag: "request.opened", ...baseFields })._tag).toBe("Failure");
+    // A detail belonging to another kind: the pair is the vocabulary, not the
+    // kind on its own, so a surface reading the kind can trust the detail.
+    expect(
+      decode(ProviderEvent, {
+        _tag: "request.opened",
+        ...baseFields,
+        request: {
+          requestId: "r1",
+          itemId: "i1",
+          kind: "command_approval",
+          decisions: ["allow"],
+          detail: { paths: ["src/main.ts"] },
+        },
+      })._tag,
+    ).toBe("Failure");
+  });
+
+  it("takes one to many structured questions, and refuses a request carrying none", () => {
+    const asking = (questions: unknown) =>
+      decode(ProviderEvent, {
+        _tag: "request.opened",
+        ...baseFields,
+        request: {
+          requestId: "r1",
+          itemId: "i1",
+          kind: "question",
+          decisions: ["deny", "cancel"],
+          detail: { questions },
+        },
+      })._tag;
+    const one = {
+      question: "Which database should this use?",
+      header: "Database",
+      options: [{ label: "SQLite", description: "the one Hydra ships" }],
+      multiSelect: false,
+    };
+
+    expect(asking([one, { ...one, header: "Second" }])).toBe("Success");
+    // A question is the payload, so a request with none of them is a card with
+    // nothing on it; the adapter falls back rather than send this.
+    expect(asking([])).toBe("Failure");
+    // The struct carries no vendor extras: the Claude SDK's optional `preview`
+    // is dropped on the way in, so what the user reads never depends on which
+    // harness asked (ADR 0007).
+    const withPreview = {
+      _tag: "request.opened",
+      ...baseFields,
+      request: {
+        requestId: "r1",
+        itemId: "i1",
+        kind: "question",
+        decisions: ["deny", "cancel"],
+        detail: {
+          questions: [{ ...one, options: [{ label: "SQLite", description: "it", preview: "x" }] }],
+        },
+      },
+    };
+    expect(Effect.runSync(Schema.decodeUnknownEffect(ProviderEvent)(withPreview))).toEqual({
+      ...withPreview,
+      request: {
+        ...withPreview.request,
+        detail: {
+          questions: [{ ...one, options: [{ label: "SQLite", description: "it" }] }],
+        },
+      },
+    });
+    expect(asking([without(one, "multiSelect")])).toBe("Failure");
+    expect(asking([{ ...one, header: "" }])).toBe("Failure");
   });
 
   it("brackets a turn by an id neither end may omit", () => {

@@ -24,6 +24,7 @@ import {
   type SessionInput,
   type SessionInputResult,
   type SessionInterrupt,
+  type SessionRespond,
   type SessionStart,
   type SessionStop,
 } from "@hydra/protocol";
@@ -43,12 +44,19 @@ interface Live {
   /** Clock time of the last event of this session while a turn was open. */
   lastEventAt: number;
   /**
-   * One fiber for as long as a turn is open, watching `lastEventAt` against
-   * `inactivityMs`; forked on `turn.started`, interrupted on `turn.completed`.
-   * Undefined whenever no turn is open, which is also when a stuck harness
-   * cannot be told from an idle one.
+   * One fiber for as long as this session is being watched, watching
+   * `lastEventAt` against `inactivityMs`. Undefined whenever it is not, which
+   * is also when a stuck harness cannot be told from an idle one.
    */
   inactivity: Fiber.Fiber<void> | undefined;
+  /** Whether a turn is open: between turns nothing can get stuck. */
+  turnOpen: boolean;
+  /**
+   * Whether the session is parked on a request. A session waiting for its user
+   * is not stuck, however long it waits, so it is not watched. A flag rather
+   * than a count: at most one request is open per session.
+   */
+  parked: boolean;
   /**
    * Ends the session at its spec's absolute deadline; lives and dies with
    * this entry. Undefined only in the moment between the entry being set and
@@ -86,6 +94,7 @@ export interface SessionSupervisor {
   readonly start: (frame: SessionStart) => Effect.Effect<void>;
   readonly input: (frame: SessionInput) => Effect.Effect<void>;
   readonly interrupt: (frame: SessionInterrupt) => Effect.Effect<void>;
+  readonly respond: (frame: SessionRespond) => Effect.Effect<void>;
   readonly stop: (frame: SessionStop) => Effect.Effect<void>;
 }
 
@@ -224,23 +233,40 @@ export const supervising = (adapters: ReadonlyArray<ProviderAdapter>): Supervisi
           if (held !== undefined) {
             switch (event._tag) {
               case "turn.started":
-                held.lastEventAt = yield* Clock.currentTimeMillis;
+                held.turnOpen = true;
+                break;
+              case "turn.completed":
+                held.turnOpen = false;
+                // A request cannot outlive the turn it parked: the controller's
+                // own fold clears it on this event too, so a park left standing
+                // here would make the next turn unwatchable for ever.
+                held.parked = false;
+                break;
+              case "request.opened":
+                held.parked = true;
+                break;
+              case "request.resolved":
+                held.parked = false;
+                break;
+              default:
+                break;
+            }
+            // A session is watched exactly while a turn is open and nothing is
+            // waiting on its user. Reconciled after every event rather than
+            // armed and disarmed per case: the two flags are what the clock is
+            // a function of, and a fiber left over from a state that has
+            // passed would stop a session nobody is waiting on.
+            if (held.turnOpen && !held.parked) {
+              held.lastEventAt = yield* Clock.currentTimeMillis;
+              if (held.inactivity === undefined) {
                 held.inactivity = yield* Effect.forkDetach(
                   watchingInactivity(held, event.sessionId),
                 );
-                break;
-              case "turn.completed": {
-                const fiber = held.inactivity;
-                held.inactivity = undefined;
-                if (fiber !== undefined) yield* Fiber.interrupt(fiber);
-                break;
               }
-              default:
-                // Only matters while a turn is open: one between turns says
-                // nothing about a turn getting stuck, and there is no fiber
-                // to move.
-                if (held.inactivity !== undefined)
-                  held.lastEventAt = yield* Clock.currentTimeMillis;
+            } else if (held.inactivity !== undefined) {
+              const fiber = held.inactivity;
+              held.inactivity = undefined;
+              yield* Fiber.interrupt(fiber);
             }
           }
           lastSeq += 1;
@@ -304,9 +330,12 @@ export const supervising = (adapters: ReadonlyArray<ProviderAdapter>): Supervisi
                   adapter,
                   scratch: resolved.scratch,
                   inactivityMs: frame.spec.timeouts.inactivityMs,
-                  // Meaningless until turn.started sets it alongside `inactivity`.
+                  // Meaningless until the session is watched: `forward` sets
+                  // it alongside `inactivity`, on whatever event starts the watch.
                   lastEventAt: 0,
                   inactivity: undefined,
+                  turnOpen: false,
+                  parked: false,
                   absolute: undefined,
                   phase: "starting",
                   pendingStop: undefined,
@@ -443,6 +472,17 @@ export const supervising = (adapters: ReadonlyArray<ProviderAdapter>): Supervisi
       /** Idempotent: a session this runner does not hold has no turn to end. */
       interrupt: (frame: SessionInterrupt): Effect.Effect<void> =>
         live.get(frame.sessionId)?.adapter.interrupt(frame.sessionId) ?? Effect.void,
+
+      /**
+       * Idempotent, and the adapter's to judge: a request it is not holding -
+       * already answered, or never opened here - is a no-op, and the outcome
+       * arrives on the session's own stream rather than as an answer to this.
+       */
+      respond: (frame: SessionRespond): Effect.Effect<void> =>
+        live
+          .get(frame.sessionId)
+          ?.adapter.respondToRequest(frame.sessionId, frame.requestId, frame.decision) ??
+        Effect.void,
 
       /** Idempotent: a session this runner does not hold is already stopped. */
       stop: (frame: SessionStop): Effect.Effect<void> => {

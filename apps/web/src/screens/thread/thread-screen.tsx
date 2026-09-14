@@ -8,6 +8,7 @@ import { turnsOf, type HydraClient, type Live } from "@hydra/client-core";
 import { useLiveInvalidation } from "../../app/live-invalidation";
 import { inputsQuery, sessionQuery, transcriptQuery } from "../../app/queries";
 import { Composer } from "../composer/composer";
+import { PermissionCard } from "./permission-card";
 import { QueuedInputs } from "./queued-inputs";
 import { ChromeAction, ThreadChrome, ThreadColumn } from "./thread-chrome";
 import { useStickToBottom } from "./use-stick-to-bottom";
@@ -35,7 +36,9 @@ export function ThreadScreen({
 
   const session = useSuspenseQuery(sessionQuery(client, sessionId)).data;
   const rows = useSuspenseQuery(transcriptQuery(client, sessionId)).data;
-  const turns = turnsOf(rows);
+  // The item the session is parked on reads `awaiting approval` in the
+  // transcript, in place of `running`.
+  const turns = turnsOf(rows, session.openRequest?.itemId);
   const { followIfAtBottom, scrollToBottom } = useStickToBottom();
   const tailRef = useThreadLive(live, queryClient, sessionId, rows, followIfAtBottom);
   const lastIndex = turns.length - 1;
@@ -53,7 +56,9 @@ export function ThreadScreen({
   // decides whether that growth should move the scroll.
   useLayoutEffect(() => {
     followIfAtBottom();
-  }, [rows.length, queuedCount, followIfAtBottom]);
+    // A card docking above the composer takes room from the column the same
+    // way a queued row does, so the tail follows it too.
+  }, [rows.length, queuedCount, session.openRequest?.requestId, followIfAtBottom]);
 
   return (
     <div className="flex flex-1 flex-col">
@@ -88,7 +93,19 @@ export function ThreadScreen({
         })}
         <div className="sticky bottom-0 mt-auto flex flex-col gap-2">
           <QueuedInputs client={client} sessionId={sessionId} />
-          <Composer thread={{ kind: "active", session }} onSend={scrollToBottom} />
+          <div className="flex flex-col">
+            {session.openRequest === null ? null : (
+              <PermissionCard
+                // A new request is a new card: the answered state of the one
+                // before it is not carried over.
+                key={session.openRequest.requestId}
+                client={client}
+                sessionId={sessionId}
+                request={session.openRequest}
+              />
+            )}
+            <Composer thread={{ kind: "active", session }} onSend={scrollToBottom} />
+          </div>
         </div>
       </ThreadColumn>
     </div>

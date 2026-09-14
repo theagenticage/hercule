@@ -7,6 +7,7 @@ import type * as Schema from "effect/Schema";
 import type * as Stream from "effect/Stream";
 import {
   MAX_FACT_LENGTH,
+  type ApprovalDecision,
   type ExitReason,
   type ProbeResult,
   type ProviderEvent,
@@ -89,6 +90,19 @@ export interface ProviderAdapter {
    * the only report; a session this adapter does not hold has no turn to end.
    */
   readonly interrupt: (sessionId: string) => Effect.Effect<void>;
+
+  /**
+   * Answers the question the session is parked on, by the id the adapter minted
+   * for it. The harness resumes and `request.resolved` follows on `events`,
+   * which is the only report. A request this adapter is not holding - never
+   * opened here, already answered, or one that does not take this answer - is
+   * a no-op.
+   */
+  readonly respondToRequest: (
+    sessionId: string,
+    requestId: string,
+    decision: ApprovalDecision,
+  ) => Effect.Effect<void>;
 
   /**
    * Ends the harness cleanly. `session.exited { reason }` follows on `events`,

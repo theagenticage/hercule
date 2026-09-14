@@ -11,6 +11,7 @@ import { afterAll, describe, expect, it, vi } from "vitest";
 import { Duration, Effect, Fiber, PubSub, Stream } from "effect";
 import { TestClock } from "effect/testing";
 import type {
+  ApprovalDecision,
   ExitReason,
   ProviderEvent,
   RunnerToController,
@@ -38,6 +39,8 @@ const NATIVE = "0199e0e7-0000-7000-8000-0000000000fe";
 const TURN = "0199e0e7-0000-7000-8000-0000000000fd";
 /** The Queued Input row an input frame is sent under, and answered under. */
 const REQUEST = "0199e0e7-0000-7000-8000-0000000000fc";
+/** The adapter's own id for the park an answer names; the controller mints none. */
+const PARK = "0199e0e7-0000-7000-8000-0000000000fb";
 
 /** The shipped defaults (spec 03 section 6.2): only the test clock can cross them. */
 const INACTIVITY_MS = 30 * 60 * 1000;
@@ -82,6 +85,8 @@ interface Fake {
   readonly heard: () => number;
   readonly inputs: Array<TurnInput>;
   readonly interrupted: Array<string>;
+  /** Every `respondToRequest`, as the positional arguments it was handed. */
+  readonly answered: Array<readonly [string, string, ApprovalDecision]>;
   /** Every `stopSession`, with the reason its caller gave it. */
   readonly stops: Array<{ readonly sessionId: string; readonly reason: ExitReason }>;
   readonly emit: (event: ProviderEvent) => void;
@@ -101,6 +106,7 @@ const faking = (): Fake => {
   const contexts: Array<ProviderRunnerContext> = [];
   const inputs: Array<TurnInput> = [];
   const interrupted: Array<string> = [];
+  const answered: Array<readonly [string, string, ApprovalDecision]> = [];
   const stops: Array<{ readonly sessionId: string; readonly reason: ExitReason }> = [];
   const held = new Map<string, SessionBinding>();
   const fake: Fake = {
@@ -108,6 +114,7 @@ const faking = (): Fake => {
     heard: () => heard,
     inputs,
     interrupted,
+    answered,
     stops,
     fails: undefined,
     dies: false,
@@ -153,6 +160,14 @@ const faking = (): Fake => {
           return Effect.succeed({ turnId: TURN, delivery: "opened" });
         }),
       interrupt: (sessionId) => Effect.sync(() => void interrupted.push(sessionId)),
+      /**
+       * Nothing parks in this fake: the request events are emitted directly,
+       * so there is never an answer for it to carry back to a harness. What
+       * the answer was handed is recorded, because the frame's three fields
+       * reaching the adapter in the right order is the runner's own job.
+       */
+      respondToRequest: (sessionId, requestId, decision) =>
+        Effect.sync(() => void answered.push([sessionId, requestId, decision])),
       /**
        * The reason is the caller's, not this adapter's: the supervisor is the
        * one that knows why it stopped a session, and the exit event is the only
@@ -681,6 +696,33 @@ describe("what the controller hears back about one input", () => {
 
     expect(fake.interrupted).toEqual([SESSION]);
   });
+
+  it("answers the park for a session it holds, and nothing for one it does not", async () => {
+    const fake = faking();
+    const { supervisor } = connecting(fake);
+
+    await driving(
+      fake,
+      supervisor,
+      Effect.gen(function* () {
+        yield* supervisor.start(START);
+        yield* supervisor.respond({
+          _tag: "sessionRespond",
+          sessionId: SESSION,
+          requestId: PARK,
+          decision: "allow_always",
+        });
+        yield* supervisor.respond({
+          _tag: "sessionRespond",
+          sessionId: "0199e0e7-0000-7000-8000-0000000000aa",
+          requestId: PARK,
+          decision: "deny",
+        });
+      }),
+    );
+
+    expect(fake.answered).toEqual([[SESSION, PARK, "allow_always"]]);
+  });
 });
 
 /**
@@ -867,6 +909,103 @@ describe("a harness that goes silent mid-turn", () => {
     expect(fake.stops).toEqual([{ sessionId: SESSION, reason: "inactivity_timeout" }]);
     expect(exitReasons(sent)).toEqual(["inactivity_timeout"]);
   });
+});
+
+/**
+ * A session parked on an open request is waiting for its user, not stuck, so
+ * the inactivity clock must not be running while one is open.
+ */
+const requestOpened = (fake: Fake, requestId: string): void =>
+  fake.emit({
+    _tag: "request.opened",
+    eventId: `e-${requestId}-opened`,
+    sessionId: SESSION,
+    at,
+    request: {
+      requestId,
+      itemId: "i-1",
+      kind: "command_approval",
+      decisions: ["allow", "allow_always", "deny", "cancel"],
+      detail: { command: "ls -la" },
+    },
+  });
+
+const requestResolved = (fake: Fake, requestId: string): void =>
+  fake.emit({
+    _tag: "request.resolved",
+    eventId: `e-${requestId}-resolved`,
+    sessionId: SESSION,
+    at,
+    requestId,
+    decision: "allow",
+  });
+
+/** The four events the inactivity clock's arming is a function of. */
+type Step = "turn.started" | "request.opened" | "request.resolved" | "turn.completed";
+
+const step = (fake: Fake, which: Step, nth: number): void => {
+  if (which === "turn.started") return turnStarted(fake, `t-${String(nth)}`);
+  if (which === "turn.completed") return turnCompleted(fake, `t-${String(nth)}`);
+  if (which === "request.opened") return requestOpened(fake, `r-${String(nth)}`);
+  return requestResolved(fake, `r-${String(nth)}`);
+};
+
+describe("a session parked on an open request", () => {
+  /**
+   * Enumerated rather than generated: the repo carries no property-testing
+   * library, and the arming is a function of two flags, so the sequences that
+   * flip each of them are countable.
+   */
+  const SEQUENCES: ReadonlyArray<readonly [ReadonlyArray<Step>, boolean]> = [
+    [["turn.started"], true],
+    [["turn.started", "request.opened"], false],
+    [["turn.started", "request.opened", "request.resolved"], true],
+    [["turn.started", "request.opened", "turn.completed"], false],
+    // The clock a still-open request disarmed is gone, not leaked: the next
+    // turn is watched the ordinary way and this session is stopped once.
+    [["turn.started", "request.opened", "turn.completed", "turn.started"], true],
+    [["turn.started", "request.opened", "request.resolved", "turn.completed"], false],
+    [["turn.started", "turn.completed", "turn.started"], true],
+    // One request is open per session at a time, so a second open that replaced
+    // the first is answered by one resolution.
+    [["turn.started", "request.opened", "request.opened", "request.resolved"], true],
+    [["turn.started", "request.opened", "request.resolved", "request.opened"], false],
+  ];
+
+  for (const [sequence, armed] of SEQUENCES) {
+    it(`is ${armed ? "watched" : "left alone"} after ${sequence.join(" -> ")}`, async () => {
+      const fake = faking();
+      const { supervisor, sent } = connecting(fake);
+
+      await timing(
+        fake,
+        supervisor,
+        Effect.gen(function* () {
+          yield* supervisor.start(START);
+          // One pass through the relay per event, in order: arming the clock
+          // and sending the event that armed it are the same pass, so a frame
+          // seen is a clock already set.
+          let count = 1;
+          for (const which of sequence) {
+            count += 1;
+            const nth = count;
+            yield* Effect.sync(() => step(fake, which, nth));
+            yield* forwarded(sent, nth);
+          }
+
+          yield* TestClock.adjust(INACTIVITY_MS);
+          // The exit frame itself, not merely the adapter having been asked:
+          // the two are several ticks apart on the way through the relay.
+          if (armed) yield* awaiting("sent the exit", () => exitReasons(sent).length === 1);
+        }),
+      );
+
+      expect(fake.stops).toEqual(
+        armed ? [{ sessionId: SESSION, reason: "inactivity_timeout" }] : [],
+      );
+      expect(exitReasons(sent)).toEqual(armed ? ["inactivity_timeout"] : []);
+    });
+  }
 });
 
 describe("a session that has run for as long as it may", () => {

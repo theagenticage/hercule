@@ -23,7 +23,7 @@ import { describe, expect, it } from "vitest";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ModelOption, Profile, ProviderInstance, Runner, Session } from "@hydra/contract";
-import { envelope, pickRow, renderApp, stubApi, type Handler } from "../../../app/testing";
+import { envelope, pickRow, reading, renderApp, stubApi, type Handler } from "../../../app/testing";
 
 const ZONE = "Europe/Amsterdam";
 
@@ -170,6 +170,7 @@ const NEW_SESSION: Session = {
   nativeSessionId: null,
   modelSelection: { model: "claude-sonnet-5", options: {} },
   parentSessionId: null,
+  openRequest: null,
   createdAt: "2026-09-08T10:00:00.000Z",
   startedAt: null,
   exitedAt: null,
@@ -215,10 +216,6 @@ const open = async (
   });
   return { ...app, api };
 };
-
-/** The page's text with its whitespace collapsed, the way a reader sees it. */
-const reading = (element: HTMLElement | null = document.body): string =>
-  (element?.textContent ?? "").replace(/\s+/g, " ").trim();
 
 describe("Composer: draft defaults (AC-15)", () => {
   it("prefills from the spawn defaults when no thread.* setting is stored", async () => {
@@ -1049,9 +1046,14 @@ describe("Composer: the model options selector's label", () => {
   });
 });
 
-/** `auto` is not native here, so it runs as the nearest native mode below it. */
+/**
+ * `auto` is not native here, so it runs as the nearest native mode below it.
+ * Its display name is its own rather than `INSTANCE_A`'s, so a row naming the
+ * provider can only be reading this instance's `displayName` (ticket #70).
+ */
 const NO_AUTO: ProviderInstance = {
   ...INSTANCE_A,
+  displayName: "Claude Code Work",
   declared: { ...DECLARED, accessModes: { ...DECLARED.accessModes, auto: "unsupported" } },
 };
 
@@ -1074,7 +1076,7 @@ describe("Composer: the access mode menu", () => {
 
     // The unsupported mode keeps its row and stays pickable, saying what it
     // will really run as.
-    expect(reading(menu)).toContain("runs as auto-accept-edits on this provider");
+    expect(reading(menu)).toContain("runs as auto-accept-edits on Claude Code Work");
     await user.click(within(menu).getByText("auto", { exact: true }));
     await user.keyboard("{Escape}");
 
@@ -1082,6 +1084,36 @@ describe("Composer: the access mode menu", () => {
       expect(screen.queryByRole("dialog")).toBeNull();
     });
     expect(screen.getByRole("button", { name: /^auto$/i })).toBeDefined();
+  });
+
+  /**
+   * The fallback annotation names the provider that decided it (spec 14 §The
+   * composer, `runs as auto-accept-edits on pi`) and stands in the attention
+   * hue under the mode's own meaning, which every row keeps (ticket #70).
+   */
+  it("shows each mode's meaning and names the provider in the fallback annotation, in the attention hue", async () => {
+    const user = userEvent.setup();
+    await open([NO_AUTO]);
+
+    await user.click(screen.getByRole("button", { name: /approval-required/i }));
+    const menu = await screen.findByRole("dialog");
+
+    const MEANINGS = [
+      "asks for every side-effecting action",
+      "allows file edits, asks for the rest",
+      "lets a harness-side reviewer judge routine actions",
+      "allows everything",
+    ];
+    // Four rows, each carrying its own meaning; the one that falls back says
+    // so under its meaning rather than in place of it.
+    for (const meaning of MEANINGS) {
+      expect(reading(menu)).toContain(meaning);
+    }
+
+    const annotation = within(menu).getByText("runs as auto-accept-edits on Claude Code Work");
+    expect(annotation.className).toContain("text-attn");
+    // The provider is named, not alluded to.
+    expect(reading(menu)).not.toContain("on this provider");
   });
 });
 

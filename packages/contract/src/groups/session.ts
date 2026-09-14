@@ -6,7 +6,7 @@
  * downward fallback of [06-providers section 8.4] must never be silent.
  */
 import { Schema } from "effect";
-import { AccessMode, ModelSelection } from "@hydra/protocol";
+import { AccessMode, ApprovalDecision, Fact, ModelSelection, OpenRequest } from "@hydra/protocol";
 import * as HttpApiEndpoint from "effect/unstable/httpapi/HttpApiEndpoint";
 import * as HttpApiGroup from "effect/unstable/httpapi/HttpApiGroup";
 import { closedStruct } from "../closed";
@@ -22,6 +22,9 @@ import { Id, Timestamp } from "../ids";
 import { page, pageParams } from "../pagination";
 import { Authenticated } from "../security";
 import { bounded } from "../strings";
+
+/** The request vocabulary is the protocol's; the API hands it out unchanged. */
+export { ApprovalDecision, OpenRequest };
 
 /** The longest prompt or turn input the API takes: it crosses the runner socket in one frame. */
 export const MAX_PROMPT_LENGTH = 64 * 1024;
@@ -76,6 +79,13 @@ export const Session = Schema.Struct({
   modelSelection: ModelSelection,
   /** Set where this session was forked off another one; null otherwise. */
   parentSessionId: Schema.NullOr(Id),
+  /**
+   * The request the harness has parked on, if any: what the user has to answer
+   * before this turn goes any further. At most one is open at a time, and it is
+   * cleared when the machine resolves it or when the turn or session it belongs
+   * to ends.
+   */
+  openRequest: Schema.NullOr(OpenRequest),
   createdAt: Timestamp,
   startedAt: Schema.NullOr(Timestamp),
   /** The last exit: kept while the session is resumed, rewritten when it exits again. */
@@ -160,6 +170,20 @@ export const SessionInputOutcome = Schema.Struct({
 export type SessionInputOutcome = Schema.Schema.Type<typeof SessionInputOutcome>;
 
 /**
+ * Answering the request a session is parked on. `requestId` is the open
+ * request's own, so an answer that arrives after the harness moved on is
+ * refused rather than applied to whatever is open now.
+ */
+export const SESSION_RESPOND_FIELDS = {
+  requestId: Fact,
+  decision: ApprovalDecision,
+} as const;
+
+export const SessionRespondInput = closedStruct(SESSION_RESPOND_FIELDS);
+
+export type SessionRespondInput = Schema.Schema.Type<typeof SessionRespondInput>;
+
+/**
  * Branching a session: `fork` opens a second provider-native session off the
  * one the parent left behind, leaving the parent's own history untouched. It
  * lands on the parent's runner and provider instance, because that is where
@@ -226,6 +250,12 @@ export const session = HttpApiGroup.make("session")
     }),
     HttpApiEndpoint.post("interrupt", "/sessions/:id/interrupt", {
       params: { id: Id },
+      success: Session,
+      error: [Unauthenticated, Forbidden, Validation, NotFound, InvalidState, Internal],
+    }),
+    HttpApiEndpoint.post("respond", "/sessions/:id/respond", {
+      params: { id: Id },
+      payload: SessionRespondInput,
       success: Session,
       error: [Unauthenticated, Forbidden, Validation, NotFound, InvalidState, Internal],
     }),

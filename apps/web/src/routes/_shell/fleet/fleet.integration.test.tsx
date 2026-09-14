@@ -17,7 +17,7 @@ import { describe, expect, it } from "vitest";
 import { act, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { formatStamp } from "@hydra/client-core";
-import { renderApp, stubApi, type Call, type Handler } from "../../../app/testing";
+import { reading, renderApp, stubApi, type Call, type Handler } from "../../../app/testing";
 import { CONTROLLER_VERSION, GIB, MOSS, ZONE, type Fixture } from "./-fixtures";
 
 /** A machine somewhere else, running an older binary than the controller. */
@@ -122,10 +122,6 @@ const open = async (
 /** The fleet listings the screen made, oldest first. */
 const listings = (api: { readonly calls: readonly Call[] }) =>
   api.calls.filter((call) => call.method === "GET" && call.path === "/api/v1/runners");
-
-/** The page's text with its whitespace collapsed, the way a reader sees it. */
-const reading = (element: HTMLElement | null = document.body): string =>
-  (element?.textContent ?? "").replace(/\s+/g, " ").trim();
 
 /**
  * The part of the page that is about one machine and no other.

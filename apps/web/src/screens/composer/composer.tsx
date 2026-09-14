@@ -68,6 +68,10 @@ export function Composer({
       {fields.lead === null ? null : (
         <DraftHero lead={fields.lead} blocked={fields.blocked} loginSlot={login} />
       )}
+      {/* The card is the same box whatever is docked to it: the lip below and
+          the permission dock above both tuck under it, so its own radius,
+          border and lift never change (spec 14 §Measurements, amended
+          2026-09-14). It sits above both of them. */}
       <div className="relative z-[1] flex flex-col gap-2 rounded-[14px] border border-line bg-raised px-3.5 pt-3 pb-2.5 shadow-lift">
         <MessageBox
           value={model.message}

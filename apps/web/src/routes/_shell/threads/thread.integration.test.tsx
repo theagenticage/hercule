@@ -13,7 +13,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { formatDuration, formatStamp } from "@hydra/client-core";
+import { approvalCard, formatDuration, formatStamp } from "@hydra/client-core";
 import type {
   Input,
   ModelOption,
@@ -24,7 +24,7 @@ import type {
   TranscriptRow,
 } from "@hydra/contract";
 import { sessionStreamTopic, sessionTapTopic } from "@hydra/contract";
-import { envelope, pickRow, renderApp, stubApi, type Handler } from "../../../app/testing";
+import { envelope, pickRow, reading, renderApp, stubApi, type Handler } from "../../../app/testing";
 
 const SESSION_ID = "01a06d02-b100-7000-8000-000000000001";
 const ZONE = "Europe/Amsterdam";
@@ -43,6 +43,7 @@ const BASE_SESSION: Session = {
   nativeSessionId: null,
   modelSelection: { model: "claude-sonnet-5", options: {} },
   parentSessionId: null,
+  openRequest: null,
   createdAt: "2026-09-08T09:59:00.000Z",
   startedAt: "2026-09-08T09:59:01.000Z",
   exitedAt: null,
@@ -214,10 +215,6 @@ const open = async (
   const app = await renderApp({ path: `/threads/${fixture.id}`, api: api.fetch, token: "held" });
   return { ...app, api };
 };
-
-/** The page's text with its whitespace collapsed, the way a reader sees it. */
-const reading = (element: HTMLElement | null = document.body): string =>
-  (element?.textContent ?? "").replace(/\s+/g, " ").trim();
 
 /**
  * `StubSocket.push` delivers over `queueMicrotask` (`socket-stub.ts`'s
@@ -2048,5 +2045,259 @@ describe("Composer: what locked at start says why", () => {
     expect(screen.queryByRole("button", { name: /approval-required/i })).toBeNull();
     expect(screen.queryByRole("button", { name: /no workspace/i })).toBeNull();
     expect(screen.queryByRole("button", { name: RUNNER_STARTED.name })).toBeNull();
+  });
+});
+
+/**
+ * The permission card docked above the composer (spec 14 §The thread
+ * surface, ticket #70). Every word on it comes from `approvalCard` in
+ * `client-core`, so this test reads its labels from there rather than
+ * restating copy `apps/web` does not author.
+ */
+describe("Thread: the permission card", () => {
+  const REQUEST: NonNullable<Session["openRequest"]> = {
+    requestId: "req-1",
+    itemId: "tool3",
+    kind: "command_approval",
+    decisions: ["allow", "allow_always", "deny", "cancel"],
+    detail: { command: "ls -la" },
+  };
+
+  const QUESTIONS: NonNullable<Session["openRequest"]> = {
+    requestId: "req-2",
+    itemId: "tool3",
+    kind: "question",
+    decisions: ["deny", "cancel"],
+    detail: {
+      questions: [
+        {
+          question: "Which database should it use?",
+          header: "Database",
+          options: [
+            { label: "SQLite", description: "the one Hydra ships" },
+            { label: "Postgres", description: "somebody else's server" },
+          ],
+          multiSelect: false,
+        },
+      ],
+    },
+  };
+
+  /** A live turn whose one open item is the one `REQUEST` is about. */
+  const parkedRows = (): TranscriptRow[] => [
+    row(0, {
+      _tag: "turn.started",
+      eventId: "e0",
+      sessionId: SESSION_ID,
+      at: "2026-09-08T11:00:00.000Z",
+      turnId: "t3",
+    }),
+    row(1, {
+      _tag: "item.started",
+      eventId: "e1",
+      sessionId: SESSION_ID,
+      at: "2026-09-08T11:00:00.100Z",
+      turnId: "t3",
+      itemId: "u3",
+      kind: "user_message",
+      detail: { text: "List the files" },
+    }),
+    row(2, {
+      _tag: "item.completed",
+      eventId: "e2",
+      sessionId: SESSION_ID,
+      at: "2026-09-08T11:00:00.100Z",
+      turnId: "t3",
+      itemId: "u3",
+      kind: "user_message",
+      status: "completed",
+      detail: { text: "List the files" },
+    }),
+    row(3, {
+      _tag: "item.started",
+      eventId: "e3",
+      sessionId: SESSION_ID,
+      at: "2026-09-08T11:00:01.000Z",
+      turnId: "t3",
+      itemId: "tool3",
+      kind: "command_execution",
+      detail: { name: "Bash", input: { command: "ls -la" } },
+    }),
+  ];
+
+  /** One answer row of the card, matched by the text `client-core` gave it. */
+  const answer = (
+    request: NonNullable<Session["openRequest"]>,
+    decision: string,
+  ): ((name: string) => boolean) => {
+    const found = approvalCard(request).rows.find((each) => each.decision === decision);
+    if (found === undefined) throw new Error(`the card offers no ${decision} row`);
+    return (name: string) => name.includes(found.label) && name.includes(found.describe);
+  };
+
+  /** The composer's own card: the raised box the message goes in. */
+  const composerCard = (): HTMLElement => {
+    const found = screen.getByRole("textbox").closest<HTMLElement>('[class*="bg-raised"]');
+    if (found === null) throw new Error("the composer's card was not found");
+    return found;
+  };
+
+  it("docks the card above the composer, one row per offered decision and no copy in the transcript", async () => {
+    await open(session({ status: "busy", openRequest: REQUEST }), parkedRows());
+
+    const allow = await screen.findByRole("button", { name: answer(REQUEST, "allow") });
+    // One row per offered decision, and exactly one card: the transcript does
+    // not repeat it.
+    for (const decision of REQUEST.decisions) {
+      expect(
+        screen.getAllByRole("button", { name: answer(REQUEST, decision) }),
+        `${decision} does not render exactly once`,
+      ).toHaveLength(1);
+    }
+    // The card names the command the request is about.
+    expect(reading()).toContain("ls -la");
+
+    // In the sticky foot, above the composer.
+    const foot = allow.closest<HTMLElement>('[class*="sticky"]');
+    expect(foot, "the card is not in the sticky foot").not.toBeNull();
+    expect(foot?.contains(composerCard())).toBe(true);
+    expect(
+      allow.compareDocumentPosition(composerCard()) & Node.DOCUMENT_POSITION_FOLLOWING,
+      "the composer does not follow the card",
+    ).toBeTruthy();
+
+    // The dock is the lip mirrored above the card, so the card keeps its own
+    // 14px radius in every state and the dock tucks under it (spec 14
+    // §Measurements, amended 2026-09-14). Whether it looks flush is the
+    // residual manual check; the classes are what jsdom can say.
+    expect(composerCard().className).toContain("rounded-[14px]");
+    const dock = allow.closest<HTMLElement>('[class*="rounded-t-[10px]"]');
+    expect(dock, "the dock is not the lip mirrored").not.toBeNull();
+    expect(dock?.className).toContain("bg-surface");
+    expect(dock?.className).toContain("border-line-soft");
+  });
+
+  it("posts the clicked decision once and drops the card when the record's open request clears", async () => {
+    const user = userEvent.setup();
+    let current = session({ status: "busy", openRequest: REQUEST });
+    let release: (() => void) | undefined;
+    const api = stubApi({
+      ...controller(current, parkedRows()),
+      [`GET /api/v1/sessions/${SESSION_ID}`]: () => ({ body: current }),
+      // Held open until the test releases it, and answering with the park
+      // still on the record: the answer is a snapshot of when it was asked,
+      // and the card follows the live record instead.
+      [`POST /api/v1/sessions/${SESSION_ID}/respond`]: () =>
+        new Promise<{ readonly body: unknown }>((resolve) => {
+          release = () => {
+            resolve({ body: session({ status: "busy", openRequest: REQUEST }) });
+          };
+        }),
+    });
+    const { live } = await renderApp({
+      path: `/threads/${SESSION_ID}`,
+      api: api.fetch,
+      token: "held",
+    });
+
+    await user.click(await screen.findByRole("button", { name: answer(REQUEST, "allow") }));
+
+    await waitFor(() => {
+      expect(api.calls.filter((call) => call.path.endsWith("/respond"))).toHaveLength(1);
+    });
+    expect(api.calls.find((call) => call.path.endsWith("/respond"))).toMatchObject({
+      method: "POST",
+      body: { requestId: REQUEST.requestId, decision: "allow" },
+    });
+
+    // The card goes when the record does, not when the click happens.
+    expect(screen.getByRole("button", { name: answer(REQUEST, "allow") })).toBeDefined();
+    current = session({ status: "busy", openRequest: null });
+    await waitFor(() => {
+      expect(live.topics()).toContain("session");
+    });
+    act(() => {
+      live.push("session", { _tag: "invalidate", ids: [SESSION_ID], kind: "updated" });
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByRole("button", { name: answer(REQUEST, "allow") })).toBeNull();
+    });
+
+    // And now the answer lands, carrying the park the controller still had
+    // when it was asked. A card the record has cleared does not come back.
+    await act(async () => {
+      release?.();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    expect(screen.queryByRole("button", { name: answer(REQUEST, "allow") })).toBeNull();
+  });
+
+  it("takes one answer only: a second click while the request is still open sends nothing", async () => {
+    const user = userEvent.setup();
+    const current = session({ status: "busy", openRequest: REQUEST });
+    const api = stubApi({
+      ...controller(current, parkedRows()),
+      [`POST /api/v1/sessions/${SESSION_ID}/respond`]: { body: current },
+    });
+    await renderApp({ path: `/threads/${SESSION_ID}`, api: api.fetch, token: "held" });
+
+    const allow = await screen.findByRole("button", { name: answer(REQUEST, "allow") });
+    await user.click(allow);
+    await waitFor(() => {
+      expect(api.calls.filter((call) => call.path.endsWith("/respond"))).toHaveLength(1);
+    });
+
+    // The card is still up - only the runner clears it - but it has had its
+    // answer, and a contradictory second one would be sent and audited.
+    await user.click(screen.getByRole("button", { name: answer(REQUEST, "deny") }));
+    await user.click(allow);
+
+    expect(api.calls.filter((call) => call.path.endsWith("/respond"))).toHaveLength(1);
+  });
+
+  it("reads the item the request is about as awaiting approval, in the attention hue", async () => {
+    const user = userEvent.setup();
+    await open(session({ status: "busy", openRequest: REQUEST }), parkedRows());
+
+    await user.click(await screen.findByRole("button", { name: /^Working for/ }));
+
+    const line = screen.getByText(/awaiting approval/);
+    expect(reading(line)).toBe("command · ls -la · awaiting approval");
+    expect(line.className).toContain("text-attn");
+    expect(reading()).not.toContain("· running");
+  });
+
+  it("renders no card when the record carries no open request", async () => {
+    await open(session({ status: "busy", openRequest: null }), parkedRows());
+
+    await screen.findByRole("textbox");
+    expect(screen.queryByRole("button", { name: answer(REQUEST, "allow") })).toBeNull();
+    // The composer's radius never depends on what is above it.
+    expect(composerCard().className).toContain("rounded-[14px]");
+  });
+
+  it("shows a question request's questions with deny and cancel only, and says answering is not built", async () => {
+    await open(session({ status: "busy", openRequest: QUESTIONS }), parkedRows());
+
+    await screen.findByRole("button", { name: answer(QUESTIONS, "deny") });
+    expect(screen.getByRole("button", { name: answer(QUESTIONS, "cancel") })).toBeDefined();
+    expect(screen.queryByRole("button", { name: answer(REQUEST, "allow") })).toBeNull();
+    expect(screen.queryByRole("button", { name: answer(REQUEST, "allow_always") })).toBeNull();
+
+    // The chip, the prose and what each answer would have meant: a question is
+    // not an approval, and the card shows all three - as three blocks rather
+    // than one paragraph. The chip is a lane label, and an option's label and
+    // its description are two elements on the answer ledger's grid.
+    expect(screen.getByText("Database").className).toContain("uppercase");
+    expect(screen.getByText("Which database should it use?")).toBeDefined();
+    expect(screen.getByText("SQLite").className).toContain("font-emph");
+    expect(screen.getByText("the one Hydra ships")).toBeDefined();
+    // Cancel first: a reply sent while the session is parked queues behind the
+    // turn instead of reaching the harness that is asking.
+    expect(reading()).toContain(
+      "Answering here is not built yet. Cancel the turn, then reply in the thread.",
+    );
   });
 });

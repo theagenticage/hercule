@@ -7,7 +7,14 @@
  */
 import { describe, expect, it } from "vitest";
 import type { ProviderEvent } from "@hydra/protocol";
-import { DELTA_FLUSH_BYTES, fold, track, type Folded, type Tracked } from "./stream";
+import {
+  DELTA_FLUSH_BYTES,
+  fold,
+  openRequestAfter,
+  track,
+  type Folded,
+  type Tracked,
+} from "./stream";
 
 const SESSION = "0199e0e7-0000-7000-8000-000000000001";
 
@@ -45,6 +52,23 @@ const completedItem = (itemId: string): ProviderEvent => ({
   kind: "assistant_message",
   status: "completed",
 });
+
+const request = {
+  requestId: "r1",
+  itemId: "i1",
+  kind: "command_approval",
+  decisions: ["allow", "deny", "cancel"],
+  detail: { command: "ls -la" },
+} as const;
+
+const opened: ProviderEvent = { ...base, _tag: "request.opened", request };
+
+const resolved: ProviderEvent = {
+  ...base,
+  _tag: "request.resolved",
+  requestId: "r1",
+  decision: "allow",
+};
 
 /** The tags a fold wrote, in the order it wrote them. */
 const tags = (folded: Folded): ReadonlyArray<string> => folded.rows.map((row) => row.event._tag);
@@ -186,5 +210,38 @@ describe("every other event", () => {
     const { folds } = applied([[1, usage]]);
 
     expect(folds[0]!.rows).toEqual([{ seq: 1, at: base.at, event: usage }]);
+  });
+});
+
+describe("the open request", () => {
+  it("is set by the request that opens it", () => {
+    expect(openRequestAfter(opened, null)).toEqual(request);
+  });
+
+  it("is cleared by the answer to it, by the turn ending and by the harness going", () => {
+    expect(openRequestAfter(resolved, request)).toBeNull();
+    // The question dies with the turn it was asked in, answered or not.
+    expect(openRequestAfter(turnCompleted, request)).toBeNull();
+    expect(openRequestAfter(exited, request)).toBeNull();
+  });
+
+  it("is left standing by an answer to some other request", () => {
+    const other: ProviderEvent = { ...resolved, requestId: "r2" };
+
+    expect(openRequestAfter(other, request)).toBeUndefined();
+    expect(openRequestAfter(resolved, null)).toBeUndefined();
+  });
+
+  it("says nothing where the clear changes nothing, so no write is made for it", () => {
+    // How most turns end: nothing was parked, and a write would cost every
+    // client watching the session a refetch for no change.
+    expect(openRequestAfter(turnCompleted, null)).toBeUndefined();
+    expect(openRequestAfter(exited, null)).toBeUndefined();
+  });
+
+  it("is left alone by every other event", () => {
+    for (const event of [started, turnStarted, delta("i1", "hi"), completedItem("i1")]) {
+      expect(openRequestAfter(event, request), event._tag).toBeUndefined();
+    }
   });
 });

@@ -7,7 +7,7 @@
 import { describe, expect, it } from "vitest";
 import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { renderApp, stubApi, type Handler } from "../../../app/testing";
+import { reading, renderApp, stubApi, type Handler } from "../../../app/testing";
 
 interface Contribution {
   readonly extensionPoint: string;
@@ -148,10 +148,6 @@ const writesTo = (
   api.calls.filter(
     (call) => call.method !== "GET" && call.path.startsWith(`/api/v1/plugins/${id}`),
   );
-
-/** The page's text with its whitespace collapsed, the way a reader sees it. */
-const reading = (element: HTMLElement | null = document.body): string =>
-  (element?.textContent ?? "").replace(/\s+/g, " ").trim();
 
 /** The card about one plugin: the section its display name heads. */
 const cardFor = async (plugin: Fixture): Promise<HTMLElement> => {

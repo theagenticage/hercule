@@ -7,9 +7,21 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
 import { Duration, Effect, Fiber, Stream } from "effect";
 import { TestClock } from "effect/testing";
-import type { Options, SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
+import type {
+  Options,
+  PermissionResult,
+  PermissionUpdate,
+  SDKUserMessage,
+} from "@anthropic-ai/claude-agent-sdk";
 import { CLAUDE_CODE_VERSION } from "@hydra/home/version";
-import type { ProbeResult, ProviderEvent, SessionSpec } from "@hydra/protocol";
+import {
+  MAX_MESSAGE_LENGTH,
+  type ApprovalDecision,
+  type OpenRequest,
+  type ProbeResult,
+  type ProviderEvent,
+  type SessionSpec,
+} from "@hydra/protocol";
 import { PROBE_DEADLINE, claudeCodeAdapter, type ClaudeSeam } from "./claude-code";
 import type { ProviderAdapter, ProviderRunnerContext } from "./index";
 
@@ -552,6 +564,13 @@ describe("a Claude Code session", () => {
 
       expect(run.options[0]?.permissionMode).toBe(permissionMode);
       expect(run.options[0]?.allowDangerouslySkipPermissions).toBe(dangerous);
+      // In every mode but full-access, not only in `approval-required`: the
+      // harness decides whether it asks, and a mode that asks about nothing
+      // simply never calls back. With permissions skipped the SDK ignores the
+      // callback and warns once per session, so it is not supplied there.
+      expect(typeof run.options[0]?.canUseTool).toBe(
+        accessMode === "full-access" ? "undefined" : "function",
+      );
     });
   }
 
@@ -954,5 +973,560 @@ describe("the model the adapter last applied to the harness", () => {
     );
     expect(run.models).toEqual(["claude-opus-4-8"]);
     expect(retried.delivery).toBe("opened");
+  });
+});
+
+/**
+ * The park. `options.canUseTool` is the seam the harness asks through, so a
+ * test reaches it the way the CLI does: it calls the callback the adapter
+ * supplied and watches what the session's stream says about it.
+ */
+const TOOL_USE = "toolu_0199e0e70000700080000000000001";
+
+/** What the CLI offers to persist for an "always allow", in its own shape. */
+const SUGGESTIONS: ReadonlyArray<PermissionUpdate> = [
+  {
+    type: "addRules",
+    rules: [{ toolName: "Bash", ruleContent: "ls:*" }],
+    behavior: "allow",
+    destination: "session",
+  },
+];
+
+/** One tool call the harness is asking about, and what came of the ask. */
+interface Park {
+  /** What the callback resolved to, or `undefined` while the session is parked. */
+  readonly settled: () => PermissionResult | null | undefined;
+  /** The CLI withdrawing the question, which it does by aborting the signal. */
+  readonly abort: () => void;
+}
+
+const parks = (
+  run: Driving,
+  toolName: string,
+  input: Record<string, unknown>,
+  extra: {
+    readonly suggestions?: ReadonlyArray<PermissionUpdate>;
+    readonly toolUseID?: string;
+  } = {},
+): Park => {
+  const callback = run.options[0]?.canUseTool;
+  expect(typeof callback, "the adapter supplied no canUseTool to park on").toBe("function");
+  const aborting = new AbortController();
+  let settled: PermissionResult | null | undefined;
+  void callback?.(toolName, input, {
+    signal: aborting.signal,
+    toolUseID: extra.toolUseID ?? TOOL_USE,
+    requestId: "cr-1",
+    ...(extra.suggestions === undefined ? {} : { suggestions: [...extra.suggestions] }),
+  }).then((answer) => {
+    settled = answer;
+  });
+  return { settled: () => settled, abort: () => aborting.abort() };
+};
+
+/** The adapter's own answer channel for a park, named through one helper. */
+const respond = (run: Driving, requestId: string, decision: ApprovalDecision): Promise<void> =>
+  Effect.runPromise(run.adapter.respondToRequest(SESSION, requestId, decision));
+
+const requestsIn = (seen: ReadonlyArray<ProviderEvent>): ReadonlyArray<OpenRequest> =>
+  seen.flatMap((event) => (event._tag === "request.opened" ? [event.request] : []));
+
+const resolutionsIn = (
+  seen: ReadonlyArray<ProviderEvent>,
+): ReadonlyArray<{ readonly requestId: string; readonly decision: ApprovalDecision }> =>
+  seen.flatMap((event) =>
+    event._tag === "request.resolved"
+      ? [{ requestId: event.requestId, decision: event.decision }]
+      : [],
+  );
+
+/** What an allow persisted; nothing at all is what a non-allow persisted. */
+const persistedBy = (settled: PermissionResult | null | undefined): ReadonlyArray<unknown> =>
+  settled !== null && settled !== undefined && settled.behavior === "allow"
+    ? (settled.updatedPermissions ?? [])
+    : [];
+
+/**
+ * How a deny was worded and whether it ended the turn. A non-deny reads as an
+ * empty message that did end the turn, so either assertion fails on one.
+ */
+const denialOf = (
+  settled: PermissionResult | null | undefined,
+): { readonly message: string; readonly interrupt: boolean } =>
+  settled !== null && settled !== undefined && settled.behavior === "deny"
+    ? { message: settled.message, interrupt: settled.interrupt ?? false }
+    : { message: "", interrupt: true };
+
+/** A session in `approval-required` with a turn open, ready to be asked. */
+const asking = async (): Promise<Driving> => {
+  const run = driving();
+  await Effect.runPromise(
+    run.adapter.startSession(SESSION, { ...SPEC, accessMode: "approval-required" }, WORKING),
+  );
+  await Effect.runPromise(run.adapter.sendInput(SESSION, { text: "list the files" }));
+  return run;
+};
+
+/** Parks on one tool call and answers with the request the stream carried. */
+const parked = async (
+  run: Driving,
+  toolName: string,
+  input: Record<string, unknown>,
+  extra: Parameters<typeof parks>[3] = {},
+): Promise<{ readonly park: Park; readonly request: OpenRequest }> => {
+  const before = requestsIn(run.seen).length;
+  const park = parks(run, toolName, input, extra);
+  await until("opened the request", () => requestsIn(run.seen).length === before + 1);
+  return { park, request: requestsIn(run.seen)[before]! };
+};
+
+describe("a tool call the harness has to ask about", () => {
+  it("parks the call and says what is being asked, against the item it is about", async () => {
+    const run = await asking();
+
+    const { park, request } = await parked(
+      run,
+      "Bash",
+      { command: "ls -la" },
+      { suggestions: SUGGESTIONS },
+    );
+
+    // Parked: nothing has been decided, so the harness is still waiting.
+    expect(park.settled()).toBeUndefined();
+    expect(request.kind).toBe("command_approval");
+    expect(request.decisions).toEqual(["allow", "allow_always", "deny", "cancel"]);
+    expect(request.detail).toEqual({ command: "ls -la" });
+    // The tool-use id, so a surface can overlay the item the ask is about.
+    expect(request.itemId).toBe(TOOL_USE);
+    expect(request.requestId).not.toBe("");
+    expect(resolutionsIn(run.seen)).toEqual([]);
+  });
+
+  it("leaves allow always off a question no rule may be persisted for", async () => {
+    const run = await asking();
+
+    // The harness hands over no rules to persist for an ask it will not let a
+    // host make permanent, and a button that had to invent one would grant
+    // more than the user clicked.
+    const { request } = await parked(run, "Bash", { command: "ls -la" });
+
+    expect(request.decisions).toEqual(["allow", "deny", "cancel"]);
+  });
+
+  it("lets the call run on an allow, and says the park is over", async () => {
+    const run = await asking();
+    const { park, request } = await parked(run, "Bash", { command: "ls -la" });
+
+    await respond(run, request.requestId, "allow");
+
+    await until("resolved the park", () => park.settled() !== undefined);
+    expect(park.settled()).toMatchObject({ behavior: "allow" });
+    expect(resolutionsIn(run.seen)).toEqual([{ requestId: request.requestId, decision: "allow" }]);
+  });
+
+  it("persists an allow-always rule against the session, never the user's settings files", async () => {
+    const run = await asking();
+    const { park, request } = await parked(
+      run,
+      "Bash",
+      { command: "ls -la" },
+      {
+        suggestions: [
+          {
+            type: "addRules",
+            rules: [{ toolName: "Bash", ruleContent: "ls:*" }],
+            behavior: "allow",
+            destination: "userSettings",
+          },
+        ],
+      },
+    );
+
+    await respond(run, request.requestId, "allow_always");
+
+    await until("resolved the park", () => park.settled() !== undefined);
+    expect(persistedBy(park.settled())).toEqual([
+      {
+        type: "addRules",
+        rules: [{ toolName: "Bash", ruleContent: "ls:*" }],
+        behavior: "allow",
+        destination: "session",
+      },
+    ]);
+  });
+
+  it("persists the harness's own rule on an allow always", async () => {
+    const run = await asking();
+    const { park, request } = await parked(
+      run,
+      "Bash",
+      { command: "ls -la" },
+      {
+        suggestions: SUGGESTIONS,
+      },
+    );
+
+    await respond(run, request.requestId, "allow_always");
+
+    await until("resolved the park", () => park.settled() !== undefined);
+    const settled = park.settled();
+    expect(settled).toMatchObject({ behavior: "allow", decisionClassification: "user_permanent" });
+    // Something to persist, so the same command is not asked about again.
+    expect(persistedBy(settled).length).toBeGreaterThan(0);
+    expect(resolutionsIn(run.seen)).toEqual([
+      { requestId: request.requestId, decision: "allow_always" },
+    ]);
+  });
+
+  it("blocks the call on a deny, with a message and the turn left running", async () => {
+    const run = await asking();
+    const { park, request } = await parked(run, "Bash", { command: "rm -rf /" });
+
+    await respond(run, request.requestId, "deny");
+
+    await until("resolved the park", () => park.settled() !== undefined);
+    const settled = park.settled();
+    expect(settled).toMatchObject({ behavior: "deny" });
+    // Required by the vendor, and it is what the harness tells the model.
+    expect(denialOf(settled).message).not.toBe("");
+    expect(denialOf(settled).interrupt).toBe(false);
+    expect(resolutionsIn(run.seen)).toEqual([{ requestId: request.requestId, decision: "deny" }]);
+  });
+
+  it("blocks the call and ends the turn on a cancel", async () => {
+    const run = await asking();
+    const { park, request } = await parked(run, "Bash", { command: "rm -rf /" });
+
+    await respond(run, request.requestId, "cancel");
+
+    await until("resolved the park", () => park.settled() !== undefined);
+    expect(park.settled()).toMatchObject({ behavior: "deny", interrupt: true });
+    expect(resolutionsIn(run.seen)).toEqual([{ requestId: request.requestId, decision: "cancel" }]);
+  });
+
+  /**
+   * Spec 06 section 8.2: the CLI withdraws a pending prompt after the turn was
+   * interrupted, and it does so by aborting the signal it handed the callback.
+   */
+  it("answers a withdrawn ask as a deny, and reports the park cancelled", async () => {
+    const run = await asking();
+    const { park, request } = await parked(run, "Bash", { command: "ls -la" });
+
+    park.abort();
+
+    await until("resolved the park", () => park.settled() !== undefined);
+    expect(park.settled()).toMatchObject({ behavior: "deny" });
+    expect(resolutionsIn(run.seen)).toEqual([{ requestId: request.requestId, decision: "cancel" }]);
+  });
+
+  it("does nothing at all for a request it is not holding, or holds no longer", async () => {
+    const run = await asking();
+    const { request } = await parked(run, "Bash", { command: "ls -la" });
+
+    await respond(run, "r-nobody-asked", "allow");
+    expect(resolutionsIn(run.seen)).toEqual([]);
+
+    await respond(run, request.requestId, "deny");
+    await until("resolved the park", () => resolutionsIn(run.seen).length === 1);
+    // Answered twice: the second answer has nothing left to resolve, and must
+    // not report a second outcome for a park that is already over.
+    await respond(run, request.requestId, "allow");
+    expect(resolutionsIn(run.seen)).toEqual([{ requestId: request.requestId, decision: "deny" }]);
+  });
+
+  it("refuses an answer the request never offered", async () => {
+    const run = await asking();
+    const { park, request } = await parked(run, "AskUserQuestion", {
+      questions: [{ question: "Which one?", header: "One", options: [], multiSelect: false }],
+    });
+
+    // There is no answer for an allow to carry, so an allow must not reach the
+    // harness however it got this far.
+    await respond(run, request.requestId, "allow");
+
+    expect(park.settled()).toBeUndefined();
+    expect(resolutionsIn(run.seen)).toEqual([]);
+  });
+
+  it("holds one question at a time, and tells the harness to ask the rest again", async () => {
+    const run = await asking();
+    const { park: first } = await parked(run, "Bash", { command: "ls -la" });
+
+    const second = parks(run, "Read", { file_path: "/work/one.ts" }, { toolUseID: "toolu_two" });
+
+    await until("answered the second ask", () => second.settled() !== undefined);
+    expect(second.settled()).toMatchObject({ behavior: "deny" });
+    // The card the user is looking at stays the one that is open.
+    expect(first.settled()).toBeUndefined();
+    expect(requestsIn(run.seen)).toHaveLength(1);
+  });
+
+  it("cuts a command to what the protocol carries, and says where it cut", async () => {
+    const run = await asking();
+
+    const { request } = await parked(run, "Bash", { command: `echo ${"x".repeat(9_000)}` });
+
+    const command = request.kind === "command_approval" ? request.detail.command : "";
+    expect(command).toHaveLength(MAX_MESSAGE_LENGTH);
+    expect(command.endsWith("\u2026")).toBe(true);
+  });
+
+  it("opens the turn the park belongs to where the harness asked before one was open", async () => {
+    const run = driving();
+    await Effect.runPromise(
+      run.adapter.startSession(SESSION, { ...SPEC, accessMode: "approval-required" }, WORKING),
+    );
+
+    const { request } = await parked(run, "Bash", { command: "ls -la" });
+
+    // The SDK can call back before the assistant message that opened the turn
+    // has been read off its stream, so the park opens the turn it belongs to
+    // rather than reporting a request no turn is waiting on.
+    expect(tags(run.seen)).toEqual(["session.started", "turn.started", "request.opened"]);
+    expect(request.itemId).toBe(TOOL_USE);
+  });
+
+  it("names an item of its own where the harness named no tool-use id", async () => {
+    const run = await asking();
+
+    const { request } = await parked(run, "Bash", { command: "ls -la" }, { toolUseID: "" });
+
+    // An empty id is a frame the protocol refuses, and the event would be lost
+    // with the park still held.
+    expect(request.itemId).not.toBe("");
+  });
+});
+
+describe("what kind of question each tool is", () => {
+  const KINDS: ReadonlyArray<
+    readonly [string, Record<string, unknown>, OpenRequest["kind"], ReadonlyArray<string>]
+  > = [
+    ["Bash", { command: "ls -la" }, "command_approval", []],
+    [
+      "Edit",
+      { file_path: "/work/one.ts", old_string: "a", new_string: "b" },
+      "file_change_approval",
+      ["/work/one.ts"],
+    ],
+    [
+      "Write",
+      { file_path: "/work/two.ts", content: "hello" },
+      "file_change_approval",
+      ["/work/two.ts"],
+    ],
+    [
+      "NotebookEdit",
+      { notebook_path: "/work/three.ipynb" },
+      "file_change_approval",
+      ["/work/three.ipynb"],
+    ],
+    ["Read", { file_path: "/work/five.ts" }, "file_read_approval", ["/work/five.ts"]],
+    ["Glob", { pattern: "**/*.ts", path: "/work" }, "file_read_approval", ["/work"]],
+    ["Grep", { pattern: "todo", path: "/work" }, "file_read_approval", ["/work"]],
+    ["WebFetch", { url: "https://example.com" }, "tool_approval", []],
+  ];
+
+  for (const [toolName, input, kind, paths] of KINDS) {
+    it(`asks about ${toolName} as a ${kind}`, async () => {
+      const run = await asking();
+
+      const { request } = await parked(run, toolName, input);
+
+      expect(request.kind).toBe(kind);
+      if (request.kind === "tool_approval") expect(request.detail.toolName).toBe(toolName);
+      if (request.kind === "file_change_approval" || request.kind === "file_read_approval") {
+        expect(request.detail.paths).toEqual(paths);
+      }
+    });
+  }
+
+  /**
+   * Answering carries a decision and nothing else, so there
+   * is no answer an allow could run the tool with.
+   */
+  it("records an AskUserQuestion as a question it cannot answer, offering deny and cancel", async () => {
+    const run = await asking();
+
+    const { request } = await parked(run, "AskUserQuestion", {
+      questions: [
+        {
+          question: "Which database should this use?",
+          header: "Database",
+          options: [
+            { label: "SQLite", description: "the one Hydra ships" },
+            { label: "Postgres", description: "somebody else's server" },
+          ],
+          multiSelect: false,
+        },
+      ],
+    });
+
+    expect(request.kind).toBe("question");
+    expect(request.decisions).toEqual(["deny", "cancel"]);
+    // Structured, not flattened to text: the card shows the chip, the prose and
+    // what each answer would have meant.
+    expect(request.kind === "question" ? request.detail.questions : []).toEqual([
+      {
+        question: "Which database should this use?",
+        header: "Database",
+        options: [
+          { label: "SQLite", description: "the one Hydra ships" },
+          { label: "Postgres", description: "somebody else's server" },
+        ],
+        multiSelect: false,
+      },
+    ]);
+  });
+
+  it("asks all the questions an ask carries, dropping a malformed one and its unlabelled options", async () => {
+    const run = await asking();
+
+    const { request } = await parked(run, "AskUserQuestion", {
+      questions: [
+        // No header: the SDK's own schema requires one, and a chip cannot be
+        // invented, so this question is dropped rather than guessed at.
+        { question: "Which one?", options: [], multiSelect: false },
+        {
+          question: "Which features?",
+          header: "Features",
+          options: [
+            { label: "Rules", description: "persisted rules", preview: "dropped" },
+            { label: "", description: "no label to show" },
+            "not an option",
+          ],
+          multiSelect: true,
+        },
+      ],
+    });
+
+    expect(request.kind === "question" ? request.detail.questions : []).toEqual([
+      {
+        question: "Which features?",
+        header: "Features",
+        // The vendor's `preview` has no field in the protocol, so it is gone.
+        options: [{ label: "Rules", description: "persisted rules" }],
+        multiSelect: true,
+      },
+    ]);
+  });
+
+  /**
+   * A `question` request with no question on it is an undecodable frame, which
+   * costs the runner its socket; a tool call the user can refuse is the honest
+   * card.
+   */
+  it("falls back to a tool approval when no question survives the mapping", async () => {
+    const run = await asking();
+
+    const { request } = await parked(run, "AskUserQuestion", { questions: "nonsense" });
+
+    expect(request.kind).toBe("tool_approval");
+    expect(request.kind === "tool_approval" ? request.detail.toolName : "").toBe("AskUserQuestion");
+    expect(request.decisions).toEqual(["deny", "cancel"]);
+  });
+
+  /**
+   * The plan is an item of its own - the one the harness's own tool call
+   * opened - and the ask is against it, so the surface overlays the plan the
+   * user is being asked to approve rather than a second copy of it.
+   */
+  it("asks about the plan item the tool call already opened", async () => {
+    const run = await asking();
+    const plan = { plan: "1. read it\n2. write it" };
+    run.say({
+      type: "assistant",
+      message: {
+        id: "msg-plan",
+        content: [{ type: "tool_use", id: TOOL_USE, name: "ExitPlanMode", input: plan }],
+      },
+    });
+    await until("published the plan", () => itemsOf(run.seen, "plan").length > 0);
+
+    const { request } = await parked(run, "ExitPlanMode", plan);
+
+    // Exactly one: a second plan item would leave one of them never closed,
+    // since only the harness's own `tool_result` closes the one it opened.
+    expect(itemsOf(run.seen, "plan")).toHaveLength(1);
+    const started = itemsOf(run.seen, "plan")[0]!;
+    expect(JSON.stringify(started.detail)).toContain("read it");
+    expect(request.kind).toBe("tool_approval");
+    expect(request.itemId).toBe(started.itemId);
+  });
+});
+
+describe("a park that is still open when the turn or the session ends", () => {
+  it("is cancelled first, and the cancellation is reported before the turn closes", async () => {
+    const run = await asking();
+    const { park, request } = await parked(run, "Bash", { command: "ls -la" });
+
+    await Effect.runPromise(run.adapter.interrupt(SESSION));
+    // The CLI's own answer to an interrupt: the turn ends as aborted.
+    run.say({ ...RESULT, terminal_reason: "aborted_by_user" });
+    await until("closed the turn", () => run.seen.some((event) => event._tag === "turn.completed"));
+
+    expect(run.interrupted()).toBe(1);
+    expect(park.settled()).toMatchObject({ behavior: "deny" });
+    expect(resolutionsIn(run.seen)).toEqual([{ requestId: request.requestId, decision: "cancel" }]);
+    // In that order: a turn reported as over while a request still reads as
+    // open leaves a card on screen for a turn that has ended.
+    const closing = tags(run.seen).filter(
+      (tag) => tag === "request.resolved" || tag === "turn.completed",
+    );
+    expect(closing).toEqual(["request.resolved", "turn.completed"]);
+    const completed = run.seen.find((event) => event._tag === "turn.completed");
+    expect(completed?._tag === "turn.completed" ? completed.state : undefined).toBe("interrupted");
+  });
+
+  it("says nothing about a park where there was none to cancel", async () => {
+    const run = await asking();
+
+    await Effect.runPromise(run.adapter.interrupt(SESSION));
+
+    expect(run.interrupted()).toBe(1);
+    expect(resolutionsIn(run.seen)).toEqual([]);
+    expect(requestsIn(run.seen)).toEqual([]);
+  });
+
+  it("is withdrawn when the session is stopped, and the exit still says why it stopped", async () => {
+    const run = await asking();
+    const { park, request } = await parked(run, "Bash", { command: "ls -la" });
+
+    await Effect.runPromise(run.adapter.stopSession(SESSION, "inactivity_timeout"));
+    await ends(run.seen);
+
+    // A park left hanging is a promise the harness waits on for ever.
+    await until("resolved the park", () => park.settled() !== undefined);
+    expect(park.settled()).toMatchObject({ behavior: "deny" });
+    // A stop ends the turn, so the stream reads the same as an interrupt's.
+    expect(resolutionsIn(run.seen)).toEqual([{ requestId: request.requestId, decision: "cancel" }]);
+    const exited = run.seen.at(-1);
+    expect(exited?._tag === "session.exited" ? exited.reason : undefined).toBe(
+      "inactivity_timeout",
+    );
+  });
+
+  it("is withdrawn once when the harness stops talking on its own, before the exit", async () => {
+    const run = await asking();
+    const { park, request } = await parked(run, "Bash", { command: "ls -la" });
+
+    // Nobody asked: the harness simply reached the end of its stream with the
+    // question still open.
+    run.end();
+    await ends(run.seen);
+
+    await until("resolved the park", () => park.settled() !== undefined);
+    // The harness gets a plain deny - there is no turn left to interrupt - and
+    // the stream says the question was cancelled rather than refused.
+    expect(park.settled()).toMatchObject({ behavior: "deny" });
+    expect(denialOf(park.settled()).interrupt).toBe(false);
+    expect(resolutionsIn(run.seen)).toEqual([{ requestId: request.requestId, decision: "cancel" }]);
+    // Every exit passes through one place, so the park is ended once, and
+    // before the exit: a request still reading as open on a session that is
+    // gone leaves a card nothing can answer.
+    const closing = tags(run.seen).filter(
+      (tag) => tag === "request.resolved" || tag === "session.exited",
+    );
+    expect(closing).toEqual(["request.resolved", "session.exited"]);
   });
 });

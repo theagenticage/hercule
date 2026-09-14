@@ -8,7 +8,7 @@
  * exit, and - the in-item cadence spec 04 left open and this build pins - once
  * the held text passes `DELTA_FLUSH_BYTES`. Every other event is its own row.
  */
-import type { ProviderEvent, StreamKind } from "@hydra/protocol";
+import type { OpenRequest, ProviderEvent, StreamKind } from "@hydra/protocol";
 import type { SessionStatus } from "@hydra/contract";
 
 /**
@@ -83,6 +83,34 @@ const statusAfter = (event: ProviderEvent): SessionStatus | undefined => {
       return "idle";
     case "session.exited":
       return "exited";
+    default:
+      return undefined;
+  }
+};
+
+/**
+ * Where this event leaves the request the session is parked on, given the one
+ * it is parked on now: `undefined` for an event that says nothing about it,
+ * `null` for one that ends it, and the request itself for one that opens it.
+ *
+ * A turn that completes and a harness that exits both end any park with them,
+ * whether or not the answer ever arrived: the question died with the turn -
+ * but only where there was one, since a clear that changes nothing costs every
+ * client watching the session a refetch. A resolution names its own request,
+ * so one for a park that is no longer open leaves the open one alone.
+ */
+export const openRequestAfter = (
+  event: ProviderEvent,
+  open: OpenRequest | null,
+): OpenRequest | null | undefined => {
+  switch (event._tag) {
+    case "request.opened":
+      return event.request;
+    case "request.resolved":
+      return open?.requestId === event.requestId ? null : undefined;
+    case "turn.completed":
+    case "session.exited":
+      return open === null ? undefined : null;
     default:
       return undefined;
   }

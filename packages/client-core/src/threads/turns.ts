@@ -20,7 +20,12 @@ export interface ThreadItem {
   readonly itemId: string;
   readonly verb: string;
   readonly target: string;
-  readonly result: "completed" | "failed" | "declined" | "running";
+  /**
+   * `awaiting approval` is what an open item the session is parked on reads
+   * as: the word is here rather than in the column that prints it, so both
+   * surfaces that render an item say the same thing about it.
+   */
+  readonly result: "completed" | "failed" | "declined" | "running" | "awaiting approval";
 }
 
 export interface ThreadTurn {
@@ -96,7 +101,11 @@ interface Building {
   lastAssistantItemId: string | null;
 }
 
-export const turnsOf = (rows: readonly TranscriptRow[]): readonly ThreadTurn[] => {
+export const turnsOf = (
+  rows: readonly TranscriptRow[],
+  /** The item the session's open request is about, if it has one. */
+  awaitingItemId?: string,
+): readonly ThreadTurn[] => {
   const turns = new Map<string, Building>();
 
   const turnOf = (turnId: string, fallbackAt: string): Building => {
@@ -177,7 +186,14 @@ export const turnsOf = (rows: readonly TranscriptRow[]): readonly ThreadTurn[] =
   return Array.from(turns.values()).map((turn) => ({
     turnId: turn.turnId,
     user: turn.user,
-    items: turn.items,
+    // Only an item still running can be the one a request is parked on: one
+    // the harness already settled keeps its own outcome, whatever the row
+    // still names.
+    items: turn.items.map((item) =>
+      item.itemId === awaitingItemId && item.result === "running"
+        ? { ...item, result: "awaiting approval" as const }
+        : item,
+    ),
     assistantText: turn.assistantText,
     startedAt: turn.startedAt,
     duration:

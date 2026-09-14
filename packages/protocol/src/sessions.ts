@@ -169,6 +169,85 @@ export const ItemStatus = Schema.Literals(["completed", "failed", "declined"]);
 export type ItemStatus = Schema.Schema.Type<typeof ItemStatus>;
 
 /**
+ * The four answers a parked session can be given. `allow_always` persists a
+ * rule for the rest of the session, `cancel` denies and ends the turn with it.
+ */
+export const ApprovalDecision = Schema.Literals(["allow", "allow_always", "deny", "cancel"]);
+
+export type ApprovalDecision = Schema.Schema.Type<typeof ApprovalDecision>;
+
+/**
+ * Which answers this request takes. A request that may persist no rule, or that
+ * has nothing for an allow to carry, says so here rather than leaving a surface
+ * to offer an answer the harness would have to substitute for silently.
+ */
+const Decisions = Schema.NonEmptyArray(ApprovalDecision);
+
+/**
+ * One question a harness parked a session on, and the answers it accepts.
+ *
+ * `detail` is a closed struct per `kind` rather than free Json: the surfaces
+ * render the card from it, and a vendor-shaped payload there would make what
+ * the user reads a function of which harness answered (ADR 0007).
+ */
+const openRequest = <const K extends string, F extends Schema.Struct.Fields>(kind: K, detail: F) =>
+  Schema.Struct({
+    requestId: Fact,
+    /** The item the request is about, so a surface can overlay it in place. */
+    itemId: Fact,
+    kind: Schema.Literal(kind),
+    decisions: Decisions,
+    detail: Schema.Struct(detail),
+  });
+
+/** A rename carries two paths, a multi-file edit more, so it is a list. */
+const Paths = Schema.Array(Fact);
+
+const CommandApproval = openRequest("command_approval", { command: Message });
+
+const FileChangeApproval = openRequest("file_change_approval", { paths: Paths });
+
+const FileReadApproval = openRequest("file_read_approval", { paths: Paths });
+
+const ToolApproval = openRequest("tool_approval", { toolName: Fact });
+
+/**
+ * One question in a `question` request: the chip it is labelled with, the
+ * prose the agent wrote, and the options it offers. A permission request and a
+ * question are different things sharing one request slot, so the question
+ * keeps its own structure rather than being flattened to text: a surface that
+ * reads only the text cannot show what the answers were.
+ *
+ * The struct is closed, as every detail here is - a vendor's extra field (the
+ * Claude SDK's `preview`) would make what the user reads a function of which
+ * harness asked (ADR 0007). Every provider maps its own shape into this one.
+ */
+const Question = Schema.Struct({
+  question: Message,
+  header: Fact,
+  options: Schema.Array(Schema.Struct({ label: Fact, description: Message })),
+  /** Whether more than one option may be chosen, once answering is built. */
+  multiSelect: Schema.Boolean,
+});
+
+/** A harness asks one to four at a time, so the request carries a list. */
+const QuestionRequest = openRequest("question", { questions: Schema.NonEmptyArray(Question) });
+
+/**
+ * The request a session is parked on, as the row that holds it and the API
+ * that hands it out read it. The same five shapes ride `request.opened`.
+ */
+export const OpenRequest = Schema.Union([
+  CommandApproval,
+  FileChangeApproval,
+  FileReadApproval,
+  ToolApproval,
+  QuestionRequest,
+]);
+
+export type OpenRequest = Schema.Schema.Type<typeof OpenRequest>;
+
+/**
  * The three append-only text streams. Where a vendor sends raw and summarized
  * reasoning separately the adapter picks one, raw preferred, and the other
  * stays raw-only (spec 06 section 6.4).
@@ -280,6 +359,23 @@ const RuntimeError = event("runtime.error", {
   message: Schema.optionalKey(Message),
 });
 
+/**
+ * The session is parked: nothing more happens on this turn until a decision
+ * arrives. The request is nested rather than spread across the event, so what
+ * the row and the API hold is exactly what arrived, whatever the envelope
+ * around it grows to carry.
+ */
+const RequestOpened = event("request.opened", { request: OpenRequest });
+
+/**
+ * The park is over, whoever ended it: the user's answer, the turn being
+ * interrupted, or the harness withdrawing the question.
+ */
+const RequestResolved = event("request.resolved", {
+  requestId: Fact,
+  decision: ApprovalDecision,
+});
+
 export const ProviderEvent = Schema.Union([
   SessionStarted,
   SessionExited,
@@ -291,6 +387,8 @@ export const ProviderEvent = Schema.Union([
   SessionUsageUpdated,
   RuntimeWarning,
   RuntimeError,
+  RequestOpened,
+  RequestResolved,
 ]);
 
 export type ProviderEvent = Schema.Schema.Type<typeof ProviderEvent>;
@@ -337,6 +435,21 @@ export const SessionInterrupt = Schema.Struct({
 });
 
 export type SessionInterrupt = Schema.Schema.Type<typeof SessionInterrupt>;
+
+/**
+ * Answers the request the session is parked on. `requestId` is the adapter's
+ * own, echoed back: the controller mints none of its own for a park it did not
+ * open. Fire-and-forget in the shape above - what the answer did arrives in the
+ * session's own stream as `request.resolved`.
+ */
+export const SessionRespond = Schema.Struct({
+  _tag: Schema.Literal("sessionRespond"),
+  sessionId: SessionId,
+  requestId: Fact,
+  decision: ApprovalDecision,
+});
+
+export type SessionRespond = Schema.Schema.Type<typeof SessionRespond>;
 
 /**
  * What one input did, under the row id it was sent with. It carries no turn id:

@@ -235,6 +235,11 @@ const TABLE = {
     method: "POST",
     path: "/api/v1/sessions/:id/interrupt",
   },
+  "session.respond": {
+    requires: "session.steer",
+    method: "POST",
+    path: "/api/v1/sessions/:id/respond",
+  },
   "session.stop": {
     requires: "session.steer",
     method: "POST",

@@ -387,41 +387,52 @@ export const connect = (
         }
         // A peer that has not proved who it is gets no evidence this runner is alive.
         if (!greeted) return;
-        if (message._tag === "ping") return yield* write(asText({ _tag: "pong" }));
-        if (message._tag === "factsRequest") {
-          // Sent whatever the probe finds, unlike the hourly report: the
-          // controller asked because somebody is waiting for an answer.
-          return yield* write(asText({ _tag: "factsReport", facts: yield* reportFacts }));
+        switch (message._tag) {
+          case "ping":
+            return yield* write(asText({ _tag: "pong" }));
+          case "factsRequest":
+            // Sent whatever the probe finds, unlike the hourly report: the
+            // controller asked because somebody is waiting for an answer.
+            return yield* write(asText({ _tag: "factsReport", facts: yield* reportFacts }));
+          case "probeRequest":
+            // Forked: a probe takes seconds, and the connection has to keep
+            // answering pings and further requests while it runs.
+            return yield* Effect.asVoid(Effect.forkIn(answerProbe(message), connection));
+          case "installRequest":
+            return yield* Effect.asVoid(Effect.forkIn(answerInstall(message), connection));
+          case "loginStart":
+            return yield* Effect.asVoid(
+              Effect.forkIn(answerLogin(message.requestId, startingLogin(message)), connection),
+            );
+          case "loginCode":
+            return yield* Effect.asVoid(
+              Effect.forkIn(
+                answerLogin(
+                  message.requestId,
+                  providerLogins.submit(message.instanceId, message.code),
+                ),
+                connection,
+              ),
+            );
+          // Sessions run in the frame order they arrived in, unforked: input for
+          // a session started one frame ago must not overtake the start.
+          case "sessionStart":
+            return yield* supervisor.start(message);
+          case "sessionInput":
+            return yield* supervisor.input(message);
+          case "sessionInterrupt":
+            return yield* supervisor.interrupt(message);
+          case "sessionRespond":
+            return yield* supervisor.respond(message);
+          case "sessionStop":
+            return yield* supervisor.stop(message);
+          case "ack":
+            // Acks belong to the replayable events nothing sends yet.
+            return;
         }
-        if (message._tag === "probeRequest") {
-          // Forked: a probe takes seconds, and the connection has to keep
-          // answering pings and further requests while it runs.
-          return yield* Effect.asVoid(Effect.forkIn(answerProbe(message), connection));
-        }
-        if (message._tag === "installRequest") {
-          return yield* Effect.asVoid(Effect.forkIn(answerInstall(message), connection));
-        }
-        if (message._tag === "loginStart") {
-          return yield* Effect.asVoid(
-            Effect.forkIn(answerLogin(message.requestId, startingLogin(message)), connection),
-          );
-        }
-        if (message._tag === "loginCode") {
-          const { requestId, instanceId, code } = message;
-          return yield* Effect.asVoid(
-            Effect.forkIn(
-              answerLogin(requestId, providerLogins.submit(instanceId, code)),
-              connection,
-            ),
-          );
-        }
-        // Sessions run in the frame order they arrived in, unforked: input for
-        // a session started one frame ago must not overtake the start.
-        if (message._tag === "sessionStart") return yield* supervisor.start(message);
-        if (message._tag === "sessionInput") return yield* supervisor.input(message);
-        if (message._tag === "sessionInterrupt") return yield* supervisor.interrupt(message);
-        if (message._tag === "sessionStop") return yield* supervisor.stop(message);
-        // An ack belongs to the replayable events nothing sends yet.
+        // Every frame the protocol declares is answered above. A new one that
+        // reaches here would otherwise be dropped in silence.
+        return message satisfies never;
       });
 
     // The transport forks a fiber per frame, so two frames arriving together

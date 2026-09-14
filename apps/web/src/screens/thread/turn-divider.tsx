@@ -11,6 +11,10 @@ import { useEffect, useState, type JSX } from "react";
 import { cn } from "@hydra/ui";
 import { formatDuration, type ThreadItem } from "@hydra/client-core";
 
+/** A running item reads live; the one a request is parked on needs the reader. */
+const resultHue = (result: ThreadItem["result"]): string | undefined =>
+  result === "running" ? "text-live" : result === "awaiting approval" ? "text-attn" : undefined;
+
 export function TurnDivider({
   live,
   duration,
@@ -62,7 +66,7 @@ export function TurnDivider({
       {open ? (
         <ul className="mt-1 flex flex-col gap-0.5 font-mono text-fine text-muted">
           {items.map((item) => (
-            <li key={item.itemId} className={item.result === "running" ? "text-live" : undefined}>
+            <li key={item.itemId} className={resultHue(item.result)}>
               {item.verb} · {item.target} · {item.result}
             </li>
           ))}

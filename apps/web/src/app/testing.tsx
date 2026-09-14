@@ -149,6 +149,10 @@ afterEach(async () => {
   await Promise.all(started.splice(0).map((live) => live.stop()));
 });
 
+/** The page's text with its whitespace collapsed, the way a reader sees it. */
+export const reading = (element: HTMLElement | null = document.body): string =>
+  (element?.textContent ?? "").replace(/\s+/g, " ").trim();
+
 /**
  * Clicks a row inside the open menu - the Radix popover, read as
  * `role="dialog"` - and waits for the menu to be gone.

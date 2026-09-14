@@ -9,7 +9,8 @@ import { SelectorShell } from "./selector-shell";
  *
  * A mode the provider does not declare native keeps its row and stays
  * pickable - the controller runs it at the nearest mode it does declare, and
- * the row says so in the attention hue rather than refusing the choice.
+ * the row says so in the attention hue under its meaning, rather than
+ * refusing the choice or dropping what the mode means.
  */
 export function AccessModeSelector({
   mode,
@@ -34,7 +35,10 @@ export function AccessModeSelector({
           name={item.mode}
           current={item.mode === mode}
           sub={
-            item.dimmed === null ? item.meaning : <span className="text-attn">{item.dimmed}</span>
+            <>
+              <span className="block">{item.meaning}</span>
+              {item.dimmed === null ? null : <span className="block text-attn">{item.dimmed}</span>}
+            </>
           }
           onPick={() => {
             onPick(item.mode);
