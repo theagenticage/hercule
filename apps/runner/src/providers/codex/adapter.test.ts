@@ -136,17 +136,17 @@ describe("what the Codex adapter reports about a machine", () => {
     expect(probed.models[0]?.isDefault).toBe(true);
     expect(probed.models[1]?.isDefault ?? false).toBe(false);
 
-    const effort = optionOf(probed.models, "gpt-6-astra", "reasoningEffort");
+    const effort = optionOf(probed.models, "gpt-6-astra", "effort");
     expect(effort).toMatchObject({ kind: "select", default: "low" });
     expect(valuesOf(effort)).toEqual(["low", "medium", "high"]);
-    expect(valuesOf(optionOf(probed.models, "gpt-5.5", "reasoningEffort"))).toEqual([
+    expect(valuesOf(optionOf(probed.models, "gpt-5.5", "effort"))).toEqual([
       "low",
       "medium",
       "high",
       "xhigh",
     ]);
     // A model the server lists no efforts for offers no effort choice.
-    expect(optionOf(probed.models, "gpt-5.6-sol", "reasoningEffort")).toBeUndefined();
+    expect(optionOf(probed.models, "gpt-5.6-sol", "effort")).toBeUndefined();
 
     expect(optionOf(probed.models, "gpt-6-astra", "serviceTier")).toMatchObject({ kind: "select" });
     expect(valuesOf(optionOf(probed.models, "gpt-5.6-sol", "serviceTier"))).toEqual([
@@ -591,7 +591,7 @@ describe("the app-server an instance's sessions share", () => {
 
 const SELECTED = {
   model: "gpt-6-astra",
-  options: { reasoningEffort: "high", serviceTier: "priority" },
+  options: { effort: "high", serviceTier: "priority" },
 } as const;
 
 describe("the model a turn runs under", () => {

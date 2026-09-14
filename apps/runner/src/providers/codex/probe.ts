@@ -105,8 +105,10 @@ const optionsFor = (model: Model): ReadonlyArray<ModelOption> => {
   if (efforts.length > 0) {
     options.push(
       selecting(
-        "reasoningEffort",
-        "Reasoning effort",
+        // The well-known option id (spec 06 section 3.3): the composer labels and
+        // recognises reasoning effort under `effort`, whatever the harness calls it.
+        "effort",
+        "Effort",
         efforts.map(({ reasoningEffort }) => ({
           value: fact(reasoningEffort),
           label: fact(`${reasoningEffort.slice(0, 1).toUpperCase()}${reasoningEffort.slice(1)}`),

@@ -653,7 +653,7 @@ export const codexAdapter = (seam: CodexSeam): ProviderAdapter => {
     selection: ModelSelection | undefined,
   ): Pick<TurnStartParams, "model" | "effort" | "serviceTier"> => {
     if (selection === undefined) return {};
-    const effort = selection.options["reasoningEffort"];
+    const effort = selection.options["effort"];
     const tier = selection.options["serviceTier"];
     return {
       model: selection.model,

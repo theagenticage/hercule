@@ -792,6 +792,69 @@ describe("Thread: token tap (AC-13)", () => {
     await screen.findByText("Hello");
   });
 
+  it("starts the live tail as its own paragraph when the turn's text ends in another item", async () => {
+    // A turn holds any number of assistant messages (spec 06 section 6.2).
+    // The committed text ends in a3; the open item a4 is a new message, so its
+    // streaming tail is a new paragraph - the same break the reducer writes
+    // once a3's successor lands as a row, rather than glued on until it does.
+    const { runFrame } = stubFrames();
+    const rows = openTurnRows();
+    const withEarlier = [
+      ...rows.slice(0, 3),
+      row(3, {
+        _tag: "content.delta",
+        eventId: "e3a",
+        sessionId: SESSION_ID,
+        at: "2026-09-08T12:00:00.150Z",
+        turnId: "t4",
+        itemId: "a3",
+        streamKind: "assistant_text",
+        delta: "First answer.",
+      }),
+      row(4, {
+        _tag: "item.completed",
+        eventId: "e3b",
+        sessionId: SESSION_ID,
+        at: "2026-09-08T12:00:00.160Z",
+        turnId: "t4",
+        itemId: "a3",
+        kind: "assistant_message",
+        status: "completed",
+      }),
+      rows[3]!,
+    ];
+    const { live } = await open(session({ status: "busy" }), withEarlier);
+
+    await waitFor(() => {
+      expect(live.topics()).toContain(sessionTapTopic(SESSION_ID));
+    });
+    const paragraph = (await screen.findByText(/First answer\./)).closest("p");
+
+    act(() => {
+      live.push(sessionTapTopic(SESSION_ID), {
+        _tag: "delta",
+        items: [{ turnId: "t4", itemId: "a4", streamKind: "assistant_text", delta: "Second" }],
+      });
+    });
+    await settle();
+    runFrame();
+
+    expect(paragraph?.textContent).toBe("First answer.\n\nSecond");
+
+    // A flush inside the same item continues that paragraph rather than
+    // breaking mid-sentence.
+    act(() => {
+      live.push(sessionTapTopic(SESSION_ID), {
+        _tag: "delta",
+        items: [{ turnId: "t4", itemId: "a4", streamKind: "assistant_text", delta: " answer." }],
+      });
+    });
+    await settle();
+    runFrame();
+
+    expect(paragraph?.textContent).toBe("First answer.\n\nSecond answer.");
+  });
+
   it("never paints a reasoning or command-output tap on the open item as the assistant's answer", async () => {
     // The open item (a4) is an `assistant_message`; a `reasoning_text` or
     // `command_output` delta naming it is never the answer, so it is dropped
@@ -1185,6 +1248,31 @@ describe("Thread: live subscriptions", () => {
     });
   });
 
+  it("replays a just-spawned thread's rows when the transcript read found none", async () => {
+    // The loader reads the transcript of a session the runner is still
+    // starting, so the answer is empty and the cache is never refetched
+    // (staleTime Infinity). Subscribing with no cursor would mean "start at
+    // the head, replay nothing", and every row written between the read and
+    // the subscription would be lost for good.
+    const { live } = await open(session({ status: "busy" }), []);
+
+    await waitFor(() => {
+      expect(live.topics()).toContain(sessionStreamTopic(SESSION_ID));
+    });
+    expect(live.cursorOf(sessionStreamTopic(SESSION_ID))).toBe("0");
+
+    act(() => {
+      live.push(sessionStreamTopic(SESSION_ID), {
+        _tag: "delta",
+        items: twoCompletedTurns(),
+        cursor: "15",
+      });
+    });
+
+    await screen.findByText("Fix the login bug", { selector: "div" });
+    await screen.findByText("Added a test too.");
+  });
+
   it("does not carry the previous thread's cursor into a newly opened thread's :stream subscription", async () => {
     // The router does not remount this screen for a route-param-only
     // navigation, so per-thread state - the seeded cursor included - has to
@@ -1199,8 +1287,8 @@ describe("Thread: live subscriptions", () => {
     await waitFor(() => {
       expect(live.topics()).toContain(sessionStreamTopic(SESSION_ID));
     });
-    // This thread has rows on record, so its own cursor is not the head.
-    expect(live.cursorOf(sessionStreamTopic(SESSION_ID))).toBeDefined();
+    // This thread has rows on record, so its own cursor is its last position.
+    expect(live.cursorOf(sessionStreamTopic(SESSION_ID))).toBe("15");
 
     await act(async () => {
       await router.navigate({ to: "/threads/$sessionId", params: { sessionId: OTHER_ID } });
@@ -1209,10 +1297,10 @@ describe("Thread: live subscriptions", () => {
     await waitFor(() => {
       expect(live.topics()).toContain(sessionStreamTopic(OTHER_ID));
     });
-    // The second thread's transcript is empty, so a correctly-scoped seed has
-    // nothing to start from; a leaked cursor from the thread just left is the
-    // only way this could read as anything else.
-    expect(live.cursorOf(sessionStreamTopic(OTHER_ID))).toBeUndefined();
+    // The second thread's transcript is empty, so a correctly-scoped seed
+    // starts at the beginning of its log; a leaked cursor from the thread just
+    // left is the only way this could read as anything else.
+    expect(live.cursorOf(sessionStreamTopic(OTHER_ID))).toBe("0");
   });
 });
 
