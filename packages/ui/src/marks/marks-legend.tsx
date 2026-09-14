@@ -1,5 +1,6 @@
 import { useEffect, useState, type JSX, type ReactNode } from "react";
 import { Popover, PopoverContent, PopoverTrigger } from "../primitives/popover";
+import { LaneLabel } from "../patterns/patterns";
 import {
   CancelledMark,
   DecisionMark,
@@ -30,14 +31,6 @@ const things: [ReactNode, string][] = [
   [<SessionGlyph key="session" />, "session"],
   [<WorkflowGlyph key="workflow" />, "workflow"],
 ];
-
-function LaneLabel({ children }: { children: ReactNode }): JSX.Element {
-  return (
-    <div className="mb-1 text-label font-emph tracking-[0.1em] text-faint uppercase">
-      {children}
-    </div>
-  );
-}
 
 function row([mark, meaning]: [ReactNode, string]): JSX.Element {
   return (
@@ -87,10 +80,10 @@ export function MarksLegend(): JSX.Element {
         </kbd>
       </PopoverTrigger>
       <PopoverContent side="right" align="end" className="w-[236px]" aria-label="Marks legend">
-        <LaneLabel>Marks</LaneLabel>
+        <LaneLabel className="mb-1">Marks</LaneLabel>
         {states.map(row)}
         <div className="mt-2">
-          <LaneLabel>Things</LaneLabel>
+          <LaneLabel className="mb-1">Things</LaneLabel>
         </div>
         {things.map(row)}
         <p className="mt-2 border-t border-line-soft pt-2 text-fine text-faint">

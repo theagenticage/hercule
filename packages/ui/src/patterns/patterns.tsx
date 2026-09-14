@@ -1,4 +1,5 @@
 import type { JSX, ReactNode } from "react";
+import { cn } from "../primitives/cn";
 import { Label } from "../primitives/label";
 
 /**
@@ -27,9 +28,21 @@ export function EmptyState({
 }
 
 /** An uppercase lane label; the one heading style above a group of rows. */
-export function LaneLabel({ children }: { readonly children: ReactNode }): JSX.Element {
+export function LaneLabel({
+  className,
+  id,
+  children,
+}: {
+  readonly className?: string;
+  /** Names a group whose visible heading this is, through `aria-labelledby`. */
+  readonly id?: string;
+  readonly children: ReactNode;
+}): JSX.Element {
   return (
-    <div className="mb-2.5 text-label font-emph tracking-[0.1em] text-faint uppercase">
+    <div
+      id={id}
+      className={cn("mb-2.5 text-label font-emph tracking-[0.1em] text-faint uppercase", className)}
+    >
       {children}
     </div>
   );

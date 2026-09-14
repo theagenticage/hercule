@@ -247,6 +247,15 @@ configuration**: every selector opens a menu anchored above it, and whatever can
 focus rule) was built as the record and rejected under the color doctrine; provider marks, if ever
 shown, are monochrome. Owner: spec 14 §App shell.
 
+Amended 2026-09-14 by ticket #186 (Web: a quiet light/dark/system theme selector at the sidebar foot):
+the sidebar foot gains a third quiet row, **below the Marks toggle** - `Theme` with the current
+choice (`Light` / `Dark` / `System`) at the row's right, a text-only ghost row in the Marks family
+opening a popover with the three choices (Light, Dark, System last, one radio dot each, a fine note
+under System saying it follows the machine's appearance). No new mark: the row is text, like the
+non-entity nav items. The choice is per browser (localStorage, no stored key = the system
+preference), never a setting; a stored light/dark reaches the document before the first paint via
+an external script, because the CSP allows no inline one. Owner: spec 14 §App shell.
+
 ## Provenance
 
 Three reaction rounds on the identical #20 check-in slice (enriched with #29 Task nouns).

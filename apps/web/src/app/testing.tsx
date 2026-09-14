@@ -15,6 +15,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createClient, createLive, type FetchLike, type Live } from "@hydra/client-core";
 import type { Runner } from "@hydra/contract";
 import { StubSocket, openInto } from "@hydra/client-core/testing";
+import { memoryStorage } from "@hydra/ui/testing";
 import { createAppRouter } from "./router";
 import { followLiveStatus } from "./live-status";
 
@@ -171,36 +172,6 @@ export const pickRow = async (
   await waitFor(() => {
     expect(screen.queryByRole("dialog")).toBeNull();
   });
-};
-
-/**
- * A `localStorage` that lives in memory for one render.
- *
- * Whether this jsdom has a `localStorage` of its own depends on the Node it
- * runs under - Node 22 exposes one and persists it across the tests in a file,
- * later Node versions leave `window.localStorage` undefined, which is why
- * `client-core`'s own token store reaches it through a try. A stub makes both
- * read the same: every render starts from the seed it was given and nothing
- * one test writes reaches the next.
- */
-export const memoryStorage = (seed: Readonly<Record<string, string>> = {}): Storage => {
-  const held = new Map(Object.entries(seed));
-  return {
-    getItem: (key) => held.get(key) ?? null,
-    setItem: (key, value) => {
-      held.set(key, String(value));
-    },
-    removeItem: (key) => {
-      held.delete(key);
-    },
-    clear: () => {
-      held.clear();
-    },
-    key: (index) => [...held.keys()][index] ?? null,
-    get length() {
-      return held.size;
-    },
-  };
 };
 
 /** Renders the whole app at `path`, holding `token` from the start if given. */

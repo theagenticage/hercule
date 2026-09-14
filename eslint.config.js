@@ -106,6 +106,14 @@ export default tseslint.config(
     },
   },
   {
+    // The pre-paint theme script is plain browser JavaScript that no build
+    // touches, so it is linted as what it is rather than ignored.
+    files: ["apps/web/public/**/*.js"],
+    languageOptions: {
+      globals: globals.browser,
+    },
+  },
+  {
     files: ["apps/web/**/*.{ts,tsx}", "packages/ui/**/*.{ts,tsx}"],
     languageOptions: {
       globals: globals.browser,

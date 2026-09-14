@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { Session } from "@hydra/contract";
@@ -183,6 +183,30 @@ describe("the two-face sidebar", () => {
     await user.keyboard("?");
 
     expect(await screen.findByLabelText("Marks legend")).toBeDefined();
+  });
+});
+
+describe("the theme selector", () => {
+  /** The document attribute is the one thing one render may leave on the next. */
+  afterEach(() => {
+    delete document.documentElement.dataset.theme;
+  });
+
+  it("sits below Marks at the sidebar foot, and a pick paints and persists", async () => {
+    const user = userEvent.setup();
+    await renderApp({ path: "/tasks", api: stubApi(inShell()).fetch, token: "held" });
+
+    // At rest the machine is in charge: no explicit theme on the document.
+    expect(document.documentElement.dataset.theme).toBeUndefined();
+    const marks = screen.getByRole("button", { name: /Marks/ });
+    const theme = screen.getByRole("button", { name: "Theme System" });
+    expect(marks.compareDocumentPosition(theme) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+    await user.click(theme);
+    await user.click(screen.getByRole("radio", { name: "Dark" }));
+
+    expect(document.documentElement.dataset.theme).toBe("dark");
+    expect(localStorage.getItem("hydra:theme")).toBe("dark");
   });
 });
 

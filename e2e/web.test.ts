@@ -63,16 +63,24 @@ describe("the binary serving the web app", () => {
     expect(await state.json()).toEqual({ complete: false });
   });
 
-  it("serves the fingerprinted script the page asks for, cached forever", async () => {
+  it("serves every script the page asks for, each cached the way it ships", async () => {
     const page = await (await fetch(`${url}/`)).text();
-    const source = /<script[^>]*\ssrc="([^"]+)"/.exec(page)?.[1];
-    expect(source).toMatch(/^\/assets\//);
+    const sources = [...page.matchAll(/<script[^>]*\ssrc="([^"]+)"/g)].map((m) => m[1]!);
+    // The entry module and its chunks are fingerprinted; the theme's pre-paint
+    // script keeps its name, so for it "cached forever" would be wrong.
+    expect(sources.some((source) => /^\/assets\//.test(source))).toBe(true);
+    expect(sources).toContain("/theme-init.js");
 
-    const script = await fetch(`${url}${source!}`);
-    expect(script.status).toBe(200);
-    expect(script.headers.get("content-type")).toBe("text/javascript; charset=utf-8");
-    expect(script.headers.get("cache-control")).toBe("public, max-age=31536000, immutable");
-    expect((await script.text()).length).toBeGreaterThan(0);
+    for (const source of sources) {
+      const script = await fetch(`${url}${source}`);
+      expect(script.status).toBe(200);
+      expect(script.headers.get("content-type")).toBe("text/javascript; charset=utf-8");
+      const fingerprinted = source.startsWith("/assets/");
+      expect(script.headers.get("cache-control")).toBe(
+        fingerprinted ? "public, max-age=31536000, immutable" : "no-cache",
+      );
+      expect((await script.text()).length).toBeGreaterThan(0);
+    }
   });
 
   it("ships React's production build, not its development one", async () => {
