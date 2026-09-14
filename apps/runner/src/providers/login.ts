@@ -37,6 +37,11 @@ export type LoginSpawn = (
 export interface LoginCommand {
   readonly command: ReadonlyArray<string>;
   readonly env: Readonly<Record<string, string | undefined>>;
+  /**
+   * Set by a vendor that prints a one-time code for the user to type in the
+   * browser. Such a login reads nothing back: it ends when its child does.
+   */
+  readonly userCode?: RegExp;
 }
 
 /** The login frames minus the request id, which belongs to the connection. */
@@ -45,6 +50,12 @@ export type LoginAnswer =
 
 /** A tab closed on the URL would otherwise block the vendor on stdin for ever. */
 export const LOGIN_IDLE: Duration.Duration = Duration.minutes(10);
+
+/**
+ * A device login is silent from its code to its exit, so the idle clock
+ * cannot reach it; what bounds it is how long the code it printed is good for.
+ */
+export const LOGIN_CODE_LIFETIME: Duration.Duration = Duration.minutes(15);
 
 /** A vendor writes to stderr on its way out too, so a complaint may be overtaken. */
 export const COMPLAINT_GRACE: Duration.Duration = Duration.seconds(2);
@@ -85,10 +96,22 @@ const AUTHORIZE = /https:\/\/\S+/;
 
 const MAX_TRANSCRIPT = 4096;
 
+interface Printed {
+  readonly url: string;
+  readonly userCode: string | undefined;
+}
+
 interface Held {
   readonly child: LoginChild;
-  /** The first authorize URL, or nothing when the child ended without one. */
-  readonly url: Promise<string | undefined>;
+  /**
+   * The address, with the code beside it where the vendor prints one, or
+   * nothing when the child ended before it had printed both.
+   */
+  readonly printed: Promise<Printed | undefined>;
+  /** A login that prints a code reads nothing back: nobody submits to it. */
+  readonly device: boolean;
+  /** Gives up on `printed`, for a child that was killed before it printed. */
+  readonly abandon: () => void;
   /** Resolves with the child's next complaint, and never when it ends first. */
   readonly nextComplaint: () => Promise<string>;
   readonly transcript: () => string;
@@ -119,31 +142,66 @@ export const logins = (
   const stop = (instanceId: string, login: Held): Effect.Effect<void> =>
     Effect.suspend(() => {
       login.child.kill();
+      // A killed child's pipes do not always end, so the reader cannot be the
+      // one to say this login has nothing more to print.
+      login.abandon();
       return forget(instanceId, login);
     });
 
-  /** Restarts the clock on a login that just showed a sign of life. */
+  /**
+   * Restarts the clock on a login that just showed a sign of life. A device
+   * login shows none - it is read from, never written to - so its clock is the
+   * lifetime of the code it printed, armed once here and never restarted.
+   */
   const keep = (instanceId: string, login: Held): Effect.Effect<void> =>
     Effect.gen(function* () {
       if (login.idle !== undefined) yield* Fiber.interrupt(login.idle);
       login.idle = yield* Effect.forkDetach(
-        Effect.andThen(Effect.sleep(LOGIN_IDLE), stop(instanceId, login)),
+        Effect.andThen(
+          Effect.sleep(login.device ? LOGIN_CODE_LIFETIME : LOGIN_IDLE),
+          stop(instanceId, login),
+        ),
       );
     });
 
   const open = (instanceId: string, command: LoginCommand): Effect.Effect<Held> =>
     Effect.gen(function* () {
       const child = spawn(command.command, command.env);
-      let found: (url: string | undefined) => void = () => undefined;
-      const firstUrl = new Promise<string | undefined>((resolve) => {
-        found = resolve;
-      });
-      const spent = readLines(child.stdout, (line) => {
-        const match = AUTHORIZE.exec(line);
-        if (match !== null) found(match[0]);
-      }).catch(() => undefined);
+      const pattern = command.userCode;
       const complaints: Array<(line: string) => void> = [];
       let transcript = "";
+      let url: string | undefined;
+      let userCode: string | undefined;
+      let settle: (printed: Printed | undefined) => void = () => undefined;
+      const printed = new Promise<Printed | undefined>((resolve) => {
+        settle = resolve;
+      });
+      /**
+       * Both halves or neither: an address answered before the code beside it
+       * has been read would send the user to a page they cannot get past. A
+       * command that names no pattern is complete at the address.
+       */
+      const whole = (): Printed | undefined =>
+        url === undefined || (pattern !== undefined && userCode === undefined)
+          ? undefined
+          : { url, userCode };
+      const spent = readLines(child.stdout, (line) => {
+        if (pattern !== undefined && userCode === undefined) {
+          const code = pattern.exec(line);
+          if (code !== null) userCode = code[0];
+        }
+        if (url === undefined) {
+          const match = AUTHORIZE.exec(line);
+          if (match !== null) url = match[0];
+        }
+        const found = whole();
+        if (found !== undefined) settle(found);
+      }).catch(() => undefined);
+      // The reader, not the exit, is what says a child has stopped printing: a
+      // child that exits on the line after its code has still printed both.
+      void spent.then(() => {
+        settle(whole());
+      });
       void readLines(child.stderr, (line) => {
         transcript = `${transcript}${line}\n`.slice(-MAX_TRANSCRIPT);
         // A blank line is the vendor's formatting, not a complaint, and the
@@ -153,13 +211,11 @@ export const logins = (
       }).catch(() => undefined);
       const login: Held = {
         child,
-        // Killing a child does not always end its pipes, so without `exited` a
-        // replaced login waits for ever.
-        url: Promise.race([
-          firstUrl,
-          spent.then(() => undefined),
-          child.exited.then(() => undefined),
-        ]),
+        device: pattern !== undefined,
+        abandon: () => {
+          settle(undefined);
+        },
+        printed,
         nextComplaint: () =>
           new Promise<string>((resolve) => {
             complaints.push(resolve);
@@ -190,24 +246,32 @@ export const logins = (
         const previous = held.get(instanceId);
         if (previous !== undefined) yield* stop(instanceId, previous);
         const login = yield* open(instanceId, adapter.login(ctx, ctx.binary));
-        const url = yield* Effect.promise(() => login.url);
-        if (url === undefined) {
+        const printed = yield* Effect.promise(() => login.printed);
+        if (printed === undefined) {
           yield* stop(instanceId, login);
           return failed(said(login.transcript(), "the login ended without a URL"));
         }
         // Cutting it would hand the browser an address that cannot complete the
         // login, which is worse than saying the vendor printed something odd.
-        if (url.length > MAX_AUTHORIZE_URL_LENGTH) {
+        if (printed.url.length > MAX_AUTHORIZE_URL_LENGTH) {
           yield* stop(instanceId, login);
           return failed("the login printed an address too long to relay");
         }
-        return { _tag: "loginUrl", url };
+        return {
+          _tag: "loginUrl",
+          url: printed.url,
+          ...(printed.userCode === undefined ? {} : { userCode: printed.userCode }),
+        };
       }),
 
     submit: (instanceId, code) =>
       Effect.gen(function* () {
         const login = held.get(instanceId);
         if (login === undefined) return failed(NO_LOGIN);
+        // The user types this login's code into the browser, and the browser
+        // finishes it with the vendor: there is nothing here to hand a code to
+        // and nothing to wait for.
+        if (login.device) return failed("this login takes no code");
         yield* keep(instanceId, login);
         yield* Effect.sync(() => {
           // The newline is what makes it a line: the vendor is reading one, and

@@ -31,6 +31,7 @@ import {
   type TurnInput,
 } from "@hydra/protocol";
 import { INSTALL_DEADLINE, lastLines } from "../claude-code";
+import type { LoginCommand } from "../login";
 import type { InstallOutcome, ProviderAdapter, ProviderRunnerContext } from "../index";
 import { userMessage } from "../events";
 import { runProcess, spawnAppServer, type Run } from "../process";
@@ -310,6 +311,9 @@ const INITIALIZE: InitializeParams = {
   clientInfo: { name: "hydra", title: "Hydra", version: VERSION },
   capabilities: { experimentalApi: false, requestAttestation: false },
 };
+
+/** What the device login prints for the user to type: four characters, a dash, five. */
+const USER_CODE = /\b[A-Z0-9]{4}-[A-Z0-9]{5}\b/;
 
 export const codexAdapter = (seam: CodexSeam): ProviderAdapter => {
   // Creating an unbounded PubSub allocates and nothing more, so it is safe to
@@ -931,6 +935,18 @@ export const codexAdapter = (seam: CodexSeam): ProviderAdapter => {
       }),
 
     listSessions: Effect.sync(() => [...sessions.values()].map((held) => held.binding)),
+
+    /**
+     * The device flow rather than the browser one: the machine the harness runs
+     * on usually has no browser, and this login prints a code the user types
+     * into one anywhere. The homes are the instance's own, as a session's are,
+     * so the credential lands where the app-server will look for it.
+     */
+    login: (ctx: ProviderRunnerContext, binary: string): LoginCommand => ({
+      command: [binary, "login", "--device-auth"],
+      env: envFor(ctx),
+      userCode: USER_CODE,
+    }),
 
     /** The script URL is pinned to the tag, so it and the release it fetches move together. */
     install: (env: Readonly<Record<string, string | undefined>>): Effect.Effect<InstallOutcome> =>

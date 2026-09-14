@@ -208,6 +208,9 @@ describe("Sessions", () => {
           held = [claudeCode([LOGGED_IN])];
           return { body: LOGGED_IN };
         },
+        // Every finished login is followed by a probe: what the machine holds
+        // now is what this screen reads.
+        [`POST /api/v1/runners/${MOSS.id}/probe`]: () => ({ body: LOGGED_IN }),
       },
     });
 

@@ -641,6 +641,9 @@ describe("Runner > providers", () => {
           held = [claudeCode([LOGGED_IN]), CODEX];
           return { body: LOGGED_IN };
         },
+        // Every finished login is followed by a probe: what the machine holds
+        // now is what the page shows.
+        [`POST /api/v1/runners/${ONLINE.id}/probe`]: () => ({ body: LOGGED_IN }),
       },
     });
 
@@ -673,6 +676,42 @@ describe("Runner > providers", () => {
     await waitFor(() => {
       expect(reading()).toContain("rogier@example.com");
     });
+  });
+
+  it("finishes a printed-code login with no paste and asks the machine about it", async () => {
+    const user = userEvent.setup();
+    let held = [claudeCode([NOT_LOGGED_IN]), CODEX];
+    const { api } = await open(ONLINE, {
+      instances: held,
+      extra: {
+        "GET /api/v1/providers": () => ({ body: held }),
+        [`POST /api/v1/providers/${CLAUDE_ID}/login`]: {
+          body: { url: AUTHORIZE_URL, userCode: "CH61-0FI2N" },
+        },
+        [`POST /api/v1/runners/${ONLINE.id}/probe`]: () => {
+          held = [claudeCode([LOGGED_IN]), CODEX];
+          return { body: LOGGED_IN };
+        },
+      },
+    });
+
+    await user.click(within(await claudeRow()).getByRole("button", { name: /log in/i }));
+
+    await waitFor(() => {
+      expect(reading()).toContain("CH61-0FI2N");
+    });
+    // The browser finishes this login with the vendor; Hydra is told it is over.
+    await user.click(screen.getByRole("button", { name: "Done" }));
+
+    // The credential is on the machine and the stored snapshot predates it, so
+    // the account only appears if the machine is asked again.
+    await waitFor(() => {
+      expect(reading()).toContain("rogier@example.com");
+    });
+    const asked = api.calls.filter((call) => call.path.endsWith("/probe"));
+    expect(asked).toHaveLength(1);
+    expect(asked[0]?.body).toEqual({ instanceId: CLAUDE_ID });
+    expect(api.calls.filter((call) => call.path.endsWith("/login-code"))).toEqual([]);
   });
 
   it("probes one instance on demand and shows what came back", async () => {

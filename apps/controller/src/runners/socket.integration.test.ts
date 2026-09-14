@@ -2021,6 +2021,8 @@ describe("logging a runner's provider instance in", () => {
 
   const AUTHORIZE_URL = "https://claude.ai/oauth/authorize?code=challenge";
 
+  const DEVICE_URL = "https://auth.openai.com/codex/device";
+
   /** A deadline a test can wait out. */
   const LOGIN_DEADLINE = Duration.millis(200);
 
@@ -2042,6 +2044,33 @@ describe("logging a runner's provider instance in", () => {
         const response = await pending;
         expect(response.status, await response.clone().text()).toBe(200);
         expect(await response.json()).toEqual({ url: AUTHORIZE_URL });
+      } finally {
+        wire.close();
+      }
+    });
+  });
+
+  it("carries the one-time code back when the machine printed one instead of prompting", async () => {
+    await withRegistry(async (harness) => {
+      const token = await completeSetup(harness.base);
+      const joined = await enlist(harness);
+      const claude = await instanceOf(harness.base, token, "claude-code");
+      const { wire } = await greet(harness.base, joined.credential);
+      try {
+        const pending = login(harness.base, token, claude.id, joined.runnerId);
+        const request = await frameOn<LoginStart>(wire, "loginStart");
+        // A device login shows the user a code to type in the browser; there is
+        // nothing for them to paste back here.
+        wire.send({
+          _tag: "loginUrl",
+          requestId: request.requestId,
+          url: DEVICE_URL,
+          userCode: "CH61-0FI2N",
+        });
+
+        const response = await pending;
+        expect(response.status, await response.clone().text()).toBe(200);
+        expect(await response.json()).toEqual({ url: DEVICE_URL, userCode: "CH61-0FI2N" });
       } finally {
         wire.close();
       }

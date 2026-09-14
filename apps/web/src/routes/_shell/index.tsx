@@ -1,6 +1,6 @@
 import type { JSX, ReactNode } from "react";
 import { Link, createFileRoute } from "@tanstack/react-router";
-import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { Button, EmptyState } from "@hydra/ui";
 import { queryKeys, sessionsEmptyState } from "@hydra/client-core";
 import { useLiveInvalidation } from "../../app/live-invalidation";
@@ -44,6 +44,16 @@ function Sessions(): JSX.Element {
   const reread = (): void => {
     void queryClient.invalidateQueries({ queryKey: queryKeys.providers() });
   };
+  // A login writes a credential the stored snapshot knows nothing about, so the
+  // machine is asked about the instance again before this screen believes it.
+  const probe = useMutation({
+    mutationFn: (asked: { readonly runnerId: string; readonly instanceId: string }) =>
+      client.runner.probe({
+        params: { id: asked.runnerId },
+        payload: { instanceId: asked.instanceId },
+      }),
+    onSuccess: reread,
+  });
 
   // `local === null` is what narrows the type below; the state alone already
   // says so.
@@ -95,7 +105,9 @@ function Sessions(): JSX.Element {
             subject={`${instance.displayName} on this machine`}
             label={`Log in to ${instance.displayName}`}
             variant="primary"
-            onLoggedIn={reread}
+            onLoggedIn={() => {
+              probe.mutate({ runnerId: local.id, instanceId: instance.id });
+            }}
           />
         ))}
       </Screen>

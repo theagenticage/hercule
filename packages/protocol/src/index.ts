@@ -389,6 +389,8 @@ export const LoginUrl = Schema.Struct({
   _tag: Schema.Literal("loginUrl"),
   requestId: RequestId,
   url: AuthorizeUrl,
+  /** Present when the vendor printed a code to type there instead of reading one back. */
+  userCode: Schema.optionalKey(Fact),
 });
 
 export type LoginUrl = Schema.Schema.Type<typeof LoginUrl>;
