@@ -86,7 +86,7 @@ describe("the floor each provider is held to", () => {
       .filter((line) => line !== "")
       .map((line) => line.slice(0, line.indexOf(":")))
       // Fixtures in test files are not the source this rule is about.
-      .filter((path) => !/\.(test|testing)\.ts$/.test(path));
+      .filter((path) => !/(\.(test|testing)|\/testing)\.ts$/.test(path));
 
     expect([...new Set(found)].sort()).toEqual([
       "packages/home/src/version.ts",

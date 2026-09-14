@@ -50,6 +50,7 @@ import type { LoginCommand } from "./login";
 import { runProcess, type Run } from "./process";
 import { fact, text } from "./text";
 import { userMessage } from "./events";
+import { questionRequest } from "./questions";
 import { now } from "../report";
 
 export const CLAUDE_CODE = "claude-code";
@@ -316,60 +317,6 @@ const pathsIn = (input: Record<string, unknown>): ReadonlyArray<string> =>
     return typeof found === "string" && found !== "" ? [fact(found)] : [];
   });
 
-/** One question as the protocol carries it: the vendor's shape mapped over. */
-type Question = Extract<OpenRequest, { readonly kind: "question" }>["detail"]["questions"][number];
-
-/**
- * The options of one question, read-only for now: until an answer can travel
- * back with the decision there is no button for them to be. They are carried
- * anyway, because what each answer would have meant is what the question is
- * about, and a user reading only the prose cannot see it.
- *
- * An option the protocol has no field for - the SDK's `preview` - is left
- * behind, and one with no label has nothing to show, so it is dropped.
- */
-const optionsIn = (given: unknown): ReadonlyArray<Question["options"][number]> => {
-  if (!Array.isArray(given)) return [];
-  return given.flatMap((one: unknown) => {
-    if (typeof one !== "object" || one === null) return [];
-    const { label, description } = one as {
-      readonly label?: unknown;
-      readonly description?: unknown;
-    };
-    if (typeof label !== "string" || label === "" || typeof description !== "string") return [];
-    return [{ label: fact(label), description: text(description) }];
-  });
-};
-
-/**
- * Each question of an ask, field by field. A question missing what the card
- * reads it by - its prose or its chip - is dropped rather than guessed at: an
- * invented header is a word the agent never wrote.
- */
-const questionsIn = (input: Record<string, unknown>): ReadonlyArray<Question> => {
-  const asked = input["questions"];
-  if (!Array.isArray(asked)) return [];
-  return asked.flatMap((one: unknown) => {
-    if (typeof one !== "object" || one === null) return [];
-    const { question, header, options, multiSelect } = one as {
-      readonly question?: unknown;
-      readonly header?: unknown;
-      readonly options?: unknown;
-      readonly multiSelect?: unknown;
-    };
-    if (typeof question !== "string" || question === "") return [];
-    if (typeof header !== "string" || header === "") return [];
-    return [
-      {
-        question: text(question),
-        header: fact(header),
-        options: optionsIn(options),
-        multiSelect: multiSelect === true,
-      },
-    ];
-  });
-};
-
 /**
  * One tool call turned into the question a user answers. Every field is cut to
  * what the protocol carries: an over-long command or path would be a frame
@@ -383,28 +330,7 @@ const requestFor = (
   canPersist: boolean,
 ): OpenRequest => {
   if (toolName === "AskUserQuestion") {
-    // Answering a question with its answers is not built, so an allow would run
-    // the tool with no answer in it: the two honest answers are the only ones.
-    const [first, ...rest] = questionsIn(input);
-    return first === undefined
-      ? // Nothing decodable was asked. A `question` request carrying no
-        // question on it is a frame the controller refuses, which costs the
-        // runner its socket and leaves the park hanging; the tool call under
-        // it is still refusable.
-        {
-          requestId,
-          itemId,
-          kind: "tool_approval",
-          decisions: ["deny", "cancel"],
-          detail: { toolName: "AskUserQuestion" },
-        }
-      : {
-          requestId,
-          itemId,
-          kind: "question",
-          decisions: ["deny", "cancel"],
-          detail: { questions: [first, ...rest] },
-        };
+    return questionRequest({ requestId, itemId }, toolName, input["questions"]);
   }
   // `allow always` is offered only where the harness handed over rules to
   // persist: a button that would have to invent one grants more than the user

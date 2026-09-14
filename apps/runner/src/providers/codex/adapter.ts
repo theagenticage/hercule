@@ -18,6 +18,7 @@ import {
   MAX_FACT_ITEMS,
   MAX_FACT_LENGTH,
   type AccessMode,
+  type ApprovalDecision,
   type ExitReason,
   type ModelDescriptor,
   type ModelOption,
@@ -35,6 +36,7 @@ import { userMessage } from "../events";
 import { runProcess, spawnAppServer, type Run } from "../process";
 import { fact, text } from "../text";
 import { now } from "../../report";
+import { ASKED, type Asked } from "./approvals";
 import { normalize, normalizing, type Normalizing } from "./normalize";
 import {
   rpcOver,
@@ -47,9 +49,12 @@ import {
 import type {
   ApprovalsReviewer,
   AskForApproval,
+  DynamicToolCallResponse,
   GetAccountResponse,
   InitializeParams,
   InitializeResponse,
+  ItemCompletedNotification,
+  ItemStartedNotification,
   Model,
   ModelListResponse,
   SandboxMode,
@@ -93,6 +98,19 @@ interface Host {
   readonly sessions: Set<string>;
 }
 
+/**
+ * A request the session is parked on, under the id this adapter minted for it.
+ * The frame id is Codex's own and is echoed back verbatim, because it types one
+ * as a string or a number and an answer under a reshaped id answers nothing.
+ */
+interface Park {
+  readonly requestId: string;
+  readonly id: string | number;
+  readonly decisions: ReadonlyArray<ApprovalDecision>;
+  readonly asked: Asked;
+  readonly params: unknown;
+}
+
 /** One session this adapter hosts, and what it believes about its thread. */
 interface Held {
   readonly binding: SessionBinding;
@@ -100,6 +118,13 @@ interface Held {
   readonly state: Normalizing;
   /** The turn believed to be running, which is what makes an input a steer. */
   turnId: string | undefined;
+  /** Every request waiting on an answer, by the id it was opened under. */
+  readonly parks: Map<string, Park>;
+  /**
+   * What each running file change item is about. A file change approval names
+   * no paths at this release, so the card reads them off the item instead.
+   */
+  readonly fileChanges: Map<string, ReadonlyArray<string>>;
 }
 
 /**
@@ -145,6 +170,9 @@ const OVERLOADED = -32001;
 /** JSON-RPC's own: this build has no answer for that method. */
 const METHOD_NOT_FOUND = -32601;
 
+/** JSON-RPC's own, and the code Codex itself refuses a request it cannot read with. */
+const INVALID_REQUEST = -32600;
+
 const RETRIES = 3;
 
 const BACKOFF: Duration.Duration = Duration.millis(500);
@@ -171,6 +199,12 @@ const retrying = <A>(request: Effect.Effect<A, RpcError>): Effect.Effect<A, RpcE
     times: RETRIES,
     while: (error: RpcError) => error.code === OVERLOADED,
   });
+
+/** Which thread a frame is about, where it names one at all. */
+const threadIn = (params: unknown): string | undefined => {
+  const threadId = (params as { readonly threadId?: unknown } | null | undefined)?.threadId;
+  return typeof threadId === "string" ? threadId : undefined;
+};
 
 /** Turn input is text only: attachments are the open item in spec 16 section B. */
 const textInput = (text: string): UserInput => ({ type: "text", text, text_elements: [] });
@@ -353,8 +387,8 @@ export const codexAdapter = (seam: CodexSeam): ProviderAdapter => {
   };
 
   const onNotification = (host: Host, frame: NotificationFrame): void => {
-    const threadId = (frame.params as { readonly threadId?: unknown } | null | undefined)?.threadId;
-    const held = typeof threadId === "string" ? sessionOn(host, threadId) : undefined;
+    const threadId = threadIn(frame.params);
+    const held = threadId === undefined ? undefined : sessionOn(host, threadId);
     if (held === undefined) return;
     // The thread is unloaded and its rollout is on disk, which is what makes
     // this the one exit a later session can carry on from (spec 06 section 4.1).
@@ -363,6 +397,23 @@ export const codexAdapter = (seam: CodexSeam): ProviderAdapter => {
       return;
     }
     for (const event of normalize(held.state, frame)) emit(event);
+    // A file change approval names no paths at this release, so what a card
+    // shows are the item's own, held from the moment the patch is announced
+    // until it is applied: the window an approval for it arrives in.
+    if (frame.method === "item/started" || frame.method === "item/completed") {
+      const { item } = frame.params as ItemStartedNotification | ItemCompletedNotification;
+      if (item.type !== "fileChange") return;
+      if (frame.method === "item/completed") held.fileChanges.delete(item.id);
+      else {
+        held.fileChanges.set(
+          item.id,
+          // A change the harness named no file in has nothing for a card to
+          // show, and an empty path is a frame nobody can decode.
+          item.changes.flatMap((change) => (change.path === "" ? [] : [fact(change.path)])),
+        );
+      }
+      return;
+    }
     // What the adapter believes about the turn, which is what decides whether
     // the next input steers. The turn a `turn/start` answered with is already
     // held; this is the server's own account of the same thing.
@@ -374,17 +425,94 @@ export const codexAdapter = (seam: CodexSeam): ProviderAdapter => {
       const turn = (frame.params as TurnCompletedNotification).turn;
       // Only the turn in flight ends the flight: a completion for another turn
       // would otherwise make the next input open a turn beside a running one.
-      if (turn.status !== "inProgress" && turn.id === held.turnId) held.turnId = undefined;
+      if (turn.status !== "inProgress" && turn.id === held.turnId) {
+        held.turnId = undefined;
+        // The turn a park belonged to is over, and the controller closed the
+        // open request with it: an answer arriving now would be written to a
+        // harness that stopped waiting and reported as a second end.
+        held.parks.clear();
+        held.fileChanges.clear();
+      }
     }
   };
 
-  const onServerRequest = (host: Host, frame: ServerRequestFrame): void => {
-    // Answered, not dropped: a request left hanging is a turn that never ends,
-    // with nothing said anywhere. The mapped requests arrive with approvals.
-    host.rpc.answer(frame.id, {
-      error: { code: METHOD_NOT_FOUND, message: `Hydra does not answer ${frame.method}` },
+  /**
+   * Ends a park: Codex is told the answer in its own terms, the stream says the
+   * park is over, and nothing is left holding an id nobody will answer again.
+   */
+  const resolving = (held: Held, park: Park, decision: ApprovalDecision): void => {
+    held.parks.delete(park.requestId);
+    held.host.rpc.answer(park.id, park.asked.replies(decision, park.params));
+    emit({
+      _tag: "request.resolved",
+      eventId: crypto.randomUUID(),
+      sessionId: held.binding.sessionId,
+      at: now(),
+      requestId: park.requestId,
+      decision,
     });
-    warn(host, `the app-server asked for ${frame.method}, which this runner build cannot answer`);
+  };
+
+  /**
+   * Answered, not dropped: a request left hanging is a turn that never ends,
+   * with nothing said anywhere.
+   */
+  const refuse = (host: Host, frame: ServerRequestFrame, error: RpcError): void => {
+    host.rpc.answer(frame.id, { error });
+  };
+
+  const onServerRequest = (host: Host, frame: ServerRequestFrame): void => {
+    if (frame.method === "item/tool/call") {
+      // Hydra hosts no tools for Codex, so there is nothing a user could decide
+      // and nothing to wait for: the call is refused where it arrives.
+      host.rpc.answer(frame.id, {
+        result: {
+          contentItems: [{ type: "inputText", text: "Hydra does not host dynamic tools" }],
+          success: false,
+        } satisfies DynamicToolCallResponse,
+      });
+      return;
+    }
+    const asked = ASKED[frame.method];
+    if (asked === undefined) {
+      refuse(host, frame, {
+        code: METHOD_NOT_FOUND,
+        message: `Hydra does not answer ${frame.method}`,
+      });
+      warn(host, `the app-server asked for ${frame.method}, which this runner build cannot answer`);
+      return;
+    }
+    const threadId = threadIn(frame.params);
+    const held = threadId === undefined ? undefined : sessionOn(host, threadId);
+    // A thread nobody here holds has no one to ask and no one to tell: a
+    // warning for it would go to every other session on this app-server.
+    if (threadId === undefined || held === undefined) {
+      refuse(host, frame, {
+        code: INVALID_REQUEST,
+        message: `no session on this runner is on thread ${String(threadId)}`,
+      });
+      return;
+    }
+    const requestId = crypto.randomUUID();
+    const request = asked.opens(frame.params, {
+      requestId,
+      threadId,
+      paths: (itemId) => held.fileChanges.get(itemId) ?? [],
+    });
+    held.parks.set(requestId, {
+      requestId,
+      id: frame.id,
+      decisions: request.decisions,
+      asked,
+      params: frame.params,
+    });
+    emit({
+      _tag: "request.opened",
+      eventId: crypto.randomUUID(),
+      sessionId: held.binding.sessionId,
+      at: now(),
+      request,
+    });
   };
 
   /**
@@ -430,7 +558,20 @@ export const codexAdapter = (seam: CodexSeam): ProviderAdapter => {
     })();
     const host: Host = {
       rpc: rpcOver(child, {
-        onServerRequest: (frame) => onServerRequest(host, frame),
+        // Nothing a vendor writes may take the reader down, and a request that
+        // threw on its way through is still a request that must be answered:
+        // dropping it would hang the turn and the connection both.
+        onServerRequest: (frame) => {
+          try {
+            onServerRequest(host, frame);
+          } catch {
+            refuse(host, frame, {
+              code: INVALID_REQUEST,
+              message: `Hydra could not read the ${frame.method} it was asked`,
+            });
+            warn(host, `the app-server sent a ${frame.method} this build could not read`);
+          }
+        },
         // Nothing a vendor writes may take the reader down: a throw here would
         // abandon every request in flight on this connection.
         onNotification: (frame) => {
@@ -507,9 +648,6 @@ export const codexAdapter = (seam: CodexSeam): ProviderAdapter => {
         }),
       );
     });
-
-  const unbuilt = (what: string): Effect.Effect<never> =>
-    Effect.die(new Error(`${what} is not implemented in this runner build`));
 
   /**
    * Ends the running turn, if the adapter believes there is one. A refusal
@@ -703,7 +841,14 @@ export const codexAdapter = (seam: CodexSeam): ProviderAdapter => {
         };
         const state = normalizing(sessionId, opened);
         state.model = spec.modelSelection.model;
-        sessions.set(sessionId, { binding, host, state, turnId: undefined });
+        sessions.set(sessionId, {
+          binding,
+          host,
+          state,
+          turnId: undefined,
+          parks: new Map(),
+          fileChanges: new Map(),
+        });
         // The native id rides the event, because the controller has no other
         // way to learn it: a session started after hello is never named again.
         emit({
@@ -742,10 +887,33 @@ export const codexAdapter = (seam: CodexSeam): ProviderAdapter => {
       Effect.suspend(() => {
         const held = sessions.get(sessionId);
         // The turn completing as `interrupted` is the whole report.
-        return held === undefined ? Effect.void : interrupting(held);
+        if (held === undefined) return Effect.void;
+        // A park nobody answered is what the turn is waiting on, so it is ended
+        // first: the harness is told the nearest refusal it can express, and
+        // the stream says the park was cancelled, because that is what ended it.
+        for (const park of [...held.parks.values()]) resolving(held, park, "cancel");
+        return interrupting(held);
       }),
 
-    respondToRequest: () => unbuilt("answering a Codex request"),
+    respondToRequest: (
+      sessionId: string,
+      requestId: string,
+      decision: ApprovalDecision,
+    ): Effect.Effect<void> =>
+      Effect.suspend(() => {
+        const held = sessions.get(sessionId);
+        const park = held?.parks.get(requestId);
+        // A request nobody here is parked on has nothing to answer, and the
+        // request itself is the authority on which answers it takes: one it did
+        // not offer is one the harness would have to substitute for.
+        if (held === undefined || park === undefined || !park.decisions.includes(decision)) {
+          return Effect.void;
+        }
+        resolving(held, park, decision);
+        // Only where the answer shape cannot carry the refusal itself: every
+        // other row says "stopped" to Codex in its own terms.
+        return park.asked.endsTurn.includes(decision) ? interrupting(held) : Effect.void;
+      }),
 
     stopSession: (sessionId: string, reason: ExitReason): Effect.Effect<void> =>
       Effect.suspend(() => {
