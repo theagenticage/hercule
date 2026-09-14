@@ -1031,7 +1031,7 @@ export const claudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
 
 const LAST_LINES = 5;
 
-const lastLines = (output: string): string => {
+export const lastLines = (output: string): string => {
   const said = output.trimEnd().split("\n").slice(-LAST_LINES).join("\n");
   return said === ""
     ? "the installer failed without saying why"

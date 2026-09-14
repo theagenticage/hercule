@@ -3,6 +3,7 @@
  * all - without running it.
  */
 import * as Effect from "effect/Effect";
+import type { AppServerChild, AppServerSpawn } from "./codex/rpc";
 import type { LoginChild, LoginSpawn } from "./login";
 
 export interface Ran {
@@ -45,22 +46,55 @@ export const runProcess: Run = (command, env) =>
     catch: (error) => (error instanceof Error ? error.message : String(error)),
   }).pipe(Effect.catch((message) => Effect.succeed({ code: 1, stdout: "", stderr: message })));
 
+const decoded = (stream: ReadableStream<Uint8Array>): AsyncIterable<string> => {
+  const decoder = new TextDecoder();
+  return (async function* () {
+    for await (const chunk of stream) yield decoder.decode(chunk, { stream: true });
+  })();
+};
+
+/** One item per line, with the trailing partial line held back until it ends. */
+const lined = (stream: ReadableStream<Uint8Array>): AsyncIterable<string> =>
+  (async function* () {
+    let buffered = "";
+    for await (const chunk of decoded(stream)) {
+      buffered += chunk;
+      const parts = buffered.split("\n");
+      buffered = parts.pop() ?? "";
+      yield* parts;
+    }
+    if (buffered !== "") yield buffered;
+  })();
+
 /** Unlike a run, a login is read and written while it lives. */
 export const spawnLogin: LoginSpawn = (command, env): LoginChild => {
   const child = Bun.spawn([...command], { stdin: "pipe", stdout: "pipe", stderr: "pipe", env });
-  const text = (stream: ReadableStream<Uint8Array>): AsyncIterable<string> => {
-    const decoder = new TextDecoder();
-    return (async function* () {
-      for await (const chunk of stream) yield decoder.decode(chunk, { stream: true });
-    })();
-  };
   return {
-    stdout: text(child.stdout),
-    stderr: text(child.stderr),
+    stdout: decoded(child.stdout),
+    stderr: decoded(child.stderr),
     write: (value) => {
       // Written and flushed without waiting: the vendor is reading a line and
       // the answer comes back on the pipes, not from the write.
       void child.stdin.write(value);
+      void child.stdin.flush();
+    },
+    kill: () => {
+      child.kill();
+    },
+    exited: child.exited,
+  };
+};
+
+/** The app-server is a conversation, not a run: framed, and read while it lives. */
+export const spawnAppServer: AppServerSpawn = (command, env): AppServerChild => {
+  const child = Bun.spawn([...command], { stdin: "pipe", stdout: "pipe", stderr: "pipe", env });
+  return {
+    stdout: lined(child.stdout),
+    stderr: lined(child.stderr),
+    write: (text) => {
+      // Written and flushed without waiting: the answer comes back on stdout
+      // under the frame's own id, not from the write.
+      void child.stdin.write(text);
       void child.stdin.flush();
     },
     kill: () => {

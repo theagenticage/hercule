@@ -88,6 +88,7 @@ export default tseslint.config(
       "packages/home/src/version.ts",
       "apps/controller/src/http/bundle.ts",
       "apps/web/src/routeTree.gen.ts",
+      "apps/runner/src/providers/codex/generated/**",
       "/hydra",
     ],
   },

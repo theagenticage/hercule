@@ -4,7 +4,7 @@
  */
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { CLAUDE_CODE_VERSION } from "@hydra/home/version";
+import { CLAUDE_CODE_VERSION, CODEX_VERSION } from "@hydra/home/version";
 import { floorFor, versionVerdict } from "./version";
 
 const root = fileURLToPath(new URL("../../../../", import.meta.url));
@@ -46,8 +46,11 @@ describe("the verdict on a harness version", () => {
 describe("the floor each provider is held to", () => {
   it("holds Claude Code to the SDK's CLI version, and a provider with no adapter to none", () => {
     expect(floorFor("claude-code")).toBe(CLAUDE_CODE_VERSION);
-    expect(floorFor("codex")).toBeNull();
     expect(floorFor("pi")).toBeNull();
+  });
+
+  it("holds Codex to the release this build's types were generated from", () => {
+    expect(floorFor("codex")).toBe(CODEX_VERSION);
   });
 
   it("is written down in one generated file and nowhere else in the source", () => {
@@ -64,5 +67,30 @@ describe("the floor each provider is held to", () => {
     }).stdout.toString();
 
     expect(found.trim()).toBe("");
+  });
+
+  it("writes the Codex release down in the generated file and the script that writes it", () => {
+    // Built from the constant rather than spelled out, so this file is not
+    // itself a second place the release is written down.
+    const [major, minor] = CODEX_VERSION.split(".");
+    const found = Bun.spawnSync({
+      cmd: [
+        "bash",
+        "-c",
+        `grep -rn "${major ?? ""}\\.${minor ?? ""}\\.[0-9]" apps packages plugins scripts --include=*.ts || true`,
+      ],
+      cwd: root,
+    })
+      .stdout.toString()
+      .split("\n")
+      .filter((line) => line !== "")
+      .map((line) => line.slice(0, line.indexOf(":")))
+      // Fixtures in test files are not the source this rule is about.
+      .filter((path) => !/\.(test|testing)\.ts$/.test(path));
+
+    expect([...new Set(found)].sort()).toEqual([
+      "packages/home/src/version.ts",
+      "scripts/gen-version.ts",
+    ]);
   });
 });
