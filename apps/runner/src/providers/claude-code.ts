@@ -328,10 +328,7 @@ const pathsIn = (input: Record<string, unknown>): ReadonlyArray<string> =>
   });
 
 /** One question as the protocol carries it: the vendor's shape mapped over. */
-type Question = Extract<
-  OpenRequest,
-  { readonly kind: "user_input" }
->["detail"]["questions"][number];
+type Question = Extract<OpenRequest, { readonly kind: "question" }>["detail"]["questions"][number];
 
 /**
  * The options of one question, read-only for now: until an answer can travel
@@ -401,9 +398,10 @@ const requestFor = (
     // the tool with no answer in it: the two honest answers are the only ones.
     const [first, ...rest] = questionsIn(input);
     return first === undefined
-      ? // Nothing decodable was asked. A `user_input` carrying no question is a
-        // frame the controller refuses, which costs the runner its socket and
-        // leaves the park hanging; the tool call under it is still refusable.
+      ? // Nothing decodable was asked. A `question` request carrying no
+        // question on it is a frame the controller refuses, which costs the
+        // runner its socket and leaves the park hanging; the tool call under
+        // it is still refusable.
         {
           requestId,
           itemId,
@@ -414,7 +412,7 @@ const requestFor = (
       : {
           requestId,
           itemId,
-          kind: "user_input",
+          kind: "question",
           decisions: ["deny", "cancel"],
           detail: { questions: [first, ...rest] },
         };

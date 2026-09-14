@@ -19,7 +19,7 @@ import { messageOf } from "../save-status";
  * 2026-09-14). A second raised card would read as a second surface; a lip reads
  * as part of the composer, which is what this is.
  *
- * A `user_input` request is a question rather than a permission ask, so it
+ * A `question` request is a question rather than a permission ask, so it
  * reads as one block per question - its chip, its prose, and its options
  * read-only under it - in the slot a command or a path would sit in.
  *

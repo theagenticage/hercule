@@ -15,11 +15,11 @@ export interface ApprovalRow {
 }
 
 /**
- * One question of a `user_input` request, as the card reads it. A question is
- * not a permission request: it has a chip, prose and answers of its own, and
- * they share the request slot rather than the shape (decision D-27). The
- * options are shown read-only - what each answer would have meant is part of
- * the question - until answering with one is built.
+ * One question of a `question` request, as the card reads it. A question is
+ * not an approval: it has a chip, prose and answers of its own, and they share
+ * the request slot rather than the shape (decisions D-27, D-28). The options
+ * are shown read-only - what each answer would have meant is part of the
+ * question - until answering with one is built.
  */
 export interface ApprovalQuestion {
   /** The short chip the harness labelled the question with. */
@@ -45,7 +45,7 @@ export interface ApprovalCard {
   readonly code: boolean;
   /** Why an answer the user expects is missing; null where none is. */
   readonly note: string | null;
-  /** The questions of a `user_input`; empty on every other kind. */
+  /** The questions of a `question` request; empty on every approval kind. */
   readonly questions: readonly ApprovalQuestion[];
   /** One row per decision the request offers, in the order it offered them. */
   readonly rows: readonly ApprovalRow[];
@@ -68,7 +68,7 @@ const SUBJECTS: Readonly<Record<OpenRequest["kind"], string>> = {
   file_change_approval: "the change",
   file_read_approval: "the read",
   tool_approval: "the tool call",
-  user_input: "the question",
+  question: "the question",
 };
 
 const describeOf = (decision: ApprovalDecision, subject: string): string => {
@@ -105,8 +105,8 @@ const titleOf = (request: OpenRequest): string => {
       return request.detail.paths.length === 1 ? "Read this file?" : "Read these files?";
     case "tool_approval":
       return `Run ${request.detail.toolName}?`;
-    case "user_input":
-      return "The agent is asking a question.";
+    case "question":
+      return "The agent needs answers.";
   }
 };
 
@@ -119,17 +119,14 @@ const subjectOf = (request: OpenRequest): readonly string[] => {
       return request.detail.paths;
     case "tool_approval":
       return [];
-    case "user_input":
+    case "question":
       // The questions carry their own structure, so there is nothing here for
       // a flat list of lines to repeat.
       return [];
   }
 };
 
-type Question = Extract<
-  OpenRequest,
-  { readonly kind: "user_input" }
->["detail"]["questions"][number];
+type Question = Extract<OpenRequest, { readonly kind: "question" }>["detail"]["questions"][number];
 
 /**
  * A question's options as read-only lines. The label and what it means read as
@@ -144,7 +141,7 @@ const optionsOf = (question: Question): readonly string[] =>
 const MULTI = "More than one answer may be chosen.";
 
 const questionsOf = (request: OpenRequest): readonly ApprovalQuestion[] =>
-  request.kind === "user_input"
+  request.kind === "question"
     ? request.detail.questions.map((question) => ({
         header: question.header,
         question: question.question,
@@ -156,9 +153,9 @@ const questionsOf = (request: OpenRequest): readonly ApprovalQuestion[] =>
 export const approvalCard = (request: OpenRequest): ApprovalCard => ({
   title: titleOf(request),
   subject: subjectOf(request),
-  code: request.kind !== "user_input",
+  code: request.kind !== "question",
   questions: questionsOf(request),
-  note: request.kind === "user_input" ? NOT_BUILT : null,
+  note: request.kind === "question" ? NOT_BUILT : null,
   rows: request.decisions.map((decision) => ({
     decision,
     label: LABELS[decision],

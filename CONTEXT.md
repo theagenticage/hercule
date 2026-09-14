@@ -57,8 +57,8 @@ One user-visible episode of a session: from a user input until the agent goes id
 _Avoid_: exchange, round, iteration
 
 **Request**:
-A provider-held question a session is parked on until a decision arrives: an approval or a user-input ask; surfaced as the permission card docked on the thread's composer and answered by `session.respond` with an `ApprovalDecision` - allow / allow always / deny / cancel. An approval and a question are different things sharing one slot: an approval names what would be run, a `user_input` carries one to many structured questions (chip, prose, options, whether several may be chosen), and only the rendering is alike.
-_Avoid_: permission request (reserved for grant escalation), approval prompt, tool prompt
+A provider-held question a session is parked on until an answer arrives; surfaced as the permission card docked on the thread's composer. A request is one of two different things sharing one slot. An **approval** (`command_approval`, `file_change_approval`, `file_read_approval`, `tool_approval`) names what would be run and is resolved by `session.respond` with one of the four `ApprovalDecision` values - allow / allow always / deny / cancel - and never by free text. A **question** (kind `question`) carries one to many structured questions (chip, prose, options, whether several may be chosen) and is resolved by answers, each either one or more of the offered options or a custom string the user types. Only the rendering is alike.
+_Avoid_: user input (the old name for the `question` kind), permission request (reserved for grant escalation), approval prompt, tool prompt
 
 **Steering**:
 Delivering user input into a session's running turn, folding it into that turn instead of opening a new one.

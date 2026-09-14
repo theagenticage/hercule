@@ -115,7 +115,7 @@ const requests = [
   { kind: "file_read_approval", detail: { paths: ["/etc/hosts"] } },
   { kind: "tool_approval", detail: { toolName: "WebFetch" } },
   {
-    kind: "user_input",
+    kind: "question",
     detail: {
       questions: [
         {
@@ -231,7 +231,7 @@ describe("the normalized event taxonomy", () => {
         request: {
           requestId: "r1",
           itemId: "i1",
-          kind: "user_input",
+          kind: "question",
           decisions: ["deny", "cancel"],
           detail: { questions },
         },
@@ -256,7 +256,7 @@ describe("the normalized event taxonomy", () => {
       request: {
         requestId: "r1",
         itemId: "i1",
-        kind: "user_input",
+        kind: "question",
         decisions: ["deny", "cancel"],
         detail: {
           questions: [{ ...one, options: [{ label: "SQLite", description: "it", preview: "x" }] }],

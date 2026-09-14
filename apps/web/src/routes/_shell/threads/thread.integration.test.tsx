@@ -2066,7 +2066,7 @@ describe("Thread: the permission card", () => {
   const QUESTIONS: NonNullable<Session["openRequest"]> = {
     requestId: "req-2",
     itemId: "tool3",
-    kind: "user_input",
+    kind: "question",
     decisions: ["deny", "cancel"],
     detail: {
       questions: [
@@ -2278,7 +2278,7 @@ describe("Thread: the permission card", () => {
     expect(composerCard().className).toContain("rounded-[14px]");
   });
 
-  it("shows a user_input's questions with deny and cancel only, and says answering is not built", async () => {
+  it("shows a question request's questions with deny and cancel only, and says answering is not built", async () => {
     await open(session({ status: "busy", openRequest: QUESTIONS }), parkedRows());
 
     await screen.findByRole("button", { name: answer(QUESTIONS, "deny") });
@@ -2288,7 +2288,7 @@ describe("Thread: the permission card", () => {
 
     const text = reading();
     // The chip, the prose and what each answer would have meant: a question is
-    // not a permission request, and the card shows all three.
+    // not an approval, and the card shows all three.
     expect(text).toContain("Database");
     expect(text).toContain("Which database should it use?");
     expect(text).toContain("SQLite \u00b7 the one Hydra ships");

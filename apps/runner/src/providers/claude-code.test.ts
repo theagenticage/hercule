@@ -1362,11 +1362,11 @@ describe("what kind of question each tool is", () => {
       ],
     });
 
-    expect(request.kind).toBe("user_input");
+    expect(request.kind).toBe("question");
     expect(request.decisions).toEqual(["deny", "cancel"]);
     // Structured, not flattened to text: the card shows the chip, the prose and
     // what each answer would have meant.
-    expect(request.kind === "user_input" ? request.detail.questions : []).toEqual([
+    expect(request.kind === "question" ? request.detail.questions : []).toEqual([
       {
         question: "Which database should this use?",
         header: "Database",
@@ -1400,7 +1400,7 @@ describe("what kind of question each tool is", () => {
       ],
     });
 
-    expect(request.kind === "user_input" ? request.detail.questions : []).toEqual([
+    expect(request.kind === "question" ? request.detail.questions : []).toEqual([
       {
         question: "Which features?",
         header: "Features",
@@ -1412,8 +1412,9 @@ describe("what kind of question each tool is", () => {
   });
 
   /**
-   * A `user_input` with no question on it is an undecodable frame, which costs
-   * the runner its socket; a tool call the user can refuse is the honest card.
+   * A `question` request with no question on it is an undecodable frame, which
+   * costs the runner its socket; a tool call the user can refuse is the honest
+   * card.
    */
   it("falls back to a tool approval when no question survives the mapping", async () => {
     const run = await asking();

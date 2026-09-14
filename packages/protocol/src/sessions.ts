@@ -212,7 +212,7 @@ const FileReadApproval = openRequest("file_read_approval", { paths: Paths });
 const ToolApproval = openRequest("tool_approval", { toolName: Fact });
 
 /**
- * One question in a `user_input` request: the chip it is labelled with, the
+ * One question in a `question` request: the chip it is labelled with, the
  * prose the agent wrote, and the options it offers. A permission request and a
  * question are different things sharing one request slot, so the question
  * keeps its own structure rather than being flattened to text: a surface that
@@ -231,7 +231,7 @@ const Question = Schema.Struct({
 });
 
 /** A harness asks one to four at a time, so the request carries a list. */
-const UserInput = openRequest("user_input", { questions: Schema.NonEmptyArray(Question) });
+const QuestionRequest = openRequest("question", { questions: Schema.NonEmptyArray(Question) });
 
 /**
  * The request a session is parked on, as the row that holds it and the API
@@ -242,7 +242,7 @@ export const OpenRequest = Schema.Union([
   FileChangeApproval,
   FileReadApproval,
   ToolApproval,
-  UserInput,
+  QuestionRequest,
 ]);
 
 export type OpenRequest = Schema.Schema.Type<typeof OpenRequest>;

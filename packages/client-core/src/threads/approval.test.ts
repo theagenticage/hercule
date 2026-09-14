@@ -89,10 +89,10 @@ describe("approvalCard", () => {
     expect(card.subject).toEqual([]);
   });
 
-  it("shows a user_input's questions with deny and cancel only, saying answering is not built and to reply in the thread", () => {
+  it("shows a question request's questions with deny and cancel only, saying answering is not built and to reply in the thread", () => {
     const request: OpenRequest = {
       ...COMMAND,
-      kind: "user_input",
+      kind: "question",
       decisions: ["deny", "cancel"],
       detail: {
         questions: [
@@ -111,6 +111,9 @@ describe("approvalCard", () => {
     const card = approvalCard(request);
 
     expect(card.rows.map((row) => row.decision)).toEqual(["deny", "cancel"]);
+    // A question asks for answers rather than permission, so the title says so
+    // rather than borrowing an approval's "Run this?".
+    expect(card.title).toBe("The agent needs answers.");
     // The questions carry the whole content, so the subject has nothing to
     // repeat, and a question is the agent's own prose rather than code.
     expect(card.subject).toEqual([]);
@@ -132,7 +135,7 @@ describe("approvalCard", () => {
   it("keeps every question of a multi-question request, and says where more than one answer is allowed", () => {
     const request: OpenRequest = {
       ...COMMAND,
-      kind: "user_input",
+      kind: "question",
       decisions: ["deny", "cancel"],
       detail: {
         questions: [
