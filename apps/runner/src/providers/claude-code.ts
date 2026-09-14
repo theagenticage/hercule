@@ -24,9 +24,7 @@ import {
 import { CLAUDE_CODE_VERSION } from "@hydra/home/version";
 import {
   MAX_FACT_ITEMS,
-  MAX_FACT_LENGTH,
   MAX_INSTALL_MESSAGE_LENGTH,
-  MAX_MESSAGE_LENGTH,
   type AccessMode,
   type ApprovalDecision,
   type ExitReason,
@@ -50,6 +48,8 @@ import {
 import type { InstallOutcome, ProviderAdapter, ProviderRunnerContext } from "./index";
 import type { LoginCommand } from "./login";
 import { runProcess, type Run } from "./process";
+import { fact, text } from "./text";
+import { userMessage } from "./events";
 import { now } from "../report";
 
 export const CLAUDE_CODE = "claude-code";
@@ -118,17 +118,6 @@ const SEMVER = /\d+\.\d+\.\d+\S*/;
 
 /** The effort level the CLI starts on when nothing chose one. */
 const DEFAULT_EFFORT = "medium";
-
-/** Cut to what the protocol carries; one over-long value would fail the report. */
-const fact = (value: string): string => value.slice(0, MAX_FACT_LENGTH);
-
-/**
- * The same cut for the longer fields: free text a harness wrote, not an id. It
- * says where it cut, because a command read as whole is a command the user
- * approved something else than.
- */
-const text = (value: string): string =>
-  value.length > MAX_MESSAGE_LENGTH ? `${value.slice(0, MAX_MESSAGE_LENGTH - 1)}\u2026` : value;
 
 /** `Fact` refuses an empty string, and an `Error` can carry an empty message. */
 const describe = (error: unknown): string => {
@@ -881,26 +870,9 @@ export const claudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
         // turn already running, so the input folds into it. Read off what
         // `openTurn` just did rather than remembered from before the wait.
         const steered = events.length === 0;
-        // The user message is reported here rather than off the harness's echo
-        // of it, because only here is it known whether it steered: the echo
-        // cannot say which input it echoes.
-        const itemId = held.state.mint();
-        const detail = { text: turn.text, ...(steered ? { steered: true } : {}) };
-        const item = {
-          sessionId,
-          at: held.state.now(),
-          turnId,
-          itemId,
-          kind: "user_message",
-        } as const;
-        emit({ _tag: "item.started", eventId: held.state.mint(), ...item, detail });
-        emit({
-          _tag: "item.completed",
-          eventId: held.state.mint(),
-          ...item,
-          status: "completed",
-          detail,
-        });
+        for (const event of userMessage({ sessionId, turnId, text: turn.text, steered })) {
+          emit(event);
+        }
         held.input.push({
           type: "user",
           message: { role: "user", content: turn.text },

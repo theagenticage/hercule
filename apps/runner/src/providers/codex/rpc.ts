@@ -56,6 +56,15 @@ export interface RpcHandlers {
 export interface Rpc {
   readonly request: (method: string, params: unknown) => Effect.Effect<unknown, RpcError>;
   readonly notify: (method: string) => void;
+  /**
+   * Answers a server request, by its id. Every one is answered, including the
+   * ones this build has no mapping for: a request left hanging is a turn that
+   * never ends, with nothing said anywhere.
+   */
+  readonly answer: (
+    id: string | number,
+    body: { readonly result: unknown } | { readonly error: RpcError },
+  ) => void;
   /** Reads the peer until it stops talking; nothing is answered before it runs. */
   readonly pump: Effect.Effect<void>;
 }
@@ -162,6 +171,8 @@ export const rpcOver = (child: RpcChild, handlers: RpcHandlers): Rpc => {
       }),
 
     notify: (method) => child.write(`${JSON.stringify({ method })}\n`),
+
+    answer: (id, body) => child.write(`${JSON.stringify({ id, ...body })}\n`),
 
     pump: Effect.callback<void>((resume, signal) => {
       void (async () => {

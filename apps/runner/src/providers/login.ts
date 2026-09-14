@@ -18,6 +18,7 @@ import {
   type LoginUrl,
 } from "@hydra/protocol";
 import type { ProviderAdapter, ProviderRunnerContext } from "./index";
+import { fact } from "./text";
 
 export interface LoginChild {
   readonly stdout: AsyncIterable<string>;
@@ -49,9 +50,6 @@ export const LOGIN_IDLE: Duration.Duration = Duration.minutes(10);
 export const COMPLAINT_GRACE: Duration.Duration = Duration.seconds(2);
 
 const NO_LOGIN = "no login in progress";
-
-/** Cut to what the protocol carries; one over-long line would fail the answer. */
-const fact = (value: string): string => value.slice(0, MAX_FACT_LENGTH);
 
 /** The tail, not the head: the failure prints last, the vendor's banner first. */
 const said = (value: string, whenSilent: string): string =>
