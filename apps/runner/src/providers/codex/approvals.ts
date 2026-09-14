@@ -13,7 +13,7 @@
  */
 import type { ApprovalDecision, OpenRequest } from "@hydra/protocol";
 import { questionRequest } from "../questions";
-import { fact, text } from "../text";
+import { fact, idOf, text } from "../text";
 import type { RpcError } from "./rpc";
 import type {
   CommandExecutionRequestApprovalParams,
@@ -80,13 +80,6 @@ const APPROVED: Readonly<Record<ApprovalDecision, FileChangeApprovalDecision>> =
   deny: "decline",
   cancel: "cancel",
 };
-
-/**
- * An id the protocol will not carry is a frame nobody can decode, which loses
- * the request and leaves the park with nothing to show for it. A harness that
- * named none gets one of ours, so the park is still answerable.
- */
-const idOf = (given: string): string => (given === "" ? crypto.randomUUID() : fact(given));
 
 /** JSON-RPC's own: this client will not do what was asked. */
 const INTERNAL_ERROR = -32603;

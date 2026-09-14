@@ -17,7 +17,7 @@ import {
   type TurnInput,
 } from "@hydra/protocol";
 import { CLAUDE_CODE, claudeCode } from "./claude-code";
-import { CODEX, codex } from "./codex/adapter";
+import { CODEX, codex } from "./codex";
 import { logins, type LoginCommand } from "./login";
 import { spawnLogin } from "./process";
 

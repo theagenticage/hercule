@@ -232,4 +232,27 @@ describe("Sessions", () => {
       expect(reading()).toContain("Claude Code is ready.");
     });
   });
+
+  it("says why the screen did not move on when the probe after a login fails", async () => {
+    const user = userEvent.setup();
+    await open({
+      runners: [MOSS],
+      instances: [claudeCode([NOT_LOGGED_IN])],
+      local: MOSS.id,
+      extra: {
+        [`POST /api/v1/providers/${CLAUDE_ID}/login`]: { body: { url: AUTHORIZE_URL } },
+        [`POST /api/v1/providers/${CLAUDE_ID}/login-code`]: { body: LOGGED_IN },
+        [`POST /api/v1/runners/${MOSS.id}/probe`]: {
+          status: 500,
+          body: envelope("internal", "moss stopped answering"),
+        },
+      },
+    });
+
+    await user.click(await screen.findByRole("button", { name: /log in/i }));
+    await user.type(await screen.findByLabelText("Code", { exact: true }), "the-whole-code");
+    await user.click(screen.getByRole("button", { name: /submit/i }));
+
+    expect((await screen.findByRole("alert")).textContent).toBe("moss stopped answering");
+  });
 });

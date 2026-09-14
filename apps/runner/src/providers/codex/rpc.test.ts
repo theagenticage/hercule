@@ -88,6 +88,57 @@ const until = (what: string, ready: () => boolean): Effect.Effect<void> =>
 const frameOf = (written: string): Record<string, unknown> =>
   JSON.parse(written) as Record<string, unknown>;
 
+/** A peer whose stdin has closed: every write to it throws. */
+const deaf = (): Peer => {
+  const stdout = lines();
+  const warnings: Array<string> = [];
+  const rpc = rpcOver(
+    {
+      write: () => {
+        throw new Error("EPIPE");
+      },
+      stdout: stdout.iterable,
+    },
+    {
+      onServerRequest: () => undefined,
+      onNotification: () => undefined,
+      onWarning: (message) => void warnings.push(message),
+    },
+  );
+  return {
+    rpc,
+    writes: [],
+    answer: stdout.push,
+    warnings,
+    serverRequests: [],
+    notifications: [],
+  };
+};
+
+describe("a peer that cannot be written to", () => {
+  it("reports it once and throws at nobody", () => {
+    const peer = deaf();
+
+    // A reply thrown out of would be a defect in whoever was answering a
+    // request, and the turn it belonged to would hang either way.
+    expect(() => peer.rpc.answer(1, { result: {} })).not.toThrow();
+    expect(() => peer.rpc.notify("initialized")).not.toThrow();
+    expect(() => peer.rpc.answer(2, { error: { message: "no" } })).not.toThrow();
+
+    // Once: a closed pipe fails every write after it for the same reason.
+    expect(peer.warnings).toHaveLength(1);
+    expect(peer.warnings[0]).toContain("EPIPE");
+  });
+
+  it("fails the request it could not send", async () => {
+    const peer = deaf();
+
+    const failure = await Effect.runPromise(Effect.flip(peer.rpc.request("initialize", {})));
+
+    expect(failure.message).toContain("EPIPE");
+  });
+});
+
 describe("what the codec writes", () => {
   it("writes one line per request, with no jsonrpc key on it", async () => {
     const peer = peering();

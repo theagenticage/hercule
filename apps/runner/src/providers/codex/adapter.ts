@@ -8,21 +8,16 @@ import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
-import * as Option from "effect/Option";
 import * as PubSub from "effect/PubSub";
 import * as Random from "effect/Random";
 import * as Schedule from "effect/Schedule";
 import * as Stream from "effect/Stream";
-import { CODEX_VERSION, VERSION } from "@hydra/home/version";
 import {
-  MAX_FACT_ITEMS,
-  MAX_FACT_LENGTH,
   type AccessMode,
   type ApprovalDecision,
   type ExitReason,
-  type ModelDescriptor,
-  type ModelOption,
   type ModelSelection,
+  type OpenRequest,
   type ProbeResult,
   type ProviderEvent,
   type SendResult,
@@ -30,20 +25,19 @@ import {
   type SessionSpec,
   type TurnInput,
 } from "@hydra/protocol";
-import { INSTALL_DEADLINE, lastLines } from "../claude-code";
 import type { LoginCommand } from "../login";
-import type { InstallOutcome, ProviderAdapter, ProviderRunnerContext } from "../index";
+import type { ProviderAdapter, ProviderRunnerContext } from "../index";
 import { userMessage } from "../events";
 import { runProcess, spawnAppServer, type Run } from "../process";
 import { fact, text } from "../text";
 import { now } from "../../report";
 import { ASKED, type Asked } from "./approvals";
 import { normalize, normalizing, type Normalizing } from "./normalize";
+import { failed, handshake, installing, probing, saidBy, type AppServer } from "./probe";
 import {
   rpcOver,
   type AppServerSpawn,
   type NotificationFrame,
-  type Rpc,
   type RpcError,
   type ServerRequestFrame,
 } from "./rpc";
@@ -51,13 +45,8 @@ import type {
   ApprovalsReviewer,
   AskForApproval,
   DynamicToolCallResponse,
-  GetAccountResponse,
-  InitializeParams,
-  InitializeResponse,
   ItemCompletedNotification,
   ItemStartedNotification,
-  Model,
-  ModelListResponse,
   SandboxMode,
   ThreadForkParams,
   ThreadResumeParams,
@@ -77,9 +66,6 @@ export const CODEX = "codex";
 
 const CODEX_BINARY = "codex";
 
-/** Long enough for a cold app-server, short enough that a Fleet page does not look hung. */
-export const PROBE_DEADLINE: Duration.Duration = Duration.seconds(15);
-
 /** What an app-server writes on its way out, kept for the report when it dies. */
 const MAX_COMPLAINT_LINES = 5;
 
@@ -89,10 +75,7 @@ export interface CodexSeam {
 }
 
 /** One app-server, what it said that was not a frame, and who is on it. */
-interface Host {
-  readonly rpc: Rpc;
-  readonly kill: () => void;
-  readonly complaint: () => string;
+interface Host extends AppServer {
   /** The instance this host serves; a probe's own process serves none. */
   readonly instanceId: string | undefined;
   /** Reference count, by name: the host goes when its last session does. */
@@ -100,14 +83,14 @@ interface Host {
 }
 
 /**
- * A request the session is parked on, under the id this adapter minted for it.
- * The frame id is Codex's own and is echoed back verbatim, because it types one
- * as a string or a number and an answer under a reshaped id answers nothing.
+ * A request the session is parked on, as a surface reads it and as it is
+ * answered. The frame id is Codex's own and is echoed back verbatim, because it
+ * types one as a string or a number and an answer under a reshaped id answers
+ * nothing.
  */
 interface Park {
-  readonly requestId: string;
   readonly id: string | number;
-  readonly decisions: ReadonlyArray<ApprovalDecision>;
+  readonly request: OpenRequest;
   readonly asked: Asked;
   readonly params: unknown;
 }
@@ -119,8 +102,15 @@ interface Held {
   readonly state: Normalizing;
   /** The turn believed to be running, which is what makes an input a steer. */
   turnId: string | undefined;
-  /** Every request waiting on an answer, by the id it was opened under. */
-  readonly parks: Map<string, Park>;
+  /**
+   * The request the session is parked on, and the ones that arrived while it
+   * was open. A session has exactly one open request, so a second announced
+   * before the first is answered would take its place and the first would
+   * disappear from every surface with nobody able to answer it. Codex waits for
+   * both, so the second waits here and is opened when the first is resolved.
+   */
+  open: Park | undefined;
+  readonly waiting: Array<Park>;
   /**
    * What each running file change item is about. A file change approval names
    * no paths at this release, so the card reads them off the item instead.
@@ -209,108 +199,6 @@ const threadIn = (params: unknown): string | undefined => {
 
 /** Turn input is text only: attachments are the open item in spec 16 section B. */
 const textInput = (text: string): UserInput => ({ type: "text", text, text_elements: [] });
-
-const failed = (harnessVersion: string | null, message: string): ProbeResult => ({
-  harnessVersion,
-  auth: { status: "error", message: fact(message) },
-  models: [],
-});
-
-/**
- * `initialize` carries no version field, so the version is the token after the
- * first `/` of the user agent, which reads `<client>/<version> (os; arch) ...`.
- * A user agent that does not read as one reports nothing rather than a guess,
- * which `versionVerdict` already takes as "unknown".
- */
-const USER_AGENT = /^[^/\s]+\/(\S+)/;
-
-const versionOf = (userAgent: string): string | null =>
-  USER_AGENT.exec(userAgent)?.[1]?.slice(0, MAX_FACT_LENGTH) ?? null;
-
-const authOf = ({ account }: GetAccountResponse): ProbeResult["auth"] => {
-  if (account === null) return { status: "unauthenticated" };
-  if (account.type !== "chatgpt") return { status: "ok", backend: account.type };
-  return {
-    status: "ok",
-    ...(account.email === null ? {} : { identity: fact(account.email) }),
-    planLabel: account.planType,
-    backend: account.type,
-  };
-};
-
-const selecting = (
-  id: string,
-  label: string,
-  choices: ReadonlyArray<{ readonly value: string; readonly label: string }>,
-  preferred: string | null,
-): ModelOption => ({
-  id,
-  label,
-  kind: "select",
-  choices,
-  default: preferred ?? choices[0]!.value,
-});
-
-/**
- * Only what the model itself lists: an empty select is a control the composer
- * shows and nothing can be chosen in.
- */
-const optionsFor = (model: Model): ReadonlyArray<ModelOption> => {
-  const options: Array<ModelOption> = [];
-  const efforts = model.supportedReasoningEfforts ?? [];
-  if (efforts.length > 0) {
-    options.push(
-      selecting(
-        "reasoningEffort",
-        "Reasoning effort",
-        efforts.map(({ reasoningEffort }) => ({
-          value: fact(reasoningEffort),
-          label: fact(`${reasoningEffort.slice(0, 1).toUpperCase()}${reasoningEffort.slice(1)}`),
-        })),
-        model.defaultReasoningEffort ?? null,
-      ),
-    );
-  }
-  const tiers = model.serviceTiers ?? [];
-  if (tiers.length > 0) {
-    options.push(
-      selecting(
-        "serviceTier",
-        "Service tier",
-        // An unnamed tier is still a tier, and the protocol will not carry an
-        // empty label.
-        tiers.map((tier) => ({
-          value: fact(tier.id),
-          label: fact(tier.name === "" || tier.name === undefined ? tier.id : tier.name),
-        })),
-        model.defaultServiceTier ?? null,
-      ),
-    );
-  }
-  return options;
-};
-
-const catalogOf = (models: ReadonlyArray<Model>): ReadonlyArray<ModelDescriptor> =>
-  models
-    // The protocol will not carry an empty slug or name.
-    .filter((model) => model.id !== "" && model.displayName !== "")
-    .slice(0, MAX_FACT_ITEMS)
-    .map((model) => ({
-      slug: fact(model.id),
-      name: fact(model.displayName),
-      ...(model.isDefault === true ? { isDefault: true } : {}),
-      options: optionsFor(model),
-    }));
-
-/**
- * Attestation is declined here rather than left to a request nobody answers,
- * and the experimental surface is off because this build talks the methods the
- * pinned release declares.
- */
-const INITIALIZE: InitializeParams = {
-  clientInfo: { name: "hydra", title: "Hydra", version: VERSION },
-  capabilities: { experimentalApi: false, requestAttestation: false },
-};
 
 /** What the device login prints for the user to type: four characters, a dash, five. */
 const USER_CODE = /\b[A-Z0-9]{4}-[A-Z0-9]{5}\b/;
@@ -434,27 +322,53 @@ export const codexAdapter = (seam: CodexSeam): ProviderAdapter => {
         // The turn a park belonged to is over, and the controller closed the
         // open request with it: an answer arriving now would be written to a
         // harness that stopped waiting and reported as a second end.
-        held.parks.clear();
+        held.open = undefined;
+        held.waiting.length = 0;
         held.fileChanges.clear();
       }
     }
   };
 
   /**
-   * Ends a park: Codex is told the answer in its own terms, the stream says the
-   * park is over, and nothing is left holding an id nobody will answer again.
+   * Ends every park nobody has been shown, in Codex's own terms. No event: no
+   * surface was ever told these existed, so there is nothing to report over.
+   */
+  const cancelWaiting = (held: Held): void => {
+    for (const park of held.waiting.splice(0)) {
+      held.host.rpc.answer(park.id, park.asked.replies("cancel", park.params));
+    }
+  };
+
+  /** Puts the session on a park: exactly one is open at a time. */
+  const announce = (held: Held, park: Park): void => {
+    held.open = park;
+    emit({
+      _tag: "request.opened",
+      eventId: crypto.randomUUID(),
+      sessionId: held.binding.sessionId,
+      at: now(),
+      request: park.request,
+    });
+  };
+
+  /**
+   * Ends the open park: Codex is told the answer in its own terms, the stream
+   * says the park is over, and the next request Codex is waiting on takes the
+   * slot it left.
    */
   const resolving = (held: Held, park: Park, decision: ApprovalDecision): void => {
-    held.parks.delete(park.requestId);
+    held.open = undefined;
     held.host.rpc.answer(park.id, park.asked.replies(decision, park.params));
     emit({
       _tag: "request.resolved",
       eventId: crypto.randomUUID(),
       sessionId: held.binding.sessionId,
       at: now(),
-      requestId: park.requestId,
+      requestId: park.request.requestId,
       decision,
     });
+    const next = held.waiting.shift();
+    if (next !== undefined) announce(held, next);
   };
 
   /**
@@ -503,20 +417,11 @@ export const codexAdapter = (seam: CodexSeam): ProviderAdapter => {
       threadId,
       paths: (itemId) => held.fileChanges.get(itemId) ?? [],
     });
-    held.parks.set(requestId, {
-      requestId,
-      id: frame.id,
-      decisions: request.decisions,
-      asked,
-      params: frame.params,
-    });
-    emit({
-      _tag: "request.opened",
-      eventId: crypto.randomUUID(),
-      sessionId: held.binding.sessionId,
-      at: now(),
-      request,
-    });
+    const park: Park = { id: frame.id, request, asked, params: frame.params };
+    // Codex asks for a second approval without waiting for the first, and waits
+    // for both: this one is announced when the one in the slot is answered.
+    if (held.open === undefined) announce(held, park);
+    else held.waiting.push(park);
   };
 
   /**
@@ -614,18 +519,7 @@ export const codexAdapter = (seam: CodexSeam): ProviderAdapter => {
       catch: (error) => (error instanceof Error ? error.message : String(error)),
     });
 
-  /** Nothing else may be asked of an app-server until this has been answered. */
-  const handshake = (host: Host): Effect.Effect<InitializeResponse, RpcError> =>
-    Effect.map(host.rpc.request("initialize", INITIALIZE), (answer) => {
-      host.rpc.notify("initialized");
-      return answer as InitializeResponse;
-    });
-
-  /** What the app-server said, in preference to what the codec made of it. */
-  const saidBy = (host: Host, error: RpcError): string => {
-    const said = host.complaint();
-    return said === "" ? error.message : said;
-  };
+  const probe = probing(openHost);
 
   const hostFor = (
     instanceId: string,
@@ -769,45 +663,10 @@ export const codexAdapter = (seam: CodexSeam): ProviderAdapter => {
 
     // Every shipped provider's config schema is empty, so the Codex adapter
     // takes nothing from it and does not name the argument.
-    probe: (ctx: ProviderRunnerContext): Effect.Effect<ProbeResult> => {
-      const binary = ctx.binary;
-      if (binary === undefined) {
-        return Effect.succeed(failed(null, `no ${CODEX_BINARY} on this machine`));
-      }
-      // A probe runs on a process of its own and kills it: sharing the
-      // connection a session runs on would keep an app-server alive for a Fleet
-      // page nobody is looking at any more.
-      const gather = Effect.acquireUseRelease(
-        openHost(ctx, binary),
-        (host) =>
-          Effect.matchEffect(handshake(host), {
-            onFailure: (error) => Effect.succeed(failed(null, saidBy(host, error))),
-            onSuccess: (initialized) =>
-              Effect.match(
-                Effect.all([
-                  host.rpc.request("account/read", {}),
-                  host.rpc.request("model/list", {}),
-                ]),
-                {
-                  onFailure: (error) =>
-                    failed(versionOf(initialized.userAgent), saidBy(host, error)),
-                  onSuccess: ([account, models]) => ({
-                    harnessVersion: versionOf(initialized.userAgent),
-                    auth: authOf(account as GetAccountResponse),
-                    models: catalogOf((models as ModelListResponse).data),
-                  }),
-                },
-              ),
-          }),
-        (host) => Effect.sync(() => host.kill()),
-      ).pipe(Effect.catch((message) => Effect.succeed(failed(null, message))));
-      return Effect.map(
-        Effect.timeoutOption(gather, PROBE_DEADLINE),
-        Option.getOrElse(() =>
-          failed(null, `the app-server did not answer within ${Duration.format(PROBE_DEADLINE)}`),
-        ),
-      );
-    },
+    probe: (ctx: ProviderRunnerContext): Effect.Effect<ProbeResult> =>
+      ctx.binary === undefined
+        ? Effect.succeed(failed(null, `no ${CODEX_BINARY} on this machine`))
+        : probe(ctx, ctx.binary),
 
     startSession: (sessionId, spec, ctx) =>
       Effect.gen(function* () {
@@ -850,7 +709,8 @@ export const codexAdapter = (seam: CodexSeam): ProviderAdapter => {
           host,
           state,
           turnId: undefined,
-          parks: new Map(),
+          open: undefined,
+          waiting: [],
           fileChanges: new Map(),
         });
         // The native id rides the event, because the controller has no other
@@ -892,10 +752,15 @@ export const codexAdapter = (seam: CodexSeam): ProviderAdapter => {
         const held = sessions.get(sessionId);
         // The turn completing as `interrupted` is the whole report.
         if (held === undefined) return Effect.void;
-        // A park nobody answered is what the turn is waiting on, so it is ended
-        // first: the harness is told the nearest refusal it can express, and
-        // the stream says the park was cancelled, because that is what ended it.
-        for (const park of [...held.parks.values()]) resolving(held, park, "cancel");
+        // A park nobody answered is what the turn is waiting on, so every one
+        // is ended first: the harness is told the nearest refusal it can
+        // express. The waiting ones go before the open one, so that answering
+        // it announces none of them.
+        cancelWaiting(held);
+        const open = held.open;
+        // The stream says the open park was cancelled, because that is what
+        // ended it.
+        if (open !== undefined) resolving(held, open, "cancel");
         return interrupting(held);
       }),
 
@@ -906,17 +771,26 @@ export const codexAdapter = (seam: CodexSeam): ProviderAdapter => {
     ): Effect.Effect<void> =>
       Effect.suspend(() => {
         const held = sessions.get(sessionId);
-        const park = held?.parks.get(requestId);
+        const park = held?.open;
         // A request nobody here is parked on has nothing to answer, and the
         // request itself is the authority on which answers it takes: one it did
         // not offer is one the harness would have to substitute for.
-        if (held === undefined || park === undefined || !park.decisions.includes(decision)) {
+        if (
+          held === undefined ||
+          park === undefined ||
+          park.request.requestId !== requestId ||
+          !park.request.decisions.includes(decision)
+        ) {
           return Effect.void;
         }
+        // An answer that ends the turn ends every park with it, so nothing
+        // waiting is announced to a user who could only watch it die.
+        const ending = park.asked.endsTurn.includes(decision);
+        if (ending) cancelWaiting(held);
         resolving(held, park, decision);
         // Only where the answer shape cannot carry the refusal itself: every
         // other row says "stopped" to Codex in its own terms.
-        return park.asked.endsTurn.includes(decision) ? interrupting(held) : Effect.void;
+        return ending ? interrupting(held) : Effect.void;
       }),
 
     stopSession: (sessionId: string, reason: ExitReason): Effect.Effect<void> =>
@@ -948,31 +822,7 @@ export const codexAdapter = (seam: CodexSeam): ProviderAdapter => {
       userCode: USER_CODE,
     }),
 
-    /** The script URL is pinned to the tag, so it and the release it fetches move together. */
-    install: (env: Readonly<Record<string, string | undefined>>): Effect.Effect<InstallOutcome> =>
-      Effect.map(
-        Effect.timeoutOption(
-          seam.run(
-            [
-              "bash",
-              "-c",
-              `curl -fsSL https://raw.githubusercontent.com/openai/codex/rust-v${CODEX_VERSION}/scripts/install/install.sh | CODEX_RELEASE=${CODEX_VERSION} CODEX_NON_INTERACTIVE=1 sh`,
-            ],
-            env,
-          ),
-          INSTALL_DEADLINE,
-        ),
-        Option.match({
-          onNone: () => ({
-            ok: false,
-            message: `the installer did not finish within ${Duration.format(INSTALL_DEADLINE)}`,
-          }),
-          onSome: (ran) =>
-            ran.code === 0
-              ? { ok: true }
-              : { ok: false, message: lastLines(ran.stderr === "" ? ran.stdout : ran.stderr) },
-        }),
-      ),
+    install: installing(seam.run),
   };
 };
 

@@ -23,7 +23,7 @@ import {
   type Usage,
 } from "@hydra/protocol";
 import { now } from "../../report";
-import { fact, text } from "../text";
+import { fact, idOf, text } from "../text";
 import type { NotificationFrame } from "./rpc";
 import type {
   AgentMessageDeltaNotification,
@@ -38,7 +38,7 @@ import type {
 } from "./types";
 
 /** The one channel every raw payload from this adapter is filed under. */
-export const CODEX_NOTIFICATION = "codex.app-server.notification";
+const CODEX_NOTIFICATION = "codex.app-server.notification";
 
 /** Which of an item's two reasoning streams this session settled on. */
 type Channel = "summary" | "raw";
@@ -64,8 +64,8 @@ export const normalizing = (sessionId: string, threadId: string): Normalizing =>
 
 /**
  * A real round-trip, not a cast: one `undefined` property anywhere in a vendor
- * payload would be a frame the protocol refuses to encode, which costs the
- * runner its socket and every session on it.
+ * payload would be a frame the protocol refuses to encode, and an event that
+ * will not encode is one the runner drops.
  */
 const json = (value: unknown): Schema.Json =>
   JSON.parse(JSON.stringify(value ?? null)) as Schema.Json;
@@ -77,18 +77,26 @@ const count = (value: number | null | undefined): number =>
 /** What every event off this module carries, whatever else it says. */
 const envelope = (
   state: Normalizing,
-  payload: unknown,
 ): {
   readonly eventId: string;
   readonly sessionId: string;
   readonly at: string;
   readonly providerRefs: Readonly<Record<string, string>>;
-  readonly raw: { readonly source: string; readonly payload: Schema.Json };
 } => ({
   eventId: crypto.randomUUID(),
   sessionId: state.sessionId,
   at: now(),
   providerRefs: { threadId: state.threadId },
+});
+
+/**
+ * The frame the event was read off, for a reader that wants what the harness
+ * actually said. Not on a delta: a turn is thousands of them, and a copy on
+ * each would double the stream for a payload that is the delta itself.
+ */
+const raw = (
+  payload: unknown,
+): { readonly raw: { readonly source: string; readonly payload: Schema.Json } } => ({
   raw: { source: CODEX_NOTIFICATION, payload: json(payload) },
 });
 
@@ -197,9 +205,9 @@ const delta = (
 ): ReadonlyArray<ProviderEvent> => [
   {
     _tag: "content.delta",
-    ...envelope(state, params),
-    turnId: fact(params.turnId),
-    itemId: fact(params.itemId),
+    ...envelope(state),
+    turnId: idOf(params.turnId),
+    itemId: idOf(params.itemId),
     streamKind,
     delta: params.delta,
   },
@@ -248,7 +256,8 @@ const onError = (state: Normalizing, params: ErrorNotification): ReadonlyArray<P
     return [
       {
         _tag: "runtime.warning",
-        ...envelope(state, params),
+        ...envelope(state),
+        ...raw(params),
         ...turn,
         message: text(`${failure}: ${params.error.message}, which Codex is retrying itself`),
       },
@@ -257,7 +266,8 @@ const onError = (state: Normalizing, params: ErrorNotification): ReadonlyArray<P
   return [
     {
       _tag: "runtime.error",
-      ...envelope(state, params),
+      ...envelope(state),
+      ...raw(params),
       ...turn,
       class: failure,
       message: text(params.error.message),
@@ -283,8 +293,9 @@ export const normalize = (
       return [
         {
           _tag: "turn.started",
-          ...envelope(state, params),
-          turnId: fact(params.turn.id),
+          ...envelope(state),
+          ...raw(params),
+          turnId: idOf(params.turn.id),
           ...(state.model === undefined ? {} : { model: fact(state.model) }),
         },
       ];
@@ -299,8 +310,9 @@ export const normalize = (
       return [
         {
           _tag: "turn.completed",
-          ...envelope(state, params),
-          turnId: fact(params.turn.id),
+          ...envelope(state),
+          ...raw(params),
+          turnId: idOf(params.turn.id),
           state: ended,
         },
       ];
@@ -312,9 +324,10 @@ export const normalize = (
       return [
         {
           _tag: "item.started",
-          ...envelope(state, params),
-          turnId: fact(params.turnId),
-          itemId: fact(params.item.id),
+          ...envelope(state),
+          ...raw(params),
+          turnId: idOf(params.turnId),
+          itemId: idOf(params.item.id),
           kind,
           ...detail(params.item),
         },
@@ -327,9 +340,10 @@ export const normalize = (
       return [
         {
           _tag: "item.completed",
-          ...envelope(state, params),
-          turnId: fact(params.turnId),
-          itemId: fact(params.item.id),
+          ...envelope(state),
+          ...raw(params),
+          turnId: idOf(params.turnId),
+          itemId: idOf(params.item.id),
           kind,
           status: statusOf(params.item),
           ...detail(params.item),
@@ -341,7 +355,8 @@ export const normalize = (
       return [
         {
           _tag: "session.usage.updated",
-          ...envelope(state, params),
+          ...envelope(state),
+          ...raw(params),
           // The cumulative breakdown, not the last turn's: a snapshot taken
           // from `last` would make the session look like it never grew.
           usage: usageOf(params.tokenUsage),

@@ -551,6 +551,30 @@ describe("a device-code login", () => {
     expect((answer as { message: string }).message).toContain("not enabled for this account");
   });
 
+  it("says the code is what was missing when the machine said nothing", async () => {
+    const { spawn, children } = machine();
+    const driver = logins(spawn);
+
+    const answer = await run(
+      Effect.gen(function* () {
+        const starting = yield* Effect.forkChild(driver.start(INSTANCE, codex, CODEX_CONTEXT));
+        yield* TestClock.adjust(Duration.zero);
+        yield* Effect.sync(() => {
+          children[0]?.says(`Open this link to sign in\n${DEVICE_URL}\n`);
+          children[0]?.exit(1);
+        });
+        return yield* Fiber.join(starting);
+      }),
+    );
+
+    // A silent child leaves the reason to us, and the address did arrive: the
+    // half that is missing is the code, which is what the user is told.
+    expect(answer).toStrictEqual({
+      _tag: "loginFailed",
+      message: "the login printed no code to type",
+    });
+  });
+
   it("leaves a paste login's answer exactly as it was", async () => {
     const { spawn, children } = machine();
     const driver = logins(spawn);

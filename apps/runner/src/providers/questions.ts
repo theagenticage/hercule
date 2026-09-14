@@ -6,8 +6,8 @@
  * between a refusable park and a frame the controller drops.
  *
  * Every field is read defensively: what arrives here is whatever a vendor put
- * on the wire, and one field of the wrong type would otherwise be a frame
- * nobody can decode, which loses the event and leaves the park hanging.
+ * on the wire, and one field of the wrong type would otherwise be a frame the
+ * runner drops, which loses the event and leaves the park hanging.
  */
 import type { OpenRequest } from "@hydra/protocol";
 import { fact, text } from "./text";
@@ -73,8 +73,8 @@ const questionsIn = (given: unknown): ReadonlyArray<Question> => {
  *
  * Where nothing decodable was asked the request is a `tool_approval` named
  * after the ask instead: a `question` request carrying no question is a frame
- * the controller refuses, which costs the runner its socket and leaves the park
- * hanging, while the ask under it is still refusable.
+ * the controller refuses, which the runner drops, leaving the park hanging,
+ * while the ask under it is still refusable.
  */
 export const questionRequest = (
   identity: { readonly requestId: string; readonly itemId: string },

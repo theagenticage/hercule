@@ -97,6 +97,27 @@ export const rpcOver = (child: RpcChild, handlers: RpcHandlers): Rpc => {
   const pending = new Map<number, Deferred.Deferred<unknown, RpcError>>();
   let next = 1;
   let gone = false;
+  let complained = false;
+
+  /**
+   * Every write goes through here: a peer whose stdin has closed throws on each
+   * one, and an answer or a notification thrown out of would be a defect in
+   * whoever was replying rather than a connection reported as broken. Said once,
+   * because a closed pipe fails every write after it for the same reason.
+   */
+  const send = (frame: Record<string, unknown>): string | undefined => {
+    try {
+      child.write(`${JSON.stringify(frame)}\n`);
+      return undefined;
+    } catch (error) {
+      const failure = describe(error);
+      if (!complained) {
+        complained = true;
+        handlers.onWarning(`the app-server could not be written to: ${failure}`);
+      }
+      return failure;
+    }
+  };
 
   const settle = (frame: Record<string, unknown>, id: number): void => {
     const waiting = pending.get(id);
@@ -152,11 +173,10 @@ export const rpcOver = (child: RpcChild, handlers: RpcHandlers): Rpc => {
         // Registered before the write, because the answer may be delivered
         // inside it, and taken back out again when the write is what failed.
         pending.set(id, settled);
-        try {
-          child.write(`${JSON.stringify({ id, method, params })}\n`);
-        } catch (error) {
+        const failure = send({ id, method, params });
+        if (failure !== undefined) {
           pending.delete(id);
-          return Effect.fail<RpcError>({ message: describe(error) });
+          return Effect.fail<RpcError>({ message: failure });
         }
         return Deferred.await(settled).pipe(
           Effect.timeoutOrElse({
@@ -170,9 +190,9 @@ export const rpcOver = (child: RpcChild, handlers: RpcHandlers): Rpc => {
         );
       }),
 
-    notify: (method) => child.write(`${JSON.stringify({ method })}\n`),
+    notify: (method) => void send({ method }),
 
-    answer: (id, body) => child.write(`${JSON.stringify({ id, ...body })}\n`),
+    answer: (id, body) => void send({ id, ...body }),
 
     pump: Effect.callback<void>((resume, signal) => {
       void (async () => {

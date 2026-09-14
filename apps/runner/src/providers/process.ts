@@ -3,7 +3,7 @@
  * all - without running it.
  */
 import * as Effect from "effect/Effect";
-import type { AppServerChild, AppServerSpawn } from "./codex/rpc";
+import type { AppServerChild, AppServerSpawn } from "./codex";
 import type { LoginChild, LoginSpawn } from "./login";
 
 export interface Ran {

@@ -57,7 +57,7 @@ export const INITIALIZE = {
 };
 
 /** Arrives unsolicited right after `initialize`, and is nothing the probe asked for. */
-export const UNSOLICITED = {
+const UNSOLICITED = {
   method: "remoteControl/status/changed",
   params: {
     status: "disabled",
@@ -209,7 +209,7 @@ export const RESUMED = THREAD;
 export const FORKED = "0199e0e7-0000-7000-8000-0000000000fc";
 export const TURN = "0199e0e7-0000-7000-8000-0000000000fb";
 
-export const DEFAULT_ANSWERS: Answers = {
+const DEFAULT_ANSWERS: Answers = {
   initialize: () => INITIALIZE,
   "account/read": () => LOGGED_OUT,
   "model/list": () => MODELS,
@@ -219,7 +219,6 @@ export const DEFAULT_ANSWERS: Answers = {
   "turn/start": () => ({ turn: { id: TURN, items: [], itemsView: "full", status: "inProgress" } }),
   "turn/steer": () => ({ turnId: TURN }),
   "turn/interrupt": () => ({}),
-  "thread/close": () => ({}),
 };
 
 /**

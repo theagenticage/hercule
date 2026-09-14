@@ -44,6 +44,9 @@ const FILE_ITEM = "0199e0e7-0000-7000-8000-0000000000e2";
 /** Codex types a request id as a string or a number; both shapes arrive. */
 const ID = 7;
 
+/** The second request of a turn, which Codex asks without waiting for the first. */
+const SECOND_ID = 8;
+
 const STARTED_AT = 1789373122124;
 
 type Run = Awaited<ReturnType<typeof busy>>;
@@ -469,6 +472,59 @@ describe("an approval answered while the turn is still running", () => {
     const sent = await Effect.runPromise(run.adapter.sendInput(SESSION, { text: "carry on" }));
     expect(sent).toEqual({ turnId: TURN, delivery: "steered" });
     expect(taggedIn(run.seen, "turn.completed")).toEqual([]);
+  });
+});
+
+describe("a second request Codex asks before the first is answered", () => {
+  const SECOND_PARAMS = { ...COMMAND_PARAMS, itemId: FILE_ITEM, command: "rm -rf dist" };
+
+  it("opens them one at a time, and answers each under its own id", async () => {
+    const run = await asking(COMMAND, COMMAND_PARAMS);
+    run.server.push({ id: SECOND_ID, method: COMMAND, params: SECOND_PARAMS });
+    await settle();
+
+    // A session has one open request, so announcing the second now would take
+    // the first off every surface with nobody left able to answer it - and
+    // Codex is waiting for both.
+    const first = await openedIn(run);
+    expect(first.request.detail).toEqual({ command: "rm -rf build" });
+    expect(run.answered).toEqual([]);
+
+    await Effect.runPromise(
+      run.adapter.respondToRequest(SESSION, first.request.requestId, "allow"),
+    );
+
+    await until("opened the second", () => taggedIn(run.seen, "request.opened").length === 2);
+    const second = taggedIn(run.seen, "request.opened")[1]!;
+    expect(second.request.detail).toEqual({ command: "rm -rf dist" });
+    expect((await answerTo(run, ID)).result).toEqual({ decision: "accept" });
+
+    await Effect.runPromise(
+      run.adapter.respondToRequest(SESSION, second.request.requestId, "deny"),
+    );
+
+    expect((await answerTo(run, SECOND_ID)).result).toEqual({ decision: "decline" });
+    expect(taggedIn(run.seen, "request.resolved").map((event) => event.decision)).toEqual([
+      "allow",
+      "deny",
+    ]);
+  });
+
+  it("cancels the one still waiting when the session is interrupted", async () => {
+    const run = await asking(COMMAND, COMMAND_PARAMS);
+    run.server.push({ id: SECOND_ID, method: COMMAND, params: SECOND_PARAMS });
+    await settle();
+    const first = await openedIn(run);
+
+    await Effect.runPromise(run.adapter.interrupt(SESSION));
+
+    expect((await answerTo(run, ID)).result).toEqual({ decision: "cancel" });
+    expect((await answerTo(run, SECOND_ID)).result).toEqual({ decision: "cancel" });
+    // Only the open park was ever reported, so only it has an end to report.
+    const resolved = taggedIn(run.seen, "request.resolved");
+    expect(resolved).toHaveLength(1);
+    expect(resolved[0]).toMatchObject({ requestId: first.request.requestId, decision: "cancel" });
+    expect(taggedIn(run.seen, "request.opened")).toHaveLength(1);
   });
 });
 

@@ -142,10 +142,12 @@ describe("what a whole Codex turn normalizes to", () => {
 
     expect(events).not.toEqual([]);
     for (const event of events) {
-      // Without the source a surface cannot tell whose payload it is holding,
-      // and without the thread id nothing joins the event to the native thread.
-      expect(event.raw?.source).toBe(SOURCE);
+      // Without the thread id nothing joins the event to the native thread.
       expect(event.providerRefs?.["threadId"]).toBe(THREAD);
+      // A delta carries no copy of its own frame: a turn is thousands of them,
+      // and the payload is the delta the event already holds. Everything else
+      // says whose payload it is holding.
+      expect(event.raw?.source).toBe(event._tag === "content.delta" ? undefined : SOURCE);
     }
   });
 

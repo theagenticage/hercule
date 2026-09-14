@@ -7,6 +7,7 @@ import { useLiveInvalidation } from "../../app/live-invalidation";
 import { localRunnerQuery, providersQuery, runnersQuery } from "../../app/queries";
 import { CreateThreadLink } from "../../screens/create-thread-link";
 import { ProviderLogin } from "../../screens/provider-login";
+import { messageOf } from "../../screens/save-status";
 
 export const Route = createFileRoute("/_shell/")({
   staticData: { title: "Sessions" },
@@ -95,6 +96,7 @@ function Sessions(): JSX.Element {
         headline={found(state.instances.map((instance) => instance.displayName))}
         lead="Log in to use it in Hydra. The login runs on this machine and its credential stays there."
         fine="A thread needs a harness that is logged in, so starting one waits on this."
+        failure={probe.error === null ? null : messageOf(probe.error)}
       >
         {state.instances.map((instance) => (
           <ProviderLogin
@@ -128,6 +130,7 @@ function Screen({
   lead,
   fine,
   ready = false,
+  failure = null,
   children,
 }: {
   readonly headline: string;
@@ -135,6 +138,8 @@ function Screen({
   readonly fine?: ReactNode;
   /** Whether a thread can actually be started from here yet. */
   readonly ready?: boolean;
+  /** What the last move on this screen failed with, if it failed. */
+  readonly failure?: string | null;
   readonly children?: ReactNode;
 }): JSX.Element {
   return (
@@ -149,6 +154,11 @@ function Screen({
           </Button>
         )}
       </div>
+      {failure === null ? null : (
+        <p className="text-fine text-fail" role="alert">
+          {failure}
+        </p>
+      )}
     </EmptyState>
   );
 }

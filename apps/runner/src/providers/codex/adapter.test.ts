@@ -13,7 +13,8 @@ import { TestClock } from "effect/testing";
 import { CODEX_VERSION } from "@hydra/home/version";
 import type { ProbeResult, ProviderEvent, SessionSpec } from "@hydra/protocol";
 import { INSTALL_DEADLINE } from "../claude-code";
-import { codexAdapter, PROBE_DEADLINE, type CodexSeam } from "./adapter";
+import { codexAdapter, type CodexSeam } from "./adapter";
+import { PROBE_DEADLINE } from "./probe";
 import {
   API_KEY,
   type Answers,
@@ -304,7 +305,7 @@ describe("the thread a session is given", () => {
       cwd: CWD,
       model: "gpt-5.5",
       ephemeral: false,
-      // `approval-required`, the row AD-17 gives it.
+      // What `approval-required` is on a Codex thread.
       approvalPolicy: "untrusted",
       sandbox: "read-only",
       approvalsReviewer: "user",
@@ -597,8 +598,10 @@ const TURN_ANSWER = { turn: { id: TURN, items: [], itemsView: "full", status: "i
 
 /**
  * Walks the three backoff steps on a test clock, one attempt at a time, and
- * checks nothing retried before the clock said it could. 750, 1500 and 3000 ms
- * are the spec's 500, 1000 and 2000 with the whole 250 ms of jitter allowed.
+ * checks nothing retried before the clock said it could. 750, 1250 and 2250 ms
+ * are the spec's 500, 1000 and 2000 with the whole 250 ms of jitter allowed and
+ * not a millisecond more: a step that advanced further would pass on a base
+ * nobody chose.
  */
 const backingOff = (attempts: () => number) =>
   Effect.gen(function* () {
@@ -606,7 +609,7 @@ const backingOff = (attempts: () => number) =>
       yield* Effect.promise(() => until(`sent attempt ${step + 1}`, () => attempts() > step));
       yield* Effect.promise(settle);
       expect(attempts(), `attempt ${step + 2} came before the backoff`).toBe(step + 1);
-      yield* TestClock.adjust(Duration.millis(750 * 2 ** step));
+      yield* TestClock.adjust(Duration.millis(500 * 2 ** step + 250));
     }
   });
 

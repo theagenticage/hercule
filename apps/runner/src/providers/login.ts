@@ -110,6 +110,8 @@ interface Held {
   readonly printed: Promise<Printed | undefined>;
   /** A login that prints a code reads nothing back: nobody submits to it. */
   readonly device: boolean;
+  /** The address on its own, which is what tells a half-printed login from a silent one. */
+  readonly address: () => string | undefined;
   /** Gives up on `printed`, for a child that was killed before it printed. */
   readonly abandon: () => void;
   /** Resolves with the child's next complaint, and never when it ends first. */
@@ -212,6 +214,7 @@ export const logins = (
       const login: Held = {
         child,
         device: pattern !== undefined,
+        address: () => url,
         abandon: () => {
           settle(undefined);
         },
@@ -249,7 +252,16 @@ export const logins = (
         const printed = yield* Effect.promise(() => login.printed);
         if (printed === undefined) {
           yield* stop(instanceId, login);
-          return failed(said(login.transcript(), "the login ended without a URL"));
+          // A device login that printed its address and stopped is a login with
+          // no code to show, which is not the same as one that printed nothing.
+          return failed(
+            said(
+              login.transcript(),
+              login.address() === undefined
+                ? "the login ended without a URL"
+                : "the login printed no code to type",
+            ),
+          );
         }
         // Cutting it would hand the browser an address that cannot complete the
         // login, which is worse than saying the vendor printed something odd.
