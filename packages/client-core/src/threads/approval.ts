@@ -15,6 +15,18 @@ export interface ApprovalRow {
 }
 
 /**
+ * One option of a question, kept as its two parts rather than one line: the
+ * card lays the label and what it would have meant out in the same two columns
+ * as the answer ledger under it (spec 14 §Measurements).
+ */
+export interface ApprovalOption {
+  /** The short label the harness put on the option. */
+  readonly label: string;
+  /** What choosing it would mean; empty where the harness said nothing. */
+  readonly description: string;
+}
+
+/**
  * One question of a `question` request, as the card reads it. A question is
  * not an approval: it has a chip, prose and answers of its own, and they share
  * the request slot rather than the shape (decisions D-27, D-28). The options
@@ -26,8 +38,8 @@ export interface ApprovalQuestion {
   readonly header: string;
   /** The question, in the agent's own words. */
   readonly question: string;
-  /** One line per option: its label, then what choosing it would mean. */
-  readonly options: readonly string[];
+  /** The options it offers, each its label and what choosing it would mean. */
+  readonly options: readonly ApprovalOption[];
   /** Said where the question takes more than one answer; null where it takes one. */
   readonly note: string | null;
 }
@@ -91,9 +103,11 @@ const describeOf = (decision: ApprovalDecision, subject: string): string => {
  * `session.respond` carries a decision and no answers, so there is nothing an
  * allow could run the tool with. The card says so rather than leaving the
  * missing Allow to be read as a bug.
+ *
+ * Cancel first, then reply: a message sent while the session is parked is
+ * queued behind the turn, so it would not reach the harness that is asking.
  */
-const NOT_BUILT =
-  "Answering a question here is not built yet. Reply in the thread instead, then deny this request.";
+const NOT_BUILT = "Answering here is not built yet. Cancel the turn, then reply in the thread.";
 
 const titleOf = (request: OpenRequest): string => {
   switch (request.kind) {
@@ -126,18 +140,6 @@ const subjectOf = (request: OpenRequest): readonly string[] => {
   }
 };
 
-type Question = Extract<OpenRequest, { readonly kind: "question" }>["detail"]["questions"][number];
-
-/**
- * A question's options as read-only lines. The label and what it means read as
- * one line rather than two, because an option nobody can click is a fact about
- * the question, not an answer of its own.
- */
-const optionsOf = (question: Question): readonly string[] =>
-  question.options.map((option) =>
-    option.description === "" ? option.label : `${option.label} \u00b7 ${option.description}`,
-  );
-
 const MULTI = "More than one answer may be chosen.";
 
 const questionsOf = (request: OpenRequest): readonly ApprovalQuestion[] =>
@@ -145,7 +147,7 @@ const questionsOf = (request: OpenRequest): readonly ApprovalQuestion[] =>
     ? request.detail.questions.map((question) => ({
         header: question.header,
         question: question.question,
-        options: optionsOf(question),
+        options: question.options,
         note: question.multiSelect ? MULTI : null,
       }))
     : [];

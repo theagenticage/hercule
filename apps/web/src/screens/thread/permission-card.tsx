@@ -1,4 +1,4 @@
-import type { JSX } from "react";
+import { Fragment, type JSX } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { approvalCard, type HydraClient } from "@hydra/client-core";
 import type { ApprovalDecision, OpenRequest } from "@hydra/contract";
@@ -80,26 +80,42 @@ export function PermissionCard({
             options are shown read-only - what each answer would have meant is
             part of the question - until answering with one is built. */}
         {card.questions.length === 0 ? null : (
-          <div className="mt-1 flex max-h-48 flex-col gap-2 overflow-y-auto">
+          // One block per question, 12px apart; inside a block the lines are
+          // 2px apart, so the label, the question and the options read as one
+          // thing rather than three.
+          <div className="mt-3 flex max-h-48 flex-col gap-3 overflow-y-auto">
             {card.questions.map((question, index) => (
               <div key={index} className="flex min-w-0 flex-col">
-                <span className="text-fine font-emph text-ink">{question.header}</span>
-                <span className="text-fine text-ink">{question.question}</span>
-                {question.options.map((option, optionIndex) => (
-                  <span key={optionIndex} className="text-fine">
-                    {option}
-                  </span>
-                ))}
-                {/* A little air, or it reads as one more option. */}
+                {/* The chip heads the block as a lane label, not as a
+                    sentence: 10px uppercase `--faint`, the size a label inside
+                    a surface takes (spec 14 §Measurements, the popover's
+                    options grid). */}
+                <span className="text-[10px] font-emph tracking-[0.09em] text-faint uppercase">
+                  {question.header}
+                </span>
+                <span className="mt-0.5 text-meta text-ink">{question.question}</span>
+                {/* The answer ledger's two columns, so an option and an answer
+                    read on one grid: the label on the shared left edge, what it
+                    means beside it. Plain rows - nothing here is clickable. */}
+                <div className="mt-0.5 grid grid-cols-[140px_minmax(0,1fr)] items-baseline gap-x-3 gap-y-0.5">
+                  {question.options.map((option, optionIndex) => (
+                    <Fragment key={optionIndex}>
+                      <span className="text-fine font-emph text-ink">{option.label}</span>
+                      <span className="text-fine text-muted">{option.description}</span>
+                    </Fragment>
+                  ))}
+                </div>
+                {/* Smaller and quieter than an option, with air above it, or it
+                    reads as one more option. */}
                 {question.note === null ? null : (
-                  <span className="mt-0.5 text-fine">{question.note}</span>
+                  <span className="mt-1.5 text-[11px] text-faint">{question.note}</span>
                 )}
               </div>
             ))}
           </div>
         )}
-        {/* A little air, or the note reads as one more question. */}
-        {card.note === null ? null : <p className="mt-1">{card.note}</p>}
+        {/* An instruction, not an option: 12px `--muted` with air above it. */}
+        {card.note === null ? null : <p className="mt-2">{card.note}</p>}
         {/* A row bleeds 8px past this column on each side, so a hover
             background has room around its label without crossing the edge the
             head shares with it. The 13px bottom padding is what keeps the last

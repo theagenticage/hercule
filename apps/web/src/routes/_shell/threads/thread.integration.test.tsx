@@ -2286,13 +2286,18 @@ describe("Thread: the permission card", () => {
     expect(screen.queryByRole("button", { name: answer(REQUEST, "allow") })).toBeNull();
     expect(screen.queryByRole("button", { name: answer(REQUEST, "allow_always") })).toBeNull();
 
-    const text = reading();
     // The chip, the prose and what each answer would have meant: a question is
-    // not an approval, and the card shows all three.
-    expect(text).toContain("Database");
-    expect(text).toContain("Which database should it use?");
-    expect(text).toContain("SQLite \u00b7 the one Hydra ships");
-    expect(text).toMatch(/not built/i);
-    expect(text).toMatch(/reply/i);
+    // not an approval, and the card shows all three - as three blocks rather
+    // than one paragraph. The chip is a lane label, and an option's label and
+    // its description are two elements on the answer ledger's grid.
+    expect(screen.getByText("Database").className).toContain("uppercase");
+    expect(screen.getByText("Which database should it use?")).toBeDefined();
+    expect(screen.getByText("SQLite").className).toContain("font-emph");
+    expect(screen.getByText("the one Hydra ships")).toBeDefined();
+    // Cancel first: a reply sent while the session is parked queues behind the
+    // turn instead of reaching the harness that is asking.
+    expect(reading()).toContain(
+      "Answering here is not built yet. Cancel the turn, then reply in the thread.",
+    );
   });
 });

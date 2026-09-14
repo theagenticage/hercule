@@ -122,14 +122,20 @@ describe("approvalCard", () => {
       {
         header: "Database",
         question: "Which database should it use?",
-        options: ["SQLite \u00b7 the one Hydra ships", "Postgres \u00b7 somebody else's server"],
+        options: [
+          { label: "SQLite", description: "the one Hydra ships" },
+          { label: "Postgres", description: "somebody else's server" },
+        ],
         note: null,
       },
     ]);
     // There is nothing an allow could carry, so the note says so rather than
-    // leaving the user to guess why no Allow is offered.
-    expect(card.note).toMatch(/not built/i);
-    expect(card.note).toMatch(/reply/i);
+    // leaving the user to guess why no Allow is offered - and it says to cancel
+    // first, because a reply sent while the session is parked queues behind the
+    // turn instead of reaching the harness that is asking.
+    expect(card.note).toBe(
+      "Answering here is not built yet. Cancel the turn, then reply in the thread.",
+    );
   });
 
   it("keeps every question of a multi-question request, and says where more than one answer is allowed", () => {
@@ -142,7 +148,6 @@ describe("approvalCard", () => {
           {
             question: "Which features?",
             header: "Features",
-            // No description to add: the label is the whole line.
             options: [{ label: "Rules", description: "" }],
             multiSelect: true,
           },
@@ -158,7 +163,8 @@ describe("approvalCard", () => {
     const card = approvalCard(request);
 
     expect(card.questions.map((one) => one.header)).toEqual(["Features", "Branch"]);
-    expect(card.questions[0]?.options).toEqual(["Rules"]);
+    // No description to show: the label is the whole option.
+    expect(card.questions[0]?.options).toEqual([{ label: "Rules", description: "" }]);
     expect(card.questions[0]?.note).toMatch(/more than one/i);
     // One answer is the ordinary case, and a line saying so on every question
     // would be noise.
