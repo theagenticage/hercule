@@ -52,6 +52,7 @@ These come from the spec and ADRs; restated here because violating them is expen
 - **Every mutation is stamped with an actor** (`user` or `session:<id>`). Widened later, never restructured.
 - **No repo-local Hydra config.** The controller's state is the single source of truth; repositories hold no Hydra configuration.
 - **Never edit generated files by hand** (derived clients, OpenAPI documents, lockfiles).
+- **Every operation has a CLI row.** An operation added to `packages/contract` lands its row in the CLI table beside the operation table in the same change: spelling, purpose, examples and a line per field, or `hidden: true` with the reason. The row type and the tree tests refuse a contract without it. (Spec 11 §6.3)
 - **Never silently substitute behaviour.** Access-mode fallback, trigger pauses, dropped events: the system tells the user; so do you.
 - **Never touch `~/.hydra`.** That is the user's live Hydra Home: its database, credentials, runner state and backups. Any run you start (a proof run, an e2e check, a migration try-out, a `hydra` command that writes) uses a throwaway home: `HYDRA_HOME=<scratch dir>` or `--home <scratch dir>`, created for that run and deleted after. Reading `~/.hydra/config.toml` to learn a port is fine; running a controller, runner, or migration against it is not, even when you believe the change is additive. A migration edited in place is the standing example: the live database already ran the old version and would break on the new one.
 

@@ -11,7 +11,7 @@ The product. A controller-plus-runners platform that orchestrates agents doing w
 _Avoid_: agentick, agentick-next
 
 **Operation**:
-One named thing the public API can do (`task.create`, `session.spawn`), the same name on every surface: the contract, the HTTP route table, the CLI command, and the built-in workflow action.
+One named thing the public API can do (`task.create`, `session.spawn`), the same name in the contract, the HTTP route table and the built-in workflow action. The `hydra` CLI spells it for a terminal (`hydra task list`) and names it in `--help`.
 _Avoid_: endpoint, command (bare), method
 
 **Subscription Target**:

@@ -34,7 +34,7 @@ One identifier names an operation on every surface ([ADR 0021](../adr/0021-one-o
 
 - **Operation id** = `<entity>.<verb>`, entity singular: `task.create`, `session.spawn`, `workflow.submit`, `runner.drain`. Every entity is its own operation family.
 - **Built-in workflow action id** = the operation id, unchanged. The built-in actions *are* the operations ([./07-workflows.md](./07-workflows.md) section 8).
-- **CLI** = the id split on the dot: `hydra task create`, `hydra session spawn`, `hydra runner drain`. No aliases, no second spelling.
+- **CLI** = a command spelled for a terminal, written per operation in the contract's CLI table and one-to-one with the operations (section 6.3): `hydra task list`, `hydra session spawn`, `hydra runner join-token create`. One spelling per command, no aliases; `--help` names the operation id. *(Amended 2026-09-15, [#126](https://github.com/rogierpennink/hydra/issues/126): was "the id split on the dot".)*
 - **Grant** = `<family>.<verb>` in the coarse grant vocabulary of [./13-security.md](./13-security.md) section 6.1. Grant families are *not* one-to-one with operation families: `infra.write` covers `runner.*`, `plugin.*`, `provider.*` and `controller.*`. The operation-to-grant mapping is an explicit table in the contract package; a 403 and the CLI's `--help` both name the grant, so an agent never has to guess it.
 
 Standard verbs, used with the same meaning on every entity that has them:
@@ -61,7 +61,7 @@ The web app additionally holds one WebSocket for live topics (subscriptions only
 
 A Hydra MCP server is not a v1 transport (section 10).
 
-**Ids on the wire** are canonical lowercase UUIDv7 strings, except event ids, which are integers ([./04-state-store.md](./04-state-store.md)). The CLI accepts a full id or an unambiguous tail of eight or more characters for any `<id>` argument (`conflict` if ambiguous) and prints tails in human output; `--json` always prints full ids. *(Amended 2026-09-04, [#57](https://github.com/rogierpennink/hydra/issues/57).)* **Tail resolution is a CLI-side behaviour**: the CLI resolves a tail through the entity's `query` operation and reports `conflict` itself when more than one id matches. The wire carries canonical ids only - no `{id}` path parameter and no input schema accepts a tail - so a tail costs an extra round trip and needs the entity's read grant.
+**Ids on the wire** are canonical lowercase UUIDv7 strings, except event ids, which are integers ([./04-state-store.md](./04-state-store.md)). The CLI accepts a full id or an unambiguous tail of eight or more characters for any id argument whose CLI row names the listing that resolves it (`conflict` if ambiguous; section 6.3, [#126](https://github.com/rogierpennink/hydra/issues/126)) and prints tails in human output; `--json` always prints full ids. *(Amended 2026-09-04, [#57](https://github.com/rogierpennink/hydra/issues/57).)* **Tail resolution is a CLI-side behaviour**: the CLI resolves a tail through the entity's `query` operation and reports `conflict` itself when more than one id matches. The wire carries canonical ids only - no `{id}` path parameter and no input schema accepts a tail - so a tail costs an extra round trip and needs the entity's read grant.
 
 **Routes are resource paths with HTTP methods**, under `/api/v1/`. Every operation's `{ method, path }` is written explicitly in the contract's route table; the conventions below are what the table follows, and any exception (an irregular plural, a nested resource) is simply written in the table. One CI test asserts that operations and routes are one-to-one.
 
@@ -460,27 +460,37 @@ When `HYDRA_SESSION=1` is set, step 2 is skipped: the CLI refuses file credentia
 
 Inside a session the `hydra` CLI is the whole of hydra-as-a-tool in v1. It ships built-in (not a plugin contribution), is uniform across Claude Code, Codex and pi, and needs no per-adapter wiring. The runner makes the binary available to the session process and materializes the skill (below) into it.
 
-Rules the CLI follows on every subcommand:
+*(Rewritten 2026-09-15, [#126](https://github.com/rogierpennink/hydra/issues/126). Until then this section pinned "Command = operation id": `hydra <entity> <verb>` was `<entity>.<verb>` spelled exactly as the contract spells it, which produced `hydra apiKey query` and `hydra auth wsTicket` and left the agent-addressed help nowhere to live.)*
 
-- **Command = operation id.** `hydra <entity> <verb>` is `<entity>.<verb>` (section 1.3); `--help` on a command names the grant it requires. Filters and fields are flags (`--label bug --label ui --text crash`); ids are positional.
-- **Agent-addressed help.** `--help` works at any position on every subcommand. Help text is written for an agent reading it mid-task, pi-style: what the command does, its arguments, what to do next. Static help plus 403s that name the missing grant are the two teaching channels.
-- **Output.** Human-readable by default; `--json` on every command emits the contract's output schema (or error envelope) verbatim. Teaching lines ("subscribe with ...") exist only in the human rendering.
-- **Progressive disclosure.** The skill is a minimal skeleton pointing at the CLI's own help; the CLI self-documents deeper levels.
-- **One content channel (hard rule).** Where a command takes document content (`memory write`, `memory append`, task descriptions), content arrives on stdin and nowhere else. There is no inline content flag and no `--file` flag. [Assemble the v1 spec](https://github.com/rogierpennink/hydra/issues/21) delegated the pick between stdin-only and `--file` to the spec; the spec picks stdin-only. Rationale: a model mixed `--content` with a heredoc in the memory experiment ([Prototype: assistant memory interface](https://github.com/rogierpennink/hydra/issues/31)).
+**The command tree is spelled for a terminal and written in the contract.** `packages/contract` holds, beside the operation table, one CLI table with a row per operation: the command's words, its purpose, its examples, and one entry per field with its flag name and one line of help; or `hidden: true` for an operation only programmatic clients call. The row type is keyed by operation id, so an operation without a row does not compile. The `hydra` CLI derives its whole tree, its argument parsing and its help from that table plus the operation's schemas; nothing per-operation lives in the CLI package. A test proves the tree and the visible operations are one-to-one.
+
+What survives of the one-vocabulary rule (section 1.3, [ADR 0021](../adr/0021-one-operation-vocabulary-coarse-grants-explicit-routes.md)): the operation id names the endpoint, the contract key and the built-in workflow action; a 403 names the grant; `--json` prints the output schema verbatim; and every command's `--help` names its operation id, route and grant on one line, so an agent holding a workflow action id or a 403 can find the command, and the other way round.
+
+Spelling rules:
+
+- A command is `hydra <noun>... <verb>`, every word kebab-case. The first noun is the operation's entity in kebab-case, singular as the id is (`api-key`, `session`).
+- Standard verbs: `query` is `list`; `read`, `create`, `update` and `delete` keep their names. `hydra task list`, `hydra task read <id>`.
+- A custom verb is kebab-cased as a verb phrase: `hydra runner refresh-facts`, `hydra user set-password`, `hydra connection start-oauth`.
+- A custom verb of the form `<action><Thing>`, where the things have ids and a listing of their own, becomes a nested noun with standard verbs: `runner.createJoinToken`, `runner.queryJoinTokens` and `runner.revokeJoinToken` are `hydra runner join-token create | list | revoke <id>`.
+- An owned sub-resource that is its own operation entity keeps its own root noun: `hydra input list <session-id>`, `hydra transcript read <session-id>`.
+- One spelling per command. No aliases, no second spelling; the operation id is not accepted as a command.
+- A hidden operation has no command at all: not in the tree, not in help, not callable. `auth.login`, `auth.logout` and `auth.wsTicket` are hidden; `hydra login` is the human form of login.
+- Path parameters are positional, in route order. A payload field may be positional when its row says so (`hydra permission request <grant>`, `hydra subscription create <target>`), after the path parameters. Every other field is a flag, kebab-case, named in the row; a repeatable flag is singular (`--label bug --label ui`).
+- Ids: a full id, or a tail of eight or more characters where the row names the listing that resolves it (section 1.4). A positional whose row names no listing takes the full id, and its help says so.
+- The CLI adds no default of its own. A common case that needs no flags gets there through the operation's own defaults, never through a value the CLI invents.
+
+Rules the CLI follows on every command:
+
+- **Agent-addressed help.** `--help` works at any position on every subcommand, `hydra runner --help` included. Three levels. `hydra --help` lists every visible noun with its verbs and one line, then the conventions that hold everywhere (ids, `--json`, stdin, paging, exit codes, what a 403 means). `hydra <noun> --help` lists the noun's verbs with one line and the grant each needs, and a flow line naming the usual order. `hydra <noun> <verb> --help` prints, in this fixed order: purpose (what it does and when to use it), usage, examples, arguments, flags, stdin, returns, errors, next, and the operation line (`operation <id> · <METHOD> <path> · grant <g>`). Purpose, examples, the line per field, the noun's summary and flow line, and optional per-error meanings are written in the table; usage, placeholders, allowed values, required or optional, the stdin note, paging, the returns fields, the error code list and the operation line are derived from the contract. Examples are stored as arguments plus stdin and are parsed by a test, so they cannot go stale; every command any help text names must exist, by test. Static help plus 403s that name the missing grant are the two teaching channels.
+- **Output.** Human-readable by default; `--json` on every command emits the contract's output schema (or error envelope) verbatim. Teaching lines ("read the reply with ...") exist only in the human rendering.
+- **Progressive disclosure.** The skill is a minimal skeleton pointing at the CLI's own help. It names no command beyond the three help forms, and the ticket that writes it carries a test that every command it names exists. The list of "commands an agent uses most" that this section used to carry is the root help, generated.
+- **One content channel (hard rule).** A field the row marks `stdin` has no inline flag: a password, a secret's value, credentials, a task's or project's description, a session's prompt or input text, a config that is the whole payload. Required, it is read from stdin unasked: `echo "carry on" | hydra session input <id>`. Optional, it is read only when its `--<flag>-stdin` marker is given (`hydra task update <id> --description-stdin < notes.md`), so an empty pipe never blanks a field. The whole of stdin is the value, one trailing newline removed, which is what a heredoc produces. At most one stdin field per command, because a document has newlines and cannot share the stream; `hydra user set-password` is the one exception and reads two lines, current then next. At a terminal the CLI never blocks on a stdin field: it exits 2 and shows the piped form (the echo-off prompt of section 6.1 is `hydra login`'s exception). There is no inline content flag and no `--file` flag. [Assemble the v1 spec](https://github.com/rogierpennink/hydra/issues/21) delegated the pick between stdin-only and `--file` to the spec; the spec picks stdin-only. Rationale: a model mixed `--content` with a heredoc in the memory experiment ([Prototype: assistant memory interface](https://github.com/rogierpennink/hydra/issues/31)).
 - **Never blocks.** No `--wait` on any command (section 8).
-- **Pagination.** `query` commands page with `--limit` and `--cursor`; `--all` follows `nextCursor` to the end.
+- **Pagination.** `list` commands page with `--limit`, `--cursor` and `--sort`; `--all` follows `nextCursor` to the end.
+
+**Standing rule.** An operation added to the contract lands its CLI row in the same change: spelling, purpose, examples and a line per field, or `hidden: true` with the reason in a comment. The row type and the tree tests refuse a contract without it; no ticket ships an operation the CLI cannot explain.
 
 **The skill.** One provider-agnostic skill source describes the CLI; each provider adapter materializes it in that provider's native instruction format (Codex takes instructions only as `AGENTS.md` in the cwd, so a Codex session needs a cwd even when workspace-less). Materialization and provider-home isolation are specified in [./06-providers.md](./06-providers.md).
-
-**Commands an agent uses most** (the full set is section 2):
-
-- `hydra task query | read | create | update | delete`
-- `hydra workflow run <id> | submit` (definition on stdin), `hydra run read | cancel`
-- `hydra session spawn | input | read`, `hydra transcript query --text "..." [--assistant me]`
-- `hydra subscription create <target>` (section 7), `hydra subscription query | cancel`
-- `hydra notification create`
-- `hydra memory list | read | search | write | append | delete` (section 6.4)
-- `hydra permission request <grant> --reason "..."`
 
 ### 6.4 `hydra memory`
 
