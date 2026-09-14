@@ -6,7 +6,6 @@ import type * as Effect from "effect/Effect";
 import type * as Schema from "effect/Schema";
 import type * as Stream from "effect/Stream";
 import {
-  MAX_FACT_LENGTH,
   type ApprovalDecision,
   type ExitReason,
   type ProbeResult,
@@ -132,12 +131,7 @@ export const adapterFor = (providerId: string): ProviderAdapter | undefined =>
 /** One per process, not per connection: a child outlives a socket that drops. */
 export const providerLogins = logins(spawnLogin);
 
-/** Cut to what the protocol carries rather than failing the whole report. */
-export const probeFailed = (message: string): ProbeResult => ({
-  harnessVersion: null,
-  auth: { status: "error", message: message.slice(0, MAX_FACT_LENGTH) },
-  models: [],
-});
+export { PROBE_DEADLINE, probeFailed } from "./probe";
 
 export const noAdapterFor = (providerId: string): string =>
   `no adapter for ${providerId} in this runner build`;

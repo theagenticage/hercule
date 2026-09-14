@@ -15,8 +15,9 @@ import {
   type ModelOption,
   type ProbeResult,
 } from "@hydra/protocol";
-import { INSTALL_DEADLINE, lastLines } from "../claude-code";
 import type { InstallOutcome, ProviderRunnerContext } from "../index";
+import { installing } from "../install";
+import { PROBE_DEADLINE, probeFailed } from "../probe";
 import type { Run } from "../process";
 import { fact } from "../text";
 import type { Rpc, RpcError } from "./rpc";
@@ -35,15 +36,6 @@ export interface AppServer {
   /** What the child wrote that was not a frame, which is where a start failure is said. */
   readonly complaint: () => string;
 }
-
-/** Long enough for a cold app-server, short enough that a Fleet page does not look hung. */
-export const PROBE_DEADLINE: Duration.Duration = Duration.seconds(15);
-
-export const failed = (harnessVersion: string | null, message: string): ProbeResult => ({
-  harnessVersion,
-  auth: { status: "error", message: fact(message) },
-  models: [],
-});
 
 /**
  * Attestation is declined here rather than left to a request nobody answers,
@@ -170,7 +162,7 @@ export const probing =
       openHost(ctx, binary),
       (host) =>
         Effect.matchEffect(handshake(host), {
-          onFailure: (error) => Effect.succeed(failed(null, saidBy(host, error))),
+          onFailure: (error) => Effect.succeed(probeFailed(null, saidBy(host, error))),
           onSuccess: (initialized) =>
             Effect.match(
               Effect.all([
@@ -178,7 +170,8 @@ export const probing =
                 host.rpc.request("model/list", {}),
               ]),
               {
-                onFailure: (error) => failed(versionOf(initialized.userAgent), saidBy(host, error)),
+                onFailure: (error) =>
+                  probeFailed(versionOf(initialized.userAgent), saidBy(host, error)),
                 onSuccess: ([account, models]) => ({
                   harnessVersion: versionOf(initialized.userAgent),
                   auth: authOf(account as GetAccountResponse),
@@ -188,39 +181,24 @@ export const probing =
             ),
         }),
       (host) => Effect.sync(() => host.kill()),
-    ).pipe(Effect.catch((message) => Effect.succeed(failed(null, message))));
+    ).pipe(Effect.catch((message) => Effect.succeed(probeFailed(null, message))));
     return Effect.map(
       Effect.timeoutOption(gather, PROBE_DEADLINE),
       Option.getOrElse(() =>
-        failed(null, `the app-server did not answer within ${Duration.format(PROBE_DEADLINE)}`),
+        probeFailed(
+          null,
+          `the app-server did not answer within ${Duration.format(PROBE_DEADLINE)}`,
+        ),
       ),
     );
   };
 
 /** The script URL is pinned to the tag, so it and the release it fetches move together. */
-export const installing =
-  (run: Run) =>
-  (env: Readonly<Record<string, string | undefined>>): Effect.Effect<InstallOutcome> =>
-    Effect.map(
-      Effect.timeoutOption(
-        run(
-          [
-            "bash",
-            "-c",
-            `curl -fsSL https://raw.githubusercontent.com/openai/codex/rust-v${CODEX_VERSION}/scripts/install/install.sh | CODEX_RELEASE=${CODEX_VERSION} CODEX_NON_INTERACTIVE=1 sh`,
-          ],
-          env,
-        ),
-        INSTALL_DEADLINE,
-      ),
-      Option.match({
-        onNone: () => ({
-          ok: false,
-          message: `the installer did not finish within ${Duration.format(INSTALL_DEADLINE)}`,
-        }),
-        onSome: (ran) =>
-          ran.code === 0
-            ? { ok: true }
-            : { ok: false, message: lastLines(ran.stderr === "" ? ran.stdout : ran.stderr) },
-      }),
-    );
+export const codexInstall = (
+  run: Run,
+): ((env: Readonly<Record<string, string | undefined>>) => Effect.Effect<InstallOutcome>) =>
+  installing(run, [
+    "bash",
+    "-c",
+    `curl -fsSL https://raw.githubusercontent.com/openai/codex/rust-v${CODEX_VERSION}/scripts/install/install.sh | CODEX_RELEASE=${CODEX_VERSION} CODEX_NON_INTERACTIVE=1 sh`,
+  ]);

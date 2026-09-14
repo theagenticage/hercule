@@ -633,10 +633,37 @@ describe("a park the turn outran", () => {
     );
 
     await settle();
-    // The controller closed the open request when the turn ended, so an answer
-    // here would be written to a harness that stopped waiting and reported as a
-    // second end for one park.
-    expect(run.answered).toEqual([]);
+    // The park ended with its turn: Codex was told so at the end of the turn,
+    // because every request it asks is answered, and the user's answer arrives
+    // at a park that is no longer there. The controller closed the open request
+    // on `turn.completed`, so there is no resolution to report either way.
+    expect(run.answered).toEqual([{ id: ID, result: { decision: "cancel" } }]);
     expect(taggedIn(run.seen, "request.resolved")).toEqual([]);
+  });
+
+  it("answers the ones still waiting too, so nothing is left hanging", async () => {
+    const run = await asking(COMMAND, COMMAND_PARAMS);
+    run.server.push({
+      id: SECOND_ID,
+      method: COMMAND,
+      params: { ...COMMAND_PARAMS, itemId: FILE_ITEM, command: "rm -rf dist" },
+    });
+    await settle();
+    run.server.push({
+      method: "turn/completed",
+      params: {
+        threadId: THREAD,
+        turn: { id: TURN, items: [], itemsView: "full", status: "completed" },
+      },
+    });
+    await until("ended the turn", () => taggedIn(run.seen, "turn.completed").length === 1);
+
+    await settle();
+    expect(run.answered).toEqual([
+      { id: SECOND_ID, result: { decision: "cancel" } },
+      { id: ID, result: { decision: "cancel" } },
+    ]);
+    expect(taggedIn(run.seen, "request.resolved")).toEqual([]);
+    expect(taggedIn(run.seen, "request.opened")).toHaveLength(1);
   });
 });

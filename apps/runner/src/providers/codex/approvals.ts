@@ -12,9 +12,10 @@
  * JSON-RPC error reply.
  */
 import type { ApprovalDecision, OpenRequest } from "@hydra/protocol";
+import { idOf } from "../events";
 import { questionRequest } from "../questions";
-import { fact, idOf, text } from "../text";
-import type { RpcError } from "./rpc";
+import { fact, text } from "../text";
+import type { RpcReply } from "./rpc";
 import type {
   CommandExecutionRequestApprovalParams,
   CommandExecutionRequestApprovalResponse,
@@ -30,11 +31,8 @@ import type {
   ToolRequestUserInputParams,
 } from "./types";
 
-/** Exactly one of the two, which is what tells an answer from a refusal. */
-export type Reply = { readonly result: unknown } | { readonly error: RpcError };
-
-/** What the adapter knows about a request and the request itself does not. */
-export interface Asking {
+/** What the adapter knows when a request arrives and the request itself does not. */
+export interface Arrival {
   readonly requestId: string;
   /** The thread it arrived on, which is the only id some requests can be filed under. */
   readonly threadId: string;
@@ -44,13 +42,13 @@ export interface Asking {
 
 export interface Asked {
   /** The question as a surface reads it. */
-  readonly opens: (params: unknown, asking: Asking) => OpenRequest;
+  readonly opens: (params: unknown, arrival: Arrival) => OpenRequest;
   /**
    * What Codex is told. Only a decision the row offers arrives here, with one
    * exception: an interrupt cancels a park whose row offers no cancel, and the
    * permissions row answers that with its deny.
    */
-  readonly replies: (decision: ApprovalDecision, params: unknown) => Reply;
+  readonly replies: (decision: ApprovalDecision, params: unknown) => RpcReply;
   /** The answers Codex cannot express, so the turn is ended for it. */
   readonly endsTurn: ReadonlyArray<ApprovalDecision>;
 }
@@ -61,8 +59,8 @@ export interface Asked {
  * rather than in five row bodies.
  */
 const asked = <P>(row: {
-  readonly opens: (params: P, asking: Asking) => OpenRequest;
-  readonly replies: (decision: ApprovalDecision, params: P) => Reply;
+  readonly opens: (params: P, arrival: Arrival) => OpenRequest;
+  readonly replies: (decision: ApprovalDecision, params: P) => RpcReply;
   readonly endsTurn?: ReadonlyArray<ApprovalDecision>;
 }): Asked => ({ endsTurn: [], ...row }) as Asked;
 
@@ -84,7 +82,7 @@ const APPROVED: Readonly<Record<ApprovalDecision, FileChangeApprovalDecision>> =
 /** JSON-RPC's own: this client will not do what was asked. */
 const INTERNAL_ERROR = -32603;
 
-const DECLINED: Reply = { error: { code: INTERNAL_ERROR, message: "declined by the user" } };
+const DECLINED: RpcReply = { error: { code: INTERNAL_ERROR, message: "declined by the user" } };
 
 /**
  * The profile the agent asked for, as a grant. A half the request left null is

@@ -23,7 +23,8 @@ import {
   type Usage,
 } from "@hydra/protocol";
 import { now } from "../../report";
-import { fact, idOf, text } from "../text";
+import { idOf } from "../events";
+import { fact, text } from "../text";
 import type { NotificationFrame } from "./rpc";
 import type {
   AgentMessageDeltaNotification,
@@ -136,6 +137,15 @@ const kindOf = (item: ThreadItem): ItemKind | null => {
 };
 
 /**
+ * What a file change is about, as the protocol carries it. A change the harness
+ * named no file in has nothing for a reader to see, and an empty path is a
+ * frame nobody can decode, so it is left out: the adapter's approval card and
+ * the item row read the same list.
+ */
+export const pathsOf = (item: Extract<ThreadItem, { type: "fileChange" }>): ReadonlyArray<string> =>
+  item.changes.flatMap((change) => (change.path === "" ? [] : [fact(change.path)]));
+
+/**
  * The one field of an item a reader wants in a row: what the command ran, what
  * the patch touched, what the tool was called. Kept to that - `raw` holds the
  * rest, and a vendor-shaped detail would make what the user reads a function of
@@ -146,7 +156,7 @@ const detail = (item: ThreadItem): { readonly detail?: Schema.Json } => {
     case "commandExecution":
       return { detail: { command: text(item.command) } };
     case "fileChange": {
-      const paths = item.changes.map((change) => fact(change.path));
+      const paths = pathsOf(item);
       const path = paths[0];
       if (path === undefined) return {};
       // The first path is what a one-line row shows; the rest are there for a

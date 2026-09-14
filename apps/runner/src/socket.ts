@@ -276,7 +276,7 @@ export const connect = (
         const adapter = adapterFor(request.providerId);
         return yield* reporting(
           adapter === undefined
-            ? probeFailed(noAdapterFor(request.providerId))
+            ? probeFailed(null, noAdapterFor(request.providerId))
             : yield* adapter.probe(contextFor(adapter, request.instanceId), request.config),
         );
       }).pipe(
@@ -284,7 +284,7 @@ export const connect = (
         // reach the controller as an error, not as silence. The fallback is
         // bounded, so it always encodes.
         Effect.catchCause((cause) =>
-          Effect.ignore(reporting(probeFailed(wentWrong(cause, MAX_FACT_LENGTH)))),
+          Effect.ignore(reporting(probeFailed(null, wentWrong(cause, MAX_FACT_LENGTH)))),
         ),
         // The connection is going if the write itself failed, and there is
         // nowhere left to report that to.

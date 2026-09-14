@@ -10,14 +10,6 @@ import { MAX_FACT_LENGTH, MAX_MESSAGE_LENGTH } from "@hydra/protocol";
 export const fact = (value: string): string => value.slice(0, MAX_FACT_LENGTH);
 
 /**
- * The same cut, for an id something downstream is filed under. An id the
- * protocol will not carry is a frame nobody can decode, which loses the event
- * whole; a harness that named none gets one of ours instead, so what it was
- * about is still reported.
- */
-export const idOf = (given: string): string => (given === "" ? crypto.randomUUID() : fact(given));
-
-/**
  * The same cut for the longer fields: free text a harness wrote, not an id. It
  * says where it cut, because a command read as whole is a command the user
  * approved something else than.

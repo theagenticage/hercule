@@ -47,6 +47,9 @@ export interface NotificationFrame {
   readonly params: unknown;
 }
 
+/** What a request is answered with: exactly one of the two, never both. */
+export type RpcReply = { readonly result: unknown } | { readonly error: RpcError };
+
 export interface RpcHandlers {
   readonly onServerRequest: (frame: ServerRequestFrame) => void;
   readonly onNotification: (frame: NotificationFrame) => void;
@@ -61,10 +64,7 @@ export interface Rpc {
    * ones this build has no mapping for: a request left hanging is a turn that
    * never ends, with nothing said anywhere.
    */
-  readonly answer: (
-    id: string | number,
-    body: { readonly result: unknown } | { readonly error: RpcError },
-  ) => void;
+  readonly answer: (id: string | number, body: RpcReply) => void;
   /** Reads the peer until it stops talking; nothing is answered before it runs. */
   readonly pump: Effect.Effect<void>;
 }

@@ -1,0 +1,17 @@
+What `codex login --device-auth` printed on stdout, ANSI colour stripped.
+Observed 2026-09-14 against codex-cli 0.154.0: the URL and the code are on
+stdout, nothing is read from stdin, and the child polls and then exits.
+The lines below this one are the capture, verbatim.
+
+Welcome to Codex [v0.154.0]
+OpenAI's command-line coding agent
+
+Follow these steps to sign in with ChatGPT using device code authorization:
+
+1. Open this link in your browser and sign in to your account
+   https://auth.openai.com/codex/device
+
+2. Enter this one-time code (expires in 15 minutes)
+   CH61-0FI2N
+
+Continue only if you started this login in Codex. If a website or another person gave you this code, cancel.

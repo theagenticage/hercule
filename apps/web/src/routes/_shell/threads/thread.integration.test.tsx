@@ -1,6 +1,5 @@
 /**
- * The thread surface over a stubbed controller: AC-11 to AC-14 and AC-23 of
- * `docs/plans/P009-thread-surface-and-composer/SPEC.md`.
+ * The thread surface over a stubbed controller.
  *
  * These tests drive the transcript's rendering, the live turn's divider, the
  * token tap and the top bar's crumb - all through `renderApp` and the

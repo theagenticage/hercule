@@ -1,6 +1,5 @@
 /**
- * The composer on a draft thread over a stubbed controller: AC-15 to AC-18 of
- * `docs/plans/P009-thread-surface-and-composer/SPEC.md`, plus the AD-6 routing
+ * The composer on a draft thread over a stubbed controller, plus the routing
  * check that `/threads/new` is a static route rather than `$sessionId` reading
  * "new" as a session id.
  *

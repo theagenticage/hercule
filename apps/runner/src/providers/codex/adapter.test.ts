@@ -1,8 +1,8 @@
 /**
  * The Codex adapter's probe, its install and the isolation it spawns an
  * app-server under, over a scripted app-server: nothing vendor-supplied runs.
- * The frames the script answers with are the shapes captured from codex 0.154.0
- * in `docs/plans/P013-codex-adapter/samples/`, not shapes invented here.
+ * The frames the script answers with are the shapes captured from codex 0.154.0,
+ * not shapes invented here.
  */
 import { existsSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
@@ -12,9 +12,9 @@ import { Duration, Effect, Fiber } from "effect";
 import { TestClock } from "effect/testing";
 import { CODEX_VERSION } from "@hydra/home/version";
 import type { ProbeResult, ProviderEvent, SessionSpec } from "@hydra/protocol";
-import { INSTALL_DEADLINE } from "../claude-code";
-import { codexAdapter, type CodexSeam } from "./adapter";
-import { PROBE_DEADLINE } from "./probe";
+import { INSTALL_DEADLINE } from "../install";
+import { codexAdapter, CONTROL_DEADLINE, type CodexSeam } from "./adapter";
+import { PROBE_DEADLINE } from "../probe";
 import {
   API_KEY,
   type Answers,
@@ -422,6 +422,52 @@ describe("what an input does to a Codex session", () => {
     expect(sent).toEqual({ turnId: NEXT, delivery: "opened" });
     expect(sentOf(run.requests, "turn/steer")).toHaveLength(1);
     expect(sentOf(run.requests, "turn/start")).toHaveLength(2);
+  });
+});
+
+describe("an app-server that stops answering a control request", () => {
+  it("gives up on the interrupt rather than holding up every session on the machine", async () => {
+    const { adapter, ctx, seen } = driving({ "turn/interrupt": SILENT });
+
+    await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          yield* adapter.startSession(SESSION, SPEC, ctx);
+          yield* adapter.sendInput(SESSION, { text: "look around" });
+          const stopping = yield* Effect.forkChild(adapter.stopSession(SESSION, "stopped"));
+          // The runner handles session frames in the order they arrived, so a
+          // stop that waited out the request deadline would stall the machine.
+          yield* TestClock.adjust(CONTROL_DEADLINE);
+          return yield* Fiber.join(stopping);
+        }),
+        TestClock.layer(),
+      ),
+    );
+
+    expect(taggedIn(seen, "session.exited").map((event) => event.reason)).toEqual(["stopped"]);
+  });
+
+  it("reports one end when the thread closes while the stop is waiting", async () => {
+    const run = driving({ "turn/interrupt": SILENT });
+    await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, run.ctx));
+    await Effect.runPromise(run.adapter.sendInput(SESSION, { text: "look around" }));
+
+    const stopping = Effect.runFork(run.adapter.stopSession(SESSION, "stopped"));
+    await until(
+      "asked the server to end the turn",
+      () => sentOf(run.requests, "turn/interrupt").length === 1,
+    );
+    run.spawns[0]!.push({ method: "thread/closed", params: { threadId: THREAD } });
+    await until("reported the session gone", () => taggedIn(run.seen, "session.exited").length > 0);
+    await Effect.runPromise(Fiber.join(stopping));
+
+    await settle();
+    // The thread the server closed is the end that happened: the stop was
+    // waiting on the harness while it came, and a second exit would be a second
+    // row for one session's end.
+    expect(taggedIn(run.seen, "session.exited").map((event) => event.reason)).toEqual([
+      "idle_unload",
+    ]);
   });
 });
 

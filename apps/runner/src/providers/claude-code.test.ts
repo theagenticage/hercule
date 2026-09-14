@@ -22,7 +22,8 @@ import {
   type ProviderEvent,
   type SessionSpec,
 } from "@hydra/protocol";
-import { PROBE_DEADLINE, claudeCodeAdapter, type ClaudeSeam } from "./claude-code";
+import { claudeCodeAdapter, type ClaudeSeam } from "./claude-code";
+import { PROBE_DEADLINE } from "./probe";
 import type { ProviderAdapter, ProviderRunnerContext } from "./index";
 
 const CONTEXT: ProviderRunnerContext = {

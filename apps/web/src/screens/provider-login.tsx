@@ -59,17 +59,17 @@ export function ProviderLogin({
     },
   });
 
-  /** Nothing was relayed, so all that is left is to stop showing the code. */
-  const done = (): void => {
-    close();
-    onLoggedIn();
-  };
-
   /** The started login is the whole of this panel's state, so dropping it closes. */
   const close = (): void => {
     setCode("");
     submit.reset();
     start.reset();
+  };
+
+  /** Nothing was relayed, so all that is left is to stop showing the code. */
+  const done = (): void => {
+    close();
+    onLoggedIn();
   };
 
   const url = start.data?.url;

@@ -27,13 +27,14 @@ import {
 } from "@hydra/protocol";
 import type { LoginCommand } from "../login";
 import type { ProviderAdapter, ProviderRunnerContext } from "../index";
+import { probeFailed } from "../probe";
 import { userMessage } from "../events";
 import { runProcess, spawnAppServer, type Run } from "../process";
-import { fact, text } from "../text";
+import { text } from "../text";
 import { now } from "../../report";
 import { ASKED, type Asked } from "./approvals";
-import { normalize, normalizing, type Normalizing } from "./normalize";
-import { failed, handshake, installing, probing, saidBy, type AppServer } from "./probe";
+import { normalize, normalizing, pathsOf, type Normalizing } from "./normalize";
+import { codexInstall, handshake, probing, saidBy, type AppServer } from "./probe";
 import {
   rpcOver,
   type AppServerSpawn,
@@ -155,6 +156,14 @@ const ACCESS_MODES: Readonly<
   },
 };
 
+/**
+ * How long a control request is given. It is a write to the app-server and a
+ * wait for its answer, and the runner handles session frames in the order they
+ * arrived rather than concurrently, so one app-server that stops answering
+ * would otherwise hold up every session on the machine - pings included.
+ */
+export const CONTROL_DEADLINE: Duration.Duration = Duration.seconds(5);
+
 /** The code spec 06 section 10.2 names for a server too busy to take a turn. */
 const OVERLOADED = -32001;
 
@@ -259,6 +268,10 @@ export const codexAdapter = (seam: CodexSeam): ProviderAdapter => {
   };
 
   const exit = (held: Held, reason: ExitReason): void => {
+    // By identity: a stop waits on the harness, and a thread the server closed
+    // or an app-server that died in that window has already ended this session.
+    // A second exit would be a second row for one end.
+    if (sessions.get(held.binding.sessionId) !== held) return;
     sessions.delete(held.binding.sessionId);
     emit({
       _tag: "session.exited",
@@ -276,152 +289,6 @@ export const codexAdapter = (seam: CodexSeam): ProviderAdapter => {
       const held = sessions.get(sessionId);
       if (held !== undefined) exit(held, "process_exit");
     }
-  };
-
-  const onNotification = (host: Host, frame: NotificationFrame): void => {
-    const threadId = threadIn(frame.params);
-    const held = threadId === undefined ? undefined : sessionOn(host, threadId);
-    if (held === undefined) return;
-    // The thread is unloaded and its rollout is on disk, which is what makes
-    // this the one exit a later session can carry on from (spec 06 section 4.1).
-    if (frame.method === "thread/closed") {
-      exit(held, "idle_unload");
-      return;
-    }
-    for (const event of normalize(held.state, frame)) emit(event);
-    // A file change approval names no paths at this release, so what a card
-    // shows are the item's own, held from the moment the patch is announced
-    // until it is applied: the window an approval for it arrives in.
-    if (frame.method === "item/started" || frame.method === "item/completed") {
-      const { item } = frame.params as ItemStartedNotification | ItemCompletedNotification;
-      if (item.type !== "fileChange") return;
-      if (frame.method === "item/completed") held.fileChanges.delete(item.id);
-      else {
-        held.fileChanges.set(
-          item.id,
-          // A change the harness named no file in has nothing for a card to
-          // show, and an empty path is a frame nobody can decode.
-          item.changes.flatMap((change) => (change.path === "" ? [] : [fact(change.path)])),
-        );
-      }
-      return;
-    }
-    // What the adapter believes about the turn, which is what decides whether
-    // the next input steers. The turn a `turn/start` answered with is already
-    // held; this is the server's own account of the same thing.
-    if (frame.method === "turn/started") {
-      // The turn a `turn/start` answered with is already held, and it is the
-      // one this session is steering; a turn opened elsewhere is not.
-      held.turnId ??= (frame.params as TurnStartedNotification).turn.id;
-    } else if (frame.method === "turn/completed") {
-      const turn = (frame.params as TurnCompletedNotification).turn;
-      // Only the turn in flight ends the flight: a completion for another turn
-      // would otherwise make the next input open a turn beside a running one.
-      if (turn.status !== "inProgress" && turn.id === held.turnId) {
-        held.turnId = undefined;
-        // The turn a park belonged to is over, and the controller closed the
-        // open request with it: an answer arriving now would be written to a
-        // harness that stopped waiting and reported as a second end.
-        held.open = undefined;
-        held.waiting.length = 0;
-        held.fileChanges.clear();
-      }
-    }
-  };
-
-  /**
-   * Ends every park nobody has been shown, in Codex's own terms. No event: no
-   * surface was ever told these existed, so there is nothing to report over.
-   */
-  const cancelWaiting = (held: Held): void => {
-    for (const park of held.waiting.splice(0)) {
-      held.host.rpc.answer(park.id, park.asked.replies("cancel", park.params));
-    }
-  };
-
-  /** Puts the session on a park: exactly one is open at a time. */
-  const announce = (held: Held, park: Park): void => {
-    held.open = park;
-    emit({
-      _tag: "request.opened",
-      eventId: crypto.randomUUID(),
-      sessionId: held.binding.sessionId,
-      at: now(),
-      request: park.request,
-    });
-  };
-
-  /**
-   * Ends the open park: Codex is told the answer in its own terms, the stream
-   * says the park is over, and the next request Codex is waiting on takes the
-   * slot it left.
-   */
-  const resolving = (held: Held, park: Park, decision: ApprovalDecision): void => {
-    held.open = undefined;
-    held.host.rpc.answer(park.id, park.asked.replies(decision, park.params));
-    emit({
-      _tag: "request.resolved",
-      eventId: crypto.randomUUID(),
-      sessionId: held.binding.sessionId,
-      at: now(),
-      requestId: park.request.requestId,
-      decision,
-    });
-    const next = held.waiting.shift();
-    if (next !== undefined) announce(held, next);
-  };
-
-  /**
-   * Answered, not dropped: a request left hanging is a turn that never ends,
-   * with nothing said anywhere.
-   */
-  const refuse = (host: Host, frame: ServerRequestFrame, error: RpcError): void => {
-    host.rpc.answer(frame.id, { error });
-  };
-
-  const onServerRequest = (host: Host, frame: ServerRequestFrame): void => {
-    if (frame.method === "item/tool/call") {
-      // Hydra hosts no tools for Codex, so there is nothing a user could decide
-      // and nothing to wait for: the call is refused where it arrives.
-      host.rpc.answer(frame.id, {
-        result: {
-          contentItems: [{ type: "inputText", text: "Hydra does not host dynamic tools" }],
-          success: false,
-        } satisfies DynamicToolCallResponse,
-      });
-      return;
-    }
-    const asked = ASKED[frame.method];
-    if (asked === undefined) {
-      refuse(host, frame, {
-        code: METHOD_NOT_FOUND,
-        message: `Hydra does not answer ${frame.method}`,
-      });
-      warn(host, `the app-server asked for ${frame.method}, which this runner build cannot answer`);
-      return;
-    }
-    const threadId = threadIn(frame.params);
-    const held = threadId === undefined ? undefined : sessionOn(host, threadId);
-    // A thread nobody here holds has no one to ask and no one to tell: a
-    // warning for it would go to every other session on this app-server.
-    if (threadId === undefined || held === undefined) {
-      refuse(host, frame, {
-        code: INVALID_REQUEST,
-        message: `no session on this runner is on thread ${String(threadId)}`,
-      });
-      return;
-    }
-    const requestId = crypto.randomUUID();
-    const request = asked.opens(frame.params, {
-      requestId,
-      threadId,
-      paths: (itemId) => held.fileChanges.get(itemId) ?? [],
-    });
-    const park: Park = { id: frame.id, request, asked, params: frame.params };
-    // Codex asks for a second approval without waiting for the first, and waits
-    // for both: this one is announced when the one in the slot is answered.
-    if (held.open === undefined) announce(held, park);
-    else held.waiting.push(park);
   };
 
   /**
@@ -547,6 +414,153 @@ export const codexAdapter = (seam: CodexSeam): ProviderAdapter => {
       );
     });
 
+  const onNotification = (host: Host, frame: NotificationFrame): void => {
+    const threadId = threadIn(frame.params);
+    const held = threadId === undefined ? undefined : sessionOn(host, threadId);
+    if (held === undefined) return;
+    // The thread is unloaded and its rollout is on disk, which is what makes
+    // this the one exit a later session can carry on from (spec 06 section 4.1).
+    if (frame.method === "thread/closed") {
+      exit(held, "idle_unload");
+      return;
+    }
+    for (const event of normalize(held.state, frame)) emit(event);
+    // A file change approval names no paths at this release, so what a card
+    // shows are the item's own, held from the moment the patch is announced
+    // until it is applied: the window an approval for it arrives in.
+    if (frame.method === "item/started" || frame.method === "item/completed") {
+      const { item } = frame.params as ItemStartedNotification | ItemCompletedNotification;
+      if (item.type !== "fileChange") return;
+      if (frame.method === "item/completed") held.fileChanges.delete(item.id);
+      else {
+        held.fileChanges.set(item.id, pathsOf(item));
+      }
+      return;
+    }
+    // What the adapter believes about the turn, which is what decides whether
+    // the next input steers. The turn a `turn/start` answered with is already
+    // held; this is the server's own account of the same thing.
+    if (frame.method === "turn/started") {
+      // The turn a `turn/start` answered with is already held, and it is the
+      // one this session is steering; a turn opened elsewhere is not.
+      held.turnId ??= (frame.params as TurnStartedNotification).turn.id;
+    } else if (frame.method === "turn/completed") {
+      const turn = (frame.params as TurnCompletedNotification).turn;
+      // Only the turn in flight ends the flight: a completion for another turn
+      // would otherwise make the next input open a turn beside a running one.
+      if (turn.status !== "inProgress" && turn.id === held.turnId) {
+        held.turnId = undefined;
+        // The controller closed the open request when the turn ended, so no
+        // resolution is reported for it - but Codex is still waiting on every
+        // park it asked, and a request left unanswered is a connection nobody
+        // can reason about.
+        cancelWaiting(held);
+        const open = held.open;
+        held.open = undefined;
+        if (open !== undefined) cancelled(held, open);
+        held.fileChanges.clear();
+      }
+    }
+  };
+
+  /** Tells Codex a park is over, in its own terms. Every request is answered. */
+  const cancelled = (held: Held, park: Park): void => {
+    held.host.rpc.answer(park.id, park.asked.replies("cancel", park.params));
+  };
+
+  /**
+   * Ends every park nobody has been shown. No event: no surface was ever told
+   * these existed, so there is nothing to report over.
+   */
+  const cancelWaiting = (held: Held): void => {
+    for (const park of held.waiting.splice(0)) cancelled(held, park);
+  };
+
+  /** Puts the session on a park: exactly one is open at a time. */
+  const announce = (held: Held, park: Park): void => {
+    held.open = park;
+    emit({
+      _tag: "request.opened",
+      eventId: crypto.randomUUID(),
+      sessionId: held.binding.sessionId,
+      at: now(),
+      request: park.request,
+    });
+  };
+
+  /**
+   * Ends the open park: Codex is told the answer in its own terms, the stream
+   * says the park is over, and the next request Codex is waiting on takes the
+   * slot it left.
+   */
+  const resolving = (held: Held, park: Park, decision: ApprovalDecision): void => {
+    held.open = undefined;
+    held.host.rpc.answer(park.id, park.asked.replies(decision, park.params));
+    emit({
+      _tag: "request.resolved",
+      eventId: crypto.randomUUID(),
+      sessionId: held.binding.sessionId,
+      at: now(),
+      requestId: park.request.requestId,
+      decision,
+    });
+    const next = held.waiting.shift();
+    if (next !== undefined) announce(held, next);
+  };
+
+  /**
+   * Answered, not dropped: a request left hanging is a turn that never ends,
+   * with nothing said anywhere.
+   */
+  const refuse = (host: Host, frame: ServerRequestFrame, error: RpcError): void => {
+    host.rpc.answer(frame.id, { error });
+  };
+
+  const onServerRequest = (host: Host, frame: ServerRequestFrame): void => {
+    if (frame.method === "item/tool/call") {
+      // Hydra hosts no tools for Codex, so there is nothing a user could decide
+      // and nothing to wait for: the call is refused where it arrives.
+      host.rpc.answer(frame.id, {
+        result: {
+          contentItems: [{ type: "inputText", text: "Hydra does not host dynamic tools" }],
+          success: false,
+        } satisfies DynamicToolCallResponse,
+      });
+      return;
+    }
+    const asked = ASKED[frame.method];
+    if (asked === undefined) {
+      refuse(host, frame, {
+        code: METHOD_NOT_FOUND,
+        message: `Hydra does not answer ${frame.method}`,
+      });
+      warn(host, `the app-server asked for ${frame.method}, which this runner build cannot answer`);
+      return;
+    }
+    const threadId = threadIn(frame.params);
+    const held = threadId === undefined ? undefined : sessionOn(host, threadId);
+    // A thread nobody here holds has no one to ask and no one to tell: a
+    // warning for it would go to every other session on this app-server.
+    if (threadId === undefined || held === undefined) {
+      refuse(host, frame, {
+        code: INVALID_REQUEST,
+        message: `no session on this runner is on thread ${String(threadId)}`,
+      });
+      return;
+    }
+    const requestId = crypto.randomUUID();
+    const request = asked.opens(frame.params, {
+      requestId,
+      threadId,
+      paths: (itemId) => held.fileChanges.get(itemId) ?? [],
+    });
+    const park: Park = { id: frame.id, request, asked, params: frame.params };
+    // Codex asks for a second approval without waiting for the first, and waits
+    // for both: this one is announced when the one in the slot is answered.
+    if (held.open === undefined) announce(held, park);
+    else held.waiting.push(park);
+  };
+
   /**
    * Ends the running turn, if the adapter believes there is one. A refusal
    * means the turn is already over, which is the same outcome.
@@ -555,10 +569,13 @@ export const codexAdapter = (seam: CodexSeam): ProviderAdapter => {
     held.turnId === undefined
       ? Effect.void
       : Effect.ignore(
-          held.host.rpc.request("turn/interrupt", {
-            threadId: held.binding.nativeSessionId,
-            turnId: held.turnId,
-          } satisfies TurnInterruptParams),
+          Effect.timeout(
+            held.host.rpc.request("turn/interrupt", {
+              threadId: held.binding.nativeSessionId,
+              turnId: held.turnId,
+            } satisfies TurnInterruptParams),
+            CONTROL_DEADLINE,
+          ),
         );
 
   const hosting = (sessionId: string): Effect.Effect<Held, string> =>
@@ -583,13 +600,20 @@ export const codexAdapter = (seam: CodexSeam): ProviderAdapter => {
         input: [textInput(input.text)],
         ...modelParams(input.modelSelection),
       };
+      // What the turn is running under, which is what the normalizer reports on
+      // `turn.started`: the notification itself carries no model. Set before
+      // the write, because `turn/started` can be read before this fiber resumes.
+      const before = held.state.model;
+      if (input.modelSelection !== undefined) held.state.model = input.modelSelection.model;
       const answer = yield* Effect.mapError(
         retrying(held.host.rpc.request("turn/start", params)),
-        (error) => error.message,
+        (error) => {
+          // No turn opened, so the selection it would have run under is not
+          // what the next one reports.
+          held.state.model = before;
+          return error.message;
+        },
       );
-      // What the turn is running under, which is what the normalizer reports on
-      // `turn.started`: the notification itself carries no model.
-      if (input.modelSelection !== undefined) held.state.model = input.modelSelection.model;
       return { turnId: (answer as TurnStartResponse).turn.id, delivery: "opened" };
     });
 
@@ -665,7 +689,7 @@ export const codexAdapter = (seam: CodexSeam): ProviderAdapter => {
     // takes nothing from it and does not name the argument.
     probe: (ctx: ProviderRunnerContext): Effect.Effect<ProbeResult> =>
       ctx.binary === undefined
-        ? Effect.succeed(failed(null, `no ${CODEX_BINARY} on this machine`))
+        ? Effect.succeed(probeFailed(null, `no ${CODEX_BINARY} on this machine`))
         : probe(ctx, ctx.binary),
 
     startSession: (sessionId, spec, ctx) =>
@@ -822,7 +846,7 @@ export const codexAdapter = (seam: CodexSeam): ProviderAdapter => {
       userCode: USER_CODE,
     }),
 
-    install: installing(seam.run),
+    install: codexInstall(seam.run),
   };
 };
 

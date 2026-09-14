@@ -7,43 +7,7 @@ import { describe, expect, it } from "vitest";
 import { Duration, Effect, Fiber } from "effect";
 import { TestClock } from "effect/testing";
 import { RPC_DEADLINE, rpcOver, type Rpc } from "./rpc";
-
-/** A stream of lines a test pushes into, read once by the codec. */
-const lines = (): {
-  readonly push: (line: string) => void;
-  readonly end: () => void;
-  readonly iterable: AsyncIterable<string>;
-} => {
-  const queued: Array<string> = [];
-  let wake: (() => void) | undefined;
-  let ended = false;
-  const woken = (): void => {
-    const pending = wake;
-    wake = undefined;
-    pending?.();
-  };
-  return {
-    push: (line) => {
-      queued.push(line);
-      woken();
-    },
-    end: () => {
-      ended = true;
-      woken();
-    },
-    iterable: {
-      async *[Symbol.asyncIterator]() {
-        for (;;) {
-          while (queued.length > 0) yield queued.shift()!;
-          if (ended) return;
-          await new Promise<void>((resolve) => {
-            wake = resolve;
-          });
-        }
-      },
-    },
-  };
-};
+import { lines } from "./testing";
 
 interface Peer {
   readonly rpc: Rpc;

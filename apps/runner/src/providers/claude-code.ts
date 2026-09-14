@@ -24,7 +24,6 @@ import {
 import { CLAUDE_CODE_VERSION } from "@hydra/home/version";
 import {
   MAX_FACT_ITEMS,
-  MAX_INSTALL_MESSAGE_LENGTH,
   type AccessMode,
   type ApprovalDecision,
   type ExitReason,
@@ -45,7 +44,9 @@ import {
   toolKind,
   type Normalizing,
 } from "./claude-code-normalize";
-import type { InstallOutcome, ProviderAdapter, ProviderRunnerContext } from "./index";
+import type { ProviderAdapter, ProviderRunnerContext } from "./index";
+import { installing } from "./install";
+import { PROBE_DEADLINE, probeFailed } from "./probe";
 import type { LoginCommand } from "./login";
 import { runProcess, type Run } from "./process";
 import { fact, text } from "./text";
@@ -56,12 +57,6 @@ import { now } from "../report";
 export const CLAUDE_CODE = "claude-code";
 
 const CLAUDE_BINARY = "claude";
-
-/** Long enough for a cold CLI, short enough that a Fleet page does not look hung. */
-export const PROBE_DEADLINE: Duration.Duration = Duration.seconds(15);
-
-/** Downloading and running somebody else's installer over a slow link. */
-export const INSTALL_DEADLINE: Duration.Duration = Duration.minutes(5);
 
 /**
  * How long a control request is given. It is a write to the harness child and a
@@ -125,12 +120,6 @@ const describe = (error: unknown): string => {
   const said = fact(error instanceof Error ? error.message : String(error));
   return said === "" ? "the harness failed without saying why" : said;
 };
-
-const failed = (harnessVersion: string | null, message: string): ProbeResult => ({
-  harnessVersion,
-  auth: { status: "error", message },
-  models: [],
-});
 
 /** Only ever called with levels the CLI listed, or with the overlay's own. */
 function effortOver([first, ...rest]: readonly [string, ...ReadonlyArray<string>]): ModelOption {
@@ -866,12 +855,12 @@ export const claudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
     probe: (ctx: ProviderRunnerContext): Effect.Effect<ProbeResult> => {
       const binary = ctx.binary;
       if (binary === undefined) {
-        return Effect.succeed(failed(null, `no ${CLAUDE_BINARY} on this machine`));
+        return Effect.succeed(probeFailed(null, `no ${CLAUDE_BINARY} on this machine`));
       }
       const gather = Effect.gen(function* () {
         const harnessVersion = yield* versionOf(ctx, binary);
         return yield* Effect.match(ask(ctx, binary), {
-          onFailure: (message) => failed(harnessVersion, message),
+          onFailure: (message) => probeFailed(harnessVersion, message),
           onSuccess: ({ account, models }) => ({
             harnessVersion,
             auth: authOf(account),
@@ -882,7 +871,7 @@ export const claudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
       return Effect.map(
         Effect.timeoutOption(gather, PROBE_DEADLINE),
         Option.getOrElse(() =>
-          failed(null, `the harness did not answer within ${Duration.format(PROBE_DEADLINE)}`),
+          probeFailed(null, `the harness did not answer within ${Duration.format(PROBE_DEADLINE)}`),
         ),
       );
     },
@@ -900,40 +889,12 @@ export const claudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
      * Pinned to the CLI this build's SDK talks to. The script needs the network
      * even so.
      */
-    install: (env: Readonly<Record<string, string | undefined>>): Effect.Effect<InstallOutcome> =>
-      Effect.map(
-        Effect.timeoutOption(
-          seam.run(
-            [
-              "bash",
-              "-c",
-              `curl -fsSL https://claude.ai/install.sh | bash -s ${CLAUDE_CODE_VERSION}`,
-            ],
-            env,
-          ),
-          INSTALL_DEADLINE,
-        ),
-        Option.match({
-          onNone: () => ({
-            ok: false,
-            message: `the installer did not finish within ${Duration.format(INSTALL_DEADLINE)}`,
-          }),
-          onSome: (ran) =>
-            ran.code === 0
-              ? { ok: true }
-              : { ok: false, message: lastLines(ran.stderr === "" ? ran.stdout : ran.stderr) },
-        }),
-      ),
+    install: installing(seam.run, [
+      "bash",
+      "-c",
+      `curl -fsSL https://claude.ai/install.sh | bash -s ${CLAUDE_CODE_VERSION}`,
+    ]),
   };
-};
-
-const LAST_LINES = 5;
-
-export const lastLines = (output: string): string => {
-  const said = output.trimEnd().split("\n").slice(-LAST_LINES).join("\n");
-  return said === ""
-    ? "the installer failed without saying why"
-    : said.slice(-MAX_INSTALL_MESSAGE_LENGTH);
 };
 
 export const claudeCode: ProviderAdapter = claudeCodeAdapter({

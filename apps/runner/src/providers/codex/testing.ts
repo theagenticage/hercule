@@ -2,8 +2,8 @@
  * The scripted app-server every Codex adapter test drives: a seam whose child
  * answers line by line, records what it was asked, and lets a test push a
  * notification or a request of its own. Nothing vendor-supplied runs, and the
- * frames the script answers with are the shapes captured from codex 0.154.0 in
- * `docs/plans/P013-codex-adapter/samples/`, not shapes invented here.
+ * frames the script answers with are the shapes captured from codex 0.154.0,
+ * not shapes invented here.
  *
  * It lives beside the tests rather than inside one of them because two test
  * files drive the same app-server: the adapter's own and the approvals'.

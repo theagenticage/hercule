@@ -444,12 +444,12 @@ describe("a device-code login", () => {
   /** What `codex login --device-auth` printed, out of the recording of it. */
   const RECORDED = ((): ReadonlyArray<string> => {
     const lines = readFileSync(
-      new URL("../../../../docs/plans/P013-codex-adapter/samples/device-auth.txt", import.meta.url),
+      new URL("./codex/device-auth.sample.txt", import.meta.url),
       "utf8",
     ).split("\n");
-    const from = lines.findIndex((line) => line.startsWith("(stdout")) + 1;
-    const to = lines.findIndex((line) => line.startsWith("Facts:"));
-    return lines.slice(from, to);
+    // The file opens with what it is and where it came from; the capture is
+    // everything after the blank line that ends that.
+    return lines.slice(lines.indexOf("") + 1);
   })();
 
   /**
