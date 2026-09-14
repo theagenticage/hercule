@@ -426,7 +426,7 @@ From `research/pi-approval-parking.md` (branch `research/pi-approval-parking`), 
 - **No contractual guarantee** (pre-1.0): pin the pi version and ship a regression test asserting that a pending `tool_call` handler delays execution.
 - **The park is bridged in-band over RPC**: the Hydra extension's `tool_call` handler blocks on `ctx.ui`, which RPC mode surfaces as an `extension_ui_request` on stdout; the adapter answers with `extension_ui_response` when `respondToRequest` arrives. No side channel.
 - While parked no LLM connection is held open; the turn stays active; `tool_execution_start` has already fired, so the UI overlays "awaiting approval" on the started item.
-- On Claude, `canUseTool` is reached only when the pipeline falls through to a prompt; auto-approved tools never hit it. That is the intended behaviour for the mapped modes. A `PreToolUse` hook is the seam if every call must be observed.
+- On Claude, `canUseTool` is reached only when the pipeline falls through to a prompt; auto-approved tools never hit it. That is the intended behaviour for the mapped modes. A `PreToolUse` hook is the seam if every call must be observed. In `approval-required`, which actions are asked about is the harness's own judgement: Claude Code decides read-only shell itself, so only mutating commands park - `ls -la` ran without the callback being called at all, while `touch proof.txt` parked *(observed 2026-09-14, [#70](https://github.com/rogierpennink/hydra/issues/70), CLI 2.1.270)*.
 
 ### 8.3 Codex sandbox caveats
 
