@@ -12,7 +12,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, type RefObject } from "react";
 import type { QueryClient } from "@tanstack/react-query";
-import { openItemOf, queryKeys, type Live } from "@hydra/client-core";
+import { mergeTranscript, openItemOf, queryKeys, type Live } from "@hydra/client-core";
 import {
   sessionStreamTopic,
   sessionTapTopic,
@@ -131,17 +131,14 @@ export const useThreadLive = (
         // a row for any other item (another item starting, a turn boundary)
         // leaves the open item's own buffered tail exactly as it was.
         if (items.some((item) => itemIdOf(item.event) === openItemIdRef.current)) clearTail();
-        // Appended on `position`, never blindly: the transcript log is
-        // append-only and strictly ordered, so a row at or below the last one
-        // held is one this cache already has - a replay the subscription
-        // resumed from, or the same delta delivered twice.
+        // Merged on `position`, not appended after the last row held: a row
+        // this cache already has is the same row and is left alone, and one it
+        // does not is placed in order however late it arrives. Two
+        // subscriptions seeded from the same empty cache both replay from the
+        // start of the log, so the later delivery can be the earlier rows.
         queryClient.setQueryData<readonly TranscriptRow[]>(
           queryKeys.transcript(sessionId),
-          (current) => {
-            const last = current?.at(-1)?.position ?? -1;
-            const fresh = items.filter((item) => item.position > last);
-            return fresh.length === 0 ? current : [...(current ?? []), ...fresh];
-          },
+          (current) => mergeTranscript(current ?? [], items),
         );
       },
       String(cursor),

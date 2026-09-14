@@ -148,8 +148,20 @@ describe("what the Codex adapter reports about a machine", () => {
     // A model the server lists no efforts for offers no effort choice.
     expect(optionOf(probed.models, "gpt-5.6-sol", "effort")).toBeUndefined();
 
-    expect(optionOf(probed.models, "gpt-6-astra", "serviceTier")).toMatchObject({ kind: "select" });
+    // Amended under D-12: `serviceTiers` lists only the tiers beyond the
+    // standard one and `defaultServiceTier: null` means that one, so the
+    // standard tier is a choice of Hydra's own and the default where Codex
+    // names none - otherwise every turn would run on a paid tier nobody chose.
+    expect(optionOf(probed.models, "gpt-6-astra", "serviceTier")).toMatchObject({
+      kind: "select",
+      default: "standard",
+    });
+    expect(valuesOf(optionOf(probed.models, "gpt-6-astra", "serviceTier"))).toEqual([
+      "standard",
+      "priority",
+    ]);
     expect(valuesOf(optionOf(probed.models, "gpt-5.6-sol", "serviceTier"))).toEqual([
+      "standard",
       "priority",
       "ultrafast",
     ]);
@@ -621,6 +633,24 @@ describe("the model a turn runs under", () => {
     expect(opened["model"]).toBeUndefined();
     expect(opened["effort"]).toBeUndefined();
     expect(opened["serviceTier"]).toBeUndefined();
+  });
+
+  it("sends no service tier for a selection of the standard one, and sends a chosen one", async () => {
+    // "standard" is Hydra's name for the tier Codex runs on when it is told
+    // none, so choosing it means leaving the field off (D-12).
+    const opened = async (tier: string): Promise<Record<string, unknown>> => {
+      const run = await started();
+      await Effect.runPromise(
+        run.adapter.sendInput(SESSION, {
+          text: "hello",
+          modelSelection: { model: "gpt-6-astra", options: { serviceTier: tier } },
+        }),
+      );
+      return sentOf(run.requests, "turn/start")[0] as Record<string, unknown>;
+    };
+
+    expect((await opened("standard"))["serviceTier"]).toBeUndefined();
+    expect((await opened("priority"))["serviceTier"]).toBe("priority");
   });
 
   it("opens the thread on the model and the tier the session was given", async () => {

@@ -34,7 +34,7 @@ import { text } from "../text";
 import { now } from "../../report";
 import { ASKED, type Asked } from "./approvals";
 import { normalize, normalizing, pathsOf, type Normalizing } from "./normalize";
-import { codexInstall, handshake, probing, saidBy, type AppServer } from "./probe";
+import { codexInstall, handshake, probing, saidBy, STANDARD_TIER, type AppServer } from "./probe";
 import {
   rpcOver,
   type AppServerSpawn,
@@ -646,6 +646,14 @@ export const codexAdapter = (seam: CodexSeam): ProviderAdapter => {
     );
 
   /**
+   * The tier a request names, if it names one at all. `STANDARD_TIER` is
+   * Hydra's own name for the tier Codex runs on by default and is not an id
+   * Codex knows, so selecting it sends no `serviceTier` field.
+   */
+  const tierOf = (selected: unknown): string | undefined =>
+    typeof selected === "string" && selected !== STANDARD_TIER ? selected : undefined;
+
+  /**
    * A selection as Codex takes it. The option ids are the ones the probe put on
    * the model descriptor, so a composer that offers one sends it back by name.
    */
@@ -654,11 +662,11 @@ export const codexAdapter = (seam: CodexSeam): ProviderAdapter => {
   ): Pick<TurnStartParams, "model" | "effort" | "serviceTier"> => {
     if (selection === undefined) return {};
     const effort = selection.options["effort"];
-    const tier = selection.options["serviceTier"];
+    const tier = tierOf(selection.options["serviceTier"]);
     return {
       model: selection.model,
       ...(typeof effort === "string" ? { effort } : {}),
-      ...(typeof tier === "string" ? { serviceTier: tier } : {}),
+      ...(tier === undefined ? {} : { serviceTier: tier }),
     };
   };
 
@@ -670,11 +678,11 @@ export const codexAdapter = (seam: CodexSeam): ProviderAdapter => {
     ThreadStartParams,
     "cwd" | "model" | "serviceTier" | "approvalPolicy" | "sandbox" | "approvalsReviewer"
   > => {
-    const tier = spec.modelSelection.options["serviceTier"];
+    const tier = tierOf(spec.modelSelection.options["serviceTier"]);
     return {
       cwd: ctx.cwd,
       model: spec.modelSelection.model,
-      ...(typeof tier === "string" ? { serviceTier: tier } : {}),
+      ...(tier === undefined ? {} : { serviceTier: tier }),
       ...ACCESS_MODES[spec.accessMode],
     };
   };

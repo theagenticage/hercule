@@ -1273,6 +1273,46 @@ describe("Thread: live subscriptions", () => {
     await screen.findByText("Added a test too.");
   });
 
+  it("renders a replay that arrives after the rows it comes before", async () => {
+    // Two deliveries on one just-spawned thread: the subscribe effect re-runs
+    // while the cache is still empty, so both subscriptions replay from
+    // cursor 0 and the later one's rows can land first. The transcript is
+    // merged on `position` rather than appended after whatever it last held,
+    // or every row of the earlier replay would be dropped as already seen.
+    const { live } = await open(session({ status: "busy" }), []);
+
+    await waitFor(() => {
+      expect(live.topics()).toContain(sessionStreamTopic(SESSION_ID));
+    });
+
+    const rows = twoCompletedTurns();
+    act(() => {
+      live.push(sessionStreamTopic(SESSION_ID), {
+        _tag: "delta",
+        items: rows.slice(4),
+        cursor: "15",
+      });
+    });
+    await settle();
+    act(() => {
+      live.push(sessionStreamTopic(SESSION_ID), {
+        _tag: "delta",
+        items: rows.slice(0, 4),
+        cursor: "15",
+      });
+    });
+
+    // The first turn's user message is in the earlier delta and the second
+    // turn's text is in the later one: both are on screen, and the transcript
+    // reads in position order rather than in arrival order.
+    const shown = await screen.findByText("Fix the login bug", { selector: "div" });
+    await screen.findByText("Added a test too.");
+    expect(reading().indexOf("Fix the login bug")).toBeLessThan(
+      reading().indexOf("Added a test too."),
+    );
+    expect(shown).toBeDefined();
+  });
+
   it("does not carry the previous thread's cursor into a newly opened thread's :stream subscription", async () => {
     // The router does not remount this screen for a route-param-only
     // navigation, so per-thread state - the seeded cursor included - has to

@@ -96,6 +96,15 @@ const selecting = (
 });
 
 /**
+ * Hydra's name for the tier Codex runs on when it is told none. Codex has no id
+ * for it: `serviceTiers` lists only the tiers beyond the standard one, and a
+ * `defaultServiceTier` of `null` means that one. Without a choice for it the
+ * only selectable value would be a paid tier nobody asked for, so it is offered
+ * by name and the request omits `serviceTier` when it is the one selected.
+ */
+export const STANDARD_TIER = "standard";
+
+/**
  * Only what the model itself lists: an empty select is a control the composer
  * shows and nothing can be chosen in.
  */
@@ -123,13 +132,16 @@ const optionsFor = (model: Model): ReadonlyArray<ModelOption> => {
       selecting(
         "serviceTier",
         "Service tier",
-        // An unnamed tier is still a tier, and the protocol will not carry an
-        // empty label.
-        tiers.map((tier) => ({
-          value: fact(tier.id),
-          label: fact(tier.name === "" || tier.name === undefined ? tier.id : tier.name),
-        })),
-        model.defaultServiceTier ?? null,
+        [
+          { value: STANDARD_TIER, label: "Standard" },
+          // An unnamed tier is still a tier, and the protocol will not carry an
+          // empty label.
+          ...tiers.map((tier) => ({
+            value: fact(tier.id),
+            label: fact(tier.name === "" || tier.name === undefined ? tier.id : tier.name),
+          })),
+        ],
+        model.defaultServiceTier ?? STANDARD_TIER,
       ),
     );
   }
