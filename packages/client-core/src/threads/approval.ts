@@ -14,6 +14,24 @@ export interface ApprovalRow {
   readonly describe: string;
 }
 
+/**
+ * One question of a `user_input` request, as the card reads it. A question is
+ * not a permission request: it has a chip, prose and answers of its own, and
+ * they share the request slot rather than the shape (decision D-27). The
+ * options are shown read-only - what each answer would have meant is part of
+ * the question - until answering with one is built.
+ */
+export interface ApprovalQuestion {
+  /** The short chip the harness labelled the question with. */
+  readonly header: string;
+  /** The question, in the agent's own words. */
+  readonly question: string;
+  /** One line per option: its label, then what choosing it would mean. */
+  readonly options: readonly string[];
+  /** Said where the question takes more than one answer; null where it takes one. */
+  readonly note: string | null;
+}
+
 export interface ApprovalCard {
   /** The question, naming what is being asked about. */
   readonly title: string;
@@ -27,6 +45,8 @@ export interface ApprovalCard {
   readonly code: boolean;
   /** Why an answer the user expects is missing; null where none is. */
   readonly note: string | null;
+  /** The questions of a `user_input`; empty on every other kind. */
+  readonly questions: readonly ApprovalQuestion[];
   /** One row per decision the request offers, in the order it offered them. */
   readonly rows: readonly ApprovalRow[];
 }
@@ -100,14 +120,44 @@ const subjectOf = (request: OpenRequest): readonly string[] => {
     case "tool_approval":
       return [];
     case "user_input":
-      return request.detail.questions;
+      // The questions carry their own structure, so there is nothing here for
+      // a flat list of lines to repeat.
+      return [];
   }
 };
+
+type Question = Extract<
+  OpenRequest,
+  { readonly kind: "user_input" }
+>["detail"]["questions"][number];
+
+/**
+ * A question's options as read-only lines. The label and what it means read as
+ * one line rather than two, because an option nobody can click is a fact about
+ * the question, not an answer of its own.
+ */
+const optionsOf = (question: Question): readonly string[] =>
+  question.options.map((option) =>
+    option.description === "" ? option.label : `${option.label} \u00b7 ${option.description}`,
+  );
+
+const MULTI = "More than one answer may be chosen.";
+
+const questionsOf = (request: OpenRequest): readonly ApprovalQuestion[] =>
+  request.kind === "user_input"
+    ? request.detail.questions.map((question) => ({
+        header: question.header,
+        question: question.question,
+        options: optionsOf(question),
+        note: question.multiSelect ? MULTI : null,
+      }))
+    : [];
 
 export const approvalCard = (request: OpenRequest): ApprovalCard => ({
   title: titleOf(request),
   subject: subjectOf(request),
   code: request.kind !== "user_input",
+  questions: questionsOf(request),
   note: request.kind === "user_input" ? NOT_BUILT : null,
   rows: request.decisions.map((decision) => ({
     decision,

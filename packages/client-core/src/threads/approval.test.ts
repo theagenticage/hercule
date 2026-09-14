@@ -94,18 +94,75 @@ describe("approvalCard", () => {
       ...COMMAND,
       kind: "user_input",
       decisions: ["deny", "cancel"],
-      detail: { questions: ["Which database should it use?", "Postgres or SQLite?"] },
+      detail: {
+        questions: [
+          {
+            question: "Which database should it use?",
+            header: "Database",
+            options: [
+              { label: "SQLite", description: "the one Hydra ships" },
+              { label: "Postgres", description: "somebody else's server" },
+            ],
+            multiSelect: false,
+          },
+        ],
+      },
     };
     const card = approvalCard(request);
 
     expect(card.rows.map((row) => row.decision)).toEqual(["deny", "cancel"]);
-    // The questions are the agent's own prose, so they are not code, and the
-    // note is where the missing answer is explained.
-    expect(card.subject).toEqual(["Which database should it use?", "Postgres or SQLite?"]);
+    // The questions carry the whole content, so the subject has nothing to
+    // repeat, and a question is the agent's own prose rather than code.
+    expect(card.subject).toEqual([]);
     expect(card.code).toBe(false);
+    expect(card.questions).toEqual([
+      {
+        header: "Database",
+        question: "Which database should it use?",
+        options: ["SQLite \u00b7 the one Hydra ships", "Postgres \u00b7 somebody else's server"],
+        note: null,
+      },
+    ]);
     // There is nothing an allow could carry, so the note says so rather than
     // leaving the user to guess why no Allow is offered.
     expect(card.note).toMatch(/not built/i);
     expect(card.note).toMatch(/reply/i);
+  });
+
+  it("keeps every question of a multi-question request, and says where more than one answer is allowed", () => {
+    const request: OpenRequest = {
+      ...COMMAND,
+      kind: "user_input",
+      decisions: ["deny", "cancel"],
+      detail: {
+        questions: [
+          {
+            question: "Which features?",
+            header: "Features",
+            // No description to add: the label is the whole line.
+            options: [{ label: "Rules", description: "" }],
+            multiSelect: true,
+          },
+          {
+            question: "Which branch?",
+            header: "Branch",
+            options: [],
+            multiSelect: false,
+          },
+        ],
+      },
+    };
+    const card = approvalCard(request);
+
+    expect(card.questions.map((one) => one.header)).toEqual(["Features", "Branch"]);
+    expect(card.questions[0]?.options).toEqual(["Rules"]);
+    expect(card.questions[0]?.note).toMatch(/more than one/i);
+    // One answer is the ordinary case, and a line saying so on every question
+    // would be noise.
+    expect(card.questions[1]?.note).toBeNull();
+  });
+
+  it("gives the other kinds no questions", () => {
+    expect(approvalCard(COMMAND).questions).toEqual([]);
   });
 });

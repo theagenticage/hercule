@@ -2068,7 +2068,19 @@ describe("Thread: the permission card", () => {
     itemId: "tool3",
     kind: "user_input",
     decisions: ["deny", "cancel"],
-    detail: { questions: ["Which database should it use?"] },
+    detail: {
+      questions: [
+        {
+          question: "Which database should it use?",
+          header: "Database",
+          options: [
+            { label: "SQLite", description: "the one Hydra ships" },
+            { label: "Postgres", description: "somebody else's server" },
+          ],
+          multiSelect: false,
+        },
+      ],
+    },
   };
 
   /** A live turn whose one open item is the one `REQUEST` is about. */
@@ -2275,7 +2287,11 @@ describe("Thread: the permission card", () => {
     expect(screen.queryByRole("button", { name: answer(REQUEST, "allow_always") })).toBeNull();
 
     const text = reading();
+    // The chip, the prose and what each answer would have meant: a question is
+    // not a permission request, and the card shows all three.
+    expect(text).toContain("Database");
     expect(text).toContain("Which database should it use?");
+    expect(text).toContain("SQLite \u00b7 the one Hydra ships");
     expect(text).toMatch(/not built/i);
     expect(text).toMatch(/reply/i);
   });

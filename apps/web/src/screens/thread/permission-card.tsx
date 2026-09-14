@@ -19,6 +19,10 @@ import { messageOf } from "../save-status";
  * 2026-09-14). A second raised card would read as a second surface; a lip reads
  * as part of the composer, which is what this is.
  *
+ * A `user_input` request is a question rather than a permission ask, so it
+ * reads as one block per question - its chip, its prose, and its options
+ * read-only under it - in the slot a command or a path would sit in.
+ *
  * Every word on it comes from `approvalCard`, so what an answer does reads the
  * same wherever it is shown and no surface can reword or drop it.
  */
@@ -71,6 +75,29 @@ export function PermissionCard({
             </span>
           ))}
         </div>
+        {/* A question is not a permission request: it has a chip, prose and
+            answers of its own, so it reads as a block rather than a line. Its
+            options are shown read-only - what each answer would have meant is
+            part of the question - until answering with one is built. */}
+        {card.questions.length === 0 ? null : (
+          <div className="mt-1 flex max-h-48 flex-col gap-2 overflow-y-auto">
+            {card.questions.map((question, index) => (
+              <div key={index} className="flex min-w-0 flex-col">
+                <span className="text-fine font-emph text-ink">{question.header}</span>
+                <span className="text-fine text-ink">{question.question}</span>
+                {question.options.map((option, optionIndex) => (
+                  <span key={optionIndex} className="text-fine">
+                    {option}
+                  </span>
+                ))}
+                {/* A little air, or it reads as one more option. */}
+                {question.note === null ? null : (
+                  <span className="mt-0.5 text-fine">{question.note}</span>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
         {/* A little air, or the note reads as one more question. */}
         {card.note === null ? null : <p className="mt-1">{card.note}</p>}
         {/* A row bleeds 8px past this column on each side, so a hover

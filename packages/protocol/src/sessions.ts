@@ -211,7 +211,27 @@ const FileReadApproval = openRequest("file_read_approval", { paths: Paths });
 
 const ToolApproval = openRequest("tool_approval", { toolName: Fact });
 
-const UserInput = openRequest("user_input", { questions: Schema.Array(Message) });
+/**
+ * One question in a `user_input` request: the chip it is labelled with, the
+ * prose the agent wrote, and the options it offers. A permission request and a
+ * question are different things sharing one request slot, so the question
+ * keeps its own structure rather than being flattened to text: a surface that
+ * reads only the text cannot show what the answers were.
+ *
+ * The struct is closed, as every detail here is - a vendor's extra field (the
+ * Claude SDK's `preview`) would make what the user reads a function of which
+ * harness asked (ADR 0007). Every provider maps its own shape into this one.
+ */
+const Question = Schema.Struct({
+  question: Message,
+  header: Fact,
+  options: Schema.Array(Schema.Struct({ label: Fact, description: Message })),
+  /** Whether more than one option may be chosen, once answering is built. */
+  multiSelect: Schema.Boolean,
+});
+
+/** A harness asks one to four at a time, so the request carries a list. */
+const UserInput = openRequest("user_input", { questions: Schema.NonEmptyArray(Question) });
 
 /**
  * The request a session is parked on, as the row that holds it and the API

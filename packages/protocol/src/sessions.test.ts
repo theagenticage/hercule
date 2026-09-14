@@ -114,7 +114,22 @@ const requests = [
   { kind: "file_change_approval", detail: { paths: ["src/main.ts", "src/old.ts"] } },
   { kind: "file_read_approval", detail: { paths: ["/etc/hosts"] } },
   { kind: "tool_approval", detail: { toolName: "WebFetch" } },
-  { kind: "user_input", detail: { questions: ["Which branch should this land on?"] } },
+  {
+    kind: "user_input",
+    detail: {
+      questions: [
+        {
+          question: "Which branch should this land on?",
+          header: "Branch",
+          options: [
+            { label: "main", description: "straight onto the default branch" },
+            { label: "a branch", description: "a branch per ticket, as the conventions ask" },
+          ],
+          multiSelect: false,
+        },
+      ],
+    },
+  },
 ] as const;
 
 const tagsOf = (union: typeof ProviderEvent) =>
@@ -206,6 +221,59 @@ describe("the normalized event taxonomy", () => {
         },
       })._tag,
     ).toBe("Failure");
+  });
+
+  it("takes one to many structured questions, and refuses a request carrying none", () => {
+    const asking = (questions: unknown) =>
+      decode(ProviderEvent, {
+        _tag: "request.opened",
+        ...baseFields,
+        request: {
+          requestId: "r1",
+          itemId: "i1",
+          kind: "user_input",
+          decisions: ["deny", "cancel"],
+          detail: { questions },
+        },
+      })._tag;
+    const one = {
+      question: "Which database should this use?",
+      header: "Database",
+      options: [{ label: "SQLite", description: "the one Hydra ships" }],
+      multiSelect: false,
+    };
+
+    expect(asking([one, { ...one, header: "Second" }])).toBe("Success");
+    // A question is the payload, so a request with none of them is a card with
+    // nothing on it; the adapter falls back rather than send this.
+    expect(asking([])).toBe("Failure");
+    // The struct carries no vendor extras: the Claude SDK's optional `preview`
+    // is dropped on the way in, so what the user reads never depends on which
+    // harness asked (ADR 0007).
+    const withPreview = {
+      _tag: "request.opened",
+      ...baseFields,
+      request: {
+        requestId: "r1",
+        itemId: "i1",
+        kind: "user_input",
+        decisions: ["deny", "cancel"],
+        detail: {
+          questions: [{ ...one, options: [{ label: "SQLite", description: "it", preview: "x" }] }],
+        },
+      },
+    };
+    expect(Effect.runSync(Schema.decodeUnknownEffect(ProviderEvent)(withPreview))).toEqual({
+      ...withPreview,
+      request: {
+        ...withPreview.request,
+        detail: {
+          questions: [{ ...one, options: [{ label: "SQLite", description: "it" }] }],
+        },
+      },
+    });
+    expect(asking([without(one, "multiSelect")])).toBe("Failure");
+    expect(asking([{ ...one, header: "" }])).toBe("Failure");
   });
 
   it("brackets a turn by an id neither end may omit", () => {

@@ -1364,9 +1364,65 @@ describe("what kind of question each tool is", () => {
 
     expect(request.kind).toBe("user_input");
     expect(request.decisions).toEqual(["deny", "cancel"]);
-    expect(request.kind === "user_input" ? request.detail.questions.join(" ") : "").toContain(
-      "Which database should this use?",
-    );
+    // Structured, not flattened to text: the card shows the chip, the prose and
+    // what each answer would have meant.
+    expect(request.kind === "user_input" ? request.detail.questions : []).toEqual([
+      {
+        question: "Which database should this use?",
+        header: "Database",
+        options: [
+          { label: "SQLite", description: "the one Hydra ships" },
+          { label: "Postgres", description: "somebody else's server" },
+        ],
+        multiSelect: false,
+      },
+    ]);
+  });
+
+  it("asks all the questions an ask carries, dropping a malformed one and its unlabelled options", async () => {
+    const run = await asking();
+
+    const { request } = await parked(run, "AskUserQuestion", {
+      questions: [
+        // No header: the SDK's own schema requires one, and a chip cannot be
+        // invented, so this question is dropped rather than guessed at.
+        { question: "Which one?", options: [], multiSelect: false },
+        {
+          question: "Which features?",
+          header: "Features",
+          options: [
+            { label: "Rules", description: "persisted rules", preview: "dropped" },
+            { label: "", description: "no label to show" },
+            "not an option",
+          ],
+          multiSelect: true,
+        },
+      ],
+    });
+
+    expect(request.kind === "user_input" ? request.detail.questions : []).toEqual([
+      {
+        question: "Which features?",
+        header: "Features",
+        // The vendor's `preview` has no field in the protocol, so it is gone.
+        options: [{ label: "Rules", description: "persisted rules" }],
+        multiSelect: true,
+      },
+    ]);
+  });
+
+  /**
+   * A `user_input` with no question on it is an undecodable frame, which costs
+   * the runner its socket; a tool call the user can refuse is the honest card.
+   */
+  it("falls back to a tool approval when no question survives the mapping", async () => {
+    const run = await asking();
+
+    const { request } = await parked(run, "AskUserQuestion", { questions: "nonsense" });
+
+    expect(request.kind).toBe("tool_approval");
+    expect(request.kind === "tool_approval" ? request.detail.toolName : "").toBe("AskUserQuestion");
+    expect(request.decisions).toEqual(["deny", "cancel"]);
   });
 
   /**
