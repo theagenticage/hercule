@@ -8,6 +8,7 @@ import {
   MarksLegend,
   SegmentedControl,
   SegmentedControlItem,
+  ThemeSelector,
   cn,
   useMinuteClock,
 } from "@hydra/ui";
@@ -233,6 +234,7 @@ export function Sidebar({
       <div className="mt-auto flex flex-col gap-1.5 pt-2.5">
         <Pulse />
         <MarksLegend />
+        <ThemeSelector />
       </div>
     </div>
   );

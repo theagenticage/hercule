@@ -5,7 +5,8 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./styles.css": "./src/styles.css"
+    "./styles.css": "./src/styles.css",
+    "./testing": "./src/testing.ts"
   },
   "peerDependencies": {
     "react": "19.2.8"

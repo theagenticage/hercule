@@ -32,3 +32,4 @@ export {
 export { Logo } from "./marks/logo";
 export { MarksLegend } from "./marks/marks-legend";
 export { ProviderLogo } from "./marks/provider-logo";
+export { ThemeSelector } from "./theme/theme-selector";

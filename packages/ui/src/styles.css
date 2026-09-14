@@ -73,8 +73,11 @@
 
 /* The Midnight token system: blue-violet neutrals at oklch hue 265, grounds
    94.5% light and 20% dark. Light is the base; the two dark rules below give the
-   same values to the system preference and to an explicit choice. */
+   same values to the system preference and to an explicit choice. `color-scheme`
+   moves with the tokens so what the browser draws itself - scrollbars, form
+   controls, the caret - follows a forced theme rather than the machine. */
 :root {
+  color-scheme: light;
   --bg: oklch(94.5% 0.0156 265);
   --surface: oklch(96.7% 0.0125 265);
   --raised: oklch(100% 0.0078 265);
@@ -102,6 +105,7 @@
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
+    color-scheme: dark;
     --bg: oklch(20% 0.0288 265);
     --surface: oklch(22.2% 0.0288 265);
     --raised: oklch(25.5% 0.0259 265);
@@ -126,6 +130,7 @@
 }
 
 :root[data-theme="dark"] {
+  color-scheme: dark;
   --bg: oklch(20% 0.0288 265);
   --surface: oklch(22.2% 0.0288 265);
   --raised: oklch(25.5% 0.0259 265);
