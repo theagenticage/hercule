@@ -128,12 +128,14 @@ const LOOKS_LIKE_A_TAIL = /^[0-9a-f]{8,}$/;
 
 /**
  * A positional whose row names no listing takes its value as written: a plugin
- * is named `github`, an owner id is an id the caller already holds. Text shaped
- * like an id tail is refused rather than sent, because sending it would answer
- * `not_found` and teach the caller that the id was wrong.
+ * is named `github`, a secret is named `deadbeef` if its owner says so. Where
+ * the field holds an id, text shaped like a tail is refused rather than sent,
+ * because sending it would answer `not_found` and teach the caller that the id
+ * was wrong.
  */
 const asWritten = (command: Command, field: Field, text: string): string => {
-  if (LOOKS_LIKE_A_TAIL.test(text) && !CANONICAL_ID.test(text)) {
+  const holdsAnId = field.name === "id" || field.name.endsWith("Id");
+  if (holdsAnId && LOOKS_LIKE_A_TAIL.test(text) && !CANONICAL_ID.test(text)) {
     throw new UsageError(
       `<${field.flag}>: ${text} reads as an id tail, and nothing lists these ids to resolve it against; give the full id`,
       command.words.join(" "),

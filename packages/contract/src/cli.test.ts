@@ -224,17 +224,10 @@ const RESOLVES: Record<string, string> = {
 };
 
 /**
- * Commands help may name that no row spells: the hand-written commands outside
- * the operation table, and the two the spec promises but has not built.
+ * The one command help may name that no row spells: `hydra login` is
+ * hand-written, outside the operation table, and has no row to be found by.
  */
-const ALLOWED_MENTIONS = [
-  "login",
-  "setup-url",
-  "serve",
-  "runner",
-  "permission request",
-  "subscription create",
-];
+const ALLOWED_MENTIONS = ["login"];
 
 /** Every prose string a mention can hide in. */
 const prose = (): ReadonlyArray<[string, string]> => {

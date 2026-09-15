@@ -67,7 +67,7 @@ export interface Command {
   readonly requires: Requirement;
   readonly method: Method;
   readonly path: string;
-  /** Path parameters in route order, then any payload field the row makes positional. */
+  /** The path parameters, in route order; given as bare words. */
   readonly positionals: ReadonlyArray<Field>;
   /** Payload fields; given as `--<flag>`. */
   readonly payload: ReadonlyArray<Field>;
@@ -272,13 +272,10 @@ const build = (): ReadonlyArray<Command> => {
         requires: operation.requires,
         method: operation.method,
         path: operation.path,
-        positionals: [
-          // A route parameter the params schema does not declare is a contract
-          // mistake, not a string: the CLI would send a value nothing decodes.
-          ...inPath.map((name) => params.get(name)!),
-          ...payload.filter((field) => field.positional && !inPath.includes(field.name)),
-        ],
-        payload: payload.filter((field) => !field.positional),
+        // A route parameter the params schema does not declare is a contract
+        // mistake, not a string: the CLI would send a value nothing decodes.
+        positionals: inPath.map((name) => params.get(name)!),
+        payload,
         query: query.filter((field) => !PAGE_FIELDS.has(field.name)),
         paged: sort !== undefined,
         sortFields: sortFieldsOf(each.query),

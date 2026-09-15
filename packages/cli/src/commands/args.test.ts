@@ -142,6 +142,11 @@ describe("parseArguments", () => {
     ).rejects.toThrow(UsageError);
   });
 
+  it("refuses a short flag rather than counting it as an argument", async () => {
+    await expect(parseArguments(profileList, ["-x"], noStdin)).rejects.toThrow(/unknown flag -x/);
+    await expect(parseArguments(profileList, ["-x"], noStdin)).rejects.toThrow(UsageError);
+  });
+
   it("rejects the wrong number of positional arguments", async () => {
     await expect(parseArguments(profileList, ["extra"], noStdin)).rejects.toThrow(
       /takes 0 argument/,

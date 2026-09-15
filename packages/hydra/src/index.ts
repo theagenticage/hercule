@@ -23,7 +23,7 @@ const ROLE_ENTRYPOINTS: Record<Role, () => Promise<RoleModule>> = {
  *
  * `hydra serve` is the controller; `hydra runner`, `hydra runner --local`,
  * `hydra runner join` and `hydra runner set-controller` are the runner. Every
- * other verb, `hydra runner create-join-token` included, is the CLI. The role
+ * other verb, `hydra runner join-token create` included, is the CLI. The role
  * keeps the global options; only the verb is consumed.
  *
  * `--home <dir>` and `-c key=value` may precede the verb, so the verb is

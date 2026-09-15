@@ -157,6 +157,12 @@ export function* tokenize(tokens: ReadonlyArray<string>, help: string): Generato
     const token = tokens[i]!;
 
     if (!token.startsWith("--")) {
+      // A single dash is a word every shell knows and no flag of this CLI is
+      // spelled with one, so `-x` is a mistake rather than an argument: taken
+      // as a positional it would be counted as an id and reported as one.
+      if (token.startsWith("-") && token !== "-") {
+        throw new UsageError(`unknown flag ${token}`, help);
+      }
       yield { kind: "positional", text: token };
       continue;
     }

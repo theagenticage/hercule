@@ -118,17 +118,12 @@ describe("the spelling of a command", () => {
     }
   });
 
-  it("puts the path parameters first, in route order, then any positional payload field", () => {
+  it("takes the path parameters positionally, in route order", () => {
     for (const command of COMMANDS) {
-      const row = rowOf(command.id);
-      const params = pathParams(command.path);
-      const extra = Object.entries(row.fields ?? {})
-        .filter(([name, field]) => field.positional === true && !params.includes(name))
-        .map(([name]) => name);
       expect(
         command.positionals.map((field) => field.name),
         spelling(command),
-      ).toEqual([...params, ...extra]);
+      ).toEqual(pathParams(command.path));
     }
   });
 });
