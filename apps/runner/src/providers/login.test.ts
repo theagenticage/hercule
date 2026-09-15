@@ -29,6 +29,9 @@ const CONTEXT: ProviderRunnerContext = {
   home: `/var/hydra/runner/providers/${INSTANCE}`,
   binary: "/usr/local/bin/claude",
   env: { PATH: "/usr/local/bin:/usr/bin", HOME: "/home/rogier" },
+  // Never read by a probe, an install or a login; the context type carries it
+  // for the sessions this adapter also hosts.
+  hydraTool: { skill: "", claudePluginDir: "/var/hydra/runner/storage/claude-plugin" },
 };
 
 const URL_ONE = "https://claude.ai/oauth/authorize?code=challenge-one";
@@ -432,6 +435,9 @@ describe("a device-code login", () => {
     home: mkdtempSync(join(tmpdir(), "hydra-login-")),
     binary: "/usr/local/bin/codex",
     env: { PATH: "/usr/local/bin:/usr/bin", HOME: "/home/rogier" },
+    // Never read by a probe, an install or a login; the context type carries it
+    // for the sessions this adapter also hosts.
+    hydraTool: { skill: "", claudePluginDir: "/var/hydra/runner/storage/claude-plugin" },
   };
 
   afterAll(() => {

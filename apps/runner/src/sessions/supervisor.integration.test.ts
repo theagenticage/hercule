@@ -200,6 +200,8 @@ const connecting = (fake: Fake) => {
   const machine: Machine = {
     providersDir: join(under, "providers"),
     scratchDir: join(under, "scratch"),
+    binDir: join(under, "bin"),
+    hydraTool: { skill: "# hydra", claudePluginDir: join(under, "claude-plugin") },
     controllerUrl: "https://controller.example:4938",
     baseEnv: { PATH: "/usr/bin" },
     binaryOf: (name) => `/usr/local/bin/${name}`,
@@ -331,6 +333,11 @@ describe("one session, start to exit", () => {
     expect(fake.contexts[0]?.home).toBe(join(machine.providersDir, INSTANCE));
     expect(fake.contexts[0]?.binary).toBe("/usr/local/bin/fake-harness");
     expect(fake.contexts[0]?.env["HYDRA_SESSION"]).toBe("1");
+    // The credential the session calls Hydra with, carried from the frame the
+    // controller sent to the process the adapter spawns, and nowhere else.
+    expect(fake.contexts[0]?.env["HYDRA_TOKEN"]).toBe(START.token);
+    // And the skill it learns Hydra exists from, as this machine resolved it.
+    expect(fake.contexts[0]?.hydraTool.claudePluginDir).toBe(machine.hydraTool.claudePluginDir);
   });
 
   it("reports what it holds, and holds nothing once the session has exited", async () => {

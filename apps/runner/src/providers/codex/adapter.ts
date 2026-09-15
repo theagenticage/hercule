@@ -77,9 +77,9 @@ export interface CodexSeam {
 
 /** One app-server, what it said that was not a frame, and who is on it. */
 interface Host extends AppServer {
-  /** The instance this host serves; a probe's own process serves none. */
-  readonly instanceId: string | undefined;
-  /** Reference count, by name: the host goes when its last session does. */
+  /** The session this host serves; a probe's own process serves none. */
+  readonly sessionId: string | undefined;
+  /** Who is on it, which is at most the one session it was started for. */
   readonly sessions: Set<string>;
 }
 
@@ -218,7 +218,15 @@ export const codexAdapter = (seam: CodexSeam): ProviderAdapter => {
   // already treats it as.
   const published = Effect.runSync(PubSub.unbounded<ProviderEvent>());
   const sessions = new Map<string, Held>();
-  /** One app-server per instance: its sessions share the auth refresh and the model catalog. */
+  /**
+   * One app-server per session, not per instance: the session's own token is in
+   * the environment its process was spawned with, and every shell command that
+   * process runs inherits it. A host shared with a second session would run that
+   * session's work under the first session's credential, grants and stamp, and
+   * would go dead for everyone the moment the first session's token was revoked
+   * (spec 06 section 9.3). The auth refresh and the model catalog are per
+   * process as a result.
+   */
   const hosts = new Map<string, Host>();
 
   const emit = (event: ProviderEvent): void => {
@@ -255,14 +263,14 @@ export const codexAdapter = (seam: CodexSeam): ProviderAdapter => {
   };
 
   /**
-   * Gives up a session's claim on its app-server. The host is the instance's,
-   * not the session's, so it lives exactly as long as its last session.
+   * Gives up a session's claim on its app-server, which ends the process: the
+   * host is that session's, so nothing is left running with its token in it.
    */
   const release = (host: Host, sessionId: string): void => {
     host.sessions.delete(sessionId);
     if (host.sessions.size > 0) return;
-    if (host.instanceId !== undefined && hosts.get(host.instanceId) === host) {
-      hosts.delete(host.instanceId);
+    if (host.sessionId !== undefined && hosts.get(host.sessionId) === host) {
+      hosts.delete(host.sessionId);
     }
     host.kill();
   };
@@ -310,7 +318,7 @@ export const codexAdapter = (seam: CodexSeam): ProviderAdapter => {
   const startHost = (
     ctx: ProviderRunnerContext,
     binary: string,
-    instanceId: string | undefined,
+    sessionId: string | undefined,
   ): Host => {
     const complaints: Array<string> = [];
     const child = seam.appServer(
@@ -364,7 +372,7 @@ export const codexAdapter = (seam: CodexSeam): ProviderAdapter => {
       }),
       kill: child.kill,
       complaint: () => complaints.join("\n"),
-      instanceId,
+      sessionId,
       sessions: new Set(),
     };
     void child.exited.then(
@@ -379,35 +387,41 @@ export const codexAdapter = (seam: CodexSeam): ProviderAdapter => {
   const openHost = (
     ctx: ProviderRunnerContext,
     binary: string,
-    instanceId?: string,
+    sessionId?: string,
   ): Effect.Effect<Host, string> =>
     Effect.try({
-      try: () => startHost(ctx, binary, instanceId),
+      try: () => startHost(ctx, binary, sessionId),
       catch: (error) => (error instanceof Error ? error.message : String(error)),
     });
 
   const probe = probing(openHost);
 
   const hostFor = (
-    instanceId: string,
+    sessionId: string,
     ctx: ProviderRunnerContext,
     binary: string,
   ): Effect.Effect<Host, string> =>
     Effect.suspend(() => {
-      const running = hosts.get(instanceId);
-      if (running !== undefined) return Effect.succeed(running);
-      return Effect.flatMap(openHost(ctx, binary, instanceId), (host) =>
+      // A session resumed in place is started again under its own id, and an
+      // entry left here is the process of the run that ended - never one to
+      // talk to, and never one to leave running with a dead token in it.
+      const stale = hosts.get(sessionId);
+      if (stale !== undefined) {
+        hosts.delete(sessionId);
+        stale.kill();
+      }
+      return Effect.flatMap(openHost(ctx, binary, sessionId), (host) =>
         Effect.matchEffect(handshake(host), {
-          // Registered only once it has answered: a host kept under an instance
-          // id without a handshake is one every later session would talk to and
-          // none of them could, and its child would outlive the runner.
+          // Registered only once it has answered: a host kept under a session
+          // id without a handshake is one nothing could talk to, and its child
+          // would outlive the runner.
           onFailure: (error) => {
             const said = saidBy(host, error);
             host.kill();
             return Effect.fail(said);
           },
           onSuccess: () => {
-            hosts.set(instanceId, host);
+            hosts.set(sessionId, host);
             return Effect.succeed(host);
           },
         }),
@@ -670,18 +684,31 @@ export const codexAdapter = (seam: CodexSeam): ProviderAdapter => {
     };
   };
 
-  /** What a thread is opened, resumed or forked with: the session's own row. */
+  /**
+   * What a thread is opened, resumed or forked with: the session's own row, and
+   * hydra-as-a-tool as the developer instructions all three methods take - the
+   * channel #73 found, and the whole of what this adapter knows about the skill
+   * (spec 06 section 9.3). No `AGENTS.md` is written: the scratch directory a
+   * session runs in stays empty.
+   */
   const threadParams = (
     spec: SessionSpec,
     ctx: ProviderRunnerContext,
   ): Pick<
     ThreadStartParams,
-    "cwd" | "model" | "serviceTier" | "approvalPolicy" | "sandbox" | "approvalsReviewer"
+    | "cwd"
+    | "model"
+    | "serviceTier"
+    | "approvalPolicy"
+    | "sandbox"
+    | "approvalsReviewer"
+    | "developerInstructions"
   > => {
     const tier = tierOf(spec.modelSelection.options["serviceTier"]);
     return {
       cwd: ctx.cwd,
       model: spec.modelSelection.model,
+      developerInstructions: ctx.hydraTool.skill,
       ...(tier === undefined ? {} : { serviceTier: tier }),
       ...ACCESS_MODES[spec.accessMode],
     };
@@ -704,7 +731,7 @@ export const codexAdapter = (seam: CodexSeam): ProviderAdapter => {
       Effect.gen(function* () {
         const binary = ctx.binary;
         if (binary === undefined) return yield* Effect.fail(`no ${CODEX_BINARY} on this machine`);
-        const host = yield* hostFor(spec.instanceId, ctx, binary);
+        const host = yield* hostFor(sessionId, ctx, binary);
         // Claimed before the thread is asked for, so a thread that never opens
         // gives the host back rather than leaving a process nobody talks to.
         host.sessions.add(sessionId);

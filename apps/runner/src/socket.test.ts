@@ -258,6 +258,8 @@ const PATIENT = Duration.minutes(1);
 /** Nothing here starts a session, so neither directory is ever made. */
 const PROVIDERS_DIR = "/nonexistent/hydra-runner-providers";
 const SCRATCH_DIR = "/nonexistent/hydra-runner-scratch";
+const BIN_DIR = "/nonexistent/hydra-runner-bin";
+const HYDRA_TOOL = { skill: "# hydra", claudePluginDir: "/nonexistent/hydra-runner-claude-plugin" };
 
 /** Runs one connection to its end and reports how it ended. */
 const attempt = (
@@ -274,6 +276,8 @@ const attempt = (
         headroom: Effect.succeed({ diskFreeBytes: 200 * 1024 ** 3, availableMemoryBytes: 1 }),
         providersDir: PROVIDERS_DIR,
         scratchDir: SCRATCH_DIR,
+        binDir: BIN_DIR,
+        hydraTool: HYDRA_TOOL,
         proofDeadline,
       }),
     ),

@@ -15,6 +15,10 @@ export interface Machine {
   readonly providersDir: string;
   /** Where a workspace-less session's empty cwd is made, one directory per session. */
   readonly scratchDir: string;
+  /** `<home>/runner/bin`, holding the `hydra` symlink, prepended to a session's `PATH`. */
+  readonly binDir: string;
+  /** hydra-as-a-tool, as the runner resolved it once at start (spec 06 section 9.3). */
+  readonly hydraTool: ProviderRunnerContext["hydraTool"];
   /** What a session reads as `HYDRA_API_URL`. */
   readonly controllerUrl: string;
   /** The runner's own environment, the bottom layer of a session's. */
@@ -50,19 +54,37 @@ const instanceEnv = (config: unknown): Record<string, string> => {
 
 /**
  * Base env, then the instance's, then Hydra's own: the layering of spec 06
- * section 4, in that order, so instance config can never take `HYDRA_SESSION`
- * or the API URL away from the `hydra` CLI a session calls.
+ * section 4, in that order, so instance config can never take the session's
+ * token, its controller or its `hydra` away from the CLI a session calls.
  *
- * `HYDRA_TOKEN`, the `PATH` prepend and the git credential material of spec 06
- * section 9.3 are absent: each arrives with the feature that needs it - session
- * tokens, and workspaces.
+ * The token is the frame's, never one the runner invented, and it is passed
+ * through the environment alone: written down anywhere it would outlive the
+ * session it dies with (spec 06 section 9.3).
+ *
+ * The git credential material of spec 06 section 9.3 is still absent: it
+ * arrives with workspaces.
  */
-const envFor = (machine: Machine, config: unknown): Record<string, string | undefined> => ({
-  ...machine.baseEnv,
-  ...instanceEnv(config),
-  HYDRA_API_URL: machine.controllerUrl,
-  HYDRA_SESSION: "1",
-});
+const envFor = (
+  machine: Machine,
+  config: unknown,
+  token: string,
+): Record<string, string | undefined> => {
+  const base = { ...machine.baseEnv, ...instanceEnv(config) };
+  return {
+    ...base,
+    HYDRA_API_URL: machine.controllerUrl,
+    HYDRA_TOKEN: token,
+    HYDRA_SESSION: "1",
+    // Prepended, so `which hydra` finds this build and the machine's own tools
+    // keep working after it (spec 15 section 2). An empty entry on `PATH` is
+    // the current directory, so a machine that gave the runner none gets the
+    // bin directory alone rather than a trailing colon.
+    PATH:
+      machine.baseEnv["PATH"] === undefined || machine.baseEnv["PATH"] === ""
+        ? machine.binDir
+        : `${machine.binDir}:${machine.baseEnv["PATH"]}`,
+  };
+};
 
 /**
  * A workspace-less session gets an empty scratch directory rather than the
@@ -95,7 +117,8 @@ export const resolve = (
           cwd: scratch,
           home,
           binary: machine.binaryOf(binaryName),
-          env: envFor(machine, frame.config),
+          env: envFor(machine, frame.config, frame.token),
+          hydraTool: machine.hydraTool,
         },
       };
     },

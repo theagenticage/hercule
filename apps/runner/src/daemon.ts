@@ -6,10 +6,13 @@ import { rmSync } from "node:fs";
 import { networkInterfaces } from "node:os";
 import { join as joinPath } from "node:path";
 import * as Effect from "effect/Effect";
+import * as Schema from "effect/Schema";
 import { runnerDirIn } from "@hydra/home";
 import { IDENTITY_PORT } from "@hydra/protocol";
 import { identityListener } from "./identity";
 import { probeFacts, thisMachine } from "./probe";
+import { HYDRA_SKILL } from "./sessions/skill";
+import { prepareTooling, type Tooling } from "./sessions/tooling";
 import { reconnect, reconnectSignals } from "./reconnect";
 import { CONTROLLER_URL_SCHEMES, NotEnrolled, readRunnerFile, runnerFileIn } from "./runner-file";
 import { connect, type RunnerRetired } from "./socket";
@@ -46,10 +49,38 @@ const dialable = (home: string, controllerUrl: string): Effect.Effect<void, NotE
 };
 
 /**
+ * Its own error because nothing about the connection will fix it: the machine
+ * has to be made writable, or the thing in the way removed.
+ */
+export class ToolingUnavailable extends Schema.TaggedError<ToolingUnavailable>()(
+  "ToolingUnavailable",
+  { message: Schema.String },
+) {}
+
+/**
+ * Putting `hydra` and the session skill on this machine is a precondition, not
+ * a step: a runner that came up without them hosts sessions that cannot call
+ * Hydra at all. Reported by name, like every other precondition here.
+ */
+const tooling = (home: string, storageDir: string): Effect.Effect<Tooling, ToolingUnavailable> =>
+  Effect.try({
+    try: () => prepareTooling({ home, storageDir, execPath: process.execPath, skill: HYDRA_SKILL }),
+    catch: (error) =>
+      new ToolingUnavailable({
+        message:
+          `could not put hydra and the session skill under ${runnerDirIn(home)}: ` +
+          `${error instanceof Error ? error.message : String(error)}. ` +
+          "No session on this machine could reach Hydra.",
+      }),
+  });
+
+/**
  * The facts are read afresh per attempt, so a machine that gained memory between
  * two connections says so in the second hello.
  */
-export const daemon = (home: string): Effect.Effect<never, NotEnrolled | RunnerRetired> =>
+export const daemon = (
+  home: string,
+): Effect.Effect<never, NotEnrolled | RunnerRetired | ToolingUnavailable> =>
   Effect.scoped(
     Effect.gen(function* () {
       const pin = yield* readRunnerFile(home);
@@ -72,9 +103,25 @@ export const daemon = (home: string): Effect.Effect<never, NotEnrolled | RunnerR
       // No session survives this process, so everything under there is what the
       // last one left behind: swept here rather than growing with every crash.
       rmSync(scratchDir, { recursive: true, force: true });
+      // Once, here: what every session on this machine reaches Hydra through,
+      // refreshed so an upgraded binary takes over the last build's symlink and
+      // skill text (spec 15 section 2, spec 06 section 9.3).
+      const { binDir, claudePluginDir } = yield* tooling(
+        home,
+        joinPath(runnerDirIn(home), pin.storageDirectory),
+      );
       return yield* reconnect({
         attempt: Effect.flatMap(probe, (facts) =>
-          connect({ pin, facts, probe, headroom, providersDir, scratchDir }),
+          connect({
+            pin,
+            facts,
+            probe,
+            headroom,
+            providersDir,
+            scratchDir,
+            binDir,
+            hydraTool: { skill: HYDRA_SKILL, claudePluginDir },
+          }),
         ),
         signals: reconnectSignals({ now: () => Date.now(), addresses }),
       });

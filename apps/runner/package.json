@@ -11,5 +11,8 @@
     "@hydra/home": "workspace:*",
     "@hydra/protocol": "workspace:*",
     "effect": "4.0.0-rc.112"
+  },
+  "devDependencies": {
+    "@hydra/contract": "workspace:*"
   }
 }
