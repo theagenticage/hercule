@@ -35,6 +35,12 @@ export type FieldRow =
       readonly positional: true;
       readonly help: string;
       /**
+       * What the placeholder is called in usage, where the field's own name
+       * would not say whose id it is: the `id` of `/sessions/:id/inputs` is a
+       * session's, so it is spelled `<session-id>`.
+       */
+      readonly as?: string;
+      /**
        * The listing an eight-character-or-longer tail is resolved through. A
        * positional without one takes the full id, and its line says so.
        */
@@ -1249,6 +1255,7 @@ export const CLI = {
     fields: {
       id: {
         positional: true,
+        as: "session-id",
         help: "The session's id, or a tail of eight or more characters.",
         resolves: "session.query",
       },
@@ -1266,6 +1273,7 @@ export const CLI = {
     fields: {
       id: {
         positional: true,
+        as: "session-id",
         help: "The session's id, or a tail of eight or more characters.",
         resolves: "session.query",
       },
@@ -1286,6 +1294,7 @@ export const CLI = {
     fields: {
       id: {
         positional: true,
+        as: "session-id",
         help: "The session's id, or a tail of eight or more characters.",
         resolves: "session.query",
       },
@@ -1305,6 +1314,7 @@ export const CLI = {
     fields: {
       id: {
         positional: true,
+        as: "session-id",
         help: "The session's id, or a tail of eight or more characters.",
         resolves: "session.query",
       },
@@ -1326,6 +1336,7 @@ export const CLI = {
     fields: {
       id: {
         positional: true,
+        as: "session-id",
         help: "The session's id, or a tail of eight or more characters.",
         resolves: "session.query",
       },

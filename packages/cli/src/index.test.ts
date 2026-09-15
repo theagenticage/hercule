@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { Result } from "effect";
+import { CLI, NOUNS } from "@hydra/contract";
 import { main, readSetupUrl } from "./index";
 import { envelope, id, stubFetch, stubIo, type Handler } from "./testing";
 
@@ -74,86 +75,280 @@ describe("hydra setup-url", () => {
   });
 });
 
-describe("--help", () => {
-  it("lists the entities at the root, with the exit codes", async () => {
+/** The lines one `--help` printed, at exit 0. */
+const help = async (...argv: ReadonlyArray<string>): Promise<ReadonlyArray<string>> => {
+  const { io, run } = cli();
+  expect(await run(...argv, "--help"), `hydra ${argv.join(" ")} --help`).toBe(0);
+  return io.stdout;
+};
+
+/** Where a section marker sits, or -1. */
+const section = (out: ReadonlyArray<string>, marker: string): number =>
+  out.findIndex((line) => line.trim().toLowerCase().startsWith(marker));
+
+/** The text between two section markers. */
+const between = (out: ReadonlyArray<string>, from: string, to: string): string =>
+  out.slice(section(out, from), section(out, to)).join("\n");
+
+const lastLine = (out: ReadonlyArray<string>): string =>
+  [...out].reverse().find((line) => line.trim() !== "") ?? "";
+
+const startsWithWord = (line: string, word: string): boolean =>
+  new RegExp(`^${word}\\b`).test(line.trim());
+
+/** The root help's lines for one noun: its own, and everything before the next noun. */
+const nounBlock = (out: ReadonlyArray<string>, noun: string): string => {
+  const from = out.findIndex((line) => startsWithWord(line, noun));
+  expect(from, `the root help has no ${noun} noun`).toBeGreaterThan(-1);
+  const next = out.findIndex(
+    (line, index) =>
+      index > from &&
+      Object.keys(NOUNS).some((other) => other !== noun && startsWithWord(line, other)),
+  );
+  return out.slice(from, next === -1 ? out.length : next).join("\n");
+};
+
+/** Every visible command, as the words after `hydra`. */
+const spellings = Object.values(CLI as Record<string, { hidden?: true; command?: string }>)
+  .filter((row) => row.hidden !== true)
+  .map((row) => (row.command ?? "").split(" "));
+
+// the command screen, in one fixed shape.
+describe("hydra session input --help", () => {
+  const MARKERS = [
+    "usage:",
+    "examples:",
+    "arguments:",
+    "flags:",
+    "stdin:",
+    "returns:",
+    "errors:",
+    "next:",
+  ];
+
+  it("opens with the purpose, then the sections in their fixed order", async () => {
+    const out = await help("session", "input");
+    const at = MARKERS.map((marker) => section(out, marker));
+    for (const [index, marker] of MARKERS.entries()) {
+      expect(at[index], `${marker} is missing`).toBeGreaterThan(-1);
+    }
+    expect(at, MARKERS.join(" then ")).toEqual([...at].sort((a, b) => a - b));
+    expect(at[0]).toBeGreaterThan(0);
+    expect(out.slice(0, at[0]).join("\n")).toContain("opens a turn on an idle session");
+  });
+
+  it("renders the example as a piped shell line", async () => {
+    const out = await help("session", "input");
+    expect(out.join("\n")).toMatch(
+      /echo "Carry on, and run the tests when you are done\." \| hydra session input 1f3a9c2e/,
+    );
+  });
+
+  it("describes the id argument and each flag", async () => {
+    const text = (await help("session", "input")).join("\n");
+    expect(text).toContain("<id>");
+    expect(text).toContain("The session's id, or a tail of eight or more characters.");
+    expect(text).toContain("--model");
+    expect(text).toContain("Switch the session to this model for this turn on.");
+    expect(text).toContain("--options");
+    expect(text).toContain(
+      "The per-model choices as inline JSON, applied before the input is stored.",
+    );
+  });
+
+  it("says the text is required on stdin and that there is no --text flag", async () => {
+    const out = await help("session", "input");
+    const block = between(out, "stdin:", "returns:");
+    expect(block).toContain("required");
+    expect(block.toLowerCase()).toContain("there is no --text flag");
+  });
+
+  it("names what comes back", async () => {
+    const block = between(await help("session", "input"), "returns:", "errors:");
+    expect(block).toContain("inputId");
+    expect(block).toContain("result");
+  });
+
+  it("says what forbidden means and how to ask for the grant", async () => {
+    const block = between(await help("session", "input"), "errors:", "next:");
+    expect(block).toContain("forbidden");
+    expect(block).toContain("hydra permission request session.steer");
+  });
+
+  it("ends on the operation line", async () => {
+    expect(lastLine(await help("session", "input"))).toBe(
+      "operation session.input \u00b7 POST /api/v1/sessions/:id/input \u00b7 grant session.steer",
+    );
+  });
+});
+
+describe("hydra task list --help", () => {
+  it("shows the paging section and a page's items", async () => {
+    const out = await help("task", "list");
+    expect(section(out, "paging:"), "no paging section").toBeGreaterThan(-1);
+    expect(out.slice(section(out, "returns:")).join("\n")).toContain("items[]");
+  });
+});
+
+describe("hydra session --help", () => {
+  const VERBS = [
+    "list",
+    "read",
+    "spawn",
+    "update",
+    "input",
+    "interrupt",
+    "respond",
+    "stop",
+    "continue",
+  ];
+
+  it("lists the nine verbs, each with the grant it needs", async () => {
+    const out = await help("session");
+    for (const verb of VERBS) {
+      const line = out.find((each) => startsWithWord(each, verb));
+      expect(line, `no line for session ${verb}`).toBeDefined();
+      expect(line, `session ${verb} names no grant`).toContain("grant ");
+    }
+  });
+
+  it("names the usual order in a flow line", async () => {
+    const out = await help("session");
+    expect(section(out, "flow:"), "no flow line").toBeGreaterThan(-1);
+    expect(out.join("\n")).toContain("hydra session spawn starts one");
+  });
+});
+
+describe("hydra --help", () => {
+  it("lists every visible noun with its verbs", async () => {
+    const out = await help();
+    for (const words of spellings) {
+      expect(nounBlock(out, words[0]!), `${words.join(" ")} is not in the root help`).toContain(
+        words[1]!,
+      );
+    }
+  });
+
+  it("shows the nested join-token noun under runner", async () => {
+    const block = nounBlock(await help(), "runner");
+    expect(block).toMatch(/join-token:\s+create\s+list\s+revoke/);
+  });
+
+  it("carries the conventions that hold everywhere", async () => {
+    const text = (await help()).join("\n");
+    expect(text).toContain("--json");
+    expect(text).toContain("exit");
+    expect(text).toContain("hydra permission request");
+  });
+
+  it("has no auth noun at all", async () => {
+    const out = await help();
+    expect(out.filter((line) => startsWithWord(line, "auth"))).toEqual([]);
+    expect(out.join("\n")).not.toContain("ws-ticket");
+  });
+});
+
+// the bridge, on the CLI's side of it.
+describe("hydra runner --help", () => {
+  it("shows the four daemon forms above the verbs", async () => {
+    const out = await help("runner");
+    const text = out.join("\n");
+    expect(
+      out.some((line) => /^hydra runner(\s\s|$)/.test(line.trim())),
+      "no bare daemon form",
+    ).toBe(true);
+    expect(text).toContain("hydra runner --local");
+    expect(text).toContain("hydra runner join");
+    expect(text).toContain("hydra runner set-controller");
+    expect(text).toContain("list");
+  });
+});
+
+// a word the tree does not answer to, and the ones it does.
+describe("an unknown command", () => {
+  const fails = async (...argv: ReadonlyArray<string>) => {
     const { io, run } = cli();
-    expect(await run("--help")).toBe(0);
-    const text = io.stdout.join("\n");
-    expect(text).toContain("profile");
-    expect(text).toContain("secret");
-    expect(text).toContain("HYDRA_SESSION=1");
-    expect(text).toContain("2  the command line was wrong");
+    return { code: await run(...argv), err: io.stderr.join("\n") };
+  };
+
+  it("exits 2 on a hidden noun, help or not", async () => {
+    const asked = await fails("auth", "--help");
+    expect(asked.code).toBe(2);
+    expect(asked.err).toContain("auth");
+    expect(asked.err).toContain("api-key");
+    expect(asked.err).toContain("task");
+
+    const called = await fails("auth", "ws-ticket");
+    expect(called.code).toBe(2);
+    expect(called.err).toContain("auth");
   });
 
-  it("lists an entity's verbs and the grant each needs", async () => {
-    const { io, run } = cli();
-    expect(await run("profile", "--help")).toBe(0);
-    const text = io.stdout.join("\n");
-    expect(text).toContain("query");
-    expect(text).toContain("grant permission.read");
-    expect(text).toContain("grant permission.write");
+  it("exits 2 on the operation id spelled as a command", async () => {
+    const keys = await fails("apiKey", "query");
+    expect(keys.code).toBe(2);
+    expect(keys.err).toContain("apiKey");
+    expect(keys.err).toContain("api-key");
+
+    const task = await fails("task", "query");
+    expect(task.code).toBe(2);
+    expect(task.err).toContain("query");
+    expect(task.err).toContain("list");
   });
 
-  it("names the grant, the route and the flags of one verb", async () => {
-    const { io, run } = cli();
-    expect(await run("profile", "create", "--help")).toBe(0);
-    const text = io.stdout.join("\n");
-    expect(text).toContain("operation: profile.create");
-    expect(text).toContain("POST /api/v1/profiles");
-    expect(text).toContain("requires:  grant permission.write");
-    expect(text).toContain("--name");
-    expect(text).toContain("--grants");
+  it("exits 2 on the derived join-token verb and says what is valid there", async () => {
+    const { code, err } = await fails("runner", "create-join-token");
+    expect(code).toBe(2);
+    expect(err).toContain("create-join-token");
+    expect(err).toContain("join-token");
   });
 
-  it("says which of a nested route's two ids takes a tail", async () => {
-    const { io, run } = cli();
-    expect(await run("input", "update", "--help")).toBe(0);
-    const text = io.stdout.join("\n");
-    expect(text).toContain("<id>       a canonical id, or an unambiguous tail");
-    expect(text).toContain("<inputId>  a canonical id, written out in full");
+  it("sends the listings that do exist to their own routes", async () => {
+    const cases = [
+      [["api-key", "list"], "/api/v1/api-keys"],
+      [["task", "list"], "/api/v1/tasks"],
+      [["runner", "join-token", "list"], "/api/v1/runners/join-tokens"],
+    ] as const;
+    for (const [argv, path] of cases) {
+      const { fetch, run } = cli((request) =>
+        request.path === "/api/v1/runners/join-tokens" ? [] : { items: [] },
+      );
+      expect(await run(...argv), argv.join(" ")).toBe(0);
+      expect(fetch.calls[0], argv.join(" ")).toMatchObject({ method: "GET", path });
+    }
+  });
+});
+
+// a stdin field at a terminal.
+describe("a stdin field with no pipe", () => {
+  it("exits 2 naming the field and the piped form, and never reads stdin", async () => {
+    const fetch = stubFetch(() => ({}));
+    const base = stubIo({
+      env: { HYDRA_TOKEN: "t", HYDRA_API_URL: "http://controller.test" },
+      fetch,
+    });
+    let reads = 0;
+    const io = {
+      ...base,
+      isTty: () => true,
+      stdin: () => {
+        reads += 1;
+        return Promise.reject(new Error("stdin was read at a terminal"));
+      },
+    };
+
+    expect(await main(["--home", home, "session", "input", id("aaaaaaa1")], io)).toBe(2);
+    expect(reads).toBe(0);
+    expect(base.stderr.join("\n")).toContain("text");
+    expect(base.stderr.join("\n")).toContain("| hydra session input");
+    expect(fetch.calls).toEqual([]);
   });
 
-  it("documents the two-line stdin order of user setPassword", async () => {
-    const { io, run } = cli();
-    expect(await run("user", "setPassword", "--help")).toBe(0);
-    const text = io.stdout.join("\n");
-    expect(text).toContain("--current-stdin");
-    expect(text).toContain("--next-stdin");
-    expect(text).toContain("There is no --current flag.");
-    expect(text).toContain("2 lines, one per field, in this order: current, then next.");
-  });
+  it("shows the line the caller wrote, with the pipe it was missing", async () => {
+    const base = stubIo({ env: { HYDRA_TOKEN: "t", HYDRA_API_URL: "http://controller.test" } });
+    const io = { ...base, isTty: () => true };
 
-  it("says how a nullable field is cleared, on each of the two that are", async () => {
-    const task = cli();
-    expect(await task.run("task", "update", "--help")).toBe(0);
-    expect(task.io.stdout.join("\n")).toContain("--projectId null clears it");
-
-    const project = cli();
-    expect(await project.run("project", "update", "--help")).toBe(0);
-    expect(project.io.stdout.join("\n")).toContain("--description null clears it");
-  });
-
-  it("says nothing about null on a field that does not accept it", async () => {
-    const { io, run } = cli();
-    expect(await run("profile", "create", "--help")).toBe(0);
-    expect(io.stdout.join("\n")).not.toContain("null clears it");
-  });
-
-  it("works after other flags have been written", async () => {
-    const { io, run } = cli();
-    expect(await run("profile", "create", "--name", "x", "--help")).toBe(0);
-    expect(io.stdout.join("\n")).toContain("operation: profile.create");
-  });
-
-  it("renders the three requirement markers as prose, not as grants", async () => {
-    const setup = cli();
-    await setup.run("setup", "--help");
-    expect(setup.io.stdout.join("\n")).toContain("no credential needed");
-    expect(setup.io.stdout.join("\n")).toContain("the one-time setup token");
-
-    const auth = cli();
-    await auth.run("auth", "--help");
-    expect(auth.io.stdout.join("\n")).toContain("any authenticated caller");
+    expect(await main(["--home", home, "task", "create", "--title", "x"], io)).toBe(2);
+    expect(base.stderr.join("\n")).toContain('echo "<description>" | hydra task create --title x');
   });
 });
 
@@ -161,7 +356,7 @@ describe("running an operation", () => {
   it("sends the payload the flags describe, under the resolved credential", async () => {
     const { fetch, run } = cli(() => profile("aaaaaaa1", "reviewer"));
 
-    expect(await run("profile", "create", "--name", "reviewer", "--grants", "task.read")).toBe(0);
+    expect(await run("profile", "create", "--name", "reviewer", "--grant", "task.read")).toBe(0);
     expect(fetch.calls[0]).toMatchObject({
       method: "POST",
       path: "/api/v1/profiles",
@@ -180,9 +375,9 @@ describe("running an operation", () => {
       "create",
       "--name",
       "reviewer",
-      "--grants",
+      "--grant",
       "task.read",
-      "--grants",
+      "--grant",
       "task.update",
     );
     expect((fetch.calls[0]?.body as { grants: Array<string> }).grants).toEqual([
@@ -228,7 +423,7 @@ describe("running an operation", () => {
 
   it("prints a page as a table and says how to get the rest", async () => {
     const { io, run } = cli(() => ({ items: [profile("aaaaaaa1", "one")], nextCursor: "c2" }));
-    await run("profile", "query");
+    await run("profile", "list");
     expect(io.stdout).toEqual([
       "id        name  grants     shipped  createdAt                 updatedAt",
       "aaaaaaa1  one   task.read  false    2026-09-04T10:00:00.000Z  2026-09-04T10:00:00.000Z",
@@ -249,12 +444,9 @@ describe("running an operation", () => {
       fetch,
       stdin: "s3cret\n",
     });
-    expect(
-      await main(
-        ["--home", home, "secret", "set", "connection", "github", "token", "--value-stdin"],
-        io,
-      ),
-    ).toBe(0);
+    expect(await main(["--home", home, "secret", "set", "connection", "github", "token"], io)).toBe(
+      0,
+    );
     expect(fetch.calls[0]).toMatchObject({
       method: "PUT",
       path: "/api/v1/secrets/connection/github/token",
@@ -269,18 +461,15 @@ describe("running an operation", () => {
       fetch,
       stdin: "old-password\nnew-password\n",
     });
-    expect(
-      await main(["--home", home, "user", "setPassword", "--current-stdin", "--next-stdin"], io),
-    ).toBe(0);
+    expect(await main(["--home", home, "user", "set-password"], io)).toBe(0);
     expect(fetch.calls[0]?.body).toEqual({ current: "old-password", next: "new-password" });
     expect(io.stdout).toEqual(["ok"]);
   });
 
   it("has no plain flag for any password", async () => {
     const { io, run } = cli();
-    expect(await run("auth", "login", "--username", "u", "--password", "p")).toBe(2);
-    expect(io.stderr.join("\n")).toContain("process lists");
-    expect(io.stderr.join("\n")).toContain("--password-stdin");
+    expect(await run("user", "set-password", "--current", "p")).toBe(2);
+    expect(io.stderr.join("\n")).toContain("--current-stdin");
   });
 
   it("refuses --value on a secret and says where the value goes", async () => {
@@ -309,7 +498,7 @@ describe("paging", () => {
       env: { HYDRA_TOKEN: "t", HYDRA_API_URL: "http://controller.test" },
       fetch,
     });
-    expect(await main(["--home", home, "profile", "query", "--all", "--json"], io)).toBe(0);
+    expect(await main(["--home", home, "profile", "list", "--all", "--json"], io)).toBe(0);
     expect(JSON.parse(io.stdout.join("\n"))).toEqual({
       items: [profile("aaaaaaa1", "one"), profile("aaaaaaa2", "two"), profile("aaaaaaa3", "three")],
     });
@@ -328,7 +517,7 @@ describe("paging", () => {
       fetch,
     });
     expect(
-      await main(["--home", home, "profile", "query", "--all", "--cursor", "c2", "--json"], io),
+      await main(["--home", home, "profile", "list", "--all", "--cursor", "c2", "--json"], io),
     ).toBe(0);
     expect(JSON.parse(io.stdout.join("\n"))).toEqual({
       items: [profile("aaaaaaa2", "two"), profile("aaaaaaa3", "three")],
@@ -339,7 +528,7 @@ describe("paging", () => {
 
   it("passes --limit and --sort through", async () => {
     const { fetch, run } = cli(() => ({ items: [] }));
-    await run("profile", "query", "--limit", "2", "--sort", "name:desc");
+    await run("profile", "list", "--limit", "2", "--sort", "name:desc");
     expect(fetch.calls[0]?.query.get("limit")).toBe("2");
     expect(fetch.calls[0]?.query.get("sort")).toBe("name:desc");
     expect(fetch.calls[0]?.path).toBe("/api/v1/profiles");
@@ -347,19 +536,19 @@ describe("paging", () => {
 
   it("leaves the direction out when --sort names only a field", async () => {
     const { fetch, run } = cli(() => ({ items: [] }));
-    await run("profile", "query", "--sort", "name");
+    await run("profile", "list", "--sort", "name");
     expect(fetch.calls[0]?.query.get("sort")).toBe("name");
   });
 
   it("rejects a sort direction that is neither asc nor desc", async () => {
     const { io, run } = cli();
-    expect(await run("profile", "query", "--sort", "name:sideways")).toBe(2);
+    expect(await run("profile", "list", "--sort", "name:sideways")).toBe(2);
     expect(io.stderr.join("\n")).toContain("is not asc or desc");
   });
 
   it("rejects a sort field the operation does not declare", async () => {
     const { io, run } = cli();
-    expect(await run("profile", "query", "--sort", "createdAt")).toBe(2);
+    expect(await run("profile", "list", "--sort", "createdAt")).toBe(2);
     expect(io.stderr.join("\n")).toContain("is not sortable");
   });
 });
@@ -520,6 +709,14 @@ describe("id tails", () => {
     expect(fetch.calls.at(-1)?.path).toBe(`/api/v1/tasks/${id("aaaaaaa1")}`);
   });
 
+  it("exits 2 on a tail where the row names no listing, and calls nothing", async () => {
+    const fetch = stubFetch(() => ({}));
+    const stub = io(fetch);
+    expect(await main(["--home", home, "plugin", "read", "1f3a9c2e"], stub)).toBe(2);
+    expect(fetch.calls).toEqual([]);
+    expect(stub.stderr.join("\n")).toContain("full id");
+  });
+
   it("refuses a tail shorter than eight characters before calling anything", async () => {
     const fetch = withProfiles(() => ({}));
     const stub = io(fetch);
@@ -530,10 +727,11 @@ describe("id tails", () => {
 });
 
 describe("failures", () => {
-  it("exits 2 on an unknown command and names the entities", async () => {
+  it("exits 2 on an unknown noun and lists what is valid there", async () => {
     const { io, run } = cli();
     expect(await run("nope", "read")).toBe(2);
-    expect(io.stderr.join("\n")).toContain("unknown command `nope`");
+    expect(io.stderr.join("\n")).toContain("nope");
+    expect(io.stderr.join("\n")).toContain("task");
   });
 
   it("exits 2 on an unknown flag and points at --help", async () => {
@@ -545,14 +743,14 @@ describe("failures", () => {
   it("exits 2 when a required flag is missing", async () => {
     const { io, run } = cli();
     expect(await run("profile", "create")).toBe(2);
-    expect(io.stderr.join("\n")).toContain("missing required --name, --grants");
+    expect(io.stderr.join("\n")).toContain("missing required --name, --grant");
   });
 
   it("exits 1 on an error envelope and prints the missing grant verbatim", async () => {
     const { io, run } = cli(() =>
       envelope("forbidden", 403, "missing grant permission.write", { grant: "permission.write" }),
     );
-    expect(await run("profile", "create", "--name", "x", "--grants", "task.read")).toBe(1);
+    expect(await run("profile", "create", "--name", "x", "--grant", "task.read")).toBe(1);
     expect(io.stderr.join("\n")).toContain("missing grant permission.write");
   });
 
@@ -572,8 +770,6 @@ describe("failures", () => {
         "create",
         "--title",
         "a task",
-        "--description",
-        "",
         "--provenance",
         '{"note":"nothing that names anything"}',
       ),
@@ -581,6 +777,16 @@ describe("failures", () => {
     expect(fetch.calls).toEqual([]);
     expect(io.stderr.join("\n")).toContain("--provenance: A provenance entry names at least one");
     expect(io.stderr.join("\n")).toContain("run `hydra task create --help`");
+  });
+
+  it("names a field read from stdin by its name, never by a flag it does not have", async () => {
+    // An empty pipe is a value the field refuses, and the caller has no
+    // `--text` to correct: the message has to point at the pipe.
+    const { io, fetch, run } = cli();
+    expect(await run("session", "input", id("aaaaaaa1"))).toBe(2);
+    expect(fetch.calls).toEqual([]);
+    expect(io.stderr.join("\n")).toContain("text (on stdin)");
+    expect(io.stderr.join("\n")).not.toContain("--text");
   });
 
   it("exits 3 when the controller cannot be reached", async () => {

@@ -1,44 +1,24 @@
 /**
  * Turning a command line into one operation's request.
  *
- * Path parameters are positional, in route order; payload and query fields are
- * `--<field>` flags; paging is `--limit`, `--cursor`, `--sort` and `--all`.
- * Nothing about a particular operation is written here:
- * the rules are applied to the `Command` the contract produced.
+ * Positionals come first, in the order the command writes them; every other
+ * field is `--<flag>`, spelled as the contract's CLI table spells it; paging is
+ * `--limit`, `--cursor`, `--sort` and `--all`. Nothing about a particular
+ * operation is written here: the rules are applied to the `Command` the tree
+ * produced.
  *
- * Values that must not appear in `ps` or in shell history arrive on stdin
- * instead: every string field also has a `--<field>-stdin` form. Given once, it
- * takes all of stdin with one trailing newline removed, which is what a
- * heredoc produces; given more than once, stdin supplies one line per field, in
- * the order the operation's schema declares them - never in the order the flags
- * happened to be written, so `hydra user setPassword` always reads the current
- * password first.
+ * One field per command carries content, and it arrives on stdin rather than in
+ * `argv`, where a password would be visible in process lists and a document
+ * would have to be folded onto one line. Such a field has no inline flag at
+ * all. Required, it is read unasked; optional, only when its
+ * `--<flag>-stdin` marker says so, so an empty pipe never blanks a field.
  *
- * What arrives on stdin is read exactly as the flag's value is read, `coerce`
- * and all, so a field means the same thing however it was given: the bare word
- * `null` clears a nullable field from stdin as it does from `argv`.
+ * `hydra user set-password` is the one command that reads two fields, one line
+ * each, in the order its schema declares them - never in the order the markers
+ * were written, or two passwords would silently swap.
  */
 import { UsageError } from "../exit";
 import type { Command, Field } from "./tree";
-
-/**
- * Fields that may arrive **only** on stdin; the plain `--<field>` flag for one
- * of these does not exist.
- *
- * A bare `--password` flag does not exist, and the reason generalises:
- * anything in `argv` is visible in process lists and lands in shell history. So
- * every password the API takes, and a secret's value, is listed here.
- */
-export const STDIN_ONLY = new Map<string, ReadonlyArray<string>>([
-  ["setup.complete", ["password"]],
-  ["auth.login", ["password"]],
-  ["user.setPassword", ["current", "next"]],
-  ["secret.set", ["value"]],
-]);
-
-/** True when this operation's field refuses a plain `--<field>` flag. */
-export const isStdinOnly = (id: string, field: string): boolean =>
-  STDIN_ONLY.get(id)?.includes(field) === true;
 
 export interface SortArgument {
   readonly field: string;
@@ -61,18 +41,22 @@ export interface Arguments {
   readonly setupToken: string | undefined;
 }
 
-const coerce = (field: Field, text: string, help: string): unknown => {
-  // The bare word `null` is how a nullable field is cleared, and it is checked
-  // before anything else: a field that accepts null accepts it whatever shape
-  // its other values have, and `null` is not one of a closed value set. The
-  // cost is that a nullable string field cannot be given the four letters
-  // themselves, which is the trade every command line that spells null makes.
-  if (field.nullable && text === "null") return null;
+/**
+ * How a message names a field: the way the caller had to write it. A field read
+ * from stdin has no flag to name, and naming one would send the reader looking
+ * for a flag that does not exist.
+ */
+export const said = (field: Field): string =>
+  field.stdin
+    ? `${field.name} (on stdin)`
+    : field.positional
+      ? `<${field.flag}>`
+      : `--${field.flag}`;
+
+/** The value a field holds, from the text that was written for it. */
+export const coerce = (field: Field, text: string, help: string): unknown => {
   if (field.choices !== undefined && !field.choices.includes(text)) {
-    throw new UsageError(
-      `--${field.name}: ${text} is not one of ${field.choices.join(", ")}`,
-      help,
-    );
+    throw new UsageError(`${said(field)}: ${text} is not one of ${field.choices.join(", ")}`, help);
   }
   switch (field.kind) {
     case "string":
@@ -80,22 +64,35 @@ const coerce = (field: Field, text: string, help: string): unknown => {
     case "number": {
       const value = Number(text);
       if (!Number.isFinite(value))
-        throw new UsageError(`--${field.name}: ${text} is not a number`, help);
+        throw new UsageError(`${said(field)}: ${text} is not a number`, help);
       return value;
     }
     case "boolean": {
       if (text === "true") return true;
       if (text === "false") return false;
-      throw new UsageError(`--${field.name}: ${text} is not true or false`, help);
+      throw new UsageError(`${said(field)}: ${text} is not true or false`, help);
     }
     case "json":
       try {
         return JSON.parse(text);
       } catch {
-        throw new UsageError(`--${field.name}: ${text} is not valid JSON`, help);
+        throw new UsageError(`${said(field)}: ${text} is not valid JSON`, help);
       }
   }
 };
+
+/**
+ * The value a field holds, from the text written for it in `argv`.
+ *
+ * The bare word `null` is how a nullable field is cleared, and it is checked
+ * before anything else: a field that accepts null accepts it whatever shape its
+ * other values have, and `null` is not one of a closed value set. The cost is
+ * that a nullable string field cannot be given the four letters themselves,
+ * which is the trade every command line that spells null makes. Content read
+ * from stdin is a document and never a shortcut, so it does not pass here.
+ */
+const written = (field: Field, text: string, help: string): unknown =>
+  field.nullable && text === "null" ? null : coerce(field, text, help);
 
 const set = (into: Record<string, unknown>, field: Field, value: unknown): void => {
   if (!field.repeated) {
@@ -182,24 +179,25 @@ export function* tokenize(tokens: ReadonlyArray<string>, help: string): Generato
 }
 
 /**
- * Parse the tokens after `hydra <entity> <verb>`.
+ * Parse the tokens after the command's own words.
  *
- * `readStdin` is called at most once, and only when a `--<field>-stdin` flag
- * was given, so a command that takes nothing from stdin never blocks on a pipe.
+ * `readStdin` is called at most once, and only when the command has a field to
+ * read from it, so a command that takes nothing from stdin never blocks on a
+ * pipe.
  */
 export const parseArguments = async (
   command: Command,
   tokens: ReadonlyArray<string>,
   readStdin: () => Promise<string>,
 ): Promise<Arguments> => {
-  const help = `${command.entity} ${command.verb}`;
-  const payloadFields = new Map(command.payload.map((field) => [field.name, field]));
-  const queryFields = new Map(command.query.map((field) => [field.name, field]));
+  const help = command.words.join(" ");
+  const payloadFields = new Map(command.payload.map((field) => [field.flag, field]));
+  const queryFields = new Map(command.query.map((field) => [field.flag, field]));
 
   const positionals: Array<string> = [];
   const payload: Record<string, unknown> = {};
   const query: Record<string, unknown> = {};
-  const stdinFields: Array<Field> = [];
+  const marked = new Set<Field>();
   let limit: number | undefined;
   let cursor: string | undefined;
   let sort: SortArgument | undefined;
@@ -245,75 +243,68 @@ export const parseArguments = async (
 
     if (name.endsWith("-stdin")) {
       const field = payloadFields.get(name.slice(0, -"-stdin".length));
-      if (field === undefined || field.kind !== "string" || field.repeated) {
-        throw new UsageError(`unknown flag --${name}`, help);
-      }
+      if (field === undefined || !field.stdin) throw new UsageError(`unknown flag --${name}`, help);
+      // The marker asks for the read; it never carries the value, or the value
+      // would be back in `argv`, which is the whole point of reading stdin.
       if (inline !== undefined) throw new UsageError(`--${name} takes no value`, help);
-      stdinFields.push(field);
+      marked.add(field);
       continue;
     }
 
     const payloadField = payloadFields.get(name);
-    if (payloadField !== undefined) {
-      if (isStdinOnly(command.id, name)) {
-        throw new UsageError(
-          `--${name} does not exist: it would be visible in process lists and in shell history. ${command.id} reads it from stdin, as --${name}-stdin.`,
-          help,
-        );
-      }
-      set(payload, payloadField, coerce(payloadField, value(), help));
-      continue;
+    const field = payloadField ?? queryFields.get(name);
+    if (field === undefined) throw new UsageError(`unknown flag --${name}`, help);
+    if (field.stdin) {
+      throw new UsageError(
+        `--${name} does not exist: ${command.id} reads ${field.name} from stdin, never from argv, where it would show in process lists and in shell history. Pipe it in; --${name}-stdin ${field.optional ? "asks for the read" : "is accepted and not needed"}.`,
+        help,
+      );
     }
-
-    const queryField = queryFields.get(name);
-    if (queryField !== undefined) {
-      set(query, queryField, coerce(queryField, value(), help));
-      continue;
-    }
-
-    throw new UsageError(`unknown flag --${name}`, help);
+    set(payloadField === undefined ? query : payload, field, written(field, value(), help));
   }
 
-  if (stdinFields.length > 0) {
-    // Declaration order, not flag order: `--next-stdin --current-stdin` must
-    // read the same two lines as `--current-stdin --next-stdin`, or the flags
-    // would silently swap two passwords.
-    const ordered = command.payload.filter((field) => stdinFields.includes(field));
-    const text = await readStdin();
-    if (ordered.length === 1) {
-      const field = ordered[0]!;
-      payload[field.name] = coerce(field, text.replace(/\n$/, ""), help);
-    } else {
-      const lines = text.replace(/\n$/, "").split("\n");
-      if (lines.length !== ordered.length) {
-        throw new UsageError(
-          `stdin has ${lines.length} line(s) but ${ordered.length} fields read from it: ${ordered
-            .map((field) => field.name)
-            .join(", then ")}`,
-          help,
-        );
-      }
-      ordered.forEach((field, index) => {
-        payload[field.name] = coerce(field, lines[index]!, help);
-      });
-    }
-  }
+  // A required content field is read unasked; an optional one only where its
+  // marker said so, so an empty pipe never blanks a field that was not named.
+  const reading = command.payload.filter(
+    (field) => field.stdin && (!field.optional || marked.has(field)),
+  );
 
+  // Everything argv alone can settle is settled before the pipe is touched, so
+  // a command line that was never going to work does not first consume stdin.
   if (positionals.length !== command.positionals.length) {
-    const expected = command.positionals.map((field) => `<${field.name}>`).join(" ");
+    const expected = command.positionals.map((field) => `<${field.flag}>`).join(" ");
     throw new UsageError(
-      `${command.entity} ${command.verb} takes ${command.positionals.length} argument(s): ${expected || "none"}`,
+      `${help} takes ${command.positionals.length} argument(s): ${expected || "none"}`,
       help,
     );
   }
 
   const missing = command.payload
-    .filter((field) => !field.optional && !(field.name in payload))
-    .map((field) =>
-      isStdinOnly(command.id, field.name) ? `--${field.name}-stdin` : `--${field.name}`,
-    );
+    .filter((field) => !field.optional && !(field.name in payload) && !reading.includes(field))
+    .map((field) => `--${field.flag}${field.stdin ? "-stdin" : ""}`);
   if (missing.length > 0) {
     throw new UsageError(`missing required ${missing.join(", ")}`, help);
+  }
+
+  if (reading.length > 0) {
+    const text = await readStdin();
+    if (reading.length === 1) {
+      const field = reading[0]!;
+      payload[field.name] = coerce(field, text.replace(/\n$/, ""), help);
+    } else {
+      const lines = text.replace(/\n$/, "").split("\n");
+      if (lines.length !== reading.length) {
+        throw new UsageError(
+          `stdin has ${lines.length} line(s) but ${reading.length} fields read from it: ${reading
+            .map((field) => field.name)
+            .join(", then ")}`,
+          help,
+        );
+      }
+      reading.forEach((field, index) => {
+        payload[field.name] = coerce(field, lines[index]!, help);
+      });
+    }
   }
 
   return { positionals, payload, query, limit, cursor, sort, all, json, setupToken };

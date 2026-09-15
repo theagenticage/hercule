@@ -1,9 +1,8 @@
 /**
  * The CLI role: every API-facing verb, spoken over HTTP only.
  *
- * `hydra <entity> <verb>` is the operation id `<entity>.<verb>`; the whole
- * command tree is derived from the contract, so this file routes and reports
- * and holds no list of commands.
+ * The command tree is the contract's CLI table, so this file walks words,
+ * routes and reports, and holds no list of commands.
  *
  * `setup-url` is the one exception and always will be: it is a filesystem read
  * of `<home>/setup-url`, needing no credential, because it is what a user has
@@ -16,11 +15,11 @@ import { readFileSync } from "node:fs";
 import { ApiError, ConnectionError, RequestError, createClient } from "@hydra/client-core";
 import { parseGlobalOptions, resolveHomePath, setupUrlFileIn } from "@hydra/home";
 import { Result } from "effect";
-import { parseArguments } from "./commands/args";
+import { parseArguments, said } from "./commands/args";
 import { execute } from "./commands/execute";
-import { commandHelp, entityHelp, rootHelp } from "./commands/help";
+import { commandHelp, nounHelp, rootHelp, shellExample } from "./commands/help";
 import { renderHuman } from "./commands/render";
-import { commandFor, ENTITIES, verbsOf, type Command } from "./commands/tree";
+import { commandAt, wordsAfter, type Command } from "./commands/tree";
 import { CredentialError, resolveCredential, resolveUrl, type Env } from "./credentials";
 import { EXIT, UsageError } from "./exit";
 import { login, loginHelp } from "./login";
@@ -49,57 +48,65 @@ const wantsHelp = (tokens: ReadonlyArray<string>): boolean =>
 
 /**
  * A request the client refused to encode, said as the command line that caused
- * it. Nothing was sent, so this is a usage error and not an API failure: the
- * value of a flag - a `--<field>` carrying JSON is the way to get here - does
- * not fit the field it is written into.
+ * it. Nothing was sent, so this is a usage error and not an API failure: a
+ * value - a `--<flag>` carrying JSON, a document piped in - does not fit the
+ * field it was written into.
  *
- * The issue's path is the field's path inside the payload, so its head is the
- * flag's own name.
+ * The issue's path is the field's path inside the request, so its head names a
+ * field of this command, and each is named the way the caller wrote it.
  */
 const usageErrorOf = (error: RequestError, command: Command): UsageError => {
-  const flags = new Set([...command.payload, ...command.query].map((field) => field.name));
-  const said = error.issues.map((issue) => {
-    const head = issue.path[0];
-    return head !== undefined && flags.has(head) ? `--${head}: ${issue.message}` : issue.message;
+  const named = new Map(
+    [...command.positionals, ...command.payload, ...command.query].map((field) => [
+      field.name,
+      said(field),
+    ]),
+  );
+  const refused = error.issues.map((issue) => {
+    const label = issue.path[0] === undefined ? undefined : named.get(issue.path[0]);
+    return label === undefined ? issue.message : `${label}: ${issue.message}`;
   });
-  return new UsageError(said.join("; "), `${command.entity} ${command.verb}`);
+  return new UsageError(refused.join("; "), command.words.join(" "));
+};
+
+/**
+ * What reads stdin, or the refusal that stands in for it at a terminal.
+ *
+ * A command whose field is read from stdin must never sit there looking stopped
+ * with a cursor blinking: it names the fields it wants and shows the line the
+ * caller just wrote, with the pipe it was missing. The refusal is the read
+ * itself, so a command that would not have read anything is unaffected.
+ */
+const stdinOf = (
+  command: Command,
+  tokens: ReadonlyArray<string>,
+  io: Io,
+): (() => Promise<string>) => {
+  if (!io.isTty()) return io.stdin;
+  return () => {
+    const fields = command.payload.filter((field) => field.stdin);
+    const names = fields.map((field) => field.name);
+    const asked =
+      names.length === 1
+        ? `${names[0]} is read from stdin, and stdin is a terminal. Pipe it in:`
+        : `${names.join(" and ")} are read from stdin, and stdin is a terminal. Pipe them in:`;
+    throw new UsageError(
+      [asked, ...shellExample(command, tokens, names.map((name) => `<${name}>`).join("\n"))].join(
+        "\n",
+      ),
+      command.words.join(" "),
+    );
+  };
 };
 
 /** Run one operation: parse, resolve a credential, call, print. */
 const runOperation = async (
-  entity: string,
-  verb: string | undefined,
+  command: Command,
   tokens: ReadonlyArray<string>,
   home: string,
   io: Io,
 ): Promise<number> => {
-  if (verb === undefined) {
-    if (wantsHelp(tokens)) {
-      for (const line of entityHelp(entity)) io.out(line);
-      return EXIT.ok;
-    }
-    throw new UsageError(
-      `${entity} needs a verb: ${verbsOf(entity)
-        .map((command) => command.verb)
-        .join(", ")}`,
-    );
-  }
-
-  const command = commandFor(entity, verb);
-  if (command === undefined) {
-    throw new UsageError(
-      `unknown verb \`${entity} ${verb}\`; ${entity} has ${verbsOf(entity)
-        .map((each) => each.verb)
-        .join(", ")}`,
-    );
-  }
-
-  if (wantsHelp(tokens)) {
-    for (const line of commandHelp(command)) io.out(line);
-    return EXIT.ok;
-  }
-
-  const args = await parseArguments(command, tokens, io.stdin);
+  const args = await parseArguments(command, tokens, stdinOf(command, tokens, io));
 
   let url: string;
   let token: string | null = null;
@@ -109,7 +116,7 @@ const runOperation = async (
     if (args.setupToken === undefined) {
       throw new UsageError(
         `${command.id} needs --setup-token <token>; \`hydra setup-url\` prints the URL that carries it`,
-        `${entity} ${verb}`,
+        command.words.join(" "),
       );
     }
     url = resolveUrl(home, io.env);
@@ -134,6 +141,26 @@ const runOperation = async (
   return EXIT.ok;
 };
 
+/**
+ * Where the command's words end and its arguments begin.
+ *
+ * The longest run of leading words the tree answers to is the command; what is
+ * left is its arguments. A run the tree does not answer to is a mistake, and
+ * what the tree does answer to at that position is the whole of the help a
+ * misspelling needs.
+ */
+const walk = (
+  words: ReadonlyArray<string>,
+): { readonly command: Command; readonly taken: number } | { readonly prefix: number } => {
+  for (let taken = words.length; taken > 0; taken -= 1) {
+    const command = commandAt(words.slice(0, taken));
+    if (command !== undefined) return { command, taken };
+  }
+  let prefix = 0;
+  while (prefix < words.length && wordsAfter(words.slice(0, prefix + 1)).length > 0) prefix += 1;
+  return { prefix };
+};
+
 /** Everything after the global options have been stripped. Returns the exit code. */
 const dispatch = async (argv: readonly string[], io: Io): Promise<number> => {
   const options = parseGlobalOptions(argv);
@@ -142,7 +169,7 @@ const dispatch = async (argv: readonly string[], io: Io): Promise<number> => {
     return EXIT.usage;
   }
 
-  const [head, second, ...rest] = options.success.rest;
+  const [head, ...after] = options.success.rest;
   const home = resolveHomePath(options.success.home, io.env);
 
   if (head === undefined) {
@@ -175,7 +202,7 @@ const dispatch = async (argv: readonly string[], io: Io): Promise<number> => {
   }
 
   if (head === "login") {
-    const tokens = [second, ...rest].filter((token): token is string => token !== undefined);
+    const tokens = after;
     if (wantsHelp(tokens)) {
       for (const line of loginHelp()) io.out(line);
       return EXIT.ok;
@@ -191,20 +218,40 @@ const dispatch = async (argv: readonly string[], io: Io): Promise<number> => {
     return EXIT.ok;
   }
 
-  if (!ENTITIES.includes(head)) {
-    throw new UsageError(`unknown command \`${head}\`; entities: ${ENTITIES.join(", ")}`);
+  // The command's words are the leading tokens before any flag: `--help` and a
+  // flag's value never name a word of the tree.
+  const rest = options.success.rest;
+  const flag = rest.findIndex((token) => token.startsWith("-"));
+  const words = flag === -1 ? rest : rest.slice(0, flag);
+  if (words.length === 0) {
+    throw new UsageError(`unknown command \`${head}\`; there is ${wordsAfter([]).join(", ")}`);
+  }
+  const found = walk(words);
+
+  if ("command" in found) {
+    const tokens = rest.slice(found.taken);
+    if (wantsHelp(tokens)) {
+      for (const line of commandHelp(found.command)) io.out(line);
+      return EXIT.ok;
+    }
+    return runOperation(found.command, tokens, home, io);
   }
 
-  // A flag where the verb should be is not a verb: `hydra profile --help`.
-  return second === undefined || second.startsWith("-")
-    ? runOperation(
-        head,
-        undefined,
-        [second, ...rest].filter((token) => token !== undefined),
-        home,
-        io,
-      )
-    : runOperation(head, second, [...rest], home, io);
+  const valid = wordsAfter(words.slice(0, found.prefix));
+  if (found.prefix === words.length) {
+    if (wantsHelp(rest)) {
+      for (const line of nounHelp(words)) io.out(line);
+      return EXIT.ok;
+    }
+    throw new UsageError(`${words.join(" ")} needs a verb: ${valid.join(", ")}`, words.join(" "));
+  }
+
+  const unknown = words[found.prefix]!;
+  const under = words.slice(0, found.prefix).join(" ");
+  throw new UsageError(
+    `unknown command \`${unknown}\`; ${under === "" ? "" : `under \`${under}\` `}there is ${valid.join(", ")}`,
+    under === "" ? undefined : under,
+  );
 };
 
 /**

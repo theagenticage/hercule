@@ -4,11 +4,11 @@
  */
 import { describe, expect, it } from "vitest";
 import { renderHuman } from "./render";
-import { commandFor, type Command } from "./tree";
+import { commandAt, type Command } from "./tree";
 
-const command = (entity: string, verb: string): Command => {
-  const found = commandFor(entity, verb);
-  expect(found, `${entity} ${verb}`).toBeDefined();
+const command = (...words: ReadonlyArray<string>): Command => {
+  const found = commandAt(words);
+  expect(found, words.join(" ")).toBeDefined();
   return found!;
 };
 
