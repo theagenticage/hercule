@@ -223,37 +223,6 @@ const RESOLVES: Record<string, string> = {
   "transcript.read id": "session.query",
 };
 
-/**
- * The one command help may name that no row spells: `hydra login` is
- * hand-written, outside the operation table, and has no row to be found by.
- */
-const ALLOWED_MENTIONS = ["login"];
-
-/** Every prose string a mention can hide in. */
-const prose = (): ReadonlyArray<[string, string]> => {
-  const found: Array<[string, string]> = [];
-  for (const [id, row] of visible) {
-    if (row.help !== undefined) found.push([`${id} help`, row.help]);
-    for (const [code, meaning] of Object.entries(row.errors ?? {})) {
-      if (meaning !== undefined) found.push([`${id} errors.${code}`, meaning]);
-    }
-    for (const [name, field] of Object.entries(row.fields ?? {})) {
-      if (field.help !== undefined) found.push([`${id} fields.${name}`, field.help]);
-    }
-  }
-  for (const [noun, entry] of Object.entries(nouns)) {
-    if (entry.summary !== undefined) found.push([`${noun} summary`, entry.summary]);
-    if (entry.flow !== undefined) found.push([`${noun} flow`, entry.flow]);
-  }
-  return found;
-};
-
-/** `hydra` followed by kebab-case words: a flag, a `<placeholder>` or any other punctuation ends it. */
-const mentionsIn = (text: string): ReadonlyArray<ReadonlyArray<string>> =>
-  [...text.matchAll(/\bhydra((?:\s+[a-z][a-z-]*)+)/g)].map((match) =>
-    match[1]!.trim().split(/\s+/),
-  );
-
 describe("the CLI table", () => {
   it("has a row for every operation and no row for anything else", () => {
     expect(Object.keys(table).sort()).toEqual(Object.keys(OPERATIONS).sort());
@@ -288,6 +257,18 @@ describe("what a visible row says", () => {
       for (const [index, example] of (row.examples ?? []).entries()) {
         expect(Array.isArray(example.args), `${id} example ${index} has no args`).toBe(true);
       }
+    }
+  });
+
+  it("opens every purpose with a sentence a verb line can carry whole", () => {
+    // The noun screen prints the first sentence under each verb, so a purpose
+    // that opens with a paragraph is unreadable there.
+    for (const [id, row] of visible) {
+      const first = /^.*?[.!?](?=\s|$)/.exec(row.help ?? "")?.[0] ?? row.help ?? "";
+      expect(
+        first.length,
+        `${id} opens with ${first.length} characters: ${first}`,
+      ).toBeLessThanOrEqual(100);
     }
   });
 
@@ -335,43 +316,6 @@ describe("the resolvers", () => {
   it("leaves an id with no listing of its own unresolved", () => {
     for (const name of ["event.read id", "plugin.configure id", "input.update inputId"]) {
       expect(resolvers()[name], `${name} should take a full id`).toBeUndefined();
-    }
-  });
-});
-
-describe("the commands help names", () => {
-  /** Every word sequence the tree answers to: a command, or a prefix of one. */
-  const nodes = (): ReadonlySet<string> => {
-    const found = new Set<string>();
-    const commands = [...visible.map(([, row]) => row.command ?? ""), ...ALLOWED_MENTIONS];
-    for (const command of commands) {
-      const words = command.split(" ").filter((word) => word.length > 0);
-      for (let index = 1; index <= words.length; index += 1) {
-        found.add(words.slice(0, index).join(" "));
-      }
-    }
-    return found;
-  };
-
-  const commands = (): ReadonlySet<string> =>
-    new Set([...visible.map(([, row]) => row.command ?? ""), ...ALLOWED_MENTIONS]);
-
-  it("mentions no command the tree does not answer to", () => {
-    const tree = nodes();
-    const whole = commands();
-    for (const [where, text] of prose()) {
-      for (const words of mentionsIn(text)) {
-        // The longest prefix the tree knows. Prose may run on after a command,
-        // so a mention passes when the tree knows all of it, or when what it
-        // knows of it is a whole command.
-        let known = 0;
-        for (let index = 1; index <= words.length; index += 1) {
-          if (tree.has(words.slice(0, index).join(" "))) known = index;
-        }
-        const named = words.slice(0, known).join(" ");
-        const ok = known > 0 && (known === words.length || whole.has(named));
-        expect(ok, `${where} names "hydra ${words.join(" ")}", which is not a command`).toBe(true);
-      }
     }
   });
 });

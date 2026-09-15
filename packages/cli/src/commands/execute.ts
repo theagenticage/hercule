@@ -8,7 +8,6 @@
  * instead of a loop.
  */
 import { ApiError, type HydraClient } from "@hydra/client-core";
-import type { OperationId } from "@hydra/contract";
 import { UsageError } from "../exit";
 import { coerce, type Arguments } from "./args";
 import { commandOf, type Command, type Field } from "./tree";
@@ -84,19 +83,22 @@ const readAll = async (
  */
 const resolveTail = async (
   client: HydraClient,
-  through: OperationId,
+  command: Command,
+  field: Field,
   text: string,
 ): Promise<string> => {
   if (CANONICAL_ID.test(text)) return text;
 
+  // Too short to be a tail and not an id: the command line is wrong, so
+  // nothing is sent, exactly as for a tail nothing can resolve.
   if (text.length < MIN_TAIL) {
-    throw new ApiError(
-      "validation",
-      `${text} is neither an id nor a tail: a tail is at least ${MIN_TAIL} characters`,
+    throw new UsageError(
+      `<${field.spelling}>: ${text} is neither an id nor a tail: a tail is at least ${MIN_TAIL} characters`,
+      command.spelling,
     );
   }
 
-  const listing = commandOf(through)!;
+  const listing = commandOf(field.resolves!)!;
   const noun = listing.words[0]!;
 
   // Ordered by creation, not by the listing's own default. A keyset walk never
@@ -137,8 +139,8 @@ const asWritten = (command: Command, field: Field, text: string): string => {
   const holdsAnId = field.name === "id" || field.name.endsWith("Id");
   if (holdsAnId && LOOKS_LIKE_A_TAIL.test(text) && !CANONICAL_ID.test(text)) {
     throw new UsageError(
-      `<${field.flag}>: ${text} reads as an id tail, and nothing lists these ids to resolve it against; give the full id`,
-      command.words.join(" "),
+      `<${field.spelling}>: ${text} reads as an id tail, and nothing lists these ids to resolve it against; give the full id`,
+      command.spelling,
     );
   }
   return text;
@@ -156,22 +158,19 @@ export const execute = async (
 ): Promise<Outcome> => {
   const params: Record<string, string | number> = {};
   for (const [index, field] of command.positionals.entries()) {
-    const text = args.positionals[index]!;
-    // A numeric path parameter is the value itself, not a tail of a longer id:
-    // the event log numbers its rows, and `42` is row 42. Text that is not a
-    // number is passed on as written, so the contract refuses it by name.
-    if (field.kind === "number") {
-      const value = Number(text);
-      params[field.name] = text.trim() === "" || Number.isNaN(value) ? text : value;
+    // Every positional is checked against its own field here, where a failure
+    // is still a usage error and nothing has been sent.
+    const value = coerce(field, args.positionals[index]!, command.spelling) as string | number;
+    // A numeric path parameter is the value itself, never a tail of a longer
+    // id: the event log numbers its rows, and `42` is row 42.
+    if (typeof value !== "string") {
+      params[field.name] = value;
       continue;
     }
-    // A positional with a closed value set is checked here, where the failure
-    // is still a usage error and nothing has been sent.
-    const written = coerce(field, text, command.words.join(" ")) as string;
     params[field.name] =
       field.resolves === undefined
-        ? asWritten(command, field, written)
-        : await resolveTail(client, field.resolves, written);
+        ? asWritten(command, field, value)
+        : await resolveTail(client, command, field, value);
   }
 
   // `--limit` is the page size on a `--all` sweep, not a cap on the total: a

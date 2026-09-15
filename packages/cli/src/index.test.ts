@@ -149,7 +149,7 @@ describe("hydra session input --help", () => {
     expect(text).toContain("<id>");
     expect(text).toContain("The session's id, or a tail of eight or more characters.");
     expect(text).toContain("--model");
-    expect(text).toContain("Switch the session to this model for this turn on.");
+    expect(text).toContain("Switch the session to this model from this turn on.");
     expect(text).toContain("--options");
     expect(text).toContain(
       "The per-model choices as inline JSON, applied before the input is stored.",
@@ -159,7 +159,7 @@ describe("hydra session input --help", () => {
   it("says the text is required on stdin and that there is no --text flag", async () => {
     const out = await help("session", "input");
     const block = between(out, "stdin:", "returns:");
-    expect(block).toContain("required");
+    expect(block.toLowerCase()).toContain("required");
     expect(block.toLowerCase()).toContain("there is no --text flag");
   });
 
@@ -720,7 +720,7 @@ describe("id tails", () => {
   it("refuses a tail shorter than eight characters before calling anything", async () => {
     const fetch = withProfiles(() => ({}));
     const stub = io(fetch);
-    expect(await main(["--home", home, "profile", "read", "abc"], stub)).toBe(1);
+    expect(await main(["--home", home, "profile", "read", "abc"], stub)).toBe(2);
     expect(fetch.calls.length).toBe(0);
     expect(stub.stderr.join("\n")).toContain("at least 8 characters");
   });

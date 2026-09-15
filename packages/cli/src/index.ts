@@ -66,7 +66,7 @@ const usageErrorOf = (error: RequestError, command: Command): UsageError => {
     const label = issue.path[0] === undefined ? undefined : named.get(issue.path[0]);
     return label === undefined ? issue.message : `${label}: ${issue.message}`;
   });
-  return new UsageError(refused.join("; "), command.words.join(" "));
+  return new UsageError(refused.join("; "), command.spelling);
 };
 
 /**
@@ -94,7 +94,7 @@ const stdinOf = (
       [asked, ...shellExample(command, tokens, names.map((name) => `<${name}>`).join("\n"))].join(
         "\n",
       ),
-      command.words.join(" "),
+      command.spelling,
     );
   };
 };
@@ -116,7 +116,7 @@ const runOperation = async (
     if (args.setupToken === undefined) {
       throw new UsageError(
         `${command.id} needs --setup-token <token>; \`hydra setup-url\` prints the URL that carries it`,
-        command.words.join(" "),
+        command.spelling,
       );
     }
     url = resolveUrl(home, io.env);
@@ -172,12 +172,8 @@ const dispatch = async (argv: readonly string[], io: Io): Promise<number> => {
   const [head, ...after] = options.success.rest;
   const home = resolveHomePath(options.success.home, io.env);
 
-  if (head === undefined) {
-    for (const line of rootHelp()) io.out(line);
-    return EXIT.ok;
-  }
-
-  if (head === "--help" || head === "-h") {
+  // `hydra` on its own is the same ask as `hydra --help`: what is there.
+  if (head === undefined || head === "--help" || head === "-h") {
     for (const line of rootHelp()) io.out(line);
     return EXIT.ok;
   }

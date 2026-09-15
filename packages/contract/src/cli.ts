@@ -20,7 +20,7 @@ import type { ErrorCode } from "./errors";
 import type { OperationId } from "./operations";
 
 /** One worked invocation: the tokens after the command words, and what is piped in. */
-export interface Example {
+export interface CliExample {
   readonly args: ReadonlyArray<string>;
   readonly stdin?: string;
 }
@@ -39,7 +39,7 @@ export type FieldRow =
        * would not say whose id it is: the `id` of `/sessions/:id/inputs` is a
        * session's, so it is spelled `<session-id>`.
        */
-      readonly as?: string;
+      readonly placeholder?: string;
       /**
        * The listing an eight-character-or-longer tail is resolved through. A
        * positional without one takes the full id, and its line says so.
@@ -60,7 +60,7 @@ export type CliRow =
       readonly command: string;
       readonly help: string;
       /** At least one, most common first. */
-      readonly examples: ReadonlyArray<Example>;
+      readonly examples: ReadonlyArray<CliExample>;
       readonly fields: Record<string, FieldRow>;
       /** Only where the code's generic meaning does not say enough here. */
       readonly errors?: Partial<Record<ErrorCode, string>>;
@@ -82,7 +82,7 @@ export const CLI = {
   },
   "setup.complete": {
     command: "setup complete",
-    help: "Creates the one user and finishes first-run setup, answering with the bearer token that user is logged in with. It takes the one-time setup token the controller printed at first boot, not a credential. The password is read from stdin.",
+    help: "Creates the one user and finishes first-run setup. Answers with the bearer token that user is logged in with, and takes the one-time setup token the controller printed at first boot, not a credential.",
     examples: [
       {
         args: [
@@ -101,7 +101,7 @@ export const CLI = {
       password: {
         stdin: true,
         flag: "password",
-        help: "The password to set, read from stdin so it never reaches the process list.",
+        help: "The password to set; it never reaches the process list or the shell history.",
       },
       timezone: {
         flag: "timezone",
@@ -124,7 +124,7 @@ export const CLI = {
     help: "Lists the user's API keys - references only, never the tokens. Use it to find the id of a key to revoke with `hydra api-key revoke`.",
     examples: [{ args: [] }],
     fields: {},
-    errors: { unauthenticated: "User credential only: a session token is refused." },
+    errors: { unauthenticated: "user credential only: a session token is refused" },
   },
   "apiKey.create": {
     command: "api-key create",
@@ -133,7 +133,7 @@ export const CLI = {
     fields: {
       name: { flag: "name", help: "What to call the key, so a later listing says what it is for." },
     },
-    errors: { unauthenticated: "User credential only: a session token is refused." },
+    errors: { unauthenticated: "user credential only: a session token is refused" },
   },
   "apiKey.revoke": {
     command: "api-key revoke",
@@ -146,30 +146,30 @@ export const CLI = {
         resolves: "apiKey.query",
       },
     },
-    errors: { unauthenticated: "User credential only: a session token is refused." },
+    errors: { unauthenticated: "user credential only: a session token is refused" },
   },
 
   "user.setPassword": {
     command: "user set-password",
-    help: "Changes the user's password, verifying the current one first, so a stolen token alone cannot take the account over. Both passwords are read from stdin: the current one on the first line, the new one on the second.",
+    help: "Changes the user's password, verifying the current one first. A stolen token alone cannot take the account over.",
     examples: [{ args: [], stdin: "the-old-password\nthe-new-password" }],
     fields: {
       current: {
         stdin: true,
         flag: "current",
-        help: "The password in force now, first line of stdin.",
+        help: "The password in force now.",
       },
-      next: { stdin: true, flag: "next", help: "The password to set, second line of stdin." },
+      next: { stdin: true, flag: "next", help: "The password to set." },
     },
-    errors: { unauthenticated: "User credential only: a session token is refused." },
+    errors: { unauthenticated: "user credential only: a session token is refused" },
   },
 
   "settings.read": {
     command: "settings read",
-    help: "Reads every setting that is set, in both scopes: `controller` for the controller's operational settings, `user` for the user's own preferences. A key that is not set is absent rather than defaulted. Write with `hydra settings update`.",
+    help: "Reads every setting that is set, in both scopes. `controller` holds the controller's operational settings, `user` the user's own preferences. A key that is not set is absent rather than defaulted. Write with `hydra settings update`.",
     examples: [{ args: [] }],
     fields: {},
-    errors: { unauthenticated: "User credential only: a session token is refused." },
+    errors: { unauthenticated: "user credential only: a session token is refused" },
   },
   "settings.update": {
     command: "settings update",
@@ -188,7 +188,7 @@ export const CLI = {
         help: "The user's own settings as a JSON object: timezone, thread defaults, topic order, mutes.",
       },
     },
-    errors: { unauthenticated: "User credential only: a session token is refused." },
+    errors: { unauthenticated: "user credential only: a session token is refused" },
   },
 
   "profile.query": {
@@ -199,7 +199,7 @@ export const CLI = {
   },
   "profile.read": {
     command: "profile read",
-    help: "Reads one Permission Profile in full: its name, its grants, and whether it is one of the shipped three.",
+    help: "Reads one Permission Profile in full: its name and its grants. It says too whether it is one of the shipped three.",
     examples: [{ args: ["1f3a9c2e"] }],
     fields: {
       id: {
@@ -211,7 +211,7 @@ export const CLI = {
   },
   "profile.create": {
     command: "profile create",
-    help: "Creates a Permission Profile: a named bundle of grants a session's token carries, bounding what that session may do through the API. Parity with the user is the ceiling, not the starting point.",
+    help: "Creates a Permission Profile: a named bundle of grants a session's token carries. It bounds what that session may do through the API; parity with the user is the ceiling, not the starting point.",
     examples: [
       {
         args: [
@@ -264,13 +264,13 @@ export const CLI = {
     },
     errors: {
       invalid_state:
-        "That profile is one of the shipped three, which are never deleted; edit its grants instead.",
+        "that profile is one of the shipped three, which are never deleted; edit its grants instead",
     },
   },
 
   "secret.query": {
     command: "secret list",
-    help: "Lists secret references - owner, name and when each was last rotated - and never values: nothing in the API reads a secret back.",
+    help: "Lists secret references: owner, name and when each was last rotated. Never values - nothing in the API reads a secret back.",
     examples: [{ args: [] }, { args: ["--owner-kind", "plugin", "--owner-id", "github"] }],
     fields: {
       ownerKind: {
@@ -279,11 +279,11 @@ export const CLI = {
       },
       ownerId: { flag: "owner-id", help: "Only secrets of this one owner, by its full id." },
     },
-    errors: { unauthenticated: "User credential only: a session token is refused." },
+    errors: { unauthenticated: "user credential only: a session token is refused" },
   },
   "secret.set": {
     command: "secret set",
-    help: "Stores or rotates one secret under an owner. The value is read from stdin and can never be read back out. The `core` owner kind is the controller's own key material and is refused here.",
+    help: "Stores or rotates one secret under an owner. The value can never be read back out. The `core` owner kind is the controller's own key material and is refused here.",
     examples: [{ args: ["plugin", "github", "client_secret"], stdin: "ghp_the_secret_value" }],
     fields: {
       ownerKind: {
@@ -298,9 +298,9 @@ export const CLI = {
         positional: true,
         help: "What the secret is called under that owner; it may not contain `|` either.",
       },
-      value: { stdin: true, flag: "value", help: "The secret value, read from stdin." },
+      value: { stdin: true, flag: "value", help: "The secret value." },
     },
-    errors: { unauthenticated: "User credential only: a session token is refused." },
+    errors: { unauthenticated: "user credential only: a session token is refused" },
   },
   "secret.delete": {
     command: "secret delete",
@@ -320,12 +320,12 @@ export const CLI = {
         help: "What the secret is called under that owner; it may not contain `|` either.",
       },
     },
-    errors: { unauthenticated: "User credential only: a session token is refused." },
+    errors: { unauthenticated: "user credential only: a session token is refused" },
   },
 
   "task.query": {
     command: "task list",
-    help: "Lists tasks. Within one flag the values are any-of, across flags the filter is and; there is no or and no negation. This is how to find the id `hydra task read` and `hydra task update` name.",
+    help: "Lists tasks. Repeating a flag widens (any of its values); adding another flag narrows (all must hold); there is no negation. This is how to find the id `hydra task read` and `hydra task update` name.",
     examples: [
       { args: ["--status", "open"] },
       { args: ["--status", "open", "--status", "in-progress", "--label", "triage"] },
@@ -356,7 +356,7 @@ export const CLI = {
   },
   "task.read": {
     command: "task read",
-    help: "Reads one task in full, its Provenance included - the append-only record of what created or touched it.",
+    help: "Reads one task in full, its Provenance included. Provenance is the append-only record of what created or touched it.",
     examples: [{ args: ["1f3a9c2e"] }],
     fields: {
       id: {
@@ -368,7 +368,7 @@ export const CLI = {
   },
   "task.create": {
     command: "task create",
-    help: "Creates a Task: a unit of human intent, never an execution. The description is markdown read from stdin, so pipe it or use a heredoc. Comes back with the task's id, which `hydra task update` and `hydra task read` take.",
+    help: "Creates a Task: a unit of human intent, never an execution. The description is markdown. Comes back with the task's id, which `hydra task update` and `hydra task read` take.",
     examples: [
       {
         args: ["--title", "Fix the flaky login test", "--label", "triage", "--priority", "high"],
@@ -381,7 +381,7 @@ export const CLI = {
       description: {
         stdin: true,
         flag: "description",
-        help: "The task's markdown body, read from stdin. Pipe an empty string for none.",
+        help: "The task's markdown body. Pipe an empty string for none.",
       },
       priority: {
         flag: "priority",
@@ -403,7 +403,7 @@ export const CLI = {
   },
   "task.update": {
     command: "task update",
-    help: "Edits a task; a field you do not name is untouched. Labels move one at a time with --add-label and --remove-label, so a user and an agent writing the same task never undo each other. The description is replaced only when --description-stdin is given.",
+    help: "Edits a task; a field you do not name is untouched. Labels move one at a time with --add-label and --remove-label, so a user and an agent writing the same task never undo each other.",
     examples: [
       { args: ["1f3a9c2e", "--status", "in-progress"] },
       { args: ["1f3a9c2e", "--add-label", "triaged", "--remove-label", "needs-triage"] },
@@ -422,7 +422,7 @@ export const CLI = {
       description: {
         stdin: true,
         flag: "description",
-        help: "A replacement markdown body, read from stdin only when --description-stdin is given.",
+        help: "A replacement markdown body.",
       },
       status: {
         flag: "status",
@@ -477,7 +477,7 @@ export const CLI = {
   },
   "project.create": {
     command: "project create",
-    help: "Creates a Project to group related work. It is organisation only: nothing about a task changes because it joins one. The description is markdown, read from stdin when `--description-stdin` is given.",
+    help: "Creates a Project to group related work. It is organisation only: nothing about a task changes because it joins one. The description is markdown.",
     examples: [
       { args: ["--name", "Hydra v1"] },
       {
@@ -490,13 +490,13 @@ export const CLI = {
       description: {
         stdin: true,
         flag: "description",
-        help: "The project's markdown body, read from stdin only when --description-stdin is given.",
+        help: "The project's markdown body.",
       },
     },
   },
   "project.update": {
     command: "project update",
-    help: "Edits a project; a field you do not name is left as it was. The description is replaced only when --description-stdin is given.",
+    help: "Edits a project; a field you do not name is left as it was.",
     examples: [
       { args: ["1f3a9c2e", "--name", "Hydra v1.1"] },
       {
@@ -514,7 +514,7 @@ export const CLI = {
       description: {
         stdin: true,
         flag: "description",
-        help: "A replacement markdown body, read from stdin only when --description-stdin is given; pipe `null` to take the description off again.",
+        help: "A replacement markdown body; pipe `null` to take the description off again.",
       },
     },
   },
@@ -562,7 +562,7 @@ export const CLI = {
 
   "runner.query": {
     command: "runner list",
-    help: "Lists the fleet: every Runner enrolled with this controller, by name, with how reachable each is and where it stands with its owner. Use it to find the id the other `hydra runner` commands take.",
+    help: "Lists the fleet: every Runner enrolled with this controller, by name. Each row says how reachable the machine is and where it stands with its owner. Use it to find the id the other `hydra runner` commands take.",
     examples: [{ args: [] }, { args: ["--connectivity", "online", "--lifecycle", "active"] }],
     fields: {
       connectivity: {
@@ -578,7 +578,7 @@ export const CLI = {
   },
   "runner.read": {
     command: "runner read",
-    help: "Reads one runner in full: its Runner Facts, the capabilities it negotiated, its disk watermark and its session cap.",
+    help: "Reads one runner in full: its Runner Facts and the capabilities it negotiated. Its disk watermark and its session cap come with it.",
     examples: [{ args: ["1f3a9c2e"] }],
     fields: {
       id: {
@@ -590,7 +590,7 @@ export const CLI = {
   },
   "runner.update": {
     command: "runner update",
-    help: "Edits what the owner owns about a runner: its name, its labels, its session cap, its disk watermark and whether it is reserved. Everything else on the row is the machine's own report and is refused rather than ignored.",
+    help: "Edits what the owner owns about a runner. That is its name, its labels, its session cap, its disk watermark and whether it is reserved; everything else on the row is the machine's own report and is refused rather than ignored.",
     examples: [
       { args: ["1f3a9c2e", "--max-sessions", "4"] },
       { args: ["1f3a9c2e", "--label", "macos", "--label", "gpu", "--reserved", "true"] },
@@ -662,7 +662,7 @@ export const CLI = {
   },
   "runner.probe": {
     command: "runner probe",
-    help: "Probes one Provider Instance on a runner and answers with a fresh Capability Snapshot: auth state, harness version and model catalog. Reach for it when a spawn was refused for want of a logged-in machine.",
+    help: "Probes one Provider Instance on a runner and answers with a fresh Capability Snapshot. The snapshot is its auth state, harness version and model catalog. Reach for it when a spawn was refused for want of a logged-in machine.",
     examples: [{ args: ["1f3a9c2e", "--instance", "7b41d0a5"] }],
     fields: {
       id: {
@@ -678,7 +678,7 @@ export const CLI = {
   },
   "runner.refreshFacts": {
     command: "runner refresh-facts",
-    help: "Re-probes a runner's facts now - OS, architecture, RAM, toolchains and which provider CLIs are on its PATH - instead of waiting for the hourly refresh. Answers with the runner carrying what it just reported.",
+    help: "Re-probes a runner's facts now instead of waiting for the hourly refresh. The facts are its OS, architecture, RAM, toolchains and which provider CLIs are on its PATH. Answers with the runner carrying what it just reported.",
     examples: [{ args: ["1f3a9c2e"] }],
     fields: {
       id: {
@@ -731,13 +731,13 @@ export const CLI = {
 
   "plugin.query": {
     command: "plugin list",
-    help: "Lists every plugin this binary was built with: what the user decided about each, and what this boot made of it. The set is fixed at build time, so this is the whole of it.",
+    help: "Lists every plugin this binary was built with. Each row says what the user decided about the plugin and what this boot made of it. The set is fixed at build time, so this is the whole of it.",
     examples: [{ args: [] }],
     fields: {},
   },
   "plugin.read": {
     command: "plugin read",
-    help: "Reads one plugin in full: its capabilities, its contributions, its stored config and the config schema a settings form is generated from. A refused plugin has no config schema, and its status says why it was refused.",
+    help: "Reads one plugin in full: its capabilities, contributions, stored config and config schema. A settings form is generated from that schema; a refused plugin has none, and its status says why it was refused.",
     examples: [{ args: ["github"] }],
     fields: {
       id: {
@@ -792,7 +792,7 @@ export const CLI = {
   },
   "plugin.configure": {
     command: "plugin configure",
-    help: "Stores a plugin's config and restarts it on the new one: there is no hot reconfigure, so a plugin never sees its config change under it. The config is a JSON object read from stdin and validated first, so a rejected one leaves a running plugin running. Read the shape it must take from `hydra plugin read`.",
+    help: "Stores a plugin's config and restarts it on the new one. There is no hot reconfigure, so a plugin never sees its config change under it. The config is a JSON object, validated before anything restarts, so a rejected one leaves a running plugin running. Read the shape it must take from `hydra plugin read`.",
     examples: [{ args: ["github"], stdin: '{"appId":"1234","pollSeconds":60}' }],
     fields: {
       id: {
@@ -802,20 +802,20 @@ export const CLI = {
       config: {
         stdin: true,
         flag: "config",
-        help: "The whole config as a JSON object, read from stdin and validated against the plugin's own schema.",
+        help: "The whole config as a JSON object, validated against the plugin's own schema.",
       },
     },
   },
 
   "provider.query": {
     command: "provider list",
-    help: "Lists the Provider Instances: one row per account of a provider, each with its own config and its own vendor login. Placement and spawning route on the instance id, never on the provider id.",
+    help: "Lists the Provider Instances: one row per account of a provider. Each has its own config and its own vendor login. Placement and spawning route on the instance id, never on the provider id.",
     examples: [{ args: [] }],
     fields: {},
   },
   "provider.read": {
     command: "provider read",
-    help: "Reads one Provider Instance in full, with the Capability Snapshot each runner reported for it: auth state, harness version and model catalog.",
+    help: "Reads one Provider Instance in full, with the Capability Snapshot each runner reported for it. A snapshot is auth state, harness version and model catalog.",
     examples: [{ args: ["1f3a9c2e"] }],
     fields: {
       id: {
@@ -827,7 +827,7 @@ export const CLI = {
   },
   "provider.create": {
     command: "provider create",
-    help: "Opens a Provider Instance: one account of one provider, with its own isolated provider home on every runner. The config is a JSON object read from stdin and checked against the provider's own schema. Log the new instance in on a machine with `hydra provider login`.",
+    help: "Opens a Provider Instance: one account of one provider, with its own provider home on every runner. The config is a JSON object checked against the provider's own schema. Log the new instance in on a machine with `hydra provider login`.",
     examples: [{ args: ["--provider", "claude-code", "--name", "work"], stdin: "{}" }],
     fields: {
       providerId: {
@@ -841,7 +841,7 @@ export const CLI = {
       config: {
         stdin: true,
         flag: "config",
-        help: "The instance's config as a JSON object, read from stdin; send {} for none.",
+        help: "The instance's config as a JSON object; send {} for none.",
       },
     },
   },
@@ -876,7 +876,7 @@ export const CLI = {
   },
   "provider.login": {
     command: "provider login",
-    help: "Starts the vendor login for a Provider Instance on one machine and answers with the URL to open, plus the code the harness printed when there is one. A vendor credential belongs to exactly one machine, because two live copies of one login rotate each other out. Finish it with `hydra provider submit-login-code`.",
+    help: "Starts the vendor login for a Provider Instance on one machine. Answers with the URL to open, plus the code the harness printed when there is one. A vendor credential belongs to exactly one machine, because two live copies of one login rotate each other out. Finish it with `hydra provider submit-login-code`.",
     examples: [{ args: ["1f3a9c2e", "--runner", "7b41d0a5"] }],
     fields: {
       id: {
@@ -922,7 +922,7 @@ export const CLI = {
   },
   "connection.read": {
     command: "connection read",
-    help: "Reads one Connection in full: the account it names, where it stands, its topics and the names of the secrets it owns.",
+    help: "Reads one Connection in full: the account it names, where it stands, and its topics. The names of the secrets it owns come with it.",
     examples: [{ args: ["1f3a9c2e"] }],
     fields: {
       id: {
@@ -934,7 +934,7 @@ export const CLI = {
   },
   "connection.create": {
     command: "connection create",
-    help: "Creates a Connection from credentials you already hold. The credentials are a JSON object read from stdin, keyed by the field names the type declares, and are never readable again. For an account reached through a browser, use `hydra connection start-oauth` instead.",
+    help: "Creates a Connection from credentials you already hold. The credentials are a JSON object keyed by the field names the type declares, and are never readable again. For an account reached through a browser, use `hydra connection start-oauth` instead.",
     examples: [
       {
         args: ["--type", "github/github", "--label", "work", "--topic", "engineering"],
@@ -958,13 +958,13 @@ export const CLI = {
       credentials: {
         stdin: true,
         flag: "credentials",
-        help: "The credential values as a JSON object keyed by the type's field names, read from stdin.",
+        help: "The credential values as a JSON object keyed by the type's field names.",
       },
     },
   },
   "connection.update": {
     command: "connection update",
-    help: "Edits what the user chose about a Connection - its label, its topics, its config - and never the account behind it. Rotate credentials with `hydra connection set-credentials`.",
+    help: "Edits what the user chose about a Connection: its label, its topics, its config. Never the account behind it. Rotate credentials with `hydra connection set-credentials`.",
     examples: [{ args: ["1f3a9c2e", "--label", "personal"] }],
     fields: {
       id: {
@@ -994,7 +994,7 @@ export const CLI = {
   },
   "connection.setCredentials": {
     command: "connection set-credentials",
-    help: "Rotates a Connection's credentials in place, leaving everything else about it alone. Reach for it when `hydra connection list` shows the account needs reauth. The new values are a JSON object read from stdin, keyed by the type's field names.",
+    help: "Rotates a Connection's credentials in place, leaving everything else about it alone. Reach for it when `hydra connection list` shows the account needs reauth. The new values are a JSON object keyed by the type's field names.",
     examples: [{ args: ["1f3a9c2e"], stdin: '{"token":"ghp_yyy"}' }],
     fields: {
       id: {
@@ -1005,13 +1005,13 @@ export const CLI = {
       credentials: {
         stdin: true,
         flag: "credentials",
-        help: "The replacement values as a JSON object keyed by the type's field names, read from stdin.",
+        help: "The replacement values as a JSON object keyed by the type's field names.",
       },
     },
   },
   "connection.startOAuth": {
     command: "connection start-oauth",
-    help: "Starts a redirect flow and answers with the authorization URL to open in a browser; the connection exists only once the provider sends the browser back. The redirect URI is built from --origin, so it has to come out byte for byte as what was registered with the provider. Name --connection to reconnect an account that already exists instead of making a second one.",
+    help: "Starts a redirect flow and answers with the authorization URL to open in a browser. The connection exists only once the provider sends the browser back. The redirect URI is built from --origin, so it has to come out byte for byte as what was registered with the provider. Name --connection to reconnect an account that already exists instead of making a second one.",
     examples: [
       {
         args: [
@@ -1055,7 +1055,7 @@ export const CLI = {
     },
     errors: {
       invalid_state:
-        "The plugin that owns this type holds no OAuth client credentials; set them in settings first.",
+        "the plugin that owns this type holds no OAuth client credentials; set them in settings first",
     },
   },
 
@@ -1073,7 +1073,7 @@ export const CLI = {
   },
   "session.read": {
     command: "session read",
-    help: "Reads one session: where it stands, what it runs under, whether it can be resumed, and the Request it is parked on if there is one. Answer that Request with `hydra session respond`.",
+    help: "Reads one session: where it stands, what it runs under, and whether it can be resumed. The Request it is parked on comes with it, if there is one; answer that Request with `hydra session respond`.",
     examples: [{ args: ["1f3a9c2e"] }],
     fields: {
       id: {
@@ -1085,7 +1085,7 @@ export const CLI = {
   },
   "session.spawn": {
     command: "session spawn",
-    help: "Starts a Thread: a session the user drives by hand, with no Agent behind it, taking every value from the user's thread settings unless a flag overrides it. The opening prompt is read from stdin. Comes back with the session's id; watch what it does with `hydra transcript read` and send the next turn with `hydra session input`.",
+    help: "Starts a Thread: a session the user drives by hand, with no Agent behind it. It takes every value from the user's thread settings unless a flag overrides it. Comes back with the session's id; watch what it does with `hydra transcript read` and send the next turn with `hydra session input`.",
     examples: [
       { args: [], stdin: "Look at the failing login test and tell me what you find." },
       {
@@ -1094,7 +1094,7 @@ export const CLI = {
       },
     ],
     fields: {
-      prompt: { stdin: true, flag: "prompt", help: "The opening prompt, read from stdin." },
+      prompt: { stdin: true, flag: "prompt", help: "The opening prompt." },
       instanceId: {
         flag: "instance",
         help: "The Provider Instance to run on, in place of the thread default.",
@@ -1122,9 +1122,9 @@ export const CLI = {
       },
     },
     errors: {
-      unauthenticated: "User credential only: a session token is refused.",
+      unauthenticated: "user credential only: a session token is refused",
       invalid_state:
-        "Nothing can host it: no connected runner is logged in to that provider instance, or the runner named is draining or retired. Check with `hydra runner list` and `hydra provider login`.",
+        "nothing can host it: no connected runner is logged in to that provider instance, or the runner named is draining or retired; check with `hydra runner list` and `hydra provider login`",
     },
   },
   "session.update": {
@@ -1143,11 +1143,11 @@ export const CLI = {
         help: "The per-model choices as inline JSON; they merge over what is already set.",
       },
     },
-    errors: { invalid_state: "That session has exited; there is nothing left to configure." },
+    errors: { invalid_state: "that session has exited; there is nothing left to configure" },
   },
   "session.input": {
     command: "session input",
-    help: "Sends one turn's input to a session: it opens a turn on an idle session and is queued on any other, and a session whose process is gone but whose transcript is still on its runner is resumed in place by it. The text is read from stdin. Comes back with the input's id and what became of it; while the row is still queued, `hydra input update` and `hydra input cancel` change it and `hydra input steer` folds it into the turn already running.",
+    help: "Sends one turn's input to a session. It opens a turn on an idle session and is queued on any other, and a session whose process is gone but whose transcript is still on its runner is resumed in place by it. Comes back with the input's id and what became of it; while the row is still queued, `hydra input update` and `hydra input cancel` change it and `hydra input steer` folds it into the turn already running.",
     examples: [
       { args: ["1f3a9c2e"], stdin: "Carry on, and run the tests when you are done." },
       { args: ["1f3a9c2e", "--model", "claude-opus-4"], stdin: "Try that again with more care." },
@@ -1158,8 +1158,8 @@ export const CLI = {
         help: "The session's id, or a tail of eight or more characters.",
         resolves: "session.query",
       },
-      text: { stdin: true, flag: "text", help: "What to say to the session, read from stdin." },
-      model: { flag: "model", help: "Switch the session to this model for this turn on." },
+      text: { stdin: true, flag: "text", help: "What to say to the session." },
+      model: { flag: "model", help: "Switch the session to this model from this turn on." },
       options: {
         flag: "options",
         help: "The per-model choices as inline JSON, applied before the input is stored.",
@@ -1167,7 +1167,7 @@ export const CLI = {
     },
     errors: {
       invalid_state:
-        "The session cannot take it: it left no provider-native session to resume, or its runner is retired, draining or no longer connected.",
+        "the session cannot take it: it left no provider-native session to resume, or its runner is retired, draining or no longer connected",
     },
   },
   "session.interrupt": {
@@ -1181,11 +1181,11 @@ export const CLI = {
         resolves: "session.query",
       },
     },
-    errors: { invalid_state: "That session has exited, or its runner is no longer connected." },
+    errors: { invalid_state: "that session has exited, or its runner is no longer connected" },
   },
   "session.respond": {
     command: "session respond",
-    help: "Answers the Request a session is parked on with one of the four decisions, which is the only way an approval is resolved; free text never is. Read the open request first with `hydra session read`.",
+    help: "Answers the Request a session is parked on with one of the four decisions. That is the only way an approval is resolved; free text never is. Read the open request first with `hydra session read`.",
     examples: [{ args: ["1f3a9c2e", "--request", "req_9c2e4f18", "--decision", "allow"] }],
     fields: {
       id: {
@@ -1204,7 +1204,7 @@ export const CLI = {
     },
     errors: {
       invalid_state:
-        "The session is not waiting on a decision, or the harness has moved on and this is not the request it is waiting on now. Read it again with `hydra session read`.",
+        "the session is not waiting on a decision, or the harness has moved on and this is not the request it is waiting on now; read it again with `hydra session read`",
     },
   },
   "session.stop": {
@@ -1221,7 +1221,7 @@ export const CLI = {
   },
   "session.continue": {
     command: "session continue",
-    help: "Forks a session: opens a second provider-native session off the one the parent left behind, leaving the parent's own transcript untouched. It lands on the parent's runner and Provider Instance, because that is where the native state is, and comes back as a new session with its own id. To carry the parent itself on instead, send it `hydra session input`.",
+    help: "Forks a session: opens a second provider-native session off the one the parent left behind. The parent's own transcript is untouched. It lands on the parent's runner and Provider Instance, because that is where the native state is, and comes back as a new session with its own id. To carry the parent itself on instead, send it `hydra session input`.",
     examples: [
       {
         args: ["1f3a9c2e", "--mode", "fork"],
@@ -1238,13 +1238,13 @@ export const CLI = {
       prompt: {
         stdin: true,
         flag: "prompt",
-        help: "The opening prompt of the forked session, read from stdin.",
+        help: "The opening prompt of the forked session.",
       },
     },
     errors: {
-      unauthenticated: "User credential only: a session token is refused.",
+      unauthenticated: "user credential only: a session token is refused",
       invalid_state:
-        "The parent is still live, or it left no provider-native session to fork from, or its runner is retired or draining. Stop it first with `hydra session stop`.",
+        "the parent is still live, or it left no provider-native session to fork from, or its runner is retired or draining; stop it first with `hydra session stop`",
     },
   },
 
@@ -1255,7 +1255,7 @@ export const CLI = {
     fields: {
       id: {
         positional: true,
-        as: "session-id",
+        placeholder: "session-id",
         help: "The session's id, or a tail of eight or more characters.",
         resolves: "session.query",
       },
@@ -1263,7 +1263,7 @@ export const CLI = {
   },
   "input.update": {
     command: "input update",
-    help: "Rewrites a Queued Input before the controller delivers it. The new text is read from stdin. An input already sent or delivered is refused, so read `hydra input list` if it fails.",
+    help: "Rewrites a Queued Input before the controller delivers it. An input already sent or delivered is refused, so read `hydra input list` if it fails.",
     examples: [
       {
         args: ["1f3a9c2e", "0193f3a9-2e5c-7b41-9a6d-1f3a9c2e77b0"],
@@ -1273,7 +1273,7 @@ export const CLI = {
     fields: {
       id: {
         positional: true,
-        as: "session-id",
+        placeholder: "session-id",
         help: "The session's id, or a tail of eight or more characters.",
         resolves: "session.query",
       },
@@ -1281,10 +1281,10 @@ export const CLI = {
         positional: true,
         help: "The input's full id, as `hydra input list` reports it; no tail is resolved here.",
       },
-      text: { stdin: true, flag: "text", help: "The replacement text, read from stdin." },
+      text: { stdin: true, flag: "text", help: "The replacement text." },
     },
     errors: {
-      invalid_state: "That input has already gone to the machine, or was delivered or cancelled.",
+      invalid_state: "that input has already gone to the machine, or was delivered or cancelled",
     },
   },
   "input.cancel": {
@@ -1294,7 +1294,7 @@ export const CLI = {
     fields: {
       id: {
         positional: true,
-        as: "session-id",
+        placeholder: "session-id",
         help: "The session's id, or a tail of eight or more characters.",
         resolves: "session.query",
       },
@@ -1304,17 +1304,17 @@ export const CLI = {
       },
     },
     errors: {
-      invalid_state: "That input has already gone to the machine, or was delivered or cancelled.",
+      invalid_state: "that input has already gone to the machine, or was delivered or cancelled",
     },
   },
   "input.steer": {
     command: "input steer",
-    help: "Delivers a Queued Input into the session's running turn now, folding it into that turn instead of waiting for the turn to end. Only a busy session can be steered, and only where the provider supports it.",
+    help: "Delivers a Queued Input into the session's running turn now. It is folded into that turn instead of waiting for the turn to end. Only a busy session can be steered, and only where the provider supports it.",
     examples: [{ args: ["1f3a9c2e", "0193f3a9-2e5c-7b41-9a6d-1f3a9c2e77b0"] }],
     fields: {
       id: {
         positional: true,
-        as: "session-id",
+        placeholder: "session-id",
         help: "The session's id, or a tail of eight or more characters.",
         resolves: "session.query",
       },
@@ -1325,18 +1325,18 @@ export const CLI = {
     },
     errors: {
       invalid_state:
-        "The session is not busy, its provider does not steer into a running turn, or the input is no longer waiting.",
+        "the session is not busy, its provider does not steer into a running turn, or the input is no longer waiting",
     },
   },
 
   "transcript.read": {
     command: "transcript read",
-    help: "Reads what a session actually did: the normalized stream it left behind, in order, one row per event with its position. It is append-only and walked by position, so there is no filter and no search - the only choice is which end to start from.",
+    help: "Reads what a session actually did: the normalized stream it left behind, one row per event. The rows are in order and carry their position. It is append-only and walked by position, so there is no filter and no search - the only choice is which end to start from.",
     examples: [{ args: ["1f3a9c2e"] }],
     fields: {
       id: {
         positional: true,
-        as: "session-id",
+        placeholder: "session-id",
         help: "The session's id, or a tail of eight or more characters.",
         resolves: "session.query",
       },
@@ -1345,10 +1345,10 @@ export const CLI = {
 
   "controller.read": {
     command: "controller read",
-    help: "Reads the controller's own identity: its id, its version, the public key runners verify against, and the Runner a placement falls back to.",
+    help: "Reads the controller's own identity: its id, its version and the public key runners verify against. The Runner a placement falls back to comes with it.",
     examples: [{ args: [] }],
     fields: {},
-    errors: { unauthenticated: "User credential only: a session token is refused." },
+    errors: { unauthenticated: "user credential only: a session token is refused" },
   },
   "controller.update": {
     command: "controller update",
@@ -1360,7 +1360,7 @@ export const CLI = {
         help: "The runner to fall back to, by its full id; `null` clears it.",
       },
     },
-    errors: { unauthenticated: "User credential only: a session token is refused." },
+    errors: { unauthenticated: "user credential only: a session token is refused" },
   },
 } as const satisfies Record<OperationId, CliRow>;
 

@@ -25,7 +25,7 @@ export {
 
 export { ALL_GRANTS, GRANT_FAMILIES, GrantSchema, type Grant, type GrantFamily } from "./grants";
 
-export { CLI, NOUNS, type CliRow, type Example, type FieldRow, type NounRow } from "./cli";
+export { CLI, NOUNS, type CliExample, type CliRow, type FieldRow, type NounRow } from "./cli";
 
 export {
   CapExceeded,

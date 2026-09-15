@@ -19,7 +19,7 @@ import {
   sortFieldsOf,
   type CliRow,
   type ErrorCode,
-  type Example,
+  type CliExample,
   type FieldRow,
   type Method,
   type OperationId,
@@ -33,8 +33,8 @@ export type FieldKind = "string" | "number" | "boolean" | "json";
 export interface Field {
   /** The name the API knows the field by. */
   readonly name: string;
-  /** The command line's spelling: the flag after `--`, or the placeholder inside `<>`. */
-  readonly flag: string;
+  /** The word after `--`, or the word inside `<>` for a positional. */
+  readonly spelling: string;
   /** The field is written as a bare word in its place, not as a flag. */
   readonly positional: boolean;
   readonly kind: FieldKind;
@@ -64,6 +64,8 @@ export interface Command {
   readonly id: OperationId;
   /** The words after `hydra`, in tree order. */
   readonly words: ReadonlyArray<string>;
+  /** The same words as one string, which is how a message and a help line name a command. */
+  readonly spelling: string;
   readonly requires: Requirement;
   readonly method: Method;
   readonly path: string;
@@ -78,11 +80,11 @@ export interface Command {
   /** The fields `--sort` accepts, when the operation pages. */
   readonly sortFields: ReadonlyArray<string>;
   readonly help: string;
-  readonly examples: ReadonlyArray<Example>;
+  readonly examples: ReadonlyArray<CliExample>;
   /** The error codes the endpoint declares, in the order it declares them. */
   readonly codes: ReadonlyArray<ErrorCode>;
   /** What a code means on this operation, where the generic line does not say enough. */
-  readonly errors: Partial<Record<ErrorCode, string>>;
+  readonly meanings: Partial<Record<ErrorCode, string>>;
   readonly returns: Returns;
 }
 
@@ -161,46 +163,60 @@ const scalarKind = (input: Ast): FieldKind => {
 const kebab = (name: string): string => name.replace(/([a-z0-9])([A-Z])/g, "$1-$2").toLowerCase();
 
 /** The shape of one field, as the schema has it and the row spells it. */
-const fieldOf = (name: string, ast: Ast, row: FieldRow | undefined): Field => {
+const fieldOf = (name: string, ast: Ast, row: FieldRow): Field => {
   const element = elementOf(ast);
   const value = element ?? ast;
-  const positional = row !== undefined && "positional" in row;
   // A positional is spelled by the row where its own name would not say whose
   // id it is; a flag is always spelled by the row.
-  const spelled =
-    row === undefined ? kebab(name) : "flag" in row ? row.flag : (row.as ?? kebab(name));
+  const spelling = "flag" in row ? row.flag : (row.placeholder ?? kebab(name));
   return {
     name,
-    flag: spelled,
-    positional,
+    spelling,
+    positional: "positional" in row,
     kind: scalarKind(value),
     repeated: element !== undefined,
     optional: ast.context?.isOptional === true,
     nullable: isNullable(ast) || isNullable(value),
     choices: literalsOf(withoutNull(value)),
-    stdin: row !== undefined && "stdin" in row && row.stdin === true,
-    resolves: row !== undefined && "resolves" in row ? row.resolves : undefined,
-    help: row?.help ?? "",
+    stdin: "stdin" in row && row.stdin === true,
+    resolves: "resolves" in row ? row.resolves : undefined,
+    help: row.help,
   };
 };
 
-const fieldsOf = (schema: unknown, rows: Record<string, FieldRow>): ReadonlyArray<Field> => {
+/**
+ * Every field of one schema, the paging triple left out: `--limit`, `--cursor`
+ * and `--sort` are handled by name everywhere and so have no row. A field the
+ * table does not write is a row missing from the contract, and it is said here
+ * rather than rendered as a nameless flag.
+ */
+const fieldsOf = (
+  id: OperationId,
+  schema: unknown,
+  rows: Record<string, FieldRow>,
+): ReadonlyArray<Field> => {
   const ast = (schema as { ast?: Ast } | undefined)?.ast;
   if (ast?.propertySignatures === undefined) return [];
-  return ast.propertySignatures.map((property) =>
-    fieldOf(String(property.name), property.type, rows[String(property.name)]),
-  );
+  return ast.propertySignatures
+    .map((property) => [String(property.name), property.type] as const)
+    .filter(([name]) => !PAGE_FIELDS.has(name))
+    .map(([name, type]) => {
+      const row = rows[name];
+      if (row === undefined) throw new Error(`${id}: ${name} has no row`);
+      return fieldOf(name, type, row);
+    });
 };
 
 /** The payload schema hides one level deeper: a media-type map holding a codec. */
 const payloadFieldsOf = (
+  id: OperationId,
   payload: unknown,
   rows: Record<string, FieldRow>,
 ): ReadonlyArray<Field> => {
   if (!(payload instanceof Map)) return [];
   const json = payload.get("application/json") as { schemas?: ReadonlyArray<unknown> } | undefined;
   const codec = json?.schemas?.[0] as { schema?: unknown } | undefined;
-  return fieldsOf(codec?.schema, rows);
+  return fieldsOf(id, codec?.schema, rows);
 };
 
 const propertyNames = (ast: Ast | undefined): ReadonlyArray<string> =>
@@ -260,15 +276,17 @@ const build = (): ReadonlyArray<Command> => {
         success?: unknown;
         error?: unknown;
       };
-      const params = new Map(fieldsOf(each.params, row.fields).map((field) => [field.name, field]));
-      const payload = payloadFieldsOf(each.payload, row.fields);
-      const query = fieldsOf(each.query, row.fields);
-      const sort = query.find((field) => field.name === "sort");
+      const params = new Map(
+        fieldsOf(id, each.params, row.fields).map((field) => [field.name, field]),
+      );
+      const payload = payloadFieldsOf(id, each.payload, row.fields);
+      const query = fieldsOf(id, each.query, row.fields);
       const inPath = pathParams(operation.path);
 
       commands.push({
         id,
         words: row.command.split(" "),
+        spelling: row.command,
         requires: operation.requires,
         method: operation.method,
         path: operation.path,
@@ -276,13 +294,15 @@ const build = (): ReadonlyArray<Command> => {
         // mistake, not a string: the CLI would send a value nothing decodes.
         positionals: inPath.map((name) => params.get(name)!),
         payload,
-        query: query.filter((field) => !PAGE_FIELDS.has(field.name)),
-        paged: sort !== undefined,
+        query,
+        // The paging triple travels together, so the sort field is enough to
+        // say the operation pages.
+        paged: propertyNames((each.query as { ast?: Ast } | undefined)?.ast).includes("sort"),
         sortFields: sortFieldsOf(each.query),
         help: row.help,
         examples: row.examples,
         codes: codesOf(each.error),
-        errors: row.errors ?? {},
+        meanings: row.errors ?? {},
         returns: returnsOf(each.success),
       });
     },
@@ -329,3 +349,47 @@ export const wordsAfter = (prefix: ReadonlyArray<string>): ReadonlyArray<string>
   }
   return next;
 };
+
+/**
+ * The hand-written commands, which have no row: help may name them and the
+ * scanner below must not call them unknown.
+ */
+const HAND_WRITTEN = ["login", "setup-url", "serve"];
+
+/** One `hydra ...` the prose named, resolved against the tree. */
+export interface Mention {
+  /** The words the prose wrote after `hydra`. */
+  readonly words: ReadonlyArray<string>;
+  /**
+   * The longest leading run of those words the tree answers to, or `undefined`
+   * when it answers to none of them - or when the prose ran on past a run that
+   * is a noun rather than a whole command, which reads as a misspelling.
+   */
+  readonly names: string | undefined;
+  /** The command that run spells; absent when the run is only a noun. */
+  readonly command: Command | undefined;
+}
+
+/**
+ * Every `hydra ...` a piece of prose names. One scanner, so what the help
+ * offers as the next command and what the table's test accepts are the same
+ * reading.
+ *
+ * A flag, a `<placeholder>` or any other punctuation ends the mention, and
+ * prose that runs on after a whole command - "hydra task list to find work" -
+ * keeps the command.
+ */
+export const mentionsIn = (text: string): ReadonlyArray<Mention> =>
+  [...text.matchAll(/\bhydra((?:\s+[a-z][a-z-]*)+)/g)].map((match) => {
+    const words = match[1]!.trim().split(/\s+/);
+    for (let length = words.length; length > 0; length -= 1) {
+      const run = words.slice(0, length);
+      const named = run.join(" ");
+      const command = commandAt(run);
+      const whole = command !== undefined || HAND_WRITTEN.includes(named);
+      if (!whole && wordsAfter(run).length === 0) continue;
+      if (length === words.length || whole) return { words, names: named, command };
+      break;
+    }
+    return { words, names: undefined, command: undefined };
+  });

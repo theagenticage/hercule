@@ -11,23 +11,30 @@
  * Static help and 403s that name the missing grant are the two teaching
  * channels, so every screen names the grant a command needs.
  */
-import { NOUNS, type ErrorCode, type NounRow, type Requirement } from "@hydra/contract";
-import { COMMANDS, commandAt, commandsUnder, type Command, type Field } from "./tree";
+import { NOUNS, type ErrorCode, type Grant, type NounRow, type Requirement } from "@hydra/contract";
+import { COMMANDS, commandsUnder, mentionsIn, type Command, type Field } from "./tree";
 
 /** How wide a line is allowed to be before it is wrapped. */
 const WIDTH = 92;
 
+/** The grant an operation needs, or `undefined` for one of the three markers. */
+const grantOf = (requires: Requirement): Grant | undefined =>
+  requires === "unauthenticated" || requires === "setup-token" || requires === "authenticated"
+    ? undefined
+    : requires;
+
 /** The three markers are not grants, so they are rendered as prose. */
 const requirementProse = (requires: Requirement): string => {
+  const grant = grantOf(requires);
+  if (grant !== undefined) return `grant ${grant}`;
   switch (requires) {
-    case "unauthenticated":
-      return "no credential needed";
     case "setup-token":
       return "the one-time setup token, as --setup-token <token>";
     case "authenticated":
       return "any authenticated caller";
+    // Only "unauthenticated" is left: a grant was answered above.
     default:
-      return `grant ${requires}`;
+      return "no credential needed";
   }
 };
 
@@ -82,7 +89,7 @@ export const shellExample = (
 };
 
 const placeholder = (field: Field): string => {
-  if (field.choices !== undefined) return `<${field.flag}>`;
+  if (field.choices !== undefined) return `<${field.spelling}>`;
   switch (field.kind) {
     case "string":
       return "<text>";
@@ -110,30 +117,25 @@ const GENERIC: Record<ErrorCode, string> = {
 /** The commands a help text names, in the order it names them, itself excluded. */
 const mentioned = (command: Command): ReadonlyArray<string> => {
   const found: Array<string> = [];
-  for (const match of command.help.matchAll(/\bhydra((?:\s+[a-z][a-z-]*)+)/g)) {
-    const words = match[1]!.trim().split(/\s+/);
-    for (let length = words.length; length > 0; length -= 1) {
-      const named = words.slice(0, length).join(" ");
-      if (commandAt(words.slice(0, length)) === undefined) continue;
-      if (named !== command.words.join(" ") && !found.includes(named)) found.push(named);
-      break;
-    }
+  for (const mention of mentionsIn(command.help)) {
+    const named = mention.command?.spelling;
+    if (named === undefined || named === command.spelling || found.includes(named)) continue;
+    found.push(named);
   }
   return found;
 };
 
 /** `hydra <noun>... <verb> --help`. */
 export const commandHelp = (command: Command): ReadonlyArray<string> => {
-  const words = command.words.join(" ");
   const flags = [...command.payload.filter((field) => !field.stdin), ...command.query];
   const onStdin = command.payload.filter((field) => field.stdin);
-  const shape = command.positionals.map((field) => `<${field.flag}>`).join(" ");
+  const shape = command.positionals.map((field) => `<${field.spelling}>`).join(" ");
   const lines: Array<string> = [...wrap(command.help, "")];
 
   const takesFlags = flags.length > 0 || command.paged || command.requires === "setup-token";
   lines.push(
     "",
-    ["usage: hydra", words, shape, takesFlags ? "[flags]" : ""]
+    ["usage: hydra", command.spelling, shape, takesFlags ? "[flags]" : ""]
       .filter((part) => part !== "")
       .join(" "),
   );
@@ -144,76 +146,78 @@ export const commandHelp = (command: Command): ReadonlyArray<string> => {
   }
 
   if (command.positionals.length > 0) {
-    const width = Math.max(...command.positionals.map((field) => field.flag.length)) + 2;
+    const width = Math.max(...command.positionals.map((field) => field.spelling.length)) + 2;
     lines.push("", "arguments:");
     for (const field of command.positionals) {
       const closed = field.choices === undefined ? "" : ` One of: ${field.choices.join(", ")}.`;
-      lines.push(...labelled(`<${field.flag}>`, width, `${field.help}${closed}`));
+      lines.push(...labelled(`<${field.spelling}>`, width, `${field.help}${closed}`));
     }
   }
 
   if (takesFlags) {
-    const spelled = flags.map((field) => `--${field.flag} ${placeholder(field)}`);
-    const width = Math.max(
-      ...spelled.map((each) => each.length),
-      "--sort <field>[:asc|desc]".length,
-    );
-    lines.push("", "flags:");
-    for (const [index, field] of flags.entries()) {
+    // Every row is collected before any is printed, so the label column is as
+    // wide as what is actually shown and no wider.
+    const rows: Array<{ label: string; notes: string; help?: string }> = flags.map((field) => {
       const notes = [field.optional ? "optional" : "required"];
       if (field.repeated) notes.push("repeatable");
       if (field.choices !== undefined) notes.push(`one of: ${field.choices.join(", ")}`);
       if (field.nullable) notes.push("`null` clears it");
-      lines.push(...labelled(spelled[index]!, width, notes.join("; ")));
-      lines.push(...wrap(field.help, "      "));
-    }
+      return {
+        label: `--${field.spelling} ${placeholder(field)}`,
+        notes: notes.join("; "),
+        help: field.help,
+      };
+    });
     if (command.requires === "setup-token") {
-      lines.push(
-        ...labelled("--setup-token <token>", width, "required"),
-        "      The one-time token `hydra setup-url` prints.",
-      );
+      rows.push({
+        label: "--setup-token <token>",
+        notes: "required",
+        help: "The one-time token `hydra setup-url` prints.",
+      });
     }
     if (command.paged) {
-      lines.push(
-        ...labelled("--limit <number>", width, "optional; the page size"),
-        ...labelled("--cursor <cursor>", width, "optional; the nextCursor of the page before"),
-        ...labelled(
-          "--sort <field>[:asc|desc]",
-          width,
-          `optional; one of: ${command.sortFields.join(", ")}`,
-        ),
-        ...labelled("--all", width, "optional; follow nextCursor to the end and print every item"),
+      rows.push(
+        { label: "--limit <number>", notes: "optional; the page size" },
+        { label: "--cursor <cursor>", notes: "optional; the nextCursor of the page before" },
+        {
+          label: "--sort <field>[:asc|desc]",
+          notes: `optional; one of: ${command.sortFields.join(", ")}`,
+        },
+        {
+          label: "--all",
+          notes: "optional; follow nextCursor to the end and print every item",
+        },
       );
+    }
+
+    const width = Math.max(...rows.map((row) => row.label.length));
+    lines.push("", "flags:");
+    for (const row of rows) {
+      lines.push(...labelled(row.label, width, row.notes));
+      if (row.help !== undefined) lines.push(...wrap(row.help, "      "));
     }
   }
 
-  if (onStdin.length === 1) {
-    const field = onStdin[0]!;
-    lines.push(
-      "",
-      "stdin:",
-      ...wrap(
-        field.optional
-          ? `${field.name} is read from stdin only when --${field.flag}-stdin is given: the whole of stdin, one trailing newline removed. There is no --${field.flag} flag.`
-          : `${field.name} is required and is read from stdin unasked: the whole of stdin, one trailing newline removed. There is no --${field.flag} flag.`,
-        "  ",
-      ),
-    );
-  } else if (onStdin.length > 1) {
-    lines.push(
-      "",
-      "stdin:",
-      ...wrap(
-        `${onStdin.length} lines, one per field, in this order: ${onStdin
-          .map((field) => field.name)
-          .join(", then ")}. The markers ${onStdin
-          .map((field) => `--${field.flag}-stdin`)
-          .join(
-            " and ",
-          )} are accepted and change nothing, least of all the order. There is no ${onStdin.map((field) => `--${field.flag}`).join(" or ")} flag.`,
-        "  ",
-      ),
-    );
+  if (onStdin.length > 0) {
+    // The row's own line first, then the rule the CLI applies to it, so the
+    // field is said once and the mechanics once. The one-field rule keeps
+    // "there is no --<flag> flag" on a line of its own, where nothing can wrap
+    // it in half.
+    const one = onStdin.length === 1 ? onStdin[0]! : undefined;
+    const rule =
+      one !== undefined
+        ? one.optional
+          ? `Read only with --${one.spelling}-stdin: the whole of stdin, one trailing newline removed.`
+          : "Required, read unasked: the whole of stdin, one trailing newline removed."
+        : `${onStdin.length} lines, one per field, in this order: ${onStdin
+            .map((field) => field.name)
+            .join(", then ")}. The markers ${onStdin
+            .map((field) => `--${field.spelling}-stdin`)
+            .join(" and ")} are accepted and do not change the order.`;
+    lines.push("", "stdin:");
+    for (const field of onStdin) lines.push(...wrap(field.help, "  "));
+    lines.push(...wrap(rule, "  "));
+    if (one !== undefined) lines.push(`  There is no --${one.spelling} flag.`);
   }
 
   if (command.paged) {
@@ -243,13 +247,12 @@ export const commandHelp = (command: Command): ReadonlyArray<string> => {
 
   lines.push("", "errors:");
   const width = Math.max(...command.codes.map((code) => code.length));
-  // A requirement that holds a dot is a grant; the three markers never do.
-  const grant = command.requires.includes(".");
+  const grant = grantOf(command.requires);
   for (const code of command.codes) {
     const meaning =
-      code === "forbidden" && grant
-        ? `you lack ${command.requires}; ask with \`hydra permission request ${command.requires}\``
-        : (command.errors[code] ?? GENERIC[code]);
+      code === "forbidden" && grant !== undefined
+        ? `you lack ${grant}; ask with \`hydra permission request ${grant}\``
+        : (command.meanings[code] ?? GENERIC[code]);
     lines.push(...labelled(code, width, meaning));
   }
 
@@ -282,7 +285,7 @@ export const nounHelp = (prefix: ReadonlyArray<string>): ReadonlyArray<string> =
   const shapeOf = (command: Command): string =>
     [
       ...command.words.slice(prefix.length),
-      ...command.positionals.map((field) => `<${field.flag}>`),
+      ...command.positionals.map((field) => `<${field.spelling}>`),
     ].join(" ");
   // Only a root noun is introduced; a nested one is introduced by its parent.
   const noted: NounRow | undefined =

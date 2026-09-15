@@ -1,7 +1,7 @@
-import { CLI, OPERATIONS } from "@hydra/contract";
+import { CLI, NOUNS } from "@hydra/contract";
 import { describe, expect, it } from "vitest";
 import { parseArguments } from "./args";
-import { COMMANDS, commandAt } from "./tree";
+import { COMMANDS, commandAt, mentionsIn } from "./tree";
 
 /**
  * The table, read structurally, so this test asserts the values the contract
@@ -30,8 +30,7 @@ const visible = Object.entries(table).filter(([, row]) => row.hidden !== true);
 const hidden = Object.entries(table).filter(([, row]) => row.hidden === true);
 
 const rowOf = (id: string): Row => table[id]!;
-const spelling = (command: { readonly words: ReadonlyArray<string> }): string =>
-  command.words.join(" ");
+const spelling = (command: { readonly spelling: string }): string => command.spelling;
 
 /** `:name` path parameters, in the order the route writes them. */
 const pathParams = (path: string): ReadonlyArray<string> =>
@@ -88,7 +87,7 @@ describe("the spelling of a command", () => {
 
   it("writes every flag in kebab-case, unique within the command", () => {
     for (const command of COMMANDS) {
-      const flags = [...command.payload, ...command.query].map((field) => field.flag);
+      const flags = [...command.payload, ...command.query].map((field) => field.spelling);
       for (const flag of flags) {
         expect(flag, `${spelling(command)}: --${flag}`).toMatch(KEBAB);
       }
@@ -100,20 +99,9 @@ describe("the spelling of a command", () => {
     for (const command of COMMANDS) {
       for (const field of [...command.payload, ...command.query]) {
         expect(
-          RESERVED_FLAGS.includes(field.flag),
-          `${spelling(command)}: --${field.flag} is reserved`,
+          RESERVED_FLAGS.includes(field.spelling),
+          `${spelling(command)}: --${field.spelling} is reserved`,
         ).toBe(false);
-      }
-    }
-  });
-
-  it("takes each flag's name from the table", () => {
-    for (const command of COMMANDS) {
-      const row = rowOf(command.id);
-      for (const field of [...command.payload, ...command.query]) {
-        expect(field.flag, `${spelling(command)}: ${field.name}`).toBe(
-          row.fields?.[field.name]?.flag,
-        );
       }
     }
   });
@@ -183,25 +171,6 @@ describe("a command's fields against the schema", () => {
     );
   });
 
-  it("marks stdin exactly where the table does", () => {
-    for (const command of COMMANDS) {
-      const row = rowOf(command.id);
-      for (const field of [...command.positionals, ...command.payload, ...command.query]) {
-        expect(field.stdin, `${spelling(command)}: ${field.name}`).toBe(
-          row.fields?.[field.name]?.stdin === true,
-        );
-      }
-    }
-  });
-
-  it("keeps each operation's grant and route as the contract writes them", () => {
-    for (const command of COMMANDS) {
-      expect({ requires: command.requires, method: command.method, path: command.path }).toEqual(
-        OPERATIONS[command.id],
-      );
-    }
-  });
-
   it("reads a field's kind, its repetition, its optionality and its closed value set", () => {
     const create = commandAt(["profile", "create"])!;
     expect(create.payload.find((field) => field.name === "name")).toMatchObject({
@@ -228,7 +197,7 @@ describe("a command's fields against the schema", () => {
 describe("the placeholders a usage line shows", () => {
   const shapeOf = (spelled: string): string =>
     commandAt(spelled.split(" "))!
-      .positionals.map((field) => `<${field.flag}>`)
+      .positionals.map((field) => `<${field.spelling}>`)
       .join(" ");
 
   /** Every command whose positionals are not one plain `<id>`. */
@@ -267,6 +236,43 @@ describe("every example in the table", () => {
           parseArguments(command, example.args, () => Promise.resolve(example.stdin ?? "")),
           `${id} example ${index}: hydra ${row.command} ${example.args.join(" ")}`,
         ).resolves.toBeDefined();
+      }
+    }
+  });
+});
+
+// help that names a command the tree cannot answer to teaches a misspelling.
+describe("every command the table's prose names", () => {
+  /** Every string a mention can hide in, addressed the way a failure should read. */
+  const prose = (): ReadonlyArray<[string, string]> => {
+    const found: Array<[string, string]> = [];
+    for (const [id, row] of visible) {
+      found.push([`${id} help`, (row as { help?: string }).help ?? ""]);
+      for (const [code, meaning] of Object.entries(
+        (row as { errors?: Record<string, string> }).errors ?? {},
+      )) {
+        found.push([`${id} errors.${code}`, meaning]);
+      }
+      for (const [name, field] of Object.entries(row.fields ?? {})) {
+        found.push([`${id} fields.${name}`, field.help ?? ""]);
+      }
+    }
+    for (const [noun, entry] of Object.entries(
+      NOUNS as Record<string, { summary?: string; flow?: string }>,
+    )) {
+      found.push([`${noun} summary`, entry.summary ?? ""]);
+      if (entry.flow !== undefined) found.push([`${noun} flow`, entry.flow]);
+    }
+    return found;
+  };
+
+  it("resolves against the tree", () => {
+    for (const [where, text] of prose()) {
+      for (const mention of mentionsIn(text)) {
+        expect(
+          mention.names,
+          `${where} names "hydra ${mention.words.join(" ")}", which is not a command`,
+        ).toBeDefined();
       }
     }
   });

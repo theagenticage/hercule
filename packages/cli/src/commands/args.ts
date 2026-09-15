@@ -50,8 +50,8 @@ export const said = (field: Field): string =>
   field.stdin
     ? `${field.name} (on stdin)`
     : field.positional
-      ? `<${field.flag}>`
-      : `--${field.flag}`;
+      ? `<${field.spelling}>`
+      : `--${field.spelling}`;
 
 /** The value a field holds, from the text that was written for it. */
 export const coerce = (field: Field, text: string, help: string): unknown => {
@@ -196,9 +196,9 @@ export const parseArguments = async (
   tokens: ReadonlyArray<string>,
   readStdin: () => Promise<string>,
 ): Promise<Arguments> => {
-  const help = command.words.join(" ");
-  const payloadFields = new Map(command.payload.map((field) => [field.flag, field]));
-  const queryFields = new Map(command.query.map((field) => [field.flag, field]));
+  const help = command.spelling;
+  const payloadFields = new Map(command.payload.map((field) => [field.spelling, field]));
+  const queryFields = new Map(command.query.map((field) => [field.spelling, field]));
 
   const positionals: Array<string> = [];
   const payload: Record<string, unknown> = {};
@@ -278,7 +278,7 @@ export const parseArguments = async (
   // Everything argv alone can settle is settled before the pipe is touched, so
   // a command line that was never going to work does not first consume stdin.
   if (positionals.length !== command.positionals.length) {
-    const expected = command.positionals.map((field) => `<${field.flag}>`).join(" ");
+    const expected = command.positionals.map((field) => `<${field.spelling}>`).join(" ");
     throw new UsageError(
       `${help} takes ${command.positionals.length} argument(s): ${expected || "none"}`,
       help,
@@ -287,7 +287,7 @@ export const parseArguments = async (
 
   const missing = command.payload
     .filter((field) => !field.optional && !(field.name in payload) && !reading.includes(field))
-    .map((field) => `--${field.flag}${field.stdin ? "-stdin" : ""}`);
+    .map((field) => `--${field.spelling}${field.stdin ? "-stdin" : ""}`);
   if (missing.length > 0) {
     throw new UsageError(`missing required ${missing.join(", ")}`, help);
   }
