@@ -33,14 +33,6 @@ export interface ThreadTurn {
   readonly user: string;
   readonly items: readonly ThreadItem[];
   readonly assistantText: string;
-  /**
-   * Which assistant item `assistantText` ends in, or `null` for a turn with no
-   * assistant text yet. A surface painting an open item's live tail after this
-   * text needs it to know whether the tail continues that item or starts a new
-   * one, which is the same paragraph break this shape already applies to
-   * committed text.
-   */
-  readonly lastAssistantItemId: string | null;
   readonly startedAt: string;
   readonly duration: number | null;
 }
@@ -203,7 +195,6 @@ export const turnsOf = (
         : item,
     ),
     assistantText: turn.assistantText,
-    lastAssistantItemId: turn.lastAssistantItemId,
     startedAt: turn.startedAt,
     duration:
       turn.completedAt === null ? null : Date.parse(turn.completedAt) - Date.parse(turn.startedAt),

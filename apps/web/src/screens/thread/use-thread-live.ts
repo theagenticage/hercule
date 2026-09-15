@@ -1,7 +1,9 @@
 /**
  * The thread surface's live wiring: `session:<id>:stream` appends rows to the
  * transcript cache, `session:<id>:tap` streams the open item's token deltas
- * straight into one DOM node. Nothing here writes React state from a tap
+ * straight into one DOM node, verbatim - the settled prose above it is block
+ * elements, so the tail already begins on a line of its own and has no break
+ * to be given. Nothing here writes React state from a tap
  * delta - the tail node is written to directly, once per animation frame, no
  * matter how many deltas arrived since the last one, because a `setState` per
  * token would re-render the whole column on every keystroke the agent types.
@@ -29,14 +31,6 @@ export const useThreadLive = (
   queryClient: QueryClient,
   sessionId: string,
   rows: readonly TranscriptRow[],
-  /**
-   * Whether the tail opens a paragraph of its own: true where the turn's
-   * committed assistant text ends in another item than the open one. A turn
-   * holds any number of assistant messages (spec 06 §6.2), and the break a new
-   * one gets when its row lands has to be there while it is still streaming,
-   * or the two run together as one sentence until it does.
-   */
-  breakBeforeTail: boolean,
   /** Called after a tap flush paints text - the one growth path no React render follows. */
   onTapFlush: () => void,
 ): RefObject<HTMLSpanElement | null> => {
@@ -45,27 +39,12 @@ export const useThreadLive = (
   const openItemIdRef = useRef<string | null>(null);
   const frameRef = useRef<number | null>(null);
 
-  // Read at flush time rather than rendered beside the text: the break belongs
-  // to text this hook writes to the DOM directly, and rendering it in React
-  // would leave a blank paragraph standing whenever the tail holds nothing -
-  // an open item that is a command, or an assistant message between its first
-  // row and its first token.
-  const breakRef = useRef(breakBeforeTail);
-
   const flushTail = useCallback(() => {
-    const text = bufferRef.current;
     if (tailRef.current !== null) {
-      tailRef.current.textContent = text === "" || !breakRef.current ? text : `\n\n${text}`;
+      tailRef.current.textContent = bufferRef.current;
     }
     onTapFlush();
   }, [onTapFlush]);
-
-  // Mirrored into the ref the tap handler reads synchronously, the way the
-  // open item below is, rather than written during render.
-  useEffect(() => {
-    breakRef.current = breakBeforeTail;
-    flushTail();
-  }, [breakBeforeTail, flushTail]);
 
   const clearTail = useCallback(() => {
     if (frameRef.current !== null) {

@@ -4,7 +4,7 @@
  */
 import { useLayoutEffect, type JSX } from "react";
 import { useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
-import { openItemOf, turnsOf, type HydraClient, type Live } from "@hydra/client-core";
+import { turnsOf, type HydraClient, type Live } from "@hydra/client-core";
 import { useLiveInvalidation } from "../../app/live-invalidation";
 import { inputsQuery, sessionQuery, transcriptQuery } from "../../app/queries";
 import { Composer } from "../composer/composer";
@@ -40,22 +40,7 @@ export function ThreadScreen({
   // transcript, in place of `running`.
   const turns = turnsOf(rows, session.openRequest?.itemId);
   const { followIfAtBottom, scrollToBottom } = useStickToBottom();
-  // The item the tail is painting, read the one way every surface reads it,
-  // and whether the turn it lands in already ends in another item's text.
-  const openItemId = openItemOf(rows);
-  const lastTurn = turns.at(-1);
-  const breakBeforeTail =
-    lastTurn !== undefined &&
-    lastTurn.assistantText !== "" &&
-    lastTurn.lastAssistantItemId !== openItemId;
-  const tailRef = useThreadLive(
-    live,
-    queryClient,
-    sessionId,
-    rows,
-    breakBeforeTail,
-    followIfAtBottom,
-  );
+  const tailRef = useThreadLive(live, queryClient, sessionId, rows, followIfAtBottom);
   const lastIndex = turns.length - 1;
 
   // The queued list above the composer is the transcript's third growth path

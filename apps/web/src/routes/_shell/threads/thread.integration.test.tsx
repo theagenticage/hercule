@@ -890,11 +890,12 @@ describe("Thread: token tap (AC-13)", () => {
     await screen.findByText("Hello");
   });
 
-  it("starts the live tail as its own paragraph when the turn's text ends in another item", async () => {
+  it("paints the live tail beside the settled prose, not inside it", async () => {
     // A turn holds any number of assistant messages (spec 06 section 6.2).
-    // The committed text ends in a3; the open item a4 is a new message, so its
-    // streaming tail is a new paragraph - the same break the reducer writes
-    // once a3's successor lands as a row, rather than glued on until it does.
+    // The committed text ends in a3; the open item a4 is a new message. The
+    // settled text is a block of its own and the tail is the span after it, so
+    // the break between them is the layout's and nothing is written into the
+    // text to make one.
     const { runFrame } = stubFrames();
     const rows = openTurnRows();
     const withEarlier = [
@@ -937,10 +938,12 @@ describe("Thread: token tap (AC-13)", () => {
     await settle();
     runFrame();
 
-    expect(answer.textContent).toBe("First answer.\n\nSecond");
+    // The settled prose is the paragraph; the tail is the span beside it, and
+    // it holds exactly what the agent has typed so far.
+    expect(answer.querySelector("p")?.textContent).toBe("First answer.");
+    expect(answer.querySelector("span")?.textContent).toBe("Second");
 
-    // A flush inside the same item continues that paragraph rather than
-    // breaking mid-sentence.
+    // A flush inside the same item goes on filling that same span.
     act(() => {
       live.push(sessionTapTopic(SESSION_ID), {
         _tag: "delta",
@@ -950,7 +953,8 @@ describe("Thread: token tap (AC-13)", () => {
     await settle();
     runFrame();
 
-    expect(answer.textContent).toBe("First answer.\n\nSecond answer.");
+    expect(answer.querySelector("p")?.textContent).toBe("First answer.");
+    expect(answer.querySelector("span")?.textContent).toBe("Second answer.");
   });
 
   it("never paints a reasoning or command-output tap on the open item as the assistant's answer", async () => {

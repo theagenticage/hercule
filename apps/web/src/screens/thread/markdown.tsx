@@ -68,18 +68,21 @@ const components: Components = {
   // 500, not the browser's 700: heavier bolds squint in this face.
   strong: styled("strong", "font-emph"),
   // The link text is written by the agent and the target need not match it, so
-  // a click leaves this tab where it is and carries no referrer out.
+  // a click leaves this tab where it is and carries no referrer out. A link
+  // into the page itself - a footnote's number and its way back - is the
+  // exception: sending that to a new tab opens a second copy of the app.
   a: (props) =>
     createElement("a", {
       ...props,
       node: undefined,
-      target: "_blank",
-      rel: "noreferrer",
+      ...(props.href?.startsWith("#") === true ? {} : { target: "_blank", rel: "noreferrer" }),
       className: "underline decoration-line underline-offset-[3px]",
     }),
   ul: styled("ul", `${STACKED} list-disc space-y-1 pl-5 marker:text-faint`),
   ol: styled("ol", `${STACKED} list-decimal space-y-1 pl-5 marker:text-faint`),
-  li: styled("li", "leading-relaxed"),
+  // A list inside a list item belongs to that item, so it sits closer to it
+  // than two blocks of prose sit to each other.
+  li: styled("li", "leading-relaxed [&>ul]:mt-1 [&>ol]:mt-1"),
   // A tint rather than a filled chip, because the same rule has to read on the
   // page behind the prose and on the surface of the user's bubble; an alpha
   // over either one shows, a second opaque colour over one of them does not.
@@ -96,10 +99,6 @@ const components: Components = {
   th: styled("th", `${CELL} font-emph`),
   td: styled("td", CELL),
 };
-
-/** Hoisted so a render allocates no array; the parser is rebuilt either way. */
-const PROSE = [remarkGfm];
-const PROSE_WITH_BREAKS = [remarkGfm, remarkBreaks];
 
 /**
  * Deeply nested markdown - a few thousand `>` in a row will do it - overflows
@@ -136,9 +135,10 @@ class Legible extends Component<
 }
 
 /**
- * Memoized because the thread rebuilds every turn from the transcript whenever
- * a row lands; without it, every answer in a long thread would be parsed again
- * on every streamed row.
+ * The thread rebuilds every turn from the transcript whenever a row lands, and
+ * parsing is the expensive part of rendering one. The React Compiler already
+ * caches this element on the text it is given; `memo` is what makes that hold
+ * whether or not the compiler managed to compile the component above it.
  */
 export const Markdown = memo(function Markdown({
   text,
@@ -158,7 +158,10 @@ export const Markdown = memo(function Markdown({
   // here would push it out of the prose it is finishing.
   return (
     <Legible text={text}>
-      <ReactMarkdown remarkPlugins={breaks ? PROSE_WITH_BREAKS : PROSE} components={components}>
+      <ReactMarkdown
+        remarkPlugins={breaks ? [remarkGfm, remarkBreaks] : [remarkGfm]}
+        components={components}
+      >
         {text}
       </ReactMarkdown>
     </Legible>

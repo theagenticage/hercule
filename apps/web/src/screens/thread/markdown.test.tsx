@@ -44,6 +44,16 @@ it("sends a link to a new tab and no referrer with it", () => {
   expect(link.getAttribute("rel")).toBe("noreferrer");
 });
 
+it("keeps a link into the page itself in this tab", () => {
+  const { container } = render(<Markdown text={"Note[^1]\n\n[^1]: the body."} />);
+
+  // The footnote's number, which scrolls down to its note rather than leaving.
+  const footnote = container.querySelector('a[href^="#"]');
+  expect(footnote).not.toBeNull();
+  expect(footnote?.getAttribute("target")).toBeNull();
+  expect(footnote?.getAttribute("rel")).toBeNull();
+});
+
 // react-markdown decides this, not us; the test is the fence that notices if
 // anyone ever hands it a `urlTransform` of our own.
 it("empties the href of a link that is not http, mailto or relative", () => {
