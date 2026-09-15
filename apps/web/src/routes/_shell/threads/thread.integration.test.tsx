@@ -10,7 +10,7 @@
  * the `assistant_message` item events themselves.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { act, fireEvent, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { approvalCard, formatDuration, formatStamp } from "@hydra/client-core";
 import type {
@@ -235,6 +235,182 @@ const row = (position: number, event: TranscriptRow["event"]): TranscriptRow => 
   event,
 });
 
+/**
+ * The box holding one turn's whole answer: the prose blocks and, while the
+ * agent is typing, the live tail beside them. Found from any node inside it,
+ * because a block and the tail are siblings there.
+ */
+const answerArea = (inside: HTMLElement): HTMLElement => {
+  const paragraph = inside.tagName === "SPAN" ? inside : inside.closest("p");
+  expect(paragraph, "the answer is neither a paragraph nor the live tail").not.toBeNull();
+  return paragraph!.parentElement as HTMLElement;
+};
+
+/**
+ * The 800px reading column a turn renders into, found from something inside it
+ * - the same anchor the transcript test above uses. It scopes the markdown
+ * assertions to the thread's own prose, away from the chrome and the composer.
+ */
+const proseColumn = (inside: HTMLElement): HTMLElement => {
+  const column = inside.closest('[class*="max-w-[800px]"]');
+  expect(column, "no 800px column ancestor found").not.toBeNull();
+  return column as HTMLElement;
+};
+
+/** One event of a turn, before `transcript` gives it its place in the log. */
+type TurnEvent = TranscriptRow["event"];
+
+/**
+ * A transcript, numbered in order. Event ids are handed out alongside the
+ * positions because nothing under test reads one: what a row means to these
+ * surfaces is where it sits in the log, and the position is what
+ * `mergeTranscript` orders and de-duplicates on.
+ */
+const transcript = (...parts: ReadonlyArray<readonly TurnEvent[]>): TranscriptRow[] =>
+  parts.flat().map((event, index) => row(index, { ...event, eventId: `e${index}` }));
+
+/** A turn opens. */
+const turnStarted = (turnId: string, at: string): TurnEvent[] => [
+  { _tag: "turn.started", eventId: "", sessionId: SESSION_ID, at, turnId },
+];
+
+/** A turn closes, which is what gives it a duration to show. */
+const turnCompleted = (turnId: string, at: string): TurnEvent[] => [
+  { _tag: "turn.completed", eventId: "", sessionId: SESSION_ID, at, turnId, state: "completed" },
+];
+
+/**
+ * The user's message, the way a transcript writes one: started and completed
+ * in the same breath, the text on both.
+ */
+const userSaid = (turnId: string, at: string, itemId: string, text: string): TurnEvent[] => [
+  {
+    _tag: "item.started",
+    eventId: "",
+    sessionId: SESSION_ID,
+    at,
+    turnId,
+    itemId,
+    kind: "user_message",
+    detail: { text },
+  },
+  {
+    _tag: "item.completed",
+    eventId: "",
+    sessionId: SESSION_ID,
+    at,
+    turnId,
+    itemId,
+    kind: "user_message",
+    status: "completed",
+    detail: { text },
+  },
+];
+
+/** The text of an assistant message, which is the only place one carries text. */
+const assistantText = (turnId: string, at: string, itemId: string, text: string): TurnEvent[] => [
+  {
+    _tag: "content.delta",
+    eventId: "",
+    sessionId: SESSION_ID,
+    at,
+    turnId,
+    itemId,
+    streamKind: "assistant_text",
+    delta: text,
+  },
+];
+
+/** An assistant message's start; on an open item this is the last row there is. */
+const assistantStarted = (turnId: string, at: string, itemId: string): TurnEvent[] => [
+  {
+    _tag: "item.started",
+    eventId: "",
+    sessionId: SESSION_ID,
+    at,
+    turnId,
+    itemId,
+    kind: "assistant_message",
+  },
+];
+
+/** An assistant message's completion. */
+const assistantCompleted = (turnId: string, at: string, itemId: string): TurnEvent[] => [
+  {
+    _tag: "item.completed",
+    eventId: "",
+    sessionId: SESSION_ID,
+    at,
+    turnId,
+    itemId,
+    kind: "assistant_message",
+    status: "completed",
+  },
+];
+
+/** What an assistant message is in full: its text, then its own two rows. */
+const assistantSaid = (turnId: string, at: string, itemId: string, text: string): TurnEvent[] => [
+  ...assistantText(turnId, at, itemId, text),
+  ...assistantStarted(turnId, at, itemId),
+  ...assistantCompleted(turnId, at, itemId),
+];
+
+/** A command item's start; it completes separately, or not at all while it runs. */
+const commandStarted = (
+  turnId: string,
+  at: string,
+  itemId: string,
+  detail: { readonly name: string; readonly input: { readonly command: string } },
+): TurnEvent[] => [
+  {
+    _tag: "item.started",
+    eventId: "",
+    sessionId: SESSION_ID,
+    at,
+    turnId,
+    itemId,
+    kind: "command_execution",
+    detail,
+  },
+];
+
+/** A command item's completion. */
+const commandCompleted = (
+  turnId: string,
+  at: string,
+  itemId: string,
+  detail: { readonly name: string; readonly input: { readonly command: string } },
+): TurnEvent[] => [
+  {
+    _tag: "item.completed",
+    eventId: "",
+    sessionId: SESSION_ID,
+    at,
+    turnId,
+    itemId,
+    kind: "command_execution",
+    status: "completed",
+    detail,
+  },
+];
+
+const USER_TEXT = "Show me some markdown";
+
+/** One completed turn: `userText` as the user's line, then `text` as the whole answer. */
+const turnWithAnswer = (text: string, userText: string = USER_TEXT): TranscriptRow[] =>
+  transcript(
+    turnStarted("t5", "2026-09-08T13:00:00.000Z"),
+    userSaid("t5", "2026-09-08T13:00:00.100Z", "u5", userText),
+    assistantSaid("t5", "2026-09-08T13:00:01.000Z", "a5", text),
+    turnCompleted("t5", "2026-09-08T13:00:02.000Z"),
+  );
+
+/** Opens a thread whose one turn answers with `text`, and returns its column. */
+const openAnswer = async (text: string): Promise<HTMLElement> => {
+  await open(session({ status: "idle" }), turnWithAnswer(text));
+  return proseColumn(await screen.findByText(USER_TEXT));
+};
+
 const TOOL_DETAIL = { name: "Bash", input: { command: "ls -la" } };
 /** `summarize`'s own summary of `TOOL_DETAIL`: the command, not the row's raw JSON. */
 const TOOL_TARGET = "ls -la";
@@ -243,159 +419,23 @@ const TOOL_TARGET = "ls -la";
  * Two completed turns: the first opens with a tool call (a divider to
  * collapse/expand), the second has no tool items at all (no divider).
  */
-const twoCompletedTurns = (): TranscriptRow[] => [
-  row(0, {
-    _tag: "turn.started",
-    eventId: "e0",
-    sessionId: SESSION_ID,
-    at: "2026-09-08T10:00:00.000Z",
-    turnId: "t1",
-  }),
-  row(1, {
-    _tag: "item.started",
-    eventId: "e1",
-    sessionId: SESSION_ID,
-    at: "2026-09-08T10:00:00.100Z",
-    turnId: "t1",
-    itemId: "u1",
-    kind: "user_message",
-    detail: { text: "Fix the login bug" },
-  }),
-  row(2, {
-    _tag: "item.completed",
-    eventId: "e2",
-    sessionId: SESSION_ID,
-    at: "2026-09-08T10:00:00.100Z",
-    turnId: "t1",
-    itemId: "u1",
-    kind: "user_message",
-    status: "completed",
-    detail: { text: "Fix the login bug" },
-  }),
-  row(3, {
-    _tag: "item.started",
-    eventId: "e3",
-    sessionId: SESSION_ID,
-    at: "2026-09-08T10:00:01.000Z",
-    turnId: "t1",
-    itemId: "tool1",
-    kind: "command_execution",
-    detail: TOOL_DETAIL,
-  }),
-  row(4, {
-    _tag: "content.delta",
-    eventId: "e4",
-    sessionId: SESSION_ID,
-    at: "2026-09-08T10:00:02.000Z",
-    turnId: "t1",
-    itemId: "a1",
-    streamKind: "assistant_text",
-    delta: "I'll look at the file.",
-  }),
-  row(5, {
-    _tag: "item.completed",
-    eventId: "e5",
-    sessionId: SESSION_ID,
-    at: "2026-09-08T10:00:03.000Z",
-    turnId: "t1",
-    itemId: "tool1",
-    kind: "command_execution",
-    status: "completed",
-    detail: TOOL_DETAIL,
-  }),
-  row(6, {
-    _tag: "item.started",
-    eventId: "e6",
-    sessionId: SESSION_ID,
-    at: "2026-09-08T10:00:03.500Z",
-    turnId: "t1",
-    itemId: "a1",
-    kind: "assistant_message",
-  }),
-  row(7, {
-    _tag: "item.completed",
-    eventId: "e7",
-    sessionId: SESSION_ID,
-    at: "2026-09-08T10:00:03.600Z",
-    turnId: "t1",
-    itemId: "a1",
-    kind: "assistant_message",
-    status: "completed",
-  }),
-  row(8, {
-    _tag: "turn.completed",
-    eventId: "e8",
-    sessionId: SESSION_ID,
-    at: "2026-09-08T10:00:05.000Z",
-    turnId: "t1",
-    state: "completed",
-  }),
-  row(9, {
-    _tag: "turn.started",
-    eventId: "e9",
-    sessionId: SESSION_ID,
-    at: "2026-09-08T10:01:00.000Z",
-    turnId: "t2",
-  }),
-  row(10, {
-    _tag: "item.started",
-    eventId: "e10",
-    sessionId: SESSION_ID,
-    at: "2026-09-08T10:01:00.100Z",
-    turnId: "t2",
-    itemId: "u2",
-    kind: "user_message",
-    detail: { text: "What about the tests?" },
-  }),
-  row(11, {
-    _tag: "item.completed",
-    eventId: "e11",
-    sessionId: SESSION_ID,
-    at: "2026-09-08T10:01:00.100Z",
-    turnId: "t2",
-    itemId: "u2",
-    kind: "user_message",
-    status: "completed",
-    detail: { text: "What about the tests?" },
-  }),
-  row(12, {
-    _tag: "content.delta",
-    eventId: "e12",
-    sessionId: SESSION_ID,
-    at: "2026-09-08T10:01:01.000Z",
-    turnId: "t2",
-    itemId: "a2",
-    streamKind: "assistant_text",
-    delta: "Added a test too.",
-  }),
-  row(13, {
-    _tag: "item.started",
-    eventId: "e13",
-    sessionId: SESSION_ID,
-    at: "2026-09-08T10:01:01.500Z",
-    turnId: "t2",
-    itemId: "a2",
-    kind: "assistant_message",
-  }),
-  row(14, {
-    _tag: "item.completed",
-    eventId: "e14",
-    sessionId: SESSION_ID,
-    at: "2026-09-08T10:01:01.600Z",
-    turnId: "t2",
-    itemId: "a2",
-    kind: "assistant_message",
-    status: "completed",
-  }),
-  row(15, {
-    _tag: "turn.completed",
-    eventId: "e15",
-    sessionId: SESSION_ID,
-    at: "2026-09-08T10:01:03.000Z",
-    turnId: "t2",
-    state: "completed",
-  }),
-];
+const twoCompletedTurns = (): TranscriptRow[] =>
+  transcript(
+    turnStarted("t1", "2026-09-08T10:00:00.000Z"),
+    userSaid("t1", "2026-09-08T10:00:00.100Z", "u1", "Fix the login bug"),
+    // The tool starts before the answer's text and finishes between that text
+    // and the assistant item's own rows, the way a real turn interleaves them.
+    commandStarted("t1", "2026-09-08T10:00:01.000Z", "tool1", TOOL_DETAIL),
+    assistantText("t1", "2026-09-08T10:00:02.000Z", "a1", "I'll look at the file."),
+    commandCompleted("t1", "2026-09-08T10:00:03.000Z", "tool1", TOOL_DETAIL),
+    assistantStarted("t1", "2026-09-08T10:00:03.500Z", "a1"),
+    assistantCompleted("t1", "2026-09-08T10:00:03.600Z", "a1"),
+    turnCompleted("t1", "2026-09-08T10:00:05.000Z"),
+    turnStarted("t2", "2026-09-08T10:01:00.000Z"),
+    userSaid("t2", "2026-09-08T10:01:00.100Z", "u2", "What about the tests?"),
+    assistantSaid("t2", "2026-09-08T10:01:01.000Z", "a2", "Added a test too."),
+    turnCompleted("t2", "2026-09-08T10:01:03.000Z"),
+  );
 
 describe("Thread: transcript (AC-11)", () => {
   it("renders each completed turn with its timestamp, the user bubble, the assistant text and a Worked-for divider for the turn with a tool item", async () => {
@@ -405,9 +445,8 @@ describe("Thread: transcript (AC-11)", () => {
     // The user's message and the assistant's reply, both turns.
     const userBubble = await screen.findByText("Fix the login bug");
     // The column itself: 800px max width, holding both.
-    const column = userBubble.closest('[class*="max-w-[800px]"]');
-    expect(column, "no 800px column ancestor found").not.toBeNull();
-    expect(column?.contains(await screen.findByText("What about the tests?"))).toBe(true);
+    const column = proseColumn(userBubble);
+    expect(column.contains(await screen.findByText("What about the tests?"))).toBe(true);
     expect(reading()).toContain("I'll look at the file.");
     expect(reading()).toContain("What about the tests?");
     expect(reading()).toContain("Added a test too.");
@@ -502,47 +541,16 @@ describe("Thread: transcript (AC-11)", () => {
 });
 
 describe("Thread: the live turn (AC-12)", () => {
-  const liveTurnRows = (): TranscriptRow[] => [
-    row(0, {
-      _tag: "turn.started",
-      eventId: "e0",
-      sessionId: SESSION_ID,
-      at: "2026-09-08T11:00:00.000Z",
-      turnId: "t3",
-    }),
-    row(1, {
-      _tag: "item.started",
-      eventId: "e1",
-      sessionId: SESSION_ID,
-      at: "2026-09-08T11:00:00.100Z",
-      turnId: "t3",
-      itemId: "u3",
-      kind: "user_message",
-      detail: { text: "Run the tests" },
-    }),
-    row(2, {
-      _tag: "item.completed",
-      eventId: "e2",
-      sessionId: SESSION_ID,
-      at: "2026-09-08T11:00:00.100Z",
-      turnId: "t3",
-      itemId: "u3",
-      kind: "user_message",
-      status: "completed",
-      detail: { text: "Run the tests" },
-    }),
-    row(3, {
-      _tag: "item.started",
-      eventId: "e3",
-      sessionId: SESSION_ID,
-      at: "2026-09-08T11:00:01.000Z",
-      turnId: "t3",
-      itemId: "tool3",
-      kind: "command_execution",
-      detail: { name: "Bash", input: { command: "pnpm test" } },
-    }),
-    // No item.completed for tool3, and no turn.completed: the turn is live.
-  ];
+  const liveTurnRows = (): TranscriptRow[] =>
+    transcript(
+      turnStarted("t3", "2026-09-08T11:00:00.000Z"),
+      userSaid("t3", "2026-09-08T11:00:00.100Z", "u3", "Run the tests"),
+      // No completion for tool3, and no turn.completed: the turn is live.
+      commandStarted("t3", "2026-09-08T11:00:01.000Z", "tool3", {
+        name: "Bash",
+        input: { command: "pnpm test" },
+      }),
+    );
 
   /**
    * Advances the frozen fake clock in small steps, settling after each one,
@@ -691,46 +699,14 @@ describe("Thread: the live turn (AC-12)", () => {
 });
 
 describe("Thread: token tap (AC-13)", () => {
-  const openTurnRows = (): TranscriptRow[] => [
-    row(0, {
-      _tag: "turn.started",
-      eventId: "e0",
-      sessionId: SESSION_ID,
-      at: "2026-09-08T12:00:00.000Z",
-      turnId: "t4",
-    }),
-    row(1, {
-      _tag: "item.started",
-      eventId: "e1",
-      sessionId: SESSION_ID,
-      at: "2026-09-08T12:00:00.100Z",
-      turnId: "t4",
-      itemId: "u4",
-      kind: "user_message",
-      detail: { text: "Say hi" },
-    }),
-    row(2, {
-      _tag: "item.completed",
-      eventId: "e2",
-      sessionId: SESSION_ID,
-      at: "2026-09-08T12:00:00.100Z",
-      turnId: "t4",
-      itemId: "u4",
-      kind: "user_message",
-      status: "completed",
-      detail: { text: "Say hi" },
-    }),
-    row(3, {
-      _tag: "item.started",
-      eventId: "e3",
-      sessionId: SESSION_ID,
-      at: "2026-09-08T12:00:00.200Z",
-      turnId: "t4",
-      itemId: "a4",
-      kind: "assistant_message",
-    }),
-    // No item.completed for a4: it is the open item.
-  ];
+  const openTurnRows = (): TranscriptRow[] =>
+    transcript(
+      turnStarted("t4", "2026-09-08T12:00:00.000Z"),
+      userSaid("t4", "2026-09-08T12:00:00.100Z", "u4", "Say hi"),
+      // Only the assistant item's start, never its completion: it is the open
+      // item, and its text is still arriving on the tap.
+      assistantStarted("t4", "2026-09-08T12:00:00.200Z", "a4"),
+    );
 
   /**
    * A `requestAnimationFrame` stub that records every request and never
@@ -792,11 +768,12 @@ describe("Thread: token tap (AC-13)", () => {
     await screen.findByText("Hello");
   });
 
-  it("starts the live tail as its own paragraph when the turn's text ends in another item", async () => {
+  it("paints the live tail beside the settled prose, not inside it", async () => {
     // A turn holds any number of assistant messages (spec 06 section 6.2).
-    // The committed text ends in a3; the open item a4 is a new message, so its
-    // streaming tail is a new paragraph - the same break the reducer writes
-    // once a3's successor lands as a row, rather than glued on until it does.
+    // The committed text ends in a3; the open item a4 is a new message. The
+    // settled text is a block of its own and the tail is the span after it, so
+    // the break between them is the layout's and nothing is written into the
+    // text to make one.
     const { runFrame } = stubFrames();
     const rows = openTurnRows();
     const withEarlier = [
@@ -828,7 +805,7 @@ describe("Thread: token tap (AC-13)", () => {
     await waitFor(() => {
       expect(live.topics()).toContain(sessionTapTopic(SESSION_ID));
     });
-    const paragraph = (await screen.findByText(/First answer\./)).closest("p");
+    const answer = answerArea(await screen.findByText(/First answer\./));
 
     act(() => {
       live.push(sessionTapTopic(SESSION_ID), {
@@ -839,10 +816,12 @@ describe("Thread: token tap (AC-13)", () => {
     await settle();
     runFrame();
 
-    expect(paragraph?.textContent).toBe("First answer.\n\nSecond");
+    // The settled prose is the paragraph; the tail is the span beside it, and
+    // it holds exactly what the agent has typed so far.
+    expect(answer.querySelector("p")?.textContent).toBe("First answer.");
+    expect(answer.querySelector("span")?.textContent).toBe("Second");
 
-    // A flush inside the same item continues that paragraph rather than
-    // breaking mid-sentence.
+    // A flush inside the same item goes on filling that same span.
     act(() => {
       live.push(sessionTapTopic(SESSION_ID), {
         _tag: "delta",
@@ -852,7 +831,8 @@ describe("Thread: token tap (AC-13)", () => {
     await settle();
     runFrame();
 
-    expect(paragraph?.textContent).toBe("First answer.\n\nSecond answer.");
+    expect(answer.querySelector("p")?.textContent).toBe("First answer.");
+    expect(answer.querySelector("span")?.textContent).toBe("Second answer.");
   });
 
   it("never paints a reasoning or command-output tap on the open item as the assistant's answer", async () => {
@@ -933,8 +913,7 @@ describe("Thread: token tap (AC-13)", () => {
       });
     });
 
-    const paragraph = (await screen.findByText("Hello world")).closest("p");
-    expect(paragraph).not.toBeNull();
+    const answer = answerArea(await screen.findByText("Hello world"));
     expect(screen.queryByText("Hello ")).toBeNull();
 
     act(() => {
@@ -948,7 +927,7 @@ describe("Thread: token tap (AC-13)", () => {
 
     // A later tap delta for the item the row already answered for changes
     // nothing: the whole paragraph's text, tail node included, is unchanged.
-    expect(paragraph?.textContent).toBe("Hello world");
+    expect(answer.textContent).toBe("Hello world");
   });
 
   it("lets a coalesced :stream row for an item that is still open win, and keeps painting the taps after it", async () => {
@@ -997,8 +976,7 @@ describe("Thread: token tap (AC-13)", () => {
     });
     await settle();
 
-    const paragraph = (await screen.findByText("Hello world")).closest("p");
-    expect(paragraph).not.toBeNull();
+    const answer = answerArea(await screen.findByText("Hello world"));
 
     act(() => {
       live.push(sessionTapTopic(SESSION_ID), {
@@ -1011,7 +989,7 @@ describe("Thread: token tap (AC-13)", () => {
 
     // The row's text, then the taps that came after it - the buffer the row
     // replaced is not repeated.
-    expect(paragraph?.textContent).toBe("Hello world, again");
+    expect(answer.textContent).toBe("Hello world, again");
   });
 
   it("leaves the open item's buffered tail alone when a :stream row for a different item arrives", async () => {
@@ -1054,7 +1032,7 @@ describe("Thread: token tap (AC-13)", () => {
     });
     await settle();
     runFrame();
-    const paragraph = (await screen.findByText("Hello")).closest("p");
+    const answer = answerArea(await screen.findByText("Hello"));
 
     // tool0 finishing is a row about a different item; a4 stays open.
     await waitFor(() => {
@@ -1082,7 +1060,7 @@ describe("Thread: token tap (AC-13)", () => {
     await settle();
 
     // Untouched: the row was not about the open item's own text.
-    expect(paragraph?.textContent).toBe("Hello");
+    expect(answer.textContent).toBe("Hello");
   });
 
   it("refetches the transcript and shows the refetched rows when the live overlay reports reset", async () => {
@@ -1153,6 +1131,212 @@ describe("Thread: token tap (AC-13)", () => {
     await screen.findByText("Hi there, refetched.");
     expect(screen.queryByText(/stale buffer/)).toBeNull();
   });
+
+  // Markdown leaves the streaming path alone: a tap delta is a plain write
+  // into the tail - no parse, one frame for the two deltas - and the prose
+  // only becomes markdown once the item's own row lands.
+  it("a live tap paints plain text into the tail and the row lands as markdown", async () => {
+    const { raf, runFrame } = stubFrames();
+    const { live } = await open(session({ status: "busy" }), openTurnRows());
+
+    await waitFor(() => {
+      expect(live.topics()).toContain(sessionTapTopic(SESSION_ID));
+    });
+    const column = proseColumn(await screen.findByText("Say hi"));
+
+    act(() => {
+      live.push(sessionTapTopic(SESSION_ID), {
+        _tag: "delta",
+        items: [{ turnId: "t4", itemId: "a4", streamKind: "assistant_text", delta: "**bo" }],
+      });
+    });
+    await settle();
+    act(() => {
+      live.push(sessionTapTopic(SESSION_ID), {
+        _tag: "delta",
+        items: [{ turnId: "t4", itemId: "a4", streamKind: "assistant_text", delta: "ld**" }],
+      });
+    });
+    await settle();
+
+    expect(raf).toHaveBeenCalledTimes(1);
+    runFrame();
+
+    // The tail reads as the literal characters the agent typed: nothing parsed
+    // them on the way in.
+    expect(reading(column)).toContain("**bold**");
+    expect(column.querySelector("strong")).toBeNull();
+
+    await waitFor(() => {
+      expect(live.topics()).toContain(sessionStreamTopic(SESSION_ID));
+    });
+    act(() => {
+      live.push(sessionStreamTopic(SESSION_ID), {
+        _tag: "delta",
+        items: [
+          row(4, {
+            _tag: "content.delta",
+            eventId: "e4",
+            sessionId: SESSION_ID,
+            at: "2026-09-08T12:00:01.000Z",
+            turnId: "t4",
+            itemId: "a4",
+            streamKind: "assistant_text",
+            delta: "**bold**",
+          }),
+          row(5, {
+            _tag: "item.completed",
+            eventId: "e5",
+            sessionId: SESSION_ID,
+            at: "2026-09-08T12:00:01.100Z",
+            turnId: "t4",
+            itemId: "a4",
+            kind: "assistant_message",
+            status: "completed",
+          }),
+        ],
+        cursor: "5",
+      });
+    });
+
+    await waitFor(() => {
+      expect(within(column).getByText("bold").tagName).toBe("STRONG");
+    });
+    expect(reading(column)).not.toContain("**");
+  });
+});
+
+/**
+ * The assistant's prose reads as markdown. Each test opens one completed turn
+ * whose whole answer is the fixture text, and reads the prose column the turn
+ * renders into.
+ */
+describe("Thread: the assistant's prose renders markdown", () => {
+  it("renders assistant markdown", async () => {
+    const answer = [
+      "Here is **bold**, `inline`, a [link](https://example.com), a list:",
+      "",
+      "- one",
+      "- two",
+      "",
+      "| a | b |",
+      "|---|---|",
+      "| 1 | 2 |",
+      "",
+      "```ts",
+      "const x = 1;",
+      "```",
+      "",
+    ].join("\n");
+    const column = await openAnswer(answer);
+
+    expect(within(column).getByText("bold").tagName).toBe("STRONG");
+    expect(within(column).getByText("inline").tagName).toBe("CODE");
+
+    const link = within(column).getByRole("link", { name: "link" });
+    expect(link.getAttribute("href")).toBe("https://example.com");
+
+    const items = within(within(column).getByRole("list")).getAllByRole("listitem");
+    expect(items.map((item) => reading(item))).toEqual(["one", "two"]);
+
+    const table = within(column).getByRole("table");
+    expect(within(table).getByRole("cell", { name: "2" })).toBeDefined();
+
+    // The fenced block: the mono face and the hairline card, carried by the
+    // code element, its `<pre>` or the wrapper around it.
+    const code = within(column).getByText("const x = 1;");
+    const pre = code.closest("pre");
+    expect(pre, "the fenced block is not a <pre>").not.toBeNull();
+    const shell = [code, pre, pre?.parentElement]
+      .map((element) => element?.className ?? "")
+      .join(" ");
+    expect(shell).toMatch(/\bfont-mono\b/);
+    expect(shell).toMatch(/\bborder\b/);
+    expect(shell).toContain("border-line-soft");
+    expect(shell).toContain("rounded-card");
+
+    // None of the markup survives as characters to read.
+    const prose = reading(column);
+    expect(prose).not.toContain("**");
+    expect(prose).not.toContain("`");
+    expect(prose).not.toContain("|");
+  });
+
+  it("raw HTML in assistant text renders as literal text", async () => {
+    const column = await openAnswer(
+      "before <script>alert(1)</script> and <img src=x onerror=alert(1)> after",
+    );
+
+    expect(reading(column)).toContain("<script>alert(1)</script>");
+    expect(document.querySelector("script")).toBeNull();
+    expect(column.querySelector("img")).toBeNull();
+    expect(column.querySelector("[onerror]")).toBeNull();
+  });
+
+  it("assistant prose keeps soft breaks", async () => {
+    const column = await openAnswer("line one\nline two");
+
+    // A single typed newline is a CommonMark soft break, not a line break:
+    // `remark-breaks` belongs to the user's bubble alone.
+    expect(column.querySelectorAll("br")).toHaveLength(0);
+    const paragraph = within(column).getByText(
+      (_, element) =>
+        element?.tagName === "P" && reading(element as HTMLElement) === "line one line two",
+    );
+    expect(paragraph).toBeDefined();
+  });
+});
+
+/**
+ * The user's own bubble reads as markdown too, with `remark-breaks`, so a
+ * newline they typed stays a line break instead of collapsing the way
+ * CommonMark's soft break would.
+ */
+describe("Thread: the user's bubble renders markdown", () => {
+  it("renders the user's bubble as markdown with typed line breaks", async () => {
+    const typed = "Try **this** with `code`\nsecond line <b>not bold</b>\n\n- a\n- b";
+    await open(session({ status: "idle" }), turnWithAnswer("Sure.", typed));
+    const column = proseColumn(await screen.findByText("Sure."));
+
+    // The right-aligned card the bubble has always been: the flex row, and the
+    // card shape on the element inside it.
+    const rows = column.querySelectorAll('[class*="justify-end"]');
+    expect(rows, "no right-aligned row for the user's bubble").toHaveLength(1);
+    const flexRow = rows[0] as HTMLElement;
+    expect(flexRow.className).toMatch(/\bflex\b/);
+    const bubble = flexRow.firstElementChild as HTMLElement;
+    expect(bubble.className).toContain("rounded-card");
+    expect(bubble.className).toMatch(/\bborder\b/);
+    expect(bubble.className).toContain("border-line-soft");
+    expect(bubble.className).toContain("bg-surface");
+
+    expect(within(bubble).getByText("this").tagName).toBe("STRONG");
+    expect(within(bubble).getByText("code").tagName).toBe("CODE");
+
+    // One line break, exactly where the user typed their newline: between the
+    // inline code and the line that follows it.
+    const breaks = bubble.querySelectorAll("br");
+    expect(breaks).toHaveLength(1);
+    const lineBreak = breaks[0]!;
+    expect((lineBreak.previousSibling as HTMLElement | null)?.tagName).toBe("CODE");
+    let afterTheBreak = "";
+    for (let node = lineBreak.nextSibling; node !== null; node = node.nextSibling) {
+      afterTheBreak += node.textContent ?? "";
+    }
+    expect(afterTheBreak.trim()).toContain("second line");
+
+    // Raw HTML is characters, not markup.
+    expect(reading(bubble)).toContain("<b>not bold</b>");
+    expect(bubble.querySelector("b")).toBeNull();
+
+    const list = within(bubble).getByRole("list");
+    expect(list.tagName).toBe("UL");
+    expect(
+      within(list)
+        .getAllByRole("listitem")
+        .map((item) => reading(item)),
+    ).toEqual(["a", "b"]);
+  });
 });
 
 describe("Thread: the transcript cache only ever grows forwards", () => {
@@ -1206,7 +1390,7 @@ describe("Thread: the transcript cache only ever grows forwards", () => {
       live.push(sessionStreamTopic(SESSION_ID), again);
     });
     await settle();
-    const paragraph = (await screen.findByText("One more thing.")).closest("p");
+    const answer = answerArea(await screen.findByText("One more thing."));
 
     act(() => {
       live.push(sessionStreamTopic(SESSION_ID), again);
@@ -1218,7 +1402,7 @@ describe("Thread: the transcript cache only ever grows forwards", () => {
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
 
-    expect(paragraph?.textContent).toBe("One more thing.");
+    expect(answer.textContent).toBe("One more thing.");
     expect(reading()).not.toContain("One more thing.One more thing.");
   });
 });
@@ -1269,7 +1453,7 @@ describe("Thread: live subscriptions", () => {
       });
     });
 
-    await screen.findByText("Fix the login bug", { selector: "div" });
+    await screen.findByText("Fix the login bug", { selector: "p" });
     await screen.findByText("Added a test too.");
   });
 
@@ -1305,7 +1489,7 @@ describe("Thread: live subscriptions", () => {
     // The first turn's user message is in the earlier delta and the second
     // turn's text is in the later one: both are on screen, and the transcript
     // reads in position order rather than in arrival order.
-    const shown = await screen.findByText("Fix the login bug", { selector: "div" });
+    const shown = await screen.findByText("Fix the login bug", { selector: "p" });
     await screen.findByText("Added a test too.");
     expect(reading().indexOf("Fix the login bug")).toBeLessThan(
       reading().indexOf("Added a test too."),
