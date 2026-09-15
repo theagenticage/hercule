@@ -51,7 +51,32 @@ const FENCE =
   "font-mono text-fine leading-relaxed [&_code]:rounded-none [&_code]:bg-transparent " +
   "[&_code]:px-0 [&_code]:py-0 [&_code]:text-[length:inherit]";
 
-const CELL = "border border-line-soft px-2 py-1 text-left align-top";
+const CELL = "border border-line-soft px-2 py-1 align-top";
+
+/**
+ * A table cell, with its column's alignment as a class.
+ *
+ * `remark-gfm` puts the alignment of `|:---|---:|` in an inline `style`, and
+ * the bundle is served under a Content-Security-Policy whose `style-src` is
+ * `'self'` with no `'unsafe-inline'`: the browser drops every style attribute,
+ * so the alignment would work in a dev server and vanish in the shipped
+ * binary, one console violation per cell. Read here and dropped, it also means
+ * no markdown an agent wrote ever reaches a style attribute at all.
+ */
+const cell = (
+  tag: "th" | "td",
+  className: string,
+  props: Dressable & { readonly style?: { readonly textAlign?: string | undefined } | undefined },
+): JSX.Element => {
+  const { style, ...rest } = props;
+  const alignment =
+    style?.textAlign === "center"
+      ? "text-center"
+      : style?.textAlign === "right"
+        ? "text-right"
+        : "text-left";
+  return createElement(tag, { ...rest, node: undefined, className: `${className} ${alignment}` });
+};
 
 const components: Components = {
   // The heading scale is shallow and stops one step above the body: an answer
@@ -96,8 +121,8 @@ const components: Components = {
       {createElement("table", { ...props, node: undefined, className: "w-full border-collapse" })}
     </div>
   ),
-  th: styled("th", `${CELL} font-emph`),
-  td: styled("td", CELL),
+  th: (props) => cell("th", `${CELL} font-emph`, props),
+  td: (props) => cell("td", CELL, props),
 };
 
 /**

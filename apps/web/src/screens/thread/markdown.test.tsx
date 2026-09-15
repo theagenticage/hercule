@@ -63,3 +63,25 @@ it("empties the href of a link that is not http, mailto or relative", () => {
   expect(link?.textContent).toBe("run me");
   expect(link?.getAttribute("href")).toBe("");
 });
+
+const ALIGNED_TABLE = ["| l | c | r |", "|:---|:---:|---:|", "| 1 | 2 | 3 |"].join("\n");
+
+it("carries a table column's alignment as a class", () => {
+  const { container } = render(<Markdown text={ALIGNED_TABLE} />);
+
+  const cells = [...container.querySelectorAll("tbody td")].map((td) => td.className);
+  expect(cells[0]).toContain("text-left");
+  expect(cells[1]).toContain("text-center");
+  expect(cells[2]).toContain("text-right");
+});
+
+// The fence for the Content-Security-Policy the controller serves the bundle
+// under: `style-src 'self'` with no `'unsafe-inline'` means the browser drops
+// every style attribute. Any markdown construct that starts emitting one fails
+// here, rather than silently losing its effect in the shipped binary while
+// still working behind a dev server that sends no policy.
+it("puts no inline style on anything it renders", () => {
+  const { container } = render(<Markdown text={ALIGNED_TABLE} />);
+
+  expect(container.querySelector("[style]")).toBeNull();
+});
