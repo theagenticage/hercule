@@ -257,76 +257,153 @@ const proseColumn = (inside: HTMLElement): HTMLElement => {
   return column as HTMLElement;
 };
 
+/** One event of a turn, before `transcript` gives it its place in the log. */
+type TurnEvent = TranscriptRow["event"];
+
+/**
+ * A transcript, numbered in order. Event ids are handed out alongside the
+ * positions because nothing under test reads one: what a row means to these
+ * surfaces is where it sits in the log, and the position is what
+ * `mergeTranscript` orders and de-duplicates on.
+ */
+const transcript = (...parts: ReadonlyArray<readonly TurnEvent[]>): TranscriptRow[] =>
+  parts.flat().map((event, index) => row(index, { ...event, eventId: `e${index}` }));
+
+/** A turn opens. */
+const turnStarted = (turnId: string, at: string): TurnEvent[] => [
+  { _tag: "turn.started", eventId: "", sessionId: SESSION_ID, at, turnId },
+];
+
+/** A turn closes, which is what gives it a duration to show. */
+const turnCompleted = (turnId: string, at: string): TurnEvent[] => [
+  { _tag: "turn.completed", eventId: "", sessionId: SESSION_ID, at, turnId, state: "completed" },
+];
+
+/**
+ * The user's message, the way a transcript writes one: started and completed
+ * in the same breath, the text on both.
+ */
+const userSaid = (turnId: string, at: string, itemId: string, text: string): TurnEvent[] => [
+  {
+    _tag: "item.started",
+    eventId: "",
+    sessionId: SESSION_ID,
+    at,
+    turnId,
+    itemId,
+    kind: "user_message",
+    detail: { text },
+  },
+  {
+    _tag: "item.completed",
+    eventId: "",
+    sessionId: SESSION_ID,
+    at,
+    turnId,
+    itemId,
+    kind: "user_message",
+    status: "completed",
+    detail: { text },
+  },
+];
+
+/** The text of an assistant message, which is the only place one carries text. */
+const assistantText = (turnId: string, at: string, itemId: string, text: string): TurnEvent[] => [
+  {
+    _tag: "content.delta",
+    eventId: "",
+    sessionId: SESSION_ID,
+    at,
+    turnId,
+    itemId,
+    streamKind: "assistant_text",
+    delta: text,
+  },
+];
+
+/** An assistant message's start; on an open item this is the last row there is. */
+const assistantStarted = (turnId: string, at: string, itemId: string): TurnEvent[] => [
+  {
+    _tag: "item.started",
+    eventId: "",
+    sessionId: SESSION_ID,
+    at,
+    turnId,
+    itemId,
+    kind: "assistant_message",
+  },
+];
+
+/** An assistant message's completion. */
+const assistantCompleted = (turnId: string, at: string, itemId: string): TurnEvent[] => [
+  {
+    _tag: "item.completed",
+    eventId: "",
+    sessionId: SESSION_ID,
+    at,
+    turnId,
+    itemId,
+    kind: "assistant_message",
+    status: "completed",
+  },
+];
+
+/** What an assistant message is in full: its text, then its own two rows. */
+const assistantSaid = (turnId: string, at: string, itemId: string, text: string): TurnEvent[] => [
+  ...assistantText(turnId, at, itemId, text),
+  ...assistantStarted(turnId, at, itemId),
+  ...assistantCompleted(turnId, at, itemId),
+];
+
+/** A command item's start; it completes separately, or not at all while it runs. */
+const commandStarted = (
+  turnId: string,
+  at: string,
+  itemId: string,
+  detail: { readonly name: string; readonly input: { readonly command: string } },
+): TurnEvent[] => [
+  {
+    _tag: "item.started",
+    eventId: "",
+    sessionId: SESSION_ID,
+    at,
+    turnId,
+    itemId,
+    kind: "command_execution",
+    detail,
+  },
+];
+
+/** A command item's completion. */
+const commandCompleted = (
+  turnId: string,
+  at: string,
+  itemId: string,
+  detail: { readonly name: string; readonly input: { readonly command: string } },
+): TurnEvent[] => [
+  {
+    _tag: "item.completed",
+    eventId: "",
+    sessionId: SESSION_ID,
+    at,
+    turnId,
+    itemId,
+    kind: "command_execution",
+    status: "completed",
+    detail,
+  },
+];
+
 const USER_TEXT = "Show me some markdown";
 
 /** One completed turn: `userText` as the user's line, then `text` as the whole answer. */
-const turnWithAnswer = (text: string, userText: string = USER_TEXT): TranscriptRow[] => [
-  row(0, {
-    _tag: "turn.started",
-    eventId: "m0",
-    sessionId: SESSION_ID,
-    at: "2026-09-08T13:00:00.000Z",
-    turnId: "t5",
-  }),
-  row(1, {
-    _tag: "item.started",
-    eventId: "m1",
-    sessionId: SESSION_ID,
-    at: "2026-09-08T13:00:00.100Z",
-    turnId: "t5",
-    itemId: "u5",
-    kind: "user_message",
-    detail: { text: userText },
-  }),
-  row(2, {
-    _tag: "item.completed",
-    eventId: "m2",
-    sessionId: SESSION_ID,
-    at: "2026-09-08T13:00:00.100Z",
-    turnId: "t5",
-    itemId: "u5",
-    kind: "user_message",
-    status: "completed",
-    detail: { text: userText },
-  }),
-  row(3, {
-    _tag: "content.delta",
-    eventId: "m3",
-    sessionId: SESSION_ID,
-    at: "2026-09-08T13:00:01.000Z",
-    turnId: "t5",
-    itemId: "a5",
-    streamKind: "assistant_text",
-    delta: text,
-  }),
-  row(4, {
-    _tag: "item.started",
-    eventId: "m4",
-    sessionId: SESSION_ID,
-    at: "2026-09-08T13:00:01.100Z",
-    turnId: "t5",
-    itemId: "a5",
-    kind: "assistant_message",
-  }),
-  row(5, {
-    _tag: "item.completed",
-    eventId: "m5",
-    sessionId: SESSION_ID,
-    at: "2026-09-08T13:00:01.200Z",
-    turnId: "t5",
-    itemId: "a5",
-    kind: "assistant_message",
-    status: "completed",
-  }),
-  row(6, {
-    _tag: "turn.completed",
-    eventId: "m6",
-    sessionId: SESSION_ID,
-    at: "2026-09-08T13:00:02.000Z",
-    turnId: "t5",
-    state: "completed",
-  }),
-];
+const turnWithAnswer = (text: string, userText: string = USER_TEXT): TranscriptRow[] =>
+  transcript(
+    turnStarted("t5", "2026-09-08T13:00:00.000Z"),
+    userSaid("t5", "2026-09-08T13:00:00.100Z", "u5", userText),
+    assistantSaid("t5", "2026-09-08T13:00:01.000Z", "a5", text),
+    turnCompleted("t5", "2026-09-08T13:00:02.000Z"),
+  );
 
 /** Opens a thread whose one turn answers with `text`, and returns its column. */
 const openAnswer = async (text: string): Promise<HTMLElement> => {
@@ -342,159 +419,23 @@ const TOOL_TARGET = "ls -la";
  * Two completed turns: the first opens with a tool call (a divider to
  * collapse/expand), the second has no tool items at all (no divider).
  */
-const twoCompletedTurns = (): TranscriptRow[] => [
-  row(0, {
-    _tag: "turn.started",
-    eventId: "e0",
-    sessionId: SESSION_ID,
-    at: "2026-09-08T10:00:00.000Z",
-    turnId: "t1",
-  }),
-  row(1, {
-    _tag: "item.started",
-    eventId: "e1",
-    sessionId: SESSION_ID,
-    at: "2026-09-08T10:00:00.100Z",
-    turnId: "t1",
-    itemId: "u1",
-    kind: "user_message",
-    detail: { text: "Fix the login bug" },
-  }),
-  row(2, {
-    _tag: "item.completed",
-    eventId: "e2",
-    sessionId: SESSION_ID,
-    at: "2026-09-08T10:00:00.100Z",
-    turnId: "t1",
-    itemId: "u1",
-    kind: "user_message",
-    status: "completed",
-    detail: { text: "Fix the login bug" },
-  }),
-  row(3, {
-    _tag: "item.started",
-    eventId: "e3",
-    sessionId: SESSION_ID,
-    at: "2026-09-08T10:00:01.000Z",
-    turnId: "t1",
-    itemId: "tool1",
-    kind: "command_execution",
-    detail: TOOL_DETAIL,
-  }),
-  row(4, {
-    _tag: "content.delta",
-    eventId: "e4",
-    sessionId: SESSION_ID,
-    at: "2026-09-08T10:00:02.000Z",
-    turnId: "t1",
-    itemId: "a1",
-    streamKind: "assistant_text",
-    delta: "I'll look at the file.",
-  }),
-  row(5, {
-    _tag: "item.completed",
-    eventId: "e5",
-    sessionId: SESSION_ID,
-    at: "2026-09-08T10:00:03.000Z",
-    turnId: "t1",
-    itemId: "tool1",
-    kind: "command_execution",
-    status: "completed",
-    detail: TOOL_DETAIL,
-  }),
-  row(6, {
-    _tag: "item.started",
-    eventId: "e6",
-    sessionId: SESSION_ID,
-    at: "2026-09-08T10:00:03.500Z",
-    turnId: "t1",
-    itemId: "a1",
-    kind: "assistant_message",
-  }),
-  row(7, {
-    _tag: "item.completed",
-    eventId: "e7",
-    sessionId: SESSION_ID,
-    at: "2026-09-08T10:00:03.600Z",
-    turnId: "t1",
-    itemId: "a1",
-    kind: "assistant_message",
-    status: "completed",
-  }),
-  row(8, {
-    _tag: "turn.completed",
-    eventId: "e8",
-    sessionId: SESSION_ID,
-    at: "2026-09-08T10:00:05.000Z",
-    turnId: "t1",
-    state: "completed",
-  }),
-  row(9, {
-    _tag: "turn.started",
-    eventId: "e9",
-    sessionId: SESSION_ID,
-    at: "2026-09-08T10:01:00.000Z",
-    turnId: "t2",
-  }),
-  row(10, {
-    _tag: "item.started",
-    eventId: "e10",
-    sessionId: SESSION_ID,
-    at: "2026-09-08T10:01:00.100Z",
-    turnId: "t2",
-    itemId: "u2",
-    kind: "user_message",
-    detail: { text: "What about the tests?" },
-  }),
-  row(11, {
-    _tag: "item.completed",
-    eventId: "e11",
-    sessionId: SESSION_ID,
-    at: "2026-09-08T10:01:00.100Z",
-    turnId: "t2",
-    itemId: "u2",
-    kind: "user_message",
-    status: "completed",
-    detail: { text: "What about the tests?" },
-  }),
-  row(12, {
-    _tag: "content.delta",
-    eventId: "e12",
-    sessionId: SESSION_ID,
-    at: "2026-09-08T10:01:01.000Z",
-    turnId: "t2",
-    itemId: "a2",
-    streamKind: "assistant_text",
-    delta: "Added a test too.",
-  }),
-  row(13, {
-    _tag: "item.started",
-    eventId: "e13",
-    sessionId: SESSION_ID,
-    at: "2026-09-08T10:01:01.500Z",
-    turnId: "t2",
-    itemId: "a2",
-    kind: "assistant_message",
-  }),
-  row(14, {
-    _tag: "item.completed",
-    eventId: "e14",
-    sessionId: SESSION_ID,
-    at: "2026-09-08T10:01:01.600Z",
-    turnId: "t2",
-    itemId: "a2",
-    kind: "assistant_message",
-    status: "completed",
-  }),
-  row(15, {
-    _tag: "turn.completed",
-    eventId: "e15",
-    sessionId: SESSION_ID,
-    at: "2026-09-08T10:01:03.000Z",
-    turnId: "t2",
-    state: "completed",
-  }),
-];
+const twoCompletedTurns = (): TranscriptRow[] =>
+  transcript(
+    turnStarted("t1", "2026-09-08T10:00:00.000Z"),
+    userSaid("t1", "2026-09-08T10:00:00.100Z", "u1", "Fix the login bug"),
+    // The tool starts before the answer's text and finishes between that text
+    // and the assistant item's own rows, the way a real turn interleaves them.
+    commandStarted("t1", "2026-09-08T10:00:01.000Z", "tool1", TOOL_DETAIL),
+    assistantText("t1", "2026-09-08T10:00:02.000Z", "a1", "I'll look at the file."),
+    commandCompleted("t1", "2026-09-08T10:00:03.000Z", "tool1", TOOL_DETAIL),
+    assistantStarted("t1", "2026-09-08T10:00:03.500Z", "a1"),
+    assistantCompleted("t1", "2026-09-08T10:00:03.600Z", "a1"),
+    turnCompleted("t1", "2026-09-08T10:00:05.000Z"),
+    turnStarted("t2", "2026-09-08T10:01:00.000Z"),
+    userSaid("t2", "2026-09-08T10:01:00.100Z", "u2", "What about the tests?"),
+    assistantSaid("t2", "2026-09-08T10:01:01.000Z", "a2", "Added a test too."),
+    turnCompleted("t2", "2026-09-08T10:01:03.000Z"),
+  );
 
 describe("Thread: transcript (AC-11)", () => {
   it("renders each completed turn with its timestamp, the user bubble, the assistant text and a Worked-for divider for the turn with a tool item", async () => {
@@ -600,47 +541,16 @@ describe("Thread: transcript (AC-11)", () => {
 });
 
 describe("Thread: the live turn (AC-12)", () => {
-  const liveTurnRows = (): TranscriptRow[] => [
-    row(0, {
-      _tag: "turn.started",
-      eventId: "e0",
-      sessionId: SESSION_ID,
-      at: "2026-09-08T11:00:00.000Z",
-      turnId: "t3",
-    }),
-    row(1, {
-      _tag: "item.started",
-      eventId: "e1",
-      sessionId: SESSION_ID,
-      at: "2026-09-08T11:00:00.100Z",
-      turnId: "t3",
-      itemId: "u3",
-      kind: "user_message",
-      detail: { text: "Run the tests" },
-    }),
-    row(2, {
-      _tag: "item.completed",
-      eventId: "e2",
-      sessionId: SESSION_ID,
-      at: "2026-09-08T11:00:00.100Z",
-      turnId: "t3",
-      itemId: "u3",
-      kind: "user_message",
-      status: "completed",
-      detail: { text: "Run the tests" },
-    }),
-    row(3, {
-      _tag: "item.started",
-      eventId: "e3",
-      sessionId: SESSION_ID,
-      at: "2026-09-08T11:00:01.000Z",
-      turnId: "t3",
-      itemId: "tool3",
-      kind: "command_execution",
-      detail: { name: "Bash", input: { command: "pnpm test" } },
-    }),
-    // No item.completed for tool3, and no turn.completed: the turn is live.
-  ];
+  const liveTurnRows = (): TranscriptRow[] =>
+    transcript(
+      turnStarted("t3", "2026-09-08T11:00:00.000Z"),
+      userSaid("t3", "2026-09-08T11:00:00.100Z", "u3", "Run the tests"),
+      // No completion for tool3, and no turn.completed: the turn is live.
+      commandStarted("t3", "2026-09-08T11:00:01.000Z", "tool3", {
+        name: "Bash",
+        input: { command: "pnpm test" },
+      }),
+    );
 
   /**
    * Advances the frozen fake clock in small steps, settling after each one,
@@ -789,46 +699,14 @@ describe("Thread: the live turn (AC-12)", () => {
 });
 
 describe("Thread: token tap (AC-13)", () => {
-  const openTurnRows = (): TranscriptRow[] => [
-    row(0, {
-      _tag: "turn.started",
-      eventId: "e0",
-      sessionId: SESSION_ID,
-      at: "2026-09-08T12:00:00.000Z",
-      turnId: "t4",
-    }),
-    row(1, {
-      _tag: "item.started",
-      eventId: "e1",
-      sessionId: SESSION_ID,
-      at: "2026-09-08T12:00:00.100Z",
-      turnId: "t4",
-      itemId: "u4",
-      kind: "user_message",
-      detail: { text: "Say hi" },
-    }),
-    row(2, {
-      _tag: "item.completed",
-      eventId: "e2",
-      sessionId: SESSION_ID,
-      at: "2026-09-08T12:00:00.100Z",
-      turnId: "t4",
-      itemId: "u4",
-      kind: "user_message",
-      status: "completed",
-      detail: { text: "Say hi" },
-    }),
-    row(3, {
-      _tag: "item.started",
-      eventId: "e3",
-      sessionId: SESSION_ID,
-      at: "2026-09-08T12:00:00.200Z",
-      turnId: "t4",
-      itemId: "a4",
-      kind: "assistant_message",
-    }),
-    // No item.completed for a4: it is the open item.
-  ];
+  const openTurnRows = (): TranscriptRow[] =>
+    transcript(
+      turnStarted("t4", "2026-09-08T12:00:00.000Z"),
+      userSaid("t4", "2026-09-08T12:00:00.100Z", "u4", "Say hi"),
+      // Only the assistant item's start, never its completion: it is the open
+      // item, and its text is still arriving on the tap.
+      assistantStarted("t4", "2026-09-08T12:00:00.200Z", "a4"),
+    );
 
   /**
    * A `requestAnimationFrame` stub that records every request and never
