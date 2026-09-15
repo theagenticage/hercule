@@ -21,6 +21,9 @@ type Dressable = { readonly node?: unknown; readonly className?: string | undefi
 /** The gap between two blocks, and none above the first one in its container. */
 const STACKED = "mt-3 first:mt-0";
 
+/** A heading takes more air above it than below: that gap is what groups it. */
+const HEADING = "mt-5 first:mt-0";
+
 /**
  * One element of the prose, dressed.
  *
@@ -45,22 +48,24 @@ const styled =
  */
 const FENCE =
   `${STACKED} overflow-x-auto rounded-card border border-line-soft bg-surface px-3 py-2.5 ` +
-  "font-mono text-fine leading-relaxed [&_code]:rounded-none [&_code]:border-0 " +
-  "[&_code]:bg-transparent [&_code]:px-0 [&_code]:py-0 [&_code]:text-[length:inherit]";
+  "font-mono text-fine leading-relaxed [&_code]:rounded-none [&_code]:bg-transparent " +
+  "[&_code]:px-0 [&_code]:py-0 [&_code]:text-[length:inherit]";
 
 const CELL = "border border-line-soft px-2 py-1 text-left align-top";
 
 const Table = styled("table", "w-full border-collapse");
 
 const components: Components = {
-  // Headings step up in weight before they step up in size: the scale is
-  // shallow on purpose, because an answer is prose and not a document.
-  h1: styled("h1", `${STACKED} text-lead font-emph text-ink`),
-  h2: styled("h2", `${STACKED} text-body font-emph text-ink`),
-  h3: styled("h3", `${STACKED} font-emph text-ink`),
-  h4: styled("h4", `${STACKED} font-emph text-ink`),
-  h5: styled("h5", `${STACKED} font-emph text-ink`),
-  h6: styled("h6", `${STACKED} font-emph text-ink`),
+  // The heading scale is shallow and stops one step above the body: an answer
+  // is prose with sections, not a document, and the thread's own title sits a
+  // few pixels away in the chrome. What separates a heading is the air above
+  // it and the weight, not the size.
+  h1: styled("h1", `${HEADING} text-lead font-emph text-ink`),
+  h2: styled("h2", `${HEADING} text-body font-emph text-ink`),
+  h3: styled("h3", `${HEADING} font-emph text-ink`),
+  h4: styled("h4", `${HEADING} font-emph text-ink`),
+  h5: styled("h5", `${HEADING} font-emph text-ink`),
+  h6: styled("h6", `${HEADING} font-emph text-ink`),
   p: styled("p", `${STACKED} leading-relaxed`),
   // 500, not the browser's 700: heavier bolds squint in this face.
   strong: styled("strong", "font-emph"),
@@ -77,10 +82,10 @@ const components: Components = {
   ul: styled("ul", `${STACKED} list-disc space-y-1 pl-5 marker:text-faint`),
   ol: styled("ol", `${STACKED} list-decimal space-y-1 pl-5 marker:text-faint`),
   li: styled("li", "leading-relaxed"),
-  code: styled(
-    "code",
-    "rounded-control border border-line-soft bg-surface px-1 py-px font-mono text-[0.92em]",
-  ),
+  // A tint rather than a filled chip, because the same rule has to read on the
+  // page behind the prose and on the surface of the user's bubble; an alpha
+  // over either one shows, a second opaque colour over one of them does not.
+  code: styled("code", "rounded-control bg-line-soft px-1 py-px font-mono text-[0.92em]"),
   pre: styled("pre", FENCE),
   blockquote: styled("blockquote", `${STACKED} border-l-2 border-line-soft pl-3 text-muted`),
   hr: styled("hr", `${STACKED} border-line`),

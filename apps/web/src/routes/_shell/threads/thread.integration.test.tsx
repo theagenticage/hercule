@@ -257,6 +257,83 @@ const proseColumn = (inside: HTMLElement): HTMLElement => {
   return column as HTMLElement;
 };
 
+const USER_TEXT = "Show me some markdown";
+
+/** One completed turn: `userText` as the user's line, then `text` as the whole answer. */
+const turnWithAnswer = (text: string, userText: string = USER_TEXT): TranscriptRow[] => [
+  row(0, {
+    _tag: "turn.started",
+    eventId: "m0",
+    sessionId: SESSION_ID,
+    at: "2026-09-08T13:00:00.000Z",
+    turnId: "t5",
+  }),
+  row(1, {
+    _tag: "item.started",
+    eventId: "m1",
+    sessionId: SESSION_ID,
+    at: "2026-09-08T13:00:00.100Z",
+    turnId: "t5",
+    itemId: "u5",
+    kind: "user_message",
+    detail: { text: userText },
+  }),
+  row(2, {
+    _tag: "item.completed",
+    eventId: "m2",
+    sessionId: SESSION_ID,
+    at: "2026-09-08T13:00:00.100Z",
+    turnId: "t5",
+    itemId: "u5",
+    kind: "user_message",
+    status: "completed",
+    detail: { text: userText },
+  }),
+  row(3, {
+    _tag: "content.delta",
+    eventId: "m3",
+    sessionId: SESSION_ID,
+    at: "2026-09-08T13:00:01.000Z",
+    turnId: "t5",
+    itemId: "a5",
+    streamKind: "assistant_text",
+    delta: text,
+  }),
+  row(4, {
+    _tag: "item.started",
+    eventId: "m4",
+    sessionId: SESSION_ID,
+    at: "2026-09-08T13:00:01.100Z",
+    turnId: "t5",
+    itemId: "a5",
+    kind: "assistant_message",
+  }),
+  row(5, {
+    _tag: "item.completed",
+    eventId: "m5",
+    sessionId: SESSION_ID,
+    at: "2026-09-08T13:00:01.200Z",
+    turnId: "t5",
+    itemId: "a5",
+    kind: "assistant_message",
+    status: "completed",
+  }),
+  row(6, {
+    _tag: "turn.completed",
+    eventId: "m6",
+    sessionId: SESSION_ID,
+    at: "2026-09-08T13:00:02.000Z",
+    turnId: "t5",
+    state: "completed",
+  }),
+];
+
+/** Opens a thread whose one turn answers with `text`, and returns its column. */
+const openAnswer = async (text: string): Promise<HTMLElement> => {
+  await open(session({ status: "idle" }), turnWithAnswer(text));
+  return proseColumn(await screen.findByText(USER_TEXT));
+};
+
 const TOOL_DETAIL = { name: "Bash", input: { command: "ls -la" } };
 /** `summarize`'s own summary of `TOOL_DETAIL`: the command, not the row's raw JSON. */
 const TOOL_TARGET = "ls -la";
@@ -1254,83 +1331,6 @@ describe("Thread: token tap (AC-13)", () => {
  * renders into.
  */
 describe("Thread: the assistant's prose renders markdown", () => {
-  const USER_TEXT = "Show me some markdown";
-
-  /** One completed turn: the user's line, then `text` as the whole answer. */
-  const turnWithAnswer = (text: string): TranscriptRow[] => [
-    row(0, {
-      _tag: "turn.started",
-      eventId: "m0",
-      sessionId: SESSION_ID,
-      at: "2026-09-08T13:00:00.000Z",
-      turnId: "t5",
-    }),
-    row(1, {
-      _tag: "item.started",
-      eventId: "m1",
-      sessionId: SESSION_ID,
-      at: "2026-09-08T13:00:00.100Z",
-      turnId: "t5",
-      itemId: "u5",
-      kind: "user_message",
-      detail: { text: USER_TEXT },
-    }),
-    row(2, {
-      _tag: "item.completed",
-      eventId: "m2",
-      sessionId: SESSION_ID,
-      at: "2026-09-08T13:00:00.100Z",
-      turnId: "t5",
-      itemId: "u5",
-      kind: "user_message",
-      status: "completed",
-      detail: { text: USER_TEXT },
-    }),
-    row(3, {
-      _tag: "content.delta",
-      eventId: "m3",
-      sessionId: SESSION_ID,
-      at: "2026-09-08T13:00:01.000Z",
-      turnId: "t5",
-      itemId: "a5",
-      streamKind: "assistant_text",
-      delta: text,
-    }),
-    row(4, {
-      _tag: "item.started",
-      eventId: "m4",
-      sessionId: SESSION_ID,
-      at: "2026-09-08T13:00:01.100Z",
-      turnId: "t5",
-      itemId: "a5",
-      kind: "assistant_message",
-    }),
-    row(5, {
-      _tag: "item.completed",
-      eventId: "m5",
-      sessionId: SESSION_ID,
-      at: "2026-09-08T13:00:01.200Z",
-      turnId: "t5",
-      itemId: "a5",
-      kind: "assistant_message",
-      status: "completed",
-    }),
-    row(6, {
-      _tag: "turn.completed",
-      eventId: "m6",
-      sessionId: SESSION_ID,
-      at: "2026-09-08T13:00:02.000Z",
-      turnId: "t5",
-      state: "completed",
-    }),
-  ];
-
-  /** Opens a thread whose one turn answers with `text`, and returns its column. */
-  const openAnswer = async (text: string): Promise<HTMLElement> => {
-    await open(session({ status: "idle" }), turnWithAnswer(text));
-    return proseColumn(await screen.findByText(USER_TEXT));
-  };
-
   it("renders assistant markdown", async () => {
     const answer = [
       "Here is **bold**, `inline`, a [link](https://example.com), a list:",
@@ -1403,6 +1403,58 @@ describe("Thread: the assistant's prose renders markdown", () => {
         element?.tagName === "P" && reading(element as HTMLElement) === "line one line two",
     );
     expect(paragraph).toBeDefined();
+  });
+});
+
+/**
+ * The user's own bubble reads as markdown too, with `remark-breaks`, so a
+ * newline they typed stays a line break instead of collapsing the way
+ * CommonMark's soft break would.
+ */
+describe("Thread: the user's bubble renders markdown", () => {
+  it("renders the user's bubble as markdown with typed line breaks", async () => {
+    const typed = "Try **this** with `code`\nsecond line <b>not bold</b>\n\n- a\n- b";
+    await open(session({ status: "idle" }), turnWithAnswer("Sure.", typed));
+    const column = proseColumn(await screen.findByText("Sure."));
+
+    // The right-aligned card the bubble has always been: the flex row, and the
+    // card shape on the element inside it.
+    const rows = column.querySelectorAll('[class*="justify-end"]');
+    expect(rows, "no right-aligned row for the user's bubble").toHaveLength(1);
+    const flexRow = rows[0] as HTMLElement;
+    expect(flexRow.className).toMatch(/\bflex\b/);
+    const bubble = flexRow.firstElementChild as HTMLElement;
+    expect(bubble.className).toContain("rounded-card");
+    expect(bubble.className).toMatch(/\bborder\b/);
+    expect(bubble.className).toContain("border-line-soft");
+    expect(bubble.className).toContain("bg-surface");
+
+    expect(within(bubble).getByText("this").tagName).toBe("STRONG");
+    expect(within(bubble).getByText("code").tagName).toBe("CODE");
+
+    // One line break, exactly where the user typed their newline: between the
+    // inline code and the line that follows it.
+    const breaks = bubble.querySelectorAll("br");
+    expect(breaks).toHaveLength(1);
+    const lineBreak = breaks[0]!;
+    expect((lineBreak.previousSibling as HTMLElement | null)?.tagName).toBe("CODE");
+    let afterTheBreak = "";
+    for (let node = lineBreak.nextSibling; node !== null; node = node.nextSibling) {
+      afterTheBreak += node.textContent ?? "";
+    }
+    expect(afterTheBreak.trim()).toContain("second line");
+
+    // Raw HTML is characters, not markup.
+    expect(reading(bubble)).toContain("<b>not bold</b>");
+    expect(bubble.querySelector("b")).toBeNull();
+
+    const list = within(bubble).getByRole("list");
+    expect(list.tagName).toBe("UL");
+    expect(
+      within(list)
+        .getAllByRole("listitem")
+        .map((item) => reading(item)),
+    ).toEqual(["a", "b"]);
   });
 });
 
@@ -1520,7 +1572,7 @@ describe("Thread: live subscriptions", () => {
       });
     });
 
-    await screen.findByText("Fix the login bug", { selector: "div" });
+    await screen.findByText("Fix the login bug", { selector: "p" });
     await screen.findByText("Added a test too.");
   });
 
@@ -1556,7 +1608,7 @@ describe("Thread: live subscriptions", () => {
     // The first turn's user message is in the earlier delta and the second
     // turn's text is in the later one: both are on screen, and the transcript
     // reads in position order rather than in arrival order.
-    const shown = await screen.findByText("Fix the login bug", { selector: "div" });
+    const shown = await screen.findByText("Fix the login bug", { selector: "p" });
     await screen.findByText("Added a test too.");
     expect(reading().indexOf("Fix the login bug")).toBeLessThan(
       reading().indexOf("Added a test too."),

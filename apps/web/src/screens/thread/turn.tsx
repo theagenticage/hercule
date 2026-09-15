@@ -1,8 +1,8 @@
 /**
  * One turn of the transcript: a mono timestamp, the user's message as a
- * right-aligned bubble, the assistant's prose full width as markdown, and the
- * "Worked for" divider where there is something to disclose (spec 14 §The
- * thread surface).
+ * right-aligned bubble, the assistant's prose full width, both as markdown,
+ * and the "Worked for" divider where there is something to disclose (spec 14
+ * §The thread surface).
  */
 import type { JSX, RefObject } from "react";
 import { formatStamp, type ThreadTurn } from "@hydra/client-core";
@@ -31,8 +31,8 @@ export function Turn({
       )}
       {turn.user === "" ? null : (
         <div className="flex justify-end">
-          <div className="max-w-[80%] rounded-card border border-line-soft bg-surface px-3.5 py-2 text-row whitespace-pre-wrap text-ink">
-            {turn.user}
+          <div className="max-w-[80%] rounded-card border border-line-soft bg-surface px-3.5 py-2 text-row text-ink">
+            <Markdown text={turn.user} breaks />
           </div>
         </div>
       )}
