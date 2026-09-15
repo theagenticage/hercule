@@ -23,7 +23,7 @@ const ROLE_ENTRYPOINTS: Record<Role, () => Promise<RoleModule>> = {
  *
  * `hydra serve` is the controller; `hydra runner`, `hydra runner --local`,
  * `hydra runner join` and `hydra runner set-controller` are the runner. Every
- * other verb, `hydra runner create-join-token` included, is the CLI. The role
+ * other verb, `hydra runner join-token create` included, is the CLI. The role
  * keeps the global options; only the verb is consumed.
  *
  * `--home <dir>` and `-c key=value` may precede the verb, so the verb is
@@ -40,9 +40,12 @@ function route(
     case "serve":
       return { role: "controller", args: withoutVerb };
     case "runner":
+      // A bridge for as long as `hydra runner` names the daemon as well as the
+      // noun: help for either is one screen, and the CLI is what renders it.
+      if (subcommand === "--help" || subcommand === "-h") return { role: "cli", args: argv };
       // The daemon forms take no subcommand, and `join` and `set-controller`
       // write the runner's own files rather than calling an operation; the
-      // rest, `runner create-join-token` among them, are ops CLI verbs.
+      // rest, `runner join-token create` among them, are CLI verbs.
       return subcommand === undefined ||
         subcommand.startsWith("-") ||
         subcommand === "join" ||

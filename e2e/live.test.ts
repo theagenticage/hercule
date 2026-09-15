@@ -117,11 +117,21 @@ describe("the binary serving live topics", () => {
     }
   }, 60_000);
 
-  it("prints a ws ticket", async () => {
-    const ran = await hydra(["auth", "wsTicket", "--json"]);
-    const ticket = ok(ran) as { readonly ticket: string };
+  it("mints a ws ticket over the wire, and has no command for it", async () => {
+    // The ticket is the web app's, so its operation is hidden from the CLI: the
+    // route is called the way the web app calls it, with the key the login minted.
+    const response = await fetch(`${url}/api/v1/auth/ws-ticket`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}` },
+    });
+    expect(response.status).toBe(200);
+    const ticket = (await response.json()) as { readonly ticket: string };
     expect(typeof ticket.ticket).toBe("string");
     expect(ticket.ticket.length).toBeGreaterThanOrEqual(43);
+
+    // Hidden means absent, not undocumented: the spelling is an unknown command.
+    const ran = await hydra(["auth", "ws-ticket", "--json"]);
+    expect(ran.code).toBe(2);
   }, 30_000);
 
   it("delivers the created task's query keys to a client-core subscriber", async () => {
@@ -141,15 +151,7 @@ describe("the binary serving live topics", () => {
       const greeted = calls.length;
 
       const created = ok(
-        await hydra([
-          "task",
-          "create",
-          "--title",
-          "live from the binary",
-          "--description",
-          "",
-          "--json",
-        ]),
+        await hydra(["task", "create", "--title", "live from the binary", "--json"], ""),
       ) as { readonly id: string };
 
       await until("the task invalidation", () => calls.length > greeted);

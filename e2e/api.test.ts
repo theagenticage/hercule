@@ -176,7 +176,7 @@ describe("the first run and everything after it", () => {
   }, 15_000);
 
   it("4a. lists the key login minted, without its token", async () => {
-    const keys = await hydra(["apiKey", "query", "--json"]);
+    const keys = await hydra(["api-key", "list", "--json"]);
     expect(keys.code).toBe(0);
     const items = (jsonOf(keys) as { items: Array<Record<string, unknown>> }).items;
     const named = items.find((item) => item.name === "e2e-laptop");
@@ -214,7 +214,7 @@ describe("the first run and everything after it", () => {
   });
 
   it("4c. lists the shipped profiles, creates one, and resolves an id tail", async () => {
-    const shipped = await hydra(["profile", "query", "--json"]);
+    const shipped = await hydra(["profile", "list", "--json"]);
     const profiles = (
       jsonOf(shipped) as { items: Array<{ id: string; name: string; shipped: boolean }> }
     ).items;
@@ -230,7 +230,7 @@ describe("the first run and everything after it", () => {
       "create",
       "--name",
       "e2e",
-      "--grants",
+      "--grant",
       "task.read",
       "--json",
     ]);
@@ -244,7 +244,7 @@ describe("the first run and everything after it", () => {
 
   it("4d. refuses to delete a shipped profile, on stderr, with exit 1", async () => {
     const assistant = (
-      jsonOf(await hydra(["profile", "query", "--json"])) as {
+      jsonOf(await hydra(["profile", "list", "--json"])) as {
         items: Array<{ id: string; name: string }>;
       }
     ).items.find((profile) => profile.name === "assistant")!;
@@ -273,7 +273,7 @@ describe("the first run and everything after it", () => {
     expect(set.code).toBe(0);
     expect(jsonOf(set)).toMatchObject({ ownerKind: "plugin", ownerId: "p1", name: "key1" });
 
-    const listed = await hydra(["secret", "query", "--ownerKind", "plugin", "--json"]);
+    const listed = await hydra(["secret", "list", "--owner-kind", "plugin", "--json"]);
     expect(listed.code).toBe(0);
     expect((jsonOf(listed) as { items: Array<object> }).items).toContainEqual(
       expect.objectContaining({ ownerKind: "plugin", ownerId: "p1", name: "key1" }),
@@ -314,13 +314,13 @@ describe("the first run and everything after it", () => {
     expect(jsonOf(byEnv)).toHaveProperty("publicKey");
 
     const throwaway = jsonOf(
-      await hydra(["apiKey", "create", "--name", "throwaway", "--json"]),
+      await hydra(["api-key", "create", "--name", "throwaway", "--json"]),
     ) as { id: string; token: string };
     expect(await withToken(throwaway.token, ["controller", "read", "--json"])).toMatchObject({
       code: 0,
     });
 
-    const revoked = await hydra(["apiKey", "revoke", throwaway.id, "--json"]);
+    const revoked = await hydra(["api-key", "revoke", throwaway.id, "--json"]);
     expect(revoked.code).toBe(0);
 
     const dead = await withToken(throwaway.token, ["controller", "read", "--json"]);
@@ -341,7 +341,7 @@ describe("the first run and everything after it", () => {
   });
 
   it("7. prints exactly what the route returned under --json", async () => {
-    const viaCli = await hydra(["profile", "query", "--json"]);
+    const viaCli = await hydra(["profile", "list", "--json"]);
     const viaFetch = await fetch(`${url}/api/v1/profiles`, {
       headers: { authorization: `Bearer ${apiKey}` },
     });
@@ -350,33 +350,40 @@ describe("the first run and everything after it", () => {
   });
 
   it("8. logs out a login bearer, and refuses to log out an API key", async () => {
-    const bearer = (
-      jsonOf(
-        await withToken(
-          apiKey,
-          ["auth", "login", "--username", USERNAME, "--password-stdin", "--json"],
-          PASSWORD,
-        ),
-      ) as { token: string }
-    ).token;
+    // `auth.login` and `auth.logout` have no command at all: the CLI trades a
+    // password for an API key with `hydra login` and never holds a bearer. The
+    // endpoints are the web app's, so they are driven here over the wire.
+    const post = (path: string, body: unknown, token?: string) =>
+      fetch(`${url}/api/v1${path}`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...(token === undefined ? {} : { authorization: `Bearer ${token}` }),
+        },
+        body: JSON.stringify(body),
+      });
+
+    const login = await post("/auth/login", { username: USERNAME, password: PASSWORD });
+    expect(login.status).toBe(200);
+    const bearer = ((await login.json()) as { token: string }).token;
 
     const alive = await fetch(`${url}/api/v1/settings`, {
       headers: { authorization: `Bearer ${bearer}` },
     });
     expect(alive.status).toBe(200);
 
-    const out = await withToken(bearer, ["auth", "logout", "--json"]);
-    expect(out.code).toBe(0);
-    expect(jsonOf(out)).toEqual({});
+    const out = await post("/auth/logout", {}, bearer);
+    expect(out.status).toBe(200);
+    expect(await out.json()).toEqual({});
 
     const dead = await fetch(`${url}/api/v1/settings`, {
       headers: { authorization: `Bearer ${bearer}` },
     });
     expect(dead.status).toBe(401);
 
-    const key = await hydra(["auth", "logout", "--json"]);
-    expect(key.code).toBe(1);
-    expect(jsonOf(key)).toMatchObject({ error: { code: "validation" } });
+    const key = await post("/auth/logout", {}, apiKey);
+    expect(key.status).toBe(400);
+    expect(await key.json()).toMatchObject({ error: { code: "validation" } });
 
     // The bearer setup handed back is a login token like any other, and it is
     // still alive: logging out one credential leaves the others alone.

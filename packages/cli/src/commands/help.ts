@@ -1,31 +1,95 @@
 /**
  * `--help`, at any position, written for an agent reading it mid-task.
  *
- * Terse and exact: what the command does not say, it does not have. Static help
- * and 403s that name the missing grant are the two teaching channels, so every
- * verb's help names the grant it needs up front.
+ * Three levels, each rendered from the contract's CLI table and the operation's
+ * schemas: the root lists the nouns and the conventions that hold everywhere, a
+ * noun lists its verbs, and a command says what it does, shows a working
+ * invocation, then describes every argument, what comes back and what each
+ * failure means. The sections are always the same and always in the same order,
+ * so a reader can skip to the one it wants.
+ *
+ * Static help and 403s that name the missing grant are the two teaching
+ * channels, so every screen names the grant a command needs.
  */
-import type { Requirement } from "@hydra/contract";
-import { isStdinOnly, STDIN_ONLY } from "./args";
-import { COMMANDS, ENTITIES, verbsOf, type Command, type Field } from "./tree";
+import { NOUNS, type ErrorCode, type Grant, type NounRow, type Requirement } from "@hydra/contract";
+import { COMMANDS, commandsUnder, mentionsIn, type Command, type Field } from "./tree";
+
+/** How wide a line is allowed to be before it is wrapped. */
+const WIDTH = 92;
+
+/** The grant an operation needs, or `undefined` for one of the three markers. */
+const grantOf = (requires: Requirement): Grant | undefined =>
+  requires === "unauthenticated" || requires === "setup-token" || requires === "authenticated"
+    ? undefined
+    : requires;
 
 /** The three markers are not grants, so they are rendered as prose. */
-export const requirementProse = (requires: Requirement): string => {
+const requirementProse = (requires: Requirement): string => {
+  const grant = grantOf(requires);
+  if (grant !== undefined) return `grant ${grant}`;
   switch (requires) {
-    case "unauthenticated":
-      return "no credential needed";
     case "setup-token":
-      return "the one-time setup token, given as --setup-token <token>";
+      return "the one-time setup token, as --setup-token <token>";
     case "authenticated":
       return "any authenticated caller";
+    // Only "unauthenticated" is left: a grant was answered above.
     default:
-      return `grant ${requires}`;
+      return "no credential needed";
   }
 };
 
+/** One paragraph, broken at spaces so nothing runs past the width. */
+const wrap = (text: string, indent: string): ReadonlyArray<string> => {
+  const lines: Array<string> = [];
+  let line = indent;
+  for (const word of text.split(/\s+/).filter((each) => each !== "")) {
+    const candidate = line === indent ? `${line}${word}` : `${line} ${word}`;
+    if (candidate.length > WIDTH && line !== indent) {
+      lines.push(line);
+      line = `${indent}${word}`;
+    } else {
+      line = candidate;
+    }
+  }
+  return line === indent ? lines : [...lines, line];
+};
+
+/** A label and its prose, the prose hanging under the label when it wraps. */
+const labelled = (label: string, width: number, text: string): ReadonlyArray<string> => {
+  const indent = " ".repeat(width + 4);
+  const [first = "", ...rest] = wrap(text, indent);
+  return [`  ${label.padEnd(width)}  ${first.trimStart()}`, ...rest];
+};
+
+/** What the help says before the first full stop. */
+const firstSentence = (text: string): string => /^.*?[.!?](?=\s|$)/.exec(text)?.[0] ?? text;
+
+/** One token of a shell line, quoted only where a shell would need it. */
+const shellArg = (text: string): string => {
+  if (/^[A-Za-z0-9_@%+=:,./-]+$/.test(text)) return text;
+  return text.includes('"') ? `'${text}'` : `"${text}"`;
+};
+
+/**
+ * One invocation as lines a reader can paste, used both by the examples and by
+ * the refusal a terminal gets in place of a read. What is piped in decides the
+ * shape: a one-line value goes through `echo`, and anything with a newline in
+ * it needs a heredoc, whose body and terminator stay at the left margin because
+ * a shell takes the body literally and ends it only on a bare `EOF`.
+ */
+export const shellExample = (
+  command: Command,
+  args: ReadonlyArray<string>,
+  stdin: string | undefined,
+): ReadonlyArray<string> => {
+  const invocation = ["hydra", ...command.words, ...args.map(shellArg)].join(" ");
+  if (stdin === undefined) return [`  ${invocation}`];
+  if (!stdin.includes("\n")) return [`  echo ${shellArg(stdin)} | ${invocation}`];
+  return [`  ${invocation} <<'EOF'`, ...stdin.split("\n"), "EOF"];
+};
+
 const placeholder = (field: Field): string => {
-  if (field.choices !== undefined)
-    return `<${field.choices.length <= 6 ? field.choices.join("|") : field.name}>`;
+  if (field.choices !== undefined) return `<${field.spelling}>`;
   switch (field.kind) {
     case "string":
       return "<text>";
@@ -38,194 +102,278 @@ const placeholder = (field: Field): string => {
   }
 };
 
-/** A long list of allowed values, wrapped so no line runs past 96 characters. */
-const wrap = (prefix: string, words: ReadonlyArray<string>): ReadonlyArray<string> => {
-  const lines: Array<string> = [];
-  let line = prefix;
-  for (const word of words) {
-    const candidate = line === prefix ? `${line}${word}` : `${line}, ${word}`;
-    if (candidate.length > 96 && line !== prefix) {
-      lines.push(`${line},`);
-      line = `      ${word}`;
-    } else {
-      line = candidate;
-    }
-  }
-  lines.push(line);
-  return lines;
+/** What a code means when the row says nothing more particular. */
+const GENERIC: Record<ErrorCode, string> = {
+  unauthenticated: "no credential, or one this operation does not accept",
+  forbidden: "you lack the grant this operation needs",
+  validation: "an argument does not fit its field; nothing was written",
+  not_found: "no such record, or none this credential may see",
+  conflict: "it collides with something that already exists",
+  invalid_state: "the record is in a state that does not allow this",
+  cap_exceeded: "a size or count cap was exceeded",
+  internal: "the controller failed",
 };
 
-/**
- * One flag, as two or more lines: the flag itself, then what it takes.
- *
- * `fromStdin` is false for query filters: only a payload field has a
- * `--<field>-stdin` form, because only a payload field carries content.
- */
-const flagLine = (command: Command, field: Field, fromStdin: boolean): ReadonlyArray<string> => {
-  const notes: Array<string> = [field.optional ? "optional" : "required"];
-  if (field.repeated) notes.push("repeatable");
-
-  const head = isStdinOnly(command.id, field.name)
-    ? [
-        `  --${field.name}-stdin`,
-        `      ${notes.join("; ")}; read from stdin, so it is never visible in`,
-        `      process lists or shell history. There is no --${field.name} flag.`,
-      ]
-    : [`  --${field.name} ${placeholder(field)}`, `      ${notes.join("; ")}`];
-
-  const lines = [...head];
-  // The only way to clear a nullable field, and the one field shape whose
-  // values the CLI does not pass through as written, so the help says both.
-  if (field.nullable) {
-    lines.push(`      --${field.name} null clears it; the four letters cannot be a value`);
+/** The commands a help text names, in the order it names them, itself excluded. */
+const mentioned = (command: Command): ReadonlyArray<string> => {
+  const found: Array<string> = [];
+  for (const mention of mentionsIn(command.help)) {
+    const named = mention.command?.spelling;
+    if (named === undefined || named === command.spelling || found.includes(named)) continue;
+    found.push(named);
   }
-  if (field.choices !== undefined && field.choices.length > 6) {
-    lines.push(...wrap("      one of: ", field.choices));
-  }
-  if (
-    fromStdin &&
-    field.kind === "string" &&
-    !field.repeated &&
-    !isStdinOnly(command.id, field.name)
-  ) {
-    lines.push(`      --${field.name}-stdin reads it from stdin instead`);
-  }
-  return lines;
+  return found;
 };
 
-/** `hydra <entity> <verb> --help`. */
+/** `hydra <noun>... <verb> --help`. */
 export const commandHelp = (command: Command): ReadonlyArray<string> => {
-  const positionals = command.positionals.map((field) => `<${field.name}>`).join(" ");
-  const lines: Array<string> = [
-    `usage: hydra ${command.entity} ${command.verb}${positionals === "" ? "" : ` ${positionals}`} [flags]`,
+  const flags = [...command.payload.filter((field) => !field.stdin), ...command.query];
+  const onStdin = command.payload.filter((field) => field.stdin);
+  const shape = command.positionals.map((field) => `<${field.spelling}>`).join(" ");
+  const lines: Array<string> = [...wrap(command.help, "")];
+
+  const takesFlags = flags.length > 0 || command.paged || command.requires === "setup-token";
+  lines.push(
     "",
-    `operation: ${command.id}`,
-    `route:     ${command.method} ${command.path}`,
-    `requires:  ${requirementProse(command.requires)}`,
-  ];
+    ["usage: hydra", command.spelling, shape, takesFlags ? "[flags]" : ""]
+      .filter((part) => part !== "")
+      .join(" "),
+  );
+
+  lines.push("", "examples:");
+  for (const example of command.examples) {
+    lines.push(...shellExample(command, example.args, example.stdin));
+  }
 
   if (command.positionals.length > 0) {
-    const width = Math.max(...command.positionals.map((field) => field.name.length)) + 2;
+    const width = Math.max(...command.positionals.map((field) => field.spelling.length)) + 2;
     lines.push("", "arguments:");
     for (const field of command.positionals) {
-      const what =
-        field.name === "id"
-          ? "a canonical id, or an unambiguous tail of 8 or more characters"
-          : // Only the `id` of a route resolves a tail, so an id argument that
-            // is not it says so rather than reading as free text.
-            field.name.endsWith("Id")
-            ? "a canonical id, written out in full"
-            : field.choices !== undefined
-              ? `one of: ${field.choices.join(", ")}`
-              : "text";
-      lines.push(`  ${`<${field.name}>`.padEnd(width)}  ${what}`);
+      const closed = field.choices === undefined ? "" : ` One of: ${field.choices.join(", ")}.`;
+      lines.push(...labelled(`<${field.spelling}>`, width, `${field.help}${closed}`));
     }
   }
 
-  const flags = [
-    ...command.payload.map((field) => flagLine(command, field, true)),
-    ...command.query.map((field) => flagLine(command, field, false)),
-  ].flat();
-  if (flags.length > 0) lines.push("", "flags:", ...flags);
+  if (takesFlags) {
+    // Every row is collected before any is printed, so the label column is as
+    // wide as what is actually shown and no wider.
+    const rows: Array<{ label: string; notes: string; help?: string }> = flags.map((field) => {
+      const notes = [field.optional ? "optional" : "required"];
+      if (field.repeated) notes.push("repeatable");
+      if (field.choices !== undefined) notes.push(`one of: ${field.choices.join(", ")}`);
+      if (field.nullable) notes.push("`null` clears it");
+      return {
+        label: `--${field.spelling} ${placeholder(field)}`,
+        notes: notes.join("; "),
+        help: field.help,
+      };
+    });
+    if (command.requires === "setup-token") {
+      rows.push({
+        label: "--setup-token <token>",
+        notes: "required",
+        help: "The one-time token `hydra setup-url` prints.",
+      });
+    }
+    if (command.paged) {
+      rows.push(
+        { label: "--limit <number>", notes: "optional; the page size" },
+        { label: "--cursor <cursor>", notes: "optional; the nextCursor of the page before" },
+        {
+          label: "--sort <field>[:asc|desc]",
+          notes: `optional; one of: ${command.sortFields.join(", ")}`,
+        },
+        {
+          label: "--all",
+          notes: "optional; follow nextCursor to the end and print every item",
+        },
+      );
+    }
 
-  // With one field on stdin, stdin is the value. With more than one, it is one
-  // line each, and the order is the order the flags are listed above.
-  const onStdin = STDIN_ONLY.get(command.id) ?? [];
-  if (onStdin.length > 1) {
-    lines.push(
-      "",
-      "stdin:",
-      `  ${onStdin.length} lines, one per field, in this order: ${onStdin.join(", then ")}.`,
-      "  The order of the --*-stdin flags on the command line does not change it.",
-      `  e.g. printf '%s\\n%s\\n' "$OLD" "$NEW" | hydra ${command.entity} ${command.verb} ${onStdin
-        .map((name) => `--${name}-stdin`)
-        .join(" ")}`,
-    );
+    const width = Math.max(...rows.map((row) => row.label.length));
+    lines.push("", "flags:");
+    for (const row of rows) {
+      lines.push(...labelled(row.label, width, row.notes));
+      if (row.help !== undefined) lines.push(...wrap(row.help, "      "));
+    }
+  }
+
+  if (onStdin.length > 0) {
+    // The row's own line first, then the rule the CLI applies to it, so the
+    // field is said once and the mechanics once. The one-field rule keeps
+    // "there is no --<flag> flag" on a line of its own, where nothing can wrap
+    // it in half.
+    const one = onStdin.length === 1 ? onStdin[0]! : undefined;
+    const rule =
+      one !== undefined
+        ? one.optional
+          ? `Read only with --${one.spelling}-stdin: the whole of stdin, one trailing newline removed.`
+          : "Required, read unasked: the whole of stdin, one trailing newline removed."
+        : `${onStdin.length} lines, one per field, in this order: ${onStdin
+            .map((field) => field.name)
+            .join(", then ")}. The markers ${onStdin
+            .map((field) => `--${field.spelling}-stdin`)
+            .join(" and ")} are accepted and do not change the order.`;
+    lines.push("", "stdin:");
+    for (const field of onStdin) lines.push(...wrap(field.help, "  "));
+    lines.push(...wrap(rule, "  "));
+    if (one !== undefined) lines.push(`  There is no --${one.spelling} flag.`);
   }
 
   if (command.paged) {
     lines.push(
       "",
       "paging:",
-      "  --limit <number>   page size, 1 to 500; the default is 50",
-      "  --cursor <cursor>  the nextCursor of a previous page",
-      "  --sort <field>[:asc|desc]",
-      `                     sortable: ${command.sortFields.join(", ")}`,
-      "                     omit the direction to keep this operation's own default order",
-      "  --all              follow nextCursor to the end and print every item",
+      ...wrap(
+        "One page at a time, newest first unless --sort says otherwise. The answer carries nextCursor while more remain; pass it back as --cursor, or let --all follow it to the end.",
+        "  ",
+      ),
     );
   }
 
-  if (command.requires === "setup-token") {
-    lines.push("", "  --setup-token <token>  required; from <home>/setup-url");
+  lines.push("", "returns:");
+  const { fields, items } = command.returns;
+  if (items === undefined) {
+    lines.push(...wrap(fields.join(", ") || "nothing but the status", "  "));
+  } else {
+    // A page names its items; a small fixed listing answers with the bare list.
+    const said = fields.includes("items")
+      ? `items[] (${items.join(", ")})`
+      : `a list of (${items.join(", ")})`;
+    const [head = "", ...more] = wrap(said, "  ");
+    lines.push(head, ...more.map((line) => `  ${line}`));
+    for (const name of fields.filter((field) => field !== "items")) lines.push(`  ${name}`);
   }
 
-  lines.push("", "  --json  print the operation's output verbatim; ids stay canonical");
-
-  if (command.paged || command.positionals.some((field) => field.name === "id")) {
-    lines.push(
-      "",
-      "Without --json, ids print as their last 8 characters, which this CLI accepts back",
-      "wherever an id is an argument.",
-    );
+  lines.push("", "errors:");
+  const width = Math.max(...command.codes.map((code) => code.length));
+  const grant = grantOf(command.requires);
+  for (const code of command.codes) {
+    const meaning =
+      code === "forbidden" && grant !== undefined
+        ? `you lack ${grant}; ask with \`hydra permission request ${grant}\``
+        : (command.meanings[code] ?? GENERIC[code]);
+    lines.push(...labelled(code, width, meaning));
   }
+
+  const next = mentioned(command);
+  if (next.length > 0) {
+    lines.push("", "next:");
+    for (const named of next) lines.push(`  hydra ${named}`);
+  }
+
+  lines.push(
+    "",
+    `operation ${command.id} · ${command.method} ${command.path} · ${requirementProse(command.requires)}`,
+  );
   return lines;
 };
 
-/** `hydra <entity> --help`. */
-export const entityHelp = (entity: string): ReadonlyArray<string> => {
-  const commands = verbsOf(entity);
-  const width = Math.max(...commands.map((command) => command.verb.length));
-  return [
-    `usage: hydra ${entity} <verb> [arguments] [flags]`,
-    "",
-    "verbs:",
-    ...commands.map(
-      (command) => `  ${command.verb.padEnd(width)}  ${requirementProse(command.requires)}`,
-    ),
-    "",
-    `run \`hydra ${entity} <verb> --help\` for arguments and flags.`,
-  ];
+/** The daemon forms of `hydra runner`, which are not operations and have no rows. */
+const DAEMON_FORMS = [
+  "daemon forms (this machine's own runner, not the fleet):",
+  "  hydra runner",
+  "  hydra runner --local",
+  "  hydra runner join <controller-url> --token <token> [--reserved]",
+  "  hydra runner set-controller <controller-url>",
+];
+
+/** `hydra <noun> --help`, and the same for a nested noun. */
+export const nounHelp = (prefix: ReadonlyArray<string>): ReadonlyArray<string> => {
+  const noun = prefix.join(" ");
+  const commands = commandsUnder(prefix);
+  const shapeOf = (command: Command): string =>
+    [
+      ...command.words.slice(prefix.length),
+      ...command.positionals.map((field) => `<${field.spelling}>`),
+    ].join(" ");
+  // Only a root noun is introduced; a nested one is introduced by its parent.
+  const noted: NounRow | undefined =
+    prefix.length === 1 ? NOUNS[prefix[0] as keyof typeof NOUNS] : undefined;
+
+  const lines: Array<string> = [`usage: hydra ${noun} <verb> [arguments] [flags]`];
+  if (noted !== undefined) lines.push("", ...wrap(noted.summary, ""));
+  if (noun === "runner") lines.push("", ...DAEMON_FORMS);
+
+  const width = Math.max(...commands.map((command) => shapeOf(command).length));
+  lines.push("", "verbs:");
+  for (const command of commands) {
+    lines.push(`  ${shapeOf(command).padEnd(width)}  ${requirementProse(command.requires)}`);
+    lines.push(...wrap(firstSentence(command.help), "      "));
+  }
+
+  if (noted?.flow !== undefined) lines.push("", "flow:", ...wrap(noted.flow, "  "));
+  lines.push("", `run \`hydra ${noun} <verb> --help\` for one command's arguments and examples.`);
+  return lines;
+};
+
+/** Every noun at the root, in the contract's order, with what sits under it. */
+const nounsOfTheRoot = (): ReadonlyArray<{
+  readonly noun: string;
+  readonly verbs: ReadonlyArray<string>;
+  readonly nested: ReadonlyArray<readonly [string, ReadonlyArray<string>]>;
+}> => {
+  const order: Array<string> = [];
+  for (const command of COMMANDS) {
+    if (!order.includes(command.words[0]!)) order.push(command.words[0]!);
+  }
+  return order.map((noun) => {
+    const under = commandsUnder([noun]);
+    const nested = new Map<string, Array<string>>();
+    for (const command of under.filter((each) => each.words.length > 2)) {
+      const child = command.words[1]!;
+      nested.set(child, [...(nested.get(child) ?? []), command.words[2]!]);
+    }
+    return {
+      noun,
+      verbs: under.filter((each) => each.words.length === 2).map((each) => each.words[1]!),
+      nested: [...nested].map(([child, verbs]) => [child, verbs] as const),
+    };
+  });
 };
 
 /** `hydra --help`. */
 export const rootHelp = (): ReadonlyArray<string> => {
-  const width = Math.max(...ENTITIES.map((entity) => entity.length));
-  return [
+  const nouns = nounsOfTheRoot();
+  const width = Math.max(...nouns.map((each) => each.noun.length));
+  const indent = " ".repeat(width + 4);
+  const lines: Array<string> = [
     "hydra - the command line for a Hydra controller.",
     "",
-    "usage: hydra <entity> <verb> [arguments] [flags]",
+    "usage: hydra <noun> <verb> [arguments] [flags]",
     "",
-    "Every command is one API operation: `hydra <entity> <verb>` is the operation id",
-    "`<entity>.<verb>`, spelled exactly as the contract spells it. There are no aliases.",
-    "",
-    "entities:",
-    ...ENTITIES.map(
-      (entity) =>
-        `  ${entity.padEnd(width)}  ${COMMANDS.filter((command) => command.entity === entity)
-          .map((command) => command.verb)
-          .join(", ")}`,
-    ),
+    "nouns:",
+  ];
+
+  for (const { noun, verbs, nested } of nouns) {
+    lines.push(`  ${noun.padEnd(width)}  ${verbs.join(" ")}`.trimEnd());
+    for (const [child, children] of nested) {
+      lines.push(`${indent}${child}: ${children.join(" ")}`);
+    }
+    lines.push(...wrap(NOUNS[noun as keyof typeof NOUNS].summary, indent));
+  }
+
+  lines.push(
     "",
     "other commands:",
-    "  login <url>  log in with a password and store an API key in <home>/credentials.json",
-    "  setup-url    print the one-time setup URL this machine's controller wrote",
-    "  serve        run the controller; `hydra runner` runs a runner",
+    "  hydra login <url>, hydra setup-url, hydra serve, and the daemon forms of hydra runner.",
     "",
-    "global flags:",
-    "  --home <dir>   the Hydra Home; defaults to $HYDRA_HOME, then ~/.hydra",
-    "  -c key=value   override a bootstrap config key",
-    "  --json         print output, or the error envelope, verbatim",
-    "  --help         this help; works at any position on any command",
+    "conventions:",
+    "  ids       An id in full, or its last eight characters or more where a command's help",
+    "            says a listing resolves them. Human output prints the last eight; --json",
+    "            prints them whole.",
+    "  --json    Prints the operation's output, or the error envelope, verbatim.",
+    "  stdin     A description, a prompt, a password or a config is piped in, never written",
+    "            as a flag. Required, it is read unasked; optional, only with its",
+    "            --<flag>-stdin marker.",
+    "  paging    A listing takes --limit, --cursor and --sort; --all follows nextCursor to",
+    "            the end.",
+    "  exit      0 succeeded, 1 the controller answered with an error envelope, 2 the command",
+    "            line was wrong and nothing was sent, 3 no credential or no controller.",
+    "  403       A forbidden envelope names the grant you lack. Ask the user for it with",
+    "            `hydra permission request <grant>`.",
     "",
-    "credential:",
-    "  HYDRA_TOKEN with HYDRA_API_URL, else <home>/credentials.json from `hydra login`.",
-    "  With HYDRA_SESSION=1 the file is refused outright: the environment token or nothing.",
-    "",
-    "exit codes:",
-    "  0  the operation succeeded",
-    "  1  the controller returned an error envelope",
-    "  2  the command line was wrong; nothing was sent",
-    "  3  no credential, no setup URL, or the controller could not be reached",
-  ];
+    "run `hydra <noun> --help` for a noun's verbs, `hydra <noun> <verb> --help` for one command.",
+  );
+  return lines;
 };

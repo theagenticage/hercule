@@ -33,21 +33,33 @@ describe("dispatch", () => {
     expect(run.runner).toHaveBeenCalledWith(["--local"]);
   });
 
-  it("sends runner create-join-token to the CLI", async () => {
-    await dispatch(["runner", "create-join-token"]);
-    expect(run.cli).toHaveBeenCalledWith(["runner", "create-join-token"]);
+  it("sends runner join-token create to the CLI", async () => {
+    await dispatch(["runner", "join-token", "create"]);
+    expect(run.cli).toHaveBeenCalledWith(["runner", "join-token", "create"]);
     expect(run.runner).not.toHaveBeenCalled();
   });
 
-  it("sends runner set-controller to the runner, and still sends create-join-token to the CLI", async () => {
+  // `runner --help` is the one flag-shaped subcommand the runner role does not
+  // own: what it documents is the CLI's noun as much as the daemon.
+  it("sends runner --help and runner -h to the CLI", async () => {
+    await dispatch(["runner", "--help"]);
+    expect(run.cli).toHaveBeenCalledWith(["runner", "--help"]);
+    expect(run.runner).not.toHaveBeenCalled();
+
+    await dispatch(["runner", "-h"]);
+    expect(run.cli).toHaveBeenCalledWith(["runner", "-h"]);
+    expect(run.runner).not.toHaveBeenCalled();
+  });
+
+  it("sends runner set-controller to the runner, and still sends join-token create to the CLI", async () => {
     // `set-controller` rewrites the runner's own file rather than calling an
     // operation, so it belongs to the runner role beside `join`.
     await dispatch(["runner", "set-controller", "https://controller.example:8443"]);
     expect(run.runner).toHaveBeenCalledWith(["set-controller", "https://controller.example:8443"]);
     expect(run.cli).not.toHaveBeenCalled();
 
-    await dispatch(["runner", "create-join-token"]);
-    expect(run.cli).toHaveBeenCalledWith(["runner", "create-join-token"]);
+    await dispatch(["runner", "join-token", "create"]);
+    expect(run.cli).toHaveBeenCalledWith(["runner", "join-token", "create"]);
     expect(run.runner).toHaveBeenCalledTimes(1);
   });
 

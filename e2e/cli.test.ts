@@ -2,9 +2,9 @@
  * Tasks, projects, the event log and the shipped plugins out of the release
  * binary.
  *
- * Tasks, projects and the event log add no CLI code: the commands are derived
- * from the contract, so the only way to know they are really there is to run
- * the thing a release ships. The plugin registry is compiled in the same way,
+ * Tasks, projects and the event log add no CLI code of their own: the commands
+ * are derived from the contract's CLI table, so the only way to know they are
+ * really there is to run the thing a release ships. The plugin registry is compiled in the same way,
  * so what a release boots with is only visible from a release. This suite runs
  * `./hydra` as the controller and as the CLI, which is why it is out of
  * `pnpm test`: `pnpm build:binary` first, then `pnpm test:binary`.
@@ -74,7 +74,7 @@ afterAll(async () => {
 });
 
 describe("tasks, projects, the log and the plugins through the binary", () => {
-  it("creates, queries, reads, updates and deletes a task", async () => {
+  it("creates, lists, reads, updates and deletes a task", async () => {
     const project = ok(await hydra(["project", "create", "--name", "hydra", "--json"])) as {
       id: string;
       name: string;
@@ -82,19 +82,20 @@ describe("tasks, projects, the log and the plugins through the binary", () => {
     expect(project.name).toBe("hydra");
 
     const created = ok(
-      await hydra([
-        "task",
-        "create",
-        "--title",
-        "wire the runner up",
-        "--description",
+      await hydra(
+        [
+          "task",
+          "create",
+          "--title",
+          "wire the runner up",
+          "--label",
+          "x",
+          "--project",
+          project.id,
+          "--json",
+        ],
         "the first task the binary made",
-        "--labels",
-        "x",
-        "--projectId",
-        project.id,
-        "--json",
-      ]),
+      ),
     ) as TaskRow;
     expect(created).toMatchObject({
       title: "wire the runner up",
@@ -103,12 +104,12 @@ describe("tasks, projects, the log and the plugins through the binary", () => {
       projectId: project.id,
     });
 
-    // A task that matches neither filter, so a query that answers with both
+    // A task that matches neither filter, so a listing that answers with both
     // rows would fail here rather than pass by accident.
-    ok(await hydra(["task", "create", "--title", "unrelated", "--description", "", "--json"]));
+    ok(await hydra(["task", "create", "--title", "unrelated", "--json"], ""));
 
     const queried = ok(
-      await hydra(["task", "query", "--status", "open", "--labels", "x", "--json"]),
+      await hydra(["task", "list", "--status", "open", "--label", "x", "--json"]),
     ) as { items: ReadonlyArray<TaskRow> };
     expect(queried.items.map((task) => task.id)).toEqual([created.id]);
 
@@ -127,14 +128,14 @@ describe("tasks, projects, the log and the plugins through the binary", () => {
     expect(gone.code).toBe(1);
     expect(jsonOf(gone)).toMatchObject({ error: { code: "not_found" } });
 
-    const projects = ok(await hydra(["project", "query", "--json"])) as {
+    const projects = ok(await hydra(["project", "list", "--json"])) as {
       items: ReadonlyArray<{ id: string; name: string }>;
     };
     expect(projects.items.map((one) => one.name)).toContain("hydra");
   }, 60_000);
 
   it("shows the task events the commands wrote, each stamped with the user", async () => {
-    const events = ok(await hydra(["event", "query", "--kind", "task.created", "--json"])) as {
+    const events = ok(await hydra(["event", "list", "--kind", "task.created", "--json"])) as {
       items: ReadonlyArray<{ id: number; kind: string; actor: string | null }>;
     };
     expect(events.items.length).toBeGreaterThanOrEqual(2);
@@ -166,13 +167,29 @@ describe("tasks, projects, the log and the plugins through the binary", () => {
     expect(plugins.at(-1)?.capabilities).toEqual(["connections"]);
   }, 30_000);
 
-  it("lists the five task verbs in help, with no CLI code behind them", async () => {
+  it("lists the five task verbs in help, each with its grant and a line of its own", async () => {
     const help = await hydra(["task", "--help"]);
     expect(help.code).toBe(0);
     expect(help.stdout).toContain("usage: hydra task <verb>");
-    for (const verb of ["query", "read", "create", "update", "delete"]) {
-      // Each verb, with the grant it needs: what the derived tree produced.
-      expect(help.stdout).toMatch(new RegExp(`^ {2}${verb} +grant task\\.`, "m"));
+    for (const verb of ["list", "read", "create", "update", "delete"]) {
+      // Each verb in its positional shape, with the grant it needs: what the
+      // tree built from the contract's CLI table produced.
+      expect(help.stdout).toMatch(new RegExp(`^ {2}${verb}( <id>)? +grant task\\.`, "m"));
     }
+
+    // `create` is the row the criterion names: its grant on the verb line, and
+    // one line of what it does under it.
+    const lines = help.stdout.split("\n");
+    const create = lines.findIndex((line) => /^ {2}create +grant task\.create$/.test(line));
+    expect(create, help.stdout).toBeGreaterThanOrEqual(0);
+    expect(lines[create + 1]).toMatch(/^ {6}\S.*\.$/);
+  }, 30_000);
+
+  it("ends the help of one command with its operation, route and grant", async () => {
+    const help = await hydra(["task", "create", "--help"]);
+    expect(help.code).toBe(0);
+    expect(help.stdout.trimEnd().split("\n").at(-1)).toBe(
+      "operation task.create · POST /api/v1/tasks · grant task.create",
+    );
   }, 30_000);
 });
