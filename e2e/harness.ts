@@ -255,3 +255,126 @@ export function jsonOf(ran: Ran): unknown {
     throw new Error(`not JSON (exit ${String(ran.code)}):\n${ran.stdout}\n${ran.stderr}`);
   }
 }
+
+/**
+ * The CLI's `--json` output of a command that was meant to succeed. A non-zero
+ * exit is the command's own output, raised: a test that reports "not JSON"
+ * about an error envelope says nothing about what went wrong.
+ */
+export function jsonOk<A>(ran: Ran): A {
+  if (ran.code !== 0) {
+    throw new Error(`exit ${String(ran.code)}:\n${ran.stdout}\n${ran.stderr}`);
+  }
+  return jsonOf(ran) as A;
+}
+
+/** What a runner reported about one Provider Instance when it last probed it. */
+export interface Snapshot {
+  readonly auth: { readonly status: string; readonly message?: string };
+  readonly models: ReadonlyArray<{ readonly slug: string }>;
+}
+
+/** A Provider Instance as `provider.query` answers it. */
+export interface Instance {
+  readonly id: string;
+  readonly providerId: string;
+  readonly snapshots: ReadonlyArray<Snapshot>;
+}
+
+/**
+ * Every Provider Instance, over HTTP rather than through the CLI: the snapshots
+ * are what these tests wait on, and waiting is a loop, not a command.
+ */
+export async function instancesOf(options: {
+  readonly url: string;
+  readonly apiKey: string;
+}): Promise<ReadonlyArray<Instance>> {
+  const response = await fetch(`${options.url}/api/v1/providers`, {
+    headers: { authorization: `Bearer ${options.apiKey}` },
+  });
+  const body = await response.text();
+  if (!response.ok)
+    throw new Error(`GET /api/v1/providers answered ${String(response.status)}: ${body}`);
+  return JSON.parse(body) as ReadonlyArray<Instance>;
+}
+
+/** A session as the session operations answer it. */
+export interface Session {
+  readonly id: string;
+  readonly status: string;
+  readonly accessMode: string;
+  readonly permissionProfileId: string | null;
+  readonly nativeSessionId: string | null;
+}
+
+/** Where a session got to, read back the way an operator reads it. */
+export async function sessionOf(options: {
+  readonly home: string;
+  readonly binary: string;
+  readonly id: string;
+}): Promise<Session> {
+  return jsonOk<Session>(
+    await cli(["session", "read", options.id, "--json"], {
+      home: options.home,
+      binary: options.binary,
+    }),
+  );
+}
+
+/** One normalized transcript row: its position and the event at it. */
+export interface Row {
+  readonly position: number;
+  readonly event: { readonly _tag: string; readonly [key: string]: unknown };
+}
+
+/** A session's whole transcript, in order. */
+export async function transcriptOf(options: {
+  readonly home: string;
+  readonly binary: string;
+  readonly id: string;
+}): Promise<ReadonlyArray<Row>> {
+  return jsonOk<{ items: ReadonlyArray<Row> }>(
+    await cli(["transcript", "read", options.id, "--json", "--all"], {
+      home: options.home,
+      binary: options.binary,
+    }),
+  ).items;
+}
+
+/**
+ * Waits until a session's transcript holds `tag`, and says what it held instead
+ * - and where the session got to - when it never does.
+ */
+export async function untilTag(options: {
+  readonly home: string;
+  readonly binary: string;
+  readonly id: string;
+  readonly tag: string;
+  readonly timeoutMs: number;
+}): Promise<ReadonlyArray<Row>> {
+  const deadline = Date.now() + options.timeoutMs;
+  for (;;) {
+    const rows = await transcriptOf(options);
+    if (rows.some((row) => row.event._tag === options.tag)) return rows;
+    if (Date.now() > deadline) {
+      const session = await sessionOf(options);
+      throw new Error(
+        `no ${options.tag} within ${String(options.timeoutMs / 1000)}s: the session reads ` +
+          `${session.status} and its transcript holds ` +
+          `${rows.map((row) => row.event._tag).join(", ") || "nothing"}`,
+      );
+    }
+    await Bun.sleep(500);
+  }
+}
+
+/** Everything a session said, as one string: the coalesced assistant text. */
+export function saidIn(rows: ReadonlyArray<Row>): string {
+  return rows
+    .flatMap((row) =>
+      row.event._tag === "content.delta" && row.event["streamKind"] === "assistant_text"
+        ? [String(row.event["delta"])]
+        : [],
+    )
+    .join("");
+}
