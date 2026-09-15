@@ -10,7 +10,7 @@
  * the `assistant_message` item events themselves.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { act, fireEvent, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { approvalCard, formatDuration, formatStamp } from "@hydra/client-core";
 import type {
@@ -234,6 +234,28 @@ const row = (position: number, event: TranscriptRow["event"]): TranscriptRow => 
   at: event.at,
   event,
 });
+
+/**
+ * The box holding one turn's whole answer: the prose blocks and, while the
+ * agent is typing, the live tail beside them. Found from any node inside it,
+ * because a block and the tail are siblings there.
+ */
+const answerArea = (inside: HTMLElement): HTMLElement => {
+  const paragraph = inside.tagName === "SPAN" ? inside : inside.closest("p");
+  expect(paragraph, "the answer is neither a paragraph nor the live tail").not.toBeNull();
+  return paragraph!.parentElement as HTMLElement;
+};
+
+/**
+ * The 800px reading column a turn renders into, found from something inside it
+ * - the same anchor the transcript test above uses. It scopes the markdown
+ * assertions to the thread's own prose, away from the chrome and the composer.
+ */
+const proseColumn = (inside: HTMLElement): HTMLElement => {
+  const column = inside.closest('[class*="max-w-[800px]"]');
+  expect(column, "no 800px column ancestor found").not.toBeNull();
+  return column as HTMLElement;
+};
 
 const TOOL_DETAIL = { name: "Bash", input: { command: "ls -la" } };
 /** `summarize`'s own summary of `TOOL_DETAIL`: the command, not the row's raw JSON. */
@@ -828,7 +850,7 @@ describe("Thread: token tap (AC-13)", () => {
     await waitFor(() => {
       expect(live.topics()).toContain(sessionTapTopic(SESSION_ID));
     });
-    const paragraph = (await screen.findByText(/First answer\./)).closest("p");
+    const answer = answerArea(await screen.findByText(/First answer\./));
 
     act(() => {
       live.push(sessionTapTopic(SESSION_ID), {
@@ -839,7 +861,7 @@ describe("Thread: token tap (AC-13)", () => {
     await settle();
     runFrame();
 
-    expect(paragraph?.textContent).toBe("First answer.\n\nSecond");
+    expect(answer.textContent).toBe("First answer.\n\nSecond");
 
     // A flush inside the same item continues that paragraph rather than
     // breaking mid-sentence.
@@ -852,7 +874,7 @@ describe("Thread: token tap (AC-13)", () => {
     await settle();
     runFrame();
 
-    expect(paragraph?.textContent).toBe("First answer.\n\nSecond answer.");
+    expect(answer.textContent).toBe("First answer.\n\nSecond answer.");
   });
 
   it("never paints a reasoning or command-output tap on the open item as the assistant's answer", async () => {
@@ -933,8 +955,7 @@ describe("Thread: token tap (AC-13)", () => {
       });
     });
 
-    const paragraph = (await screen.findByText("Hello world")).closest("p");
-    expect(paragraph).not.toBeNull();
+    const answer = answerArea(await screen.findByText("Hello world"));
     expect(screen.queryByText("Hello ")).toBeNull();
 
     act(() => {
@@ -948,7 +969,7 @@ describe("Thread: token tap (AC-13)", () => {
 
     // A later tap delta for the item the row already answered for changes
     // nothing: the whole paragraph's text, tail node included, is unchanged.
-    expect(paragraph?.textContent).toBe("Hello world");
+    expect(answer.textContent).toBe("Hello world");
   });
 
   it("lets a coalesced :stream row for an item that is still open win, and keeps painting the taps after it", async () => {
@@ -997,8 +1018,7 @@ describe("Thread: token tap (AC-13)", () => {
     });
     await settle();
 
-    const paragraph = (await screen.findByText("Hello world")).closest("p");
-    expect(paragraph).not.toBeNull();
+    const answer = answerArea(await screen.findByText("Hello world"));
 
     act(() => {
       live.push(sessionTapTopic(SESSION_ID), {
@@ -1011,7 +1031,7 @@ describe("Thread: token tap (AC-13)", () => {
 
     // The row's text, then the taps that came after it - the buffer the row
     // replaced is not repeated.
-    expect(paragraph?.textContent).toBe("Hello world, again");
+    expect(answer.textContent).toBe("Hello world, again");
   });
 
   it("leaves the open item's buffered tail alone when a :stream row for a different item arrives", async () => {
@@ -1054,7 +1074,7 @@ describe("Thread: token tap (AC-13)", () => {
     });
     await settle();
     runFrame();
-    const paragraph = (await screen.findByText("Hello")).closest("p");
+    const answer = answerArea(await screen.findByText("Hello"));
 
     // tool0 finishing is a row about a different item; a4 stays open.
     await waitFor(() => {
@@ -1082,7 +1102,7 @@ describe("Thread: token tap (AC-13)", () => {
     await settle();
 
     // Untouched: the row was not about the open item's own text.
-    expect(paragraph?.textContent).toBe("Hello");
+    expect(answer.textContent).toBe("Hello");
   });
 
   it("refetches the transcript and shows the refetched rows when the live overlay reports reset", async () => {
@@ -1153,6 +1173,237 @@ describe("Thread: token tap (AC-13)", () => {
     await screen.findByText("Hi there, refetched.");
     expect(screen.queryByText(/stale buffer/)).toBeNull();
   });
+
+  // Markdown leaves the streaming path alone: a tap delta is a plain write
+  // into the tail - no parse, one frame for the two deltas - and the prose
+  // only becomes markdown once the item's own row lands.
+  it("a live tap paints plain text into the tail and the row lands as markdown", async () => {
+    const { raf, runFrame } = stubFrames();
+    const { live } = await open(session({ status: "busy" }), openTurnRows());
+
+    await waitFor(() => {
+      expect(live.topics()).toContain(sessionTapTopic(SESSION_ID));
+    });
+    const column = proseColumn(await screen.findByText("Say hi"));
+
+    act(() => {
+      live.push(sessionTapTopic(SESSION_ID), {
+        _tag: "delta",
+        items: [{ turnId: "t4", itemId: "a4", streamKind: "assistant_text", delta: "**bo" }],
+      });
+    });
+    await settle();
+    act(() => {
+      live.push(sessionTapTopic(SESSION_ID), {
+        _tag: "delta",
+        items: [{ turnId: "t4", itemId: "a4", streamKind: "assistant_text", delta: "ld**" }],
+      });
+    });
+    await settle();
+
+    expect(raf).toHaveBeenCalledTimes(1);
+    runFrame();
+
+    // The tail reads as the literal characters the agent typed: nothing parsed
+    // them on the way in.
+    expect(reading(column)).toContain("**bold**");
+    expect(column.querySelector("strong")).toBeNull();
+
+    await waitFor(() => {
+      expect(live.topics()).toContain(sessionStreamTopic(SESSION_ID));
+    });
+    act(() => {
+      live.push(sessionStreamTopic(SESSION_ID), {
+        _tag: "delta",
+        items: [
+          row(4, {
+            _tag: "content.delta",
+            eventId: "e4",
+            sessionId: SESSION_ID,
+            at: "2026-09-08T12:00:01.000Z",
+            turnId: "t4",
+            itemId: "a4",
+            streamKind: "assistant_text",
+            delta: "**bold**",
+          }),
+          row(5, {
+            _tag: "item.completed",
+            eventId: "e5",
+            sessionId: SESSION_ID,
+            at: "2026-09-08T12:00:01.100Z",
+            turnId: "t4",
+            itemId: "a4",
+            kind: "assistant_message",
+            status: "completed",
+          }),
+        ],
+        cursor: "5",
+      });
+    });
+
+    await waitFor(() => {
+      expect(within(column).getByText("bold").tagName).toBe("STRONG");
+    });
+    expect(reading(column)).not.toContain("**");
+  });
+});
+
+/**
+ * The assistant's prose reads as markdown. Each test opens one completed turn
+ * whose whole answer is the fixture text, and reads the prose column the turn
+ * renders into.
+ */
+describe("Thread: the assistant's prose renders markdown", () => {
+  const USER_TEXT = "Show me some markdown";
+
+  /** One completed turn: the user's line, then `text` as the whole answer. */
+  const turnWithAnswer = (text: string): TranscriptRow[] => [
+    row(0, {
+      _tag: "turn.started",
+      eventId: "m0",
+      sessionId: SESSION_ID,
+      at: "2026-09-08T13:00:00.000Z",
+      turnId: "t5",
+    }),
+    row(1, {
+      _tag: "item.started",
+      eventId: "m1",
+      sessionId: SESSION_ID,
+      at: "2026-09-08T13:00:00.100Z",
+      turnId: "t5",
+      itemId: "u5",
+      kind: "user_message",
+      detail: { text: USER_TEXT },
+    }),
+    row(2, {
+      _tag: "item.completed",
+      eventId: "m2",
+      sessionId: SESSION_ID,
+      at: "2026-09-08T13:00:00.100Z",
+      turnId: "t5",
+      itemId: "u5",
+      kind: "user_message",
+      status: "completed",
+      detail: { text: USER_TEXT },
+    }),
+    row(3, {
+      _tag: "content.delta",
+      eventId: "m3",
+      sessionId: SESSION_ID,
+      at: "2026-09-08T13:00:01.000Z",
+      turnId: "t5",
+      itemId: "a5",
+      streamKind: "assistant_text",
+      delta: text,
+    }),
+    row(4, {
+      _tag: "item.started",
+      eventId: "m4",
+      sessionId: SESSION_ID,
+      at: "2026-09-08T13:00:01.100Z",
+      turnId: "t5",
+      itemId: "a5",
+      kind: "assistant_message",
+    }),
+    row(5, {
+      _tag: "item.completed",
+      eventId: "m5",
+      sessionId: SESSION_ID,
+      at: "2026-09-08T13:00:01.200Z",
+      turnId: "t5",
+      itemId: "a5",
+      kind: "assistant_message",
+      status: "completed",
+    }),
+    row(6, {
+      _tag: "turn.completed",
+      eventId: "m6",
+      sessionId: SESSION_ID,
+      at: "2026-09-08T13:00:02.000Z",
+      turnId: "t5",
+      state: "completed",
+    }),
+  ];
+
+  /** Opens a thread whose one turn answers with `text`, and returns its column. */
+  const openAnswer = async (text: string): Promise<HTMLElement> => {
+    await open(session({ status: "idle" }), turnWithAnswer(text));
+    return proseColumn(await screen.findByText(USER_TEXT));
+  };
+
+  it("renders assistant markdown", async () => {
+    const answer = [
+      "Here is **bold**, `inline`, a [link](https://example.com), a list:",
+      "",
+      "- one",
+      "- two",
+      "",
+      "| a | b |",
+      "|---|---|",
+      "| 1 | 2 |",
+      "",
+      "```ts",
+      "const x = 1;",
+      "```",
+      "",
+    ].join("\n");
+    const column = await openAnswer(answer);
+
+    expect(within(column).getByText("bold").tagName).toBe("STRONG");
+    expect(within(column).getByText("inline").tagName).toBe("CODE");
+
+    const link = within(column).getByRole("link", { name: "link" });
+    expect(link.getAttribute("href")).toBe("https://example.com");
+
+    const items = within(within(column).getByRole("list")).getAllByRole("listitem");
+    expect(items.map((item) => reading(item))).toEqual(["one", "two"]);
+
+    const table = within(column).getByRole("table");
+    expect(within(table).getByRole("cell", { name: "2" })).toBeDefined();
+
+    // The fenced block: the mono face and the hairline card, carried by the
+    // code element, its `<pre>` or the wrapper around it.
+    const code = within(column).getByText("const x = 1;");
+    const pre = code.closest("pre");
+    expect(pre, "the fenced block is not a <pre>").not.toBeNull();
+    const shell = [code, pre, pre?.parentElement]
+      .map((element) => element?.className ?? "")
+      .join(" ");
+    expect(shell).toMatch(/\bfont-mono\b/);
+    expect(shell).toMatch(/\bborder\b/);
+    expect(shell).toContain("border-line-soft");
+    expect(shell).toContain("rounded-card");
+
+    // None of the markup survives as characters to read.
+    const prose = reading(column);
+    expect(prose).not.toContain("**");
+    expect(prose).not.toContain("`");
+    expect(prose).not.toContain("|");
+  });
+
+  it("raw HTML in assistant text renders as literal text", async () => {
+    const column = await openAnswer(
+      "before <script>alert(1)</script> and <img src=x onerror=alert(1)> after",
+    );
+
+    expect(reading(column)).toContain("<script>alert(1)</script>");
+    expect(document.querySelector("script")).toBeNull();
+    expect(column.querySelector("img")).toBeNull();
+    expect(column.querySelector("[onerror]")).toBeNull();
+  });
+
+  it("assistant prose keeps soft breaks", async () => {
+    const column = await openAnswer("line one\nline two");
+
+    // A single typed newline is a CommonMark soft break, not a line break:
+    // `remark-breaks` belongs to the user's bubble alone.
+    expect(column.querySelectorAll("br")).toHaveLength(0);
+    const paragraph = within(column).getByText(
+      (_, element) =>
+        element?.tagName === "P" && reading(element as HTMLElement) === "line one line two",
+    );
+    expect(paragraph).toBeDefined();
+  });
 });
 
 describe("Thread: the transcript cache only ever grows forwards", () => {
@@ -1206,7 +1457,7 @@ describe("Thread: the transcript cache only ever grows forwards", () => {
       live.push(sessionStreamTopic(SESSION_ID), again);
     });
     await settle();
-    const paragraph = (await screen.findByText("One more thing.")).closest("p");
+    const answer = answerArea(await screen.findByText("One more thing."));
 
     act(() => {
       live.push(sessionStreamTopic(SESSION_ID), again);
@@ -1218,7 +1469,7 @@ describe("Thread: the transcript cache only ever grows forwards", () => {
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
 
-    expect(paragraph?.textContent).toBe("One more thing.");
+    expect(answer.textContent).toBe("One more thing.");
     expect(reading()).not.toContain("One more thing.One more thing.");
   });
 });
