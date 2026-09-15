@@ -169,15 +169,8 @@ describe.skipIf(!wanted)("a real Claude Code session through the binary", () => 
       const haiku = slugs.find((slug) => slug.includes("haiku"));
 
       const ran = await cli(
-        [
-          "session",
-          "spawn",
-          "--prompt",
-          "Reply with the single word ready. Use no tools.",
-          ...(haiku === undefined ? [] : ["--model", haiku]),
-          "--json",
-        ],
-        { home: state.home, binary },
+        ["session", "spawn", ...(haiku === undefined ? [] : ["--model", haiku]), "--json"],
+        { home: state.home, binary, stdin: "Reply with the single word ready. Use no tools." },
       );
       const session = asJson<Session>(ran);
       expect(session.status).toBe("starting");
@@ -218,10 +211,11 @@ describe.skipIf(!wanted)("a real Claude Code session through the binary", () => 
         return;
       }
 
-      const ran = await cli(
-        ["session", "spawn", "--prompt", "Reply with the single word ready. Use no tools."],
-        { home: state.home, binary },
-      );
+      const ran = await cli(["session", "spawn"], {
+        home: state.home,
+        binary,
+        stdin: "Reply with the single word ready. Use no tools.",
+      });
 
       expect(ran.code, `${ran.stdout}\n${ran.stderr}`).toBe(0);
       expect(ran.stdout).toContain("hydra transcript read");

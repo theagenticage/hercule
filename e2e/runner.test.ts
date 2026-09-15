@@ -32,7 +32,7 @@ let apiKey: string;
 
 /** Mints a single-use join token, the way an operator on the controller does. */
 const mintToken = async (): Promise<string> => {
-  const ran = await cli(["runner", "createJoinToken", "--json"], {
+  const ran = await cli(["runner", "join-token", "create", "--json"], {
     home: state.home,
     binary,
   });
