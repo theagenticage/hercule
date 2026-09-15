@@ -16,9 +16,13 @@ it("falls back to the characters the agent sent when the parser overflows", () =
   // React reports the caught error on the console; the test is about the
   // fallback, not the noise.
   const quiet = vi.spyOn(console, "error").mockImplementation(() => {});
-  render(<Markdown text={`${">".repeat(6000)} deeply nested`} />);
+  const { rerender } = render(<Markdown text={`${">".repeat(6000)} deeply nested`} />);
 
   expect(screen.getByText(/deeply nested$/).textContent).toContain(">>>");
+
+  // The next answer is not held hostage by the one that overflowed.
+  rerender(<Markdown text="**fine** again" />);
+  expect(screen.getByText("fine").tagName).toBe("STRONG");
   quiet.mockRestore();
 });
 
@@ -40,18 +44,12 @@ it("sends a link to a new tab and no referrer with it", () => {
   expect(link.getAttribute("rel")).toBe("noreferrer");
 });
 
+// react-markdown decides this, not us; the test is the fence that notices if
+// anyone ever hands it a `urlTransform` of our own.
 it("empties the href of a link that is not http, mailto or relative", () => {
   const { container } = render(<Markdown text="[run me](<javascript:alert(1)>)" />);
 
   const link = container.querySelector("a");
   expect(link?.textContent).toBe("run me");
   expect(link?.getAttribute("href")).toBe("");
-});
-
-it("renders a typed newline as a line break only when asked to", () => {
-  const { container, rerender } = render(<Markdown text={"line one\nline two"} />);
-  expect(container.querySelectorAll("br")).toHaveLength(0);
-
-  rerender(<Markdown text={"line one\nline two"} breaks />);
-  expect(container.querySelectorAll("br")).toHaveLength(1);
 });

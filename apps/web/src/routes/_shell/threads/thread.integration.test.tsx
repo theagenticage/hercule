@@ -504,9 +504,8 @@ describe("Thread: transcript (AC-11)", () => {
     // The user's message and the assistant's reply, both turns.
     const userBubble = await screen.findByText("Fix the login bug");
     // The column itself: 800px max width, holding both.
-    const column = userBubble.closest('[class*="max-w-[800px]"]');
-    expect(column, "no 800px column ancestor found").not.toBeNull();
-    expect(column?.contains(await screen.findByText("What about the tests?"))).toBe(true);
+    const column = proseColumn(userBubble);
+    expect(column.contains(await screen.findByText("What about the tests?"))).toBe(true);
     expect(reading()).toContain("I'll look at the file.");
     expect(reading()).toContain("What about the tests?");
     expect(reading()).toContain("Added a test too.");

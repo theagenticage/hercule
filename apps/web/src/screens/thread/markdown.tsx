@@ -53,8 +53,6 @@ const FENCE =
 
 const CELL = "border border-line-soft px-2 py-1 text-left align-top";
 
-const Table = styled("table", "w-full border-collapse");
-
 const components: Components = {
   // The heading scale is shallow and stops one step above the body: an answer
   // is prose with sections, not a document, and the thread's own title sits a
@@ -92,14 +90,14 @@ const components: Components = {
   // A wide table scrolls on its own rather than widening the column.
   table: (props) => (
     <div className={`${STACKED} overflow-x-auto`}>
-      <Table {...props} />
+      {createElement("table", { ...props, node: undefined, className: "w-full border-collapse" })}
     </div>
   ),
   th: styled("th", `${CELL} font-emph`),
   td: styled("td", CELL),
 };
 
-/** One array each, rather than a fresh one per render. */
+/** Hoisted so a render allocates no array; the parser is rebuilt either way. */
 const PROSE = [remarkGfm];
 const PROSE_WITH_BREAKS = [remarkGfm, remarkBreaks];
 
@@ -130,7 +128,7 @@ class Legible extends Component<
 
   override render(): ReactNode {
     return this.state.failed ? (
-      <p className="whitespace-pre-wrap">{this.props.text}</p>
+      <p className={`${STACKED} whitespace-pre-wrap`}>{this.props.text}</p>
     ) : (
       this.props.children
     );
