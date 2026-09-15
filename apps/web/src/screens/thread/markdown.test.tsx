@@ -85,3 +85,14 @@ it("puts no inline style on anything it renders", () => {
 
   expect(container.querySelector("[style]")).toBeNull();
 });
+
+// A fenced block holds lines nobody wrapped - a CLI's output table, a long
+// JSON value - and the card it sits in is only as wide as the column. Without
+// this the long line is clipped at the card's edge and the rest is
+// unreachable, so the fence scrolls on its own rather than wrapping the
+// characters or widening the thread.
+it("lets a fenced block scroll sideways instead of clipping a long line", () => {
+  const { container } = render(<Markdown text={"```\n" + "x".repeat(400) + "\n```"} />);
+
+  expect(container.querySelector("pre")?.className).toContain("overflow-x-auto");
+});

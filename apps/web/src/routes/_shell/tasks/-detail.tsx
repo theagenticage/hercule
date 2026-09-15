@@ -203,7 +203,7 @@ export function TaskDetail({
                         <Link
                           to="/threads/$sessionId"
                           params={{ sessionId: actor.sessionId }}
-                          className="text-muted underline underline-offset-2 hover:text-ink"
+                          className="text-ink underline decoration-line underline-offset-[3px]"
                         >
                           {actor.label}
                         </Link>
