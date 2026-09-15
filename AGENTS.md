@@ -54,6 +54,7 @@ These come from the spec and ADRs; restated here because violating them is expen
 - **Never edit generated files by hand** (derived clients, OpenAPI documents, lockfiles).
 - **Never silently substitute behaviour.** Access-mode fallback, trigger pauses, dropped events: the system tells the user; so do you.
 - **Never touch `~/.hydra`.** That is the user's live Hydra Home: its database, credentials, runner state and backups. Any run you start (a proof run, an e2e check, a migration try-out, a `hydra` command that writes) uses a throwaway home: `HYDRA_HOME=<scratch dir>` or `--home <scratch dir>`, created for that run and deleted after. Reading `~/.hydra/config.toml` to learn a port is fine; running a controller, runner, or migration against it is not, even when you believe the change is additive. A migration edited in place is the standing example: the live database already ran the old version and would break on the new one.
+- **Never kill processes by pattern.** `pkill -f vite`, `pkill -f node`, `killall bun` and the like reach every worktree and every session on this machine, not just yours; another agent's dev server, controller or test run dies with no trace of why. Stop only what you started, by the PID you captured when you started it (or the port you bound), and leave anything you did not start alone.
 
 ## Working conventions
 
