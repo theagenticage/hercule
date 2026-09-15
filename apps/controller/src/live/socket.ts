@@ -50,7 +50,7 @@ import {
   type Validation,
 } from "@hydra/contract";
 import { VERSION } from "@hydra/home/version";
-import { CurrentActor, requireGrant, type Actor } from "../actor";
+import { CurrentActor, requireGrant, type UserActor } from "../actor";
 import { Credentials } from "../credentials";
 import { WsTickets } from "./tickets";
 import { LiveTopics, type LiveQueue } from "./topics";
@@ -99,7 +99,7 @@ const parsePosition = (raw: string | undefined): Effect.Effect<number | undefine
  * makes the greeting a claim rather than a check.
  */
 interface Connection {
-  actor: Actor | undefined;
+  actor: UserActor | undefined;
   greeting: boolean;
   gone: boolean;
   readonly open: Set<LiveQueue>;
@@ -137,10 +137,8 @@ const handlers = live.toLayer(
      * token itself was never kept - only the hash it resolved through - which
      * is all a second lookup needs.
      */
-    const stillThere = (actor: Actor): Effect.Effect<boolean, Internal> =>
-      actor._tag === "none"
-        ? Effect.succeed(false)
-        : Effect.mapError(credentials.stillLive(actor.credential), () => internal(UNREADABLE));
+    const stillThere = (actor: UserActor): Effect.Effect<boolean, Internal> =>
+      Effect.mapError(credentials.stillLive(actor.credential), () => internal(UNREADABLE));
 
     /**
      * Takes everything away from a connection whose credential has gone. A
@@ -168,7 +166,7 @@ const handlers = live.toLayer(
           const resolved = new Map<string, boolean>();
           for (const connection of [...watching]) {
             const actor = connection.actor;
-            if (actor === undefined || actor._tag === "none") continue;
+            if (actor === undefined) continue;
             const hash = actor.credential.tokenHash;
             let alive = resolved.get(hash);
             if (alive === undefined) {
@@ -196,7 +194,7 @@ const handlers = live.toLayer(
     const caller = (
       client: Rpc.ServerClient,
     ): Effect.Effect<
-      { readonly connection: Connection; readonly actor: Actor },
+      { readonly connection: Connection; readonly actor: UserActor },
       Unauthenticated | Internal
     > =>
       Effect.gen(function* () {

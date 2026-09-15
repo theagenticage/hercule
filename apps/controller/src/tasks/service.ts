@@ -41,7 +41,7 @@ import {
   type Unauthenticated,
   type Validation,
 } from "@hydra/contract";
-import { requireGrant, USER_ACTOR } from "../actor";
+import { currentStamp, requireGrant } from "../actor";
 import { nowIso, pageInput, refuseCursor, withTransaction } from "../db";
 import { AuditLog } from "../events";
 import { taskRepository, type TaskOrder } from "./repository";
@@ -185,6 +185,7 @@ const make = Effect.gen(function* () {
             // One clock read, inside the transaction: the row and the event
             // that records it carry the same instant.
             const at = yield* nowIso;
+            const actor = yield* currentStamp;
             yield* requireProject(decoded.projectId);
             const task = yield* tasks.insert({
               title: decoded.title,
@@ -195,11 +196,11 @@ const make = Effect.gen(function* () {
               projectId: decoded.projectId,
               provenance: decoded.provenance ?? [],
               at,
-              actor: USER_ACTOR,
+              actor,
             });
             yield* audit.append({
               kind: "task.created",
-              actor: USER_ACTOR,
+              actor,
               record: { topic: "task", id: task.id },
               payload: { task },
               at,
@@ -230,6 +231,7 @@ const make = Effect.gen(function* () {
           sql,
           Effect.gen(function* () {
             const at = yield* nowIso;
+            const actor = yield* currentStamp;
             const before = yield* live(id);
             yield* requireProject(patch.projectId);
 
@@ -280,7 +282,7 @@ const make = Effect.gen(function* () {
               const entries: ReadonlyArray<ProvenanceEntry> = appended.map((entry) => ({
                 ...entry,
                 at,
-                actor: USER_ACTOR,
+                actor,
               }));
               changes["provenance"] = { added: entries, removed: [] };
             }
@@ -289,10 +291,10 @@ const make = Effect.gen(function* () {
             // is, with no row written and no event claiming one.
             if (Object.keys(changes).length === 0) return before;
 
-            yield* tasks.update(id, edit, appended, at, USER_ACTOR);
+            yield* tasks.update(id, edit, appended, at, actor);
             yield* audit.append({
               kind: "task.updated",
-              actor: USER_ACTOR,
+              actor,
               record: { topic: "task", id },
               payload: { taskId: id, changes },
               at,
@@ -321,12 +323,13 @@ const make = Effect.gen(function* () {
           sql,
           Effect.gen(function* () {
             const at = yield* nowIso;
+            const actor = yield* currentStamp;
             const task = yield* live(id);
             yield* tasks.softDelete(id, at);
             // The final snapshot, because nothing can read the row afterwards.
             yield* audit.append({
               kind: "task.deleted",
-              actor: USER_ACTOR,
+              actor,
               record: { topic: "task", id },
               payload: { taskId: id, snapshot: { ...task, deletedAt: at } },
               at,

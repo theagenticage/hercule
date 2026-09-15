@@ -43,7 +43,7 @@ import {
   type Unauthenticated,
   type Validation,
 } from "@hydra/contract";
-import { requireGrant, USER_ACTOR } from "../actor";
+import { currentStamp, requireGrant } from "../actor";
 import { nowIso, pageInput, refuseCursor, withTransaction } from "../db";
 import { AuditLog } from "../events";
 import { projectRepository, type ProjectSortField } from "./repository";
@@ -158,7 +158,7 @@ const make = Effect.gen(function* () {
             });
             yield* audit.append({
               kind: "project.created",
-              actor: USER_ACTOR,
+              actor: yield* currentStamp,
               payload: { project },
               at,
             });
@@ -211,7 +211,7 @@ const make = Effect.gen(function* () {
             yield* projects.update(id, edit, at);
             yield* audit.append({
               kind: "project.updated",
-              actor: USER_ACTOR,
+              actor: yield* currentStamp,
               payload: { projectId: id, changes },
               at,
             });
@@ -244,7 +244,7 @@ const make = Effect.gen(function* () {
             // The final snapshot, because nothing can read the row afterwards.
             yield* audit.append({
               kind: "project.deleted",
-              actor: USER_ACTOR,
+              actor: yield* currentStamp,
               payload: { projectId: id, snapshot: { ...project, deletedAt: at } },
               at,
             });

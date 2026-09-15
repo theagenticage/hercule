@@ -362,6 +362,12 @@ const make = Effect.gen(function* () {
      * the spec its resumed harness is to be started with. The caller's read of
      * `resumable` inside this same transaction is the licence for the write.
      *
+     * The token goes with the process that held it. A queued session has no
+     * harness running, so there is nothing for a credential to be the identity
+     * of, and leaving the old hash here would let a token that leaked before
+     * the exit act again from the moment the session is put back on the queue.
+     * Dispatch mints the resumed process one of its own.
+     *
      * The base every reported sequence is counted from moves up to what the
      * stored stream reached, unconditionally: the controller cannot tell
      * whether the machine's process restarted and so began numbering from zero
@@ -375,9 +381,21 @@ const make = Effect.gen(function* () {
           spec = ${spec},
           last_activity_at = ${at},
           open_request = NULL,
+          token_hash = NULL,
           stream_base = (SELECT COALESCE(MAX(runner_seq), 0) FROM session_stream
                          WHERE session_id = sessions.id)
         WHERE id = ${uuidFromString(sessionId)}
+      `),
+
+    /**
+     * The hash of the session's own credential on the public API, or `null`
+     * where the start it was minted for never reached the machine. Written by
+     * the same transaction as the move it belongs to, which is what decides
+     * whether the row may hold one at all.
+     */
+    setTokenHash: (sessionId: string, tokenHash: string | null): Effect.Effect<void, SqlError> =>
+      Effect.asVoid(sql`
+        UPDATE sessions SET token_hash = ${tokenHash} WHERE id = ${uuidFromString(sessionId)}
       `),
 
     /**

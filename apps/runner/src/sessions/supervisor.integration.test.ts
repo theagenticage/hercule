@@ -60,6 +60,7 @@ const START: SessionStart = {
   providerId: "fake",
   config: {},
   spec: SPEC,
+  token: "a-session-token",
 };
 
 const at = "2026-09-07T10:00:00.000Z";
