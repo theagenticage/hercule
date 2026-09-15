@@ -76,9 +76,12 @@ const envFor = (
     HYDRA_TOKEN: token,
     HYDRA_SESSION: "1",
     // Prepended, so `which hydra` finds this build and the machine's own tools
-    // keep working after it (spec 15 section 2). An empty entry on `PATH` is
-    // the current directory, so a machine that gave the runner none gets the
-    // bin directory alone rather than a trailing colon.
+    // keep working after it (spec 15 section 2). What it is prepended to is the
+    // machine's own `PATH`: a `PATH` in instance config is dropped, because a
+    // session whose config put another directory first could shadow `hydra`
+    // with a binary of its own choosing. An empty entry on `PATH` is the
+    // current directory, so a machine that gave the runner none gets the bin
+    // directory alone rather than a trailing colon.
     PATH:
       machine.baseEnv["PATH"] === undefined || machine.baseEnv["PATH"] === ""
         ? machine.binDir

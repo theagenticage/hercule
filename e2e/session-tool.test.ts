@@ -1,5 +1,5 @@
 /**
- * AC-10: hydra-as-a-tool, proved end to end through the release binary.
+ * Hydra-as-a-tool, proved end to end through the release binary.
  *
  * A Thread is spawned under the shipped `worker` profile with a prompt that
  * asks for three things: create a task, update it, delete it. The first two are
@@ -16,7 +16,7 @@
  * Opt-in, like `session.test.ts` beside it: it spends the developer's tokens
  * and takes a couple of minutes. `HYDRA_LIVE_SESSION_TEST=1` asks for it.
  *
- * ## The login (decision D-3)
+ * ## The login is lent for the run
  *
  * A session runs against the Provider Instance's own `CLAUDE_CONFIG_DIR` under
  * the runner's storage (spec 06 section 4.2), which in a throwaway Hydra Home
@@ -33,9 +33,9 @@
  * deliberately unreachable from out here: it exists in the `SessionStart` frame
  * and in the session process's environment, and the one thing that could print
  * it - the agent - must never be asked to. Revocation on exit is proved instead
- * where the token is in hand, by the controller's own `withServer` test (slice
- * 1, `apps/controller/src/http/session-actor.integration.test.ts`, "dies with
- * the session the machine reports has exited"). What is asserted here is the
+ * where the token is in hand, by the controller's own `withServer` test:
+ * `apps/controller/src/http/session-actor.integration.test.ts`, "dies with the
+ * session the machine reports has exited". What is asserted here is the
  * observable half: the session reads `exited` after the stop.
  */
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -129,7 +129,7 @@ const instanceDir = (instanceId: string): string => {
   return join(state.home, "runner", file.storageDirectory, "providers", instanceId);
 };
 
-/** Lends the login to the throwaway instance (D-3). */
+/** Lends the developer's own login to the throwaway instance, for this run. */
 const lend = (instanceId: string, credential: string): void => {
   const dir = instanceDir(instanceId);
   mkdirSync(dir, { recursive: true, mode: 0o700 });
@@ -253,7 +253,7 @@ describe.skipIf(!wanted)("an agent reaching Hydra from inside a session", () => 
         ctx.skip(
           'no "Claude Code-credentials" Keychain item on this machine. A session runs against ' +
             "the Provider Instance's own CLAUDE_CONFIG_DIR, which is empty in a throwaway " +
-            "home, so this test lends the developer's own login to it for the run (D-3).",
+            "home, so this test lends the developer's own login to it for the run.",
         );
         return;
       }

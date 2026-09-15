@@ -148,7 +148,7 @@ describe("the environment a session runs with", () => {
 
     // The instance's routing reaches the harness: that is what instance config
     // is for (spec 06 section 2.1). Its `PATH` does not, because the session
-    // would then have no `hydra` to call (AC-7).
+    // would then have no `hydra` to call.
     expect(env["ANTHROPIC_BASE_URL"]).toBe("https://gateway.example");
     expect(env["HOME"]).toBe("/home/somebody");
   });
@@ -160,7 +160,7 @@ describe("the environment a session runs with", () => {
     // The `hydra` CLI refuses the user's stored key under this (spec 15 section 2).
     expect(env["HYDRA_SESSION"]).toBe("1");
     // The credential the session calls Hydra with: the very token the frame
-    // carried, never one the runner invented (AC-7, spec 06 section 9.3).
+    // carried, never one the runner invented (spec 06 section 9.3).
     expect(env["HYDRA_TOKEN"]).toBe("a-session-token");
   });
 
@@ -201,7 +201,7 @@ describe("the environment a session runs with", () => {
     );
 
     // Instance config is the user's routing, not a way to point the session's
-    // credential, its controller or its `hydra` at something else (AC-7).
+    // credential, its controller or its `hydra` at something else.
     expect(env["HYDRA_SESSION"]).toBe("1");
     expect(env["HYDRA_API_URL"]).toBe("https://controller.example:4938");
     expect(env["HYDRA_TOKEN"]).toBe("a-session-token");

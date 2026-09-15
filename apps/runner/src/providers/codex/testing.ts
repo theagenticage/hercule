@@ -36,7 +36,7 @@ export const contextIn = (home: string, cwd: string | null = null): ProviderRunn
   binary: "/usr/local/bin/codex",
   env: { PATH: "/usr/local/bin:/usr/bin", HYDRA_RUNNER: "runner-1" },
   // The runner resolves this once, at start; a test that cares about it says
-  // what it is (AD-8).
+  // what it is.
   hydraTool: { skill: "", claudePluginDir: join(home, "claude-plugin") },
 });
 

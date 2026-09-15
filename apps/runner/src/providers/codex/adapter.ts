@@ -77,10 +77,8 @@ export interface CodexSeam {
 
 /** One app-server, what it said that was not a frame, and who is on it. */
 interface Host extends AppServer {
-  /** The session this host serves; a probe's own process serves none. */
+  /** The one session this host serves; a probe's own process serves none. */
   readonly sessionId: string | undefined;
-  /** Who is on it, which is at most the one session it was started for. */
-  readonly sessions: Set<string>;
 }
 
 /**
@@ -233,42 +231,40 @@ export const codexAdapter = (seam: CodexSeam): ProviderAdapter => {
     PubSub.publishUnsafe(published, event);
   };
 
-  /** A thread belongs to one app-server, so only that host's sessions are asked. */
+  /** The session this host serves, once it has a thread open. */
+  const sessionOf = (host: Host): Held | undefined =>
+    host.sessionId === undefined ? undefined : sessions.get(host.sessionId);
+
+  /** A thread belongs to one app-server, so only that host's session is asked. */
   const sessionOn = (host: Host, threadId: string): Held | undefined => {
-    for (const sessionId of host.sessions) {
-      const held = sessions.get(sessionId);
-      if (held?.binding.nativeSessionId === threadId) return held;
-    }
-    return undefined;
+    const held = sessionOf(host);
+    return held?.binding.nativeSessionId === threadId ? held : undefined;
   };
 
   /**
-   * A complaint about the connection belongs to no one thread, so every session
+   * A complaint about the connection belongs to no one thread, so the session
    * on that app-server hears it: the alternative is a session going quiet with
-   * the reason kept in a log nobody is reading.
+   * the reason kept in a log nobody is reading. A probe's own host has no
+   * session to tell, and a session whose thread is still opening has not been
+   * reported as started - a warning naming it would arrive before it does.
    */
   const warn = (host: Host, message: string): void => {
-    for (const sessionId of host.sessions) {
-      // A session whose thread is still opening has not been reported as
-      // started, and a warning naming it would arrive before the session does.
-      if (!sessions.has(sessionId)) continue;
-      emit({
-        _tag: "runtime.warning",
-        eventId: crypto.randomUUID(),
-        sessionId,
-        at: now(),
-        message: text(message),
-      });
-    }
+    const held = sessionOf(host);
+    if (held === undefined) return;
+    emit({
+      _tag: "runtime.warning",
+      eventId: crypto.randomUUID(),
+      sessionId: held.binding.sessionId,
+      at: now(),
+      message: text(message),
+    });
   };
 
   /**
-   * Gives up a session's claim on its app-server, which ends the process: the
-   * host is that session's, so nothing is left running with its token in it.
+   * Ends the app-server a session was given: the host is that session's alone,
+   * so nothing is left running with its token in it.
    */
-  const release = (host: Host, sessionId: string): void => {
-    host.sessions.delete(sessionId);
-    if (host.sessions.size > 0) return;
+  const release = (host: Host): void => {
     if (host.sessionId !== undefined && hosts.get(host.sessionId) === host) {
       hosts.delete(host.sessionId);
     }
@@ -288,15 +284,13 @@ export const codexAdapter = (seam: CodexSeam): ProviderAdapter => {
       at: now(),
       reason,
     });
-    release(held.host, held.binding.sessionId);
+    release(held.host);
   };
 
-  /** An app-server that stopped on its own takes every session it held with it. */
+  /** An app-server that stopped on its own takes the session it held with it. */
   const gone = (host: Host): void => {
-    for (const sessionId of [...host.sessions]) {
-      const held = sessions.get(sessionId);
-      if (held !== undefined) exit(held, "process_exit");
-    }
+    const held = sessionOf(host);
+    if (held !== undefined) exit(held, "process_exit");
   };
 
   /**
@@ -373,7 +367,6 @@ export const codexAdapter = (seam: CodexSeam): ProviderAdapter => {
       kill: child.kill,
       complaint: () => complaints.join("\n"),
       sessionId,
-      sessions: new Set(),
     };
     void child.exited.then(
       () => gone(host),
@@ -732,9 +725,6 @@ export const codexAdapter = (seam: CodexSeam): ProviderAdapter => {
         const binary = ctx.binary;
         if (binary === undefined) return yield* Effect.fail(`no ${CODEX_BINARY} on this machine`);
         const host = yield* hostFor(sessionId, ctx, binary);
-        // Claimed before the thread is asked for, so a thread that never opens
-        // gives the host back rather than leaving a process nobody talks to.
-        host.sessions.add(sessionId);
         const carried = spec.continue;
         const opened = yield* Effect.matchEffect(
           carried === undefined
@@ -748,7 +738,9 @@ export const codexAdapter = (seam: CodexSeam): ProviderAdapter => {
               } satisfies ThreadResumeParams & ThreadForkParams),
           {
             onFailure: (error: RpcError) => {
-              release(host, sessionId);
+              // A thread that never opens gives the host back rather than
+              // leaving a process nobody talks to.
+              release(host);
               return Effect.fail(error.message);
             },
             // A fork is a thread of its own, so the id answered with is the
@@ -858,9 +850,9 @@ export const codexAdapter = (seam: CodexSeam): ProviderAdapter => {
         // A session whose thread the server unloaded, or whose app-server died,
         // has already exited: a second exit would be a second row for one end.
         if (held === undefined) return Effect.void;
-        // The turn is ended before the session is: an app-server this instance
-        // keeps for its other sessions would otherwise go on working in the
-        // workspace, with every notification about it going nowhere.
+        // The turn is ended before the session is: the app-server would
+        // otherwise go on working in the workspace between the exit and its own
+        // kill, with every notification about it going nowhere.
         return Effect.andThen(
           interrupting(held),
           Effect.sync(() => exit(held, reason)),

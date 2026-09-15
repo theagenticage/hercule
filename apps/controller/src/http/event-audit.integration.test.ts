@@ -12,46 +12,19 @@
  * everything.
  */
 import { describe, expect, it, vi } from "vitest";
-import type { SessionStart } from "@hydra/protocol";
-import type { Profile, Session } from "@hydra/contract";
-import { fixture, providerDefinition } from "../plugins/testing";
+import type { Profile } from "@hydra/contract";
 import {
-  framesOf,
-  report,
-  spawned,
-  until,
+  agentOn,
+  profileNamed,
+  profileOf,
   WAIT_DEADLINE_MS,
-  withFleet as sharedWithFleet,
+  withAgentFleet as withFleet,
   type Arranged,
 } from "../sessions/testing";
 import { completeSetup, get, post, send, withServer, PASSWORD, USERNAME } from "./testing";
 
 /** The fleet is stood up before every case, and a session started on it. */
 vi.setConfig({ testTimeout: WAIT_DEADLINE_MS * 3 + 10_000 });
-
-const PROVIDER = providerDefinition("full-provider", { token: "t" });
-
-const FACTS = {
-  os: "darwin",
-  arch: "arm64",
-  totalMemoryBytes: 68719476736,
-  docker: false,
-  toolchains: [],
-  providers: [{ name: "harness", present: true, path: "/usr/local/bin/harness" }],
-  adapters: ["full-provider"],
-  identityPort: 4939,
-} as const;
-
-const MODELS = [{ slug: "fast", name: "Fast", isDefault: true, options: [] }];
-
-const withFleet = (body: (arranged: Arranged) => Promise<void>): Promise<void> =>
-  sharedWithFleet(body, {
-    plugins: [fixture({ id: "providers", definitions: [PROVIDER] }).plugin],
-    facts: FACTS,
-    models: MODELS,
-  });
-
-const at = "2026-09-07T10:00:00.000Z";
 
 const SECRET_OWNER = "connection/0198e4b0-0000-7000-8000-000000000001";
 
@@ -71,69 +44,6 @@ const kinds = (page: EventPage): ReadonlyArray<unknown> => page.items.map((item)
 /** The error code a refusal names. */
 const codeOf = async (response: Response): Promise<string> =>
   ((await response.json()) as { readonly error: { readonly code: string } }).error.code;
-
-const profileNamed = async (arranged: Arranged, name: string): Promise<Profile> => {
-  const response = await get(arranged.harness.base, "/api/v1/profiles", arranged.token);
-  expect(response.status, await response.clone().text()).toBe(200);
-  const items = ((await response.json()) as { items: ReadonlyArray<Profile> }).items;
-  const found = items.find((one) => one.name === name);
-  expect(found, name).toBeDefined();
-  return found!;
-};
-
-/** A profile of this test's own making, for a grant set no shipped one has. */
-const profileOf = async (
-  arranged: Arranged,
-  name: string,
-  grants: ReadonlyArray<string>,
-): Promise<Profile> => {
-  const response = await post(
-    arranged.harness.base,
-    "/api/v1/profiles",
-    { name, grants },
-    arranged.token,
-  );
-  expect(response.status, await response.clone().text()).toBe(200);
-  return (await response.json()) as Profile;
-};
-
-/** The start frames the controller has sent for one session, once there are this many. */
-const startFrames = (
-  arranged: Arranged,
-  sessionId: string,
-  count: number,
-): Promise<ReadonlyArray<SessionStart>> =>
-  until(`sent ${String(count)} start frames for the session`, () => {
-    const found = framesOf<SessionStart>(arranged.wire, "sessionStart").filter(
-      (frame) => frame.sessionId === sessionId,
-    );
-    return found.length >= count ? found : undefined;
-  });
-
-const readSession = async (arranged: Arranged, id: string): Promise<Session> => {
-  const response = await get(arranged.harness.base, `/api/v1/sessions/${id}`, arranged.token);
-  expect(response.status, await response.clone().text()).toBe(200);
-  return (await response.json()) as Session;
-};
-
-/** A session on a named profile, started, with the token its machine was handed. */
-const agentOn = async (arranged: Arranged, profile: Profile): Promise<string> => {
-  const opened = await spawned(arranged, { prompt: "hello", permissionProfileId: profile.id });
-  const frame = (await startFrames(arranged, opened.id, 1))[0]!;
-  const token: unknown = frame.token;
-  expect(typeof token === "string" && token !== "", "the start frame carries a token").toBe(true);
-  report(arranged.wire, 1, {
-    eventId: crypto.randomUUID(),
-    sessionId: opened.id,
-    at,
-    _tag: "session.started",
-    providerRefs: { nativeSessionId: "native-1" },
-  });
-  await until("started the session", async () =>
-    (await readSession(arranged, opened.id)).status === "idle" ? true : undefined,
-  );
-  return frame.token;
-};
 
 /**
  * Writes one row of each population through the API, as the user: a task the
@@ -184,11 +94,11 @@ const securityEntryId = async (arranged: Arranged, kind: string): Promise<number
   return page.items[0]!.id as number;
 };
 
-describe("AC-6: security entries in the event log", () => {
+describe("security entries in the event log", () => {
   it("keeps them off a worker session's page, and leaves the rest of the log on it", async () => {
     await withFleet(async (arranged) => {
       await writeTheLog(arranged);
-      const token = await agentOn(arranged, await profileNamed(arranged, "worker"));
+      const { token } = await agentOn(arranged, await profileNamed(arranged, "worker"));
       const base = arranged.harness.base;
 
       const page = await events(base, token, "?limit=500");
@@ -213,7 +123,7 @@ describe("AC-6: security entries in the event log", () => {
   it("answers a worker session's read of one with a not-found, and the user's with the entry", async () => {
     await withFleet(async (arranged) => {
       await writeTheLog(arranged);
-      const token = await agentOn(arranged, await profileNamed(arranged, "worker"));
+      const { token } = await agentOn(arranged, await profileNamed(arranged, "worker"));
       const base = arranged.harness.base;
 
       for (const kind of SECURITY_KINDS) {
@@ -241,7 +151,7 @@ describe("AC-6: security entries in the event log", () => {
     await withFleet(async (arranged) => {
       await writeTheLog(arranged);
       const auditor = await profileOf(arranged, "auditor", ["event.read", "event.audit"]);
-      const token = await agentOn(arranged, auditor);
+      const { token } = await agentOn(arranged, auditor);
       const base = arranged.harness.base;
 
       const page = await events(base, token, "?limit=500");
@@ -257,7 +167,7 @@ describe("AC-6: security entries in the event log", () => {
   });
 });
 
-describe("AC-6: event.audit as a grant a profile may hold", () => {
+describe("event.audit as a grant a profile may hold", () => {
   it("is accepted by profile.create and comes back on the profile", async () => {
     await withServer(async ({ base }) => {
       const token = await completeSetup(base);

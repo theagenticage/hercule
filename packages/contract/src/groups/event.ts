@@ -5,8 +5,11 @@
  * the matcher will evaluate against triggers, and audit entries, which it never
  * will. Both come back from `query`, told apart by `kind`, because the log is
  * also the audit log and the reason to open it is usually to read a security
- * entry beside the events around it. Any holder of `event.read` therefore reads
- * every entry; there is no population filter.
+ * entry beside the events around it. One population filter applies: the
+ * security entries - the audit kinds of the secret, auth and user account
+ * families - are returned only to a caller that also holds `event.audit`. To
+ * anyone else they are absent from the page rather than refused, and `read` of
+ * one answers not-found, so the log does not confirm what it withholds.
  *
  * An event's id is its position in the log, so it is an integer, and the one
  * integer id in a system of UUIDv7s.

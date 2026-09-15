@@ -533,7 +533,7 @@ export const CLI = {
 
   "event.query": {
     command: "event list",
-    help: "Reads the event log: external events and audit entries under one envelope, told apart by their kind. Reach for it to see what the system saw and what it did about it.",
+    help: "Reads the event log: external events and audit entries under one envelope, told apart by their kind. Reach for it to see what the system saw and what it did about it. Security entries - the secret, auth and user account kinds - need the event.audit grant; without it they are simply absent from the page, and filtering by one of those kinds returns nothing.",
     examples: [{ args: ["--kind", "task.created"] }, { args: ["--since", "2026-09-15T00:00:00Z"] }],
     fields: {
       connectionId: {
@@ -550,13 +550,17 @@ export const CLI = {
   },
   "event.read": {
     command: "event read",
-    help: "Reads one event in full, its payload and the vendor original included. Find its id in `hydra event list`.",
+    help: "Reads one event in full, its payload and the vendor original included. Find its id in `hydra event list`. A security entry - the secret, auth and user account kinds - needs the event.audit grant; without it the entry answers not-found.",
     examples: [{ args: ["4217"] }],
     fields: {
       id: {
         positional: true,
         help: "The event's id, which is its position in the log: a whole number counted from one, never a tail.",
       },
+    },
+    errors: {
+      not_found:
+        "no entry has that id, or it is a security entry and you do not hold event.audit; the two answer alike on purpose",
     },
   },
 

@@ -383,7 +383,7 @@ describe.skipIf(!authed)("a real Claude Code session continued on this machine",
  * That the Claude CLI really does discover an explicitly loaded plugin's skill
  * under `settingSources: []`. The SDK's types say `plugins` loads a local
  * plugin directory and say nothing about the two options together, and the
- * whole of hydra-as-a-tool on Claude rests on it (AD-4, AC-8).
+ * whole of hydra-as-a-tool on Claude rests on it (spec 06 section 9.3).
  *
  * The plugin directory is the runner's own, written by `prepareTooling` into a
  * temporary home. The skill text is this test's, not the shipped one, because

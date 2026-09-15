@@ -501,10 +501,8 @@ The adapter reports context usage through `session.usage.updated`, which gains t
 | Provider | Channel |
 |---|---|
 | Claude Code | the SDK's `systemPrompt` option (a plain string, not the preset-plus-append form, so nothing of the CLI's default prompt leaks in) |
-| Codex | `AGENTS.md` in the session's scratch cwd (section 9.1), Codex's only instruction channel |
+| Codex | `developerInstructions` on `thread/start`, `thread/resume` and `thread/fork` *(amended 2026-09-14, [#73](https://github.com/rogierpennink/hydra/issues/73); built 2026-09-15, [#68](https://github.com/rogierpennink/hydra/issues/68), replacing "`AGENTS.md` in the session's scratch cwd", which is retired as an instruction channel - the scratch cwd itself stays and stays empty)* |
 | pi | the session's system prompt parameter |
-
-*(Amended 2026-09-14, [#73](https://github.com/rogierpennink/hydra/issues/73).)* The Codex row of the table above becomes `developerInstructions` on `thread/start`, `thread/resume` and `thread/fork`, which the app-server has taken all along (section 9.1); `AGENTS.md` in the scratch cwd is retired as an instruction channel.
 
 Never the first user turn: memory is standing context, and a synthetic first message would show in the conversation view as a message nobody sent.
 

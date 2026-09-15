@@ -6,7 +6,9 @@
  * handshake is a second place for the two to drift apart.
  *
  * Each caller supplies its own plugins, facts and models: what a fleet spawns
- * sessions against is the test's own fixture, not this module's business.
+ * sessions against is the test's own fixture, not this module's business. The
+ * one exception is `withAgentFleet` at the bottom, for the suites that care
+ * only that a session runs and carries a token.
  */
 import { expect } from "vitest";
 import type * as Duration from "effect/Duration";
@@ -24,9 +26,11 @@ import {
   type RunnerToController as RunnerMessage,
   type ProviderEvent,
   type SessionInput,
+  type SessionStart,
 } from "@hydra/protocol";
 import type { Plugin } from "@hydra/plugin-host";
-import type { Session } from "@hydra/contract";
+import type { Profile, Session } from "@hydra/contract";
+import { fixture, providerDefinition } from "../plugins/testing";
 import { completeSetup, get, post, send, withServer, type ServerHarness } from "../http/testing";
 
 const SOCKET_PATH = "/api/v1/runners/socket";
@@ -300,4 +304,127 @@ export const spawned = async (arranged: Arranged, body: unknown): Promise<Sessio
   const response = await spawn(arranged, body);
   expect(response.status, await response.clone().text()).toBe(200);
   return (await response.json()) as Session;
+};
+
+/**
+ * Below: the fleet a test about *what the agent inside a session may do* needs.
+ * That test does not care what the session runs, only that it runs and has a
+ * token, so the fixture is this module's after all - and two suites arranging
+ * the same machine, the same profile lookup and the same start frame twice is
+ * two places for the arrangement to drift while the assertions stay put.
+ */
+
+const AGENT_PROVIDER = providerDefinition("full-provider", { token: "t" });
+
+const AGENT_FACTS = {
+  os: "darwin",
+  arch: "arm64",
+  totalMemoryBytes: 68719476736,
+  docker: false,
+  toolchains: [],
+  providers: [{ name: "harness", present: true, path: "/usr/local/bin/harness" }],
+  adapters: ["full-provider"],
+  identityPort: 4939,
+} as const;
+
+const AGENT_MODELS = [{ slug: "fast", name: "Fast", isDefault: true, options: [] }];
+
+/** A fleet whose one machine can run a session on any shipped profile. */
+export const withAgentFleet = (body: (arranged: Arranged) => Promise<void>): Promise<void> =>
+  withFleet(body, {
+    plugins: [fixture({ id: "providers", definitions: [AGENT_PROVIDER] }).plugin],
+    facts: AGENT_FACTS,
+    models: AGENT_MODELS,
+  });
+
+/** The instant every event a test reports carries. */
+export const at = "2026-09-07T10:00:00.000Z";
+
+/** One of the profiles the controller ships, by the name it ships under. */
+export const profileNamed = async (arranged: Arranged, name: string): Promise<Profile> => {
+  const response = await get(arranged.harness.base, "/api/v1/profiles", arranged.token);
+  expect(response.status, await response.clone().text()).toBe(200);
+  const items = ((await response.json()) as { items: ReadonlyArray<Profile> }).items;
+  const found = items.find((one) => one.name === name);
+  expect(found, name).toBeDefined();
+  return found!;
+};
+
+/** A profile of the test's own making, for a grant set no shipped one has. */
+export const profileOf = async (
+  arranged: Arranged,
+  name: string,
+  grants: ReadonlyArray<string>,
+): Promise<Profile> => {
+  const response = await post(
+    arranged.harness.base,
+    "/api/v1/profiles",
+    { name, grants },
+    arranged.token,
+  );
+  expect(response.status, await response.clone().text()).toBe(200);
+  return (await response.json()) as Profile;
+};
+
+/** The start frames the controller has sent for one session, once there are this many. */
+export const startFrames = (
+  arranged: Arranged,
+  sessionId: string,
+  count: number,
+): Promise<ReadonlyArray<SessionStart>> =>
+  until(`sent ${String(count)} start frames for the session`, () => {
+    const found = framesOf<SessionStart>(arranged.wire, "sessionStart").filter(
+      (frame) => frame.sessionId === sessionId,
+    );
+    return found.length >= count ? found : undefined;
+  });
+
+export const readSession = async (arranged: Arranged, id: string): Promise<Session> => {
+  const response = await get(arranged.harness.base, `/api/v1/sessions/${id}`, arranged.token);
+  expect(response.status, await response.clone().text()).toBe(200);
+  return (await response.json()) as Session;
+};
+
+/** Waits until the session reads back the way the caller is waiting for. */
+export const sessionWhen = (
+  arranged: Arranged,
+  id: string,
+  ready: (session: Session) => boolean,
+): Promise<Session> =>
+  until("moved the session", async () => {
+    const session = await readSession(arranged, id);
+    return ready(session) ? session : undefined;
+  });
+
+/**
+ * The plaintext session token off a start frame. The frame is the only place
+ * the plaintext is ever seen, which is exactly what the runner reads it from.
+ */
+export const tokenOf = (frame: SessionStart): string => {
+  const token: unknown = frame.token;
+  expect(
+    typeof token === "string" && token !== "",
+    "the sessionStart frame carries a non-empty session token",
+  ).toBe(true);
+  return frame.token;
+};
+
+/** A session on a profile, started, with the token its machine was handed. */
+export interface Agent {
+  readonly session: Session;
+  readonly token: string;
+}
+
+export const agentOn = async (arranged: Arranged, profile: Profile): Promise<Agent> => {
+  const opened = await spawned(arranged, { prompt: "hello", permissionProfileId: profile.id });
+  const token = tokenOf((await startFrames(arranged, opened.id, 1))[0]!);
+  report(arranged.wire, 1, {
+    eventId: crypto.randomUUID(),
+    sessionId: opened.id,
+    at,
+    _tag: "session.started",
+    providerRefs: { nativeSessionId: "native-1" },
+  });
+  const session = await sessionWhen(arranged, opened.id, (one) => one.status === "idle");
+  return { session, token };
 };

@@ -898,7 +898,7 @@ describe("the two Codex surfaces this adapter must never reach for", () => {
 });
 
 describe("hydra-as-a-tool on a Codex thread", () => {
-  /** What the runner resolved once, at start, for every adapter (AD-8). */
+  /** What the runner resolved once, at start, for every adapter. */
   const TOOL = {
     skill: "# hydra\n\nCall `hydra --help` to find out what this controller can do.\n",
     claudePluginDir: "/var/hydra/runner/storage/claude-plugin",
@@ -916,7 +916,7 @@ describe("hydra-as-a-tool on a Codex thread", () => {
     await Effect.runPromise(adapter.startSession(SESSION, spec, { ...ctx, hydraTool: TOOL }));
 
     // The channel #73 found, and the only one: a session that cannot be told
-    // the CLI exists never calls it (spec 06 section 9.1, AD-8).
+    // the CLI exists never calls it (spec 06 section 9.1).
     expect(sentOf(requests, method)).toEqual([
       expect.objectContaining({ developerInstructions: TOOL.skill }),
     ]);

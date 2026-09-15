@@ -12,17 +12,20 @@
  */
 import { describe, expect, it, vi } from "vitest";
 import { Effect } from "effect";
-import type { SessionStart } from "@hydra/protocol";
-import type { Profile, Session, Task } from "@hydra/contract";
-import { fixture, providerDefinition } from "../plugins/testing";
+import type { Session, Task } from "@hydra/contract";
 import {
-  framesOf,
+  agentOn,
+  at,
+  profileNamed,
+  profileOf,
   report,
+  sessionWhen,
   spawn,
-  spawned,
-  until,
+  startFrames,
+  tokenOf,
   WAIT_DEADLINE_MS,
-  withFleet as sharedWithFleet,
+  withAgentFleet as withFleet,
+  type Agent,
   type Arranged,
 } from "../sessions/testing";
 import { del, get, post, send } from "./testing";
@@ -34,30 +37,6 @@ import { del, get, post, send } from "./testing";
  * than the move that never came.
  */
 vi.setConfig({ testTimeout: WAIT_DEADLINE_MS * 3 + 10_000 });
-
-const PROVIDER = providerDefinition("full-provider", { token: "t" });
-
-const FACTS = {
-  os: "darwin",
-  arch: "arm64",
-  totalMemoryBytes: 68719476736,
-  docker: false,
-  toolchains: [],
-  providers: [{ name: "harness", present: true, path: "/usr/local/bin/harness" }],
-  adapters: ["full-provider"],
-  identityPort: 4939,
-} as const;
-
-const MODELS = [{ slug: "fast", name: "Fast", isDefault: true, options: [] }];
-
-const withFleet = (body: (arranged: Arranged) => Promise<void>): Promise<void> =>
-  sharedWithFleet(body, {
-    plugins: [fixture({ id: "providers", definitions: [PROVIDER] }).plugin],
-    facts: FACTS,
-    models: MODELS,
-  });
-
-const at = "2026-09-07T10:00:00.000Z";
 
 /** One refusal, read as the code, the message and the grant it names. */
 interface Refusal {
@@ -79,97 +58,6 @@ const refusalOf = async (response: Response): Promise<Refusal> => {
     message: body.error.message,
     ...(body.error.details?.grant === undefined ? {} : { grant: body.error.details.grant }),
   };
-};
-
-const profileNamed = async (arranged: Arranged, name: string): Promise<Profile> => {
-  const response = await get(arranged.harness.base, "/api/v1/profiles", arranged.token);
-  expect(response.status, await response.clone().text()).toBe(200);
-  const items = ((await response.json()) as { items: ReadonlyArray<Profile> }).items;
-  const found = items.find((one) => one.name === name);
-  expect(found, name).toBeDefined();
-  return found!;
-};
-
-/** A profile of this test's own making, for a grant set no shipped one has. */
-const profileOf = async (
-  arranged: Arranged,
-  name: string,
-  grants: ReadonlyArray<string>,
-): Promise<Profile> => {
-  const response = await post(
-    arranged.harness.base,
-    "/api/v1/profiles",
-    { name, grants },
-    arranged.token,
-  );
-  expect(response.status, await response.clone().text()).toBe(200);
-  return (await response.json()) as Profile;
-};
-
-/**
- * The plaintext session token off a start frame. The frame is the only place
- * the plaintext is ever seen, which is exactly what the runner reads it from.
- */
-const tokenOf = (frame: SessionStart): string => {
-  const token: unknown = frame.token;
-  expect(
-    typeof token === "string" && token !== "",
-    "the sessionStart frame carries a non-empty session token",
-  ).toBe(true);
-  return frame.token;
-};
-
-/** The start frames the controller has sent for one session, once there are this many. */
-const startFrames = (
-  arranged: Arranged,
-  sessionId: string,
-  count: number,
-): Promise<ReadonlyArray<SessionStart>> =>
-  until(`sent ${String(count)} start frames for the session`, () => {
-    const found = framesOf<SessionStart>(arranged.wire, "sessionStart").filter(
-      (frame) => frame.sessionId === sessionId,
-    );
-    return found.length >= count ? found : undefined;
-  });
-
-const readSession = async (arranged: Arranged, id: string): Promise<Session> => {
-  const response = await get(arranged.harness.base, `/api/v1/sessions/${id}`, arranged.token);
-  expect(response.status, await response.clone().text()).toBe(200);
-  return (await response.json()) as Session;
-};
-
-const sessionWhen = (
-  arranged: Arranged,
-  id: string,
-  ready: (session: Session) => boolean,
-): Promise<Session> =>
-  until("moved the session", async () => {
-    const session = await readSession(arranged, id);
-    return ready(session) ? session : undefined;
-  });
-
-/** A session on a named profile, started, with the token its machine was handed. */
-interface Agent {
-  readonly session: Session;
-  readonly token: string;
-}
-
-const agentOn = async (arranged: Arranged, profile: Profile): Promise<Agent> => {
-  const opened = await spawned(arranged, {
-    prompt: "hello",
-    permissionProfileId: profile.id,
-  });
-  const frame = (await startFrames(arranged, opened.id, 1))[0]!;
-  const token = tokenOf(frame);
-  report(arranged.wire, 1, {
-    eventId: crypto.randomUUID(),
-    sessionId: opened.id,
-    at,
-    _tag: "session.started",
-    providerRefs: { nativeSessionId: "native-1" },
-  });
-  const session = await sessionWhen(arranged, opened.id, (one) => one.status === "idle");
-  return { session, token };
 };
 
 /** A worker: the shipped profile with task read, create and update, and no delete. */
@@ -214,7 +102,7 @@ const eventsOfKind = async (
   return ((await response.json()) as { items: ReadonlyArray<EventRow> }).items;
 };
 
-describe("AC-1: the token the controller mints for a session", () => {
+describe("the token the controller mints for a session", () => {
   it("rides on the start frame, and is never the plaintext the session row holds", async () => {
     await withFleet(async (arranged) => {
       const { token } = await worker(arranged);
@@ -270,7 +158,7 @@ describe("AC-1: the token the controller mints for a session", () => {
   });
 });
 
-describe("AC-2: what a session token may reach", () => {
+describe("what a session token may reach", () => {
   it("creates and updates a task on the worker profile, and is refused the delete by name", async () => {
     await withFleet(async (arranged) => {
       const { token } = await worker(arranged);
@@ -347,7 +235,7 @@ describe("AC-2: what a session token may reach", () => {
   });
 });
 
-describe("AC-3: when a session token stops working", () => {
+describe("when a session token stops working", () => {
   it("dies with the session the machine reports has exited", async () => {
     await withFleet(async (arranged) => {
       const { session, token } = await worker(arranged);
@@ -407,7 +295,7 @@ describe("AC-3: when a session token stops working", () => {
   });
 });
 
-describe("AC-4: a session may not spawn a Thread", () => {
+describe("a session may not spawn a Thread", () => {
   it("refuses a session actor's spawn by naming session.spawn, and lets the user through", async () => {
     await withFleet(async (arranged) => {
       const { token } = await worker(arranged);
@@ -491,7 +379,7 @@ describe("a session forking a session", () => {
   });
 });
 
-describe("AC-5: what the record says made the change", () => {
+describe("what the record says made the change", () => {
   it("stamps a session's task and its event log rows session:<id>, where the user's say user", async () => {
     await withFleet(async (arranged) => {
       const { session, token } = await worker(arranged);

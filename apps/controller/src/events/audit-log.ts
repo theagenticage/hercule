@@ -82,7 +82,9 @@ export type AuditKind = (typeof AUDIT_KINDS)[number];
  * read these: `event.audit` is what returns them.
  *
  * Derived from the kind list rather than written out, so a kind added under one
- * of these prefixes is behind the grant the day it is emitted.
+ * of these prefixes is behind the grant the day it is emitted. The API-key
+ * kinds need no prefix of their own: they are spelled `auth.apiKey.*` and so
+ * fall under `auth.` already.
  */
 const SECURITY_PREFIXES = ["secret.", "auth.", "user."];
 

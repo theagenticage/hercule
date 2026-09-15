@@ -2,7 +2,7 @@
  * What the runner puts on the machine once, at start, so that every session it
  * hosts can reach Hydra: the `hydra` binary on a directory it prepends to
  * PATH (spec 15 section 2) and the Claude plugin directory the skill is
- * materialized into (spec 06 section 9.3, AD-4).
+ * materialized into (spec 06 section 9.3).
  *
  * Both are refreshed rather than written once, because an upgraded binary must
  * take over an older build's symlink and an older build's skill text.
