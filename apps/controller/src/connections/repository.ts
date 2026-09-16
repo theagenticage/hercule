@@ -8,7 +8,7 @@ import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import type { ConnectionStatus } from "@hydra/plugin-host";
-import type { SortDirection } from "@hydra/contract";
+import { GITHUB_CONNECTION_TYPE, type SortDirection } from "@hydra/contract";
 import {
   decodeCursor,
   encodeCursor,
@@ -22,6 +22,13 @@ import {
   type Page,
   type PageRequest,
 } from "../db";
+
+/** One spelling of the shipped GitHub type, which the contract owns. */
+export { GITHUB_CONNECTION_TYPE };
+
+/** Whether this connection is the GitHub account a repo may act through. */
+export const isGithubConnection = (connection: StoredConnection): boolean =>
+  connection.type === GITHUB_CONNECTION_TYPE;
 
 /** A connection row, with its JSON columns read. */
 export interface StoredConnection {
@@ -134,6 +141,19 @@ const make = Effect.gen(function* () {
 
   return {
     one,
+
+    /**
+     * Whether a resource still acts through this connection, which is what
+     * makes a delete refusable. The question is asked here rather than of the
+     * resources domain so the two do not import each other.
+     */
+    namedByResource: (id: string): Effect.Effect<boolean, SqlError> =>
+      Effect.map(
+        sql<{ readonly id: Uint8Array }>`
+          SELECT id FROM resources WHERE connection_id = ${uuidFromString(id)} LIMIT 1
+        `,
+        (rows) => rows.length > 0,
+      ),
 
     insert: (connection: NewConnection): Effect.Effect<StoredConnection, SqlError> =>
       Effect.gen(function* () {

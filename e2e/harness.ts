@@ -9,8 +9,8 @@
  * The processes are started with `Bun.spawn` rather than `spawnHydra`, which
  * inherits stdio: a test has to read what the command printed.
  */
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
 /** The repository root, so the tests run from any working directory. */
@@ -18,6 +18,22 @@ export const ROOT = dirname(import.meta.dirname);
 
 /** The dispatcher's source entrypoint: the same `main.ts` the binary compiles. */
 const ENTRYPOINT = join(ROOT, "packages/hydra/src/main.ts");
+
+/**
+ * The release binary if one has been built, and `undefined` - the dispatcher's
+ * own source - if not.
+ *
+ * The suites that are only honest as a release say so themselves and refuse to
+ * run without `./hydra`, and do not call this. A suite that exercises the
+ * controller's own surface rather than the packaging is the same program either
+ * way: it runs the release under `pnpm test:binary`, which is the only command
+ * that runs it, and the dispatcher's source when it is run on its own with no
+ * build behind it.
+ */
+export function releaseBinary(): string | undefined {
+  const built = join(ROOT, "hydra");
+  return existsSync(built) ? built : undefined;
+}
 
 /**
  * The Bun that is running this test. Under `pnpm test` that is `bun`, but a
@@ -40,6 +56,18 @@ function cleanEnv(): Record<string, string> {
   );
 }
 
+/**
+ * Whether the cases that spend a real model token were asked for.
+ *
+ * Set to anything but `0` or the empty string is a yes, so a shell that exports
+ * `HYDRA_LIVE_SESSION_TEST` can turn it off again with a `0` rather than having
+ * to unset it.
+ */
+export function liveSessionsAsked(): boolean {
+  const asked = process.env["HYDRA_LIVE_SESSION_TEST"];
+  return asked !== undefined && asked !== "" && asked !== "0";
+}
+
 /** What a finished command left behind. */
 export interface Ran {
   readonly code: number;
@@ -57,14 +85,51 @@ function candidatePort(): number {
   return 20_000 + Math.floor(Math.random() * 40_000);
 }
 
-/** A temporary Hydra Home, removed when the suite ends. */
-export function temporaryHome(): { home: string; remove: () => void } {
+/**
+ * A temporary Hydra Home, removed when the suite ends.
+ *
+ * With a `gitconfig`, the directory is also fit to hand a process as `HOME`:
+ * it holds none of the git configuration the developer running the suite has -
+ * no `.gitconfig` but the one written here, no `.git-credentials`, no `gh`
+ * login.
+ *
+ * `Library` is linked back to the real home on macOS. The master key lives in
+ * the login keychain, which `security` finds under `$HOME/Library/Keychains`,
+ * so a home without it is a controller that cannot boot; git reads nothing
+ * under `Library`, so the scrub still holds.
+ */
+export function temporaryHome(gitconfig?: string): { home: string; remove: () => void } {
   const home = mkdtempSync(join(tmpdir(), "hydra-e2e-"));
+  if (gitconfig !== undefined) {
+    writeFileSync(join(home, ".gitconfig"), gitconfig);
+    if (process.platform === "darwin") {
+      symlinkSync(join(homedir(), "Library"), join(home, "Library"));
+    }
+  }
   return {
     home,
     remove: () => {
       rmSync(home, { recursive: true, force: true });
     },
+  };
+}
+
+/**
+ * The environment a test runs `git` in: the `HOME` it was handed and nothing of
+ * the developer's - no system configuration, and no terminal to be prompted on
+ * - plus one fixed identity, so a commit made here needs no configuration of
+ * its own to succeed.
+ */
+export function gitEnv(home: string): Record<string, string> {
+  return {
+    PATH: process.env["PATH"] ?? "",
+    HOME: home,
+    GIT_CONFIG_NOSYSTEM: "1",
+    GIT_TERMINAL_PROMPT: "0",
+    GIT_AUTHOR_NAME: "Hydra E2E",
+    GIT_AUTHOR_EMAIL: "e2e@hydra.test",
+    GIT_COMMITTER_NAME: "Hydra E2E",
+    GIT_COMMITTER_EMAIL: "e2e@hydra.test",
   };
 }
 
@@ -97,6 +162,13 @@ export async function startController(options: {
   readonly timeoutMs?: number | undefined;
   /** The compiled binary to run instead of the dispatcher's source. */
   readonly binary?: string | undefined;
+  /**
+   * What the controller - and the runner it starts for itself - sees beyond the
+   * clean environment. A suite that has to say what `HOME` is, because git on
+   * that machine must find no configuration of the developer's own, has no
+   * other way to say it.
+   */
+  readonly env?: Readonly<Record<string, string>> | undefined;
 }): Promise<Controller> {
   const attempts = options.port === undefined ? 20 : 1;
   const command = options.binary === undefined ? [BUN, ENTRYPOINT] : [options.binary];
@@ -104,7 +176,7 @@ export async function startController(options: {
   for (let attempt = 0; attempt < attempts; attempt++) {
     const port = options.port ?? candidatePort();
     try {
-      return await startOn(command, options.home, port, options.timeoutMs);
+      return await startOn(command, options.home, port, options.timeoutMs, options.env);
     } catch (error) {
       last = error as Error;
       if (!/in use/.test(last.message)) throw last;
@@ -119,13 +191,14 @@ async function startOn(
   home: string,
   port: number,
   timeoutMs: number | undefined,
+  env?: Readonly<Record<string, string>>,
 ): Promise<Controller> {
   const url = `http://127.0.0.1:${String(port)}`;
   const chunks: Array<string> = [];
 
   const child = Bun.spawn([...command, "serve", "-c", `bind.port=${String(port)}`], {
     cwd: ROOT,
-    env: { ...cleanEnv(), HYDRA_HOME: home },
+    env: { ...cleanEnv(), ...env, HYDRA_HOME: home },
     stdout: "pipe",
     stderr: "pipe",
   });

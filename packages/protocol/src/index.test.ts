@@ -32,8 +32,16 @@ const without = (message: Record<string, unknown>, key: string) => {
  * The tags a union really holds, read off the schema rather than off the list
  * of examples below it, so a member added without a case here is caught.
  */
-const tagsOf = (union: typeof RunnerToController | typeof ControllerToRunner) =>
-  union.members.map((member) => member.fields._tag.literal);
+const tagsOf = (union: typeof RunnerToController | typeof ControllerToRunner): Array<string> =>
+  union.members.flatMap((member) =>
+    // A frame whose shape depends on what it carries is a union of its own, and
+    // each of its members is still that frame's tag.
+    "members" in member
+      ? (member.members as ReadonlyArray<{ fields: { _tag: { literal: string } } }>).map(
+          (nested) => nested.fields._tag.literal,
+        )
+      : [member.fields._tag.literal],
+  );
 
 const facts = {
   os: "darwin",
@@ -115,6 +123,12 @@ const spec = {
   timeouts: { inactivityMs: 1_800_000, absoluteMs: 28_800_000 },
 } as const;
 
+const WORKSPACE_ID = "0199e0e7-0000-7000-8000-000000000010";
+
+const CHECKOUT_ID = "0199e0e7-0000-7000-8000-000000000011";
+
+const RESOURCE_ID = "0199e0e7-0000-7000-8000-000000000012";
+
 const runnerMessages: ReadonlyArray<RunnerMessage> = [
   runnerHello,
   { _tag: "pong" },
@@ -143,6 +157,31 @@ const runnerMessages: ReadonlyArray<RunnerMessage> = [
   {
     _tag: "sessionsReport",
     sessions: [{ sessionId: SESSION_ID, nativeSessionId: "native-1", instanceId: INSTANCE_ID }],
+  },
+  {
+    _tag: "workspaceReport",
+    workspaceId: WORKSPACE_ID,
+    status: "ready",
+    checkouts: [
+      {
+        checkoutId: CHECKOUT_ID,
+        branch: "hydra/run-0199e0e7",
+        branches: ["main", "hydra/run-0199e0e7"],
+        defaultBranch: "main",
+      },
+    ],
+  },
+  {
+    _tag: "credentialRequest",
+    requestId: REQUEST_ID,
+    remote: "github.com/acme/web",
+    sessionToken: "a-session-token",
+  },
+  {
+    _tag: "credentialRequest",
+    requestId: REQUEST_ID,
+    remote: "github.com/acme/web",
+    workspaceId: WORKSPACE_ID,
   },
   { _tag: "goodbye" },
 ];
@@ -184,6 +223,27 @@ const controllerMessages: ReadonlyArray<ControllerMessage> = [
     requestId: "0199e0e7-0000-7000-8000-00000000000f",
     decision: "allow_always",
   },
+  {
+    _tag: "workspaceProvision",
+    workspaceId: WORKSPACE_ID,
+    kind: "ephemeral",
+    checkouts: [
+      {
+        checkoutId: CHECKOUT_ID,
+        resourceId: RESOURCE_ID,
+        remote: "https://github.com/acme/web",
+        subdirectory: null,
+        branch: "hydra/run-0199e0e7",
+        baseBranch: "main",
+        setupCommand: "pnpm install",
+        workspaceInclude: true,
+      },
+    ],
+  },
+  { _tag: "workspaceDispose", workspaceId: WORKSPACE_ID },
+  // D-21 F5: the git identity rides on `sessionStart`, not on every credential.
+  { _tag: "credentialAnswer", requestId: REQUEST_ID, token: "ghp_a-token", username: "octocat" },
+  { _tag: "credentialAnswer", requestId: REQUEST_ID, error: "no_connection" },
 ];
 
 describe("the protocol version", () => {
@@ -202,6 +262,22 @@ describe("the runner-to-controller catalogue", () => {
 
   it("holds exactly the members the round-trip cases cover", () => {
     expect(tagsOf(RunnerToController)).toEqual(runnerMessages.map((message) => message._tag));
+  });
+
+  /**
+   * D-21 F2: a machine that could not read a branch - a detached HEAD, or a git
+   * that would not answer - says null rather than a word standing in for one,
+   * and the wire has to carry that rather than refuse the report.
+   */
+  it("round-trips a checkout the machine could read no branch for", () => {
+    const report = {
+      _tag: "workspaceReport",
+      workspaceId: WORKSPACE_ID,
+      status: "ready",
+      checkouts: [{ checkoutId: CHECKOUT_ID, branch: null, branches: [], defaultBranch: null }],
+    } as const;
+    const encoded = Schema.encodeSync(RunnerToController)(report);
+    expect(Effect.runSync(Schema.decodeUnknownEffect(RunnerToController)(encoded))).toEqual(report);
   });
 
   it("refuses a tag outside the union, including one the other direction owns", () => {
@@ -342,6 +418,56 @@ describe("sequence numbers", () => {
     expect(fromController({ _tag: "ack", lastAckedSeq: 0 })._tag).toBe("Failure");
     expect(fromController({ _tag: "ack", lastAckedSeq: 1.5 })._tag).toBe("Failure");
     expect(fromController({ _tag: "ack", lastAckedSeq: "1" })._tag).toBe("Failure");
+  });
+});
+
+const provisioning = (overrides: Record<string, unknown>): Record<string, unknown> => ({
+  ...(controllerMessages.find((message) => message._tag === "workspaceProvision") as Record<
+    string,
+    unknown
+  >),
+  ...overrides,
+});
+
+describe("the ids a machine makes a directory of", () => {
+  it("takes the identifiers the controller mints", () => {
+    expect(fromController(provisioning({}))._tag).toBe("Success");
+  });
+
+  it("refuses anything that could be a path rather than a name", () => {
+    // The runner joins these into paths under its storage directory and a
+    // dispose removes what they name.
+    for (const workspaceId of ["../../etc", "a/b", "", "with space", ".."]) {
+      expect(fromController(provisioning({ workspaceId }))._tag).toBe("Failure");
+    }
+    expect(fromController({ _tag: "workspaceDispose", workspaceId: "../elsewhere" })._tag).toBe(
+      "Failure",
+    );
+  });
+
+  it("refuses a checkout whose resource or subdirectory could climb out of the workspace", () => {
+    const one = (checkout: Record<string, unknown>): Record<string, unknown> =>
+      provisioning({
+        checkouts: [
+          {
+            ...((
+              controllerMessages.find((message) => message._tag === "workspaceProvision") as {
+                checkouts: ReadonlyArray<Record<string, unknown>>;
+              }
+            ).checkouts[0] ?? {}),
+            ...checkout,
+          },
+        ],
+      });
+    expect(fromController(one({ subdirectory: "web" }))._tag).toBe("Success");
+    expect(fromController(one({ subdirectory: "my.repo" }))._tag).toBe("Success");
+    // A repository really can be called this, and a workspace can hold it.
+    expect(fromController(one({ subdirectory: ".github" }))._tag).toBe("Success");
+    for (const subdirectory of ["..", ".", "../web", "web/api", ".git", ".GIT", ""]) {
+      expect(fromController(one({ subdirectory }))._tag).toBe("Failure");
+    }
+    expect(fromController(one({ resourceId: "../../cache" }))._tag).toBe("Failure");
+    expect(fromController(one({ checkoutId: "a/b" }))._tag).toBe("Failure");
   });
 });
 

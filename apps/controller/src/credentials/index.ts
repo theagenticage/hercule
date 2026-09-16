@@ -1,5 +1,7 @@
 /**
- * User credentials: login bearer tokens and API keys, stored only as hashes.
+ * Credentials Hydra issues: login bearer tokens and API keys, both of them
+ * stored as their hash alone. A session's own token is the sessions domain's:
+ * it is a column on the session row, minted here and hashed with `hashToken`.
  */
 export {
   Credentials,

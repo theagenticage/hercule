@@ -18,6 +18,7 @@ import { plugin } from "./groups/plugin";
 import { profile } from "./groups/profile";
 import { provider } from "./groups/provider";
 import { project } from "./groups/project";
+import { resource } from "./groups/resource";
 import { runner } from "./groups/runner";
 import { secret } from "./groups/secret";
 import { session } from "./groups/session";
@@ -26,6 +27,7 @@ import { setup } from "./groups/setup";
 import { task } from "./groups/task";
 import { transcript } from "./groups/transcript";
 import { user } from "./groups/user";
+import { workspace } from "./groups/workspace";
 
 export const api = HttpApi.make("hydra")
   .add(
@@ -38,6 +40,8 @@ export const api = HttpApi.make("hydra")
     secret,
     task,
     project,
+    resource,
+    workspace,
     event,
     runner,
     plugin,

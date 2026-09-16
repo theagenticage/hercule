@@ -3,6 +3,12 @@
  * credentials are core-owned; the types are plugin contributions.
  */
 export { PluginConfigs } from "./plugin-configs";
+export {
+  connectionRepository,
+  GITHUB_CONNECTION_TYPE,
+  isGithubConnection,
+  type StoredConnection,
+} from "./repository";
 export { OAuthCallbackRouteLayer } from "./route";
 export { ConnectionTypes, ConnectionTypesLayer, type RegisteredConnectionType } from "./runtime";
 export {

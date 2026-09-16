@@ -16,6 +16,7 @@ const BASE: Session = {
   instanceId: "instance-claude-code",
   runnerId: "runner-1",
   workspaceId: null,
+  projectId: null,
   requestedAccessMode: "approval-required",
   accessMode: "approval-required",
   nativeSessionId: null,

@@ -100,6 +100,10 @@ interface Account {
   readonly email?: string;
   readonly subscriptionType?: string;
   readonly apiProvider?: string;
+  /** Where the harness took its token from; `"none"` when it has none. */
+  readonly tokenSource?: string;
+  /** The variable an API key came from, when that is what it runs on. */
+  readonly apiKeySource?: string;
 }
 
 interface Model {
@@ -195,17 +199,45 @@ const catalogOf = (models: ReadonlyArray<Model>): ReadonlyArray<ModelDescriptor>
   );
 };
 
-const authOf = (account: Account): ProbeResult["auth"] =>
-  account.email === undefined
-    ? { status: "unauthenticated" }
-    : {
-        status: "ok",
-        identity: fact(account.email),
-        ...(account.subscriptionType === undefined
-          ? {}
-          : { planLabel: fact(account.subscriptionType) }),
-        ...(account.apiProvider === undefined ? {} : { backend: fact(account.apiProvider) }),
-      };
+/** `"none"` is what the harness says where it has no credential of that kind. */
+const sourced = (source: string | undefined): boolean => source !== undefined && source !== "none";
+
+/**
+ * Whether the harness has a usable login, which spec 06 §3.2 makes the
+ * question, and which is not the same as an account it can name. A login held
+ * in the instance's own config directory reports an email; a credential handed
+ * to it on the environment - an OAuth token or an API key - reports only where
+ * it came from, and runs just as well.
+ */
+const credentialled = (account: Account): boolean =>
+  account.email !== undefined ||
+  sourced(account.tokenSource) ||
+  sourced(account.apiKeySource) ||
+  // A third-party backend - bedrock, vertex, foundry - authenticates outside
+  // the harness, so it names no token source of its own and still runs.
+  (account.apiProvider !== undefined && account.apiProvider !== "firstParty");
+
+/**
+ * One field of the report, dropped when the account left it blank: an empty
+ * string is not a `Fact`, and the whole report would fail to encode over it.
+ */
+const carried = <K extends string>(
+  key: K,
+  value: string | undefined,
+): Partial<Record<K, string>> => {
+  const said = value === undefined ? "" : fact(value);
+  return said === "" ? {} : ({ [key]: said } as Record<K, string>);
+};
+
+const authOf = (account: Account): ProbeResult["auth"] => {
+  if (!credentialled(account)) return { status: "unauthenticated" };
+  return {
+    status: "ok",
+    ...carried("identity", account.email),
+    ...carried("planLabel", account.subscriptionType),
+    ...carried("backend", account.apiProvider),
+  };
+};
 
 /** `HOME` is left alone: overriding it makes the CLI report another account's login. */
 const envFor = (ctx: ProviderRunnerContext): Record<string, string | undefined> => ({

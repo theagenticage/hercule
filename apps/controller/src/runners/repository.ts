@@ -168,6 +168,16 @@ const toDetail = (row: RunnerRow): Effect.Effect<RunnerDetail> =>
     };
   });
 
+/**
+ * A machine that can be told something now: connected, and not retired or
+ * draining. Exported as a fragment because the workspace sweep asks the same
+ * question of the machine a workspace sits on - a workspace is never disposed
+ * of behind a machine's back - and two spellings of "online" would be two
+ * different answers.
+ */
+export const onlineWhere = (alias: string): string =>
+  `${alias}.connectivity = 'online' AND ${alias}.lifecycle = 'active'`;
+
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
 
@@ -224,7 +234,7 @@ const make = Effect.gen(function* () {
       Effect.map(
         sql<{ readonly id: Uint8Array }>`
           SELECT id FROM runners
-          WHERE connectivity = 'online' AND lifecycle = 'active' AND reserved = 0
+          WHERE ${sql.literal(onlineWhere("runners"))} AND reserved = 0
         `,
         (rows) => new Set(rows.map((row) => uuidToString(row.id))),
       ),

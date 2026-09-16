@@ -56,7 +56,9 @@ import {
   ProviderServiceLayer,
 } from "../providers";
 import { cancelStrandedInputs, SessionInputDeadline, SessionServiceLayer } from "../sessions";
+import { ResourceServiceLayer } from "../resources";
 import { SettingsLayer } from "../settings";
+import { WorkspaceServiceLayer, WorkspaceSweepInterval } from "../workspaces";
 import {
   JoinTokens,
   JoinTokensLayer,
@@ -93,8 +95,11 @@ const services = (home: string) =>
       Layer.mergeAll(
         PluginsLayer,
         ProviderServiceLayer,
-        SessionServiceLayer,
+        // The workspace service reaches the session service, as it does in the
+        // boot: a workspace that came up releases the sessions waiting for it.
+        SessionServiceLayer.pipe(Layer.provideMerge(WorkspaceServiceLayer)),
         ConnectionServiceLayer,
+        ResourceServiceLayer,
       ).pipe(
         Layer.provideMerge(PluginHostLayer),
         Layer.provideMerge(ConnectionTypesLayer),
@@ -209,6 +214,8 @@ export interface ServerOptions {
   readonly loginDeadline?: Duration.Duration;
   /** How long a delivered input waits for the machine to say what it did with it. */
   readonly inputDeadline?: Duration.Duration;
+  /** The shipped ten minutes is longer than a test that watches it can wait. */
+  readonly workspaceSweepInterval?: Duration.Duration;
   /** The shipped registry is compiled in, so a test hands over its own. */
   readonly plugins?: ReadonlyArray<Plugin>;
 }
@@ -256,6 +263,7 @@ export const withServer = (
         named(ProviderProbeInterval, options.probeInterval);
         named(ProviderLoginDeadline, options.loginDeadline);
         named(SessionInputDeadline, options.inputDeadline);
+        named(WorkspaceSweepInterval, options.workspaceSweepInterval);
         yield* listening;
         const base = yield* baseUrl;
         // The log this database holds, read the way anything else reads it: a

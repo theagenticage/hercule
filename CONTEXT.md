@@ -170,12 +170,22 @@ _Avoid_: workspace (as a grouping term)
 A durable external thing a project works with: a git repo, a folder, a mailbox. A vocabulary term, not a promise of a common code interface.
 _Avoid_: source, asset, material
 
+**Canonical remote**:
+The identity of a repo resource: `host/owner/repo`, lowercased, with the scheme, the user, the port and a `.git` suffix taken off, so `git@github.com:Acme/Web.git` and `https://GitHub.com/acme/web` are one repository. A second resource on a canonical remote one already holds is a conflict, and it is what a machine's credential request is matched against.
+_Avoid_: URL, origin, clone URL (for the identity; those are spellings of it)
+
 **Workspace**:
-A provisioned working area on a runner in which sessions do their work, containing zero or more checkouts. Two kinds: a **primary** workspace (exactly one checkout; at most one per resource per runner; long-lived and shared, the resource's main checkout) and **ephemeral** workspaces (provisioned for one run, disposed after; zero checkouts makes a scratch workspace, several makes a multi-repo workspace). A run has exactly one workspace, shared by all its agent steps. A session may also run with no workspace at all.
-_Avoid_: worktree (reserved for the git mechanism), playground
+A provisioned working area on a runner in which sessions do their work, containing zero or more checkouts. Two kinds: a **primary** workspace (exactly one checkout; at most one per resource per runner; long-lived and shared) and **ephemeral** workspaces (provisioned for one run, disposed after; zero checkouts makes a scratch workspace, several makes a multi-repo workspace). A run has exactly one workspace, shared by all its agent steps. A session may also run with no workspace at all.
+
+The user-facing word for a primary is **main workspace**: `primary` is the kind in code, on the wire and in the database, and "main workspace" is what every label, menu row, help text and sentence a person reads calls it. It is always Hydra's own clone under the runner's storage - Hydra never takes over a folder the user already has.
+_Avoid_: worktree (reserved for the git mechanism), playground; current checkout, shared checkout, main checkout (all three named the primary before; "main workspace" replaced them), adopt (adopting a folder in place is not built)
 
 **Checkout**:
 One working copy of a single resource inside a workspace. In v1 only git repos are checkout-able.
+
+**`.workspaceinclude`**:
+A file in a repo listing untracked paths, one relative path per line with `#` comments, that a fresh checkout takes from the resource's primary workspace on the same machine. An existing vendor convention Hydra reads, never Hydra configuration stored in a repo; whether it is read at all is a flag on the resource.
+_Avoid_: include file, copy list
 
 ### Infrastructure
 

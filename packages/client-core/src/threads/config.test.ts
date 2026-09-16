@@ -57,6 +57,7 @@ const SESSION: Session = {
   instanceId: "i-claude",
   runnerId: "r-local",
   workspaceId: "w-1",
+  projectId: null,
   requestedAccessMode: "full-access",
   accessMode: "approval-required",
   nativeSessionId: null,
@@ -75,6 +76,18 @@ describe("threadConfig", () => {
   });
 
   it("reads an active thread off the session: the mode it runs at, not the one asked for", () => {
-    expect(threadConfig({ kind: "active", session: SESSION })).toEqual(BASE);
+    expect(threadConfig({ kind: "active", session: SESSION })).toEqual({
+      ...BASE,
+      projectId: null,
+      // Where it works is the session's own, and a session is in a workspace
+      // that already stands or in none at all - never in one to be made.
+      workspace: { kind: "existing", workspaceId: "w-1" },
+    });
+  });
+
+  it("reads a thread with no workspace as one working without a checkout", () => {
+    expect(
+      threadConfig({ kind: "active", session: { ...SESSION, workspaceId: null } }),
+    ).toMatchObject({ workspace: { kind: "none" } });
   });
 });

@@ -37,7 +37,7 @@ export function SegmentedControlItem({
   return (
     <ToggleGroup.Item
       className={cn(
-        "flex-1 cursor-pointer rounded-[4px] px-2 py-1 text-meta text-muted",
+        "flex-1 cursor-pointer rounded-[4px] px-2 py-1 text-meta whitespace-nowrap text-muted",
         "hover:text-ink",
         "data-[state=on]:bg-raised data-[state=on]:text-ink data-[state=on]:font-emph data-[state=on]:shadow-card",
         "focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-live",

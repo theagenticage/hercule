@@ -5,12 +5,35 @@
  * first rendered: that is what lets a draft pick up a fresh catalog after a
  * login without losing the choices already made.
  */
-import type { ProviderInstance, Runner, Session } from "@hydra/contract";
+import type {
+  Project,
+  ProviderInstance,
+  Resource,
+  Runner,
+  Session,
+  ThreadWorkspace,
+  Workspace,
+} from "@hydra/contract";
 import type { ThreadDefaults } from "./thread-defaults";
+import type { WorkspacePick } from "./workspaces";
 
-/** What a thread runs with: the defaults a new one starts from, plus the per-model choices. */
+/**
+ * What a thread runs with: the defaults a new one starts from, plus the
+ * per-model choices and where it works.
+ *
+ * The three placement fields are optional because a surface that has no
+ * project to speak of - Settings > Threads, a thread that predates them - says
+ * nothing about them rather than saying null three times. `workspace` is the
+ * pick in the config: `null` means nothing has been picked and the default
+ * stands, which is not the same as `{ kind: "none" }`, a thread deliberately
+ * working without a checkout.
+ */
 export interface ThreadConfig extends ThreadDefaults {
   readonly options: Readonly<Record<string, string | boolean>>;
+  readonly projectId?: string | null;
+  readonly workspace?: WorkspacePick | null;
+  /** The stored `thread.workspace` setting; null while it is unset. */
+  readonly preferredWorkspace?: ThreadWorkspace | null;
 }
 
 /**
@@ -31,11 +54,20 @@ export type Thread =
 
 export type ThreadKind = Thread["kind"];
 
-/** The fleet and the provider instances every composer view model reads. */
+/**
+ * The records every composer view model reads. The last three are optional for
+ * the same reason the config's placement fields are: a caller with no project
+ * surface at all hands over what it has.
+ */
 export interface ThreadCatalogs {
   readonly instances: readonly ProviderInstance[];
   readonly runners: readonly Runner[];
   readonly localRunnerId: string | null;
+  readonly projects?: readonly Project[];
+  readonly resources?: readonly Resource[];
+  readonly workspaces?: readonly Workspace[];
+  /** What is running where, which is what a machine's capacity is read from. */
+  readonly sessions?: readonly Session[];
 }
 
 /**
@@ -52,6 +84,11 @@ export const threadConfig = (thread: Thread): ThreadConfig =>
         accessMode: thread.session.accessMode,
         runnerId: thread.session.runnerId,
         profileId: thread.session.permissionProfileId,
+        projectId: thread.session.projectId,
+        workspace:
+          thread.session.workspaceId === null
+            ? { kind: "none" }
+            : { kind: "existing", workspaceId: thread.session.workspaceId },
       };
 
 /**

@@ -4,9 +4,6 @@ import { PillLabel } from "./controls";
 import { ModelList } from "./model-list";
 import { SelectorShell } from "./selector-shell";
 
-/** With no filter to type in, focus stays on the trigger the menu opened from. */
-const holdFocus = (event: Event): void => event.preventDefault();
-
 /**
  * The model selector: the pill, the filter once there is enough to filter, and
  * the catalog behind them.
@@ -46,7 +43,7 @@ export function ModelSelector({
   return (
     <SelectorShell
       label={<PillLabel pill={pill} />}
-      className="gap-1.5 rounded-full border border-line bg-surface py-1 pr-[11px] pl-[9px] text-ink hover:bg-surface aria-expanded:border-faint aria-expanded:bg-surface [&>svg]:opacity-80"
+      className="max-w-[220px] gap-1.5 rounded-full border border-line bg-surface py-1 pr-[11px] pl-[9px] text-ink hover:bg-surface aria-expanded:border-faint aria-expanded:bg-surface [&_svg]:opacity-80"
       disabled={disabled}
       open={open}
       onOpenChange={(next) => {
@@ -55,7 +52,6 @@ export function ModelSelector({
       }}
       align="end"
       contentClassName="w-[360px]"
-      onOpenAutoFocus={menu?.filterable === true ? undefined : holdFocus}
     >
       {menu === null ? null : (
         <>

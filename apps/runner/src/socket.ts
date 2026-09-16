@@ -36,7 +36,10 @@ import {
   type ProbeResult,
   type RunnerFacts,
   type RunnerWatermark,
+  MAX_MESSAGE_LENGTH,
+  type WorkspaceReport,
 } from "@hydra/protocol";
+import type { CredentialRelay } from "./credentials";
 import { refreshFacts } from "./probe";
 import { wentWrong } from "./report";
 import {
@@ -51,6 +54,7 @@ import {
 import type { LoginAnswer } from "./providers/login";
 import { sessions } from "./sessions";
 import { checkWatermark } from "./watermark";
+import type { Workspaces } from "./workspaces";
 
 const SOCKET_PATH = "/api/v1/runners/socket";
 
@@ -91,6 +95,12 @@ export interface ConnectOptions {
    * per session, removed when the session exits (spec 06 section 9.1).
    */
   readonly scratchDir: string;
+  /** The workspaces this machine holds, and makes when the controller asks. */
+  readonly workspaces: Workspaces;
+  /** Where this machine's credential helper asks for a token. */
+  readonly socketPath: string;
+  /** Carries a helper's question to the controller and the answer back. */
+  readonly credentials: CredentialRelay;
   /** `<home>/runner/bin`, holding the `hydra` symlink every session gets on `PATH`. */
   readonly binDir: string;
   /** hydra-as-a-tool, resolved once at runner start (spec 06 section 9.3). */
@@ -273,8 +283,41 @@ export const connect = (
         controllerUrl: pin.controllerUrl,
         baseEnv: process.env,
         binaryOf,
+        workspaces: options.workspaces,
+        socketPath: options.socketPath,
       },
     });
+
+    // The helper's questions go out on this connection for as long as it is up;
+    // with none up there is no credential, which git reads as "try the next
+    // helper" rather than as a failure.
+    yield* options.credentials.attached((frame) => write(asText(frame)));
+
+    /**
+     * Making a workspace takes as long as a clone does, so it is forked and the
+     * report goes out when it is done. The controller is waiting on one for
+     * every frame it sent, which is why even a crash answers.
+     */
+    const answerWorkspace = (
+      workspaceId: string,
+      making: () => Promise<WorkspaceReport>,
+    ): Effect.Effect<void> =>
+      Effect.promise(making).pipe(
+        Effect.flatMap((report) => write(asText(report))),
+        Effect.catchCause((cause) =>
+          Effect.ignore(
+            write(
+              asText({
+                _tag: "workspaceReport",
+                workspaceId,
+                status: "failed",
+                message: wentWrong(cause, MAX_MESSAGE_LENGTH),
+              }),
+            ),
+          ),
+        ),
+        Effect.ignore,
+      );
 
     const answerProbe = (request: ProbeRequest) => {
       const reporting = (result: ProbeResult) =>
@@ -443,6 +486,24 @@ export const connect = (
           case "ack":
             // Acks belong to the replayable events nothing sends yet.
             return;
+          case "workspaceProvision":
+            return yield* Effect.asVoid(
+              Effect.forkIn(
+                answerWorkspace(message.workspaceId, () => options.workspaces.provision(message)),
+                connection,
+              ),
+            );
+          case "workspaceDispose":
+            return yield* Effect.asVoid(
+              Effect.forkIn(
+                answerWorkspace(message.workspaceId, () => options.workspaces.dispose(message)),
+                connection,
+              ),
+            );
+          case "credentialAnswer":
+            // Whoever asked is holding git open on it; nothing is kept past
+            // that reply.
+            return yield* Effect.sync(() => options.credentials.deliver(message));
         }
         // Every frame the protocol declares is answered above. A new one that
         // reaches here would otherwise be dropped in silence.

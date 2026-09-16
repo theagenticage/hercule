@@ -210,7 +210,7 @@ A Workspace is a provisioned working area on one runner containing 0..N checkout
 
 | Kind | Checkouts | Lifetime | Use |
 |---|---|---|---|
-| Primary | exactly 1 | long-lived; at most one per (resource, runner) | the resource's main checkout, shared by "just open X" sessions |
+| Primary | exactly 1 | long-lived; at most one per (resource, runner) | the resource's **main workspace**, shared by "just open X" sessions |
 | Ephemeral, single | 1 | one job | the normal unit for workflow agent steps |
 | Ephemeral, scratch | 0 | one job | sessions that need a working directory but no repo (e.g. mail sessions; mail truth lives on the server, reached through tools) |
 | Ephemeral, multi-repo | several | one job | one root directory with one checkout subdirectory per resource |
@@ -233,13 +233,13 @@ Transitions: `provisioning -> ready | failed`; `ready | failed -> deleted` (tear
 
 Non-repo resources get no workspaces in v1: folder resources need a versioning story for non-git materials (post-v1), and mailboxes never produce workspaces.
 
+*(Amended 2026-09-16, [#72](https://github.com/rogierpennink/hydra/issues/72).)* **A failed primary is superseded by the next provision.** "At most one per (resource, runner)" counts only `provisioning` and `ready`. A primary that could not be made holds nothing, so `workspace.provision` and a spawn asking for the main workspace both stand it down - marking it `deleted`, keeping the row and the machine's words as the record of the attempt - and open a fresh one in its place. This is the one way a primary reaches `deleted`; nothing tears one down on request. **Adopt-in-place is not built**: a primary is always a Hydra-managed clone under the runner's storage directory. **The user-facing word for a primary is "main workspace"**; `primary` stays the kind in code, on the wire and in the database.
+
 ### 6.4 Checkouts, cache and provisioning
 
 - **Bare cache.** Each runner keeps one bare git cache per resource, under its storage directory. Ephemeral checkouts are git worktrees off that cache, on the branch the run names (default `hydra/run-<runId>`, a template on the workflow's workspace policy; [07-workflows.md](./07-workflows.md) section 4.4). No worktree pooling.
-- **Primary.** Always a standalone clone with `origin` pointing at the real remote. Two ways to come into being, one resulting shape:
-  - *Adopt in place*: an existing local checkout the user points at becomes the primary, untouched, and seeds the runner's bare cache locally.
-  - *Clone fresh*: on a runner with no existing checkout the primary is cloned once from the remote, with hardlink object sharing against the cache.
-- Primaries live wherever the user's checkout is or wherever the user chooses; caches and ephemerals live under the runner's storage directory.
+- **Primary.** Always a standalone clone with `origin` pointing at the real remote, cloned once from the cache with hardlink object sharing and then pointed at the remote. ~~*Adopt in place*: an existing local checkout the user points at becomes the primary, untouched, and seeds the runner's bare cache locally.~~ *(Amended 2026-09-16, [#72](https://github.com/rogierpennink/hydra/issues/72).)* **Struck: adopt-in-place is not built.** `workspace.provision` takes `{resourceId, runnerId}` and no path; a checkout the user already has on that machine is never read, written or taken over. The consequences are deliberate and are the reason it went: nothing the controller holds could rebuild a frame naming a folder, so a provisioning frame could never be re-sent to a machine that was away; the machine had to read the folder's `origin` to decide whether it was the right repository at all; and "Hydra never writes under a folder you did not give it" is a promise with no exception to explain.
+- Primaries, caches and ephemerals all live under the runner's storage directory.
 - Git's one-branch-one-worktree guard applies uniformly across a runner's ephemerals; primaries are standalone clones, so the guard never spans the two kinds.
 - Git credentials for clone, fetch and push derive from the checkout's Connection and are delivered on demand, never written to runner disk; mechanics in [13-security](./13-security.md) ([ADR 0016](../adr/0016-git-credentials-derive-from-connections.md)).
 
@@ -269,6 +269,8 @@ The probed toolchain list is deliberately minimal in v1 (resolved 2026-08-31, [#
 Primary workspaces are never torn down by Hydra and bare caches persist for the runner's life (this spec's consolidation; the ticket's teardown rules cover ephemerals only).
 
 A retired runner's workspaces are marked `lost` in the controller (section 7); the disk itself is not touched.
+
+*(Amended 2026-09-16, [#72](https://github.com/rogierpennink/hydra/issues/72).)* The reaper is a **controller sweep the runner executes**: every ten minutes the controller disposes, by the same frame `workspace.dispose` uses, every ephemeral workspace on an online runner that is either orphaned for longer than `workspace.orphanTtlHours` (default **24 hours**) or idle for longer than `workspace.idleTtlDays` (default **30 days**), both controller settings. The runner never decides on its own: it lacks the facts the rule is written in - session status, resumability, last activity. A thread's worktree is its work, so a workspace whose threads are still resumable is not orphaned and expires only on the idle TTL, which the user can raise. A workspace on an offline or unreachable runner waits for the next sweep after it returns. The **14-day** window below is a rule about runs - it keeps a failed run's ephemerals until the run is dismissed - and v1 has no runs, so it is unimplemented; the sweep knows only the orphan and idle TTLs.
 
 Reaper TTLs (resolved 2026-08-31, [#43](https://github.com/rogierpennink/hydra/issues/43)): orphaned ephemerals are reaped after **24 hours**; the ephemerals of failed runs are kept until the failed run is dismissed or **14 days**, whichever comes first - the run record keeps a "workspace reaped" note so a stale failed run never pretends its files still exist. Both are controller-wide settings.
 

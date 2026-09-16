@@ -48,7 +48,7 @@ Not design questions. The constraint is stated where one exists.
 - 13 §2.1: AEAD cipher choice with per-row nonce and owner/name as associated data.
 - 13 §2.3: the KDF from the promotion token.
 - ~~13 §4.2: the password hash function (argon2id expected).~~ **Resolved 2026-09-04 ([#57](https://github.com/rogierpennink/hydra/issues/57)):** argon2id via `Bun.password`, native in the pinned Bun; recorded in 13 §4.2.
-- 13 §9: the runner daemon's local channel for the git credential helper and how the helper authenticates.
+- ~~13 §9: the runner daemon's local channel for the git credential helper and how the helper authenticates.~~ **Resolved 2026-09-16 ([#72](https://github.com/rogierpennink/hydra/issues/72)):** a Unix socket under the runner's storage directory, mode 0600, and the session's own token verified by the controller, which answers only for that session's workspace; recorded in 13 §9.1.
 - 15 §11: macOS notarization of a Bun-compiled binary - prototype notarize + staple first.
 - ~~15 §11: serving the embedded SPA (`import index from "./index.html"` / `Bun.serve({ routes })`) through the Effect HTTP server on Bun (`@effect/platform-bun`), or beside it on the same port - confirm before the web bundle is wired in.~~ **Resolved 2026-09-04 ([#58](https://github.com/rogierpennink/hydra/issues/58)):** measured both; Bun's HTML route ignores `vite.config.ts` and so loses the React Compiler and code splitting. `vite build`'s output is embedded per file with `with { type: "file" }` and served through the Effect HTTP server; recorded in 15 §11.
 

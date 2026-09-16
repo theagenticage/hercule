@@ -26,6 +26,7 @@ import {
   completeSetup,
   instancesOf,
   jsonOk,
+  liveSessionsAsked,
   sessionOf,
   startController,
   temporaryHome,
@@ -36,7 +37,7 @@ import {
 } from "./harness";
 
 /** Opt-in: `pnpm test:binary` on any machine must not quietly spend a subscription. */
-const wanted = process.env["HYDRA_LIVE_SESSION_TEST"] !== undefined;
+const wanted = liveSessionsAsked();
 
 const state = temporaryHome();
 const binary = join(ROOT, "hydra");

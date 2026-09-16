@@ -299,11 +299,18 @@ Semantics: [./03-controller-and-runners.md](./03-controller-and-runners.md).
 
 | Operation | Input | Grant | Route |
 |---|---|---|---|
-| `workspace.query` / `workspace.read` | `{ runnerId?, resourceId?, kind?, status? }` / `{ workspaceId }` | `workspace.read` | `GET /workspaces[/{id}]` |
-| `workspace.provision` | `{ resourceId, runnerId }` -> a primary workspace (adopts an existing local checkout in place) | `workspace.write` | `POST /workspaces` |
+| `workspace.query` / `workspace.read` | `{ runnerId?, resourceId?, projectId?, kind?, status? }` / `{ workspaceId }` | `workspace.read` | `GET /workspaces[/{id}]` |
+| `workspace.provision` | `{ resourceId, runnerId }` -> a primary workspace, cloned fresh under the runner's storage | `workspace.write` | `POST /workspaces` |
 | `workspace.dispose` | `{ workspaceId }` (an ephemeral, including the kept workspace of a failed run; a primary is never torn down by Hydra: 409 `invalid_state`) | `workspace.write` | `DELETE /workspaces/{id}` |
 
 Workspaces otherwise appear as side effects of session and run placement; `lost` is set by runner retirement, never by an operation.
+
+*(Amended 2026-09-16, [#72](https://github.com/rogierpennink/hydra/issues/72).)* Three sentences the rows above only sketched.
+
+- `workspace.query` filters by `projectId` as well: a project's workspaces are the ones holding a checkout of a repo filed under it, which is what the composer lists.
+- `workspace.provision` takes `{resourceId, runnerId}` and nothing else. ~~It adopts an existing local checkout in place.~~ Adopt-in-place is not built ([./03-controller-and-runners.md](./03-controller-and-runners.md) section 6.4): the main workspace is always a Hydra-managed clone under that runner's storage directory.
+- `session.spawn`'s `workspace` is one of four, and a caller writes exactly one of them: absent (the thread runs with no workspace, `workspaceId: null`); `{kind: "primary", resourceId, branch?}` (the repo's main workspace on the placing machine, made if it is not there yet, with `branch` the one the machine switches it to before the harness starts - a one-shot pick, never replayed when the thread is resumed); `{kind: "ephemeral", checkouts: [{resourceId, baseBranch?}]}` (a workspace of the thread's own, one worktree per repo on `hydra/run-<last 8 of the session id>`, an empty list making a scratch workspace); `{kind: "existing", workspaceId}` (join one that stands - it must be `ready`, it pins the machine, and every repo in it must be filed under the `projectId` the thread carries).
+- `session.spawn` takes `projectId`: the Project the thread is filed under. Every resource any of the above reaches has to be filed under it, whether the workspace is made or joined.
 
 ### agent, assistant, binding, conversation
 

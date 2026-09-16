@@ -1,15 +1,28 @@
-import { useState, type JSX } from "react";
+import { useRef, useState, type JSX } from "react";
 import { useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { useRouteContext } from "@tanstack/react-router";
 import {
-  composerFields,
+  branchField,
+  draftSubject,
   modelMenu,
   optionsLabel,
   pendingModelNote,
+  projectRepos,
   queryKeys,
+  runnerForPick,
+  withBranch,
+  workspaceMenu,
   type Thread,
 } from "@hydra/client-core";
-import { localRunnerQuery, providersQuery, runnersQuery } from "../../app/queries";
+import {
+  localRunnerQuery,
+  projectsQuery,
+  providersQuery,
+  resourcesQuery,
+  runnersQuery,
+  sessionsQuery,
+  workspacesQuery,
+} from "../../app/queries";
 import { messageOf } from "../save-status";
 import { AccessModeSelector } from "./access-mode-selector";
 import { AttachButton, SendButton, StopButton, VoiceButton } from "./controls";
@@ -21,7 +34,7 @@ import { ModelSelector } from "./model-selector";
 import { MessageBox } from "./message-box";
 import { useComposerModel } from "./use-composer-model";
 
-type SelectorKey = "accessMode" | "options" | "model" | "workspace" | "machine";
+type SelectorKey = "accessMode" | "options" | "model" | "workspace" | "branch" | "machine";
 
 /**
  * The composer: what the thread runs with, and the message about to go to it. One
@@ -41,11 +54,28 @@ export function Composer({
   const instances = useSuspenseQuery(providersQuery(client)).data;
   const runners = useSuspenseQuery(runnersQuery(client)).data.items;
   const localRunnerId = useQuery(localRunnerQuery(detectLocalRunner, runners)).data ?? null;
-  const catalogs = { instances, runners, localRunnerId };
+  // The three catalogs the workspace menu reads. A controller that cannot
+  // answer them leaves the composer with no project and no workspace to offer,
+  // which is exactly what it shows before #72's records exist.
+  const projects = useQuery(projectsQuery(client)).data?.items ?? [];
+  const resources = useQuery(resourcesQuery(client)).data?.items ?? [];
+  const workspaces = useQuery(workspacesQuery(client)).data?.items ?? [];
+  const sessions = useQuery(sessionsQuery(client)).data?.items ?? [];
+  const catalogs = {
+    instances,
+    runners,
+    localRunnerId,
+    projects,
+    resources,
+    workspaces,
+    sessions,
+  };
   const [open, setOpen] = useState<SelectorKey | null>(null);
+  // Where the model pill begins: what the lip's branch menu keeps clear of.
+  const pill = useRef<HTMLSpanElement>(null);
   const [filter, setFilter] = useState("");
   const model = useComposerModel(thread, catalogs, client, onSend);
-  const fields = composerFields(catalogs, model.config, model.kind);
+  const fields = model.fields;
   const pending = pendingModelNote(model.kind, model.picks);
   const login = loginSlot(client, () => {
     void queryClient.invalidateQueries({ queryKey: queryKeys.providers() });
@@ -56,17 +86,38 @@ export function Composer({
     if (key === "model" && !next) setFilter("");
   };
   // The catalog behind the model pill is worth resolving only while it is on show.
-  const menu =
+  const models =
     open === "model"
       ? modelMenu(catalogs, model.config, { kind: model.kind, filter, recent: model.recent })
       : null;
+  const projectId = model.config.projectId ?? null;
+  const project = projects.find((each) => each.id === projectId);
+  const pick = fields.workspace.value;
+  const menu = workspaceMenu({
+    project,
+    repos: projectRepos(resources, projectId),
+    workspaces,
+    sessions,
+    runners,
+    // The machine the fields resolved, never the draft's raw pick: those two
+    // differ before anything is selectable, and the menu would then say the
+    // repo is not cloned on a machine the sentence above it never named.
+    runnerId: fields.machine.runnerId,
+    pick,
+  });
+  const branch = branchField(pick, { workspaces, runnerId: fields.machine.runnerId });
   const cannotSend = fields.blocked !== null || model.readOnly !== null || model.sending;
   const canSend = !cannotSend && model.message.trim() !== "";
   return (
     // A draft stands under its own sentence, which takes the room above the card.
     <div className={fields.lead === null ? "flex w-full flex-col" : "flex w-full flex-1 flex-col"}>
       {fields.lead === null ? null : (
-        <DraftHero lead={fields.lead} blocked={fields.blocked} loginSlot={login} />
+        <DraftHero
+          subject={draftSubject(pick, workspaces, projectId, projects)}
+          lead={fields.lead}
+          blocked={fields.blocked}
+          loginSlot={login}
+        />
       )}
       {/* The card is the same box whatever is docked to it: the lip below and
           the permission dock above both tuck under it, so its own radius,
@@ -116,19 +167,21 @@ export function Composer({
                 }}
               />
             )}
-            <ModelSelector
-              menu={menu}
-              filter={filter}
-              onFilter={setFilter}
-              pill={fields.model.pill}
-              disabled={model.readOnly !== null}
-              open={open === "model"}
-              onOpenChange={(next) => {
-                openChange("model", next);
-              }}
-              onPick={model.pick}
-              loginSlot={login}
-            />
+            <span ref={pill} className="inline-flex min-w-0">
+              <ModelSelector
+                menu={models}
+                filter={filter}
+                onFilter={setFilter}
+                pill={fields.model.pill}
+                disabled={model.readOnly !== null}
+                open={open === "model"}
+                onOpenChange={(next) => {
+                  openChange("model", next);
+                }}
+                onPick={model.pick}
+                loginSlot={login}
+              />
+            </span>
           </div>
           <VoiceButton />
           {model.busy ? <StopButton onStop={model.stop} /> : null}
@@ -142,9 +195,23 @@ export function Composer({
       </div>
       <Lip
         workspace={fields.workspace}
+        menu={menu}
+        branch={branch}
         machine={fields.machine}
-        open={open === "workspace" || open === "machine" ? open : null}
+        pill={pill}
+        open={open === "workspace" || open === "branch" || open === "machine" ? open : null}
         onOpenChange={openChange}
+        onPickWorkspace={(picked) => {
+          // A workspace that already stands settles the machine too, which is
+          // `runnerForPick`'s to say rather than this component's.
+          const settled = runnerForPick(picked, workspaces);
+          if (settled === null) model.pick({ kind: "workspace", value: picked });
+          else
+            model.pick({ kind: "workspace", value: picked }, { kind: "runnerId", value: settled });
+        }}
+        onPickBranch={(picked) => {
+          model.pick({ kind: "workspace", value: withBranch(pick, picked) });
+        }}
         onPickRunner={(runnerId) => {
           model.pick({ kind: "runnerId", value: runnerId });
         }}

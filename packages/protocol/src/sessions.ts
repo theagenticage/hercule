@@ -136,6 +136,8 @@ export const ExitReason = Schema.Literals([
   "crash",
   "inactivity_timeout",
   "absolute_timeout",
+  /** The workspace the session was waiting for could not be made. */
+  "workspace_failed",
 ]);
 
 export type ExitReason = Schema.Schema.Type<typeof ExitReason>;
@@ -299,7 +301,14 @@ const event = <const Tag extends string, Fields extends Schema.Struct.Fields>(
 
 const SessionStarted = event("session.started", {});
 
-const SessionExited = event("session.exited", { reason: ExitReason });
+/**
+ * `message` carries what the exit was, where the reason alone does not say it:
+ * a workspace that could not be made says why in the machine's own words.
+ */
+const SessionExited = event("session.exited", {
+  reason: ExitReason,
+  message: Schema.optionalKey(Message),
+});
 
 /**
  * A completion the controller cannot bracket against its start is not a turn
@@ -416,9 +425,21 @@ export const SessionStart = Schema.Struct({
    * runner injects it into the agent's environment and keeps it nowhere else:
    * this frame is the only place its plaintext ever travels, and the controller
    * holds nothing but its hash. An empty one would authenticate nobody, so the
-   * wire refuses it rather than leaving the agent to find out.
+   * wire refuses it rather than leaving the agent to find out. It is also what
+   * the session proves itself with when it asks this machine for a git
+   * credential.
    */
   token: Schema.String.check(Schema.isLengthBetween(1, MAX_TOKEN_LENGTH)),
+  /** `GH_TOKEN` for this session, where a GitHub Connection backs it. */
+  ghToken: Schema.optionalKey(Fact),
+  /**
+   * Who the session commits as: the account its Connection belongs to. Absent
+   * where no Connection backs it, and the machine then leaves git's own
+   * identity alone rather than inventing one.
+   */
+  gitIdentity: Schema.optionalKey(Schema.Struct({ name: Fact, email: Fact })),
+  /** The branch the session's checkout is switched to before the harness starts. */
+  checkoutBranch: Schema.optionalKey(Fact),
 });
 
 export type SessionStart = Schema.Schema.Type<typeof SessionStart>;

@@ -21,7 +21,18 @@
 import { describe, expect, it } from "vitest";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type { ModelOption, Profile, ProviderInstance, Runner, Session } from "@hydra/contract";
+import type {
+  Connection,
+  ModelOption,
+  Profile,
+  Project,
+  ProviderInstance,
+  Resource,
+  Runner,
+  Session,
+  Workspace,
+} from "@hydra/contract";
+import { threadsWorld } from "@hydra/client-core/threads/testing";
 import { envelope, pickRow, reading, renderApp, stubApi, type Handler } from "../../../app/testing";
 
 const ZONE = "Europe/Amsterdam";
@@ -164,6 +175,7 @@ const NEW_SESSION: Session = {
   instanceId: INSTANCE_A.id,
   runnerId: RUNNER.id,
   workspaceId: null,
+  projectId: null,
   requestedAccessMode: "approval-required",
   accessMode: "approval-required",
   nativeSessionId: null,
@@ -335,15 +347,17 @@ describe("Composer: selector popovers (AC-16)", () => {
 
     await user.type(screen.getByRole("textbox"), "Fix the login bug");
 
-    await user.click(screen.getByRole("button", { name: /no workspace/i }));
-    expect(await screen.findByText("Adopt a folder on this machine…")).toBeDefined();
+    // D-20b: the workspace selector of a project-less draft is locked text
+    // now, so the pair of selectors driven here is the machine and the model.
+    await user.click(screen.getByRole("button", { name: /^machine / }));
+    expect(await screen.findByText("Machine")).toBeDefined();
 
     // A second selector opened closes the first. The new one's own content
     // mounts through Radix's `Presence`, one microtask behind the click, so
     // this is awaited rather than asserted synchronously.
     await user.click(screen.getByRole("button", { name: /claude sonnet 5/i }));
     await waitFor(() => {
-      expect(screen.queryByText("Adopt a folder on this machine…")).toBeNull();
+      expect(screen.queryByText("Machine")).toBeNull();
     });
     expect(await screen.findByRole("button", { name: /claude opus 5/i })).toBeDefined();
 
@@ -354,35 +368,34 @@ describe("Composer: selector popovers (AC-16)", () => {
     });
 
     // An outside click closes it too.
-    await user.click(screen.getByRole("button", { name: /no workspace/i }));
-    expect(await screen.findByText("Adopt a folder on this machine…")).toBeDefined();
+    await user.click(screen.getByRole("button", { name: /^machine / }));
+    expect(await screen.findByText("Machine")).toBeDefined();
     await user.click(document.body);
     await waitFor(() => {
-      expect(screen.queryByText("Adopt a folder on this machine…")).toBeNull();
+      expect(screen.queryByText("Machine")).toBeNull();
     });
 
     // Text typed before any of this survives.
     expect(screen.getByRole<HTMLTextAreaElement>("textbox").value).toBe("Fix the login bug");
   });
 
-  it("holds No workspace selected and the other two entries dimmed with their reason", async () => {
+  // D-20d: with nothing to work in there is nothing to choose between, so the
+  // workspace field is greyed plain text carrying the way out as its reason.
+  // R5: the way out of a draft in no project is picking one, not adding a repo
+  // to a project it does not stand in.
+  it("reads No workspace as locked text on a draft standing in no project", async () => {
     const user = userEvent.setup();
     await open();
 
-    await user.click(screen.getByRole("button", { name: /no workspace/i }));
+    const locked = await screen.findByTitle("Pick a project to work in a repository");
+    expect(reading(locked)).toContain("No workspace");
+    expect(locked.closest("button")).toBeNull();
 
-    const rows = screen.getAllByRole("button", { name: /no workspace/i });
-    // The trigger, plus the row inside the now-open menu.
-    expect(rows.length).toBeGreaterThanOrEqual(2);
-    expect(rows.at(-1)?.getAttribute("aria-current")).toBe("true");
-
-    expect(await screen.findByText("Adopt a folder on this machine…")).toBeDefined();
-    expect(screen.getByText("Add a repo →")).toBeDefined();
-    // "not built yet" is the dimmed reason on both placeholder entries.
-    expect(reading().match(/not built yet/g)?.length).toBeGreaterThanOrEqual(2);
+    await user.click(locked);
+    expect(screen.queryByRole("dialog")).toBeNull();
   });
 
-  it("opens the runner menu with the runner's state and machine on the row's first line", async () => {
+  it("opens the runner menu with the state and the capacity beside the machine, and what it is under it", async () => {
     const user = userEvent.setup();
     await open();
 
@@ -392,8 +405,11 @@ describe("Composer: selector popovers (AC-16)", () => {
     // spans several elements - read the dialog's whole text rather than
     // asking for one element whose own text is the exact string.
     const dialog = reading(await screen.findByRole("dialog"));
-    expect(dialog).toContain("moss · online · this machine");
-    expect(dialog).toContain("rogier@example.com · Claude Max");
+    // The machine, then its state and how much of it is taken; what this
+    // machine is stands under it. Who is logged in is the model menu's to say.
+    expect(dialog).toContain("moss online 0/4");
+    expect(dialog).toContain("this machine · default");
+    expect(dialog).toContain("The thread runs where you say; nothing moves it later.");
   });
 });
 
@@ -498,7 +514,6 @@ describe("Composer: sending (AC-18)", () => {
       accessMode: "approval-required",
       runnerId: RUNNER.id,
       permissionProfileId: PROFILE_UNRESTRICTED.id,
-      workspaceId: null,
       // A spawn carries the option picks unconditionally, so a thread started
       // with none reads as an empty record rather than an absent field.
       options: {},
@@ -544,7 +559,6 @@ describe("Composer: sending (AC-18)", () => {
       accessMode: "approval-required",
       runnerId: RUNNER.id,
       permissionProfileId: PROFILE_UNRESTRICTED.id,
-      workspaceId: null,
       options: { effort: "high", thinking: false },
     });
   });
@@ -1132,5 +1146,1032 @@ describe("Draft: the chrome is the screen's first row", () => {
     // The hero "What should the agent do?" is an h2, so level 1 belongs to
     // nobody on this route once the shell's top bar steps aside.
     expect(screen.queryByRole("heading", { level: 1 })).toBeNull();
+  });
+});
+
+/* ------------------------------------------------------------------ *
+ * Slice 3 of #72: the project picker, the workspace, branch and
+ * machine selectors, and the workspace menu's foot (AC-16 to AC-19,
+ * AC-23). Driven through `renderApp` and the stubbed `fetch`, like
+ * everything above.
+ *
+ * Readings picked here, where the SPEC names copy but not a handle:
+ * - the picker is the Radix overlay, read as `role="dialog"`, opened by the
+ *   sidebar's "Create new thread";
+ * - a menu row is a button carrying its text, as in the menus above;
+ * - the New project dialog (D-20b) is read as `role="dialog"` named "New
+ *   project", like the picker; its fields are labelled "Name", "Remote URL",
+ *   "GitHub account" and "Setup command", a source is added with "+ Git
+ *   repository", and it submits through a button named "Create project".
+ * ------------------------------------------------------------------ */
+
+const AT = "2026-09-10T09:00:00.000Z";
+
+const COVE: Runner = { ...RUNNER, id: "01a06d02-beff-7037-9f5b-042822015953", name: "cove" };
+
+const GITHUB_ID = "01a06d02-7500-7000-8000-000000000001";
+
+const BUMP_THE_BUN_PIN = "01a06d02-7400-7000-8000-000000000004";
+
+/** The webshop/ops world every workspace suite shares, with ids the contract
+ * takes. What stands beside it below - the edge and sandbox projects, the
+ * worktree on cove, the main workspaces of the two ops repos - is this
+ * suite's own. */
+const IDS = {
+  moss: RUNNER.id,
+  cove: COVE.id,
+  webshopProject: "01a06d02-7000-7000-8000-000000000001",
+  opsProject: "01a06d02-7000-7000-8000-000000000002",
+  webshop: "01a06d02-7100-7000-8000-000000000001",
+  infra: "01a06d02-7100-7000-8000-000000000002",
+  runbooks: "01a06d02-7100-7000-8000-000000000003",
+  primary: "01a06d02-7200-7000-8000-000000000001",
+  primaryCheckout: "01a06d02-7300-7000-8000-000000000001",
+  run3f1: "01a06d02-7200-7000-8000-000000000002",
+  run3f1Checkout: "01a06d02-7300-7000-8000-000000000002",
+  flakyThread: "01a06d02-7400-7000-8000-000000000001",
+  runbookThread: "01a06d02-7400-7000-8000-000000000002",
+};
+
+const WORLD = threadsWorld(IDS);
+
+const project = (id: string, name: string): Project => ({
+  id,
+  name,
+  createdAt: AT,
+  updatedAt: AT,
+});
+
+const WEBSHOP = WORLD.WEBSHOP_PROJECT;
+const OPS = WORLD.OPS_PROJECT;
+/** A project whose one repo has never been cloned on any machine. */
+const EDGE = project("01a06d02-7000-7000-8000-000000000003", "edge");
+/** A project with no repo at all. */
+const SANDBOX = project("01a06d02-7000-7000-8000-000000000004", "sandbox");
+
+const repo = (
+  id: string,
+  owner: string,
+  name: string,
+  projectIds: readonly string[],
+): Resource => ({
+  id,
+  kind: "repo",
+  remote: `git@github.com:${owner}/${name}.git`,
+  canonicalRemote: `github.com/${owner}/${name}`,
+  label: null,
+  connectionId: "01a06d02-7500-7000-8000-000000000001",
+  setupCommand: null,
+  workspaceInclude: true,
+  projectIds,
+  createdAt: AT,
+  updatedAt: AT,
+});
+
+const R_WEBSHOP = WORLD.WEBSHOP;
+const R_INFRA = WORLD.INFRA;
+const R_RUNBOOKS = WORLD.RUNBOOKS;
+const R_EDGE = repo("01a06d02-7100-7000-8000-000000000004", "acme", "edge-api", [EDGE.id]);
+
+const checkout = (
+  id: string,
+  resourceId: string,
+  form: "clone" | "worktree",
+  branch: string,
+  branches: readonly string[],
+  defaultBranch: string,
+) => ({ checkoutId: id, resourceId, form, subdirectory: null, branch, branches, defaultBranch });
+
+const workspace = (
+  id: string,
+  kind: "primary" | "ephemeral",
+  runnerId: string,
+  checkouts: Workspace["checkouts"],
+  sessionIds: readonly string[] = [],
+): Workspace => ({
+  id,
+  runnerId,
+  kind,
+  status: "ready",
+  checkouts,
+  designatedConnectionId: "01a06d02-7500-7000-8000-000000000001",
+  message: null,
+  sessionIds,
+  createdAt: AT,
+  provisionedAt: AT,
+  lastUsedAt: AT,
+  disposedAt: null,
+});
+
+/** webshop's main workspace on moss; `hydra/run-3f1` is one of its branches. */
+const W_PRIMARY_WEBSHOP: Workspace = {
+  ...WORLD.PRIMARY,
+  designatedConnectionId: GITHUB_ID,
+  sessionIds: [BUMP_THE_BUN_PIN],
+};
+
+const W_RUN_3F1: Workspace = { ...WORLD.RUN_3F1, designatedConnectionId: GITHUB_ID };
+
+const W_RUN_8A0 = workspace(
+  "01a06d02-7200-7000-8000-000000000003",
+  "ephemeral",
+  COVE.id,
+  [
+    checkout(
+      "01a06d02-7300-7000-8000-000000000003",
+      R_WEBSHOP.id,
+      "worktree",
+      "hydra/run-8a0",
+      ["hydra/run-8a0"],
+      "main",
+    ),
+  ],
+  ["01a06d02-7400-7000-8000-000000000003"],
+);
+
+const W_PRIMARY_INFRA = workspace("01a06d02-7200-7000-8000-000000000004", "primary", RUNNER.id, [
+  checkout(
+    "01a06d02-7300-7000-8000-000000000004",
+    R_INFRA.id,
+    "clone",
+    "master",
+    ["master", "hetzner-migration"],
+    "master",
+  ),
+]);
+
+const W_PRIMARY_RUNBOOKS = workspace("01a06d02-7200-7000-8000-000000000005", "primary", RUNNER.id, [
+  checkout(
+    "01a06d02-7300-7000-8000-000000000005",
+    R_RUNBOOKS.id,
+    "clone",
+    "main",
+    ["main"],
+    "main",
+  ),
+]);
+
+const thread = (
+  id: string,
+  title: string,
+  projectId: string | null,
+  workspaceId: string | null,
+  runnerId: string = RUNNER.id,
+): Session => ({
+  ...NEW_SESSION,
+  id,
+  title,
+  status: "idle",
+  projectId,
+  workspaceId,
+  runnerId,
+  createdAt: AT,
+  startedAt: AT,
+  lastActivityAt: AT,
+});
+
+const SESSIONS: readonly Session[] = [
+  thread(IDS.flakyThread, "Fix flaky webhook tests", WEBSHOP.id, W_RUN_3F1.id),
+  thread(IDS.runbookThread, "Write the retry runbook", WEBSHOP.id, W_RUN_3F1.id),
+  thread(
+    "01a06d02-7400-7000-8000-000000000003",
+    "Runner drain command",
+    WEBSHOP.id,
+    W_RUN_8A0.id,
+    COVE.id,
+  ),
+  thread(BUMP_THE_BUN_PIN, "Bump the Bun pin", WEBSHOP.id, W_PRIMARY_WEBSHOP.id),
+  thread("01a06d02-7400-7000-8000-000000000005", "Tidy the promotion runbook", WEBSHOP.id, null),
+  thread("01a06d02-7400-7000-8000-000000000006", "Rotate the Hetzner backups key", OPS.id, null),
+];
+
+const GITHUB: Connection = {
+  id: GITHUB_ID,
+  type: "github/github",
+  label: "personal",
+  displayName: "rogierpennink",
+  status: "connected",
+  labels: [],
+  config: {},
+  credentials: [],
+  createdAt: AT,
+  updatedAt: AT,
+};
+
+/** The one Connection of another type, which the GitHub selects must not offer. */
+const SLACK: Connection = {
+  ...GITHUB,
+  id: "01a06d02-7500-7000-8000-000000000002",
+  type: "slack",
+  label: "acme",
+  displayName: "acme.slack.com",
+};
+
+const WORKSPACES: readonly Workspace[] = [
+  W_PRIMARY_WEBSHOP,
+  W_RUN_3F1,
+  W_RUN_8A0,
+  W_PRIMARY_INFRA,
+  W_PRIMARY_RUNBOOKS,
+];
+
+const RESOURCES: readonly Resource[] = [R_WEBSHOP, R_INFRA, R_RUNBOOKS, R_EDGE];
+
+const PROJECTS: readonly Project[] = [WEBSHOP, OPS, EDGE, SANDBOX];
+
+/** The catalogs slice 3 adds, over the ones every composer test already stubs. */
+const world = (
+  overrides: Readonly<Record<string, Handler>> = {},
+): Readonly<Record<string, Handler>> => ({
+  "GET /api/v1/projects": { body: { items: PROJECTS } },
+  "GET /api/v1/resources": { body: { items: RESOURCES } },
+  "GET /api/v1/workspaces": { body: { items: WORKSPACES } },
+  "GET /api/v1/sessions": { body: { items: SESSIONS } },
+  "GET /api/v1/connections": { body: { items: [GITHUB, SLACK] } },
+  "GET /api/v1/runners": { body: { items: [RUNNER, COVE] } },
+  ...overrides,
+});
+
+/** A draft at `path`, with the slice-3 catalogs behind it. */
+const openAt = async (
+  path: string,
+  user: Record<string, unknown> = {},
+  extra: Readonly<Record<string, Handler>> = {},
+) => {
+  const api = stubApi(controller([INSTANCE_A], user, world(extra)));
+  const app = await renderApp({
+    path,
+    api: api.fetch,
+    token: "held",
+    detectLocalRunner: () => Promise.resolve(RUNNER.id),
+  });
+  return { ...app, api };
+};
+
+const inProject = (id: string) => `/threads/new?project=${id}`;
+
+/** Opens the workspace selector and hands back its menu. */
+const openWorkspaceMenu = async (
+  user: ReturnType<typeof userEvent.setup>,
+): Promise<HTMLElement> => {
+  await user.click(await screen.findByRole("button", { name: /^workspace / }));
+  return screen.findByRole("dialog");
+};
+
+/** Opens the branch selector and hands back its menu. */
+const openBranchMenu = async (
+  user: ReturnType<typeof userEvent.setup>,
+  name: RegExp,
+): Promise<HTMLElement> => {
+  await user.click(await screen.findByRole("button", { name }));
+  return screen.findByRole("dialog");
+};
+
+describe("Picker: a thread starts from a project (AC-16)", () => {
+  const openPicker = async (user: ReturnType<typeof userEvent.setup>): Promise<HTMLElement> => {
+    await user.click(screen.getByText("Create new thread"));
+    return screen.findByRole("dialog");
+  };
+
+  it("lists one row per project with its repos, threads and workspaces", async () => {
+    const user = userEvent.setup();
+    await openAt("/threads/new");
+
+    const picker = await openPicker(user);
+
+    expect(reading(picker)).toContain("New thread in");
+    // One repo, five threads in the project, two ephemeral workspaces.
+    expect(reading(picker)).toContain("1 repo · webshop · 5 threads · 2 workspaces");
+    // The plural half of `<n> repo(s) · <repo names>`, with the names listed.
+    expect(reading(picker)).toContain("2 repos · ops-infra, ops-runbooks");
+    expect(reading(picker)).toContain("⌘1");
+    expect(reading(picker)).toContain("⌘2");
+  });
+
+  it("navigates to a draft in the project that was clicked", async () => {
+    const user = userEvent.setup();
+    const { router } = await openAt("/threads/new");
+
+    const picker = await openPicker(user);
+    await user.click(within(picker).getByRole("button", { name: /ops/ }));
+
+    await waitFor(() => {
+      expect(router.state.location.href).toBe(inProject(OPS.id));
+    });
+  });
+
+  it("moves with the arrows and picks with Enter", async () => {
+    const user = userEvent.setup();
+    const { router } = await openAt("/threads/new");
+
+    await openPicker(user);
+    await user.keyboard("{ArrowDown}{Enter}");
+
+    await waitFor(() => {
+      expect(router.state.location.href).toBe(inProject(OPS.id));
+    });
+  });
+
+  it("picks the first project with its own ⌘1", async () => {
+    const user = userEvent.setup();
+    const { router } = await openAt("/threads/new");
+
+    await openPicker(user);
+    await user.keyboard("{Meta>}1{/Meta}");
+
+    await waitFor(() => {
+      expect(router.state.location.href).toBe(inProject(WEBSHOP.id));
+    });
+  });
+
+  it("closes on Escape without starting anything", async () => {
+    const user = userEvent.setup();
+    const { router } = await openAt("/threads/new");
+
+    await openPicker(user);
+    await user.keyboard("{Escape}");
+
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog")).toBeNull();
+    });
+    expect(router.state.location.href).toBe("/threads/new");
+  });
+
+  it("closes on a click past the panel, and on Esc after a click inside it", async () => {
+    const user = userEvent.setup();
+    const { router } = await openAt("/threads/new");
+
+    const picker = await openPicker(user);
+    // The scrim is the panel's parent: the page behind the picker.
+    await user.click(picker.parentElement!);
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog")).toBeNull();
+    });
+
+    // A click inside takes the focus the panel was listening with, so Esc is
+    // heard on the document rather than on the panel.
+    const again = await openPicker(user);
+    await user.click(within(again).getByRole("button", { name: /webshop/ }));
+    await user.keyboard("{Escape}");
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog")).toBeNull();
+    });
+    expect(router.state.location.href).toBe(inProject(WEBSHOP.id));
+  });
+
+  it("offers New project as the last row when there are projects", async () => {
+    const user = userEvent.setup();
+    await openAt("/threads/new");
+
+    const picker = await openPicker(user);
+
+    const text = reading(picker);
+    expect(text).toContain("New project");
+    expect(text.indexOf("sandbox")).toBeLessThan(text.indexOf("New project"));
+  });
+
+  // D-20b: the picker no longer names a project itself; its New project row
+  // opens the dialog that does.
+  it("offers New project and nothing else when there is no project yet, and opens the dialog", async () => {
+    const user = userEvent.setup();
+    const created = project("01a06d02-7000-7000-8000-000000000009", "first");
+    const { api, router } = await openAt(
+      "/threads/new",
+      {},
+      {
+        "GET /api/v1/projects": { body: { items: [] } },
+        "POST /api/v1/projects": { body: created },
+      },
+    );
+
+    const picker = await openPicker(user);
+
+    expect(reading(picker)).toContain("New project");
+    expect(within(picker).queryByRole("button", { name: /webshop/ })).toBeNull();
+
+    await user.click(within(picker).getByRole("button", { name: "New project" }));
+
+    const dialog = await screen.findByRole("dialog", { name: "New project" });
+    await user.type(within(dialog).getByLabelText("Name"), "first");
+    await user.click(within(dialog).getByRole("button", { name: "Create project" }));
+
+    await waitFor(() => {
+      expect(router.state.location.href).toBe(inProject(created.id));
+    });
+    expect(
+      api.calls.find((call) => call.method === "POST" && call.path === "/api/v1/projects")?.body,
+    ).toEqual({ name: "first" });
+  });
+
+  it("heads the draft with the project it is in", async () => {
+    await openAt(inProject(WEBSHOP.id));
+
+    expect(
+      await screen.findByRole("heading", { name: "What should the agent do in webshop?" }),
+    ).toBeDefined();
+  });
+});
+
+describe("Composer: the workspace selector (AC-17)", () => {
+  it("heads the menu with what it picks and when it stops being pickable", async () => {
+    const user = userEvent.setup();
+    await openAt(inProject(WEBSHOP.id));
+
+    const menu = await openWorkspaceMenu(user);
+
+    expect(reading(menu)).toContain("Workspace");
+    expect(reading(menu)).toContain("locks when the thread starts");
+  });
+
+  // D-20c/D-20d: the primary is the Main workspace, and None is not offered.
+  it("offers the main workspace, a new worktree and the live workspaces", async () => {
+    const user = userEvent.setup();
+    await openAt(inProject(WEBSHOP.id));
+
+    const menu = await openWorkspaceMenu(user);
+    const text = reading(menu);
+
+    expect(text).toContain("Main workspace");
+    expect(text).toContain("on main · you and the agent share the files");
+    expect(text).toContain("New workspace");
+    expect(text).toContain("a fresh worktree of webshop on a new branch");
+    // The project's own live ephemeral workspaces, named after their branch,
+    // with the machine they stand on and the threads already in them.
+    expect(text).toContain("hydra/run-3f1");
+    expect(text).toContain("moss");
+    expect(text).toContain("2 threads · “Fix flaky webhook tests”, “Write the retry runbook”");
+    expect(text).toContain("hydra/run-8a0");
+    expect(text).not.toContain("None");
+  });
+
+  it("names the repo per row and lists New workspace first in a multi-repo project", async () => {
+    const user = userEvent.setup();
+    await openAt(inProject(OPS.id));
+
+    const menu = await openWorkspaceMenu(user);
+    const text = reading(menu);
+
+    expect(text).toContain("a worktree of each repo, side by side, each on a new branch");
+    expect(text).toContain("Main workspace of ops-infra");
+    expect(text).toContain("Main workspace of ops-runbooks");
+    expect(text.indexOf("New workspace")).toBeLessThan(text.indexOf("Main workspace of"));
+  });
+
+  it("asks about the machine the draft would be placed on, not the one it picked", async () => {
+    const user = userEvent.setup();
+    // `INSTANCE_FRESH` is on no machine, so no row is selectable and the draft
+    // picks none - but it would still be placed on moss, which holds webshop's
+    // main workspace. The menu has to ask about that machine, or it says the
+    // repo is not cloned on a machine nothing else ever named.
+    const api = stubApi(controller([INSTANCE_FRESH], {}, world()));
+    await renderApp({
+      path: inProject(WEBSHOP.id),
+      api: api.fetch,
+      token: "held",
+      detectLocalRunner: () => Promise.resolve(RUNNER.id),
+    });
+
+    const menu = await openWorkspaceMenu(user);
+    expect(reading(menu)).toContain("on main · you and the agent share the files");
+    expect(reading(menu)).not.toContain("not cloned");
+  });
+
+  it("says a repo is not cloned on the machine rather than hiding the row", async () => {
+    const user = userEvent.setup();
+    await openAt(inProject(EDGE.id));
+
+    const menu = await openWorkspaceMenu(user);
+
+    expect(reading(menu)).toContain("not cloned on moss · clones on first use");
+  });
+
+  // D-20d: a project with no source works in None and says how to change that.
+  it("reads None as locked text in a project with no repo", async () => {
+    const user = userEvent.setup();
+    await openAt(inProject(SANDBOX.id));
+
+    const locked = await screen.findByTitle("Add a repository to the project to work in one");
+    expect(reading(locked)).toContain("None");
+    expect(locked.closest("button")).toBeNull();
+
+    await user.click(locked);
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("defaults to the main workspace in a one-repo project and to a worktree in a multi-repo one", async () => {
+    const one = await openAt(inProject(WEBSHOP.id));
+    expect(await screen.findByRole("button", { name: /^workspace Main workspace$/ })).toBeDefined();
+    one.unmount();
+
+    await openAt(inProject(OPS.id));
+    expect(await screen.findByRole("button", { name: /^workspace New workspace$/ })).toBeDefined();
+  });
+
+  it("follows the stored thread.workspace", async () => {
+    await openAt(inProject(WEBSHOP.id), { "thread.workspace": "ephemeral" });
+    expect(await screen.findByRole("button", { name: /^workspace New workspace$/ })).toBeDefined();
+  });
+
+  it("rewrites the lead sentence as the pick changes", async () => {
+    const user = userEvent.setup();
+    await openAt(inProject(WEBSHOP.id));
+
+    await waitFor(() => {
+      expect(reading()).toContain(
+        "It works in the main workspace of webshop on moss, on main. You and the agent share the files.",
+      );
+    });
+
+    await openWorkspaceMenu(user);
+    await pickRow(user, /New workspace/);
+    await waitFor(() => {
+      expect(reading()).toContain(
+        "It gets its own worktree of webshop, on a new branch from main.",
+      );
+    });
+
+    await openWorkspaceMenu(user);
+    await pickRow(user, /hydra\/run-3f1/);
+    // D-19: joining names the work already going on there, not the workspace.
+    await waitFor(() => {
+      expect(reading()).toContain(
+        "It joins “Fix flaky webhook tests” and “Write the retry runbook” there: the agents see each other's edits, on one branch.",
+      );
+    });
+  });
+
+  // D-20d: None is offered only where there is nothing else, and there it is
+  // what the draft stands under.
+  it("says a draft in a project with no repo works without a checkout", async () => {
+    await openAt(inProject(SANDBOX.id));
+
+    await waitFor(() => {
+      expect(reading()).toContain("It works without a checkout.");
+    });
+  });
+
+  it("spawns with the project and the main workspace the draft stands in", async () => {
+    const user = userEvent.setup();
+    const { api, router } = await openAt(
+      inProject(WEBSHOP.id),
+      {},
+      { "POST /api/v1/sessions": { body: NEW_SESSION } },
+    );
+
+    await user.type(screen.getByRole("textbox"), "Fix the login bug");
+    await user.click(screen.getByRole("button", { name: /send/i }));
+
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe(`/threads/${NEW_SESSION.id}`);
+    });
+    const spawn = api.calls.find(
+      (call) => call.method === "POST" && call.path === "/api/v1/sessions",
+    );
+    expect(spawn?.body).toEqual({
+      prompt: "Fix the login bug",
+      instanceId: INSTANCE_A.id,
+      model: "claude-sonnet-5",
+      accessMode: "approval-required",
+      runnerId: RUNNER.id,
+      permissionProfileId: PROFILE_UNRESTRICTED.id,
+      options: {},
+      projectId: WEBSHOP.id,
+      workspace: { kind: "primary", resourceId: R_WEBSHOP.id },
+    });
+  });
+
+  it("spawns with the workspace the user joined instead of the default", async () => {
+    const user = userEvent.setup();
+    const { api } = await openAt(
+      inProject(WEBSHOP.id),
+      {},
+      { "POST /api/v1/sessions": { body: NEW_SESSION } },
+    );
+
+    await openWorkspaceMenu(user);
+    await pickRow(user, /hydra\/run-3f1/);
+
+    await user.type(screen.getByRole("textbox"), "Fix the login bug");
+    await user.click(screen.getByRole("button", { name: /send/i }));
+
+    await waitFor(() => {
+      expect(
+        api.calls.some((call) => call.method === "POST" && call.path === "/api/v1/sessions"),
+      ).toBe(true);
+    });
+    const spawn = api.calls.find(
+      (call) => call.method === "POST" && call.path === "/api/v1/sessions",
+    );
+    expect(spawn?.body).toMatchObject({
+      projectId: WEBSHOP.id,
+      workspace: { kind: "existing", workspaceId: W_RUN_3F1.id },
+    });
+  });
+
+  it("spawns with one checkout per repo when a multi-repo project takes a new workspace", async () => {
+    const user = userEvent.setup();
+    const { api } = await openAt(
+      inProject(OPS.id),
+      {},
+      { "POST /api/v1/sessions": { body: NEW_SESSION } },
+    );
+
+    await user.type(await screen.findByRole("textbox"), "Fix the login bug");
+    await user.click(screen.getByRole("button", { name: /send/i }));
+
+    await waitFor(() => {
+      expect(
+        api.calls.some((call) => call.method === "POST" && call.path === "/api/v1/sessions"),
+      ).toBe(true);
+    });
+    const spawn = api.calls.find(
+      (call) => call.method === "POST" && call.path === "/api/v1/sessions",
+    );
+    expect(spawn?.body).toMatchObject({
+      projectId: OPS.id,
+      workspace: {
+        kind: "ephemeral",
+        checkouts: [{ resourceId: R_INFRA.id }, { resourceId: R_RUNBOOKS.id }],
+      },
+    });
+  });
+
+  it("preselects the workspace named in the address", async () => {
+    await openAt(`/threads/new?project=${WEBSHOP.id}&workspace=${W_RUN_3F1.id}`);
+
+    expect(await screen.findByRole("button", { name: /^workspace hydra\/run-3f1$/ })).toBeDefined();
+  });
+});
+
+describe("Composer: the branch selector (AC-18)", () => {
+  it("lists the main workspace's branches, badges the one it is on and dims one a workspace holds", async () => {
+    const user = userEvent.setup();
+    await openAt(inProject(WEBSHOP.id));
+
+    const menu = await openBranchMenu(user, /main/);
+    const text = reading(menu);
+
+    expect(text).toContain("Branch");
+    expect(text).toContain("the checkout switches to it");
+    expect(text).toContain("release/2.4");
+    expect(text).toContain("current");
+    // `hydra/run-3f1` is a branch of the primary, but a ready ephemeral on the
+    // same machine is sitting on it, so it is dimmed with what holds it.
+    expect(text).toContain("in workspace hydra/run-3f1");
+    expect(within(menu).queryByRole("button", { name: /hydra\/run-3f1/ })).toBeNull();
+  });
+
+  // R6: the branch is what is being picked and is read whole; what holds it is
+  // a note about it, so the note is what gives when the row runs out of room.
+  it("keeps a held branch whole, cuts the note that holds it, and keeps it right-aligned", async () => {
+    const user = userEvent.setup();
+    await openAt(inProject(WEBSHOP.id));
+
+    const menu = await openBranchMenu(user, /main/);
+
+    // The annotation is the cell that gives, and carries the whole of itself
+    // as its title so what is cut is still readable.
+    const note = within(menu).getByTitle("in workspace hydra/run-3f1");
+    expect(note.className).toContain("truncate");
+
+    // The branch is read whole: its cell takes what it needs and never cuts.
+    const branch = within(menu).getByText("hydra/run-3f1", { selector: "span.font-mono" });
+    expect(branch.parentElement?.className).not.toContain("truncate");
+
+    // And the note keeps the row's right edge: its column is the wide one and
+    // its contents sit at the end of it, as every other row's badge does.
+    const cell = note.parentElement;
+    expect(cell?.className).toContain("justify-end");
+    expect(cell?.parentElement?.className).toContain("grid-cols-[auto_auto_minmax(0,1fr)]");
+  });
+
+  it("switches the lip and the lead to the branch that was picked", async () => {
+    const user = userEvent.setup();
+    await openAt(inProject(WEBSHOP.id));
+
+    await openBranchMenu(user, /main/);
+    await pickRow(user, /release\/2\.4/);
+
+    await waitFor(() => {
+      expect(reading()).toContain(
+        "It works in the main workspace of webshop on moss, on release/2.4. You and the agent share the files.",
+      );
+    });
+    expect(await screen.findByRole("button", { name: /release\/2\.4/ })).toBeDefined();
+  });
+
+  it("asks for a base branch on a new workspace, badging the default and saying where it starts", async () => {
+    const user = userEvent.setup();
+    await openAt(inProject(WEBSHOP.id));
+
+    await openWorkspaceMenu(user);
+    await pickRow(user, /New workspace/);
+
+    const lip = await screen.findByRole("button", { name: /^from main$/ });
+    expect(lip).toBeDefined();
+
+    await user.click(lip);
+    const menu = await screen.findByRole("dialog");
+    const text = reading(menu);
+
+    expect(text).toContain("Base branch");
+    expect(text).toContain("the new branch starts from it");
+    expect(text).toContain("default");
+    expect(text).toContain(
+      "The new branch is hydra/run-…, named after the thread, and starts from origin/main when the remote has it.",
+    );
+  });
+
+  it("reads the bases side by side, and takes no pick, in a multi-repo project", async () => {
+    const user = userEvent.setup();
+    await openAt(inProject(OPS.id));
+
+    const lip = await screen.findByText("from master · main");
+    expect(lip.closest("button")).toBeNull();
+
+    // Nothing opens behind it: there is no base to pick per repo in v1.
+    await user.click(lip);
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("reads default, with nothing to pick, on a repo no machine has cloned", async () => {
+    const user = userEvent.setup();
+    await openAt(inProject(EDGE.id));
+
+    const lip = await screen.findByText("default");
+    expect(lip.closest("button")).toBeNull();
+
+    await user.click(lip);
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("is absent on a joined workspace, and on a draft with no workspace at all", async () => {
+    const user = userEvent.setup();
+    const joined = await openAt(inProject(WEBSHOP.id));
+
+    await openWorkspaceMenu(user);
+    await pickRow(user, /hydra\/run-3f1/);
+    await waitFor(() => {
+      expect(screen.queryByText("Branch")).toBeNull();
+    });
+    expect(screen.queryByRole("button", { name: /^from / })).toBeNull();
+    joined.unmount();
+
+    // D-20d: None stands alone in a project with no repo, and carries no branch.
+    await openAt(inProject(SANDBOX.id));
+    await waitFor(() => {
+      expect(screen.queryByText("Branch")).toBeNull();
+    });
+    expect(screen.queryByRole("button", { name: /^from / })).toBeNull();
+  });
+});
+
+describe("Composer: the machine selector follows the workspace (AC-19)", () => {
+  it("is read-only, naming the workspace, once the thread joins one", async () => {
+    const user = userEvent.setup();
+    await openAt(inProject(WEBSHOP.id));
+
+    await openWorkspaceMenu(user);
+    await pickRow(user, /hydra\/run-8a0/);
+
+    const locked = await screen.findByText("set by the workspace hydra/run-8a0");
+    expect(locked.closest("button")).toBeNull();
+    await user.click(locked);
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("keeps a machine without the repo pickable, saying it clones on first use", async () => {
+    const user = userEvent.setup();
+    await openAt(inProject(EDGE.id));
+
+    await user.click(await screen.findByRole("button", { name: /^machine moss/ }));
+    const menu = await screen.findByRole("dialog");
+
+    expect(reading(menu)).toContain("edge-api is not cloned there · clones on first use");
+    // "not cloned" is a wait, not a refusal: the row stays a button. Asserted
+    // on moss rather than on cove (D-15), which this fixture dims for a reason
+    // of its own - no provider instance was ever probed there - and which
+    // #160's own rule (a dimmed row is inert) keeps inert whatever this ticket
+    // does.
+    expect(within(menu).getByRole("button", { name: /moss/ })).toBeDefined();
+  });
+});
+
+/* ------------------------------------------------------------------ *
+ * D-20b: repo setup left the composer. The add-repo and adopt forms in
+ * the workspace menu's foot are gone, and a project and its sources are
+ * made in the New project dialog, opened from the sidebar or from the
+ * picker's New project row.
+ * ------------------------------------------------------------------ */
+
+describe("The New project dialog (D-20b)", () => {
+  const NEW_PROJECT = project("01a06d02-7000-7000-8000-000000000009", "checkout");
+
+  const NEW_REPO = repo("01a06d02-7100-7000-8000-000000000009", "acme", "checkout", [
+    NEW_PROJECT.id,
+  ]);
+
+  /** Opens the dialog from the sidebar's own icon beside Create new thread. */
+  const openDialog = async (user: ReturnType<typeof userEvent.setup>): Promise<HTMLElement> => {
+    await user.click(await screen.findByRole("button", { name: "New project" }));
+    return screen.findByRole("dialog", { name: "New project" });
+  };
+
+  it("creates the project, then a resource per source, and opens a draft in it", async () => {
+    const user = userEvent.setup();
+    const { api, router } = await openAt(
+      "/threads/new",
+      {},
+      {
+        "POST /api/v1/projects": { body: NEW_PROJECT },
+        "POST /api/v1/resources": { body: NEW_REPO },
+      },
+    );
+
+    const dialog = await openDialog(user);
+    await user.type(within(dialog).getByLabelText("Name"), "checkout");
+    await user.click(within(dialog).getByRole("button", { name: "+ Git repository" }));
+
+    await user.type(
+      await within(dialog).findByLabelText("Remote URL"),
+      "git@github.com:acme/checkout.git",
+    );
+    await user.selectOptions(within(dialog).getByLabelText("GitHub account"), GITHUB.id);
+    await user.type(within(dialog).getByLabelText("Setup command"), "pnpm install");
+    await user.click(within(dialog).getByRole("button", { name: "Create project" }));
+
+    await waitFor(() => {
+      expect(router.state.location.href).toBe(inProject(NEW_PROJECT.id));
+    });
+    expect(
+      api.calls.find((call) => call.method === "POST" && call.path === "/api/v1/projects")?.body,
+    ).toEqual({ name: "checkout" });
+    expect(
+      api.calls.find((call) => call.method === "POST" && call.path === "/api/v1/resources")?.body,
+    ).toEqual({
+      kind: "repo",
+      remote: "git@github.com:acme/checkout.git",
+      connectionId: GITHUB.id,
+      setupCommand: "pnpm install",
+      projectIds: [NEW_PROJECT.id],
+    });
+  });
+
+  it("offers only the GitHub connections, and says what an account is for", async () => {
+    const user = userEvent.setup();
+    await openAt("/threads/new");
+
+    const dialog = await openDialog(user);
+    await user.click(within(dialog).getByRole("button", { name: "+ Git repository" }));
+
+    const select = await within(dialog).findByLabelText<HTMLSelectElement>("GitHub account");
+    const offered = [...select.options].map((option) => option.textContent);
+    expect(offered).toContain(GITHUB.label);
+    expect(offered).not.toContain(SLACK.label);
+    expect(reading(dialog)).toContain("A private repo needs one.");
+  });
+
+  it("refuses a remote git would not take before anything is sent", async () => {
+    const user = userEvent.setup();
+    const { api } = await openAt(
+      "/threads/new",
+      {},
+      { "POST /api/v1/projects": { body: NEW_PROJECT } },
+    );
+
+    const dialog = await openDialog(user);
+    await user.type(within(dialog).getByLabelText("Name"), "checkout");
+    await user.click(within(dialog).getByRole("button", { name: "+ Git repository" }));
+    await user.type(await within(dialog).findByLabelText("Remote URL"), "/Users/rogier/code/x");
+    await user.click(within(dialog).getByRole("button", { name: "Create project" }));
+
+    expect((await within(dialog).findByRole("alert")).textContent).toBe(
+      "Write an https:// URL or git@host:owner/repo",
+    );
+    expect(
+      api.calls.some(
+        (call) =>
+          call.method === "POST" &&
+          (call.path === "/api/v1/projects" || call.path === "/api/v1/resources"),
+      ),
+    ).toBe(false);
+  });
+
+  it("shows the API's refusal beside the source it was about", async () => {
+    const user = userEvent.setup();
+    const { router } = await openAt(
+      "/threads/new",
+      {},
+      {
+        "POST /api/v1/projects": { body: NEW_PROJECT },
+        "POST /api/v1/resources": {
+          status: 409,
+          body: envelope("conflict", "that repo is already a resource"),
+        },
+      },
+    );
+
+    const dialog = await openDialog(user);
+    await user.type(within(dialog).getByLabelText("Name"), "checkout");
+    await user.click(within(dialog).getByRole("button", { name: "+ Git repository" }));
+    await user.type(
+      await within(dialog).findByLabelText("Remote URL"),
+      "git@github.com:acme/webshop.git",
+    );
+    await user.click(within(dialog).getByRole("button", { name: "Create project" }));
+
+    expect((await within(dialog).findByRole("alert")).textContent).toBe(
+      "that repo is already a resource",
+    );
+    // The dialog stands: nothing is navigated away from what was refused.
+    expect(router.state.location.href).toBe("/threads/new");
+  });
+
+  // R4: a project made before a source was refused is not left unseen - the
+  // way out opens the draft in it, with what was refused simply not made.
+  it("opens the draft in the project it made when the dialog is left after a refusal", async () => {
+    const user = userEvent.setup();
+    const { router } = await openAt(
+      "/threads/new",
+      {},
+      {
+        "POST /api/v1/projects": { body: NEW_PROJECT },
+        "POST /api/v1/resources": {
+          status: 409,
+          body: envelope("conflict", "that repo is already a resource"),
+        },
+      },
+    );
+
+    const dialog = await openDialog(user);
+    await user.type(within(dialog).getByLabelText("Name"), "checkout");
+    await user.click(within(dialog).getByRole("button", { name: "+ Git repository" }));
+    await user.type(
+      await within(dialog).findByLabelText("Remote URL"),
+      "git@github.com:acme/webshop.git",
+    );
+    await user.click(within(dialog).getByRole("button", { name: "Create project" }));
+    await within(dialog).findByRole("alert");
+
+    await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
+
+    await waitFor(() => {
+      expect(router.state.location.href).toBe(inProject(NEW_PROJECT.id));
+    });
+    expect(screen.queryByRole("dialog", { name: "New project" })).toBeNull();
+  });
+
+  it("names the project before anything is sent", async () => {
+    const user = userEvent.setup();
+    const { api } = await openAt("/threads/new");
+
+    const dialog = await openDialog(user);
+    await user.click(within(dialog).getByRole("button", { name: "Create project" }));
+
+    expect((await within(dialog).findByRole("alert")).textContent).toBe("Name the project");
+    expect(
+      api.calls.some(
+        (call) =>
+          call.method === "POST" &&
+          (call.path === "/api/v1/projects" || call.path === "/api/v1/resources"),
+      ),
+    ).toBe(false);
+  });
+
+  // R6: a modal says what it is and takes the focus, as the picker does.
+  it("is a modal dialog named after itself, with the focus in it", async () => {
+    const user = userEvent.setup();
+    await openAt("/threads/new");
+
+    const dialog = await openDialog(user);
+    expect(dialog.getAttribute("aria-modal")).toBe("true");
+    expect(dialog.contains(document.activeElement)).toBe(true);
+  });
+
+  it("closes on Cancel and on Esc", async () => {
+    const user = userEvent.setup();
+    await openAt("/threads/new");
+
+    const dialog = await openDialog(user);
+    await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: "New project" })).toBeNull();
+    });
+
+    await openDialog(user);
+    await user.keyboard("{Escape}");
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: "New project" })).toBeNull();
+    });
+  });
+
+  it("leaves no add-repo or adopt form in the workspace menu", async () => {
+    const user = userEvent.setup();
+    await openAt(inProject(WEBSHOP.id));
+
+    const menu = await openWorkspaceMenu(user);
+    const text = reading(menu);
+    expect(text).not.toContain("Add a repo");
+    expect(text).not.toContain("Adopt a folder");
   });
 });

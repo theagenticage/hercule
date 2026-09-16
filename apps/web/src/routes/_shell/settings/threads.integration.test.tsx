@@ -5,7 +5,7 @@
 import { describe, expect, it } from "vitest";
 import { screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type { Profile, ProviderInstance, Runner } from "@hydra/contract";
+import type { Connection, Profile, ProviderInstance, Runner } from "@hydra/contract";
 import { envelope, renderApp, stubApi, type Call, type Handler } from "../../../app/testing";
 
 const RUNNER_LOCAL: Runner = {
@@ -300,5 +300,138 @@ describe("Settings > Threads defaults", () => {
     for (const field of [instanceField, modelField, accessGroup, profileField]) {
       expect(isBefore(field, sidebarRows)).toBe(true);
     }
+  });
+});
+
+/* ------------------------------------------------------------------ *
+ * Slice 3 of #72 (AC-22): what a thread opens in, and which GitHub
+ * account a thread with no checkout acts through.
+ *
+ * Readings picked here, where the SPEC names copy but not a handle:
+ * - the two faces of the Workspace control write the `thread.workspace`
+ *   values they stand for: Main workspace -> `primary`, New workspace ->
+ *   `ephemeral` (D-20d dropped None);
+ * - the select's label is the row's own wording, "GitHub account for threads
+ *   without a checkout".
+ * ------------------------------------------------------------------ */
+
+const CONNECTION_AT = "2026-09-10T09:00:00.000Z";
+
+const GITHUB: Connection = {
+  id: "01a06d02-7500-7000-8000-000000000001",
+  type: "github/github",
+  label: "personal",
+  displayName: "rogierpennink",
+  status: "connected",
+  labels: [],
+  config: {},
+  credentials: [],
+  createdAt: CONNECTION_AT,
+  updatedAt: CONNECTION_AT,
+};
+
+const GITHUB_WORK: Connection = {
+  ...GITHUB,
+  id: "01a06d02-7500-7000-8000-000000000002",
+  label: "work",
+  displayName: "acme-bot",
+};
+
+/** A Connection of another type, which this select must not offer. */
+const SLACK: Connection = {
+  ...GITHUB,
+  id: "01a06d02-7500-7000-8000-000000000003",
+  type: "slack",
+  label: "acme",
+  displayName: "acme.slack.com",
+};
+
+const openWithConnections = async (
+  user: Record<string, unknown> = {},
+  connections: readonly Connection[] = [GITHUB, GITHUB_WORK, SLACK],
+) => {
+  const api = stubApi({
+    ...controller(user),
+    "GET /api/v1/connections": { body: { items: connections } },
+  });
+  const app = await renderApp({
+    path: "/settings/threads",
+    api: api.fetch,
+    token: "held",
+    detectLocalRunner: () => Promise.resolve(RUNNER_LOCAL.id),
+  });
+  return { ...app, api };
+};
+
+describe("Settings > Threads: the workspace a thread opens in (AC-22)", () => {
+  it("offers the two faces and writes thread.workspace on pick", async () => {
+    const user = userEvent.setup();
+    const { api } = await openWithConnections({ "thread.workspace": "primary" });
+
+    const group = await screen.findByRole("radiogroup", { name: "Workspace" });
+    for (const face of ["Main workspace", "New workspace"]) {
+      expect(within(group).getByRole("radio", { name: face })).toBeDefined();
+    }
+    // D-20d: a project without a source always runs without a workspace, so
+    // None is not a default anyone picks.
+    expect(within(group).queryByRole("radio", { name: "None" })).toBeNull();
+
+    await user.click(within(group).getByRole("radio", { name: "New workspace" }));
+
+    expect(await screen.findByRole("status")).toBeDefined();
+    expect(writes(api)).toHaveLength(1);
+    expect(writes(api)[0]?.body).toEqual({ user: { "thread.workspace": "ephemeral" } });
+  });
+
+  // D-20d: the fine print is what says a project without a source runs
+  // without a workspace, since there is no face for it any more.
+  it("says in its fine print that a project with no source runs without a workspace", async () => {
+    await openWithConnections();
+
+    const fine = await screen.findByText(/repos/);
+    expect(fine.textContent).toContain("A project with no source always runs without a workspace.");
+  });
+
+  it("says in its fine print that a project with several repos takes a new workspace anyway", async () => {
+    await openWithConnections();
+
+    const fine = await screen.findByText(/repos/);
+    expect(fine.textContent).toContain("New workspace");
+  });
+});
+
+describe("Settings > Threads: the GitHub account a checkout-less thread uses (AC-22)", () => {
+  it("offers only the github connections and writes thread.githubConnectionId on pick", async () => {
+    const user = userEvent.setup();
+    const { api } = await openWithConnections();
+
+    const field = await screen.findByLabelText<HTMLSelectElement>(
+      "GitHub account for threads without a checkout",
+    );
+    const offered = [...field.options].map((option) => option.textContent);
+    expect(offered).toContain(GITHUB.label);
+    expect(offered).toContain(GITHUB_WORK.label);
+    expect(offered).not.toContain(SLACK.label);
+
+    await user.selectOptions(field, GITHUB_WORK.id);
+
+    expect(await screen.findByRole("status")).toBeDefined();
+    expect(writes(api)).toHaveLength(1);
+    expect(writes(api)[0]?.body).toEqual({
+      user: { "thread.githubConnectionId": GITHUB_WORK.id },
+    });
+  });
+
+  it("clears the setting rather than storing an empty id when no account is picked", async () => {
+    const user = userEvent.setup();
+    const { api } = await openWithConnections({ "thread.githubConnectionId": GITHUB.id });
+
+    const field = await screen.findByLabelText<HTMLSelectElement>(
+      "GitHub account for threads without a checkout",
+    );
+    await user.selectOptions(field, "");
+
+    expect(await screen.findByRole("status")).toBeDefined();
+    expect(writes(api)[0]?.body).toEqual({ user: { "thread.githubConnectionId": null } });
   });
 });

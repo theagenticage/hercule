@@ -76,6 +76,7 @@ import {
 import { seed } from "./seed";
 import { cancelStrandedInputs, SessionService, SessionServiceLayer } from "./sessions";
 import { Settings, SettingsLayer, type SettingError } from "./settings";
+import { WorkspaceService, WorkspaceServiceLayer } from "./workspaces";
 
 /** Setup tokens are minted and stored like every other Hydra token. */
 export { hashToken };
@@ -226,6 +227,7 @@ export type ControllerServices =
   | ProviderProbes
   | ProviderService
   | SessionService
+  | WorkspaceService
   | ConnectionService
   | HydraHome
   | BootstrapConfig;
@@ -287,7 +289,11 @@ export const bootWith = <A, E>(
     const withPlugins = Layer.mergeAll(
       PluginsLayer,
       ProviderServiceLayer,
-      SessionServiceLayer,
+      // A spawn asks the workspace service where it is to work, so the session
+      // service is layered on top of that one rather than merged beside it. The
+      // reverse edge - what a machine's report means for the sessions waiting on
+      // a workspace - is the runner socket's, which holds both.
+      SessionServiceLayer.pipe(Layer.provideMerge(WorkspaceServiceLayer)),
       ConnectionServiceLayer,
     ).pipe(
       Layer.provideMerge(PluginHostLayer),

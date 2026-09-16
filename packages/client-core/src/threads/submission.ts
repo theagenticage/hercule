@@ -42,6 +42,10 @@ export const submission = (
   // Nothing unpicked is sent as an empty string: the server has its own
   // fallback for each of these and `Id` refuses one outright.
   const config = effectiveConfig(threadConfig(thread), picks);
+  // A thread that works without a checkout is spelled by leaving `workspace`
+  // off, and a draft that has resolved none says nothing either: neither
+  // `{ kind: "none" }` nor `null` is a value the contract has a field for.
+  const workspace = config.workspace ?? null;
   return {
     kind: "spawn",
     input: {
@@ -52,7 +56,10 @@ export const submission = (
       accessMode: config.accessMode,
       ...(config.runnerId === null ? {} : { runnerId: config.runnerId }),
       ...(config.profileId === null ? {} : { permissionProfileId: config.profileId }),
-      workspaceId: null,
+      ...(config.projectId === null || config.projectId === undefined
+        ? {}
+        : { projectId: config.projectId }),
+      ...(workspace === null || workspace.kind === "none" ? {} : { workspace }),
     },
   };
 };

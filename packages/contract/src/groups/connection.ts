@@ -35,6 +35,14 @@ import { Label, MAX_TASK_LABELS } from "./task";
 /** Re-exported from the package plugins are written against: one list, two readers. */
 export { ConnectionStatus } from "@hydra/plugin-host";
 
+/**
+ * The shipped GitHub type, by the qualified id the host mints for it. A repo's
+ * credential is a GitHub token, so a repo may act through no other account, and
+ * every reader of that rule - the controller, the CLI, the web app's account
+ * pickers - names it from here rather than spelling the id again.
+ */
+export const GITHUB_CONNECTION_TYPE = "github/github";
+
 /** The longest user-given label: "work", "personal". */
 export const MAX_CONNECTION_LABEL_LENGTH = 128;
 
@@ -176,7 +184,7 @@ export const connection = HttpApiGroup.make("connection")
     HttpApiEndpoint.delete("delete", "/connections/:id", {
       params: { id: Id },
       success: Schema.Struct({}),
-      error: [Unauthenticated, Forbidden, Validation, NotFound, Internal],
+      error: [Unauthenticated, Forbidden, Validation, NotFound, InvalidState, Internal],
     }),
     HttpApiEndpoint.post("setCredentials", "/connections/:id/credentials", {
       params: { id: Id },

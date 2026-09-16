@@ -39,6 +39,33 @@ export const SessionId = Schema.String.check(
   Schema.isPattern(/^[A-Za-z0-9_-]+$/, { title: "session id", description: "an identifier" }),
 );
 
+/**
+ * An id a machine makes a directory of, or removes one by: a workspace, a
+ * resource's cache, a checkout. Narrow for the reason a session's id is: these
+ * are joined into paths under the runner's storage directory and a dispose
+ * removes what they name, so a segment that could climb out of that root would
+ * be a path traversal with an `rm -rf` behind it.
+ */
+export const StorageId = Schema.String.check(
+  Schema.isLengthBetween(1, 64),
+  Schema.isPattern(/^[A-Za-z0-9_-]+$/, { title: "storage id", description: "an identifier" }),
+);
+
+/**
+ * Where one checkout sits inside a multi-repo workspace: one path segment with
+ * no separator in it, and none of the three names a directory cannot be called
+ * - `.` and `..` are the workspace and what is above it, and `.git` is git's
+ * own. A repository may well be called `.github`, so a leading dot on its own
+ * is no reason to refuse one.
+ */
+export const Subdirectory = Schema.String.check(
+  Schema.isLengthBetween(1, 64),
+  Schema.isPattern(/^(?!\.$|\.\.$|\.git$)[A-Za-z0-9._-]+$/i, {
+    title: "subdirectory",
+    description: "one path segment",
+  }),
+);
+
 /** A position. Counting starts at one: a connection that acked nothing sends no ack. */
 export const Seq = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1));
 

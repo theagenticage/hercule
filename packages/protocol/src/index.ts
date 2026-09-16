@@ -11,7 +11,15 @@
  */
 import { Schema } from "effect";
 
-import { Fact, InstanceId, MAX_FACT_LENGTH, Seq, Sequenced } from "./primitives";
+import {
+  Fact,
+  InstanceId,
+  MAX_FACT_LENGTH,
+  Seq,
+  Sequenced,
+  StorageId,
+  Subdirectory,
+} from "./primitives";
 import {
   SessionEvent,
   SessionInput,
@@ -22,9 +30,18 @@ import {
   SessionStart,
   SessionStop,
 } from "./sessions";
+import {
+  CredentialAnswer,
+  CredentialRequest,
+  WorkspaceDispose,
+  WorkspaceProvision,
+  WorkspaceReport,
+} from "./workspaces";
 
+export * from "./remote";
 export * from "./sessions";
-export { Fact, InstanceId, MAX_FACT_LENGTH, Sequenced };
+export * from "./workspaces";
+export { Fact, InstanceId, MAX_FACT_LENGTH, Sequenced, StorageId, Subdirectory };
 
 export const PROTOCOL_VERSION = 1;
 
@@ -438,6 +455,8 @@ export const RunnerToController = Schema.Union([
   SessionEvent,
   SessionInputResult,
   SessionsReport,
+  WorkspaceReport,
+  CredentialRequest,
   Goodbye,
 ]);
 
@@ -515,6 +534,9 @@ export const ControllerToRunner = Schema.Union([
   SessionInput,
   SessionInterrupt,
   SessionRespond,
+  WorkspaceProvision,
+  WorkspaceDispose,
+  CredentialAnswer,
 ]);
 
 export type ControllerToRunner = Schema.Schema.Type<typeof ControllerToRunner>;

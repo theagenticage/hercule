@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 import { Effect } from "effect";
 import type { RunnerToController } from "@hydra/protocol";
 import type { Machine } from "../sessions/context";
+import { makeWorkspaces } from "../workspaces";
 import { supervising } from "../sessions/supervisor";
 import { ADAPTER_IDS, adapterFor, adapters } from "./index";
 
@@ -37,6 +38,8 @@ describe("the adapters this runner build carries", () => {
       controllerUrl: "https://controller.example:4938",
       baseEnv: { PATH: "/usr/bin" },
       binaryOf: () => undefined,
+      workspaces: makeWorkspaces({ storageDir: "/var/hydra/runner" }),
+      socketPath: "/var/hydra/runner/daemon.sock",
     };
     const supervisor = supervising(adapters).forConnection({
       machine,

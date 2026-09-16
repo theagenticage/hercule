@@ -11,13 +11,15 @@
 import type { AccessMode } from "@hydra/contract";
 import type { ThreadCatalogs, ThreadConfig, ThreadPicks } from "./config";
 import { instanceDefaults } from "./thread-defaults";
+import type { WorkspacePick } from "./workspaces";
 
 export type ComposerPick =
   | { readonly kind: "model"; readonly value: string }
   | { readonly kind: "instanceId"; readonly value: string }
   | { readonly kind: "option"; readonly id: string; readonly value: string | boolean }
   | { readonly kind: "accessMode"; readonly value: AccessMode }
-  | { readonly kind: "runnerId"; readonly value: string };
+  | { readonly kind: "runnerId"; readonly value: string }
+  | { readonly kind: "workspace"; readonly value: WorkspacePick };
 
 type Key = keyof ThreadPicks;
 
@@ -70,5 +72,11 @@ export const applyPick = (
       return config.runnerId === pick.value
         ? revert(picks, "runnerId", "options")
         : { ...withoutOptions(picks), runnerId: pick.value };
+    // Unlike the others, a workspace pick is not compared against the config:
+    // what the config holds is `null` until something is picked, and the value
+    // that stands in its place is a default resolved from the catalogs, not a
+    // value this function can see.
+    case "workspace":
+      return { ...picks, workspace: pick.value };
   }
 };

@@ -83,13 +83,23 @@ export function SendButton({
   );
 }
 
-/** The pill's face: the mark, the account where a provider has two, the model. */
+/**
+ * The pill's face: the mark, the account where a provider has two, the model.
+ *
+ * A row of its own rather than three things in a line of text: the mark is an
+ * `svg`, which is a block, and a block in a line of text breaks it. The name
+ * is the only part that may be clipped - a model called `Default
+ * (recommended)` is cut with an ellipsis rather than growing the pill a second
+ * line (spec 14 §Measurements, the pill holds still).
+ */
 export function PillLabel({ pill }: { readonly pill: ModelPill }): JSX.Element {
   return (
-    <>
+    <span className="flex min-w-0 items-center gap-1.5">
       {pill.providerId === null ? null : <ProviderLogo providerId={pill.providerId} />}
-      {pill.account === null ? null : <span className="text-faint">{pill.account}</span>}{" "}
-      <span>{pill.name ?? "No model"}</span>
-    </>
+      {pill.account === null ? null : (
+        <span className="shrink-0 text-faint">{pill.account}</span>
+      )}{" "}
+      <span className="truncate">{pill.name ?? "No model"}</span>
+    </span>
   );
 }

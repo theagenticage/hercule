@@ -85,6 +85,26 @@ describe("dispatch", () => {
     expect(run.cli).not.toHaveBeenCalled();
   });
 
+  // The git credential helper is a runner-side subcommand: it talks to the
+  // daemon's socket, not to the public API, and git invokes it per request.
+  it("sends git-credential to the runner", async () => {
+    await dispatch(["git-credential", "get"]);
+    expect(run.runner).toHaveBeenCalledWith(["get"]);
+    expect(run.cli).not.toHaveBeenCalled();
+
+    await dispatch(["--home=/tmp/h", "git-credential", "store"]);
+    expect(run.runner).toHaveBeenCalledWith(["--home=/tmp/h", "store"]);
+    expect(run.cli).not.toHaveBeenCalled();
+  });
+
+  // git always names an action. A bare `hydra git-credential` must not read as
+  // `hydra runner` and start a daemon, so the word itself rides along.
+  it("keeps git-credential in the line when no action follows it", async () => {
+    await dispatch(["git-credential"]);
+    expect(run.runner).toHaveBeenCalledWith(["git-credential"]);
+    expect(run.cli).not.toHaveBeenCalled();
+  });
+
   it("sends everything else to the CLI", async () => {
     await dispatch(["task", "list"]);
     expect(run.cli).toHaveBeenCalledWith(["task", "list"]);

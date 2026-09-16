@@ -114,6 +114,9 @@ const DEFAULT_SORT: { field: ConnectionSortField; direction: SortDirection } = {
 
 const NO_SUCH_CONNECTION = "no such connection";
 
+const NAMED_BY_RESOURCE =
+  "a resource still acts through that connection; point it elsewhere before removing it";
+
 /** A type as the host registered it: the catalog half, plus its `validate`. */
 type Contribution = RegisteredConnectionType["contribution"];
 
@@ -700,12 +703,16 @@ const make = Effect.gen(function* () {
         (outcome) => `/connections?oauth=${outcome}`,
       ),
 
-    /** Removes the connection and every secret it owned, in one transaction. */
+    /**
+     * Removes the connection and every secret it owned, in one transaction.
+     * A connection a resource still acts through is refused: taking it away
+     * would leave that repo with a credential that no longer exists.
+     */
     delete: (
       input: Identified,
     ): Effect.Effect<
       Record<string, never>,
-      Unauthenticated | Forbidden | Validation | NotFound | SqlError
+      Unauthenticated | Forbidden | Validation | NotFound | InvalidState | SqlError
     > =>
       Effect.gen(function* () {
         yield* requireGrant("connection.delete");
@@ -714,6 +721,12 @@ const make = Effect.gen(function* () {
         yield* withTransaction(
           sql,
           Effect.gen(function* () {
+            // Inside the transaction that deletes: a resource pointed at this
+            // connection between the check and the delete would be left naming
+            // a connection that is gone.
+            if (yield* connections.namedByResource(id)) {
+              return yield* Effect.fail(invalidState(NAMED_BY_RESOURCE));
+            }
             const at = yield* nowIso;
             const owner = ownerOf(id);
             const names =

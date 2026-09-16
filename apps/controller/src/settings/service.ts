@@ -12,6 +12,7 @@
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import {
@@ -23,6 +24,7 @@ import {
   type Validation,
 } from "@hydra/contract";
 import { currentUser, USER_ACTOR } from "../actor";
+import { connectionRepository, isGithubConnection } from "../connections";
 import { withTransaction } from "../db";
 import { AuditLog } from "../events";
 import { Settings, type SettingError, type TypedScope } from "./repository";
@@ -33,10 +35,35 @@ interface WrittenKey {
   readonly key: string;
 }
 
+/** The one key whose value names another record, which has to be the right one. */
+const THREAD_GITHUB = "thread.githubConnectionId";
+
+const NOT_GITHUB = "that connection is not a github one";
+
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const settings = yield* Settings;
+  const connections = yield* connectionRepository;
   const audit = yield* AuditLog;
+
+  /**
+   * A thread with no checkout of its own pushes as this account, so a key
+   * naming something that is not a GitHub connection would be a setting that
+   * can only fail later, on a machine.
+   */
+  const checkedGithubConnection = (
+    patch: SettingsPatch,
+  ): Effect.Effect<void, Validation | SqlError> =>
+    Effect.gen(function* () {
+      const connectionId = patch.user?.[THREAD_GITHUB];
+      if (connectionId === undefined || connectionId === null) return;
+      const found = yield* connections.one(connectionId);
+      if (Option.isNone(found) || !isGithubConnection(found.value)) {
+        return yield* Effect.fail(
+          validation([{ path: ["user", THREAD_GITHUB], message: NOT_GITHUB }]),
+        );
+      }
+    });
 
   const state = (userId: string): Effect.Effect<SettingsState, SettingError | SqlError> =>
     Effect.all({ controller: settings.all(), user: settings.allForUser(userId) });
@@ -110,6 +137,9 @@ const make = Effect.gen(function* () {
         return yield* withTransaction(
           sql,
           Effect.gen(function* () {
+            // Inside the transaction that writes: a connection deleted between
+            // the check and the write would leave a setting naming nothing.
+            yield* checkedGithubConnection(patch);
             const written = [
               ...(patch.controller === undefined
                 ? []

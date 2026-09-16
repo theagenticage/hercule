@@ -24,9 +24,9 @@ import {
   queryKeysFor,
   type FetchLike,
   type Live,
-  type LiveDelta,
   type LiveQueryKey,
 } from "../index";
+import type { LiveDelta } from "./live";
 import { STUB_SERVER_VERSION as SERVER_VERSION, StubSocket, openInto } from "./socket-stub";
 
 const BASE = "http://controller.test";

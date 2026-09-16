@@ -6,13 +6,7 @@
  * the three error classes below - nothing else.
  */
 export { actorReading, type ActorReading } from "./actor-display";
-export {
-  createClient,
-  type ClientOptions,
-  type FetchLike,
-  type HydraClient,
-  type Operations,
-} from "./client";
+export { createClient, type FetchLike, type HydraClient } from "./client";
 export {
   configDraft,
   configFields,
@@ -20,64 +14,42 @@ export {
   configPayload,
   type ConfigDraft,
   type ConfigField,
-  type ConfigFieldKind,
   type ConfigJson,
   type ConfigValue,
 } from "./config-fields";
 export {
   connectionTypes,
   credentialFieldsOf,
+  githubConnections,
   redirectUriFor,
   setupFlowOf,
   type ConnectionType,
   type CredentialField,
   type SetupStep,
 } from "./connections";
-export { ApiError, ConnectionError, RequestError, type ErrorEnvelope } from "./errors";
-export { ID_TAIL, idTail } from "./id-tail";
+export { ApiError, ConnectionError, RequestError } from "./errors";
+export { idTail } from "./id-tail";
 export { joinCommand } from "./join-command";
 export {
   retireQuestion,
   runnerConflictField,
   runnerDraft,
   runnerPatch,
-  type RetireQuestion,
   type RunnerDraft,
 } from "./runner-edit";
 export { runnerFactsReading, type RunnerFactsReading } from "./runner-facts";
-export {
-  createLive,
-  type Live,
-  type LiveDelta,
-  type LiveDeltaHandler,
-  type LiveInvalidateHandler,
-  type LiveOptions,
-  type LiveStatus,
-  type LiveWebSocketConstructor,
-} from "./live/live";
+export { createLive, type Live } from "./live/live";
 export { queryKeys, queryKeysFor, type LiveQueryKey } from "./live/keys";
-export {
-  detectLocalRunner,
-  loopbackEndpoints,
-  IDENTITY_TIMEOUT_MS,
-  type LoopbackEndpoint,
-} from "./local-runner";
+export { detectLocalRunner, loopbackEndpoints } from "./local-runner";
 export { refusalReason } from "./plugin-refusal";
 export { capacityLine, queuedSessions, RUNNING_STATUSES } from "./runner-capacity";
 export { providerRows, type ProviderRow } from "./provider-rows";
-export { sessionsEmptyState, type SessionsEmptyState } from "./sessions-empty-state";
-export { nextOnboardingStep, ONBOARDING_STEPS, type OnboardingStep } from "./onboarding";
-export { formatBytes } from "./format-bytes";
+export { sessionsEmptyState } from "./sessions-empty-state";
+export { nextOnboardingStep, type OnboardingStep } from "./onboarding";
 export { formatSince, formatStamp, formatTimeContext } from "./time-context";
-export {
-  priorityGlyph,
-  provenanceTarget,
-  taskRecedes,
-  type GlyphTone,
-  type PriorityReading,
-} from "./task-display";
-export { THREAD_ROWS_DEFAULT, threadRowsMode } from "./thread-rows";
-export { accessModeMenu, type AccessModeMenuItem } from "./threads/access-modes";
+export { priorityGlyph, provenanceTarget, taskRecedes, type GlyphTone } from "./task-display";
+export { threadRowsMode } from "./thread-rows";
+export { type AccessModeMenuItem } from "./threads/access-modes";
 export { ageOf } from "./threads/age";
 export { approvalCard } from "./threads/approval";
 export { applyPick, type ComposerPick } from "./threads/apply-pick";
@@ -98,41 +70,54 @@ export type {
   ThreadKind,
   ThreadPicks,
 } from "./threads/config";
-export { defaultInstanceId } from "./threads/default-instance";
 export { formatDuration } from "./threads/duration";
 export { headlineOf, lanesOf, type Lane, type LaneKind } from "./threads/lanes";
-export {
-  threadModelField,
-  type ThreadModelField,
-  type ThreadModelFieldOption,
-} from "./threads/model-field";
+export { threadModelField } from "./threads/model-field";
 export { modelMenu, type ModelMenu } from "./threads/model-menu";
 export { openItemOf } from "./threads/open-item";
 export { mergeTranscript } from "./threads/transcript";
 export { optionsLabel } from "./threads/options-label";
-export { optionsMenu, type ModelOptionRow } from "./threads/options-menu";
+export { optionsMenu } from "./threads/options-menu";
 export { pushRecent, type RecentModel } from "./threads/recent";
 export { resumeBlockedReason } from "./threads/resume-blocked";
 export { threadRows, type ThreadRow } from "./threads/rows";
 export {
-  referenceRunner,
-  runnerMenu,
-  type RunnerMenu,
-  type RunnerMenuRow,
-} from "./threads/runner-menu";
-export { submission, type Submission } from "./threads/submission";
-export { instanceDefaults, threadDefaults, type ThreadDefaults } from "./threads/thread-defaults";
+  threadGroups,
+  type DraftPlace,
+  draftPlace,
+  type ProjectGroup,
+  type WorkspaceGroup,
+} from "./threads/groups";
+export { siblingTabs, type ThreadTab } from "./threads/siblings";
+export { projectPickerRows, type ProjectPickerRow } from "./threads/projects";
+export { projectTone, type ProjectTone } from "./threads/tone";
+export { branchField, type BranchField } from "./threads/branch-menu";
+export { workspaceMenu, type WorkspaceMenu } from "./threads/workspace-menu";
+export { isClonableRemote, REMOTE_REFUSAL } from "./remote";
+export {
+  composerPlaceholder,
+  draftSubject,
+  labelText,
+  phraseText,
+  preferredWorkspaceOf,
+  projectRepos,
+  repoName,
+  runnerForPick,
+  withBranch,
+  workspaceName,
+  type DraftSubject,
+  type Phrase,
+  type WorkspaceLabel,
+  type WorkspacePick,
+} from "./threads/workspaces";
+export { runnerMenu } from "./threads/runner-menu";
+export { submission } from "./threads/submission";
+export { instanceDefaults, threadDefaults } from "./threads/thread-defaults";
 export { turnsOf, type ThreadItem, type ThreadTurn } from "./threads/turns";
 export {
   browserTimezone,
   FALLBACK_TIMEZONE,
   isSupportedTimezone,
   supportedTimezones,
-  type TimezoneResolver,
 } from "./timezone";
-export {
-  createTokenStore,
-  tokenStorageKey,
-  type StorageLike,
-  type TokenStore,
-} from "./token-store";
+export { createTokenStore } from "./token-store";

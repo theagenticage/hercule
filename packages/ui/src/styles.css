@@ -96,6 +96,8 @@
   --attn-soft: rgba(138, 97, 22, 0.09);
   --project-hydra: #7d7ab0;
   --project-ops: #a67f92;
+  /* What an overlay dims the page behind it with. */
+  --scrim: rgba(23, 26, 33, 0.22);
 
   --sans: "Onest", -apple-system, system-ui, sans-serif;
   --mono: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
@@ -126,6 +128,7 @@
     --attn-soft: rgba(208, 161, 71, 0.12);
     --project-hydra: #9490c9;
     --project-ops: #bd93a8;
+    --scrim: rgba(0, 0, 0, 0.45);
   }
 }
 
@@ -151,6 +154,7 @@
   --attn-soft: rgba(208, 161, 71, 0.12);
   --project-hydra: #9490c9;
   --project-ops: #bd93a8;
+  --scrim: rgba(0, 0, 0, 0.45);
 }
 
 /* The type scale and radii are Tailwind theme values outright: nothing else
@@ -186,6 +190,7 @@
   --color-ok: var(--ok);
   --color-project-hydra: var(--project-hydra);
   --color-project-ops: var(--project-ops);
+  --color-scrim: var(--scrim);
 
   --font-sans: var(--sans);
   --font-mono: var(--mono);

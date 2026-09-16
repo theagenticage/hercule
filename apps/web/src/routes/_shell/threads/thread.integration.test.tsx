@@ -17,10 +17,13 @@ import type {
   Input,
   ModelOption,
   Profile,
+  Project,
   ProviderInstance,
+  Resource,
   Runner,
   Session,
   TranscriptRow,
+  Workspace,
 } from "@hydra/contract";
 import { sessionStreamTopic, sessionTapTopic } from "@hydra/contract";
 import { envelope, pickRow, reading, renderApp, stubApi, type Handler } from "../../../app/testing";
@@ -37,6 +40,7 @@ const BASE_SESSION: Session = {
   instanceId: "01a06d02-1000-7000-8000-000000000001",
   runnerId: "01a06d02-3000-7000-8000-000000000001",
   workspaceId: null,
+  projectId: null,
   requestedAccessMode: "approval-required",
   accessMode: "approval-required",
   nativeSessionId: null,
@@ -2610,5 +2614,215 @@ describe("Thread: the permission card", () => {
     expect(reading()).toContain(
       "Answering here is not built yet. Cancel the turn, then reply in the thread.",
     );
+  });
+});
+
+/* ------------------------------------------------------------------ *
+ * Slice 3 of #72 (AC-21): the thread's chrome names the project it
+ * belongs to, the workspace's other threads sit beside the title as
+ * tabs, and a thread in a workspace offers a new one beside it.
+ *
+ * Readings picked here, where the SPEC names copy but not a handle:
+ * - the chrome is still the crumb's parent element, as above;
+ * - a sibling tab is a link to that thread, so a tab strip is read by the
+ *   links the chrome holds;
+ * - "+ New thread here" is a link carrying that text.
+ * ------------------------------------------------------------------ */
+
+const AT = "2026-09-10T09:00:00.000Z";
+
+const WEBSHOP: Project = {
+  id: "01a06d02-7000-7000-8000-000000000001",
+  name: "webshop",
+  createdAt: AT,
+  updatedAt: AT,
+};
+
+const R_WEBSHOP: Resource = {
+  id: "01a06d02-7100-7000-8000-000000000001",
+  kind: "repo",
+  remote: "git@github.com:acme/webshop.git",
+  canonicalRemote: "github.com/acme/webshop",
+  label: null,
+  connectionId: null,
+  setupCommand: null,
+  workspaceInclude: true,
+  projectIds: [WEBSHOP.id],
+  createdAt: AT,
+  updatedAt: AT,
+};
+
+const SIBLING_ID = "01a06d02-b100-7000-8000-000000000002";
+
+const ephemeralWorkspace = (sessionIds: readonly string[]): Workspace => ({
+  id: "01a06d02-7200-7000-8000-000000000002",
+  runnerId: RUNNER_STARTED.id,
+  kind: "ephemeral",
+  status: "ready",
+  checkouts: [
+    {
+      checkoutId: "01a06d02-7300-7000-8000-000000000002",
+      resourceId: R_WEBSHOP.id,
+      form: "worktree",
+      subdirectory: null,
+      branch: "hydra/run-3f1",
+      branches: ["hydra/run-3f1"],
+      defaultBranch: "main",
+    },
+  ],
+  designatedConnectionId: null,
+  message: null,
+  sessionIds,
+  createdAt: AT,
+  provisionedAt: AT,
+  lastUsedAt: AT,
+  disposedAt: null,
+});
+
+const primaryWorkspace = (sessionIds: readonly string[]): Workspace => ({
+  ...ephemeralWorkspace(sessionIds),
+  id: "01a06d02-7200-7000-8000-000000000001",
+  kind: "primary",
+  checkouts: [
+    {
+      checkoutId: "01a06d02-7300-7000-8000-000000000001",
+      resourceId: R_WEBSHOP.id,
+      form: "clone",
+      subdirectory: null,
+      branch: "main",
+      branches: ["main"],
+      defaultBranch: "main",
+    },
+  ],
+});
+
+const SIBLING: Session = session({
+  id: SIBLING_ID,
+  title: "Write the retry runbook",
+  status: "busy",
+  projectId: WEBSHOP.id,
+});
+
+/** The world slice 3 adds around one thread: its project and its workspace. */
+const around = (
+  workspaces: readonly Workspace[],
+  sessions: readonly Session[],
+): Readonly<Record<string, Handler>> => ({
+  "GET /api/v1/projects": { body: { items: [WEBSHOP] } },
+  "GET /api/v1/resources": { body: { items: [R_WEBSHOP] } },
+  "GET /api/v1/workspaces": { body: { items: workspaces } },
+  "GET /api/v1/sessions": { body: { items: sessions } },
+  [`GET /api/v1/sessions/${SIBLING_ID}`]: { body: SIBLING },
+  [`GET /api/v1/sessions/${SIBLING_ID}/transcript`]: { body: { items: [] } },
+});
+
+const chromeOf = async (): Promise<HTMLElement> => {
+  const crumb = await waitFor(() => screen.getByText(/\/$/));
+  const row = crumb.parentElement;
+  if (row === null) throw new Error("the crumb stands in no row");
+  return row;
+};
+
+describe("Thread: the chrome names the project and the workspace's threads (AC-21)", () => {
+  const inWorkspace = (workspaceId: string): Session =>
+    session({ status: "idle", projectId: WEBSHOP.id, workspaceId });
+
+  it("crumbs the project a thread belongs to", async () => {
+    const fixture = inWorkspace(ephemeralWorkspace([SESSION_ID]).id);
+    await open(fixture, twoCompletedTurns(), around([ephemeralWorkspace([SESSION_ID])], [fixture]));
+
+    expect(reading(await chromeOf())).toMatch(/^webshop \/ Fix the login bug/);
+  });
+
+  it("keeps Threads / on a thread that belongs to no project", async () => {
+    const fixture = session({ status: "idle", projectId: null, workspaceId: null });
+    await open(fixture, twoCompletedTurns(), around([], [fixture]));
+
+    expect(reading(await chromeOf())).toMatch(/^Threads \/ Fix the login bug/);
+  });
+
+  it("leaves the title alone while the workspace holds one thread", async () => {
+    const workspace = ephemeralWorkspace([SESSION_ID]);
+    const fixture = inWorkspace(workspace.id);
+    await open(fixture, twoCompletedTurns(), around([workspace], [fixture]));
+
+    const chrome = await chromeOf();
+    expect(reading(chrome)).toContain("Fix the login bug");
+    expect(within(chrome).queryByRole("link", { name: /Write the retry runbook/ })).toBeNull();
+  });
+
+  it("puts the workspace's other threads beside the title, in the workspace's own order", async () => {
+    const workspace = ephemeralWorkspace([SESSION_ID, SIBLING_ID]);
+    const fixture = inWorkspace(workspace.id);
+    await open(
+      fixture,
+      twoCompletedTurns(),
+      around([workspace], [fixture, { ...SIBLING, workspaceId: workspace.id }]),
+    );
+
+    const chrome = await chromeOf();
+    const sibling = within(chrome).getByRole("link", { name: /Write the retry runbook/ });
+    expect(sibling.getAttribute("href")).toBe(`/threads/${SIBLING_ID}`);
+    const text = reading(chrome);
+    expect(text.indexOf("Fix the login bug")).toBeLessThan(text.indexOf("Write the retry runbook"));
+  });
+
+  it("shows concurrent threads in a main workspace as the same tabs", async () => {
+    const workspace = primaryWorkspace([SESSION_ID, SIBLING_ID]);
+    const fixture = inWorkspace(workspace.id);
+    await open(
+      fixture,
+      twoCompletedTurns(),
+      around([workspace], [fixture, { ...SIBLING, workspaceId: workspace.id }]),
+    );
+
+    const chrome = await chromeOf();
+    expect(within(chrome).getByRole("link", { name: /Write the retry runbook/ })).toBeDefined();
+  });
+
+  it("offers a new thread in the same workspace", async () => {
+    const workspace = ephemeralWorkspace([SESSION_ID]);
+    const fixture = inWorkspace(workspace.id);
+    await open(fixture, twoCompletedTurns(), around([workspace], [fixture]));
+
+    const chrome = await chromeOf();
+    const here = within(chrome).getByRole("link", { name: "+ New thread here" });
+    expect(here.getAttribute("href")).toBe(
+      `/threads/new?project=${WEBSHOP.id}&workspace=${workspace.id}`,
+    );
+  });
+
+  it("offers no new thread here on a thread with no workspace", async () => {
+    const fixture = session({ status: "idle", projectId: WEBSHOP.id, workspaceId: null });
+    await open(fixture, twoCompletedTurns(), around([], [fixture]));
+
+    const chrome = await chromeOf();
+    expect(within(chrome).queryByRole("link", { name: "+ New thread here" })).toBeNull();
+  });
+});
+
+describe("Draft: a draft joining a workspace (AC-21)", () => {
+  it("crumbs its project, joins the tab strip last, and offers no actions", async () => {
+    const workspace = ephemeralWorkspace([SESSION_ID]);
+    const fixture = session({ status: "idle", projectId: WEBSHOP.id, workspaceId: workspace.id });
+    const api = stubApi({
+      ...controller(fixture, twoCompletedTurns(), around([workspace], [fixture])),
+      "GET /api/v1/connections": { body: { items: [] } },
+    });
+    await renderApp({
+      path: `/threads/new?project=${WEBSHOP.id}&workspace=${workspace.id}`,
+      api: api.fetch,
+      token: "held",
+    });
+
+    const chrome = await chromeOf();
+    const text = reading(chrome);
+    expect(text).toContain("webshop /");
+    expect(text).toContain("New thread");
+    // The draft joins the workspace's strip last, after the thread already in it.
+    expect(text.indexOf("Fix the login bug")).toBeLessThan(text.indexOf("New thread"));
+    // A draft has nothing to act on yet.
+    expect(within(chrome).queryByRole("button", { name: "…" })).toBeNull();
+    expect(within(chrome).queryByRole("link", { name: "+ New thread here" })).toBeNull();
   });
 });

@@ -54,6 +54,7 @@ import { LiveSocketLayer } from "../live";
 import { ProviderProbes } from "../providers";
 import { RunnerJoinRouteLayer, RunnerPresence, RunnerSocketRouteLayer } from "../runners";
 import { SessionService } from "../sessions";
+import { WorkspaceService } from "../workspaces";
 import { handlerLayers } from "./routes";
 import { withWebBundle, type WebBundle } from "./static";
 
@@ -200,5 +201,10 @@ export const serve = (bundle: WebBundle | undefined) =>
     // Likewise before the listener: the queue it reads is built with the layer,
     // so nothing a machine reports is missed while this fiber is starting.
     yield* Effect.forkScoped(Effect.flatMap(SessionService, (sessions) => sessions.ingesting));
+    // Workspaces: a machine that dials in is told what it still owes, and a
+    // workspace nothing needs any more is taken off its machine's disk. Forked
+    // before the listener binds, like the probe driver, so no arrival is
+    // missed.
+    yield* Effect.forkScoped(Effect.flatMap(WorkspaceService, (workspaces) => workspaces.driving));
     yield* Effect.flatMap(application(bundle), HttpServer.serveEffect());
   });

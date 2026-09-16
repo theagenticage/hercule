@@ -5,7 +5,8 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./testing": "./src/live/socket-stub.ts"
+    "./testing": "./src/live/socket-stub.ts",
+    "./threads/testing": "./src/threads/workspaces.testing.ts"
   },
   "dependencies": {
     "@hydra/contract": "workspace:*",

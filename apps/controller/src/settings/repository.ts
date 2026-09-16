@@ -13,7 +13,7 @@
  * Schema, so a read that cannot produce the key's type is an error rather than
  * a value the caller misinterprets.
  */
-import { Context, Effect, Layer, Schema } from "effect";
+import { Context, Effect, Layer, Option, Schema } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import { Id, SETTING_VALUES } from "@hydra/contract";
@@ -95,9 +95,13 @@ const encode = (
 /**
  * Every row of one scope, decoded to its key's declared type.
  *
- * A row whose key this build does not declare - what a downgrade leaves behind
- * - is left out and said so in the log, rather than failing the whole read over
- * a key the caller never asked about.
+ * A row this build cannot read is left out and said so in the log, rather than
+ * failing the whole read over one key the caller never asked about. Two ways a
+ * row gets there: a key this build does not declare, which is what a downgrade
+ * leaves behind, and a value the key no longer takes, which is what narrowing a
+ * key's type leaves behind (`thread.workspace` lost `none` in
+ * [#72](https://github.com/rogierpennink/hydra/issues/72)). Both read as unset,
+ * which is what the setting meant either way, so neither needs a migration.
  */
 const decodeRows = <S extends TypedScope>(
   scope: S,
@@ -110,7 +114,14 @@ const decodeRows = <S extends TypedScope>(
         yield* Effect.logWarning(`Ignoring the ${scope} setting ${row.key}: no such key.`);
         continue;
       }
-      entries.push([row.key, yield* decode(scope, row.key, row.value)] as const);
+      const value = yield* Effect.option(decode(scope, row.key, row.value));
+      if (Option.isNone(value)) {
+        yield* Effect.logWarning(
+          `Ignoring the ${scope} setting ${row.key}: this build does not take its stored value.`,
+        );
+        continue;
+      }
+      entries.push([row.key, value.value] as const);
     }
     // The keys are the scope's own and each value came from that key's schema,
     // which is exactly what the mapped type says; TypeScript cannot follow the

@@ -19,6 +19,8 @@ export function MenuRow({
   sub,
   current = false,
   dimmed = null,
+  clipNote = false,
+  inert,
   trailing,
   className,
   onPick,
@@ -32,6 +34,18 @@ export function MenuRow({
   readonly sub?: ReactNode;
   readonly current?: boolean;
   readonly dimmed?: string | null;
+  /**
+   * Whether it is the right-hand annotation that gives when the row is too
+   * narrow, rather than the name. A branch is the thing being picked and has
+   * to be read whole; what holds it is a note about it (R6).
+   */
+  readonly clipNote?: boolean;
+  /**
+   * Whether the row takes no pick, where the reason it takes none is said
+   * somewhere other than the right-hand slot - on its sub-line, say. A row
+   * carrying its reason at the right is inert because it carries one.
+   */
+  readonly inert?: boolean;
   readonly trailing?: ReactNode;
   /** What this row wears beyond the row treatment: a rule above it, say. */
   readonly className?: string;
@@ -44,7 +58,7 @@ export function MenuRow({
           <span className={cn("size-[5px] rounded-full", current && "bg-ink")} />
         </span>
       )}
-      <span className="min-w-0 truncate">
+      <span className={cn(clipNote ? "whitespace-nowrap" : "min-w-0 truncate")}>
         {name}
         {detail === undefined || detail === null || detail === "" ? null : (
           <span className="ml-1.5 text-[11px] font-normal text-faint">{detail}</span>
@@ -52,11 +66,25 @@ export function MenuRow({
       </span>{" "}
       <span
         className={cn(
-          "flex shrink-0 items-center gap-1.5 text-[11px] font-normal whitespace-nowrap",
+          "flex items-center gap-1.5 text-[11px] font-normal",
+          // The cell keeps the row's right edge whichever half gives: it is
+          // the wide column on a `clipNote` row, so its contents are pushed to
+          // that edge rather than left sitting against the name.
+          clipNote ? "min-w-0 justify-end text-right" : "shrink-0 whitespace-nowrap",
           marker !== undefined && current ? "text-ink" : "text-faint",
         )}
       >
-        {note ?? dimmed}
+        {note}
+        {note !== undefined && note !== null && dimmed !== null ? <span>·</span> : null}
+        {clipNote && typeof dimmed === "string" ? (
+          // Cut from its own width, with the whole of it as the title, so what
+          // is clipped is still readable.
+          <span title={dimmed} className="min-w-0 truncate">
+            {dimmed}
+          </span>
+        ) : (
+          dimmed
+        )}
         {trailing === undefined || trailing === null ? null : <span>·</span>}
         {trailing}
       </span>
@@ -69,7 +97,10 @@ export function MenuRow({
   );
 
   const layout = cn(
-    "grid w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-2 rounded-[6px]",
+    "grid w-full items-center gap-x-2 rounded-[6px]",
+    // The flexible column is the one allowed to give: the name by default, the
+    // annotation where the name is what must be read whole.
+    clipNote ? "grid-cols-[auto_auto_minmax(0,1fr)]" : "grid-cols-[auto_minmax(0,1fr)_auto]",
     // A row that carries a mark is a model row: a shade taller, and in ink.
     marker === undefined ? "px-2 py-[5px]" : "px-2 py-1.5",
     "text-left text-meta",
@@ -78,7 +109,7 @@ export function MenuRow({
     className,
   );
 
-  if (dimmed !== null) {
+  if (inert ?? dimmed !== null) {
     return <div className={cn(layout, "opacity-50")}>{body}</div>;
   }
 
@@ -122,7 +153,9 @@ export function MenuHeader({
 }): JSX.Element {
   return (
     <div className="flex items-baseline gap-2 px-2 pt-1.5 pb-[5px]">
-      <span className="text-label font-emph tracking-[0.1em] text-faint uppercase">{label}</span>
+      <span className="text-label font-emph tracking-[0.1em] whitespace-nowrap text-faint uppercase">
+        {label}
+      </span>
       {note === undefined ? null : (
         <span className="ml-auto font-mono text-[10.5px] whitespace-nowrap text-faint">{note}</span>
       )}

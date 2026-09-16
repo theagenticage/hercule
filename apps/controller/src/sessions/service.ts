@@ -50,6 +50,7 @@ import {
   SESSION_UPDATE_FIELDS,
   SessionSpawnInput,
   type SessionSelection,
+  type SpawnWorkspace,
   TRANSCRIPT_SORT_FIELDS,
   validation,
   validationOf,
@@ -66,9 +67,11 @@ import { currentStamp, currentUser, requireGrant, SYSTEM_ACTOR } from "../actor"
 import {
   afterCommit,
   announce,
+  mintUuid,
   nowIso,
   pageInput,
   refuseCursor,
+  uuidToString,
   withTransaction,
   type Page,
 } from "../db";
@@ -77,8 +80,11 @@ import { AuditLog } from "../events";
 import { PermissionProfiles, SessionTokens, type GrantsError } from "../permissions";
 import { PluginHost } from "../plugins";
 import { providerRepository, type StoredSnapshot } from "../providers";
+import { resourceRepository } from "../resources";
 import { RunnerPresence, runnerRepository, type Connection, type SessionTraffic } from "../runners";
+import { Secrets } from "../secrets";
 import { Settings, type ScopeSettings, type SettingError } from "../settings";
+import { gitCredentials, gitIdentityOf, WorkspaceService, type GitCredential } from "../workspaces";
 import { inputRepository, type StoredInput } from "./inputs";
 import { validatedOptions } from "./options";
 import { sessionRepository, type StoredSession } from "./repository";
@@ -249,6 +255,12 @@ const NO_SUCH_RUNNER = "no such runner";
 
 const NO_SUCH_PROFILE = "no such permission profile";
 
+const NO_SUCH_PROJECT_NAMED = "no such project";
+
+/** Why a thread cannot be picked up again: the files it worked in are gone. */
+const workspaceGone = (status: string): string =>
+  `that session's workspace is ${status}, so there is nothing left to resume it in`;
+
 /** The shipped profile a thread takes when the user has chosen none (spec 02 Thread). */
 const DEFAULT_PROFILE = "unrestricted";
 
@@ -313,6 +325,9 @@ const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const sessions = yield* sessionRepository;
   const inputs = yield* inputRepository;
+  const workspaces = yield* WorkspaceService;
+  const resources = yield* resourceRepository;
+  const credentials = yield* gitCredentials;
   const instances = yield* providerRepository;
   const runners = yield* runnerRepository;
   const presence = yield* RunnerPresence;
@@ -521,7 +536,19 @@ const make = Effect.gen(function* () {
     Effect.gen(function* () {
       if (session.status !== "exited") return yield* Effect.fail(invalidState(STILL_LIVE));
       if (session.nativeSessionId === null) return yield* Effect.fail(invalidState(NO_TRANSCRIPT));
-      if (!session.resumable) return yield* Effect.fail(invalidState(RETIRED));
+      if (!session.resumable) {
+        // A thread's transcript is keyed to the working area it ran in, so a
+        // workspace that is gone is a session that cannot be picked up - and
+        // the user needs to read which one it was, not a word about machines.
+        const status =
+          session.workspaceId === null
+            ? undefined
+            : yield* workspaces.statusOf(session.workspaceId);
+        if (status !== undefined && status !== "ready") {
+          return yield* Effect.fail(invalidState(workspaceGone(status)));
+        }
+        return yield* Effect.fail(invalidState(RETIRED));
+      }
       // `resumable` says the transcript is still there; this says the machine
       // will not open it. Whether it can be reached right now is dispatch's to
       // decide: unreachable queues the session rather than refusing it.
@@ -733,6 +760,9 @@ const make = Effect.gen(function* () {
             bindings.map((binding) => binding.sessionId),
             at,
           );
+          // `ending` is the whole revocation: the rows moved to `exited`, which
+          // is what refuses their tokens, and what was cached from them while
+          // they ran is dropped after the commit.
           yield* ending(gone);
           yield* Effect.forEach(
             gone,
@@ -750,6 +780,25 @@ const make = Effect.gen(function* () {
       );
       yield* presence.markSessionsReported(runnerId, connection);
     });
+
+  /**
+   * The GitHub account a session starts with: the token it pushes with and the
+   * identity it commits as. A connection that will not answer is logged and
+   * left out - a session starting without `GH_TOKEN` is better than one that
+   * does not start.
+   */
+  const githubAccountOf = (connectionId: string): Effect.Effect<GitCredential | undefined> =>
+    Effect.map(
+      Effect.catchCause(
+        credentials.credentialOf(connectionId),
+        (cause): Effect.Effect<Option.Option<GitCredential>> =>
+          Effect.as(
+            Effect.logError("A session's GitHub connection could not be read", cause),
+            Option.none(),
+          ),
+      ),
+      Option.getOrUndefined,
+    );
 
   /**
    * Moves this runner's oldest queued sessions to `starting`, as many as its
@@ -794,6 +843,12 @@ const make = Effect.gen(function* () {
         }),
       );
       for (const row of ready) {
+        // Read now rather than stored: a token is never written down anywhere
+        // but the frame that carries it to the machine.
+        const account =
+          row.githubConnectionId === null
+            ? undefined
+            : yield* githubAccountOf(row.githubConnectionId);
         const start: SessionStart = {
           _tag: "sessionStart",
           sessionId: row.id,
@@ -804,6 +859,10 @@ const make = Effect.gen(function* () {
           // codec changed underneath a row already queued with the old one.
           spec: yield* Effect.orDie(decodeSpec(JSON.parse(row.spec))),
           token: row.token,
+          ...(account === undefined
+            ? {}
+            : { ghToken: account.token, gitIdentity: gitIdentityOf(account.login) }),
+          ...(row.checkoutBranch === null ? {} : { checkoutBranch: row.checkoutBranch }),
         };
         if (!(yield* presence.tell(runnerId, start))) {
           yield* withTransaction(
@@ -855,6 +914,49 @@ const make = Effect.gen(function* () {
       }),
     );
 
+  /**
+   * Ends every session waiting on a workspace that could not be made. They
+   * never started, so there is no harness to stop and nothing to tell the
+   * machine; what the user needs is the reason, which is the machine's own
+   * words, recorded on the session's own stream where the exit is read.
+   */
+  const endForWorkspace = (
+    workspaceId: string,
+    message: string | null,
+  ): Effect.Effect<void, SqlError> =>
+    withTransaction(
+      sql,
+      Effect.gen(function* () {
+        const at = yield* nowIso;
+        const waiting = yield* sessions.liveInWorkspace(workspaceId);
+        for (const id of waiting) {
+          yield* sessions.append(id, {
+            seq: 0,
+            at,
+            event: {
+              _tag: "session.exited",
+              eventId: crypto.randomUUID(),
+              sessionId: id,
+              at,
+              reason: "workspace_failed",
+              ...(message === null ? {} : { message }),
+            },
+          });
+          yield* sessions.moved(id, "exited", at);
+          yield* audit.append({
+            kind: "session.stopped",
+            actor: SYSTEM_ACTOR,
+            payload: { sessionId: id, workspaceId, reason: "workspace_failed" },
+            at,
+          });
+          // The exit is a row on this session's own stream, so whoever is
+          // watching that session has to be told about that session.
+          yield* announce({ _tag: "transcript", sessionId: id });
+        }
+        yield* ending(waiting, message ?? undefined);
+      }),
+    );
+
   const reported = (
     runnerId: string,
     seq: number,
@@ -897,6 +999,14 @@ const make = Effect.gen(function* () {
           for (const row of folded.rows) yield* sessions.append(id, row);
           if (folded.rows.length > 0) {
             yield* announce({ _tag: "transcript", sessionId: id });
+          }
+          // A session starting or ending is work in its workspace, which is
+          // what keeps that workspace from expiring under it.
+          if (
+            found.value.workspaceId !== null &&
+            (event._tag === "session.started" || event._tag === "session.exited")
+          ) {
+            yield* workspaces.touched(found.value.workspaceId, at);
           }
           // Written with the move the same event causes: a session that reads
           // `idle` has the provider-native id that made it so.
@@ -965,13 +1075,33 @@ const make = Effect.gen(function* () {
     readonly runnerId: string;
     readonly requestedAccessMode: AccessMode;
     readonly parentSessionId: string | undefined;
-    /** Everything the machine is told, and the source of what the row stores. */
+    /**
+     * Everything the machine is told, and the source of what the row stores.
+     * Its `workspaceId` is what the session keeps where the wish below brings
+     * no workspace of its own: a fork stays in the one its parent was in.
+     */
     readonly spec: SessionSpec;
     readonly prompt: string;
     readonly kind: "session.spawned" | "session.continued";
     /** What the audit entry records beyond the new session's own id. */
     readonly payload: Readonly<Record<string, unknown>>;
+    readonly projectId: string | undefined;
+    /** Where the session is to work; absent keeps the workspace the spec names. */
+    readonly workspace: SpawnWorkspace | undefined;
+    /** The GitHub account a session with no workspace of its own pushes as. */
+    readonly fallbackGithubConnectionId: string | undefined;
   }
+
+  /** A thread is filed under a project that exists, or under none at all. */
+  const liveProject = (projectId: string): Effect.Effect<void, Validation | SqlError> =>
+    Effect.gen(function* () {
+      const live = yield* resources.liveProjects([projectId]);
+      if (live.length === 0) {
+        return yield* Effect.fail(
+          validation([{ path: ["projectId"], message: NO_SUCH_PROJECT_NAMED }]),
+        );
+      }
+    });
 
   /**
    * The row and its first input, and the entry that records it, in one
@@ -979,31 +1109,54 @@ const make = Effect.gen(function* () {
    * whether this runner has room for it right now, and it is the same
    * decision either way, so a fresh row takes it rather than a copy of it.
    */
-  const opening = (open: Opening): Effect.Effect<StoredSession, SqlError> =>
+  const opening = (open: Opening): Effect.Effect<StoredSession, Validation | SqlError> =>
     Effect.gen(function* () {
-      const stored = yield* withTransaction(
+      // Minted here rather than by the insert: the working area is opened in the
+      // same transaction and a thread's own worktree is made on a branch named
+      // after the thread, so the id has to exist before either row does.
+      const sessionId = uuidToString(mintUuid());
+      const { stored, frame } = yield* withTransaction(
         sql,
         Effect.gen(function* () {
           const at = yield* nowIso;
+          const actor = yield* currentStamp;
+          // Where it works is the workspaces domain's to decide, in full: what
+          // the wish means, how the checkouts are laid out, what the branch is
+          // called and which Connection the work acts through.
+          const opened = yield* workspaces.openFor({
+            wish: open.workspace,
+            heldWorkspaceId: open.spec.workspaceId,
+            runnerId: open.runnerId,
+            projectId: open.projectId,
+            sessionId,
+            at,
+            actor,
+          });
+          const spec = { ...open.spec, workspaceId: opened.workspaceId } satisfies SessionSpec;
           const row = yield* sessions.insert({
+            id: sessionId,
             title: titleOf(open.prompt),
             permissionProfileId: open.permissionProfileId,
-            instanceId: open.spec.instanceId,
+            instanceId: spec.instanceId,
             runnerId: open.runnerId,
-            workspaceId: open.spec.workspaceId,
+            workspaceId: spec.workspaceId,
+            projectId: open.projectId,
+            checkoutBranch: opened.checkoutBranch,
+            // The workspace's own account where it has one, and the thread
+            // default otherwise: a session pushes as one account, settled here.
+            githubConnectionId: opened.designatedConnectionId ?? open.fallbackGithubConnectionId,
             requestedAccessMode: open.requestedAccessMode,
-            accessMode: open.spec.accessMode,
+            accessMode: spec.accessMode,
             // Byte for byte: the row holds the exact document the runner is
             // told, not a re-encode of an object that resembles it.
-            spec: JSON.stringify(encodeSpec(open.spec)),
-            modelSelection: open.spec.modelSelection,
+            spec: JSON.stringify(encodeSpec(spec)),
+            modelSelection: spec.modelSelection,
             parentSessionId: open.parentSessionId,
             at,
           });
           // The prompt is an ordinary input, waiting with the session: it
           // leaves when the harness comes up, and a controller restarted in
           // that window still has it.
-          const actor = yield* currentStamp;
           yield* inputs.insert({
             sessionId: row.id,
             source: "user",
@@ -1015,14 +1168,20 @@ const make = Effect.gen(function* () {
             kind: open.kind,
             actor,
             record: { topic: "session", id: row.id },
-            payload: { ...open.payload, sessionId: row.id },
+            payload: {
+              ...open.payload,
+              sessionId: row.id,
+              ...(spec.workspaceId === null ? {} : { workspaceId: spec.workspaceId }),
+            },
             at,
           });
-          return row;
+          return { stored: row, frame: opened.frame };
         }),
       );
-      // Outside the transaction: dispatch may tell the machine, and a
-      // transaction never spans a wait on anything outside the database.
+      // Outside the transaction, in the order the machine needs them: it makes
+      // the working area, and the session it holds is dispatched once it says
+      // the area stands. A transaction never spans a wait on the machine.
+      if (frame !== undefined) yield* presence.tell(open.runnerId, frame);
       yield* dispatch(open.runnerId);
       // Read back rather than returned from the insert, so the caller sees
       // `starting` where dispatch placed it at once rather than `queued`.
@@ -1104,25 +1263,23 @@ const make = Effect.gen(function* () {
         // open one (spec 02 Thread).
         const user = yield* currentUser("session.spawn");
         const decoded = yield* Effect.mapError(decodeSpawn(input), validationOf);
-        if (decoded.workspaceId !== undefined && decoded.workspaceId !== null) {
-          return yield* Effect.fail(
-            validation([
-              {
-                path: ["workspaceId"],
-                message: "workspaces are not built yet; a thread runs without one",
-              },
-            ]),
-          );
-        }
+        if (decoded.projectId !== undefined) yield* liveProject(decoded.projectId);
+        // Read before placement: a workspace that already stands decides which
+        // machine the session runs on, because that is where its files are.
+        const pinnedTo =
+          decoded.workspace?.kind === "existing"
+            ? yield* workspaces.machineFor(decoded.workspace.workspaceId, decoded.runnerId)
+            : undefined;
         // An override is for this session only, never written back to the store.
         const defaults = yield* settings.allForUser(user.userId);
 
         const instanceId =
           decoded.instanceId ?? defaults["thread.instanceId"] ?? (yield* firstLoggedIn());
         const { definition, snapshots } = yield* resolved(instanceId);
-        const hosting = yield* decoded.runnerId === undefined
+        const placeOn = pinnedTo ?? decoded.runnerId;
+        const hosting = yield* placeOn === undefined
           ? placement(snapshots)
-          : explicitRunner(decoded.runnerId, snapshots);
+          : explicitRunner(placeOn, snapshots);
 
         const requestedAccessMode =
           decoded.accessMode ?? defaults["thread.accessMode"] ?? DEFAULT_ACCESS_MODE;
@@ -1172,11 +1329,15 @@ const make = Effect.gen(function* () {
           spec,
           prompt: decoded.prompt,
           kind: "session.spawned",
+          projectId: decoded.projectId,
+          workspace: decoded.workspace,
+          fallbackGithubConnectionId: defaults["thread.githubConnectionId"] ?? undefined,
           payload: {
             instanceId,
             runnerId: hosting.runnerId,
             requestedAccessMode,
             accessMode,
+            ...(decoded.projectId === undefined ? {} : { projectId: decoded.projectId }),
           },
         });
       }),
@@ -1476,9 +1637,14 @@ const make = Effect.gen(function* () {
           runnerId: parent.runnerId,
           requestedAccessMode: parent.requestedAccessMode,
           parentSessionId: parent.id,
+          // A fork carries on in the workspace and the project the parent was
+          // in: it is the same piece of work, branched.
           spec: yield* continuingSpec(parent, parent.modelSelection, nativeSessionId, mode),
           prompt,
           kind: "session.continued",
+          projectId: parent.projectId ?? undefined,
+          workspace: undefined,
+          fallbackGithubConnectionId: parent.githubConnectionId ?? undefined,
           payload: { parentSessionId: parent.id, mode },
         });
       }),
@@ -1556,6 +1722,23 @@ const make = Effect.gen(function* () {
 
     /** Reached by `runner.retire`, which owns the sessions a retired machine leaves behind. */
     endOnRunner,
+
+    /**
+     * What a machine's report about a workspace means for the sessions waiting
+     * on it: one that came up releases them, and one that could not be made ends
+     * them with the machine's own words for why. Called by the runner socket,
+     * which holds both services - so neither domain has to reach into the other.
+     */
+    workspaceSettled: (
+      runnerId: string,
+      settled: { readonly workspaceId: string; readonly moved: "ready" | "failed" | "deleted" },
+      message: string | null,
+    ): Effect.Effect<void, SqlError> =>
+      settled.moved === "ready"
+        ? dispatch(runnerId)
+        : settled.moved === "failed"
+          ? endForWorkspace(settled.workspaceId, message)
+          : Effect.void,
   };
 });
 
@@ -1573,6 +1756,8 @@ export const SessionServiceLayer: Layer.Layer<
   | Settings
   | PermissionProfiles
   | SessionTokens
+  | Secrets
+  | WorkspaceService
 > = Layer.effect(SessionService)(make);
 
 /**
