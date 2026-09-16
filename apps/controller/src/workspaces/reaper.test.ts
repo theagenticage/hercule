@@ -189,6 +189,20 @@ const disposedWhen = (arranged: Arranged, id: string): Promise<WorkspaceRecord> 
     return one.status === "deleted" ? one : undefined;
   });
 
+/**
+ * The workspaces the machine has been told to delete, once this many frames
+ * have crossed the socket. The sweep flips the row in its transaction and sends
+ * the frame after it commits, so a test that reads the wire the moment the row
+ * reads `deleted` is asserting on a race rather than on an ordering.
+ */
+const disposesWhen = (arranged: Arranged, count: number): Promise<ReadonlyArray<unknown>> =>
+  until(`sent ${String(count)} workspaceDispose frames`, () => {
+    const sent = framesTagged(arranged.wire, "workspaceDispose").map(
+      (frame) => frame["workspaceId"],
+    );
+    return sent.length >= count ? sent : undefined;
+  });
+
 describe("the workspace expiry sweep", () => {
   it("disposes an orphaned ephemeral past the orphan window, and leaves a young one", async () => {
     await withSweep(async (arranged) => {
@@ -206,9 +220,7 @@ describe("the workspace expiry sweep", () => {
 
       const gone = await disposedWhen(arranged, oldWorkspace);
       expect(gone.status).toBe("deleted");
-      expect(
-        framesTagged(arranged.wire, "workspaceDispose").map((frame) => frame["workspaceId"]),
-      ).toEqual([oldWorkspace]);
+      expect(await disposesWhen(arranged, 1)).toEqual([oldWorkspace]);
       expect((await readWorkspace(arranged, youngWorkspace)).status).not.toBe("deleted");
 
       // Nobody asked for this one to go, so the log says who did and why.
@@ -263,9 +275,7 @@ describe("the workspace expiry sweep", () => {
       // The pass that took the decoy is the pass that saw this one and kept it.
       await disposedWhen(arranged, taken);
       expect((await readWorkspace(arranged, workspaceId)).status).not.toBe("deleted");
-      expect(
-        framesTagged(arranged.wire, "workspaceDispose").map((frame) => frame["workspaceId"]),
-      ).toEqual([taken]);
+      expect(await disposesWhen(arranged, 1)).toEqual([taken]);
     });
   });
 
@@ -284,9 +294,7 @@ describe("the workspace expiry sweep", () => {
       // The pass that took the decoy is the pass that saw the primary and kept it.
       await disposedWhen(arranged, taken);
       expect((await readWorkspace(arranged, primary.id)).status).toBe("ready");
-      expect(
-        framesTagged(arranged.wire, "workspaceDispose").map((frame) => frame["workspaceId"]),
-      ).toEqual([taken]);
+      expect(await disposesWhen(arranged, 1)).toEqual([taken]);
     });
   });
 

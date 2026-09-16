@@ -3816,10 +3816,12 @@ describe("session.spawn into a workspace", () => {
         workspace: { kind: "primary", resourceId: web, branch: "feature/x" },
       });
       expect(second.workspaceId).toBe(workspace.id);
-      expect(tagged(arranged.wire, "workspaceProvision")).toHaveLength(1);
 
       const start = (await framesWhen<SessionStart>(arranged.wire, "sessionStart", 2))[1]!;
       expect(start.sessionId).toBe(second.id);
+      // Counted once the second start has crossed: anything the second spawn
+      // asked the machine for would be on the wire ahead of it.
+      expect(tagged(arranged.wire, "workspaceProvision")).toHaveLength(1);
       // The branch is a checkout word: it rides the start frame so the machine
       // switches before the harness sees the folder.
       expect((start as unknown as WorkspaceFrame)["checkoutBranch"]).toBe("feature/x");
@@ -4050,9 +4052,11 @@ describe("session.spawn into a workspace", () => {
         workspace: { kind: "primary", resourceId: web },
       });
       expect(second.workspaceId).not.toBe(failed);
-      expect(tagged(arranged.wire, "workspaceProvision")).toHaveLength(2);
+      // The frame crosses the socket after the spawn's transaction commits, so
+      // the second one is waited for before it is counted.
       const frame = await frameWhenTagged(arranged.wire, "workspaceProvision", 1);
       expect(frame["workspaceId"]).toBe(second.workspaceId);
+      expect(tagged(arranged.wire, "workspaceProvision")).toHaveLength(2);
     });
   });
 
