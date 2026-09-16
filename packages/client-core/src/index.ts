@@ -5,6 +5,7 @@
  * app and the CLI import `createClient` and see promises, plain objects, and
  * the three error classes below - nothing else.
  */
+export { actorReading, type ActorReading } from "./actor-display";
 export {
   createClient,
   type ClientOptions,

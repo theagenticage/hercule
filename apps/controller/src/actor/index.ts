@@ -7,9 +7,10 @@
  * same reference. It is a `Context.Reference` with a default, which keeps
  * `CurrentActor` out of every handler's requirement type.
  *
- * v1 authenticates one population: the user, through a login bearer token or an
- * API key. Session, run and plugin actors will widen this union later; nothing
- * here is restructured when they do.
+ * v1 authenticates two populations: the user, through a login bearer token or
+ * an API key, and a session, through the token the controller minted for it.
+ * Run and plugin actors will widen this union later; nothing here is
+ * restructured when they do.
  */
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -43,12 +44,28 @@ export interface UserActor {
   readonly credential: PresentedCredential;
 }
 
+/**
+ * An agent inside a session, calling on the token the controller minted for it.
+ *
+ * The grants are the session's permission profile as it stood when the token
+ * was resolved, carried here rather than looked up again: the check runs before
+ * the body is decoded and on every call, and a second read per request would be
+ * a join on the request path for a set that changes only when the user edits
+ * the profile.
+ */
+export interface SessionActor {
+  readonly _tag: "session";
+  readonly sessionId: string;
+  readonly profileId: string;
+  readonly grants: ReadonlyArray<Grant>;
+}
+
 /** Nobody has been resolved: an unauthenticated route, or an in-process caller. */
 export interface NoActor {
   readonly _tag: "none";
 }
 
-export type Actor = UserActor | NoActor;
+export type Actor = UserActor | SessionActor | NoActor;
 
 const NONE: NoActor = { _tag: "none" };
 
@@ -76,26 +93,83 @@ export const USER_ACTOR = "user";
 export const SYSTEM_ACTOR = "system";
 
 /**
- * Whether this actor may reach an operation with this requirement, and which
- * grant it is missing if it may not.
+ * How an actor is stamped on what it changes: the session's own id for a
+ * session, which is what a reader of the event log or of a task's provenance
+ * follows back to the conversation that made the change, and the bare word for
+ * the user.
  *
- * The user actor has full parity: no profile applies, so it passes every grant.
- * Session actors are checked against their profile and run and plugin actors are
- * ungated - neither exists yet, and both are a branch here rather than a rewrite
- * when they do.
- *
- * The transport middleware runs this before the payload is decoded and the
- * service method runs it again for in-process callers, which is why it lives
- * beside the actor rather than inside either.
+ * Nobody has no stamp, which is why it is not in the parameter: an operation
+ * that mutates anything names a grant, and `requireGrant` refuses an actorless
+ * caller that grant, so the only two that reach a write through a request are
+ * the user and a session. A write with no request behind it names
+ * `SYSTEM_ACTOR` for itself, explicitly, rather than passing nobody here.
  */
-export const grantCheck = (requirement: Requirement, actor: Actor): Grant | undefined => {
+export const stampOf = (actor: UserActor | SessionActor): string =>
+  actor._tag === "session" ? `session:${actor.sessionId}` : USER_ACTOR;
+
+/**
+ * How the actor behind the current request is stamped on what it changes. The
+ * one place a mutation's `actor` comes from, so no service decides it.
+ *
+ * An actorless caller here is a defect, not a failure: it means a write reached
+ * stamping without the grant check that would have refused it, and stamping it
+ * as the user would attribute the change to a person who made no request.
+ */
+export const currentStamp: Effect.Effect<string> = Effect.flatMap(CurrentActor, (actor) =>
+  actor._tag === "none"
+    ? Effect.die("a write reached stamping with no authenticated actor behind it")
+    : Effect.succeed(stampOf(actor)),
+);
+
+/**
+ * The grant an operation names, or `undefined` where its requirement is not a
+ * grant at all.
+ */
+const grantOf = (requirement: Requirement): Grant | undefined => {
   switch (requirement) {
     case "unauthenticated":
     case "setup-token":
     case "authenticated":
       return undefined;
     default:
-      return actor._tag === "user" ? undefined : requirement;
+      return requirement;
+  }
+};
+
+/** Why a Thread is not a session's to open. */
+const THREAD_IS_THE_USERS = "a Thread is the user's own, and no session may open one";
+
+/**
+ * Whether this actor may reach this operation, and the refusal to answer with
+ * if it may not.
+ *
+ * The user actor has full parity: no profile applies, so it passes every grant.
+ * A session passes exactly the grants its permission profile holds. Run and
+ * plugin actors are ungated - neither exists yet, and both are a branch here
+ * rather than a rewrite when they do.
+ *
+ * It answers with the whole refusal rather than the missing grant, and it takes
+ * the operation rather than its requirement, because of the one rule here that
+ * is per-operation rather than per-grant: `session.spawn` and `session.continue`
+ * both require the `session.spawn` grant, but in v1 every spawn is a Thread -
+ * there is no Agent to spawn from yet - and a Thread runs on the user's own
+ * thread defaults, so a profile holding that grant still does not make one a
+ * session's to open. A continue follows the grant like any other operation. The
+ * refusal has to name "Thread" before the payload is decoded, which is why it
+ * is here rather than in the service: the middleware runs this ahead of the
+ * decode and the service method runs it again for in-process callers.
+ */
+export const grantCheck = (id: OperationId, actor: Actor): Forbidden | undefined => {
+  const grant = grantOf(OPERATIONS[id].requires);
+  if (grant === undefined) return undefined;
+  switch (actor._tag) {
+    case "user":
+      return undefined;
+    case "session":
+      if (id === "session.spawn") return forbidden(grant, THREAD_IS_THE_USERS);
+      return actor.grants.includes(grant) ? undefined : forbidden(grant);
+    case "none":
+      return forbidden(grant);
   }
 };
 
@@ -103,23 +177,40 @@ export const grantCheck = (requirement: Requirement, actor: Actor): Grant | unde
  * The static grant check as a service method runs it: enforcement lives inside
  * the method, not in the handler. Answers with the current actor, which is
  * what the method stamps its mutation with.
- *
- * v1 authenticates one population, so an in-process caller with no actor is
- * told it needs a credential rather than acting as somebody.
  */
 export const requireGrant = (id: OperationId): Effect.Effect<Actor, Forbidden> =>
   Effect.flatMap(CurrentActor, (actor) => {
-    const missing = grantCheck(OPERATIONS[id].requires, actor);
-    return missing === undefined ? Effect.succeed(actor) : Effect.fail(forbidden(missing));
+    const refused = grantCheck(id, actor);
+    return refused === undefined ? Effect.succeed(actor) : Effect.fail(refused);
   });
+
+/**
+ * Why an operation the caller holds the grant for is still the user's alone.
+ * The grant on the refusal is the one the operation names, so the message has
+ * to say that widening the profile is not the answer.
+ */
+const USER_ONLY = "only the user may make this call; no grant confers it";
 
 /**
  * The same check for an operation that acts on the caller's own rows, and so
  * needs a user rather than an actor of any kind.
+ *
+ * A session that holds the grant is refused with it: the credential is good and
+ * the profile allows the family, so the answer is 403 naming what was asked
+ * for, never the 401 that would tell an agent its token had died. The 401 is
+ * for an actorless caller, because nobody was resolved at all - which only
+ * happens where the operation's requirement is `authenticated` rather than a
+ * grant, since `requireGrant` refuses nobody a grant first.
  */
 export const currentUser = (
   id: OperationId,
 ): Effect.Effect<UserActor, Forbidden | Unauthenticated> =>
-  Effect.flatMap(requireGrant(id), (actor) =>
-    actor._tag === "user" ? Effect.succeed(actor) : Effect.fail(unauthenticated(NO_CREDENTIAL)),
-  );
+  Effect.flatMap(requireGrant(id), (actor) => {
+    if (actor._tag === "user") return Effect.succeed(actor);
+    const grant = grantOf(OPERATIONS[id].requires);
+    return Effect.fail(
+      actor._tag === "session" && grant !== undefined
+        ? forbidden(grant, USER_ONLY)
+        : unauthenticated(NO_CREDENTIAL),
+    );
+  });

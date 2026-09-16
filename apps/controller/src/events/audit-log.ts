@@ -76,6 +76,24 @@ export const AUDIT_KINDS = [
 export type AuditKind = (typeof AUDIT_KINDS)[number];
 
 /**
+ * The kind prefixes whose entries say something about a credential, a secret or
+ * the user's own account. They are the audit kinds of the families the shipped
+ * agent profiles withhold, so a profile that may read the log still may not
+ * read these: `event.audit` is what returns them.
+ *
+ * Derived from the kind list rather than written out, so a kind added under one
+ * of these prefixes is behind the grant the day it is emitted. The API-key
+ * kinds need no prefix of their own: they are spelled `auth.apiKey.*` and so
+ * fall under `auth.` already.
+ */
+const SECURITY_PREFIXES = ["secret.", "auth.", "user."];
+
+/** The audit kinds only an actor holding `event.audit` is shown. */
+export const SECURITY_KINDS: ReadonlyArray<AuditKind> = AUDIT_KINDS.filter((kind) =>
+  SECURITY_PREFIXES.some((prefix) => kind.startsWith(prefix)),
+);
+
+/**
  * The audit kinds that record a change to a Live Topic record, and which way
  * the record changed. A kind listed here has to name the record it is about:
  * the id sits in the free-form payload under a different shape per verb, and

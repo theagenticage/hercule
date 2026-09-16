@@ -5,7 +5,15 @@
  * environment where instance config could take `HYDRA_SESSION` away from the
  * `hydra` CLI the session calls.
  */
-import { existsSync, mkdtempSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
@@ -33,6 +41,8 @@ const machining = (overrides: Partial<Machine> = {}): Machine => {
   return {
     providersDir: join(under, "providers"),
     scratchDir: join(under, "scratch"),
+    binDir: join(under, "runner", "bin"),
+    hydraTool: { skill: "# hydra", claudePluginDir: join(under, "claude-plugin") },
     controllerUrl: "https://controller.example:4938",
     baseEnv: { PATH: "/usr/bin", HOME: "/home/somebody" },
     binaryOf: (name) => `/usr/local/bin/${name}`,
@@ -45,6 +55,7 @@ const starting = (overrides: Partial<SessionStart> = {}): SessionStart => ({
   sessionId: SESSION,
   providerId: "claude-code",
   config: {},
+  token: "a-session-token",
   spec: {
     instanceId: INSTANCE,
     workspaceId: null,
@@ -135,10 +146,10 @@ describe("the environment a session runs with", () => {
       machining(),
     );
 
-    // The instance's routing reaches the harness, and its `PATH` wins over the
-    // runner's: that is what instance config is for (spec 06 section 2.1).
+    // The instance's routing reaches the harness: that is what instance config
+    // is for (spec 06 section 2.1). Its `PATH` does not, because the session
+    // would then have no `hydra` to call.
     expect(env["ANTHROPIC_BASE_URL"]).toBe("https://gateway.example");
-    expect(env["PATH"]).toBe("/opt");
     expect(env["HOME"]).toBe("/home/somebody");
   });
 
@@ -148,21 +159,53 @@ describe("the environment a session runs with", () => {
     expect(env["HYDRA_API_URL"]).toBe("https://controller.example:4938");
     // The `hydra` CLI refuses the user's stored key under this (spec 15 section 2).
     expect(env["HYDRA_SESSION"]).toBe("1");
-    // Session tokens are not minted yet, and an empty one would read as a
-    // credential that failed rather than as one nobody issued.
-    expect(env["HYDRA_TOKEN"]).toBeUndefined();
+    // The credential the session calls Hydra with: the very token the frame
+    // carried, never one the runner invented (spec 06 section 9.3).
+    expect(env["HYDRA_TOKEN"]).toBe("a-session-token");
+  });
+
+  it("puts the runner's own bin directory at the front of PATH", () => {
+    const machine = machining();
+
+    const env = envOf(starting(), machine);
+
+    // `which hydra` has to work, and the machine's own tools have to keep
+    // working after it (spec 15 section 2).
+    expect(env["PATH"]).toBe(`${machine.binDir}:/usr/bin`);
+  });
+
+  it("is the bin directory alone where the machine gave the runner no PATH", () => {
+    const machine = machining({ baseEnv: { HOME: "/home/somebody" } });
+
+    const env = envOf(starting(), machine);
+
+    // Never a stray colon: an empty entry on PATH is the current directory,
+    // which is a scratch directory the session writes into.
+    expect(env["PATH"]).toBe(machine.binDir);
   });
 
   it("does not let instance config take those away", () => {
+    const machine = machining();
     const env = envOf(
       starting({
-        config: { env: { HYDRA_SESSION: "0", HYDRA_API_URL: "http://attacker.example" } },
+        config: {
+          env: {
+            HYDRA_SESSION: "0",
+            HYDRA_API_URL: "http://attacker.example",
+            HYDRA_TOKEN: "a token nobody minted",
+            PATH: "/opt",
+          },
+        },
       }),
-      machining(),
+      machine,
     );
 
+    // Instance config is the user's routing, not a way to point the session's
+    // credential, its controller or its `hydra` at something else.
     expect(env["HYDRA_SESSION"]).toBe("1");
     expect(env["HYDRA_API_URL"]).toBe("https://controller.example:4938");
+    expect(env["HYDRA_TOKEN"]).toBe("a-session-token");
+    expect(env["PATH"]).toBe(`${machine.binDir}:/usr/bin`);
   });
 
   it("does not let instance config move HOME", () => {
@@ -200,5 +243,39 @@ describe("a session the runner cannot place", () => {
     expect(outcome._tag).toBe("Failure");
     expect(outcome._tag === "Failure" ? outcome.failure : "").toContain("0199e0e7");
     expect(existsSync(machine.scratchDir)).toBe(false);
+  });
+});
+
+describe("where the session's token is written", () => {
+  /** Every regular file under a directory, symlinks left unread. */
+  const filesUnder = (dir: string): ReadonlyArray<string> =>
+    !existsSync(dir)
+      ? []
+      : readdirSync(dir, { withFileTypes: true }).flatMap((entry) =>
+          entry.isDirectory()
+            ? filesUnder(join(dir, entry.name))
+            : entry.isFile()
+              ? [join(dir, entry.name)]
+              : [],
+        );
+
+  it("is nowhere on disk: the token lives in the process environment alone", () => {
+    const under = root();
+    const machine = machining({
+      providersDir: join(under, "providers"),
+      scratchDir: join(under, "scratch"),
+      binDir: join(under, "bin"),
+      hydraTool: { skill: "# hydra", claudePluginDir: join(under, "claude-plugin") },
+    });
+    const token = `hydra-token-${crypto.randomUUID()}`;
+
+    const outcome = resolving(starting({ token }), machine);
+
+    expect(outcome._tag).toBe("Success");
+    expect(outcome._tag === "Success" ? outcome.success.ctx.env["HYDRA_TOKEN"] : "").toBe(token);
+    // A token on disk outlives the session that held it; the whole point of
+    // one is that it dies with the process (spec 06 section 9.3).
+    const leaked = filesUnder(under).filter((path) => readFileSync(path, "utf8").includes(token));
+    expect(leaked).toEqual([]);
   });
 });

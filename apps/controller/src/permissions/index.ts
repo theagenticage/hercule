@@ -6,3 +6,4 @@ export {
   type PermissionProfile,
   type GrantsError,
 } from "./profiles";
+export { SessionTokens, SessionTokensLayer } from "./tokens";

@@ -40,7 +40,7 @@ import {
   type Unauthenticated,
   type Validation,
 } from "@hydra/contract";
-import { requireGrant, SYSTEM_ACTOR, USER_ACTOR } from "../actor";
+import { currentStamp, requireGrant, SYSTEM_ACTOR } from "../actor";
 import { nowIso, pageInput, refuseCursor, withTransaction } from "../db";
 import { AuditLog } from "../events";
 import { SessionService } from "../sessions";
@@ -177,7 +177,7 @@ const make = Effect.gen(function* () {
           yield* runners.setLifecycle(id, move.to, at);
           yield* audit.append({
             kind: move.kind,
-            actor: USER_ACTOR,
+            actor: yield* currentStamp,
             record: { topic: "runner", id },
             payload: { runnerId: id },
             at,
@@ -287,7 +287,7 @@ const make = Effect.gen(function* () {
             yield* runners.update(id, edit, at);
             yield* audit.append({
               kind: "runner.updated",
-              actor: USER_ACTOR,
+              actor: yield* currentStamp,
               record: { topic: "runner", id },
               payload: { runnerId: id, changes },
               at,
@@ -393,7 +393,7 @@ const make = Effect.gen(function* () {
                 if (wasDefault) yield* settings.setDefaultRunnerId(null, at);
                 yield* audit.append({
                   kind: "runner.retired",
-                  actor: USER_ACTOR,
+                  actor: yield* currentStamp,
                   record: { topic: "runner", id },
                   payload: { runnerId: id, forced: force === true, lostDefaultRunner: wasDefault },
                   at,
@@ -452,7 +452,7 @@ const make = Effect.gen(function* () {
             const minted = yield* joinTokens.create(at);
             yield* audit.append({
               kind: "runner.joinToken.minted",
-              actor: USER_ACTOR,
+              actor: yield* currentStamp,
               // The token is a bearer secret; its id is what ties this entry to
               // the machine that spends it.
               payload: { joinTokenId: minted.id, expiresAt: minted.expiresAt },
@@ -496,7 +496,7 @@ const make = Effect.gen(function* () {
             }
             yield* audit.append({
               kind: "runner.joinToken.revoked",
-              actor: USER_ACTOR,
+              actor: yield* currentStamp,
               payload: { joinTokenId: id },
               at,
             });

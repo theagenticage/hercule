@@ -13,7 +13,7 @@ import * as Effect from "effect/Effect";
 import * as Schedule from "effect/Schedule";
 import * as Schema from "effect/Schema";
 import { LocalAnnouncement, LocalEnrolment } from "@hydra/protocol";
-import { daemon } from "./daemon";
+import { daemon, type ToolingUnavailable } from "./daemon";
 import type { RunnerRetired } from "./socket";
 import { join, JoinError } from "./join";
 import { readRunnerFile, runnerFileIn, type NotEnrolled } from "./runner-file";
@@ -81,7 +81,9 @@ const enrol = (home: string): Effect.Effect<void, JoinError> =>
     );
   });
 
-export const local = (home: string): Effect.Effect<void, NotEnrolled | JoinError | RunnerRetired> =>
+export const local = (
+  home: string,
+): Effect.Effect<void, NotEnrolled | JoinError | RunnerRetired | ToolingUnavailable> =>
   Effect.gen(function* () {
     // Whether the file is there, not whether it reads: a machine holding an
     // unparseable `runner.json` should say so rather than enlist again.

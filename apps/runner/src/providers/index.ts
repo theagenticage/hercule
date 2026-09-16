@@ -36,6 +36,16 @@ export interface ProviderRunnerContext {
    * section 4). Never carries a `HOME` override.
    */
   readonly env: Readonly<Record<string, string | undefined>>;
+  /**
+   * hydra-as-a-tool, resolved once by the runner and materialized by each
+   * adapter into its harness's own channel (spec 06 section 9.3): the skill
+   * text itself, and the Claude plugin directory the runner wrote it into.
+   * Exactly one function per adapter reads this.
+   */
+  readonly hydraTool: {
+    readonly skill: string;
+    readonly claudePluginDir: string;
+  };
 }
 
 export interface InstallOutcome {

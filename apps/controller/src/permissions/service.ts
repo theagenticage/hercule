@@ -33,10 +33,11 @@ import {
   type Unauthenticated,
   type Validation,
 } from "@hydra/contract";
-import { requireGrant, USER_ACTOR } from "../actor";
-import { withTransaction } from "../db";
+import { currentStamp, requireGrant } from "../actor";
+import { afterCommit, withTransaction } from "../db";
 import { AuditLog } from "../events";
 import { PermissionProfiles, type GrantsError } from "./profiles";
+import { SessionTokens } from "./tokens";
 
 /** What listing takes. Absent fields are the defaults, not "no page". */
 export interface QueryInput {
@@ -62,6 +63,7 @@ const NO_SUCH_PROFILE = "no such permission profile";
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const profiles = yield* PermissionProfiles;
+  const tokens = yield* SessionTokens;
   const audit = yield* AuditLog;
 
   return {
@@ -118,7 +120,7 @@ const make = Effect.gen(function* () {
             if (Option.isNone(created)) return yield* Effect.fail(NAME_TAKEN(input.name));
             yield* audit.append({
               kind: "profile.created",
-              actor: USER_ACTOR,
+              actor: yield* currentStamp,
               payload: { id: created.value.id, name: created.value.name },
             });
             return created.value;
@@ -162,9 +164,16 @@ const make = Effect.gen(function* () {
                 // so a patch that got here carried one.
                 return yield* Effect.fail(NAME_TAKEN(input.name!));
               case "updated":
+                // Every live session on this profile is carrying the grants it
+                // held a moment ago; the next call each makes reads the row
+                // this write just changed. After the commit, so a call in
+                // flight cannot cache the old grants again in between.
+                yield* afterCommit(() => {
+                  tokens.forgetProfile(outcome.profile.id);
+                });
                 yield* audit.append({
                   kind: "profile.updated",
-                  actor: USER_ACTOR,
+                  actor: yield* currentStamp,
                   payload: { id: outcome.profile.id, name: outcome.profile.name },
                 });
                 return outcome.profile;
@@ -196,10 +205,22 @@ const make = Effect.gen(function* () {
                 invalidState(`${found.value.name} is a profile Hydra ships; it cannot be deleted.`),
               );
             }
+            // A session is bounded by the grants it copied from this row for as
+            // long as it runs. Deleting it underneath one would kill that
+            // session's credential without saying so, so the delete waits for
+            // the sessions to end rather than the sessions for the delete.
+            if (yield* profiles.heldByLiveSession(input.id)) {
+              return yield* Effect.fail(
+                invalidState(
+                  `${found.value.name} is carried by a session that has not exited; ` +
+                    "it can be deleted once they have.",
+                ),
+              );
+            }
             yield* profiles.delete(input.id);
             yield* audit.append({
               kind: "profile.deleted",
-              actor: USER_ACTOR,
+              actor: yield* currentStamp,
               payload: { id: found.value.id, name: found.value.name },
             });
             return {};
@@ -217,5 +238,5 @@ export class Profiles extends Context.Service<Profiles, Effect.Success<typeof ma
 export const ProfilesLayer: Layer.Layer<
   Profiles,
   never,
-  SqlClient.SqlClient | PermissionProfiles | AuditLog
+  SqlClient.SqlClient | PermissionProfiles | SessionTokens | AuditLog
 > = Layer.effect(Profiles)(make);

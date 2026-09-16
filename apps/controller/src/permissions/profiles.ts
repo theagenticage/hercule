@@ -236,6 +236,23 @@ const make = Effect.gen(function* () {
       }),
 
     /**
+     * Whether a session that has not exited still carries this profile. A
+     * session copies its grants at spawn and is bounded by them for as long as
+     * it runs, so deleting the row underneath one would leave the agent inside
+     * it with a credential that resolves to nothing.
+     */
+    heldByLiveSession: (id: string): Effect.Effect<boolean, SqlError> =>
+      Effect.map(
+        sql<{ readonly held: number }>`
+          SELECT EXISTS (
+            SELECT 1 FROM sessions
+            WHERE permission_profile_id = ${uuidFromString(id)} AND status <> 'exited'
+          ) AS held
+        `,
+        (rows) => rows[0]!.held === 1,
+      ),
+
+    /**
      * Deletes a profile. Whether this profile may be deleted at all is the
      * service's rule, not the store's: a shipped profile is not deletable and
      * never reaches here.

@@ -522,7 +522,10 @@ const OTHER_SESSION = "0199e0e7-0000-7000-8000-0000000000f7";
 
 const OTHER_THREAD = "0199e0e7-0000-7000-8000-0000000000f6";
 
-/** Two sessions of one instance, which is one app-server hosting both. */
+/** The token the runner put in each session's environment; they never match. */
+const TOKENS = { [SESSION]: "token-of-the-first", [OTHER_SESSION]: "token-of-the-second" };
+
+/** Two sessions of one instance, each with its own token and its own app-server. */
 const pair = async (): Promise<ReturnType<typeof driving>> => {
   let opened = 0;
   const run = driving({
@@ -531,8 +534,12 @@ const pair = async (): Promise<ReturnType<typeof driving>> => {
       return { thread: { id: opened === 1 ? THREAD : OTHER_THREAD } };
     },
   });
-  await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, run.ctx));
-  await Effect.runPromise(run.adapter.startSession(OTHER_SESSION, SPEC, run.ctx));
+  const withToken = (sessionId: keyof typeof TOKENS) => ({
+    ...run.ctx,
+    env: { ...run.ctx.env, HYDRA_TOKEN: TOKENS[sessionId] },
+  });
+  await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, withToken(SESSION)));
+  await Effect.runPromise(run.adapter.startSession(OTHER_SESSION, SPEC, withToken(OTHER_SESSION)));
   return run;
 };
 
@@ -541,20 +548,36 @@ const exitsIn = (seen: ReadonlyArray<ProviderEvent>, sessionId: string): Readonl
     .filter((event) => event.sessionId === sessionId)
     .map((event) => event.reason);
 
-describe("the app-server an instance's sessions share", () => {
-  it("hosts both on one process and ends it only when the last one leaves", async () => {
+describe("the app-server one session of an instance gets to itself", () => {
+  it("is its own process, spawned with its own session token", async () => {
     const run = await pair();
 
-    expect(run.spawns).toHaveLength(1);
+    // Every shell command a Codex session runs is a child of its app-server and
+    // inherits that process's environment. Two sessions on one process means
+    // the second acting as the first: its credential, its grants, its stamp -
+    // and a 401 for both the moment the first session's token is revoked (spec
+    // 06 section 9.3).
+    expect(run.spawns).toHaveLength(2);
+    expect(run.spawns[0]?.env["HYDRA_TOKEN"]).toBe(TOKENS[SESSION]);
+    expect(run.spawns[1]?.env["HYDRA_TOKEN"]).toBe(TOKENS[OTHER_SESSION]);
     expect(await Effect.runPromise(run.adapter.listSessions)).toHaveLength(2);
+  });
+
+  it("dies with the session that held it, and takes no other with it", async () => {
+    const run = await pair();
 
     await Effect.runPromise(run.adapter.stopSession(SESSION, "stopped"));
-    // Still hosting the other session: an app-server killed here would take a
-    // session nobody stopped with it.
-    expect(run.spawns[0]?.kills()).toBe(0);
+
+    // Killed, because a process left running holds a token that is already
+    // dead; and only that one, because the other session has not ended.
+    expect(run.spawns[0]?.kills()).toBe(1);
+    expect(run.spawns[1]?.kills()).toBe(0);
+    expect(await Effect.runPromise(run.adapter.listSessions)).toEqual([
+      { sessionId: OTHER_SESSION, nativeSessionId: OTHER_THREAD, instanceId: SPEC.instanceId },
+    ]);
 
     await Effect.runPromise(run.adapter.stopSession(OTHER_SESSION, "stopped"));
-    expect(run.spawns[0]?.kills()).toBe(1);
+    expect(run.spawns[1]?.kills()).toBe(1);
     expect(await Effect.runPromise(run.adapter.listSessions)).toEqual([]);
   });
 
@@ -574,18 +597,20 @@ describe("the app-server an instance's sessions share", () => {
     ]);
   });
 
-  it("reports every session on an app-server that stopped by itself", async () => {
+  it("reports the session on an app-server that stopped by itself, and only that one", async () => {
     const run = await pair();
 
     run.spawns[0]!.crash();
 
     await until(
-      "reported both sessions gone",
-      () => taggedIn(run.seen, "session.exited").length === 2,
+      "reported the session gone",
+      () => taggedIn(run.seen, "session.exited").length === 1,
     );
     expect(exitsIn(run.seen, SESSION)).toEqual(["process_exit"]);
-    expect(exitsIn(run.seen, OTHER_SESSION)).toEqual(["process_exit"]);
-    expect(await Effect.runPromise(run.adapter.listSessions)).toEqual([]);
+    expect(exitsIn(run.seen, OTHER_SESSION)).toEqual([]);
+    expect(await Effect.runPromise(run.adapter.listSessions)).toEqual([
+      { sessionId: OTHER_SESSION, nativeSessionId: OTHER_THREAD, instanceId: SPEC.instanceId },
+    ]);
   });
 
   it("says nothing about a thread no session on it holds", async () => {
@@ -869,5 +894,45 @@ describe("the two Codex surfaces this adapter must never reach for", () => {
   it("never names the user's own Codex home", () => {
     // The only Codex home a runner may touch is the one built from `ctx.home`.
     expect(grepping(["~/\\", ".codex\\|$HOME/\\", ".codex"].join(""))).toBe("");
+  });
+});
+
+describe("hydra-as-a-tool on a Codex thread", () => {
+  /** What the runner resolved once, at start, for every adapter. */
+  const TOOL = {
+    skill: "# hydra\n\nCall `hydra --help` to find out what this controller can do.\n",
+    claudePluginDir: "/var/hydra/runner/storage/claude-plugin",
+  };
+
+  const THREE: ReadonlyArray<readonly [string, SessionSpec]> = [
+    ["thread/start", SPEC],
+    ["thread/resume", { ...SPEC, continue: { nativeSessionId: PRIOR, mode: "resume" } }],
+    ["thread/fork", { ...SPEC, continue: { nativeSessionId: PRIOR, mode: "fork" } }],
+  ];
+
+  it.each(THREE)("carries the skill as %s's developer instructions", async (method, spec) => {
+    const { adapter, ctx, requests } = driving();
+
+    await Effect.runPromise(adapter.startSession(SESSION, spec, { ...ctx, hydraTool: TOOL }));
+
+    // The channel #73 found, and the only one: a session that cannot be told
+    // the CLI exists never calls it (spec 06 section 9.1).
+    expect(sentOf(requests, method)).toEqual([
+      expect.objectContaining({ developerInstructions: TOOL.skill }),
+    ]);
+  });
+
+  it("writes no AGENTS.md into the scratch directory it runs in", async () => {
+    const scratch = homing();
+    const { adapter, ctx } = driving({}, scratch);
+
+    await Effect.runPromise(adapter.startSession(SESSION, SPEC, { ...ctx, hydraTool: TOOL }));
+    await settle();
+
+    // The retired channel (spec 06 section 9.1, amended 2026-09-14): a file
+    // here is instructions the harness reads out of a directory Hydra says is
+    // empty, and one more copy of the skill to keep current.
+    expect(existsSync(join(scratch, "AGENTS.md"))).toBe(false);
+    expect(readdirSync(scratch)).toEqual([]);
   });
 });

@@ -9,6 +9,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { Effect } from "effect";
+import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { ProviderEvent } from "@hydra/protocol";
 import { CursorError, mintUuid, uuidToString } from "../db";
 import { TestDatabase } from "../db/testing";
@@ -71,6 +72,19 @@ const walk = (sessionId: string, limit: number) =>
       cursor = page.nextCursor;
     }
   });
+
+/** The token hash a session row holds, read straight off the row. */
+const hashOf = (sessionId: string) =>
+  Effect.map(
+    Effect.flatMap(
+      SqlClient.SqlClient,
+      (sql) =>
+        sql<{
+          readonly token_hash: string | null;
+        }>`SELECT token_hash FROM sessions WHERE id = unhex(${sessionId.replaceAll("-", "")})`,
+    ),
+    (rows) => rows[0]!.token_hash,
+  );
 
 const turnIdOf = (row: StoredStreamRow): string =>
   row.event._tag === "turn.started" ? row.event.turnId : row.event._tag;
@@ -216,5 +230,28 @@ describe("the transcript walk", () => {
       streamKind: "assistant_text",
       delta: "Hello",
     });
+  });
+});
+
+describe("the session's own credential across a resume", () => {
+  it("is gone the moment the session goes back on the queue", async () => {
+    // A resumed session is queued again, with no process to be the identity of,
+    // and it is put back there by the same call that would otherwise leave the
+    // dead process's token live until dispatch happened to overwrite it.
+    const held = await run(
+      Effect.gen(function* () {
+        const sessions = yield* sessionRepository;
+        const sessionId = yield* aSession;
+        yield* sessions.moved(sessionId, "starting", at);
+        yield* sessions.setTokenHash(sessionId, "hash-one");
+        yield* sessions.moved(sessionId, "exited", at);
+        const before = yield* hashOf(sessionId);
+        yield* sessions.resume(sessionId, "{}", at);
+        return { before, after: yield* hashOf(sessionId) };
+      }).pipe(Effect.provide(TestDatabase), Effect.orDie),
+    );
+
+    expect(held.before).toBe("hash-one");
+    expect(held.after).toBeNull();
   });
 });

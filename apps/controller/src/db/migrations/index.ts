@@ -24,6 +24,8 @@ import resumedSessionStreams from "./0013-resumed-session-streams";
 import connections from "./0014-connections";
 import oauthSetups from "./0015-oauth-setups";
 import openRequest from "./0016-open-request";
+import sessionTokens from "./0017-session-tokens";
+import auditGrantOnUnrestricted from "./0018-audit-grant-on-unrestricted";
 
 export const migrations: ReadonlyArray<ResolvedMigration> = [
   [1, "initial", Effect.succeed(initial)],
@@ -42,6 +44,8 @@ export const migrations: ReadonlyArray<ResolvedMigration> = [
   [14, "connections", Effect.succeed(connections)],
   [15, "oauth-setups", Effect.succeed(oauthSetups)],
   [16, "open-request", Effect.succeed(openRequest)],
+  [17, "session-tokens", Effect.succeed(sessionTokens)],
+  [18, "audit-grant-on-unrestricted", Effect.succeed(auditGrantOnUnrestricted)],
 ];
 
 /** The schema version this binary carries: the highest embedded migration id. */

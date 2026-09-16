@@ -278,7 +278,7 @@ describe("Tasks > the drawer", () => {
     await user.click(await screen.findByRole("button", { name: new RegExp(RUNNER.title) }));
     const first = await screen.findByRole("dialog");
     expect(first.textContent).toContain("github:issue:rogierpennink/hydra#61");
-    expect(first.textContent).toContain("user");
+    expect(first.textContent).toContain("you");
     // The reading may be in the user's zone or in UTC; either says the minute.
     expect(first.textContent).toMatch(/17:21|15:21/);
 
@@ -290,7 +290,11 @@ describe("Tasks > the drawer", () => {
     await user.click(row(PRUNE.title));
     const second = await screen.findByRole("dialog");
     expect(second.textContent).toContain("4242");
-    expect(second.textContent).toContain("session:01a06d02-c111-7a0e-8b3d-9c1f7c82ebeb");
+    // A session that acted is named by its tail and links to its thread, rather
+    // than printing the raw `session:<uuid>` stamp.
+    expect(second.textContent).not.toContain("session:01a06d02-c111-7a0e-8b3d-9c1f7c82ebeb");
+    const thread = await within(second).findByRole("link", { name: "session 7c82ebeb" });
+    expect(thread.getAttribute("href")).toBe("/threads/01a06d02-c111-7a0e-8b3d-9c1f7c82ebeb");
   });
 
   it("moves a task from any status to any other", async () => {

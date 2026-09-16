@@ -24,7 +24,7 @@ import {
   type Validation,
 } from "@hydra/contract";
 import { nowIso, withTransaction } from "../db";
-import { requireGrant, USER_ACTOR } from "../actor";
+import { currentStamp, requireGrant } from "../actor";
 import { AuditLog } from "../events";
 import { PluginHost } from "./host";
 import { pluginRepository, storedState } from "./repository";
@@ -130,7 +130,7 @@ const make = Effect.gen(function* () {
           yield* change(at);
           yield* audit.append({
             kind,
-            actor: USER_ACTOR,
+            actor: yield* currentStamp,
             payload: { pluginId: id },
             record: { topic: "plugin", id },
             at,

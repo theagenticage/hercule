@@ -36,6 +36,7 @@ import {
   Id,
   INPUT_SORT_FIELDS,
   INPUT_UPDATE_FIELDS,
+  forbidden,
   InvalidState,
   invalidState,
   nearestSupportedAccessMode,
@@ -61,10 +62,19 @@ import {
   type Unauthenticated,
   type Validation,
 } from "@hydra/contract";
-import { currentUser, requireGrant, SYSTEM_ACTOR, USER_ACTOR } from "../actor";
-import { announce, nowIso, pageInput, refuseCursor, withTransaction, type Page } from "../db";
+import { currentStamp, currentUser, requireGrant, SYSTEM_ACTOR } from "../actor";
+import {
+  afterCommit,
+  announce,
+  nowIso,
+  pageInput,
+  refuseCursor,
+  withTransaction,
+  type Page,
+} from "../db";
+import { mintToken, hashToken } from "../credentials";
 import { AuditLog } from "../events";
-import { PermissionProfiles, type GrantsError } from "../permissions";
+import { PermissionProfiles, SessionTokens, type GrantsError } from "../permissions";
 import { PluginHost } from "../plugins";
 import { providerRepository, type StoredSnapshot } from "../providers";
 import { RunnerPresence, runnerRepository, type Connection, type SessionTraffic } from "../runners";
@@ -213,6 +223,9 @@ const NO_TRANSCRIPT =
   "that session left no provider-native session, so its transcript is gone and there is " +
   "nothing to resume";
 
+/** Why a session may not fork a session that is bounded by other grants. */
+const NOT_ITS_PROFILE = "a session may only continue a session on its own permission profile";
+
 /** Read at any runner named directly: for a session to continue on, and for one to spawn on. */
 const DRAINING = "that runner is draining and takes no new sessions";
 const RETIRED = "that runner is retired";
@@ -304,6 +317,7 @@ const make = Effect.gen(function* () {
   const runners = yield* runnerRepository;
   const presence = yield* RunnerPresence;
   const profiles = yield* PermissionProfiles;
+  const tokens = yield* SessionTokens;
   const settings = yield* Settings;
   const host = yield* PluginHost;
   const audit = yield* AuditLog;
@@ -655,19 +669,29 @@ const make = Effect.gen(function* () {
     Effect.ignore(Effect.tapCause(effect, (cause) => Effect.logError(what, cause)));
 
   /**
-   * The tail of any move to `exited`: queued inputs cancelled, one announce per
-   * session. A reason is written on the rows where the machine gave one.
+   * The tail of any move to `exited`: queued inputs cancelled, the session's
+   * token forgotten, one announce per session. A reason is written on the rows
+   * where the machine gave one.
    */
   const ending = (ids: ReadonlyArray<string>, reason?: string): Effect.Effect<void, SqlError> =>
-    Effect.forEach(
-      ids,
-      (id) =>
-        Effect.gen(function* () {
-          yield* inputs.cancelQueued(id, reason);
-          yield* announce({ _tag: "record", topic: "session", id, kind: "updated" });
-        }),
-      { discard: true },
-    );
+    Effect.gen(function* () {
+      yield* Effect.forEach(
+        ids,
+        (id) =>
+          Effect.gen(function* () {
+            yield* inputs.cancelQueued(id, reason);
+            yield* announce({ _tag: "record", topic: "session", id, kind: "updated" });
+          }),
+        { discard: true },
+      );
+      // The row's status is what refuses the token from here on; this drops
+      // only what was resolved from it while the session was still running.
+      // After the commit, so a call in flight cannot cache the old row again
+      // between the drop and the write becoming visible.
+      yield* afterCommit(() => {
+        tokens.forgetSessions(ids);
+      });
+    });
 
   /**
    * Applies a runner's report of what it holds: records the native id each
@@ -754,11 +778,19 @@ const make = Effect.gen(function* () {
           if (room <= 0) return [];
           const queued = yield* sessions.oldestQueued(runnerId, room);
           const at = yield* nowIso;
+          const starting: Array<(typeof queued)[number] & { readonly token: string }> = [];
           for (const row of queued) {
-            yield* sessions.moved(row.id, "starting", at);
+            // The session's own credential on the public API, minted for this
+            // start and stored as its hash with the move that licenses it: a
+            // session is reachable exactly while the row says it is running.
+            // A resume comes back through here, so the token it starts under
+            // replaces the one the previous process held.
+            const token = mintToken();
+            yield* sessions.started(row.id, hashToken(token), at);
             yield* announce({ _tag: "record", topic: "session", id: row.id, kind: "updated" });
+            starting.push({ ...row, token });
           }
-          return queued;
+          return starting;
         }),
       );
       for (const row of ready) {
@@ -771,12 +803,21 @@ const make = Effect.gen(function* () {
           // same codec at insert, so a decode failure means a spec field's
           // codec changed underneath a row already queued with the old one.
           spec: yield* Effect.orDie(decodeSpec(JSON.parse(row.spec))),
+          token: row.token,
         };
         if (!(yield* presence.tell(runnerId, start))) {
           yield* withTransaction(
             sql,
             Effect.gen(function* () {
               yield* sessions.moved(row.id, "queued", yield* nowIso);
+              // The token went out on a frame nobody took, so nothing holds it:
+              // a queued session is one nothing may call the API as. Forgotten
+              // after the commit, like any other drop, so a call in flight
+              // cannot cache the old row again before the write is visible.
+              yield* sessions.setTokenHash(row.id, null);
+              yield* afterCommit(() => {
+                tokens.forgetSessions([row.id]);
+              });
               yield* announce({ _tag: "record", topic: "session", id: row.id, kind: "updated" });
             }),
           );
@@ -962,16 +1003,17 @@ const make = Effect.gen(function* () {
           // The prompt is an ordinary input, waiting with the session: it
           // leaves when the harness comes up, and a controller restarted in
           // that window still has it.
+          const actor = yield* currentStamp;
           yield* inputs.insert({
             sessionId: row.id,
             source: "user",
-            actor: USER_ACTOR,
+            actor,
             text: open.prompt,
             at,
           });
           yield* audit.append({
             kind: open.kind,
-            actor: USER_ACTOR,
+            actor,
             record: { topic: "session", id: row.id },
             payload: { ...open.payload, sessionId: row.id },
             at,
@@ -1210,7 +1252,7 @@ const make = Effect.gen(function* () {
             const created = yield* inputs.insert({
               sessionId: id,
               source: "user",
-              actor: USER_ACTOR,
+              actor: yield* currentStamp,
               text,
               at,
               ...(session.status === "idle" ? { sentAt: at } : {}),
@@ -1283,12 +1325,13 @@ const make = Effect.gen(function* () {
         ) {
           return yield* Effect.fail(invalidState(GONE));
         }
+        const actor = yield* currentStamp;
         yield* withTransaction(
           sql,
           Effect.flatMap(nowIso, (at) =>
             audit.append({
               kind: "session.interrupted",
-              actor: USER_ACTOR,
+              actor,
               payload: { sessionId: id, runnerId: session.runnerId },
               at,
             }),
@@ -1337,12 +1380,13 @@ const make = Effect.gen(function* () {
         ) {
           return yield* Effect.fail(invalidState(GONE));
         }
+        const actor = yield* currentStamp;
         yield* withTransaction(
           sql,
           Effect.flatMap(nowIso, (at) =>
             audit.append({
               kind: "session.responded",
-              actor: USER_ACTOR,
+              actor,
               payload: { sessionId: id, runnerId: session.runnerId, requestId, decision },
               at,
             }),
@@ -1374,7 +1418,7 @@ const make = Effect.gen(function* () {
               yield* ending([id]);
               yield* audit.append({
                 kind: "session.stopped",
-                actor: USER_ACTOR,
+                actor: yield* currentStamp,
                 payload: { sessionId: id, runnerId: session.runnerId },
                 at,
               });
@@ -1385,12 +1429,13 @@ const make = Effect.gen(function* () {
         if (!(yield* presence.tell(session.runnerId, { _tag: "sessionStop", sessionId: id }))) {
           return yield* Effect.fail(invalidState(GONE));
         }
+        const actor = yield* currentStamp;
         yield* withTransaction(
           sql,
           Effect.flatMap(nowIso, (at) =>
             audit.append({
               kind: "session.stopped",
-              actor: USER_ACTOR,
+              actor,
               payload: { sessionId: id, runnerId: session.runnerId },
               at,
             }),
@@ -1405,14 +1450,22 @@ const make = Effect.gen(function* () {
      * the native state is (spec 06 section 4.1). Only an exited parent may be
      * forked from. Resuming the parent itself is `session.input`'s.
      *
-     * It carries a Thread's profile onto a new session, so like `spawn` only
-     * the user may open one (spec 02 Thread).
+     * It carries the parent's own profile onto the fork rather than reaching
+     * the user's thread defaults, so unlike `spawn` a session holding
+     * `session.spawn` may make one - but only of a session on the profile it is
+     * bounded by itself. Any other parent would be an escalation: `session.read`
+     * is unscoped, so a session can find every other session on the controller,
+     * and forking one on a wider profile would hand it that profile's grants
+     * with a prompt of its own choosing.
      */
     continue: (input: ContinueInput): Effect.Effect<Session, InputError> =>
       Effect.gen(function* () {
-        yield* currentUser("session.continue");
+        const actor = yield* requireGrant("session.continue");
         const { id, mode, prompt } = yield* Effect.mapError(decodeContinue(input), validationOf);
         const parent = yield* one(id);
+        if (actor._tag === "session" && parent.permissionProfileId !== actor.profileId) {
+          return yield* Effect.fail(forbidden("session.spawn", NOT_ITS_PROFILE));
+        }
         // Read for what it refuses: an instance that is gone, or a provider this
         // build no longer carries, before the machine's snapshot is trusted.
         yield* resolved(parent.instanceId);
@@ -1513,7 +1566,13 @@ export class SessionService extends Context.Service<SessionService, Effect.Succe
 export const SessionServiceLayer: Layer.Layer<
   SessionService,
   never,
-  SqlClient.SqlClient | RunnerPresence | PluginHost | AuditLog | Settings | PermissionProfiles
+  | SqlClient.SqlClient
+  | RunnerPresence
+  | PluginHost
+  | AuditLog
+  | Settings
+  | PermissionProfiles
+  | SessionTokens
 > = Layer.effect(SessionService)(make);
 
 /**

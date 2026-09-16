@@ -11,6 +11,14 @@ describe("the grant vocabulary", () => {
     }
   });
 
+  it("carries event.audit, the verb the security entries of the log sit behind", () => {
+    expect(GRANT_FAMILIES.event).toContain("audit");
+    expect(ALL_GRANTS).toContain("event.audit");
+    expect(Effect.runSync(Schema.decodeUnknownEffect(GrantSchema)("event.audit"))).toBe(
+      "event.audit",
+    );
+  });
+
   it("has no duplicates and covers every family", () => {
     expect(new Set(ALL_GRANTS).size).toBe(ALL_GRANTS.length);
     expect(ALL_GRANTS).toContain("credential.write");

@@ -26,11 +26,18 @@ import { claudeCodeAdapter, type ClaudeSeam } from "./claude-code";
 import { PROBE_DEADLINE } from "./probe";
 import type { ProviderAdapter, ProviderRunnerContext } from "./index";
 
+/** What the runner resolved once, at start, for hydra-as-a-tool. */
+const HYDRA_TOOL = {
+  skill: "# hydra\n\nCall `hydra --help`.\n",
+  claudePluginDir: "/var/hydra/runner/storage/claude-plugin",
+};
+
 const CONTEXT: ProviderRunnerContext = {
   cwd: null,
   home: "/var/hydra/runner/providers/0199e0e7-0000-7000-8000-00000000000a",
   binary: "/usr/local/bin/claude",
   env: { PATH: "/usr/local/bin:/usr/bin" },
+  hydraTool: HYDRA_TOOL,
 };
 
 const AUTHENTICATED = {
@@ -548,6 +555,21 @@ describe("a Claude Code session", () => {
     expect(options?.env?.["CLAUDE_CONFIG_DIR"]).toBe(WORKING.home);
     expect(options?.env?.["CLAUDE_CODE_DISABLE_AUTO_MEMORY"]).toBe("1");
     expect(Object.keys(options?.env ?? {})).not.toContain("HOME");
+  });
+
+  it("loads hydra-as-a-tool as a local plugin, and no settings of the machine's", async () => {
+    const run = driving();
+    await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, WORKING));
+
+    const [options] = run.options;
+    // The one plugin Hydra owns, loaded from the directory the runner wrote it
+    // into, so nothing is copied per session and a Thread's own `.claude/` is
+    // never collided with (spec 06 section 9.3).
+    expect(options?.plugins).toEqual([{ type: "local", path: HYDRA_TOOL.claudePluginDir }]);
+    // Explicitly beside it: the skill has to be discovered with no setting
+    // source at all, which is what makes this the Hydra-owned channel rather
+    // than whatever files happen to sit on this runner (spec 06 section 10.1).
+    expect(options?.settingSources).toEqual([]);
   });
 
   // Spec 06 section 8.1 is normative, and full-access is the row that matters.

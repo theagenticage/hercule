@@ -168,6 +168,7 @@ const controllerMessages: ReadonlyArray<ControllerMessage> = [
     providerId: "claude-code",
     config: {},
     spec,
+    token: "a-session-token",
   },
   { _tag: "sessionStop", sessionId: SESSION_ID },
   {

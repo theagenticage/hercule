@@ -23,16 +23,28 @@ const USER: Actor = {
   credential: { kind: "login", id: "0199e0e7-0001-7000-8000-000000000000", tokenHash: "x" },
 };
 
+/** An agent inside a session, which is the one caller a ticket is refused to. */
+const AGENT: Actor = {
+  _tag: "session",
+  sessionId: "0199e0e7-0002-7000-8000-000000000000",
+  profileId: "0199e0e7-0003-7000-8000-000000000000",
+  grants: ["session.read"],
+};
+
 const FIVE_MINUTES = 5 * 60_000;
 
-const run = <A, E>(effect: Effect.Effect<A, E, WsTickets>): Promise<A> =>
-  Effect.runPromise(
-    effect.pipe(
-      Effect.provideService(CurrentActor, USER),
-      Effect.provide(WsTicketsLayer),
-      Effect.provide(TestClock.layer()),
-    ),
-  );
+const runAs =
+  (actor: Actor) =>
+  <A, E>(effect: Effect.Effect<A, E, WsTickets>): Promise<A> =>
+    Effect.runPromise(
+      effect.pipe(
+        Effect.provideService(CurrentActor, actor),
+        Effect.provide(WsTicketsLayer),
+        Effect.provide(TestClock.layer()),
+      ),
+    );
+
+const run = runAs(USER);
 
 describe("a ticket's lifetime", () => {
   it("still resolves a moment before five minutes are up", async () => {
@@ -75,5 +87,19 @@ describe("a ticket's lifetime", () => {
 
     expect(Option.isNone(old)).toBe(true);
     expect(Option.getOrNull(fresh)).toEqual(USER);
+  });
+});
+
+describe("who a ticket is issued to", () => {
+  it("refuses an agent inside a session, because the socket is the user's screens", async () => {
+    // A 401 rather than the 403 a session actor gets elsewhere: this operation
+    // names no grant, so there is none for a refusal to point at. What the
+    // message says is the part that matters to whoever reads it.
+    const refusal = await runAs(AGENT)(
+      Effect.flip(Effect.flatMap(WsTickets, (tickets) => tickets.issue())),
+    );
+
+    expect(refusal.error.code).toBe("unauthenticated");
+    expect(refusal.error.message.toLowerCase()).toContain("user");
   });
 });
