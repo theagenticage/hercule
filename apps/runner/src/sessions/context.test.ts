@@ -12,11 +12,23 @@ import { afterAll, describe, expect, it } from "vitest";
 import { Effect } from "effect";
 import type { SessionStart } from "@hydra/protocol";
 import { resolve, type Machine } from "./context";
+import { makeWorkspaces } from "../workspaces";
+import {
+  addBranch,
+  adoptedCheckout,
+  checkout,
+  cleanTemporaries,
+  git,
+  id,
+  makeRemote,
+  provisionFrame,
+} from "../workspaces/testing";
 
 const roots: Array<string> = [];
 
 afterAll(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+  cleanTemporaries();
 });
 
 const root = (): string => {
@@ -36,6 +48,8 @@ const machining = (overrides: Partial<Machine> = {}): Machine => {
     controllerUrl: "https://controller.example:4938",
     baseEnv: { PATH: "/usr/bin", HOME: "/home/somebody" },
     binaryOf: (name) => `/usr/local/bin/${name}`,
+    workspaces: makeWorkspaces({ storageDir: join(under, "storage") }),
+    socketPath: join(under, "daemon.sock"),
     ...overrides,
   };
 };
@@ -57,6 +71,10 @@ const starting = (overrides: Partial<SessionStart> = {}): SessionStart => ({
 
 const resolving = (frame: SessionStart, machine: Machine) =>
   Effect.runSync(Effect.result(resolve(frame, machine, "claude")));
+
+/** The same, for the cases where resolving a workspace reaches real git. */
+const resolvingAsync = (frame: SessionStart, machine: Machine) =>
+  Effect.runPromise(Effect.result(resolve(frame, machine, "claude")));
 
 describe("what a workspace-less session runs in", () => {
   it("gets a scratch directory of its own, and it is empty", () => {
@@ -185,20 +203,140 @@ describe("the environment a session runs with", () => {
 });
 
 describe("a session the runner cannot place", () => {
-  it("says a workspace is not something it can provision yet", () => {
+  it("refuses a workspace this machine does not hold, by id", async () => {
     const machine = machining();
+    const workspaceId = "0199e0e7-0000-7000-8000-00000000000b";
 
-    const outcome = resolving(
-      starting({
-        spec: { ...starting().spec, workspaceId: "0199e0e7-0000-7000-8000-00000000000b" },
-      }),
+    const outcome = await resolvingAsync(
+      starting({ spec: { ...starting().spec, workspaceId } }),
       machine,
     );
 
     // Never a silent fallback to a scratch directory: the session would run
     // somewhere the user did not choose.
     expect(outcome._tag).toBe("Failure");
-    expect(outcome._tag === "Failure" ? outcome.failure : "").toContain("0199e0e7");
+    expect(outcome._tag === "Failure" ? outcome.failure : "").toContain(workspaceId);
     expect(existsSync(machine.scratchDir)).toBe(false);
+  });
+});
+
+describe("a session that has a workspace", () => {
+  it("runs in the workspace's directory, with no scratch of its own", async () => {
+    const remote = makeRemote();
+    const machine = machining();
+    const workspaceId = id();
+    await machine.workspaces.provision(
+      provisionFrame({
+        workspaceId,
+        kind: "ephemeral",
+        checkouts: [
+          checkout({ resourceId: id(), remote: remote.url, branch: "hydra/run-9c9c9c9c" }),
+        ],
+      }),
+    );
+
+    const outcome = await resolvingAsync(
+      starting({ spec: { ...starting().spec, workspaceId } }),
+      machine,
+    );
+
+    expect(outcome._tag).toBe("Success");
+    const resolved = outcome._tag === "Success" ? outcome.success : undefined;
+    expect(resolved?.ctx.cwd).toBe(machine.workspaces.resolve(workspaceId)?.cwd);
+    // Nothing to remove on exit: the workspace outlives the session.
+    expect(resolved?.scratch).toBeUndefined();
+  });
+
+  it("switches a primary's checkout to the branch the frame names, before it starts", async () => {
+    const remote = makeRemote();
+    addBranch(remote, "release");
+    const folder = adoptedCheckout(remote);
+    const machine = machining();
+    const workspaceId = id();
+    await machine.workspaces.provision(
+      provisionFrame({
+        workspaceId,
+        kind: "primary",
+        checkouts: [checkout({ resourceId: id(), remote: remote.url, path: folder })],
+      }),
+    );
+
+    const outcome = await resolvingAsync(
+      starting({ spec: { ...starting().spec, workspaceId }, checkoutBranch: "release" }),
+      machine,
+    );
+
+    expect(outcome._tag).toBe("Success");
+    expect(git(folder, "rev-parse", "--abbrev-ref", "HEAD")).toBe("release");
+  });
+
+  it("refuses the session with git's own words when the branch cannot be switched to", async () => {
+    const remote = makeRemote();
+    const folder = adoptedCheckout(remote);
+    const machine = machining();
+    const workspaceId = id();
+    await machine.workspaces.provision(
+      provisionFrame({
+        workspaceId,
+        kind: "primary",
+        checkouts: [checkout({ resourceId: id(), remote: remote.url, path: folder })],
+      }),
+    );
+
+    const outcome = await resolvingAsync(
+      starting({ spec: { ...starting().spec, workspaceId }, checkoutBranch: "no-such-branch" }),
+      machine,
+    );
+
+    // A forced switch would lose the user's uncommitted work, so it is a
+    // failure the user reads, not something the runner works around.
+    expect(outcome._tag).toBe("Failure");
+    expect(outcome._tag === "Failure" ? outcome.failure : "").toContain("no-such-branch");
+    expect(git(folder, "rev-parse", "--abbrev-ref", "HEAD")).toBe("main");
+  });
+});
+
+describe("the git credential environment a session runs with", () => {
+  /** The `GIT_CONFIG_*` triple, read back as the ordered pairs git would see. */
+  const gitConfigOf = (
+    env: Record<string, string | undefined>,
+  ): ReadonlyArray<readonly [string | undefined, string | undefined]> =>
+    Array.from({ length: Number(env["GIT_CONFIG_COUNT"] ?? "0") }, (_, n) => [
+      env[`GIT_CONFIG_KEY_${String(n)}`],
+      env[`GIT_CONFIG_VALUE_${String(n)}`],
+    ]);
+
+  it("points git at this runner's helper and drops the machine's own", async () => {
+    const machine = machining();
+
+    const outcome = await resolvingAsync(starting({ sessionToken: "the-session-token" }), machine);
+    const env = outcome._tag === "Success" ? { ...outcome.success.ctx.env } : {};
+
+    expect(env["HYDRA_RUNNER_SOCKET"]).toBe(machine.socketPath);
+    // The helper authenticates as this session, and nothing else.
+    expect(env["HYDRA_TOKEN"]).toBe("the-session-token");
+    const pairs = gitConfigOf(env);
+    // The empty entry comes first: an inherited helper would otherwise answer
+    // with the machine owner's credentials, for any repository.
+    expect(pairs[0]).toEqual(["credential.helper", ""]);
+    expect(pairs[1]?.[0]).toBe("credential.helper");
+    expect(pairs[1]?.[1] ?? "").toContain("git-credential");
+    expect((pairs[1]?.[1] ?? "").startsWith("/")).toBe(true);
+    // Without it the token of one repository would be sent to another host's.
+    expect(pairs).toContainEqual(["credential.useHttpPath", "true"]);
+    expect(pairs.length).toBe(Number(env["GIT_CONFIG_COUNT"]));
+  });
+
+  it("carries GH_TOKEN only when the frame does", async () => {
+    const withToken = await resolvingAsync(starting({ ghToken: "ghp_for_gh_cli" }), machining());
+    const without = await resolvingAsync(starting(), machining());
+
+    expect(withToken._tag === "Success" ? withToken.success.ctx.env["GH_TOKEN"] : undefined).toBe(
+      "ghp_for_gh_cli",
+    );
+    // An empty one reads to `gh` as a credential that failed.
+    expect(
+      without._tag === "Success" ? without.success.ctx.env["GH_TOKEN"] : "set",
+    ).toBeUndefined();
   });
 });

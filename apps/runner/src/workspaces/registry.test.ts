@@ -1,0 +1,174 @@
+/**
+ * What the runner still knows about its workspaces after it restarts (AC-11).
+ *
+ * The controller stores no path, so this registry is the only place a
+ * workspace's directory exists. A daemon that forgets it has stranded the
+ * user's work on its own disk.
+ */
+import { writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { afterAll, describe, expect, it } from "vitest";
+import { makeWorkspaces } from "./index";
+import {
+  adoptedCheckout,
+  checkout,
+  cleanTemporaries,
+  git,
+  id,
+  makeRemote,
+  provisionFrame,
+  temporary,
+} from "./testing";
+
+afterAll(cleanTemporaries);
+
+const storage = (): string => temporary("hydra-storage-");
+
+describe("resolving a workspace", () => {
+  it("reads an ephemeral back after a restart, with its checkouts", async () => {
+    const remote = makeRemote();
+    const storageDir = storage();
+    const workspaceId = id();
+    const resourceId = id();
+    const checkoutId = id();
+    await makeWorkspaces({ storageDir }).provision(
+      provisionFrame({
+        workspaceId,
+        kind: "ephemeral",
+        checkouts: [
+          checkout({ checkoutId, resourceId, remote: remote.url, branch: "hydra/run-1a1a1a1a" }),
+        ],
+      }),
+    );
+
+    // A second instance over the same storage: the daemon after a restart.
+    const resolved = makeWorkspaces({ storageDir }).resolve(workspaceId);
+
+    const directory = join(storageDir, "workspaces", workspaceId);
+    expect(resolved?.root).toBe(directory);
+    // A single-repo ephemeral runs in the checkout itself, not above it.
+    expect(resolved?.cwd).toBe(directory);
+    expect(resolved?.checkouts).toEqual([
+      { checkoutId, resourceId, remote: remote.url, path: directory },
+    ]);
+  });
+
+  it("runs a multi-repo ephemeral above its repositories", async () => {
+    const web = makeRemote();
+    const api = makeRemote();
+    const storageDir = storage();
+    const workspaceId = id();
+    await makeWorkspaces({ storageDir }).provision(
+      provisionFrame({
+        workspaceId,
+        kind: "ephemeral",
+        checkouts: [
+          checkout({
+            resourceId: id(),
+            remote: web.url,
+            subdirectory: "web",
+            branch: "hydra/run-2b2b2b2b",
+          }),
+          checkout({
+            resourceId: id(),
+            remote: api.url,
+            subdirectory: "api",
+            branch: "hydra/run-2b2b2b2b",
+          }),
+        ],
+      }),
+    );
+
+    const resolved = makeWorkspaces({ storageDir }).resolve(workspaceId);
+
+    const root = join(storageDir, "workspaces", workspaceId);
+    expect(resolved?.cwd).toBe(root);
+    expect(resolved?.checkouts.map((one) => one.path)).toEqual([
+      join(root, "web"),
+      join(root, "api"),
+    ]);
+  });
+
+  it("runs a primary in the folder that was adopted", async () => {
+    const remote = makeRemote();
+    const folder = adoptedCheckout(remote);
+    const storageDir = storage();
+    const workspaceId = id();
+    await makeWorkspaces({ storageDir }).provision(
+      provisionFrame({
+        workspaceId,
+        kind: "primary",
+        checkouts: [checkout({ resourceId: id(), remote: remote.url, path: folder })],
+      }),
+    );
+
+    const resolved = makeWorkspaces({ storageDir }).resolve(workspaceId);
+
+    expect(resolved?.cwd).toBe(folder);
+    expect(resolved?.root).toBe(folder);
+  });
+
+  it("knows nothing about a workspace it does not hold", () => {
+    expect(makeWorkspaces({ storageDir: storage() }).resolve(id())).toBeUndefined();
+  });
+});
+
+describe("provisioning a workspace this runner already holds", () => {
+  it("re-reports it rather than making it again", async () => {
+    const remote = makeRemote();
+    const storageDir = storage();
+    const workspaceId = id();
+    const resourceId = id();
+    const frame = provisionFrame({
+      workspaceId,
+      kind: "ephemeral",
+      checkouts: [checkout({ resourceId, remote: remote.url, branch: "hydra/run-3c3c3c3c" })],
+    });
+    const workspaces = makeWorkspaces({ storageDir });
+    const first = await workspaces.provision(frame);
+    const directory = join(storageDir, "workspaces", workspaceId);
+    writeFileSync(join(directory, "work-in-progress.txt"), "the agent's work\n");
+
+    const again = await makeWorkspaces({ storageDir }).provision(frame);
+
+    expect(again.status).toBe("ready");
+    expect(again.checkouts?.[0]?.branch).toBe(first.checkouts?.[0]?.branch);
+    // A repeated frame must never throw the work in the workspace away.
+    expect(git(directory, "status", "--porcelain")).toContain("work-in-progress.txt");
+  });
+});
+
+describe("what a primary is re-reported as after a session in it", () => {
+  it("re-reads the branch the session left the checkout on", async () => {
+    const remote = makeRemote();
+    const folder = adoptedCheckout(remote);
+    const storageDir = storage();
+    const workspaceId = id();
+    const workspaces = makeWorkspaces({ storageDir });
+    await workspaces.provision(
+      provisionFrame({
+        workspaceId,
+        kind: "primary",
+        checkouts: [checkout({ resourceId: id(), remote: remote.url, path: folder })],
+      }),
+    );
+    // What a session does: it works on a branch of its own.
+    git(folder, "checkout", "-b", "feature/what-the-agent-did");
+
+    const report = await workspaces.reportAfterSession(workspaceId);
+
+    expect(report?.status).toBe("ready");
+    expect(report?.workspaceId).toBe(workspaceId);
+    expect(report?.checkouts?.[0]?.branch).toBe("feature/what-the-agent-did");
+    expect([...(report?.checkouts?.[0]?.branches ?? [])].sort()).toEqual([
+      "feature/what-the-agent-did",
+      "main",
+    ]);
+  });
+
+  it("has nothing to say about a workspace it does not hold", async () => {
+    expect(
+      await makeWorkspaces({ storageDir: storage() }).reportAfterSession(id()),
+    ).toBeUndefined();
+  });
+});
