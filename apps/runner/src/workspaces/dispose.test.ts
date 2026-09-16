@@ -96,3 +96,32 @@ describe("disposing something this runner never had", () => {
     expect(report.workspaceId).toBe(workspaceId);
   });
 });
+
+describe("disposing a workspace that is still being provisioned", () => {
+  /**
+   * D-21 R6: the two frames can arrive together, and a dispose that overtook
+   * the provisioning would remove a directory git was still writing into - and
+   * the provisioning would then register what the dispose had just removed.
+   */
+  it("waits for the provisioning to finish, then leaves nothing behind", async () => {
+    const remote = makeRemote();
+    const storageDir = storage();
+    const workspaceId = id();
+    const workspaces = makeWorkspaces({ storageDir });
+    const frame = provisionFrame({
+      workspaceId,
+      kind: "ephemeral",
+      checkouts: [checkout({ resourceId: id(), remote: remote.url, branch: "hydra/run-2e2e2e2e" })],
+    });
+
+    const [, disposed] = await Promise.all([
+      workspaces.provision(frame),
+      workspaces.dispose(disposing(workspaceId)),
+    ]);
+
+    expect(disposed.status).toBe("deleted");
+    expect(existsSync(join(storageDir, "workspaces", workspaceId))).toBe(false);
+    // And nothing of it is still registered, so no session can be placed there.
+    expect(makeWorkspaces({ storageDir }).resolve(workspaceId)).toBeUndefined();
+  });
+});

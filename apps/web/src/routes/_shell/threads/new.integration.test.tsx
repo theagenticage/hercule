@@ -381,11 +381,13 @@ describe("Composer: selector popovers (AC-16)", () => {
 
   // D-20d: with nothing to work in there is nothing to choose between, so the
   // workspace field is greyed plain text carrying the way out as its reason.
+  // R5: the way out of a draft in no project is picking one, not adding a repo
+  // to a project it does not stand in.
   it("reads No workspace as locked text on a draft standing in no project", async () => {
     const user = userEvent.setup();
     await open();
 
-    const locked = await screen.findByTitle("Add a repository to the project to work in one");
+    const locked = await screen.findByTitle("Pick a project to work in a repository");
     expect(reading(locked)).toContain("No workspace");
     expect(locked.closest("button")).toBeNull();
 
@@ -1665,15 +1667,9 @@ describe("Composer: the workspace selector (AC-17)", () => {
     expect(await screen.findByRole("button", { name: /^workspace New workspace$/ })).toBeDefined();
   });
 
-  // D-20d: a stored none is honoured only where None is offered, so a project
-  // that holds a repo falls back to the rule.
-  it("follows the stored thread.workspace, and ignores a stored none where a repo stands", async () => {
-    const stored = await openAt(inProject(WEBSHOP.id), { "thread.workspace": "ephemeral" });
+  it("follows the stored thread.workspace", async () => {
+    await openAt(inProject(WEBSHOP.id), { "thread.workspace": "ephemeral" });
     expect(await screen.findByRole("button", { name: /^workspace New workspace$/ })).toBeDefined();
-    stored.unmount();
-
-    await openAt(inProject(WEBSHOP.id), { "thread.workspace": "none" });
-    expect(await screen.findByRole("button", { name: /^workspace Main workspace$/ })).toBeDefined();
   });
 
   it("rewrites the lead sentence as the pick changes", async () => {
@@ -2065,6 +2061,40 @@ describe("The New project dialog (D-20b)", () => {
     );
     // The dialog stands: nothing is navigated away from what was refused.
     expect(router.state.location.href).toBe("/threads/new");
+  });
+
+  // R4: a project made before a source was refused is not left unseen - the
+  // way out opens the draft in it, with what was refused simply not made.
+  it("opens the draft in the project it made when the dialog is left after a refusal", async () => {
+    const user = userEvent.setup();
+    const { router } = await openAt(
+      "/threads/new",
+      {},
+      {
+        "POST /api/v1/projects": { body: NEW_PROJECT },
+        "POST /api/v1/resources": {
+          status: 409,
+          body: envelope("conflict", "that repo is already a resource"),
+        },
+      },
+    );
+
+    const dialog = await openDialog(user);
+    await user.type(within(dialog).getByLabelText("Name"), "checkout");
+    await user.click(within(dialog).getByRole("button", { name: "+ Git repository" }));
+    await user.type(
+      await within(dialog).findByLabelText("Remote URL"),
+      "git@github.com:acme/webshop.git",
+    );
+    await user.click(within(dialog).getByRole("button", { name: "Create project" }));
+    await within(dialog).findByRole("alert");
+
+    await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
+
+    await waitFor(() => {
+      expect(router.state.location.href).toBe(inProject(NEW_PROJECT.id));
+    });
+    expect(screen.queryByRole("form", { name: "New project" })).toBeNull();
   });
 
   it("names the project before anything is sent", async () => {

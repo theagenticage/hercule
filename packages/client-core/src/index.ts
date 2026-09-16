@@ -93,9 +93,11 @@ export { branchField, type BranchField } from "./threads/branch-menu";
 export { workspaceMenu, type WorkspaceMenu } from "./threads/workspace-menu";
 export { isClonableRemote, REMOTE_REFUSAL } from "./remote";
 export {
+  composerPlaceholder,
   draftSubject,
   labelText,
   phraseText,
+  preferredWorkspaceOf,
   projectRepos,
   repoName,
   runnerForPick,

@@ -10,7 +10,9 @@
 import { describe, expect, it } from "vitest";
 import {
   baseBranchOf,
+  composerPlaceholder,
   defaultWorkspacePick,
+  preferredWorkspaceOf,
   draftSubject,
   pickKey,
   readyPrimary,
@@ -219,6 +221,52 @@ describe("defaultWorkspacePick", () => {
       kind: "primary",
       resourceId: INFRA.id,
     });
+  });
+
+  // D-20d dropped `none` from the setting; one stored before that reads as
+  // unset, so the rule decides rather than a value nobody can set any more.
+  it("reads a stored none as nothing stored", () => {
+    expect(preferredWorkspaceOf("none")).toBeNull();
+    expect(preferredWorkspaceOf(undefined)).toBeNull();
+    expect(preferredWorkspaceOf("primary")).toBe("primary");
+    expect(preferredWorkspaceOf("ephemeral")).toBe("ephemeral");
+    expect(defaultWorkspacePick([WEBSHOP], preferredWorkspaceOf("none"))).toEqual({
+      kind: "primary",
+      resourceId: WEBSHOP.id,
+    });
+  });
+});
+
+describe("composerPlaceholder", () => {
+  const ask = (over: Partial<Parameters<typeof composerPlaceholder>[0]> = {}) =>
+    composerPlaceholder({
+      readOnly: null,
+      busy: false,
+      active: false,
+      pick: { kind: "none" },
+      workspaces: [RUN_3F1],
+      ...over,
+    });
+
+  it("asks a fresh draft what it should do", () => {
+    expect(ask()).toBe("Say what you want done…");
+  });
+
+  it("names the workspace a draft joins, whose files already stand", () => {
+    expect(ask({ pick: { kind: "existing", workspaceId: RUN_3F1.id } })).toBe(
+      "Say what this thread should do in hydra/run-3f1…",
+    );
+  });
+
+  it("asks for a reply on a thread that has started", () => {
+    expect(ask({ active: true })).toBe("Reply…");
+  });
+
+  it("says input is queued while the turn runs, and why it takes none at all", () => {
+    expect(ask({ active: true, busy: true })).toBe("Queued until the turn finishes…");
+    expect(ask({ active: true, readOnly: "its runner is gone" })).toBe(
+      "This thread can't be resumed: its runner is gone.",
+    );
   });
 });
 

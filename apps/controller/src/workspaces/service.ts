@@ -158,16 +158,17 @@ const stillLivedIn = (sessions: number): string =>
 
 /**
  * Where a session that asked for a workspace is to work, once the rows are
- * written: the workspace it is in, the machine that pins it, the branch the
- * machine switches the main workspace to before the harness starts, the account
- * it pushes as, and - where this opened a new one - the frame that asks the
- * machine to make it. The frame is handed back rather than sent from here: it
- * is the caller's transaction, and a transaction never spans a wait on a
- * machine.
+ * written: the workspace it is in, the branch the machine switches the main
+ * workspace to before the harness starts, the account it pushes as, and - where
+ * this opened a new one - the frame that asks the machine to make it. The frame
+ * is handed back rather than sent from here: it is the caller's transaction, and
+ * a transaction never spans a wait on a machine.
+ *
+ * The machine is not among them: it is `machineFor`'s answer, settled before the
+ * session was placed, and `openFor` is told it rather than deciding it.
  */
 export interface Opened {
   readonly workspaceId: string | null;
-  readonly runnerId: string;
   readonly checkoutBranch: string | undefined;
   readonly designatedConnectionId: string | null;
   readonly frame?: WorkspaceProvision;
@@ -326,6 +327,11 @@ const make = Effect.gen(function* () {
    * Connection the work acts through. The caller hands it a session id that does
    * not exist yet - the branch is named after the thread - and gets back the
    * frame to send once its transaction has committed.
+   *
+   * Whether a workspace named by an `existing` wish stands is not re-asked here:
+   * `machineFor` asked it before the session was placed, because which machine
+   * this runs on is that answer. What is asked here is what that read had no
+   * business asking - whether the repos in it are this project's.
    */
   const openFor = (input: {
     /** What the caller asked for; absent keeps the workspace it already holds. */
@@ -342,7 +348,6 @@ const make = Effect.gen(function* () {
       const wish = input.wish;
       const nothing: Opened = {
         workspaceId: null,
-        runnerId: input.runnerId,
         checkoutBranch: undefined,
         designatedConnectionId: null,
       };
@@ -367,7 +372,6 @@ const make = Effect.gen(function* () {
         );
         return {
           workspaceId: joined,
-          runnerId: row.value.runnerId,
           checkoutBranch: undefined,
           designatedConnectionId: row.value.designatedConnectionId,
         };
@@ -379,7 +383,6 @@ const make = Effect.gen(function* () {
         if (Option.isSome(standing)) {
           return {
             workspaceId: standing.value.id,
-            runnerId: standing.value.runnerId,
             checkoutBranch: wish.branch,
             designatedConnectionId: standing.value.designatedConnectionId,
           };
@@ -390,7 +393,6 @@ const make = Effect.gen(function* () {
         );
         return {
           workspaceId: opened.workspace.id,
-          runnerId: opened.workspace.runnerId,
           checkoutBranch: wish.branch,
           designatedConnectionId: opened.workspace.designatedConnectionId,
           frame: opened.frame,
@@ -448,7 +450,6 @@ const make = Effect.gen(function* () {
       );
       return {
         workspaceId: opened.workspace.id,
-        runnerId: opened.workspace.runnerId,
         checkoutBranch: undefined,
         designatedConnectionId: opened.workspace.designatedConnectionId,
         frame: opened.frame,

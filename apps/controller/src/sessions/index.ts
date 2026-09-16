@@ -5,5 +5,4 @@ export {
   SessionService,
   SessionServiceLayer,
 } from "./service";
-export { resumableWhere } from "./repository";
 export { headOfTranscript, sessionExists, transcriptRowsAfter } from "./transcript-log";

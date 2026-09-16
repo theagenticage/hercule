@@ -191,10 +191,60 @@ describe("a primary the machine could not make", () => {
 
 describe("the machine's report", () => {
   /**
-   * D-21 F13: a report that moves nothing writes nothing. `markReady` used to
-   * write the branches whatever the row said, so a report that arrived after the
-   * workspace was disposed of would record branches for a directory that is
-   * gone - and a second report could overwrite what the live one recorded.
+   * A primary is re-reported after every session that runs in it, and that
+   * second report is the only thing that says what the agent left the checkout
+   * on. It moves no status - the workspace was already `ready` - so what it
+   * changes is the checkouts and nothing else.
+   */
+  it("records the branches a re-report brings for a workspace that is already ready", async () => {
+    await withWorkspaces(async (arranged) => {
+      const web = await repo(arranged, "https://github.com/acme/web");
+      const workspace = await provisioned(arranged, {
+        resourceId: web,
+        runnerId: arranged.runnerId,
+      });
+      const checkoutId = checkoutIdOf(workspace.checkouts[0]!);
+      arranged.wire.send({
+        _tag: "workspaceReport",
+        workspaceId: workspace.id,
+        status: "ready",
+        checkouts: [{ checkoutId, branch: "main", branches: ["main"], defaultBranch: "main" }],
+      } as never);
+      await workspaceWhen(arranged, workspace.id, (one) => one.status === "ready");
+
+      // What the machine says after a session in it: the agent made a branch and
+      // left the checkout on it.
+      arranged.wire.send({
+        _tag: "workspaceReport",
+        workspaceId: workspace.id,
+        status: "ready",
+        checkouts: [
+          {
+            checkoutId,
+            branch: "feature/what-the-agent-did",
+            branches: ["main", "feature/what-the-agent-did"],
+            defaultBranch: "main",
+          },
+        ],
+      } as never);
+
+      const after = await workspaceWhen(
+        arranged,
+        workspace.id,
+        (one) => one.checkouts[0]?.branch === "feature/what-the-agent-did",
+      );
+      expect(after.status).toBe("ready");
+      expect([...(after.checkouts[0]?.branches ?? [])].sort()).toEqual([
+        "feature/what-the-agent-did",
+        "main",
+      ]);
+    });
+  });
+
+  /**
+   * D-21 F13: a report about a workspace that is gone writes nothing. Its
+   * directory is not there, so there are no branches to record, and a stale
+   * report must not overwrite what a live one recorded.
    */
   it("writes no checkouts when it says ready about a workspace that has gone", async () => {
     await withWorkspaces(async (arranged) => {

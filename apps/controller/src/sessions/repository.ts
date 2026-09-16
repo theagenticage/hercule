@@ -25,7 +25,7 @@ import {
   type CursorScope,
   type Page,
 } from "../db";
-import { readyWhere } from "../workspaces";
+import { readyWhere, resumableWhere } from "../workspaces";
 import type { StreamRow } from "./stream";
 
 /** A session as it is stored. `resumable` is derived at read; see above. */
@@ -111,30 +111,18 @@ interface SessionRow {
 }
 
 /**
- * Whether a session can be picked up again, as one SQL expression over a row of
- * `sessions` under the alias given. Three things have to hold: the process is
- * gone, the provider-native transcript is still there, and the machine and the
- * working area it was in are both still there to open it in - the last of which
- * is the workspaces domain's own predicate, so the two never disagree.
- *
- * Exported because the workspace sweep asks the same question about the threads
- * living in a workspace, and two spellings of "resumable" would be two
- * different answers.
+ * The column list, built when the repository is, never at module load. Two of
+ * its pieces are functions the workspaces domain exports, and a constant that
+ * called one of them while this module was being evaluated would read it before
+ * its own module had finished - a `ReferenceError` that depends only on which
+ * domain happened to be imported first.
  */
-export const resumableWhere = (alias: string): string =>
-  `${alias}.status = 'exited' AND ${alias}.native_session_id IS NOT NULL ` +
-  `AND EXISTS (SELECT 1 FROM runners WHERE runners.id = ${alias}.runner_id ` +
-  `AND runners.lifecycle <> 'retired') ` +
-  `AND ${readyWhere(alias)}`;
-
-const RESUMABLE = `(${resumableWhere("sessions")}) AS resumable`;
-
-const COLUMNS =
+const columns = (): string =>
   "id, title, permission_profile_id, instance_id, runner_id, workspace_id, project_id, " +
   "github_connection_id, requested_access_mode, " +
-  `access_mode, native_session_id, model_selection, parent_session_id, status, ` +
-  `open_request, created_at, started_at, exited_at, ` +
-  `last_activity_at, ${RESUMABLE}`;
+  "access_mode, native_session_id, model_selection, parent_session_id, status, " +
+  "open_request, created_at, started_at, exited_at, " +
+  `last_activity_at, (${resumableWhere("sessions")}) AS resumable`;
 
 const toSession = (row: SessionRow): StoredSession => ({
   id: uuidToString(row.id),
@@ -210,6 +198,7 @@ export interface TranscriptPageRequest {
 
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
+  const COLUMNS = columns();
 
   /**
    * One status is `=`; several - the runner page's capacity read - is `IN`.

@@ -57,8 +57,16 @@ const MuteTarget = Schema.NonEmptyString.check(
   }),
 );
 
-/** What a thread opens in unless the draft says otherwise. */
-export const ThreadWorkspace = Schema.Literals(["primary", "ephemeral", "none"]);
+/**
+ * What a thread opens in unless the draft says otherwise. Two values, not
+ * three: `none` was a third that could never be read back as itself, because a
+ * project with repos does not offer "no workspace" at all (spec 14 §The
+ * composer, amended 2026-09-16, [#72]) and a project without them has nothing
+ * else to offer - so a stored `none` always read as unset, and unset is what
+ * it is. Nothing migrates: a row still holding it fails to decode and reads
+ * unset, which is the same answer it already gave.
+ */
+export const ThreadWorkspace = Schema.Literals(["primary", "ephemeral"]);
 
 export type ThreadWorkspace = Schema.Schema.Type<typeof ThreadWorkspace>;
 
@@ -103,9 +111,10 @@ export const SETTING_VALUES = {
     "thread.accessMode": AccessMode,
     "thread.profileId": Id,
     /**
-     * What a thread opens in: the repo's main workspace, a worktree of its
-     * own, or nothing. Unset follows the project - one repo takes the shared
-     * checkout, several take a worktree.
+     * What a thread opens in: the repo's main workspace or a worktree of its
+     * own. Unset follows the project - one repo takes the main workspace,
+     * several take a worktree - and a project with no repos opens with no
+     * workspace whatever this says.
      */
     "thread.workspace": ThreadWorkspace,
     /** The GitHub Connection a thread with no checkout of its own acts through. */

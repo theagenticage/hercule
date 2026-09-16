@@ -3,9 +3,10 @@
  * what may be provisioned, what may be torn down and what has expired are the
  * service's.
  *
- * One question is asked of the sessions table from here - which sessions are
- * living in a workspace - because that is a fact about the workspace. Nothing
- * else about a session is read.
+ * What is asked of the sessions table from here - which sessions are living in
+ * a workspace, and which could still be picked up in one - are facts about the
+ * workspace: they are what the sweep decides on. Nothing else about a session is
+ * read, and this domain imports nothing from that one.
  */
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
@@ -13,7 +14,6 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import type { CheckoutForm, SortDirection, WorkspaceKind, WorkspaceStatus } from "@hydra/contract";
 import { onlineWhere } from "../runners";
-import { resumableWhere } from "../sessions";
 import {
   decodeCursor,
   encodeCursor,
@@ -105,6 +105,24 @@ export interface SweepCandidate {
 export const readyWhere = (alias: string): string =>
   `(${alias}.workspace_id IS NULL OR EXISTS (SELECT 1 FROM workspaces ` +
   `WHERE workspaces.id = ${alias}.workspace_id AND workspaces.status = 'ready'))`;
+
+/**
+ * Whether a session can be picked up again, as one SQL expression over a row of
+ * `sessions` under the alias given. Three things have to hold: the process is
+ * gone, the provider-native transcript is still there, and the machine and the
+ * working area it was in are both still there to open it in.
+ *
+ * It lives here rather than in the sessions domain because the sweep below is
+ * written in it - a thread that can still be picked up keeps its worktree, so
+ * its workspace expires on the long window rather than the short one - and the
+ * sessions listing reads the same one to answer `resumable`. One owner, and the
+ * only owner both can import without the two domains importing each other.
+ */
+export const resumableWhere = (alias: string): string =>
+  `${alias}.status = 'exited' AND ${alias}.native_session_id IS NOT NULL ` +
+  `AND EXISTS (SELECT 1 FROM runners WHERE runners.id = ${alias}.runner_id ` +
+  `AND runners.lifecycle <> 'retired') ` +
+  `AND ${readyWhere(alias)}`;
 
 /** The statuses a workspace can still leave: everything else is where it ends. */
 const LIVE_STATUSES = "('provisioning', 'ready', 'failed')";
@@ -357,10 +375,16 @@ const make = Effect.gen(function* () {
 
     /**
      * The machine's report: the workspace stands, and this is what is in it.
-     * Answers whether it moved the workspace, like the other two. A report that
-     * moved nothing writes no checkouts either: a second report, or one about a
-     * workspace that was disposed of meanwhile, must not overwrite the branches
-     * a live report already recorded.
+     *
+     * Two separate things, because the machine says this more than once. The
+     * status moves only out of `provisioning`, and that transition is what the
+     * answer reports - it is what releases the sessions waiting on the
+     * workspace, and a second report must not release them twice. The checkouts
+     * are written whenever the workspace is `ready`, transition or not: a
+     * primary is re-reported after every session that ran in it, and that report
+     * is the only thing that tells the branch listing what the agent left it on.
+     * A workspace that is `deleted`, `lost` or `failed` takes neither: its
+     * directory is gone or was never made, so there are no branches to record.
      */
     markReady: (
       id: string,
@@ -375,7 +399,6 @@ const make = Effect.gen(function* () {
           WHERE id = ${uuidFromString(id)} AND status = 'provisioning'
           RETURNING id
         `;
-        if (moved.length === 0) return false;
         yield* Effect.forEach(
           checkouts,
           (checkout) =>
@@ -385,10 +408,12 @@ const make = Effect.gen(function* () {
                                    default_branch = ${checkout.defaultBranch}
               WHERE id = ${uuidFromString(checkout.checkoutId)}
                 AND workspace_id = ${uuidFromString(id)}
+                AND EXISTS (SELECT 1 FROM workspaces w
+                            WHERE w.id = ${uuidFromString(id)} AND w.status = 'ready')
             `,
           { discard: true },
         );
-        return true;
+        return moved.length > 0;
       }),
 
     /**

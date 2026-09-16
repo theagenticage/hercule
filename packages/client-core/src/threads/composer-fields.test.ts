@@ -98,7 +98,14 @@ describe("composerFields", () => {
     expect(fields.accessMode.locked).toBeNull();
     expect(fields.machine.locked).toBeNull();
     // D-20d: with no repo to work in there is nothing to choose between, so
-    // the workspace field is its value with the way out as its reason.
+    // the workspace field is its value with the way out as its reason - and on
+    // a draft standing in no project the way out is picking one (R5).
+    expect(fields.workspace.locked).toBe("Pick a project to work in a repository");
+  });
+
+  it("names the repository as the way out where the project is the one that holds none", () => {
+    const fields = composerFields(FULL, draft({ projectId: EMPTY_PROJECT.id }), "draft");
+
     expect(fields.workspace.locked).toBe("Add a repository to the project to work in one");
   });
 

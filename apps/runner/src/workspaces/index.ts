@@ -94,7 +94,15 @@ export const makeWorkspaces = (options: {
         inFlight.delete(frame.workspaceId);
       }
     },
-    dispose: (frame) => disposeWorkspace(substrate, frame),
+    dispose: async (frame) => {
+      // A dispose that overtook the provisioning it is disposing of would tear
+      // down a directory git was still writing into, and the provisioning would
+      // then register what the dispose had just removed. The outcome of the one
+      // in flight is not this frame's answer - this frame's answer is what the
+      // teardown after it makes of the workspace.
+      await inFlight.get(frame.workspaceId)?.catch(() => undefined);
+      return disposeWorkspace(substrate, frame);
+    },
     resolve: (workspaceId) => {
       const entry = standing(workspaceId);
       return entry === undefined

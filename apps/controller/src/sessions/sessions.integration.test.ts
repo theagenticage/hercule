@@ -3956,6 +3956,48 @@ describe("session.spawn into a workspace", () => {
     });
   });
 
+  /**
+   * D-21 R7: a fork inherits its parent's workspace and its parent's project,
+   * and `openFor` holds the repos in that workspace to that project like any
+   * other opening. So a repo that has since left the project stops the fork,
+   * with the same refusal a fresh spawn would get - which is the intended
+   * behaviour: the filing is what says a thread may reach a repo, and a fork is
+   * a new thread.
+   */
+  it("refuses a fork whose parent's repo has left the project", async () => {
+    await withFleet(async (arranged) => {
+      const hydra = await makeProject(arranged, "Hydra");
+      const web = await makeRepo(arranged, "https://github.com/acme/web", [hydra]);
+      const parent = await spawned(arranged, {
+        prompt: "hello",
+        projectId: hydra,
+        workspace: { kind: "ephemeral", checkouts: [{ resourceId: web }] },
+      });
+      const workspace = await workspaceOf(arranged, String(parent.workspaceId));
+      workspaceReady(arranged, workspace);
+      await sessionWhen(arranged, parent.id, (one) => one.status !== "queued");
+      report(arranged.wire, 1, {
+        eventId: crypto.randomUUID(),
+        sessionId: parent.id,
+        at,
+        _tag: "session.started",
+      });
+      await sessionWhen(arranged, parent.id, (one) => one.status === "idle");
+      await framesWhen<SessionInput>(arranged.wire, "sessionInput", 1);
+      await ends(arranged, parent, 2);
+
+      // The repo is filed under no project any more.
+      const moved = await send("PATCH", arranged.harness.base, `/api/v1/resources/${web}`, {
+        body: { projectIds: [] },
+        token: arranged.token,
+      });
+      expect(moved.status, await moved.clone().text()).toBe(200);
+
+      const response = await carryOn(arranged, parent.id, { mode: "fork", prompt: "branch off" });
+      expect((await refusal(response)).code).toBe("validation");
+    });
+  });
+
   it("ends the session when the machine could not make its workspace", async () => {
     await withFleet(async (arranged) => {
       const web = await makeRepo(arranged, "https://github.com/acme/web");

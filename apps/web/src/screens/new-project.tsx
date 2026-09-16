@@ -21,6 +21,11 @@ import { messageOf } from "./save-status";
  * Neither write is undone when a later one is refused - a project that exists
  * exists - so what already stands is remembered and skipped on the next
  * submission, and only what was refused is sent again.
+ *
+ * Which is also what leaving does (R4): once the project has been made, Cancel
+ * and Esc open the draft in it rather than dropping the user back where they
+ * started with a project they were never shown. What was refused was named on
+ * its own row and is simply not made.
  */
 export function NewProject({
   client,
@@ -53,6 +58,19 @@ export function NewProject({
     setSources((current) =>
       current.map((source) => (source.key === key ? { ...source, ...next } : source)),
     );
+  };
+
+  const pending = createProject.isPending || createResource.isPending;
+
+  /**
+   * The way out. A project that stands is where the user is taken, so nothing
+   * is left made-but-unseen; a request in flight is not something to walk out
+   * of, so while one is the dialog holds.
+   */
+  const leave = (): void => {
+    if (pending) return;
+    onClose();
+    if (projectId !== null) void navigate({ to: "/threads/new", search: { project: projectId } });
   };
 
   const submit = async (): Promise<void> => {
@@ -111,7 +129,7 @@ export function NewProject({
       name={name}
       sources={sources}
       accounts={accounts}
-      pending={createProject.isPending || createResource.isPending}
+      pending={pending}
       failure={failure}
       onName={setName}
       onAddSource={() => {
@@ -134,7 +152,7 @@ export function NewProject({
       onSubmit={() => {
         void submit();
       }}
-      onClose={onClose}
+      onClose={leave}
     />
   );
 }

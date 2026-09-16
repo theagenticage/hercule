@@ -7,7 +7,7 @@ import {
   registerConnectionType,
   type Plugin,
 } from "@hydra/plugin-host";
-import { completeSetup, get, post, send, withServer } from "../http/testing";
+import { completeSetup, get, post, send, withServer, type ServerHarness } from "../http/testing";
 import { CurrentActor, type Actor } from "../actor";
 import { uuidFromString } from "../db";
 import { TestDatabase } from "../db/testing";
@@ -297,11 +297,13 @@ interface SettingsState {
   readonly user: Record<string, unknown>;
 }
 
-const withSettings = (body: (base: string, token: string) => Promise<void>): Promise<void> =>
+const withSettings = (
+  body: (base: string, token: string, harness: ServerHarness) => Promise<void>,
+): Promise<void> =>
   withServer(
     async (harness) => {
       const token = await completeSetup(harness.base);
-      await body(harness.base, token);
+      await body(harness.base, token, harness);
     },
     { plugins: [githubPlugin, mailerPlugin] },
   );
@@ -335,9 +337,12 @@ const connect = async (
 };
 
 describe("the thread workspace default", () => {
-  it("takes each of the three a thread may open in, and reads it back", async () => {
+  // D-21 R3: two values, not three. `none` could never be read back as itself -
+  // a project with repos never offers it and one without has nothing else - so
+  // it always meant unset, which is what absent already means.
+  it("takes each of the two a thread may open in, and reads it back", async () => {
     await withSettings(async (base, token) => {
-      for (const value of ["primary", "ephemeral", "none"]) {
+      for (const value of ["primary", "ephemeral"]) {
         const response = await patch(base, token, { user: { "thread.workspace": value } });
         expect(response.status, `${value}: ${await response.clone().text()}`).toBe(200);
         expect((await readSettings(base, token)).user["thread.workspace"]).toBe(value);
@@ -351,11 +356,31 @@ describe("the thread workspace default", () => {
     });
   });
 
-  it("refuses a value that is not one of the three", async () => {
-    await withSettings(async (base, token) => {
-      const response = await patch(base, token, { user: { "thread.workspace": "worktree" } });
-      expect(await refusedCode(response)).toBe("validation");
+  /**
+   * D-21 R3: narrowing a key's type must not brick the settings screen for
+   * whoever had the old value. A row this build cannot read is left out, which
+   * is what unset already meant here.
+   */
+  it("reads a stored value this build no longer takes as unset", async () => {
+    await withSettings(async (base, token, harness) => {
+      await Effect.runPromise(
+        Effect.orDie(
+          harness.sql`INSERT INTO user_settings (user_id, key, value, updated_at)
+                      SELECT id, 'thread.workspace', '"none"', '2026-09-16T00:00:00.000Z'
+                      FROM users LIMIT 1`,
+        ),
+      );
       expect((await readSettings(base, token)).user["thread.workspace"]).toBeUndefined();
+    });
+  });
+
+  it("refuses a value that is not one of the two, `none` among them", async () => {
+    await withSettings(async (base, token) => {
+      for (const value of ["worktree", "none"]) {
+        const response = await patch(base, token, { user: { "thread.workspace": value } });
+        expect(await refusedCode(response), value).toBe("validation");
+        expect((await readSettings(base, token)).user["thread.workspace"]).toBeUndefined();
+      }
     });
   });
 });

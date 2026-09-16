@@ -18,6 +18,7 @@ import type { ThreadCatalogs, ThreadConfig, ThreadKind, ThreadPicks } from "./co
 import { referenceRunner, runnerMenu, type RunnerMenuRow } from "./runner-menu";
 import {
   defaultWorkspacePick,
+  NO_PROJECT_REASON,
   NO_WORKSPACE_REASON,
   projectRepos,
   readyPrimary,
@@ -195,8 +196,11 @@ export const composerFields = (
     workspace: {
       // A project with no repo works in none, so there is nothing to choose
       // between and the selector is its value with the way out as its reason
-      // (D-20d).
-      locked: lockedReason(kind, "workspace") ?? (repos.length === 0 ? NO_WORKSPACE_REASON : null),
+      // (D-20d) - which is a different way out on a draft that stands in no
+      // project at all, where there is nothing to add a repo to yet.
+      locked:
+        lockedReason(kind, "workspace") ??
+        (repos.length > 0 ? null : projectId === null ? NO_PROJECT_REASON : NO_WORKSPACE_REASON),
       value: pick,
     },
     machine: {

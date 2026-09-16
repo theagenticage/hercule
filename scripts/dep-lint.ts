@@ -13,6 +13,14 @@
  * (`await import("bun" + ":sqlite")`) is invisible to it. Nothing in the
  * codebase does that, and no scan short of running the code could catch it.
  *
+ * A second graph rule is about the controller rather than the runner: its
+ * domains form a DAG. `src/<domain>/index.ts` is the boundary a domain is
+ * imported through, and a cycle between two of them is not only a design smell
+ * - a constant in one that calls a function exported by the other is evaluated
+ * before that function exists, so which domain is imported first decides
+ * whether the process starts. That is a `ReferenceError` no test finds until
+ * an import order changes, which is why it is a lint rather than a review note.
+ *
  * One rule is about the workspace, not an import graph: the Agent SDK's eight
  * per-platform CLI packages (one is 196 MB) are excluded at install, and the
  * shipped binary would carry them if they came back. The pnpm store is read
@@ -122,6 +130,134 @@ if (violations.length > 0) {
 }
 
 console.log(`dep-lint: ${entrypoint} is clean (${graph.length} modules in the graph).`);
+
+/**
+ * The controller's domains, as a graph over the folders under `src/`: every
+ * file in a domain is that domain, and an import of `../<other>` is an edge
+ * from this domain to that one. `db/` and `config/` are infrastructure every
+ * domain may reach and are not folded into the check as sources of edges.
+ */
+const controllerSrc = `${root}apps/controller/src`;
+
+/**
+ * Empty where there is no controller to read: `scripts/dep-lint.test.ts` proves
+ * the store rules by copying this script into a root of its own, and a rule
+ * about a directory that is not there has nothing to say.
+ */
+const domainsOf = async (): Promise<ReadonlyArray<string>> => {
+  const entries = await readdir(controllerSrc, { withFileTypes: true }).catch(() => undefined);
+  return entries === undefined
+    ? []
+    : entries.filter((entry) => entry.isDirectory()).map((entry) => entry.name);
+};
+
+/**
+ * Every shipped `.ts` under a directory. A test and the harness beside it are
+ * left out on purpose: they are loaded by vitest, one file at a time, and a
+ * suite that drives one domain through another's harness is what a colocated
+ * integration test is for. What this rule is about is the order the controller
+ * links its own modules in at boot.
+ */
+const shipped = (name: string): boolean =>
+  name.endsWith(".ts") && !name.endsWith(".test.ts") && name !== "testing.ts";
+
+const filesUnder = async (dir: string): Promise<ReadonlyArray<string>> =>
+  (await readdir(dir, { withFileTypes: true, recursive: true }))
+    .filter((entry) => entry.isFile() && shipped(entry.name))
+    .map((entry) => resolve(entry.parentPath, entry.name));
+
+const domains = await domainsOf();
+
+/**
+ * `../<domain>` exactly: the domain's index, which is the boundary another
+ * domain imports it through and the module whose evaluation order this is
+ * about. A deep `../<domain>/<file>` reaches one module and never loads that
+ * index, so it is not an edge between the two domains.
+ */
+const reached = (specifier: string): string | undefined => {
+  const match = /^\.\.\/([^/]+)$/.exec(specifier);
+  const named = match?.[1];
+  return named !== undefined && domains.includes(named) ? named : undefined;
+};
+
+/**
+ * The cycles this repository already has, each as the edge that closes it.
+ * Both are the fleet knot: the runners domain routes a machine's frames and
+ * retires a machine, which is work in the sessions and workspaces domains,
+ * while both of those read the fleet's presence and rows. Untying it means
+ * moving the socket and the retire sequence out of `runners/`, which is its own
+ * ticket; until then the two edges below are the debt, and everything else has
+ * to be a DAG - a third cycle is a new one.
+ */
+const ACCEPTED: ReadonlyArray<readonly [string, string]> = [
+  ["runners", "sessions"],
+  ["runners", "workspaces"],
+];
+
+const edges = new Map<string, Set<string>>();
+for (const domain of domains) {
+  const out = new Set<string>();
+  for (const file of await filesUnder(resolve(controllerSrc, domain))) {
+    const text = await Bun.file(file).text();
+    const transpiler = new Bun.Transpiler({ loader: "ts" });
+    // `scanImports` drops `import type`, which creates no runtime edge: a type
+    // that crosses a domain boundary cannot be evaluated too early.
+    for (const record of transpiler.scanImports(text)) {
+      const other = reached(record.path);
+      if (other !== undefined && other !== domain) out.add(other);
+    }
+  }
+  edges.set(domain, out);
+}
+
+for (const [from, to] of ACCEPTED) edges.get(from)?.delete(to);
+
+/** The first cycle a depth-first walk closes, as the path that closed it. */
+const cycleIn = (): ReadonlyArray<string> | undefined => {
+  const open = new Set<string>();
+  const done = new Set<string>();
+  const path: Array<string> = [];
+  const walk = (domain: string): ReadonlyArray<string> | undefined => {
+    if (open.has(domain)) return [...path.slice(path.indexOf(domain)), domain];
+    if (done.has(domain)) return undefined;
+    open.add(domain);
+    path.push(domain);
+    for (const next of edges.get(domain) ?? []) {
+      const found = walk(next);
+      if (found !== undefined) return found;
+    }
+    path.pop();
+    open.delete(domain);
+    done.add(domain);
+    return undefined;
+  };
+  for (const domain of domains) {
+    const found = walk(domain);
+    if (found !== undefined) return found;
+  }
+  return undefined;
+};
+
+const cycle = domains.length === 0 ? undefined : cycleIn();
+if (cycle !== undefined) {
+  console.error("dep-lint: the controller's domains import each other in a cycle:");
+  console.error(`    ${cycle.join(" -> ")}`);
+  console.error(
+    "A domain is imported through its index, and a cycle makes a constant in one " +
+      "evaluate before the other has defined what it calls: whichever domain is " +
+      "imported first decides whether the process starts. Move the shared piece " +
+      "into the domain that owns it, or hand it over where both are already held.",
+  );
+  console.error("The two edges this repository already accepts are listed in this script.");
+  process.exit(1);
+}
+
+if (domains.length > 0) {
+  console.log(
+    `dep-lint: the controller's ${String(domains.length)} domains form a DAG ` +
+      `beside ${String(ACCEPTED.length)} accepted edges.`,
+  );
+}
 
 const SDK = "@anthropic-ai/claude-agent-sdk";
 

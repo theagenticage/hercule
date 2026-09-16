@@ -49,6 +49,7 @@ export function NewProjectDialog({
   readonly name: string;
   readonly sources: readonly SourceDraft[];
   readonly accounts: readonly ConnectionOption[];
+  /** Whether a write is in flight: while one is, there is no way out. */
   readonly pending: boolean;
   /** Why the project itself was not made; a source carries its own. */
   readonly failure: string | null;
@@ -138,7 +139,7 @@ export function NewProjectDialog({
           </p>
         )}
         <div className="flex items-center justify-end gap-1.5 border-t border-line-soft pt-3">
-          <button type="button" onClick={onClose} className={ACTION}>
+          <button type="button" disabled={pending} onClick={onClose} className={ACTION}>
             Cancel
           </button>
           <button type="submit" disabled={pending} className={ACTION}>

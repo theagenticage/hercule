@@ -152,11 +152,14 @@ export const baseBranchOf = (
 };
 
 /**
- * Why a draft takes no workspace pick at all: a project with no repo has
- * nowhere to work, so None is the one thing on offer and the selector says
- * what would put something else there (D-20d).
+ * Why a draft takes no workspace pick at all, in the two shapes that happen:
+ * a project with no repo has nowhere to work, and a draft standing in no
+ * project has no project to add a repo to. None is the one thing on offer in
+ * both, and the selector says what would put something else there (D-20d).
  */
 export const NO_WORKSPACE_REASON = "Add a repository to the project to work in one";
+
+export const NO_PROJECT_REASON = "Pick a project to work in a repository";
 
 /** What tells two picks apart. A branch is a choice inside a pick, not a pick. */
 export const pickKey = (pick: WorkspacePick): string => {
@@ -229,6 +232,15 @@ export const draftSubject = (
 };
 
 /**
+ * The stored `thread.workspace` read as a preference: one of the two faces the
+ * setting offers, or nothing. Anything else - a `none` stored before D-20d
+ * dropped it - reads as unset, so the rule below decides rather than a value
+ * nobody can set any more.
+ */
+export const preferredWorkspaceOf = (stored: string | null | undefined): ThreadWorkspace | null =>
+  stored === "primary" || stored === "ephemeral" ? stored : null;
+
+/**
  * The workspace a draft opens in before the user touches anything: the stored
  * `thread.workspace` where there is one, else the main workspace of a project
  * that holds one repo and a worktree of each repo of a project that holds
@@ -245,8 +257,7 @@ export const defaultWorkspacePick = (
 ): WorkspacePick => {
   const first = repos[0];
   if (first === undefined) return { kind: "none" };
-  const stored = preferred === "none" ? null : preferred;
-  const mode = stored ?? (repos.length === 1 ? "primary" : "ephemeral");
+  const mode = preferredWorkspaceOf(preferred) ?? (repos.length === 1 ? "primary" : "ephemeral");
   if (mode === "primary") return { kind: "primary", resourceId: first.id };
   return { kind: "ephemeral", checkouts: repos.map((repo) => ({ resourceId: repo.id })) };
 };
@@ -292,6 +303,37 @@ const titlesIn = (workspace: Workspace, sessions: readonly Session[]): string =>
   if (shown.length === 0) return "";
   if (rest > 0) return `${shown.join(", ")} and ${String(rest)} more`;
   return shown.length === 1 ? shown[0]! : `${shown[0]!} and ${shown[1]!}`;
+};
+
+/**
+ * What the composer's box asks for before anything is typed. It follows the
+ * same reading as the lead sentence, which is why it lives beside it: a draft
+ * joining a workspace is being written into files that already stand, so it
+ * says which (spec 14 §The composer).
+ */
+export const composerPlaceholder = ({
+  readOnly,
+  busy,
+  active,
+  pick,
+  workspaces,
+}: {
+  /** Why the thread can take no input at all; null when it can. */
+  readonly readOnly: string | null;
+  readonly busy: boolean;
+  /** Whether the thread has started; a draft has not. */
+  readonly active: boolean;
+  readonly pick: WorkspacePick;
+  readonly workspaces: readonly Workspace[];
+}): string => {
+  if (readOnly !== null) return `This thread can't be resumed: ${readOnly}.`;
+  if (busy) return "Queued until the turn finishes…";
+  if (active) return "Reply…";
+  const joined =
+    pick.kind === "existing" ? workspaces.find((each) => each.id === pick.workspaceId) : undefined;
+  return joined === undefined
+    ? "Say what you want done…"
+    : `Say what this thread should do in ${workspaceName(joined)}…`;
 };
 
 /**
