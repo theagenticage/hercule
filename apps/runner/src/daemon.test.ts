@@ -8,7 +8,7 @@
  * cannot dial is told which field to edit, and that one that did dials the
  * controller its `runner.json` points at, with the credential that file holds.
  */
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { lstatSync, mkdtempSync, mkdirSync, readlinkSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -104,6 +104,12 @@ describe("the runner daemon", () => {
 
       expect(seen[0]?.path).toBe("/api/v1/runners/socket");
       expect(seen[0]?.authorization).toBe("Bearer the-credential-the-join-handed-back");
+      // Put there on the way up, before any session could be placed here: a
+      // session whose `PATH` names this directory and finds nothing in it has
+      // no way to call Hydra at all (spec 15 section 2).
+      const link = join(runnerDirIn(home), "bin", "hydra");
+      expect(lstatSync(link).isSymbolicLink()).toBe(true);
+      expect(readlinkSync(link)).toBe(process.execPath);
     } finally {
       await server.stop(true);
     }

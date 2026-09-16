@@ -101,6 +101,10 @@ export interface ConnectOptions {
   readonly socketPath: string;
   /** Carries a helper's question to the controller and the answer back. */
   readonly credentials: CredentialRelay;
+  /** `<home>/runner/bin`, holding the `hydra` symlink every session gets on `PATH`. */
+  readonly binDir: string;
+  /** hydra-as-a-tool, resolved once at runner start (spec 06 section 9.3). */
+  readonly hydraTool: ProviderRunnerContext["hydraTool"];
   /** The shipped deadline unless a test says otherwise. */
   readonly proofDeadline?: Duration.Duration;
 }
@@ -256,7 +260,15 @@ export const connect = (
       mkdirSync(home, { recursive: true, mode: 0o700 });
       // Probes, logins and installs run nowhere: a cwd is a session's, and the
       // session supervisor builds its own context (spec 06 section 4.2).
-      return { cwd: null, home, binary: binaryOf(adapter.binaryName), env: process.env };
+      return {
+        cwd: null,
+        home,
+        binary: binaryOf(adapter.binaryName),
+        env: process.env,
+        // Carried because the context type is one: a probe, an install and a
+        // login never load the skill.
+        hydraTool: options.hydraTool,
+      };
     };
 
     // The connection lends the supervisor a way to write and the paths this
@@ -266,6 +278,8 @@ export const connect = (
       machine: {
         providersDir: options.providersDir,
         scratchDir: options.scratchDir,
+        binDir: options.binDir,
+        hydraTool: options.hydraTool,
         controllerUrl: pin.controllerUrl,
         baseEnv: process.env,
         binaryOf,

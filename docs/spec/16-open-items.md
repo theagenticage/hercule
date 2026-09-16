@@ -31,6 +31,7 @@ Not design questions. The constraint is stated where one exists.
 - 12 §5.1: the runner's idle timeout for assistant session processes - one controller-wide default, 15 minutes as the starting value.
 - 08 §3: whether security audit entries become matchable platform events - not in v1, additive later.
 - 14 §App shell (composer): the voice button is a placeholder for dictation, kept for the shape; no v1 feature is specced behind it.
+- 11 §5, 13 §6.1: the contract has no error shape for "the credential is good and the profile holds the grant, but the operation is the user's own" - `session.spawn` by a session actor, `secret.set`, `apiKey.create`. Today it is 403 `forbidden` naming the operation's grant, with a message saying no grant confers it; `auth.wsTicket` is the exception and answers 401, because its requirement is `authenticated` and there is no grant for a 403 to name. A refusal code of its own would be additive. *(Noted 2026-09-15, [#68](https://github.com/rogierpennink/hydra/issues/68).)*
 
 ## C. Verify at build time
 

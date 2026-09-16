@@ -261,6 +261,8 @@ const PATIENT = Duration.minutes(1);
 const PROVIDERS_DIR = "/nonexistent/hydra-runner-providers";
 const SCRATCH_DIR = "/nonexistent/hydra-runner-scratch";
 const STORAGE_DIR = "/nonexistent/hydra-runner-storage";
+const BIN_DIR = "/nonexistent/hydra-runner-bin";
+const HYDRA_TOOL = { skill: "# hydra", claudePluginDir: "/nonexistent/hydra-runner-claude-plugin" };
 
 /** Runs one connection to its end and reports how it ended. */
 const attempt = (
@@ -280,6 +282,8 @@ const attempt = (
         workspaces: makeWorkspaces({ storageDir: STORAGE_DIR }),
         socketPath: `${STORAGE_DIR}/daemon.sock`,
         credentials: makeCredentialRelay(),
+        binDir: BIN_DIR,
+        hydraTool: HYDRA_TOOL,
         proofDeadline,
       }),
     ),

@@ -61,6 +61,8 @@ describe("the shipped permission profiles", () => {
       ].sort(),
     );
     expect(profile.shipped).toBe(true);
+    // An assistant reads the log, but not the security entries in it.
+    expect(profile.grants).not.toContain("event.audit");
   });
 
   it("seeds worker with the trust floor for workflow agent steps", async () => {
@@ -87,6 +89,7 @@ describe("the shipped permission profiles", () => {
     expect(profile.grants).not.toContain("workflow.submit");
     expect(profile.grants).not.toContain("memory.read");
     expect(profile.grants).not.toContain("memory.write");
+    expect(profile.grants).not.toContain("event.audit");
   });
 
   it("seeds unrestricted at user parity, withholding nothing", async () => {
@@ -100,6 +103,8 @@ describe("the shipped permission profiles", () => {
     expect(unrestricted.grants).toContain("credential.write");
     expect(unrestricted.grants).toContain("infra.write");
     expect(unrestricted.grants).toContain("permission.write");
+    // Parity includes the security entries of the event log.
+    expect(unrestricted.grants).toContain("event.audit");
   });
 
   it("seeds exactly three profiles, all marked shipped", async () => {

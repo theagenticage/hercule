@@ -310,8 +310,8 @@ describe("resources, workspaces and checkouts", () => {
     return found;
   });
 
-  it("carries a migration past the sixteen that were there before", () => {
-    expect(binaryVersion).toBeGreaterThanOrEqual(17);
+  it("carries a migration past the eighteen that were there before", () => {
+    expect(binaryVersion).toBeGreaterThanOrEqual(19);
   });
 
   it("gives a session the project it belongs to", async () => {

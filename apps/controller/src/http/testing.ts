@@ -45,7 +45,7 @@ import { AuditLog, AuditLogLayer, type AuditKind, type AuditRow } from "../event
 import { ControllerIdentity, controllerIdentityLayer } from "../identity";
 import { COALESCE_WINDOW_MS, LiveTopics } from "../live";
 import { masterKeyLayer, secretsLayer } from "../secrets";
-import { PermissionProfilesLayer } from "../permissions";
+import { PermissionProfilesLayer, SessionTokensLayer } from "../permissions";
 import { PluginConfigsLayer, PluginHost, PluginHostLayer, PluginsLayer } from "../plugins";
 import {
   ensureProviderInstances,
@@ -118,7 +118,7 @@ const services = (home: string) =>
         AuditLogLayer,
         controllerIdentityLayer,
         JoinTokensLayer,
-        PermissionProfilesLayer,
+        SessionTokensLayer,
       ),
     ),
     Layer.provideMerge(secretsLayer.pipe(Layer.provide(masterKeyLayer("file")))),

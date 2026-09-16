@@ -14,6 +14,7 @@ import { basename, dirname, join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { Duration, Effect, Stream } from "effect";
 import type { ProviderEvent, SessionSpec } from "@hydra/protocol";
+import { prepareTooling } from "../sessions/tooling";
 import { claudeCode } from "./claude-code";
 import { PROBE_DEADLINE } from "./probe";
 import type { ProviderRunnerContext } from "./index";
@@ -30,6 +31,30 @@ const emptyHome = (): string => {
   const home = mkdtempSync(join(tmpdir(), "hydra-claude-probe-"));
   homes.push(home);
   return home;
+};
+
+/**
+ * hydra-as-a-tool as the contexts here carry it: a real plugin directory,
+ * because a path that is not one is a plugin the CLI would have to refuse. The
+ * skill case below writes its own, with a marker in it.
+ *
+ * Made on first use, so a run that skips every case here writes nothing.
+ */
+let tool: ProviderRunnerContext["hydraTool"] | undefined;
+const TOOL = (): ProviderRunnerContext["hydraTool"] => {
+  if (tool === undefined) {
+    const under = emptyHome();
+    const {
+      hydraTool: { claudePluginDir },
+    } = prepareTooling({
+      home: join(under, "home"),
+      storageDir: join(under, "storage"),
+      execPath: process.execPath,
+      skill: "# hydra\n\nNothing this test asks about.\n",
+    });
+    tool = { skill: "", claudePluginDir };
+  }
+  return tool;
 };
 
 const installedVersion = async (path: string): Promise<string> => {
@@ -49,6 +74,7 @@ describe.skipIf(binary === undefined)("the real Claude adapter on this machine",
         home: emptyHome(),
         binary: binary!,
         env: { PATH: process.env["PATH"] ?? "" },
+        hydraTool: TOOL(),
       };
 
       const started = Date.now();
@@ -128,7 +154,10 @@ const authed =
     ? false
     : (
         await Effect.runPromise(
-          claudeCode.probe({ cwd: null, home: CONFIG_DIR, binary, env: process.env }, {}),
+          claudeCode.probe(
+            { cwd: null, home: CONFIG_DIR, binary, env: process.env, hydraTool: TOOL() },
+            {},
+          ),
         )
       ).auth.status === "ok";
 
@@ -154,6 +183,7 @@ describe.skipIf(!authed)("a real Claude Code session on this machine", () => {
             ? {}
             : { ANTHROPIC_API_KEY: process.env["ANTHROPIC_API_KEY"] }),
         },
+        hydraTool: TOOL(),
       };
 
       const binding = await Effect.runPromise(claudeCode.startSession(SESSION, SPEC, context));
@@ -246,6 +276,7 @@ const watching = (): Array<ProviderEvent> => {
 const PARENT = "0199e0e7-0000-7000-8000-00000000ff01";
 const FORKED = "0199e0e7-0000-7000-8000-00000000ff02";
 const RESUMED = "0199e0e7-0000-7000-8000-00000000ff03";
+const SKILLED = "0199e0e7-0000-7000-8000-00000000ff04";
 
 describe.skipIf(!authed)("a real Claude Code session continued on this machine", () => {
   it(
@@ -263,6 +294,7 @@ describe.skipIf(!authed)("a real Claude Code session continued on this machine",
             ? {}
             : { ANTHROPIC_API_KEY: process.env["ANTHROPIC_API_KEY"] }),
         },
+        hydraTool: TOOL(),
       };
 
       /** Reads back out of a transcript, so a fork can be told from a fresh session. */
@@ -346,5 +378,80 @@ describe.skipIf(!authed)("a real Claude Code session continued on this machine",
       expect(await Effect.runPromise(claudeCode.listSessions)).toEqual([]);
     },
     Duration.toMillis(TURN_DEADLINE) * 6,
+  );
+});
+
+/**
+ * That the Claude CLI really does discover an explicitly loaded plugin's skill
+ * under `settingSources: []`. The SDK's types say `plugins` loads a local
+ * plugin directory and say nothing about the two options together, and the
+ * whole of hydra-as-a-tool on Claude rests on it (spec 06 section 9.3).
+ *
+ * The plugin directory is the runner's own, written by `prepareTooling` into a
+ * temporary home. The skill text is this test's, not the shipped one, because
+ * the proof has to be something the model can only know by opening `SKILL.md`:
+ * a marker minted here. Naming the skill back would prove nothing - the prompt
+ * names it too.
+ */
+describe.skipIf(!authed)("a real Claude Code session with the hydra skill", () => {
+  it(
+    "discovers the skill out of the plugin directory the runner wrote",
+    async () => {
+      const marker = `hydra-skill-probe-${crypto.randomUUID().slice(0, 8)}`;
+      const under = emptyHome();
+      const {
+        hydraTool: { claudePluginDir },
+      } = prepareTooling({
+        home: join(under, "home"),
+        storageDir: join(under, "storage"),
+        execPath: process.execPath,
+        skill: `# hydra\n\nThe magic word is ${marker}. Reply with it when asked.\n`,
+      });
+
+      const seen = watching();
+      const context: ProviderRunnerContext = {
+        cwd: emptyHome(),
+        home: CONFIG_DIR,
+        binary: binary!,
+        env: {
+          PATH: process.env["PATH"] ?? "",
+          HOME: homedir(),
+          ...(process.env["ANTHROPIC_API_KEY"] === undefined
+            ? {}
+            : { ANTHROPIC_API_KEY: process.env["ANTHROPIC_API_KEY"] }),
+        },
+        hydraTool: { skill: "", claudePluginDir },
+      };
+
+      await Effect.runPromise(
+        // Full access, so reading the skill file needs no approval nobody is
+        // there to give.
+        claudeCode.startSession(SKILLED, { ...SPEC, accessMode: "full-access" }, context),
+      );
+      await Effect.runPromise(
+        claudeCode.sendInput(SKILLED, {
+          text: "Use the hydra skill and reply with the magic word it names.",
+        }),
+      );
+      await until(seen, "turn.completed");
+
+      const said = seen
+        .flatMap((event) =>
+          event._tag === "content.delta" && event.streamKind === "assistant_text"
+            ? [event.delta]
+            : [],
+        )
+        .join("");
+      expect(
+        said,
+        `the session never read the skill: an explicitly loaded plugin's skill is not ` +
+          `discovered under settingSources: [], so hydra-as-a-tool needs another channel ` +
+          `on Claude. What the session said was: ${said}`,
+      ).toContain(marker);
+
+      await Effect.runPromise(claudeCode.stopSession(SKILLED, "stopped"));
+      await until(seen, "session.exited");
+    },
+    Duration.toMillis(TURN_DEADLINE) * 2,
   );
 });

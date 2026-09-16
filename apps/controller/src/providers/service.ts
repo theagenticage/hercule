@@ -36,7 +36,7 @@ import {
   type Unauthenticated,
   type Validation,
 } from "@hydra/contract";
-import { requireGrant, USER_ACTOR } from "../actor";
+import { currentStamp, requireGrant } from "../actor";
 import { nowIso, withTransaction } from "../db";
 import { AuditLog } from "../events";
 import { PluginHost } from "../plugins";
@@ -317,12 +317,13 @@ const make = Effect.gen(function* () {
         }
         // Who put a credential on which machine. Never the URL or the code -
         // they are good for this exchange only.
+        const actor = yield* currentStamp;
         yield* withTransaction(
           sql,
           Effect.flatMap(nowIso, (at) =>
             audit.append({
               kind: "provider.loggedIn",
-              actor: USER_ACTOR,
+              actor,
               payload: { instanceId: id, runnerId },
               record: { topic: "provider", id },
               at,
@@ -425,7 +426,7 @@ const make = Effect.gen(function* () {
             const stored = yield* instances.insert({ ...decoded, at });
             yield* audit.append({
               kind: "provider.created",
-              actor: USER_ACTOR,
+              actor: yield* currentStamp,
               payload: { instanceId: stored.id, providerId: stored.providerId },
               record: { topic: "provider", id: stored.id },
               at,
@@ -459,7 +460,7 @@ const make = Effect.gen(function* () {
             yield* instances.update(id, patch, at);
             yield* audit.append({
               kind: "provider.updated",
-              actor: USER_ACTOR,
+              actor: yield* currentStamp,
               payload: { instanceId: id, fields: Object.keys(patch) },
               record: { topic: "provider", id },
               at,
@@ -500,7 +501,7 @@ const make = Effect.gen(function* () {
             // and an instance's config is where a provider's secrets will live.
             yield* audit.append({
               kind: "provider.deleted",
-              actor: USER_ACTOR,
+              actor: yield* currentStamp,
               payload: { instanceId: id, providerId: stored.providerId, name: stored.name },
               record: { topic: "provider", id },
               at,

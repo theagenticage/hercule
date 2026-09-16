@@ -24,12 +24,16 @@ import {
   apiKeyIn,
   cli,
   completeSetup,
-  jsonOf,
+  instancesOf,
+  jsonOk,
   liveSessionsAsked,
+  sessionOf,
   startController,
   temporaryHome,
+  untilTag,
   type Controller,
-  type Ran,
+  type Instance,
+  type Session,
 } from "./harness";
 
 /** Opt-in: `pnpm test:binary` on any machine must not quietly spend a subscription. */
@@ -48,31 +52,6 @@ const TURN_DEADLINE_MS = 120_000;
 /** Long enough for a machine to have probed the instance and said it is logged in. */
 const LOGIN_DEADLINE_MS = 60_000;
 
-const asJson = <A>(ran: Ran): A => {
-  expect(ran.code, `${ran.stdout}\n${ran.stderr}`).toBe(0);
-  return jsonOf(ran) as A;
-};
-
-interface Snapshot {
-  readonly auth: { readonly status: string; readonly message?: string };
-  readonly models: ReadonlyArray<{ readonly slug: string }>;
-}
-
-interface Instance {
-  readonly id: string;
-  readonly providerId: string;
-  readonly snapshots: ReadonlyArray<Snapshot>;
-}
-
-const instances = async (): Promise<ReadonlyArray<Instance>> => {
-  const response = await fetch(`${url}/api/v1/providers`, {
-    headers: { authorization: `Bearer ${apiKey}` },
-  });
-  const body = await response.text();
-  expect(response.status, body).toBe(200);
-  return JSON.parse(body) as ReadonlyArray<Instance>;
-};
-
 /**
  * The Claude instance once a machine has probed it, or `undefined` if no
  * machine ever reported a usable login for it.
@@ -80,48 +59,19 @@ const instances = async (): Promise<ReadonlyArray<Instance>> => {
 const loggedIn = async (): Promise<Instance | undefined> => {
   const deadline = Date.now() + LOGIN_DEADLINE_MS;
   for (;;) {
-    const claude = (await instances()).find((one) => one.providerId === "claude-code");
+    const claude = (await instancesOf({ url, apiKey })).find(
+      (one) => one.providerId === "claude-code",
+    );
     if (claude?.snapshots.some((snapshot) => snapshot.auth.status === "ok") === true) return claude;
     if (Date.now() > deadline) return undefined;
     await Bun.sleep(500);
   }
 };
 
-interface Session {
-  readonly id: string;
-  readonly status: string;
-  readonly nativeSessionId: string | null;
-}
+const read = (id: string): Promise<Session> => sessionOf({ home: state.home, binary, id });
 
-interface Row {
-  readonly position: number;
-  readonly event: { readonly _tag: string; readonly [key: string]: unknown };
-}
-
-const read = async (id: string): Promise<Session> =>
-  asJson<Session>(await cli(["session", "read", id, "--json"], { home: state.home, binary }));
-
-const rowsOf = async (id: string): Promise<ReadonlyArray<Row>> =>
-  asJson<{ items: ReadonlyArray<Row> }>(
-    await cli(["transcript", "read", id, "--json", "--all"], { home: state.home, binary }),
-  ).items;
-
-/** Waits until the session's transcript holds `tag`, or says what it held instead. */
-const until = async (id: string, tag: string): Promise<ReadonlyArray<Row>> => {
-  const deadline = Date.now() + TURN_DEADLINE_MS;
-  for (;;) {
-    const rows = await rowsOf(id);
-    if (rows.some((row) => row.event._tag === tag)) return rows;
-    if (Date.now() > deadline) {
-      const session = await read(id);
-      throw new Error(
-        `no ${tag} within ${String(TURN_DEADLINE_MS / 1000)}s: the session reads ${session.status} ` +
-          `and its transcript holds ${rows.map((row) => row.event._tag).join(", ") || "nothing"}`,
-      );
-    }
-    await Bun.sleep(500);
-  }
-};
+const until = (id: string, tag: string) =>
+  untilTag({ home: state.home, binary, id, tag, timeoutMs: TURN_DEADLINE_MS });
 
 beforeAll(async () => {
   if (!wanted) return;
@@ -173,7 +123,7 @@ describe.skipIf(!wanted)("a real Claude Code session through the binary", () => 
         ["session", "spawn", ...(haiku === undefined ? [] : ["--model", haiku]), "--json"],
         { home: state.home, binary, stdin: "Reply with the single word ready. Use no tools." },
       );
-      const session = asJson<Session>(ran);
+      const session = jsonOk<Session>(ran);
       expect(session.status).toBe("starting");
 
       const rows = await until(session.id, "turn.completed");

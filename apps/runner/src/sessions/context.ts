@@ -17,6 +17,10 @@ export interface Machine {
   readonly providersDir: string;
   /** Where a workspace-less session's empty cwd is made, one directory per session. */
   readonly scratchDir: string;
+  /** `<home>/runner/bin`, holding the `hydra` symlink, prepended to a session's `PATH`. */
+  readonly binDir: string;
+  /** hydra-as-a-tool, as the runner resolved it once at start (spec 06 section 9.3). */
+  readonly hydraTool: ProviderRunnerContext["hydraTool"];
   /** What a session reads as `HYDRA_API_URL`. */
   readonly controllerUrl: string;
   /** The runner's own environment, the bottom layer of a session's. */
@@ -56,12 +60,15 @@ const instanceEnv = (config: unknown): Record<string, string> => {
 
 /**
  * Base env, then the instance's, then Hydra's own: the layering of spec 06
- * section 4, in that order, so instance config can never take `HYDRA_SESSION`
- * or the API URL away from the `hydra` CLI a session calls.
+ * section 4, in that order, so instance config can never take the session's
+ * token, its controller or its `hydra` away from the CLI a session calls.
  *
- * The token and `GH_TOKEN` are the frame's alone: an empty one would read to
- * the CLI, and to `gh`, as a credential that failed rather than as one nobody
- * issued. Neither is ever written anywhere but here.
+ * The token, `GH_TOKEN` and the git identity are the frame's alone, never
+ * something the runner invented, and they are passed through the environment
+ * and nowhere else: written down, any of them would outlive the session it dies
+ * with (spec 06 section 9.3). An empty `GH_TOKEN` would read to `gh` as a
+ * credential that failed rather than as one nobody issued, so it is left out
+ * where the frame carries none.
  *
  * What the machine inherited is scrubbed of git's own variables first, the same
  * way the substrate's is: a `GIT_ASKPASS` or a `GIT_CONFIG_*` the person who
@@ -72,10 +79,21 @@ const envFor = (machine: Machine, frame: SessionStart): Record<string, string | 
   ...substrateEnv(machine.baseEnv),
   ...instanceEnv(frame.config),
   ...gitCredentialEnv({ socketPath: machine.socketPath, identity: frame.gitIdentity }),
-  ...(frame.sessionToken === undefined ? {} : { HYDRA_TOKEN: frame.sessionToken }),
   ...(frame.ghToken === undefined ? {} : { GH_TOKEN: frame.ghToken }),
   HYDRA_API_URL: machine.controllerUrl,
+  HYDRA_TOKEN: frame.token,
   HYDRA_SESSION: "1",
+  // Prepended, so `which hydra` finds this build and the machine's own tools
+  // keep working after it (spec 15 section 2). What it is prepended to is the
+  // machine's own `PATH`: a `PATH` in instance config is dropped, because a
+  // session whose config put another directory first could shadow `hydra`
+  // with a binary of its own choosing. An empty entry on `PATH` is the
+  // current directory, so a machine that gave the runner none gets the bin
+  // directory alone rather than a trailing colon.
+  PATH:
+    machine.baseEnv["PATH"] === undefined || machine.baseEnv["PATH"] === ""
+      ? machine.binDir
+      : `${machine.binDir}:${machine.baseEnv["PATH"]}`,
 });
 
 /** Whatever the filesystem refused, said in the words a session's reader sees. */
@@ -144,6 +162,7 @@ export const resolve = (
         home,
         binary: machine.binaryOf(binaryName),
         env: envFor(machine, frame),
+        hydraTool: machine.hydraTool,
       },
     };
   });

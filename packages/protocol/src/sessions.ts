@@ -403,6 +403,14 @@ export const ProviderEvent = Schema.Union([
 export type ProviderEvent = Schema.Schema.Type<typeof ProviderEvent>;
 
 /**
+ * The longest a session token may be. Hydra mints 32 random bytes rendered
+ * base64url, which is 43 characters; the bound is a multiple of that so a
+ * change of encoding does not need a protocol change, and it is far below a
+ * fact's, because a credential is not free text.
+ */
+const MAX_TOKEN_LENGTH = 128;
+
+/**
  * Start one session. It carries the instance's decoded config the way a probe
  * does, because the runner holds no Hydra state and cannot look it up.
  */
@@ -413,12 +421,15 @@ export const SessionStart = Schema.Struct({
   config: Schema.Json,
   spec: SessionSpec,
   /**
-   * The credential this session proves itself with when it asks for a git
-   * credential, and what the runner puts in its environment. Top-level rather
-   * than in the spec: the spec is stored byte for byte on the session row, and
-   * a token must never land in the database.
+   * The session's own credential on the public API, minted for this start. The
+   * runner injects it into the agent's environment and keeps it nowhere else:
+   * this frame is the only place its plaintext ever travels, and the controller
+   * holds nothing but its hash. An empty one would authenticate nobody, so the
+   * wire refuses it rather than leaving the agent to find out. It is also what
+   * the session proves itself with when it asks this machine for a git
+   * credential.
    */
-  sessionToken: Schema.optionalKey(Fact),
+  token: Schema.String.check(Schema.isLengthBetween(1, MAX_TOKEN_LENGTH)),
   /** `GH_TOKEN` for this session, where a GitHub Connection backs it. */
   ghToken: Schema.optionalKey(Fact),
   /**

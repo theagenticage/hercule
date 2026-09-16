@@ -22,6 +22,7 @@ import type { CredentialAnswer, CredentialRefusal, CredentialRequest } from "@hy
 import { connectionRepository, isGithubConnection } from "../connections";
 import { hashToken } from "../credentials";
 import { uuidFromString, uuidToString } from "../db";
+import { SessionTokens } from "../permissions";
 import { canonicalRemoteOf } from "../resources";
 import { Secrets, type SecretDecryptError, type SecretNameError } from "../secrets";
 
@@ -52,6 +53,7 @@ const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const connections = yield* connectionRepository;
   const secrets = yield* Secrets;
+  const sessionTokens = yield* SessionTokens;
 
   /**
    * The GitHub token a Connection holds, and the login it belongs to. `none`
@@ -103,19 +105,21 @@ const make = Effect.gen(function* () {
         }));
       }
 
+      // Who the asker is, is the session-token resolver's answer and not a
+      // predicate of its own: one lookup says whether a live session holds this
+      // token and which session it is, and the token is dead the moment that
+      // session stops running. What is left to ask here is only whether that
+      // session's workspace is a checkout of this remote.
+      const actor = yield* sessionTokens.resolve(hashToken(request.sessionToken));
+      if (Option.isNone(actor)) return Option.none();
       const rows = yield* sql<{ readonly connection_id: Uint8Array | null }>`
         SELECT w.designated_connection_id AS connection_id FROM resources r
         JOIN checkouts c ON c.resource_id = r.id
         JOIN workspaces w ON w.id = c.workspace_id
         JOIN sessions s ON s.workspace_id = c.workspace_id
-        JOIN session_tokens t ON t.session_id = s.id
         WHERE r.canonical_remote = ${canonicalRemote}
-          AND t.token_hash = ${hashToken(request.sessionToken)}
-          AND t.revoked_at IS NULL
+          AND s.id = ${uuidFromString(actor.value.sessionId)}
           AND s.runner_id = ${uuidFromString(runnerId)}
-          -- A live token on an exited session is a revocation that did not
-          -- happen; the session's own state is the backstop for it.
-          AND s.status <> 'exited'
         LIMIT 1
       `;
       return Option.map(Option.fromNullishOr(rows[0]), (row) => ({

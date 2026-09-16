@@ -426,6 +426,18 @@ const effortIn = (options: SessionSpec["modelSelection"]["options"]): EffortLeve
 };
 
 /**
+ * hydra-as-a-tool on Claude: the one plugin Hydra owns, loaded by path from the
+ * directory the runner wrote it into at start (spec 06 section 9.3). The whole
+ * of what this adapter knows about the skill.
+ *
+ * Loaded independently of `settingSources`, which stays empty: the plugin is
+ * named here, not discovered among whatever settings sit on this runner.
+ */
+const pluginsFor = (ctx: ProviderRunnerContext): NonNullable<Options["plugins"]> => [
+  { type: "local", path: ctx.hydraTool.claudePluginDir },
+];
+
+/**
  * A session, unlike a probe, runs the user's work: it gets the workspace as its
  * cwd and the instance's home as its config directory. Auto memory is off and
  * `settingSources` is empty because a Hydra session's context is Hydra's to
@@ -456,6 +468,7 @@ const sessionOptionsFor = (
       ? { allowDangerouslySkipPermissions: true }
       : { canUseTool }),
     env: { ...envFor(ctx), CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1" },
+    plugins: pluginsFor(ctx),
   };
 };
 

@@ -1,6 +1,7 @@
 /**
- * Credentials Hydra issues: login bearer tokens, API keys and session tokens,
- * every one of them stored as its hash alone.
+ * Credentials Hydra issues: login bearer tokens and API keys, both of them
+ * stored as their hash alone. A session's own token is the sessions domain's:
+ * it is a column on the session row, minted here and hashed with `hashToken`.
  */
 export {
   Credentials,
@@ -11,5 +12,4 @@ export {
   type LoginTokenRecord,
 } from "./repository";
 export { ApiKeys, ApiKeysLayer, type ApiKeyPage, type QueryInput } from "./service";
-export { sessionTokenRepository } from "./session-tokens";
 export { hashToken, mintToken } from "./token";

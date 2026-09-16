@@ -28,15 +28,14 @@ import type * as HttpApiEndpoint from "effect/unstable/httpapi/HttpApiEndpoint";
 import type * as HttpApiGroup from "effect/unstable/httpapi/HttpApiGroup";
 import {
   Authenticated,
-  forbidden,
   isOperationId,
-  OPERATIONS,
   SetupToken,
   unauthenticated,
-  type Requirement,
+  type OperationId,
 } from "@hydra/contract";
 import { CurrentActor, grantCheck, NO_CREDENTIAL, type Actor } from "../actor";
 import { Credentials, hashToken } from "../credentials";
+import { SessionTokens } from "../permissions";
 import { Setup } from "../setup";
 
 /** The operation a request is for: the group and endpoint identifiers, joined. */
@@ -46,13 +45,14 @@ export const operationIdOf = (options: {
 }): string => `${options.group.identifier}.${options.endpoint.identifier}`;
 
 /**
- * The requirement for one operation. An endpoint the table does not name cannot
- * happen - the contract test asserts the declaration and the table are
- * one-to-one - so it is a defect rather than an error with a response.
+ * The operation a route is, as the contract's table names it. An endpoint the
+ * table does not name cannot happen - the contract test asserts the declaration
+ * and the table are one-to-one - so it is a defect rather than an error with a
+ * response.
  */
-const requirementFor = (id: string): Effect.Effect<Requirement> =>
+const operationFor = (id: string): Effect.Effect<OperationId> =>
   isOperationId(id)
-    ? Effect.succeed(OPERATIONS[id].requires)
+    ? Effect.succeed(id)
     : Effect.die(`no operation named ${id} in the contract's table`);
 
 /**
@@ -60,13 +60,22 @@ const requirementFor = (id: string): Effect.Effect<Requirement> =>
  * use recorded: a login bearer's 30-day window rolls forward and an API key's
  * `last_used_at` is stamped. The repository decides whether that use is worth
  * a write; on a busy connection most are not.
+ *
+ * A session's own token is tried first, because it is the one that is cached:
+ * an agent - the chatty population, calling on every tool use - costs one
+ * cached lookup rather than two indexed misses ahead of it, while a user pays
+ * one cache miss before the lookup a human is waiting on.
  */
 const resolve = (
   credentials: Credentials["Service"],
+  sessions: SessionTokens["Service"],
   token: string,
 ): Effect.Effect<Option.Option<Actor>> =>
   Effect.gen(function* () {
     const tokenHash = hashToken(token);
+
+    const session = yield* sessions.resolve(tokenHash);
+    if (Option.isSome(session)) return session;
 
     const login = yield* credentials.findLoginToken(tokenHash);
     if (Option.isSome(login)) {
@@ -92,29 +101,29 @@ const resolve = (
   }).pipe(Effect.orDie);
 
 /** Any credential of any kind, plus the operation's static grant check. */
-export const AuthenticatedLayer: Layer.Layer<Authenticated, never, Credentials> = Layer.effect(
-  Authenticated,
-)(
-  Effect.gen(function* () {
-    const credentials = yield* Credentials;
-    return {
-      bearer: (httpEffect, options) =>
-        Effect.gen(function* () {
-          const token = Redacted.value(options.credential);
-          if (token === "") return yield* Effect.fail(unauthenticated(NO_CREDENTIAL));
+export const AuthenticatedLayer: Layer.Layer<Authenticated, never, Credentials | SessionTokens> =
+  Layer.effect(Authenticated)(
+    Effect.gen(function* () {
+      const credentials = yield* Credentials;
+      const sessions = yield* SessionTokens;
+      return {
+        bearer: (httpEffect, options) =>
+          Effect.gen(function* () {
+            const token = Redacted.value(options.credential);
+            if (token === "") return yield* Effect.fail(unauthenticated(NO_CREDENTIAL));
 
-          const actor = yield* resolve(credentials, token);
-          if (Option.isNone(actor)) return yield* Effect.fail(unauthenticated(NO_CREDENTIAL));
+            const actor = yield* resolve(credentials, sessions, token);
+            if (Option.isNone(actor)) return yield* Effect.fail(unauthenticated(NO_CREDENTIAL));
 
-          const requirement = yield* requirementFor(operationIdOf(options));
-          const missing = grantCheck(requirement, actor.value);
-          if (missing !== undefined) return yield* Effect.fail(forbidden(missing));
+            const operation = yield* operationFor(operationIdOf(options));
+            const refused = grantCheck(operation, actor.value);
+            if (refused !== undefined) return yield* Effect.fail(refused);
 
-          return yield* Effect.provideService(httpEffect, CurrentActor, actor.value);
-        }),
-    };
-  }),
-);
+            return yield* Effect.provideService(httpEffect, CurrentActor, actor.value);
+          }),
+      };
+    }),
+  );
 
 /** The one-time setup token, matched against the hash the boot wrote. */
 export const SetupTokenLayer: Layer.Layer<SetupToken, never, Setup> = Layer.effect(SetupToken)(

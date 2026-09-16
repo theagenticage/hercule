@@ -13,10 +13,6 @@
  * `project_resources` is rebuilt rather than altered: SQLite cannot add a
  * foreign key to a table that already exists, and the table it replaces could
  * hold no rows, because nothing could create a resource for it to point at.
- *
- * `session_tokens` holds hashes and nothing else, like every other credential
- * Hydra issues: the token itself exists in the frame that carries it to the
- * machine and nowhere else.
  */
 import * as Effect from "effect/Effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
@@ -123,16 +119,4 @@ export default Effect.gen(function* () {
   // controller restart later.
   yield* sql`ALTER TABLE sessions ADD COLUMN checkout_branch TEXT`;
   yield* sql`ALTER TABLE sessions ADD COLUMN github_connection_id BLOB`;
-
-  yield* sql`
-    CREATE TABLE session_tokens (
-      token_hash TEXT PRIMARY KEY NOT NULL,
-      session_id BLOB NOT NULL,
-      created_at TEXT NOT NULL,
-      revoked_at TEXT
-    ) WITHOUT ROWID
-  `;
-  // A session's token is revoked by its exit, which knows the session and not
-  // the hash.
-  yield* sql`CREATE INDEX session_tokens_session ON session_tokens (session_id)`;
 });

@@ -51,6 +51,8 @@ const start = {
   providerId: "claude-code",
   config: {},
   spec,
+  /** The session's own credential on the public API, minted per start. */
+  token: "a-session-token",
 } as const;
 
 /**
@@ -374,6 +376,16 @@ describe("what the controller authors for a session", () => {
         "Failure",
       );
     }
+  });
+
+  it("carries a non-empty session token on every start", () => {
+    // The token is the session's own credential on the public API, and the
+    // frame is the only place its plaintext ever appears: a start without one
+    // would leave the agent inside that session unable to reach Hydra at all,
+    // and an empty one would be a credential that authenticates nobody.
+    expect(decode(SessionStart, start)._tag).toBe("Success");
+    expect(decode(SessionStart, without(start, "token"))._tag).toBe("Failure");
+    expect(decode(SessionStart, { ...start, token: "" })._tag).toBe("Failure");
   });
 
   it("refuses an instance id a path could climb out of, on the spec and on the binding", () => {

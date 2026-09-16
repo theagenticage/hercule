@@ -18,7 +18,10 @@ export const GRANT_FAMILIES = {
   subscription: ["read", "write"],
   notification: ["read", "write"],
   settings: ["read", "write"],
-  event: ["read", "emit"],
+  // `audit` is the security entries of the event log, which `read` alone does
+  // not return: an entry about a secret, a credential or the user's account is
+  // withheld from a profile that has not been given this verb as well.
+  event: ["read", "emit", "audit"],
   connection: ["read", "manage", "use"],
   infra: ["read", "write"],
   workspace: ["read", "write"],

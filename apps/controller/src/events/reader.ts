@@ -1,11 +1,16 @@
 /**
  * The event log, read: `event.query` and `event.read`.
  *
- * One table holds two populations and this reader tells them apart by nothing:
- * a `task.created` row and an `auth.login.failed` row come back from the same
- * unfiltered call, differing only in their `kind`. The log is also the audit
- * log, and the reason to open it is usually to read a security entry beside
- * whatever happened around it, so there is one grant and no population filter.
+ * One table holds two populations and this reader mostly tells them apart by
+ * nothing: a `task.created` row and a `github.issue.opened` row come back from
+ * the same unfiltered call, differing only in their `kind`. The log is also the
+ * audit log, and the reason to open it is usually to read what happened around
+ * something, so there is one grant to read it with.
+ *
+ * The exception is the security entries - what happened to a secret, a
+ * credential or the user's account. A session reads those only if its
+ * permission profile holds `event.audit` as well; without it they are not in
+ * the page and not readable by id. The user has parity and reads the log whole.
  *
  * The walk is a keyset over the id, which is the log's position and its only
  * sortable field. `since` and `until` bound `received_at`: that is the log's
@@ -41,8 +46,9 @@ import {
   type Unauthenticated,
   type Validation,
 } from "@hydra/contract";
-import { requireGrant } from "../actor";
+import { requireGrant, type Actor } from "../actor";
 import { decodeIdCursor, encodeIdCursor, keysetOver, pageOf, uuidFromString } from "../db";
+import { SECURITY_KINDS } from "./audit-log";
 import { EVENT_COLUMNS, toEvent, type EventRow } from "./log";
 
 /** What narrows and pages a reading of the log. */
@@ -81,6 +87,15 @@ export interface EventPage {
 /** Newest first: the log is read from its head. */
 const DEFAULT_DIRECTION: SortDirection = "desc";
 
+/**
+ * Whether the security entries are hidden from this actor. The user has parity
+ * and reads the log whole; anyone else reads them only by holding
+ * `event.audit`, so an actor kind added later is withheld from them until someone
+ * decides it should not be.
+ */
+const withoutSecurityEntries = (actor: Actor): boolean =>
+  actor._tag !== "user" && !(actor._tag === "session" && actor.grants.includes("event.audit"));
+
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
 
@@ -90,7 +105,7 @@ const make = Effect.gen(function* () {
       input: QueryInput,
     ): Effect.Effect<EventPage, Unauthenticated | Forbidden | Validation | SqlError> =>
       Effect.gen(function* () {
-        yield* requireGrant("event.query");
+        const actor = yield* requireGrant("event.query");
         const decoded = yield* Effect.mapError(decodeQuery(input), validationOf);
         const direction = decoded.sort?.direction ?? DEFAULT_DIRECTION;
         const limit = decoded.limit ?? DEFAULT_PAGE_LIMIT;
@@ -112,6 +127,12 @@ const make = Effect.gen(function* () {
         if (decoded.kind !== undefined) where.push(sql`kind = ${decoded.kind}`);
         if (decoded.since !== undefined) where.push(sql`received_at >= ${decoded.since}`);
         if (decoded.until !== undefined) where.push(sql`received_at <= ${decoded.until}`);
+        // Hidden in the query rather than dropped from the page that comes
+        // back, so a page stays as full as it was asked for and the cursor at
+        // its end still points at the next unread row.
+        if (withoutSecurityEntries(actor)) {
+          where.push(sql`kind NOT IN ${sql.in(SECURITY_KINDS)}`);
+        }
         // The log's id is its order, so the walk needs no second column to
         // break a tie on: the id is the whole key.
         const { keyset, order } = keysetOver(
@@ -143,10 +164,16 @@ const make = Effect.gen(function* () {
       input: Identified,
     ): Effect.Effect<Event, Unauthenticated | Forbidden | Validation | NotFound | SqlError> =>
       Effect.gen(function* () {
-        yield* requireGrant("event.read");
+        const actor = yield* requireGrant("event.read");
         const { id } = yield* Effect.mapError(decodeIdentified(input), validationOf);
+        // An entry this caller may not see answers as an entry that is not
+        // there: a hidden row and an id past the head of the log are one
+        // answer, so the log's contents cannot be probed by id.
+        const hidden = withoutSecurityEntries(actor)
+          ? sql`AND kind NOT IN ${sql.in(SECURITY_KINDS)}`
+          : sql``;
         const rows = yield* sql<EventRow>`
-          SELECT ${sql.literal(EVENT_COLUMNS)} FROM events WHERE id = ${id}
+          SELECT ${sql.literal(EVENT_COLUMNS)} FROM events WHERE id = ${id} ${hidden}
         `;
         const row = rows[0];
         return row === undefined ? yield* Effect.fail(notFound("no such event")) : toEvent(row);

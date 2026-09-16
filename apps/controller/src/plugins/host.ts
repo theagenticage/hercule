@@ -45,7 +45,7 @@ import {
 } from "@hydra/contract";
 import { nowIso, withTransaction } from "../db";
 import { AuditLog } from "../events";
-import { CurrentActor, SYSTEM_ACTOR, USER_ACTOR } from "../actor";
+import { CurrentActor, stampOf, SYSTEM_ACTOR } from "../actor";
 import { Secrets, type SecretOwner } from "../secrets";
 // The types a plugin declares, and what it reaches its own connections through,
 // both live in the connections domain: everything they touch is there. This is
@@ -356,10 +356,11 @@ const make = Effect.gen(function* () {
         ...(phase === "deactivate" ? { startable: false } : {}),
       });
       const at = yield* nowIso;
-      // The boot's own activation pass has no user behind it, so the row says
-      // what caused it rather than blaming whoever logged in last.
+      // The boot's own activation pass has no actor behind it, so the row says
+      // what caused it rather than blaming whoever logged in last. Anything
+      // else got here through a request, and is stamped with who made it.
       const actor = yield* Effect.map(CurrentActor, (who) =>
-        who._tag === "user" ? USER_ACTOR : SYSTEM_ACTOR,
+        who._tag === "none" ? SYSTEM_ACTOR : stampOf(who),
       );
       yield* withTransaction(
         sql,

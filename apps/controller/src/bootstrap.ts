@@ -33,7 +33,13 @@ import { AuditLog, AuditLogLayer } from "./events";
 import { ControllerIdentity, controllerIdentityLayer } from "./identity";
 import { Credentials, CredentialsLayer, hashToken, mintToken } from "./credentials";
 import { Users, UsersLayer } from "./users";
-import { PermissionProfilesLayer, type GrantsError, type PermissionProfiles } from "./permissions";
+import {
+  PermissionProfilesLayer,
+  SessionTokensLayer,
+  type GrantsError,
+  type PermissionProfiles,
+  type SessionTokens,
+} from "./permissions";
 import {
   masterKeyLayer,
   Secrets,
@@ -212,6 +218,7 @@ export type ControllerServices =
   | AuditLog
   | Settings
   | PermissionProfiles
+  | SessionTokens
   | Users
   | Credentials
   | JoinTokens
@@ -254,6 +261,7 @@ export const bootWith = <A, E>(
       controllerIdentityLayer,
       SettingsLayer,
       PermissionProfilesLayer,
+      SessionTokensLayer,
       UsersLayer,
       CredentialsLayer,
       AuditLogLayer,

@@ -3,7 +3,7 @@ import { Effect, Layer } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { TestDatabase } from "../db/testing";
 import { withTransaction } from "../db/client";
-import { AuditLog, AuditLogLayer } from "./audit-log";
+import { AuditLog, AuditLogLayer, SECURITY_KINDS } from "./audit-log";
 
 const layer = AuditLogLayer.pipe(Layer.provideMerge(TestDatabase));
 
@@ -128,5 +128,24 @@ describe("AuditLog", () => {
       }),
     );
     expect(entries).toHaveLength(1);
+  });
+});
+
+describe("the security kinds", () => {
+  it("is exactly the kinds behind event.audit today", () => {
+    // Written out rather than derived, so adding an audit kind under one of the
+    // security prefixes - or a kind that belongs behind the grant and does not
+    // carry one of them - fails here and is decided rather than assumed.
+    expect(SECURITY_KINDS).toEqual([
+      "auth.login.succeeded",
+      "auth.login.failed",
+      "auth.logout.succeeded",
+      "auth.apiKey.minted",
+      "auth.apiKey.revoked",
+      "user.passwordChanged",
+      "secret.created",
+      "secret.rotated",
+      "secret.deleted",
+    ]);
   });
 });

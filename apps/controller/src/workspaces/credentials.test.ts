@@ -262,7 +262,7 @@ describe("a credential asked for by a session", () => {
         checkouts: [],
       } as never);
       const start = (await framesWhen<SessionStart>(arranged.wire, "sessionStart", 1))[0]!;
-      const token = (start as unknown as Frame)["sessionToken"];
+      const token = (start as unknown as Frame)["token"];
       expect(token, "the session was started with no token").toBeTruthy();
 
       // The machine says it holds nothing: the session is over, whether or not

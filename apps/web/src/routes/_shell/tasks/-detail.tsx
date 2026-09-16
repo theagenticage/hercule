@@ -1,5 +1,12 @@
 import { useState, type FormEvent, type JSX } from "react";
-import { formatStamp, idTail, priorityGlyph, provenanceTarget } from "@hydra/client-core";
+import { Link } from "@tanstack/react-router";
+import {
+  actorReading,
+  formatStamp,
+  idTail,
+  priorityGlyph,
+  provenanceTarget,
+} from "@hydra/client-core";
 import {
   TASK_PRIORITIES,
   TASK_STATUSES,
@@ -179,19 +186,35 @@ export function TaskDetail({
             <p className="text-fine text-faint">Nothing has been recorded against this task.</p>
           ) : (
             <ol className="flex flex-col gap-2">
-              {task.provenance.map((entry) => (
-                <li
-                  key={`${entry.at}-${provenanceTarget(entry)}`}
-                  className="flex flex-col gap-0.5"
-                >
-                  <span className="font-mono text-fine break-all text-muted">
-                    {provenanceTarget(entry)}
-                  </span>
-                  <span className="font-mono text-fine text-faint tabular-nums">
-                    {entry.actor} · {formatStamp(new Date(entry.at), timezone) ?? entry.at}
-                  </span>
-                </li>
-              ))}
+              {task.provenance.map((entry) => {
+                const actor = actorReading(entry.actor);
+                return (
+                  <li
+                    key={`${entry.at}-${provenanceTarget(entry)}`}
+                    className="flex flex-col gap-0.5"
+                  >
+                    <span className="font-mono text-fine break-all text-muted">
+                      {provenanceTarget(entry)}
+                    </span>
+                    <span className="flex items-baseline gap-2 font-mono text-fine">
+                      {actor.sessionId === undefined ? (
+                        <span className="text-faint">{actor.label}</span>
+                      ) : (
+                        <Link
+                          to="/threads/$sessionId"
+                          params={{ sessionId: actor.sessionId }}
+                          className="text-ink underline decoration-line underline-offset-[3px]"
+                        >
+                          {actor.label}
+                        </Link>
+                      )}
+                      <span className="shrink-0 text-faint tabular-nums">
+                        {formatStamp(new Date(entry.at), timezone) ?? entry.at}
+                      </span>
+                    </span>
+                  </li>
+                );
+              })}
             </ol>
           )}
         </section>

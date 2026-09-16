@@ -33,6 +33,8 @@ describe("the adapters this runner build carries", () => {
     const machine: Machine = {
       providersDir: "/var/hydra/runner/providers",
       scratchDir: "/var/hydra/runner/scratch",
+      binDir: "/var/hydra/runner/bin",
+      hydraTool: { skill: "", claudePluginDir: "/var/hydra/runner/storage/claude-plugin" },
       controllerUrl: "https://controller.example:4938",
       baseEnv: { PATH: "/usr/bin" },
       binaryOf: () => undefined,

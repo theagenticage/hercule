@@ -47,7 +47,7 @@ import {
   type Unauthenticated,
   type Validation,
 } from "@hydra/contract";
-import { requireGrant, USER_ACTOR } from "../actor";
+import { currentStamp, requireGrant, USER_ACTOR } from "../actor";
 import { mintToken } from "../credentials";
 import { nowIso, pageInput, refuseCursor, withTransaction } from "../db";
 import { AuditLog } from "../events";
@@ -498,7 +498,7 @@ const make = Effect.gen(function* () {
             yield* writeSecrets(row.id, credentials);
             yield* audit.append({
               kind: "connection.created",
-              actor: USER_ACTOR,
+              actor: yield* currentStamp,
               // Names only: the log is read by the Intake views and kept for
               // 90 days, and these names are what a value is stored under.
               payload: {
@@ -537,7 +537,7 @@ const make = Effect.gen(function* () {
             yield* connections.update(id, patch, at);
             yield* audit.append({
               kind: "connection.updated",
-              actor: USER_ACTOR,
+              actor: yield* currentStamp,
               payload: { connectionId: id, fields: Object.keys(patch) },
               record: { topic: "connection", id },
               at,
@@ -582,7 +582,7 @@ const make = Effect.gen(function* () {
             );
             yield* audit.append({
               kind: "connection.credentialsSet",
-              actor: USER_ACTOR,
+              actor: yield* currentStamp,
               payload: { connectionId: row.id, credentials: Object.keys(credentials) },
               record: { topic: "connection", id: row.id },
               at,
@@ -737,7 +737,7 @@ const make = Effect.gen(function* () {
             yield* connections.delete(id);
             yield* audit.append({
               kind: "connection.deleted",
-              actor: USER_ACTOR,
+              actor: yield* currentStamp,
               payload: {
                 connectionId: id,
                 pluginId: row.pluginId,

@@ -61,6 +61,7 @@ import {
 } from "@hydra/contract";
 import { requireGrant, SYSTEM_ACTOR, USER_ACTOR } from "../actor";
 import { nowIso, pageInput, refuseCursor, withTransaction } from "../db";
+import { SessionTokens } from "../permissions";
 import { AuditLog } from "../events";
 import {
   isCheckedOut,
@@ -786,5 +787,5 @@ export class WorkspaceService extends Context.Service<
 export const WorkspaceServiceLayer: Layer.Layer<
   WorkspaceService,
   never,
-  SqlClient.SqlClient | AuditLog | RunnerPresence | Settings | Secrets
+  SqlClient.SqlClient | AuditLog | RunnerPresence | Settings | Secrets | SessionTokens
 > = Layer.effect(WorkspaceService)(make);
