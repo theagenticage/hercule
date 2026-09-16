@@ -25,6 +25,8 @@ const binaryTests = [
   "e2e/live.test.ts",
   "e2e/runner.test.ts",
   "e2e/session.test.ts",
+  "e2e/workspace.test.ts",
+  "e2e/github-push.test.ts",
   "e2e/binary-size.test.ts",
 ];
 

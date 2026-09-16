@@ -9,8 +9,16 @@
  * The processes are started with `Bun.spawn` rather than `spawnHydra`, which
  * inherits stdio: a test has to read what the command printed.
  */
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
+import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
 /** The repository root, so the tests run from any working directory. */
@@ -18,6 +26,20 @@ export const ROOT = dirname(import.meta.dirname);
 
 /** The dispatcher's source entrypoint: the same `main.ts` the binary compiles. */
 const ENTRYPOINT = join(ROOT, "packages/hydra/src/main.ts");
+
+/**
+ * The release binary if one has been built, and `undefined` - the dispatcher's
+ * own source - if not.
+ *
+ * The suites that are only honest as a release say so themselves and refuse to
+ * run without `./hydra`. A suite that exercises the controller's own surface
+ * rather than the packaging is the same program either way, so it runs from
+ * source on a working copy and as the binary under `pnpm test:binary`.
+ */
+export function releaseBinary(): string | undefined {
+  const built = join(ROOT, "hydra");
+  return existsSync(built) ? built : undefined;
+}
 
 /**
  * The Bun that is running this test. Under `pnpm test` that is `bun`, but a
@@ -68,6 +90,25 @@ export function temporaryHome(): { home: string; remove: () => void } {
   };
 }
 
+/**
+ * A directory to hand a process as `HOME`, holding none of the git
+ * configuration the developer running the suite has: no `.gitconfig` but the
+ * one written here, no `.git-credentials`, no `gh` login.
+ *
+ * `Library` is linked back to the real home on macOS. The master key lives in
+ * the login keychain, which `security` finds under `$HOME/Library/Keychains`,
+ * so a home without it is a controller that cannot boot; git reads nothing
+ * under `Library`, so the scrub still holds.
+ */
+export function scrubbedHome(at: string, gitconfig: string): string {
+  mkdirSync(at, { recursive: true });
+  writeFileSync(join(at, ".gitconfig"), gitconfig);
+  if (process.platform === "darwin") {
+    symlinkSync(join(homedir(), "Library"), join(at, "Library"));
+  }
+  return at;
+}
+
 /** A controller process that is up and answering. */
 export interface Controller {
   readonly url: string;
@@ -97,6 +138,13 @@ export async function startController(options: {
   readonly timeoutMs?: number | undefined;
   /** The compiled binary to run instead of the dispatcher's source. */
   readonly binary?: string | undefined;
+  /**
+   * What the controller - and the runner it starts for itself - sees beyond the
+   * clean environment. A suite that has to say what `HOME` is, because git on
+   * that machine must find no configuration of the developer's own, has no
+   * other way to say it.
+   */
+  readonly env?: Readonly<Record<string, string>> | undefined;
 }): Promise<Controller> {
   const attempts = options.port === undefined ? 20 : 1;
   const command = options.binary === undefined ? [BUN, ENTRYPOINT] : [options.binary];
@@ -104,7 +152,7 @@ export async function startController(options: {
   for (let attempt = 0; attempt < attempts; attempt++) {
     const port = options.port ?? candidatePort();
     try {
-      return await startOn(command, options.home, port, options.timeoutMs);
+      return await startOn(command, options.home, port, options.timeoutMs, options.env);
     } catch (error) {
       last = error as Error;
       if (!/in use/.test(last.message)) throw last;
@@ -119,13 +167,14 @@ async function startOn(
   home: string,
   port: number,
   timeoutMs: number | undefined,
+  env?: Readonly<Record<string, string>>,
 ): Promise<Controller> {
   const url = `http://127.0.0.1:${String(port)}`;
   const chunks: Array<string> = [];
 
   const child = Bun.spawn([...command, "serve", "-c", `bind.port=${String(port)}`], {
     cwd: ROOT,
-    env: { ...cleanEnv(), HYDRA_HOME: home },
+    env: { ...cleanEnv(), ...env, HYDRA_HOME: home },
     stdout: "pipe",
     stderr: "pipe",
   });
