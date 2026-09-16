@@ -39,6 +39,8 @@ import { resolve, type Machine } from "./context";
 interface Live {
   readonly adapter: ProviderAdapter;
   readonly scratch: string | undefined;
+  /** The workspace this session works in, re-read and reported when it exits. */
+  readonly workspaceId: string | null;
   /** How long this session may sit with no event while a turn is open. */
   readonly inactivityMs: number;
   /** Clock time of the last event of this session while a turn was open. */
@@ -222,11 +224,23 @@ export const supervising = (adapters: ReadonlyArray<ProviderAdapter>): Supervisi
       });
 
     /**
+     * What the user's own checkout is on now. A session in a primary is free to
+     * switch branches, and the controller's picture of it is this report.
+     */
+    const reportWorkspace = (workspaceId: string): Effect.Effect<void> =>
+      Effect.ignoreCause(
+        Effect.flatMap(
+          Effect.promise(() => connection.machine.workspaces.reportAfterSession(workspaceId)),
+          (report) => (report === undefined ? Effect.void : sending(report)),
+        ),
+      );
+
+    /**
      * Every event leaves through here, in the order it was sequenced. Arming
      * or moving the inactivity clock happens first, so a caller that has seen
      * the frame this event produced has also seen what it did to the clock.
      */
-    const forward = (event: ProviderEvent): Effect.Effect<void> =>
+    const sequenced = (event: ProviderEvent): Effect.Effect<void> =>
       sequencing.withPermits(1)(
         Effect.gen(function* () {
           const held = live.get(event.sessionId);
@@ -285,6 +299,21 @@ export const supervising = (adapters: ReadonlyArray<ProviderAdapter>): Supervisi
         }),
       );
 
+    /**
+     * Outside the sequence, because re-reading a checkout is a git call and
+     * every other session's events would wait behind it. The entry is read
+     * before the exit is sequenced, because that is what removes it.
+     */
+    const forward = (event: ProviderEvent): Effect.Effect<void> => {
+      const workspaceId =
+        event._tag === "session.exited" ? live.get(event.sessionId)?.workspaceId : undefined;
+      return Effect.flatMap(sequenced(event), () =>
+        workspaceId === undefined || workspaceId === null
+          ? Effect.void
+          : reportWorkspace(workspaceId),
+      );
+    };
+
     /** What went wrong, in the session's own stream, where a reader of the thread sees it. */
     const failed = (sessionId: string, message: string): Effect.Effect<void> =>
       forward({
@@ -329,6 +358,7 @@ export const supervising = (adapters: ReadonlyArray<ProviderAdapter>): Supervisi
                 const held: Live = {
                   adapter,
                   scratch: resolved.scratch,
+                  workspaceId: frame.spec.workspaceId,
                   inactivityMs: frame.spec.timeouts.inactivityMs,
                   // Meaningless until the session is watched: `forward` sets
                   // it alongside `inactivity`, on whatever event starts the watch.

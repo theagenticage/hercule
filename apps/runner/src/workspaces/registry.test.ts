@@ -1,11 +1,11 @@
 /**
- * What the runner still knows about its workspaces after it restarts (AC-11).
+ * What the runner still knows about its workspaces after it restarts.
  *
  * The controller stores no path, so this registry is the only place a
  * workspace's directory exists. A daemon that forgets it has stranded the
  * user's work on its own disk.
  */
-import { writeFileSync } from "node:fs";
+import { rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { makeWorkspaces } from "./index";
@@ -135,6 +135,32 @@ describe("provisioning a workspace this runner already holds", () => {
     expect(again.checkouts?.[0]?.branch).toBe(first.checkouts?.[0]?.branch);
     // A repeated frame must never throw the work in the workspace away.
     expect(git(directory, "status", "--porcelain")).toContain("work-in-progress.txt");
+  });
+});
+
+describe("a workspace whose directory is gone", () => {
+  it("is nowhere to run, and is reported failed rather than re-reported ready", async () => {
+    const remote = makeRemote();
+    const storageDir = storage();
+    const workspaceId = id();
+    const frame = provisionFrame({
+      workspaceId,
+      kind: "ephemeral",
+      checkouts: [checkout({ resourceId: id(), remote: remote.url, branch: "hydra/run-5e5e0000" })],
+    });
+    await makeWorkspaces({ storageDir }).provision(frame);
+    // Somebody cleaned up their disk, or a temporary directory was swept.
+    rmSync(join(storageDir, "workspaces", workspaceId), { recursive: true, force: true });
+
+    // A session placed here would start in a directory that does not exist.
+    expect(makeWorkspaces({ storageDir }).resolve(workspaceId)).toBeUndefined();
+
+    const again = await makeWorkspaces({ storageDir }).provision(frame);
+
+    expect(again.status).toBe("failed");
+    expect(again.message ?? "").toContain("gone");
+    // Forgotten, so the next frame for it makes the workspace afresh.
+    expect(makeWorkspaces({ storageDir }).resolve(workspaceId)).toBeUndefined();
   });
 });
 

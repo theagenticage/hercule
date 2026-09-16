@@ -2,18 +2,25 @@
  * The runner daemon: `hydra runner`. Holding the connection is all it does yet;
  * hosting sessions is what the connection is for.
  */
-import { rmSync } from "node:fs";
+import { mkdirSync, rmSync } from "node:fs";
 import { networkInterfaces } from "node:os";
 import { join as joinPath } from "node:path";
 import * as Effect from "effect/Effect";
 import { runnerDirIn } from "@hydra/home";
 import { IDENTITY_PORT } from "@hydra/protocol";
+import {
+  gitCredentialEnv,
+  makeCredentialRelay,
+  serveCredentialSocket,
+  socketPathIn,
+} from "./credentials";
 import { identityListener } from "./identity";
 import { probeFacts, thisMachine } from "./probe";
 import { reconnect, reconnectSignals } from "./reconnect";
 import { CONTROLLER_URL_SCHEMES, NotEnrolled, readRunnerFile, runnerFileIn } from "./runner-file";
 import { connect, type RunnerRetired } from "./socket";
 import { machineHeadroom } from "./watermark";
+import { makeWorkspaces } from "./workspaces";
 
 /** Sorted, so two readings can be compared. */
 const addresses = (): ReadonlyArray<string> =>
@@ -63,18 +70,51 @@ export const daemon = (home: string): Effect.Effect<never, NotEnrolled | RunnerR
       });
       const probe = probeFacts(thisMachine, identityPort);
       const headroom = machineHeadroom(home);
-      // Under the runner's own storage directory, so re-enlisting the machine
-      // leaves every provider login behind with the identity it belonged to.
-      const providersDir = joinPath(runnerDirIn(home), pin.storageDirectory, "providers");
+      // Everything this machine holds for its controller sits under here, so
+      // re-enlisting it leaves every provider login, workspace and cache behind
+      // with the identity it belonged to.
+      const storageDir = joinPath(runnerDirIn(home), pin.storageDirectory);
+      // Nobody else on the machine reads a session's workspace or the socket
+      // its credentials are asked down.
+      mkdirSync(storageDir, { recursive: true, mode: 0o700 });
+      const providersDir = joinPath(storageDir, "providers");
       // Beside them, and just as disposable: what a workspace-less session gets
       // as a cwd, one directory per session.
-      const scratchDir = joinPath(runnerDirIn(home), pin.storageDirectory, "scratch");
+      const scratchDir = joinPath(storageDir, "scratch");
+      const socketPath = socketPathIn(storageDir);
+      // The runner's own git asks for its credentials the same way a session's
+      // does: down this socket, with nothing on disk.
+      const workspaces = makeWorkspaces({ storageDir, gitEnv: gitCredentialEnv({ socketPath }) });
+      const credentials = makeCredentialRelay();
+      yield* Effect.acquireRelease(
+        // A second daemon on one home would answer this machine's helpers with
+        // another controller's credentials, so it refuses to start rather than
+        // taking the socket over.
+        Effect.tryPromise({
+          try: () => serveCredentialSocket({ path: socketPath, ask: credentials.ask }),
+          catch: (error) =>
+            new NotEnrolled({
+              message: error instanceof Error ? error.message : String(error),
+            }),
+        }),
+        (server) => Effect.promise(() => server.close()),
+      );
       // No session survives this process, so everything under there is what the
       // last one left behind: swept here rather than growing with every crash.
       rmSync(scratchDir, { recursive: true, force: true });
       return yield* reconnect({
         attempt: Effect.flatMap(probe, (facts) =>
-          connect({ pin, facts, probe, headroom, providersDir, scratchDir }),
+          connect({
+            pin,
+            facts,
+            probe,
+            headroom,
+            providersDir,
+            scratchDir,
+            workspaces,
+            socketPath,
+            credentials,
+          }),
         ),
         signals: reconnectSignals({ now: () => Date.now(), addresses }),
       });

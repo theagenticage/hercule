@@ -1,12 +1,12 @@
 /**
- * `hydra git-credential get` (AC-13), driven against a real socket. What git
+ * `hydra git-credential get`, driven against a real socket. What git
  * reads on stdout is the whole contract: the exact two lines, or nothing at
  * all, which is git's signal to try the next helper.
  */
 import { join } from "node:path";
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it, vi } from "vitest";
 import type { CredentialAnswer } from "@hydra/protocol";
-import { helperMain, serveCredentialSocket } from "./index";
+import { helperMain, runCredentialAction, serveCredentialSocket } from "./index";
 import { cleanTemporaries, temporary } from "../workspaces/testing";
 
 afterAll(cleanTemporaries);
@@ -86,6 +86,40 @@ describe("what the helper prints", () => {
     await served.close();
   });
 
+  it("asks as the machine while the runner is provisioning a workspace", async () => {
+    const served = await serving(() =>
+      Promise.resolve(answering({ token: "ghp_the-token", username: "octocat" })),
+    );
+
+    const printed = await helperMain(GIT_ASKS, {
+      HYDRA_RUNNER_SOCKET: served.path,
+      HYDRA_WORKSPACE_PROVISIONING: "0199e0e7-0000-7000-8000-00000000000b",
+    });
+
+    // The machine has no session to be, so it names the workspace it is making.
+    expect(asked).toEqual([
+      { remote: "github.com/acme/web", workspaceId: "0199e0e7-0000-7000-8000-00000000000b" },
+    ]);
+    expect(printed).toBe("username=octocat\npassword=ghp_the-token\n");
+    await served.close();
+  });
+
+  it("prints nothing when a field of the answer carries a line break", async () => {
+    const served = await serving(() =>
+      Promise.resolve(answering({ token: "ghp_the-token", username: "octocat\npassword=stolen" })),
+    );
+
+    const printed = await helperMain(GIT_ASKS, {
+      HYDRA_RUNNER_SOCKET: served.path,
+      HYDRA_TOKEN: "the-session-token",
+    });
+
+    // git reads the answer line by line: a break in a value is a line nobody
+    // checked, and the last one wins.
+    expect(printed).toBe("");
+    await served.close();
+  });
+
   it("prints nothing when there is no daemon to ask", async () => {
     const printed = await helperMain(GIT_ASKS, {
       HYDRA_RUNNER_SOCKET: join(temporary("hydra-helper-"), "nothing-listens-here.sock"),
@@ -100,5 +134,25 @@ describe("what the helper prints", () => {
     const printed = await helperMain(GIT_ASKS, { HYDRA_TOKEN: "the-session-token" });
 
     expect(printed).toBe("");
+  });
+});
+
+describe("the actions git names", () => {
+  it("says nothing, and reads no input, for anything but `get`", async () => {
+    const written: Array<unknown> = [];
+    const write = vi.spyOn(process.stdout, "write").mockImplementation((chunk) => {
+      written.push(chunk);
+      return true;
+    });
+
+    // `store` and `erase` are git reporting what it did with a credential this
+    // helper keeps none of; a bare invocation is nobody's command at all.
+    await runCredentialAction("store");
+    await runCredentialAction("erase");
+    await runCredentialAction("git-credential");
+    await runCredentialAction(undefined);
+
+    expect(written).toEqual([]);
+    write.mockRestore();
   });
 });

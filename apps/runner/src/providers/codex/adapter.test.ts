@@ -148,8 +148,8 @@ describe("what the Codex adapter reports about a machine", () => {
     // A model the server lists no efforts for offers no effort choice.
     expect(optionOf(probed.models, "gpt-5.6-sol", "effort")).toBeUndefined();
 
-    // Amended under D-12: `serviceTiers` lists only the tiers beyond the
-    // standard one and `defaultServiceTier: null` means that one, so the
+    // `serviceTiers` lists only the tiers beyond the standard one and
+    // `defaultServiceTier: null` means that one, so the
     // standard tier is a choice of Hydra's own and the default where Codex
     // names none - otherwise every turn would run on a paid tier nobody chose.
     expect(optionOf(probed.models, "gpt-6-astra", "serviceTier")).toMatchObject({
@@ -637,7 +637,7 @@ describe("the model a turn runs under", () => {
 
   it("sends no service tier for a selection of the standard one, and sends a chosen one", async () => {
     // "standard" is Hydra's name for the tier Codex runs on when it is told
-    // none, so choosing it means leaving the field off (D-12).
+    // none, so choosing it means leaving the field off.
     const opened = async (tier: string): Promise<Record<string, unknown>> => {
       const run = await started();
       await Effect.runPromise(

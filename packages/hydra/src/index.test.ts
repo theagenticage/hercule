@@ -97,6 +97,14 @@ describe("dispatch", () => {
     expect(run.cli).not.toHaveBeenCalled();
   });
 
+  // git always names an action. A bare `hydra git-credential` must not read as
+  // `hydra runner` and start a daemon, so the word itself rides along.
+  it("keeps git-credential in the line when no action follows it", async () => {
+    await dispatch(["git-credential"]);
+    expect(run.runner).toHaveBeenCalledWith(["git-credential"]);
+    expect(run.cli).not.toHaveBeenCalled();
+  });
+
   it("sends everything else to the CLI", async () => {
     await dispatch(["task", "list"]);
     expect(run.cli).toHaveBeenCalledWith(["task", "list"]);

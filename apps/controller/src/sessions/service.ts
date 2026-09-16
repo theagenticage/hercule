@@ -23,6 +23,7 @@ import type { SqlError } from "effect/unstable/sql/SqlError";
 import type { ProviderDefinition } from "@hydra/plugin-host";
 import {
   SessionSpec,
+  Subdirectory,
   type AccessMode,
   type WorkspaceProvision,
   type Delivery,
@@ -262,6 +263,12 @@ const NO_SUCH_PROJECT_NAMED = "no such project";
 const REPO_TWICE = "a workspace holds one working copy of a repo: name each one once";
 
 const SAME_NAME = "two of those repos are called the same thing, so they cannot sit side by side";
+
+/** The one rule the runner lays a multi-repo workspace out by, asked here too. */
+const isDirectoryName = Schema.is(Subdirectory);
+
+const unnameable = (name: string): string =>
+  `a repo called ${name} cannot have a directory of its own in a workspace`;
 
 const NO_SUCH_WORKSPACE = "no such workspace";
 
@@ -1254,6 +1261,15 @@ const make = Effect.gen(function* () {
       if (repos.length > 1 && new Set(names).size !== names.length) {
         return yield* Effect.fail(
           validation([{ path: ["workspace", "checkouts"], message: SAME_NAME }]),
+        );
+      }
+      // Said here, where the user can read it, rather than left to the frame
+      // that carries the name to the runner: an unencodable frame is a defect,
+      // and the spawn would fail with nothing the user could act on.
+      const unusable = repos.length > 1 ? names.find((name) => !isDirectoryName(name)) : undefined;
+      if (unusable !== undefined) {
+        return yield* Effect.fail(
+          validation([{ path: ["workspace", "checkouts"], message: unnameable(unusable) }]),
         );
       }
       const workspace = yield* workspaces.insert({

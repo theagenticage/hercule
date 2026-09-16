@@ -327,6 +327,58 @@ describe("the git credential environment a session runs with", () => {
     expect(pairs.length).toBe(Number(env["GIT_CONFIG_COUNT"]));
   });
 
+  it("commits as the account the credential comes from, when the frame names one", async () => {
+    const outcome = await resolvingAsync(
+      starting({ gitIdentity: { name: "octocat", email: "octocat@users.noreply.github.com" } }),
+      machining(),
+    );
+    const env = outcome._tag === "Success" ? { ...outcome.success.ctx.env } : {};
+
+    const pairs = gitConfigOf(env);
+    expect(pairs).toContainEqual(["user.name", "octocat"]);
+    expect(pairs).toContainEqual(["user.email", "octocat@users.noreply.github.com"]);
+    expect(pairs.length).toBe(Number(env["GIT_CONFIG_COUNT"]));
+  });
+
+  it("leaves the identity to the machine's own git when the frame names none", async () => {
+    const outcome = await resolvingAsync(starting(), machining());
+    const env = outcome._tag === "Success" ? { ...outcome.success.ctx.env } : {};
+
+    // A session without a workspace has no Connection behind it, and an empty
+    // `user.name` would make every commit fail rather than fall back.
+    expect(gitConfigOf(env).map((pair) => pair[0])).not.toContain("user.name");
+  });
+
+  it("keeps the machine owner's own git out of the session", async () => {
+    const outcome = await resolvingAsync(
+      starting(),
+      machining({
+        baseEnv: {
+          PATH: "/usr/bin",
+          HOME: "/home/somebody",
+          SSH_AUTH_SOCK: "/private/tmp/ssh-agent.socket",
+          // What the person who started the daemon exported for themselves.
+          GIT_ASKPASS: "/usr/bin/say-the-password",
+          SSH_ASKPASS: "/usr/bin/say-the-password",
+          GIT_CONFIG_GLOBAL: "/home/somebody/.gitconfig",
+        },
+      }),
+    );
+    const env = outcome._tag === "Success" ? { ...outcome.success.ctx.env } : {};
+
+    // Either of these would answer for the agent, with the machine owner's own
+    // credentials, for any repository.
+    expect(env["GIT_ASKPASS"]).toBeUndefined();
+    expect(env["SSH_ASKPASS"]).toBeUndefined();
+    // And this would take the helper away by pointing git at another file.
+    expect(env["GIT_CONFIG_GLOBAL"]).toBeUndefined();
+    // The agent still reaches its ssh keys and its home.
+    expect(env["SSH_AUTH_SOCK"]).toBe("/private/tmp/ssh-agent.socket");
+    expect(env["HOME"]).toBe("/home/somebody");
+    expect(env["GIT_TERMINAL_PROMPT"]).toBe("0");
+    expect(gitConfigOf(env)[1]?.[0]).toBe("credential.helper");
+  });
+
   it("carries GH_TOKEN only when the frame does", async () => {
     const withToken = await resolvingAsync(starting({ ghToken: "ghp_for_gh_cli" }), machining());
     const without = await resolvingAsync(starting(), machining());

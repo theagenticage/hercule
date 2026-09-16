@@ -33,6 +33,8 @@ import {
   PROOF_DEADLINE,
   type ControllerPin,
 } from "./socket";
+import { makeCredentialRelay } from "./credentials";
+import { makeWorkspaces } from "./workspaces";
 
 /** What this machine says about itself; nothing here is about the probe. */
 const FACTS: RunnerFacts = {
@@ -255,9 +257,10 @@ const DEADLINE = Duration.millis(500);
  */
 const PATIENT = Duration.minutes(1);
 
-/** Nothing here starts a session, so neither directory is ever made. */
+/** Nothing here starts a session, so none of these is ever made. */
 const PROVIDERS_DIR = "/nonexistent/hydra-runner-providers";
 const SCRATCH_DIR = "/nonexistent/hydra-runner-scratch";
+const STORAGE_DIR = "/nonexistent/hydra-runner-storage";
 
 /** Runs one connection to its end and reports how it ended. */
 const attempt = (
@@ -274,6 +277,9 @@ const attempt = (
         headroom: Effect.succeed({ diskFreeBytes: 200 * 1024 ** 3, availableMemoryBytes: 1 }),
         providersDir: PROVIDERS_DIR,
         scratchDir: SCRATCH_DIR,
+        workspaces: makeWorkspaces({ storageDir: STORAGE_DIR }),
+        socketPath: `${STORAGE_DIR}/daemon.sock`,
+        credentials: makeCredentialRelay(),
         proofDeadline,
       }),
     ),

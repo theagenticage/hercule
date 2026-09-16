@@ -1,5 +1,5 @@
 /**
- * The runner's credential channel (AC-13, AD-2): a Unix socket that resolves
+ * The runner's credential channel: a Unix socket that resolves
  * nothing itself. It turns git's question into a request for the controller and
  * relays the answer back; anything else is an empty answer, which is what lets
  * git fall through to the machine's own helpers.
@@ -146,13 +146,71 @@ describe("when no credential is coming", () => {
   });
 });
 
+describe("an answer git could not read as one", () => {
+  it("is not passed on when a field carries a line break", async () => {
+    const served = await serving(() =>
+      // A second line would be a second answer, and git reads every line.
+      Promise.resolve(answering({ token: "the-token\nquit=1", username: "octocat" })),
+    );
+
+    const reply = await asks(served.path, {
+      protocol: "https",
+      host: "github.com",
+      path: "acme/web",
+      sessionToken: "the-session-token",
+    });
+
+    expect(JSON.parse(reply.trim())).toEqual({});
+    await served.close();
+  });
+});
+
+describe("a peer that is not asking a question", () => {
+  it("is cut off rather than buffered, and nobody is asked", async () => {
+    asked.length = 0;
+    const served = await serving(() =>
+      Promise.resolve(answering({ token: "the-token", username: "octocat" })),
+    );
+
+    const ended = await new Promise<boolean>((resolve, reject) => {
+      const socket = createConnection({ path: served.path });
+      socket.on("connect", () => {
+        // A hundred kilobytes and not one newline: nothing git sends, and
+        // nothing this end should hold on to.
+        socket.write("x".repeat(100 * 1024));
+      });
+      socket.on("close", () => resolve(true));
+      socket.on("error", () => resolve(true));
+      setTimeout(() => reject(new Error("the socket kept reading")), 2_000).unref();
+    });
+
+    expect(ended).toBe(true);
+    expect(asked).toEqual([]);
+    await served.close();
+  });
+});
+
 describe("the socket itself", () => {
   it("is reachable by this user alone", async () => {
     const served = await serving(() => Promise.resolve(answering({ error: "no_connection" })));
 
-    // AD-2: a same-user process is at parity with the runner anyway, but no
-    // other OS user reaches this.
+    // A same-user process is at parity with the runner anyway, but no other
+    // OS user reaches this.
     expect(statSync(served.path).mode & 0o777).toBe(0o600);
+    await served.close();
+  });
+
+  it("refuses to take over a socket another daemon is answering on", async () => {
+    const served = await serving(() => Promise.resolve(answering({ error: "no_connection" })));
+
+    // Two daemons on one home would answer this machine's helpers with two
+    // different controllers' credentials.
+    await expect(
+      serveCredentialSocket({ path: served.path, ask: () => Promise.reject(new Error("never")) }),
+    ).rejects.toThrow("already listening");
+
+    // And the one that was there is untouched.
+    expect(existsSync(served.path)).toBe(true);
     await served.close();
   });
 

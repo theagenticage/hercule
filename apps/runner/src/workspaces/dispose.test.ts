@@ -1,5 +1,5 @@
 /**
- * Tearing a workspace down (AC-12). The branch outlives the directory, a
+ * Tearing a workspace down. The branch outlives the directory, a
  * primary is never torn down at all, and a dispose of something that is
  * already gone is still a dispose.
  */

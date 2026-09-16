@@ -25,6 +25,7 @@ import type {
 } from "@hydra/protocol";
 import type { ProviderAdapter, ProviderRunnerContext } from "../providers";
 import type { Machine } from "./context";
+import { makeWorkspaces } from "../workspaces";
 import { supervising } from "./supervisor";
 
 const roots: Array<string> = [];
@@ -202,6 +203,8 @@ const connecting = (fake: Fake) => {
     controllerUrl: "https://controller.example:4938",
     baseEnv: { PATH: "/usr/bin" },
     binaryOf: (name) => `/usr/local/bin/${name}`,
+    workspaces: makeWorkspaces({ storageDir: join(under, "storage") }),
+    socketPath: join(under, "daemon.sock"),
   };
   // The value `supervising` returns is the process's, and one connection's
   // supervisor is built from it through `forConnection`: a session outlives
@@ -1101,7 +1104,7 @@ describe("a session that has run for as long as it may", () => {
 });
 
 /**
- * What an announced shutdown does to what this runner is holding (AC-9, AD-6).
+ * What an announced shutdown does to what this runner is holding.
  *
  * A runner that walks away without stopping its harnesses leaves orphan
  * processes behind and sessions the controller believes are busy, so what is
@@ -1117,7 +1120,7 @@ const OTHER_START: SessionStart = { ...START, sessionId: OTHER_SESSION };
 
 /**
  * The most a shutdown may take with a harness that never exits. Generous next
- * to the few seconds AD-6 bounds the wait at: what is under test is a wait that
+ * to the few seconds the shutdown bounds the wait at: what is under test is a wait that
  * ends, not the constant the implementation chose.
  */
 const SHUTDOWN_BUDGET_MS = 20_000;

@@ -39,6 +39,12 @@ function route(
   switch (options.rest[0]) {
     case "serve":
       return { role: "controller", args: withoutVerb };
+    // git runs this one, per request, and what answers it is the runner's own
+    // socket rather than the public API. The action git names is what the role
+    // acts on; with none named the word itself rides along, so a bare
+    // `hydra git-credential` cannot be read as `hydra runner` and start a daemon.
+    case "git-credential":
+      return { role: "runner", args: subcommand === undefined ? argv : withoutVerb };
     case "runner":
       // A bridge for as long as `hydra runner` names the daemon as well as the
       // noun: help for either is one screen, and the CLI is what renders it.

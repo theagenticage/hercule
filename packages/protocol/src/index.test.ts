@@ -409,6 +409,56 @@ describe("sequence numbers", () => {
   });
 });
 
+const provisioning = (overrides: Record<string, unknown>): Record<string, unknown> => ({
+  ...(controllerMessages.find((message) => message._tag === "workspaceProvision") as Record<
+    string,
+    unknown
+  >),
+  ...overrides,
+});
+
+describe("the ids a machine makes a directory of", () => {
+  it("takes the identifiers the controller mints", () => {
+    expect(fromController(provisioning({}))._tag).toBe("Success");
+  });
+
+  it("refuses anything that could be a path rather than a name", () => {
+    // The runner joins these into paths under its storage directory and a
+    // dispose removes what they name.
+    for (const workspaceId of ["../../etc", "a/b", "", "with space", ".."]) {
+      expect(fromController(provisioning({ workspaceId }))._tag).toBe("Failure");
+    }
+    expect(fromController({ _tag: "workspaceDispose", workspaceId: "../elsewhere" })._tag).toBe(
+      "Failure",
+    );
+  });
+
+  it("refuses a checkout whose resource or subdirectory could climb out of the workspace", () => {
+    const one = (checkout: Record<string, unknown>): Record<string, unknown> =>
+      provisioning({
+        checkouts: [
+          {
+            ...((
+              controllerMessages.find((message) => message._tag === "workspaceProvision") as {
+                checkouts: ReadonlyArray<Record<string, unknown>>;
+              }
+            ).checkouts[0] ?? {}),
+            ...checkout,
+          },
+        ],
+      });
+    expect(fromController(one({ subdirectory: "web" }))._tag).toBe("Success");
+    expect(fromController(one({ subdirectory: "my.repo" }))._tag).toBe("Success");
+    // A repository really can be called this, and a workspace can hold it.
+    expect(fromController(one({ subdirectory: ".github" }))._tag).toBe("Success");
+    for (const subdirectory of ["..", ".", "../web", "web/api", ".git", ".GIT", ""]) {
+      expect(fromController(one({ subdirectory }))._tag).toBe("Failure");
+    }
+    expect(fromController(one({ resourceId: "../../cache" }))._tag).toBe("Failure");
+    expect(fromController(one({ checkoutId: "a/b" }))._tag).toBe("Failure");
+  });
+});
+
 describe("the bare messages", () => {
   it.each(["pong", "goodbye"])("gives %s nothing beyond its tag", (tag) => {
     const decoded = Effect.runSync(

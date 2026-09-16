@@ -15,6 +15,7 @@ import * as Logger from "effect/Logger";
 import type * as Scope from "effect/Scope";
 import { Result } from "effect";
 import { parseGlobalOptions, resolveHomePath } from "@hydra/home";
+import { runCredentialAction } from "./credentials";
 import { daemon } from "./daemon";
 import { join } from "./join";
 import { local } from "./local";
@@ -110,8 +111,10 @@ export async function run(argv: readonly string[]): Promise<void> {
     return await hold(verb === "--local" ? local(home) : daemon(home));
   }
   if (verb !== "join" && verb !== "set-controller") {
-    misuse(`unknown runner command \`${verb}\``);
-    return;
+    // Everything else that reaches this role came from `hydra git-credential`:
+    // the dispatcher sends every other runner subcommand to the CLI. git names
+    // the action, and only `get` has an answer.
+    return await runCredentialAction(verb);
   }
 
   const args = rest.slice(1);

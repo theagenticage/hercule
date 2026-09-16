@@ -13,7 +13,7 @@
  */
 import { Schema } from "effect";
 
-import { Fact, MAX_FACT_LENGTH } from "./primitives";
+import { Fact, MAX_FACT_LENGTH, StorageId, Subdirectory } from "./primitives";
 import { MAX_MESSAGE_LENGTH } from "./sessions";
 
 const Message = Schema.String.check(Schema.isMaxLength(MAX_MESSAGE_LENGTH));
@@ -39,14 +39,14 @@ export type WorkspaceKind = Schema.Schema.Type<typeof WorkspaceKind>;
 
 /** One working copy the machine is asked to make. */
 export const ProvisionCheckout = Schema.Struct({
-  checkoutId: Fact,
-  resourceId: Fact,
+  checkoutId: StorageId,
+  resourceId: StorageId,
   /** The remote as the user wrote it, which is what git is given. */
   remote: Fact,
   /** The folder to adopt in place. Absent means clone a fresh one. */
   path: Schema.optionalKey(Schema.String.check(Schema.isLengthBetween(1, MAX_FACT_LENGTH))),
   /** Where under the workspace this copy goes; null puts it at the root. */
-  subdirectory: Schema.NullOr(Fact),
+  subdirectory: Schema.NullOr(Subdirectory),
   /** The branch to create, for a worktree; null leaves the branch alone. */
   branch: Schema.NullOr(Fact),
   /** What that branch starts from; null means the resource's default branch. */
@@ -61,7 +61,7 @@ export type ProvisionCheckout = Schema.Schema.Type<typeof ProvisionCheckout>;
 
 export const WorkspaceProvision = Schema.Struct({
   _tag: Schema.Literal("workspaceProvision"),
-  workspaceId: Fact,
+  workspaceId: StorageId,
   kind: WorkspaceKind,
   /** Empty makes a scratch workspace: a directory and no working copy at all. */
   checkouts: Schema.Array(ProvisionCheckout).check(Schema.isMaxLength(MAX_CHECKOUTS)),
@@ -71,14 +71,14 @@ export type WorkspaceProvision = Schema.Schema.Type<typeof WorkspaceProvision>;
 
 export const WorkspaceDispose = Schema.Struct({
   _tag: Schema.Literal("workspaceDispose"),
-  workspaceId: Fact,
+  workspaceId: StorageId,
 });
 
 export type WorkspaceDispose = Schema.Schema.Type<typeof WorkspaceDispose>;
 
 /** What one working copy turned out to be, once the machine has made it. */
 export const CheckoutReport = Schema.Struct({
-  checkoutId: Fact,
+  checkoutId: StorageId,
   /** The branch checked out there now. */
   branch: Fact,
   branches: Schema.Array(Fact).check(Schema.isMaxLength(MAX_BRANCHES)),
@@ -94,7 +94,7 @@ export type CheckoutReport = Schema.Schema.Type<typeof CheckoutReport>;
  */
 export const WorkspaceReport = Schema.Struct({
   _tag: Schema.Literal("workspaceReport"),
-  workspaceId: Fact,
+  workspaceId: StorageId,
   status: Schema.Literals(["ready", "failed", "deleted"]),
   checkouts: Schema.optionalKey(
     Schema.Array(CheckoutReport).check(Schema.isMaxLength(MAX_CHECKOUTS)),

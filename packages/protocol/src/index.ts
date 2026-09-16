@@ -11,7 +11,15 @@
  */
 import { Schema } from "effect";
 
-import { Fact, InstanceId, MAX_FACT_LENGTH, Seq, Sequenced } from "./primitives";
+import {
+  Fact,
+  InstanceId,
+  MAX_FACT_LENGTH,
+  Seq,
+  Sequenced,
+  StorageId,
+  Subdirectory,
+} from "./primitives";
 import {
   SessionEvent,
   SessionInput,
@@ -32,7 +40,7 @@ import {
 
 export * from "./sessions";
 export * from "./workspaces";
-export { Fact, InstanceId, MAX_FACT_LENGTH, Sequenced };
+export { Fact, InstanceId, MAX_FACT_LENGTH, Sequenced, StorageId, Subdirectory };
 
 export const PROTOCOL_VERSION = 1;
 

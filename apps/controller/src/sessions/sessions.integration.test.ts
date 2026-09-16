@@ -3733,6 +3733,28 @@ describe("session.spawn into a workspace", () => {
     });
   });
 
+  it("lays a repo whose name begins with a dot out beside the others", async () => {
+    await withFleet(async (arranged) => {
+      // A real repository, and a directory a workspace can hold: only `.`, `..`
+      // and `.git` are names a directory cannot be called.
+      const meta = await makeRepo(arranged, "https://github.com/acme/.github");
+      const web = await makeRepo(arranged, "https://github.com/acme/web");
+
+      const session = await spawned(arranged, {
+        prompt: "hello",
+        workspace: { kind: "ephemeral", checkouts: [{ resourceId: meta }, { resourceId: web }] },
+      });
+
+      const workspace = await workspaceOf(arranged, String(session.workspaceId));
+      expect(workspace.checkouts.map((one) => one.subdirectory)).toEqual([".github", "web"]);
+      // And the machine is told, rather than the frame failing to encode.
+      const frame = await frameWhenTagged(arranged.wire, "workspaceProvision");
+      expect(
+        (frame["checkouts"] as ReadonlyArray<CheckoutRow>).map((one) => one.subdirectory),
+      ).toEqual([".github", "web"]);
+    });
+  });
+
   it("makes a scratch workspace out of an empty list of checkouts", async () => {
     await withFleet(async (arranged) => {
       const session = await spawned(arranged, {
