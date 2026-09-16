@@ -118,8 +118,12 @@ export const serveCredentialSocket = async (options: {
         // One question is one line; a peer that sends no newline is not asking,
         // and is not read any further either.
         if (received.length > MAX_QUESTION_BYTES) {
+          // Nothing is written back. An unread reply sits in the peer's receive
+          // buffer ahead of the close, and a peer that is not reading - which
+          // this one, mid-write, is not - would never reach the close behind it
+          // on a kernel whose socket buffer swallowed its whole write. The
+          // cut-off is the only thing it is told.
           connection.removeAllListeners("data");
-          connection.end(EMPTY);
           connection.destroy();
         }
         return;

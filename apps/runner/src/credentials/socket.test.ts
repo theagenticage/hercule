@@ -177,22 +177,33 @@ describe("a peer that is not asking a question", () => {
       Promise.resolve(answering({ token: "the-token", username: "octocat" })),
     );
 
-    const ended = await new Promise<boolean>((resolve, reject) => {
+    // How the cut-off reaches the peer is the kernel's choice, not ours. Where
+    // the socket buffer is smaller than the write (macOS) the peer's own write
+    // fails with ECONNRESET; where it is larger (Linux) the write completes and
+    // the peer sees the close instead. Both are the same cut-off, so this waits
+    // for either, and reads - a peer that never reads never reaches a close.
+    const cutOff = await new Promise<string>((resolve, reject) => {
       const socket = createConnection({ path: served.path });
+      let received = "";
+      socket.setEncoding("utf8");
       socket.on("connect", () => {
         // A hundred kilobytes and not one newline: nothing git sends, and
         // nothing this end should hold on to.
         socket.write("x".repeat(100 * 1024));
       });
-      socket.on("close", () => resolve(true));
-      socket.on("error", () => resolve(true));
-      setTimeout(() => reject(new Error("the socket kept reading")), 2_000).unref();
+      socket.on("data", (chunk: string) => {
+        received += chunk;
+      });
+      socket.on("close", () => resolve(received));
+      socket.on("error", () => resolve(received));
+      setTimeout(() => reject(new Error("the socket kept reading")), 5_000).unref();
     });
 
-    expect(ended).toBe(true);
+    // Cut off, not answered: the peer asked nothing, so it is told nothing.
+    expect(cutOff).toBe("");
     expect(asked).toEqual([]);
     await served.close();
-  });
+  }, 15_000);
 });
 
 describe("the socket itself", () => {
