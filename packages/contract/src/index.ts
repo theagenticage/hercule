@@ -174,6 +174,7 @@ export {
   ConnectionStatus,
   ConnectionUpdateInput,
   CredentialRef,
+  GITHUB_CONNECTION_TYPE,
   MAX_CONNECTION_LABEL_LENGTH,
 } from "./groups/connection";
 export { ControllerInfo, ControllerUpdateInput } from "./groups/controller";
@@ -232,6 +233,7 @@ export {
   MAX_RESOURCE_LABEL_LENGTH,
   MAX_RESOURCE_PROJECTS,
   MAX_SETUP_COMMAND_LENGTH,
+  NOT_CHECKED_OUT,
   RESOURCE_KINDS,
   RESOURCE_SORT_FIELDS,
   RESOURCE_UPDATE_FIELDS,

@@ -1,12 +1,7 @@
 import type { JSX } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
-import {
-  defaultWorkspacePick,
-  projectRepos,
-  siblingTabs,
-  threadDefaults,
-} from "@hydra/client-core";
+import { siblingTabs, threadDefaults } from "@hydra/client-core";
 import {
   localRunnerQuery,
   profilesQuery,
@@ -72,7 +67,6 @@ function NewThread(): JSX.Element {
   const settings = useSuspenseQuery(settingsQuery(client)).data;
   const localRunnerId = useQuery(localRunnerQuery(detectLocalRunner, runners)).data ?? null;
   const projects = useQuery(projectsQuery(client)).data?.items ?? [];
-  const resources = useQuery(resourcesQuery(client)).data?.items ?? [];
   const workspaces = useQuery(workspacesQuery(client)).data?.items ?? [];
   const sessions = useQuery(sessionsQuery(client)).data?.items ?? [];
 
@@ -81,23 +75,17 @@ function NewThread(): JSX.Element {
 
   // Resolved every render rather than snapshotted: a login landing while the
   // draft is open has to reach it, and the composer lays the picks over this.
+  // The address is handed over as it stands - where the draft opens, and the
+  // workspace it joins if it names one. What a draft that names none opens in,
+  // and which machine a joined workspace settles, are the composer's to decide.
   const config = {
     ...defaults,
     options: {},
     projectId: search.project ?? null,
-    // Joining a workspace sets the machine as a default, because a workspace
-    // is on one machine and never moves; it locks nothing else.
-    ...(joined === undefined ? {} : { runnerId: joined.runnerId }),
-    // Resolved here rather than left to the selector, because it is what rides
-    // the submission: the address's workspace where there is one, else the
-    // default the stored setting and the project's repos decide.
     workspace:
-      joined === undefined
-        ? defaultWorkspacePick(
-            projectRepos(resources, search.project ?? null),
-            settings.user["thread.workspace"] ?? null,
-          )
-        : ({ kind: "existing", workspaceId: joined.id } as const),
+      search.workspace === undefined
+        ? null
+        : ({ kind: "existing", workspaceId: search.workspace } as const),
     preferredWorkspace: settings.user["thread.workspace"] ?? null,
   };
 

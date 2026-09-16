@@ -199,6 +199,9 @@ const catalogOf = (models: ReadonlyArray<Model>): ReadonlyArray<ModelDescriptor>
   );
 };
 
+/** `"none"` is what the harness says where it has no credential of that kind. */
+const sourced = (source: string | undefined): boolean => source !== undefined && source !== "none";
+
 /**
  * Whether the harness has a usable login, which spec 06 §3.2 makes the
  * question, and which is not the same as an account it can name. A login held
@@ -208,21 +211,31 @@ const catalogOf = (models: ReadonlyArray<Model>): ReadonlyArray<ModelDescriptor>
  */
 const credentialled = (account: Account): boolean =>
   account.email !== undefined ||
-  (account.tokenSource !== undefined && account.tokenSource !== "none") ||
-  account.apiKeySource !== undefined;
+  sourced(account.tokenSource) ||
+  sourced(account.apiKeySource) ||
+  // A third-party backend - bedrock, vertex, foundry - authenticates outside
+  // the harness, so it names no token source of its own and still runs.
+  (account.apiProvider !== undefined && account.apiProvider !== "firstParty");
+
+/**
+ * One field of the report, dropped when the account left it blank: an empty
+ * string is not a `Fact`, and the whole report would fail to encode over it.
+ */
+const carried = <K extends string>(
+  key: K,
+  value: string | undefined,
+): Partial<Record<K, string>> => {
+  const said = value === undefined ? "" : fact(value);
+  return said === "" ? {} : ({ [key]: said } as Record<K, string>);
+};
 
 const authOf = (account: Account): ProbeResult["auth"] => {
   if (!credentialled(account)) return { status: "unauthenticated" };
-  // An empty string is not a `Fact`, and the whole report would fail to encode
-  // over a field the account left blank.
-  const identity = account.email === undefined ? "" : fact(account.email);
-  const planLabel = account.subscriptionType === undefined ? "" : fact(account.subscriptionType);
-  const backend = account.apiProvider === undefined ? "" : fact(account.apiProvider);
   return {
     status: "ok",
-    ...(identity === "" ? {} : { identity }),
-    ...(planLabel === "" ? {} : { planLabel }),
-    ...(backend === "" ? {} : { backend }),
+    ...carried("identity", account.email),
+    ...carried("planLabel", account.subscriptionType),
+    ...carried("backend", account.apiProvider),
   };
 };
 

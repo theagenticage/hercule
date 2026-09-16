@@ -15,7 +15,8 @@
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Runner, RunnerFacts } from "@hydra/contract";
-import { detectLocalRunner, IDENTITY_TIMEOUT_MS, type FetchLike } from "./index";
+import { detectLocalRunner, type FetchLike } from "./index";
+import { IDENTITY_TIMEOUT_MS } from "./local-runner";
 
 const facts = (identityPort: number): RunnerFacts => ({
   os: "darwin",

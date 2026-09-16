@@ -3,7 +3,6 @@ import { useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-quer
 import { useRouteContext } from "@tanstack/react-router";
 import {
   branchField,
-  composerFields,
   draftSubject,
   modelMenu,
   optionsLabel,
@@ -66,7 +65,7 @@ export function Composer({
   const [open, setOpen] = useState<SelectorKey | null>(null);
   const [filter, setFilter] = useState("");
   const model = useComposerModel(thread, catalogs, client, onSend);
-  const fields = composerFields(catalogs, model.config, model.kind);
+  const fields = model.fields;
   const pending = pendingModelNote(model.kind, model.picks);
   const login = loginSlot(client, () => {
     void queryClient.invalidateQueries({ queryKey: queryKeys.providers() });

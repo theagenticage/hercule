@@ -5,6 +5,8 @@
  */
 import { join as joinPath } from "node:path";
 
+import { canonicalRemoteOf } from "@hydra/protocol";
+
 export interface GitOutcome {
   readonly ok: boolean;
   readonly stdout: string;
@@ -74,24 +76,19 @@ export const defaultBranch = async (dir: string, env: GitEnv): Promise<string | 
 };
 
 /**
- * Two spellings of one repository, as far as a machine needs to tell: the
- * controller's canonical form is an identity (`host/owner/repo`) and refuses
- * everything a machine may legitimately hold, a bare path and a `file://` URL
- * among them. All this answers is whether the folder the user pointed at is a
- * checkout of the remote they named.
+ * Whether the folder the user pointed at is a checkout of the remote they
+ * named. Both spellings go through the protocol's canonical form, so the
+ * machine and the controller can never disagree about which remotes are one
+ * repository. A spelling that names no repository at all - a bare path with no
+ * folder above it, say - canonicalises to nothing, and then only the identical
+ * spelling counts as the same remote.
  */
-const normalized = (remote: string): string =>
-  remote
-    .trim()
-    .toLowerCase()
-    .replace(/^[a-z][a-z0-9+.-]*:\/\//, "")
-    .replace(/^[^@/]*@/, "")
-    .replace(/:/g, "/")
-    .replace(/\/+$/, "")
-    .replace(/\.git$/, "");
-
-export const sameRemote = (one: string, other: string): boolean =>
-  normalized(one) === normalized(other);
+export const sameRemote = (one: string, other: string): boolean => {
+  const canonical = canonicalRemoteOf(one);
+  const against = canonicalRemoteOf(other);
+  if (canonical === undefined || against === undefined) return one.trim() === other.trim();
+  return canonical === against;
+};
 
 export const cacheDirOf = (storageDir: string, resourceId: string): string =>
   joinPath(storageDir, "cache", `${resourceId}.git`);
@@ -119,7 +116,12 @@ export const ensureCache = async (options: {
   /** The repository's default branch where the caller already knows it. */
   readonly defaultBranch?: string | null;
   readonly env: GitEnv;
-}): Promise<{ readonly path: string; readonly failure?: string }> => {
+}): Promise<{
+  readonly path: string;
+  readonly failure?: string;
+  /** The branch the cache now heads on, for callers that would otherwise re-ask. */
+  readonly defaultBranch?: string;
+}> => {
   const path = cacheDirOf(options.storageDir, options.resourceId);
   const { env, source, remote } = options;
   const known = await runGit(["-C", path, "rev-parse", "--git-dir"], { env });
@@ -146,7 +148,10 @@ export const ensureCache = async (options: {
     await runGit(["-C", path, "symbolic-ref", "HEAD", `refs/heads/${head}`], { env });
   }
   await runGit(["-C", path, "remote", "set-head", "origin", head], { env });
-  return { path };
+  // Handed back rather than left to be read off the cache again: this is the
+  // one derivation of what the repository's default branch is, and a caller
+  // that asked git a second time could answer differently from this one.
+  return { path, defaultBranch: head };
 };
 
 /**

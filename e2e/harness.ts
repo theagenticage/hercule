@@ -9,15 +9,7 @@
  * The processes are started with `Bun.spawn` rather than `spawnHydra`, which
  * inherits stdio: a test has to read what the command printed.
  */
-import {
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  rmSync,
-  symlinkSync,
-  writeFileSync,
-} from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -32,9 +24,11 @@ const ENTRYPOINT = join(ROOT, "packages/hydra/src/main.ts");
  * own source - if not.
  *
  * The suites that are only honest as a release say so themselves and refuse to
- * run without `./hydra`. A suite that exercises the controller's own surface
- * rather than the packaging is the same program either way, so it runs from
- * source on a working copy and as the binary under `pnpm test:binary`.
+ * run without `./hydra`, and do not call this. A suite that exercises the
+ * controller's own surface rather than the packaging is the same program either
+ * way: it runs the release under `pnpm test:binary`, which is the only command
+ * that runs it, and the dispatcher's source when it is run on its own with no
+ * build behind it.
  */
 export function releaseBinary(): string | undefined {
   const built = join(ROOT, "hydra");
@@ -62,6 +56,18 @@ function cleanEnv(): Record<string, string> {
   );
 }
 
+/**
+ * Whether the cases that spend a real model token were asked for (D-18).
+ *
+ * Set to anything but `0` or the empty string is a yes, so a shell that exports
+ * `HYDRA_LIVE_SESSION_TEST` can turn it off again with a `0` rather than having
+ * to unset it.
+ */
+export function liveSessionsAsked(): boolean {
+  const asked = process.env["HYDRA_LIVE_SESSION_TEST"];
+  return asked !== undefined && asked !== "" && asked !== "0";
+}
+
 /** What a finished command left behind. */
 export interface Ran {
   readonly code: number;
@@ -79,9 +85,27 @@ function candidatePort(): number {
   return 20_000 + Math.floor(Math.random() * 40_000);
 }
 
-/** A temporary Hydra Home, removed when the suite ends. */
-export function temporaryHome(): { home: string; remove: () => void } {
+/**
+ * A temporary Hydra Home, removed when the suite ends.
+ *
+ * With a `gitconfig`, the directory is also fit to hand a process as `HOME`:
+ * it holds none of the git configuration the developer running the suite has -
+ * no `.gitconfig` but the one written here, no `.git-credentials`, no `gh`
+ * login.
+ *
+ * `Library` is linked back to the real home on macOS. The master key lives in
+ * the login keychain, which `security` finds under `$HOME/Library/Keychains`,
+ * so a home without it is a controller that cannot boot; git reads nothing
+ * under `Library`, so the scrub still holds.
+ */
+export function temporaryHome(gitconfig?: string): { home: string; remove: () => void } {
   const home = mkdtempSync(join(tmpdir(), "hydra-e2e-"));
+  if (gitconfig !== undefined) {
+    writeFileSync(join(home, ".gitconfig"), gitconfig);
+    if (process.platform === "darwin") {
+      symlinkSync(join(homedir(), "Library"), join(home, "Library"));
+    }
+  }
   return {
     home,
     remove: () => {
@@ -91,22 +115,22 @@ export function temporaryHome(): { home: string; remove: () => void } {
 }
 
 /**
- * A directory to hand a process as `HOME`, holding none of the git
- * configuration the developer running the suite has: no `.gitconfig` but the
- * one written here, no `.git-credentials`, no `gh` login.
- *
- * `Library` is linked back to the real home on macOS. The master key lives in
- * the login keychain, which `security` finds under `$HOME/Library/Keychains`,
- * so a home without it is a controller that cannot boot; git reads nothing
- * under `Library`, so the scrub still holds.
+ * The environment a test runs `git` in: the `HOME` it was handed and nothing of
+ * the developer's - no system configuration, and no terminal to be prompted on
+ * - plus one fixed identity, so a commit made here needs no configuration of
+ * its own to succeed.
  */
-export function scrubbedHome(at: string, gitconfig: string): string {
-  mkdirSync(at, { recursive: true });
-  writeFileSync(join(at, ".gitconfig"), gitconfig);
-  if (process.platform === "darwin") {
-    symlinkSync(join(homedir(), "Library"), join(at, "Library"));
-  }
-  return at;
+export function gitEnv(home: string): Record<string, string> {
+  return {
+    PATH: process.env["PATH"] ?? "",
+    HOME: home,
+    GIT_CONFIG_NOSYSTEM: "1",
+    GIT_TERMINAL_PROMPT: "0",
+    GIT_AUTHOR_NAME: "Hydra E2E",
+    GIT_AUTHOR_EMAIL: "e2e@hydra.test",
+    GIT_COMMITTER_NAME: "Hydra E2E",
+    GIT_COMMITTER_EMAIL: "e2e@hydra.test",
+  };
 }
 
 /** A controller process that is up and answering. */

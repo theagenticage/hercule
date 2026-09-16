@@ -1,8 +1,13 @@
 /**
  * The records the workspace readings are written against: a fleet of two
  * machines, a one-repo project and a two-repo one, a shared checkout and a
- * live worktree. Shared by the five suites around them because they all speak
- * about the same small world, and a world written five times drifts.
+ * live worktree. Shared by every suite that speaks about them - client-core's
+ * own and the web app's, through the `@hydra/client-core/threads/testing`
+ * export - because a world written five times drifts.
+ *
+ * The ids read as words by default. A suite whose records travel over the API
+ * is decoded against the contract, which takes UUIDv7 and nothing else, so
+ * `threadsWorld` takes one id per slot and the world is built around them.
  */
 import type { Project, Resource, Runner, Session, Workspace } from "@hydra/contract";
 
@@ -23,9 +28,6 @@ export const runner = (id: string, name: string): Runner => ({
   lastSeenAt: AT,
 });
 
-export const MOSS = runner("r-moss", "moss");
-export const COVE = runner("r-cove", "cove");
-
 export const project = (id: string, name: string): Project => ({
   id,
   name,
@@ -33,17 +35,20 @@ export const project = (id: string, name: string): Project => ({
   updatedAt: AT,
 });
 
-export const WEBSHOP_PROJECT = project("p-webshop", "webshop");
-export const OPS_PROJECT = project("p-ops", "ops");
-
+/**
+ * A repo, with both spellings of its remote written out. Neither is derived
+ * from the other: canonicalizing a remote is the system's own rule, and a
+ * fixture that re-implements it backwards is a second rule to keep in step.
+ */
 export const repo = (
   id: string,
+  remote: string | null,
   canonicalRemote: string | null,
   projectIds: readonly string[] = [],
 ): Resource => ({
   id,
   kind: "repo",
-  remote: canonicalRemote === null ? null : `git@${canonicalRemote.replace("/", ":")}.git`,
+  remote,
   canonicalRemote,
   label: null,
   connectionId: null,
@@ -53,10 +58,6 @@ export const repo = (
   createdAt: AT,
   updatedAt: AT,
 });
-
-export const WEBSHOP = repo("res-webshop", "github.com/acme/webshop", [WEBSHOP_PROJECT.id]);
-export const INFRA = repo("res-infra", "github.com/acme/ops-infra", [OPS_PROJECT.id]);
-export const RUNBOOKS = repo("res-runbooks", "github.com/acme/ops-runbooks", [OPS_PROJECT.id]);
 
 export const checkout = (
   resourceId: string,
@@ -74,7 +75,7 @@ export const checkout = (
 });
 
 export const workspace = (over: Partial<Workspace> & { id: string }): Workspace => ({
-  runnerId: MOSS.id,
+  runnerId: SLOTS.moss,
   kind: "primary",
   status: "ready",
   checkouts: [],
@@ -88,27 +89,13 @@ export const workspace = (over: Partial<Workspace> & { id: string }): Workspace 
   ...over,
 });
 
-/** webshop's shared checkout on moss, sitting on `main`. */
-export const PRIMARY = workspace({
-  id: "ws-primary",
-  checkouts: [checkout(WEBSHOP.id, "main", ["main", "release/2.4", "hydra/run-3f1"])],
-});
-
-/** A live worktree of webshop on moss, which two threads are working in. */
-export const RUN_3F1 = workspace({
-  id: "ws-run-3f1",
-  kind: "ephemeral",
-  checkouts: [{ ...checkout(WEBSHOP.id, "hydra/run-3f1"), form: "worktree" }],
-  sessionIds: ["s-flaky", "s-runbook"],
-});
-
 export const session = (over: Partial<Session> & { id: string }): Session => ({
   title: "A thread",
   status: "idle",
   resumable: false,
   permissionProfileId: "p-unrestricted",
   instanceId: "i-claude",
-  runnerId: MOSS.id,
+  runnerId: SLOTS.moss,
   workspaceId: null,
   projectId: null,
   requestedAccessMode: "approval-required",
@@ -123,3 +110,109 @@ export const session = (over: Partial<Session> & { id: string }): Session => ({
   lastActivityAt: AT,
   ...over,
 });
+
+/** One id per record the world holds, and per thread the two workspaces list. */
+export interface WorldIds {
+  readonly moss: string;
+  readonly cove: string;
+  readonly webshopProject: string;
+  readonly opsProject: string;
+  readonly webshop: string;
+  readonly infra: string;
+  readonly runbooks: string;
+  readonly primary: string;
+  readonly primaryCheckout: string;
+  readonly run3f1: string;
+  readonly run3f1Checkout: string;
+  /** The two threads working in `RUN_3F1`. */
+  readonly flakyThread: string;
+  readonly runbookThread: string;
+}
+
+const SLOTS: WorldIds = {
+  moss: "r-moss",
+  cove: "r-cove",
+  webshopProject: "p-webshop",
+  opsProject: "p-ops",
+  webshop: "res-webshop",
+  infra: "res-infra",
+  runbooks: "res-runbooks",
+  primary: "ws-primary",
+  primaryCheckout: "co-ws-primary",
+  run3f1: "ws-run-3f1",
+  run3f1Checkout: "co-ws-run-3f1",
+  flakyThread: "s-flaky",
+  runbookThread: "s-runbook",
+};
+
+export interface ThreadsWorld {
+  readonly MOSS: Runner;
+  readonly COVE: Runner;
+  readonly WEBSHOP_PROJECT: Project;
+  readonly OPS_PROJECT: Project;
+  readonly WEBSHOP: Resource;
+  readonly INFRA: Resource;
+  readonly RUNBOOKS: Resource;
+  /** webshop's shared checkout on moss, sitting on `main`. */
+  readonly PRIMARY: Workspace;
+  /** A live worktree of webshop on moss, which two threads are working in. */
+  readonly RUN_3F1: Workspace;
+}
+
+export const threadsWorld = (ids: Partial<WorldIds> = {}): ThreadsWorld => {
+  const id = { ...SLOTS, ...ids };
+  const WEBSHOP = repo(id.webshop, "git@github.com:acme/webshop.git", "github.com/acme/webshop", [
+    id.webshopProject,
+  ]);
+  return {
+    MOSS: runner(id.moss, "moss"),
+    COVE: runner(id.cove, "cove"),
+    WEBSHOP_PROJECT: project(id.webshopProject, "webshop"),
+    OPS_PROJECT: project(id.opsProject, "ops"),
+    WEBSHOP,
+    INFRA: repo(id.infra, "git@github.com:acme/ops-infra.git", "github.com/acme/ops-infra", [
+      id.opsProject,
+    ]),
+    RUNBOOKS: repo(
+      id.runbooks,
+      "git@github.com:acme/ops-runbooks.git",
+      "github.com/acme/ops-runbooks",
+      [id.opsProject],
+    ),
+    PRIMARY: workspace({
+      id: id.primary,
+      runnerId: id.moss,
+      checkouts: [
+        {
+          ...checkout(WEBSHOP.id, "main", ["main", "release/2.4", "hydra/run-3f1"]),
+          checkoutId: id.primaryCheckout,
+        },
+      ],
+    }),
+    RUN_3F1: workspace({
+      id: id.run3f1,
+      runnerId: id.moss,
+      kind: "ephemeral",
+      checkouts: [
+        {
+          ...checkout(WEBSHOP.id, "hydra/run-3f1"),
+          checkoutId: id.run3f1Checkout,
+          form: "worktree",
+        },
+      ],
+      sessionIds: [id.flakyThread, id.runbookThread],
+    }),
+  };
+};
+
+export const {
+  MOSS,
+  COVE,
+  WEBSHOP_PROJECT,
+  OPS_PROJECT,
+  WEBSHOP,
+  INFRA,
+  RUNBOOKS,
+  PRIMARY,
+  RUN_3F1,
+} = threadsWorld();

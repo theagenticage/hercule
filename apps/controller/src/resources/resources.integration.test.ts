@@ -17,11 +17,10 @@ import {
   registerConnectionType,
   type Plugin,
 } from "@hydra/plugin-host";
-import type { ModelDescriptor, RunnerFacts } from "@hydra/protocol";
 import { del, get, post, send } from "../http/testing";
-import { fixture, providerDefinition } from "../plugins/testing";
 import type { AuditKind } from "../events";
-import { until, withFleet as sharedWithFleet, type Arranged } from "../sessions/testing";
+import { until, type Arranged } from "../sessions/testing";
+import { codeOf, withFleet } from "../workspaces/testing";
 
 /** The account the GitHub type names, which is what a login is read off. */
 const LOGIN = "octocat";
@@ -74,31 +73,8 @@ const otherPlugin: Plugin = {
   activate: () => Effect.succeed(Effect.void),
 };
 
-const FACTS: RunnerFacts = {
-  os: "darwin",
-  arch: "arm64",
-  totalMemoryBytes: 68719476736,
-  docker: false,
-  toolchains: [{ name: "git", version: "2.50.1", path: "/usr/bin/git" }],
-  providers: [{ name: "harness", present: true, path: "/usr/local/bin/harness" }],
-  adapters: ["test-provider"],
-  identityPort: 4939,
-};
-
-const MODELS: ReadonlyArray<ModelDescriptor> = [
-  { slug: "clever", name: "Clever", isDefault: true, options: [] },
-];
-
 const withResources = (body: (arranged: Arranged) => Promise<void>): Promise<void> =>
-  sharedWithFleet(body, {
-    plugins: [
-      fixture({ id: "providers", definitions: [providerDefinition("test-provider")] }).plugin,
-      githubPlugin,
-      otherPlugin,
-    ],
-    facts: FACTS,
-    models: MODELS,
-  });
+  withFleet(body, { plugins: [githubPlugin, otherPlugin] });
 
 /** A resource as the API hands it back; only the fields asserted here are read. */
 interface ResourceRecord {
@@ -112,9 +88,6 @@ interface ResourceRecord {
   readonly workspaceInclude?: boolean;
   readonly projectIds?: ReadonlyArray<string>;
 }
-
-const codeOf = async (response: Response): Promise<string> =>
-  ((await response.json()) as { error: { code: string } }).error.code;
 
 /**
  * A create answered the way this controller answers a create. The two shipped

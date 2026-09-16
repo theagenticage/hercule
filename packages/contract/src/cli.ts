@@ -18,6 +18,7 @@
  */
 import type { ErrorCode } from "./errors";
 import type { OperationId } from "./operations";
+import { NOT_CHECKED_OUT } from "./groups/resource";
 
 /** One worked invocation: the tokens after the command words, and what is piped in. */
 export interface CliExample {
@@ -593,7 +594,7 @@ export const CLI = {
       },
       workspaceInclude: {
         flag: "workspace-include",
-        help: "Whether a fresh worktree takes the files the main checkout's .workspaceinclude lists; on unless set to false.",
+        help: "Whether a fresh workspace takes the files the main checkout's .workspaceinclude lists; on unless set to false.",
       },
       projectIds: { flag: "project", help: "A project to file it under; repeat for several." },
     },
@@ -624,7 +625,7 @@ export const CLI = {
       },
       workspaceInclude: {
         flag: "workspace-include",
-        help: "Whether a fresh worktree takes what .workspaceinclude lists.",
+        help: "Whether a fresh workspace takes what .workspaceinclude lists.",
       },
       projectIds: {
         flag: "project",
@@ -709,7 +710,7 @@ export const CLI = {
     },
     errors: {
       conflict: "that repo already has a main checkout on that machine",
-      invalid_state: "only a repo is checked out; a folder and a mailbox are records",
+      invalid_state: NOT_CHECKED_OUT,
     },
   },
   "workspace.dispose": {
@@ -1343,7 +1344,7 @@ export const CLI = {
       },
       workspace: {
         flag: "workspace",
-        help: 'Where it works, as JSON: {"kind":"primary","resourceId":"<id>","branch":"<branch>"} for the repo\'s shared checkout, {"kind":"ephemeral","checkouts":[{"resourceId":"<id>","baseBranch":"<branch>"}]} for a worktree of its own (an empty list is a scratch workspace), or {"kind":"existing","workspaceId":"<id>"} to join one that stands. Leave it off for a thread with no checkout.',
+        help: 'Where it works, as JSON: {"kind":"primary","resourceId":"<id>","branch":"<branch>"} for the repo\'s shared checkout, {"kind":"ephemeral","checkouts":[{"resourceId":"<id>","baseBranch":"<branch>"}]} for an ephemeral workspace with a checkout of its own (an empty list is a scratch workspace), or {"kind":"existing","workspaceId":"<id>"} to join one that stands. Leave it off for a thread with no checkout.',
       },
     },
     errors: {

@@ -8,7 +8,7 @@
  * plugin contribution, so what the screen can offer is a reading of the plugin
  * listing rather than a read of its own.
  */
-import type { Connection, PluginDetail } from "@hydra/contract";
+import { GITHUB_CONNECTION_TYPE, type Connection, type PluginDetail } from "@hydra/contract";
 
 /**
  * The accounts a repo can be reached through. Two screens offer them - the
@@ -16,7 +16,7 @@ import type { Connection, PluginDetail } from "@hydra/contract";
  * domain fact, not a filter each screen rewrites.
  */
 export const githubConnections = (connections: readonly Connection[]): readonly Connection[] =>
-  connections.filter((connection) => connection.type === "github");
+  connections.filter((connection) => connection.type === GITHUB_CONNECTION_TYPE);
 
 /** The path the controller serves the provider's redirect on. */
 const CALLBACK_PATH = "/oauth/callback";

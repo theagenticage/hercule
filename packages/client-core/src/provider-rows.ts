@@ -38,7 +38,13 @@ const accountIn = (snapshot: ProviderInstance["snapshots"][number] | undefined):
   const { auth } = snapshot;
   if (auth.status === "unauthenticated") return "not logged in";
   if (auth.status === "error") return auth.message ?? "the probe failed";
-  return [auth.identity, auth.planLabel].filter((part) => part !== undefined).join(" · ");
+  // A harness credentialled from the environment reports neither an identity
+  // nor a plan, so the line says what the login is instead of standing empty:
+  // where the token came from if the harness named it, else that there is one.
+  const named = [auth.identity, auth.planLabel].filter(
+    (part): part is string => part !== undefined && part !== "",
+  );
+  return named.length === 0 ? (auth.backend ?? "signed in") : named.join(" · ");
 };
 
 const modelsIn = (snapshot: ProviderInstance["snapshots"][number] | undefined): string => {

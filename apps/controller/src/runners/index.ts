@@ -17,7 +17,7 @@ export {
   type Connection,
   type SessionTraffic,
 } from "./presence";
-export { runnerRepository } from "./repository";
+export { onlineWhere, runnerRepository } from "./repository";
 export { RunnerJoinRouteLayer } from "./route";
 export { RunnerPingSchedule, RunnerSocketRouteLayer, type RunnerPings } from "./socket";
 export {

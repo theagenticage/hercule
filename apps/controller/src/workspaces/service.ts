@@ -30,6 +30,7 @@ import {
   Id,
   invalidState,
   notFound,
+  NOT_CHECKED_OUT,
   WORKSPACE_SORT_FIELDS,
   WorkspaceFilter,
   WorkspaceProvisionInput,
@@ -47,13 +48,13 @@ import {
 import { requireGrant, SYSTEM_ACTOR, USER_ACTOR } from "../actor";
 import { nowIso, pageInput, refuseCursor, withTransaction } from "../db";
 import { AuditLog } from "../events";
-import { resourceRepository, type StoredRepo } from "../resources";
+import { isCheckedOut, resourceRepository, type StoredRepo } from "../resources";
 import { requireOnline, RunnerPresence, runnerRepository } from "../runners";
 import { SessionService } from "../sessions";
 import { Secrets } from "../secrets";
 import { Settings, type ScopeSettings } from "../settings";
 import { gitCredentials } from "./credentials";
-import { provisionFrame, type CheckoutPlan } from "./provisioning";
+import { openPrimary, provisionFrame, type CheckoutPlan } from "./provisioning";
 import { workspaceRepository, type StoredCheckout, type StoredWorkspace } from "./repository";
 
 const QueryInput = Schema.Struct({
@@ -107,8 +108,6 @@ const NO_SUCH_RUNNER = "no such runner";
 const LOST_ADOPT =
   "that machine went away before it could be told to adopt the folder; provision it again";
 
-const NOT_CHECKED_OUT = "only a repo is checked out; a folder and a mailbox are records";
-
 const PRIMARY_STANDS = "a primary is never torn down";
 
 const ALREADY_GONE = "that workspace is already gone";
@@ -118,23 +117,27 @@ const stillLivedIn = (sessions: number): string =>
 
 type ReadError = Unauthenticated | Forbidden | Validation | SqlError;
 
+/** Why the sweep took a workspace away, which is what its entry records. */
+type Expiry = "orphan" | "idle";
+
 /**
- * Whether a workspace has outlived its use: one nothing is living in, judged
- * against the window its threads earn it. A thread that can still be resumed
- * keeps its worktree - that worktree is its work - so it survives the orphan
- * window and goes only on the long idle one.
+ * Whether a workspace has outlived its use, and on which window: one nothing is
+ * living in, judged against the window its threads earn it. A thread that can
+ * still be resumed keeps its worktree - that worktree is its work - so it
+ * survives the orphan window and goes only on the long idle one.
  */
 const expired = (
   candidate: { readonly liveSessions: number; readonly resumableSessions: number },
   idleFor: number,
   controller: ScopeSettings<"controller">,
-): boolean => {
-  if (candidate.liveSessions > 0) return false;
+): Expiry | undefined => {
+  if (candidate.liveSessions > 0) return undefined;
+  const reason: Expiry = candidate.resumableSessions > 0 ? "idle" : "orphan";
   const window =
-    candidate.resumableSessions > 0
+    reason === "idle"
       ? (controller["workspace.idleTtlDays"] ?? DEFAULT_IDLE_TTL_DAYS) * DAY_MS
       : (controller["workspace.orphanTtlHours"] ?? DEFAULT_ORPHAN_TTL_HOURS) * HOUR_MS;
-  return idleFor > window;
+  return idleFor > window ? reason : undefined;
 };
 
 /** A driver must not stop on one failure, so the cause is logged and dropped. */
@@ -218,7 +221,7 @@ const make = Effect.gen(function* () {
     Effect.gen(function* () {
       const found = yield* resources.one(resourceId);
       if (Option.isNone(found)) return yield* Effect.fail(notFound(NO_SUCH_RESOURCE));
-      if (found.value.kind !== "repo") return yield* Effect.fail(invalidState(NOT_CHECKED_OUT));
+      if (!isCheckedOut(found.value)) return yield* Effect.fail(invalidState(NOT_CHECKED_OUT));
       return found.value;
     });
 
@@ -231,6 +234,8 @@ const make = Effect.gen(function* () {
   const disposing = (
     workspace: StoredWorkspace,
     actor: typeof USER_ACTOR | typeof SYSTEM_ACTOR,
+    /** Why it went, where it was not a person asking. */
+    reason?: Expiry,
   ): Effect.Effect<void, SqlError> =>
     Effect.gen(function* () {
       yield* withTransaction(
@@ -241,7 +246,11 @@ const make = Effect.gen(function* () {
           yield* audit.append({
             kind: "workspace.deleted",
             actor,
-            payload: { workspaceId: workspace.id, runnerId: workspace.runnerId },
+            payload: {
+              workspaceId: workspace.id,
+              runnerId: workspace.runnerId,
+              ...(reason === undefined ? {} : { reason }),
+            },
             at,
           });
         }),
@@ -289,12 +298,13 @@ const make = Effect.gen(function* () {
     const controller = yield* settings.all();
     const now = yield* Clock.currentTimeMillis;
     for (const candidate of candidates) {
-      if (!expired(candidate, now - Date.parse(candidate.usedAt), controller)) continue;
+      const reason = expired(candidate, now - Date.parse(candidate.usedAt), controller);
+      if (reason === undefined) continue;
       const row = yield* workspaces.one(candidate.id);
       // Read again inside the pass: a session could have started in it while
       // the previous workspace of this pass was being disposed of.
       if (Option.isNone(row) || row.value.status !== "ready") continue;
-      yield* disposing(row.value, SYSTEM_ACTOR);
+      yield* disposing(row.value, SYSTEM_ACTOR, reason);
     }
   });
 
@@ -360,40 +370,17 @@ const make = Effect.gen(function* () {
               );
             }
             const at = yield* nowIso;
-            // One that could not be made holds nothing; it is stood down here
-            // so this one takes its place rather than living beside it.
-            yield* workspaces.supersedeFailedPrimary(resource.id, decoded.runnerId, at);
-            const row = yield* workspaces.insert({
-              runnerId: decoded.runnerId,
-              kind: "primary",
-              at,
-            });
-            const checkouts = yield* workspaces.insertCheckouts(
-              row.id,
-              [{ resourceId: resource.id, form: "clone", subdirectory: null, branch: null }],
-              at,
-            );
-            yield* audit.append({
-              kind: "workspace.created",
-              actor: USER_ACTOR,
-              payload: {
-                workspaceId: row.id,
+            const opened = yield* openPrimary(
+              { workspaces, audit },
+              {
+                resource,
                 runnerId: decoded.runnerId,
-                kind: row.kind,
-                resourceIds: [resource.id],
+                actor: USER_ACTOR,
+                at,
+                ...(decoded.path === undefined ? {} : { path: decoded.path }),
               },
-              at,
-            });
-            return {
-              workspace: row,
-              frame: provisionFrame(row, [
-                {
-                  checkout: checkouts[0]!,
-                  resource,
-                  ...(decoded.path === undefined ? {} : { path: decoded.path }),
-                },
-              ]),
-            };
+            );
+            return { workspace: opened.workspace, frame: opened.frame };
           }),
         );
         // Outside the transaction: a transaction never spans a wait on

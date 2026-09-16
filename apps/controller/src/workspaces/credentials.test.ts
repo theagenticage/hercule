@@ -16,17 +16,10 @@ import {
   registerConnectionType,
   type Plugin,
 } from "@hydra/plugin-host";
-import type { ModelDescriptor, RunnerFacts, SessionStart } from "@hydra/protocol";
+import type { SessionStart } from "@hydra/protocol";
 import { get, post, send } from "../http/testing";
-import { fixture, providerDefinition } from "../plugins/testing";
-import {
-  framesWhen,
-  spawned,
-  until,
-  withFleet as sharedWithFleet,
-  type Arranged,
-  type Wire,
-} from "../sessions/testing";
+import { framesWhen, spawned, until, type Arranged, type Wire } from "../sessions/testing";
+import { framesTagged, provisioned, readWorkspace, repo, withFleet, type Frame } from "./testing";
 
 const LOGIN = "octocat";
 const PAT = "ghp_a-token";
@@ -56,35 +49,8 @@ const githubPlugin: Plugin = {
   activate: () => Effect.succeed(Effect.void),
 };
 
-const FACTS: RunnerFacts = {
-  os: "darwin",
-  arch: "arm64",
-  totalMemoryBytes: 68719476736,
-  docker: false,
-  toolchains: [{ name: "git", version: "2.50.1", path: "/usr/bin/git" }],
-  providers: [{ name: "harness", present: true, path: "/usr/local/bin/harness" }],
-  adapters: ["test-provider"],
-  identityPort: 4939,
-};
-
-const MODELS: ReadonlyArray<ModelDescriptor> = [
-  { slug: "clever", name: "Clever", isDefault: true, options: [] },
-];
-
 const withCredentials = (body: (arranged: Arranged) => Promise<void>): Promise<void> =>
-  sharedWithFleet(body, {
-    plugins: [
-      fixture({ id: "providers", definitions: [providerDefinition("test-provider")] }).plugin,
-      githubPlugin,
-    ],
-    facts: FACTS,
-    models: MODELS,
-  });
-
-type Frame = { readonly _tag: string } & Record<string, unknown>;
-
-const framesTagged = (wire: Wire, tag: string): ReadonlyArray<Frame> =>
-  (wire.frames as ReadonlyArray<Frame>).filter((frame) => frame._tag === tag);
+  withFleet(body, { plugins: [githubPlugin] });
 
 /** Asks for a credential the way a runner does, and waits for the answer to it. */
 const ask = async (wire: Wire, request: Record<string, unknown>): Promise<Frame> => {
@@ -107,35 +73,6 @@ const connection = async (
   );
   expect(response.status, await response.clone().text()).toBe(201);
   return ((await response.json()) as { id: string }).id;
-};
-
-const repo = async (arranged: Arranged, remote: string, connectionId?: string): Promise<string> => {
-  const response = await post(
-    arranged.harness.base,
-    "/api/v1/resources",
-    { kind: "repo", remote, ...(connectionId === undefined ? {} : { connectionId }) },
-    arranged.token,
-  );
-  expect([200, 201], await response.clone().text()).toContain(response.status);
-  return ((await response.json()) as { id: string }).id;
-};
-
-interface WorkspaceRecord {
-  readonly id: string;
-  readonly status: string;
-  readonly designatedConnectionId: string | null;
-}
-
-const provisioned = async (arranged: Arranged, body: unknown): Promise<WorkspaceRecord> => {
-  const response = await post(arranged.harness.base, "/api/v1/workspaces", body, arranged.token);
-  expect([200, 201], await response.clone().text()).toContain(response.status);
-  return (await response.json()) as WorkspaceRecord;
-};
-
-const readWorkspace = async (arranged: Arranged, id: string): Promise<WorkspaceRecord> => {
-  const response = await get(arranged.harness.base, `/api/v1/workspaces/${id}`, arranged.token);
-  expect(response.status, await response.clone().text()).toBe(200);
-  return (await response.json()) as WorkspaceRecord;
 };
 
 describe("the designated connection of a workspace", () => {

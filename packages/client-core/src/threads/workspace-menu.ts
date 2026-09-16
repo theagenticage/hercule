@@ -46,6 +46,9 @@ export interface WorkspaceMenu {
   readonly foot: WorkspaceMenuFoot | null;
 }
 
+/** The pick a thread makes when it works without a checkout at all. */
+const NONE: WorkspacePick = { kind: "none" };
+
 /** `2 threads · “Fix flaky webhook tests”, “Write the retry runbook”`. */
 const threadsIn = (workspace: Workspace, sessions: readonly Session[]): string | null => {
   const titles = workspace.sessionIds.map(
@@ -77,6 +80,10 @@ export const workspaceMenu = ({
   readonly pick: WorkspacePick;
 }): WorkspaceMenu => {
   const machine = runners.find((each) => each.id === runnerId)?.name ?? "this machine";
+  const freshPick: WorkspacePick = {
+    kind: "ephemeral",
+    checkouts: repos.map((repo) => ({ resourceId: repo.id })),
+  };
   const current = pickKey(pick);
   const rows: WorkspaceMenuRow[] = [];
 
@@ -86,8 +93,8 @@ export const workspaceMenu = ({
     repos.length === 0
       ? null
       : {
-          key: "ephemeral",
-          pick: { kind: "ephemeral", checkouts: repos.map((repo) => ({ resourceId: repo.id })) },
+          key: pickKey(freshPick),
+          pick: freshPick,
           name: "New workspace",
           mono: false,
           note: null,
@@ -95,15 +102,16 @@ export const workspaceMenu = ({
             repos.length === 1
               ? `a fresh worktree of ${repoName(repos[0])} on a new branch`
               : "a worktree of each repo, side by side, each on a new branch",
-          current: current === "ephemeral",
+          current: current === pickKey(freshPick),
         };
 
   const shared = repos.map((repo): WorkspaceMenuRow => {
     const primary = readyPrimary(workspaces, repo.id, runnerId);
     const branch = primary?.checkouts[0]?.branch ?? null;
+    const sharedPick: WorkspacePick = { kind: "primary", resourceId: repo.id };
     return {
-      key: `primary:${repo.id}`,
-      pick: { kind: "primary", resourceId: repo.id },
+      key: pickKey(sharedPick),
+      pick: sharedPick,
       name: repos.length === 1 ? "Current checkout" : `Current checkout of ${repoName(repo)}`,
       mono: false,
       note: null,
@@ -111,7 +119,7 @@ export const workspaceMenu = ({
         branch === null
           ? `not cloned on ${machine} · clones on first use`
           : `on ${branch} · you and the agent share the files`,
-      current: current === `primary:${repo.id}`,
+      current: current === pickKey(sharedPick),
     };
   });
 
@@ -119,28 +127,29 @@ export const workspaceMenu = ({
   else if (fresh !== null) rows.push(...shared, fresh);
 
   for (const workspace of projectWorkspaces(workspaces, repos)) {
+    const joinPick: WorkspacePick = { kind: "existing", workspaceId: workspace.id };
     rows.push({
-      key: `existing:${workspace.id}`,
-      pick: { kind: "existing", workspaceId: workspace.id },
+      key: pickKey(joinPick),
+      pick: joinPick,
       name: workspaceName(workspace),
       mono: true,
       note: runners.find((each) => each.id === workspace.runnerId)?.name ?? null,
       sub: threadsIn(workspace, sessions),
-      current: current === `existing:${workspace.id}`,
+      current: current === pickKey(joinPick),
     });
   }
 
   // A draft in no project has no repo to open in and no project to add one to,
-  // so the only row is the one #160 pinned and the foot stands dimmed.
+  // so the only row is the one that needs none, and the foot stands dimmed.
   const none = project === undefined ? "No workspace" : "None";
   rows.push({
-    key: "none",
-    pick: { kind: "none" },
+    key: pickKey(NONE),
+    pick: NONE,
     name: none,
     mono: false,
     note: null,
     sub: "the agent works without a checkout",
-    current: current === "none",
+    current: current === pickKey(NONE),
   });
 
   // A thread that already stands in a workspace names it even when no row

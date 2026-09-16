@@ -15,78 +15,24 @@
  */
 import { describe, expect, it } from "vitest";
 import { Duration, Effect } from "effect";
-import type { ModelDescriptor, RunnerFacts, SessionStart } from "@hydra/protocol";
+import type { SessionStart } from "@hydra/protocol";
 import type { Session } from "@hydra/contract";
-import { get, post, send } from "../http/testing";
-import { fixture, providerDefinition } from "../plugins/testing";
+import { get, send } from "../http/testing";
+import { framesWhen, report, spawned, until, type Arranged } from "../sessions/testing";
 import {
-  framesWhen,
-  report,
-  spawned,
-  until,
-  withFleet as sharedWithFleet,
-  type Arranged,
-  type Wire,
-} from "../sessions/testing";
-
-const FACTS: RunnerFacts = {
-  os: "darwin",
-  arch: "arm64",
-  totalMemoryBytes: 68719476736,
-  docker: false,
-  toolchains: [{ name: "git", version: "2.50.1", path: "/usr/bin/git" }],
-  providers: [{ name: "harness", present: true, path: "/usr/local/bin/harness" }],
-  adapters: ["test-provider"],
-  identityPort: 4939,
-};
-
-const MODELS: ReadonlyArray<ModelDescriptor> = [
-  { slug: "clever", name: "Clever", isDefault: true, options: [] },
-];
+  framesTagged,
+  provisioned,
+  readWorkspace,
+  repo,
+  withFleet,
+  type WorkspaceRecord,
+} from "./testing";
 
 /** A sweep a test can wait out, in place of the shipped ten minutes. */
 const SWEEP = Duration.millis(50);
 
 const withSweep = (body: (arranged: Arranged) => Promise<void>): Promise<void> =>
-  sharedWithFleet(body, {
-    plugins: [
-      fixture({ id: "providers", definitions: [providerDefinition("test-provider")] }).plugin,
-    ],
-    facts: FACTS,
-    models: MODELS,
-    workspaceSweepInterval: SWEEP,
-  });
-
-type Frame = { readonly _tag: string } & Record<string, unknown>;
-
-const framesTagged = (wire: Wire, tag: string): ReadonlyArray<Frame> =>
-  (wire.frames as ReadonlyArray<Frame>).filter((frame) => frame._tag === tag);
-
-interface WorkspaceRecord {
-  readonly id: string;
-  readonly kind: string;
-  readonly status: string;
-  readonly lastUsedAt: string | null;
-  readonly provisionedAt: string | null;
-  readonly checkouts: ReadonlyArray<{ readonly checkoutId: string }>;
-}
-
-const readWorkspace = async (arranged: Arranged, id: string): Promise<WorkspaceRecord> => {
-  const response = await get(arranged.harness.base, `/api/v1/workspaces/${id}`, arranged.token);
-  expect(response.status, await response.clone().text()).toBe(200);
-  return (await response.json()) as WorkspaceRecord;
-};
-
-const repo = async (arranged: Arranged, remote: string): Promise<string> => {
-  const response = await post(
-    arranged.harness.base,
-    "/api/v1/resources",
-    { kind: "repo", remote },
-    arranged.token,
-  );
-  expect([200, 201], await response.clone().text()).toContain(response.status);
-  return ((await response.json()) as { id: string }).id;
-};
+  withFleet(body, { workspaceSweepInterval: SWEEP });
 
 /** Says the workspace is made, so the session waiting on it can be dispatched. */
 const makeReady = async (arranged: Arranged, id: string): Promise<WorkspaceRecord> => {
@@ -223,6 +169,20 @@ const age = (arranged: Arranged, id: string, hours: number): Promise<unknown> =>
 const sweptSeveralTimes = (): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, Duration.toMillis(SWEEP) * 6));
 
+/**
+ * A workspace the same sweep pass must take away: ended with nothing to resume
+ * and aged past the orphan window. A negative case waits for this one to go
+ * rather than for a stretch of wall clock, so "left alone" is a decision the
+ * sweep took in that pass and not a pass that never ran.
+ */
+const decoy = async (arranged: Arranged, resourceId: string, count: number): Promise<string> => {
+  const session = await threadIn(arranged, resourceId, count);
+  await endUnresumable(arranged, session);
+  const workspaceId = String(session.workspaceId);
+  await age(arranged, workspaceId, 25);
+  return workspaceId;
+};
+
 const disposedWhen = (arranged: Arranged, id: string): Promise<WorkspaceRecord> =>
   until("disposed the workspace", async () => {
     const one = await readWorkspace(arranged, id);
@@ -250,6 +210,25 @@ describe("the workspace expiry sweep", () => {
         framesTagged(arranged.wire, "workspaceDispose").map((frame) => frame["workspaceId"]),
       ).toEqual([oldWorkspace]);
       expect((await readWorkspace(arranged, youngWorkspace)).status).not.toBe("deleted");
+
+      // Nobody asked for this one to go, so the log says who did and why.
+      const log = (await (
+        await get(arranged.harness.base, "/api/v1/events", arranged.token)
+      ).json()) as {
+        items: ReadonlyArray<{
+          kind: string;
+          actor: string | null;
+          payload: Record<string, unknown>;
+        }>;
+      };
+      const swept = log.items.filter((entry) => entry.kind === "workspace.deleted");
+      expect(swept).toHaveLength(1);
+      expect(swept[0]?.actor).toBe("system");
+      expect(swept[0]?.payload).toMatchObject({
+        workspaceId: oldWorkspace,
+        runnerId: arranged.runnerId,
+        reason: "orphan",
+      });
     });
   });
 
@@ -279,31 +258,35 @@ describe("the workspace expiry sweep", () => {
       const workspaceId = String(session.workspaceId);
 
       await age(arranged, workspaceId, 90 * 24);
-      await sweptSeveralTimes();
+      const taken = await decoy(arranged, web, 2);
 
+      // The pass that took the decoy is the pass that saw this one and kept it.
+      await disposedWhen(arranged, taken);
       expect((await readWorkspace(arranged, workspaceId)).status).not.toBe("deleted");
-      expect(framesTagged(arranged.wire, "workspaceDispose")).toEqual([]);
+      expect(
+        framesTagged(arranged.wire, "workspaceDispose").map((frame) => frame["workspaceId"]),
+      ).toEqual([taken]);
     });
   });
 
   it("leaves a primary alone, whatever its age", async () => {
     await withSweep(async (arranged) => {
       const web = await repo(arranged, "https://github.com/acme/web");
-      const response = await post(
-        arranged.harness.base,
-        "/api/v1/workspaces",
-        { resourceId: web, runnerId: arranged.runnerId },
-        arranged.token,
-      );
-      expect([200, 201], await response.clone().text()).toContain(response.status);
-      const primary = (await response.json()) as WorkspaceRecord;
+      const primary = await provisioned(arranged, {
+        resourceId: web,
+        runnerId: arranged.runnerId,
+      });
       await makeReady(arranged, primary.id);
 
       await age(arranged, primary.id, 90 * 24);
-      await sweptSeveralTimes();
+      const taken = await decoy(arranged, web, 1);
 
+      // The pass that took the decoy is the pass that saw the primary and kept it.
+      await disposedWhen(arranged, taken);
       expect((await readWorkspace(arranged, primary.id)).status).toBe("ready");
-      expect(framesTagged(arranged.wire, "workspaceDispose")).toEqual([]);
+      expect(
+        framesTagged(arranged.wire, "workspaceDispose").map((frame) => frame["workspaceId"]),
+      ).toEqual([taken]);
     });
   });
 
@@ -344,8 +327,8 @@ describe("the workspace expiry sweep", () => {
       });
       const workspaceId = String(session.workspaceId);
 
-      const provisioned = await readWorkspace(arranged, workspaceId);
-      expect(provisioned.lastUsedAt).not.toBeNull();
+      const atProvision = await readWorkspace(arranged, workspaceId);
+      expect(atProvision.lastUsedAt).not.toBeNull();
 
       await age(arranged, workspaceId, 1);
       const aged = await readWorkspace(arranged, workspaceId);
@@ -364,10 +347,15 @@ describe("the workspace expiry sweep", () => {
       });
 
       await age(arranged, workspaceId, 1);
+      // Read back, as after the first ageing: waiting for a wall-clock
+      // threshold instead would be satisfied by the value the start wrote, and
+      // the case would pass without the exit having marked anything.
+      const before = await readWorkspace(arranged, workspaceId);
+      expect(before.lastUsedAt).not.toBe(started.lastUsedAt);
       await endUnresumable(arranged, session);
       const ended = await until("marked the workspace used at the exit", async () => {
         const one = await readWorkspace(arranged, workspaceId);
-        return one.lastUsedAt !== null && one.lastUsedAt > hoursAgo(0.5) ? one : undefined;
+        return one.lastUsedAt !== null && one.lastUsedAt !== before.lastUsedAt ? one : undefined;
       });
       expect(ended.lastUsedAt).not.toBe(started.lastUsedAt);
     });

@@ -38,6 +38,7 @@ import {
   WorkspaceReport,
 } from "./workspaces";
 
+export * from "./remote";
 export * from "./sessions";
 export * from "./workspaces";
 export { Fact, InstanceId, MAX_FACT_LENGTH, Sequenced, StorageId, Subdirectory };

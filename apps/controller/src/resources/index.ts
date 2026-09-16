@@ -3,7 +3,12 @@
  * projects work with and workspaces are checked out from.
  */
 export { canonicalRemoteOf, isClonableRemote, repoNameOf } from "./remote";
-export { resourceRepository, type StoredRepo, type StoredResource } from "./repository";
+export {
+  isCheckedOut,
+  resourceRepository,
+  type StoredRepo,
+  type StoredResource,
+} from "./repository";
 export {
   ResourceService,
   ResourceServiceLayer,

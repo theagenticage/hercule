@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type { Project, Resource, Session, Workspace } from "@hydra/contract";
+import type { Session, Workspace } from "@hydra/contract";
 import { ageOf } from "@hydra/client-core";
+import { threadsWorld } from "@hydra/client-core/threads/testing";
 import { renderApp, stubApi, type Handler } from "../app/testing";
 
 const ZONE = "Europe/Amsterdam";
@@ -441,106 +442,49 @@ describe("the top bar", () => {
  *   which is the only name a `Workspace` record carries.
  * ------------------------------------------------------------------ */
 
-const AT = "2026-09-10T09:00:00.000Z";
-
-const MOSS = "01a06d02-beff-7037-9f5b-042822015952";
-
-const WEBSHOP: Project = {
-  id: "01a06d02-7000-7000-8000-000000000001",
-  name: "webshop",
-  createdAt: AT,
-  updatedAt: AT,
+/** The webshop/ops world every workspace suite shares, with ids the contract
+ * takes; only the threads standing in each workspace are this suite's own. */
+const IDS = {
+  moss: "01a06d02-beff-7037-9f5b-042822015952",
+  webshopProject: "01a06d02-7000-7000-8000-000000000001",
+  opsProject: "01a06d02-7000-7000-8000-000000000002",
+  webshop: "01a06d02-7100-7000-8000-000000000001",
+  infra: "01a06d02-7100-7000-8000-000000000002",
+  primary: "01a06d02-7200-7000-8000-000000000001",
+  primaryCheckout: "01a06d02-7300-7000-8000-000000000001",
+  run3f1: "01a06d02-7200-7000-8000-000000000002",
+  run3f1Checkout: "01a06d02-7300-7000-8000-000000000002",
+  flakyThread: "01a06d02-7400-7000-8000-000000000001",
+  runbookThread: "01a06d02-7400-7000-8000-000000000002",
 };
 
-const OPS: Project = {
-  id: "01a06d02-7000-7000-8000-000000000002",
-  name: "ops",
-  createdAt: AT,
-  updatedAt: AT,
-};
-
-const R_WEBSHOP: Resource = {
-  id: "01a06d02-7100-7000-8000-000000000001",
-  kind: "repo",
-  remote: "git@github.com:acme/webshop.git",
-  canonicalRemote: "github.com/acme/webshop",
-  label: null,
-  connectionId: null,
-  setupCommand: null,
-  workspaceInclude: true,
-  projectIds: [WEBSHOP.id],
-  createdAt: AT,
-  updatedAt: AT,
-};
-
-const R_INFRA: Resource = {
-  ...R_WEBSHOP,
-  id: "01a06d02-7100-7000-8000-000000000002",
-  remote: "git@github.com:acme/ops-infra.git",
-  canonicalRemote: "github.com/acme/ops-infra",
-  projectIds: [OPS.id],
-};
-
-const W_PRIMARY: Workspace = {
-  id: "01a06d02-7200-7000-8000-000000000001",
-  runnerId: MOSS,
-  kind: "primary",
-  status: "ready",
-  checkouts: [
-    {
-      checkoutId: "01a06d02-7300-7000-8000-000000000001",
-      resourceId: R_WEBSHOP.id,
-      form: "clone",
-      subdirectory: null,
-      branch: "main",
-      branches: ["main"],
-      defaultBranch: "main",
-    },
-  ],
-  designatedConnectionId: null,
-  message: null,
-  sessionIds: ["01a06d02-7400-7000-8000-000000000003"],
-  createdAt: AT,
-  provisionedAt: AT,
-  lastUsedAt: AT,
-  disposedAt: null,
-};
-
-const W_RUN_3F1: Workspace = {
-  ...W_PRIMARY,
-  id: "01a06d02-7200-7000-8000-000000000002",
-  kind: "ephemeral",
-  checkouts: [
-    {
-      checkoutId: "01a06d02-7300-7000-8000-000000000002",
-      resourceId: R_WEBSHOP.id,
-      form: "worktree",
-      subdirectory: null,
-      branch: "hydra/run-3f1",
-      branches: ["hydra/run-3f1"],
-      defaultBranch: "main",
-    },
-  ],
-  sessionIds: ["01a06d02-7400-7000-8000-000000000001", "01a06d02-7400-7000-8000-000000000002"],
-};
+const WORLD = threadsWorld(IDS);
+const MOSS = WORLD.MOSS;
+const WEBSHOP = WORLD.WEBSHOP_PROJECT;
+const OPS = WORLD.OPS_PROJECT;
+const R_WEBSHOP = WORLD.WEBSHOP;
+const R_INFRA = WORLD.INFRA;
+const BUMP_THE_BUN_PIN = "01a06d02-7400-7000-8000-000000000003";
+const W_PRIMARY: Workspace = { ...WORLD.PRIMARY, sessionIds: [BUMP_THE_BUN_PIN] };
+const W_RUN_3F1 = WORLD.RUN_3F1;
 
 const grouped: readonly Session[] = [
   session({
-    id: "01a06d02-7400-7000-8000-000000000001",
+    id: IDS.flakyThread,
     title: "Fix flaky webhook tests",
     projectId: WEBSHOP.id,
     workspaceId: W_RUN_3F1.id,
     lastActivityAt: "2026-09-10T09:05:00.000Z",
   }),
   session({
-    id: "01a06d02-7400-7000-8000-000000000002",
+    id: IDS.runbookThread,
     title: "Write the retry runbook",
     projectId: WEBSHOP.id,
     workspaceId: W_RUN_3F1.id,
     lastActivityAt: "2026-09-10T09:04:00.000Z",
   }),
   session({
-    id: "01a06d02-7400-7000-8000-000000000003",
+    id: BUMP_THE_BUN_PIN,
     title: "Bump the Bun pin",
     projectId: WEBSHOP.id,
     workspaceId: W_PRIMARY.id,
@@ -576,26 +520,7 @@ const withProjects = (user: Record<string, unknown> = {}): Readonly<Record<strin
   "GET /api/v1/resources": { body: { items: [R_WEBSHOP, R_INFRA] } },
   "GET /api/v1/workspaces": { body: { items: [W_PRIMARY, W_RUN_3F1] } },
   // What the draft route below loads; nothing here is what it asserts on.
-  "GET /api/v1/runners": {
-    body: {
-      items: [
-        {
-          id: MOSS,
-          name: "moss",
-          connectivity: "online",
-          lifecycle: "active",
-          reserved: false,
-          version: "0.4.2",
-          labels: [],
-          facts: null,
-          watermark: null,
-          maxConcurrentSessions: 4,
-          diskWatermarkBytes: 1024,
-          lastSeenAt: AT,
-        },
-      ],
-    },
-  },
+  "GET /api/v1/runners": { body: { items: [MOSS] } },
   "GET /api/v1/providers": { body: [] },
   "GET /api/v1/profiles": { body: { items: [] } },
 });

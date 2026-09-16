@@ -32,6 +32,7 @@ import type {
   Session,
   Workspace,
 } from "@hydra/contract";
+import { threadsWorld } from "@hydra/client-core/threads/testing";
 import { envelope, pickRow, reading, renderApp, stubApi, type Handler } from "../../../app/testing";
 
 const ZONE = "Europe/Amsterdam";
@@ -1165,6 +1166,32 @@ const AT = "2026-09-10T09:00:00.000Z";
 
 const COVE: Runner = { ...RUNNER, id: "01a06d02-beff-7037-9f5b-042822015953", name: "cove" };
 
+const GITHUB_ID = "01a06d02-7500-7000-8000-000000000001";
+
+const BUMP_THE_BUN_PIN = "01a06d02-7400-7000-8000-000000000004";
+
+/** The webshop/ops world every workspace suite shares, with ids the contract
+ * takes. What stands beside it below - the edge and sandbox projects, the
+ * worktree on cove, the shared checkouts of the two ops repos - is this
+ * suite's own. */
+const IDS = {
+  moss: RUNNER.id,
+  cove: COVE.id,
+  webshopProject: "01a06d02-7000-7000-8000-000000000001",
+  opsProject: "01a06d02-7000-7000-8000-000000000002",
+  webshop: "01a06d02-7100-7000-8000-000000000001",
+  infra: "01a06d02-7100-7000-8000-000000000002",
+  runbooks: "01a06d02-7100-7000-8000-000000000003",
+  primary: "01a06d02-7200-7000-8000-000000000001",
+  primaryCheckout: "01a06d02-7300-7000-8000-000000000001",
+  run3f1: "01a06d02-7200-7000-8000-000000000002",
+  run3f1Checkout: "01a06d02-7300-7000-8000-000000000002",
+  flakyThread: "01a06d02-7400-7000-8000-000000000001",
+  runbookThread: "01a06d02-7400-7000-8000-000000000002",
+};
+
+const WORLD = threadsWorld(IDS);
+
 const project = (id: string, name: string): Project => ({
   id,
   name,
@@ -1172,8 +1199,8 @@ const project = (id: string, name: string): Project => ({
   updatedAt: AT,
 });
 
-const WEBSHOP = project("01a06d02-7000-7000-8000-000000000001", "webshop");
-const OPS = project("01a06d02-7000-7000-8000-000000000002", "ops");
+const WEBSHOP = WORLD.WEBSHOP_PROJECT;
+const OPS = WORLD.OPS_PROJECT;
 /** A project whose one repo has never been cloned on any machine. */
 const EDGE = project("01a06d02-7000-7000-8000-000000000003", "edge");
 /** A project with no repo at all. */
@@ -1198,9 +1225,9 @@ const repo = (
   updatedAt: AT,
 });
 
-const R_WEBSHOP = repo("01a06d02-7100-7000-8000-000000000001", "acme", "webshop", [WEBSHOP.id]);
-const R_INFRA = repo("01a06d02-7100-7000-8000-000000000002", "acme", "ops-infra", [OPS.id]);
-const R_RUNBOOKS = repo("01a06d02-7100-7000-8000-000000000003", "acme", "ops-runbooks", [OPS.id]);
+const R_WEBSHOP = WORLD.WEBSHOP;
+const R_INFRA = WORLD.INFRA;
+const R_RUNBOOKS = WORLD.RUNBOOKS;
 const R_EDGE = repo("01a06d02-7100-7000-8000-000000000004", "acme", "edge-api", [EDGE.id]);
 
 const checkout = (
@@ -1234,39 +1261,13 @@ const workspace = (
 });
 
 /** webshop's shared checkout on moss; `hydra/run-3f1` is one of its branches. */
-const W_PRIMARY_WEBSHOP = workspace(
-  "01a06d02-7200-7000-8000-000000000001",
-  "primary",
-  RUNNER.id,
-  [
-    checkout(
-      "01a06d02-7300-7000-8000-000000000001",
-      R_WEBSHOP.id,
-      "clone",
-      "main",
-      ["main", "release/2.4", "hydra/run-3f1"],
-      "main",
-    ),
-  ],
-  ["01a06d02-7400-7000-8000-000000000004"],
-);
+const W_PRIMARY_WEBSHOP: Workspace = {
+  ...WORLD.PRIMARY,
+  designatedConnectionId: GITHUB_ID,
+  sessionIds: [BUMP_THE_BUN_PIN],
+};
 
-const W_RUN_3F1 = workspace(
-  "01a06d02-7200-7000-8000-000000000002",
-  "ephemeral",
-  RUNNER.id,
-  [
-    checkout(
-      "01a06d02-7300-7000-8000-000000000002",
-      R_WEBSHOP.id,
-      "worktree",
-      "hydra/run-3f1",
-      ["hydra/run-3f1"],
-      "main",
-    ),
-  ],
-  ["01a06d02-7400-7000-8000-000000000001", "01a06d02-7400-7000-8000-000000000002"],
-);
+const W_RUN_3F1: Workspace = { ...WORLD.RUN_3F1, designatedConnectionId: GITHUB_ID };
 
 const W_RUN_8A0 = workspace(
   "01a06d02-7200-7000-8000-000000000003",
@@ -1327,18 +1328,8 @@ const thread = (
 });
 
 const SESSIONS: readonly Session[] = [
-  thread(
-    "01a06d02-7400-7000-8000-000000000001",
-    "Fix flaky webhook tests",
-    WEBSHOP.id,
-    W_RUN_3F1.id,
-  ),
-  thread(
-    "01a06d02-7400-7000-8000-000000000002",
-    "Write the retry runbook",
-    WEBSHOP.id,
-    W_RUN_3F1.id,
-  ),
+  thread(IDS.flakyThread, "Fix flaky webhook tests", WEBSHOP.id, W_RUN_3F1.id),
+  thread(IDS.runbookThread, "Write the retry runbook", WEBSHOP.id, W_RUN_3F1.id),
   thread(
     "01a06d02-7400-7000-8000-000000000003",
     "Runner drain command",
@@ -1346,19 +1337,14 @@ const SESSIONS: readonly Session[] = [
     W_RUN_8A0.id,
     COVE.id,
   ),
-  thread(
-    "01a06d02-7400-7000-8000-000000000004",
-    "Bump the Bun pin",
-    WEBSHOP.id,
-    W_PRIMARY_WEBSHOP.id,
-  ),
+  thread(BUMP_THE_BUN_PIN, "Bump the Bun pin", WEBSHOP.id, W_PRIMARY_WEBSHOP.id),
   thread("01a06d02-7400-7000-8000-000000000005", "Tidy the promotion runbook", WEBSHOP.id, null),
   thread("01a06d02-7400-7000-8000-000000000006", "Rotate the Hetzner backups key", OPS.id, null),
 ];
 
 const GITHUB: Connection = {
-  id: "01a06d02-7500-7000-8000-000000000001",
-  type: "github",
+  id: GITHUB_ID,
+  type: "github/github",
   label: "personal",
   displayName: "rogierpennink",
   status: "connected",

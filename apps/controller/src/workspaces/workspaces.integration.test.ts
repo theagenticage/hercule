@@ -8,105 +8,25 @@
  * a differently shaped `workspaceProvision` fails here rather than on a machine.
  */
 import { describe, expect, it } from "vitest";
-import type { ModelDescriptor, RunnerFacts } from "@hydra/protocol";
 import { del, get, post, send } from "../http/testing";
-import { fixture, providerDefinition } from "../plugins/testing";
+import { spawned, until, type Arranged, type Wire } from "../sessions/testing";
 import {
-  spawned,
-  until,
-  withFleet as sharedWithFleet,
-  type Arranged,
-  type Wire,
-} from "../sessions/testing";
-
-const FACTS: RunnerFacts = {
-  os: "darwin",
-  arch: "arm64",
-  totalMemoryBytes: 68719476736,
-  docker: false,
-  toolchains: [{ name: "git", version: "2.50.1", path: "/usr/bin/git" }],
-  providers: [{ name: "harness", present: true, path: "/usr/local/bin/harness" }],
-  adapters: ["test-provider"],
-  identityPort: 4939,
-};
-
-const MODELS: ReadonlyArray<ModelDescriptor> = [
-  { slug: "clever", name: "Clever", isDefault: true, options: [] },
-];
-
-const withWorkspaces = (body: (arranged: Arranged) => Promise<void>): Promise<void> =>
-  sharedWithFleet(body, {
-    plugins: [
-      fixture({ id: "providers", definitions: [providerDefinition("test-provider")] }).plugin,
-    ],
-    facts: FACTS,
-    models: MODELS,
-  });
-
-/** A frame on the wire, read as the object it is rather than as a member of a union. */
-type Frame = { readonly _tag: string } & Record<string, unknown>;
-
-const framesTagged = (wire: Wire, tag: string): ReadonlyArray<Frame> =>
-  (wire.frames as ReadonlyArray<Frame>).filter((frame) => frame._tag === tag);
+  codeOf,
+  framesTagged,
+  provisioned,
+  readWorkspace,
+  repo,
+  withFleet as withWorkspaces,
+  type CheckoutRecord,
+  type Frame,
+  type WorkspaceRecord,
+} from "./testing";
 
 const frameWhen = (wire: Wire, tag: string, index = 0): Promise<Frame> =>
   until(`sent ${String(index + 1)} ${tag} frames`, () => framesTagged(wire, tag)[index]);
 
-/** One checkout of a workspace, as the API hands it back. */
-interface CheckoutRecord {
-  readonly checkoutId?: string;
-  readonly id?: string;
-  readonly resourceId: string;
-  readonly form: string;
-  readonly subdirectory: string | null;
-  readonly branch: string | null;
-  readonly branches?: ReadonlyArray<string>;
-  readonly defaultBranch?: string | null;
-}
-
-/** A workspace as the API hands it back; only the fields asserted here are read. */
-interface WorkspaceRecord {
-  readonly id: string;
-  readonly runnerId: string;
-  readonly kind: string;
-  readonly status: string;
-  readonly checkouts: ReadonlyArray<CheckoutRecord>;
-  readonly designatedConnectionId: string | null;
-  readonly provisionedAt: string | null;
-  readonly lastUsedAt: string | null;
-  readonly disposedAt: string | null;
-  readonly sessionIds: ReadonlyArray<string>;
-  readonly message?: string | null;
-}
-
-const codeOf = async (response: Response): Promise<string> =>
-  ((await response.json()) as { error: { code: string } }).error.code;
-
-const repo = async (arranged: Arranged, remote: string): Promise<string> => {
-  const response = await post(
-    arranged.harness.base,
-    "/api/v1/resources",
-    { kind: "repo", remote },
-    arranged.token,
-  );
-  expect([200, 201], await response.clone().text()).toContain(response.status);
-  return ((await response.json()) as { id: string }).id;
-};
-
 const provision = (arranged: Arranged, body: unknown): Promise<Response> =>
   post(arranged.harness.base, "/api/v1/workspaces", body, arranged.token);
-
-const provisioned = async (arranged: Arranged, body: unknown): Promise<WorkspaceRecord> => {
-  const response = await provision(arranged, body);
-  expect([200, 201], await response.clone().text()).toContain(response.status);
-  return (await response.json()) as WorkspaceRecord;
-};
-
-const readWorkspace = async (arranged: Arranged, id: string): Promise<WorkspaceRecord> => {
-  const response = await get(arranged.harness.base, `/api/v1/workspaces/${id}`, arranged.token);
-  expect(response.status, await response.clone().text()).toBe(200);
-  return (await response.json()) as WorkspaceRecord;
-};
 
 const workspaceWhen = (
   arranged: Arranged,

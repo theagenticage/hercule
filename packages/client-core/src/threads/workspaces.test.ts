@@ -40,9 +40,9 @@ describe("repoName", () => {
   });
 
   it("falls back to the label a resource that is not a repo carries", () => {
-    expect(repoName({ ...repo("res-mail", null), kind: "mailbox", label: "work inbox" })).toBe(
-      "work inbox",
-    );
+    expect(
+      repoName({ ...repo("res-mail", null, null), kind: "mailbox", label: "work inbox" }),
+    ).toBe("work inbox");
   });
 
   it("still reads as something for a resource the catalog no longer holds", () => {

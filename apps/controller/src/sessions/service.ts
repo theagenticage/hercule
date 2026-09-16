@@ -43,6 +43,7 @@ import {
   nearestSupportedAccessMode,
   NotFound,
   notFound,
+  NOT_CHECKED_OUT,
   SESSION_SORT_FIELDS,
   SessionFilter,
   SESSION_INPUT_FIELDS,
@@ -72,16 +73,16 @@ import { AuditLog } from "../events";
 import { PermissionProfiles, type GrantsError } from "../permissions";
 import { PluginHost } from "../plugins";
 import { providerRepository, type StoredSnapshot } from "../providers";
-import { repoNameOf, resourceRepository, type StoredRepo } from "../resources";
+import { isCheckedOut, repoNameOf, resourceRepository, type StoredRepo } from "../resources";
 import { RunnerPresence, runnerRepository, type Connection, type SessionTraffic } from "../runners";
 import { Secrets } from "../secrets";
 import { Settings, type ScopeSettings, type SettingError } from "../settings";
 import {
   gitCredentials,
   gitIdentityOf,
-  provisionFrame,
+  openPrimary,
+  openWorkspace,
   workspaceRepository,
-  type CheckoutPlan,
   type GitCredential,
   type StoredWorkspace,
 } from "../workspaces";
@@ -254,8 +255,6 @@ const NO_SUCH_PROFILE = "no such permission profile";
 
 const NO_SUCH_RESOURCE = "no such resource";
 
-const NOT_A_REPO = "only a repo is checked out; a folder and a mailbox are records";
-
 const NOT_IN_PROJECT = "that repo is not filed under that project";
 
 const NO_SUCH_PROJECT_NAMED = "no such project";
@@ -344,6 +343,20 @@ interface PlannedCheckout {
   readonly subdirectory: string | null;
   readonly baseBranch: string | undefined;
 }
+
+/**
+ * The workspace a spawn brings into being, as far as it can be written before
+ * the session is. A primary is opened outright, because nothing in it is named
+ * after the session; a thread's own worktree waits for the session id its
+ * branch is named after, and is opened once the row exists.
+ */
+type PlannedOpening =
+  | { readonly _tag: "opened"; readonly frame: WorkspaceProvision }
+  | {
+      readonly _tag: "waiting";
+      readonly workspace: StoredWorkspace;
+      readonly checkouts: ReadonlyArray<PlannedCheckout>;
+    };
 
 type ReadError = Unauthenticated | Forbidden | Validation | SqlError;
 
@@ -1153,8 +1166,8 @@ const make = Effect.gen(function* () {
       if (Option.isNone(found)) {
         return yield* Effect.fail(validation([{ path: ["workspace"], message: NO_SUCH_RESOURCE }]));
       }
-      if (found.value.kind !== "repo") {
-        return yield* Effect.fail(validation([{ path: ["workspace"], message: NOT_A_REPO }]));
+      if (!isCheckedOut(found.value)) {
+        return yield* Effect.fail(validation([{ path: ["workspace"], message: NOT_CHECKED_OUT }]));
       }
       if (projectId !== undefined) {
         const filed = yield* resources.projectsOf([resourceId]);
@@ -1178,12 +1191,7 @@ const make = Effect.gen(function* () {
       readonly workspaceId: string | null;
       readonly checkoutBranch: string | undefined;
       readonly designatedConnectionId: string | null;
-      readonly created:
-        | {
-            readonly workspace: StoredWorkspace;
-            readonly checkouts: ReadonlyArray<PlannedCheckout>;
-          }
-        | undefined;
+      readonly created: PlannedOpening | undefined;
     },
     Validation | SqlError
   > =>
@@ -1223,24 +1231,18 @@ const make = Effect.gen(function* () {
             created: undefined,
           };
         }
-        // A primary that could not be made holds nothing: it is stood down and
-        // this one takes its place, in the transaction that opens the session.
-        yield* workspaces.supersedeFailedPrimary(resource.id, open.runnerId, at);
-        const workspace = yield* workspaces.insert({
-          runnerId: open.runnerId,
-          kind: "primary",
-          at,
-        });
+        // Opened by the same sequence `workspace.provision` uses, in the
+        // transaction that opens the session: a primary that could not be made
+        // is stood down and this one takes its place.
+        const opened = yield* openPrimary(
+          { workspaces, audit },
+          { resource, runnerId: open.runnerId, actor: USER_ACTOR, at },
+        );
         return {
-          workspaceId: workspace.id,
+          workspaceId: opened.workspace.id,
           checkoutBranch: wish.branch,
           designatedConnectionId: resource.connectionId,
-          created: {
-            workspace,
-            // The shared checkout is a clone of the whole repo, on whatever
-            // branch it is already on.
-            checkouts: [{ resource, form: "clone", subdirectory: null, baseBranch: undefined }],
-          },
+          created: { _tag: "opened", frame: opened.frame },
         };
       }
       const repos = yield* Effect.forEach(wish.checkouts, (checkout) =>
@@ -1282,6 +1284,7 @@ const make = Effect.gen(function* () {
         checkoutBranch: undefined,
         designatedConnectionId: repos[0]?.resource.connectionId ?? null,
         created: {
+          _tag: "waiting",
           workspace,
           checkouts: repos.map((repo, index) => ({
             resource: repo.resource,
@@ -1329,27 +1332,27 @@ const make = Effect.gen(function* () {
             parentSessionId: open.parentSessionId,
             at,
           });
-          // The checkouts come after the session, because a thread's worktree
-          // is made on a branch named after the thread.
           const created = planned.created;
           let frame: WorkspaceProvision | undefined;
-          if (created !== undefined) {
-            const rows = yield* workspaces.insertCheckouts(
-              created.workspace.id,
-              created.checkouts.map((checkout) => ({
-                resourceId: checkout.resource.id,
-                form: checkout.form,
-                subdirectory: checkout.subdirectory,
-                branch: checkout.form === "worktree" ? threadBranch(row.id) : null,
-              })),
-              at,
+          if (created?._tag === "opened") frame = created.frame;
+          else if (created !== undefined) {
+            // The checkouts come after the session, because a thread's worktree
+            // is made on a branch named after the thread.
+            frame = yield* openWorkspace(
+              { workspaces, audit },
+              {
+                workspace: created.workspace,
+                checkouts: created.checkouts.map((checkout) => ({
+                  resource: checkout.resource,
+                  form: checkout.form,
+                  subdirectory: checkout.subdirectory,
+                  branch: checkout.form === "worktree" ? threadBranch(row.id) : null,
+                  ...(checkout.baseBranch === undefined ? {} : { baseBranch: checkout.baseBranch }),
+                })),
+                actor: USER_ACTOR,
+                at,
+              },
             );
-            const plans: ReadonlyArray<CheckoutPlan> = created.checkouts.map((checkout, index) => ({
-              checkout: rows[index]!,
-              resource: checkout.resource,
-              ...(checkout.baseBranch === undefined ? {} : { baseBranch: checkout.baseBranch }),
-            }));
-            frame = provisionFrame(created.workspace, plans);
           }
           // The prompt is an ordinary input, waiting with the session: it
           // leaves when the harness comes up, and a controller restarted in

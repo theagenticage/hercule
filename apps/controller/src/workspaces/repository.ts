@@ -12,6 +12,7 @@ import * as Option from "effect/Option";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import type { CheckoutForm, SortDirection, WorkspaceKind, WorkspaceStatus } from "@hydra/contract";
+import { onlineWhere } from "../runners";
 import { resumableWhere } from "../sessions";
 import {
   decodeCursor,
@@ -418,7 +419,7 @@ const make = Effect.gen(function* () {
                  COALESCE(w.last_used_at, w.created_at) AS used_at
           FROM workspaces w JOIN runners r ON r.id = w.runner_id
           WHERE w.kind = 'ephemeral' AND w.status = 'ready'
-            AND r.connectivity = 'online' AND r.lifecycle = 'active'
+            AND ${sql.literal(onlineWhere("r"))}
         `,
         (rows) =>
           rows.map((row) => ({

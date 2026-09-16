@@ -22,9 +22,10 @@
  * ships, so it runs a real one and is opt-in under `HYDRA_LIVE_SESSION_TEST`
  * like `e2e/session.test.ts` (D-18). The rest run everywhere.
  *
- * The suite runs as the release binary where one has been built and from the
- * dispatcher's source where none has: what it exercises is the controller's own
- * surface, which is the same program either way.
+ * The suite is in vitest's `binary` project, so `pnpm test:binary` is what runs
+ * it and `pnpm test` does not. It runs the release binary where one has been
+ * built and the dispatcher's source where none has: what it exercises is the
+ * controller's own surface, which is the same program either way.
  */
 import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -35,9 +36,10 @@ import {
   apiKeyIn,
   cli,
   completeSetup,
+  gitEnv,
   jsonOf,
+  liveSessionsAsked,
   releaseBinary,
-  scrubbedHome,
   startController,
   temporaryHome,
   type Controller,
@@ -57,11 +59,12 @@ const REMOTE = "https://hydra.test/acme/web";
  * that needs a session, no fake provider ships, and a real one spends the
  * developer's tokens (D-18).
  */
-const live = process.env["HYDRA_LIVE_SESSION_TEST"] !== undefined;
+const live = liveSessionsAsked();
 
 const bare = join(world.home, "remote.git");
 const checkout = join(world.home, "web");
-const gitHome = join(world.home, "home");
+/** The `HOME` both the machine's git and the test's own git read, and nothing else. */
+const gitHome = temporaryHome("[init]\n\tdefaultBranch = main\n");
 
 let controller: Controller;
 let url: string;
@@ -83,18 +86,7 @@ const ok = <A>(ran: Ran): A => {
 
 /** git, run by the test on its own files, with nothing of the developer's in it. */
 const git = (args: ReadonlyArray<string>, cwd: string): string => {
-  const ran = Bun.spawnSync(["git", ...args], {
-    cwd,
-    env: {
-      PATH: process.env["PATH"] ?? "",
-      HOME: gitHome,
-      GIT_CONFIG_NOSYSTEM: "1",
-      GIT_AUTHOR_NAME: "Hydra E2E",
-      GIT_AUTHOR_EMAIL: "e2e@hydra.test",
-      GIT_COMMITTER_NAME: "Hydra E2E",
-      GIT_COMMITTER_EMAIL: "e2e@hydra.test",
-    },
-  });
+  const ran = Bun.spawnSync(["git", ...args], { cwd, env: gitEnv(gitHome.home) });
   if (ran.exitCode !== 0) {
     throw new Error(`git ${args.join(" ")} in ${cwd}:\n${ran.stderr.toString()}`);
   }
@@ -171,7 +163,6 @@ beforeAll(async () => {
   // A bare repository with one commit on `main`, and a working copy of it whose
   // `origin` is spelled the way the resource is: adopting checks that the two
   // name one repository before it touches anything.
-  scrubbedHome(gitHome, "[init]\n\tdefaultBranch = main\n");
   git(["init", "--bare", "--initial-branch=main", bare], world.home);
   const seed = join(world.home, "seed");
   mkdirSync(seed);
@@ -187,7 +178,7 @@ beforeAll(async () => {
     home: state.home,
     binary,
     // The machine's git reads this `HOME`, and nothing of the developer's.
-    env: { HOME: gitHome, GIT_CONFIG_NOSYSTEM: "1" },
+    env: { HOME: gitHome.home, GIT_CONFIG_NOSYSTEM: "1" },
   });
   url = controller.url;
 
@@ -223,6 +214,7 @@ afterAll(async () => {
   await controller?.stop().catch(() => -1);
   state.remove();
   world.remove();
+  gitHome.remove();
 });
 
 describe("a repo, its main checkout and a thread's worktree, through the CLI", () => {
@@ -309,7 +301,7 @@ describe("a repo, its main checkout and a thread's worktree, through the CLI", (
       // From here the machine has to reach the remote, so the https spelling is
       // pointed at the bare repository on disk.
       appendFileSync(
-        join(gitHome, ".gitconfig"),
+        join(gitHome.home, ".gitconfig"),
         `[url "file://${bare}"]\n\tinsteadOf = ${REMOTE}\n`,
       );
 

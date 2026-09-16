@@ -60,7 +60,7 @@ export function WorkspaceSelector({
       <MenuFoot>
         {menu.foot === null ? (
           // Both ways out need a project to put the repo in, so a draft that
-          // stands in none says what would unlock them (D-17).
+          // stands in none says what would unlock them instead of hiding them.
           <>
             <div>
               <span>Add a repo →</span>

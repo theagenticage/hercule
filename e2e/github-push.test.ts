@@ -30,9 +30,10 @@ import {
   apiKeyIn,
   cli,
   completeSetup,
+  gitEnv,
   jsonOf,
+  liveSessionsAsked,
   releaseBinary,
-  scrubbedHome,
   startController,
   temporaryHome,
   type Controller,
@@ -48,13 +49,14 @@ const wanted = token !== undefined && repo !== undefined;
  * top of the token, like `e2e/session.test.ts` (D-18): a thread of its own, in
  * a worktree of the same repository, running `git push` itself.
  */
-const live = wanted && process.env["HYDRA_LIVE_SESSION_TEST"] !== undefined;
+const live = wanted && liveSessionsAsked();
 
 const state = temporaryHome();
 const world = temporaryHome();
 const binary = releaseBinary();
 
-const gitHome = join(world.home, "home");
+/** The `HOME` the machine's git and the test's own git read, and nothing else. */
+const gitHome = temporaryHome("");
 /** The repository the push is made from: an empty one, with the remote's name on it. */
 const sender = join(world.home, "sender");
 
@@ -106,6 +108,49 @@ const github = (path: string, init?: RequestInit): Promise<Response> =>
     },
   });
 
+/**
+ * Takes a branch off the account, and says so when it cannot: a branch this run
+ * made and left behind is the account in a state the next run did not expect.
+ * `404` and `422` are GitHub's answers for a ref that is not there, which is
+ * what a case that deleted its own branch already leaves.
+ */
+const removeBranch = async (name: string): Promise<void> => {
+  const response = await github(`/git/refs/heads/${name}`, { method: "DELETE" });
+  if (response.status === 204 || response.status === 404 || response.status === 422) return;
+  throw new Error(
+    `${name} is still on the account: ${String(response.status)} ${await response.text()}`,
+  );
+};
+
+/**
+ * Every file under a directory that holds a string, with grep's own verdict:
+ * `0` found something, `1` found nothing, anything else is grep failing.
+ */
+const filesHolding = (
+  needle: string,
+  where: string,
+): { readonly code: number; readonly files: string } => {
+  const ran = Bun.spawnSync(["grep", "-rl", "--binary-files=text", "--", needle, where]);
+  return { code: ran.exitCode, files: ran.stdout.toString().trim() };
+};
+
+/**
+ * That no file under the Hydra Home holds the token - asked only after the
+ * search has been shown to work at all, on the API key that the login wrote
+ * into that same home. A grep that matched nothing because it was pointed at
+ * the wrong directory, or gave up on the database as binary, would otherwise
+ * read as a clean bill of health.
+ */
+const holdsNoToken = (where: string): void => {
+  const control = filesHolding(apiKeyIn(where), where);
+  expect(control.code, "the search found nothing it was known to be able to find").toBe(0);
+  expect(control.files).toContain(join(where, "credentials.json"));
+
+  const held = filesHolding(token!, where);
+  expect(held.files, "these files under the Hydra Home hold the token").toBe("");
+  expect(held.code, "the search failed rather than finding nothing").toBe(1);
+};
+
 /** The helper as the machine spells it: the binary, or Bun and the dispatcher. */
 const helperCommand = (() => {
   const built = releaseBinary();
@@ -137,10 +182,7 @@ const gitWithHelper = (
   const ran = Bun.spawnSync(["git", ...args], {
     cwd,
     env: {
-      PATH: process.env["PATH"] ?? "",
-      HOME: gitHome,
-      GIT_CONFIG_NOSYSTEM: "1",
-      GIT_TERMINAL_PROMPT: "0",
+      ...gitEnv(gitHome.home),
       HYDRA_RUNNER_SOCKET: socketPath,
       GIT_CONFIG_COUNT: String(pairs.length),
       ...Object.fromEntries(
@@ -188,14 +230,13 @@ const workspaceRead = async (id: string): Promise<Workspace> =>
 
 beforeAll(async () => {
   if (!wanted) return;
-  scrubbedHome(gitHome, "");
 
   controller = await startController({
     home: state.home,
     binary,
     // No git configuration of the developer's, and no system one either: what
     // authenticates here has to come from Hydra.
-    env: { HOME: gitHome, GIT_CONFIG_NOSYSTEM: "1" },
+    env: { HOME: gitHome.home, GIT_CONFIG_NOSYSTEM: "1" },
   });
   url = controller.url;
 
@@ -217,18 +258,7 @@ beforeAll(async () => {
     ["remote", "add", "origin", remote],
     ["commit", "--allow-empty", "-m", `hydra e2e ${branch}`],
   ]) {
-    const ran = Bun.spawnSync(["git", ...args], {
-      cwd: sender,
-      env: {
-        PATH: process.env["PATH"] ?? "",
-        HOME: gitHome,
-        GIT_CONFIG_NOSYSTEM: "1",
-        GIT_AUTHOR_NAME: "Hydra E2E",
-        GIT_AUTHOR_EMAIL: "e2e@hydra.test",
-        GIT_COMMITTER_NAME: "Hydra E2E",
-        GIT_COMMITTER_EMAIL: "e2e@hydra.test",
-      },
-    });
+    const ran = Bun.spawnSync(["git", ...args], { cwd: sender, env: gitEnv(gitHome.home) });
     expect(ran.exitCode, ran.stderr.toString()).toBe(0);
   }
 }, 180_000);
@@ -236,17 +266,16 @@ beforeAll(async () => {
 afterAll(async () => {
   if (wanted) {
     // Whatever the run did, the account is left as it was found.
-    await github(`/git/refs/heads/${branch}`, { method: "DELETE" }).catch(() => undefined);
-    if (threadBranch !== undefined) {
-      await github(`/git/refs/heads/${threadBranch}`, { method: "DELETE" }).catch(() => undefined);
-    }
+    await removeBranch(branch);
+    if (threadBranch !== undefined) await removeBranch(threadBranch);
   }
   await controller?.stop().catch(() => -1);
   state.remove();
   world.remove();
+  gitHome.remove();
 });
 
-describe.skipIf(!wanted)("a push to GitHub with a credential nothing wrote down", () => {
+describe.skipIf(!wanted)("pushes GitHub accepted on Hydra's credential alone", () => {
   /** The repo and the machine the first case records, which the live case reuses. */
   let resourceId = "";
   let machineId = "";
@@ -331,9 +360,11 @@ describe.skipIf(!wanted)("a push to GitHub with a credential nothing wrote down"
      * long as the clone takes, so the attempt is repeated for as long as that
      * is true rather than fired once into a window nobody measured.
      */
-    let pushed = { code: -1, output: "never attempted" };
-    for (let attempt = 0; attempt < 8; attempt++) {
-      pushed = gitWithHelper(["push", "-u", "origin", `HEAD:refs/heads/${branch}`], sender, {
+    const window = Date.now() + PROVISION_DEADLINE_MS;
+    // The only way out of this loop is the push landing; every other end throws
+    // with what git said.
+    for (;;) {
+      const pushed = gitWithHelper(["push", "-u", "origin", `HEAD:refs/heads/${branch}`], sender, {
         HYDRA_WORKSPACE_PROVISIONING: answered.id,
       });
       if (pushed.code === 0) break;
@@ -344,8 +375,15 @@ describe.skipIf(!wanted)("a push to GitHub with a credential nothing wrote down"
             `${now.message === null ? "" : ` (${now.message})`} and git said:\n${pushed.output}`,
         );
       }
+      if (Date.now() > window) {
+        throw new Error(
+          `the push never landed in ${String(PROVISION_DEADLINE_MS)}ms, with the workspace still ` +
+            `being made; git said:\n${pushed.output}`,
+        );
+      }
+      // Slow enough that a clone gets the machine rather than this loop.
+      await Bun.sleep(500);
     }
-    expect(pushed.code, pushed.output).toBe(0);
 
     // The clone the machine was making needed a credential of its own, so a
     // workspace that stands is the read side of the same path.
@@ -371,15 +409,11 @@ describe.skipIf(!wanted)("a push to GitHub with a credential nothing wrote down"
 
     // Nothing under the Hydra Home holds the token: not the database, not a
     // log, not a git config the machine wrote.
-    // grep exits 1 when it finds nothing, which is the answer wanted here, so
-    // what it printed is read rather than what it exited with.
-    const holding = Bun.spawnSync(["grep", "-rl", "--binary-files=text", "--", token!, state.home])
-      .stdout.toString()
-      .trim();
-    expect(holding, "these files under the Hydra Home hold the token").toBe("");
+    holdsNoToken(state.home);
   }, 300_000);
   it.skipIf(!live)(
-    "a real thread in its own worktree commits and pushes, with credentials it was never given",
+    "a real thread pushes a branch GitHub accepted on the credential the daemon answered, " +
+      "and the home is left holding no token",
     async (ctx) => {
       if (!(await claudeLoggedIn())) {
         ctx.skip(
@@ -414,73 +448,67 @@ describe.skipIf(!wanted)("a push to GitHub with a credential nothing wrote down"
       // is this session's and nothing else's.
       threadBranch = `hydra/run-${session.id.slice(-8)}`;
 
-      // The worktree comes off a clone of the private repository, which is the
-      // read side of the same credential path.
-      const provisioned = Date.now() + PROVISION_DEADLINE_MS;
-      let workspace = await workspaceRead(session.workspaceId!);
-      while (workspace.status === "provisioning" && Date.now() < provisioned) {
-        await Bun.sleep(500);
-        workspace = await workspaceRead(session.workspaceId!);
-      }
-      expect(workspace.status, workspace.message ?? "").toBe("ready");
-      expect(workspace.checkouts[0]?.branch).toBe(threadBranch);
+      // The thread is stopped whatever happens next: one left running holds a
+      // worktree and, on a real account, keeps spending.
+      try {
+        // The worktree comes off a clone of the private repository, which is the
+        // read side of the same credential path.
+        const provisioned = Date.now() + PROVISION_DEADLINE_MS;
+        let workspace = await workspaceRead(session.workspaceId!);
+        while (workspace.status === "provisioning" && Date.now() < provisioned) {
+          await Bun.sleep(500);
+          workspace = await workspaceRead(session.workspaceId!);
+        }
+        expect(workspace.status, workspace.message ?? "").toBe("ready");
+        expect(workspace.checkouts[0]?.branch).toBe(threadBranch);
 
-      // The turn is over when the transcript brackets it, which a status read
-      // cannot say on its own: a session that has not started its first turn
-      // yet is idle too.
-      const done = Date.now() + TURN_DEADLINE_MS;
-      let tags: ReadonlyArray<string>;
-      for (;;) {
-        tags = ok<{ items: ReadonlyArray<{ event: { _tag: string } }> }>(
-          await hydra(["transcript", "read", session.id, "--json", "--all"]),
-        ).items.map((row) => row.event._tag);
-        if (tags.includes("turn.completed")) break;
-        if (Date.now() > done) {
-          const read = ok<Session>(await hydra(["session", "read", session.id, "--json"]));
+        // The turn is over when the transcript brackets it, which a status read
+        // cannot say on its own: a session that has not started its first turn
+        // yet is idle too.
+        const done = Date.now() + TURN_DEADLINE_MS;
+        let tags: ReadonlyArray<string>;
+        for (;;) {
+          tags = ok<{ items: ReadonlyArray<{ event: { _tag: string } }> }>(
+            await hydra(["transcript", "read", session.id, "--json", "--all"]),
+          ).items.map((row) => row.event._tag);
+          if (tags.includes("turn.completed")) break;
+          if (Date.now() > done) {
+            const read = ok<Session>(await hydra(["session", "read", session.id, "--json"]));
+            throw new Error(
+              `the thread never finished a turn; it reads ${read.status} and its transcript holds ` +
+                `${tags.join(", ") || "nothing"}`,
+            );
+          }
+          await Bun.sleep(1000);
+        }
+        // A model really ran: the agent used tools and answered. A branch on
+        // GitHub without these would be someone else's push.
+        expect(tags, tags.join(", ")).toContain("item.completed");
+        expect(tags, tags.join(", ")).toContain("content.delta");
+
+        // The branch is on GitHub, pushed by the agent with a token no file on
+        // this machine holds. The transcript says what it did if it is not.
+        const ref = await github(`/git/ref/heads/${threadBranch}`);
+        const body = await ref.text();
+        if (ref.status !== 200) {
+          const transcript = await hydra(["transcript", "read", session.id, "--json", "--all"]);
           throw new Error(
-            `the thread never finished a turn; it reads ${read.status} and its transcript holds ` +
-              `${tags.join(", ") || "nothing"}`,
+            `no ${threadBranch} on GitHub (${String(ref.status)} ${body}); the thread said:\n` +
+              transcript.stdout,
           );
         }
-        await Bun.sleep(1000);
+
+        const deleted = await github(`/git/refs/heads/${threadBranch}`, { method: "DELETE" });
+        expect(deleted.status, await deleted.text()).toBe(204);
+        threadBranch = undefined;
+      } finally {
+        const stopped = await hydra(["session", "stop", session.id, "--json"]);
+        expect(stopped.code, `${stopped.stdout}\n${stopped.stderr}`).toBe(0);
       }
-      // A model really ran: the agent used tools and answered. A branch on
-      // GitHub without these would be someone else's push.
-      expect(tags, tags.join(", ")).toContain("item.completed");
-      expect(tags, tags.join(", ")).toContain("content.delta");
-
-      // The branch is on GitHub, pushed by the agent with a token no file on
-      // this machine holds. The transcript says what it did if it is not.
-      const ref = await github(`/git/ref/heads/${threadBranch}`);
-      const body = await ref.text();
-      if (ref.status !== 200) {
-        const transcript = await hydra(["transcript", "read", session.id, "--json", "--all"]);
-        throw new Error(
-          `no ${threadBranch} on GitHub (${String(ref.status)} ${body}); the thread said:\n` +
-            transcript.stdout,
-        );
-      }
-
-      const deleted = await github(`/git/refs/heads/${threadBranch}`, { method: "DELETE" });
-      expect(deleted.status, await deleted.text()).toBe(204);
-      threadBranch = undefined;
-
-      const stopped = await hydra(["session", "stop", session.id, "--json"]);
-      expect(stopped.code, `${stopped.stdout}\n${stopped.stderr}`).toBe(0);
 
       // Same question as the case above, now that an agent has held the
       // credential: nothing under the Hydra Home holds the token.
-      const holding = Bun.spawnSync([
-        "grep",
-        "-rl",
-        "--binary-files=text",
-        "--",
-        token!,
-        state.home,
-      ])
-        .stdout.toString()
-        .trim();
-      expect(holding, "these files under the Hydra Home hold the token").toBe("");
+      holdsNoToken(state.home);
     },
     PROVISION_DEADLINE_MS + TURN_DEADLINE_MS + 120_000,
   );

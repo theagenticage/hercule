@@ -5,7 +5,7 @@
  * A primary is the user's own checkout. Nothing here writes under an adopted
  * folder: the cache is cloned and fetched from it, which only reads.
  */
-import { cpSync, existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
+import { cpSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { dirname, join as joinPath, resolve as resolvePath, sep } from "node:path";
 import {
   MAX_MESSAGE_LENGTH,
@@ -14,20 +14,18 @@ import {
   type WorkspaceProvision,
   type WorkspaceReport,
 } from "@hydra/protocol";
+import { tearDown } from "./dispose";
 import {
-  cacheDirOf,
   currentBranch,
   defaultBranch,
   ensureCache,
   localBranches,
-  pruneWorktrees,
-  removeWorktree,
   runGit,
   sameRemote,
   startPointFor,
   type GitEnv,
 } from "./git";
-import type { RegisteredCheckout, RegisteredWorkspace } from "./registry";
+import { stillOnDisk, type RegisteredCheckout, type RegisteredWorkspace } from "./registry";
 import type { Substrate } from "./substrate";
 
 /** The most of a setup command's output the user is shown: the tail says why. */
@@ -277,18 +275,8 @@ const makeEphemeral = async (
    * directory over there is one of its own. A setup command that failed is the
    * exception the spec names: its files stay for the user to look at.
    */
-  const rollBack = async (): Promise<void> => {
-    for (const one of held) {
-      await removeWorktree(cacheDirOf(substrate.storageDir, one.resourceId), one.path, env);
-    }
-    rmSync(root, { recursive: true, force: true });
-    // After the directories are gone, so nothing is left registered to one.
-    for (const one of held) {
-      await pruneWorktrees(cacheDirOf(substrate.storageDir, one.resourceId), env);
-    }
-  };
   const giveUp = async (message: string): Promise<WorkspaceReport> => {
-    await rollBack();
+    await tearDown(substrate.storageDir, root, held, env);
     return failed(workspaceId, message);
   };
 
@@ -307,9 +295,9 @@ const makeEphemeral = async (
       env,
     });
     if (cache.failure !== undefined) return await giveUp(cache.failure);
-    const base =
-      one.baseBranch ??
-      (await runGit(["-C", cache.path, "symbolic-ref", "--short", "HEAD"], { env })).stdout;
+    // The cache just said what the default branch is; asking git again here
+    // would be a second derivation of the one answer.
+    const base = one.baseBranch ?? cache.defaultBranch ?? "";
     const start = await startPointFor(cache.path, base, env);
     if (start === undefined) return await giveUp(`${one.remote} has no branch ${base}`);
     const added = await runGit(
@@ -367,9 +355,7 @@ export const reprovision = async (
   substrate: Substrate,
   entry: RegisteredWorkspace,
 ): Promise<WorkspaceReport> => {
-  if (existsSync(entry.root) && entry.checkouts.every((one) => existsSync(one.path))) {
-    return reportOf(entry, substrate.gitEnv);
-  }
+  if (stillOnDisk(entry)) return reportOf(entry, substrate.gitEnv);
   await substrate.registry.update((entries) =>
     entries.filter((held) => held.workspaceId !== entry.workspaceId),
   );

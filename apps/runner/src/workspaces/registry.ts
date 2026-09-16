@@ -9,7 +9,7 @@
  * machine's workspaces still stand.
  */
 import { randomUUID } from "node:crypto";
-import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join as joinPath } from "node:path";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
@@ -36,6 +36,15 @@ const RegisteredWorkspace = Schema.Struct({
 export type RegisteredWorkspace = Schema.Schema.Type<typeof RegisteredWorkspace>;
 
 const decodeEntry = Schema.decodeUnknownResult(RegisteredWorkspace);
+
+/**
+ * Whether the directories this entry names are still there. A workspace
+ * somebody removed underneath the machine is one no session can be placed in
+ * and one nothing can be re-reported about, so both readers ask it here rather
+ * than each keeping its own idea of what standing means.
+ */
+export const stillOnDisk = (entry: RegisteredWorkspace): boolean =>
+  existsSync(entry.root) && entry.checkouts.every((one) => existsSync(one.path));
 
 const registryPathIn = (storageDir: string): string => joinPath(storageDir, "workspaces.json");
 

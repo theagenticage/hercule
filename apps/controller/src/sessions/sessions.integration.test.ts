@@ -3697,6 +3697,27 @@ describe("session.spawn into a workspace", () => {
       expect(frame["workspaceId"]).toBe(workspace.id);
       expect(frame["kind"]).toBe("ephemeral");
 
+      // A workspace a spawn brought into being is a workspace someone made, so
+      // the log says so, exactly as `workspace.provision` does.
+      const log = (await (
+        await get(arranged.harness.base, "/api/v1/events", arranged.token)
+      ).json()) as {
+        items: ReadonlyArray<{
+          kind: string;
+          actor: string | null;
+          payload: Record<string, unknown>;
+        }>;
+      };
+      const made = log.items.filter((entry) => entry.kind === "workspace.created");
+      expect(made).toHaveLength(1);
+      expect(made[0]?.actor).toBe("user");
+      expect(made[0]?.payload).toMatchObject({
+        workspaceId: workspace.id,
+        runnerId: arranged.runnerId,
+        kind: "ephemeral",
+        resourceIds: [web],
+      });
+
       workspaceReady(arranged, workspace);
       const start = (await framesWhen<SessionStart>(arranged.wire, "sessionStart", 1))[0]!;
       expect(start.sessionId).toBe(session.id);

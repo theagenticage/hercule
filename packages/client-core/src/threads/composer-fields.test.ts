@@ -290,10 +290,17 @@ const OPS_PROJECT: Project = { id: "p-ops", name: "ops", createdAt: at, updatedA
 /** A project with a name and nothing filed under it. */
 const EMPTY_PROJECT: Project = { id: "p-empty", name: "sandbox", createdAt: at, updatedAt: at };
 
-const repo = (id: string, canonicalRemote: string, projectIds: readonly string[]): Resource => ({
+/** Both spellings of the remote are written out; neither is derived from the
+ * other, because canonicalizing a remote is the system's rule to hold. */
+const repo = (
+  id: string,
+  remote: string,
+  canonicalRemote: string,
+  projectIds: readonly string[],
+): Resource => ({
   id,
   kind: "repo",
-  remote: `git@github.com:${canonicalRemote.replace("github.com/", "")}.git`,
+  remote,
   canonicalRemote,
   label: null,
   connectionId: "conn-github",
@@ -304,9 +311,18 @@ const repo = (id: string, canonicalRemote: string, projectIds: readonly string[]
   updatedAt: at,
 });
 
-const WEBSHOP = repo("res-webshop", "github.com/acme/webshop", [WEBSHOP_PROJECT.id]);
-const INFRA = repo("res-infra", "github.com/acme/ops-infra", [OPS_PROJECT.id]);
-const RUNBOOKS = repo("res-runbooks", "github.com/acme/ops-runbooks", [OPS_PROJECT.id]);
+const WEBSHOP = repo("res-webshop", "git@github.com:acme/webshop.git", "github.com/acme/webshop", [
+  WEBSHOP_PROJECT.id,
+]);
+const INFRA = repo("res-infra", "git@github.com:acme/ops-infra.git", "github.com/acme/ops-infra", [
+  OPS_PROJECT.id,
+]);
+const RUNBOOKS = repo(
+  "res-runbooks",
+  "git@github.com:acme/ops-runbooks.git",
+  "github.com/acme/ops-runbooks",
+  [OPS_PROJECT.id],
+);
 
 /** webshop's shared checkout on the local machine, sitting on `main`. */
 const PRIMARY: Workspace = {

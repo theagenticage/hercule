@@ -84,9 +84,9 @@ export const branchField = (
       };
     }
     const held = branchesHeldNearby(workspaces, pick.resourceId, runnerId);
-    // D-14: the primary's own branches, plus whatever a live worktree of the
-    // same repo on the same machine is sitting on, the latter dimmed - checking
-    // one of those out twice is what git itself refuses.
+    // The primary's own branches, plus whatever a live worktree of the same
+    // repo on the same machine is sitting on, the latter dimmed - checking one
+    // of those out twice is what git itself refuses.
     const names = [...new Set([...checkout.branches, ...held.keys()])];
     return {
       header: "Branch",

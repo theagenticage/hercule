@@ -8,7 +8,7 @@ import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import type { ConnectionStatus } from "@hydra/plugin-host";
-import type { SortDirection } from "@hydra/contract";
+import { GITHUB_CONNECTION_TYPE, type SortDirection } from "@hydra/contract";
 import {
   decodeCursor,
   encodeCursor,
@@ -23,11 +23,8 @@ import {
   type PageRequest,
 } from "../db";
 
-/**
- * The shipped GitHub type, by the qualified id the host mints for it. A repo's
- * credential is a GitHub token, so a repo may act through no other account.
- */
-export const GITHUB_CONNECTION_TYPE = "github/github";
+/** One spelling of the shipped GitHub type, which the contract owns. */
+export { GITHUB_CONNECTION_TYPE };
 
 /** Whether this connection is the GitHub account a repo may act through. */
 export const isGithubConnection = (connection: StoredConnection): boolean =>

@@ -22,6 +22,28 @@ describe("providerRows", () => {
     });
   });
 
+  it("says the harness is signed in when it reports neither an identity nor a plan", () => {
+    // A harness credentialled from the environment: the login works, but there
+    // is no account name behind it, and an empty sub-line reads as a fault.
+    const row = only(
+      WITH_CLAUDE,
+      instance("claude-code", "Claude Code", [snapshot({ auth: { status: "ok" } })]),
+    );
+
+    expect(row.account).toBe("signed in");
+  });
+
+  it("names the token source the harness reported, where it named one", () => {
+    const row = only(
+      WITH_CLAUDE,
+      instance("claude-code", "Claude Code", [
+        snapshot({ auth: { status: "ok", backend: "ANTHROPIC_API_KEY" } }),
+      ]),
+    );
+
+    expect(row.account).toBe("ANTHROPIC_API_KEY");
+  });
+
   it("names a version this build was not tested against", () => {
     const row = only(
       WITH_CLAUDE,

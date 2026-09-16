@@ -3,12 +3,15 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import {
   applyPick,
+  composerFields,
   effectiveConfig,
   pushRecent,
   queryKeys,
   resumeBlockedReason,
+  runnerForPick,
   submission,
   threadConfig,
+  type ComposerFields,
   type ComposerPick,
   type HydraClient,
   type RecentModel,
@@ -42,6 +45,8 @@ const writeRecent = (recent: readonly RecentModel[]): void => {
 export interface ComposerModel {
   readonly kind: ThreadKind;
   readonly config: ThreadConfig;
+  /** Every lock, blocker and resolved pick the composer draws from. */
+  readonly fields: ComposerFields;
   readonly picks: ThreadPicks;
   readonly recent: readonly RecentModel[];
   readonly message: string;
@@ -80,6 +85,7 @@ export function useComposerModel(
   const session = thread.kind === "active" ? thread.session : null;
   const base = threadConfig(thread);
   const config = effectiveConfig(base, picks);
+  const fields = composerFields(catalogs, config, thread.kind);
   // Recent follows the submission home, and holds only what was picked.
   const remember = (): void => {
     const model = picks.model ?? null;
@@ -120,6 +126,7 @@ export function useComposerModel(
   return {
     kind: thread.kind,
     config,
+    fields,
     picks,
     recent,
     message,
@@ -143,7 +150,18 @@ export function useComposerModel(
       setPicks((held) => steps.reduce((acc, step) => applyPick(catalogs, base, acc, step), held));
     },
     submit: () => {
-      const sent = submission(thread, picks, { text: message });
+      // A draft spawns with the workspace the composer resolved, default
+      // included: a pick the user never touched is still where the thread
+      // works, and a workspace that already stands settles the machine too.
+      const workspace = fields.workspace.value;
+      const settled = runnerForPick(workspace, catalogs.workspaces ?? []);
+      const sent = submission(
+        thread,
+        thread.kind === "draft"
+          ? { ...picks, workspace, ...(settled === null ? {} : { runnerId: settled }) }
+          : picks,
+        { text: message },
+      );
       switch (sent.kind) {
         case "spawn":
           return spawn.mutate(sent.input);

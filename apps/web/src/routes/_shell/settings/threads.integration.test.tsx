@@ -319,7 +319,7 @@ const CONNECTION_AT = "2026-09-10T09:00:00.000Z";
 
 const GITHUB: Connection = {
   id: "01a06d02-7500-7000-8000-000000000001",
-  type: "github",
+  type: "github/github",
   label: "personal",
   displayName: "rogierpennink",
   status: "connected",

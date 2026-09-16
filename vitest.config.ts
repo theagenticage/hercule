@@ -11,11 +11,15 @@ import { defineConfig } from "vitest/config";
  * installs another, so a stubbed response decodes as the wrong type. Browser
  * code belongs on Node with jsdom anyway.
  *
- * The `binary` project is out of both, and out of `pnpm test`. It runs `./hydra`
- * as a release does, so it needs a build that has already happened - and a
- * build rewrites `apps/web/dist` and the generated file list underneath any
- * controller a parallel suite is running from source. `pnpm test:binary` runs
- * it, after `pnpm build:binary`.
+ * The `binary` project is out of both, and out of `pnpm test`: `pnpm test:binary`
+ * runs it, after `pnpm build:binary`. It is kept apart because a build rewrites
+ * `apps/web/dist` and the generated file list underneath any controller a
+ * parallel suite is running from source. Most of its suites test the packaging
+ * itself and refuse to start without `./hydra`, saying so; the two that test the
+ * controller's own surface rather than the packaging - `e2e/workspace.test.ts`
+ * and `e2e/github-push.test.ts` - are the same program either way, so with no
+ * build they run the dispatcher's source instead (`releaseBinary` in
+ * `e2e/harness.ts`).
  */
 const reactPackages = ["apps/web", "packages/ui"];
 

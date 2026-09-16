@@ -8,7 +8,7 @@ import { connectionsQuery, resourcesQuery, workspaceQuery } from "../../app/quer
 import { messageOf } from "../save-status";
 
 /**
- * The two ways out of a project with nothing checked out anywhere (AC-23):
+ * The two ways out of a project with nothing checked out anywhere:
  * name a repo Hydra should clone, or point at a folder on this machine that
  * already holds one. Both are forms inside the workspace menu rather than
  * screens of their own - the user is in the middle of starting a thread.

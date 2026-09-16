@@ -240,6 +240,25 @@ describe("what the Claude adapter reports about a credential from the environmen
     expect(probed.auth.backend).toBe("firstParty");
   });
 
+  it("does not count a machine with neither source as a login", async () => {
+    const { result } = probeWith({
+      accountInfo: () => Promise.resolve({ tokenSource: "none", apiKeySource: "none" }),
+    });
+
+    const probed = await result;
+    expect(probed.auth.status).toBe("unauthenticated");
+  });
+
+  it("counts a third-party backend as a login, authenticated outside the harness", async () => {
+    const { result } = probeWith({
+      accountInfo: () => Promise.resolve({ apiProvider: "bedrock" }),
+    });
+
+    const probed = await result;
+    expect(probed.auth.status).toBe("ok");
+    expect(probed.auth.backend).toBe("bedrock");
+  });
+
   it("counts an API key as a login", async () => {
     const { result } = probeWith({
       accountInfo: () =>

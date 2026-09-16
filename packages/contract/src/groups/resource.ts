@@ -33,6 +33,13 @@ import { atMost, bounded } from "../strings";
 /** The longest remote URL a resource may carry. */
 export const MAX_REMOTE_LENGTH = 512;
 
+/**
+ * What a caller is told when it points an operation that checks something out
+ * at a resource that is not a repo. One sentence: the API refuses with it, and
+ * the CLI glosses the refusal with it.
+ */
+export const NOT_CHECKED_OUT = "only a repo is checked out; a folder and a mailbox are records";
+
 /** The longest label a folder or a mailbox may carry. */
 export const MAX_RESOURCE_LABEL_LENGTH = 128;
 

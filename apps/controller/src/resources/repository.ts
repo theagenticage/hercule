@@ -56,6 +56,15 @@ export interface StoredRecordResource extends ResourceFields {
 /** A resource row, without the projects it is filed under. */
 export type StoredResource = StoredRepo | StoredRecordResource;
 
+/**
+ * Whether this resource is one a working copy is made from. Only a repo is: a
+ * folder and a mailbox are records of something outside Hydra. Every door that
+ * checks something out asks this one question and refuses with the contract's
+ * one sentence, `NOT_CHECKED_OUT`, in whatever error its own shape calls for.
+ */
+export const isCheckedOut = (resource: StoredResource): resource is StoredRepo =>
+  resource.kind === "repo";
+
 export interface NewResource {
   readonly kind: ResourceKind;
   readonly remote: string | null;

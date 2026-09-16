@@ -116,9 +116,6 @@ export const composerFields = (
   kind: ThreadKind,
 ): ComposerFields => {
   const instance = catalogs.instances.find((each) => each.id === config.instanceId);
-  const runner = referenceRunner(catalogs.runners, config.runnerId, catalogs.localRunnerId);
-  const snapshot = instance === undefined ? undefined : snapshotOn(instance, runner?.id);
-  const descriptor = snapshot?.models.find((model) => model.slug === config.model);
   const resources = catalogs.resources ?? [];
   const workspaces = catalogs.workspaces ?? [];
   const projectId = config.projectId ?? null;
@@ -134,6 +131,16 @@ export const composerFields = (
     kind === "draft" && pick.kind === "existing"
       ? workspaces.find((each) => each.id === pick.workspaceId)
       : undefined;
+  // A workspace that already stands is on one machine and never moves, so a
+  // draft joining one takes that machine as its default before anything is
+  // read off it; a machine the user picked is in `config.runnerId` already.
+  const runner = referenceRunner(
+    catalogs.runners,
+    joined?.runnerId ?? config.runnerId,
+    catalogs.localRunnerId,
+  );
+  const snapshot = instance === undefined ? undefined : snapshotOn(instance, runner?.id);
+  const descriptor = snapshot?.models.find((model) => model.slug === config.model);
 
   // The name and the reason come off one machine, never off two: a machine
   // named with another's reason would send the user to fix the wrong thing.

@@ -6,11 +6,15 @@
  * Ids come in and paths go out. The registry, not the controller, is what
  * remembers where a workspace is.
  */
-import { existsSync } from "node:fs";
 import type { WorkspaceDispose, WorkspaceProvision, WorkspaceReport } from "@hydra/protocol";
 import { disposeWorkspace } from "./dispose";
 import { provisionWorkspace, reprovision } from "./provision";
-import { makeRegistry, type RegisteredCheckout, type RegisteredWorkspace } from "./registry";
+import {
+  makeRegistry,
+  stillOnDisk,
+  type RegisteredCheckout,
+  type RegisteredWorkspace,
+} from "./registry";
 import { SETUP_DEADLINE_MS, substrateEnv, type Substrate } from "./substrate";
 
 export { switchBranch } from "./git";
@@ -61,10 +65,7 @@ export const makeWorkspaces = (options: {
    */
   const standing = (workspaceId: string): RegisteredWorkspace | undefined => {
     const entry = substrate.registry.held(workspaceId);
-    if (entry === undefined) return undefined;
-    return existsSync(entry.root) && entry.checkouts.every((one) => existsSync(one.path))
-      ? entry
-      : undefined;
+    return entry !== undefined && stillOnDisk(entry) ? entry : undefined;
   };
 
   return {
