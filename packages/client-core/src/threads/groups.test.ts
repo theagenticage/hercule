@@ -128,11 +128,7 @@ describe("threadGroups", () => {
   });
 
   it("puts the worktrees first, then the shared checkout, then the workspace-less lane", () => {
-    expect(laneLabels(groups()[0])).toEqual([
-      "hydra/run-3f1",
-      "webshop checkout · moss",
-      "no workspace",
-    ]);
+    expect(laneLabels(groups()[0])).toEqual(["hydra/run-3f1", "webshop · moss", "no workspace"]);
   });
 
   it("keeps the worktrees in the catalog's own order, whatever their threads did last", () => {
@@ -159,7 +155,7 @@ describe("threadGroups", () => {
     expect(laneLabels(ordered)).toEqual([
       "hydra/run-3f1",
       "hydra/run-3f1",
-      "webshop checkout · moss",
+      "webshop · moss",
       "no workspace",
     ]);
   });
@@ -174,12 +170,8 @@ describe("threadGroups", () => {
     const webshop = groups({ projectId: WEBSHOP_PROJECT.id, workspaceId: PRIMARY.id })[0];
     const lane = webshop?.workspaces.find((each) => each.draft);
 
-    expect(lane?.label === null ? null : labelText(lane!.label)).toBe("webshop checkout · moss");
-    expect(laneLabels(webshop)).toEqual([
-      "hydra/run-3f1",
-      "webshop checkout · moss",
-      "no workspace",
-    ]);
+    expect(lane?.label === null ? null : labelText(lane!.label)).toBe("webshop · moss");
+    expect(laneLabels(webshop)).toEqual(["hydra/run-3f1", "webshop · moss", "no workspace"]);
   });
 
   it("stands a project up for a draft even while nothing has been started in it", () => {

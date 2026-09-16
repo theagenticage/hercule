@@ -50,8 +50,10 @@ describe("what the relay does with an answer", () => {
       relay.deliver(answering(sent[1]!.requestId, "for-the-api"));
       relay.deliver(answering(sent[0]!.requestId, "for-the-web"));
 
-      expect((await first).token).toBe("for-the-web");
-      expect((await second).token).toBe("for-the-api");
+      const web = await first;
+      const api = await second;
+      expect("token" in web ? web.token : undefined).toBe("for-the-web");
+      expect("token" in api ? api.token : undefined).toBe("for-the-api");
     });
 
     expect(sent.map((frame) => frame.remote)).toEqual([

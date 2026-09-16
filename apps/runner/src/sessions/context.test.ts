@@ -15,7 +15,6 @@ import { resolve, type Machine } from "./context";
 import { makeWorkspaces } from "../workspaces";
 import {
   addBranch,
-  adoptedCheckout,
   checkout,
   cleanTemporaries,
   git,
@@ -250,16 +249,17 @@ describe("a session that has a workspace", () => {
   it("switches a primary's checkout to the branch the frame names, before it starts", async () => {
     const remote = makeRemote();
     addBranch(remote, "release");
-    const folder = adoptedCheckout(remote);
     const machine = machining();
     const workspaceId = id();
+    const resourceId = id();
     await machine.workspaces.provision(
       provisionFrame({
         workspaceId,
         kind: "primary",
-        checkouts: [checkout({ resourceId: id(), remote: remote.url, path: folder })],
+        checkouts: [checkout({ resourceId, remote: remote.url })],
       }),
     );
+    const folder = machine.workspaces.resolve(workspaceId)!.cwd;
 
     const outcome = await resolvingAsync(
       starting({ spec: { ...starting().spec, workspaceId }, checkoutBranch: "release" }),
@@ -272,16 +272,17 @@ describe("a session that has a workspace", () => {
 
   it("refuses the session with git's own words when the branch cannot be switched to", async () => {
     const remote = makeRemote();
-    const folder = adoptedCheckout(remote);
     const machine = machining();
     const workspaceId = id();
+    const resourceId = id();
     await machine.workspaces.provision(
       provisionFrame({
         workspaceId,
         kind: "primary",
-        checkouts: [checkout({ resourceId: id(), remote: remote.url, path: folder })],
+        checkouts: [checkout({ resourceId, remote: remote.url })],
       }),
     );
+    const folder = machine.workspaces.resolve(workspaceId)!.cwd;
 
     const outcome = await resolvingAsync(
       starting({ spec: { ...starting().spec, workspaceId }, checkoutBranch: "no-such-branch" }),

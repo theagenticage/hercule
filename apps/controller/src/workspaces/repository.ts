@@ -3,9 +3,9 @@
  * what may be provisioned, what may be torn down and what has expired are the
  * service's.
  *
- * Two questions are asked of the sessions table from here - which sessions are
- * living in a workspace, and when one of them last did anything in it - because
- * both are facts about the workspace. Nothing else about a session is read.
+ * One question is asked of the sessions table from here - which sessions are
+ * living in a workspace - because that is a fact about the workspace. Nothing
+ * else about a session is read.
  */
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
@@ -32,6 +32,8 @@ export interface StoredWorkspace {
   readonly runnerId: string;
   readonly kind: WorkspaceKind;
   readonly status: WorkspaceStatus;
+  /** The Connection the work in it acts through, settled when it was opened. */
+  readonly designatedConnectionId: string | null;
   readonly message: string | null;
   readonly createdAt: string;
   readonly provisionedAt: string | null;
@@ -72,7 +74,8 @@ export interface WorkspacePageRequest {
 /** What one checkout turned out to be, as the machine reported it. */
 export interface CheckoutState {
   readonly checkoutId: string;
-  readonly branch: string;
+  /** What the machine said is checked out; null where it could not read one. */
+  readonly branch: string | null;
   readonly branches: ReadonlyArray<string>;
   readonly defaultBranch: string | null;
 }
@@ -89,6 +92,20 @@ export interface SweepCandidate {
   readonly usedAt: string;
 }
 
+/**
+ * Whether the working area a session row names is one it can be placed into, as
+ * one SQL expression over a row of `sessions` under the alias given. A session
+ * with no workspace at all is placed anywhere; one whose workspace is still
+ * being made, or is gone, is not.
+ *
+ * Exported because the sessions domain asks it twice - a queued session waits
+ * for it before it is dispatched, and an exited one cannot be resumed without it
+ * - and three spellings of "the workspace stands" would be three answers.
+ */
+export const readyWhere = (alias: string): string =>
+  `(${alias}.workspace_id IS NULL OR EXISTS (SELECT 1 FROM workspaces ` +
+  `WHERE workspaces.id = ${alias}.workspace_id AND workspaces.status = 'ready'))`;
+
 /** The statuses a workspace can still leave: everything else is where it ends. */
 const LIVE_STATUSES = "('provisioning', 'ready', 'failed')";
 
@@ -103,6 +120,7 @@ interface WorkspaceRow {
   readonly runner_id: Uint8Array;
   readonly kind: string;
   readonly status: string;
+  readonly designated_connection_id: Uint8Array | null;
   readonly message: string | null;
   readonly created_at: string;
   readonly provisioned_at: string | null;
@@ -122,7 +140,8 @@ interface CheckoutRow {
 }
 
 const COLUMNS =
-  "id, runner_id, kind, status, message, created_at, provisioned_at, last_used_at, disposed_at";
+  "id, runner_id, kind, status, designated_connection_id, message, created_at, " +
+  "provisioned_at, last_used_at, disposed_at";
 
 /** The same columns, for the one query that joins the checkouts table. */
 const WORKSPACE_COLUMNS = COLUMNS.split(", ")
@@ -137,6 +156,8 @@ const toWorkspace = (row: WorkspaceRow): StoredWorkspace => ({
   runnerId: uuidToString(row.runner_id),
   kind: row.kind as WorkspaceKind,
   status: row.status as WorkspaceStatus,
+  designatedConnectionId:
+    row.designated_connection_id === null ? null : uuidToString(row.designated_connection_id),
   message: row.message,
   createdAt: row.created_at,
   provisionedAt: row.provisioned_at,
@@ -225,20 +246,29 @@ const make = Effect.gen(function* () {
     insert: (workspace: {
       readonly runnerId: string;
       readonly kind: WorkspaceKind;
+      readonly designatedConnectionId: string | null;
       readonly at: string;
     }): Effect.Effect<StoredWorkspace, SqlError> =>
       Effect.gen(function* () {
         const id = mintUuid();
         yield* sql`
-          INSERT INTO workspaces (id, runner_id, kind, status, created_at, last_used_at)
+          INSERT INTO workspaces (id, runner_id, kind, status, designated_connection_id,
+                                  created_at, last_used_at)
           VALUES (${id}, ${uuidFromString(workspace.runnerId)}, ${workspace.kind},
-                  'provisioning', ${workspace.at}, ${workspace.at})
+                  'provisioning',
+                  ${
+                    workspace.designatedConnectionId === null
+                      ? null
+                      : uuidFromString(workspace.designatedConnectionId)
+                  },
+                  ${workspace.at}, ${workspace.at})
         `;
         return {
           id: uuidToString(id),
           runnerId: workspace.runnerId,
           kind: workspace.kind,
           status: "provisioning",
+          designatedConnectionId: workspace.designatedConnectionId,
           message: null,
           createdAt: workspace.at,
           provisionedAt: null,
@@ -279,7 +309,7 @@ const make = Effect.gen(function* () {
     /**
      * The primary of this resource on this machine that is standing or on its
      * way: what makes a second one a conflict, and what a thread asking for the
-     * shared checkout is given.
+     * main workspace is given.
      */
     primaryOn: (
       resourceId: string,
@@ -325,19 +355,27 @@ const make = Effect.gen(function* () {
                      WHERE resource_id = ${uuidFromString(resourceId)})
       `),
 
-    /** The machine's report: the workspace stands, and this is what is in it. */
+    /**
+     * The machine's report: the workspace stands, and this is what is in it.
+     * Answers whether it moved the workspace, like the other two. A report that
+     * moved nothing writes no checkouts either: a second report, or one about a
+     * workspace that was disposed of meanwhile, must not overwrite the branches
+     * a live report already recorded.
+     */
     markReady: (
       id: string,
       checkouts: ReadonlyArray<CheckoutState>,
       at: string,
-    ): Effect.Effect<void, SqlError> =>
+    ): Effect.Effect<boolean, SqlError> =>
       Effect.gen(function* () {
         // `last_used_at` is left alone: it counts work done in the workspace,
         // which is a session starting or ending, not the machine reporting.
-        yield* sql`
+        const moved = yield* sql<{ readonly id: Uint8Array }>`
           UPDATE workspaces SET status = 'ready', provisioned_at = ${at}, message = NULL
           WHERE id = ${uuidFromString(id)} AND status = 'provisioning'
+          RETURNING id
         `;
+        if (moved.length === 0) return false;
         yield* Effect.forEach(
           checkouts,
           (checkout) =>
@@ -350,6 +388,7 @@ const make = Effect.gen(function* () {
             `,
           { discard: true },
         );
+        return true;
       }),
 
     /**
@@ -390,11 +429,10 @@ const make = Effect.gen(function* () {
           AND status IN ${sql.literal(LIVE_STATUSES)}
       `),
 
-    /** Marks the workspace a session is in as worked in just now. */
-    markUsedBySession: (sessionId: string, at: string): Effect.Effect<void, SqlError> =>
+    /** Marks a workspace as worked in just now, which is what keeps it alive. */
+    touched: (workspaceId: string, at: string): Effect.Effect<void, SqlError> =>
       Effect.asVoid(sql`
-        UPDATE workspaces SET last_used_at = ${at}
-        WHERE id = (SELECT workspace_id FROM sessions WHERE id = ${uuidFromString(sessionId)})
+        UPDATE workspaces SET last_used_at = ${at} WHERE id = ${uuidFromString(workspaceId)}
       `),
 
     /**

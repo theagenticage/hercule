@@ -240,14 +240,9 @@ const controllerMessages: ReadonlyArray<ControllerMessage> = [
     ],
   },
   { _tag: "workspaceDispose", workspaceId: WORKSPACE_ID },
-  {
-    _tag: "credentialAnswer",
-    requestId: REQUEST_ID,
-    token: "ghp_a-token",
-    username: "octocat",
-    name: "octocat",
-    email: "octocat@users.noreply.github.com",
-  },
+  // D-21 F5: the git identity rides on `sessionStart`, not on every credential.
+  { _tag: "credentialAnswer", requestId: REQUEST_ID, token: "ghp_a-token", username: "octocat" },
+  { _tag: "credentialAnswer", requestId: REQUEST_ID, error: "no_connection" },
 ];
 
 describe("the protocol version", () => {
@@ -266,6 +261,22 @@ describe("the runner-to-controller catalogue", () => {
 
   it("holds exactly the members the round-trip cases cover", () => {
     expect(tagsOf(RunnerToController)).toEqual(runnerMessages.map((message) => message._tag));
+  });
+
+  /**
+   * D-21 F2: a machine that could not read a branch - a detached HEAD, or a git
+   * that would not answer - says null rather than a word standing in for one,
+   * and the wire has to carry that rather than refuse the report.
+   */
+  it("round-trips a checkout the machine could read no branch for", () => {
+    const report = {
+      _tag: "workspaceReport",
+      workspaceId: WORKSPACE_ID,
+      status: "ready",
+      checkouts: [{ checkoutId: CHECKOUT_ID, branch: null, branches: [], defaultBranch: null }],
+    } as const;
+    const encoded = Schema.encodeSync(RunnerToController)(report);
+    expect(Effect.runSync(Schema.decodeUnknownEffect(RunnerToController)(encoded))).toEqual(report);
   });
 
   it("refuses a tag outside the union, including one the other direction owns", () => {

@@ -59,11 +59,11 @@ describe("workspaceName and workspaceLabel", () => {
   });
 
   it("names a shared checkout after its repo and its machine", () => {
-    expect(workspaceLabel(PRIMARY, [WEBSHOP], [MOSS])).toBe("webshop checkout · moss");
+    expect(workspaceLabel(PRIMARY, [WEBSHOP], [MOSS])).toBe("webshop · moss");
   });
 
   it("names a machine that is no longer in the fleet rather than going blank", () => {
-    expect(workspaceLabel(PRIMARY, [WEBSHOP], [])).toBe("webshop checkout · unknown machine");
+    expect(workspaceLabel(PRIMARY, [WEBSHOP], [])).toBe("webshop · unknown machine");
   });
 
   // The sidebar is narrower than some of these labels, and the machine is what
@@ -71,7 +71,7 @@ describe("workspaceName and workspaceLabel", () => {
   it("splits a shared checkout's label into the repo, which may be cut, and the rest", () => {
     expect(workspaceLabelParts(PRIMARY, [WEBSHOP], [MOSS])).toEqual({
       clip: "webshop",
-      keep: " checkout · moss",
+      keep: " · moss",
     });
   });
 
@@ -83,9 +83,7 @@ describe("workspaceName and workspaceLabel", () => {
   });
 
   it("reads both parts back as the one label a tooltip shows", () => {
-    expect(labelText(workspaceLabelParts(PRIMARY, [WEBSHOP], [MOSS]))).toBe(
-      "webshop checkout · moss",
-    );
+    expect(labelText(workspaceLabelParts(PRIMARY, [WEBSHOP], [MOSS]))).toBe("webshop · moss");
   });
 });
 
@@ -233,7 +231,7 @@ describe("workspaceLead", () => {
 
   it("leaves the branch clause out of a checkout no machine holds yet", () => {
     expect(lead({ kind: "primary", resourceId: INFRA.id }, { ...reading, runnerId: MOSS.id })).toBe(
-      "It works in the checkout of ops-infra on moss. You and the agent share the files.",
+      "It works in the main workspace of ops-infra on moss. You and the agent share the files.",
     );
   });
 

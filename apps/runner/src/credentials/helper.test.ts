@@ -11,7 +11,12 @@ import { cleanTemporaries, temporary } from "../workspaces/testing";
 
 afterAll(cleanTemporaries);
 
-const answering = (fields: Omit<CredentialAnswer, "_tag" | "requestId">): CredentialAnswer => ({
+/** D-21 F5: an answer is a credential or a refusal, never a struct of maybes. */
+const answering = (
+  fields:
+    | { readonly token: string; readonly username: string }
+    | { readonly error: "unauthorized" | "no_connection" },
+): CredentialAnswer => ({
   _tag: "credentialAnswer",
   requestId: crypto.randomUUID(),
   ...fields,
@@ -41,12 +46,9 @@ describe("what the helper prints", () => {
   it("prints exactly the two lines git reads, from the answer the daemon gave", async () => {
     const served = await serving(() =>
       Promise.resolve(
-        answering({
-          token: "ghp_the-token",
-          username: "octocat",
-          name: "octocat",
-          email: "octocat@users.noreply.github.com",
-        }),
+        // D-21 F5: an answer carries the credential; the git identity is the
+        // session's and rides on `sessionStart`.
+        answering({ token: "ghp_the-token", username: "octocat" }),
       ),
     );
 

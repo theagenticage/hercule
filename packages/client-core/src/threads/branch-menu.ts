@@ -42,6 +42,7 @@ const UNKNOWN = "default";
 
 /** Why the field takes no pick, where it takes none. */
 const NOT_CLONED = "Nothing is cloned on this machine yet: it lands on the default branch";
+const NO_BRANCH = "This machine could not read the checkout's branch";
 const PER_REPO = "A base branch per repo is not built yet";
 
 const branchesHeldNearby = (
@@ -76,16 +77,18 @@ export const branchField = (
   if (pick.kind === "primary") {
     const primary = readyPrimary(workspaces, pick.resourceId, runnerId);
     const checkout = primary?.checkouts[0];
-    if (checkout === undefined) {
-      // Nothing is cloned there yet, so there is no branch list to read and the
-      // clone will land on whatever the remote calls its default.
+    // Nothing is cloned there yet, so there is no branch list to read and the
+    // clone will land on whatever the remote calls its default; a checkout
+    // whose branch the machine could not read is the same unknown, and
+    // switching from one nobody can name is not something to offer (D-21).
+    if (checkout === undefined || checkout.branch === null) {
       return {
         header: "Branch",
         note: "the checkout switches to it",
         label: UNKNOWN,
         value: UNKNOWN,
         glyph: false,
-        locked: NOT_CLONED,
+        locked: checkout === undefined ? NOT_CLONED : NO_BRANCH,
         rows: [],
         foot: null,
       };
@@ -98,8 +101,8 @@ export const branchField = (
     return {
       header: "Branch",
       note: "the checkout switches to it",
-      label: pick.branch ?? checkout.branch ?? UNKNOWN,
-      value: pick.branch ?? checkout.branch ?? UNKNOWN,
+      label: pick.branch ?? checkout.branch,
+      value: pick.branch ?? checkout.branch,
       glyph: true,
       locked: null,
       rows: names.map((branch) => {

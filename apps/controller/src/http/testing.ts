@@ -97,7 +97,7 @@ const services = (home: string) =>
         ProviderServiceLayer,
         // The workspace service reaches the session service, as it does in the
         // boot: a workspace that came up releases the sessions waiting for it.
-        WorkspaceServiceLayer.pipe(Layer.provideMerge(SessionServiceLayer)),
+        SessionServiceLayer.pipe(Layer.provideMerge(WorkspaceServiceLayer)),
         ConnectionServiceLayer,
         ResourceServiceLayer,
       ).pipe(

@@ -18,7 +18,6 @@
  */
 import type { ErrorCode } from "./errors";
 import type { OperationId } from "./operations";
-import { NOT_CHECKED_OUT } from "./groups/resource";
 
 /** One worked invocation: the tokens after the command words, and what is piped in. */
 export interface CliExample {
@@ -582,7 +581,7 @@ export const CLI = {
       },
       label: {
         flag: "label",
-        help: "What to call it; required for a folder and a mailbox, which have no remote to name them.",
+        help: "What to call it; required for a folder and a mailbox, which have no remote to name them, and refused on a repo.",
       },
       connectionId: {
         flag: "connection",
@@ -590,11 +589,11 @@ export const CLI = {
       },
       setupCommand: {
         flag: "setup-command",
-        help: "Run once in every fresh checkout of this repo, before the agent starts.",
+        help: "Run once in every fresh checkout of this repo, before the agent starts; a repo only.",
       },
       workspaceInclude: {
         flag: "workspace-include",
-        help: "Whether a fresh workspace takes the files the main checkout's .workspaceinclude lists; on unless set to false.",
+        help: "Whether a fresh workspace takes the files the main workspace's .workspaceinclude lists; on unless set to false; a repo only.",
       },
       projectIds: { flag: "project", help: "A project to file it under; repeat for several." },
     },
@@ -614,18 +613,21 @@ export const CLI = {
         resolves: "resource.query",
       },
       remote: { flag: "remote", help: "The git remote; it is canonicalised again and re-checked." },
-      label: { flag: "label", help: "What to call it; null takes the label off again." },
+      label: {
+        flag: "label",
+        help: "What to call it; null takes the label off again. Refused on a repo.",
+      },
       connectionId: {
         flag: "connection",
         help: "The Connection to act through; null takes it off again.",
       },
       setupCommand: {
         flag: "setup-command",
-        help: "Run in every fresh checkout; null takes it off again.",
+        help: "Run in every fresh checkout; null takes it off again. A repo only.",
       },
       workspaceInclude: {
         flag: "workspace-include",
-        help: "Whether a fresh workspace takes what .workspaceinclude lists.",
+        help: "Whether a fresh workspace takes what .workspaceinclude lists. A repo only.",
       },
       projectIds: {
         flag: "project",
@@ -683,39 +685,25 @@ export const CLI = {
   },
   "workspace.provision": {
     command: "workspace provision",
-    help: "Makes a repo's main checkout on one machine, which is the long-lived working copy threads share. It answers at once with the workspace provisioning, and the machine reports when it stands; read it back with `hydra workspace read`.",
-    examples: [
-      { args: ["--resource", "1f3a9c2e", "--runner", "7b41d0a5"] },
-      {
-        args: [
-          "--resource",
-          "1f3a9c2e",
-          "--runner",
-          "7b41d0a5",
-          "--path",
-          "/Users/rogier/code/web",
-        ],
-      },
-    ],
+    help: "Makes a repo's main workspace on one machine, which is the long-lived working copy threads share. Hydra clones it fresh under that machine's own storage; a folder you already have is never taken over. It answers at once with the workspace provisioning, and the machine reports when it stands; read it back with `hydra workspace read`.",
+    examples: [{ args: ["--resource", "1f3a9c2e", "--runner", "7b41d0a5"] }],
     fields: {
       resourceId: {
         flag: "resource",
         help: "The repo to check out; a folder or a mailbox is refused.",
       },
       runnerId: { flag: "runner", help: "The machine to make it on." },
-      path: {
-        flag: "path",
-        help: "A checkout of that repo already on that machine, to adopt in place rather than clone; nothing is written into it. Left off, Hydra clones a fresh one.",
-      },
     },
     errors: {
-      conflict: "that repo already has a main checkout on that machine",
-      invalid_state: NOT_CHECKED_OUT,
+      conflict: "that repo already has a main workspace on that machine",
+      // Restated rather than imported: the sentence the controller refuses with
+      // is the controller's, and this is the gloss beside the flag.
+      invalid_state: "only a repo is checked out; a folder and a mailbox are records",
     },
   },
   "workspace.dispose": {
     command: "workspace dispose",
-    help: "Tears down an ephemeral workspace. The machine removes its worktrees and its directory, the branches stay in the repo's cache, and a main checkout is never torn down.",
+    help: "Tears down an ephemeral workspace. The machine removes its worktrees and its directory, the branches stay in the repo's cache, and a main workspace is never torn down.",
     examples: [{ args: ["1f3a9c2e"] }],
     fields: {
       id: {
@@ -726,7 +714,7 @@ export const CLI = {
     },
     errors: {
       invalid_state:
-        "a main checkout is never torn down, and one already gone has nothing left to tear down",
+        "a main workspace is never torn down, and one already gone has nothing left to tear down",
     },
   },
 
@@ -1344,7 +1332,7 @@ export const CLI = {
       },
       workspace: {
         flag: "workspace",
-        help: 'Where it works, as JSON: {"kind":"primary","resourceId":"<id>","branch":"<branch>"} for the repo\'s shared checkout, {"kind":"ephemeral","checkouts":[{"resourceId":"<id>","baseBranch":"<branch>"}]} for an ephemeral workspace with a checkout of its own (an empty list is a scratch workspace), or {"kind":"existing","workspaceId":"<id>"} to join one that stands. Leave it off for a thread with no checkout.',
+        help: 'Where it works, as JSON: {"kind":"primary","resourceId":"<id>","branch":"<branch>"} for the repo\'s main workspace, {"kind":"ephemeral","checkouts":[{"resourceId":"<id>","baseBranch":"<branch>"}]} for an ephemeral workspace with a checkout of its own (an empty list is a scratch workspace), or {"kind":"existing","workspaceId":"<id>"} to join one that stands. Leave it off for a thread with no checkout.',
       },
     },
     errors: {
@@ -1623,7 +1611,7 @@ export const NOUNS = {
   },
   workspace: {
     summary: "Workspaces: the working areas on a machine that sessions do their work in.",
-    flow: "hydra workspace provision makes a repo's main checkout, hydra workspace list shows what stands, hydra workspace dispose tears an ephemeral one down.",
+    flow: "hydra workspace provision makes a repo's main workspace, hydra workspace list shows what stands, hydra workspace dispose tears an ephemeral one down.",
   },
   event: {
     summary: "The event log: external events and audit entries, under one envelope.",

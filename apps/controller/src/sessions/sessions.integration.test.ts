@@ -3590,7 +3590,7 @@ describe("session.respond", () => {
  * Spawning into a workspace.
  *
  * A spawn says which project the thread belongs to and which workspace it wants
- * - the repo's shared checkout, a fresh worktree of its own, or one that is
+ * - the repo's main workspace, a fresh worktree of its own, or one that is
  * already standing - and the session waits in `queued` while a machine makes
  * it. Git words live on checkouts; a workspace is a kind and a list of them.
  */
@@ -3826,6 +3826,47 @@ describe("session.spawn into a workspace", () => {
     });
   });
 
+  /**
+   * D-21 F1: the branch pick is one-shot. It is what the machine switches the
+   * main workspace to before this thread first runs; replaying it on a resume
+   * would switch the branch out from under whatever the user has done in that
+   * checkout since the thread last ran.
+   */
+  it("sends the branch pick once and never again when the thread is resumed", async () => {
+    await withFleet(async (arranged) => {
+      const web = await makeRepo(arranged, "https://github.com/acme/web");
+      const session = await spawned(arranged, {
+        prompt: "hello",
+        workspace: { kind: "primary", resourceId: web, branch: "feature/x" },
+      });
+      const workspace = await workspaceOf(arranged, String(session.workspaceId));
+      workspaceReady(arranged, workspace);
+
+      const first = (await framesWhen<SessionStart>(arranged.wire, "sessionStart", 1))[0]!;
+      expect((first as unknown as WorkspaceFrame)["checkoutBranch"]).toBe("feature/x");
+
+      report(arranged.wire, 1, {
+        eventId: crypto.randomUUID(),
+        sessionId: session.id,
+        at,
+        _tag: "session.started",
+      });
+      await sessionWhen(arranged, session.id, (one) => one.status === "idle");
+      await framesWhen<SessionInput>(arranged.wire, "sessionInput", 1);
+      await ends(arranged, session, 2);
+
+      const response = await sendInput(arranged, session.id, { text: "still there?" });
+      expect(response.status, await response.clone().text()).toBe(200);
+
+      const again = (await framesWhen<SessionStart>(arranged.wire, "sessionStart", 2))[1]!;
+      expect(again.sessionId).toBe(session.id);
+      expect(again.spec.continue).toEqual({ nativeSessionId: "native-1", mode: "resume" });
+      // The row still records what the thread was started on - that is history -
+      // but the machine is not told to switch again.
+      expect((again as unknown as WorkspaceFrame)["checkoutBranch"] ?? null).toBeNull();
+    });
+  });
+
   it("takes the machine from a workspace that already stands, and refuses a second one", async () => {
     await withFleet(async (arranged) => {
       const other = await arranged.enlist();
@@ -3875,6 +3916,43 @@ describe("session.spawn into a workspace", () => {
       });
       expect((await refusal(response)).code).toBe("validation");
       expect(await sessionsOf(arranged)).toEqual([]);
+    });
+  });
+
+  /**
+   * D-21 F8: joining is not a way around the filing. A workspace that already
+   * stands is still a set of repos, and a thread filed under one project must
+   * not reach a repo that belongs to another just because somebody else already
+   * made a workspace holding it.
+   */
+  it("refuses joining a standing workspace whose repos are not the project's", async () => {
+    await withFleet(async (arranged) => {
+      const hydra = await makeProject(arranged, "Hydra");
+      const side = await makeProject(arranged, "Side");
+      const web = await makeRepo(arranged, "https://github.com/acme/web", [hydra]);
+      const first = await spawned(arranged, {
+        prompt: "hello",
+        projectId: hydra,
+        workspace: { kind: "ephemeral", checkouts: [{ resourceId: web }] },
+      });
+      const workspace = await workspaceOf(arranged, String(first.workspaceId));
+      workspaceReady(arranged, workspace);
+      await sessionWhen(arranged, first.id, (one) => one.status !== "queued");
+
+      const response = await spawn(arranged, {
+        prompt: "again",
+        projectId: side,
+        workspace: { kind: "existing", workspaceId: workspace.id },
+      });
+      expect((await refusal(response)).code).toBe("validation");
+
+      // And the same workspace under its own project is joined as before.
+      const joined = await spawned(arranged, {
+        prompt: "again",
+        projectId: hydra,
+        workspace: { kind: "existing", workspaceId: workspace.id },
+      });
+      expect(joined.workspaceId).toBe(workspace.id);
     });
   });
 

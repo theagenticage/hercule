@@ -1,14 +1,8 @@
 import { useEffect, useRef, useState, type JSX } from "react";
 import { useNavigate } from "@tanstack/react-router";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import {
-  projectPickerRows,
-  queryKeys,
-  type HydraClient,
-  type ProjectPickerRow,
-} from "@hydra/client-core";
-import { Input, cn } from "@hydra/ui";
-import { messageOf } from "./save-status";
+import { useQuery } from "@tanstack/react-query";
+import { projectPickerRows, type HydraClient, type ProjectPickerRow } from "@hydra/client-core";
+import { cn } from "@hydra/ui";
 import { ProjectDot } from "./project-dot";
 import { projectsQuery, resourcesQuery, sessionsQuery, workspacesQuery } from "../app/queries";
 
@@ -18,18 +12,21 @@ import { projectsQuery, resourcesQuery, sessionsQuery, workspacesQuery } from ".
  * own, because choosing a project is not a place the user goes - it is the one
  * question asked before the draft opens.
  *
- * A fresh install has no project, so the picker is the naming field alone:
- * there is nothing to choose between and one thing to do.
+ * A fresh install has no project, so the picker is the New project row alone:
+ * there is nothing to choose between and one thing to do. Making one is the
+ * New project dialog's job (D-20b), not a field in here.
  */
 export function ProjectPicker({
   client,
   onClose,
+  onNewProject,
 }: {
   readonly client: HydraClient;
   readonly onClose: () => void;
+  /** The way to the New project dialog, which this row opens. */
+  readonly onNewProject: () => void;
 }): JSX.Element {
   const navigate = useNavigate();
-  const queryClient = useQueryClient();
   const projects = useQuery(projectsQuery(client)).data?.items ?? [];
   const resources = useQuery(resourcesQuery(client)).data?.items ?? [];
   const workspaces = useQuery(workspacesQuery(client)).data?.items ?? [];
@@ -41,22 +38,8 @@ export function ProjectPicker({
     void navigate({ to: "/threads/new", search: { project: projectId } });
   };
 
-  // Derived, not latched: the listing may land after the first render, and a
-  // picker that decided "there are no projects" before the answer arrived
-  // would keep saying so with the projects on screen behind it.
-  const [asked, setAsked] = useState(false);
-  const naming = asked || rows.length === 0;
-  const [name, setName] = useState("");
   const [active, setActive] = useState(0);
   const panel = useRef<HTMLDivElement>(null);
-
-  const create = useMutation({
-    mutationFn: (value: string) => client.project.create({ payload: { name: value } }),
-    onSuccess: (project) => {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.projects() });
-      open(project.id);
-    },
-  });
 
   useEffect(() => {
     panel.current?.focus();
@@ -65,15 +48,13 @@ export function ProjectPicker({
   // ↑↓ ⏎ Esc and ⌘<n>, heard on the document rather than on the panel: the
   // picker is the only thing that answers keys while it stands, and a click on
   // the scrim or on a row would otherwise take the focus the panel was
-  // listening with. While the name is being typed only Esc acts, so the field
-  // keeps every key the user means for it.
+  // listening with.
   useEffect(() => {
     const onKeyDown = (event: globalThis.KeyboardEvent): void => {
       if (event.key === "Escape") {
         onClose();
         return;
       }
-      if (naming) return;
       if (event.metaKey || event.ctrlKey) {
         const row = rows[Number(event.key) - 1];
         if (row !== undefined) {
@@ -92,7 +73,7 @@ export function ProjectPicker({
       if (event.key === "Enter") {
         event.preventDefault();
         const row = rows[active];
-        if (row === undefined) setAsked(true);
+        if (row === undefined) onNewProject();
         else open(row.projectId);
       }
     };
@@ -139,52 +120,23 @@ export function ProjectPicker({
             }}
           />
         ))}
-        {naming ? (
-          <div className="flex flex-col gap-1.5 border-t border-line-soft px-2 pt-2 pb-1.5 first:border-t-0">
-            <label htmlFor="new-project" className="text-meta text-muted">
-              New project
-            </label>
-            <Input
-              id="new-project"
-              autoFocus
-              value={name}
-              placeholder="What it is called"
-              onChange={(event) => {
-                setName(event.target.value);
-              }}
-              onKeyDown={(event) => {
-                if (event.key !== "Enter" || name.trim() === "") return;
-                event.preventDefault();
-                create.mutate(name.trim());
-              }}
-            />
-            {create.error === null ? null : (
-              <p className="text-fine text-fail" role="alert">
-                {messageOf(create.error)}
-              </p>
-            )}
-          </div>
-        ) : (
-          <button
-            type="button"
-            onClick={() => {
-              setAsked(true);
-            }}
-            className={cn(
-              // The same grid a project row stands on, so its label keeps the
-              // left edge the names above it have.
-              "grid w-full cursor-pointer grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-2",
-              "rounded-[6px] px-2 py-[5px] text-left text-meta text-muted",
-              "hover:bg-line-soft hover:text-ink",
-              active === rows.length && "bg-line-soft text-ink",
-            )}
-          >
-            {/* The marker column a project row carries, empty: the label keeps
-                the left edge the names above it stand on. */}
-            <span aria-hidden="true" className="w-2.5" />
-            <span className="min-w-0 truncate">New project</span>
-          </button>
-        )}
+        <button
+          type="button"
+          onClick={onNewProject}
+          className={cn(
+            // The same grid a project row stands on, so its label keeps the
+            // left edge the names above it have.
+            "grid w-full cursor-pointer grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-2",
+            "rounded-[6px] px-2 py-[5px] text-left text-meta text-muted",
+            "hover:bg-line-soft hover:text-ink",
+            active === rows.length && "bg-line-soft text-ink",
+          )}
+        >
+          {/* The marker column a project row carries, empty: the label keeps
+              the left edge the names above it stand on. */}
+          <span aria-hidden="true" className="w-2.5" />
+          <span className="min-w-0 truncate">New project</span>
+        </button>
         <div className="mt-1.5 flex gap-3.5 border-t border-line-soft px-2 pt-2 pb-1 text-[11.5px] text-faint">
           <span>
             <Keycap>↑↓</Keycap>Navigate

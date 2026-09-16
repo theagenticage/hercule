@@ -45,7 +45,7 @@ import { nowIso, pageInput, refuseCursor, withTransaction } from "../db";
 import { AuditLog } from "../events";
 import { SessionService } from "../sessions";
 import { Settings, type SettingError } from "../settings";
-import { workspaceRepository } from "../workspaces";
+import { WorkspaceService } from "../workspaces";
 import { requireOnline } from "./adapters";
 import { JoinTokens } from "./join-tokens";
 import { RunnerFactsDeadline, RunnerPresence } from "./presence";
@@ -137,7 +137,7 @@ const make = Effect.gen(function* () {
   const settings = yield* Settings;
   const audit = yield* AuditLog;
   const sessions = yield* SessionService;
-  const workspaces = yield* workspaceRepository;
+  const workspaces = yield* WorkspaceService;
 
   const presence = yield* RunnerPresence;
 
@@ -519,5 +519,11 @@ export class RunnerService extends Context.Service<RunnerService, Effect.Success
 export const RunnerServiceLayer: Layer.Layer<
   RunnerService,
   never,
-  SqlClient.SqlClient | JoinTokens | Settings | RunnerPresence | AuditLog | SessionService
+  | SqlClient.SqlClient
+  | JoinTokens
+  | Settings
+  | RunnerPresence
+  | AuditLog
+  | SessionService
+  | WorkspaceService
 > = Layer.effect(RunnerService)(make);

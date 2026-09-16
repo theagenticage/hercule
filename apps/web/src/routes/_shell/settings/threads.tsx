@@ -28,11 +28,14 @@ const ACCESS_MODES: readonly AccessMode[] = [
   "full-access",
 ];
 
-/** The three faces of the workspace default, and what each one stores. */
+/**
+ * The two faces of the workspace default, and what each one stores. None is not
+ * one of them (D-20d): a project without a source always runs without a
+ * workspace, and a project with one always works in one of its own.
+ */
 const WORKSPACES: ReadonlyArray<{ readonly value: ThreadWorkspace; readonly label: string }> = [
-  { value: "primary", label: "Current checkout" },
+  { value: "primary", label: "Main workspace" },
   { value: "ephemeral", label: "New workspace" },
-  { value: "none", label: "None" },
 ];
 
 export const Route = createFileRoute("/_shell/settings/threads")({
@@ -178,7 +181,7 @@ function Threads(): JSX.Element {
 
       <FormCard
         label="Threads · workspace"
-        fine="Picked here, it stands whatever the project holds. Left unset, a project with one repo opens in its current checkout and a project with several repos opens in a New workspace."
+        fine="Picked here, it stands whatever the project holds. Left unset, a project with one repo opens in its main workspace and a project with several repos opens in a New workspace. A project with no source always runs without a workspace."
       >
         <Row label="Workspace">
           <SegmentedControl

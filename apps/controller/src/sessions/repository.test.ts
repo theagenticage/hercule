@@ -25,6 +25,9 @@ const anId = () => uuidToString(mintUuid());
 const aSession = Effect.gen(function* () {
   const sessions = yield* sessionRepository;
   const stored = yield* sessions.insert({
+    // D-21: the caller mints the id, because a spawn opens the working area in
+    // the same transaction and its branch is named after the session.
+    id: anId(),
     title: "a session",
     permissionProfileId: anId(),
     instanceId: anId(),

@@ -17,6 +17,7 @@ import { AuditLog, AuditLogLayer } from "../events";
 import { TestDatabase } from "../db/testing";
 import { SessionService } from "../sessions";
 import { Settings, SettingsLayer } from "../settings";
+import { WorkspaceService } from "../workspaces";
 import { runnerRepository } from "./repository";
 import { JoinTokensLayer, RunnerPresenceLayer, RunnerService, RunnerServiceLayer } from "./index";
 
@@ -32,8 +33,18 @@ const stubSessionService = Layer.succeed(
   >[0]),
 );
 
+/** The same, for the one workspace call retiring a machine makes (D-21). */
+const stubWorkspaceService = Layer.succeed(
+  WorkspaceService,
+  WorkspaceService.of({ lostOnRunner: () => Effect.void } as unknown as Parameters<
+    typeof WorkspaceService.of
+  >[0]),
+);
+
 const layer = RunnerServiceLayer.pipe(
-  Layer.provideMerge(Layer.mergeAll(JoinTokensLayer, SettingsLayer, stubSessionService)),
+  Layer.provideMerge(
+    Layer.mergeAll(JoinTokensLayer, SettingsLayer, stubSessionService, stubWorkspaceService),
+  ),
   Layer.provideMerge(RunnerPresenceLayer),
   Layer.provideMerge(AuditLogLayer),
   Layer.provideMerge(TestDatabase),

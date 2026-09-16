@@ -72,8 +72,10 @@ const answerFor = async (
   if (asking === undefined) return EMPTY;
   try {
     const answer = await ask(asking);
+    // A refusal is an answer with no credential in it, which is an empty reply
+    // to git: it falls through to whatever helper comes next.
+    if (!("token" in answer)) return EMPTY;
     const { token, username } = answer;
-    if (token === undefined || username === undefined) return EMPTY;
     if (!isSpeakable(token) || !isSpeakable(username)) return EMPTY;
     return `${JSON.stringify({ username, password: token })}\n`;
   } catch {

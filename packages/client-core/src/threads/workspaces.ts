@@ -5,8 +5,9 @@
  *
  * A workspace carries no name of its own. An ephemeral one is named after the
  * branch its checkout sits on (`hydra/run-3f1`), which is what the user typed
- * nothing to get; a primary is named after the repo and the machine it stands
- * on, because there is exactly one of those per pair.
+ * nothing to get; a primary - the repo's **main workspace** (D-20c) - is named
+ * after the repo and the machine it stands on, because there is exactly one of
+ * those per pair.
  */
 import type {
   Project,
@@ -57,11 +58,11 @@ export const workspaceName = (workspace: Workspace): string =>
  * A workspace's label in two parts: what may be cut short where the sidebar is
  * narrower than the name, and what must stand whole whatever happens.
  *
- * On a primary that is the repo and ` checkout · <machine>`: the machine is
- * the whole point of the label - it is what tells one repo's two checkouts
- * apart - so cutting the label's tail would eat the one word that means
- * something. An ephemeral workspace is named after its branch, which is one
- * word and is cut as one.
+ * On a primary that is the repo and ` · <machine>` (D-20c): the machine is
+ * the whole point of the label - it is what tells one repo's two main
+ * workspaces apart - so cutting the label's tail would eat the one word that
+ * means something. An ephemeral workspace is named after its branch, which is
+ * one word and is cut as one.
  */
 export interface WorkspaceLabel {
   /** The part that may be cut short, with an ellipsis, when room runs out. */
@@ -80,7 +81,7 @@ export const workspaceLabelParts = (
   const runner = runners.find((each) => each.id === workspace.runnerId);
   return {
     clip: repoName(resource),
-    keep: ` checkout · ${runner?.name ?? "unknown machine"}`,
+    keep: ` · ${runner?.name ?? "unknown machine"}`,
   };
 };
 
@@ -149,6 +150,13 @@ export const baseBranchOf = (
   }
   return null;
 };
+
+/**
+ * Why a draft takes no workspace pick at all: a project with no repo has
+ * nowhere to work, so None is the one thing on offer and the selector says
+ * what would put something else there (D-20d).
+ */
+export const NO_WORKSPACE_REASON = "Add a repository to the project to work in one";
 
 /** What tells two picks apart. A branch is a choice inside a pick, not a pick. */
 export const pickKey = (pick: WorkspacePick): string => {
@@ -222,10 +230,14 @@ export const draftSubject = (
 
 /**
  * The workspace a draft opens in before the user touches anything: the stored
- * `thread.workspace` where there is one, else the shared checkout of a project
+ * `thread.workspace` where there is one, else the main workspace of a project
  * that holds one repo and a worktree of each repo of a project that holds
  * several (spec 14 §The composer). A project with no repo has nothing to open
  * in, whatever the setting asks for.
+ *
+ * A stored `none` is honoured only where None is offered at all, which is a
+ * project with no repo (D-20d); a project that holds one falls back to the
+ * rule rather than starting a thread outside the repo the user picked.
  */
 export const defaultWorkspacePick = (
   repos: readonly Resource[],
@@ -233,8 +245,8 @@ export const defaultWorkspacePick = (
 ): WorkspacePick => {
   const first = repos[0];
   if (first === undefined) return { kind: "none" };
-  const mode = preferred ?? (repos.length === 1 ? "primary" : "ephemeral");
-  if (mode === "none") return { kind: "none" };
+  const stored = preferred === "none" ? null : preferred;
+  const mode = stored ?? (repos.length === 1 ? "primary" : "ephemeral");
   if (mode === "primary") return { kind: "primary", resourceId: first.id };
   return { kind: "ephemeral", checkouts: repos.map((repo) => ({ resourceId: repo.id })) };
 };
@@ -303,9 +315,9 @@ export const workspaceLead = (
         null;
       const where: readonly Phrase[] =
         branch === null
-          ? [{ text: `It works in the checkout of ${repo} on ${reading.machine}.` }]
+          ? [{ text: `It works in the main workspace of ${repo} on ${reading.machine}.` }]
           : [
-              { text: `It works in the checkout of ${repo} on ${reading.machine}, on ` },
+              { text: `It works in the main workspace of ${repo} on ${reading.machine}, on ` },
               { text: branch, mono: true },
               { text: "." },
             ];

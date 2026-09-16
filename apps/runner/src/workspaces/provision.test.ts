@@ -12,7 +12,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import { makeWorkspaces } from "./index";
 import {
   addBranch,
-  adoptedCheckout,
+  userCheckout,
   checkout,
   cleanTemporaries,
   contentsOf,
@@ -44,79 +44,6 @@ const goneWithin = async (pid: number, within: number): Promise<boolean> => {
   return false;
 };
 
-describe("a primary that adopts the folder the user already has", () => {
-  it("reports the folder's branches and seeds the cache from it, writing nothing under it", async () => {
-    const remote = makeRemote();
-    addBranch(remote, "spike");
-    const folder = adoptedCheckout(remote);
-    git(folder, "checkout", "-b", "local-only");
-    const head = git(folder, "rev-parse", "HEAD");
-    const before = contentsOf(folder);
-    const storageDir = storage();
-    const resourceId = id();
-    const checkoutId = id();
-
-    const report = await makeWorkspaces({ storageDir }).provision(
-      provisionFrame({
-        kind: "primary",
-        checkouts: [checkout({ checkoutId, resourceId, remote: remote.url, path: folder })],
-      }),
-    );
-
-    expect(report.status).toBe("ready");
-    const reported = report.checkouts?.[0];
-    expect(reported?.checkoutId).toBe(checkoutId);
-    // The branch the user left it on, and the branches they can switch to.
-    expect(reported?.branch).toBe("local-only");
-    expect([...(reported?.branches ?? [])].sort()).toEqual(["local-only", "main"]);
-    expect(reported?.defaultBranch).toBe("main");
-    // The cache is seeded from the folder, so an ephemeral needs no network.
-    expect(existsSync(cacheOf(storageDir, resourceId))).toBe(true);
-    expect(git(cacheOf(storageDir, resourceId), "cat-file", "-t", head)).toBe("commit");
-    // Hydra never touches a primary beyond what the user asked for.
-    expect(contentsOf(folder)).toBe(before);
-  });
-
-  it("fails, naming the folder, when there is no git repository there", async () => {
-    const remote = makeRemote();
-    const folder = join(temporary("hydra-not-a-repo-"), "plain");
-    mkdirSync(folder);
-    writeFileSync(join(folder, "notes.txt"), "just files\n");
-    const storageDir = storage();
-
-    const report = await makeWorkspaces({ storageDir }).provision(
-      provisionFrame({
-        kind: "primary",
-        checkouts: [checkout({ resourceId: id(), remote: remote.url, path: folder })],
-      }),
-    );
-
-    expect(report.status).toBe("failed");
-    expect(report.message ?? "").toContain(folder);
-    // Nothing was adopted, so nothing was cached either.
-    expect(report.checkouts ?? []).toEqual([]);
-  });
-
-  it("fails when the folder's origin is another remote", async () => {
-    const asked = makeRemote();
-    const other = makeRemote();
-    const folder = adoptedCheckout(other);
-    const storageDir = storage();
-
-    const report = await makeWorkspaces({ storageDir }).provision(
-      provisionFrame({
-        kind: "primary",
-        checkouts: [checkout({ resourceId: id(), remote: asked.url, path: folder })],
-      }),
-    );
-
-    expect(report.status).toBe("failed");
-    // The user has to be able to see which two remotes disagreed.
-    expect(report.message ?? "").toContain("origin");
-    expect(report.message ?? "").toContain(other.path);
-  });
-});
-
 describe("a primary cloned fresh", () => {
   it("clones from the cache into the runner's own directory and points origin at the remote", async () => {
     const remote = makeRemote();
@@ -145,6 +72,37 @@ describe("a primary cloned fresh", () => {
       .map((entry) => statSync(join(objects, entry)))
       .some((stat) => stat.isFile() && stat.nlink > 1);
     expect(shared).toBe(true);
+  });
+
+  /**
+   * AD-5, under D-20a: adopting in place is not built, so what must be proved
+   * is the other half of the same promise - a checkout of this repository that
+   * the user already has on this machine is not read, written or moved.
+   */
+  it("leaves a checkout of the same repository the user already has untouched", async () => {
+    const remote = makeRemote();
+    const mine = userCheckout(remote);
+    git(mine, "checkout", "-b", "local-only");
+    writeFileSync(join(mine, "scratch.txt"), "mine\n");
+    const before = contentsOf(mine);
+    const head = git(mine, "rev-parse", "HEAD");
+    const storageDir = storage();
+    const resourceId = id();
+
+    const report = await makeWorkspaces({ storageDir }).provision(
+      provisionFrame({
+        kind: "primary",
+        checkouts: [checkout({ resourceId, remote: remote.url })],
+      }),
+    );
+
+    expect(report.status).toBe("ready");
+    // Hydra's own clone, somewhere else entirely.
+    expect(report.checkouts?.[0]?.branch).toBe("main");
+    expect(existsSync(join(storageDir, "primaries", resourceId))).toBe(true);
+    expect(contentsOf(mine)).toBe(before);
+    expect(git(mine, "rev-parse", "HEAD")).toBe(head);
+    expect(git(mine, "rev-parse", "--abbrev-ref", "HEAD")).toBe("local-only");
   });
 });
 
@@ -263,16 +221,15 @@ describe("a cache that has seen the branches agents made", () => {
     expect(second.checkouts?.[0]?.branch).toBe("hydra/run-bbbbbbbb");
   });
 
-  it("gives a worktree off an adopted folder's cache the repository's own remote", async () => {
+  it("gives a worktree off the primary's cache the repository's own remote", async () => {
     const remote = makeRemote();
-    const folder = adoptedCheckout(remote);
     const storageDir = storage();
     const resourceId = id();
     const workspaces = makeWorkspaces({ storageDir });
     await workspaces.provision(
       provisionFrame({
         kind: "primary",
-        checkouts: [checkout({ resourceId, remote: remote.url, path: folder })],
+        checkouts: [checkout({ resourceId, remote: remote.url })],
       }),
     );
     const workspaceId = id();
@@ -495,16 +452,19 @@ describe(".workspaceinclude", () => {
 
   it("copies what the primary lists into the worktree", async () => {
     const remote = makeRemote();
-    const folder = adoptedCheckout(remote);
-    withInclude(folder, "# what the agent needs\n\n.env\nconfig/local.json\n");
     const storageDir = storage();
     const resourceId = id();
     const workspaces = makeWorkspaces({ storageDir });
     await workspaces.provision(
       provisionFrame({
         kind: "primary",
-        checkouts: [checkout({ resourceId, remote: remote.url, path: folder })],
+        checkouts: [checkout({ resourceId, remote: remote.url })],
       }),
+    );
+    // The primary is Hydra's own clone, so what it lists is written there.
+    withInclude(
+      join(storageDir, "primaries", resourceId),
+      "# what the agent needs\n\n.env\nconfig/local.json\n",
     );
     const workspaceId = id();
 

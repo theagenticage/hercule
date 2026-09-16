@@ -92,12 +92,14 @@ describe("composerFields", () => {
     expect(fields.machine.locked).toBe("Create a new thread to change the machine");
   });
 
-  it("locks nothing on a draft thread", () => {
+  it("locks nothing a draft can still change", () => {
     const fields = composerFields(catalogs([CLAUDE]), config(), "draft");
 
     expect(fields.accessMode.locked).toBeNull();
-    expect(fields.workspace.locked).toBeNull();
     expect(fields.machine.locked).toBeNull();
+    // D-20d: with no repo to work in there is nothing to choose between, so
+    // the workspace field is its value with the way out as its reason.
+    expect(fields.workspace.locked).toBe("Add a repository to the project to work in one");
   });
 
   it("blocks a draft with no provider instance set up", () => {
@@ -450,10 +452,22 @@ describe("composerFields: the workspace a draft defaults to (AC-17)", () => {
     });
   });
 
-  it("works without a checkout when the stored setting says none", () => {
+  // D-20d: None is honoured only where None is offered, which is a project
+  // with no repo; one that holds a repo falls back to the rule.
+  it("ignores a stored none in a project that holds a repo", () => {
     const fields = composerFields(
       FULL,
       draft({ projectId: WEBSHOP_PROJECT.id, preferredWorkspace: "none" }),
+      "draft",
+    );
+
+    expect(fields.workspace.value).toEqual({ kind: "primary", resourceId: WEBSHOP.id });
+  });
+
+  it("works without a checkout when the stored setting says none and there is no repo", () => {
+    const fields = composerFields(
+      FULL,
+      draft({ projectId: EMPTY_PROJECT.id, preferredWorkspace: "none" }),
       "draft",
     );
 
@@ -512,7 +526,7 @@ describe("composerFields: one machine, read by everything that names one", () =>
     // The lead reads the shared checkout on that same machine, rather than
     // reading nothing because no machine was picked.
     expect(phraseText(fields.lead ?? [])).toBe(
-      "It works in the checkout of webshop on moss, on main. You and the agent share the files.",
+      "It works in the main workspace of webshop on moss, on main. You and the agent share the files.",
     );
   });
 });
@@ -559,7 +573,7 @@ describe("composerFields: the lead sentence follows the workspace (AC-17)", () =
     );
 
     expect(phraseText(fields.lead ?? [])).toBe(
-      "It works in the checkout of webshop on moss, on release/2.4. You and the agent share the files.",
+      "It works in the main workspace of webshop on moss, on release/2.4. You and the agent share the files.",
     );
   });
 
@@ -574,7 +588,7 @@ describe("composerFields: the lead sentence follows the workspace (AC-17)", () =
     );
 
     expect(phraseText(fields.lead ?? [])).toBe(
-      "It works in the checkout of webshop on moss, on main. You and the agent share the files.",
+      "It works in the main workspace of webshop on moss, on main. You and the agent share the files.",
     );
   });
 
@@ -661,10 +675,11 @@ describe("composerFields: the lead sentence follows the workspace (AC-17)", () =
     );
   });
 
+  // D-20d: a thread works without a checkout where the project has no repo.
   it("says a thread with no checkout works without one", () => {
     const fields = composerFields(
       FULL,
-      draft({ projectId: WEBSHOP_PROJECT.id, preferredWorkspace: "none" }),
+      draft({ projectId: EMPTY_PROJECT.id, preferredWorkspace: "none" }),
       "draft",
     );
 

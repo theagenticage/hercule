@@ -8,7 +8,6 @@ import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { makeWorkspaces } from "./index";
 import {
-  adoptedCheckout,
   checkout,
   cleanTemporaries,
   contentsOf,
@@ -57,29 +56,32 @@ describe("disposing an ephemeral workspace", () => {
 });
 
 describe("disposing a primary", () => {
-  it("refuses, and touches the user's folder not at all", async () => {
+  // D-20a: a primary is always Hydra's own clone, so what must survive a dispose
+  // is that clone rather than a folder of the user's that was adopted.
+  it("refuses, and leaves the main workspace where it is", async () => {
     const remote = makeRemote();
-    const folder = adoptedCheckout(remote);
     const storageDir = storage();
     const workspaceId = id();
+    const resourceId = id();
     const workspaces = makeWorkspaces({ storageDir });
     await workspaces.provision(
       provisionFrame({
         workspaceId,
         kind: "primary",
-        checkouts: [checkout({ resourceId: id(), remote: remote.url, path: folder })],
+        checkouts: [checkout({ resourceId, remote: remote.url })],
       }),
     );
-    const before = contentsOf(folder);
+    const directory = join(storageDir, "primaries", resourceId);
+    const before = contentsOf(directory);
 
     const report = await workspaces.dispose(disposing(workspaceId));
 
     expect(report.status).toBe("failed");
     expect(report.message).toBe("a primary is never torn down");
-    expect(existsSync(folder)).toBe(true);
-    expect(contentsOf(folder)).toBe(before);
+    expect(existsSync(directory)).toBe(true);
+    expect(contentsOf(directory)).toBe(before);
     // Still the runner's, so a session can still be placed in it.
-    expect(workspaces.resolve(workspaceId)?.cwd).toBe(folder);
+    expect(workspaces.resolve(workspaceId)?.cwd).toBe(directory);
   });
 });
 

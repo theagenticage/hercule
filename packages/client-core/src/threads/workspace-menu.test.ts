@@ -37,12 +37,12 @@ const menu = (over: Partial<Parameters<typeof workspaceMenu>[0]> = {}) =>
   });
 
 describe("workspaceMenu", () => {
-  it("leads with the shared checkout in a project that holds one repo", () => {
+  // D-20d: a project that holds a repo never offers None.
+  it("leads with the main workspace in a project that holds one repo", () => {
     expect(menu().rows.map((row) => row.name)).toEqual([
-      "Current checkout",
+      "Main workspace",
       "New workspace",
       "hydra/run-3f1",
-      "None",
     ]);
   });
 
@@ -51,14 +51,13 @@ describe("workspaceMenu", () => {
 
     expect(rows.map((row) => row.name)).toEqual([
       "New workspace",
-      "Current checkout of ops-infra",
-      "Current checkout of ops-runbooks",
-      "None",
+      "Main workspace of ops-infra",
+      "Main workspace of ops-runbooks",
     ]);
     expect(rows[0]?.sub).toBe("a worktree of each repo, side by side, each on a new branch");
   });
 
-  it("says what a shared checkout is on, and says so when the machine has none", () => {
+  it("says what a main workspace is on, and says so when the machine has none", () => {
     expect(menu().rows[0]?.sub).toBe("on main · you and the agent share the files");
     expect(menu({ runnerId: COVE.id }).rows[0]?.sub).toBe(
       "not cloned on cove · clones on first use",
@@ -73,26 +72,21 @@ describe("workspaceMenu", () => {
     expect(row?.sub).toBe("2 threads · “Fix flaky webhook tests”, “Write the retry runbook”");
   });
 
-  it("offers None alone in a project with no repo, and a way to give it one", () => {
+  // D-20d: None is offered only where there is nothing else to offer.
+  it("offers None alone in a project with no repo", () => {
     const empty = menu({ repos: [], workspaces: [], project: project("p-sandbox", "sandbox") });
 
     expect(empty.rows.map((row) => row.name)).toEqual(["None"]);
-    expect(empty.foot).toEqual({
-      projectId: "p-sandbox",
-      addRepo: "Add a repo to sandbox →",
-      runnerId: MOSS.id,
-    });
   });
 
-  it("has nothing to act on in the foot of a draft that stands in no project", () => {
+  it("calls it No workspace on a draft that stands in no project", () => {
     const loose = menu({ repos: [], workspaces: [], project: undefined });
 
     expect(loose.rows.map((row) => row.name)).toEqual(["No workspace"]);
-    expect(loose.foot).toBeNull();
   });
 
   it("reads the trigger off the row in force", () => {
-    expect(menu().label).toBe("Current checkout");
+    expect(menu().label).toBe("Main workspace");
     expect(menu({ pick: { kind: "existing", workspaceId: RUN_3F1.id } }).label).toBe(
       "hydra/run-3f1",
     );

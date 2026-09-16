@@ -8,7 +8,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { switchBranch } from "./git";
-import { addBranch, adoptedCheckout, cleanTemporaries, git, makeRemote } from "./testing";
+import { addBranch, userCheckout, cleanTemporaries, git, makeRemote } from "./testing";
 
 afterAll(cleanTemporaries);
 
@@ -18,7 +18,7 @@ describe("switching a checkout to a branch", () => {
   it("switches to the branch that was named", async () => {
     const remote = makeRemote();
     addBranch(remote, "release");
-    const folder = adoptedCheckout(remote);
+    const folder = userCheckout(remote);
 
     const outcome = await switchBranch(folder, "release", ENV);
 
@@ -28,7 +28,7 @@ describe("switching a checkout to a branch", () => {
 
   it("refuses a name that is a file rather than a branch, and keeps the edit under it", async () => {
     const remote = makeRemote();
-    const folder = adoptedCheckout(remote);
+    const folder = userCheckout(remote);
     // The user's uncommitted work, in a file whose name could be read as a
     // branch: `git checkout README.md` would silently restore it from HEAD.
     writeFileSync(join(folder, "README.md"), "what the user was in the middle of\n");

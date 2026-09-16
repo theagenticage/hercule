@@ -175,8 +175,10 @@ The identity of a repo resource: `host/owner/repo`, lowercased, with the scheme,
 _Avoid_: URL, origin, clone URL (for the identity; those are spellings of it)
 
 **Workspace**:
-A provisioned working area on a runner in which sessions do their work, containing zero or more checkouts. Two kinds: a **primary** workspace (exactly one checkout; at most one per resource per runner; long-lived and shared, the resource's main checkout) and **ephemeral** workspaces (provisioned for one run, disposed after; zero checkouts makes a scratch workspace, several makes a multi-repo workspace). A run has exactly one workspace, shared by all its agent steps. A session may also run with no workspace at all.
-_Avoid_: worktree (reserved for the git mechanism), playground
+A provisioned working area on a runner in which sessions do their work, containing zero or more checkouts. Two kinds: a **primary** workspace (exactly one checkout; at most one per resource per runner; long-lived and shared) and **ephemeral** workspaces (provisioned for one run, disposed after; zero checkouts makes a scratch workspace, several makes a multi-repo workspace). A run has exactly one workspace, shared by all its agent steps. A session may also run with no workspace at all.
+
+The user-facing word for a primary is **main workspace**: `primary` is the kind in code, on the wire and in the database, and "main workspace" is what every label, menu row, help text and sentence a person reads calls it. It is always Hydra's own clone under the runner's storage - Hydra never takes over a folder the user already has.
+_Avoid_: worktree (reserved for the git mechanism), playground; current checkout, shared checkout, main checkout (all three named the primary before; "main workspace" replaced them), adopt (adopting a folder in place is not built)
 
 **Checkout**:
 One working copy of a single resource inside a workspace. In v1 only git repos are checkout-able.

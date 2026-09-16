@@ -81,6 +81,27 @@ const DEFAULT_DIRECTION: SortDirection = "asc";
 
 const NO_SUCH_RESOURCE = "no such resource";
 
+/** A repo is named by the remote it is; a second name nothing reads is refused. */
+const REPO_IS_ITS_REMOTE = "a repo is named by its remote, so it takes no label";
+
+/** What a kind that is never checked out has no use for. */
+const noCheckout = (kind: string): string =>
+  `a ${kind} is never checked out, so it has no setup command and nothing to include`;
+
+/**
+ * Which of the two checkout-only fields a non-repo was given, if either: they
+ * are refused rather than stored where nothing would ever read them.
+ */
+const offRepo = (given: {
+  readonly setupCommand?: unknown;
+  readonly workspaceInclude?: unknown;
+}): "setupCommand" | "workspaceInclude" | undefined =>
+  given.setupCommand !== undefined && given.setupCommand !== null
+    ? "setupCommand"
+    : given.workspaceInclude !== undefined
+      ? "workspaceInclude"
+      : undefined;
+
 const NOT_A_REMOTE =
   "that is not a remote Hydra can clone: write https://host/owner/repo or git@host:owner/repo";
 
@@ -206,6 +227,9 @@ const make = Effect.gen(function* () {
             validation([{ path: ["remote"], message: "a repo is named by its remote" }]),
           );
         }
+        if (decoded.kind === "repo" && decoded.label !== undefined) {
+          return yield* Effect.fail(validation([{ path: ["label"], message: REPO_IS_ITS_REMOTE }]));
+        }
         if (decoded.kind !== "repo") {
           if (decoded.remote !== undefined) {
             return yield* Effect.fail(
@@ -217,6 +241,12 @@ const make = Effect.gen(function* () {
           if (decoded.label === undefined) {
             return yield* Effect.fail(
               validation([{ path: ["label"], message: `a ${decoded.kind} is named by its label` }]),
+            );
+          }
+          const off = offRepo(decoded);
+          if (off !== undefined) {
+            return yield* Effect.fail(
+              validation([{ path: [off], message: noCheckout(decoded.kind) }]),
             );
           }
         }
@@ -241,9 +271,10 @@ const make = Effect.gen(function* () {
               label: decoded.label ?? null,
               connectionId: decoded.connectionId ?? null,
               setupCommand: decoded.setupCommand ?? null,
-              // On unless it is turned off: a fresh worktree that silently
-              // lacked the files the user works with is the surprising answer.
-              workspaceInclude: decoded.workspaceInclude ?? true,
+              // On unless it is turned off, and never on off a repo: a fresh
+              // worktree that silently lacked the files the user works with is
+              // the surprising answer, and a folder has no worktree to fill.
+              workspaceInclude: decoded.kind === "repo" && (decoded.workspaceInclude ?? true),
               at,
             });
             yield* resources.setProjects(row.id, projectIds);
@@ -275,12 +306,26 @@ const make = Effect.gen(function* () {
             if (patch.connectionId !== undefined && patch.connectionId !== null) {
               yield* namedConnection(before.kind, patch.connectionId);
             }
-            if (patch.remote !== undefined && before.kind !== "repo") {
-              return yield* Effect.fail(
-                validation([
-                  { path: ["remote"], message: `a ${before.kind} has no remote to check out` },
-                ]),
-              );
+            if (before.kind === "repo") {
+              if (patch.label !== undefined && patch.label !== null) {
+                return yield* Effect.fail(
+                  validation([{ path: ["label"], message: REPO_IS_ITS_REMOTE }]),
+                );
+              }
+            } else {
+              if (patch.remote !== undefined) {
+                return yield* Effect.fail(
+                  validation([
+                    { path: ["remote"], message: `a ${before.kind} has no remote to check out` },
+                  ]),
+                );
+              }
+              const off = offRepo(patch);
+              if (off !== undefined) {
+                return yield* Effect.fail(
+                  validation([{ path: [off], message: noCheckout(before.kind) }]),
+                );
+              }
             }
             const canonicalRemote =
               patch.remote === undefined ? undefined : yield* freeRemote(patch.remote, id);

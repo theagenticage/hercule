@@ -114,7 +114,7 @@ describe("the Task and Project tables", () => {
         // The link points at a resource as well as at a project, so there has
         // to be one to point at.
         yield* sql`INSERT INTO resources (id, kind, workspace_include, created_at, updated_at)
-                   VALUES (x'00000000000000000000000000000002', 'folder', 1, 'a', 'a')`;
+                   VALUES (x'00000000000000000000000000000002', 'folder', 0, 'a', 'a')`;
         const link = sql`INSERT INTO project_resources (project_id, resource_id)
                          VALUES (x'00000000000000000000000000000001',
                                  x'00000000000000000000000000000002')`;

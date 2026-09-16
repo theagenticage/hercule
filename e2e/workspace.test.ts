@@ -1,7 +1,7 @@
 /**
  * Resources, workspaces and checkouts out of the shipped program: a repo
- * recorded, its main checkout adopted on the machine the controller runs for
- * itself, and a thread's own worktree made off the cache that adopt seeded.
+ * recorded, its main workspace cloned on the machine the controller runs for
+ * itself, and a thread's own worktree made off the cache that clone seeded.
  *
  * Nothing here reaches GitHub. The repository is a bare one in a temporary
  * directory, and the resource names it the way a user would - `https://` -
@@ -9,14 +9,12 @@
  * in `apps/controller/src/resources/remote.ts` takes `https://` and git's
  * `user@host:owner/repo` and nothing else).
  *
- * Adopting needs no network: the machine seeds its cache from the folder and
- * only checks that the folder's `origin` names the same repository the resource
- * does. Making a worktree does need one - `ensureCache` fetches the remote every
- * time and a failed fetch fails the workspace - so the worktree case writes
- * git's own `url.<base>.insteadOf` into the machine's `HOME` first, which is
- * what makes the https spelling resolve to the bare repository beside it. It is
- * written late rather than up front because the rewrite also applies to
- * `git remote get-url`, which is the question adopt asks of the folder.
+ * Both cases need the machine to reach that remote - `ensureCache` fetches it
+ * every time and a failed fetch fails the workspace - so git's own
+ * `url.<base>.insteadOf` is written into the machine's `HOME` up front, which is
+ * what makes the https spelling resolve to the bare repository beside it.
+ * D-20a: nothing is adopted, so no folder of the user's is read at all, and the
+ * checkout beside the bare repository is here to prove exactly that.
  *
  * The worktree case is the only one that needs a session, and no fake provider
  * ships, so it runs a real one and is opt-in under `HYDRA_LIVE_SESSION_TEST`
@@ -47,7 +45,7 @@ import {
 } from "./harness";
 
 const state = temporaryHome();
-/** The bare remote, the checkout that adopts it, and the `HOME` that joins them. */
+/** The bare remote, a checkout of it the user has, and the `HOME` that joins them. */
 const world = temporaryHome();
 const binary = releaseBinary();
 
@@ -160,9 +158,8 @@ const anyLoggedIn = async (): Promise<boolean> => {
 };
 
 beforeAll(async () => {
-  // A bare repository with one commit on `main`, and a working copy of it whose
-  // `origin` is spelled the way the resource is: adopting checks that the two
-  // name one repository before it touches anything.
+  // A bare repository with one commit on `main`, and a working copy of it the
+  // user has beside it, which Hydra must never touch.
   git(["init", "--bare", "--initial-branch=main", bare], world.home);
   const seed = join(world.home, "seed");
   mkdirSync(seed);
@@ -173,6 +170,12 @@ beforeAll(async () => {
   git(["push", bare, "main"], seed);
   git(["clone", "--", bare, checkout], world.home);
   git(["remote", "set-url", "origin", REMOTE], checkout);
+  // The machine clones and fetches the https spelling, which resolves to the
+  // bare repository beside it through git's own rewrite.
+  appendFileSync(
+    join(gitHome.home, ".gitconfig"),
+    `[url "file://${bare}"]\n\tinsteadOf = ${REMOTE}\n`,
+  );
 
   controller = await startController({
     home: state.home,
@@ -217,7 +220,7 @@ afterAll(async () => {
   gitHome.remove();
 });
 
-describe("a repo, its main checkout and a thread's worktree, through the CLI", () => {
+describe("a repo, its main workspace and a thread's worktree, through the CLI", () => {
   /** The resource the whole suite stands on, recorded by the first case. */
   let resourceId = "";
 
@@ -233,7 +236,7 @@ describe("a repo, its main checkout and a thread's worktree, through the CLI", (
     resourceId = resource.id;
   }, 30_000);
 
-  it("adopts the folder already on the machine as the main checkout, writing nothing into it", async () => {
+  it("clones the repo as its main workspace, touching the user's own checkout not at all", async () => {
     const before = git(["status", "--porcelain=v1", "--untracked-files=all"], checkout);
     const head = git(["rev-parse", "HEAD"], checkout);
 
@@ -245,8 +248,6 @@ describe("a repo, its main checkout and a thread's worktree, through the CLI", (
         resourceId,
         "--runner",
         runnerId,
-        "--path",
-        checkout,
         "--json",
       ]),
     );
@@ -265,13 +266,14 @@ describe("a repo, its main checkout and a thread's worktree, through the CLI", (
     expect(only!.branch).toBe("main");
     expect(only!.branches).toContain("main");
 
-    // Hydra never touches a primary beyond what the user asked for: the folder
-    // reads exactly as it did, on the commit it was on.
+    // AD-5 under D-20a: the user's own checkout of this repository is not
+    // Hydra's and is never read or written - it reads exactly as it did, on the
+    // commit it was on.
     expect(git(["status", "--porcelain=v1", "--untracked-files=all"], checkout)).toBe(before);
     expect(git(["rev-parse", "HEAD"], checkout)).toBe(head);
   }, 120_000);
 
-  it("refuses a second main checkout of the same repo on the same machine", async () => {
+  it("refuses a second main workspace of the same repo on the same machine", async () => {
     const ran = await hydra([
       "workspace",
       "provision",
@@ -297,13 +299,6 @@ describe("a repo, its main checkout and a thread's worktree, through the CLI", (
         );
         return;
       }
-
-      // From here the machine has to reach the remote, so the https spelling is
-      // pointed at the bare repository on disk.
-      appendFileSync(
-        join(gitHome.home, ".gitconfig"),
-        `[url "file://${bare}"]\n\tinsteadOf = ${REMOTE}\n`,
-      );
 
       const spawned = ok<Session>(
         await hydra(
@@ -332,7 +327,7 @@ describe("a repo, its main checkout and a thread's worktree, through the CLI", (
       // The thread's branch is the session's own, and nothing else's: the tail of
       // the session id is what tells two threads in one repo apart.
       expect(only!.branch).toBe(`hydra/run-${spawned.id.slice(-8)}`);
-      // It starts where `main` is, so the worktree came off the cache the adopt
+      // It starts where `main` is, so the worktree came off the cache the clone
       // seeded rather than from a repository nobody could reach.
       expect(only!.branches).toContain(only!.branch!);
       // The workspace knows which thread is in it: `sessionIds` is what the

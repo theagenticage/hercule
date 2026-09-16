@@ -8,9 +8,9 @@
  * in it and never torn down; an ephemeral one is made for a piece of work and
  * disposed of afterwards.
  *
- * The controller stores no path. Where the folder is is the machine's own
- * business, and the one path a caller may name - a folder to adopt in place -
- * is forwarded to that machine and never written down here.
+ * The controller stores no path and takes none. Where the folder is is the
+ * machine's own business: a primary is always a Hydra-managed clone under that
+ * machine's own storage.
  */
 import { Schema } from "effect";
 import { CheckoutForm, WorkspaceKind } from "@hydra/protocol";
@@ -33,9 +33,6 @@ import { Authenticated } from "../security";
 /** The kinds and the forms are the wire's; the API hands them out unchanged. */
 export { CheckoutForm, WorkspaceKind };
 
-/** The longest path a caller may point at to adopt in place. */
-export const MAX_PATH_LENGTH = 512;
-
 /** The longest branch name; git's own limit is the filesystem's. */
 export const MAX_BRANCH_LENGTH = 255;
 
@@ -45,7 +42,9 @@ export const MAX_BRANCH_LENGTH = 255;
  * beginning with `-` would be read as an option, and the rest of these are what
  * `git check-ref-format` refuses - `..` and `@{` have meanings of their own, a
  * control character or a space is not a name, `~^:?*[\` are pattern and
- * revision syntax, and a trailing `/` or `.lock` is not a ref.
+ * revision syntax, and a trailing `/` or `.lock` is not a ref. A component
+ * beginning with `.` is refused for the same reason git refuses it: `.hidden`
+ * and `refs/heads/.git` are not ref components.
  */
 export const Branch = Schema.String.check(
   Schema.isLengthBetween(1, MAX_BRANCH_LENGTH),
@@ -53,26 +52,9 @@ export const Branch = Schema.String.check(
   // a name is checked here rather than by a command that half ran.
   Schema.isPattern(
     // eslint-disable-next-line no-control-regex
-    /^(?!-)(?!.*\.\.)(?!.*@\{)(?!.*\.lock$)(?!.*\/$)[^\u0000-\u0020~^:?*[\\\u007f]+$/,
+    /^(?!.*(?:^|\/)[-.])(?!.*\.\.)(?!.*@\{)(?!.*\.lock$)(?!.*\/$)[^\u0000-\u0020~^:?*[\\\u007f]+$/,
     { title: "branch", description: "a git branch name" },
   ),
-);
-
-/**
- * A folder on the machine, as the user points at it: absolute, because the
- * machine has no working directory the user can see, and never something git
- * would read as an option.
- */
-export const AdoptPath = Schema.String.check(
-  Schema.isLengthBetween(1, MAX_PATH_LENGTH),
-  // A path is what it says it is, absolutely: the machine has no working
-  // directory the user can see, and a word beginning with `-` is an option. The
-  // NUL is the point, as above: it cannot be in a path.
-  // eslint-disable-next-line no-control-regex
-  Schema.isPattern(/^\/[^\u0000]*$/, {
-    title: "path",
-    description: "an absolute path on the machine",
-  }),
 );
 
 /**
@@ -93,11 +75,16 @@ export const Checkout = Schema.Struct({
   form: CheckoutForm,
   /** Where under the workspace it sits; null puts it at the root. */
   subdirectory: Schema.NullOr(Schema.String),
-  /** What is checked out there, once the machine has said. */
-  branch: Schema.NullOr(Branch),
+  /**
+   * What is checked out there, as the machine said it: null until it has, and
+   * null again where it could not read one. Not `Branch`, which is what a
+   * caller may ask for - this is a fact reported back, and a record that
+   * refused to carry what the machine found would be a record of nothing.
+   */
+  branch: Schema.NullOr(Schema.String),
   /** Every local branch the machine found, in its order. */
-  branches: Schema.Array(Branch),
-  defaultBranch: Schema.NullOr(Branch),
+  branches: Schema.Array(Schema.String),
+  defaultBranch: Schema.NullOr(Schema.String),
 });
 
 export type Checkout = Schema.Schema.Type<typeof Checkout>;
@@ -134,11 +121,6 @@ export const WORKSPACE_SORT_FIELDS = ["createdAt"] as const;
 export const WorkspaceProvisionInput = closedStruct({
   resourceId: Id,
   runnerId: Id,
-  /**
-   * A folder on that machine to adopt in place, instead of cloning a fresh one.
-   * Forwarded to the machine and never stored.
-   */
-  path: Schema.optionalKey(AdoptPath),
 });
 
 export type WorkspaceProvisionInput = Schema.Schema.Type<typeof WorkspaceProvisionInput>;

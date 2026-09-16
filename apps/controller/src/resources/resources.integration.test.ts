@@ -212,6 +212,58 @@ describe("resource.create", () => {
       expect(inbox.label).toBe("Work mail");
       expect(inbox.connectionId).toBe(mailbox);
       expect(inbox.remote ?? null).toBeNull();
+      // D-21 F7: neither is ever checked out, so neither carries the two fields
+      // that only mean something in a checkout.
+      expect(folder.setupCommand ?? null).toBeNull();
+      expect(folder.workspaceInclude).toBe(false);
+      expect(inbox.workspaceInclude).toBe(false);
+    });
+  });
+
+  /**
+   * D-21 F7: the per-kind fields are honest. A repo is named by its remote, so a
+   * label on one is a second name nothing reads; a folder and a mailbox are
+   * never checked out, so a setup command and an include flag are rules for a
+   * checkout that can never exist. Both are refused rather than stored.
+   */
+  it("refuses a label on a repo and the checkout fields off one", async () => {
+    await withResources(async (arranged) => {
+      const labelled = await createResource(arranged, {
+        kind: "repo",
+        remote: "https://github.com/acme/web",
+        label: "Web",
+      });
+      expect(labelled.status, await labelled.clone().text()).toBe(400);
+      expect(await labelled.text()).toContain("named by its remote");
+
+      for (const field of [{ setupCommand: "pnpm install" }, { workspaceInclude: true }]) {
+        const refused = await createResource(arranged, {
+          kind: "folder",
+          label: "Notes",
+          ...field,
+        });
+        expect(refused.status, await refused.clone().text()).toBe(400);
+        expect(await refused.text()).toContain("never checked out");
+      }
+    });
+  });
+
+  it("refuses the same on an update", async () => {
+    await withResources(async (arranged) => {
+      const web = await repo(arranged);
+      const folder = await okCreate(
+        await createResource(arranged, { kind: "folder", label: "Notes" }),
+      );
+
+      const labelled = await patchResource(arranged, web.id, { label: "Web" });
+      expect(labelled.status, await labelled.clone().text()).toBe(400);
+
+      const included = await patchResource(arranged, folder.id, { workspaceInclude: true });
+      expect(included.status, await included.clone().text()).toBe(400);
+      // Clearing a label a repo never had is not a second name: it is a no-op
+      // the caller may write.
+      const cleared = await patchResource(arranged, web.id, { label: null });
+      expect(cleared.status, await cleared.clone().text()).toBe(200);
     });
   });
 

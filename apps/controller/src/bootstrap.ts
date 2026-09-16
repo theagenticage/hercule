@@ -281,10 +281,11 @@ export const bootWith = <A, E>(
     const withPlugins = Layer.mergeAll(
       PluginsLayer,
       ProviderServiceLayer,
-      // The workspace service reaches the session service - a workspace that
-      // came up releases the sessions waiting for it - so it is layered on top
-      // of that one rather than merged beside it.
-      WorkspaceServiceLayer.pipe(Layer.provideMerge(SessionServiceLayer)),
+      // A spawn asks the workspace service where it is to work, so the session
+      // service is layered on top of that one rather than merged beside it. The
+      // reverse edge - what a machine's report means for the sessions waiting on
+      // a workspace - is the runner socket's, which holds both.
+      SessionServiceLayer.pipe(Layer.provideMerge(WorkspaceServiceLayer)),
       ConnectionServiceLayer,
     ).pipe(
       Layer.provideMerge(PluginHostLayer),

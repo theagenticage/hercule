@@ -61,11 +61,12 @@ export const repo = (
 
 export const checkout = (
   resourceId: string,
-  branch: string,
-  branches: readonly string[] = [branch],
+  /** Null where the machine could not read one, which the record carries (D-21). */
+  branch: string | null,
+  branches: readonly string[] = branch === null ? [] : [branch],
   defaultBranch: string | null = "main",
 ) => ({
-  checkoutId: `co-${resourceId}-${branch}`,
+  checkoutId: `co-${resourceId}-${branch ?? "unknown"}`,
   resourceId,
   form: "clone" as const,
   subdirectory: null,

@@ -308,9 +308,9 @@ describe("Settings > Threads defaults", () => {
  * account a thread with no checkout acts through.
  *
  * Readings picked here, where the SPEC names copy but not a handle:
- * - the three faces of the Workspace control write the `thread.workspace`
- *   values they stand for: Current checkout -> `primary`, New workspace ->
- *   `ephemeral`, None -> `none`;
+ * - the two faces of the Workspace control write the `thread.workspace`
+ *   values they stand for: Main workspace -> `primary`, New workspace ->
+ *   `ephemeral` (D-20d dropped None);
  * - the select's label is the row's own wording, "GitHub account for threads
  *   without a checkout".
  * ------------------------------------------------------------------ */
@@ -364,14 +364,17 @@ const openWithConnections = async (
 };
 
 describe("Settings > Threads: the workspace a thread opens in (AC-22)", () => {
-  it("offers the three faces and writes thread.workspace on pick", async () => {
+  it("offers the two faces and writes thread.workspace on pick", async () => {
     const user = userEvent.setup();
     const { api } = await openWithConnections({ "thread.workspace": "primary" });
 
     const group = await screen.findByRole("radiogroup", { name: "Workspace" });
-    for (const face of ["Current checkout", "New workspace", "None"]) {
+    for (const face of ["Main workspace", "New workspace"]) {
       expect(within(group).getByRole("radio", { name: face })).toBeDefined();
     }
+    // D-20d: a project without a source always runs without a workspace, so
+    // None is not a default anyone picks.
+    expect(within(group).queryByRole("radio", { name: "None" })).toBeNull();
 
     await user.click(within(group).getByRole("radio", { name: "New workspace" }));
 
@@ -380,15 +383,13 @@ describe("Settings > Threads: the workspace a thread opens in (AC-22)", () => {
     expect(writes(api)[0]?.body).toEqual({ user: { "thread.workspace": "ephemeral" } });
   });
 
-  it("writes none when the thread is to work without a checkout", async () => {
-    const user = userEvent.setup();
-    const { api } = await openWithConnections({ "thread.workspace": "primary" });
+  // D-20d: the fine print is what says a project without a source runs
+  // without a workspace, since there is no face for it any more.
+  it("says in its fine print that a project with no source runs without a workspace", async () => {
+    await openWithConnections();
 
-    const group = await screen.findByRole("radiogroup", { name: "Workspace" });
-    await user.click(within(group).getByRole("radio", { name: "None" }));
-
-    expect(await screen.findByRole("status")).toBeDefined();
-    expect(writes(api)[0]?.body).toEqual({ user: { "thread.workspace": "none" } });
+    const fine = await screen.findByText(/repos/);
+    expect(fine.textContent).toContain("A project with no source always runs without a workspace.");
   });
 
   it("says in its fine print that a project with several repos takes a new workspace anyway", async () => {

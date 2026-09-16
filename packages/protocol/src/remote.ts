@@ -2,13 +2,11 @@
  * What two spellings of one repository have in common.
  *
  * `git@github.com:Acme/Web.git` and `https://GitHub.com/acme/web` are the same
- * repository, and both ends of the protocol have to agree that they are: the
- * controller because a second resource on a remote it already holds is a
- * conflict and because the credential a machine asks for names the remote git
- * was about to talk to rather than any id, the runner because adopting a folder
- * means checking that the folder's `origin` is the repository it was told to
- * adopt. One rule, in the one package both of them link, so the two ends can
- * never disagree about what a remote is.
+ * repository, and every end that names one has to agree that they are: a second
+ * resource on a remote the controller already holds is a conflict, and the
+ * credential a machine asks for names the remote git was about to talk to
+ * rather than any id, so the question is asked once, in the one package every
+ * role links, and no two ends can disagree about what a remote is.
  *
  * The canonical form is `host/owner/repo`, lowercased, with the scheme, the
  * user, the port and a `.git` suffix taken off. Case is folded on the path as

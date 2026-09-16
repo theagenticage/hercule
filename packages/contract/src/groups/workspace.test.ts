@@ -1,14 +1,16 @@
 /**
- * What a branch name and a folder may be.
+ * What a branch name may be when a caller writes one, and what a checkout
+ * carries when a machine reports one back.
  *
- * Both end up as arguments to a command on a machine - `git checkout`, `git
- * worktree add`, a clone into a directory - so what a caller writes is held to
- * git's own rules here, in one refusal a caller can act on, rather than as a
- * command that fails halfway through on a runner.
+ * A branch a caller writes ends up as an argument to a command on a machine -
+ * `git checkout`, `git worktree add` - so it is held to git's own rules here, in
+ * one refusal a caller can act on, rather than as a command that fails halfway
+ * through on a runner. What comes back is a different thing: a fact, which the
+ * record carries as the machine said it (D-21 F2).
  */
 import { Schema } from "effect";
 import { describe, expect, it } from "vitest";
-import { AdoptPath, Branch } from "./workspace";
+import { Branch, Checkout } from "./workspace";
 
 const takes = (schema: Schema.Codec<string>, value: string): boolean =>
   Schema.decodeUnknownExit(schema)(value)._tag === "Success";
@@ -47,6 +49,9 @@ describe("a branch name", () => {
       "feature*",
       "feature[1]",
       "feature\\x",
+      // D-21 F13: a component beginning with a dot is not a ref component.
+      ".hidden",
+      "feature/.git",
       `${"a".repeat(256)}`,
     ]) {
       expect(takes(Branch, branch), JSON.stringify(branch)).toBe(false);
@@ -54,16 +59,41 @@ describe("a branch name", () => {
   });
 });
 
-describe("a folder to adopt", () => {
-  it("takes an absolute path", () => {
-    for (const path of ["/Users/rogier/code/web", "/srv/repos/web", "/a"]) {
-      expect(takes(AdoptPath, path), path).toBe(true);
-    }
+describe("a checkout as the API hands it out", () => {
+  /**
+   * D-21 F2: the machine could read no branch - a detached HEAD, or a clone of
+   * an empty repository - and the record says so. Encoding it as `Branch` would
+   * make the API unable to describe a checkout it is holding.
+   */
+  it("encodes a checkout the machine could read no branch for", () => {
+    const checkout = {
+      checkoutId: "0199e0e7-1111-7000-8000-000000000001",
+      resourceId: "0199e0e7-1111-7000-8000-000000000002",
+      form: "clone",
+      subdirectory: null,
+      branch: null,
+      branches: [],
+      defaultBranch: null,
+    } as const;
+    expect(Schema.encodeSync(Checkout)(checkout)).toMatchObject({ branch: null, branches: [] });
   });
 
-  it("refuses a relative one, and one git would read as an option", () => {
-    for (const path of ["", "code/web", "./code/web", "~/code/web", "-o/tmp/x", "--git-dir=/tmp"]) {
-      expect(takes(AdoptPath, path), JSON.stringify(path)).toBe(false);
-    }
+  /**
+   * And what a machine did say, whatever it is: a detached worktree reports
+   * `(HEAD detached at abc1234)`-shaped words on some gits, and a record that
+   * refused them would be a record of nothing.
+   */
+  it("encodes a branch a caller could never have asked for", () => {
+    expect(
+      Schema.encodeSync(Checkout)({
+        checkoutId: "0199e0e7-1111-7000-8000-000000000001",
+        resourceId: "0199e0e7-1111-7000-8000-000000000002",
+        form: "worktree",
+        subdirectory: null,
+        branch: ".hidden",
+        branches: [".hidden"],
+        defaultBranch: null,
+      }),
+    ).toMatchObject({ branch: ".hidden" });
   });
 });

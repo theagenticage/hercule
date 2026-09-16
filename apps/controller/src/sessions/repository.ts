@@ -18,7 +18,6 @@ import {
   encodeCursor,
   encodeIdCursor,
   keysetOver,
-  mintUuid,
   pageOf,
   uuidFromString,
   uuidToString,
@@ -26,6 +25,7 @@ import {
   type CursorScope,
   type Page,
 } from "../db";
+import { readyWhere } from "../workspaces";
 import type { StreamRow } from "./stream";
 
 /** A session as it is stored. `resumable` is derived at read; see above. */
@@ -54,13 +54,19 @@ export interface StoredSession {
 }
 
 export interface NewSession {
+  /**
+   * Minted by the caller, not here: a spawn opens the working area in the same
+   * transaction and a thread's own worktree is made on a branch named after the
+   * thread, so the id has to exist before either row does.
+   */
+  readonly id: string;
   readonly title: string;
   readonly permissionProfileId: string;
   readonly instanceId: string;
   readonly runnerId: string;
   readonly workspaceId: string | null;
   readonly projectId: string | undefined;
-  /** The branch a shared checkout is switched to before the harness starts. */
+  /** The branch the main workspace is switched to before the harness starts. */
   readonly checkoutBranch: string | undefined;
   /** The GitHub account this session pushes as, settled when it was spawned. */
   readonly githubConnectionId: string | undefined;
@@ -108,7 +114,8 @@ interface SessionRow {
  * Whether a session can be picked up again, as one SQL expression over a row of
  * `sessions` under the alias given. Three things have to hold: the process is
  * gone, the provider-native transcript is still there, and the machine and the
- * working area it was in are both still there to open it in.
+ * working area it was in are both still there to open it in - the last of which
+ * is the workspaces domain's own predicate, so the two never disagree.
  *
  * Exported because the workspace sweep asks the same question about the threads
  * living in a workspace, and two spellings of "resumable" would be two
@@ -118,8 +125,7 @@ export const resumableWhere = (alias: string): string =>
   `${alias}.status = 'exited' AND ${alias}.native_session_id IS NOT NULL ` +
   `AND EXISTS (SELECT 1 FROM runners WHERE runners.id = ${alias}.runner_id ` +
   `AND runners.lifecycle <> 'retired') ` +
-  `AND (${alias}.workspace_id IS NULL OR EXISTS (SELECT 1 FROM workspaces ` +
-  `WHERE workspaces.id = ${alias}.workspace_id AND workspaces.status = 'ready'))`;
+  `AND ${readyWhere(alias)}`;
 
 const RESUMABLE = `(${resumableWhere("sessions")}) AS resumable`;
 
@@ -216,7 +222,7 @@ const make = Effect.gen(function* () {
   return {
     insert: (session: NewSession): Effect.Effect<StoredSession, SqlError> =>
       Effect.gen(function* () {
-        const id = mintUuid();
+        const id = uuidFromString(session.id);
         const parent =
           session.parentSessionId === undefined ? null : uuidFromString(session.parentSessionId);
         const workspace = session.workspaceId === null ? null : uuidFromString(session.workspaceId);
@@ -239,7 +245,7 @@ const make = Effect.gen(function* () {
                   'queued', ${session.at}, ${session.at})
         `;
         return {
-          id: uuidToString(id),
+          id: session.id,
           title: session.title,
           permissionProfileId: session.permissionProfileId,
           instanceId: session.instanceId,
@@ -492,16 +498,20 @@ const make = Effect.gen(function* () {
           readonly provider_id: string;
           readonly config: string;
         }>`
-          SELECT s.id, s.spec, s.checkout_branch, s.github_connection_id,
-                 pi.provider_id, pi.config
+          SELECT s.id, s.spec,
+                 -- The branch pick is one-shot: it is what the machine switches
+                 -- the main workspace to before this thread first runs. A resume
+                 -- picks the thread up where it left off, and replaying the pick
+                 -- would switch the branch out from under whatever the user has
+                 -- done in that checkout since.
+                 CASE WHEN s.started_at IS NULL THEN s.checkout_branch END AS checkout_branch,
+                 s.github_connection_id, pi.provider_id, pi.config
           FROM sessions s JOIN provider_instances pi ON pi.id = s.instance_id
           WHERE s.runner_id = ${uuidFromString(runnerId)} AND s.status = 'queued'
             -- A session waits for the working area it asked for: telling the
             -- machine to start it before the workspace stands would hand the
             -- harness a directory that is not there yet.
-            AND (s.workspace_id IS NULL
-                 OR EXISTS (SELECT 1 FROM workspaces w
-                            WHERE w.id = s.workspace_id AND w.status = 'ready'))
+            AND ${sql.literal(readyWhere("s"))}
           ORDER BY s.created_at ASC, s.id ASC
           LIMIT ${limit}
         `,

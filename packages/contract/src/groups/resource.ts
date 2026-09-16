@@ -11,6 +11,11 @@
  * A resource joins any number of projects, and a project is a grouping and
  * nothing else, so the join is a list on the resource rather than a nested
  * record of its own.
+ *
+ * The fields are per-kind, and the service refuses the ones a kind has no use
+ * for rather than storing them where nothing would ever read them: a repo takes
+ * a remote, a setup command and `workspaceInclude` and no label; a folder and a
+ * mailbox take a label and none of the three.
  */
 import { Schema } from "effect";
 import * as HttpApiEndpoint from "effect/unstable/httpapi/HttpApiEndpoint";
@@ -32,13 +37,6 @@ import { atMost, bounded } from "../strings";
 
 /** The longest remote URL a resource may carry. */
 export const MAX_REMOTE_LENGTH = 512;
-
-/**
- * What a caller is told when it points an operation that checks something out
- * at a resource that is not a repo. One sentence: the API refuses with it, and
- * the CLI glosses the refusal with it.
- */
-export const NOT_CHECKED_OUT = "only a repo is checked out; a folder and a mailbox are records";
 
 /** The longest label a folder or a mailbox may carry. */
 export const MAX_RESOURCE_LABEL_LENGTH = 128;
@@ -71,13 +69,16 @@ export const Resource = Schema.Struct({
   remote: Schema.NullOr(Remote),
   /** `host/owner/repo`, lowercased: the identity two spellings share. */
   canonicalRemote: Schema.NullOr(Schema.String),
-  /** What to call it where the remote does not say; null on a repo. */
+  /** What a folder or a mailbox is called; always null on a repo, which its remote names. */
   label: Schema.NullOr(ResourceLabel),
   /** The Connection Hydra acts through for this resource. */
   connectionId: Schema.NullOr(Id),
-  /** Run in a fresh checkout once it stands. */
+  /** Run in a fresh checkout once it stands; always null off a repo. */
   setupCommand: Schema.NullOr(SetupCommand),
-  /** Whether a fresh checkout takes what the primary's `.workspaceinclude` lists. */
+  /**
+   * Whether a fresh checkout takes what the main workspace's `.workspaceinclude`
+   * lists. False off a repo, which has no checkout to take anything into.
+   */
   workspaceInclude: Schema.Boolean,
   projectIds: Schema.Array(Id),
   createdAt: Timestamp,
@@ -89,10 +90,10 @@ export type Resource = Schema.Schema.Type<typeof Resource>;
 export const RESOURCE_SORT_FIELDS = ["createdAt"] as const;
 
 /**
- * What creating one takes. Which fields a kind requires is the service's to
- * say: a repo needs a remote and no label, a folder and a mailbox the reverse,
- * and a schema union would make every field of it one opaque document on a
- * command line.
+ * What creating one takes. Which fields a kind takes is the service's to say: a
+ * repo needs a remote and refuses a label, a folder and a mailbox the reverse
+ * and refuse a setup command and `workspaceInclude` too, and a schema union
+ * would make every field of it one opaque document on a command line.
  */
 export const ResourceCreateInput = closedStruct({
   kind: ResourceKind,

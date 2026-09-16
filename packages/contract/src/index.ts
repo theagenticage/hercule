@@ -233,7 +233,6 @@ export {
   MAX_RESOURCE_LABEL_LENGTH,
   MAX_RESOURCE_PROJECTS,
   MAX_SETUP_COMMAND_LENGTH,
-  NOT_CHECKED_OUT,
   RESOURCE_KINDS,
   RESOURCE_SORT_FIELDS,
   RESOURCE_UPDATE_FIELDS,
@@ -244,12 +243,10 @@ export {
   ResourceUpdateInput,
 } from "./groups/resource";
 export {
-  AdoptPath,
   Branch,
   Checkout,
   CheckoutForm,
   MAX_BRANCH_LENGTH,
-  MAX_PATH_LENGTH,
   WORKSPACE_SORT_FIELDS,
   WORKSPACE_STATUSES,
   Workspace,

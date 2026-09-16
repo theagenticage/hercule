@@ -59,11 +59,19 @@ export type StoredResource = StoredRepo | StoredRecordResource;
 /**
  * Whether this resource is one a working copy is made from. Only a repo is: a
  * folder and a mailbox are records of something outside Hydra. Every door that
- * checks something out asks this one question and refuses with the contract's
- * one sentence, `NOT_CHECKED_OUT`, in whatever error its own shape calls for.
+ * checks something out asks this one question and refuses with the one sentence
+ * below, in whatever error its own shape calls for.
  */
 export const isCheckedOut = (resource: StoredResource): resource is StoredRepo =>
   resource.kind === "repo";
+
+/**
+ * What a caller is told when it points an operation that checks something out
+ * at a resource that is not a repo. Here rather than in the contract: it is a
+ * refusal this controller makes, not a shape the API declares, and the CLI
+ * restates it as the gloss beside the flag.
+ */
+export const NOT_CHECKED_OUT = "only a repo is checked out; a folder and a mailbox are records";
 
 export interface NewResource {
   readonly kind: ResourceKind;

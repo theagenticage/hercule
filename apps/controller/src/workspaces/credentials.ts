@@ -18,7 +18,7 @@ import * as Option from "effect/Option";
 import * as Redacted from "effect/Redacted";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
-import type { CredentialAnswer, CredentialRequest } from "@hydra/protocol";
+import type { CredentialAnswer, CredentialRefusal, CredentialRequest } from "@hydra/protocol";
 import { connectionRepository, isGithubConnection } from "../connections";
 import { hashToken } from "../credentials";
 import { uuidFromString, uuidToString } from "../db";
@@ -30,8 +30,8 @@ const PAT = "pat";
 
 /**
  * Who an account commits as: its login, and the address GitHub gives an account
- * that keeps its mail private. The machine is told this at session start and
- * again with every credential it asks for, so it is derived in one place.
+ * that keeps its mail private. The machine is told this once, at session start;
+ * a credential exchange carries the credential and nothing else.
  */
 export const gitIdentityOf = (
   login: string,
@@ -72,9 +72,14 @@ const make = Effect.gen(function* () {
     });
 
   /**
-   * The resource the asker holds a checkout of under this canonical remote, and
-   * the Connection on it. `none` means the asker does not hold it - or is not
-   * who it says it is, which reads the same from here.
+   * The workspace the asker holds a checkout of this canonical remote in, and
+   * the Connection that workspace was opened against. `none` means the asker
+   * does not hold it - or is not who it says it is, which reads the same from
+   * here.
+   *
+   * The Connection is the workspace's own column rather than the resource's:
+   * what a workspace acts through is settled when it is opened, and a resource
+   * that changes hands afterwards does not change what is already running.
    */
   const heldResource = (
     runnerId: string,
@@ -84,7 +89,7 @@ const make = Effect.gen(function* () {
     Effect.gen(function* () {
       if ("workspaceId" in request) {
         const rows = yield* sql<{ readonly connection_id: Uint8Array | null }>`
-          SELECT r.connection_id FROM resources r
+          SELECT w.designated_connection_id AS connection_id FROM resources r
           JOIN checkouts c ON c.resource_id = r.id
           JOIN workspaces w ON w.id = c.workspace_id
           WHERE r.canonical_remote = ${canonicalRemote}
@@ -99,8 +104,9 @@ const make = Effect.gen(function* () {
       }
 
       const rows = yield* sql<{ readonly connection_id: Uint8Array | null }>`
-        SELECT r.connection_id FROM resources r
+        SELECT w.designated_connection_id AS connection_id FROM resources r
         JOIN checkouts c ON c.resource_id = r.id
+        JOIN workspaces w ON w.id = c.workspace_id
         JOIN sessions s ON s.workspace_id = c.workspace_id
         JOIN session_tokens t ON t.session_id = s.id
         WHERE r.canonical_remote = ${canonicalRemote}
@@ -126,7 +132,7 @@ const make = Effect.gen(function* () {
       request: CredentialRequest,
     ): Effect.Effect<CredentialAnswer, CredentialError> =>
       Effect.gen(function* () {
-        const refuse = (error: NonNullable<CredentialAnswer["error"]>): CredentialAnswer => ({
+        const refuse = (error: CredentialRefusal): CredentialAnswer => ({
           _tag: "credentialAnswer",
           requestId: request.requestId,
           error,
@@ -143,7 +149,6 @@ const make = Effect.gen(function* () {
           requestId: request.requestId,
           token: credential.value.token,
           username: credential.value.login,
-          ...gitIdentityOf(credential.value.login),
         };
       }),
   };

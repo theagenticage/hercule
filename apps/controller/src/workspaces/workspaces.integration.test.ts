@@ -94,24 +94,23 @@ describe("workspace.provision", () => {
         resourceId: web,
         remote: "https://github.com/acme/web",
       });
-      // Nothing was asked to be adopted, so no path rides the frame.
+      // D-20a: no path crosses the wire at all. Where the clone goes is the
+      // machine's own business.
       expect(checkouts[0]?.["path"] ?? null).toBeNull();
     });
   });
 
-  it("forwards an adopt-in-place path to the machine", async () => {
+  // D-20a: adopting a folder in place is not built, so the payload takes no
+  // path and one offered is refused rather than quietly ignored.
+  it("refuses a path: a main workspace is always Hydra's own clone", async () => {
     await withWorkspaces(async (arranged) => {
       const web = await repo(arranged, "https://github.com/acme/web");
-      const workspace = await provisioned(arranged, {
+      const refused = await provision(arranged, {
         resourceId: web,
         runnerId: arranged.runnerId,
         path: "/Users/rogier/code/web",
       });
-
-      const frame = await frameWhen(arranged.wire, "workspaceProvision");
-      const checkouts = frame["checkouts"] as ReadonlyArray<Record<string, unknown>>;
-      expect(checkouts[0]?.["path"]).toBe("/Users/rogier/code/web");
-      expect(workspace.status).toBe("provisioning");
+      expect(await codeOf(refused)).toBe("validation");
     });
   });
 
@@ -191,6 +190,57 @@ describe("a primary the machine could not make", () => {
 });
 
 describe("the machine's report", () => {
+  /**
+   * D-21 F13: a report that moves nothing writes nothing. `markReady` used to
+   * write the branches whatever the row said, so a report that arrived after the
+   * workspace was disposed of would record branches for a directory that is
+   * gone - and a second report could overwrite what the live one recorded.
+   */
+  it("writes no checkouts when it says ready about a workspace that has gone", async () => {
+    await withWorkspaces(async (arranged) => {
+      const web = await repo(arranged, "https://github.com/acme/web");
+      const session = await spawned(arranged, {
+        prompt: "hello",
+        workspace: { kind: "ephemeral", checkouts: [{ resourceId: web }] },
+      });
+      const workspaceId = String(session.workspaceId);
+      const opened = (await readWorkspace(arranged, workspaceId)).checkouts[0]!;
+      const checkoutId = checkoutIdOf(opened);
+      arranged.wire.send({
+        _tag: "workspaceReport",
+        workspaceId,
+        status: "deleted",
+      } as never);
+      await workspaceWhen(arranged, workspaceId, (one) => one.status === "deleted");
+
+      // A second workspace whose own report follows the stale one: frames are
+      // handled in the order they arrive, so its readiness is what says the
+      // stale one has been through.
+      const next = await provisioned(arranged, { resourceId: web, runnerId: arranged.runnerId });
+      arranged.wire.send({
+        _tag: "workspaceReport",
+        workspaceId,
+        status: "ready",
+        checkouts: [
+          { checkoutId, branch: "hydra/run-ffffffff", branches: ["main"], defaultBranch: "main" },
+        ],
+      } as never);
+      arranged.wire.send({
+        _tag: "workspaceReport",
+        workspaceId: next.id,
+        status: "ready",
+        checkouts: [],
+      } as never);
+      await workspaceWhen(arranged, next.id, (one) => one.status === "ready");
+
+      const after = await readWorkspace(arranged, workspaceId);
+      expect(after.status).toBe("deleted");
+      // Still what it was opened with, not what the stale report said.
+      expect(after.checkouts[0]?.branch).toBe(opened.branch);
+      expect(after.checkouts[0]?.branches ?? []).toEqual([]);
+    });
+  });
+
   it("changes nothing when it says a workspace failed that has already come up", async () => {
     await withWorkspaces(async (arranged) => {
       const web = await repo(arranged, "https://github.com/acme/web");
@@ -381,17 +431,9 @@ describe("a machine that was not connected", () => {
         return runner.connectivity === "online" ? undefined : runner;
       });
 
-      // A folder to adopt is the one thing the controller never stores, so it
-      // cannot be re-sent later; asking for one is refused while the machine
-      // is away rather than turning into a clone behind the user's back.
-      const adopt = await provision(arranged, {
-        resourceId: web,
-        runnerId: arranged.runnerId,
-        path: "/Users/rogier/code/web",
-      });
-      expect(await codeOf(adopt)).toBe("invalid_state");
-      expect(await queryWorkspaces(arranged)).toEqual([]);
-
+      // D-20a: every frame the rows can rebuild is one that can be re-sent, so
+      // provisioning while the machine is away is taken and queued rather than
+      // refused.
       const workspace = await provisioned(arranged, {
         resourceId: web,
         runnerId: arranged.runnerId,
@@ -402,29 +444,6 @@ describe("a machine that was not connected", () => {
       const frame = await frameWhen(again, "workspaceProvision");
       expect(frame["workspaceId"]).toBe(workspace.id);
       expect(frame["kind"]).toBe("primary");
-    });
-  });
-});
-
-describe("an adopt the machine never heard", () => {
-  it("fails the workspace rather than waiting for a frame that is never re-sent", async () => {
-    await withWorkspaces(async (arranged) => {
-      const web = await repo(arranged, "https://github.com/acme/web");
-      // A machine the fleet reads as online but holds no connection to: the
-      // controller was told it went only after the frame was written.
-      const stale = await arranged.harness.insertRunner({ name: "vega", connectivity: "online" });
-
-      const workspace = await provisioned(arranged, {
-        resourceId: web,
-        runnerId: stale.id,
-        path: "/Users/rogier/code/web",
-      });
-
-      expect(workspace.status).toBe("failed");
-      expect(workspace.message).toContain("adopt the folder");
-      // Nothing re-sends an adopt, so the row says so now rather than sitting
-      // in `provisioning` waiting for a machine that was never told.
-      expect((await readWorkspace(arranged, workspace.id)).status).toBe("failed");
     });
   });
 });

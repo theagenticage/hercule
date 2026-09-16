@@ -222,9 +222,15 @@ const hold = (runnerId: string, socket: Socket.Socket) =>
           case "sessionInputResult":
             if (!greeted) return;
             return yield* presence.reportedAnswer(runnerId, mine, message);
-          case "workspaceReport":
+          case "workspaceReport": {
             if (!greeted) return;
-            return yield* workspaces.reported(runnerId, message);
+            // The two domains meet here and nowhere else: what a machine made of
+            // a workspace is the workspaces domain's to record, and what it
+            // means for the sessions waiting on it is the sessions domain's.
+            const settled = yield* workspaces.reported(runnerId, message);
+            if (settled === undefined) return;
+            return yield* sessions.workspaceSettled(runnerId, settled, message.message ?? null);
+          }
           case "credentialRequest":
             if (!greeted) return;
             return yield* workspaces.credentialAsked(runnerId, message);

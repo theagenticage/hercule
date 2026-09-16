@@ -51,14 +51,24 @@ export const makeWorkspaces = (options: {
   /** The shipped deadline for a setup command unless a test says otherwise. */
   readonly setupDeadlineMs?: number;
 }): Workspaces => {
-  const setupEnv = substrateEnv(process.env, options.gitEnv);
   const substrate: Substrate = {
     storageDir: options.storageDir,
     registry: makeRegistry(options.storageDir),
-    gitEnv: setupEnv,
-    setupEnv,
+    gitEnv: substrateEnv(process.env, options.gitEnv),
     setupDeadlineMs: options.setupDeadlineMs ?? SETUP_DEADLINE_MS,
   };
+
+  /**
+   * What is being made right now, per workspace. The controller re-sends a
+   * provisioning frame to a machine that dialled in again, and that resend can
+   * land while the first one is still cloning: the registry is written at the
+   * end, so both would see nothing there and both would provision, the second
+   * one failing on the branch the first had just made and tearing down what it
+   * found. Whoever arrives second waits for the one in flight and reports what
+   * it reported, which is the same answer the controller would have got had the
+   * frame never been sent twice.
+   */
+  const inFlight = new Map<string, Promise<WorkspaceReport>>();
   /**
    * A workspace whose directory somebody removed underneath the machine is one
    * no session can be placed in, and re-reporting it would place one there.
@@ -70,12 +80,19 @@ export const makeWorkspaces = (options: {
 
   return {
     provision: async (frame) => {
+      const running = inFlight.get(frame.workspaceId);
+      if (running !== undefined) return running;
       // The controller resends a provisioning frame to a runner that dialled in
       // again, and the work in a workspace must survive that.
       const entry = substrate.registry.held(frame.workspaceId);
-      return entry === undefined
-        ? provisionWorkspace(substrate, frame)
-        : reprovision(substrate, entry);
+      const started =
+        entry === undefined ? provisionWorkspace(substrate, frame) : reprovision(substrate, entry);
+      inFlight.set(frame.workspaceId, started);
+      try {
+        return await started;
+      } finally {
+        inFlight.delete(frame.workspaceId);
+      }
     },
     dispose: (frame) => disposeWorkspace(substrate, frame),
     resolve: (workspaceId) => {

@@ -1,9 +1,10 @@
 /**
- * Making a workspace on this machine: a primary that adopts the folder the user
- * already has or is cloned fresh, and an ephemeral worktree per repository.
+ * Making a workspace on this machine: a primary cloned fresh under this
+ * machine's own storage, and an ephemeral worktree per repository.
  *
- * A primary is the user's own checkout. Nothing here writes under an adopted
- * folder: the cache is cloned and fetched from it, which only reads.
+ * Nothing here ever touches a folder the user already has. A primary is Hydra's
+ * own clone, in a directory Hydra made, so no directory outside the storage
+ * directory is read or written.
  */
 import { cpSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { dirname, join as joinPath, resolve as resolvePath, sep } from "node:path";
@@ -21,7 +22,6 @@ import {
   ensureCache,
   localBranches,
   runGit,
-  sameRemote,
   startPointFor,
   type GitEnv,
 } from "./git";
@@ -67,52 +67,6 @@ const remember = (substrate: Substrate, entry: RegisteredWorkspace): Promise<voi
     entry,
   ]);
 
-/**
- * The folder the user pointed at, adopted as it stands: the cache is made from
- * it so an ephemeral of the same repository needs no network, and the folder
- * itself is only ever read.
- */
-const adopt = async (
-  substrate: Substrate,
-  workspaceId: string,
-  one: ProvisionCheckout,
-  folder: string,
-  env: GitEnv,
-): Promise<WorkspaceReport> => {
-  if (!(await runGit(["-C", folder, "rev-parse", "--git-dir"], { env })).ok) {
-    return failed(workspaceId, `${folder} is not a git repository`);
-  }
-  const origin = await runGit(["-C", folder, "remote", "get-url", "origin"], { env });
-  if (!origin.ok) return failed(workspaceId, `${folder} has no origin remote`);
-  if (!sameRemote(origin.stdout, one.remote)) {
-    return failed(
-      workspaceId,
-      `the origin of ${folder} is ${origin.stdout}, not the ${one.remote} this repository is`,
-    );
-  }
-  const cache = await ensureCache({
-    storageDir: substrate.storageDir,
-    resourceId: one.resourceId,
-    // The folder, so adopting needs no network and no credential; `origin` is
-    // pointed at the real remote afterwards, which is what a worktree pushes to.
-    source: folder,
-    remote: one.remote,
-    defaultBranch: await defaultBranch(folder, env),
-    env,
-  });
-  if (cache.failure !== undefined) return failed(workspaceId, cache.failure);
-  const entry: RegisteredWorkspace = {
-    workspaceId,
-    kind: "primary",
-    root: folder,
-    checkouts: [
-      { checkoutId: one.checkoutId, resourceId: one.resourceId, remote: one.remote, path: folder },
-    ],
-  };
-  await remember(substrate, entry);
-  return reportOf(entry, env);
-};
-
 /** A primary this machine makes for itself: hardlinked off the cache, pointed at the real remote. */
 const cloneFresh = async (
   substrate: Substrate,
@@ -123,7 +77,6 @@ const cloneFresh = async (
   const cache = await ensureCache({
     storageDir: substrate.storageDir,
     resourceId: one.resourceId,
-    source: one.remote,
     remote: one.remote,
     env,
   });
@@ -139,9 +92,11 @@ const cloneFresh = async (
   const pointed = await runGit(["-C", dir, "remote", "set-url", "origin", one.remote], { env });
   if (!pointed.ok) return failed(workspaceId, pointed.stderr);
   // The cache's branches are as old as the cache; the remote's are current, and
-  // this clone is seconds old with nothing in it to lose by taking them.
+  // this clone is seconds old with nothing in it to lose by taking them. A clone
+  // that came up on no branch at all - an empty repository - has nothing to
+  // bring forward.
   const branch = await currentBranch(dir, env);
-  if ((await runGit(["-C", dir, "fetch", "--no-tags", "origin"], { env })).ok) {
+  if (branch !== null && (await runGit(["-C", dir, "fetch", "--no-tags", "origin"], { env })).ok) {
     await runGit(["-C", dir, "reset", "--hard", `refs/remotes/origin/${branch}`], { env });
   }
   const entry: RegisteredWorkspace = {
@@ -225,7 +180,9 @@ const runSetup = async (
 ): Promise<string | undefined> => {
   const child = Bun.spawn(["/bin/sh", "-c", command], {
     cwd: dir,
-    env: { ...substrate.setupEnv },
+    // The clean environment, without the provisioning claim: a setup command is
+    // repository code and gets no credential of its own (D-16).
+    env: { ...substrate.gitEnv },
     // A group of its own, so the deadline can reach everything it started.
     detached: true,
     stdout: "pipe",
@@ -290,7 +247,6 @@ const makeEphemeral = async (
     const cache = await ensureCache({
       storageDir: substrate.storageDir,
       resourceId: one.resourceId,
-      source: one.remote,
       remote: one.remote,
       env,
     });
@@ -374,7 +330,5 @@ export const provisionWorkspace = async (
   if (one === undefined) {
     return failed(frame.workspaceId, "a primary is one checkout of a repository");
   }
-  return one.path === undefined
-    ? cloneFresh(substrate, frame.workspaceId, one, env)
-    : adopt(substrate, frame.workspaceId, one, one.path, env);
+  return cloneFresh(substrate, frame.workspaceId, one, env);
 };

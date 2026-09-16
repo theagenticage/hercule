@@ -16,7 +16,12 @@ afterAll(cleanTemporaries);
 
 const socketPath = (): string => join(temporary("hydra-credentials-"), "daemon.sock");
 
-const answering = (fields: Omit<CredentialAnswer, "_tag" | "requestId">): CredentialAnswer => ({
+/** D-21 F5: an answer is a credential or a refusal, never a struct of maybes. */
+const answering = (
+  fields:
+    | { readonly token: string; readonly username: string }
+    | { readonly error: "unauthorized" | "no_connection" },
+): CredentialAnswer => ({
   _tag: "credentialAnswer",
   requestId: crypto.randomUUID(),
   ...fields,

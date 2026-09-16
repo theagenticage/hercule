@@ -97,8 +97,44 @@ describe("the designated connection of a workspace", () => {
   });
 });
 
+/**
+ * D-21 F4: the Connection the work in a workspace acts through is settled when
+ * it is opened and stored on the row. Re-deriving it from the first checkout's
+ * resource at every read would change what a workspace already standing acts
+ * through the moment the resource changed hands.
+ */
+describe("a workspace whose resource changes hands", () => {
+  it("keeps the Connection it was opened against, and answers credentials from it", async () => {
+    await withCredentials(async (arranged) => {
+      const mine = await connection(arranged, { pat: PAT });
+      const web = await repo(arranged, "https://github.com/acme/web", mine);
+      const workspace = await provisioned(arranged, {
+        resourceId: web,
+        runnerId: arranged.runnerId,
+      });
+      expect(workspace.designatedConnectionId).toBe(mine);
+
+      const other = await connection(arranged, { pat: "ghp_somebody-else" });
+      const moved = await send("PATCH", arranged.harness.base, `/api/v1/resources/${web}`, {
+        body: { connectionId: other },
+        token: arranged.token,
+      });
+      expect(moved.status, await moved.clone().text()).toBe(200);
+
+      expect((await readWorkspace(arranged, workspace.id)).designatedConnectionId).toBe(mine);
+      const answer = await ask(arranged.wire, {
+        remote: "github.com/acme/web",
+        workspaceId: workspace.id,
+      });
+      expect(answer["token"]).toBe(PAT);
+    });
+  });
+});
+
 describe("a credential asked for by a provisioning workspace", () => {
-  it("answers with the connection's token and the git identity its login makes", async () => {
+  // D-21 F5: the answer is the credential; the git identity rides on the start
+  // frame, once, rather than on every credential exchange.
+  it("answers with the connection's token and the login it belongs to", async () => {
     await withCredentials(async (arranged) => {
       const github = await connection(arranged, { pat: PAT });
       const web = await repo(arranged, "https://github.com/acme/web", github);
@@ -113,8 +149,8 @@ describe("a credential asked for by a provisioning workspace", () => {
       });
       expect(answer["token"]).toBe(PAT);
       expect(answer["username"]).toBe(LOGIN);
-      expect(answer["name"]).toBe(LOGIN);
-      expect(answer["email"]).toBe(`${LOGIN}@users.noreply.github.com`);
+      expect(answer["name"]).toBeUndefined();
+      expect(answer["email"]).toBeUndefined();
       expect(answer["error"]).toBeUndefined();
     });
   });

@@ -103,7 +103,7 @@ export const SETTING_VALUES = {
     "thread.accessMode": AccessMode,
     "thread.profileId": Id,
     /**
-     * What a thread opens in: the repo's shared checkout, a worktree of its
+     * What a thread opens in: the repo's main workspace, a worktree of its
      * own, or nothing. Unset follows the project - one repo takes the shared
      * checkout, several take a worktree.
      */

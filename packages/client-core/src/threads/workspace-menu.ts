@@ -1,9 +1,13 @@
 /**
  * The composer's workspace menu: what a thread may open in, as rows (spec 14
  * §The composer, the Workspace selector). One row per thing that exists - the
- * repo's shared checkout, a fresh worktree, every live worktree of the project,
- * and none - with the reason a row is what it is on its sub-line, because
- * "dimmed with the reason, never hidden" is the rule for everything here.
+ * repo's main workspace, a fresh worktree, every live worktree of the project -
+ * with the reason a row is what it is on its sub-line, because "dimmed with the
+ * reason, never hidden" is the rule for everything here.
+ *
+ * None is not one of them: a project that holds a repo always works in one of
+ * its workspaces, so None is offered only where there is nothing else to offer
+ * (D-20d), and there the selector itself is locked.
  */
 import type { Project, Resource, Runner, Session, Workspace } from "@hydra/contract";
 import {
@@ -28,22 +32,10 @@ export interface WorkspaceMenuRow {
   readonly current: boolean;
 }
 
-/**
- * What the foot can act on: the project a repo would be added to and the
- * machine a folder would be adopted on. Null on a draft that stands in no
- * project, which has nothing to add a repo to.
- */
-export interface WorkspaceMenuFoot {
-  readonly projectId: string;
-  readonly addRepo: string;
-  readonly runnerId: string | null;
-}
-
 export interface WorkspaceMenu {
   /** What the selector's own trigger reads. */
   readonly label: string;
   readonly rows: readonly WorkspaceMenuRow[];
-  readonly foot: WorkspaceMenuFoot | null;
 }
 
 /** The pick a thread makes when it works without a checkout at all. */
@@ -112,7 +104,7 @@ export const workspaceMenu = ({
     return {
       key: pickKey(sharedPick),
       pick: sharedPick,
-      name: repos.length === 1 ? "Current checkout" : `Current checkout of ${repoName(repo)}`,
+      name: repos.length === 1 ? "Main workspace" : `Main workspace of ${repoName(repo)}`,
       mono: false,
       // The machine stands at the right of every row that has one, the shared
       // checkout included: it is on a machine as much as a worktree is.
@@ -141,18 +133,21 @@ export const workspaceMenu = ({
     });
   }
 
-  // A draft in no project has no repo to open in and no project to add one to,
-  // so the only row is the one that needs none, and the foot stands dimmed.
+  // A project with a repo always works in one of its workspaces (D-20d). Only
+  // one with nothing checked out anywhere - and a draft standing in no project
+  // at all - has none to offer, and there it is the single row.
   const none = project === undefined ? "No workspace" : "None";
-  rows.push({
-    key: pickKey(NONE),
-    pick: NONE,
-    name: none,
-    mono: false,
-    note: null,
-    sub: "the agent works without a checkout",
-    current: current === pickKey(NONE),
-  });
+  if (repos.length === 0) {
+    rows.push({
+      key: pickKey(NONE),
+      pick: NONE,
+      name: none,
+      mono: false,
+      note: null,
+      sub: "the agent works without a checkout",
+      current: current === pickKey(NONE),
+    });
+  }
 
   // A thread that already stands in a workspace names it even when no row
   // offers it: an active thread's shared checkout is not something to pick.
@@ -164,9 +159,5 @@ export const workspaceMenu = ({
       rows.find((row) => row.current)?.name ??
       (joined === undefined ? none : workspaceLabel(joined, repos, runners)),
     rows,
-    foot:
-      project === undefined
-        ? null
-        : { projectId: project.id, addRepo: `Add a repo to ${project.name} →`, runnerId },
   };
 };

@@ -66,6 +66,22 @@ describe("branchField: a shared checkout", () => {
     expect(fresh?.locked).not.toBeNull();
     expect(fresh?.rows).toEqual([]);
   });
+
+  // D-21: the machine reports `branch: null` where it could not read one, and
+  // a branch nobody can name is not one to switch from.
+  it("takes no pick on a checkout whose branch the machine could not read", () => {
+    const unread = branchField(
+      { kind: "primary", resourceId: WEBSHOP.id },
+      {
+        workspaces: [{ ...PRIMARY, checkouts: [checkout(WEBSHOP.id, null)] }],
+        runnerId: MOSS.id,
+      },
+    );
+
+    expect(unread?.label).toBe("default");
+    expect(unread?.locked).toBe("This machine could not read the checkout's branch");
+    expect(unread?.rows).toEqual([]);
+  });
 });
 
 describe("branchField: a fresh worktree", () => {

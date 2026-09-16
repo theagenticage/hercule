@@ -551,11 +551,11 @@ describe("the Threads face groups by project and workspace (AC-20)", () => {
     await threadsNav().findByText("hydra/run-3f1");
     // The whole label is the tooltip, and it is split so that a sidebar too
     // narrow for it cuts the repo rather than the machine that tells one
-    // repo's two checkouts apart.
-    const label = threadsNav().getByTitle("webshop checkout · moss");
-    expect(label.textContent).toBe("webshop checkout · moss");
+    // repo's two main workspaces apart. D-20c: the word "checkout" is gone.
+    const label = threadsNav().getByTitle("webshop · moss");
+    expect(label.textContent).toBe("webshop · moss");
     expect(label.firstElementChild?.textContent).toBe("webshop");
-    expect(label.lastElementChild?.textContent).toBe(" checkout · moss");
+    expect(label.lastElementChild?.textContent).toBe(" · moss");
   });
 
   it("puts the workspace-less threads of a project last, under 'no workspace'", async () => {
@@ -564,7 +564,7 @@ describe("the Threads face groups by project and workspace (AC-20)", () => {
     await threadsNav().findByText("no workspace");
     const text = faceText();
     expect(text.indexOf("hydra/run-3f1")).toBeLessThan(text.indexOf("no workspace"));
-    expect(text.indexOf("webshop checkout · moss")).toBeLessThan(text.indexOf("no workspace"));
+    expect(text.indexOf("webshop · moss")).toBeLessThan(text.indexOf("no workspace"));
     expect(text.indexOf("no workspace")).toBeLessThan(text.indexOf("Tidy the promotion runbook"));
   });
 
@@ -603,7 +603,7 @@ describe("the Threads face groups by project and workspace (AC-20)", () => {
     expect(text.indexOf("hydra/run-3f1")).toBeLessThan(text.indexOf("New thread draft"));
     // The draft is the group's last row, as it is the last of the thread tabs.
     expect(text.indexOf("Fix flaky webhook tests")).toBeLessThan(text.indexOf("New thread draft"));
-    expect(text.indexOf("New thread draft")).toBeLessThan(text.indexOf("webshop checkout · moss"));
+    expect(text.indexOf("New thread draft")).toBeLessThan(text.indexOf("webshop · moss"));
   });
 
   it("no longer repeats the workspace on a row's second line", async () => {

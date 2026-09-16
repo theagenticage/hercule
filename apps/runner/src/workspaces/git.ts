@@ -5,8 +5,6 @@
  */
 import { join as joinPath } from "node:path";
 
-import { canonicalRemoteOf } from "@hydra/protocol";
-
 export interface GitOutcome {
   readonly ok: boolean;
   readonly stdout: string;
@@ -46,14 +44,16 @@ export const switchBranch = (dir: string, branch: string, env: GitEnv): Promise<
   runGit(["-C", dir, "checkout", branch, "--"], { env });
 
 /**
- * The branch a working copy is on now. Empty output is a detached HEAD, which
- * git itself calls `HEAD`; a failure is said in git's own words rather than
- * passed on as an empty branch nobody can act on.
+ * The branch a working copy is on now, or null where there is none to read: a
+ * detached HEAD prints nothing, and a git that would not answer has nothing to
+ * say either. Null rather than prose - `unknown`, `HEAD`, or git's own error -
+ * because whatever comes back is written down as the branch the machine found,
+ * and a sentence in that column is a branch name nobody can act on.
  */
-export const currentBranch = async (dir: string, env: GitEnv): Promise<string> => {
+export const currentBranch = async (dir: string, env: GitEnv): Promise<string | null> => {
   const shown = await runGit(["-C", dir, "branch", "--show-current"], { env });
-  if (!shown.ok) return shown.stderr.length === 0 ? "unknown" : shown.stderr;
-  return shown.stdout.length === 0 ? "HEAD" : shown.stdout;
+  if (!shown.ok || shown.stdout.length === 0) return null;
+  return shown.stdout;
 };
 
 /** Every branch the user can switch to in that working copy. */
@@ -75,21 +75,6 @@ export const defaultBranch = async (dir: string, env: GitEnv): Promise<string | 
   return target.length === 0 ? null : target;
 };
 
-/**
- * Whether the folder the user pointed at is a checkout of the remote they
- * named. Both spellings go through the protocol's canonical form, so the
- * machine and the controller can never disagree about which remotes are one
- * repository. A spelling that names no repository at all - a bare path with no
- * folder above it, say - canonicalises to nothing, and then only the identical
- * spelling counts as the same remote.
- */
-export const sameRemote = (one: string, other: string): boolean => {
-  const canonical = canonicalRemoteOf(one);
-  const against = canonicalRemoteOf(other);
-  if (canonical === undefined || against === undefined) return one.trim() === other.trim();
-  return canonical === against;
-};
-
 export const cacheDirOf = (storageDir: string, resourceId: string): string =>
   joinPath(storageDir, "cache", `${resourceId}.git`);
 
@@ -98,9 +83,9 @@ export const cacheRootIn = (storageDir: string): string => joinPath(storageDir, 
 /**
  * The bare repository every working copy of one resource is made from.
  *
- * Made once from wherever the first copy came from - the remote, or the folder
- * the user adopted - and pointed at the real remote afterwards, so a worktree
- * off it pushes to the remote rather than to this machine. Refreshed into
+ * Cloned bare from the remote once and refreshed from it afterwards, so a
+ * worktree off it pushes to the remote rather than to this machine. Refreshed
+ * into
  * `refs/remotes/origin/*` and never into `refs/heads/*`: the branches agents
  * work on live in `refs/heads`, checked out by worktrees, and git refuses to
  * fetch over a branch that is checked out - which is what would happen the
@@ -109,12 +94,8 @@ export const cacheRootIn = (storageDir: string): string => joinPath(storageDir, 
 export const ensureCache = async (options: {
   readonly storageDir: string;
   readonly resourceId: string;
-  /** Where git fetches from: the remote, or an adopted folder. */
-  readonly source: string;
-  /** What `origin` points at afterwards, wherever the objects came from. */
+  /** Where git clones from, fetches from, and points `origin` at. */
   readonly remote: string;
-  /** The repository's default branch where the caller already knows it. */
-  readonly defaultBranch?: string | null;
   readonly env: GitEnv;
 }): Promise<{
   readonly path: string;
@@ -123,30 +104,24 @@ export const ensureCache = async (options: {
   readonly defaultBranch?: string;
 }> => {
   const path = cacheDirOf(options.storageDir, options.resourceId);
-  const { env, source, remote } = options;
+  const { env, remote } = options;
   const known = await runGit(["-C", path, "rev-parse", "--git-dir"], { env });
   if (!known.ok) {
-    const cloned = await runGit(["clone", "--bare", "--", source, path], { env });
+    const cloned = await runGit(["clone", "--bare", "--", remote, path], { env });
     if (!cloned.ok) return { path, failure: cloned.stderr };
-    const pointed = await runGit(["-C", path, "remote", "set-url", "origin", remote], { env });
-    if (!pointed.ok) return { path, failure: pointed.stderr };
   }
   const fetched = await runGit(
-    ["-C", path, "fetch", "--no-tags", "--", source, "+refs/heads/*:refs/remotes/origin/*"],
+    ["-C", path, "fetch", "--no-tags", "--", remote, "+refs/heads/*:refs/remotes/origin/*"],
     { env },
   );
   if (!fetched.ok) return { path, failure: fetched.stderr };
-  // Taken from what the caller knows, or from the cache's own HEAD, rather than
-  // asked of the remote: the answer is the same and this costs no network.
+  // Taken from the cache's own HEAD rather than asked of the remote: the answer
+  // is the same and this costs no network.
   // Without it nothing downstream - a worktree asked for no base, a report -
-  // can say what the repository's default branch is, and a cache seeded from an
-  // adopted folder would answer with whatever branch that folder sat on.
+  // can say what the repository's default branch is.
   const own = await runGit(["-C", path, "symbolic-ref", "--short", "HEAD"], { env });
-  const head = options.defaultBranch ?? own.stdout;
+  const head = own.stdout;
   if (head.length === 0) return { path };
-  if (head !== own.stdout) {
-    await runGit(["-C", path, "symbolic-ref", "HEAD", `refs/heads/${head}`], { env });
-  }
   await runGit(["-C", path, "remote", "set-head", "origin", head], { env });
   // Handed back rather than left to be read off the cache again: this is the
   // one derivation of what the repository's default branch is, and a caller

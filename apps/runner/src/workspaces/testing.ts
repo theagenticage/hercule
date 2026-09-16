@@ -94,8 +94,8 @@ export const addBranch = (remote: Remote, branch: string, content = "on a branch
 };
 
 /** A checkout the user already has: cloned from the remote, origin set to it. */
-export const adoptedCheckout = (remote: Remote, branch = "main"): string => {
-  const under = temporary("hydra-adopted-");
+export const userCheckout = (remote: Remote, branch = "main"): string => {
+  const under = temporary("hydra-user-checkout-");
   const path = join(under, "checkout");
   git(under, "clone", remote.url, path);
   if (branch !== "main") git(path, "checkout", branch);

@@ -3,9 +3,9 @@
  * down, what the machine reports back, and the git credential exchange that
  * runs while it does.
  *
- * Ids cross this boundary and paths do not, with one exception: adopting a
- * folder the user already has means naming it, so `path` rides the provisioning
- * frame and is never stored on the controller.
+ * Ids cross this boundary and paths do not. Where a working copy sits is the
+ * machine's own business: the controller names the repository and the machine
+ * decides where under its storage the clone or the worktree goes.
  *
  * A credential is asked for per request and answered for that request alone:
  * the machine holds no token, and the controller answers only when the remote
@@ -13,7 +13,7 @@
  */
 import { Schema } from "effect";
 
-import { Fact, MAX_FACT_LENGTH, StorageId, Subdirectory } from "./primitives";
+import { Fact, StorageId, Subdirectory } from "./primitives";
 import { MAX_MESSAGE_LENGTH } from "./sessions";
 
 const Message = Schema.String.check(Schema.isMaxLength(MAX_MESSAGE_LENGTH));
@@ -43,8 +43,6 @@ export const ProvisionCheckout = Schema.Struct({
   resourceId: StorageId,
   /** The remote as the user wrote it, which is what git is given. */
   remote: Fact,
-  /** The folder to adopt in place. Absent means clone a fresh one. */
-  path: Schema.optionalKey(Schema.String.check(Schema.isLengthBetween(1, MAX_FACT_LENGTH))),
   /** Where under the workspace this copy goes; null puts it at the root. */
   subdirectory: Schema.NullOr(Subdirectory),
   /** The branch to create, for a worktree; null leaves the branch alone. */
@@ -79,8 +77,13 @@ export type WorkspaceDispose = Schema.Schema.Type<typeof WorkspaceDispose>;
 /** What one working copy turned out to be, once the machine has made it. */
 export const CheckoutReport = Schema.Struct({
   checkoutId: StorageId,
-  /** The branch checked out there now. */
-  branch: Fact,
+  /**
+   * The branch checked out there now, or null where the machine could not read
+   * one: a detached HEAD, or a git that would not answer. Null rather than a
+   * word standing in for a branch, because the record carries what the machine
+   * said and nothing else.
+   */
+  branch: Schema.NullOr(Fact),
   branches: Schema.Array(Fact).check(Schema.isMaxLength(MAX_BRANCHES)),
   /** What `origin/HEAD` points at, or null where the machine could not read it. */
   defaultBranch: Schema.NullOr(Fact),
@@ -139,17 +142,30 @@ export const CredentialRefusal = Schema.Literals(["unauthorized", "no_connection
 export type CredentialRefusal = Schema.Schema.Type<typeof CredentialRefusal>;
 
 /**
- * The credential, for this request and no other. The git identity rides with it
- * so the commits a session makes are attributed to the account pushing them.
+ * The credential, for this request and no other: either one to use or a reason
+ * there is none. Two members rather than one struct of optional fields, so a
+ * reader cannot hold an answer that is both and cannot forget to check which it
+ * is. The git identity does not ride here - it is the session's, told once at
+ * start on `SessionStart.gitIdentity`, and a credential exchange is not the
+ * place to settle who a commit is by.
  */
-export const CredentialAnswer = Schema.Struct({
+export const CredentialGranted = Schema.Struct({
   _tag: Schema.Literal("credentialAnswer"),
   requestId: Fact,
-  token: Schema.optionalKey(Fact),
-  username: Schema.optionalKey(Fact),
-  name: Schema.optionalKey(Fact),
-  email: Schema.optionalKey(Fact),
-  error: Schema.optionalKey(CredentialRefusal),
+  token: Fact,
+  username: Fact,
 });
+
+export type CredentialGranted = Schema.Schema.Type<typeof CredentialGranted>;
+
+export const CredentialRefused = Schema.Struct({
+  _tag: Schema.Literal("credentialAnswer"),
+  requestId: Fact,
+  error: CredentialRefusal,
+});
+
+export type CredentialRefused = Schema.Schema.Type<typeof CredentialRefused>;
+
+export const CredentialAnswer = Schema.Union([CredentialGranted, CredentialRefused]);
 
 export type CredentialAnswer = Schema.Schema.Type<typeof CredentialAnswer>;

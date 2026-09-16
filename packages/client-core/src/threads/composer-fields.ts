@@ -18,6 +18,7 @@ import type { ThreadCatalogs, ThreadConfig, ThreadKind, ThreadPicks } from "./co
 import { referenceRunner, runnerMenu, type RunnerMenuRow } from "./runner-menu";
 import {
   defaultWorkspacePick,
+  NO_WORKSPACE_REASON,
   projectRepos,
   readyPrimary,
   repoName,
@@ -124,11 +125,10 @@ export const composerFields = (
   const resources = catalogs.resources ?? [];
   const workspaces = catalogs.workspaces ?? [];
   const projectId = config.projectId ?? null;
+  const repos = projectRepos(resources, projectId);
   // The pick the user made stands; otherwise the default follows the stored
   // setting, and the repos of the project are what either can name.
-  const pick =
-    config.workspace ??
-    defaultWorkspacePick(projectRepos(resources, projectId), config.preferredWorkspace ?? null);
+  const pick = config.workspace ?? defaultWorkspacePick(repos, config.preferredWorkspace ?? null);
   // Read only on a draft: a thread that has started is locked because it
   // started, which is what its tooltip has to say, and its own machine is the
   // one worth naming rather than the workspace that chose it.
@@ -192,7 +192,13 @@ export const composerFields = (
     },
     options:
       descriptor === undefined || descriptor.options.length === 0 ? null : descriptor.options,
-    workspace: { locked: lockedReason(kind, "workspace"), value: pick },
+    workspace: {
+      // A project with no repo works in none, so there is nothing to choose
+      // between and the selector is its value with the way out as its reason
+      // (D-20d).
+      locked: lockedReason(kind, "workspace") ?? (repos.length === 0 ? NO_WORKSPACE_REASON : null),
+      value: pick,
+    },
     machine: {
       // A workspace that already stands is on one machine and never moves, so
       // joining it settles the machine rather than offering it (spec 02

@@ -5,6 +5,7 @@
 export { canonicalRemoteOf, isClonableRemote, repoNameOf } from "./remote";
 export {
   isCheckedOut,
+  NOT_CHECKED_OUT,
   resourceRepository,
   type StoredRepo,
   type StoredResource,

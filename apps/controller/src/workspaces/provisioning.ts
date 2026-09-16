@@ -1,31 +1,32 @@
 /**
- * The frame that asks a machine to make a workspace.
+ * Opening a workspace: the row, the checkouts inside it, the entry that records
+ * it, and the frame that asks the machine to make it.
  *
- * It is built here rather than in either caller because both of them ask for
- * one: `workspace.provision` for a repo's shared checkout, and `session.spawn`
- * for a thread's own worktree. What the machine needs beyond the rows - the
- * remote to clone, the setup command to run, whether to copy what
- * `.workspaceinclude` lists - is the resource's, so the resource is handed in
- * beside the checkout.
+ * It is one function rather than four steps at each call site, because both
+ * openings - `workspace.provision` for a repo's main workspace, and a spawn that
+ * wants a worktree of its own - have to write exactly the same things, and a
+ * caller that forgot the audit row or spelled the payload differently would not
+ * be caught by anything. What the machine needs beyond the rows - the remote to
+ * clone, the setup command to run, whether to copy what `.workspaceinclude`
+ * lists - is the resource's, so the resource is handed in beside the checkout.
  *
- * The folder to adopt in place is the one path that crosses this boundary. It
- * comes from the request and goes to the machine; nothing writes it down.
+ * No path crosses this boundary. A primary is always a Hydra-managed clone
+ * under the machine's own storage, so all the machine is ever told is which
+ * repository to make it from.
  */
 import * as Effect from "effect/Effect";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import type { WorkspaceProvision } from "@hydra/protocol";
-import type { Actor, CheckoutForm } from "@hydra/contract";
+import type { Actor, CheckoutForm, WorkspaceKind } from "@hydra/contract";
 import type { AuditLog } from "../events";
 import type { StoredRepo } from "../resources";
 import type { StoredCheckout, StoredWorkspace, workspaceRepository } from "./repository";
 
 /** One working copy to ask for: the row, the repo behind it, and the words the
  * row has no column for. */
-export interface CheckoutPlan {
+interface CheckoutPlan {
   readonly checkout: StoredCheckout;
   readonly resource: StoredRepo;
-  /** A folder on the machine to adopt rather than clone. */
-  readonly path?: string;
   /** What a new branch starts from; absent takes the resource's default. */
   readonly baseBranch?: string;
 }
@@ -41,7 +42,6 @@ export const provisionFrame = (
     checkoutId: plan.checkout.id,
     resourceId: plan.resource.id,
     remote: plan.resource.remote,
-    ...(plan.path === undefined ? {} : { path: plan.path }),
     subdirectory: plan.checkout.subdirectory,
     branch: plan.checkout.branch,
     baseBranch: plan.baseBranch ?? null,
@@ -50,11 +50,7 @@ export const provisionFrame = (
   })),
 });
 
-/**
- * What opening a workspace writes, beyond the workspace row itself: its
- * checkouts, and the entry that records it. Both callers do exactly this, so
- * neither can forget the audit row or spell the payload differently.
- */
+/** One working copy a workspace is opened with. */
 export interface OpeningCheckout {
   readonly resource: StoredRepo;
   readonly form: CheckoutForm;
@@ -62,11 +58,9 @@ export interface OpeningCheckout {
   readonly branch: string | null;
   /** What a new branch starts from; absent takes the resource's default. */
   readonly baseBranch?: string;
-  /** A folder on the machine to adopt rather than clone. */
-  readonly path?: string;
 }
 
-/** The two writers this needs, which both callers already hold. */
+/** The two writers this needs, which the service already holds. */
 export interface WorkspaceWriters {
   readonly workspaces: Effect.Success<typeof workspaceRepository>;
   readonly audit: AuditLog["Service"];
@@ -75,15 +69,27 @@ export interface WorkspaceWriters {
 export const openWorkspace = (
   writers: WorkspaceWriters,
   input: {
-    readonly workspace: StoredWorkspace;
+    readonly runnerId: string;
+    readonly kind: WorkspaceKind;
+    /** The Connection the work in it acts through, settled here and stored. */
+    readonly designatedConnectionId: string | null;
     readonly checkouts: ReadonlyArray<OpeningCheckout>;
     readonly actor: Actor;
     readonly at: string;
   },
-): Effect.Effect<WorkspaceProvision, SqlError> =>
+): Effect.Effect<
+  { readonly workspace: StoredWorkspace; readonly frame: WorkspaceProvision },
+  SqlError
+> =>
   Effect.gen(function* () {
+    const workspace = yield* writers.workspaces.insert({
+      runnerId: input.runnerId,
+      kind: input.kind,
+      designatedConnectionId: input.designatedConnectionId,
+      at: input.at,
+    });
     const rows = yield* writers.workspaces.insertCheckouts(
-      input.workspace.id,
+      workspace.id,
       input.checkouts.map((checkout) => ({
         resourceId: checkout.resource.id,
         form: checkout.form,
@@ -96,29 +102,31 @@ export const openWorkspace = (
       kind: "workspace.created",
       actor: input.actor,
       payload: {
-        workspaceId: input.workspace.id,
-        runnerId: input.workspace.runnerId,
-        kind: input.workspace.kind,
+        workspaceId: workspace.id,
+        runnerId: workspace.runnerId,
+        kind: workspace.kind,
         resourceIds: input.checkouts.map((checkout) => checkout.resource.id),
       },
       at: input.at,
     });
-    return provisionFrame(
-      input.workspace,
-      input.checkouts.map((checkout, index) => ({
-        checkout: rows[index]!,
-        resource: checkout.resource,
-        ...(checkout.path === undefined ? {} : { path: checkout.path }),
-        ...(checkout.baseBranch === undefined ? {} : { baseBranch: checkout.baseBranch }),
-      })),
-    );
+    return {
+      workspace,
+      frame: provisionFrame(
+        workspace,
+        input.checkouts.map((checkout, index) => ({
+          checkout: rows[index]!,
+          resource: checkout.resource,
+          ...(checkout.baseBranch === undefined ? {} : { baseBranch: checkout.baseBranch }),
+        })),
+      ),
+    };
   });
 
 /**
- * The repo's own checkout on one machine, opened. Two operations ask for one -
- * `workspace.provision` by name, and a spawn that wants the shared checkout -
- * and they have to write the same thing: a failed attempt stood down so this
- * one takes its place, the row, its single whole-repo checkout, and the entry.
+ * The repo's own workspace on one machine, opened. Two openings ask for one -
+ * `workspace.provision` by name, and a spawn that wants the main workspace -
+ * and they have to write the same thing: a failed attempt stood down so this one
+ * takes its place, the row, its single whole-repo checkout, and the entry.
  *
  * Whether a primary already stands is the caller's to answer, because the two
  * answers differ: `workspace.provision` refuses it as a conflict, and a spawn
@@ -131,8 +139,6 @@ export const openPrimary = (
     readonly runnerId: string;
     readonly actor: Actor;
     readonly at: string;
-    /** A folder on the machine to adopt rather than clone. */
-    readonly path?: string;
   },
 ): Effect.Effect<
   { readonly workspace: StoredWorkspace; readonly frame: WorkspaceProvision },
@@ -142,26 +148,14 @@ export const openPrimary = (
     // One that could not be made holds nothing; it is stood down here so this
     // one takes its place rather than living beside it.
     yield* writers.workspaces.supersedeFailedPrimary(input.resource.id, input.runnerId, input.at);
-    const workspace = yield* writers.workspaces.insert({
+    return yield* openWorkspace(writers, {
       runnerId: input.runnerId,
       kind: "primary",
-      at: input.at,
-    });
-    const frame = yield* openWorkspace(writers, {
-      workspace,
-      // The shared checkout is a clone of the whole repo, on whatever branch it
-      // is already on.
-      checkouts: [
-        {
-          resource: input.resource,
-          form: "clone",
-          subdirectory: null,
-          branch: null,
-          ...(input.path === undefined ? {} : { path: input.path }),
-        },
-      ],
+      designatedConnectionId: input.resource.connectionId,
+      // The main workspace is a clone of the whole repo, on whatever branch it
+      // comes up on.
+      checkouts: [{ resource: input.resource, form: "clone", subdirectory: null, branch: null }],
       actor: input.actor,
       at: input.at,
     });
-    return { workspace, frame };
   });

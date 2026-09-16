@@ -15,10 +15,13 @@ export const SETUP_DEADLINE_MS = 10 * 60 * 1000;
 export interface Substrate {
   readonly storageDir: string;
   readonly registry: Registry;
-  /** What the runner's own git runs with, before the workspace id is added. */
+  /**
+   * What the runner's own git runs with, before the workspace id is added, and
+   * what a repository's setup command runs with - which is this without the
+   * claim, so it is this (D-16: a setup command is repository code and asks for
+   * no credential of its own).
+   */
   readonly gitEnv: GitEnv;
-  /** The same, without the provisioning claim: a setup command is repository code. */
-  readonly setupEnv: GitEnv;
   readonly setupDeadlineMs: number;
 }
 

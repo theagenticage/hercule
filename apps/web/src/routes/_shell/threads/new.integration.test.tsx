@@ -347,15 +347,17 @@ describe("Composer: selector popovers (AC-16)", () => {
 
     await user.type(screen.getByRole("textbox"), "Fix the login bug");
 
-    await user.click(screen.getByRole("button", { name: /no workspace/i }));
-    expect(await screen.findByText("Adopt a folder on this machine…")).toBeDefined();
+    // D-20b: the workspace selector of a project-less draft is locked text
+    // now, so the pair of selectors driven here is the machine and the model.
+    await user.click(screen.getByRole("button", { name: /^machine / }));
+    expect(await screen.findByText("Machine")).toBeDefined();
 
     // A second selector opened closes the first. The new one's own content
     // mounts through Radix's `Presence`, one microtask behind the click, so
     // this is awaited rather than asserted synchronously.
     await user.click(screen.getByRole("button", { name: /claude sonnet 5/i }));
     await waitFor(() => {
-      expect(screen.queryByText("Adopt a folder on this machine…")).toBeNull();
+      expect(screen.queryByText("Machine")).toBeNull();
     });
     expect(await screen.findByRole("button", { name: /claude opus 5/i })).toBeDefined();
 
@@ -366,34 +368,29 @@ describe("Composer: selector popovers (AC-16)", () => {
     });
 
     // An outside click closes it too.
-    await user.click(screen.getByRole("button", { name: /no workspace/i }));
-    expect(await screen.findByText("Adopt a folder on this machine…")).toBeDefined();
+    await user.click(screen.getByRole("button", { name: /^machine / }));
+    expect(await screen.findByText("Machine")).toBeDefined();
     await user.click(document.body);
     await waitFor(() => {
-      expect(screen.queryByText("Adopt a folder on this machine…")).toBeNull();
+      expect(screen.queryByText("Machine")).toBeNull();
     });
 
     // Text typed before any of this survives.
     expect(screen.getByRole<HTMLTextAreaElement>("textbox").value).toBe("Fix the login bug");
   });
 
-  it("holds No workspace selected and the other two entries dimmed with their reason", async () => {
+  // D-20d: with nothing to work in there is nothing to choose between, so the
+  // workspace field is greyed plain text carrying the way out as its reason.
+  it("reads No workspace as locked text on a draft standing in no project", async () => {
     const user = userEvent.setup();
     await open();
 
-    await user.click(screen.getByRole("button", { name: /no workspace/i }));
+    const locked = await screen.findByTitle("Add a repository to the project to work in one");
+    expect(reading(locked)).toContain("No workspace");
+    expect(locked.closest("button")).toBeNull();
 
-    const rows = screen.getAllByRole("button", { name: /no workspace/i });
-    // The trigger, plus the row inside the now-open menu.
-    expect(rows.length).toBeGreaterThanOrEqual(2);
-    expect(rows.at(-1)?.getAttribute("aria-current")).toBe("true");
-
-    expect(await screen.findByText("Adopt a folder on this machine…")).toBeDefined();
-    expect(screen.getByText("Add a repo →")).toBeDefined();
-    // Amended by #72 (D-17): both entries are built now, and both need a
-    // project to act on, so a draft standing in none says what would unlock
-    // them rather than the pre-#72 "not built yet".
-    expect(reading().match(/pick a project first/g)?.length).toBeGreaterThanOrEqual(2);
+    await user.click(locked);
+    expect(screen.queryByRole("dialog")).toBeNull();
   });
 
   it("opens the runner menu with the state and the capacity beside the machine, and what it is under it", async () => {
@@ -1160,9 +1157,10 @@ describe("Draft: the chrome is the screen's first row", () => {
  * - the picker is the Radix overlay, read as `role="dialog"`, opened by the
  *   sidebar's "Create new thread";
  * - a menu row is a button carrying its text, as in the menus above;
- * - the add-repo and adopt forms label their fields "Remote URL", "GitHub
- *   Connection", "Setup command", "Repo" and "Path", and submit through
- *   buttons named "Add repo" and "Adopt".
+ * - the New project dialog (D-20b) is read as `role="form"` named "New
+ *   project"; its fields are labelled "Name", "Remote URL", "GitHub account"
+ *   and "Setup command", a source is added with "+ Git repository", and it
+ *   submits through a button named "Create project".
  * ------------------------------------------------------------------ */
 
 const AT = "2026-09-10T09:00:00.000Z";
@@ -1530,7 +1528,9 @@ describe("Picker: a thread starts from a project (AC-16)", () => {
     expect(text.indexOf("sandbox")).toBeLessThan(text.indexOf("New project"));
   });
 
-  it("offers New project and nothing else when there is no project yet", async () => {
+  // D-20b: the picker no longer names a project itself; its New project row
+  // opens the dialog that does.
+  it("offers New project and nothing else when there is no project yet, and opens the dialog", async () => {
     const user = userEvent.setup();
     const created = project("01a06d02-7000-7000-8000-000000000009", "first");
     const { api, router } = await openAt(
@@ -1547,8 +1547,11 @@ describe("Picker: a thread starts from a project (AC-16)", () => {
     expect(reading(picker)).toContain("New project");
     expect(within(picker).queryByRole("button", { name: /webshop/ })).toBeNull();
 
-    await user.type(within(picker).getByRole("textbox"), "first");
-    await user.keyboard("{Enter}");
+    await user.click(within(picker).getByRole("button", { name: "New project" }));
+
+    const dialog = await screen.findByRole("form", { name: "New project" });
+    await user.type(within(dialog).getByLabelText("Name"), "first");
+    await user.click(within(dialog).getByRole("button", { name: "Create project" }));
 
     await waitFor(() => {
       expect(router.state.location.href).toBe(inProject(created.id));
@@ -1578,14 +1581,15 @@ describe("Composer: the workspace selector (AC-17)", () => {
     expect(reading(menu)).toContain("locks when the thread starts");
   });
 
-  it("offers the shared checkout, a new worktree, the live workspaces and none", async () => {
+  // D-20c/D-20d: the primary is the Main workspace, and None is not offered.
+  it("offers the main workspace, a new worktree and the live workspaces", async () => {
     const user = userEvent.setup();
     await openAt(inProject(WEBSHOP.id));
 
     const menu = await openWorkspaceMenu(user);
     const text = reading(menu);
 
-    expect(text).toContain("Current checkout");
+    expect(text).toContain("Main workspace");
     expect(text).toContain("on main · you and the agent share the files");
     expect(text).toContain("New workspace");
     expect(text).toContain("a fresh worktree of webshop on a new branch");
@@ -1595,8 +1599,7 @@ describe("Composer: the workspace selector (AC-17)", () => {
     expect(text).toContain("moss");
     expect(text).toContain("2 threads · “Fix flaky webhook tests”, “Write the retry runbook”");
     expect(text).toContain("hydra/run-8a0");
-    expect(text).toContain("None");
-    expect(text).toContain("the agent works without a checkout");
+    expect(text).not.toContain("None");
   });
 
   it("names the repo per row and lists New workspace first in a multi-repo project", async () => {
@@ -1607,9 +1610,9 @@ describe("Composer: the workspace selector (AC-17)", () => {
     const text = reading(menu);
 
     expect(text).toContain("a worktree of each repo, side by side, each on a new branch");
-    expect(text).toContain("Current checkout of ops-infra");
-    expect(text).toContain("Current checkout of ops-runbooks");
-    expect(text.indexOf("New workspace")).toBeLessThan(text.indexOf("Current checkout of"));
+    expect(text).toContain("Main workspace of ops-infra");
+    expect(text).toContain("Main workspace of ops-runbooks");
+    expect(text.indexOf("New workspace")).toBeLessThan(text.indexOf("Main workspace of"));
   });
 
   it("asks about the machine the draft would be placed on, not the one it picked", async () => {
@@ -1640,35 +1643,37 @@ describe("Composer: the workspace selector (AC-17)", () => {
     expect(reading(menu)).toContain("not cloned on moss · clones on first use");
   });
 
-  it("offers None alone, plus the foot, in a project with no repo", async () => {
+  // D-20d: a project with no source works in None and says how to change that.
+  it("reads None as locked text in a project with no repo", async () => {
     const user = userEvent.setup();
     await openAt(inProject(SANDBOX.id));
 
-    const menu = await openWorkspaceMenu(user);
-    const text = reading(menu);
+    const locked = await screen.findByTitle("Add a repository to the project to work in one");
+    expect(reading(locked)).toContain("None");
+    expect(locked.closest("button")).toBeNull();
 
-    expect(text).toContain("None");
-    expect(text).not.toContain("Current checkout");
-    expect(text).not.toContain("New workspace");
-    expect(text).toContain("Add a repo to sandbox →");
-    expect(text).toContain("Adopt a folder on this machine…");
+    await user.click(locked);
+    expect(screen.queryByRole("dialog")).toBeNull();
   });
 
-  it("defaults to the shared checkout in a one-repo project and to a worktree in a multi-repo one", async () => {
+  it("defaults to the main workspace in a one-repo project and to a worktree in a multi-repo one", async () => {
     const one = await openAt(inProject(WEBSHOP.id));
-    expect(
-      await screen.findByRole("button", { name: /^workspace Current checkout$/ }),
-    ).toBeDefined();
+    expect(await screen.findByRole("button", { name: /^workspace Main workspace$/ })).toBeDefined();
     one.unmount();
 
     await openAt(inProject(OPS.id));
     expect(await screen.findByRole("button", { name: /^workspace New workspace$/ })).toBeDefined();
   });
 
-  it("follows the stored thread.workspace over the repo count", async () => {
-    await openAt(inProject(WEBSHOP.id), { "thread.workspace": "none" });
+  // D-20d: a stored none is honoured only where None is offered, so a project
+  // that holds a repo falls back to the rule.
+  it("follows the stored thread.workspace, and ignores a stored none where a repo stands", async () => {
+    const stored = await openAt(inProject(WEBSHOP.id), { "thread.workspace": "ephemeral" });
+    expect(await screen.findByRole("button", { name: /^workspace New workspace$/ })).toBeDefined();
+    stored.unmount();
 
-    expect(await screen.findByRole("button", { name: /^workspace None$/ })).toBeDefined();
+    await openAt(inProject(WEBSHOP.id), { "thread.workspace": "none" });
+    expect(await screen.findByRole("button", { name: /^workspace Main workspace$/ })).toBeDefined();
   });
 
   it("rewrites the lead sentence as the pick changes", async () => {
@@ -1677,7 +1682,7 @@ describe("Composer: the workspace selector (AC-17)", () => {
 
     await waitFor(() => {
       expect(reading()).toContain(
-        "It works in the checkout of webshop on moss, on main. You and the agent share the files.",
+        "It works in the main workspace of webshop on moss, on main. You and the agent share the files.",
       );
     });
 
@@ -1697,9 +1702,13 @@ describe("Composer: the workspace selector (AC-17)", () => {
         "It joins “Fix flaky webhook tests” and “Write the retry runbook” there: the agents see each other's edits, on one branch.",
       );
     });
+  });
 
-    await openWorkspaceMenu(user);
-    await pickRow(user, /^None/);
+  // D-20d: None is offered only where there is nothing else, and there it is
+  // what the draft stands under.
+  it("says a draft in a project with no repo works without a checkout", async () => {
+    await openAt(inProject(SANDBOX.id));
+
     await waitFor(() => {
       expect(reading()).toContain("It works without a checkout.");
     });
@@ -1825,7 +1834,7 @@ describe("Composer: the branch selector (AC-18)", () => {
 
     await waitFor(() => {
       expect(reading()).toContain(
-        "It works in the checkout of webshop on moss, on release/2.4. You and the agent share the files.",
+        "It works in the main workspace of webshop on moss, on release/2.4. You and the agent share the files.",
       );
     });
     expect(await screen.findByRole("button", { name: /release\/2\.4/ })).toBeDefined();
@@ -1876,9 +1885,9 @@ describe("Composer: the branch selector (AC-18)", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
-  it("is absent on a joined workspace and on none", async () => {
+  it("is absent on a joined workspace, and on a draft with no workspace at all", async () => {
     const user = userEvent.setup();
-    await openAt(inProject(WEBSHOP.id));
+    const joined = await openAt(inProject(WEBSHOP.id));
 
     await openWorkspaceMenu(user);
     await pickRow(user, /hydra\/run-3f1/);
@@ -1886,12 +1895,14 @@ describe("Composer: the branch selector (AC-18)", () => {
       expect(screen.queryByText("Branch")).toBeNull();
     });
     expect(screen.queryByRole("button", { name: /^from / })).toBeNull();
+    joined.unmount();
 
-    await openWorkspaceMenu(user);
-    await pickRow(user, /^None/);
+    // D-20d: None stands alone in a project with no repo, and carries no branch.
+    await openAt(inProject(SANDBOX.id));
     await waitFor(() => {
-      expect(screen.queryByRole("button", { name: /^from / })).toBeNull();
+      expect(screen.queryByText("Branch")).toBeNull();
     });
+    expect(screen.queryByRole("button", { name: /^from / })).toBeNull();
   });
 });
 
@@ -1926,37 +1937,55 @@ describe("Composer: the machine selector follows the workspace (AC-19)", () => {
   });
 });
 
-describe("Composer: the workspace menu's foot (AC-23)", () => {
-  const NEW_REPO = repo("01a06d02-7100-7000-8000-000000000009", "acme", "checkout", [SANDBOX.id]);
+/* ------------------------------------------------------------------ *
+ * D-20b: repo setup left the composer. The add-repo and adopt forms in
+ * the workspace menu's foot are gone, and a project and its sources are
+ * made in the New project dialog, opened from the sidebar or from the
+ * picker's New project row.
+ * ------------------------------------------------------------------ */
 
-  it("adds a repo to the project and then lists it in the menu", async () => {
+describe("The New project dialog (D-20b)", () => {
+  const NEW_PROJECT = project("01a06d02-7000-7000-8000-000000000009", "checkout");
+
+  const NEW_REPO = repo("01a06d02-7100-7000-8000-000000000009", "acme", "checkout", [
+    NEW_PROJECT.id,
+  ]);
+
+  /** Opens the dialog from the sidebar's own icon beside Create new thread. */
+  const openDialog = async (user: ReturnType<typeof userEvent.setup>): Promise<HTMLElement> => {
+    await user.click(await screen.findByRole("button", { name: "New project" }));
+    return screen.findByRole("form", { name: "New project" });
+  };
+
+  it("creates the project, then a resource per source, and opens a draft in it", async () => {
     const user = userEvent.setup();
-    let resources: readonly Resource[] = RESOURCES;
-    const { api } = await openAt(
-      inProject(SANDBOX.id),
+    const { api, router } = await openAt(
+      "/threads/new",
       {},
       {
-        "GET /api/v1/resources": () => ({ body: { items: resources } }),
-        "POST /api/v1/resources": () => {
-          resources = [...RESOURCES, NEW_REPO];
-          return { body: NEW_REPO };
-        },
+        "POST /api/v1/projects": { body: NEW_PROJECT },
+        "POST /api/v1/resources": { body: NEW_REPO },
       },
     );
 
-    await openWorkspaceMenu(user);
-    await user.click(screen.getByText("Add a repo to sandbox →"));
+    const dialog = await openDialog(user);
+    await user.type(within(dialog).getByLabelText("Name"), "checkout");
+    await user.click(within(dialog).getByRole("button", { name: "+ Git repository" }));
 
-    await user.type(await screen.findByLabelText("Remote URL"), "git@github.com:acme/checkout.git");
-    await user.selectOptions(screen.getByLabelText("GitHub Connection"), GITHUB.id);
-    await user.type(screen.getByLabelText("Setup command"), "pnpm install");
-    await user.click(screen.getByRole("button", { name: "Add repo" }));
+    await user.type(
+      await within(dialog).findByLabelText("Remote URL"),
+      "git@github.com:acme/checkout.git",
+    );
+    await user.selectOptions(within(dialog).getByLabelText("GitHub account"), GITHUB.id);
+    await user.type(within(dialog).getByLabelText("Setup command"), "pnpm install");
+    await user.click(within(dialog).getByRole("button", { name: "Create project" }));
 
     await waitFor(() => {
-      expect(
-        api.calls.some((call) => call.method === "POST" && call.path === "/api/v1/resources"),
-      ).toBe(true);
+      expect(router.state.location.href).toBe(inProject(NEW_PROJECT.id));
     });
+    expect(
+      api.calls.find((call) => call.method === "POST" && call.path === "/api/v1/projects")?.body,
+    ).toEqual({ name: "checkout" });
     expect(
       api.calls.find((call) => call.method === "POST" && call.path === "/api/v1/resources")?.body,
     ).toEqual({
@@ -1964,37 +1993,57 @@ describe("Composer: the workspace menu's foot (AC-23)", () => {
       remote: "git@github.com:acme/checkout.git",
       connectionId: GITHUB.id,
       setupCommand: "pnpm install",
-      projectIds: [SANDBOX.id],
+      projectIds: [NEW_PROJECT.id],
     });
-
-    // The menu is the record of what happened: the repo is on offer now.
-    // Read inside the menu (D-15), which is portalled away from the lip: the
-    // draft now opens in that repo's checkout, so the trigger reads the same
-    // words and a page-wide query would find both.
-    expect(
-      await within(await screen.findByRole("dialog")).findByText("Current checkout"),
-    ).toBeDefined();
   });
 
-  it("offers only the GitHub connections in the add-repo form", async () => {
+  it("offers only the GitHub connections, and says what an account is for", async () => {
     const user = userEvent.setup();
-    await openAt(inProject(SANDBOX.id));
+    await openAt("/threads/new");
 
-    await openWorkspaceMenu(user);
-    await user.click(screen.getByText("Add a repo to sandbox →"));
+    const dialog = await openDialog(user);
+    await user.click(within(dialog).getByRole("button", { name: "+ Git repository" }));
 
-    const select = await screen.findByLabelText<HTMLSelectElement>("GitHub Connection");
+    const select = await within(dialog).findByLabelText<HTMLSelectElement>("GitHub account");
     const offered = [...select.options].map((option) => option.textContent);
     expect(offered).toContain(GITHUB.label);
     expect(offered).not.toContain(SLACK.label);
+    expect(reading(dialog)).toContain("A private repo needs one.");
   });
 
-  it("shows the API's refusal on the add-repo form", async () => {
+  it("refuses a remote git would not take before anything is sent", async () => {
     const user = userEvent.setup();
-    await openAt(
-      inProject(SANDBOX.id),
+    const { api } = await openAt(
+      "/threads/new",
+      {},
+      { "POST /api/v1/projects": { body: NEW_PROJECT } },
+    );
+
+    const dialog = await openDialog(user);
+    await user.type(within(dialog).getByLabelText("Name"), "checkout");
+    await user.click(within(dialog).getByRole("button", { name: "+ Git repository" }));
+    await user.type(await within(dialog).findByLabelText("Remote URL"), "/Users/rogier/code/x");
+    await user.click(within(dialog).getByRole("button", { name: "Create project" }));
+
+    expect((await within(dialog).findByRole("alert")).textContent).toBe(
+      "Write an https:// URL or git@host:owner/repo",
+    );
+    expect(
+      api.calls.some(
+        (call) =>
+          call.method === "POST" &&
+          (call.path === "/api/v1/projects" || call.path === "/api/v1/resources"),
+      ),
+    ).toBe(false);
+  });
+
+  it("shows the API's refusal beside the source it was about", async () => {
+    const user = userEvent.setup();
+    const { router } = await openAt(
+      "/threads/new",
       {},
       {
+        "POST /api/v1/projects": { body: NEW_PROJECT },
         "POST /api/v1/resources": {
           status: 409,
           body: envelope("conflict", "that repo is already a resource"),
@@ -2002,140 +2051,63 @@ describe("Composer: the workspace menu's foot (AC-23)", () => {
       },
     );
 
-    await openWorkspaceMenu(user);
-    await user.click(screen.getByText("Add a repo to sandbox →"));
+    const dialog = await openDialog(user);
+    await user.type(within(dialog).getByLabelText("Name"), "checkout");
+    await user.click(within(dialog).getByRole("button", { name: "+ Git repository" }));
+    await user.type(
+      await within(dialog).findByLabelText("Remote URL"),
+      "git@github.com:acme/webshop.git",
+    );
+    await user.click(within(dialog).getByRole("button", { name: "Create project" }));
 
-    await user.type(await screen.findByLabelText("Remote URL"), "git@github.com:acme/webshop.git");
-    await user.click(screen.getByRole("button", { name: "Add repo" }));
-
-    expect((await screen.findByRole("alert")).textContent).toBe("that repo is already a resource");
+    expect((await within(dialog).findByRole("alert")).textContent).toBe(
+      "that repo is already a resource",
+    );
+    // The dialog stands: nothing is navigated away from what was refused.
+    expect(router.state.location.href).toBe("/threads/new");
   });
 
-  it("adopts a folder for the repo picked in the form and follows the workspace to ready", async () => {
+  it("names the project before anything is sent", async () => {
     const user = userEvent.setup();
-    const provisioning: Workspace = {
-      ...W_PRIMARY_WEBSHOP,
-      id: "01a06d02-7200-7000-8000-000000000009",
-      status: "provisioning",
-      checkouts: [],
-      provisionedAt: null,
-    };
-    const ready: Workspace = { ...provisioning, status: "ready" };
-    let answered = false;
-    const { api } = await openAt(
-      inProject(WEBSHOP.id),
-      {},
-      {
-        "POST /api/v1/workspaces": { body: provisioning },
-        [`GET /api/v1/workspaces/${provisioning.id}`]: () => {
-          const body = answered ? ready : provisioning;
-          answered = true;
-          return { body };
-        },
-      },
-    );
+    const { api } = await openAt("/threads/new");
 
-    await openWorkspaceMenu(user);
-    await user.click(screen.getByText("Adopt a folder on this machine…"));
+    const dialog = await openDialog(user);
+    await user.click(within(dialog).getByRole("button", { name: "Create project" }));
 
-    await user.selectOptions(await screen.findByLabelText("Repo"), R_WEBSHOP.id);
-    await user.type(screen.getByLabelText("Path"), "/Users/rogier/code/webshop");
-    await user.click(screen.getByRole("button", { name: "Adopt" }));
-
-    await waitFor(() => {
-      expect(
-        api.calls.some((call) => call.method === "POST" && call.path === "/api/v1/workspaces"),
-      ).toBe(true);
-    });
+    expect((await within(dialog).findByRole("alert")).textContent).toBe("Name the project");
     expect(
-      api.calls.find((call) => call.method === "POST" && call.path === "/api/v1/workspaces")?.body,
-    ).toEqual({
-      resourceId: R_WEBSHOP.id,
-      runnerId: RUNNER.id,
-      path: "/Users/rogier/code/webshop",
-    });
-
-    expect(await screen.findByText("provisioning")).toBeDefined();
-    expect(await screen.findByText("ready")).toBeDefined();
-  });
-
-  it("shows the message a failed adopt came back with", async () => {
-    const user = userEvent.setup();
-    const failed: Workspace = {
-      ...W_PRIMARY_WEBSHOP,
-      id: "01a06d02-7200-7000-8000-00000000000a",
-      status: "failed",
-      checkouts: [],
-      message: "/Users/rogier/code/webshop is not a git repository",
-    };
-    await openAt(
-      inProject(WEBSHOP.id),
-      {},
-      {
-        "POST /api/v1/workspaces": { body: failed },
-        [`GET /api/v1/workspaces/${failed.id}`]: { body: failed },
-      },
-    );
-
-    await openWorkspaceMenu(user);
-    await user.click(screen.getByText("Adopt a folder on this machine…"));
-
-    await user.selectOptions(await screen.findByLabelText("Repo"), R_WEBSHOP.id);
-    await user.type(screen.getByLabelText("Path"), "/Users/rogier/code/webshop");
-    await user.click(screen.getByRole("button", { name: "Adopt" }));
-
-    expect(
-      await screen.findByText("/Users/rogier/code/webshop is not a git repository"),
-    ).toBeDefined();
-  });
-
-  it("says a machine has to be picked before a folder on one can be adopted", async () => {
-    const user = userEvent.setup();
-    const { api } = await openAt(
-      inProject(WEBSHOP.id),
-      {},
-      {
-        // No machine is connected at all, so the draft is placed on none and
-        // there is no machine whose folder could be adopted.
-        "GET /api/v1/runners": { body: { items: [] } },
-      },
-    );
-
-    await openWorkspaceMenu(user);
-    await user.click(screen.getByText("Adopt a folder on this machine…"));
-
-    await user.selectOptions(await screen.findByLabelText("Repo"), R_WEBSHOP.id);
-    await user.type(screen.getByLabelText("Path"), "/Users/rogier/code/webshop");
-    await user.click(screen.getByRole("button", { name: "Adopt" }));
-
-    expect((await screen.findByRole("alert")).textContent).toBe("Pick a machine first");
-    expect(
-      api.calls.some((call) => call.method === "POST" && call.path === "/api/v1/workspaces"),
+      api.calls.some(
+        (call) =>
+          call.method === "POST" &&
+          (call.path === "/api/v1/projects" || call.path === "/api/v1/resources"),
+      ),
     ).toBe(false);
   });
 
-  it("shows the API's refusal on the adopt form", async () => {
+  it("closes on Cancel and on Esc", async () => {
     const user = userEvent.setup();
-    await openAt(
-      inProject(WEBSHOP.id),
-      {},
-      {
-        "POST /api/v1/workspaces": {
-          status: 409,
-          body: envelope("conflict", "moss already holds a checkout of webshop"),
-        },
-      },
-    );
+    await openAt("/threads/new");
 
-    await openWorkspaceMenu(user);
-    await user.click(screen.getByText("Adopt a folder on this machine…"));
+    const dialog = await openDialog(user);
+    await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    await waitFor(() => {
+      expect(screen.queryByRole("form", { name: "New project" })).toBeNull();
+    });
 
-    await user.selectOptions(await screen.findByLabelText("Repo"), R_WEBSHOP.id);
-    await user.type(screen.getByLabelText("Path"), "/Users/rogier/code/webshop");
-    await user.click(screen.getByRole("button", { name: "Adopt" }));
+    await openDialog(user);
+    await user.keyboard("{Escape}");
+    await waitFor(() => {
+      expect(screen.queryByRole("form", { name: "New project" })).toBeNull();
+    });
+  });
 
-    expect((await screen.findByRole("alert")).textContent).toBe(
-      "moss already holds a checkout of webshop",
-    );
+  it("leaves no add-repo or adopt form in the workspace menu", async () => {
+    const user = userEvent.setup();
+    await openAt(inProject(WEBSHOP.id));
+
+    const menu = await openWorkspaceMenu(user);
+    const text = reading(menu);
+    expect(text).not.toContain("Add a repo");
+    expect(text).not.toContain("Adopt a folder");
   });
 });

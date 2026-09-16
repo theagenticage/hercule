@@ -111,7 +111,7 @@ export const SpawnCheckout = Schema.Struct({
 export type SpawnCheckout = Schema.Schema.Type<typeof SpawnCheckout>;
 
 /**
- * The workspace a thread opens in: the repo's shared checkout, a fresh worktree
+ * The workspace a thread opens in: the repo's main workspace, a fresh worktree
  * of its own, or one that already stands. A workspace is a kind and a list of
  * checkouts; every git word rides a checkout. Leaving it off is a thread with
  * no checkout at all.
@@ -120,7 +120,7 @@ export const SpawnWorkspace = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("primary"),
     resourceId: Id,
-    /** The branch the shared checkout is switched to before the harness starts. */
+    /** The branch the main workspace is switched to before the harness starts. */
     branch: Schema.optionalKey(Branch),
   }),
   Schema.Struct({

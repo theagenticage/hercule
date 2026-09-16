@@ -25,6 +25,7 @@ import {
   workspacesQuery,
 } from "../app/queries";
 import { ProjectDot } from "../screens/project-dot";
+import { NewProject } from "../screens/new-project";
 import { ProjectPicker } from "../screens/project-picker";
 import { ThreadRowView } from "../screens/thread-row";
 
@@ -66,7 +67,9 @@ export function ThreadsFace({
   // checkout already stands where the draft would run.
   const { detectLocalRunner } = useRouteContext({ from: "/_shell" });
   const localRunnerId = useQuery(localRunnerQuery(detectLocalRunner, runners)).data ?? null;
-  const [picking, setPicking] = useState(false);
+  // One overlay at a time: the picker asks which project, the dialog makes one
+  // (D-20b), and the picker's New project row hands over to it.
+  const [overlay, setOverlay] = useState<"picker" | "new-project" | null>(null);
 
   // The router's own answers for which thread is open and which draft is being
   // written, so neither can drift from the route file the way a path pattern
@@ -98,21 +101,49 @@ export function ThreadsFace({
 
   return (
     <nav aria-label="Threads" className="flex min-h-0 flex-col">
-      <button
-        type="button"
-        onClick={() => {
-          setPicking(true);
-        }}
-        className="mb-2.5 flex w-full cursor-pointer items-center gap-2 rounded-control border border-line bg-raised px-2.5 py-1.5 text-left text-row font-emph text-ink shadow-card hover:bg-line-soft"
-      >
-        <span className="font-mono text-row text-faint">+</span>
-        Create new thread
-      </button>
-      {picking ? (
+      <div className="mb-2.5 flex items-center gap-1.5">
+        <button
+          type="button"
+          onClick={() => {
+            setOverlay("picker");
+          }}
+          className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-control border border-line bg-raised px-2.5 py-1.5 text-left text-row font-emph text-ink shadow-card hover:bg-line-soft"
+        >
+          <span className="font-mono text-row text-faint">+</span>
+          Create new thread
+        </button>
+        {/* The one other thing started from up here: a project to start threads
+            in (D-20b). The `+` is the sidebar's own affordance for "one more of
+            these", as the per-project and per-workspace rows below already use;
+            the marks family holds no folder glyph, and #35 pins what it holds. */}
+        <button
+          type="button"
+          aria-label="New project"
+          title="New project"
+          onClick={() => {
+            setOverlay("new-project");
+          }}
+          className="flex size-[30px] shrink-0 cursor-pointer items-center justify-center rounded-control border border-line bg-raised font-mono text-row text-faint shadow-card hover:bg-line-soft hover:text-ink"
+        >
+          +
+        </button>
+      </div>
+      {overlay === "picker" ? (
         <ProjectPicker
           client={client}
           onClose={() => {
-            setPicking(false);
+            setOverlay(null);
+          }}
+          onNewProject={() => {
+            setOverlay("new-project");
+          }}
+        />
+      ) : null}
+      {overlay === "new-project" ? (
+        <NewProject
+          client={client}
+          onClose={() => {
+            setOverlay(null);
           }}
         />
       ) : null}
@@ -198,9 +229,9 @@ function WorkspaceLane({
     <div className="group/lane">
       {projectId === null || lane.label === null ? null : (
         <div className="flex items-center gap-1.5 pt-1.5 pr-1 pb-px pl-2">
-          {/* The repo is what gives when the sidebar is narrow; ` checkout ·
-              <machine>` stands whole, because the machine is what tells one
-              repo's two checkouts apart. The whole label is the title. A label
+          {/* The repo is what gives when the sidebar is narrow; ` · <machine>`
+              stands whole, because the machine is what tells one repo's two
+              main workspaces apart (D-20c). The whole label is the title. A label
               that is one word is one element: two would be the same text
               twice, to a reader and to anything looking for it. */}
           {lane.label.keep === "" ? (

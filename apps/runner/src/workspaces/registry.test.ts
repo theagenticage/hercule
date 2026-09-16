@@ -10,7 +10,6 @@ import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { makeWorkspaces } from "./index";
 import {
-  adoptedCheckout,
   checkout,
   cleanTemporaries,
   git,
@@ -89,23 +88,25 @@ describe("resolving a workspace", () => {
     ]);
   });
 
-  it("runs a primary in the folder that was adopted", async () => {
+  // D-20a: a primary is Hydra's own clone under the machine's storage.
+  it("runs a primary in the clone it made for the repository", async () => {
     const remote = makeRemote();
-    const folder = adoptedCheckout(remote);
     const storageDir = storage();
     const workspaceId = id();
+    const resourceId = id();
     await makeWorkspaces({ storageDir }).provision(
       provisionFrame({
         workspaceId,
         kind: "primary",
-        checkouts: [checkout({ resourceId: id(), remote: remote.url, path: folder })],
+        checkouts: [checkout({ resourceId, remote: remote.url })],
       }),
     );
 
     const resolved = makeWorkspaces({ storageDir }).resolve(workspaceId);
 
-    expect(resolved?.cwd).toBe(folder);
-    expect(resolved?.root).toBe(folder);
+    const directory = join(storageDir, "primaries", resourceId);
+    expect(resolved?.cwd).toBe(directory);
+    expect(resolved?.root).toBe(directory);
   });
 
   it("knows nothing about a workspace it does not hold", () => {
@@ -135,6 +136,36 @@ describe("provisioning a workspace this runner already holds", () => {
     expect(again.checkouts?.[0]?.branch).toBe(first.checkouts?.[0]?.branch);
     // A repeated frame must never throw the work in the workspace away.
     expect(git(directory, "status", "--porcelain")).toContain("work-in-progress.txt");
+  });
+
+  /**
+   * D-21 F12: the registry is written when a provisioning finishes, so a frame
+   * that arrives while the first is still cloning would find nothing there and
+   * provision a second time - failing on the branch the first had just made and
+   * tearing down what it found. Whoever arrives second waits for the one in
+   * flight and reports what it reported.
+   */
+  it("reports the one in flight rather than provisioning twice", async () => {
+    const remote = makeRemote();
+    const storageDir = storage();
+    const workspaceId = id();
+    const frame = provisionFrame({
+      workspaceId,
+      kind: "ephemeral",
+      checkouts: [checkout({ resourceId: id(), remote: remote.url, branch: "hydra/run-1d1d1d1d" })],
+    });
+    const workspaces = makeWorkspaces({ storageDir });
+
+    // Both sent before either has answered: one daemon, one frame resent.
+    const [first, second] = await Promise.all([
+      workspaces.provision(frame),
+      workspaces.provision(frame),
+    ]);
+
+    expect(first.status, first.message ?? "").toBe("ready");
+    expect(second).toEqual(first);
+    const directory = join(storageDir, "workspaces", workspaceId);
+    expect(git(directory, "rev-parse", "--abbrev-ref", "HEAD")).toBe("hydra/run-1d1d1d1d");
   });
 });
 
@@ -167,17 +198,18 @@ describe("a workspace whose directory is gone", () => {
 describe("what a primary is re-reported as after a session in it", () => {
   it("re-reads the branch the session left the checkout on", async () => {
     const remote = makeRemote();
-    const folder = adoptedCheckout(remote);
     const storageDir = storage();
     const workspaceId = id();
+    const resourceId = id();
     const workspaces = makeWorkspaces({ storageDir });
     await workspaces.provision(
       provisionFrame({
         workspaceId,
         kind: "primary",
-        checkouts: [checkout({ resourceId: id(), remote: remote.url, path: folder })],
+        checkouts: [checkout({ resourceId, remote: remote.url })],
       }),
     );
+    const folder = join(storageDir, "primaries", resourceId);
     // What a session does: it works on a branch of its own.
     git(folder, "checkout", "-b", "feature/what-the-agent-did");
 

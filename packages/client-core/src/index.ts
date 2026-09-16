@@ -91,6 +91,7 @@ export { siblingTabs, type ThreadTab } from "./threads/siblings";
 export { projectPickerRows, projectTone, type ProjectPickerRow } from "./threads/projects";
 export { branchField, type BranchField } from "./threads/branch-menu";
 export { workspaceMenu, type WorkspaceMenu } from "./threads/workspace-menu";
+export { isClonableRemote, REMOTE_REFUSAL } from "./remote";
 export {
   draftSubject,
   labelText,
