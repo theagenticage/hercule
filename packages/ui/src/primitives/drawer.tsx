@@ -45,7 +45,7 @@ export function Drawer({
         data-backdrop
         aria-hidden="true"
         onClick={onClose}
-        className="absolute inset-0 bg-ink/20"
+        className="absolute inset-0 bg-scrim"
       />
       <div
         ref={panel}

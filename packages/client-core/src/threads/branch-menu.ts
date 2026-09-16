@@ -7,7 +7,13 @@
  * after its branch - and on a thread with no checkout at all.
  */
 import type { Workspace } from "@hydra/contract";
-import { baseBranchOf, readyPrimary, workspaceName, type WorkspacePick } from "./workspaces";
+import {
+  baseBranchOf,
+  readyPrimary,
+  workspaceName,
+  type Phrase,
+  type WorkspacePick,
+} from "./workspaces";
 
 export interface BranchRow {
   readonly branch: string;
@@ -27,7 +33,8 @@ export interface BranchField {
   /** Why there is nothing to choose between; a field like that is text, not a menu. */
   readonly locked: string | null;
   readonly rows: readonly BranchRow[];
-  readonly foot: string | null;
+  /** The fine print under the rows; the git words in it are set in mono. */
+  readonly foot: readonly Phrase[] | null;
 }
 
 /** What a branch reads as before any machine has cloned the repo it is in. */
@@ -148,6 +155,12 @@ export const branchField = (
     foot:
       base === null
         ? null
-        : `The new branch is hydra/run-…, named after the thread, and starts from origin/${base} when the remote has it.`,
+        : [
+            { text: "The new branch is " },
+            { text: "hydra/run-…", mono: true },
+            { text: ", named after the thread, and starts from " },
+            { text: `origin/${base}`, mono: true },
+            { text: " when the remote has it." },
+          ],
   };
 };

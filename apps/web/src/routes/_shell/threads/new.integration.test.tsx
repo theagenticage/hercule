@@ -396,7 +396,7 @@ describe("Composer: selector popovers (AC-16)", () => {
     expect(reading().match(/pick a project first/g)?.length).toBeGreaterThanOrEqual(2);
   });
 
-  it("opens the runner menu with the runner's state and machine on the row's first line", async () => {
+  it("opens the runner menu with the state and the capacity beside the machine, and what it is under it", async () => {
     const user = userEvent.setup();
     await open();
 
@@ -406,8 +406,11 @@ describe("Composer: selector popovers (AC-16)", () => {
     // spans several elements - read the dialog's whole text rather than
     // asking for one element whose own text is the exact string.
     const dialog = reading(await screen.findByRole("dialog"));
-    expect(dialog).toContain("moss · online · this machine");
-    expect(dialog).toContain("rogier@example.com · Claude Max");
+    // The machine, then its state and how much of it is taken; what this
+    // machine is stands under it. Who is logged in is the model menu's to say.
+    expect(dialog).toContain("moss online 0/4");
+    expect(dialog).toContain("this machine · default");
+    expect(dialog).toContain("The thread runs where you say; nothing moves it later.");
   });
 });
 

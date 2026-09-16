@@ -92,11 +92,14 @@ export { branchField, type BranchField } from "./threads/branch-menu";
 export { workspaceMenu, type WorkspaceMenu } from "./threads/workspace-menu";
 export {
   draftSubject,
+  phraseText,
   projectRepos,
   repoName,
   runnerForPick,
   withBranch,
+  workspaceName,
   type DraftSubject,
+  type Phrase,
   type WorkspacePick,
 } from "./threads/workspaces";
 export { runnerMenu } from "./threads/runner-menu";

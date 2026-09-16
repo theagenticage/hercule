@@ -40,6 +40,13 @@ export function WorkspaceSelector({
         onOpenChange(next);
       }}
       contentClassName="w-[420px]"
+      // A form inside the menu is what Esc leaves first: the menu stands, and
+      // a second Esc closes it.
+      onEscapeKeyDown={(event) => {
+        if (form === null) return;
+        event.preventDefault();
+        setForm(null);
+      }}
     >
       <MenuHeader label="Workspace" note="locks when the thread starts" />
       {menu.rows.map((row) => (
@@ -77,9 +84,18 @@ export function WorkspaceSelector({
             onDone={() => {
               setForm(null);
             }}
+            onCancel={() => {
+              setForm(null);
+            }}
           />
         ) : form === "adopt" ? (
-          <AdoptForm projectId={menu.foot.projectId} runnerId={menu.foot.runnerId} />
+          <AdoptForm
+            projectId={menu.foot.projectId}
+            runnerId={menu.foot.runnerId}
+            onCancel={() => {
+              setForm(null);
+            }}
+          />
         ) : (
           <>
             <FootAction

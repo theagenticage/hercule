@@ -55,6 +55,11 @@ function Tab({ tab }: { readonly tab: ThreadTab }): JSX.Element {
           <WorkingMark />
         ) : tab.mark === "exited" ? (
           <DoneMark />
+        ) : tab.mark === "draft" ? (
+          // The draft's own mark, as the sidebar's draft row carries it.
+          <span aria-hidden="true" className="text-faint">
+            ·
+          </span>
         ) : (
           <span className="size-1.5 rounded-full border-[1.5px] border-faint" />
         )}

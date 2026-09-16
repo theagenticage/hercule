@@ -17,6 +17,7 @@ import type {
 } from "@hydra/contract";
 import { BARE, instance, snapshot } from "../providers.testing";
 import { composerFields, pendingModelNote } from "./composer-fields";
+import { phraseText } from "./workspaces";
 
 const runner = (overrides: Partial<Runner> & { id: string }): Runner => ({
   ...BARE,
@@ -232,7 +233,7 @@ describe("composerFields: the machine", () => {
 
 describe("composerFields: the lead", () => {
   it("carries the draft's sentence, and none on a thread that has started", () => {
-    expect(composerFields(catalogs([CLAUDE]), config(), "draft").lead).toBe(
+    expect(phraseText(composerFields(catalogs([CLAUDE]), config(), "draft").lead ?? [])).toBe(
       "It works without a checkout.",
     );
     expect(composerFields(catalogs([CLAUDE]), config(), "active").lead).toBeNull();
@@ -478,7 +479,7 @@ describe("composerFields: one machine, read by everything that names one", () =>
     expect(fields.machine.label).toBe("moss · not logged in");
     // The lead reads the shared checkout on that same machine, rather than
     // reading nothing because no machine was picked.
-    expect(fields.lead).toBe(
+    expect(phraseText(fields.lead ?? [])).toBe(
       "It works in the checkout of webshop on moss, on main. You and the agent share the files.",
     );
   });
@@ -525,7 +526,7 @@ describe("composerFields: the lead sentence follows the workspace (AC-17)", () =
       "draft",
     );
 
-    expect(fields.lead).toBe(
+    expect(phraseText(fields.lead ?? [])).toBe(
       "It works in the checkout of webshop on moss, on release/2.4. You and the agent share the files.",
     );
   });
@@ -540,7 +541,7 @@ describe("composerFields: the lead sentence follows the workspace (AC-17)", () =
       "draft",
     );
 
-    expect(fields.lead).toBe(
+    expect(phraseText(fields.lead ?? [])).toBe(
       "It works in the checkout of webshop on moss, on main. You and the agent share the files.",
     );
   });
@@ -558,7 +559,7 @@ describe("composerFields: the lead sentence follows the workspace (AC-17)", () =
       "draft",
     );
 
-    expect(fields.lead).toBe(
+    expect(phraseText(fields.lead ?? [])).toBe(
       "It gets its own worktree of webshop, on a new branch from release/2.4.",
     );
   });
@@ -573,7 +574,9 @@ describe("composerFields: the lead sentence follows the workspace (AC-17)", () =
       "draft",
     );
 
-    expect(fields.lead).toBe("It gets its own worktree of webshop, on a new branch from main.");
+    expect(phraseText(fields.lead ?? [])).toBe(
+      "It gets its own worktree of webshop, on a new branch from main.",
+    );
   });
 
   it("names the workspace it joins, and what joining one means", () => {
@@ -586,7 +589,7 @@ describe("composerFields: the lead sentence follows the workspace (AC-17)", () =
       "draft",
     );
 
-    expect(fields.lead).toBe(
+    expect(phraseText(fields.lead ?? [])).toBe(
       "It joins “hydra/run-3f1” there: the agents see each other's edits, on one branch.",
     );
   });
@@ -598,6 +601,6 @@ describe("composerFields: the lead sentence follows the workspace (AC-17)", () =
       "draft",
     );
 
-    expect(fields.lead).toBe("It works without a checkout.");
+    expect(phraseText(fields.lead ?? [])).toBe("It works without a checkout.");
   });
 });

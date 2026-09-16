@@ -1,6 +1,6 @@
 import type { JSX } from "react";
+import { Link } from "@tanstack/react-router";
 import type { MachineRow } from "@hydra/client-core";
-import { cn } from "@hydra/ui";
 import { MenuFoot, MenuHeader, MenuRow } from "./menu";
 import { SelectorShell } from "./selector-shell";
 
@@ -14,35 +14,34 @@ const STATE_HUE: Record<MachineRow["state"], string> = {
 };
 
 /**
- * A row's first line: the machine, its state word in the state's hue, then
- * what else is true of it. The separating " · " is a text character in every
- * segment rather than a flex gap, so the row's own text - and a reader of it -
- * carries the spacing the eye sees.
+ * A row's first line at the right: the state word in the state's hue, then how
+ * much of the machine is taken. Nothing else is said there - what is true of
+ * the machine belongs under it, where there is room for the reason.
  */
-const rowLabel = (row: MachineRow): JSX.Element => (
-  <span className="flex min-w-0 items-center">
-    <span className="truncate">{row.name}</span>
-    <span className={cn("shrink-0 whitespace-pre", STATE_HUE[row.state])}>{` · ${row.state}`}</span>
-    {row.isLocal ? (
-      <span className="shrink-0 text-faint whitespace-pre"> · this machine</span>
-    ) : null}
-    {row.reserved ? <span className="shrink-0 text-faint whitespace-pre"> · reserved</span> : null}
-  </span>
+const stateAndCapacity = (row: MachineRow): JSX.Element => (
+  <>
+    <span className={STATE_HUE[row.state]}>{row.state}</span>
+    {/* The space is a character rather than a gap, so the row reads the way
+        it looks to a reader who hears it rather than sees it. */}
+    <span className="font-mono whitespace-pre text-faint tabular-nums">{` ${row.capacity}`}</span>
+  </>
 );
 
 /**
- * What stands under a row: who is logged in there and on what plan, and - on a
- * draft opening in a shared checkout - whether this machine holds the repo yet.
- * A machine that does not is still pickable: it clones on first use.
+ * What stands under a row: what this machine is - the local one, the one a new
+ * thread lands on, one held back - and every reason it is dimmed. A machine
+ * that does not hold the repo yet is still pickable: it clones on first use.
  */
-const subLine = (row: MachineRow): JSX.Element => (
-  <>
-    <span className="block truncate">
-      {[row.identity, row.planLabel].filter((each) => each !== null).join(" · ")}
-    </span>
-    {row.notCloned === null ? null : <span className="block truncate">{row.notCloned}</span>}
-  </>
-);
+const subLine = (row: MachineRow): string =>
+  [
+    row.isLocal ? "this machine" : null,
+    row.isDefault ? "default" : null,
+    row.reserved ? "reserved" : null,
+    row.dimmed,
+    row.notCloned,
+  ]
+    .filter((each): each is string => each !== null)
+    .join(" · ");
 
 /**
  * The lip's right-hand selector: which machine a new thread is placed on,
@@ -81,9 +80,10 @@ export function MachineSelector({
       {rows.map((row) => (
         <MenuRow
           key={row.runnerId}
-          name={rowLabel(row)}
+          name={row.name}
+          note={stateAndCapacity(row)}
           sub={subLine(row)}
-          dimmed={row.dimmed}
+          inert={row.dimmed !== null}
           current={row.current}
           onPick={() => {
             onPick(row.runnerId);
@@ -92,8 +92,10 @@ export function MachineSelector({
         />
       ))}
       <MenuFoot>
-        <span>Add machine →</span>
-        <span> · not built yet</span>
+        The thread runs where you say; nothing moves it later.{" "}
+        <Link to="/fleet" className="text-muted hover:text-ink">
+          Add machine →
+        </Link>
       </MenuFoot>
     </SelectorShell>
   );

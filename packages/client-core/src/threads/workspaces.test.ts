@@ -18,6 +18,7 @@ import {
   runnerForPick,
   withBranch,
   workspaceLabel,
+  phraseText,
   workspaceLead,
   workspaceName,
 } from "./workspaces";
@@ -202,15 +203,25 @@ describe("defaultWorkspacePick", () => {
 describe("workspaceLead", () => {
   const reading = { resources: [WEBSHOP, INFRA], workspaces: [PRIMARY], machine: "moss" };
 
+  /** The sentence as it reads; which parts of it are mono is a claim of its own. */
+  const lead = (...args: Parameters<typeof workspaceLead>): string =>
+    phraseText(workspaceLead(...args));
+
   it("leaves the branch clause out of a checkout no machine holds yet", () => {
+    expect(lead({ kind: "primary", resourceId: INFRA.id }, { ...reading, runnerId: MOSS.id })).toBe(
+      "It works in the checkout of ops-infra on moss. You and the agent share the files.",
+    );
+  });
+
+  it("sets the branch it names in mono, as a git word is set everywhere", () => {
     expect(
-      workspaceLead({ kind: "primary", resourceId: INFRA.id }, { ...reading, runnerId: MOSS.id }),
-    ).toBe("It works in the checkout of ops-infra on moss. You and the agent share the files.");
+      workspaceLead({ kind: "primary", resourceId: WEBSHOP.id }, { ...reading, runnerId: MOSS.id }),
+    ).toContainEqual({ text: "main", mono: true });
   });
 
   it("says a base nothing has reported is the repo's own default branch", () => {
     expect(
-      workspaceLead(
+      lead(
         { kind: "ephemeral", checkouts: [{ resourceId: INFRA.id }] },
         { ...reading, runnerId: MOSS.id },
       ),
@@ -219,7 +230,7 @@ describe("workspaceLead", () => {
 
   it("speaks of the repos together when a worktree is made of several", () => {
     expect(
-      workspaceLead(
+      lead(
         { kind: "ephemeral", checkouts: [{ resourceId: WEBSHOP.id }, { resourceId: INFRA.id }] },
         { ...reading, runnerId: MOSS.id },
       ),
@@ -228,7 +239,7 @@ describe("workspaceLead", () => {
 
   it("says something about a workspace the catalog no longer holds", () => {
     expect(
-      workspaceLead({ kind: "existing", workspaceId: "ws-gone" }, { ...reading, runnerId: null }),
+      lead({ kind: "existing", workspaceId: "ws-gone" }, { ...reading, runnerId: null }),
     ).toContain("that workspace");
   });
 });

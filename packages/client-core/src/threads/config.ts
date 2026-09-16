@@ -66,6 +66,8 @@ export interface ThreadCatalogs {
   readonly projects?: readonly Project[];
   readonly resources?: readonly Resource[];
   readonly workspaces?: readonly Workspace[];
+  /** What is running where, which is what a machine's capacity is read from. */
+  readonly sessions?: readonly Session[];
 }
 
 /**

@@ -114,7 +114,9 @@ export const workspaceMenu = ({
       pick: sharedPick,
       name: repos.length === 1 ? "Current checkout" : `Current checkout of ${repoName(repo)}`,
       mono: false,
-      note: null,
+      // The machine stands at the right of every row that has one, the shared
+      // checkout included: it is on a machine as much as a worktree is.
+      note: runnerId === null ? null : machine,
       sub:
         branch === null
           ? `not cloned on ${machine} · clones on first use`

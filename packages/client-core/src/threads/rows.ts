@@ -3,7 +3,7 @@
  * `now`-free `activityAt` stays raw: formatting "how long ago" needs a clock,
  * and the caller's is the one that should ever run.
  */
-import type { Session, ThreadRows } from "@hydra/contract";
+import type { ProviderInstance, Session, ThreadRows } from "@hydra/contract";
 import { isSettled, WORKING_STATUSES } from "./status";
 
 /** What a row's state mark says: working, waiting, or over. */
@@ -25,7 +25,29 @@ export const markOf = (session: Session): ThreadMark => {
   return "idle";
 };
 
-export const threadRows = (sessions: readonly Session[], mode: ThreadRows): readonly ThreadRow[] =>
+/**
+ * What the thread runs, as the catalog that offers it names it: `Claude Sonnet
+ * 5`, never the `claude-sonnet-5` a request is written with, and never the bare
+ * word `default` for the model a provider picks for itself. A slug no snapshot
+ * offers any more is still what the thread runs under, so it is named as it
+ * stands rather than going blank.
+ */
+const modelName = (instances: readonly ProviderInstance[], session: Session): string => {
+  const slug = session.modelSelection.model;
+  const instance = instances.find((each) => each.id === session.instanceId);
+  for (const snapshot of instance?.snapshots ?? []) {
+    const model = snapshot.models.find((each) => each.slug === slug);
+    if (model !== undefined) return model.name;
+  }
+  return slug;
+};
+
+export const threadRows = (
+  sessions: readonly Session[],
+  mode: ThreadRows,
+  /** The catalogs a meta row's model is named from; a plain row names none. */
+  instances: readonly ProviderInstance[] = [],
+): readonly ThreadRow[] =>
   [...sessions]
     .sort((a, b) => Date.parse(b.lastActivityAt) - Date.parse(a.lastActivityAt))
     .map((session) => ({
@@ -33,5 +55,5 @@ export const threadRows = (sessions: readonly Session[], mode: ThreadRows): read
       mark: markOf(session),
       title: session.title,
       activityAt: session.lastActivityAt,
-      secondLine: mode === "meta" ? session.modelSelection.model : null,
+      secondLine: mode === "meta" ? modelName(instances, session) : null,
     }));

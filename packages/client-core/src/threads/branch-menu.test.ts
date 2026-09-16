@@ -8,6 +8,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { branchField } from "./branch-menu";
+import { phraseText } from "./workspaces";
 import {
   COVE,
   MOSS,
@@ -77,9 +78,12 @@ describe("branchField: a fresh worktree", () => {
     expect(field?.header).toBe("Base branch");
     expect(field?.label).toBe("from main");
     expect(field?.rows.find((row) => row.branch === "main")?.badge).toBe("default");
-    expect(field?.foot).toBe(
+    expect(phraseText(field?.foot ?? [])).toBe(
       "The new branch is hydra/run-…, named after the thread, and starts from origin/main when the remote has it.",
     );
+    // The two git words in it are mono, as a git word is everywhere.
+    expect(field?.foot).toContainEqual({ text: "hydra/run-…", mono: true });
+    expect(field?.foot).toContainEqual({ text: "origin/main", mono: true });
   });
 
   it("badges the checked-out branch current where it is not the default", () => {

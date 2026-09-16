@@ -23,6 +23,7 @@ import {
   repoName,
   workspaceLead,
   workspaceName,
+  type Phrase,
   type WorkspacePick,
 } from "./workspaces";
 
@@ -47,6 +48,10 @@ export interface ComposerBlocked {
 /** One machine the thread could be placed on, and whether it is the one in force. */
 export interface MachineRow extends RunnerMenuRow {
   readonly current: boolean;
+  /** Where a new thread would land without a pick, as the row's own badge. */
+  readonly isDefault: boolean;
+  /** `1/4`: the sessions this machine is hosting, against what it will host. */
+  readonly capacity: string;
   /**
    * `webshop is not cloned there · clones on first use`, on a draft opening in
    * a shared checkout. It dims nothing: a machine without the repo yet is a
@@ -80,7 +85,7 @@ export interface ComposerFields {
     readonly rows: readonly MachineRow[];
   };
   /** The sentence a draft stands under; an active thread stands under none. */
-  readonly lead: string | null;
+  readonly lead: readonly Phrase[] | null;
   /** Why this draft cannot start at all; null once it can, and on a thread that has. */
   readonly blocked: ComposerBlocked | null;
 }
@@ -144,18 +149,26 @@ export const composerFields = (
 
   // The name and the reason come off one machine, never off two: a machine
   // named with another's reason would send the user to fix the wrong thing.
+  const menu =
+    instance === undefined ? null : runnerMenu(catalogs.runners, catalogs.localRunnerId, instance);
+  const hosted = (runnerId: string): number =>
+    (catalogs.sessions ?? []).filter(
+      (session) => session.runnerId === runnerId && session.exitedAt === null,
+    ).length;
   const rows: readonly MachineRow[] =
-    instance === undefined
-      ? []
-      : runnerMenu(catalogs.runners, catalogs.localRunnerId, instance).rows.map((row) => ({
-          ...row,
-          current: row.runnerId === runner?.id,
-          notCloned:
-            pick.kind === "primary" &&
-            readyPrimary(workspaces, pick.resourceId, row.runnerId) === undefined
-              ? `${repoName(resources.find((each) => each.id === pick.resourceId))} is not cloned there · clones on first use`
-              : null,
-        }));
+    menu?.rows.map((row) => ({
+      ...row,
+      current: row.runnerId === runner?.id,
+      isDefault: row.runnerId === menu.defaultRunnerId,
+      capacity: `${String(hosted(row.runnerId))}/${String(
+        catalogs.runners.find((each) => each.id === row.runnerId)?.maxConcurrentSessions ?? 0,
+      )}`,
+      notCloned:
+        pick.kind === "primary" &&
+        readyPrimary(workspaces, pick.resourceId, row.runnerId) === undefined
+          ? `${repoName(resources.find((each) => each.id === pick.resourceId))} is not cloned there · clones on first use`
+          : null,
+    })) ?? [];
   const dimmed = rows.find((row) => row.current)?.dimmed ?? null;
   const name = runner?.name ?? "no machine";
 

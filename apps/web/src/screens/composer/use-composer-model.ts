@@ -11,6 +11,7 @@ import {
   runnerForPick,
   submission,
   threadConfig,
+  workspaceName,
   type ComposerFields,
   type ComposerPick,
   type HydraClient,
@@ -122,6 +123,14 @@ export function useComposerModel(
   });
   const readOnly = session === null ? null : resumeBlockedReason(session);
   const busy = session?.status === "busy";
+  // A draft that joins a workspace says so where the user is about to type:
+  // the thread is being written into files that already stand.
+  const pick = fields.workspace.value;
+  const joined =
+    pick.kind === "existing"
+      ? (catalogs.workspaces ?? []).find((each) => each.id === pick.workspaceId)
+      : undefined;
+  const joining = joined === undefined ? null : workspaceName(joined);
 
   return {
     kind: thread.kind,
@@ -136,7 +145,9 @@ export function useComposerModel(
         : busy
           ? "Queued until the turn finishes…"
           : session === null
-            ? "Say what you want done…"
+            ? joining === null
+              ? "Say what you want done…"
+              : `Say what this thread should do in ${joining}…`
             : "Reply…",
     sendTip: session === null ? "Start thread ⏎" : "Send ⏎",
     readOnly,

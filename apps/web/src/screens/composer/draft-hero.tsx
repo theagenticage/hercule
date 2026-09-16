@@ -1,7 +1,8 @@
 import type { JSX, ReactNode } from "react";
-import type { ComposerBlocked, LoginTarget } from "@hydra/client-core";
+import type { ComposerBlocked, LoginTarget, Phrase } from "@hydra/client-core";
 import { projectTone } from "@hydra/client-core";
 import { cn } from "@hydra/ui";
+import { Phrases } from "./phrases";
 
 /** What the draft is for, as its heading names it: a project, or a workspace. */
 export interface DraftSubject {
@@ -31,7 +32,7 @@ export function DraftHero({
   /** What the thread is being started in; null on a draft that stands alone. */
   readonly subject: DraftSubject | null;
   /** The sentence this draft stands under, where nothing blocks it. */
-  readonly lead: string;
+  readonly lead: readonly Phrase[];
   readonly blocked: ComposerBlocked | null;
   readonly loginSlot: (login: LoginTarget, className: string) => ReactNode;
 }): JSX.Element {
@@ -59,7 +60,7 @@ export function DraftHero({
       </h2>
       <p className="text-row text-muted">
         {blocked === null ? (
-          lead
+          <Phrases parts={lead} />
         ) : (
           <>
             <span className="font-emph text-attn">Can&apos;t start yet.</span> {blocked.reason}.{" "}

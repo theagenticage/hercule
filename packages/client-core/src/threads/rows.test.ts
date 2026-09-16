@@ -4,7 +4,18 @@
  */
 import { describe, expect, it } from "vitest";
 import type { Session, SessionStatus } from "@hydra/contract";
+import { instance, snapshot } from "../providers.testing";
 import { threadRows } from "./rows";
+
+/** The one instance a row's model is named from, offering two models. */
+const CLAUDE = instance("claude-code", "Claude Code", [
+  snapshot({
+    models: [
+      { slug: "default", name: "Default (recommended)", options: [] },
+      { slug: "claude-opus-5", name: "Claude Opus 5", options: [] },
+    ],
+  }),
+]);
 
 type Mark = "working" | "idle" | "exited";
 
@@ -76,12 +87,49 @@ describe("threadRows", () => {
     });
   });
 
-  it("populates the second line with the model slug in meta mode", () => {
+  it("names the model on the second line as the catalog names it, in meta mode", () => {
     const rows = threadRows(
-      [session({ id: "s1", modelSelection: { model: "claude-opus-5", options: {} } })],
+      [
+        session({
+          id: "s1",
+          instanceId: CLAUDE.id,
+          modelSelection: { model: "claude-opus-5", options: {} },
+        }),
+      ],
       "meta",
+      [CLAUDE],
     );
-    expect(rows[0]!.secondLine).toBe("claude-opus-5");
+    expect(rows[0]!.secondLine).toBe("Claude Opus 5");
+  });
+
+  it("names the provider's own default by its display name rather than the word default", () => {
+    const rows = threadRows(
+      [
+        session({
+          id: "s1",
+          instanceId: CLAUDE.id,
+          modelSelection: { model: "default", options: {} },
+        }),
+      ],
+      "meta",
+      [CLAUDE],
+    );
+    expect(rows[0]!.secondLine).toBe("Default (recommended)");
+  });
+
+  it("falls back to the slug for a model no catalog on offer holds", () => {
+    const rows = threadRows(
+      [
+        session({
+          id: "s1",
+          instanceId: CLAUDE.id,
+          modelSelection: { model: "claude-opus-4-8", options: {} },
+        }),
+      ],
+      "meta",
+      [CLAUDE],
+    );
+    expect(rows[0]!.secondLine).toBe("claude-opus-4-8");
   });
 
   it("has no second line in plain mode", () => {

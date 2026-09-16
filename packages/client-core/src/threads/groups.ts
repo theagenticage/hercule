@@ -8,7 +8,15 @@
  * The draft being written joins the group it will belong to once it starts, so
  * the sidebar shows where a thread is going before it exists.
  */
-import type { Project, Resource, Runner, Session, ThreadRows, Workspace } from "@hydra/contract";
+import type {
+  Project,
+  ProviderInstance,
+  Resource,
+  Runner,
+  Session,
+  ThreadRows,
+  Workspace,
+} from "@hydra/contract";
 import { threadRows, type ThreadRow } from "./rows";
 import { workspaceLabel } from "./workspaces";
 
@@ -48,6 +56,7 @@ export const threadGroups = ({
   workspaces,
   resources,
   runners,
+  instances = [],
   mode,
   draft = null,
 }: {
@@ -56,10 +65,12 @@ export const threadGroups = ({
   readonly workspaces: readonly Workspace[];
   readonly resources: readonly Resource[];
   readonly runners: readonly Runner[];
+  /** What a meta row names its model from. */
+  readonly instances?: readonly ProviderInstance[];
   readonly mode: ThreadRows;
   readonly draft?: DraftPlace | null;
 }): readonly ProjectGroup[] => {
-  const rows = threadRows(sessions, mode);
+  const rows = threadRows(sessions, mode, instances);
   const placeOf = new Map(sessions.map((session) => [session.id, session]));
 
   const byProject = new Map<string | null, ThreadRow[]>();

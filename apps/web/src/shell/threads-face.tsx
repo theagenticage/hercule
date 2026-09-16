@@ -15,6 +15,7 @@ import { cn, useMinuteClock } from "@hydra/ui";
 import { useLiveInvalidation } from "../app/live-invalidation";
 import {
   projectsQuery,
+  providersQuery,
   resourcesQuery,
   runnersQuery,
   sessionsQuery,
@@ -52,6 +53,9 @@ export function ThreadsFace({
   const resources = useQuery(resourcesQuery(client)).data?.items ?? [];
   const workspaces = useQuery(workspacesQuery(client)).data?.items ?? [];
   const runners = useQuery(runnersQuery(client)).data?.items ?? [];
+  // What a meta row names its model from: the catalogs, so a row reads
+  // `Claude Sonnet 5` rather than the slug a request is written with.
+  const instances = useQuery(providersQuery(client)).data ?? [];
   const [picking, setPicking] = useState(false);
 
   // The router's own answers for which thread is open and which draft is being
@@ -73,6 +77,7 @@ export function ThreadsFace({
     workspaces,
     resources,
     runners,
+    instances,
     mode: rows,
     draft,
   });

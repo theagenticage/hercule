@@ -1,6 +1,7 @@
 import type { JSX } from "react";
 import type { BranchField } from "@hydra/client-core";
 import { MenuFoot, MenuHeader, MenuRow } from "./menu";
+import { Phrases } from "./phrases";
 import { SelectorShell } from "./selector-shell";
 
 /**
@@ -26,12 +27,13 @@ export function BranchSelector({
   return (
     <SelectorShell
       // The glyph is part of what the lip reads, not a decoration beside it:
-      // `⎇ main` is the whole value (spec 14 §Measurements, the Lip).
+      // the branch mark and the name are the whole value (spec 14
+      // §Measurements, the Lip), and the mark sits on the name's own centre.
       label={
         field.glyph ? (
-          <span className="inline-flex items-center gap-1 font-mono text-[11px]">
-            <span aria-hidden="true">⎇</span>
-            {field.label}
+          <span className="flex items-center gap-1 font-mono text-[11px]">
+            <BranchMark />
+            <span className="truncate">{field.label}</span>
           </span>
         ) : (
           field.label
@@ -56,7 +58,31 @@ export function BranchSelector({
           }}
         />
       ))}
-      {field.foot === null ? null : <MenuFoot>{field.foot}</MenuFoot>}
+      {field.foot === null ? null : (
+        <MenuFoot>
+          <Phrases parts={field.foot} />
+        </MenuFoot>
+      )}
     </SelectorShell>
+  );
+}
+
+/** The branch mark the lip carries, as the prototype draws it: two commits and a fork. */
+function BranchMark(): JSX.Element {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      aria-hidden="true"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      className="size-[11px] shrink-0"
+    >
+      <circle cx="6" cy="5" r="2.2" />
+      <circle cx="6" cy="19" r="2.2" />
+      <circle cx="18" cy="8" r="2.2" />
+      <path d="M6 7.2v9.6M18 10.2c0 4-12 2.6-12 6.6" />
+    </svg>
   );
 }

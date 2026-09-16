@@ -229,41 +229,70 @@ export interface WorkspaceReading {
 }
 
 /**
+ * One piece of a sentence the composer writes. A git word - a branch, a ref -
+ * is set in mono wherever it is read, here as everywhere else, so a sentence
+ * is parts rather than one string.
+ */
+export interface Phrase {
+  readonly text: string;
+  readonly mono?: boolean;
+}
+
+/** The same sentence as plain words, which is what a reader hears. */
+export const phraseText = (parts: readonly Phrase[]): string =>
+  parts.map((part) => part.text).join("");
+
+/**
  * The one sentence a draft stands under: where the thread will work, in the
  * four forms spec 14 §The composer pins. A shared checkout no machine has
  * cloned yet has no branch to name, so that clause is left out rather than
  * filled with a word for "we do not know".
  */
-export const workspaceLead = (pick: WorkspacePick, reading: WorkspaceReading): string => {
+export const workspaceLead = (
+  pick: WorkspacePick,
+  reading: WorkspaceReading,
+): readonly Phrase[] => {
   switch (pick.kind) {
     case "none":
-      return "It works without a checkout.";
+      return [{ text: "It works without a checkout." }];
     case "primary": {
       const repo = repoName(reading.resources.find((each) => each.id === pick.resourceId));
       const branch =
         pick.branch ??
         readyPrimary(reading.workspaces, pick.resourceId, reading.runnerId)?.checkouts[0]?.branch ??
         null;
-      const where =
+      const where: readonly Phrase[] =
         branch === null
-          ? `It works in the checkout of ${repo} on ${reading.machine}.`
-          : `It works in the checkout of ${repo} on ${reading.machine}, on ${branch}.`;
-      return `${where} You and the agent share the files.`;
+          ? [{ text: `It works in the checkout of ${repo} on ${reading.machine}.` }]
+          : [
+              { text: `It works in the checkout of ${repo} on ${reading.machine}, on ` },
+              { text: branch, mono: true },
+              { text: "." },
+            ];
+      return [...where, { text: " You and the agent share the files." }];
     }
     case "ephemeral": {
       const only = pick.checkouts.length === 1 ? pick.checkouts[0] : undefined;
       if (only === undefined) {
-        return "It gets a worktree of each repo, side by side, each on a new branch.";
+        return [{ text: "It gets a worktree of each repo, side by side, each on a new branch." }];
       }
       const repo = repoName(reading.resources.find((each) => each.id === only.resourceId));
       const base =
         only.baseBranch ?? baseBranchOf(reading.workspaces, only.resourceId, reading.runnerId);
-      return `It gets its own worktree of ${repo}, on a new branch from ${base ?? "its default branch"}.`;
+      const from: readonly Phrase[] =
+        base === null ? [{ text: "its default branch" }] : [{ text: base, mono: true }];
+      return [
+        { text: `It gets its own worktree of ${repo}, on a new branch from ` },
+        ...from,
+        { text: "." },
+      ];
     }
     case "existing": {
       const joined = reading.workspaces.find((each) => each.id === pick.workspaceId);
       const name = joined === undefined ? "that workspace" : workspaceName(joined);
-      return `It joins “${name}” there: the agents see each other's edits, on one branch.`;
+      return [
+        { text: `It joins “${name}” there: the agents see each other's edits, on one branch.` },
+      ];
     }
   }
 };

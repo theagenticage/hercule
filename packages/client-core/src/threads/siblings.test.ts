@@ -51,7 +51,7 @@ describe("siblingTabs", () => {
     expect(tabs.at(-1)).toEqual({
       sessionId: null,
       title: "New thread",
-      mark: "idle",
+      mark: "draft",
       active: true,
     });
   });

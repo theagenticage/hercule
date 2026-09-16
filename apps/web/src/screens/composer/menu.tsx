@@ -19,6 +19,7 @@ export function MenuRow({
   sub,
   current = false,
   dimmed = null,
+  inert,
   trailing,
   className,
   onPick,
@@ -32,6 +33,12 @@ export function MenuRow({
   readonly sub?: ReactNode;
   readonly current?: boolean;
   readonly dimmed?: string | null;
+  /**
+   * Whether the row takes no pick, where the reason it takes none is said
+   * somewhere other than the right-hand slot - on its sub-line, say. A row
+   * carrying its reason at the right is inert because it carries one.
+   */
+  readonly inert?: boolean;
   readonly trailing?: ReactNode;
   /** What this row wears beyond the row treatment: a rule above it, say. */
   readonly className?: string;
@@ -80,7 +87,7 @@ export function MenuRow({
     className,
   );
 
-  if (dimmed !== null) {
+  if (inert ?? dimmed !== null) {
     return <div className={cn(layout, "opacity-50")}>{body}</div>;
   }
 

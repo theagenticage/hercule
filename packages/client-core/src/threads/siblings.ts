@@ -13,7 +13,8 @@ export interface ThreadTab {
   /** Null on the draft being written, which is not a session yet. */
   readonly sessionId: string | null;
   readonly title: string;
-  readonly mark: ThreadMark;
+  /** `draft` is the one the sidebar marks with a dot; the rest are threads. */
+  readonly mark: ThreadMark | "draft";
   readonly active: boolean;
 }
 
@@ -42,6 +43,6 @@ export const siblingTabs = ({
       active: session.id === activeSessionId,
     });
   }
-  if (draft) tabs.push({ sessionId: null, title: "New thread", mark: "idle", active: true });
+  if (draft) tabs.push({ sessionId: null, title: "New thread", mark: "draft", active: true });
   return tabs.length < 2 ? [] : tabs;
 };

@@ -61,7 +61,15 @@ export function Composer({
   const resources = useQuery(resourcesQuery(client)).data?.items ?? [];
   const workspaces = useQuery(workspacesQuery(client)).data?.items ?? [];
   const sessions = useQuery(sessionsQuery(client)).data?.items ?? [];
-  const catalogs = { instances, runners, localRunnerId, projects, resources, workspaces };
+  const catalogs = {
+    instances,
+    runners,
+    localRunnerId,
+    projects,
+    resources,
+    workspaces,
+    sessions,
+  };
   const [open, setOpen] = useState<SelectorKey | null>(null);
   const [filter, setFilter] = useState("");
   const model = useComposerModel(thread, catalogs, client, onSend);

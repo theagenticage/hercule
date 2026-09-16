@@ -16,9 +16,12 @@ import { messageOf } from "../save-status";
 export function AddRepoForm({
   projectId,
   onDone,
+  onCancel,
 }: {
   readonly projectId: string;
   readonly onDone: () => void;
+  /** The way back to the menu the form was opened from. */
+  readonly onCancel: () => void;
 }): JSX.Element {
   const { client } = useRouteContext({ from: "/_shell" });
   const queryClient = useQueryClient();
@@ -86,7 +89,9 @@ export function AddRepoForm({
           }}
         />
       </Field>
-      <Submit pending={create.isPending}>Add repo</Submit>
+      <Actions pending={create.isPending} onCancel={onCancel}>
+        Add repo
+      </Actions>
       <Refusal message={create.error === null ? null : messageOf(create.error)} />
     </form>
   );
@@ -100,10 +105,13 @@ export function AddRepoForm({
 export function AdoptForm({
   projectId,
   runnerId,
+  onCancel,
 }: {
   readonly projectId: string;
   /** The machine the draft is placed on: the one whose folder is adopted. */
   readonly runnerId: string | null;
+  /** The way back to the menu the form was opened from. */
+  readonly onCancel: () => void;
 }): JSX.Element {
   const { client } = useRouteContext({ from: "/_shell" });
   const queryClient = useQueryClient();
@@ -170,7 +178,9 @@ export function AdoptForm({
           }}
         />
       </Field>
-      <Submit pending={provision.isPending}>Adopt</Submit>
+      <Actions pending={provision.isPending} onCancel={onCancel}>
+        Adopt
+      </Actions>
       {/* One message at a time: a refusal here means nothing was sent, so the
           last answer from the API cannot also be standing. */}
       <Refusal
@@ -208,23 +218,30 @@ function Provisioning({ workspaceId }: { readonly workspaceId: string }): JSX.El
   );
 }
 
-function Submit({
+/** What the form is done with: the write, and the way back to the menu. */
+function Actions({
   pending,
+  onCancel,
   children,
 }: {
   readonly pending: boolean;
+  readonly onCancel: () => void;
   readonly children: string;
 }): JSX.Element {
   return (
-    <button
-      type="submit"
-      disabled={pending}
-      className="cursor-pointer self-start rounded-full border border-line bg-raised px-[11px] py-[3px] text-meta text-ink hover:bg-line-soft disabled:cursor-default disabled:text-faint"
-    >
-      {children}
-    </button>
+    <div className="flex items-center gap-1.5">
+      <button type="submit" disabled={pending} className={ACTION}>
+        {children}
+      </button>
+      <button type="button" onClick={onCancel} className={ACTION}>
+        Cancel
+      </button>
+    </div>
   );
 }
+
+const ACTION =
+  "cursor-pointer rounded-full border border-line bg-raised px-[11px] py-[3px] text-meta text-ink hover:bg-line-soft disabled:cursor-default disabled:text-faint";
 
 /** Why it was not done: this form's own refusal, or the API's. */
 function Refusal({ message }: { readonly message: string | null }): JSX.Element | null {

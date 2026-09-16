@@ -104,7 +104,7 @@ export function ProjectPicker({
 
   return (
     <div
-      className="fixed inset-0 z-40 flex justify-center bg-ink/20 pt-[18vh]"
+      className="fixed inset-0 z-40 flex justify-center bg-scrim pt-[18vh]"
       // The page behind it is the way out, as it is on every other overlay
       // here: a picker opened by accident closes by clicking past it.
       onClick={onClose}
@@ -120,8 +120,13 @@ export function ProjectPicker({
         }}
         className="h-fit w-[520px] max-w-[92vw] rounded-card border border-line bg-raised p-1.5 shadow-lift outline-none"
       >
-        <div className="px-2 pt-1.5 pb-[5px] text-label font-emph tracking-[0.1em] text-faint uppercase">
-          New thread in
+        <div className="flex items-baseline gap-2 px-2 pt-1.5 pb-[5px]">
+          <span className="text-label font-emph tracking-[0.1em] text-faint uppercase">
+            New thread in
+          </span>
+          <span className="ml-auto font-mono text-[10.5px] text-faint">
+            the project bounds the repos and workspaces on offer
+          </span>
         </div>
         {rows.map((row, index) => (
           <PickerRow
@@ -165,16 +170,42 @@ export function ProjectPicker({
               setAsked(true);
             }}
             className={cn(
-              "flex w-full cursor-pointer items-center gap-2 rounded-[6px] px-2 py-[5px] text-left text-meta text-muted",
+              // The same grid a project row stands on, so its label keeps the
+              // left edge the names above it have.
+              "grid w-full cursor-pointer grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-2",
+              "rounded-[6px] px-2 py-[5px] text-left text-meta text-muted",
               "hover:bg-line-soft hover:text-ink",
               active === rows.length && "bg-line-soft text-ink",
             )}
           >
-            New project
+            {/* The marker column a project row carries, empty: the label keeps
+                the left edge the names above it stand on. */}
+            <span aria-hidden="true" className="w-2.5" />
+            <span className="min-w-0 truncate">New project</span>
           </button>
         )}
+        <div className="mt-1.5 flex gap-3.5 border-t border-line-soft px-2 pt-2 pb-1 text-[11.5px] text-faint">
+          <span>
+            <Keycap>↑↓</Keycap>Navigate
+          </span>
+          <span>
+            <Keycap>⏎</Keycap>Select
+          </span>
+          <span>
+            <Keycap>Esc</Keycap>Close
+          </span>
+        </div>
       </div>
     </div>
+  );
+}
+
+/** One key of the legend under the rows. */
+function Keycap({ children }: { readonly children: string }): JSX.Element {
+  return (
+    <kbd className="mr-1 rounded-[4px] border border-line px-[5px] font-mono text-[10.5px] text-muted">
+      {children}
+    </kbd>
   );
 }
 

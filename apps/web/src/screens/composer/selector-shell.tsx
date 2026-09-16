@@ -16,6 +16,10 @@ import { Popover, PopoverContent, PopoverTrigger, cn } from "@hydra/ui";
  * A locked field is not a disabled button but plain text carrying the reason:
  * there is nothing behind it to open any more (spec 14 §What locks at start).
  */
+const holdFocus = (event: Event): void => {
+  event.preventDefault();
+};
+
 export function SelectorShell({
   keyLabel,
   label,
@@ -26,7 +30,7 @@ export function SelectorShell({
   align = "start",
   className,
   contentClassName,
-  onOpenAutoFocus,
+  onEscapeKeyDown,
   children,
 }: {
   /** The field's own name, shown before the value on the lip's selectors. */
@@ -41,7 +45,12 @@ export function SelectorShell({
   readonly align?: "start" | "end";
   readonly className?: string;
   readonly contentClassName?: string;
-  readonly onOpenAutoFocus?: ((event: Event) => void) | undefined;
+  /**
+   * What Esc means while this menu is open, where it means something other
+   * than closing it - a form inside it to leave first. Preventing the event's
+   * default keeps the menu open.
+   */
+  readonly onEscapeKeyDown?: ((event: KeyboardEvent) => void) | undefined;
   readonly children: ReactNode;
 }): JSX.Element {
   // The space is what an accessible name reads between the two; a flex
@@ -93,15 +102,21 @@ export function SelectorShell({
           {key}
           {/* The value stands in an element of its own, so a reader asking
               for a menu row's text does not also find the trigger the row
-              would change. */}
-          <span>{label}</span>
+              would change. `min-w-0` lets it be clipped rather than grow the
+              trigger past the room the card has for it. */}
+          <span className="min-w-0">{label}</span>
         </button>
       </PopoverTrigger>
       <PopoverContent
         side="top"
         align={align}
         avoidCollisions={false}
-        onOpenAutoFocus={onOpenAutoFocus}
+        // Opening a menu marks the row in force with its dot; it does not also
+        // ring the row, as the prototype's menus do not. Focus stays where the
+        // user put it - on the trigger, or in a filter field that asks for it
+        // itself - rather than being moved onto the first row.
+        onOpenAutoFocus={holdFocus}
+        {...(onEscapeKeyDown === undefined ? {} : { onEscapeKeyDown })}
         // The menu opens upwards into the room above its trigger and scrolls
         // inside it, rather than growing off the top of the window.
         className={cn(

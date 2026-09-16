@@ -60,7 +60,7 @@ function AllSessions(): JSX.Element {
         <section key={lane.kind}>
           <LaneLabel>{LANE_LABELS[lane.kind]}</LaneLabel>
           <Group>
-            {threadRows(lane.sessions, "plain").map((row) => {
+            {threadRows(lane.sessions, "plain", instances).map((row) => {
               const instanceId = sessionsById.get(row.id)?.instanceId;
               return (
                 <ThreadRowView
