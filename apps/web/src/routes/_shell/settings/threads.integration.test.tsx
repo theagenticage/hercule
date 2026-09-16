@@ -5,7 +5,7 @@
 import { describe, expect, it } from "vitest";
 import { screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type { Profile, ProviderInstance, Runner } from "@hydra/contract";
+import type { Connection, Profile, ProviderInstance, Runner } from "@hydra/contract";
 import { envelope, renderApp, stubApi, type Call, type Handler } from "../../../app/testing";
 
 const RUNNER_LOCAL: Runner = {
@@ -300,5 +300,124 @@ describe("Settings > Threads defaults", () => {
     for (const field of [instanceField, modelField, accessGroup, profileField]) {
       expect(isBefore(field, sidebarRows)).toBe(true);
     }
+  });
+});
+
+/* ------------------------------------------------------------------ *
+ * Slice 3 of #72 (AC-22): what a thread opens in, and which GitHub
+ * account a thread with no checkout acts through.
+ *
+ * Readings picked here, where the SPEC names copy but not a handle:
+ * - the three faces of the Workspace control write the `thread.workspace`
+ *   values they stand for: Current checkout -> `primary`, New workspace ->
+ *   `ephemeral`, None -> `none`;
+ * - the select's label is the row's own wording, "GitHub account for threads
+ *   without a checkout".
+ * ------------------------------------------------------------------ */
+
+const CONNECTION_AT = "2026-09-10T09:00:00.000Z";
+
+const GITHUB: Connection = {
+  id: "01a06d02-7500-7000-8000-000000000001",
+  type: "github",
+  label: "personal",
+  displayName: "rogierpennink",
+  status: "connected",
+  labels: [],
+  config: {},
+  credentials: [],
+  createdAt: CONNECTION_AT,
+  updatedAt: CONNECTION_AT,
+};
+
+const GITHUB_WORK: Connection = {
+  ...GITHUB,
+  id: "01a06d02-7500-7000-8000-000000000002",
+  label: "work",
+  displayName: "acme-bot",
+};
+
+/** A Connection of another type, which this select must not offer. */
+const SLACK: Connection = {
+  ...GITHUB,
+  id: "01a06d02-7500-7000-8000-000000000003",
+  type: "slack",
+  label: "acme",
+  displayName: "acme.slack.com",
+};
+
+const openWithConnections = async (
+  user: Record<string, unknown> = {},
+  connections: readonly Connection[] = [GITHUB, GITHUB_WORK, SLACK],
+) => {
+  const api = stubApi({
+    ...controller(user),
+    "GET /api/v1/connections": { body: { items: connections } },
+  });
+  const app = await renderApp({
+    path: "/settings/threads",
+    api: api.fetch,
+    token: "held",
+    detectLocalRunner: () => Promise.resolve(RUNNER_LOCAL.id),
+  });
+  return { ...app, api };
+};
+
+describe("Settings > Threads: the workspace a thread opens in (AC-22)", () => {
+  it("offers the three faces and writes thread.workspace on pick", async () => {
+    const user = userEvent.setup();
+    const { api } = await openWithConnections({ "thread.workspace": "primary" });
+
+    const group = await screen.findByRole("radiogroup", { name: "Workspace" });
+    for (const face of ["Current checkout", "New workspace", "None"]) {
+      expect(within(group).getByRole("radio", { name: face })).toBeDefined();
+    }
+
+    await user.click(within(group).getByRole("radio", { name: "New workspace" }));
+
+    expect(await screen.findByRole("status")).toBeDefined();
+    expect(writes(api)).toHaveLength(1);
+    expect(writes(api)[0]?.body).toEqual({ user: { "thread.workspace": "ephemeral" } });
+  });
+
+  it("writes none when the thread is to work without a checkout", async () => {
+    const user = userEvent.setup();
+    const { api } = await openWithConnections({ "thread.workspace": "primary" });
+
+    const group = await screen.findByRole("radiogroup", { name: "Workspace" });
+    await user.click(within(group).getByRole("radio", { name: "None" }));
+
+    expect(await screen.findByRole("status")).toBeDefined();
+    expect(writes(api)[0]?.body).toEqual({ user: { "thread.workspace": "none" } });
+  });
+
+  it("says in its fine print that a project with several repos takes a new workspace anyway", async () => {
+    await openWithConnections();
+
+    const fine = await screen.findByText(/repos/);
+    expect(fine.textContent).toContain("New workspace");
+  });
+});
+
+describe("Settings > Threads: the GitHub account a checkout-less thread uses (AC-22)", () => {
+  it("offers only the github connections and writes thread.githubConnectionId on pick", async () => {
+    const user = userEvent.setup();
+    const { api } = await openWithConnections();
+
+    const field = await screen.findByLabelText<HTMLSelectElement>(
+      "GitHub account for threads without a checkout",
+    );
+    const offered = [...field.options].map((option) => option.textContent);
+    expect(offered).toContain(GITHUB.label);
+    expect(offered).toContain(GITHUB_WORK.label);
+    expect(offered).not.toContain(SLACK.label);
+
+    await user.selectOptions(field, GITHUB_WORK.id);
+
+    expect(await screen.findByRole("status")).toBeDefined();
+    expect(writes(api)).toHaveLength(1);
+    expect(writes(api)[0]?.body).toEqual({
+      user: { "thread.githubConnectionId": GITHUB_WORK.id },
+    });
   });
 });

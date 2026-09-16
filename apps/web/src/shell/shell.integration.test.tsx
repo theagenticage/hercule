@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type { Session } from "@hydra/contract";
+import type { Project, Resource, Session, Workspace } from "@hydra/contract";
 import { ageOf } from "@hydra/client-core";
 import { renderApp, stubApi, type Handler } from "../app/testing";
 
@@ -421,5 +421,273 @@ describe("the top bar", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+/* ------------------------------------------------------------------ *
+ * Slice 3 of #72: the Threads face groups by project, then by
+ * workspace (AC-20), and "Create new thread" opens the project picker
+ * (AC-16).
+ *
+ * Readings picked here, where the SPEC names copy but not a handle:
+ * - a project's group header and a workspace's group header carry their
+ *   label as text, and the `+` beside each is a link whose accessible name
+ *   names what it opens;
+ * - a workspace's own label is its first checkout's branch (`hydra/run-3f1`),
+ *   which is the only name a `Workspace` record carries.
+ * ------------------------------------------------------------------ */
+
+const AT = "2026-09-10T09:00:00.000Z";
+
+const MOSS = "01a06d02-beff-7037-9f5b-042822015952";
+
+const WEBSHOP: Project = {
+  id: "01a06d02-7000-7000-8000-000000000001",
+  name: "webshop",
+  createdAt: AT,
+  updatedAt: AT,
+};
+
+const OPS: Project = {
+  id: "01a06d02-7000-7000-8000-000000000002",
+  name: "ops",
+  createdAt: AT,
+  updatedAt: AT,
+};
+
+const R_WEBSHOP: Resource = {
+  id: "01a06d02-7100-7000-8000-000000000001",
+  kind: "repo",
+  remote: "git@github.com:acme/webshop.git",
+  canonicalRemote: "github.com/acme/webshop",
+  label: null,
+  connectionId: null,
+  setupCommand: null,
+  workspaceInclude: true,
+  projectIds: [WEBSHOP.id],
+  createdAt: AT,
+  updatedAt: AT,
+};
+
+const R_INFRA: Resource = {
+  ...R_WEBSHOP,
+  id: "01a06d02-7100-7000-8000-000000000002",
+  remote: "git@github.com:acme/ops-infra.git",
+  canonicalRemote: "github.com/acme/ops-infra",
+  projectIds: [OPS.id],
+};
+
+const W_PRIMARY: Workspace = {
+  id: "01a06d02-7200-7000-8000-000000000001",
+  runnerId: MOSS,
+  kind: "primary",
+  status: "ready",
+  checkouts: [
+    {
+      checkoutId: "01a06d02-7300-7000-8000-000000000001",
+      resourceId: R_WEBSHOP.id,
+      form: "clone",
+      subdirectory: null,
+      branch: "main",
+      branches: ["main"],
+      defaultBranch: "main",
+    },
+  ],
+  designatedConnectionId: null,
+  message: null,
+  sessionIds: ["01a06d02-7400-7000-8000-000000000003"],
+  createdAt: AT,
+  provisionedAt: AT,
+  lastUsedAt: AT,
+  disposedAt: null,
+};
+
+const W_RUN_3F1: Workspace = {
+  ...W_PRIMARY,
+  id: "01a06d02-7200-7000-8000-000000000002",
+  kind: "ephemeral",
+  checkouts: [
+    {
+      checkoutId: "01a06d02-7300-7000-8000-000000000002",
+      resourceId: R_WEBSHOP.id,
+      form: "worktree",
+      subdirectory: null,
+      branch: "hydra/run-3f1",
+      branches: ["hydra/run-3f1"],
+      defaultBranch: "main",
+    },
+  ],
+  sessionIds: ["01a06d02-7400-7000-8000-000000000001", "01a06d02-7400-7000-8000-000000000002"],
+};
+
+const grouped: readonly Session[] = [
+  session({
+    id: "01a06d02-7400-7000-8000-000000000001",
+    title: "Fix flaky webhook tests",
+    projectId: WEBSHOP.id,
+    workspaceId: W_RUN_3F1.id,
+    lastActivityAt: "2026-09-10T09:05:00.000Z",
+  }),
+  session({
+    id: "01a06d02-7400-7000-8000-000000000002",
+    title: "Write the retry runbook",
+    projectId: WEBSHOP.id,
+    workspaceId: W_RUN_3F1.id,
+    lastActivityAt: "2026-09-10T09:04:00.000Z",
+  }),
+  session({
+    id: "01a06d02-7400-7000-8000-000000000003",
+    title: "Bump the Bun pin",
+    projectId: WEBSHOP.id,
+    workspaceId: W_PRIMARY.id,
+    lastActivityAt: "2026-09-10T09:03:00.000Z",
+  }),
+  session({
+    id: "01a06d02-7400-7000-8000-000000000004",
+    title: "Tidy the promotion runbook",
+    projectId: WEBSHOP.id,
+    workspaceId: null,
+    lastActivityAt: "2026-09-10T09:02:00.000Z",
+  }),
+  session({
+    id: "01a06d02-7400-7000-8000-000000000005",
+    title: "Rotate the Hetzner backups key",
+    projectId: OPS.id,
+    workspaceId: null,
+    lastActivityAt: "2026-09-10T09:01:00.000Z",
+  }),
+  session({
+    id: "01a06d02-7400-7000-8000-000000000006",
+    title: "Nothing to do with a project",
+    projectId: null,
+    workspaceId: null,
+    lastActivityAt: "2026-09-10T09:00:00.000Z",
+  }),
+];
+
+const withProjects = (user: Record<string, unknown> = {}): Readonly<Record<string, Handler>> => ({
+  ...inShell(user),
+  "GET /api/v1/sessions": { body: { items: grouped } },
+  "GET /api/v1/projects": { body: { items: [WEBSHOP, OPS] } },
+  "GET /api/v1/resources": { body: { items: [R_WEBSHOP, R_INFRA] } },
+  "GET /api/v1/workspaces": { body: { items: [W_PRIMARY, W_RUN_3F1] } },
+  // What the draft route below loads; nothing here is what it asserts on.
+  "GET /api/v1/runners": {
+    body: {
+      items: [
+        {
+          id: MOSS,
+          name: "moss",
+          connectivity: "online",
+          lifecycle: "active",
+          reserved: false,
+          version: "0.4.2",
+          labels: [],
+          facts: null,
+          watermark: null,
+          maxConcurrentSessions: 4,
+          diskWatermarkBytes: 1024,
+          lastSeenAt: AT,
+        },
+      ],
+    },
+  },
+  "GET /api/v1/providers": { body: [] },
+  "GET /api/v1/profiles": { body: { items: [] } },
+});
+
+/** The Threads face's own text, whitespace collapsed, in DOM order. */
+const faceText = (): string =>
+  (screen.getByRole("navigation", { name: "Threads" }).textContent ?? "")
+    .replace(/\s+/g, " ")
+    .trim();
+
+describe("the Threads face groups by project and workspace (AC-20)", () => {
+  it("heads each project with its name, its thread count and a + that starts a draft in it", async () => {
+    await renderApp({ path: "/", api: stubApi(withProjects()).fetch, token: "held" });
+
+    await threadsNav().findByText("webshop");
+    expect(faceText()).toContain("webshop 4");
+    expect(faceText()).toContain("ops 1");
+
+    const plus = threadsNav().getByRole("link", { name: "New thread in webshop" });
+    expect(plus.getAttribute("href")).toBe(`/threads/new?project=${WEBSHOP.id}`);
+  });
+
+  it("groups a project's threads per workspace, naming a primary after its repo and machine", async () => {
+    await renderApp({ path: "/", api: stubApi(withProjects()).fetch, token: "held" });
+
+    await threadsNav().findByText("hydra/run-3f1");
+    expect(threadsNav().getByText("webshop checkout · moss")).toBeDefined();
+  });
+
+  it("puts the workspace-less threads of a project last, under 'no workspace'", async () => {
+    await renderApp({ path: "/", api: stubApi(withProjects()).fetch, token: "held" });
+
+    await threadsNav().findByText("no workspace");
+    const text = faceText();
+    expect(text.indexOf("hydra/run-3f1")).toBeLessThan(text.indexOf("no workspace"));
+    expect(text.indexOf("webshop checkout · moss")).toBeLessThan(text.indexOf("no workspace"));
+    expect(text.indexOf("no workspace")).toBeLessThan(text.indexOf("Tidy the promotion runbook"));
+  });
+
+  it("offers a + on a workspace group that opens a draft joining it", async () => {
+    await renderApp({ path: "/", api: stubApi(withProjects()).fetch, token: "held" });
+
+    const plus = await threadsNav().findByRole("link", {
+      name: "New thread in hydra/run-3f1",
+    });
+    expect(plus.getAttribute("href")).toBe(
+      `/threads/new?project=${WEBSHOP.id}&workspace=${W_RUN_3F1.id}`,
+    );
+  });
+
+  it("puts the threads that belong to no project last, under no header of their own", async () => {
+    await renderApp({ path: "/", api: stubApi(withProjects()).fetch, token: "held" });
+
+    await threadsNav().findByText("webshop");
+    const text = faceText();
+    expect(text.indexOf("ops")).toBeLessThan(text.indexOf("Nothing to do with a project"));
+    expect(text.indexOf("Rotate the Hetzner backups key")).toBeLessThan(
+      text.indexOf("Nothing to do with a project"),
+    );
+  });
+
+  it("shows the draft being written under the group it will join", async () => {
+    await renderApp({
+      path: `/threads/new?project=${WEBSHOP.id}&workspace=${W_RUN_3F1.id}`,
+      api: stubApi(withProjects()).fetch,
+      token: "held",
+    });
+
+    await threadsNav().findByText("hydra/run-3f1");
+    const text = faceText();
+    expect(text).toContain("New thread draft");
+    expect(text.indexOf("hydra/run-3f1")).toBeLessThan(text.indexOf("New thread draft"));
+    expect(text.indexOf("New thread draft")).toBeLessThan(text.indexOf("webshop checkout · moss"));
+  });
+
+  it("no longer repeats the workspace on a row's second line", async () => {
+    await renderApp({ path: "/", api: stubApi(withProjects()).fetch, token: "held" });
+
+    const row = await threadsNav().findByRole("link", { name: /Fix flaky webhook tests/ });
+    expect(row.textContent).not.toContain("hydra/run-3f1");
+  });
+});
+
+describe("Create new thread opens the project picker (AC-16)", () => {
+  it("opens the picker rather than navigating straight to a draft", async () => {
+    const user = userEvent.setup();
+    const { router } = await renderApp({
+      path: "/",
+      api: stubApi(withProjects()).fetch,
+      token: "held",
+    });
+
+    await user.click(threadsNav().getByText("Create new thread"));
+
+    const picker = await screen.findByRole("dialog");
+    expect((picker.textContent ?? "").replace(/\s+/g, " ")).toContain("New thread in");
+    expect(router.state.location.pathname).toBe("/");
   });
 });

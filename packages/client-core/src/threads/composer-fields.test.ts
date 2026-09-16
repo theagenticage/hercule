@@ -7,7 +7,14 @@
  * has more than one.
  */
 import { describe, expect, it } from "vitest";
-import type { ModelOption, ProviderInstance, Runner } from "@hydra/contract";
+import type {
+  ModelOption,
+  Project,
+  ProviderInstance,
+  Resource,
+  Runner,
+  Workspace,
+} from "@hydra/contract";
 import { BARE, instance, snapshot } from "../providers.testing";
 import { composerFields, pendingModelNote } from "./composer-fields";
 
@@ -245,5 +252,279 @@ describe("pendingModelNote", () => {
 
   it("says nothing when only the options were picked: the model itself is not changing", () => {
     expect(pendingModelNote("active", { options: { effort: "high" } })).toBeNull();
+  });
+});
+
+/**
+ * Slice 3 of #72 (AC-17): the workspace a draft opens in, and the sentence the
+ * draft stands under once it is picked.
+ *
+ * Shapes this file fixes, where the SPEC names a value but not a signature:
+ * - `ThreadCatalogs` gains `projects`, `resources` and `workspaces`, the three
+ *   records the composer's own menu reads (the fleet and the instances are
+ *   already there).
+ * - `ThreadConfig` gains `projectId`, `workspace` and `preferredWorkspace`.
+ *   `workspace` is the pick, in the contract's own `SpawnWorkspace` spelling
+ *   plus a fourth kind `{ kind: "none" }` for a thread with no checkout; `null`
+ *   means the user has picked nothing and the default stands.
+ *   `preferredWorkspace` is the `thread.workspace` setting as stored, `null`
+ *   when it is unset.
+ * - `composerFields(...).workspace.value` is the pick that is really in force:
+ *   the config's own when it has one, the default otherwise.
+ * - A repo's short name is the last segment of its `canonicalRemote`, which is
+ *   what every sentence and row below calls it.
+ */
+const OTHER = runner({ id: "r-other", name: "cove" });
+
+const at = "2026-09-10T09:00:00.000Z";
+
+const WEBSHOP_PROJECT: Project = {
+  id: "p-webshop",
+  name: "webshop",
+  createdAt: at,
+  updatedAt: at,
+};
+
+const OPS_PROJECT: Project = { id: "p-ops", name: "ops", createdAt: at, updatedAt: at };
+
+/** A project with a name and nothing filed under it. */
+const EMPTY_PROJECT: Project = { id: "p-empty", name: "sandbox", createdAt: at, updatedAt: at };
+
+const repo = (id: string, canonicalRemote: string, projectIds: readonly string[]): Resource => ({
+  id,
+  kind: "repo",
+  remote: `git@github.com:${canonicalRemote.replace("github.com/", "")}.git`,
+  canonicalRemote,
+  label: null,
+  connectionId: "conn-github",
+  setupCommand: null,
+  workspaceInclude: true,
+  projectIds,
+  createdAt: at,
+  updatedAt: at,
+});
+
+const WEBSHOP = repo("res-webshop", "github.com/acme/webshop", [WEBSHOP_PROJECT.id]);
+const INFRA = repo("res-infra", "github.com/acme/ops-infra", [OPS_PROJECT.id]);
+const RUNBOOKS = repo("res-runbooks", "github.com/acme/ops-runbooks", [OPS_PROJECT.id]);
+
+/** webshop's shared checkout on the local machine, sitting on `main`. */
+const PRIMARY: Workspace = {
+  id: "ws-primary",
+  runnerId: LOCAL.id,
+  kind: "primary",
+  status: "ready",
+  checkouts: [
+    {
+      checkoutId: "co-primary",
+      resourceId: WEBSHOP.id,
+      form: "clone",
+      subdirectory: null,
+      branch: "main",
+      branches: ["main", "release/2.4"],
+      defaultBranch: "main",
+    },
+  ],
+  designatedConnectionId: "conn-github",
+  message: null,
+  sessionIds: [],
+  createdAt: at,
+  provisionedAt: at,
+  lastUsedAt: at,
+  disposedAt: null,
+};
+
+/** A live worktree of webshop, which another thread is already working in. */
+const RUN_3F1: Workspace = {
+  ...PRIMARY,
+  id: "ws-run-3f1",
+  kind: "ephemeral",
+  checkouts: [
+    {
+      checkoutId: "co-run-3f1",
+      resourceId: WEBSHOP.id,
+      form: "worktree",
+      subdirectory: null,
+      branch: "hydra/run-3f1",
+      branches: ["hydra/run-3f1"],
+      defaultBranch: "main",
+    },
+  ],
+  sessionIds: ["s-flaky"],
+};
+
+const withRepos = (
+  projects: readonly Project[],
+  resources: readonly Resource[],
+  workspaces: readonly Workspace[] = [PRIMARY, RUN_3F1],
+) => ({
+  instances: [CLAUDE],
+  runners: [LOCAL, OTHER],
+  localRunnerId: LOCAL.id,
+  projects,
+  resources,
+  workspaces,
+});
+
+/** The catalogs every case below reads unless it says otherwise. */
+const FULL = withRepos([WEBSHOP_PROJECT, OPS_PROJECT, EMPTY_PROJECT], [WEBSHOP, INFRA, RUNBOOKS]);
+
+const draft = (overrides: Record<string, unknown> = {}) =>
+  config({ projectId: null, workspace: null, preferredWorkspace: null, ...overrides });
+
+describe("composerFields: the workspace a draft defaults to (AC-17)", () => {
+  it("takes the one repo's shared checkout in a project that holds one repo", () => {
+    const fields = composerFields(FULL, draft({ projectId: WEBSHOP_PROJECT.id }), "draft");
+
+    expect(fields.workspace.value).toEqual({ kind: "primary", resourceId: WEBSHOP.id });
+  });
+
+  it("takes a worktree of each repo in a project that holds several", () => {
+    const fields = composerFields(FULL, draft({ projectId: OPS_PROJECT.id }), "draft");
+
+    expect(fields.workspace.value).toEqual({
+      kind: "ephemeral",
+      checkouts: [{ resourceId: INFRA.id }, { resourceId: RUNBOOKS.id }],
+    });
+  });
+
+  it("follows the stored thread.workspace over the repo count", () => {
+    const fields = composerFields(
+      FULL,
+      draft({ projectId: WEBSHOP_PROJECT.id, preferredWorkspace: "ephemeral" }),
+      "draft",
+    );
+
+    expect(fields.workspace.value).toEqual({
+      kind: "ephemeral",
+      checkouts: [{ resourceId: WEBSHOP.id }],
+    });
+  });
+
+  it("works without a checkout when the stored setting says none", () => {
+    const fields = composerFields(
+      FULL,
+      draft({ projectId: WEBSHOP_PROJECT.id, preferredWorkspace: "none" }),
+      "draft",
+    );
+
+    expect(fields.workspace.value).toEqual({ kind: "none" });
+  });
+
+  it("works without a checkout in a project with no repo, whatever the setting asks for", () => {
+    const fields = composerFields(
+      FULL,
+      draft({ projectId: EMPTY_PROJECT.id, preferredWorkspace: "primary" }),
+      "draft",
+    );
+
+    expect(fields.workspace.value).toEqual({ kind: "none" });
+  });
+
+  it("works without a checkout on a draft that belongs to no project at all", () => {
+    const fields = composerFields(FULL, draft({ preferredWorkspace: "primary" }), "draft");
+
+    expect(fields.workspace.value).toEqual({ kind: "none" });
+  });
+
+  it("keeps the pick the user made over the default", () => {
+    const fields = composerFields(
+      FULL,
+      draft({
+        projectId: WEBSHOP_PROJECT.id,
+        workspace: { kind: "existing", workspaceId: RUN_3F1.id },
+      }),
+      "draft",
+    );
+
+    expect(fields.workspace.value).toEqual({ kind: "existing", workspaceId: RUN_3F1.id });
+  });
+});
+
+describe("composerFields: the lead sentence follows the workspace (AC-17)", () => {
+  it("names the repo, the machine and the branch on the shared checkout", () => {
+    const fields = composerFields(
+      FULL,
+      draft({
+        projectId: WEBSHOP_PROJECT.id,
+        workspace: { kind: "primary", resourceId: WEBSHOP.id, branch: "release/2.4" },
+      }),
+      "draft",
+    );
+
+    expect(fields.lead).toBe(
+      "It works in the checkout of webshop on moss, on release/2.4. You and the agent share the files.",
+    );
+  });
+
+  it("reads the shared checkout's own branch when the draft has picked none", () => {
+    const fields = composerFields(
+      FULL,
+      draft({
+        projectId: WEBSHOP_PROJECT.id,
+        workspace: { kind: "primary", resourceId: WEBSHOP.id },
+      }),
+      "draft",
+    );
+
+    expect(fields.lead).toBe(
+      "It works in the checkout of webshop on moss, on main. You and the agent share the files.",
+    );
+  });
+
+  it("names the repo and the base branch on a worktree of its own", () => {
+    const fields = composerFields(
+      FULL,
+      draft({
+        projectId: WEBSHOP_PROJECT.id,
+        workspace: {
+          kind: "ephemeral",
+          checkouts: [{ resourceId: WEBSHOP.id, baseBranch: "release/2.4" }],
+        },
+      }),
+      "draft",
+    );
+
+    expect(fields.lead).toBe(
+      "It gets its own worktree of webshop, on a new branch from release/2.4.",
+    );
+  });
+
+  it("falls back to the repo's default branch as the base when the draft has picked none", () => {
+    const fields = composerFields(
+      FULL,
+      draft({
+        projectId: WEBSHOP_PROJECT.id,
+        workspace: { kind: "ephemeral", checkouts: [{ resourceId: WEBSHOP.id }] },
+      }),
+      "draft",
+    );
+
+    expect(fields.lead).toBe("It gets its own worktree of webshop, on a new branch from main.");
+  });
+
+  it("names the workspace it joins, and what joining one means", () => {
+    const fields = composerFields(
+      FULL,
+      draft({
+        projectId: WEBSHOP_PROJECT.id,
+        workspace: { kind: "existing", workspaceId: RUN_3F1.id },
+      }),
+      "draft",
+    );
+
+    expect(fields.lead).toBe(
+      "It joins “hydra/run-3f1” there: the agents see each other's edits, on one branch.",
+    );
+  });
+
+  it("says a thread with no checkout works without one", () => {
+    const fields = composerFields(
+      FULL,
+      draft({ projectId: WEBSHOP_PROJECT.id, preferredWorkspace: "none" }),
+      "draft",
+    );
+
+    expect(fields.lead).toBe("It works without a checkout.");
   });
 });

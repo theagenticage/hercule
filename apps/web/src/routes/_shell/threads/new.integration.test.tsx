@@ -21,7 +21,17 @@
 import { describe, expect, it } from "vitest";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type { ModelOption, Profile, ProviderInstance, Runner, Session } from "@hydra/contract";
+import type {
+  Connection,
+  ModelOption,
+  Profile,
+  Project,
+  ProviderInstance,
+  Resource,
+  Runner,
+  Session,
+  Workspace,
+} from "@hydra/contract";
 import { envelope, pickRow, reading, renderApp, stubApi, type Handler } from "../../../app/testing";
 
 const ZONE = "Europe/Amsterdam";
@@ -1131,5 +1141,933 @@ describe("Draft: the chrome is the screen's first row", () => {
     // The hero "What should the agent do?" is an h2, so level 1 belongs to
     // nobody on this route once the shell's top bar steps aside.
     expect(screen.queryByRole("heading", { level: 1 })).toBeNull();
+  });
+});
+
+/* ------------------------------------------------------------------ *
+ * Slice 3 of #72: the project picker, the workspace, branch and
+ * machine selectors, and the workspace menu's foot (AC-16 to AC-19,
+ * AC-23). Driven through `renderApp` and the stubbed `fetch`, like
+ * everything above.
+ *
+ * Readings picked here, where the SPEC names copy but not a handle:
+ * - the picker is the Radix overlay, read as `role="dialog"`, opened by the
+ *   sidebar's "Create new thread";
+ * - a menu row is a button carrying its text, as in the menus above;
+ * - the add-repo and adopt forms label their fields "Remote URL", "GitHub
+ *   Connection", "Setup command", "Repo" and "Path", and submit through
+ *   buttons named "Add repo" and "Adopt".
+ * ------------------------------------------------------------------ */
+
+const AT = "2026-09-10T09:00:00.000Z";
+
+const COVE: Runner = { ...RUNNER, id: "01a06d02-beff-7037-9f5b-042822015953", name: "cove" };
+
+const project = (id: string, name: string): Project => ({
+  id,
+  name,
+  createdAt: AT,
+  updatedAt: AT,
+});
+
+const WEBSHOP = project("01a06d02-7000-7000-8000-000000000001", "webshop");
+const OPS = project("01a06d02-7000-7000-8000-000000000002", "ops");
+/** A project whose one repo has never been cloned on any machine. */
+const EDGE = project("01a06d02-7000-7000-8000-000000000003", "edge");
+/** A project with no repo at all. */
+const SANDBOX = project("01a06d02-7000-7000-8000-000000000004", "sandbox");
+
+const repo = (
+  id: string,
+  owner: string,
+  name: string,
+  projectIds: readonly string[],
+): Resource => ({
+  id,
+  kind: "repo",
+  remote: `git@github.com:${owner}/${name}.git`,
+  canonicalRemote: `github.com/${owner}/${name}`,
+  label: null,
+  connectionId: "01a06d02-7500-7000-8000-000000000001",
+  setupCommand: null,
+  workspaceInclude: true,
+  projectIds,
+  createdAt: AT,
+  updatedAt: AT,
+});
+
+const R_WEBSHOP = repo("01a06d02-7100-7000-8000-000000000001", "acme", "webshop", [WEBSHOP.id]);
+const R_INFRA = repo("01a06d02-7100-7000-8000-000000000002", "acme", "ops-infra", [OPS.id]);
+const R_RUNBOOKS = repo("01a06d02-7100-7000-8000-000000000003", "acme", "ops-runbooks", [OPS.id]);
+const R_EDGE = repo("01a06d02-7100-7000-8000-000000000004", "acme", "edge-api", [EDGE.id]);
+
+const checkout = (
+  id: string,
+  resourceId: string,
+  form: "clone" | "worktree",
+  branch: string,
+  branches: readonly string[],
+  defaultBranch: string,
+) => ({ checkoutId: id, resourceId, form, subdirectory: null, branch, branches, defaultBranch });
+
+const workspace = (
+  id: string,
+  kind: "primary" | "ephemeral",
+  runnerId: string,
+  checkouts: Workspace["checkouts"],
+  sessionIds: readonly string[] = [],
+): Workspace => ({
+  id,
+  runnerId,
+  kind,
+  status: "ready",
+  checkouts,
+  designatedConnectionId: "01a06d02-7500-7000-8000-000000000001",
+  message: null,
+  sessionIds,
+  createdAt: AT,
+  provisionedAt: AT,
+  lastUsedAt: AT,
+  disposedAt: null,
+});
+
+/** webshop's shared checkout on moss; `hydra/run-3f1` is one of its branches. */
+const W_PRIMARY_WEBSHOP = workspace(
+  "01a06d02-7200-7000-8000-000000000001",
+  "primary",
+  RUNNER.id,
+  [
+    checkout(
+      "01a06d02-7300-7000-8000-000000000001",
+      R_WEBSHOP.id,
+      "clone",
+      "main",
+      ["main", "release/2.4", "hydra/run-3f1"],
+      "main",
+    ),
+  ],
+  ["01a06d02-7400-7000-8000-000000000004"],
+);
+
+const W_RUN_3F1 = workspace(
+  "01a06d02-7200-7000-8000-000000000002",
+  "ephemeral",
+  RUNNER.id,
+  [
+    checkout(
+      "01a06d02-7300-7000-8000-000000000002",
+      R_WEBSHOP.id,
+      "worktree",
+      "hydra/run-3f1",
+      ["hydra/run-3f1"],
+      "main",
+    ),
+  ],
+  ["01a06d02-7400-7000-8000-000000000001", "01a06d02-7400-7000-8000-000000000002"],
+);
+
+const W_RUN_8A0 = workspace(
+  "01a06d02-7200-7000-8000-000000000003",
+  "ephemeral",
+  COVE.id,
+  [
+    checkout(
+      "01a06d02-7300-7000-8000-000000000003",
+      R_WEBSHOP.id,
+      "worktree",
+      "hydra/run-8a0",
+      ["hydra/run-8a0"],
+      "main",
+    ),
+  ],
+  ["01a06d02-7400-7000-8000-000000000003"],
+);
+
+const W_PRIMARY_INFRA = workspace("01a06d02-7200-7000-8000-000000000004", "primary", RUNNER.id, [
+  checkout(
+    "01a06d02-7300-7000-8000-000000000004",
+    R_INFRA.id,
+    "clone",
+    "master",
+    ["master", "hetzner-migration"],
+    "master",
+  ),
+]);
+
+const W_PRIMARY_RUNBOOKS = workspace("01a06d02-7200-7000-8000-000000000005", "primary", RUNNER.id, [
+  checkout(
+    "01a06d02-7300-7000-8000-000000000005",
+    R_RUNBOOKS.id,
+    "clone",
+    "main",
+    ["main"],
+    "main",
+  ),
+]);
+
+const thread = (
+  id: string,
+  title: string,
+  projectId: string | null,
+  workspaceId: string | null,
+  runnerId: string = RUNNER.id,
+): Session => ({
+  ...NEW_SESSION,
+  id,
+  title,
+  status: "idle",
+  projectId,
+  workspaceId,
+  runnerId,
+  createdAt: AT,
+  startedAt: AT,
+  lastActivityAt: AT,
+});
+
+const SESSIONS: readonly Session[] = [
+  thread(
+    "01a06d02-7400-7000-8000-000000000001",
+    "Fix flaky webhook tests",
+    WEBSHOP.id,
+    W_RUN_3F1.id,
+  ),
+  thread(
+    "01a06d02-7400-7000-8000-000000000002",
+    "Write the retry runbook",
+    WEBSHOP.id,
+    W_RUN_3F1.id,
+  ),
+  thread(
+    "01a06d02-7400-7000-8000-000000000003",
+    "Runner drain command",
+    WEBSHOP.id,
+    W_RUN_8A0.id,
+    COVE.id,
+  ),
+  thread(
+    "01a06d02-7400-7000-8000-000000000004",
+    "Bump the Bun pin",
+    WEBSHOP.id,
+    W_PRIMARY_WEBSHOP.id,
+  ),
+  thread("01a06d02-7400-7000-8000-000000000005", "Tidy the promotion runbook", WEBSHOP.id, null),
+  thread("01a06d02-7400-7000-8000-000000000006", "Rotate the Hetzner backups key", OPS.id, null),
+];
+
+const GITHUB: Connection = {
+  id: "01a06d02-7500-7000-8000-000000000001",
+  type: "github",
+  label: "personal",
+  displayName: "rogierpennink",
+  status: "connected",
+  labels: [],
+  config: {},
+  credentials: [],
+  createdAt: AT,
+  updatedAt: AT,
+};
+
+/** The one Connection of another type, which the GitHub selects must not offer. */
+const SLACK: Connection = {
+  ...GITHUB,
+  id: "01a06d02-7500-7000-8000-000000000002",
+  type: "slack",
+  label: "acme",
+  displayName: "acme.slack.com",
+};
+
+const WORKSPACES: readonly Workspace[] = [
+  W_PRIMARY_WEBSHOP,
+  W_RUN_3F1,
+  W_RUN_8A0,
+  W_PRIMARY_INFRA,
+  W_PRIMARY_RUNBOOKS,
+];
+
+const RESOURCES: readonly Resource[] = [R_WEBSHOP, R_INFRA, R_RUNBOOKS, R_EDGE];
+
+const PROJECTS: readonly Project[] = [WEBSHOP, OPS, EDGE, SANDBOX];
+
+/** The catalogs slice 3 adds, over the ones every composer test already stubs. */
+const world = (
+  overrides: Readonly<Record<string, Handler>> = {},
+): Readonly<Record<string, Handler>> => ({
+  "GET /api/v1/projects": { body: { items: PROJECTS } },
+  "GET /api/v1/resources": { body: { items: RESOURCES } },
+  "GET /api/v1/workspaces": { body: { items: WORKSPACES } },
+  "GET /api/v1/sessions": { body: { items: SESSIONS } },
+  "GET /api/v1/connections": { body: { items: [GITHUB, SLACK] } },
+  "GET /api/v1/runners": { body: { items: [RUNNER, COVE] } },
+  ...overrides,
+});
+
+/** A draft at `path`, with the slice-3 catalogs behind it. */
+const openAt = async (
+  path: string,
+  user: Record<string, unknown> = {},
+  extra: Readonly<Record<string, Handler>> = {},
+) => {
+  const api = stubApi(controller([INSTANCE_A], user, world(extra)));
+  const app = await renderApp({
+    path,
+    api: api.fetch,
+    token: "held",
+    detectLocalRunner: () => Promise.resolve(RUNNER.id),
+  });
+  return { ...app, api };
+};
+
+const inProject = (id: string) => `/threads/new?project=${id}`;
+
+/** Opens the workspace selector and hands back its menu. */
+const openWorkspaceMenu = async (
+  user: ReturnType<typeof userEvent.setup>,
+): Promise<HTMLElement> => {
+  await user.click(await screen.findByRole("button", { name: /^workspace / }));
+  return screen.findByRole("dialog");
+};
+
+/** Opens the branch selector and hands back its menu. */
+const openBranchMenu = async (
+  user: ReturnType<typeof userEvent.setup>,
+  name: RegExp,
+): Promise<HTMLElement> => {
+  await user.click(await screen.findByRole("button", { name }));
+  return screen.findByRole("dialog");
+};
+
+describe("Picker: a thread starts from a project (AC-16)", () => {
+  const openPicker = async (user: ReturnType<typeof userEvent.setup>): Promise<HTMLElement> => {
+    await user.click(screen.getByText("Create new thread"));
+    return screen.findByRole("dialog");
+  };
+
+  it("lists one row per project with its repos, threads and workspaces", async () => {
+    const user = userEvent.setup();
+    await openAt("/threads/new");
+
+    const picker = await openPicker(user);
+
+    expect(reading(picker)).toContain("New thread in");
+    // One repo, five threads in the project, two ephemeral workspaces.
+    expect(reading(picker)).toContain("1 repo · webshop · 5 threads · 2 workspaces");
+    // The plural half of `<n> repo(s) · <repo names>`, with the names listed.
+    expect(reading(picker)).toContain("2 repos · ops-infra, ops-runbooks");
+    expect(reading(picker)).toContain("⌘1");
+    expect(reading(picker)).toContain("⌘2");
+  });
+
+  it("navigates to a draft in the project that was clicked", async () => {
+    const user = userEvent.setup();
+    const { router } = await openAt("/threads/new");
+
+    const picker = await openPicker(user);
+    await user.click(within(picker).getByRole("button", { name: /ops/ }));
+
+    await waitFor(() => {
+      expect(router.state.location.href).toBe(inProject(OPS.id));
+    });
+  });
+
+  it("moves with the arrows and picks with Enter", async () => {
+    const user = userEvent.setup();
+    const { router } = await openAt("/threads/new");
+
+    await openPicker(user);
+    await user.keyboard("{ArrowDown}{Enter}");
+
+    await waitFor(() => {
+      expect(router.state.location.href).toBe(inProject(OPS.id));
+    });
+  });
+
+  it("picks the first project with its own ⌘1", async () => {
+    const user = userEvent.setup();
+    const { router } = await openAt("/threads/new");
+
+    await openPicker(user);
+    await user.keyboard("{Meta>}1{/Meta}");
+
+    await waitFor(() => {
+      expect(router.state.location.href).toBe(inProject(WEBSHOP.id));
+    });
+  });
+
+  it("closes on Escape without starting anything", async () => {
+    const user = userEvent.setup();
+    const { router } = await openAt("/threads/new");
+
+    await openPicker(user);
+    await user.keyboard("{Escape}");
+
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog")).toBeNull();
+    });
+    expect(router.state.location.href).toBe("/threads/new");
+  });
+
+  it("offers New project as the last row when there are projects", async () => {
+    const user = userEvent.setup();
+    await openAt("/threads/new");
+
+    const picker = await openPicker(user);
+
+    const text = reading(picker);
+    expect(text).toContain("New project");
+    expect(text.indexOf("sandbox")).toBeLessThan(text.indexOf("New project"));
+  });
+
+  it("offers New project and nothing else when there is no project yet", async () => {
+    const user = userEvent.setup();
+    const created = project("01a06d02-7000-7000-8000-000000000009", "first");
+    const { api, router } = await openAt(
+      "/threads/new",
+      {},
+      {
+        "GET /api/v1/projects": { body: { items: [] } },
+        "POST /api/v1/projects": { body: created },
+      },
+    );
+
+    const picker = await openPicker(user);
+
+    expect(reading(picker)).toContain("New project");
+    expect(within(picker).queryByRole("button", { name: /webshop/ })).toBeNull();
+
+    await user.type(within(picker).getByRole("textbox"), "first");
+    await user.keyboard("{Enter}");
+
+    await waitFor(() => {
+      expect(router.state.location.href).toBe(inProject(created.id));
+    });
+    expect(
+      api.calls.find((call) => call.method === "POST" && call.path === "/api/v1/projects")?.body,
+    ).toEqual({ name: "first" });
+  });
+
+  it("heads the draft with the project it is in", async () => {
+    await openAt(inProject(WEBSHOP.id));
+
+    expect(
+      await screen.findByRole("heading", { name: "What should the agent do in webshop?" }),
+    ).toBeDefined();
+  });
+});
+
+describe("Composer: the workspace selector (AC-17)", () => {
+  it("heads the menu with what it picks and when it stops being pickable", async () => {
+    const user = userEvent.setup();
+    await openAt(inProject(WEBSHOP.id));
+
+    const menu = await openWorkspaceMenu(user);
+
+    expect(reading(menu)).toContain("Workspace");
+    expect(reading(menu)).toContain("locks when the thread starts");
+  });
+
+  it("offers the shared checkout, a new worktree, the live workspaces and none", async () => {
+    const user = userEvent.setup();
+    await openAt(inProject(WEBSHOP.id));
+
+    const menu = await openWorkspaceMenu(user);
+    const text = reading(menu);
+
+    expect(text).toContain("Current checkout");
+    expect(text).toContain("on main · you and the agent share the files");
+    expect(text).toContain("New workspace");
+    expect(text).toContain("a fresh worktree of webshop on a new branch");
+    // The project's own live ephemeral workspaces, named after their branch,
+    // with the machine they stand on and the threads already in them.
+    expect(text).toContain("hydra/run-3f1");
+    expect(text).toContain("moss");
+    expect(text).toContain("2 threads · “Fix flaky webhook tests”, “Write the retry runbook”");
+    expect(text).toContain("hydra/run-8a0");
+    expect(text).toContain("None");
+    expect(text).toContain("the agent works without a checkout");
+  });
+
+  it("names the repo per row and lists New workspace first in a multi-repo project", async () => {
+    const user = userEvent.setup();
+    await openAt(inProject(OPS.id));
+
+    const menu = await openWorkspaceMenu(user);
+    const text = reading(menu);
+
+    expect(text).toContain("a worktree of each repo, side by side, each on a new branch");
+    expect(text).toContain("Current checkout of ops-infra");
+    expect(text).toContain("Current checkout of ops-runbooks");
+    expect(text.indexOf("New workspace")).toBeLessThan(text.indexOf("Current checkout of"));
+  });
+
+  it("says a repo is not cloned on the machine rather than hiding the row", async () => {
+    const user = userEvent.setup();
+    await openAt(inProject(EDGE.id));
+
+    const menu = await openWorkspaceMenu(user);
+
+    expect(reading(menu)).toContain("not cloned on moss · clones on first use");
+  });
+
+  it("offers None alone, plus the foot, in a project with no repo", async () => {
+    const user = userEvent.setup();
+    await openAt(inProject(SANDBOX.id));
+
+    const menu = await openWorkspaceMenu(user);
+    const text = reading(menu);
+
+    expect(text).toContain("None");
+    expect(text).not.toContain("Current checkout");
+    expect(text).not.toContain("New workspace");
+    expect(text).toContain("Add a repo to sandbox →");
+    expect(text).toContain("Adopt a folder on this machine…");
+  });
+
+  it("defaults to the shared checkout in a one-repo project and to a worktree in a multi-repo one", async () => {
+    const one = await openAt(inProject(WEBSHOP.id));
+    expect(
+      await screen.findByRole("button", { name: /^workspace Current checkout$/ }),
+    ).toBeDefined();
+    one.unmount();
+
+    await openAt(inProject(OPS.id));
+    expect(await screen.findByRole("button", { name: /^workspace New workspace$/ })).toBeDefined();
+  });
+
+  it("follows the stored thread.workspace over the repo count", async () => {
+    await openAt(inProject(WEBSHOP.id), { "thread.workspace": "none" });
+
+    expect(await screen.findByRole("button", { name: /^workspace None$/ })).toBeDefined();
+  });
+
+  it("rewrites the lead sentence as the pick changes", async () => {
+    const user = userEvent.setup();
+    await openAt(inProject(WEBSHOP.id));
+
+    await waitFor(() => {
+      expect(reading()).toContain(
+        "It works in the checkout of webshop on moss, on main. You and the agent share the files.",
+      );
+    });
+
+    await openWorkspaceMenu(user);
+    await pickRow(user, /New workspace/);
+    await waitFor(() => {
+      expect(reading()).toContain(
+        "It gets its own worktree of webshop, on a new branch from main.",
+      );
+    });
+
+    await openWorkspaceMenu(user);
+    await pickRow(user, /hydra\/run-3f1/);
+    await waitFor(() => {
+      expect(reading()).toContain(
+        "It joins “hydra/run-3f1” there: the agents see each other's edits, on one branch.",
+      );
+    });
+
+    await openWorkspaceMenu(user);
+    await pickRow(user, /^None/);
+    await waitFor(() => {
+      expect(reading()).toContain("It works without a checkout.");
+    });
+  });
+
+  it("spawns with the project and the shared checkout the draft stands in", async () => {
+    const user = userEvent.setup();
+    const { api, router } = await openAt(
+      inProject(WEBSHOP.id),
+      {},
+      { "POST /api/v1/sessions": { body: NEW_SESSION } },
+    );
+
+    await user.type(screen.getByRole("textbox"), "Fix the login bug");
+    await user.click(screen.getByRole("button", { name: /send/i }));
+
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe(`/threads/${NEW_SESSION.id}`);
+    });
+    const spawn = api.calls.find(
+      (call) => call.method === "POST" && call.path === "/api/v1/sessions",
+    );
+    expect(spawn?.body).toEqual({
+      prompt: "Fix the login bug",
+      instanceId: INSTANCE_A.id,
+      model: "claude-sonnet-5",
+      accessMode: "approval-required",
+      runnerId: RUNNER.id,
+      permissionProfileId: PROFILE_UNRESTRICTED.id,
+      options: {},
+      projectId: WEBSHOP.id,
+      workspace: { kind: "primary", resourceId: R_WEBSHOP.id },
+    });
+  });
+
+  it("spawns with the workspace the user joined instead of the default", async () => {
+    const user = userEvent.setup();
+    const { api } = await openAt(
+      inProject(WEBSHOP.id),
+      {},
+      { "POST /api/v1/sessions": { body: NEW_SESSION } },
+    );
+
+    await openWorkspaceMenu(user);
+    await pickRow(user, /hydra\/run-3f1/);
+
+    await user.type(screen.getByRole("textbox"), "Fix the login bug");
+    await user.click(screen.getByRole("button", { name: /send/i }));
+
+    await waitFor(() => {
+      expect(
+        api.calls.some((call) => call.method === "POST" && call.path === "/api/v1/sessions"),
+      ).toBe(true);
+    });
+    const spawn = api.calls.find(
+      (call) => call.method === "POST" && call.path === "/api/v1/sessions",
+    );
+    expect(spawn?.body).toMatchObject({
+      projectId: WEBSHOP.id,
+      workspace: { kind: "existing", workspaceId: W_RUN_3F1.id },
+    });
+  });
+
+  it("spawns with one checkout per repo when a multi-repo project takes a new workspace", async () => {
+    const user = userEvent.setup();
+    const { api } = await openAt(
+      inProject(OPS.id),
+      {},
+      { "POST /api/v1/sessions": { body: NEW_SESSION } },
+    );
+
+    await user.type(await screen.findByRole("textbox"), "Fix the login bug");
+    await user.click(screen.getByRole("button", { name: /send/i }));
+
+    await waitFor(() => {
+      expect(
+        api.calls.some((call) => call.method === "POST" && call.path === "/api/v1/sessions"),
+      ).toBe(true);
+    });
+    const spawn = api.calls.find(
+      (call) => call.method === "POST" && call.path === "/api/v1/sessions",
+    );
+    expect(spawn?.body).toMatchObject({
+      projectId: OPS.id,
+      workspace: {
+        kind: "ephemeral",
+        checkouts: [{ resourceId: R_INFRA.id }, { resourceId: R_RUNBOOKS.id }],
+      },
+    });
+  });
+
+  it("preselects the workspace named in the address", async () => {
+    await openAt(`/threads/new?project=${WEBSHOP.id}&workspace=${W_RUN_3F1.id}`);
+
+    expect(await screen.findByRole("button", { name: /^workspace hydra\/run-3f1$/ })).toBeDefined();
+  });
+});
+
+describe("Composer: the branch selector (AC-18)", () => {
+  it("lists the shared checkout's branches, badges the one it is on and dims one a workspace holds", async () => {
+    const user = userEvent.setup();
+    await openAt(inProject(WEBSHOP.id));
+
+    const menu = await openBranchMenu(user, /main/);
+    const text = reading(menu);
+
+    expect(text).toContain("Branch");
+    expect(text).toContain("the checkout switches to it");
+    expect(text).toContain("release/2.4");
+    expect(text).toContain("current");
+    // `hydra/run-3f1` is a branch of the primary, but a ready ephemeral on the
+    // same machine is sitting on it, so it is dimmed with what holds it.
+    expect(text).toContain("in workspace hydra/run-3f1");
+    expect(within(menu).queryByRole("button", { name: /hydra\/run-3f1/ })).toBeNull();
+  });
+
+  it("switches the lip and the lead to the branch that was picked", async () => {
+    const user = userEvent.setup();
+    await openAt(inProject(WEBSHOP.id));
+
+    await openBranchMenu(user, /main/);
+    await pickRow(user, /release\/2\.4/);
+
+    await waitFor(() => {
+      expect(reading()).toContain(
+        "It works in the checkout of webshop on moss, on release/2.4. You and the agent share the files.",
+      );
+    });
+    expect(await screen.findByRole("button", { name: /release\/2\.4/ })).toBeDefined();
+  });
+
+  it("asks for a base branch on a new workspace, badging the default and saying where it starts", async () => {
+    const user = userEvent.setup();
+    await openAt(inProject(WEBSHOP.id));
+
+    await openWorkspaceMenu(user);
+    await pickRow(user, /New workspace/);
+
+    const lip = await screen.findByRole("button", { name: /^from main$/ });
+    expect(lip).toBeDefined();
+
+    await user.click(lip);
+    const menu = await screen.findByRole("dialog");
+    const text = reading(menu);
+
+    expect(text).toContain("Base branch");
+    expect(text).toContain("the new branch starts from it");
+    expect(text).toContain("default");
+    expect(text).toContain(
+      "The new branch is hydra/run-…, named after the thread, and starts from origin/main when the remote has it.",
+    );
+  });
+
+  it("reads the bases side by side, and takes no pick, in a multi-repo project", async () => {
+    const user = userEvent.setup();
+    await openAt(inProject(OPS.id));
+
+    const lip = await screen.findByText("from master · main");
+    expect(lip.closest("button")).toBeNull();
+
+    // Nothing opens behind it: there is no base to pick per repo in v1.
+    await user.click(lip);
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("reads default, with nothing to pick, on a repo no machine has cloned", async () => {
+    const user = userEvent.setup();
+    await openAt(inProject(EDGE.id));
+
+    const lip = await screen.findByText("default");
+    expect(lip.closest("button")).toBeNull();
+
+    await user.click(lip);
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("is absent on a joined workspace and on none", async () => {
+    const user = userEvent.setup();
+    await openAt(inProject(WEBSHOP.id));
+
+    await openWorkspaceMenu(user);
+    await pickRow(user, /hydra\/run-3f1/);
+    await waitFor(() => {
+      expect(screen.queryByText("Branch")).toBeNull();
+    });
+    expect(screen.queryByRole("button", { name: /^from / })).toBeNull();
+
+    await openWorkspaceMenu(user);
+    await pickRow(user, /^None/);
+    await waitFor(() => {
+      expect(screen.queryByRole("button", { name: /^from / })).toBeNull();
+    });
+  });
+});
+
+describe("Composer: the machine selector follows the workspace (AC-19)", () => {
+  it("is read-only, naming the workspace, once the thread joins one", async () => {
+    const user = userEvent.setup();
+    await openAt(inProject(WEBSHOP.id));
+
+    await openWorkspaceMenu(user);
+    await pickRow(user, /hydra\/run-8a0/);
+
+    const locked = await screen.findByText("set by the workspace hydra/run-8a0");
+    expect(locked.closest("button")).toBeNull();
+    await user.click(locked);
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("keeps a machine without the repo pickable, saying it clones on first use", async () => {
+    const user = userEvent.setup();
+    await openAt(inProject(EDGE.id));
+
+    await user.click(await screen.findByRole("button", { name: /^machine moss/ }));
+    const menu = await screen.findByRole("dialog");
+
+    expect(reading(menu)).toContain("edge-api is not cloned there · clones on first use");
+    expect(within(menu).getByRole("button", { name: /cove/ })).toBeDefined();
+  });
+});
+
+describe("Composer: the workspace menu's foot (AC-23)", () => {
+  const NEW_REPO = repo("01a06d02-7100-7000-8000-000000000009", "acme", "checkout", [SANDBOX.id]);
+
+  it("adds a repo to the project and then lists it in the menu", async () => {
+    const user = userEvent.setup();
+    let resources: readonly Resource[] = RESOURCES;
+    const { api } = await openAt(
+      inProject(SANDBOX.id),
+      {},
+      {
+        "GET /api/v1/resources": () => ({ body: { items: resources } }),
+        "POST /api/v1/resources": () => {
+          resources = [...RESOURCES, NEW_REPO];
+          return { body: NEW_REPO };
+        },
+      },
+    );
+
+    await openWorkspaceMenu(user);
+    await user.click(screen.getByText("Add a repo to sandbox →"));
+
+    await user.type(await screen.findByLabelText("Remote URL"), "git@github.com:acme/checkout.git");
+    await user.selectOptions(screen.getByLabelText("GitHub Connection"), GITHUB.id);
+    await user.type(screen.getByLabelText("Setup command"), "pnpm install");
+    await user.click(screen.getByRole("button", { name: "Add repo" }));
+
+    await waitFor(() => {
+      expect(
+        api.calls.some((call) => call.method === "POST" && call.path === "/api/v1/resources"),
+      ).toBe(true);
+    });
+    expect(
+      api.calls.find((call) => call.method === "POST" && call.path === "/api/v1/resources")?.body,
+    ).toEqual({
+      kind: "repo",
+      remote: "git@github.com:acme/checkout.git",
+      connectionId: GITHUB.id,
+      setupCommand: "pnpm install",
+      projectIds: [SANDBOX.id],
+    });
+
+    // The menu is the record of what happened: the repo is on offer now.
+    expect(await screen.findByText("Current checkout")).toBeDefined();
+  });
+
+  it("offers only the GitHub connections in the add-repo form", async () => {
+    const user = userEvent.setup();
+    await openAt(inProject(SANDBOX.id));
+
+    await openWorkspaceMenu(user);
+    await user.click(screen.getByText("Add a repo to sandbox →"));
+
+    const select = await screen.findByLabelText<HTMLSelectElement>("GitHub Connection");
+    const offered = [...select.options].map((option) => option.textContent);
+    expect(offered).toContain(GITHUB.label);
+    expect(offered).not.toContain(SLACK.label);
+  });
+
+  it("shows the API's refusal on the add-repo form", async () => {
+    const user = userEvent.setup();
+    await openAt(
+      inProject(SANDBOX.id),
+      {},
+      {
+        "POST /api/v1/resources": {
+          status: 409,
+          body: envelope("conflict", "that repo is already a resource"),
+        },
+      },
+    );
+
+    await openWorkspaceMenu(user);
+    await user.click(screen.getByText("Add a repo to sandbox →"));
+
+    await user.type(await screen.findByLabelText("Remote URL"), "git@github.com:acme/webshop.git");
+    await user.click(screen.getByRole("button", { name: "Add repo" }));
+
+    expect((await screen.findByRole("alert")).textContent).toBe("that repo is already a resource");
+  });
+
+  it("adopts a folder for the repo picked in the form and follows the workspace to ready", async () => {
+    const user = userEvent.setup();
+    const provisioning: Workspace = {
+      ...W_PRIMARY_WEBSHOP,
+      id: "01a06d02-7200-7000-8000-000000000009",
+      status: "provisioning",
+      checkouts: [],
+      provisionedAt: null,
+    };
+    const ready: Workspace = { ...provisioning, status: "ready" };
+    let answered = false;
+    const { api } = await openAt(
+      inProject(WEBSHOP.id),
+      {},
+      {
+        "POST /api/v1/workspaces": { body: provisioning },
+        [`GET /api/v1/workspaces/${provisioning.id}`]: () => {
+          const body = answered ? ready : provisioning;
+          answered = true;
+          return { body };
+        },
+      },
+    );
+
+    await openWorkspaceMenu(user);
+    await user.click(screen.getByText("Adopt a folder on this machine…"));
+
+    await user.selectOptions(await screen.findByLabelText("Repo"), R_WEBSHOP.id);
+    await user.type(screen.getByLabelText("Path"), "/Users/rogier/code/webshop");
+    await user.click(screen.getByRole("button", { name: "Adopt" }));
+
+    await waitFor(() => {
+      expect(
+        api.calls.some((call) => call.method === "POST" && call.path === "/api/v1/workspaces"),
+      ).toBe(true);
+    });
+    expect(
+      api.calls.find((call) => call.method === "POST" && call.path === "/api/v1/workspaces")?.body,
+    ).toEqual({
+      resourceId: R_WEBSHOP.id,
+      runnerId: RUNNER.id,
+      path: "/Users/rogier/code/webshop",
+    });
+
+    expect(await screen.findByText("provisioning")).toBeDefined();
+    expect(await screen.findByText("ready")).toBeDefined();
+  });
+
+  it("shows the message a failed adopt came back with", async () => {
+    const user = userEvent.setup();
+    const failed: Workspace = {
+      ...W_PRIMARY_WEBSHOP,
+      id: "01a06d02-7200-7000-8000-00000000000a",
+      status: "failed",
+      checkouts: [],
+      message: "/Users/rogier/code/webshop is not a git repository",
+    };
+    await openAt(
+      inProject(WEBSHOP.id),
+      {},
+      {
+        "POST /api/v1/workspaces": { body: failed },
+        [`GET /api/v1/workspaces/${failed.id}`]: { body: failed },
+      },
+    );
+
+    await openWorkspaceMenu(user);
+    await user.click(screen.getByText("Adopt a folder on this machine…"));
+
+    await user.selectOptions(await screen.findByLabelText("Repo"), R_WEBSHOP.id);
+    await user.type(screen.getByLabelText("Path"), "/Users/rogier/code/webshop");
+    await user.click(screen.getByRole("button", { name: "Adopt" }));
+
+    expect(
+      await screen.findByText("/Users/rogier/code/webshop is not a git repository"),
+    ).toBeDefined();
+  });
+
+  it("shows the API's refusal on the adopt form", async () => {
+    const user = userEvent.setup();
+    await openAt(
+      inProject(WEBSHOP.id),
+      {},
+      {
+        "POST /api/v1/workspaces": {
+          status: 409,
+          body: envelope("conflict", "moss already holds a checkout of webshop"),
+        },
+      },
+    );
+
+    await openWorkspaceMenu(user);
+    await user.click(screen.getByText("Adopt a folder on this machine…"));
+
+    await user.selectOptions(await screen.findByLabelText("Repo"), R_WEBSHOP.id);
+    await user.type(screen.getByLabelText("Path"), "/Users/rogier/code/webshop");
+    await user.click(screen.getByRole("button", { name: "Adopt" }));
+
+    expect((await screen.findByRole("alert")).textContent).toBe(
+      "moss already holds a checkout of webshop",
+    );
   });
 });
