@@ -31,6 +31,20 @@ const rowLabel = (row: MachineRow): JSX.Element => (
 );
 
 /**
+ * What stands under a row: who is logged in there and on what plan, and - on a
+ * draft opening in a shared checkout - whether this machine holds the repo yet.
+ * A machine that does not is still pickable: it clones on first use.
+ */
+const subLine = (row: MachineRow): JSX.Element => (
+  <>
+    <span className="block truncate">
+      {[row.identity, row.planLabel].filter((each) => each !== null).join(" · ")}
+    </span>
+    {row.notCloned === null ? null : <span className="block truncate">{row.notCloned}</span>}
+  </>
+);
+
+/**
  * The lip's right-hand selector: which machine a new thread is placed on,
  * scoped to the instance the model selector has already picked. Its own
  * trigger carries the label the field built - the machine in force, named with
@@ -68,7 +82,7 @@ export function MachineSelector({
         <MenuRow
           key={row.runnerId}
           name={rowLabel(row)}
-          sub={[row.identity, row.planLabel].filter((each) => each !== null).join(" · ")}
+          sub={subLine(row)}
           dimmed={row.dimmed}
           current={row.current}
           onPick={() => {

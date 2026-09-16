@@ -6,15 +6,18 @@
 import type { Session, ThreadRows } from "@hydra/contract";
 import { isSettled, WORKING_STATUSES } from "./status";
 
+/** What a row's state mark says: working, waiting, or over. */
+export type ThreadMark = "working" | "idle" | "exited";
+
 export interface ThreadRow {
   readonly id: string;
-  readonly mark: "working" | "idle" | "exited";
+  readonly mark: ThreadMark;
   readonly title: string;
   readonly activityAt: string;
   readonly secondLine: string | null;
 }
 
-const markOf = (session: Session): ThreadRow["mark"] => {
+export const markOf = (session: Session): ThreadMark => {
   if (WORKING_STATUSES.has(session.status)) return "working";
   // An exit that can be resumed takes input like any idle thread, so it reads
   // as one; only an exit that is refused reads as an ending.

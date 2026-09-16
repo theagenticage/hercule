@@ -25,6 +25,11 @@ export const queryKeys = {
     filter === undefined ? ["tasks"] : ["tasks", filter],
   task: (id?: string): LiveQueryKey => (id === undefined ? ["task"] : ["task", id]),
   projects: (): LiveQueryKey => ["projects"],
+  /** No live topic yet: a resource written elsewhere - the CLI - lands on the next read. */
+  resources: (): LiveQueryKey => ["resources"],
+  /** No live topic yet either; a workspace being made is followed by polling it. */
+  workspaces: (): LiveQueryKey => ["workspaces"],
+  workspace: (id?: string): LiveQueryKey => (id === undefined ? ["workspace"] : ["workspace", id]),
   connections: (): LiveQueryKey => ["connections"],
   connection: (id?: string): LiveQueryKey =>
     id === undefined ? ["connection"] : ["connection", id],

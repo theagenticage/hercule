@@ -8,7 +8,15 @@
  * plugin contribution, so what the screen can offer is a reading of the plugin
  * listing rather than a read of its own.
  */
-import type { PluginDetail } from "@hydra/contract";
+import type { Connection, PluginDetail } from "@hydra/contract";
+
+/**
+ * The accounts a repo can be reached through. Two screens offer them - the
+ * composer's add-repo form and Settings > Threads - and which type counts is a
+ * domain fact, not a filter each screen rewrites.
+ */
+export const githubConnections = (connections: readonly Connection[]): readonly Connection[] =>
+  connections.filter((connection) => connection.type === "github");
 
 /** The path the controller serves the provider's redirect on. */
 const CALLBACK_PATH = "/oauth/callback";

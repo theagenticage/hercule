@@ -54,13 +54,22 @@ export function SelectorShell({
     );
 
   if (locked !== null) {
+    // A field with a key word reads as two parts, so the value keeps a span of
+    // its own; one without reads as a single value, and wrapping it would make
+    // the same text stand in two nested elements.
     return (
       <span
         title={locked}
         className="inline-flex items-center gap-[5px] px-[7px] py-[3px] text-meta text-muted"
       >
-        {key}
-        <span>{label}</span>
+        {key === null ? (
+          label
+        ) : (
+          <>
+            {key}
+            <span>{label}</span>
+          </>
+        )}
       </span>
     );
   }
@@ -82,7 +91,10 @@ export function SelectorShell({
           )}
         >
           {key}
-          {label}
+          {/* The value stands in an element of its own, so a reader asking
+              for a menu row's text does not also find the trigger the row
+              would change. */}
+          <span>{label}</span>
         </button>
       </PopoverTrigger>
       <PopoverContent

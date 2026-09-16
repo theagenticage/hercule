@@ -1,52 +1,121 @@
-import type { JSX } from "react";
+import { useState, type JSX } from "react";
+import type { WorkspaceMenu, WorkspacePick } from "@hydra/client-core";
 import { MenuFoot, MenuHeader, MenuRow } from "./menu";
 import { SelectorShell } from "./selector-shell";
-
-/** Until a thread can join one, the only workspace on offer is no workspace. */
-const NONE = "No workspace";
+import { AddRepoForm, AdoptForm } from "./workspace-foot";
 
 /**
- * The lip's first selector. Adding a repo and adopting a folder are what its
- * foot will offer (#72); they are on show and dimmed rather than absent, so
- * the shape of the menu is the shape it keeps.
+ * The lip's first selector: where the thread works (spec 14 §The composer, the
+ * Workspace selector). Every row is a thing that exists or a thing that would
+ * be made, with what it means on its sub-line; nothing that cannot be picked is
+ * hidden, it says why instead.
+ *
+ * The foot is the way out of an empty project: a repo to add, or a folder on
+ * this machine to adopt. On a draft that belongs to no project there is no
+ * project to add a repo to, so the foot stands and says so.
  */
 export function WorkspaceSelector({
+  menu,
   locked,
   open,
   onOpenChange,
+  onPick,
 }: {
+  readonly menu: WorkspaceMenu;
   readonly locked: string | null;
   readonly open: boolean;
   readonly onOpenChange: (open: boolean) => void;
+  readonly onPick: (pick: WorkspacePick) => void;
 }): JSX.Element {
+  const [form, setForm] = useState<"add" | "adopt" | null>(null);
+
   return (
     <SelectorShell
       keyLabel="workspace"
-      label={NONE}
+      label={menu.label}
       locked={locked}
       open={open}
-      onOpenChange={onOpenChange}
+      onOpenChange={(next) => {
+        if (!next) setForm(null);
+        onOpenChange(next);
+      }}
       contentClassName="w-[420px]"
     >
       <MenuHeader label="Workspace" note="locks when the thread starts" />
-      <MenuRow
-        name={NONE}
-        sub="the agent works without a checkout"
-        current
-        onPick={() => {
-          onOpenChange(false);
-        }}
-      />
+      {menu.rows.map((row) => (
+        <MenuRow
+          key={row.key}
+          // Wrapped only where the wrapper says something: a second element
+          // holding the same text is a second element a reader finds.
+          name={row.mono ? <span className="font-mono">{row.name}</span> : row.name}
+          note={row.note}
+          sub={row.sub}
+          current={row.current}
+          onPick={() => {
+            onPick(row.pick);
+            onOpenChange(false);
+          }}
+        />
+      ))}
       <MenuFoot>
-        <div>
-          <span>Add a repo →</span>
-          <span> · not built yet</span>
-        </div>
-        <div>
-          <span>Adopt a folder on this machine…</span>
-          <span> · not built yet</span>
-        </div>
+        {menu.foot === null ? (
+          // Both ways out need a project to put the repo in, so a draft that
+          // stands in none says what would unlock them (D-17).
+          <>
+            <div>
+              <span>Add a repo →</span>
+              <span> · pick a project first</span>
+            </div>
+            <div>
+              <span>Adopt a folder on this machine…</span>
+              <span> · pick a project first</span>
+            </div>
+          </>
+        ) : form === "add" ? (
+          <AddRepoForm
+            projectId={menu.foot.projectId}
+            onDone={() => {
+              setForm(null);
+            }}
+          />
+        ) : form === "adopt" ? (
+          <AdoptForm projectId={menu.foot.projectId} runnerId={menu.foot.runnerId} />
+        ) : (
+          <>
+            <FootAction
+              label={menu.foot.addRepo}
+              onPick={() => {
+                setForm("add");
+              }}
+            />
+            <FootAction
+              label="Adopt a folder on this machine…"
+              onPick={() => {
+                setForm("adopt");
+              }}
+            />
+          </>
+        )}
       </MenuFoot>
     </SelectorShell>
+  );
+}
+
+/** One of the two ways out of an empty project, as the foot offers it. */
+function FootAction({
+  label,
+  onPick,
+}: {
+  readonly label: string;
+  readonly onPick: () => void;
+}): JSX.Element {
+  return (
+    <button
+      type="button"
+      onClick={onPick}
+      className="block cursor-pointer text-left hover:text-ink"
+    >
+      {label}
+    </button>
   );
 }

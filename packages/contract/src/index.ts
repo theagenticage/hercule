@@ -99,6 +99,7 @@ export {
   SettingsPatch,
   SettingsState,
   ThreadRows,
+  ThreadWorkspace,
   UserSettings,
 } from "./groups/settings";
 export {

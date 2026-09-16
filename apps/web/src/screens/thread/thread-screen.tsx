@@ -4,13 +4,20 @@
  */
 import { useLayoutEffect, type JSX } from "react";
 import { useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
-import { turnsOf, type HydraClient, type Live } from "@hydra/client-core";
+import { siblingTabs, turnsOf, type HydraClient, type Live } from "@hydra/client-core";
 import { useLiveInvalidation } from "../../app/live-invalidation";
-import { inputsQuery, sessionQuery, transcriptQuery } from "../../app/queries";
+import {
+  inputsQuery,
+  projectsQuery,
+  sessionQuery,
+  sessionsQuery,
+  transcriptQuery,
+  workspacesQuery,
+} from "../../app/queries";
 import { Composer } from "../composer/composer";
 import { PermissionCard } from "./permission-card";
 import { QueuedInputs } from "./queued-inputs";
-import { ChromeAction, ThreadChrome, ThreadColumn } from "./thread-chrome";
+import { ChromeAction, NewThreadHere, ThreadChrome, ThreadColumn } from "./thread-chrome";
 import { useStickToBottom } from "./use-stick-to-bottom";
 import { useThreadLive } from "./use-thread-live";
 import { Turn } from "./turn";
@@ -51,6 +58,15 @@ export function ThreadScreen({
     (row) => row.status === "queued",
   ).length;
 
+  // What the chrome names beside the title: the project the thread belongs to,
+  // and the other threads in its workspace. Read here rather than passed down,
+  // because the chrome is where they are drawn.
+  const projects = useQuery(projectsQuery(client)).data?.items ?? [];
+  const workspaces = useQuery(workspacesQuery(client)).data?.items ?? [];
+  const sessions = useQuery(sessionsQuery(client)).data?.items ?? [];
+  const workspace = workspaces.find((each) => each.id === session.workspaceId);
+  const project = projects.find((each) => each.id === session.projectId);
+
   // Runs after the DOM already reflects whatever just grew - `rows.length` or
   // `queuedCount` changing is the signal, `followIfAtBottom` itself is what
   // decides whether that growth should move the scroll.
@@ -63,11 +79,18 @@ export function ThreadScreen({
   return (
     <div className="flex flex-1 flex-col">
       <ThreadChrome
+        crumb={project?.name}
         title={session.title}
+        tabs={siblingTabs({ workspace, sessions, activeSessionId: session.id })}
         actions={
-          <ChromeAction title="More (not built)" icon disabled>
-            …
-          </ChromeAction>
+          <>
+            {workspace === undefined ? null : (
+              <NewThreadHere projectId={session.projectId} workspaceId={workspace.id} />
+            )}
+            <ChromeAction title="More (not built)" icon disabled>
+              …
+            </ChromeAction>
+          </>
         }
       />
       <ThreadColumn className="gap-6">

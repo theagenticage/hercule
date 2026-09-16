@@ -4,11 +4,15 @@ import { useSuspenseQuery } from "@tanstack/react-query";
 import { FALLBACK_TIMEZONE, isSupportedTimezone } from "@hydra/client-core";
 import {
   localRunnerQuery,
+  projectsQuery,
   providersQuery,
+  resourcesQuery,
   runnersQuery,
   sessionQuery,
+  sessionsQuery,
   settingsQuery,
   transcriptQuery,
+  workspacesQuery,
 } from "../../../app/queries";
 import { ThreadScreen } from "../../../screens/thread/thread-screen";
 
@@ -27,6 +31,16 @@ export const Route = createFileRoute("/_shell/threads/$sessionId")({
       context.queryClient.ensureQueryData(transcriptQuery(context.client, params.sessionId)),
       context.queryClient.ensureQueryData(runnersQuery(context.client)),
       context.queryClient.ensureQueryData(providersQuery(context.client)),
+      // What the chrome names beside the title: the project this thread is
+      // in, and the other threads in its workspace. Prefetched rather than
+      // ensured, for the reason the draft route gives - a controller that
+      // cannot list them leaves a thread with a plainer chrome, not a screen
+      // the user cannot reach - but prefetched all the same, so the crumb and
+      // the tabs are there at the first paint instead of popping in.
+      context.queryClient.prefetchQuery(projectsQuery(context.client)),
+      context.queryClient.prefetchQuery(resourcesQuery(context.client)),
+      context.queryClient.prefetchQuery(workspacesQuery(context.client)),
+      context.queryClient.prefetchQuery(sessionsQuery(context.client)),
     ]);
     await context.queryClient.ensureQueryData(
       localRunnerQuery(context.detectLocalRunner, runners.items),

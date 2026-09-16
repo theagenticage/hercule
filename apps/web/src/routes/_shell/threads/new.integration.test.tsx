@@ -389,8 +389,10 @@ describe("Composer: selector popovers (AC-16)", () => {
 
     expect(await screen.findByText("Adopt a folder on this machine…")).toBeDefined();
     expect(screen.getByText("Add a repo →")).toBeDefined();
-    // "not built yet" is the dimmed reason on both placeholder entries.
-    expect(reading().match(/not built yet/g)?.length).toBeGreaterThanOrEqual(2);
+    // Amended by #72 (D-17): both entries are built now, and both need a
+    // project to act on, so a draft standing in none says what would unlock
+    // them rather than the pre-#72 "not built yet".
+    expect(reading().match(/pick a project first/g)?.length).toBeGreaterThanOrEqual(2);
   });
 
   it("opens the runner menu with the runner's state and machine on the row's first line", async () => {
@@ -1506,6 +1508,28 @@ describe("Picker: a thread starts from a project (AC-16)", () => {
     expect(router.state.location.href).toBe("/threads/new");
   });
 
+  it("closes on a click past the panel, and on Esc after a click inside it", async () => {
+    const user = userEvent.setup();
+    const { router } = await openAt("/threads/new");
+
+    const picker = await openPicker(user);
+    // The scrim is the panel's parent: the page behind the picker.
+    await user.click(picker.parentElement!);
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog")).toBeNull();
+    });
+
+    // A click inside takes the focus the panel was listening with, so Esc is
+    // heard on the document rather than on the panel.
+    const again = await openPicker(user);
+    await user.click(within(again).getByRole("button", { name: /webshop/ }));
+    await user.keyboard("{Escape}");
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog")).toBeNull();
+    });
+    expect(router.state.location.href).toBe(inProject(WEBSHOP.id));
+  });
+
   it("offers New project as the last row when there are projects", async () => {
     const user = userEvent.setup();
     await openAt("/threads/new");
@@ -1597,6 +1621,25 @@ describe("Composer: the workspace selector (AC-17)", () => {
     expect(text).toContain("Current checkout of ops-infra");
     expect(text).toContain("Current checkout of ops-runbooks");
     expect(text.indexOf("New workspace")).toBeLessThan(text.indexOf("Current checkout of"));
+  });
+
+  it("asks about the machine the draft would be placed on, not the one it picked", async () => {
+    const user = userEvent.setup();
+    // `INSTANCE_FRESH` is on no machine, so no row is selectable and the draft
+    // picks none - but it would still be placed on moss, which holds webshop's
+    // shared checkout. The menu has to ask about that machine, or it says the
+    // repo is not cloned on a machine nothing else ever named.
+    const api = stubApi(controller([INSTANCE_FRESH], {}, world()));
+    await renderApp({
+      path: inProject(WEBSHOP.id),
+      api: api.fetch,
+      token: "held",
+      detectLocalRunner: () => Promise.resolve(RUNNER.id),
+    });
+
+    const menu = await openWorkspaceMenu(user);
+    expect(reading(menu)).toContain("on main · you and the agent share the files");
+    expect(reading(menu)).not.toContain("not cloned");
   });
 
   it("says a repo is not cloned on the machine rather than hiding the row", async () => {
@@ -1884,7 +1927,12 @@ describe("Composer: the machine selector follows the workspace (AC-19)", () => {
     const menu = await screen.findByRole("dialog");
 
     expect(reading(menu)).toContain("edge-api is not cloned there · clones on first use");
-    expect(within(menu).getByRole("button", { name: /cove/ })).toBeDefined();
+    // "not cloned" is a wait, not a refusal: the row stays a button. Asserted
+    // on moss rather than on cove (D-15), which this fixture dims for a reason
+    // of its own - no provider instance was ever probed there - and which
+    // #160's own rule (a dimmed row is inert) keeps inert whatever this ticket
+    // does.
+    expect(within(menu).getByRole("button", { name: /moss/ })).toBeDefined();
   });
 });
 
@@ -1930,7 +1978,12 @@ describe("Composer: the workspace menu's foot (AC-23)", () => {
     });
 
     // The menu is the record of what happened: the repo is on offer now.
-    expect(await screen.findByText("Current checkout")).toBeDefined();
+    // Read inside the menu (D-15), which is portalled away from the lip: the
+    // draft now opens in that repo's checkout, so the trigger reads the same
+    // words and a page-wide query would find both.
+    expect(
+      await within(await screen.findByRole("dialog")).findByText("Current checkout"),
+    ).toBeDefined();
   });
 
   it("offers only the GitHub connections in the add-repo form", async () => {
@@ -2044,6 +2097,31 @@ describe("Composer: the workspace menu's foot (AC-23)", () => {
     expect(
       await screen.findByText("/Users/rogier/code/webshop is not a git repository"),
     ).toBeDefined();
+  });
+
+  it("says a machine has to be picked before a folder on one can be adopted", async () => {
+    const user = userEvent.setup();
+    const { api } = await openAt(
+      inProject(WEBSHOP.id),
+      {},
+      {
+        // No machine is connected at all, so the draft is placed on none and
+        // there is no machine whose folder could be adopted.
+        "GET /api/v1/runners": { body: { items: [] } },
+      },
+    );
+
+    await openWorkspaceMenu(user);
+    await user.click(screen.getByText("Adopt a folder on this machine…"));
+
+    await user.selectOptions(await screen.findByLabelText("Repo"), R_WEBSHOP.id);
+    await user.type(screen.getByLabelText("Path"), "/Users/rogier/code/webshop");
+    await user.click(screen.getByRole("button", { name: "Adopt" }));
+
+    expect((await screen.findByRole("alert")).textContent).toBe("Pick a machine first");
+    expect(
+      api.calls.some((call) => call.method === "POST" && call.path === "/api/v1/workspaces"),
+    ).toBe(false);
   });
 
   it("shows the API's refusal on the adopt form", async () => {

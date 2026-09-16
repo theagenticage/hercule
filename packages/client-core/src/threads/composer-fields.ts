@@ -16,6 +16,15 @@ import { accessModeMenu, type AccessModeMenuItem } from "./access-modes";
 import { accountName, loginTarget, snapshotOn, type LoginTarget } from "./catalog";
 import type { ThreadCatalogs, ThreadConfig, ThreadKind, ThreadPicks } from "./config";
 import { referenceRunner, runnerMenu, type RunnerMenuRow } from "./runner-menu";
+import {
+  defaultWorkspacePick,
+  projectRepos,
+  readyPrimary,
+  repoName,
+  workspaceLead,
+  workspaceName,
+  type WorkspacePick,
+} from "./workspaces";
 
 export interface ComposerField {
   /** Why this cannot be changed here, as the sentence the tooltip reads. */
@@ -38,6 +47,12 @@ export interface ComposerBlocked {
 /** One machine the thread could be placed on, and whether it is the one in force. */
 export interface MachineRow extends RunnerMenuRow {
   readonly current: boolean;
+  /**
+   * `webshop is not cloned there · clones on first use`, on a draft opening in
+   * a shared checkout. It dims nothing: a machine without the repo yet is a
+   * machine that clones it, which is a wait and not a refusal.
+   */
+  readonly notCloned: string | null;
 }
 
 export interface ComposerFields {
@@ -49,10 +64,19 @@ export interface ComposerFields {
   readonly model: { readonly pill: ModelPill };
   /** What the current model offers to pick under it; none means no selector. */
   readonly options: readonly ModelOption[] | null;
-  readonly workspace: ComposerField;
+  /** Where the thread works: the pick in force, and whether it can still change. */
+  readonly workspace: ComposerField & { readonly value: WorkspacePick };
   /** The machine: the one in force, named with why it is dimmed, and the fleet. */
   readonly machine: ComposerField & {
     readonly label: string;
+    /**
+     * The machine everything else reads from. It is not `config.runnerId`: a
+     * draft whose fleet holds nothing selectable has picked none, and falls
+     * back to the machine it would really be placed on (`referenceRunner`).
+     * Anything asking "is the repo cloned there" has to ask about that one, or
+     * the lead sentence and the menu under it name two different machines.
+     */
+    readonly runnerId: string | null;
     readonly rows: readonly MachineRow[];
   };
   /** The sentence a draft stands under; an active thread stands under none. */
@@ -60,9 +84,6 @@ export interface ComposerFields {
   /** Why this draft cannot start at all; null once it can, and on a thread that has. */
   readonly blocked: ComposerBlocked | null;
 }
-
-/** What a draft says above its card while nothing stops it from starting. */
-const LEAD = "It works without a checkout.";
 
 /**
  * Why a draft cannot start, in the order the user can act on: something to
@@ -98,6 +119,21 @@ export const composerFields = (
   const runner = referenceRunner(catalogs.runners, config.runnerId, catalogs.localRunnerId);
   const snapshot = instance === undefined ? undefined : snapshotOn(instance, runner?.id);
   const descriptor = snapshot?.models.find((model) => model.slug === config.model);
+  const resources = catalogs.resources ?? [];
+  const workspaces = catalogs.workspaces ?? [];
+  const projectId = config.projectId ?? null;
+  // The pick the user made stands; otherwise the default follows the stored
+  // setting, and the repos of the project are what either can name.
+  const pick =
+    config.workspace ??
+    defaultWorkspacePick(projectRepos(resources, projectId), config.preferredWorkspace ?? null);
+  // Read only on a draft: a thread that has started is locked because it
+  // started, which is what its tooltip has to say, and its own machine is the
+  // one worth naming rather than the workspace that chose it.
+  const joined =
+    kind === "draft" && pick.kind === "existing"
+      ? workspaces.find((each) => each.id === pick.workspaceId)
+      : undefined;
 
   // The name and the reason come off one machine, never off two: a machine
   // named with another's reason would send the user to fix the wrong thing.
@@ -107,6 +143,11 @@ export const composerFields = (
       : runnerMenu(catalogs.runners, catalogs.localRunnerId, instance).rows.map((row) => ({
           ...row,
           current: row.runnerId === runner?.id,
+          notCloned:
+            pick.kind === "primary" &&
+            readyPrimary(workspaces, pick.resourceId, row.runnerId) === undefined
+              ? `${repoName(resources.find((each) => each.id === pick.resourceId))} is not cloned there · clones on first use`
+              : null,
         }));
   const dimmed = rows.find((row) => row.current)?.dimmed ?? null;
   const name = runner?.name ?? "no machine";
@@ -131,13 +172,33 @@ export const composerFields = (
     },
     options:
       descriptor === undefined || descriptor.options.length === 0 ? null : descriptor.options,
-    workspace: { locked: lockedReason(kind, "workspace") },
+    workspace: { locked: lockedReason(kind, "workspace"), value: pick },
     machine: {
-      locked: lockedReason(kind, "machine"),
-      label: dimmed === null ? name : `${name} · ${dimmed}`,
+      // A workspace that already stands is on one machine and never moves, so
+      // joining it settles the machine rather than offering it (spec 02
+      // §Workspace).
+      locked:
+        joined === undefined
+          ? lockedReason(kind, "machine")
+          : "The workspace it joins decides the machine",
+      label:
+        joined !== undefined
+          ? `set by the workspace ${workspaceName(joined)}`
+          : dimmed === null
+            ? name
+            : `${name} · ${dimmed}`,
+      runnerId: runner?.id ?? null,
       rows,
     },
-    lead: kind === "active" ? null : LEAD,
+    lead:
+      kind === "active"
+        ? null
+        : workspaceLead(pick, {
+            resources,
+            workspaces,
+            machine: name,
+            runnerId: runner?.id ?? null,
+          }),
     blocked: kind === "active" ? null : blockerOf(instance, runner, snapshot),
   };
 };

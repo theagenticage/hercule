@@ -2,14 +2,16 @@ import type { JSX } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import {
+  githubConnections,
   instanceDefaults,
   threadDefaults,
   threadModelField,
   threadRowsMode,
 } from "@hydra/client-core";
-import type { AccessMode, ThreadRows } from "@hydra/contract";
-import { FormCard, Row, SegmentedControl, SegmentedControlItem, Select } from "@hydra/ui";
+import type { AccessMode, ThreadRows, ThreadWorkspace } from "@hydra/contract";
+import { Field, FormCard, Row, SegmentedControl, SegmentedControlItem, Select } from "@hydra/ui";
 import {
+  connectionsQuery,
   localRunnerQuery,
   profilesQuery,
   providersQuery,
@@ -26,6 +28,13 @@ const ACCESS_MODES: readonly AccessMode[] = [
   "full-access",
 ];
 
+/** The three faces of the workspace default, and what each one stores. */
+const WORKSPACES: ReadonlyArray<{ readonly value: ThreadWorkspace; readonly label: string }> = [
+  { value: "primary", label: "Current checkout" },
+  { value: "ephemeral", label: "New workspace" },
+  { value: "none", label: "None" },
+];
+
 export const Route = createFileRoute("/_shell/settings/threads")({
   staticData: { title: "Threads" },
   loader: async ({ context }) => {
@@ -33,6 +42,10 @@ export const Route = createFileRoute("/_shell/settings/threads")({
       context.queryClient.ensureQueryData(runnersQuery(context.client)),
       context.queryClient.ensureQueryData(providersQuery(context.client)),
       context.queryClient.ensureQueryData(profilesQuery(context.client)),
+      // The GitHub accounts the select below offers. Prefetched rather than
+      // ensured: a controller that cannot list them leaves one field empty,
+      // not a screen the user cannot reach.
+      context.queryClient.prefetchQuery(connectionsQuery(context.client)),
     ]);
     await context.queryClient.ensureQueryData(
       localRunnerQuery(context.detectLocalRunner, runners.items),
@@ -54,6 +67,7 @@ function Threads(): JSX.Element {
   const profiles = useSuspenseQuery(profilesQuery(client)).data.items;
   const runners = useSuspenseQuery(runnersQuery(client)).data.items;
   const localId = useQuery(localRunnerQuery(detectLocalRunner, runners)).data ?? null;
+  const githubs = githubConnections(useQuery(connectionsQuery(client)).data?.items ?? []);
   const { save, saved, failure } = useSaveSettings(client);
 
   const rows = threadRowsMode(settings.user["ui.threadRows"]);
@@ -159,11 +173,62 @@ function Threads(): JSX.Element {
       </FormCard>
 
       <FormCard
+        label="Threads · workspace"
+        fine="Picked here, it stands whatever the project holds. Left unset, a project with one repo opens in its current checkout and a project with several repos opens in a New workspace."
+      >
+        <Row label="Workspace">
+          <SegmentedControl
+            aria-label="Workspace"
+            // Nothing stored is nothing on: the fine print below says what
+            // happens then, and a face lit up would claim a choice nobody made.
+            value={settings.user["thread.workspace"] ?? ""}
+            onValueChange={(next) => {
+              save({ user: { "thread.workspace": next as ThreadWorkspace } });
+            }}
+          >
+            {WORKSPACES.map((each) => (
+              <SegmentedControlItem key={each.value} value={each.value}>
+                {each.label}
+              </SegmentedControlItem>
+            ))}
+          </SegmentedControl>
+        </Row>
+      </FormCard>
+
+      <FormCard
+        label="Threads · git"
+        fine="A thread working in a checkout acts through that repo's own Connection; this is what the rest act through."
+      >
+        {/* A `Row` like its siblings would put this label in the 110px column
+            the other rows share, where it wraps to four lines beside a
+            one-line select; it is three times longer than any of them. */}
+        <Field id="thread-github" label="GitHub account for threads without a checkout">
+          <Select
+            id="thread-github"
+            value={settings.user["thread.githubConnectionId"] ?? ""}
+            onChange={(event) => {
+              // The setting is nullable, so "no account" clears it rather
+              // than storing an empty string the contract's `Id` refuses.
+              const picked = event.target.value;
+              save({ user: { "thread.githubConnectionId": picked === "" ? null : picked } });
+            }}
+          >
+            <option value="">No account</option>
+            {githubs.map((connection) => (
+              <option key={connection.id} value={connection.id}>
+                {connection.label}
+              </option>
+            ))}
+          </Select>
+        </Field>
+      </FormCard>
+
+      <FormCard
         label="Threads · display"
         fine={
           rows === "plain"
             ? "Plain rows show a thread's title and its age."
-            : "Meta rows add a second line with the checkout or branch, the pull request and the model."
+            : "Meta rows add a second line with the model. The workspace is the group's own label."
         }
       >
         <Row label="Sidebar rows">

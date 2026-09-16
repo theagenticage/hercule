@@ -126,9 +126,9 @@ describe("the two-face sidebar", () => {
   it("shows the Threads face on Sessions", async () => {
     await renderApp({ path: "/", api: stubApi(inShell()).fetch, token: "held" });
 
-    // Create new thread is a real navigation now, not a disabled placeholder.
-    const create = await threadsNav().findByRole("link", { name: /create new thread/i });
-    expect(create.getAttribute("href")).toBe("/threads/new");
+    // Create new thread opens the project picker (#72 AC-16, which supersedes
+    // #160's plain link to `/threads/new`; recorded as D-14).
+    expect(await threadsNav().findByRole("button", { name: /create new thread/i })).toBeDefined();
     expect(await threadsNav().findByText("No threads yet")).toBeDefined();
     expect(screen.queryByRole("navigation", { name: "Hydra" })).toBeNull();
   });
@@ -229,9 +229,9 @@ describe("the Threads face's session rows", () => {
       expect(row.getAttribute("href")).toBe(`/threads/${s.id}`);
     }
     // Create new thread still comes before the rows.
-    const create = threadsNav().getByRole("link", { name: /create new thread/i });
-    const links = threadsNav().getAllByRole("link");
-    expect(links.indexOf(create)).toBeLessThan(links.indexOf(rowLinks()[0]!));
+    const create = threadsNav().getByRole("button", { name: /create new thread/i });
+    const first = rowLinks()[0]!;
+    expect(create.compareDocumentPosition(first) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it("carries the age read with ageOf, and the model slug in meta mode", async () => {
@@ -313,12 +313,16 @@ describe("the Threads face's session rows", () => {
     });
   });
 
-  it("offers Create new thread as a link to /threads/new, not a disabled button", async () => {
+  it("offers Create new thread as a live control, not a disabled placeholder", async () => {
     await renderApp({ path: "/", api: stubApi(withThreads(THREE_SESSIONS)).fetch, token: "held" });
 
-    const create = await threadsNav().findByRole("link", { name: /create new thread/i });
-    expect(create.getAttribute("href")).toBe("/threads/new");
-    expect(threadsNav().queryByRole("button", { name: /create new thread/i })).toBeNull();
+    // Amended by #72 AC-16 (D-14): it opens the project picker rather than
+    // navigating, so it is a button and no longer carries an href.
+    const create = await threadsNav().findByRole<HTMLButtonElement>("button", {
+      name: /create new thread/i,
+    });
+    expect(create.disabled).toBe(false);
+    expect(threadsNav().queryByRole("link", { name: /create new thread/i })).toBeNull();
   });
 
   it.each(["/", "/threads/s1", "/sessions"])(

@@ -420,4 +420,17 @@ describe("Settings > Threads: the GitHub account a checkout-less thread uses (AC
       user: { "thread.githubConnectionId": GITHUB_WORK.id },
     });
   });
+
+  it("clears the setting rather than storing an empty id when no account is picked", async () => {
+    const user = userEvent.setup();
+    const { api } = await openWithConnections({ "thread.githubConnectionId": GITHUB.id });
+
+    const field = await screen.findByLabelText<HTMLSelectElement>(
+      "GitHub account for threads without a checkout",
+    );
+    await user.selectOptions(field, "");
+
+    expect(await screen.findByRole("status")).toBeDefined();
+    expect(writes(api)[0]?.body).toEqual({ user: { "thread.githubConnectionId": null } });
+  });
 });

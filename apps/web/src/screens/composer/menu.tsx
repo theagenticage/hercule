@@ -56,7 +56,9 @@ export function MenuRow({
           marker !== undefined && current ? "text-ink" : "text-faint",
         )}
       >
-        {note ?? dimmed}
+        {note}
+        {note !== undefined && note !== null && dimmed !== null ? <span>·</span> : null}
+        {dimmed}
         {trailing === undefined || trailing === null ? null : <span>·</span>}
         {trailing}
       </span>

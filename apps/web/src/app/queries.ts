@@ -86,6 +86,45 @@ export const projectsQuery = (client: HydraClient) =>
   });
 
 /**
+ * Every resource, as one page: the repos the workspace menu offers checkouts
+ * of. A handful per project, so the whole set is one answer, like the projects
+ * above it.
+ */
+export const resourcesQuery = (client: HydraClient) =>
+  queryOptions({
+    queryKey: queryKeys.resources(),
+    queryFn: () => client.resource.query({ query: { limit: MAX_PAGE_LIMIT } }),
+  });
+
+/**
+ * Every workspace, as one page: what the composer's menu lists, what the
+ * sidebar groups by, and where the branch lists come from. Disposed ones are
+ * read along with the rest - a thread that ended in one still names it.
+ */
+export const workspacesQuery = (client: HydraClient) =>
+  queryOptions({
+    queryKey: queryKeys.workspaces(),
+    queryFn: () => client.workspace.query({ query: { limit: MAX_PAGE_LIMIT } }),
+  });
+
+/**
+ * One workspace on its own, polled while it is being made: provisioning is the
+ * machine's own work and nothing pushes its end, so the form that started it
+ * asks again every second until the machine has said either way.
+ */
+export const workspaceQuery = (client: HydraClient, id: string) =>
+  queryOptions({
+    queryKey: queryKeys.workspace(id),
+    queryFn: () => client.workspace.read({ params: { id } }),
+    refetchInterval: (query) =>
+      query.state.data?.status === "provisioning" ? WORKSPACE_POLL_MS : false,
+    retry: false,
+  });
+
+/** How often a workspace being made is asked about again. */
+const WORKSPACE_POLL_MS = 400;
+
+/**
  * The fleet, as one page. A fleet is a handful of machines and the screen shows
  * all of them, so nothing follows the cursor; a fleet past one page would lose
  * rows silently, and is the point at which this grows a listing of its own.

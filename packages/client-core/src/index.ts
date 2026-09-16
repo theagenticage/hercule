@@ -26,6 +26,7 @@ export {
 export {
   connectionTypes,
   credentialFieldsOf,
+  githubConnections,
   redirectUriFor,
   setupFlowOf,
   type ConnectionType,
@@ -112,7 +113,45 @@ export { optionsLabel } from "./threads/options-label";
 export { optionsMenu, type ModelOptionRow } from "./threads/options-menu";
 export { pushRecent, type RecentModel } from "./threads/recent";
 export { resumeBlockedReason } from "./threads/resume-blocked";
-export { threadRows, type ThreadRow } from "./threads/rows";
+export { markOf, threadRows, type ThreadMark, type ThreadRow } from "./threads/rows";
+export {
+  threadGroups,
+  type DraftPlace,
+  type ProjectGroup,
+  type WorkspaceGroup,
+} from "./threads/groups";
+export { siblingTabs, type ThreadTab } from "./threads/siblings";
+export {
+  projectPickerRows,
+  projectTone,
+  type ProjectPickerRow,
+  type ProjectTone,
+} from "./threads/projects";
+export { branchField, type BranchField, type BranchRow } from "./threads/branch-menu";
+export {
+  workspaceMenu,
+  type WorkspaceMenu,
+  type WorkspaceMenuFoot,
+  type WorkspaceMenuRow,
+} from "./threads/workspace-menu";
+export {
+  baseBranchOf,
+  defaultWorkspacePick,
+  draftSubject,
+  pickKey,
+  primaryName,
+  projectRepos,
+  projectWorkspaces,
+  readyPrimary,
+  repoName,
+  runnerForPick,
+  withBranch,
+  workspaceLabel,
+  workspaceLead,
+  workspaceName,
+  type DraftSubject,
+  type WorkspacePick,
+} from "./threads/workspaces";
 export {
   referenceRunner,
   runnerMenu,

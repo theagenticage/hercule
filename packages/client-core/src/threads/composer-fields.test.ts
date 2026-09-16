@@ -441,6 +441,63 @@ describe("composerFields: the workspace a draft defaults to (AC-17)", () => {
   });
 });
 
+describe("composerFields: one machine, read by everything that names one", () => {
+  it("resolves the machine a draft with nothing selectable would really be placed on", () => {
+    // Nothing is logged in anywhere, so no row is selectable and the draft has
+    // picked no machine - but it would still be placed on the local one, and
+    // the sentence, the workspace menu and the branch list all have to ask
+    // about that one machine rather than about "none".
+    const catalogs = {
+      ...FULL,
+      instances: [LOGGED_OUT],
+      workspaces: [PRIMARY],
+    };
+    const fields = composerFields(
+      catalogs,
+      draft({ instanceId: LOGGED_OUT.id, runnerId: null, projectId: WEBSHOP_PROJECT.id }),
+      "draft",
+    );
+
+    expect(fields.machine.runnerId).toBe(LOCAL.id);
+    expect(fields.machine.label).toBe("moss · not logged in");
+    // The lead reads the shared checkout on that same machine, rather than
+    // reading nothing because no machine was picked.
+    expect(fields.lead).toBe(
+      "It works in the checkout of webshop on moss, on main. You and the agent share the files.",
+    );
+  });
+});
+
+describe("composerFields: the machine a joined workspace settles (AC-19)", () => {
+  it("names the workspace that decided it, while the draft can still change its mind", () => {
+    const fields = composerFields(
+      FULL,
+      draft({
+        projectId: WEBSHOP_PROJECT.id,
+        workspace: { kind: "existing", workspaceId: RUN_3F1.id },
+      }),
+      "draft",
+    );
+
+    expect(fields.machine.label).toBe("set by the workspace hydra/run-3f1");
+    expect(fields.machine.locked).toBe("The workspace it joins decides the machine");
+  });
+
+  it("keeps naming the machine on a thread that has started, locked because it started", () => {
+    const fields = composerFields(
+      FULL,
+      draft({
+        projectId: WEBSHOP_PROJECT.id,
+        workspace: { kind: "existing", workspaceId: RUN_3F1.id },
+      }),
+      "active",
+    );
+
+    expect(fields.machine.label).toBe("moss");
+    expect(fields.machine.locked).toBe("Create a new thread to change the machine");
+  });
+});
+
 describe("composerFields: the lead sentence follows the workspace (AC-17)", () => {
   it("names the repo, the machine and the branch on the shared checkout", () => {
     const fields = composerFields(
