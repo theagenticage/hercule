@@ -21,7 +21,7 @@
  * worktree of the same repository runs `git commit` and `git push` itself, and
  * the branch it leaves on GitHub is read back and deleted.
  */
-import { mkdirSync, readFileSync } from "node:fs";
+import { mkdirSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
@@ -123,14 +123,41 @@ const removeBranch = async (name: string): Promise<void> => {
 };
 
 /**
+ * Every regular file under a directory, listed here rather than left to
+ * `grep -r`. A live Hydra Home holds the runner daemon's Unix socket, and grep
+ * pointed at a directory containing one exits `2` - it failed - however many
+ * matches it also printed, which reads exactly like the search being broken.
+ * The files are what is being searched, so the files are what is named.
+ */
+const regularFilesIn = (where: string): ReadonlyArray<string> =>
+  readdirSync(where, { recursive: true, withFileTypes: true })
+    .filter((entry) => entry.isFile())
+    .map((entry) => join(entry.parentPath, entry.name));
+
+/**
  * Every file under a directory that holds a string, with grep's own verdict:
  * `0` found something, `1` found nothing, anything else is grep failing.
+ * `--binary-files=text` is the point of the exercise: the database is where a
+ * token would be, and a grep that gave up on it as binary would find nothing
+ * and call that clean.
  */
 const filesHolding = (
   needle: string,
   where: string,
 ): { readonly code: number; readonly files: string } => {
-  const ran = Bun.spawnSync(["grep", "-rl", "--binary-files=text", "--", needle, where]);
+  const files = regularFilesIn(where);
+  // Nothing to search is not "found nothing": it is the search being pointed at
+  // an empty directory, which the control below is there to catch.
+  if (files.length === 0) return { code: 1, files: "" };
+  const ran = Bun.spawnSync([
+    "grep",
+    "-l",
+    "--binary-files=text",
+    "--devices=skip",
+    "--",
+    needle,
+    ...files,
+  ]);
   return { code: ran.exitCode, files: ran.stdout.toString().trim() };
 };
 
