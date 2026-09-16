@@ -65,18 +65,26 @@ export function MenuRow({
         )}
       </span>{" "}
       <span
-        // The whole annotation is the title where it may be cut short, so what
-        // is clipped is still readable.
-        title={clipNote && typeof dimmed === "string" ? dimmed : undefined}
         className={cn(
           "flex items-center gap-1.5 text-[11px] font-normal",
-          clipNote ? "min-w-0 truncate" : "shrink-0 whitespace-nowrap",
+          // The cell keeps the row's right edge whichever half gives: it is
+          // the wide column on a `clipNote` row, so its contents are pushed to
+          // that edge rather than left sitting against the name.
+          clipNote ? "min-w-0 justify-end text-right" : "shrink-0 whitespace-nowrap",
           marker !== undefined && current ? "text-ink" : "text-faint",
         )}
       >
         {note}
         {note !== undefined && note !== null && dimmed !== null ? <span>·</span> : null}
-        {dimmed}
+        {clipNote && typeof dimmed === "string" ? (
+          // Cut from its own width, with the whole of it as the title, so what
+          // is clipped is still readable.
+          <span title={dimmed} className="min-w-0 truncate">
+            {dimmed}
+          </span>
+        ) : (
+          dimmed
+        )}
         {trailing === undefined || trailing === null ? null : <span>·</span>}
         {trailing}
       </span>

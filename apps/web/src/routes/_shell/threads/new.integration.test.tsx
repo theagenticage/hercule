@@ -1823,16 +1823,26 @@ describe("Composer: the branch selector (AC-18)", () => {
 
   // R6: the branch is what is being picked and is read whole; what holds it is
   // a note about it, so the note is what gives when the row runs out of room.
-  it("keeps a held branch whole and lets the note that holds it be cut", async () => {
+  it("keeps a held branch whole, cuts the note that holds it, and keeps it right-aligned", async () => {
     const user = userEvent.setup();
     await openAt(inProject(WEBSHOP.id));
 
     const menu = await openBranchMenu(user, /main/);
+
+    // The annotation is the cell that gives, and carries the whole of itself
+    // as its title so what is cut is still readable.
     const note = within(menu).getByTitle("in workspace hydra/run-3f1");
     expect(note.className).toContain("truncate");
 
+    // The branch is read whole: its cell takes what it needs and never cuts.
     const branch = within(menu).getByText("hydra/run-3f1", { selector: "span.font-mono" });
     expect(branch.parentElement?.className).not.toContain("truncate");
+
+    // And the note keeps the row's right edge: its column is the wide one and
+    // its contents sit at the end of it, as every other row's badge does.
+    const cell = note.parentElement;
+    expect(cell?.className).toContain("justify-end");
+    expect(cell?.parentElement?.className).toContain("grid-cols-[auto_auto_minmax(0,1fr)]");
   });
 
   it("switches the lip and the lead to the branch that was picked", async () => {
