@@ -127,7 +127,7 @@ describe("threadGroups", () => {
     ]);
   });
 
-  it("puts the worktrees first, then the shared checkout, then the workspace-less lane", () => {
+  it("puts the worktrees first, then the main workspace, then the workspace-less lane", () => {
     expect(laneLabels(groups()[0])).toEqual(["hydra/run-3f1", "webshop · moss", "no workspace"]);
   });
 
@@ -165,7 +165,7 @@ describe("threadGroups", () => {
   });
 
   // The group order is the workspaces' own, so joining one does not move it:
-  // the draft joins the shared checkout where the shared checkout stands.
+  // the draft joins the main workspace where the main workspace stands.
   it("puts the draft in the group it will join, in that group's own place", () => {
     const webshop = groups({ projectId: WEBSHOP_PROJECT.id, workspaceId: PRIMARY.id })[0];
     const lane = webshop?.workspaces.find((each) => each.draft);

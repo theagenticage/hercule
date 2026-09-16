@@ -2767,7 +2767,7 @@ describe("Thread: the chrome names the project and the workspace's threads (AC-2
     expect(text.indexOf("Fix the login bug")).toBeLessThan(text.indexOf("Write the retry runbook"));
   });
 
-  it("shows concurrent threads in a shared checkout as the same tabs", async () => {
+  it("shows concurrent threads in a main workspace as the same tabs", async () => {
     const workspace = primaryWorkspace([SESSION_ID, SIBLING_ID]);
     const fixture = inWorkspace(workspace.id);
     await open(

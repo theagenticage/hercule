@@ -142,7 +142,7 @@ const IN_PROJECT = {
 };
 
 describe("submission: the project and the workspace (AC-17)", () => {
-  it("carries the project and the shared checkout the draft works in", () => {
+  it("carries the project and the main workspace the draft works in", () => {
     expect(submission({ kind: "draft", config: IN_PROJECT }, {}, MESSAGE)).toEqual({
       kind: "spawn",
       input: {
@@ -159,7 +159,7 @@ describe("submission: the project and the workspace (AC-17)", () => {
     });
   });
 
-  it("carries the branch the shared checkout is to be switched to", () => {
+  it("carries the branch the main workspace is to be switched to", () => {
     const input = submission(
       {
         kind: "draft",

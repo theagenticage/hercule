@@ -536,7 +536,7 @@ describe("the Threads face groups by project and workspace (AC-20)", () => {
     await renderApp({ path: "/", api: stubApi(withProjects()).fetch, token: "held" });
 
     // The project's own + names it, and unlike the bare word it stands in one
-    // place only: a shared checkout's label carries the repo's name too.
+    // place only: a main workspace's label carries the repo's name too.
     await threadsNav().findByRole("link", { name: "New thread in webshop" });
     expect(faceText()).toContain("webshop 4");
     expect(faceText()).toContain("ops 1");

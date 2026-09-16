@@ -80,7 +80,7 @@ export const workspaceMenu = ({
   const rows: WorkspaceMenuRow[] = [];
 
   // A project with several repos opens a worktree of each by default, so that
-  // row leads; with one repo the shared checkout leads, as t3 code's does.
+  // row leads; with one repo the main workspace leads, as t3 code's does.
   const fresh: WorkspaceMenuRow | null =
     repos.length === 0
       ? null
@@ -150,7 +150,7 @@ export const workspaceMenu = ({
   }
 
   // A thread that already stands in a workspace names it even when no row
-  // offers it: an active thread's shared checkout is not something to pick.
+  // offers it: an active thread's main workspace is not something to pick.
   const joined =
     pick.kind === "existing" ? workspaces.find((each) => each.id === pick.workspaceId) : undefined;
 

@@ -39,7 +39,7 @@ describe("projectPickerRows", () => {
     expect(rows[2]?.sub).toBe("0 repos · 0 threads · 0 workspaces");
   });
 
-  it("counts the shared checkout as a checkout, not as a workspace to join", () => {
+  it("leaves the main workspace out of the workspaces there are to join", () => {
     expect(rows[0]?.sub).toContain("1 workspace");
   });
 

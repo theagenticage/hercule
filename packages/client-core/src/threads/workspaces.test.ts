@@ -58,7 +58,7 @@ describe("workspaceName and workspaceLabel", () => {
     expect(workspaceName(RUN_3F1)).toBe("hydra/run-3f1");
   });
 
-  it("names a shared checkout after its repo and its machine", () => {
+  it("names a main workspace after its repo and its machine", () => {
     expect(workspaceLabel(PRIMARY, [WEBSHOP], [MOSS])).toBe("webshop · moss");
   });
 
@@ -68,7 +68,7 @@ describe("workspaceName and workspaceLabel", () => {
 
   // The sidebar is narrower than some of these labels, and the machine is what
   // tells one repo's two checkouts apart: the repo is what gives way.
-  it("splits a shared checkout's label into the repo, which may be cut, and the rest", () => {
+  it("splits a main workspace's label into the repo, which may be cut, and the rest", () => {
     expect(workspaceLabelParts(PRIMARY, [WEBSHOP], [MOSS])).toEqual({
       clip: "webshop",
       keep: " · moss",
@@ -88,7 +88,7 @@ describe("workspaceName and workspaceLabel", () => {
 });
 
 describe("readyPrimary", () => {
-  it("finds the repo's shared checkout on the machine asked about", () => {
+  it("finds the repo's main workspace on the machine asked about", () => {
     expect(readyPrimary([PRIMARY, RUN_3F1], WEBSHOP.id, MOSS.id)?.id).toBe(PRIMARY.id);
   });
 
@@ -101,7 +101,7 @@ describe("readyPrimary", () => {
 });
 
 describe("baseBranchOf", () => {
-  it("takes the shared checkout on the picked machine, which is the clone a worktree is cut from", () => {
+  it("takes the main workspace on the picked machine, which is the clone a worktree is cut from", () => {
     const elsewhere = workspace({
       id: "ws-cove",
       runnerId: COVE.id,
@@ -145,7 +145,7 @@ describe("pickKey", () => {
 });
 
 describe("withBranch", () => {
-  it("switches the shared checkout to it", () => {
+  it("switches the main workspace's checkout to it", () => {
     expect(withBranch({ kind: "primary", resourceId: WEBSHOP.id }, "release/2.4")).toEqual({
       kind: "primary",
       resourceId: WEBSHOP.id,
@@ -214,7 +214,7 @@ describe("defaultWorkspacePick", () => {
     expect(defaultWorkspacePick([], "primary")).toEqual({ kind: "none" });
   });
 
-  it("takes the shared checkout of the first repo when the setting says primary", () => {
+  it("takes the main workspace of the first repo when the setting says primary", () => {
     expect(defaultWorkspacePick([INFRA, WEBSHOP], "primary")).toEqual({
       kind: "primary",
       resourceId: INFRA.id,

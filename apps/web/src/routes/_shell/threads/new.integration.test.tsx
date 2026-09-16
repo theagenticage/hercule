@@ -1173,7 +1173,7 @@ const BUMP_THE_BUN_PIN = "01a06d02-7400-7000-8000-000000000004";
 
 /** The webshop/ops world every workspace suite shares, with ids the contract
  * takes. What stands beside it below - the edge and sandbox projects, the
- * worktree on cove, the shared checkouts of the two ops repos - is this
+ * worktree on cove, the main workspaces of the two ops repos - is this
  * suite's own. */
 const IDS = {
   moss: RUNNER.id,
@@ -1261,7 +1261,7 @@ const workspace = (
   disposedAt: null,
 });
 
-/** webshop's shared checkout on moss; `hydra/run-3f1` is one of its branches. */
+/** webshop's main workspace on moss; `hydra/run-3f1` is one of its branches. */
 const W_PRIMARY_WEBSHOP: Workspace = {
   ...WORLD.PRIMARY,
   designatedConnectionId: GITHUB_ID,
@@ -1619,7 +1619,7 @@ describe("Composer: the workspace selector (AC-17)", () => {
     const user = userEvent.setup();
     // `INSTANCE_FRESH` is on no machine, so no row is selectable and the draft
     // picks none - but it would still be placed on moss, which holds webshop's
-    // shared checkout. The menu has to ask about that machine, or it says the
+    // main workspace. The menu has to ask about that machine, or it says the
     // repo is not cloned on a machine nothing else ever named.
     const api = stubApi(controller([INSTANCE_FRESH], {}, world()));
     await renderApp({
@@ -1714,7 +1714,7 @@ describe("Composer: the workspace selector (AC-17)", () => {
     });
   });
 
-  it("spawns with the project and the shared checkout the draft stands in", async () => {
+  it("spawns with the project and the main workspace the draft stands in", async () => {
     const user = userEvent.setup();
     const { api, router } = await openAt(
       inProject(WEBSHOP.id),
@@ -1808,7 +1808,7 @@ describe("Composer: the workspace selector (AC-17)", () => {
 });
 
 describe("Composer: the branch selector (AC-18)", () => {
-  it("lists the shared checkout's branches, badges the one it is on and dims one a workspace holds", async () => {
+  it("lists the main workspace's branches, badges the one it is on and dims one a workspace holds", async () => {
     const user = userEvent.setup();
     await openAt(inProject(WEBSHOP.id));
 

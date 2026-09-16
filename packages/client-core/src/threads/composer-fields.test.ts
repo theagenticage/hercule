@@ -328,7 +328,7 @@ const RUNBOOKS = repo(
   [OPS_PROJECT.id],
 );
 
-/** webshop's shared checkout on the local machine, sitting on `main`. */
+/** webshop's main workspace on the local machine, sitting on `main`. */
 const PRIMARY: Workspace = {
   id: "ws-primary",
   runnerId: LOCAL.id,
@@ -424,7 +424,7 @@ const draft = (overrides: Record<string, unknown> = {}) =>
   config({ projectId: null, workspace: null, preferredWorkspace: null, ...overrides });
 
 describe("composerFields: the workspace a draft defaults to (AC-17)", () => {
-  it("takes the one repo's shared checkout in a project that holds one repo", () => {
+  it("takes the one repo's main workspace in a project that holds one repo", () => {
     const fields = composerFields(FULL, draft({ projectId: WEBSHOP_PROJECT.id }), "draft");
 
     expect(fields.workspace.value).toEqual({ kind: "primary", resourceId: WEBSHOP.id });
@@ -523,7 +523,7 @@ describe("composerFields: one machine, read by everything that names one", () =>
 
     expect(fields.machine.runnerId).toBe(LOCAL.id);
     expect(fields.machine.label).toBe("moss · not logged in");
-    // The lead reads the shared checkout on that same machine, rather than
+    // The lead reads the main workspace on that same machine, rather than
     // reading nothing because no machine was picked.
     expect(phraseText(fields.lead ?? [])).toBe(
       "It works in the main workspace of webshop on moss, on main. You and the agent share the files.",
@@ -562,7 +562,7 @@ describe("composerFields: the machine a joined workspace settles (AC-19)", () =>
 });
 
 describe("composerFields: the lead sentence follows the workspace (AC-17)", () => {
-  it("names the repo, the machine and the branch on the shared checkout", () => {
+  it("names the repo, the machine and the branch on the main workspace", () => {
     const fields = composerFields(
       FULL,
       draft({
@@ -577,7 +577,7 @@ describe("composerFields: the lead sentence follows the workspace (AC-17)", () =
     );
   });
 
-  it("reads the shared checkout's own branch when the draft has picked none", () => {
+  it("reads the main workspace's own branch when the draft has picked none", () => {
     const fields = composerFields(
       FULL,
       draft({

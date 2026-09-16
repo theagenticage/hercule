@@ -1,6 +1,6 @@
 /**
  * The composer's branch selector, which is two fields wearing one slot (spec 14
- * §The composer, the Branch selector). On a shared checkout it picks the branch
+ * §The composer, the Branch selector). On a main workspace it picks the branch
  * the checkout is switched to; on a fresh worktree it picks the ref the
  * thread's own branch starts from, the branch name itself being generated. It
  * is absent on a workspace the thread merely joins - that workspace is named

@@ -1,6 +1,6 @@
 /**
  * The branch field, which is two fields wearing one slot. What matters: the
- * shared checkout lists what git would let it switch to - the primary's own
+ * main workspace lists what git would let it switch to - the primary's own
  * branches plus whatever a live worktree beside it is sitting on, the latter
  * dimmed with what holds it (D-14) - while a fresh worktree lists what its new
  * branch could start from, and neither exists at all on a workspace the thread
@@ -22,7 +22,7 @@ import {
 
 const around = { workspaces: [PRIMARY, RUN_3F1], runnerId: MOSS.id };
 
-describe("branchField: a shared checkout", () => {
+describe("branchField: a main workspace", () => {
   const field = branchField({ kind: "primary", resourceId: WEBSHOP.id }, around);
 
   it("asks which branch the checkout switches to, reading the one it is on", () => {

@@ -1,6 +1,6 @@
 /**
  * The records the workspace readings are written against: a fleet of two
- * machines, a one-repo project and a two-repo one, a shared checkout and a
+ * machines, a one-repo project and a two-repo one, a main workspace and a
  * live worktree. Shared by every suite that speaks about them - client-core's
  * own and the web app's, through the `@hydra/client-core/threads/testing`
  * export - because a world written five times drifts.
@@ -154,7 +154,7 @@ export interface ThreadsWorld {
   readonly WEBSHOP: Resource;
   readonly INFRA: Resource;
   readonly RUNBOOKS: Resource;
-  /** webshop's shared checkout on moss, sitting on `main`. */
+  /** webshop's main workspace on moss, sitting on `main`. */
   readonly PRIMARY: Workspace;
   /** A live worktree of webshop on moss, which two threads are working in. */
   readonly RUN_3F1: Workspace;

@@ -55,7 +55,7 @@ export interface MachineRow extends RunnerMenuRow {
   readonly capacity: string;
   /**
    * `webshop is not cloned there · clones on first use`, on a draft opening in
-   * a shared checkout. It dims nothing: a machine without the repo yet is a
+   * a main workspace. It dims nothing: a machine without the repo yet is a
    * machine that clones it, which is a wait and not a refusal.
    */
   readonly notCloned: string | null;

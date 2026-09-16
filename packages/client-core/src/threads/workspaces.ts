@@ -95,7 +95,7 @@ export const workspaceLabel = (
   runners: readonly Runner[],
 ): string => labelText(workspaceLabelParts(workspace, resources, runners));
 
-/** The repo's shared checkout on one machine, where that machine holds one. */
+/** The repo's main workspace on one machine, where that machine holds one. */
 export const readyPrimary = (
   workspaces: readonly Workspace[],
   resourceId: string,
@@ -124,7 +124,7 @@ export const projectWorkspaces = (
 /**
  * What a repo's new branch starts from, read once for everything that names it
  * - the Base branch field, its foot, and the draft's own lead sentence. The
- * shared checkout on the picked machine answers first, because that is the
+ * main workspace on the picked machine answers first, because that is the
  * clone the worktree is cut from; failing that, any machine that has reported
  * a checkout of the repo, because a default branch is the remote's fact rather
  * than the machine's. Null while nothing anywhere has cloned it.
@@ -173,7 +173,7 @@ export const pickKey = (pick: WorkspacePick): string => {
 };
 
 /**
- * The same pick, on another branch: the branch a shared checkout is switched
+ * The same pick, on another branch: the branch a main workspace is switched
  * to, or the ref a fresh worktree starts from.
  *
  * A worktree of several repos is handed back untouched. A base per repo is
@@ -259,7 +259,7 @@ export interface WorkspaceReading {
   readonly sessions?: readonly Session[];
   /** The machine the thread would be placed on, already named. */
   readonly machine: string;
-  /** The machine's id, which is what a shared checkout is looked up by. */
+  /** The machine's id, which is what a main workspace is looked up by. */
   readonly runnerId: string | null;
 }
 
@@ -296,7 +296,7 @@ const titlesIn = (workspace: Workspace, sessions: readonly Session[]): string =>
 
 /**
  * The one sentence a draft stands under: where the thread will work, in the
- * four forms spec 14 §The composer pins. A shared checkout no machine has
+ * four forms spec 14 §The composer pins. A main workspace no machine has
  * cloned yet has no branch to name, so that clause is left out rather than
  * filled with a word for "we do not know".
  */

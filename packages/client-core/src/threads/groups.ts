@@ -58,7 +58,7 @@ export interface DraftPlace {
 /**
  * Which group the draft being written belongs to. The address settles it where
  * it names a workspace; where it names none, the draft will open in whatever
- * the project opens in (`defaultWorkspacePick`), and a shared checkout that
+ * the project opens in (`defaultWorkspacePick`), and a main workspace that
  * already stands on the machine it would run on is a group of its own - the
  * draft is filed with the threads it will sit beside, not under "no
  * workspace". A checkout nothing has cloned yet is no group at all: the draft
@@ -102,7 +102,7 @@ const recency = (rows: readonly ThreadRow[]): number =>
 
 /**
  * Where a lane stands among its project's: the draft's own place first, then
- * one place per worktree in catalog order, then the shared checkout, then the
+ * one place per worktree in catalog order, then the main workspace, then the
  * lane of threads that work without a checkout.
  */
 const rank = (lane: WorkspaceGroup, workspaces: readonly Workspace[]): number => {
@@ -177,7 +177,7 @@ export const threadGroups = ({
       name: projects.find((each) => each.id === projectId)?.name ?? null,
       count: held.length,
       // The prototype's own order: the worktrees first, in the order the
-      // catalog lists them, then the repo's shared checkout, then the threads
+      // catalog lists them, then the repo's main workspace, then the threads
       // that work without a checkout. A draft that has no workspace at all yet
       // is not that last lane - it stands under the project's own header,
       // before everything, which is where the user just asked for it.
