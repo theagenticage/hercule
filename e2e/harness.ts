@@ -57,7 +57,7 @@ function cleanEnv(): Record<string, string> {
 }
 
 /**
- * Whether the cases that spend a real model token were asked for (D-18).
+ * Whether the cases that spend a real model token were asked for.
  *
  * Set to anything but `0` or the empty string is a yes, so a shell that exports
  * `HYDRA_LIVE_SESSION_TEST` can turn it off again with a `0` rather than having

@@ -20,7 +20,7 @@
  *
  * The worktree case is the only one that needs a session, and no fake provider
  * ships, so it runs a real one and is opt-in under `HYDRA_LIVE_SESSION_TEST`
- * like `e2e/session.test.ts` (D-18). The rest run everywhere.
+ * like `e2e/session.test.ts`. The rest run everywhere.
  *
  * The suite is in vitest's `binary` project, so `pnpm test:binary` is what runs
  * it and `pnpm test` does not. It runs the release binary where one has been
@@ -57,7 +57,7 @@ const REMOTE = "https://hydra.test/acme/web";
 /**
  * Opt-in, like `e2e/session.test.ts`: the worktree case is the only one here
  * that needs a session, no fake provider ships, and a real one spends the
- * developer's tokens (D-18).
+ * developer's tokens.
  */
 const live = liveSessionsAsked();
 

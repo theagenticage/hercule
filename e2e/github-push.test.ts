@@ -17,7 +17,7 @@
  * than by an agent, for the reason written at `pushed` below.
  *
  * The third proof is the ticket's headline and costs a turn, so it asks for
- * `HYDRA_LIVE_SESSION_TEST` as well (D-18): a real Claude Code thread in a
+ * `HYDRA_LIVE_SESSION_TEST` as well: a real Claude Code thread in a
  * worktree of the same repository runs `git commit` and `git push` itself, and
  * the branch it leaves on GitHub is read back and deleted.
  */
@@ -46,7 +46,7 @@ const wanted = token !== undefined && repo !== undefined;
 
 /**
  * The headline proof of AC-25 costs a real Claude Code turn, so it is opt-in on
- * top of the token, like `e2e/session.test.ts` (D-18): a thread of its own, in
+ * top of the token, like `e2e/session.test.ts`: a thread of its own, in
  * a worktree of the same repository, running `git push` itself.
  */
 const live = wanted && liveSessionsAsked();
