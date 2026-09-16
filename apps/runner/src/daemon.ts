@@ -48,6 +48,9 @@ const dialable = (home: string, controllerUrl: string): Effect.Effect<void, NotE
   );
 };
 
+/** Bun's own marker for an entry script that lives inside a compiled binary. */
+const EMBEDDED = "/$bunfs/";
+
 /**
  * Its own error because nothing about the connection will fix it: the machine
  * has to be made writable, or the thing in the way removed.
@@ -63,16 +66,30 @@ export class ToolingUnavailable extends Schema.TaggedError<ToolingUnavailable>()
  * Hydra at all. Reported by name, like every other precondition here.
  */
 const tooling = (home: string, storageDir: string): Effect.Effect<Tooling, ToolingUnavailable> =>
-  Effect.try({
-    try: () => prepareTooling({ home, storageDir, execPath: process.execPath, skill: HYDRA_SKILL }),
-    catch: (error) =>
-      new ToolingUnavailable({
-        message:
-          `could not put hydra and the session skill under ${runnerDirIn(home)}: ` +
-          `${error instanceof Error ? error.message : String(error)}. ` +
-          "No session on this machine could reach Hydra.",
-      }),
-  });
+  Effect.tap(
+    Effect.try({
+      try: () =>
+        prepareTooling({ home, storageDir, execPath: process.execPath, skill: HYDRA_SKILL }),
+      catch: (error) =>
+        new ToolingUnavailable({
+          message:
+            `could not put hydra and the session skill under ${runnerDirIn(home)}: ` +
+            `${error instanceof Error ? error.message : String(error)}. ` +
+            "No session on this machine could reach Hydra.",
+        }),
+    }),
+    () =>
+      // The link points at this process's executable, which is the `hydra` CLI
+      // only in a compiled build; from a checkout it is bun. Said once here
+      // rather than left for a session to discover when its first call runs
+      // bun instead of hydra.
+      Bun.main.startsWith(EMBEDDED)
+        ? Effect.void
+        : Effect.logWarning(
+            `This runner is not the compiled binary, so ${joinPath(runnerDirIn(home), "bin", "hydra")} ` +
+              `points at ${process.execPath}: a session calling \`hydra\` gets bun.`,
+          ),
+  );
 
 /**
  * The facts are read afresh per attempt, so a machine that gained memory between
@@ -106,7 +123,7 @@ export const daemon = (
       // Once, here: what every session on this machine reaches Hydra through,
       // refreshed so an upgraded binary takes over the last build's symlink and
       // skill text (spec 15 section 2, spec 06 section 9.3).
-      const { binDir, claudePluginDir } = yield* tooling(
+      const { binDir, hydraTool } = yield* tooling(
         home,
         joinPath(runnerDirIn(home), pin.storageDirectory),
       );
@@ -120,7 +137,7 @@ export const daemon = (
             providersDir,
             scratchDir,
             binDir,
-            hydraTool: { skill: HYDRA_SKILL, claudePluginDir },
+            hydraTool,
           }),
         ),
         signals: reconnectSignals({ now: () => Date.now(), addresses }),

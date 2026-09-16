@@ -786,8 +786,7 @@ const make = Effect.gen(function* () {
             // A resume comes back through here, so the token it starts under
             // replaces the one the previous process held.
             const token = mintToken();
-            yield* sessions.moved(row.id, "starting", at);
-            yield* sessions.setTokenHash(row.id, hashToken(token));
+            yield* sessions.started(row.id, hashToken(token), at);
             yield* announce({ _tag: "record", topic: "session", id: row.id, kind: "updated" });
             starting.push({ ...row, token });
           }
@@ -812,8 +811,13 @@ const make = Effect.gen(function* () {
             Effect.gen(function* () {
               yield* sessions.moved(row.id, "queued", yield* nowIso);
               // The token went out on a frame nobody took, so nothing holds it:
-              // a queued session is one nothing may call the API as.
+              // a queued session is one nothing may call the API as. Forgotten
+              // after the commit, like any other drop, so a call in flight
+              // cannot cache the old row again before the write is visible.
               yield* sessions.setTokenHash(row.id, null);
+              yield* afterCommit(() => {
+                tokens.forgetSessions([row.id]);
+              });
               yield* announce({ _tag: "record", topic: "session", id: row.id, kind: "updated" });
             }),
           );

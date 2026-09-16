@@ -236,11 +236,6 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * Deletes a profile. Whether this profile may be deleted at all is the
-     * service's rule, not the store's: a shipped profile is not deletable and
-     * never reaches here.
-     */
-    /**
      * Whether a session that has not exited still carries this profile. A
      * session copies its grants at spawn and is bounded by them for as long as
      * it runs, so deleting the row underneath one would leave the agent inside
@@ -257,6 +252,11 @@ const make = Effect.gen(function* () {
         (rows) => rows[0]!.held === 1,
       ),
 
+    /**
+     * Deletes a profile. Whether this profile may be deleted at all is the
+     * service's rule, not the store's: a shipped profile is not deletable and
+     * never reaches here.
+     */
     delete: (id: string): Effect.Effect<void, SqlError> =>
       sql`DELETE FROM permission_profiles WHERE id = ${uuidFromString(id)}`.pipe(Effect.asVoid),
   };

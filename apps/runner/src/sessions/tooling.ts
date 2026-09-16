@@ -13,7 +13,8 @@
  *
  * The link points at `process.execPath`, so it is the `hydra` CLI only when the
  * runner is the compiled binary: under `bun run` it points at bun, and a
- * session that calls `hydra` gets bun instead.
+ * session that calls `hydra` gets bun instead. The daemon warns about that at
+ * start rather than leaving a session to discover it.
  */
 import { mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -23,8 +24,14 @@ import { VERSION } from "@hydra/home/version";
 export interface Tooling {
   /** `<home>/runner/bin`: prepended to every session's `PATH`. */
   readonly binDir: string;
-  /** The Claude plugin directory, loaded by path through the SDK's `plugins`. */
-  readonly claudePluginDir: string;
+  /**
+   * hydra-as-a-tool as every adapter takes it, assembled here so the daemon
+   * carries one value rather than rebuilding it from the parts.
+   */
+  readonly hydraTool: {
+    readonly skill: string;
+    readonly claudePluginDir: string;
+  };
 }
 
 export interface ToolingRequest {
@@ -68,5 +75,5 @@ export const prepareTooling = ({ home, storageDir, execPath, skill }: ToolingReq
   mkdirSync(skillDir, { recursive: true });
   writeFileSync(join(skillDir, "SKILL.md"), skillFile(skill));
 
-  return { binDir, claudePluginDir };
+  return { binDir, hydraTool: { skill, claudePluginDir } };
 };

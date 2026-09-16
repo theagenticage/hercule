@@ -19,16 +19,9 @@ describe("actorReading", () => {
     });
   });
 
-  it("names a run by its tail, with nothing to link to", () => {
+  it("leaves a stamp it does not know as it arrived, with nothing to link to", () => {
     assert.deepStrictEqual(actorReading(`run:${SESSION}`), {
-      label: "run 7c82ebeb",
-      sessionId: undefined,
-    });
-  });
-
-  it("shows a plugin's slug whole, because an author chose it", () => {
-    assert.deepStrictEqual(actorReading("plugin:github"), {
-      label: "plugin github",
+      label: `run:${SESSION}`,
       sessionId: undefined,
     });
   });

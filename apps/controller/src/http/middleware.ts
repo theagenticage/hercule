@@ -61,8 +61,10 @@ const operationFor = (id: string): Effect.Effect<OperationId> =>
  * `last_used_at` is stamped. The repository decides whether that use is worth
  * a write; on a busy connection most are not.
  *
- * A session's own token is tried last, because the user's two credentials are
- * the ones a human is waiting on and the session's is the one that is cached.
+ * A session's own token is tried first, because it is the one that is cached:
+ * an agent - the chatty population, calling on every tool use - costs one
+ * cached lookup rather than two indexed misses ahead of it, while a user pays
+ * one cache miss before the lookup a human is waiting on.
  */
 const resolve = (
   credentials: Credentials["Service"],
@@ -71,6 +73,9 @@ const resolve = (
 ): Effect.Effect<Option.Option<Actor>> =>
   Effect.gen(function* () {
     const tokenHash = hashToken(token);
+
+    const session = yield* sessions.resolve(tokenHash);
+    if (Option.isSome(session)) return session;
 
     const login = yield* credentials.findLoginToken(tokenHash);
     if (Option.isSome(login)) {
@@ -92,7 +97,7 @@ const resolve = (
       });
     }
 
-    return yield* sessions.resolve(tokenHash);
+    return Option.none();
   }).pipe(Effect.orDie);
 
 /** Any credential of any kind, plus the operation's static grant check. */

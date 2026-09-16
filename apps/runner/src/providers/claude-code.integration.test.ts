@@ -44,7 +44,9 @@ let tool: ProviderRunnerContext["hydraTool"] | undefined;
 const TOOL = (): ProviderRunnerContext["hydraTool"] => {
   if (tool === undefined) {
     const under = emptyHome();
-    const { claudePluginDir } = prepareTooling({
+    const {
+      hydraTool: { claudePluginDir },
+    } = prepareTooling({
       home: join(under, "home"),
       storageDir: join(under, "storage"),
       execPath: process.execPath,
@@ -397,7 +399,9 @@ describe.skipIf(!authed)("a real Claude Code session with the hydra skill", () =
     async () => {
       const marker = `hydra-skill-probe-${crypto.randomUUID().slice(0, 8)}`;
       const under = emptyHome();
-      const { claudePluginDir } = prepareTooling({
+      const {
+        hydraTool: { claudePluginDir },
+      } = prepareTooling({
         home: join(under, "home"),
         storageDir: join(under, "storage"),
         execPath: process.execPath,

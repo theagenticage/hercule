@@ -84,7 +84,9 @@ describe("the Claude plugin directory the skill is materialized into", () => {
   it("is a loadable plugin under the runner's own storage, carrying the skill", () => {
     const { home, storageDir, execPath } = machine();
 
-    const { claudePluginDir } = prepareTooling({ home, storageDir, execPath, skill: SKILL });
+    const {
+      hydraTool: { claudePluginDir },
+    } = prepareTooling({ home, storageDir, execPath, skill: SKILL });
 
     // Under the runner's storage, so re-enlisting the machine takes it with
     // the identity it belonged to, and never in a Thread's own `.claude/`.
@@ -107,10 +109,12 @@ describe("the Claude plugin directory the skill is materialized into", () => {
       skill: "what the previous build said",
     });
     expect(
-      readFileSync(join(first.claudePluginDir, "skills", "hydra", "SKILL.md"), "utf8"),
+      readFileSync(join(first.hydraTool.claudePluginDir, "skills", "hydra", "SKILL.md"), "utf8"),
     ).toContain("what the previous build said");
 
-    const { claudePluginDir } = prepareTooling({ home, storageDir, execPath, skill: SKILL });
+    const {
+      hydraTool: { claudePluginDir },
+    } = prepareTooling({ home, storageDir, execPath, skill: SKILL });
 
     // Stale skill text teaches an agent commands this build may no longer
     // spell that way, and nothing else on the machine ever rewrites it.

@@ -357,6 +357,22 @@ const make = Effect.gen(function* () {
       `),
 
     /**
+     * The move to `starting` dispatch makes, carrying the hash of the token it
+     * minted for that start. One statement rather than a move and a write: the
+     * row may hold a credential exactly because it is starting, and the two
+     * facts are never separately true. `moved`'s rule applies unchanged - an
+     * exited session is not restarted from here.
+     */
+    started: (sessionId: string, tokenHash: string, at: string): Effect.Effect<void, SqlError> =>
+      Effect.asVoid(sql`
+        UPDATE sessions SET
+          status = 'starting',
+          last_activity_at = ${at},
+          token_hash = ${tokenHash}
+        WHERE id = ${uuidFromString(sessionId)} AND status <> 'exited'
+      `),
+
+    /**
      * The one move out of `exited`, and so the one exception to `moved`'s rule
      * above: the session goes back on the queue for dispatch to place, under
      * the spec its resumed harness is to be started with. The caller's read of

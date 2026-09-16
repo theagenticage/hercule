@@ -98,19 +98,28 @@ export const SYSTEM_ACTOR = "system";
  * follows back to the conversation that made the change, and the bare word for
  * the user.
  *
- * Nobody is stamped as the user too: an operation that mutates anything names a
- * grant, and `requireGrant` refuses an actorless caller that grant, so the only
- * two that reach a write through a request are the user and a session. A write
- * with no request behind it names `SYSTEM_ACTOR` for itself.
+ * Nobody has no stamp, which is why it is not in the parameter: an operation
+ * that mutates anything names a grant, and `requireGrant` refuses an actorless
+ * caller that grant, so the only two that reach a write through a request are
+ * the user and a session. A write with no request behind it names
+ * `SYSTEM_ACTOR` for itself, explicitly, rather than passing nobody here.
  */
-export const stampOf = (actor: Actor): string =>
+export const stampOf = (actor: UserActor | SessionActor): string =>
   actor._tag === "session" ? `session:${actor.sessionId}` : USER_ACTOR;
 
 /**
  * How the actor behind the current request is stamped on what it changes. The
  * one place a mutation's `actor` comes from, so no service decides it.
+ *
+ * An actorless caller here is a defect, not a failure: it means a write reached
+ * stamping without the grant check that would have refused it, and stamping it
+ * as the user would attribute the change to a person who made no request.
  */
-export const currentStamp: Effect.Effect<string> = Effect.map(CurrentActor, stampOf);
+export const currentStamp: Effect.Effect<string> = Effect.flatMap(CurrentActor, (actor) =>
+  actor._tag === "none"
+    ? Effect.die("a write reached stamping with no authenticated actor behind it")
+    : Effect.succeed(stampOf(actor)),
+);
 
 /**
  * The grant an operation names, or `undefined` where its requirement is not a
@@ -188,8 +197,10 @@ const USER_ONLY = "only the user may make this call; no grant confers it";
  *
  * A session that holds the grant is refused with it: the credential is good and
  * the profile allows the family, so the answer is 403 naming what was asked
- * for, never the 401 that would tell an agent its token had died. An actorless
- * caller is the 401, because nobody was resolved at all.
+ * for, never the 401 that would tell an agent its token had died. The 401 is
+ * for an actorless caller, because nobody was resolved at all - which only
+ * happens where the operation's requirement is `authenticated` rather than a
+ * grant, since `requireGrant` refuses nobody a grant first.
  */
 export const currentUser = (
   id: OperationId,

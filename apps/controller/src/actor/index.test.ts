@@ -47,8 +47,10 @@ describe("currentStamp", () => {
     expect(stamps).toEqual(["user", `session:${SESSION_ID}`]);
   });
 
-  it("defaults to the user, which no write ever reaches: a grant refuses nobody first", async () => {
-    expect(await Effect.runPromise(currentStamp)).toBe("user");
+  it("dies on an actorless caller rather than attributing the write to the user", async () => {
+    await expect(Effect.runPromise(currentStamp)).rejects.toThrow(
+      "a write reached stamping with no authenticated actor behind it",
+    );
   });
 });
 
