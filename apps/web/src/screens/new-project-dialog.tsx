@@ -66,8 +66,10 @@ export function NewProjectDialog({
       // The page behind it is the way out, as it is on every other overlay here.
       onClick={onClose}
     >
-      <form
-        aria-label="New project"
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="new-project-heading"
         onClick={(event) => {
           event.stopPropagation();
         }}
@@ -76,77 +78,84 @@ export function NewProjectDialog({
           event.stopPropagation();
           onClose();
         }}
-        onSubmit={(event) => {
-          event.preventDefault();
-          onSubmit();
-        }}
-        className="flex h-fit w-[520px] max-w-[92vw] flex-col gap-3 rounded-card border border-line bg-raised p-3.5 shadow-lift"
+        className="flex h-fit w-[520px] max-w-[92vw] flex-col rounded-card border border-line bg-raised p-3.5 shadow-lift"
       >
-        <span className="text-label font-emph tracking-[0.1em] text-faint uppercase">
-          New project
-        </span>
-        <Field id="new-project-name" label="Name">
-          <Input
-            id="new-project-name"
-            autoFocus
-            value={name}
-            placeholder="What it is called"
-            onChange={(event) => {
-              onName(event.target.value);
-            }}
-          />
-        </Field>
-
-        <div className="flex flex-col gap-2 border-t border-line-soft pt-3">
-          <div className="flex items-baseline gap-2">
-            <span className="text-label font-emph tracking-[0.1em] text-faint uppercase">
-              Sources
-            </span>
-            <span className="ml-auto font-mono text-[10.5px] text-faint">
-              what the project works with
-            </span>
-          </div>
-          {sources.length === 0 ? (
-            <p className="text-fine text-faint">
-              No source yet. A project without one runs its threads without a workspace.
-            </p>
-          ) : null}
-          {sources.map((source) => (
-            <SourceRow
-              key={source.key}
-              source={source}
-              accounts={accounts}
-              onChange={(next) => {
-                onChangeSource(source.key, next);
-              }}
-              onRemove={() => {
-                onRemoveSource(source.key);
+        <form
+          className="flex flex-col gap-3"
+          onSubmit={(event) => {
+            event.preventDefault();
+            onSubmit();
+          }}
+        >
+          <span
+            id="new-project-heading"
+            className="text-label font-emph tracking-[0.1em] text-faint uppercase"
+          >
+            New project
+          </span>
+          <Field id="new-project-name" label="Name">
+            <Input
+              id="new-project-name"
+              autoFocus
+              value={name}
+              placeholder="What it is called"
+              onChange={(event) => {
+                onName(event.target.value);
               }}
             />
-          ))}
-          <button
-            type="button"
-            onClick={onAddSource}
-            className="self-start rounded-control px-1 py-0.5 text-meta text-muted hover:text-ink"
-          >
-            + Git repository
-          </button>
-        </div>
+          </Field>
 
-        {failure === null ? null : (
-          <p className="text-fine text-fail" role="alert">
-            {failure}
-          </p>
-        )}
-        <div className="flex items-center justify-end gap-1.5 border-t border-line-soft pt-3">
-          <button type="button" disabled={pending} onClick={onClose} className={ACTION}>
-            Cancel
-          </button>
-          <button type="submit" disabled={pending} className={ACTION}>
-            Create project
-          </button>
-        </div>
-      </form>
+          <div className="flex flex-col gap-2 border-t border-line-soft pt-3">
+            <div className="flex items-baseline gap-2">
+              <span className="text-label font-emph tracking-[0.1em] text-faint uppercase">
+                Sources
+              </span>
+              <span className="ml-auto font-mono text-[10.5px] text-faint">
+                what the project works with
+              </span>
+            </div>
+            {sources.length === 0 ? (
+              <p className="text-fine text-faint">
+                No source yet. A project without one runs its threads without a workspace.
+              </p>
+            ) : null}
+            {sources.map((source) => (
+              <SourceRow
+                key={source.key}
+                source={source}
+                accounts={accounts}
+                onChange={(next) => {
+                  onChangeSource(source.key, next);
+                }}
+                onRemove={() => {
+                  onRemoveSource(source.key);
+                }}
+              />
+            ))}
+            <button
+              type="button"
+              onClick={onAddSource}
+              className="self-start rounded-control px-1 py-0.5 text-meta text-muted hover:text-ink"
+            >
+              + Git repository
+            </button>
+          </div>
+
+          {failure === null ? null : (
+            <p className="text-fine text-fail" role="alert">
+              {failure}
+            </p>
+          )}
+          <div className="flex items-center justify-end gap-1.5 border-t border-line-soft pt-3">
+            <button type="button" disabled={pending} onClick={onClose} className={ACTION}>
+              Cancel
+            </button>
+            <button type="submit" disabled={pending} className={ACTION}>
+              Create project
+            </button>
+          </div>
+        </form>
+      </div>
     </div>
   );
 }

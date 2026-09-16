@@ -190,7 +190,7 @@ function ProjectLane({
     <div>
       {group.projectId === null || group.name === null ? null : (
         <div className="flex items-center gap-1.5 pt-2.5 pr-1 pb-0.5 pl-2">
-          <ProjectDot projectId={group.projectId} />
+          <ProjectDot tone={group.tone ?? "hydra"} />
           <span className="min-w-0 truncate text-meta font-emph text-ink">{group.name}</span>{" "}
           <span className="font-mono text-[11px] text-faint">{group.count}</span>
           <Plus

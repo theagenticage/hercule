@@ -1159,10 +1159,10 @@ describe("Draft: the chrome is the screen's first row", () => {
  * - the picker is the Radix overlay, read as `role="dialog"`, opened by the
  *   sidebar's "Create new thread";
  * - a menu row is a button carrying its text, as in the menus above;
- * - the New project dialog (D-20b) is read as `role="form"` named "New
- *   project"; its fields are labelled "Name", "Remote URL", "GitHub account"
- *   and "Setup command", a source is added with "+ Git repository", and it
- *   submits through a button named "Create project".
+ * - the New project dialog (D-20b) is read as `role="dialog"` named "New
+ *   project", like the picker; its fields are labelled "Name", "Remote URL",
+ *   "GitHub account" and "Setup command", a source is added with "+ Git
+ *   repository", and it submits through a button named "Create project".
  * ------------------------------------------------------------------ */
 
 const AT = "2026-09-10T09:00:00.000Z";
@@ -1551,7 +1551,7 @@ describe("Picker: a thread starts from a project (AC-16)", () => {
 
     await user.click(within(picker).getByRole("button", { name: "New project" }));
 
-    const dialog = await screen.findByRole("form", { name: "New project" });
+    const dialog = await screen.findByRole("dialog", { name: "New project" });
     await user.type(within(dialog).getByLabelText("Name"), "first");
     await user.click(within(dialog).getByRole("button", { name: "Create project" }));
 
@@ -1821,6 +1821,20 @@ describe("Composer: the branch selector (AC-18)", () => {
     expect(within(menu).queryByRole("button", { name: /hydra\/run-3f1/ })).toBeNull();
   });
 
+  // R6: the branch is what is being picked and is read whole; what holds it is
+  // a note about it, so the note is what gives when the row runs out of room.
+  it("keeps a held branch whole and lets the note that holds it be cut", async () => {
+    const user = userEvent.setup();
+    await openAt(inProject(WEBSHOP.id));
+
+    const menu = await openBranchMenu(user, /main/);
+    const note = within(menu).getByTitle("in workspace hydra/run-3f1");
+    expect(note.className).toContain("truncate");
+
+    const branch = within(menu).getByText("hydra/run-3f1", { selector: "span.font-mono" });
+    expect(branch.parentElement?.className).not.toContain("truncate");
+  });
+
   it("switches the lip and the lead to the branch that was picked", async () => {
     const user = userEvent.setup();
     await openAt(inProject(WEBSHOP.id));
@@ -1950,7 +1964,7 @@ describe("The New project dialog (D-20b)", () => {
   /** Opens the dialog from the sidebar's own icon beside Create new thread. */
   const openDialog = async (user: ReturnType<typeof userEvent.setup>): Promise<HTMLElement> => {
     await user.click(await screen.findByRole("button", { name: "New project" }));
-    return screen.findByRole("form", { name: "New project" });
+    return screen.findByRole("dialog", { name: "New project" });
   };
 
   it("creates the project, then a resource per source, and opens a draft in it", async () => {
@@ -2094,7 +2108,7 @@ describe("The New project dialog (D-20b)", () => {
     await waitFor(() => {
       expect(router.state.location.href).toBe(inProject(NEW_PROJECT.id));
     });
-    expect(screen.queryByRole("form", { name: "New project" })).toBeNull();
+    expect(screen.queryByRole("dialog", { name: "New project" })).toBeNull();
   });
 
   it("names the project before anything is sent", async () => {
@@ -2114,6 +2128,16 @@ describe("The New project dialog (D-20b)", () => {
     ).toBe(false);
   });
 
+  // R6: a modal says what it is and takes the focus, as the picker does.
+  it("is a modal dialog named after itself, with the focus in it", async () => {
+    const user = userEvent.setup();
+    await openAt("/threads/new");
+
+    const dialog = await openDialog(user);
+    expect(dialog.getAttribute("aria-modal")).toBe("true");
+    expect(dialog.contains(document.activeElement)).toBe(true);
+  });
+
   it("closes on Cancel and on Esc", async () => {
     const user = userEvent.setup();
     await openAt("/threads/new");
@@ -2121,13 +2145,13 @@ describe("The New project dialog (D-20b)", () => {
     const dialog = await openDialog(user);
     await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
     await waitFor(() => {
-      expect(screen.queryByRole("form", { name: "New project" })).toBeNull();
+      expect(screen.queryByRole("dialog", { name: "New project" })).toBeNull();
     });
 
     await openDialog(user);
     await user.keyboard("{Escape}");
     await waitFor(() => {
-      expect(screen.queryByRole("form", { name: "New project" })).toBeNull();
+      expect(screen.queryByRole("dialog", { name: "New project" })).toBeNull();
     });
   });
 

@@ -26,10 +26,12 @@ import {
   workspaceLead,
   workspaceName,
 } from "./workspaces";
+import { projectTone } from "./tone";
 import {
   COVE,
   INFRA,
   MOSS,
+  OPS_PROJECT,
   PRIMARY,
   RUN_3F1,
   WEBSHOP,
@@ -194,20 +196,38 @@ describe("runnerForPick", () => {
 });
 
 describe("draftSubject", () => {
-  it("names the workspace a draft joins, which stands for itself", () => {
+  // R6: the hue is the listing's to say, so the subject carries the answer
+  // rather than the id every surface would have to read it from again.
+  const PROJECTS = [OPS_PROJECT, WEBSHOP_PROJECT];
+
+  it("names the workspace a draft joins, which stands for itself and wears no hue", () => {
     expect(
-      draftSubject({ kind: "existing", workspaceId: RUN_3F1.id }, [RUN_3F1], WEBSHOP_PROJECT),
-    ).toEqual({ label: "hydra/run-3f1", projectId: null });
+      draftSubject(
+        { kind: "existing", workspaceId: RUN_3F1.id },
+        [RUN_3F1],
+        WEBSHOP_PROJECT.id,
+        PROJECTS,
+      ),
+    ).toEqual({ label: "hydra/run-3f1", projectId: null, tone: null });
   });
 
-  it("names the project a draft stands in, in the project's own hue", () => {
+  it("names the project a draft stands in, in the hue the listing gives it", () => {
     expect(
-      draftSubject({ kind: "primary", resourceId: WEBSHOP.id }, [PRIMARY], WEBSHOP_PROJECT),
-    ).toEqual({ label: "webshop", projectId: WEBSHOP_PROJECT.id });
+      draftSubject(
+        { kind: "primary", resourceId: WEBSHOP.id },
+        [PRIMARY],
+        WEBSHOP_PROJECT.id,
+        PROJECTS,
+      ),
+    ).toEqual({
+      label: "webshop",
+      projectId: WEBSHOP_PROJECT.id,
+      tone: projectTone(WEBSHOP_PROJECT.id, PROJECTS),
+    });
   });
 
   it("names nothing on a draft that stands in neither", () => {
-    expect(draftSubject({ kind: "none" }, [], undefined)).toBeNull();
+    expect(draftSubject({ kind: "none" }, [], null, PROJECTS)).toBeNull();
   });
 });
 

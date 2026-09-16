@@ -183,7 +183,7 @@ function PickerRow({
         active ? "bg-line-soft text-ink" : "text-muted",
       )}
     >
-      <ProjectDot projectId={row.projectId} />
+      <ProjectDot tone={row.tone} />
       <span className="min-w-0 truncate font-emph text-ink">{row.name}</span>
       <span className="shrink-0 font-mono text-[11px] text-faint">{row.shortcut}</span>
       <span className="col-start-2 col-end-4 truncate text-[11px] text-faint">{row.sub}</span>

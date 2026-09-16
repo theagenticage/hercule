@@ -3,7 +3,8 @@
  * on, rather than a name alone.
  */
 import { describe, expect, it } from "vitest";
-import { projectPickerRows, projectTone } from "./projects";
+import { projectPickerRows } from "./projects";
+import { projectTone } from "./tone";
 import {
   INFRA,
   OPS_PROJECT,
@@ -60,14 +61,31 @@ describe("projectPickerRows", () => {
 });
 
 describe("projectTone", () => {
-  it("answers the same hue for the same project every time", () => {
-    expect(projectTone(WEBSHOP_PROJECT.id)).toBe(projectTone(WEBSHOP_PROJECT.id));
+  const PROJECTS = [WEBSHOP_PROJECT, OPS_PROJECT, SANDBOX];
+
+  // R6: hashing the id gave two projects one hue as often as not; the place in
+  // the listing cannot.
+  it("gives two projects standing next to each other different hues", () => {
+    expect(projectTone(WEBSHOP_PROJECT.id, PROJECTS)).not.toBe(
+      projectTone(OPS_PROJECT.id, PROJECTS),
+    );
+    expect(projectTone(OPS_PROJECT.id, PROJECTS)).not.toBe(projectTone(SANDBOX.id, PROJECTS));
+  });
+
+  it("answers the same hue for the same project every time, and the rows agree", () => {
+    expect(projectTone(WEBSHOP_PROJECT.id, PROJECTS)).toBe(
+      projectTone(WEBSHOP_PROJECT.id, PROJECTS),
+    );
+    expect(rows.map((row) => row.tone)).toEqual(
+      PROJECTS.map((each) => projectTone(each.id, PROJECTS)),
+    );
   });
 
   it("only ever answers one of the two hues the design language fixes", () => {
-    const tones = new Set(
-      Array.from({ length: 40 }, (_, index) => projectTone(`p-${String(index)}`)),
+    const many = Array.from({ length: 40 }, (_, index) =>
+      project(`p-${String(index)}`, `p${String(index)}`),
     );
+    const tones = new Set(many.map((each) => projectTone(each.id, many)));
 
     expect([...tones].every((tone) => tone === "hydra" || tone === "ops")).toBe(true);
     expect(tones.size).toBe(2);

@@ -4,20 +4,8 @@
  * under it, so the choice is made on what is there rather than on a name.
  */
 import type { Project, Resource, Session, Workspace } from "@hydra/contract";
+import { projectTone, type ProjectTone } from "./tone";
 import { projectRepos, projectWorkspaces, repoName } from "./workspaces";
-
-/**
- * Which identity hue a project's dot carries. The design language fixes two
- * (§Color doctrine), so they alternate by id rather than being picked: a hue
- * tells two neighbouring projects apart, it does not name one.
- */
-export type ProjectTone = "hydra" | "ops";
-
-export const projectTone = (projectId: string): ProjectTone => {
-  let sum = 0;
-  for (const character of projectId) sum += character.charCodeAt(0);
-  return sum % 2 === 0 ? "hydra" : "ops";
-};
 
 export interface ProjectPickerRow {
   readonly projectId: string;
@@ -49,7 +37,7 @@ export const projectPickerRows = ({
     return {
       projectId: project.id,
       name: project.name,
-      tone: projectTone(project.id),
+      tone: projectTone(project.id, projects),
       sub: [
         count(repos.length, "repo"),
         ...(repos.length === 0 ? [] : [repos.map(repoName).join(", ")]),

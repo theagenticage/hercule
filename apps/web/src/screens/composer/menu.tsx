@@ -19,6 +19,7 @@ export function MenuRow({
   sub,
   current = false,
   dimmed = null,
+  clipNote = false,
   inert,
   trailing,
   className,
@@ -33,6 +34,12 @@ export function MenuRow({
   readonly sub?: ReactNode;
   readonly current?: boolean;
   readonly dimmed?: string | null;
+  /**
+   * Whether it is the right-hand annotation that gives when the row is too
+   * narrow, rather than the name. A branch is the thing being picked and has
+   * to be read whole; what holds it is a note about it (R6).
+   */
+  readonly clipNote?: boolean;
   /**
    * Whether the row takes no pick, where the reason it takes none is said
    * somewhere other than the right-hand slot - on its sub-line, say. A row
@@ -51,15 +58,19 @@ export function MenuRow({
           <span className={cn("size-[5px] rounded-full", current && "bg-ink")} />
         </span>
       )}
-      <span className="min-w-0 truncate">
+      <span className={cn(clipNote ? "whitespace-nowrap" : "min-w-0 truncate")}>
         {name}
         {detail === undefined || detail === null || detail === "" ? null : (
           <span className="ml-1.5 text-[11px] font-normal text-faint">{detail}</span>
         )}
       </span>{" "}
       <span
+        // The whole annotation is the title where it may be cut short, so what
+        // is clipped is still readable.
+        title={clipNote && typeof dimmed === "string" ? dimmed : undefined}
         className={cn(
-          "flex shrink-0 items-center gap-1.5 text-[11px] font-normal whitespace-nowrap",
+          "flex items-center gap-1.5 text-[11px] font-normal",
+          clipNote ? "min-w-0 truncate" : "shrink-0 whitespace-nowrap",
           marker !== undefined && current ? "text-ink" : "text-faint",
         )}
       >
@@ -78,7 +89,10 @@ export function MenuRow({
   );
 
   const layout = cn(
-    "grid w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-2 rounded-[6px]",
+    "grid w-full items-center gap-x-2 rounded-[6px]",
+    // The flexible column is the one allowed to give: the name by default, the
+    // annotation where the name is what must be read whole.
+    clipNote ? "grid-cols-[auto_auto_minmax(0,1fr)]" : "grid-cols-[auto_minmax(0,1fr)_auto]",
     // A row that carries a mark is a model row: a shade taller, and in ink.
     marker === undefined ? "px-2 py-[5px]" : "px-2 py-1.5",
     "text-left text-meta",

@@ -55,6 +55,8 @@ export function BranchSelector({
           name={<span className="font-mono">{row.branch}</span>}
           note={row.badge}
           dimmed={row.dimmed}
+          // A branch name is never cut: what holds it is (R6).
+          clipNote
           current={row.branch === field.value}
           onPick={() => {
             onPick(row.branch);

@@ -18,6 +18,7 @@ import type {
   ThreadWorkspace,
   Workspace,
 } from "@hydra/contract";
+import { projectTone, type ProjectTone } from "./tone";
 
 /**
  * What the composer's workspace selector holds: the contract's own spelling,
@@ -213,6 +214,8 @@ export interface DraftSubject {
   readonly label: string;
   /** The project whose hue the name wears; null where a workspace names it. */
   readonly projectId: string | null;
+  /** That hue, read the one way every surface reads it (`projectTone`). */
+  readonly tone: ProjectTone | null;
 }
 
 /**
@@ -223,12 +226,16 @@ export interface DraftSubject {
 export const draftSubject = (
   pick: WorkspacePick,
   workspaces: readonly Workspace[],
-  project: Project | undefined,
+  projectId: string | null,
+  projects: readonly Project[],
 ): DraftSubject | null => {
   const joined =
     pick.kind === "existing" ? workspaces.find((each) => each.id === pick.workspaceId) : undefined;
-  if (joined !== undefined) return { label: workspaceName(joined), projectId: null };
-  return project === undefined ? null : { label: project.name, projectId: project.id };
+  if (joined !== undefined) return { label: workspaceName(joined), projectId: null, tone: null };
+  const project = projects.find((each) => each.id === projectId);
+  return project === undefined
+    ? null
+    : { label: project.name, projectId: project.id, tone: projectTone(project.id, projects) };
 };
 
 /**

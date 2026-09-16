@@ -1,14 +1,13 @@
 import type { JSX, ReactNode } from "react";
-import type { ComposerBlocked, LoginTarget, Phrase } from "@hydra/client-core";
-import { projectTone } from "@hydra/client-core";
+import type { ComposerBlocked, LoginTarget, Phrase, ProjectTone } from "@hydra/client-core";
 import { cn } from "@hydra/ui";
 import { Phrases } from "./phrases";
 
 /** What the draft is for, as its heading names it: a project, or a workspace. */
 export interface DraftSubject {
   readonly label: string;
-  /** The project whose identity hue the name wears; null on a workspace. */
-  readonly projectId: string | null;
+  /** The identity hue the name wears; null on a workspace, which wears none. */
+  readonly tone: ProjectTone | null;
 }
 
 /** The two identity hues, written out so Tailwind emits them (see `ProjectDot`). */
@@ -47,9 +46,7 @@ export function DraftHero({
             <span
               className={cn(
                 "underline decoration-2 underline-offset-[5px]",
-                subject.projectId === null
-                  ? "decoration-line"
-                  : TONE[projectTone(subject.projectId)],
+                subject.tone === null ? "decoration-line" : TONE[subject.tone],
               )}
             >
               {subject.label}

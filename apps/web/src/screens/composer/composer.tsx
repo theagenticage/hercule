@@ -113,7 +113,7 @@ export function Composer({
     <div className={fields.lead === null ? "flex w-full flex-col" : "flex w-full flex-1 flex-col"}>
       {fields.lead === null ? null : (
         <DraftHero
-          subject={draftSubject(pick, workspaces, project)}
+          subject={draftSubject(pick, workspaces, projectId, projects)}
           lead={fields.lead}
           blocked={fields.blocked}
           loginSlot={login}

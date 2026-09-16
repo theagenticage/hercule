@@ -19,6 +19,7 @@ import type {
   Workspace,
 } from "@hydra/contract";
 import { threadRows, type ThreadRow } from "./rows";
+import { projectTone, type ProjectTone } from "./tone";
 import {
   defaultWorkspacePick,
   projectRepos,
@@ -45,6 +46,8 @@ export interface ProjectGroup {
   readonly projectId: string | null;
   /** Null on the threads that belong to no project: they stand under no header. */
   readonly name: string | null;
+  /** The identity hue its dot wears; null where there is no header to wear one. */
+  readonly tone: ProjectTone | null;
   readonly count: number;
   readonly workspaces: readonly WorkspaceGroup[];
 }
@@ -175,6 +178,7 @@ export const threadGroups = ({
     return {
       projectId,
       name: projects.find((each) => each.id === projectId)?.name ?? null,
+      tone: projectId === null ? null : projectTone(projectId, projects),
       count: held.length,
       // The prototype's own order: the worktrees first, in the order the
       // catalog lists them, then the repo's main workspace, then the threads
