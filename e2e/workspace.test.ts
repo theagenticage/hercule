@@ -18,6 +18,10 @@
  * written late rather than up front because the rewrite also applies to
  * `git remote get-url`, which is the question adopt asks of the folder.
  *
+ * The worktree case is the only one that needs a session, and no fake provider
+ * ships, so it runs a real one and is opt-in under `HYDRA_LIVE_SESSION_TEST`
+ * like `e2e/session.test.ts` (D-18). The rest run everywhere.
+ *
  * The suite runs as the release binary where one has been built and from the
  * dispatcher's source where none has: what it exercises is the controller's own
  * surface, which is the same program either way.
@@ -47,6 +51,13 @@ const binary = releaseBinary();
 
 /** How the resource spells the repository; it resolves to `bare` through `HOME`. */
 const REMOTE = "https://hydra.test/acme/web";
+
+/**
+ * Opt-in, like `e2e/session.test.ts`: the worktree case is the only one here
+ * that needs a session, no fake provider ships, and a real one spends the
+ * developer's tokens (D-18).
+ */
+const live = process.env["HYDRA_LIVE_SESSION_TEST"] !== undefined;
 
 const bare = join(world.home, "remote.git");
 const checkout = join(world.home, "web");
@@ -112,6 +123,8 @@ interface Workspace {
   readonly status: string;
   readonly message: string | null;
   readonly checkouts: ReadonlyArray<Checkout>;
+  /** The sessions in it that have not exited. */
+  readonly sessionIds: ReadonlyArray<string>;
 }
 
 interface Session {
@@ -280,53 +293,64 @@ describe("a repo, its main checkout and a thread's worktree, through the CLI", (
     expect(`${ran.stdout}${ran.stderr}`).toMatch(/conflict|already/i);
   }, 30_000);
 
-  it("gives a thread its own worktree, on a branch named after the session", async (ctx) => {
-    if (!(await anyLoggedIn())) {
-      ctx.skip(
-        "no machine reports a logged-in provider instance. `session.spawn` resolves an " +
-          "instance, a machine and a model catalog before it writes anything, and this build " +
-          "carries no provider that answers without a vendor login, so an ephemeral workspace " +
-          "cannot be made here. Set ANTHROPIC_API_KEY to run it.",
+  it.skipIf(!live)(
+    "gives a thread its own worktree, on a branch named after the session",
+    async (ctx) => {
+      if (!(await anyLoggedIn())) {
+        ctx.skip(
+          "no machine reports a logged-in provider instance. `session.spawn` resolves an " +
+            "instance, a machine and a model catalog before it writes anything, and this build " +
+            "carries no provider that answers without a vendor login, so an ephemeral workspace " +
+            "cannot be made here. Set ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN to run it.",
+        );
+        return;
+      }
+
+      // From here the machine has to reach the remote, so the https spelling is
+      // pointed at the bare repository on disk.
+      appendFileSync(
+        join(gitHome, ".gitconfig"),
+        `[url "file://${bare}"]\n\tinsteadOf = ${REMOTE}\n`,
       );
-      return;
-    }
 
-    // From here the machine has to reach the remote, so the https spelling is
-    // pointed at the bare repository on disk.
-    appendFileSync(
-      join(gitHome, ".gitconfig"),
-      `[url "file://${bare}"]\n\tinsteadOf = ${REMOTE}\n`,
-    );
+      const spawned = ok<Session>(
+        await hydra(
+          [
+            "session",
+            "spawn",
+            "--runner",
+            runnerId,
+            "--workspace",
+            JSON.stringify({
+              kind: "ephemeral",
+              checkouts: [{ resourceId, baseBranch: "main" }],
+            }),
+            "--json",
+          ],
+          "Say nothing and stop.",
+        ),
+      );
+      expect(spawned.workspaceId).not.toBeNull();
 
-    const spawned = ok<Session>(
-      await hydra(
-        [
-          "session",
-          "spawn",
-          "--runner",
-          runnerId,
-          "--workspace",
-          JSON.stringify({
-            kind: "ephemeral",
-            checkouts: [{ resourceId, baseBranch: "main" }],
-          }),
-          "--json",
-        ],
-        "Say nothing and stop.",
-      ),
-    );
-    expect(spawned.workspaceId).not.toBeNull();
+      const workspace = await settled(spawned.workspaceId!);
+      expect(workspace.status, workspace.message ?? "").toBe("ready");
+      expect(workspace.kind).toBe("ephemeral");
+      const [only] = workspace.checkouts;
+      expect(only!.form).toBe("worktree");
+      // The thread's branch is the session's own, and nothing else's: the tail of
+      // the session id is what tells two threads in one repo apart.
+      expect(only!.branch).toBe(`hydra/run-${spawned.id.slice(-8)}`);
+      // It starts where `main` is, so the worktree came off the cache the adopt
+      // seeded rather than from a repository nobody could reach.
+      expect(only!.branches).toContain(only!.branch!);
+      // The workspace knows which thread is in it: `sessionIds` is what the
+      // sidebar groups on and what the reaper reads before disposing anything.
+      expect(workspace.sessionIds).toContain(spawned.id);
 
-    const workspace = await settled(spawned.workspaceId!);
-    expect(workspace.status, workspace.message ?? "").toBe("ready");
-    expect(workspace.kind).toBe("ephemeral");
-    const [only] = workspace.checkouts;
-    expect(only!.form).toBe("worktree");
-    // The thread's branch is the session's own, and nothing else's: the tail of
-    // the session id is what tells two threads in one repo apart.
-    expect(only!.branch).toBe(`hydra/run-${spawned.id.slice(-8)}`);
-    // It starts where `main` is, so the worktree came off the cache the adopt
-    // seeded rather than from a repository nobody could reach.
-    expect(only!.branches).toContain(only!.branch!);
-  }, 180_000);
+      // The thread is the test's, so it does not outlive it.
+      const stopped = await hydra(["session", "stop", spawned.id, "--json"]);
+      expect(stopped.code, `${stopped.stdout}\n${stopped.stderr}`).toBe(0);
+    },
+    180_000,
+  );
 });

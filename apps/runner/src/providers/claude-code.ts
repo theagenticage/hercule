@@ -100,6 +100,10 @@ interface Account {
   readonly email?: string;
   readonly subscriptionType?: string;
   readonly apiProvider?: string;
+  /** Where the harness took its token from; `"none"` when it has none. */
+  readonly tokenSource?: string;
+  /** The variable an API key came from, when that is what it runs on. */
+  readonly apiKeySource?: string;
 }
 
 interface Model {
@@ -195,17 +199,32 @@ const catalogOf = (models: ReadonlyArray<Model>): ReadonlyArray<ModelDescriptor>
   );
 };
 
-const authOf = (account: Account): ProbeResult["auth"] =>
-  account.email === undefined
-    ? { status: "unauthenticated" }
-    : {
-        status: "ok",
-        identity: fact(account.email),
-        ...(account.subscriptionType === undefined
-          ? {}
-          : { planLabel: fact(account.subscriptionType) }),
-        ...(account.apiProvider === undefined ? {} : { backend: fact(account.apiProvider) }),
-      };
+/**
+ * Whether the harness has a usable login, which spec 06 §3.2 makes the
+ * question, and which is not the same as an account it can name. A login held
+ * in the instance's own config directory reports an email; a credential handed
+ * to it on the environment - an OAuth token or an API key - reports only where
+ * it came from, and runs just as well.
+ */
+const credentialled = (account: Account): boolean =>
+  account.email !== undefined ||
+  (account.tokenSource !== undefined && account.tokenSource !== "none") ||
+  account.apiKeySource !== undefined;
+
+const authOf = (account: Account): ProbeResult["auth"] => {
+  if (!credentialled(account)) return { status: "unauthenticated" };
+  // An empty string is not a `Fact`, and the whole report would fail to encode
+  // over a field the account left blank.
+  const identity = account.email === undefined ? "" : fact(account.email);
+  const planLabel = account.subscriptionType === undefined ? "" : fact(account.subscriptionType);
+  const backend = account.apiProvider === undefined ? "" : fact(account.apiProvider);
+  return {
+    status: "ok",
+    ...(identity === "" ? {} : { identity }),
+    ...(planLabel === "" ? {} : { planLabel }),
+    ...(backend === "" ? {} : { backend }),
+  };
+};
 
 /** `HOME` is left alone: overriding it makes the CLI report another account's login. */
 const envFor = (ctx: ProviderRunnerContext): Record<string, string | undefined> => ({

@@ -1136,7 +1136,7 @@ export const CLI = {
     examples: [
       {
         args: ["--type", "github/github", "--label", "work", "--topic", "engineering"],
-        stdin: '{"token":"ghp_xxx"}',
+        stdin: '{"pat":"ghp_xxx"}',
       },
     ],
     fields: {

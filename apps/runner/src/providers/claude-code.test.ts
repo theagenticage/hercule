@@ -223,6 +223,39 @@ describe("what the Claude adapter reports about a machine that is not logged in"
   });
 });
 
+describe("what the Claude adapter reports about a credential from the environment", () => {
+  // The two shapes the SDK 0.3.263 really answers with when the config
+  // directory holds no login but the environment carries a credential. Neither
+  // names an account, and both run: spec 06 section 3.2 asks whether there is a
+  // usable login, not whether the harness can name whose it is.
+  it("counts an OAuth token as a login, with nobody to name", async () => {
+    const { result } = probeWith({
+      accountInfo: () =>
+        Promise.resolve({ tokenSource: "CLAUDE_CODE_OAUTH_TOKEN", apiProvider: "firstParty" }),
+    });
+
+    const probed = await result;
+    expect(probed.auth.status).toBe("ok");
+    expect(probed.auth.identity).toBeUndefined();
+    expect(probed.auth.backend).toBe("firstParty");
+  });
+
+  it("counts an API key as a login", async () => {
+    const { result } = probeWith({
+      accountInfo: () =>
+        Promise.resolve({
+          tokenSource: "none",
+          apiKeySource: "ANTHROPIC_API_KEY",
+          apiProvider: "firstParty",
+        }),
+    });
+
+    const probed = await result;
+    expect(probed.auth.status).toBe("ok");
+    expect(probed.auth.identity).toBeUndefined();
+  });
+});
+
 describe("what the Claude adapter reports when the probe did not finish", () => {
   it("says what the SDK threw, so the user reads why rather than a blank row", async () => {
     const { result } = probeWith({
