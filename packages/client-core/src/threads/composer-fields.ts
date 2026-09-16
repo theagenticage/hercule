@@ -216,6 +216,7 @@ export const composerFields = (
         : workspaceLead(pick, {
             resources,
             workspaces,
+            sessions: catalogs.sessions ?? [],
             machine: name,
             runnerId: runner?.id ?? null,
           }),

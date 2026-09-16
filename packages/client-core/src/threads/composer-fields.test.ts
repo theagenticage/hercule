@@ -13,6 +13,7 @@ import type {
   ProviderInstance,
   Resource,
   Runner,
+  Session,
   Workspace,
 } from "@hydra/contract";
 import { BARE, instance, snapshot } from "../providers.testing";
@@ -367,8 +368,37 @@ const RUN_3F1: Workspace = {
       defaultBranch: "main",
     },
   ],
-  sessionIds: ["s-flaky"],
+  sessionIds: ["s-flaky", "s-runbook"],
 };
+
+/** The threads working in `RUN_3F1`, as the listing holds them (D-19). */
+const thread = (id: string, title: string): Session => ({
+  id,
+  title,
+  status: "idle",
+  resumable: false,
+  permissionProfileId: "profile-unrestricted",
+  instanceId: CLAUDE.id,
+  runnerId: LOCAL.id,
+  workspaceId: "ws-run-3f1",
+  projectId: WEBSHOP_PROJECT.id,
+  requestedAccessMode: "approval-required",
+  accessMode: "approval-required",
+  nativeSessionId: null,
+  modelSelection: { model: "claude-sonnet-5", options: {} },
+  parentSessionId: null,
+  openRequest: null,
+  createdAt: at,
+  startedAt: at,
+  exitedAt: null,
+  lastActivityAt: at,
+});
+
+const SESSIONS = [
+  thread("s-flaky", "Fix flaky webhook tests"),
+  thread("s-runbook", "Write the retry runbook"),
+  thread("s-third", "Bump the Bun pin"),
+];
 
 const withRepos = (
   projects: readonly Project[],
@@ -381,6 +411,8 @@ const withRepos = (
   projects,
   resources,
   workspaces,
+  // The threads the workspaces hold: what a draft joining one names (D-19).
+  sessions: SESSIONS,
 });
 
 /** The catalogs every case below reads unless it says otherwise. */
@@ -579,12 +611,47 @@ describe("composerFields: the lead sentence follows the workspace (AC-17)", () =
     );
   });
 
-  it("names the workspace it joins, and what joining one means", () => {
+  // D-19: the draft names the work it is joining, not the workspace's own name.
+  it("names the threads it joins, and what joining them means", () => {
     const fields = composerFields(
       FULL,
       draft({
         projectId: WEBSHOP_PROJECT.id,
         workspace: { kind: "existing", workspaceId: RUN_3F1.id },
+      }),
+      "draft",
+    );
+
+    expect(phraseText(fields.lead ?? [])).toBe(
+      "It joins “Fix flaky webhook tests” and “Write the retry runbook” there: the agents see each other's edits, on one branch.",
+    );
+  });
+
+  // D-19: two titles at most; the rest are counted.
+  it("counts the threads past the second rather than naming them all", () => {
+    const three = { ...RUN_3F1, sessionIds: ["s-flaky", "s-runbook", "s-third"] };
+    const fields = composerFields(
+      withRepos([WEBSHOP_PROJECT], [WEBSHOP], [PRIMARY, three]),
+      draft({
+        projectId: WEBSHOP_PROJECT.id,
+        workspace: { kind: "existing", workspaceId: three.id },
+      }),
+      "draft",
+    );
+
+    expect(phraseText(fields.lead ?? [])).toBe(
+      "It joins “Fix flaky webhook tests”, “Write the retry runbook” and 1 more there: the agents see each other's edits, on one branch.",
+    );
+  });
+
+  // D-19: a workspace holding no thread has no work to name, so it names itself.
+  it("names the workspace itself when it holds no thread yet", () => {
+    const empty = { ...RUN_3F1, sessionIds: [] };
+    const fields = composerFields(
+      withRepos([WEBSHOP_PROJECT], [WEBSHOP], [PRIMARY, empty]),
+      draft({
+        projectId: WEBSHOP_PROJECT.id,
+        workspace: { kind: "existing", workspaceId: empty.id },
       }),
       "draft",
     );

@@ -15,10 +15,11 @@ import type {
   Runner,
   Session,
   ThreadRows,
+  ThreadWorkspace,
   Workspace,
 } from "@hydra/contract";
 import { threadRows, type ThreadRow } from "./rows";
-import { workspaceLabel } from "./workspaces";
+import { defaultWorkspacePick, projectRepos, readyPrimary, workspaceLabel } from "./workspaces";
 
 export interface WorkspaceGroup {
   readonly workspaceId: string | null;
@@ -46,6 +47,51 @@ export interface DraftPlace {
   readonly projectId: string | null;
   readonly workspaceId: string | null;
 }
+
+/**
+ * Which group the draft being written belongs to. The address settles it where
+ * it names a workspace; where it names none, the draft will open in whatever
+ * the project opens in (`defaultWorkspacePick`), and a shared checkout that
+ * already stands on the machine it would run on is a group of its own - the
+ * draft is filed with the threads it will sit beside, not under "no
+ * workspace". A checkout nothing has cloned yet is no group at all: the draft
+ * stands under the project itself until the machine has made one.
+ */
+export const draftPlace = ({
+  projectId,
+  workspaceId,
+  resources,
+  workspaces,
+  runnerId,
+  preferred = null,
+}: {
+  readonly projectId: string | null;
+  /** The workspace the address names, where it names one. */
+  readonly workspaceId: string | null;
+  readonly resources: readonly Resource[];
+  readonly workspaces: readonly Workspace[];
+  /** The machine the draft would run on; a primary stands on one machine. */
+  readonly runnerId: string | null;
+  readonly preferred?: ThreadWorkspace | null;
+}): DraftPlace => {
+  if (workspaceId !== null || projectId === null) return { projectId, workspaceId };
+  const pick = defaultWorkspacePick(projectRepos(resources, projectId), preferred);
+  if (pick.kind !== "primary") return { projectId, workspaceId: null };
+  return {
+    projectId,
+    workspaceId: readyPrimary(workspaces, pick.resourceId, runnerId)?.id ?? null,
+  };
+};
+
+/** Whether this lane is the one the draft being written joins. */
+const holdsDraft = (
+  draft: DraftPlace | null,
+  joins: boolean,
+  workspaceId: string | null,
+): boolean => draft !== null && joins && draft.workspaceId === workspaceId;
+
+/** A lane of threads that work without a checkout, which is pinned last. */
+const loose = (lane: WorkspaceGroup): boolean => lane.workspaceId === null && !lane.draft;
 
 const recency = (rows: readonly ThreadRow[]): number =>
   rows.length === 0 ? 0 : Date.parse(rows[0]!.activityAt);
@@ -95,13 +141,17 @@ export const threadGroups = ({
       const workspace = workspaces.find((each) => each.id === workspaceId);
       return {
         workspaceId,
+        // "no workspace" names a lane of threads that work without a
+        // checkout. A lane holding nothing but the draft is not that: it is
+        // where the draft stands until it has a workspace, and it stands
+        // under the project's own header with nothing said about it.
         label:
           workspace === undefined
-            ? alone
+            ? alone || (holdsDraft(draft, joins, workspaceId) && rowsIn.length === 0)
               ? null
               : "no workspace"
             : workspaceLabel(workspace, resources, runners),
-        draft: draft !== null && joins && draft.workspaceId === workspaceId,
+        draft: holdsDraft(draft, joins, workspaceId),
         rows: rowsIn,
       };
     });
@@ -111,10 +161,13 @@ export const threadGroups = ({
       name: projects.find((each) => each.id === projectId)?.name ?? null,
       count: held.length,
       // The group the draft joins leads: it is where the user is working
-      // right now, and it holds a row no clock has an activity stamp for.
+      // right now, and it holds a row no clock has an activity stamp for. The
+      // threads that work without a checkout are pinned last - unless the
+      // draft is what stands there, which is a draft with no workspace yet
+      // rather than a lane of workspace-less threads.
       workspaces: lanes.sort(
         (a, b) =>
-          Number(a.workspaceId === null) - Number(b.workspaceId === null) ||
+          Number(loose(a)) - Number(loose(b)) ||
           Number(b.draft) - Number(a.draft) ||
           recency(b.rows) - recency(a.rows),
       ),

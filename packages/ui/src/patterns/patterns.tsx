@@ -116,22 +116,40 @@ export function FormCard({
   );
 }
 
-/** One labelled row of a card. */
+/** The micro label a card's rows are read by, whichever way the row stands. */
+const ROW_LABEL = "text-[10px] font-emph tracking-[0.09em] text-faint uppercase";
+
+/**
+ * One labelled row of a card: the label in its own column, the control beside
+ * it. A control the column cannot hold on one line - a segmented control whose
+ * choices are whole words - stands under its label instead (`wide`), where it
+ * has the card's full width.
+ */
 export function Row({
   label,
   htmlFor,
+  wide = false,
   children,
 }: {
   readonly label: string;
   readonly htmlFor?: string | undefined;
+  readonly wide?: boolean;
   readonly children: ReactNode;
 }): JSX.Element {
+  if (wide) {
+    return (
+      <div className="flex flex-col gap-1.5 text-row">
+        <label htmlFor={htmlFor} className={ROW_LABEL}>
+          {label}
+        </label>
+        {children}
+      </div>
+    );
+  }
+
   return (
     <div className="grid grid-cols-[110px_minmax(0,1fr)] items-baseline gap-3 text-row">
-      <label
-        htmlFor={htmlFor}
-        className="text-[10px] font-emph tracking-[0.09em] text-faint uppercase"
-      >
+      <label htmlFor={htmlFor} className={ROW_LABEL}>
         {label}
       </label>
       {children}

@@ -1,4 +1,4 @@
-import { useState, type JSX } from "react";
+import { useRef, useState, type JSX } from "react";
 import { useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { useRouteContext } from "@tanstack/react-router";
 import {
@@ -71,6 +71,8 @@ export function Composer({
     sessions,
   };
   const [open, setOpen] = useState<SelectorKey | null>(null);
+  // Where the model pill begins: what the lip's branch menu keeps clear of.
+  const pill = useRef<HTMLSpanElement>(null);
   const [filter, setFilter] = useState("");
   const model = useComposerModel(thread, catalogs, client, onSend);
   const fields = model.fields;
@@ -165,19 +167,21 @@ export function Composer({
                 }}
               />
             )}
-            <ModelSelector
-              menu={models}
-              filter={filter}
-              onFilter={setFilter}
-              pill={fields.model.pill}
-              disabled={model.readOnly !== null}
-              open={open === "model"}
-              onOpenChange={(next) => {
-                openChange("model", next);
-              }}
-              onPick={model.pick}
-              loginSlot={login}
-            />
+            <span ref={pill} className="inline-flex min-w-0">
+              <ModelSelector
+                menu={models}
+                filter={filter}
+                onFilter={setFilter}
+                pill={fields.model.pill}
+                disabled={model.readOnly !== null}
+                open={open === "model"}
+                onOpenChange={(next) => {
+                  openChange("model", next);
+                }}
+                onPick={model.pick}
+                loginSlot={login}
+              />
+            </span>
           </div>
           <VoiceButton />
           {model.busy ? <StopButton onStop={model.stop} /> : null}
@@ -194,6 +198,7 @@ export function Composer({
         menu={menu}
         branch={branch}
         machine={fields.machine}
+        pill={pill}
         open={open === "workspace" || open === "branch" || open === "machine" ? open : null}
         onOpenChange={openChange}
         onPickWorkspace={(picked) => {

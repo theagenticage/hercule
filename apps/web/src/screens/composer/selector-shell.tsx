@@ -30,6 +30,7 @@ export function SelectorShell({
   align = "start",
   className,
   contentClassName,
+  alignOffset = 0,
   onEscapeKeyDown,
   children,
 }: {
@@ -45,6 +46,12 @@ export function SelectorShell({
   readonly align?: "start" | "end";
   readonly className?: string;
   readonly contentClassName?: string;
+  /**
+   * How far along its own edge the menu is nudged, in pixels: what the
+   * prototype does when a menu anchored at its trigger would reach past
+   * something - the window's edge there, the model pill here.
+   */
+  readonly alignOffset?: number;
   /**
    * What Esc means while this menu is open, where it means something other
    * than closing it - a form inside it to leave first. Preventing the event's
@@ -110,6 +117,7 @@ export function SelectorShell({
       <PopoverContent
         side="top"
         align={align}
+        alignOffset={alignOffset}
         avoidCollisions={false}
         // Opening a menu marks the row in force with its dot; it does not also
         // ring the row, as the prototype's menus do not. Focus stays where the

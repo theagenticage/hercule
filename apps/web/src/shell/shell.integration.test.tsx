@@ -593,6 +593,8 @@ describe("the Threads face groups by project and workspace (AC-20)", () => {
     const text = faceText();
     expect(text).toContain("New thread draft");
     expect(text.indexOf("hydra/run-3f1")).toBeLessThan(text.indexOf("New thread draft"));
+    // The draft is the group's last row, as it is the last of the thread tabs.
+    expect(text.indexOf("Fix flaky webhook tests")).toBeLessThan(text.indexOf("New thread draft"));
     expect(text.indexOf("New thread draft")).toBeLessThan(text.indexOf("webshop checkout · moss"));
   });
 

@@ -15,11 +15,14 @@ import { SelectorShell } from "./selector-shell";
  */
 export function BranchSelector({
   field,
+  room,
   open,
   onOpenChange,
   onPick,
 }: {
   readonly field: BranchField;
+  /** How far the menu is nudged left to stay clear of the model pill. */
+  readonly room: number;
   readonly open: boolean;
   readonly onOpenChange: (open: boolean) => void;
   readonly onPick: (branch: string) => void;
@@ -43,6 +46,7 @@ export function BranchSelector({
       open={open}
       onOpenChange={onOpenChange}
       contentClassName="w-80"
+      alignOffset={room}
     >
       <MenuHeader label={field.header} note={field.note} />
       {field.rows.map((row) => (

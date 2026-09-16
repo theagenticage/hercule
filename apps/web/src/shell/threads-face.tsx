@@ -1,8 +1,9 @@
 import { useState, type JSX } from "react";
-import { Link, useMatch } from "@tanstack/react-router";
+import { Link, useMatch, useRouteContext } from "@tanstack/react-router";
 import { useQuery, type QueryClient } from "@tanstack/react-query";
 import {
   ageOf,
+  draftPlace,
   threadGroups,
   type DraftPlace,
   type HydraClient,
@@ -10,10 +11,11 @@ import {
   type ProjectGroup,
   type WorkspaceGroup,
 } from "@hydra/client-core";
-import type { ThreadRows } from "@hydra/contract";
+import type { ThreadRows, ThreadWorkspace } from "@hydra/contract";
 import { cn, useMinuteClock } from "@hydra/ui";
 import { useLiveInvalidation } from "../app/live-invalidation";
 import {
+  localRunnerQuery,
   projectsQuery,
   providersQuery,
   resourcesQuery,
@@ -35,11 +37,14 @@ import { ThreadRowView } from "../screens/thread-row";
  */
 export function ThreadsFace({
   rows,
+  preferredWorkspace,
   client,
   queryClient,
   live,
 }: {
   readonly rows: ThreadRows;
+  /** What a draft opens in where its address names no workspace. */
+  readonly preferredWorkspace: ThreadWorkspace | null;
   readonly client: HydraClient;
   readonly queryClient: QueryClient;
   readonly live: Live;
@@ -56,6 +61,10 @@ export function ThreadsFace({
   // What a meta row names its model from: the catalogs, so a row reads
   // `Claude Sonnet 5` rather than the slug a request is written with.
   const instances = useQuery(providersQuery(client)).data ?? [];
+  // Which machine is this browser's: what decides whether the project's shared
+  // checkout already stands where the draft would run.
+  const { detectLocalRunner } = useRouteContext({ from: "/_shell" });
+  const localRunnerId = useQuery(localRunnerQuery(detectLocalRunner, runners)).data ?? null;
   const [picking, setPicking] = useState(false);
 
   // The router's own answers for which thread is open and which draft is being
@@ -67,10 +76,14 @@ export function ThreadsFace({
   const draft: DraftPlace | null =
     drafted === undefined
       ? null
-      : {
+      : draftPlace({
           projectId: drafted.search.project ?? null,
           workspaceId: drafted.search.workspace ?? null,
-        };
+          resources,
+          workspaces,
+          runnerId: localRunnerId,
+          preferred: preferredWorkspace,
+        });
   const groups = threadGroups({
     sessions,
     projects,
@@ -194,17 +207,6 @@ function WorkspaceLane({
           )}
         </div>
       )}
-      {lane.draft ? (
-        <div className="flex items-center gap-2 rounded-control px-2.5 py-[7px] text-row text-muted">
-          {/* The same marker column a thread row carries, so the draft's title
-              stands on the same left edge as the titles under it. */}
-          <span aria-hidden="true" className="flex w-3 shrink-0 justify-center">
-            <span className="text-faint">·</span>
-          </span>
-          <span className="min-w-0 flex-1 truncate">New thread</span>{" "}
-          <span className="shrink-0 font-mono text-fine text-faint">draft</span>
-        </div>
-      ) : null}
       {lane.rows.map((row) => (
         <ThreadRowView
           key={row.id}
@@ -216,6 +218,19 @@ function WorkspaceLane({
           selected={row.id === current}
         />
       ))}
+      {/* The draft is the lane's last row, as it is the last tab of the thread
+          chrome (spec 14 §The thread surface). */}
+      {lane.draft ? (
+        <div className="flex items-center gap-2 rounded-control px-2.5 py-[7px] text-row text-muted">
+          {/* The same marker column a thread row carries, so the draft's title
+              stands on the same left edge as the titles under it. */}
+          <span aria-hidden="true" className="flex w-3 shrink-0 justify-center">
+            <span className="text-faint">·</span>
+          </span>
+          <span className="min-w-0 flex-1 truncate">New thread</span>{" "}
+          <span className="shrink-0 font-mono text-fine text-faint">draft</span>
+        </div>
+      ) : null}
     </div>
   );
 }

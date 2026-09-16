@@ -154,7 +154,13 @@ export function Sidebar({
       </SegmentedControl>
 
       {face === "threads" ? (
-        <ThreadsFace rows={rows} client={client} queryClient={queryClient} live={live} />
+        <ThreadsFace
+          rows={rows}
+          preferredWorkspace={settings.user["thread.workspace"] ?? null}
+          client={client}
+          queryClient={queryClient}
+          live={live}
+        />
       ) : (
         <HydraFace pathname={pathname} counts={NO_COUNTS} />
       )}

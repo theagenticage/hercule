@@ -83,6 +83,7 @@ export { threadRows, type ThreadRow } from "./threads/rows";
 export {
   threadGroups,
   type DraftPlace,
+  draftPlace,
   type ProjectGroup,
   type WorkspaceGroup,
 } from "./threads/groups";

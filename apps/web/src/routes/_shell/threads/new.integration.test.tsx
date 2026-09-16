@@ -1691,9 +1691,10 @@ describe("Composer: the workspace selector (AC-17)", () => {
 
     await openWorkspaceMenu(user);
     await pickRow(user, /hydra\/run-3f1/);
+    // D-19: joining names the work already going on there, not the workspace.
     await waitFor(() => {
       expect(reading()).toContain(
-        "It joins “hydra/run-3f1” there: the agents see each other's edits, on one branch.",
+        "It joins “Fix flaky webhook tests” and “Write the retry runbook” there: the agents see each other's edits, on one branch.",
       );
     });
 

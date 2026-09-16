@@ -12,6 +12,7 @@ import type {
   Project,
   Resource,
   Runner,
+  Session,
   SpawnWorkspace,
   ThreadWorkspace,
   Workspace,
@@ -222,6 +223,8 @@ export const defaultWorkspacePick = (
 export interface WorkspaceReading {
   readonly resources: readonly Resource[];
   readonly workspaces: readonly Workspace[];
+  /** The threads the workspaces hold, which a joining draft names (D-19). */
+  readonly sessions?: readonly Session[];
   /** The machine the thread would be placed on, already named. */
   readonly machine: string;
   /** The machine's id, which is what a shared checkout is looked up by. */
@@ -241,6 +244,23 @@ export interface Phrase {
 /** The same sentence as plain words, which is what a reader hears. */
 export const phraseText = (parts: readonly Phrase[]): string =>
   parts.map((part) => part.text).join("");
+
+/**
+ * The threads working in a workspace, as the lead names them: two of them at
+ * most, and the rest counted (D-19). A thread the listing does not hold is one
+ * the reader cannot be told about, so it is counted with the rest.
+ */
+const titlesIn = (workspace: Workspace, sessions: readonly Session[]): string => {
+  const titles = workspace.sessionIds.map(
+    (id) => sessions.find((session) => session.id === id)?.title ?? null,
+  );
+  const named = titles.filter((title): title is string => title !== null).map((t) => `“${t}”`);
+  const rest = workspace.sessionIds.length - Math.min(named.length, 2);
+  const shown = named.slice(0, 2);
+  if (shown.length === 0) return "";
+  if (rest > 0) return `${shown.join(", ")} and ${String(rest)} more`;
+  return shown.length === 1 ? shown[0]! : `${shown[0]!} and ${shown[1]!}`;
+};
 
 /**
  * The one sentence a draft stands under: where the thread will work, in the
@@ -290,8 +310,12 @@ export const workspaceLead = (
     case "existing": {
       const joined = reading.workspaces.find((each) => each.id === pick.workspaceId);
       const name = joined === undefined ? "that workspace" : workspaceName(joined);
+      const threads = joined === undefined ? "" : titlesIn(joined, reading.sessions ?? []);
+      // What the draft joins is the work already going on there, named; a
+      // workspace holding nothing yet is named after itself (D-19).
+      const subject = threads === "" ? `“${name}”` : threads;
       return [
-        { text: `It joins “${name}” there: the agents see each other's edits, on one branch.` },
+        { text: `It joins ${subject} there: the agents see each other's edits, on one branch.` },
       ];
     }
   }

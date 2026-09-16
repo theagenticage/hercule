@@ -131,7 +131,9 @@ export function MenuHeader({
 }): JSX.Element {
   return (
     <div className="flex items-baseline gap-2 px-2 pt-1.5 pb-[5px]">
-      <span className="text-label font-emph tracking-[0.1em] text-faint uppercase">{label}</span>
+      <span className="text-label font-emph tracking-[0.1em] whitespace-nowrap text-faint uppercase">
+        {label}
+      </span>
       {note === undefined ? null : (
         <span className="ml-auto font-mono text-[10.5px] whitespace-nowrap text-faint">{note}</span>
       )}

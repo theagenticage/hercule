@@ -139,13 +139,12 @@ function Threads(): JSX.Element {
             </Row>
           </>
         )}
-        <Row label="Access mode">
+        {/* The four mode words are whole words and a segment never breaks one,
+            so they need more than the value column: the row stands with its
+            label above it and the control across the card. */}
+        <Row label="Access mode" wide>
           <SegmentedControl
             aria-label="Access mode"
-            // The four mode words are too long for one row of this column, and
-            // a segment never breaks a word: they wrap as whole words instead,
-            // two to a row.
-            className="flex-wrap [&>button]:flex-none"
             value={defaults.accessMode}
             onValueChange={(next) => {
               save({ user: { "thread.accessMode": next as AccessMode } });

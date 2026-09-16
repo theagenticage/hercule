@@ -120,7 +120,8 @@ export function ProjectPicker({
         }}
         className="h-fit w-[520px] max-w-[92vw] rounded-card border border-line bg-raised p-1.5 shadow-lift outline-none"
       >
-        <div className="flex items-baseline gap-2 px-2 pt-1.5 pb-[5px]">
+        {/* The hint ends 20px from the card's own edge, as the prototype's does. */}
+        <div className="flex items-baseline gap-2 px-2 pt-1.5 pr-3.5 pb-[5px]">
           <span className="text-label font-emph tracking-[0.1em] text-faint uppercase">
             New thread in
           </span>
