@@ -176,7 +176,7 @@ export const connection = HttpApiGroup.make("connection")
     HttpApiEndpoint.delete("delete", "/connections/:id", {
       params: { id: Id },
       success: Schema.Struct({}),
-      error: [Unauthenticated, Forbidden, Validation, NotFound, Internal],
+      error: [Unauthenticated, Forbidden, Validation, NotFound, InvalidState, Internal],
     }),
     HttpApiEndpoint.post("setCredentials", "/connections/:id/credentials", {
       params: { id: Id },

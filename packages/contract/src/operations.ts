@@ -97,6 +97,33 @@ const TABLE = {
   "project.update": { requires: "project.write", method: "PATCH", path: "/api/v1/projects/:id" },
   "project.delete": { requires: "project.write", method: "DELETE", path: "/api/v1/projects/:id" },
 
+  "resource.query": { requires: "resource.read", method: "GET", path: "/api/v1/resources" },
+  "resource.read": { requires: "resource.read", method: "GET", path: "/api/v1/resources/:id" },
+  "resource.create": { requires: "resource.write", method: "POST", path: "/api/v1/resources" },
+  "resource.update": {
+    requires: "resource.write",
+    method: "PATCH",
+    path: "/api/v1/resources/:id",
+  },
+  "resource.delete": {
+    requires: "resource.write",
+    method: "DELETE",
+    path: "/api/v1/resources/:id",
+  },
+
+  "workspace.query": { requires: "workspace.read", method: "GET", path: "/api/v1/workspaces" },
+  "workspace.read": { requires: "workspace.read", method: "GET", path: "/api/v1/workspaces/:id" },
+  "workspace.provision": {
+    requires: "workspace.write",
+    method: "POST",
+    path: "/api/v1/workspaces",
+  },
+  "workspace.dispose": {
+    requires: "workspace.write",
+    method: "DELETE",
+    path: "/api/v1/workspaces/:id",
+  },
+
   "event.query": { requires: "event.read", method: "GET", path: "/api/v1/events" },
   "event.read": { requires: "event.read", method: "GET", path: "/api/v1/events/:id" },
 

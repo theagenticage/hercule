@@ -8,6 +8,7 @@ export {
   CORE_OWNER,
   Secrets,
   secretsLayer,
+  type SecretDecryptError,
   type SecretNameError,
   type SecretNameRef,
   type SecretOwner,

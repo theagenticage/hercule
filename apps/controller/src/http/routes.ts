@@ -38,6 +38,8 @@ import { Secret, SecretLayer } from "../secrets";
 import { SessionService } from "../sessions";
 import { SettingsOperations, SettingsOperationsLayer } from "../settings";
 import { ProjectService, ProjectServiceLayer } from "../projects";
+import { ResourceService, ResourceServiceLayer } from "../resources";
+import { WorkspaceService } from "../workspaces";
 import { ProviderService } from "../providers";
 import { RunnerJoinLayer, RunnerService, RunnerServiceLayer } from "../runners";
 import { Setup, SetupLayer } from "../setup";
@@ -193,6 +195,35 @@ const projectRoutes = HttpApiBuilder.group(api, "project", (handlers) =>
         operation(projects.update({ id: params.id, ...payload })),
       )
       .handle("delete", ({ params }) => operation(projects.delete(params)));
+  }),
+);
+
+const resourceRoutes = HttpApiBuilder.group(api, "resource", (handlers) =>
+  Effect.gen(function* () {
+    const resources = yield* ResourceService;
+    return handlers
+      .handle("query", ({ query }) => operation(resources.query(query)))
+      .handle("read", ({ params }) => operation(resources.read(params)))
+      .handle("create", ({ payload }) => operation(resources.create(payload)))
+      .handle("update", ({ params, payload }) =>
+        operation(resources.update({ id: params.id, ...payload })),
+      )
+      .handle("delete", ({ params }) => operation(resources.delete(params)));
+  }),
+);
+
+/**
+ * The workspace service is not in `operationLayers`: it reaches the session
+ * service, which must be the one the boot built.
+ */
+const workspaceRoutes = HttpApiBuilder.group(api, "workspace", (handlers) =>
+  Effect.gen(function* () {
+    const workspaces = yield* WorkspaceService;
+    return handlers
+      .handle("query", ({ query }) => operation(workspaces.query(query)))
+      .handle("read", ({ params }) => operation(workspaces.read(params)))
+      .handle("provision", ({ payload }) => operation(workspaces.provision(payload)))
+      .handle("dispose", ({ params }) => operation(workspaces.dispose(params)));
   }),
 );
 
@@ -357,6 +388,7 @@ export const operationLayers = Layer.mergeAll(
   ProfilesLayer,
   TaskServiceLayer,
   ProjectServiceLayer,
+  ResourceServiceLayer,
   RunnerServiceLayer,
   RunnerJoinLayer,
   EventServiceLayer,
@@ -376,6 +408,8 @@ export const handlerLayers = Layer.mergeAll(
   controllerRoutes,
   taskRoutes,
   projectRoutes,
+  resourceRoutes,
+  workspaceRoutes,
   connectionRoutes,
   eventRoutes,
   runnerRoutes,

@@ -27,6 +27,7 @@ const SESSION: Session = {
   instanceId: "instance-claude-code",
   runnerId: "r-local",
   workspaceId: null,
+  projectId: null,
   requestedAccessMode: "approval-required",
   accessMode: "approval-required",
   nativeSessionId: null,
@@ -55,7 +56,6 @@ describe("submission: a draft thread", () => {
         accessMode: "approval-required",
         runnerId: "r-local",
         permissionProfileId: "p-unrestricted",
-        workspaceId: null,
       },
     });
   });
@@ -77,7 +77,6 @@ describe("submission: a draft thread", () => {
         accessMode: "full-access",
         runnerId: "r-remote",
         permissionProfileId: "p-unrestricted",
-        workspaceId: null,
       },
     });
   });

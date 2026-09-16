@@ -22,8 +22,16 @@ import {
   SessionStart,
   SessionStop,
 } from "./sessions";
+import {
+  CredentialAnswer,
+  CredentialRequest,
+  WorkspaceDispose,
+  WorkspaceProvision,
+  WorkspaceReport,
+} from "./workspaces";
 
 export * from "./sessions";
+export * from "./workspaces";
 export { Fact, InstanceId, MAX_FACT_LENGTH, Sequenced };
 
 export const PROTOCOL_VERSION = 1;
@@ -438,6 +446,8 @@ export const RunnerToController = Schema.Union([
   SessionEvent,
   SessionInputResult,
   SessionsReport,
+  WorkspaceReport,
+  CredentialRequest,
   Goodbye,
 ]);
 
@@ -515,6 +525,9 @@ export const ControllerToRunner = Schema.Union([
   SessionInput,
   SessionInterrupt,
   SessionRespond,
+  WorkspaceProvision,
+  WorkspaceDispose,
+  CredentialAnswer,
 ]);
 
 export type ControllerToRunner = Schema.Schema.Type<typeof ControllerToRunner>;

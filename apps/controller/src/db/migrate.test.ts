@@ -29,7 +29,11 @@ const TABLES = [
   "tasks",
   "projects",
   "task_provenance",
-  "project_resources",
+  // Resources, the working areas they are checked out into, and the checkouts
+  // themselves.
+  "resources",
+  "workspaces",
+  "checkouts",
 ];
 
 type DatabaseEffect<A, E> = Effect.Effect<A, E, SqlClient.SqlClient | FileSystem>;
@@ -267,5 +271,77 @@ describe("ambient transactions", () => {
       }),
     );
     expect(found).toEqual([]);
+  });
+});
+
+/**
+ * What the resources migration has to leave behind.
+ *
+ * The set is asserted through the same migrated in-memory database every
+ * controller test runs on, so a database that came up without these is a
+ * failure here rather than a failure everywhere.
+ */
+describe("resources, workspaces and checkouts", () => {
+  const columnsOf = (table: string) =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      const rows = yield* sql<{
+        readonly name: string;
+      }>`SELECT name FROM pragma_table_info(${table})`;
+      return rows.map((row) => row.name);
+    });
+
+  /** Every foreign key in the database, as the table it leaves and the one it points at. */
+  const foreignKeys = Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    const tables = yield* sql<{
+      readonly name: string;
+    }>`SELECT name FROM sqlite_master WHERE type = 'table'`;
+    const found: Array<{ from: string; column: string; to: string }> = [];
+    for (const table of tables) {
+      const keys = yield* sql<{
+        readonly table: string;
+        readonly from: string;
+      }>`SELECT "table", "from" FROM pragma_foreign_key_list(${table.name})`;
+      for (const key of keys) {
+        found.push({ from: table.name, column: key.from, to: key.table });
+      }
+    }
+    return found;
+  });
+
+  it("carries a migration past the sixteen that were there before", () => {
+    expect(binaryVersion).toBeGreaterThanOrEqual(17);
+  });
+
+  it("gives a session the project it belongs to", async () => {
+    const columns = await Effect.runPromise(
+      columnsOf("sessions").pipe(Effect.provide(TestDatabase)),
+    );
+    expect(columns).toContain("project_id");
+    expect(columns).toContain("workspace_id");
+  });
+
+  it("points a workspace's checkouts at the resources and the workspace they belong to", async () => {
+    const keys = await Effect.runPromise(foreignKeys.pipe(Effect.provide(TestDatabase)));
+    const from = (table: string) => keys.filter((key) => key.from === table);
+
+    expect(
+      from("checkouts")
+        .map((key) => key.to)
+        .sort(),
+    ).toEqual(["resources", "workspaces"]);
+    expect(from("workspaces").map((key) => key.to)).toContain("runners");
+  });
+
+  it("gives the project-to-resource join the foreign key it never had", async () => {
+    const keys = await Effect.runPromise(foreignKeys.pipe(Effect.provide(TestDatabase)));
+    // The table may have been replaced rather than altered, so what is asserted
+    // is the path: some join row points at a project and at a resource.
+    const joins = keys.filter((key) => key.column === "resource_id" && key.to === "resources");
+    expect(joins.length, "no table points its resource_id at resources").toBeGreaterThan(0);
+    const owners = new Set(joins.map((key) => key.from));
+    const toProjects = keys.filter((key) => owners.has(key.from) && key.to === "projects");
+    expect(toProjects.length, "the join does not point at a project").toBeGreaterThan(0);
   });
 });

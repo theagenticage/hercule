@@ -136,6 +136,8 @@ export const ExitReason = Schema.Literals([
   "crash",
   "inactivity_timeout",
   "absolute_timeout",
+  /** The workspace the session was waiting for could not be made. */
+  "workspace_failed",
 ]);
 
 export type ExitReason = Schema.Schema.Type<typeof ExitReason>;
@@ -299,7 +301,14 @@ const event = <const Tag extends string, Fields extends Schema.Struct.Fields>(
 
 const SessionStarted = event("session.started", {});
 
-const SessionExited = event("session.exited", { reason: ExitReason });
+/**
+ * `message` carries what the exit was, where the reason alone does not say it:
+ * a workspace that could not be made says why in the machine's own words.
+ */
+const SessionExited = event("session.exited", {
+  reason: ExitReason,
+  message: Schema.optionalKey(Message),
+});
 
 /**
  * A completion the controller cannot bracket against its start is not a turn
@@ -403,6 +412,23 @@ export const SessionStart = Schema.Struct({
   providerId: Fact,
   config: Schema.Json,
   spec: SessionSpec,
+  /**
+   * The credential this session proves itself with when it asks for a git
+   * credential, and what the runner puts in its environment. Top-level rather
+   * than in the spec: the spec is stored byte for byte on the session row, and
+   * a token must never land in the database.
+   */
+  sessionToken: Schema.optionalKey(Fact),
+  /** `GH_TOKEN` for this session, where a GitHub Connection backs it. */
+  ghToken: Schema.optionalKey(Fact),
+  /**
+   * Who the session commits as: the account its Connection belongs to. Absent
+   * where no Connection backs it, and the machine then leaves git's own
+   * identity alone rather than inventing one.
+   */
+  gitIdentity: Schema.optionalKey(Schema.Struct({ name: Fact, email: Fact })),
+  /** The branch the session's checkout is switched to before the harness starts. */
+  checkoutBranch: Schema.optionalKey(Fact),
 });
 
 export type SessionStart = Schema.Schema.Type<typeof SessionStart>;

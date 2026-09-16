@@ -36,6 +36,9 @@ export interface StoredSession {
   readonly instanceId: string;
   readonly runnerId: string;
   readonly workspaceId: string | null;
+  readonly projectId: string | null;
+  /** The GitHub account this session pushes as, settled when it was spawned. */
+  readonly githubConnectionId: string | null;
   readonly requestedAccessMode: AccessMode;
   readonly accessMode: AccessMode;
   readonly nativeSessionId: string | null;
@@ -56,6 +59,11 @@ export interface NewSession {
   readonly instanceId: string;
   readonly runnerId: string;
   readonly workspaceId: string | null;
+  readonly projectId: string | undefined;
+  /** The branch a shared checkout is switched to before the harness starts. */
+  readonly checkoutBranch: string | undefined;
+  /** The GitHub account this session pushes as, settled when it was spawned. */
+  readonly githubConnectionId: string | undefined;
   readonly requestedAccessMode: AccessMode;
   readonly accessMode: AccessMode;
   /** The encoded `SessionSpec`, stored as the exact string that goes on the wire. */
@@ -80,6 +88,8 @@ interface SessionRow {
   readonly instance_id: Uint8Array;
   readonly runner_id: Uint8Array;
   readonly workspace_id: Uint8Array | null;
+  readonly project_id: Uint8Array | null;
+  readonly github_connection_id: Uint8Array | null;
   readonly requested_access_mode: string;
   readonly access_mode: string;
   readonly native_session_id: string | null;
@@ -94,14 +104,28 @@ interface SessionRow {
   readonly last_activity_at: string;
 }
 
-/** Spec 06 section 4.1's derived `resumable`, in one expression. */
-const RESUMABLE =
-  "(status = 'exited' AND native_session_id IS NOT NULL AND EXISTS " +
-  "(SELECT 1 FROM runners WHERE runners.id = sessions.runner_id " +
-  "AND runners.lifecycle <> 'retired')) AS resumable";
+/**
+ * Whether a session can be picked up again, as one SQL expression over a row of
+ * `sessions` under the alias given. Three things have to hold: the process is
+ * gone, the provider-native transcript is still there, and the machine and the
+ * working area it was in are both still there to open it in.
+ *
+ * Exported because the workspace sweep asks the same question about the threads
+ * living in a workspace, and two spellings of "resumable" would be two
+ * different answers.
+ */
+export const resumableWhere = (alias: string): string =>
+  `${alias}.status = 'exited' AND ${alias}.native_session_id IS NOT NULL ` +
+  `AND EXISTS (SELECT 1 FROM runners WHERE runners.id = ${alias}.runner_id ` +
+  `AND runners.lifecycle <> 'retired') ` +
+  `AND (${alias}.workspace_id IS NULL OR EXISTS (SELECT 1 FROM workspaces ` +
+  `WHERE workspaces.id = ${alias}.workspace_id AND workspaces.status = 'ready'))`;
+
+const RESUMABLE = `(${resumableWhere("sessions")}) AS resumable`;
 
 const COLUMNS =
-  "id, title, permission_profile_id, instance_id, runner_id, workspace_id, requested_access_mode, " +
+  "id, title, permission_profile_id, instance_id, runner_id, workspace_id, project_id, " +
+  "github_connection_id, requested_access_mode, " +
   `access_mode, native_session_id, model_selection, parent_session_id, status, ` +
   `open_request, created_at, started_at, exited_at, ` +
   `last_activity_at, ${RESUMABLE}`;
@@ -113,6 +137,9 @@ const toSession = (row: SessionRow): StoredSession => ({
   instanceId: uuidToString(row.instance_id),
   runnerId: uuidToString(row.runner_id),
   workspaceId: row.workspace_id === null ? null : uuidToString(row.workspace_id),
+  projectId: row.project_id === null ? null : uuidToString(row.project_id),
+  githubConnectionId:
+    row.github_connection_id === null ? null : uuidToString(row.github_connection_id),
   requestedAccessMode: row.requested_access_mode as AccessMode,
   accessMode: row.access_mode as AccessMode,
   nativeSessionId: row.native_session_id,
@@ -143,6 +170,16 @@ const transcriptScope = (sessionId: string, direction: SortDirection): CursorSco
   field: `position:${sessionId}`,
   direction,
 });
+
+/** One queued session, with everything the frame that starts it carries. */
+export interface QueuedSession {
+  readonly id: string;
+  readonly spec: string;
+  readonly checkoutBranch: string | null;
+  readonly githubConnectionId: string | null;
+  readonly providerId: string;
+  readonly config: unknown;
+}
 
 /** Where a session's ingest stands: see `ingestState`. */
 export interface IngestState {
@@ -183,14 +220,21 @@ const make = Effect.gen(function* () {
         const parent =
           session.parentSessionId === undefined ? null : uuidFromString(session.parentSessionId);
         const workspace = session.workspaceId === null ? null : uuidFromString(session.workspaceId);
+        const project = session.projectId === undefined ? null : uuidFromString(session.projectId);
+        const connection =
+          session.githubConnectionId === undefined
+            ? null
+            : uuidFromString(session.githubConnectionId);
         yield* sql`
           INSERT INTO sessions (id, title, permission_profile_id, instance_id, runner_id,
-                                workspace_id, requested_access_mode, access_mode, spec,
+                                workspace_id, project_id, checkout_branch, github_connection_id,
+                                requested_access_mode, access_mode, spec,
                                 model_selection, parent_session_id, status,
                                 created_at, last_activity_at)
           VALUES (${id}, ${session.title}, ${uuidFromString(session.permissionProfileId)},
                   ${uuidFromString(session.instanceId)}, ${uuidFromString(session.runnerId)},
-                  ${workspace}, ${session.requestedAccessMode}, ${session.accessMode},
+                  ${workspace}, ${project}, ${session.checkoutBranch ?? null}, ${connection},
+                  ${session.requestedAccessMode}, ${session.accessMode},
                   ${session.spec}, ${JSON.stringify(session.modelSelection)}, ${parent},
                   'queued', ${session.at}, ${session.at})
         `;
@@ -201,6 +245,8 @@ const make = Effect.gen(function* () {
           instanceId: session.instanceId,
           runnerId: session.runnerId,
           workspaceId: session.workspaceId,
+          projectId: session.projectId ?? null,
+          githubConnectionId: session.githubConnectionId ?? null,
           requestedAccessMode: session.requestedAccessMode,
           accessMode: session.accessMode,
           nativeSessionId: null,
@@ -436,25 +482,26 @@ const make = Effect.gen(function* () {
     oldestQueued: (
       runnerId: string,
       limit: number,
-    ): Effect.Effect<
-      ReadonlyArray<{
-        readonly id: string;
-        readonly spec: string;
-        readonly providerId: string;
-        readonly config: unknown;
-      }>,
-      SqlError
-    > =>
+    ): Effect.Effect<ReadonlyArray<QueuedSession>, SqlError> =>
       Effect.map(
         sql<{
           readonly id: Uint8Array;
           readonly spec: string;
+          readonly checkout_branch: string | null;
+          readonly github_connection_id: Uint8Array | null;
           readonly provider_id: string;
           readonly config: string;
         }>`
-          SELECT s.id, s.spec, pi.provider_id, pi.config
+          SELECT s.id, s.spec, s.checkout_branch, s.github_connection_id,
+                 pi.provider_id, pi.config
           FROM sessions s JOIN provider_instances pi ON pi.id = s.instance_id
           WHERE s.runner_id = ${uuidFromString(runnerId)} AND s.status = 'queued'
+            -- A session waits for the working area it asked for: telling the
+            -- machine to start it before the workspace stands would hand the
+            -- harness a directory that is not there yet.
+            AND (s.workspace_id IS NULL
+                 OR EXISTS (SELECT 1 FROM workspaces w
+                            WHERE w.id = s.workspace_id AND w.status = 'ready'))
           ORDER BY s.created_at ASC, s.id ASC
           LIMIT ${limit}
         `,
@@ -462,9 +509,23 @@ const make = Effect.gen(function* () {
           rows.map((row) => ({
             id: uuidToString(row.id),
             spec: row.spec,
+            checkoutBranch: row.checkout_branch,
+            githubConnectionId:
+              row.github_connection_id === null ? null : uuidToString(row.github_connection_id),
             providerId: row.provider_id,
             config: JSON.parse(row.config) as unknown,
           })),
+      ),
+
+    /** The sessions living in a workspace: what a workspace that failed ends. */
+    liveInWorkspace: (workspaceId: string): Effect.Effect<ReadonlyArray<string>, SqlError> =>
+      Effect.map(
+        sql<{ readonly id: Uint8Array }>`
+          SELECT id FROM sessions
+          WHERE workspace_id = ${uuidFromString(workspaceId)} AND status <> 'exited'
+          ORDER BY created_at, id
+        `,
+        (rows) => rows.map((row) => uuidToString(row.id)),
       ),
 
     /**

@@ -24,6 +24,7 @@ import type { ProviderDefinition } from "@hydra/plugin-host";
 import {
   SessionSpec,
   type AccessMode,
+  type WorkspaceProvision,
   type Delivery,
   type ModelSelection,
   type ProviderEvent,
@@ -48,7 +49,9 @@ import {
   SESSION_RESPOND_FIELDS,
   SESSION_UPDATE_FIELDS,
   SessionSpawnInput,
+  type CheckoutForm,
   type SessionSelection,
+  type SpawnWorkspace,
   TRANSCRIPT_SORT_FIELDS,
   validation,
   validationOf,
@@ -62,16 +65,28 @@ import {
   type Validation,
 } from "@hydra/contract";
 import { currentUser, requireGrant, SYSTEM_ACTOR, USER_ACTOR } from "../actor";
+import { sessionTokenRepository } from "../credentials";
 import { announce, nowIso, pageInput, refuseCursor, withTransaction, type Page } from "../db";
 import { AuditLog } from "../events";
 import { PermissionProfiles, type GrantsError } from "../permissions";
 import { PluginHost } from "../plugins";
 import { providerRepository, type StoredSnapshot } from "../providers";
+import { repoNameOf, resourceRepository, type StoredRepo } from "../resources";
 import { RunnerPresence, runnerRepository, type Connection, type SessionTraffic } from "../runners";
+import { Secrets } from "../secrets";
 import { Settings, type ScopeSettings, type SettingError } from "../settings";
+import {
+  gitCredentials,
+  gitIdentityOf,
+  provisionFrame,
+  workspaceRepository,
+  type CheckoutPlan,
+  type GitCredential,
+  type StoredWorkspace,
+} from "../workspaces";
 import { inputRepository, type StoredInput } from "./inputs";
 import { validatedOptions } from "./options";
-import { sessionRepository, type StoredSession } from "./repository";
+import { sessionRepository, type QueuedSession, type StoredSession } from "./repository";
 import { fold, openRequestAfter, track, type Tracked } from "./stream";
 
 const QueryInput = Schema.Struct({
@@ -236,6 +251,29 @@ const NO_SUCH_RUNNER = "no such runner";
 
 const NO_SUCH_PROFILE = "no such permission profile";
 
+const NO_SUCH_RESOURCE = "no such resource";
+
+const NOT_A_REPO = "only a repo is checked out; a folder and a mailbox are records";
+
+const NOT_IN_PROJECT = "that repo is not filed under that project";
+
+const NO_SUCH_PROJECT_NAMED = "no such project";
+
+const REPO_TWICE = "a workspace holds one working copy of a repo: name each one once";
+
+const SAME_NAME = "two of those repos are called the same thing, so they cannot sit side by side";
+
+const NO_SUCH_WORKSPACE = "no such workspace";
+
+/** Why a thread cannot be picked up again: the files it worked in are gone. */
+const workspaceGone = (workspace: StoredWorkspace): string =>
+  `that session's workspace is ${workspace.status}, so there is nothing left to resume it in`;
+
+const WORKSPACE_PINS =
+  "that workspace is on another machine; a session runs where its workspace is";
+
+const WORKSPACE_NOT_READY = "that workspace is not ready to be worked in";
+
 /** The shipped profile a thread takes when the user has chosen none (spec 02 Thread). */
 const DEFAULT_PROFILE = "unrestricted";
 
@@ -284,6 +322,22 @@ const titleOf = (prompt: string): string => {
   return line.trim().slice(0, MAX_TITLE_LENGTH);
 };
 
+/**
+ * The branch a thread's own worktree is made on, named after the thread by the
+ * last eight characters of its id: a UUIDv7 opens with a timestamp, so two
+ * threads started in the same millisecond share their first eight and would ask
+ * one machine for one branch twice.
+ */
+const threadBranch = (sessionId: string): string => `hydra/run-${sessionId.slice(-8)}`;
+
+/** One working copy a spawn brings into being, before its row exists. */
+interface PlannedCheckout {
+  readonly resource: StoredRepo;
+  readonly form: CheckoutForm;
+  readonly subdirectory: string | null;
+  readonly baseBranch: string | undefined;
+}
+
 type ReadError = Unauthenticated | Forbidden | Validation | SqlError;
 
 type SpawnError = ReadError | InvalidState | SettingError | GrantsError | Schema.SchemaError;
@@ -300,6 +354,10 @@ const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const sessions = yield* sessionRepository;
   const inputs = yield* inputRepository;
+  const workspaces = yield* workspaceRepository;
+  const resources = yield* resourceRepository;
+  const credentials = yield* gitCredentials;
+  const tokens = yield* sessionTokenRepository;
   const instances = yield* providerRepository;
   const runners = yield* runnerRepository;
   const presence = yield* RunnerPresence;
@@ -422,6 +480,31 @@ const make = Effect.gen(function* () {
       return snapshot;
     });
 
+  /**
+   * The workspace a spawn asked to join, and the machine it pins the session
+   * to. A workspace that is still being made is refused rather than joined:
+   * the harness would be handed a directory that does not exist yet.
+   */
+  const standingWorkspace = (
+    workspaceId: string,
+    requestedRunnerId: string | undefined,
+  ): Effect.Effect<StoredWorkspace, Validation | InvalidState | SqlError> =>
+    Effect.gen(function* () {
+      const found = yield* workspaces.one(workspaceId);
+      if (Option.isNone(found)) {
+        return yield* Effect.fail(
+          validation([{ path: ["workspace", "workspaceId"], message: NO_SUCH_WORKSPACE }]),
+        );
+      }
+      if (requestedRunnerId !== undefined && requestedRunnerId !== found.value.runnerId) {
+        return yield* Effect.fail(validation([{ path: ["runnerId"], message: WORKSPACE_PINS }]));
+      }
+      if (found.value.status !== "ready") {
+        return yield* Effect.fail(invalidState(WORKSPACE_NOT_READY));
+      }
+      return found.value;
+    });
+
   /** Refuses a permissionProfileId naming no profile, before it is trusted as this session's. */
   const requireProfile = (
     profileId: string,
@@ -507,7 +590,17 @@ const make = Effect.gen(function* () {
     Effect.gen(function* () {
       if (session.status !== "exited") return yield* Effect.fail(invalidState(STILL_LIVE));
       if (session.nativeSessionId === null) return yield* Effect.fail(invalidState(NO_TRANSCRIPT));
-      if (!session.resumable) return yield* Effect.fail(invalidState(RETIRED));
+      if (!session.resumable) {
+        // A thread's transcript is keyed to the working area it ran in, so a
+        // workspace that is gone is a session that cannot be picked up - and
+        // the user needs to read which one it was, not a word about machines.
+        const workspace =
+          session.workspaceId === null ? Option.none() : yield* workspaces.one(session.workspaceId);
+        if (Option.isSome(workspace) && workspace.value.status !== "ready") {
+          return yield* Effect.fail(invalidState(workspaceGone(workspace.value)));
+        }
+        return yield* Effect.fail(invalidState(RETIRED));
+      }
       // `resumable` says the transcript is still there; this says the machine
       // will not open it. Whether it can be reached right now is dispatch's to
       // decide: unreachable queues the session rather than refusing it.
@@ -710,6 +803,9 @@ const make = Effect.gen(function* () {
             at,
           );
           yield* ending(gone);
+          // The credential dies with the process it was minted for, however
+          // that process turned out to be gone.
+          yield* Effect.forEach(gone, (id) => tokens.revoke(id, at), { discard: true });
           yield* Effect.forEach(
             gone,
             (id) =>
@@ -726,6 +822,25 @@ const make = Effect.gen(function* () {
       );
       yield* presence.markSessionsReported(runnerId, connection);
     });
+
+  /**
+   * The GitHub account a session starts with: the token it pushes with and the
+   * identity it commits as. A connection that will not answer is logged and
+   * left out - a session starting without `GH_TOKEN` is better than one that
+   * does not start.
+   */
+  const githubAccountOf = (connectionId: string): Effect.Effect<GitCredential | undefined> =>
+    Effect.map(
+      Effect.catchCause(
+        credentials.credentialOf(connectionId),
+        (cause): Effect.Effect<Option.Option<GitCredential>> =>
+          Effect.as(
+            Effect.logError("A session's GitHub connection could not be read", cause),
+            Option.none(),
+          ),
+      ),
+      Option.getOrUndefined,
+    );
 
   /**
    * Moves this runner's oldest queued sessions to `starting`, as many as its
@@ -754,14 +869,25 @@ const make = Effect.gen(function* () {
           if (room <= 0) return [];
           const queued = yield* sessions.oldestQueued(runnerId, room);
           const at = yield* nowIso;
+          const starting: Array<{ readonly row: QueuedSession; readonly token: string }> = [];
           for (const row of queued) {
             yield* sessions.moved(row.id, "starting", at);
+            // Minted with the move it belongs to, and dead when this session
+            // exits: what the harness proves itself with when it asks for a
+            // git credential. A resume mints a fresh one.
+            starting.push({ row, token: yield* tokens.mint(row.id, at) });
             yield* announce({ _tag: "record", topic: "session", id: row.id, kind: "updated" });
           }
-          return queued;
+          return starting;
         }),
       );
-      for (const row of ready) {
+      for (const { row, token } of ready) {
+        // Read now rather than stored: a token is never written down anywhere
+        // but the frame that carries it to the machine.
+        const account =
+          row.githubConnectionId === null
+            ? undefined
+            : yield* githubAccountOf(row.githubConnectionId);
         const start: SessionStart = {
           _tag: "sessionStart",
           sessionId: row.id,
@@ -771,6 +897,11 @@ const make = Effect.gen(function* () {
           // same codec at insert, so a decode failure means a spec field's
           // codec changed underneath a row already queued with the old one.
           spec: yield* Effect.orDie(decodeSpec(JSON.parse(row.spec))),
+          sessionToken: token,
+          ...(account === undefined
+            ? {}
+            : { ghToken: account.token, gitIdentity: gitIdentityOf(account.login) }),
+          ...(row.checkoutBranch === null ? {} : { checkoutBranch: row.checkoutBranch }),
         };
         if (!(yield* presence.tell(runnerId, start))) {
           yield* withTransaction(
@@ -799,6 +930,7 @@ const make = Effect.gen(function* () {
         const at = yield* nowIso;
         const { ended, toStop } = yield* sessions.endOnRunner(runnerId, at);
         yield* ending(ended);
+        yield* Effect.forEach(ended, (id) => tokens.revoke(id, at), { discard: true });
         yield* Effect.forEach(
           ended,
           (id) =>
@@ -811,6 +943,50 @@ const make = Effect.gen(function* () {
           { discard: true },
         );
         return toStop;
+      }),
+    );
+
+  /**
+   * Ends every session waiting on a workspace that could not be made. They
+   * never started, so there is no harness to stop and nothing to tell the
+   * machine; what the user needs is the reason, which is the machine's own
+   * words, recorded on the session's own stream where the exit is read.
+   */
+  const endForWorkspace = (
+    workspaceId: string,
+    message: string | null,
+  ): Effect.Effect<void, SqlError> =>
+    withTransaction(
+      sql,
+      Effect.gen(function* () {
+        const at = yield* nowIso;
+        const waiting = yield* sessions.liveInWorkspace(workspaceId);
+        for (const id of waiting) {
+          yield* sessions.append(id, {
+            seq: 0,
+            at,
+            event: {
+              _tag: "session.exited",
+              eventId: crypto.randomUUID(),
+              sessionId: id,
+              at,
+              reason: "workspace_failed",
+              ...(message === null ? {} : { message }),
+            },
+          });
+          yield* sessions.moved(id, "exited", at);
+          yield* tokens.revoke(id, at);
+          yield* audit.append({
+            kind: "session.stopped",
+            actor: SYSTEM_ACTOR,
+            payload: { sessionId: id, workspaceId, reason: "workspace_failed" },
+            at,
+          });
+          // The exit is a row on this session's own stream, so whoever is
+          // watching that session has to be told about that session.
+          yield* announce({ _tag: "transcript", sessionId: id });
+        }
+        yield* ending(waiting, message ?? undefined);
       }),
     );
 
@@ -857,6 +1033,14 @@ const make = Effect.gen(function* () {
           if (folded.rows.length > 0) {
             yield* announce({ _tag: "transcript", sessionId: id });
           }
+          // A session starting or ending is work in its workspace, which is
+          // what keeps that workspace from expiring under it.
+          if (event._tag === "session.started" || event._tag === "session.exited") {
+            yield* workspaces.markUsedBySession(id, at);
+          }
+          // Nothing the exited process was given works after it: the credential
+          // it proved itself with dies with it.
+          if (event._tag === "session.exited") yield* tokens.revoke(id, at);
           // Written with the move the same event causes: a session that reads
           // `idle` has the provider-native id that made it so.
           const native = nativeIdIn(event);
@@ -924,13 +1108,176 @@ const make = Effect.gen(function* () {
     readonly runnerId: string;
     readonly requestedAccessMode: AccessMode;
     readonly parentSessionId: string | undefined;
-    /** Everything the machine is told, and the source of what the row stores. */
+    /**
+     * Everything the machine is told, and the source of what the row stores.
+     * Its `workspaceId` is what the session keeps where the wish below brings
+     * no workspace of its own: a fork stays in the one its parent was in.
+     */
     readonly spec: SessionSpec;
     readonly prompt: string;
     readonly kind: "session.spawned" | "session.continued";
     /** What the audit entry records beyond the new session's own id. */
     readonly payload: Readonly<Record<string, unknown>>;
+    readonly projectId: string | undefined;
+    /** Where the session is to work; absent keeps the workspace the spec names. */
+    readonly workspace: SpawnWorkspace | undefined;
+    /** The GitHub account a session with no workspace of its own pushes as. */
+    readonly fallbackGithubConnectionId: string | undefined;
   }
+
+  /** A thread is filed under a project that exists, or under none at all. */
+  const liveProject = (projectId: string): Effect.Effect<void, Validation | SqlError> =>
+    Effect.gen(function* () {
+      const live = yield* resources.liveProjects([projectId]);
+      if (live.length === 0) {
+        return yield* Effect.fail(
+          validation([{ path: ["projectId"], message: NO_SUCH_PROJECT_NAMED }]),
+        );
+      }
+    });
+
+  /** The repo a checkout is made of, held to what a checkout needs of it. */
+  const checkoutable = (
+    resourceId: string,
+    projectId: string | undefined,
+  ): Effect.Effect<StoredRepo, Validation | SqlError> =>
+    Effect.gen(function* () {
+      const found = yield* resources.one(resourceId);
+      if (Option.isNone(found)) {
+        return yield* Effect.fail(validation([{ path: ["workspace"], message: NO_SUCH_RESOURCE }]));
+      }
+      if (found.value.kind !== "repo") {
+        return yield* Effect.fail(validation([{ path: ["workspace"], message: NOT_A_REPO }]));
+      }
+      if (projectId !== undefined) {
+        const filed = yield* resources.projectsOf([resourceId]);
+        if (!(filed.get(resourceId) ?? []).includes(projectId)) {
+          return yield* Effect.fail(validation([{ path: ["projectId"], message: NOT_IN_PROJECT }]));
+        }
+      }
+      return found.value;
+    });
+
+  /**
+   * What the workspace half of a spawn writes, inside the transaction that
+   * writes the session: the repos are read, the workspace row is opened, and
+   * the checkouts follow once the session has an id to name their branch after.
+   */
+  const plannedWorkspace = (
+    open: Opening,
+    at: string,
+  ): Effect.Effect<
+    {
+      readonly workspaceId: string | null;
+      readonly checkoutBranch: string | undefined;
+      readonly designatedConnectionId: string | null;
+      readonly created:
+        | {
+            readonly workspace: StoredWorkspace;
+            readonly checkouts: ReadonlyArray<PlannedCheckout>;
+          }
+        | undefined;
+    },
+    Validation | SqlError
+  > =>
+    Effect.gen(function* () {
+      const wish = open.workspace;
+      // Nothing new to make: the session joins the workspace it was pointed at,
+      // or stays in the one the spec already names, which is what a fork does.
+      if (wish === undefined || wish.kind === "existing") {
+        const joined = wish === undefined ? open.spec.workspaceId : wish.workspaceId;
+        if (joined === null) {
+          return {
+            workspaceId: null,
+            checkoutBranch: undefined,
+            designatedConnectionId: null,
+            created: undefined,
+          };
+        }
+        const held = yield* workspaces.checkoutsOf([joined]);
+        const first = held.get(joined)?.[0];
+        const resource = first === undefined ? undefined : yield* resources.one(first.resourceId);
+        return {
+          workspaceId: joined,
+          checkoutBranch: undefined,
+          designatedConnectionId:
+            resource === undefined || Option.isNone(resource) ? null : resource.value.connectionId,
+          created: undefined,
+        };
+      }
+      if (wish.kind === "primary") {
+        const resource = yield* checkoutable(wish.resourceId, open.projectId);
+        const held = yield* workspaces.primaryOn(resource.id, open.runnerId);
+        if (Option.isSome(held)) {
+          return {
+            workspaceId: held.value.id,
+            checkoutBranch: wish.branch,
+            designatedConnectionId: resource.connectionId,
+            created: undefined,
+          };
+        }
+        // A primary that could not be made holds nothing: it is stood down and
+        // this one takes its place, in the transaction that opens the session.
+        yield* workspaces.supersedeFailedPrimary(resource.id, open.runnerId, at);
+        const workspace = yield* workspaces.insert({
+          runnerId: open.runnerId,
+          kind: "primary",
+          at,
+        });
+        return {
+          workspaceId: workspace.id,
+          checkoutBranch: wish.branch,
+          designatedConnectionId: resource.connectionId,
+          created: {
+            workspace,
+            // The shared checkout is a clone of the whole repo, on whatever
+            // branch it is already on.
+            checkouts: [{ resource, form: "clone", subdirectory: null, baseBranch: undefined }],
+          },
+        };
+      }
+      const repos = yield* Effect.forEach(wish.checkouts, (checkout) =>
+        Effect.map(checkoutable(checkout.resourceId, open.projectId), (resource) => ({
+          resource,
+          baseBranch: checkout.baseBranch,
+        })),
+      );
+      // Each working copy gets a directory of its own, named after the repo, so
+      // one repo twice and two repos of the same name are both a workspace that
+      // cannot be laid out.
+      const names = repos.map((repo) => repoNameOf(repo.resource.canonicalRemote));
+      if (new Set(repos.map((repo) => repo.resource.id)).size !== repos.length) {
+        return yield* Effect.fail(
+          validation([{ path: ["workspace", "checkouts"], message: REPO_TWICE }]),
+        );
+      }
+      if (repos.length > 1 && new Set(names).size !== names.length) {
+        return yield* Effect.fail(
+          validation([{ path: ["workspace", "checkouts"], message: SAME_NAME }]),
+        );
+      }
+      const workspace = yield* workspaces.insert({
+        runnerId: open.runnerId,
+        kind: "ephemeral",
+        at,
+      });
+      return {
+        workspaceId: workspace.id,
+        checkoutBranch: undefined,
+        designatedConnectionId: repos[0]?.resource.connectionId ?? null,
+        created: {
+          workspace,
+          checkouts: repos.map((repo, index) => ({
+            resource: repo.resource,
+            form: "worktree" as const,
+            // One repo sits at the root of the workspace; several sit side by
+            // side, each under the name it is known by.
+            subdirectory: repos.length > 1 ? (names[index] ?? null) : null,
+            baseBranch: repo.baseBranch,
+          })),
+        },
+      };
+    });
 
   /**
    * The row and its first input, and the entry that records it, in one
@@ -938,27 +1285,56 @@ const make = Effect.gen(function* () {
    * whether this runner has room for it right now, and it is the same
    * decision either way, so a fresh row takes it rather than a copy of it.
    */
-  const opening = (open: Opening): Effect.Effect<StoredSession, SqlError> =>
+  const opening = (open: Opening): Effect.Effect<StoredSession, Validation | SqlError> =>
     Effect.gen(function* () {
-      const stored = yield* withTransaction(
+      const { stored, frame } = yield* withTransaction(
         sql,
         Effect.gen(function* () {
           const at = yield* nowIso;
+          const planned = yield* plannedWorkspace(open, at);
+          const spec = { ...open.spec, workspaceId: planned.workspaceId } satisfies SessionSpec;
           const row = yield* sessions.insert({
             title: titleOf(open.prompt),
             permissionProfileId: open.permissionProfileId,
-            instanceId: open.spec.instanceId,
+            instanceId: spec.instanceId,
             runnerId: open.runnerId,
-            workspaceId: open.spec.workspaceId,
+            workspaceId: spec.workspaceId,
+            projectId: open.projectId,
+            checkoutBranch: planned.checkoutBranch,
+            // The workspace's own account where it has one, and the thread
+            // default otherwise: a session pushes as one account, settled here.
+            githubConnectionId: planned.designatedConnectionId ?? open.fallbackGithubConnectionId,
             requestedAccessMode: open.requestedAccessMode,
-            accessMode: open.spec.accessMode,
+            accessMode: spec.accessMode,
             // Byte for byte: the row holds the exact document the runner is
             // told, not a re-encode of an object that resembles it.
-            spec: JSON.stringify(encodeSpec(open.spec)),
-            modelSelection: open.spec.modelSelection,
+            spec: JSON.stringify(encodeSpec(spec)),
+            modelSelection: spec.modelSelection,
             parentSessionId: open.parentSessionId,
             at,
           });
+          // The checkouts come after the session, because a thread's worktree
+          // is made on a branch named after the thread.
+          const created = planned.created;
+          let frame: WorkspaceProvision | undefined;
+          if (created !== undefined) {
+            const rows = yield* workspaces.insertCheckouts(
+              created.workspace.id,
+              created.checkouts.map((checkout) => ({
+                resourceId: checkout.resource.id,
+                form: checkout.form,
+                subdirectory: checkout.subdirectory,
+                branch: checkout.form === "worktree" ? threadBranch(row.id) : null,
+              })),
+              at,
+            );
+            const plans: ReadonlyArray<CheckoutPlan> = created.checkouts.map((checkout, index) => ({
+              checkout: rows[index]!,
+              resource: checkout.resource,
+              ...(checkout.baseBranch === undefined ? {} : { baseBranch: checkout.baseBranch }),
+            }));
+            frame = provisionFrame(created.workspace, plans);
+          }
           // The prompt is an ordinary input, waiting with the session: it
           // leaves when the harness comes up, and a controller restarted in
           // that window still has it.
@@ -973,14 +1349,20 @@ const make = Effect.gen(function* () {
             kind: open.kind,
             actor: USER_ACTOR,
             record: { topic: "session", id: row.id },
-            payload: { ...open.payload, sessionId: row.id },
+            payload: {
+              ...open.payload,
+              sessionId: row.id,
+              ...(spec.workspaceId === null ? {} : { workspaceId: spec.workspaceId }),
+            },
             at,
           });
-          return row;
+          return { stored: row, frame };
         }),
       );
-      // Outside the transaction: dispatch may tell the machine, and a
-      // transaction never spans a wait on anything outside the database.
+      // Outside the transaction, in the order the machine needs them: it makes
+      // the working area, and the session it holds is dispatched once it says
+      // the area stands. A transaction never spans a wait on the machine.
+      if (frame !== undefined) yield* presence.tell(open.runnerId, frame);
       yield* dispatch(open.runnerId);
       // Read back rather than returned from the insert, so the caller sees
       // `starting` where dispatch placed it at once rather than `queued`.
@@ -1062,25 +1444,23 @@ const make = Effect.gen(function* () {
         // open one (spec 02 Thread).
         const user = yield* currentUser("session.spawn");
         const decoded = yield* Effect.mapError(decodeSpawn(input), validationOf);
-        if (decoded.workspaceId !== undefined && decoded.workspaceId !== null) {
-          return yield* Effect.fail(
-            validation([
-              {
-                path: ["workspaceId"],
-                message: "workspaces are not built yet; a thread runs without one",
-              },
-            ]),
-          );
-        }
+        if (decoded.projectId !== undefined) yield* liveProject(decoded.projectId);
+        // Read before placement: a workspace that already stands decides which
+        // machine the session runs on, because that is where its files are.
+        const standing =
+          decoded.workspace?.kind === "existing"
+            ? yield* standingWorkspace(decoded.workspace.workspaceId, decoded.runnerId)
+            : undefined;
         // An override is for this session only, never written back to the store.
         const defaults = yield* settings.allForUser(user.userId);
 
         const instanceId =
           decoded.instanceId ?? defaults["thread.instanceId"] ?? (yield* firstLoggedIn());
         const { definition, snapshots } = yield* resolved(instanceId);
-        const hosting = yield* decoded.runnerId === undefined
+        const placeOn = standing?.runnerId ?? decoded.runnerId;
+        const hosting = yield* placeOn === undefined
           ? placement(snapshots)
-          : explicitRunner(decoded.runnerId, snapshots);
+          : explicitRunner(placeOn, snapshots);
 
         const requestedAccessMode =
           decoded.accessMode ?? defaults["thread.accessMode"] ?? DEFAULT_ACCESS_MODE;
@@ -1130,11 +1510,15 @@ const make = Effect.gen(function* () {
           spec,
           prompt: decoded.prompt,
           kind: "session.spawned",
+          projectId: decoded.projectId,
+          workspace: decoded.workspace,
+          fallbackGithubConnectionId: defaults["thread.githubConnectionId"] ?? undefined,
           payload: {
             instanceId,
             runnerId: hosting.runnerId,
             requestedAccessMode,
             accessMode,
+            ...(decoded.projectId === undefined ? {} : { projectId: decoded.projectId }),
           },
         });
       }),
@@ -1372,6 +1756,7 @@ const make = Effect.gen(function* () {
               const at = yield* nowIso;
               yield* sessions.moved(id, "exited", at);
               yield* ending([id]);
+              yield* tokens.revoke(id, at);
               yield* audit.append({
                 kind: "session.stopped",
                 actor: USER_ACTOR,
@@ -1423,9 +1808,14 @@ const make = Effect.gen(function* () {
           runnerId: parent.runnerId,
           requestedAccessMode: parent.requestedAccessMode,
           parentSessionId: parent.id,
+          // A fork carries on in the workspace and the project the parent was
+          // in: it is the same piece of work, branched.
           spec: yield* continuingSpec(parent, parent.modelSelection, nativeSessionId, mode),
           prompt,
           kind: "session.continued",
+          projectId: parent.projectId ?? undefined,
+          workspace: undefined,
+          fallbackGithubConnectionId: parent.githubConnectionId ?? undefined,
           payload: { parentSessionId: parent.id, mode },
         });
       }),
@@ -1503,6 +1893,9 @@ const make = Effect.gen(function* () {
 
     /** Reached by `runner.retire`, which owns the sessions a retired machine leaves behind. */
     endOnRunner,
+
+    /** Reached by the workspaces domain when a machine could not make one. */
+    endForWorkspace,
   };
 });
 
@@ -1513,7 +1906,13 @@ export class SessionService extends Context.Service<SessionService, Effect.Succe
 export const SessionServiceLayer: Layer.Layer<
   SessionService,
   never,
-  SqlClient.SqlClient | RunnerPresence | PluginHost | AuditLog | Settings | PermissionProfiles
+  | SqlClient.SqlClient
+  | RunnerPresence
+  | PluginHost
+  | AuditLog
+  | Settings
+  | PermissionProfiles
+  | Secrets
 > = Layer.effect(SessionService)(make);
 
 /**

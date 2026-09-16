@@ -45,6 +45,7 @@ import { nowIso, pageInput, refuseCursor, withTransaction } from "../db";
 import { AuditLog } from "../events";
 import { SessionService } from "../sessions";
 import { Settings, type SettingError } from "../settings";
+import { workspaceRepository } from "../workspaces";
 import { requireOnline } from "./adapters";
 import { JoinTokens } from "./join-tokens";
 import { RunnerFactsDeadline, RunnerPresence } from "./presence";
@@ -136,6 +137,7 @@ const make = Effect.gen(function* () {
   const settings = yield* Settings;
   const audit = yield* AuditLog;
   const sessions = yield* SessionService;
+  const workspaces = yield* workspaceRepository;
 
   const presence = yield* RunnerPresence;
 
@@ -387,6 +389,9 @@ const make = Effect.gen(function* () {
                 // kinds. Either way a retired runner never dispatches again,
                 // so nothing else would ever end these.
                 const toStop = yield* sessions.endOnRunner(id);
+                // The working areas go with the machine: they were directories
+                // on its disk, and this controller will never reach them again.
+                yield* workspaces.lostOnRunner(id, at);
                 // A default nobody can place on is worse than no default: the
                 // fleet says so rather than promoting a runner nobody chose.
                 const wasDefault = (yield* settings.defaultRunnerId()) === id;

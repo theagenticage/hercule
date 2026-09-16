@@ -32,8 +32,16 @@ const without = (message: Record<string, unknown>, key: string) => {
  * The tags a union really holds, read off the schema rather than off the list
  * of examples below it, so a member added without a case here is caught.
  */
-const tagsOf = (union: typeof RunnerToController | typeof ControllerToRunner) =>
-  union.members.map((member) => member.fields._tag.literal);
+const tagsOf = (union: typeof RunnerToController | typeof ControllerToRunner): Array<string> =>
+  union.members.flatMap((member) =>
+    // A frame whose shape depends on what it carries is a union of its own, and
+    // each of its members is still that frame's tag.
+    "members" in member
+      ? (member.members as ReadonlyArray<{ fields: { _tag: { literal: string } } }>).map(
+          (nested) => nested.fields._tag.literal,
+        )
+      : [member.fields._tag.literal],
+  );
 
 const facts = {
   os: "darwin",
@@ -115,6 +123,12 @@ const spec = {
   timeouts: { inactivityMs: 1_800_000, absoluteMs: 28_800_000 },
 } as const;
 
+const WORKSPACE_ID = "0199e0e7-0000-7000-8000-000000000010";
+
+const CHECKOUT_ID = "0199e0e7-0000-7000-8000-000000000011";
+
+const RESOURCE_ID = "0199e0e7-0000-7000-8000-000000000012";
+
 const runnerMessages: ReadonlyArray<RunnerMessage> = [
   runnerHello,
   { _tag: "pong" },
@@ -143,6 +157,31 @@ const runnerMessages: ReadonlyArray<RunnerMessage> = [
   {
     _tag: "sessionsReport",
     sessions: [{ sessionId: SESSION_ID, nativeSessionId: "native-1", instanceId: INSTANCE_ID }],
+  },
+  {
+    _tag: "workspaceReport",
+    workspaceId: WORKSPACE_ID,
+    status: "ready",
+    checkouts: [
+      {
+        checkoutId: CHECKOUT_ID,
+        branch: "hydra/run-0199e0e7",
+        branches: ["main", "hydra/run-0199e0e7"],
+        defaultBranch: "main",
+      },
+    ],
+  },
+  {
+    _tag: "credentialRequest",
+    requestId: REQUEST_ID,
+    remote: "github.com/acme/web",
+    sessionToken: "a-session-token",
+  },
+  {
+    _tag: "credentialRequest",
+    requestId: REQUEST_ID,
+    remote: "github.com/acme/web",
+    workspaceId: WORKSPACE_ID,
   },
   { _tag: "goodbye" },
 ];
@@ -182,6 +221,32 @@ const controllerMessages: ReadonlyArray<ControllerMessage> = [
     sessionId: SESSION_ID,
     requestId: "0199e0e7-0000-7000-8000-00000000000f",
     decision: "allow_always",
+  },
+  {
+    _tag: "workspaceProvision",
+    workspaceId: WORKSPACE_ID,
+    kind: "ephemeral",
+    checkouts: [
+      {
+        checkoutId: CHECKOUT_ID,
+        resourceId: RESOURCE_ID,
+        remote: "https://github.com/acme/web",
+        subdirectory: null,
+        branch: "hydra/run-0199e0e7",
+        baseBranch: "main",
+        setupCommand: "pnpm install",
+        workspaceInclude: true,
+      },
+    ],
+  },
+  { _tag: "workspaceDispose", workspaceId: WORKSPACE_ID },
+  {
+    _tag: "credentialAnswer",
+    requestId: REQUEST_ID,
+    token: "ghp_a-token",
+    username: "octocat",
+    name: "octocat",
+    email: "octocat@users.noreply.github.com",
   },
 ];
 

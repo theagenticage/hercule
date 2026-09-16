@@ -129,6 +129,7 @@ export {
 export {
   ApprovalDecision,
   MAX_PROMPT_LENGTH,
+  MAX_SPAWN_CHECKOUTS,
   OpenRequest,
   SESSION_CONTINUE_FIELDS,
   SESSION_INPUT_FIELDS,
@@ -147,6 +148,8 @@ export {
   SessionSpawnInput,
   SessionStatus,
   SessionUpdateInput,
+  SpawnCheckout,
+  SpawnWorkspace,
 } from "./groups/session";
 export {
   INPUT_SORT_FIELDS,
@@ -223,6 +226,35 @@ export {
   ProjectCreateInput,
   ProjectUpdateInput,
 } from "./groups/project";
+export {
+  MAX_REMOTE_LENGTH,
+  MAX_RESOURCE_LABEL_LENGTH,
+  MAX_RESOURCE_PROJECTS,
+  MAX_SETUP_COMMAND_LENGTH,
+  RESOURCE_KINDS,
+  RESOURCE_SORT_FIELDS,
+  RESOURCE_UPDATE_FIELDS,
+  Resource,
+  ResourceCreateInput,
+  ResourceFilter,
+  ResourceKind,
+  ResourceUpdateInput,
+} from "./groups/resource";
+export {
+  AdoptPath,
+  Branch,
+  Checkout,
+  CheckoutForm,
+  MAX_BRANCH_LENGTH,
+  MAX_PATH_LENGTH,
+  WORKSPACE_SORT_FIELDS,
+  WORKSPACE_STATUSES,
+  Workspace,
+  WorkspaceFilter,
+  WorkspaceKind,
+  WorkspaceProvisionInput,
+  WorkspaceStatus,
+} from "./groups/workspace";
 export { EVENT_SORT_FIELDS, Event, EventId, MAX_EVENT_KIND_LENGTH } from "./groups/event";
 export {
   Delta,

@@ -41,6 +41,9 @@ export const MAX_SETTING_LIST = 256;
 /** A retention window or a snapshot count, in whole days or whole snapshots. */
 const PositiveDays = Schema.Int.check(Schema.isGreaterThan(0));
 
+/** An expiry window in whole hours. */
+const PositiveHours = Schema.Int.check(Schema.isGreaterThan(0));
+
 /** A session timeout, in whole minutes: the wire carries the milliseconds this turns into. */
 const PositiveMinutes = Schema.Int.check(Schema.isGreaterThan(0));
 
@@ -53,6 +56,11 @@ const MuteTarget = Schema.NonEmptyString.check(
     description: "`workflow:<id>`, `plugin:<id>` or `assistant:<id>`",
   }),
 );
+
+/** What a thread opens in unless the draft says otherwise. */
+export const ThreadWorkspace = Schema.Literals(["primary", "ephemeral", "none"]);
+
+export type ThreadWorkspace = Schema.Schema.Type<typeof ThreadWorkspace>;
 
 /** How much a thread row in the sidebar shows. */
 export const ThreadRows = Schema.Literals(["meta", "plain"]);
@@ -76,6 +84,10 @@ export const SETTING_VALUES = {
     "session.inactivityTimeoutMinutes": PositiveMinutes,
     /** How long a session may run in total before the runner ends it. */
     "session.absoluteTimeoutMinutes": PositiveMinutes,
+    /** How long an ephemeral workspace nothing references is kept, in hours. */
+    "workspace.orphanTtlHours": PositiveHours,
+    /** How long an ephemeral workspace nothing has worked in is kept, in days. */
+    "workspace.idleTtlDays": PositiveDays,
   },
   user: {
     /** The IANA zone the user reads times in, chosen during setup. */
@@ -90,6 +102,14 @@ export const SETTING_VALUES = {
     "thread.model": Schema.NonEmptyString,
     "thread.accessMode": AccessMode,
     "thread.profileId": Id,
+    /**
+     * What a thread opens in: the repo's shared checkout, a worktree of its
+     * own, or nothing. Unset follows the project - one repo takes the shared
+     * checkout, several take a worktree.
+     */
+    "thread.workspace": ThreadWorkspace,
+    /** The GitHub Connection a thread with no checkout of its own acts through. */
+    "thread.githubConnectionId": Schema.NullOr(Id),
     /** The density of a thread row in the sidebar: `meta` unless set otherwise. */
     "ui.threadRows": ThreadRows,
   },

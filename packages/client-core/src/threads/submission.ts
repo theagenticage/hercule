@@ -52,7 +52,6 @@ export const submission = (
       accessMode: config.accessMode,
       ...(config.runnerId === null ? {} : { runnerId: config.runnerId }),
       ...(config.profileId === null ? {} : { permissionProfileId: config.profileId }),
-      workspaceId: null,
     },
   };
 };

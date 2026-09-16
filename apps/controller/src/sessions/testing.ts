@@ -223,6 +223,8 @@ export interface FleetOptions {
   readonly models: ReadonlyArray<ModelDescriptor>;
   /** The shipped ten seconds is longer than a test that watches one give up can wait. */
   readonly inputDeadline?: Duration.Duration;
+  /** The shipped ten minutes is longer than a test that watches the sweep can wait. */
+  readonly workspaceSweepInterval?: Duration.Duration;
 }
 
 /** A controller with one enlisted, connected, logged-in machine on it. */
@@ -288,9 +290,13 @@ export const withFleet = (
         for (const one of wires) one.close();
       }
     },
-    options.inputDeadline === undefined
-      ? { plugins: options.plugins }
-      : { plugins: options.plugins, inputDeadline: options.inputDeadline },
+    {
+      plugins: options.plugins,
+      ...(options.inputDeadline === undefined ? {} : { inputDeadline: options.inputDeadline }),
+      ...(options.workspaceSweepInterval === undefined
+        ? {}
+        : { workspaceSweepInterval: options.workspaceSweepInterval }),
+    },
   );
 
 export const spawn = async (arranged: Arranged, body: unknown): Promise<Response> =>

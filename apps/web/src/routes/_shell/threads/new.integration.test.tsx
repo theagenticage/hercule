@@ -164,6 +164,7 @@ const NEW_SESSION: Session = {
   instanceId: INSTANCE_A.id,
   runnerId: RUNNER.id,
   workspaceId: null,
+  projectId: null,
   requestedAccessMode: "approval-required",
   accessMode: "approval-required",
   nativeSessionId: null,
@@ -498,7 +499,6 @@ describe("Composer: sending (AC-18)", () => {
       accessMode: "approval-required",
       runnerId: RUNNER.id,
       permissionProfileId: PROFILE_UNRESTRICTED.id,
-      workspaceId: null,
       // A spawn carries the option picks unconditionally, so a thread started
       // with none reads as an empty record rather than an absent field.
       options: {},
@@ -544,7 +544,6 @@ describe("Composer: sending (AC-18)", () => {
       accessMode: "approval-required",
       runnerId: RUNNER.id,
       permissionProfileId: PROFILE_UNRESTRICTED.id,
-      workspaceId: null,
       options: { effort: "high", thinking: false },
     });
   });

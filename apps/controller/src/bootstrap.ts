@@ -70,6 +70,7 @@ import {
 import { seed } from "./seed";
 import { cancelStrandedInputs, SessionService, SessionServiceLayer } from "./sessions";
 import { Settings, SettingsLayer, type SettingError } from "./settings";
+import { WorkspaceService, WorkspaceServiceLayer } from "./workspaces";
 
 /** Setup tokens are minted and stored like every other Hydra token. */
 export { hashToken };
@@ -219,6 +220,7 @@ export type ControllerServices =
   | ProviderProbes
   | ProviderService
   | SessionService
+  | WorkspaceService
   | ConnectionService
   | HydraHome
   | BootstrapConfig;
@@ -279,7 +281,10 @@ export const bootWith = <A, E>(
     const withPlugins = Layer.mergeAll(
       PluginsLayer,
       ProviderServiceLayer,
-      SessionServiceLayer,
+      // The workspace service reaches the session service - a workspace that
+      // came up releases the sessions waiting for it - so it is layered on top
+      // of that one rather than merged beside it.
+      WorkspaceServiceLayer.pipe(Layer.provideMerge(SessionServiceLayer)),
       ConnectionServiceLayer,
     ).pipe(
       Layer.provideMerge(PluginHostLayer),

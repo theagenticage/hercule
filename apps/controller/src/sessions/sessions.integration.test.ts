@@ -525,18 +525,6 @@ describe("session.spawn", () => {
     });
   });
 
-  it("refuses a workspace, because there are none to give it", async () => {
-    await withFleet(async (arranged) => {
-      const response = await spawn(arranged, {
-        prompt: "hello",
-        workspaceId: "0199e0e7-9999-7000-8000-000000000000",
-      });
-
-      expect(response.status).toBe(400);
-      expect(await response.text()).toContain("workspaces are not built yet");
-    });
-  });
-
   it("sends the prompt as one turn's input once the harness is up", async () => {
     await withFleet(async (arranged) => {
       const session = await spawned(arranged, { prompt: "what is the time" });
@@ -3594,6 +3582,425 @@ describe("session.respond", () => {
       expect((await refusal(response)).code).toBe("invalid_state");
       expect(responds(arranged.wire)).toEqual([]);
       expect(await arranged.harness.audit("session.responded")).toHaveLength(0);
+    });
+  });
+});
+
+/**
+ * Spawning into a workspace.
+ *
+ * A spawn says which project the thread belongs to and which workspace it wants
+ * - the repo's shared checkout, a fresh worktree of its own, or one that is
+ * already standing - and the session waits in `queued` while a machine makes
+ * it. Git words live on checkouts; a workspace is a kind and a list of them.
+ */
+type WorkspaceFrame = { readonly _tag: string } & Record<string, unknown>;
+
+const tagged = (wire: Wire, tag: string): ReadonlyArray<WorkspaceFrame> =>
+  (wire.frames as ReadonlyArray<WorkspaceFrame>).filter((frame) => frame._tag === tag);
+
+const frameWhenTagged = (wire: Wire, tag: string, index = 0): Promise<WorkspaceFrame> =>
+  until(`sent ${String(index + 1)} ${tag} frames`, () => tagged(wire, tag)[index]);
+
+interface CheckoutRow {
+  readonly checkoutId?: string;
+  readonly id?: string;
+  readonly resourceId: string;
+  readonly form: string;
+  readonly subdirectory: string | null;
+  readonly branch: string | null;
+}
+
+interface WorkspaceRow {
+  readonly id: string;
+  readonly runnerId: string;
+  readonly kind: string;
+  readonly status: string;
+  readonly checkouts: ReadonlyArray<CheckoutRow>;
+}
+
+const makeProject = async (arranged: Arranged, name: string): Promise<string> => {
+  const response = await post(arranged.harness.base, "/api/v1/projects", { name }, arranged.token);
+  expect([200, 201], await response.clone().text()).toContain(response.status);
+  return ((await response.json()) as { id: string }).id;
+};
+
+const makeRepo = async (
+  arranged: Arranged,
+  remote: string,
+  projectIds?: ReadonlyArray<string>,
+): Promise<string> => {
+  const response = await post(
+    arranged.harness.base,
+    "/api/v1/resources",
+    { kind: "repo", remote, ...(projectIds === undefined ? {} : { projectIds }) },
+    arranged.token,
+  );
+  expect([200, 201], await response.clone().text()).toContain(response.status);
+  return ((await response.json()) as { id: string }).id;
+};
+
+const workspaceOf = async (arranged: Arranged, id: string): Promise<WorkspaceRow> => {
+  const response = await get(arranged.harness.base, `/api/v1/workspaces/${id}`, arranged.token);
+  expect(response.status, await response.clone().text()).toBe(200);
+  return (await response.json()) as WorkspaceRow;
+};
+
+/** The project a session says it belongs to; not on the contract's shape yet. */
+const projectOf = (session: Session): string | null =>
+  (session as unknown as { readonly projectId?: string | null }).projectId ?? null;
+
+/** Has the machine say the workspace is made, so dispatch can pick the session up. */
+const workspaceReady = (arranged: Arranged, workspace: WorkspaceRow): void =>
+  arranged.wire.send({
+    _tag: "workspaceReport",
+    workspaceId: workspace.id,
+    status: "ready",
+    checkouts: workspace.checkouts.map((checkout) => ({
+      checkoutId: checkout.checkoutId ?? checkout.id,
+      branch: checkout.branch ?? "main",
+      branches: ["main"],
+      defaultBranch: "main",
+    })),
+  } as never);
+
+describe("session.spawn into a workspace", () => {
+  it("gives a thread its own worktree of one repo, on a branch named after it", async () => {
+    await withFleet(async (arranged) => {
+      const hydra = await makeProject(arranged, "Hydra");
+      const web = await makeRepo(arranged, "https://github.com/acme/web", [hydra]);
+
+      const session = await spawned(arranged, {
+        prompt: "hello",
+        projectId: hydra,
+        workspace: { kind: "ephemeral", checkouts: [{ resourceId: web }] },
+      });
+
+      // The machine has not made it yet, so the session waits rather than starting.
+      expect(session.status).toBe("queued");
+      expect(session.workspaceId).not.toBeNull();
+      expect(projectOf(session)).toBe(hydra);
+      expect(tagged(arranged.wire, "sessionStart")).toEqual([]);
+
+      const workspace = await workspaceOf(arranged, String(session.workspaceId));
+      expect(workspace.kind).toBe("ephemeral");
+      expect(workspace.runnerId).toBe(arranged.runnerId);
+      expect(workspace.checkouts).toHaveLength(1);
+      expect(workspace.checkouts[0]).toMatchObject({
+        resourceId: web,
+        form: "worktree",
+        subdirectory: null,
+        branch: `hydra/run-${session.id.slice(-8)}`,
+      });
+
+      const frame = await frameWhenTagged(arranged.wire, "workspaceProvision");
+      expect(frame["workspaceId"]).toBe(workspace.id);
+      expect(frame["kind"]).toBe("ephemeral");
+
+      workspaceReady(arranged, workspace);
+      const start = (await framesWhen<SessionStart>(arranged.wire, "sessionStart", 1))[0]!;
+      expect(start.sessionId).toBe(session.id);
+      expect(start.spec.workspaceId).toBe(workspace.id);
+
+      // And both live on the row the API hands back afterwards.
+      const read = await readSession(arranged, session.id);
+      expect(read.workspaceId).toBe(workspace.id);
+      expect(projectOf(read)).toBe(hydra);
+      const listed = (await sessionsOf(arranged)).find((one) => one.id === session.id);
+      expect(listed?.workspaceId).toBe(workspace.id);
+      expect(projectOf(listed!)).toBe(hydra);
+    });
+  });
+
+  it("puts each repo of a multi-repo workspace in a subdirectory of its own", async () => {
+    await withFleet(async (arranged) => {
+      const web = await makeRepo(arranged, "https://github.com/acme/web");
+      const api = await makeRepo(arranged, "https://github.com/acme/api");
+
+      const session = await spawned(arranged, {
+        prompt: "hello",
+        workspace: {
+          kind: "ephemeral",
+          checkouts: [{ resourceId: web }, { resourceId: api, baseBranch: "develop" }],
+        },
+      });
+
+      const workspace = await workspaceOf(arranged, String(session.workspaceId));
+      const branch = `hydra/run-${session.id.slice(-8)}`;
+      expect(workspace.checkouts).toHaveLength(2);
+      expect(workspace.checkouts.map((one) => one.subdirectory)).toEqual(["web", "api"]);
+      expect(workspace.checkouts.map((one) => one.branch)).toEqual([branch, branch]);
+    });
+  });
+
+  it("makes a scratch workspace out of an empty list of checkouts", async () => {
+    await withFleet(async (arranged) => {
+      const session = await spawned(arranged, {
+        prompt: "hello",
+        workspace: { kind: "ephemeral", checkouts: [] },
+      });
+
+      const workspace = await workspaceOf(arranged, String(session.workspaceId));
+      expect(workspace.kind).toBe("ephemeral");
+      expect(workspace.checkouts).toEqual([]);
+    });
+  });
+
+  it("clones a primary when the machine has none, and reuses the one it has", async () => {
+    await withFleet(async (arranged) => {
+      const web = await makeRepo(arranged, "https://github.com/acme/web");
+
+      const first = await spawned(arranged, {
+        prompt: "hello",
+        workspace: { kind: "primary", resourceId: web },
+      });
+      const workspace = await workspaceOf(arranged, String(first.workspaceId));
+      expect(workspace.kind).toBe("primary");
+
+      const frame = await frameWhenTagged(arranged.wire, "workspaceProvision");
+      expect(frame["kind"]).toBe("primary");
+      const checkouts = frame["checkouts"] as ReadonlyArray<Record<string, unknown>>;
+      // Cloned fresh: a spawn never adopts a folder in place.
+      expect(checkouts[0]?.["path"] ?? null).toBeNull();
+
+      workspaceReady(arranged, workspace);
+      await sessionWhen(arranged, first.id, (one) => one.status !== "queued");
+
+      // The second thread in the same repo on the same machine shares it, and
+      // asks the machine for nothing new.
+      const second = await spawned(arranged, {
+        prompt: "again",
+        workspace: { kind: "primary", resourceId: web, branch: "feature/x" },
+      });
+      expect(second.workspaceId).toBe(workspace.id);
+      expect(tagged(arranged.wire, "workspaceProvision")).toHaveLength(1);
+
+      const start = (await framesWhen<SessionStart>(arranged.wire, "sessionStart", 2))[1]!;
+      expect(start.sessionId).toBe(second.id);
+      // The branch is a checkout word: it rides the start frame so the machine
+      // switches before the harness sees the folder.
+      expect((start as unknown as WorkspaceFrame)["checkoutBranch"]).toBe("feature/x");
+    });
+  });
+
+  it("takes the machine from a workspace that already stands, and refuses a second one", async () => {
+    await withFleet(async (arranged) => {
+      const other = await arranged.enlist();
+      const web = await makeRepo(arranged, "https://github.com/acme/web");
+      const first = await spawned(arranged, {
+        prompt: "hello",
+        workspace: { kind: "ephemeral", checkouts: [{ resourceId: web }] },
+      });
+      const workspace = await workspaceOf(arranged, String(first.workspaceId));
+
+      // Still provisioning: a thread may not join a workspace that is not made.
+      const early = await spawn(arranged, {
+        prompt: "join",
+        workspace: { kind: "existing", workspaceId: workspace.id },
+      });
+      expect((await refusal(early)).code).toBe("invalid_state");
+
+      workspaceReady(arranged, workspace);
+      await sessionWhen(arranged, first.id, (one) => one.status !== "queued");
+
+      const clash = await spawn(arranged, {
+        prompt: "join",
+        workspace: { kind: "existing", workspaceId: workspace.id },
+        runnerId: other.runnerId,
+      });
+      expect((await refusal(clash)).code).toBe("validation");
+
+      const joined = await spawned(arranged, {
+        prompt: "join",
+        workspace: { kind: "existing", workspaceId: workspace.id },
+      });
+      expect(joined.workspaceId).toBe(workspace.id);
+      expect(joined.runnerId).toBe(workspace.runnerId);
+    });
+  });
+
+  it("refuses a project the repo does not belong to", async () => {
+    await withFleet(async (arranged) => {
+      const hydra = await makeProject(arranged, "Hydra");
+      const side = await makeProject(arranged, "Side");
+      const web = await makeRepo(arranged, "https://github.com/acme/web", [hydra]);
+
+      const response = await spawn(arranged, {
+        prompt: "hello",
+        projectId: side,
+        workspace: { kind: "ephemeral", checkouts: [{ resourceId: web }] },
+      });
+      expect((await refusal(response)).code).toBe("validation");
+      expect(await sessionsOf(arranged)).toEqual([]);
+    });
+  });
+
+  it("ends the session when the machine could not make its workspace", async () => {
+    await withFleet(async (arranged) => {
+      const web = await makeRepo(arranged, "https://github.com/acme/web");
+      const session = await spawned(arranged, {
+        prompt: "hello",
+        workspace: { kind: "ephemeral", checkouts: [{ resourceId: web }] },
+      });
+      const workspaceId = String(session.workspaceId);
+      await frameWhenTagged(arranged.wire, "workspaceProvision");
+
+      arranged.wire.send({
+        _tag: "workspaceReport",
+        workspaceId,
+        status: "failed",
+        message: "fatal: could not read from remote repository",
+      } as never);
+
+      await sessionWhen(arranged, session.id, (one) => one.status === "exited");
+      const stream = await streamOf(arranged.harness, session.id);
+      const exit = stream.find((row) => row.tag === "session.exited");
+      expect(exit, "the session never reported an exit").toBeDefined();
+      expect(exit!.event).toContain("workspace_failed");
+      expect(exit!.event).toContain("could not read from remote repository");
+      // It never started, so the machine was never told to.
+      expect(tagged(arranged.wire, "sessionStart")).toEqual([]);
+    });
+  });
+
+  it("replaces a primary the machine could not make rather than joining it", async () => {
+    await withFleet(async (arranged) => {
+      const web = await makeRepo(arranged, "https://github.com/acme/web");
+      const first = await spawned(arranged, {
+        prompt: "hello",
+        workspace: { kind: "primary", resourceId: web },
+      });
+      const failed = String(first.workspaceId);
+      await frameWhenTagged(arranged.wire, "workspaceProvision");
+      arranged.wire.send({
+        _tag: "workspaceReport",
+        workspaceId: failed,
+        status: "failed",
+        message: "fatal: could not read from remote repository",
+      } as never);
+      await sessionWhen(arranged, first.id, (one) => one.status === "exited");
+
+      // The next thread in that repo asks the machine again rather than
+      // joining a workspace that was never made and waiting for ever.
+      const second = await spawned(arranged, {
+        prompt: "again",
+        workspace: { kind: "primary", resourceId: web },
+      });
+      expect(second.workspaceId).not.toBe(failed);
+      expect(tagged(arranged.wire, "workspaceProvision")).toHaveLength(2);
+      const frame = await frameWhenTagged(arranged.wire, "workspaceProvision", 1);
+      expect(frame["workspaceId"]).toBe(second.workspaceId);
+    });
+  });
+
+  it("refuses one repo named twice, and two repos that would share a directory", async () => {
+    await withFleet(async (arranged) => {
+      const web = await makeRepo(arranged, "https://github.com/acme/web");
+      const fork = await makeRepo(arranged, "https://github.com/other/web");
+
+      const twice = await spawn(arranged, {
+        prompt: "hello",
+        workspace: { kind: "ephemeral", checkouts: [{ resourceId: web }, { resourceId: web }] },
+      });
+      expect((await refusal(twice)).code).toBe("validation");
+
+      const sameName = await spawn(arranged, {
+        prompt: "hello",
+        workspace: { kind: "ephemeral", checkouts: [{ resourceId: web }, { resourceId: fork }] },
+      });
+      expect((await refusal(sameName)).code).toBe("validation");
+      expect(await sessionsOf(arranged)).toEqual([]);
+    });
+  });
+
+  it("refuses a project that does not exist, whatever else the thread names", async () => {
+    await withFleet(async (arranged) => {
+      const response = await spawn(arranged, {
+        prompt: "hello",
+        projectId: "0199e0e7-9999-7000-8000-0000000000aa",
+      });
+      expect((await refusal(response)).code).toBe("validation");
+      expect(await sessionsOf(arranged)).toEqual([]);
+    });
+  });
+
+  it("refuses to resume or fork a thread whose workspace has been disposed of", async () => {
+    await withFleet(async (arranged) => {
+      const web = await makeRepo(arranged, "https://github.com/acme/web");
+      const session = await spawned(arranged, {
+        prompt: "hello",
+        workspace: { kind: "ephemeral", checkouts: [{ resourceId: web }] },
+      });
+      const workspace = await workspaceOf(arranged, String(session.workspaceId));
+      workspaceReady(arranged, workspace);
+      await framesWhen<SessionStart>(arranged.wire, "sessionStart", 1);
+      report(arranged.wire, 1, {
+        eventId: crypto.randomUUID(),
+        sessionId: session.id,
+        at,
+        _tag: "session.started",
+      });
+      const idle = await sessionWhen(arranged, session.id, (one) => one.status === "idle");
+      const ended = await ends(arranged, idle, 2);
+      expect(ended.resumable).toBe(true);
+
+      const disposed = await send(
+        "DELETE",
+        arranged.harness.base,
+        `/api/v1/workspaces/${workspace.id}`,
+        { token: arranged.token },
+      );
+      expect([200, 204], await disposed.clone().text()).toContain(disposed.status);
+
+      // The transcript is still on the machine, but the files it worked in are
+      // not: there is nowhere to pick it up.
+      const read = await readSession(arranged, session.id);
+      expect(read.resumable).toBe(false);
+
+      const resumed = await post(
+        arranged.harness.base,
+        `/api/v1/sessions/${session.id}/input`,
+        { text: "carry on" },
+        arranged.token,
+      );
+      const refusedResume = await resumed.clone().text();
+      expect((await refusal(resumed)).code).toBe("invalid_state");
+      expect(refusedResume).toContain("workspace");
+
+      const forked = await carryOn(arranged, session.id, { mode: "fork", prompt: "carry on" });
+      const refusedFork = await forked.clone().text();
+      expect((await refusal(forked)).code).toBe("invalid_state");
+      expect(refusedFork).toContain("workspace");
+    });
+  });
+
+  it("keeps the workspace and the project when a thread is forked", async () => {
+    await withFleet(async (arranged) => {
+      const hydra = await makeProject(arranged, "Hydra");
+      const web = await makeRepo(arranged, "https://github.com/acme/web", [hydra]);
+      const parent = await spawned(arranged, {
+        prompt: "hello",
+        projectId: hydra,
+        workspace: { kind: "ephemeral", checkouts: [{ resourceId: web }] },
+      });
+      const workspace = await workspaceOf(arranged, String(parent.workspaceId));
+      workspaceReady(arranged, workspace);
+      await framesWhen<SessionStart>(arranged.wire, "sessionStart", 1);
+      report(arranged.wire, 1, {
+        eventId: crypto.randomUUID(),
+        sessionId: parent.id,
+        at,
+        _tag: "session.started",
+      });
+      const idle = await sessionWhen(arranged, parent.id, (one) => one.status === "idle");
+      const ended = await ends(arranged, idle, 2);
+
+      const response = await carryOn(arranged, ended.id, { mode: "fork", prompt: "carry on" });
+      expect(response.status, await response.clone().text()).toBe(200);
+      const fork = (await response.json()) as Session;
+      expect(fork.id).not.toBe(ended.id);
+      expect(fork.workspaceId).toBe(workspace.id);
+      expect(projectOf(fork)).toBe(hydra);
     });
   });
 });

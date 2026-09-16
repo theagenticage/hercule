@@ -29,6 +29,7 @@ const BASE_SESSION: Session = {
   instanceId: "01a06d02-1000-7000-8000-000000000001",
   runnerId: "01a06d02-beff-7037-9f5b-042822015952",
   workspaceId: null,
+  projectId: null,
   requestedAccessMode: "approval-required",
   accessMode: "approval-required",
   nativeSessionId: null,

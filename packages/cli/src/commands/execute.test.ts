@@ -32,6 +32,7 @@ const session = (tail: string) => ({
   instanceId: id("eeeeeeee"),
   runnerId: id("ffffffff"),
   workspaceId: null,
+  projectId: null,
   requestedAccessMode: "approval-required",
   accessMode: "approval-required",
   nativeSessionId: null,
@@ -102,6 +103,44 @@ describe("a positional the row resolves", () => {
       path: `/api/v1/sessions/${row.id}/inputs/${inputId}`,
       body: { text: "Actually, start with the test that fails least often." },
     });
+  });
+});
+
+/**
+ * A field whose schema is a struct, or a union of them, is written as JSON on
+ * the command line: the one way a terminal can spell a nested value. What the
+ * flag holds reaches the request as the object it decodes to, not as text.
+ */
+describe("a flag over a structured field", () => {
+  it("sends the JSON a workspace flag carries as the object it is", async () => {
+    const row = session("ccccccc3");
+    const { fetch, client } = wire(() => row);
+    const command = at("session", "spawn");
+    const workspace = {
+      kind: "ephemeral",
+      checkouts: [{ resourceId: id("11111111"), baseBranch: "main" }],
+    };
+    const args = await parseArguments(command, ["--workspace", JSON.stringify(workspace)], () =>
+      Promise.resolve("Move the shared type over.\n"),
+    );
+
+    await execute(client, command, args);
+
+    expect(fetch.calls[0]).toMatchObject({
+      method: "POST",
+      path: "/api/v1/sessions",
+      body: { prompt: "Move the shared type over.", workspace },
+    });
+  });
+
+  it("refuses a workspace that is not JSON, naming the flag, and calls nothing", async () => {
+    const { fetch } = wire(() => ({}));
+    const command = at("session", "spawn");
+
+    await expect(
+      parseArguments(command, ["--workspace", "ephemeral"], () => Promise.resolve("go\n")),
+    ).rejects.toThrow(/--workspace: ephemeral is not valid JSON/);
+    expect(fetch.calls).toEqual([]);
   });
 });
 

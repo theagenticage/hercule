@@ -86,6 +86,17 @@ const COMMANDS: Record<string, string> = {
   "project.update": "project update",
   "project.delete": "project delete",
 
+  "resource.query": "resource list",
+  "resource.read": "resource read",
+  "resource.create": "resource create",
+  "resource.update": "resource update",
+  "resource.delete": "resource delete",
+
+  "workspace.query": "workspace list",
+  "workspace.read": "workspace read",
+  "workspace.provision": "workspace provision",
+  "workspace.dispose": "workspace dispose",
+
   "event.query": "event list",
   "event.read": "event read",
 
@@ -185,6 +196,13 @@ const RESOLVES: Record<string, string> = {
   "project.read id": "project.query",
   "project.update id": "project.query",
   "project.delete id": "project.query",
+
+  "resource.read id": "resource.query",
+  "resource.update id": "resource.query",
+  "resource.delete id": "resource.query",
+
+  "workspace.read id": "workspace.query",
+  "workspace.dispose id": "workspace.query",
 
   "runner.read id": "runner.query",
   "runner.update id": "runner.query",
@@ -316,6 +334,39 @@ describe("the resolvers", () => {
   it("leaves an id with no listing of its own unresolved", () => {
     for (const name of ["event.read id", "plugin.configure id", "input.update inputId"]) {
       expect(resolvers()[name], `${name} should take a full id`).toBeUndefined();
+    }
+  });
+});
+
+/**
+ * What `hydra session spawn` has to spell out once a thread can be started in a
+ * project and in a workspace.
+ */
+describe("spawning a thread from a terminal", () => {
+  it("documents the project and the workspace", () => {
+    const row = table["session.spawn"];
+    const flags = Object.values(row?.fields ?? {})
+      .map((field) => field.flag)
+      .filter((flag): flag is string => flag !== undefined);
+
+    for (const flag of ["project", "workspace"]) {
+      expect(flags, `hydra session spawn has no --${flag}`).toContain(flag);
+    }
+  });
+
+  /**
+   * The workspace is one field of one shape, so its line has to carry every
+   * kind a caller can write: there is no second flag that spells one.
+   */
+  it("shows every kind of workspace, in the line and in the examples", () => {
+    const row = table["session.spawn"];
+    const line = row?.fields?.["workspace"]?.help ?? "";
+    for (const kind of ["primary", "ephemeral", "existing"]) {
+      expect(line, `the --workspace line says nothing about ${kind}`).toContain(kind);
+      expect(
+        (row?.examples ?? []).some((example) => example.args.join(" ").includes(kind)),
+        `no example spawns into a ${kind} workspace`,
+      ).toBe(true);
     }
   });
 });

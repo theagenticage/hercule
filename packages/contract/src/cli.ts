@@ -531,6 +531,204 @@ export const CLI = {
     },
   },
 
+  "resource.query": {
+    command: "resource list",
+    help: "Lists the Resources Hydra knows: the repos, folders and mailboxes projects work with. Use it to find the id the other commands name.",
+    examples: [{ args: [] }, { args: ["--kind", "repo"] }],
+    fields: {
+      kind: { flag: "kind", help: "Only resources of this kind: repo, folder or mailbox." },
+      projectId: { flag: "project", help: "Only resources filed under this project." },
+    },
+  },
+  "resource.read": {
+    command: "resource read",
+    help: "Reads one Resource in full. It answers with the remote and the canonical form of it, the Connection it acts through, its setup command and the projects it is filed under.",
+    examples: [{ args: ["1f3a9c2e"] }],
+    fields: {
+      id: {
+        positional: true,
+        help: "The resource's id, or a tail of eight or more characters.",
+        resolves: "resource.query",
+      },
+    },
+  },
+  "resource.create": {
+    command: "resource create",
+    help: "Records a Resource: a git repo Hydra checks out, or a folder or mailbox it works with. A repo is identified by its remote however you spell it, so the same repository is added only once.",
+    examples: [
+      { args: ["--kind", "repo", "--remote", "https://github.com/acme/web"] },
+      {
+        args: [
+          "--kind",
+          "repo",
+          "--remote",
+          "git@github.com:acme/api.git",
+          "--connection",
+          "7b41d0a5",
+          "--setup-command",
+          "pnpm install",
+          "--project",
+          "1f3a9c2e",
+        ],
+      },
+      { args: ["--kind", "folder", "--label", "Notes"] },
+    ],
+    fields: {
+      kind: { flag: "kind", help: "What it is: repo, folder or mailbox." },
+      remote: {
+        flag: "remote",
+        help: "The git remote, ssh or https; required for a repo and refused for anything else.",
+      },
+      label: {
+        flag: "label",
+        help: "What to call it; required for a folder and a mailbox, which have no remote to name them.",
+      },
+      connectionId: {
+        flag: "connection",
+        help: "The Connection Hydra acts through for it; a repo takes a github one.",
+      },
+      setupCommand: {
+        flag: "setup-command",
+        help: "Run once in every fresh checkout of this repo, before the agent starts.",
+      },
+      workspaceInclude: {
+        flag: "workspace-include",
+        help: "Whether a fresh worktree takes the files the main checkout's .workspaceinclude lists; on unless set to false.",
+      },
+      projectIds: { flag: "project", help: "A project to file it under; repeat for several." },
+    },
+    errors: { conflict: "another resource already names the same repository" },
+  },
+  "resource.update": {
+    command: "resource update",
+    help: "Changes a Resource. It takes a new remote, Connection, setup command or include flag, and the project list it is given replaces the one the resource had.",
+    examples: [
+      { args: ["1f3a9c2e", "--setup-command", "pnpm install"] },
+      { args: ["1f3a9c2e", "--connection", "null"] },
+    ],
+    fields: {
+      id: {
+        positional: true,
+        help: "The resource's id, or a tail of eight or more characters.",
+        resolves: "resource.query",
+      },
+      remote: { flag: "remote", help: "The git remote; it is canonicalised again and re-checked." },
+      label: { flag: "label", help: "What to call it; null takes the label off again." },
+      connectionId: {
+        flag: "connection",
+        help: "The Connection to act through; null takes it off again.",
+      },
+      setupCommand: {
+        flag: "setup-command",
+        help: "Run in every fresh checkout; null takes it off again.",
+      },
+      workspaceInclude: {
+        flag: "workspace-include",
+        help: "Whether a fresh worktree takes what .workspaceinclude lists.",
+      },
+      projectIds: {
+        flag: "project",
+        help: "The projects to file it under, replacing the ones it has; repeat for several.",
+      },
+    },
+    errors: { conflict: "another resource already names the same repository" },
+  },
+  "resource.delete": {
+    command: "resource delete",
+    help: "Removes a Resource and the project links it had. A resource a workspace still stands on is refused; dispose of that workspace first.",
+    examples: [{ args: ["1f3a9c2e"] }],
+    fields: {
+      id: {
+        positional: true,
+        help: "The resource's id, or a tail of eight or more characters.",
+        resolves: "resource.query",
+      },
+    },
+    errors: { invalid_state: "a workspace still stands on it; dispose of that workspace first" },
+  },
+
+  "workspace.query": {
+    command: "workspace list",
+    help: 'Lists the Workspaces on the fleet: what each holds and where it stands. Use it to find one to open a thread in with `hydra session spawn --workspace \'{"kind":"existing","workspaceId":"<id>"}\'`.',
+    examples: [{ args: [] }, { args: ["--runner", "7b41d0a5", "--status", "ready"] }],
+    fields: {
+      runnerId: { flag: "runner", help: "Only workspaces on this machine." },
+      resourceId: {
+        flag: "resource",
+        help: "Only workspaces holding a checkout of this resource.",
+      },
+      projectId: {
+        flag: "project",
+        help: "Only workspaces holding a checkout of this project's repos.",
+      },
+      kind: { flag: "kind", help: "Only workspaces of this kind: primary or ephemeral." },
+      status: {
+        flag: "status",
+        help: "Only workspaces in this state: provisioning, ready, failed, deleted or lost.",
+      },
+    },
+  },
+  "workspace.read": {
+    command: "workspace read",
+    help: "Reads one Workspace in full. It answers with its checkouts and their branches, where it stands, and the sessions in it that have not exited; poll it after `hydra workspace provision` until it reads ready.",
+    examples: [{ args: ["1f3a9c2e"] }],
+    fields: {
+      id: {
+        positional: true,
+        help: "The workspace's id, or a tail of eight or more characters.",
+        resolves: "workspace.query",
+      },
+    },
+  },
+  "workspace.provision": {
+    command: "workspace provision",
+    help: "Makes a repo's main checkout on one machine, which is the long-lived working copy threads share. It answers at once with the workspace provisioning, and the machine reports when it stands; read it back with `hydra workspace read`.",
+    examples: [
+      { args: ["--resource", "1f3a9c2e", "--runner", "7b41d0a5"] },
+      {
+        args: [
+          "--resource",
+          "1f3a9c2e",
+          "--runner",
+          "7b41d0a5",
+          "--path",
+          "/Users/rogier/code/web",
+        ],
+      },
+    ],
+    fields: {
+      resourceId: {
+        flag: "resource",
+        help: "The repo to check out; a folder or a mailbox is refused.",
+      },
+      runnerId: { flag: "runner", help: "The machine to make it on." },
+      path: {
+        flag: "path",
+        help: "A checkout of that repo already on that machine, to adopt in place rather than clone; nothing is written into it. Left off, Hydra clones a fresh one.",
+      },
+    },
+    errors: {
+      conflict: "that repo already has a main checkout on that machine",
+      invalid_state: "only a repo is checked out; a folder and a mailbox are records",
+    },
+  },
+  "workspace.dispose": {
+    command: "workspace dispose",
+    help: "Tears down an ephemeral workspace. The machine removes its worktrees and its directory, the branches stay in the repo's cache, and a main checkout is never torn down.",
+    examples: [{ args: ["1f3a9c2e"] }],
+    fields: {
+      id: {
+        positional: true,
+        help: "The workspace's id, or a tail of eight or more characters.",
+        resolves: "workspace.query",
+      },
+    },
+    errors: {
+      invalid_state:
+        "a main checkout is never torn down, and one already gone has nothing left to tear down",
+    },
+  },
+
   "event.query": {
     command: "event list",
     help: "Reads the event log: external events and audit entries under one envelope, told apart by their kind. Reach for it to see what the system saw and what it did about it.",
@@ -1092,6 +1290,29 @@ export const CLI = {
         args: ["--instance", "7b41d0a5", "--access-mode", "auto-accept-edits"],
         stdin: "Bring the changelog up to date.",
       },
+      {
+        args: [
+          "--project",
+          "1f3a9c2e",
+          "--workspace",
+          '{"kind":"primary","resourceId":"7b41d0a5-0000-7000-8000-000000000001","branch":"main"}',
+        ],
+        stdin: "Bring the changelog up to date in the repo I work in.",
+      },
+      {
+        args: [
+          "--workspace",
+          '{"kind":"ephemeral","checkouts":[{"resourceId":"7b41d0a5-0000-7000-8000-000000000001","baseBranch":"main"},{"resourceId":"7b41d0a5-0000-7000-8000-000000000002"}]}',
+        ],
+        stdin: "Move the shared type into the api repo and update the web one.",
+      },
+      {
+        args: [
+          "--workspace",
+          '{"kind":"existing","workspaceId":"7b41d0a5-0000-7000-8000-000000000003"}',
+        ],
+        stdin: "Carry on where the other thread left off.",
+      },
     ],
     fields: {
       prompt: { stdin: true, flag: "prompt", help: "The opening prompt." },
@@ -1116,9 +1337,13 @@ export const CLI = {
         flag: "profile",
         help: "The Permission Profile the session's token carries, in place of the thread default.",
       },
-      workspaceId: {
+      projectId: {
+        flag: "project",
+        help: "The project the thread belongs to; every repo it names has to be filed under it.",
+      },
+      workspace: {
         flag: "workspace",
-        help: "Leave it off: workspaces are not built yet, and a real id is refused rather than ignored.",
+        help: 'Where it works, as JSON: {"kind":"primary","resourceId":"<id>","branch":"<branch>"} for the repo\'s shared checkout, {"kind":"ephemeral","checkouts":[{"resourceId":"<id>","baseBranch":"<branch>"}]} for a worktree of its own (an empty list is a scratch workspace), or {"kind":"existing","workspaceId":"<id>"} to join one that stands. Leave it off for a thread with no checkout.',
       },
     },
     errors: {
@@ -1390,6 +1615,14 @@ export const NOUNS = {
   },
   project: {
     summary: "Projects: groupings of related work and its materials. No behaviour, no defaults.",
+  },
+  resource: {
+    summary: "Resources: the repos, folders and mailboxes projects work with.",
+    flow: "hydra resource create records one, hydra resource list finds it again, then name it at hydra workspace provision or hydra session spawn.",
+  },
+  workspace: {
+    summary: "Workspaces: the working areas on a machine that sessions do their work in.",
+    flow: "hydra workspace provision makes a repo's main checkout, hydra workspace list shows what stands, hydra workspace dispose tears an ephemeral one down.",
   },
   event: {
     summary: "The event log: external events and audit entries, under one envelope.",

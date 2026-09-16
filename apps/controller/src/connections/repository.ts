@@ -23,6 +23,16 @@ import {
   type PageRequest,
 } from "../db";
 
+/**
+ * The shipped GitHub type, by the qualified id the host mints for it. A repo's
+ * credential is a GitHub token, so a repo may act through no other account.
+ */
+export const GITHUB_CONNECTION_TYPE = "github/github";
+
+/** Whether this connection is the GitHub account a repo may act through. */
+export const isGithubConnection = (connection: StoredConnection): boolean =>
+  connection.type === GITHUB_CONNECTION_TYPE;
+
 /** A connection row, with its JSON columns read. */
 export interface StoredConnection {
   readonly id: string;
@@ -134,6 +144,19 @@ const make = Effect.gen(function* () {
 
   return {
     one,
+
+    /**
+     * Whether a resource still acts through this connection, which is what
+     * makes a delete refusable. The question is asked here rather than of the
+     * resources domain so the two do not import each other.
+     */
+    namedByResource: (id: string): Effect.Effect<boolean, SqlError> =>
+      Effect.map(
+        sql<{ readonly id: Uint8Array }>`
+          SELECT id FROM resources WHERE connection_id = ${uuidFromString(id)} LIMIT 1
+        `,
+        (rows) => rows.length > 0,
+      ),
 
     insert: (connection: NewConnection): Effect.Effect<StoredConnection, SqlError> =>
       Effect.gen(function* () {

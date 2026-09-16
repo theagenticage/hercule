@@ -57,6 +57,7 @@ const SESSION: Session = {
   instanceId: "i-claude",
   runnerId: "r-local",
   workspaceId: "w-1",
+  projectId: null,
   requestedAccessMode: "full-access",
   accessMode: "approval-required",
   nativeSessionId: null,

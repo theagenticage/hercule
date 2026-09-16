@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { Effect, Layer } from "effect";
+import { Effect, Layer, Schema } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
+import {
+  ConnectionValidationFailed,
+  HOST_API,
+  registerConnectionType,
+  type Plugin,
+} from "@hydra/plugin-host";
+import { completeSetup, get, post, send, withServer } from "../http/testing";
 import { CurrentActor, type Actor } from "../actor";
 import { uuidFromString } from "../db";
 import { TestDatabase } from "../db/testing";
@@ -233,5 +240,176 @@ describe("settings.update", () => {
 
     const state = await run(Effect.flatMap(SettingsOperations, (settings) => settings.read()));
     expect(state.user).toEqual({});
+  });
+});
+
+/**
+ * The keys a thread's workspace and the expiry sweep read.
+ *
+ * These go over the wire rather than through the service, because the closed
+ * key set and the values each key admits are the contract's, and a value the
+ * schema refuses is a `validation` refusal a caller can act on.
+ */
+const PAT = "ghp_a-token";
+
+/** GitHub as a connection type, checked here rather than against api.github.com. */
+const githubPlugin: Plugin = {
+  manifest: {
+    id: "github",
+    displayName: "GitHub",
+    hostApi: HOST_API,
+    capabilities: ["connections"],
+    configSchema: Schema.Struct({}),
+  },
+  register: (host) =>
+    registerConnectionType(host, {
+      type: "github",
+      displayName: "GitHub",
+      setup: [{ kind: "credentials", fields: [{ name: "pat", label: "Personal access token" }] }],
+      validate: (credentials: Record<string, string>) =>
+        credentials["pat"] === PAT
+          ? Effect.succeed({ displayName: "octocat" })
+          : Effect.fail(new ConnectionValidationFailed({ message: "GitHub rejected the token." })),
+    }),
+  activate: () => Effect.succeed(Effect.void),
+};
+
+const mailerPlugin: Plugin = {
+  manifest: {
+    id: "mailer",
+    displayName: "Mailer",
+    hostApi: HOST_API,
+    capabilities: ["connections"],
+    configSchema: Schema.Struct({}),
+  },
+  register: (host) =>
+    registerConnectionType(host, {
+      type: "mailbox",
+      displayName: "Mailbox",
+      setup: [{ kind: "credentials", fields: [{ name: "token", label: "Token" }] }],
+      validate: () => Effect.succeed({ displayName: "work@example.com" }),
+    }),
+  activate: () => Effect.succeed(Effect.void),
+};
+
+interface SettingsState {
+  readonly controller: Record<string, unknown>;
+  readonly user: Record<string, unknown>;
+}
+
+const withSettings = (body: (base: string, token: string) => Promise<void>): Promise<void> =>
+  withServer(
+    async (harness) => {
+      const token = await completeSetup(harness.base);
+      await body(harness.base, token);
+    },
+    { plugins: [githubPlugin, mailerPlugin] },
+  );
+
+const patch = (base: string, token: string, body: unknown): Promise<Response> =>
+  send("PATCH", base, "/api/v1/settings", { body, token });
+
+const readSettings = async (base: string, token: string): Promise<SettingsState> => {
+  const response = await get(base, "/api/v1/settings", token);
+  expect(response.status, await response.clone().text()).toBe(200);
+  return (await response.json()) as SettingsState;
+};
+
+const refusedCode = async (response: Response): Promise<string> =>
+  ((await response.json()) as { error: { code: string } }).error.code;
+
+const connect = async (
+  base: string,
+  token: string,
+  type: string,
+  credentials: Record<string, string>,
+): Promise<string> => {
+  const response = await post(
+    base,
+    "/api/v1/connections",
+    { type, label: "work", labels: ["Code"], credentials },
+    token,
+  );
+  expect(response.status, await response.clone().text()).toBe(201);
+  return ((await response.json()) as { id: string }).id;
+};
+
+describe("the thread workspace default", () => {
+  it("takes each of the three a thread may open in, and reads it back", async () => {
+    await withSettings(async (base, token) => {
+      for (const value of ["primary", "ephemeral", "none"]) {
+        const response = await patch(base, token, { user: { "thread.workspace": value } });
+        expect(response.status, `${value}: ${await response.clone().text()}`).toBe(200);
+        expect((await readSettings(base, token)).user["thread.workspace"]).toBe(value);
+      }
+    });
+  });
+
+  it("is absent until it is written, so the default lives in one place", async () => {
+    await withSettings(async (base, token) => {
+      expect((await readSettings(base, token)).user["thread.workspace"]).toBeUndefined();
+    });
+  });
+
+  it("refuses a value that is not one of the three", async () => {
+    await withSettings(async (base, token) => {
+      const response = await patch(base, token, { user: { "thread.workspace": "worktree" } });
+      expect(await refusedCode(response)).toBe("validation");
+      expect((await readSettings(base, token)).user["thread.workspace"]).toBeUndefined();
+    });
+  });
+});
+
+describe("the GitHub connection threads use", () => {
+  it("takes a github connection and takes it back off again", async () => {
+    await withSettings(async (base, token) => {
+      const github = await connect(base, token, "github/github", { pat: PAT });
+
+      const set = await patch(base, token, { user: { "thread.githubConnectionId": github } });
+      expect(set.status, await set.clone().text()).toBe(200);
+      expect((await readSettings(base, token)).user["thread.githubConnectionId"]).toBe(github);
+
+      const cleared = await patch(base, token, { user: { "thread.githubConnectionId": null } });
+      expect(cleared.status, await cleared.clone().text()).toBe(200);
+      expect((await readSettings(base, token)).user["thread.githubConnectionId"]).toBeNull();
+    });
+  });
+
+  it("refuses a connection that is not a github one", async () => {
+    await withSettings(async (base, token) => {
+      const mailbox = await connect(base, token, "mailer/mailbox", { token: "t" });
+      const response = await patch(base, token, {
+        user: { "thread.githubConnectionId": mailbox },
+      });
+      expect(await refusedCode(response)).toBe("validation");
+      expect((await readSettings(base, token)).user["thread.githubConnectionId"]).toBeUndefined();
+    });
+  });
+});
+
+describe("the workspace expiry windows", () => {
+  it("takes whole positive numbers of hours and days", async () => {
+    await withSettings(async (base, token) => {
+      const response = await patch(base, token, {
+        controller: { "workspace.orphanTtlHours": 6, "workspace.idleTtlDays": 90 },
+      });
+      expect(response.status, await response.clone().text()).toBe(200);
+      expect((await readSettings(base, token)).controller).toMatchObject({
+        "workspace.orphanTtlHours": 6,
+        "workspace.idleTtlDays": 90,
+      });
+    });
+  });
+
+  it("refuses zero, a negative window and a fraction of one", async () => {
+    await withSettings(async (base, token) => {
+      for (const key of ["workspace.orphanTtlHours", "workspace.idleTtlDays"]) {
+        for (const value of [0, -1, 1.5]) {
+          const response = await patch(base, token, { controller: { [key]: value } });
+          expect(await refusedCode(response), `${key} = ${String(value)}`).toBe("validation");
+        }
+      }
+      expect(await readSettings(base, token)).toMatchObject({ controller: {} });
+    });
   });
 });

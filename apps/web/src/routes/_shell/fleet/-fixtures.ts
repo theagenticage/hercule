@@ -86,6 +86,7 @@ const BASE_SESSION: Session = {
   instanceId: "01a06d02-1000-7000-8000-000000000001",
   runnerId: MOSS.id,
   workspaceId: null,
+  projectId: null,
   requestedAccessMode: "approval-required",
   accessMode: "approval-required",
   nativeSessionId: null,

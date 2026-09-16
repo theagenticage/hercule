@@ -429,6 +429,32 @@ export const connect = (
           case "ack":
             // Acks belong to the replayable events nothing sends yet.
             return;
+          // The git substrate that makes, tears down and authenticates a
+          // workspace is not in this binary yet. The controller waits for a
+          // report on each of these, so this build answers rather than leaving
+          // a workspace provisioning for ever and the session in it queued.
+          case "workspaceProvision":
+            return yield* write(
+              asText({
+                _tag: "workspaceReport",
+                workspaceId: message.workspaceId,
+                status: "failed",
+                message: "this machine cannot make workspaces yet",
+              }),
+            );
+          case "workspaceDispose":
+            // Nothing was ever made, so there is nothing left to remove.
+            return yield* write(
+              asText({
+                _tag: "workspaceReport",
+                workspaceId: message.workspaceId,
+                status: "deleted",
+              }),
+            );
+          case "credentialAnswer":
+            // Answered to nobody: the credential helper that asks for one, and
+            // consumes this, is the next slice's.
+            return;
         }
         // Every frame the protocol declares is answered above. A new one that
         // reaches here would otherwise be dropped in silence.

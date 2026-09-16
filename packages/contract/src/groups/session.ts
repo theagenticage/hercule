@@ -19,9 +19,10 @@ import {
   Validation,
 } from "../errors";
 import { Id, Timestamp } from "../ids";
+import { Branch } from "./workspace";
 import { page, pageParams } from "../pagination";
 import { Authenticated } from "../security";
-import { bounded } from "../strings";
+import { atMost, bounded } from "../strings";
 
 /** The request vocabulary is the protocol's; the API hands it out unchanged. */
 export { ApprovalDecision, OpenRequest };
@@ -65,6 +66,8 @@ export const Session = Schema.Struct({
   /** Pinned where the session started; a session never migrates. */
   runnerId: Id,
   workspaceId: Schema.NullOr(Id),
+  /** The project the thread belongs to; organisation only, nothing derives from it. */
+  projectId: Schema.NullOr(Id),
   requestedAccessMode: AccessMode,
   /** What the session runs as, after the downward fallback. */
   accessMode: AccessMode,
@@ -95,6 +98,41 @@ export const Session = Schema.Struct({
 
 export type Session = Schema.Schema.Type<typeof Session>;
 
+/** The most repos one thread may open a workspace over at once. */
+export const MAX_SPAWN_CHECKOUTS = 32;
+
+/** One repo a fresh workspace gets a worktree of, and where that worktree starts. */
+export const SpawnCheckout = Schema.Struct({
+  resourceId: Id,
+  /** What the thread's own branch starts from; absent takes the default branch. */
+  baseBranch: Schema.optionalKey(Branch),
+});
+
+export type SpawnCheckout = Schema.Schema.Type<typeof SpawnCheckout>;
+
+/**
+ * The workspace a thread opens in: the repo's shared checkout, a fresh worktree
+ * of its own, or one that already stands. A workspace is a kind and a list of
+ * checkouts; every git word rides a checkout. Leaving it off is a thread with
+ * no checkout at all.
+ */
+export const SpawnWorkspace = Schema.Union([
+  Schema.Struct({
+    kind: Schema.Literal("primary"),
+    resourceId: Id,
+    /** The branch the shared checkout is switched to before the harness starts. */
+    branch: Schema.optionalKey(Branch),
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("ephemeral"),
+    /** Empty makes a scratch workspace: a directory and no checkout at all. */
+    checkouts: atMost(SpawnCheckout, MAX_SPAWN_CHECKOUTS),
+  }),
+  Schema.Struct({ kind: Schema.Literal("existing"), workspaceId: Id }),
+]);
+
+export type SpawnWorkspace = Schema.Schema.Type<typeof SpawnWorkspace>;
+
 /**
  * Spawning a Thread: no agent, so every value comes from the user's `thread.*`
  * settings unless this call overrides it, for this session only.
@@ -110,8 +148,10 @@ export const SessionSpawnInput = closedStruct({
   runnerId: Schema.optionalKey(Id),
   /** The Permission Profile the session's token carries, in place of the thread default. */
   permissionProfileId: Schema.optionalKey(Id),
-  /** Workspaces are not built yet, so a non-null id is refused rather than ignored. */
-  workspaceId: Schema.optionalKey(Schema.NullOr(Id)),
+  /** The project the thread belongs to; every resource it names must be in it. */
+  projectId: Schema.optionalKey(Id),
+  /** Where it works; absent is a thread with no checkout. */
+  workspace: Schema.optionalKey(SpawnWorkspace),
 });
 
 export type SessionSpawnInput = Schema.Schema.Type<typeof SessionSpawnInput>;
