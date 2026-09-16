@@ -139,12 +139,13 @@ function Threads(): JSX.Element {
             </Row>
           </>
         )}
-        {/* The four mode words are whole words and a segment never breaks one,
-            so they need more than the value column: the row stands with its
-            label above it and the control across the card. */}
-        <Row label="Access mode" wide>
+        <Row label="Access mode">
           <SegmentedControl
             aria-label="Access mode"
+            // Four hyphenated words in the width of one value column: the
+            // segments are set at the scale's smaller step and sit closer
+            // together, which is what makes them fit without breaking a word.
+            className="[&>button]:px-1.5 [&>button]:text-fine"
             value={defaults.accessMode}
             onValueChange={(next) => {
               save({ user: { "thread.accessMode": next as AccessMode } });

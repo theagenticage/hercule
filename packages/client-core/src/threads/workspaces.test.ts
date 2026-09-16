@@ -17,7 +17,9 @@ import {
   repoName,
   runnerForPick,
   withBranch,
+  labelText,
   workspaceLabel,
+  workspaceLabelParts,
   phraseText,
   workspaceLead,
   workspaceName,
@@ -62,6 +64,28 @@ describe("workspaceName and workspaceLabel", () => {
 
   it("names a machine that is no longer in the fleet rather than going blank", () => {
     expect(workspaceLabel(PRIMARY, [WEBSHOP], [])).toBe("webshop checkout · unknown machine");
+  });
+
+  // The sidebar is narrower than some of these labels, and the machine is what
+  // tells one repo's two checkouts apart: the repo is what gives way.
+  it("splits a shared checkout's label into the repo, which may be cut, and the rest", () => {
+    expect(workspaceLabelParts(PRIMARY, [WEBSHOP], [MOSS])).toEqual({
+      clip: "webshop",
+      keep: " checkout · moss",
+    });
+  });
+
+  it("gives a worktree's whole name as the part that may be cut: it is one word", () => {
+    expect(workspaceLabelParts(RUN_3F1, [WEBSHOP], [MOSS])).toEqual({
+      clip: "hydra/run-3f1",
+      keep: "",
+    });
+  });
+
+  it("reads both parts back as the one label a tooltip shows", () => {
+    expect(labelText(workspaceLabelParts(PRIMARY, [WEBSHOP], [MOSS]))).toBe(
+      "webshop checkout · moss",
+    );
   });
 });
 

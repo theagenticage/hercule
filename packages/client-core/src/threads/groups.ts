@@ -19,16 +19,23 @@ import type {
   Workspace,
 } from "@hydra/contract";
 import { threadRows, type ThreadRow } from "./rows";
-import { defaultWorkspacePick, projectRepos, readyPrimary, workspaceLabel } from "./workspaces";
+import {
+  defaultWorkspacePick,
+  projectRepos,
+  readyPrimary,
+  workspaceLabelParts,
+  type WorkspaceLabel,
+} from "./workspaces";
 
 export interface WorkspaceGroup {
   readonly workspaceId: string | null;
   /**
-   * `hydra/run-3f1`, `webshop checkout · moss`, or `no workspace` last. Null
-   * on a project whose threads are all in no workspace: the label separates
-   * one lane from another, and there is nothing there to separate.
+   * `hydra/run-3f1`, `webshop checkout · moss`, or `no workspace` last, in the
+   * two parts a narrow sidebar cuts it in. Null on a project whose threads are
+   * all in no workspace: the label separates one lane from another, and there
+   * is nothing there to separate.
    */
-  readonly label: string | null;
+  readonly label: WorkspaceLabel | null;
   /** Whether the draft being written joins this group. */
   readonly draft: boolean;
   readonly rows: readonly ThreadRow[];
@@ -90,11 +97,20 @@ const holdsDraft = (
   workspaceId: string | null,
 ): boolean => draft !== null && joins && draft.workspaceId === workspaceId;
 
-/** A lane of threads that work without a checkout, which is pinned last. */
-const loose = (lane: WorkspaceGroup): boolean => lane.workspaceId === null && !lane.draft;
-
 const recency = (rows: readonly ThreadRow[]): number =>
   rows.length === 0 ? 0 : Date.parse(rows[0]!.activityAt);
+
+/**
+ * Where a lane stands among its project's: the draft's own place first, then
+ * one place per worktree in catalog order, then the shared checkout, then the
+ * lane of threads that work without a checkout.
+ */
+const rank = (lane: WorkspaceGroup, workspaces: readonly Workspace[]): number => {
+  if (lane.workspaceId === null) return lane.draft ? -1 : workspaces.length + 2;
+  const workspace = workspaces.find((each) => each.id === lane.workspaceId);
+  if (workspace === undefined || workspace.kind === "primary") return workspaces.length + 1;
+  return workspaces.findIndex((each) => each.id === lane.workspaceId);
+};
 
 export const threadGroups = ({
   sessions,
@@ -149,8 +165,8 @@ export const threadGroups = ({
           workspace === undefined
             ? alone || (holdsDraft(draft, joins, workspaceId) && rowsIn.length === 0)
               ? null
-              : "no workspace"
-            : workspaceLabel(workspace, resources, runners),
+              : { clip: "no workspace", keep: "" }
+            : workspaceLabelParts(workspace, resources, runners),
         draft: holdsDraft(draft, joins, workspaceId),
         rows: rowsIn,
       };
@@ -160,17 +176,12 @@ export const threadGroups = ({
       projectId,
       name: projects.find((each) => each.id === projectId)?.name ?? null,
       count: held.length,
-      // The group the draft joins leads: it is where the user is working
-      // right now, and it holds a row no clock has an activity stamp for. The
-      // threads that work without a checkout are pinned last - unless the
-      // draft is what stands there, which is a draft with no workspace yet
-      // rather than a lane of workspace-less threads.
-      workspaces: lanes.sort(
-        (a, b) =>
-          Number(loose(a)) - Number(loose(b)) ||
-          Number(b.draft) - Number(a.draft) ||
-          recency(b.rows) - recency(a.rows),
-      ),
+      // The prototype's own order: the worktrees first, in the order the
+      // catalog lists them, then the repo's shared checkout, then the threads
+      // that work without a checkout. A draft that has no workspace at all yet
+      // is not that last lane - it stands under the project's own header,
+      // before everything, which is where the user just asked for it.
+      workspaces: lanes.sort((a, b) => rank(a, workspaces) - rank(b, workspaces)),
     };
   });
 

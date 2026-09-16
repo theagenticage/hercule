@@ -535,7 +535,9 @@ describe("the Threads face groups by project and workspace (AC-20)", () => {
   it("heads each project with its name, its thread count and a + that starts a draft in it", async () => {
     await renderApp({ path: "/", api: stubApi(withProjects()).fetch, token: "held" });
 
-    await threadsNav().findByText("webshop");
+    // The project's own + names it, and unlike the bare word it stands in one
+    // place only: a shared checkout's label carries the repo's name too.
+    await threadsNav().findByRole("link", { name: "New thread in webshop" });
     expect(faceText()).toContain("webshop 4");
     expect(faceText()).toContain("ops 1");
 
@@ -547,7 +549,13 @@ describe("the Threads face groups by project and workspace (AC-20)", () => {
     await renderApp({ path: "/", api: stubApi(withProjects()).fetch, token: "held" });
 
     await threadsNav().findByText("hydra/run-3f1");
-    expect(threadsNav().getByText("webshop checkout · moss")).toBeDefined();
+    // The whole label is the tooltip, and it is split so that a sidebar too
+    // narrow for it cuts the repo rather than the machine that tells one
+    // repo's two checkouts apart.
+    const label = threadsNav().getByTitle("webshop checkout · moss");
+    expect(label.textContent).toBe("webshop checkout · moss");
+    expect(label.firstElementChild?.textContent).toBe("webshop");
+    expect(label.lastElementChild?.textContent).toBe(" checkout · moss");
   });
 
   it("puts the workspace-less threads of a project last, under 'no workspace'", async () => {
@@ -574,7 +582,7 @@ describe("the Threads face groups by project and workspace (AC-20)", () => {
   it("puts the threads that belong to no project last, under no header of their own", async () => {
     await renderApp({ path: "/", api: stubApi(withProjects()).fetch, token: "held" });
 
-    await threadsNav().findByText("webshop");
+    await threadsNav().findByRole("link", { name: "New thread in webshop" });
     const text = faceText();
     expect(text.indexOf("ops")).toBeLessThan(text.indexOf("Nothing to do with a project"));
     expect(text.indexOf("Rotate the Hetzner backups key")).toBeLessThan(

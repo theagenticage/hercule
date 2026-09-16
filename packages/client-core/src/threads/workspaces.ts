@@ -53,26 +53,46 @@ export const projectRepos = (
 export const workspaceName = (workspace: Workspace): string =>
   workspace.checkouts[0]?.branch ?? "workspace";
 
-/** What a primary is called in the sidebar, where the repo and machine tell it apart. */
-export const primaryName = (
+/**
+ * A workspace's label in two parts: what may be cut short where the sidebar is
+ * narrower than the name, and what must stand whole whatever happens.
+ *
+ * On a primary that is the repo and ` checkout · <machine>`: the machine is
+ * the whole point of the label - it is what tells one repo's two checkouts
+ * apart - so cutting the label's tail would eat the one word that means
+ * something. An ephemeral workspace is named after its branch, which is one
+ * word and is cut as one.
+ */
+export interface WorkspaceLabel {
+  /** The part that may be cut short, with an ellipsis, when room runs out. */
+  readonly clip: string;
+  /** What stands whole beside it; empty where the whole label may be cut. */
+  readonly keep: string;
+}
+
+export const workspaceLabelParts = (
   workspace: Workspace,
   resources: readonly Resource[],
   runners: readonly Runner[],
-): string => {
+): WorkspaceLabel => {
+  if (workspace.kind !== "primary") return { clip: workspaceName(workspace), keep: "" };
   const resource = resources.find((each) => each.id === workspace.checkouts[0]?.resourceId);
   const runner = runners.find((each) => each.id === workspace.runnerId);
-  return `${repoName(resource)} checkout · ${runner?.name ?? "unknown machine"}`;
+  return {
+    clip: repoName(resource),
+    keep: ` checkout · ${runner?.name ?? "unknown machine"}`,
+  };
 };
+
+/** The same label read whole, which is what a tooltip and a reader get. */
+export const labelText = (label: WorkspaceLabel): string => `${label.clip}${label.keep}`;
 
 /** What a workspace is called in the sidebar, whichever kind it is. */
 export const workspaceLabel = (
   workspace: Workspace,
   resources: readonly Resource[],
   runners: readonly Runner[],
-): string =>
-  workspace.kind === "primary"
-    ? primaryName(workspace, resources, runners)
-    : workspaceName(workspace);
+): string => labelText(workspaceLabelParts(workspace, resources, runners));
 
 /** The repo's shared checkout on one machine, where that machine holds one. */
 export const readyPrimary = (

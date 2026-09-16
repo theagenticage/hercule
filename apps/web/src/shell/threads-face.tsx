@@ -4,6 +4,7 @@ import { useQuery, type QueryClient } from "@tanstack/react-query";
 import {
   ageOf,
   draftPlace,
+  labelText,
   threadGroups,
   type DraftPlace,
   type HydraClient,
@@ -197,10 +198,30 @@ function WorkspaceLane({
     <div className="group/lane">
       {projectId === null || lane.label === null ? null : (
         <div className="flex items-center gap-1.5 pt-1.5 pr-1 pb-px pl-2">
-          <span className="min-w-0 truncate font-mono text-[11px] text-faint">{lane.label}</span>
+          {/* The repo is what gives when the sidebar is narrow; ` checkout ·
+              <machine>` stands whole, because the machine is what tells one
+              repo's two checkouts apart. The whole label is the title. A label
+              that is one word is one element: two would be the same text
+              twice, to a reader and to anything looking for it. */}
+          {lane.label.keep === "" ? (
+            <span
+              title={lane.label.clip}
+              className="min-w-0 truncate font-mono text-[11px] text-faint"
+            >
+              {lane.label.clip}
+            </span>
+          ) : (
+            <span
+              title={labelText(lane.label)}
+              className="flex min-w-0 font-mono text-[11px] text-faint"
+            >
+              <span className="truncate">{lane.label.clip}</span>
+              <span className="shrink-0 whitespace-pre">{lane.label.keep}</span>
+            </span>
+          )}
           {lane.workspaceId === null ? null : (
             <Plus
-              name={`New thread in ${lane.label}`}
+              name={`New thread in ${labelText(lane.label)}`}
               search={{ project: projectId, workspace: lane.workspaceId }}
               className="ml-auto opacity-0 group-hover/lane:opacity-100 focus-visible:opacity-100"
             />

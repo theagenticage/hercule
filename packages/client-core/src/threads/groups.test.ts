@@ -6,6 +6,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { draftPlace, threadGroups } from "./groups";
+import { labelText } from "./workspaces";
 import {
   MOSS,
   OPS_PROJECT,
@@ -58,6 +59,11 @@ const groups = (draft: { projectId: string | null; workspaceId: string | null } 
     mode: "meta",
     draft,
   });
+
+/** A project's lanes as they read, in the order they stand. */
+const laneLabels = (
+  group: { workspaces: readonly { label: { clip: string; keep: string } | null }[] } | undefined,
+) => group?.workspaces.map((lane) => (lane.label === null ? null : labelText(lane.label)));
 
 describe("draftPlace", () => {
   const resources = [WEBSHOP];
@@ -121,8 +127,37 @@ describe("threadGroups", () => {
     ]);
   });
 
-  it("orders a project's workspaces by activity and pins the workspace-less lane last", () => {
-    expect(groups()[0]?.workspaces.map((lane) => lane.label)).toEqual([
+  it("puts the worktrees first, then the shared checkout, then the workspace-less lane", () => {
+    expect(laneLabels(groups()[0])).toEqual([
+      "hydra/run-3f1",
+      "webshop checkout · moss",
+      "no workspace",
+    ]);
+  });
+
+  it("keeps the worktrees in the catalog's own order, whatever their threads did last", () => {
+    const second = { ...RUN_3F1, id: "ws-run-8a0" };
+    const ordered = threadGroups({
+      sessions: [
+        session({
+          id: "s-newer",
+          projectId: WEBSHOP_PROJECT.id,
+          workspaceId: second.id,
+          lastActivityAt: at(9),
+        }),
+        ...SESSIONS,
+      ],
+      projects: [WEBSHOP_PROJECT],
+      // The catalog lists run-3f1 first, though run-8a0 holds the newer thread.
+      workspaces: [RUN_3F1, second, PRIMARY],
+      resources: [WEBSHOP],
+      runners: [MOSS],
+      mode: "meta",
+      draft: null,
+    })[0];
+
+    expect(laneLabels(ordered)).toEqual([
+      "hydra/run-3f1",
       "hydra/run-3f1",
       "webshop checkout · moss",
       "no workspace",
@@ -130,14 +165,21 @@ describe("threadGroups", () => {
   });
 
   it("heads nothing where a project's threads are all in no workspace: there is nothing to separate", () => {
-    expect(groups()[1]?.workspaces.map((lane) => lane.label)).toEqual([null]);
+    expect(laneLabels(groups()[1])).toEqual([null]);
   });
 
-  it("puts the draft in the group it will join, and puts that group first", () => {
+  // The group order is the workspaces' own, so joining one does not move it:
+  // the draft joins the shared checkout where the shared checkout stands.
+  it("puts the draft in the group it will join, in that group's own place", () => {
     const webshop = groups({ projectId: WEBSHOP_PROJECT.id, workspaceId: PRIMARY.id })[0];
+    const lane = webshop?.workspaces.find((each) => each.draft);
 
-    expect(webshop?.workspaces[0]?.label).toBe("webshop checkout · moss");
-    expect(webshop?.workspaces[0]?.draft).toBe(true);
+    expect(lane?.label === null ? null : labelText(lane!.label)).toBe("webshop checkout · moss");
+    expect(laneLabels(webshop)).toEqual([
+      "hydra/run-3f1",
+      "webshop checkout · moss",
+      "no workspace",
+    ]);
   });
 
   it("stands a project up for a draft even while nothing has been started in it", () => {
@@ -184,7 +226,7 @@ describe("threadGroups", () => {
       draft: { projectId: WEBSHOP_PROJECT.id, workspaceId: null },
     })[0];
 
-    expect(loose?.workspaces.map((lane) => lane.label)).toContain("no workspace");
+    expect(laneLabels(loose)).toContain("no workspace");
   });
 
   it("orders a project's threads newest first", () => {
