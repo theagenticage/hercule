@@ -180,20 +180,6 @@ const reached = (specifier: string): string | undefined => {
   return named !== undefined && domains.includes(named) ? named : undefined;
 };
 
-/**
- * The cycles this repository already has, each as the edge that closes it.
- * Both are the fleet knot: the runners domain routes a machine's frames and
- * retires a machine, which is work in the sessions and workspaces domains,
- * while both of those read the fleet's presence and rows. Untying it means
- * moving the socket and the retire sequence out of `runners/`, which is its own
- * ticket; until then the two edges below are the debt, and everything else has
- * to be a DAG - a third cycle is a new one.
- */
-const ACCEPTED: ReadonlyArray<readonly [string, string]> = [
-  ["runners", "sessions"],
-  ["runners", "workspaces"],
-];
-
 const edges = new Map<string, Set<string>>();
 for (const domain of domains) {
   const out = new Set<string>();
@@ -209,8 +195,6 @@ for (const domain of domains) {
   }
   edges.set(domain, out);
 }
-
-for (const [from, to] of ACCEPTED) edges.get(from)?.delete(to);
 
 /** The first cycle a depth-first walk closes, as the path that closed it. */
 const cycleIn = (): ReadonlyArray<string> | undefined => {
@@ -248,15 +232,11 @@ if (cycle !== undefined) {
       "imported first decides whether the process starts. Move the shared piece " +
       "into the domain that owns it, or hand it over where both are already held.",
   );
-  console.error("The two edges this repository already accepts are listed in this script.");
   process.exit(1);
 }
 
 if (domains.length > 0) {
-  console.log(
-    `dep-lint: the controller's ${String(domains.length)} domains form a DAG ` +
-      `beside ${String(ACCEPTED.length)} accepted edges.`,
-  );
+  console.log(`dep-lint: the controller's ${String(domains.length)} domains form a DAG.`);
 }
 
 const SDK = "@anthropic-ai/claude-agent-sdk";

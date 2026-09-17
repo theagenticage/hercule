@@ -32,6 +32,7 @@ import { ApiKeys, ApiKeysLayer } from "../credentials";
 import { EventService, EventServiceLayer } from "../events";
 import { ConnectionService } from "../connections";
 import { Controller, ControllerLayer } from "../controller";
+import { InboundLayer, Retirement, RetirementLayer } from "../daemon";
 import { Profiles, ProfilesLayer } from "../permissions";
 import { Plugins } from "../plugins";
 import { Secret, SecretLayer } from "../secrets";
@@ -213,8 +214,9 @@ const resourceRoutes = HttpApiBuilder.group(api, "resource", (handlers) =>
 );
 
 /**
- * The workspace service is not in `operationLayers`: it reaches the session
- * service, which must be the one the boot built.
+ * The workspace service is not in `operationLayers`: the controller daemon and
+ * the drivers act through it, so a request must reach the one instance the boot
+ * built rather than a second one over the same rows.
  */
 const workspaceRoutes = HttpApiBuilder.group(api, "workspace", (handlers) =>
   Effect.gen(function* () {
@@ -242,6 +244,9 @@ const runnerRoutes = HttpApiBuilder.group(api, "runner", (handlers) =>
     // Two of this group's operations are about a machine's provider instances,
     // which are this service's, not the runner service's.
     const providers = yield* ProviderService;
+    // Retiring a machine is more than its row: the sessions it was hosting and
+    // the working areas it held go with it, and it is told so.
+    const retirement = yield* Retirement;
     return handlers
       .handle("query", ({ query }) => operation(runners.query(query)))
       .handle("read", ({ params }) => operation(runners.read(params)))
@@ -251,7 +256,7 @@ const runnerRoutes = HttpApiBuilder.group(api, "runner", (handlers) =>
       .handle("drain", ({ params }) => operation(runners.drain(params)))
       .handle("undrain", ({ params }) => operation(runners.undrain(params)))
       .handle("retire", ({ params, payload }) =>
-        operation(runners.retire({ id: params.id, ...payload })),
+        operation(retirement.retireRunner({ id: params.id, ...payload })),
       )
       .handle("refreshFacts", ({ params }) => operation(runners.refreshFacts(params)))
       .handle("probe", ({ params, payload }) =>
@@ -368,8 +373,10 @@ const controllerRoutes = HttpApiBuilder.group(api, "controller", (handlers) =>
 );
 
 /**
- * Every service an operation resolves. One list, because a controller booting
- * with a layer this list has and its own does not is a controller missing an
+ * Every service an operation resolves, and the controller daemon beside them:
+ * the listener forks its inbound driver, so it is built here rather than a
+ * second time somewhere else. One list, because a controller booting with a
+ * layer this list has and its own does not is a controller missing an
  * operation, and nothing would say so until a request asked for it.
  *
  * Five are deliberately absent. `Plugins`, `ProviderService`, `SessionService`,
@@ -389,8 +396,11 @@ export const operationLayers = Layer.mergeAll(
   TaskServiceLayer,
   ProjectServiceLayer,
   ResourceServiceLayer,
-  RunnerServiceLayer,
+  // The daemon's retirement use case reaches the runner service, so that one is
+  // layered under it rather than merged beside it.
+  RetirementLayer.pipe(Layer.provideMerge(RunnerServiceLayer)),
   RunnerJoinLayer,
+  InboundLayer,
   EventServiceLayer,
   LiveTopicsLayer,
   WsTicketsLayer,

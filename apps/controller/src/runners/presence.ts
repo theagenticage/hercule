@@ -39,6 +39,8 @@ import {
   type SessionInput,
   type SessionInputResult,
   type SessionsReport,
+  type CredentialRequest,
+  type WorkspaceReport,
 } from "@hydra/protocol";
 import { SYSTEM_ACTOR } from "../actor";
 import { hashToken } from "../credentials";
@@ -78,6 +80,27 @@ export interface SessionTraffic {
   readonly connection: Connection;
   readonly frame: SessionEvent | SessionsReport;
 }
+
+/**
+ * What another domain acts on: a machine reporting something that is not about
+ * a session, and the runners domain changing something that frees a machine for
+ * work. Presence carries none of it further - what a workspace report means is
+ * the workspaces domain's and what room on a machine means is the sessions
+ * domain's. One queue, so a machine's reports are handed on in the order they
+ * arrived in; what this domain changes itself joins them as it happens.
+ */
+export type FleetTraffic =
+  | {
+      readonly _tag: "workspaceReported";
+      readonly runnerId: string;
+      readonly report: WorkspaceReport;
+    }
+  | {
+      readonly _tag: "credentialRequested";
+      readonly runnerId: string;
+      readonly request: CredentialRequest;
+    }
+  | { readonly _tag: "placementsChanged"; readonly runnerId: string };
 
 /** What came back for one of those, correlated by the request's own id. */
 export type Answer =
@@ -156,6 +179,11 @@ const make = Effect.gen(function* () {
   // attached. Order is the guarantee that matters: the session domain applies
   // events in the sequence the runner numbered them.
   const sessions = yield* Queue.unbounded<SessionTraffic>();
+  // A second queue rather than a second tag on the first: what a machine says
+  // about its sessions is applied by one consumer in sequence, and holding a
+  // workspace report behind a transcript backlog would keep a session waiting
+  // for a working area that is already there.
+  const fleet = yield* Queue.unbounded<FleetTraffic>();
 
   /**
    * Nothing more is coming over this connection, so everybody waiting on it is
@@ -179,6 +207,18 @@ const make = Effect.gen(function* () {
     held.pending.delete(key);
     for (const one of waiting) Deferred.doneUnsafe(one, Exit.succeed(Option.some(reported)));
   };
+
+  /**
+   * Hands one item to whoever is above this domain, unless the connection it
+   * came over has been replaced: yesterday's machine must not be acted on as
+   * if it were today's.
+   */
+  const publish = (id: string, connection: Connection, item: FleetTraffic): Effect.Effect<void> =>
+    Effect.suspend(() =>
+      reachable.get(id)?.connection === connection
+        ? Effect.asVoid(Queue.offer(fleet, item))
+        : Effect.void,
+    );
 
   /**
    * Sends one thing and waits for what comes back under `key`. `none` when
@@ -370,6 +410,39 @@ const make = Effect.gen(function* () {
     sessionTraffic: Stream.fromQueue(sessions),
 
     /**
+     * What a machine made of a working area. What that means for the workspace
+     * row, and for the sessions waiting on it, is decided above this domain.
+     */
+    reportedWorkspace: (
+      id: string,
+      connection: Connection,
+      report: WorkspaceReport,
+    ): Effect.Effect<void> =>
+      publish(id, connection, { _tag: "workspaceReported", runnerId: id, report }),
+
+    /**
+     * A machine asking for the credential git needs. The answer is a frame back
+     * to it, which is why the question is published rather than answered here.
+     */
+    requestedCredential: (
+      id: string,
+      connection: Connection,
+      request: CredentialRequest,
+    ): Effect.Effect<void> =>
+      publish(id, connection, { _tag: "credentialRequested", runnerId: id, request }),
+
+    /**
+     * This machine may have room for work it had none for a moment ago: its
+     * cap was raised or a drain was lifted. Whether anything is waiting for
+     * that room is not the fleet's to know.
+     */
+    placementsChanged: (id: string): Effect.Effect<void> =>
+      Effect.asVoid(Queue.offer(fleet, { _tag: "placementsChanged", runnerId: id })),
+
+    /** Everything the fleet reports or changes that another domain acts on. */
+    fleetTraffic: Stream.fromQueue(fleet),
+
+    /**
      * Whether this runner's current connection has applied a sessions report
      * yet. False for a runner holding no connection at all, same as any other
      * fact this map has no entry for.
@@ -424,22 +497,29 @@ const make = Effect.gen(function* () {
       connection: Connection,
       watermark: RunnerWatermark,
     ): Effect.Effect<void, SqlError> =>
-      withTransaction(
-        sql,
-        Effect.gen(function* () {
-          if (reachable.get(id)?.connection !== connection) return;
-          const at = yield* nowIso;
-          const result = yield* runners.recordWatermark(id, watermark, at);
-          if (!result.crossed) return;
-          yield* audit.append({
-            kind: "runner.placementsChanged",
-            actor: SYSTEM_ACTOR,
-            record: { topic: "runner", id },
-            payload: { runnerId: id, acceptingPlacements: result.accepting },
-            at,
-          });
-        }),
-      ),
+      Effect.gen(function* () {
+        yield* withTransaction(
+          sql,
+          Effect.gen(function* () {
+            if (reachable.get(id)?.connection !== connection) return;
+            const at = yield* nowIso;
+            const result = yield* runners.recordWatermark(id, watermark, at);
+            if (!result.crossed) return;
+            yield* audit.append({
+              kind: "runner.placementsChanged",
+              actor: SYSTEM_ACTOR,
+              record: { topic: "runner", id },
+              payload: { runnerId: id, acceptingPlacements: result.accepting },
+              at,
+            });
+          }),
+        );
+        // After the write, so whoever acts on the room this machine has reads
+        // the disk it just reported rather than the one it replaced. A report
+        // that crossed nothing still says the machine is there with that disk,
+        // which is what placement reads.
+        yield* publish(id, connection, { _tag: "placementsChanged", runnerId: id });
+      }),
 
     /**
      * Which departure it was is the connection's to say, because only it heard

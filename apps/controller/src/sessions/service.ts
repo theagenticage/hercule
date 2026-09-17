@@ -11,6 +11,7 @@
  * order it arrived. Each event's stream rows and the status change they cause
  * commit together (spec 04 Truth model).
  */
+import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -691,9 +692,20 @@ const make = Effect.gen(function* () {
       );
     });
 
-  /** A driver must not stop on one failure, so the cause is logged and dropped. */
-  const absorbing = (what: string, effect: Effect.Effect<void, SqlError>): Effect.Effect<void> =>
-    Effect.ignore(Effect.tapCause(effect, (cause) => Effect.logError(what, cause)));
+  /**
+   * A driver must not stop on one item, so the cause is logged and dropped - a
+   * defect as much as a failure, because a bug applying one report would
+   * otherwise take the driver down for the life of the process, silently and for
+   * the whole fleet. An interruption is the driver being stopped, and is passed
+   * on.
+   */
+  const absorbing = (
+    what: string,
+    effect: Effect.Effect<void, SqlError>,
+  ): Effect.Effect<void, SqlError> =>
+    Effect.catchCause(effect, (cause) =>
+      Cause.hasInterrupts(cause) ? Effect.failCause(cause) : Effect.logError(what, cause),
+    );
 
   /**
    * The tail of any move to `exited`: queued inputs cancelled, the session's
@@ -1714,20 +1726,20 @@ const make = Effect.gen(function* () {
     ),
 
     /**
-     * Reaches outside this domain: a runner's cap or watermark changing, and
-     * an undrain, are facts the runners domain holds and this domain has no
-     * other way to hear about.
+     * Starts what this runner now has room for. What gave it that room - a
+     * watermark crossed, a cap raised, a drain lifted - is the fleet's to
+     * report and the controller daemon's to act on.
      */
     dispatch,
 
-    /** Reached by `runner.retire`, which owns the sessions a retired machine leaves behind. */
+    /** Reached when a machine is retired, which ends the sessions it was hosting. */
     endOnRunner,
 
     /**
      * What a machine's report about a workspace means for the sessions waiting
      * on it: one that came up releases them, and one that could not be made ends
-     * them with the machine's own words for why. Called by the runner socket,
-     * which holds both services - so neither domain has to reach into the other.
+     * them with the machine's own words for why. Called by the controller
+     * daemon - so neither domain has to reach into the other.
      */
     workspaceSettled: (
       runnerId: string,

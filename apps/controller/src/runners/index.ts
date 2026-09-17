@@ -1,4 +1,10 @@
-/** Runners: the daemons that host sessions on the controller's behalf. */
+/**
+ * Runners: the daemons that host sessions on the controller's behalf.
+ *
+ * The fleet keeps its own rows and the connections it is reachable through, and
+ * calls nobody: what a machine reports that another domain acts on is published
+ * on `RunnerPresence`, and what is done about it is decided above this domain.
+ */
 export { requireAdapter, requireOnline } from "./adapters";
 export { RunnerJoinLayer } from "./join";
 export { JoinTokens, JoinTokensLayer } from "./join-tokens";
@@ -15,6 +21,7 @@ export {
   RunnerPresenceLayer,
   type Answer,
   type Connection,
+  type FleetTraffic,
   type SessionTraffic,
 } from "./presence";
 export { onlineWhere, runnerRepository } from "./repository";
@@ -24,6 +31,9 @@ export {
   RunnerService,
   RunnerServiceLayer,
   type Identified,
+  type MoveError,
   type QueryInput,
+  type Retired,
+  type RetireInput,
   type UpdateInput,
 } from "./service";

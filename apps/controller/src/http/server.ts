@@ -50,6 +50,7 @@ import { responseFor, withEnvelope } from "./envelope";
 import { setupGate } from "./gate";
 import { AuthenticatedLayer, SetupTokenLayer } from "./middleware";
 import { OAuthCallbackRouteLayer } from "../connections";
+import { Inbound } from "../daemon";
 import { LiveSocketLayer } from "../live";
 import { ProviderProbes } from "../providers";
 import { RunnerJoinRouteLayer, RunnerPresence, RunnerSocketRouteLayer } from "../runners";
@@ -206,5 +207,9 @@ export const serve = (bundle: WebBundle | undefined) =>
     // before the listener binds, like the probe driver, so no arrival is
     // missed.
     yield* Effect.forkScoped(Effect.flatMap(WorkspaceService, (workspaces) => workspaces.driving));
+    // The controller daemon's inbound driver, before the listener for the same
+    // reason: the queue it reads is built with the layer, so nothing a machine
+    // reports while this fiber is starting is missed.
+    yield* Effect.forkScoped(Effect.flatMap(Inbound, (inbound) => inbound.driving));
     yield* Effect.flatMap(application(bundle), HttpServer.serveEffect());
   });

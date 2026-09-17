@@ -19,6 +19,7 @@
  * about a workspace leaves it `provisioning`, which is what the sweep and the
  * user both read as a workspace that never came up.
  */
+import * as Cause from "effect/Cause";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as Duration from "effect/Duration";
@@ -206,9 +207,20 @@ const expired = (
   return idleFor > window ? reason : undefined;
 };
 
-/** A driver must not stop on one failure, so the cause is logged and dropped. */
-const absorbing = (what: string, effect: Effect.Effect<void, unknown>): Effect.Effect<void> =>
-  Effect.ignore(Effect.tapCause(effect, (cause) => Effect.logError(what, cause)));
+/**
+ * A driver must not stop on one item, so the cause is logged and dropped - a
+ * defect as much as a failure, because a bug applying one report would
+ * otherwise take the driver down for the life of the process, silently and for
+ * the whole fleet. A cause carrying an interrupt is the driver being stopped
+ * and is passed on whole, so nothing that rode along with it is lost.
+ */
+const absorbing = (
+  what: string,
+  effect: Effect.Effect<void, unknown>,
+): Effect.Effect<void, unknown> =>
+  Effect.catchCause(effect, (cause) =>
+    Cause.hasInterrupts(cause) ? Effect.failCause(cause) : Effect.logError(what, cause),
+  );
 
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
@@ -638,8 +650,8 @@ const make = Effect.gen(function* () {
      * What follows for the sessions waiting on it is not decided here. This
      * answers what the report moved, or nothing where it moved nothing - a
      * second report, or one about a workspace that came up meanwhile - and the
-     * caller, which holds both services, tells the sessions domain. That is
-     * what keeps this domain from reaching into that one.
+     * controller daemon tells the sessions domain. That is what keeps this
+     * domain from reaching into that one.
      */
     reported: (
       runnerId: string,

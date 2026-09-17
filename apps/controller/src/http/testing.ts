@@ -86,17 +86,17 @@ export const USERNAME = "rogier";
  * object the boot's activation pass wrote it into.
  */
 const services = (home: string) =>
-  // The routes' own layer reaches `SessionService` now (a runner cap or
-  // watermark move dispatches), so it is provided this block's output rather
-  // than merely merged beside it, the way the real boot's operation layers
-  // reach the services `withPlugins` built.
+  // The routes' own layer holds the controller daemon, which reaches the
+  // session and workspace services, so it is provided this block's output
+  // rather than merely merged beside it, the way the real boot's operation
+  // layers reach the services `withPlugins` built.
   operationLayers.pipe(
     Layer.provideMerge(
       Layer.mergeAll(
         PluginsLayer,
         ProviderServiceLayer,
-        // The workspace service reaches the session service, as it does in the
-        // boot: a workspace that came up releases the sessions waiting for it.
+        // The session service reaches the workspace service, as it does in the
+        // boot: a spawn asks where it is to work.
         SessionServiceLayer.pipe(Layer.provideMerge(WorkspaceServiceLayer)),
         ConnectionServiceLayer,
         ResourceServiceLayer,

@@ -15,36 +15,12 @@ import { CurrentActor, type Actor } from "../actor";
 import { nowIso } from "../db";
 import { AuditLog, AuditLogLayer } from "../events";
 import { TestDatabase } from "../db/testing";
-import { SessionService } from "../sessions";
 import { Settings, SettingsLayer } from "../settings";
-import { WorkspaceService } from "../workspaces";
 import { runnerRepository } from "./repository";
 import { JoinTokensLayer, RunnerPresenceLayer, RunnerService, RunnerServiceLayer } from "./index";
 
-/**
- * None of this file's scenarios move a cap or a watermark, so dispatch is
- * never actually called; a stub stands in rather than the plugin host and
- * everything else the real `SessionService` needs.
- */
-const stubSessionService = Layer.succeed(
-  SessionService,
-  SessionService.of({ dispatch: () => Effect.void } as unknown as Parameters<
-    typeof SessionService.of
-  >[0]),
-);
-
-/** The same, for the one workspace call retiring a machine makes (D-21). */
-const stubWorkspaceService = Layer.succeed(
-  WorkspaceService,
-  WorkspaceService.of({ lostOnRunner: () => Effect.void } as unknown as Parameters<
-    typeof WorkspaceService.of
-  >[0]),
-);
-
 const layer = RunnerServiceLayer.pipe(
-  Layer.provideMerge(
-    Layer.mergeAll(JoinTokensLayer, SettingsLayer, stubSessionService, stubWorkspaceService),
-  ),
+  Layer.provideMerge(Layer.mergeAll(JoinTokensLayer, SettingsLayer)),
   Layer.provideMerge(RunnerPresenceLayer),
   Layer.provideMerge(AuditLogLayer),
   Layer.provideMerge(TestDatabase),
