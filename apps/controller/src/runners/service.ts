@@ -106,6 +106,13 @@ const NAME_TAKEN = "another runner already has that name";
 const RESERVED_IS_THE_DEFAULT =
   "this is the fleet's default runner; choose another default before reserving it";
 
+/**
+ * Why a machine takes no session it does not already hold. Read wherever one is
+ * named directly - a session being placed, or one being picked up again.
+ */
+export const DRAINING = "that runner is draining and takes no new sessions";
+export const RETIRED = "that runner is retired";
+
 const NOT_ACTIVE = "only an active runner can be drained";
 
 const NOT_DRAINING = "only a draining runner can be taken off the drain";

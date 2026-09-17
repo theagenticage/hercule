@@ -2,10 +2,9 @@
  * Sessions as the API sees them, and the one place the fleet's session traffic
  * is turned into rows.
  *
- * Only a Thread can be spawned in this build, and only by the user: every value
- * comes from their `thread.*` settings plus this call's overrides, so any other
- * actor reaching those defaults would make the thread profile an escalation
- * path (spec 02 Thread).
+ * A session is written here from a spec that is already settled: what a thread
+ * runs, where it runs and in which working area are decided a layer up, by the
+ * controller daemon.
  *
  * `ingesting` is the driver: one fiber, reading what the fleet reported in the
  * order it arrived. Each event's stream rows and the status change they cause
@@ -21,7 +20,6 @@ import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
-import type { ProviderDefinition } from "@hydra/plugin-host";
 import {
   SessionSpec,
   type AccessMode,
@@ -37,21 +35,16 @@ import {
   Id,
   INPUT_SORT_FIELDS,
   INPUT_UPDATE_FIELDS,
-  forbidden,
   InvalidState,
   invalidState,
-  nearestSupportedAccessMode,
   NotFound,
   notFound,
   SESSION_SORT_FIELDS,
   SessionFilter,
   SESSION_INPUT_FIELDS,
-  SESSION_CONTINUE_FIELDS,
   SESSION_RESPOND_FIELDS,
   SESSION_UPDATE_FIELDS,
-  SessionSpawnInput,
   type SessionSelection,
-  type SpawnWorkspace,
   TRANSCRIPT_SORT_FIELDS,
   validation,
   validationOf,
@@ -64,30 +57,34 @@ import {
   type Unauthenticated,
   type Validation,
 } from "@hydra/contract";
-import { currentStamp, currentUser, requireGrant, SYSTEM_ACTOR } from "../actor";
+import { currentStamp, requireGrant, SYSTEM_ACTOR } from "../actor";
 import {
   afterCommit,
   announce,
-  mintUuid,
   nowIso,
   pageInput,
   refuseCursor,
-  uuidToString,
   withTransaction,
   type Page,
 } from "../db";
 import { mintToken, hashToken } from "../credentials";
 import { AuditLog } from "../events";
-import { PermissionProfiles, SessionTokens, type GrantsError } from "../permissions";
-import { PluginHost } from "../plugins";
-import { providerRepository, type StoredSnapshot } from "../providers";
-import { resourceRepository } from "../resources";
-import { RunnerPresence, runnerRepository, type Connection, type SessionTraffic } from "../runners";
-import { Secrets } from "../secrets";
-import { Settings, type ScopeSettings, type SettingError } from "../settings";
+import { SessionTokens } from "../permissions";
+import type { PluginHost } from "../plugins";
+import { loggedIn, NO_PLACEMENT, providerRepository, resolvedInstance } from "../providers";
+import {
+  DRAINING,
+  RETIRED,
+  RunnerPresence,
+  runnerRepository,
+  type Connection,
+  type SessionTraffic,
+} from "../runners";
+import type { Secrets } from "../secrets";
+import { Settings, type SettingError } from "../settings";
 import { gitCredentials, gitIdentityOf, WorkspaceService, type GitCredential } from "../workspaces";
 import { inputRepository, type StoredInput } from "./inputs";
-import { validatedOptions } from "./options";
+import { continuingSpecOf, validatedOptions } from "./options";
 import { sessionRepository, type StoredSession } from "./repository";
 import { fold, openRequestAfter, track, type Tracked } from "./stream";
 
@@ -122,10 +119,6 @@ const InputUpdate = Schema.Struct({ id: Id, inputId: Id, ...INPUT_UPDATE_FIELDS 
 
 export type InputUpdate = Schema.Schema.Type<typeof InputUpdate>;
 
-const ContinueInput = Schema.Struct({ id: Id, ...SESSION_CONTINUE_FIELDS });
-
-export type ContinueInput = Schema.Schema.Type<typeof ContinueInput>;
-
 const RespondInput = Schema.Struct({ id: Id, ...SESSION_RESPOND_FIELDS });
 
 export type RespondInput = Schema.Schema.Type<typeof RespondInput>;
@@ -149,6 +142,42 @@ export interface InputPage {
   readonly nextCursor?: string;
 }
 
+/**
+ * What it takes to write one session on a machine, whether it is the first of a
+ * conversation or a branch off another one's. Everything in it is settled: the
+ * controller daemon decided what runs where and opened the working area before
+ * this row exists.
+ */
+export interface Opening {
+  /**
+   * Minted by the caller, not by the insert: the working area is opened in the
+   * same transaction, and a thread's own worktree is made on a branch named
+   * after the thread, so the id has to exist before either row does.
+   */
+  readonly id: string;
+  readonly permissionProfileId: string;
+  readonly runnerId: string;
+  readonly requestedAccessMode: AccessMode;
+  readonly parentSessionId: string | undefined;
+  /** Everything the machine is told, and the source of what the row stores. */
+  readonly spec: SessionSpec;
+  readonly prompt: string;
+  readonly kind: "session.spawned" | "session.continued";
+  /** What the audit entry records beyond the new session's own id. */
+  readonly payload: Readonly<Record<string, unknown>>;
+  readonly projectId: string | undefined;
+  /** The branch the main workspace is switched to before the harness starts. */
+  readonly checkoutBranch: string | undefined;
+  /** The GitHub account this session pushes as. */
+  readonly githubConnectionId: string | undefined;
+  /**
+   * Timed by the caller: the working area it opened and this row are one write
+   * set, and they carry one instant between them. Who is writing is ambient, so
+   * it is not passed.
+   */
+  readonly at: string;
+}
+
 /** A listing as the contract hands it out: the cursor is a key, not a null. */
 const pageOut = <A>(listing: Page<A>): { items: ReadonlyArray<A>; nextCursor?: string } => ({
   items: listing.items,
@@ -157,14 +186,12 @@ const pageOut = <A>(listing: Page<A>): { items: ReadonlyArray<A>; nextCursor?: s
 
 const decodeQuery = Schema.decodeUnknownEffect(QueryInput);
 const decodeIdentified = Schema.decodeUnknownEffect(Identified);
-const decodeSpawn = Schema.decodeUnknownEffect(SessionSpawnInput);
 const decodeInput = Schema.decodeUnknownEffect(InputInput);
 const decodeUpdate = Schema.decodeUnknownEffect(UpdateInput);
 const decodeTranscript = Schema.decodeUnknownEffect(TranscriptInput);
 const decodeInputQuery = Schema.decodeUnknownEffect(InputQueryInput);
 const decodeInputUpdate = Schema.decodeUnknownEffect(InputUpdate);
 const decodeInputIdentified = Schema.decodeUnknownEffect(InputIdentified);
-const decodeContinue = Schema.decodeUnknownEffect(ContinueInput);
 const decodeRespond = Schema.decodeUnknownEffect(RespondInput);
 const encodeSpec = Schema.encodeUnknownSync(SessionSpec);
 const decodeSpec = Schema.decodeUnknownEffect(SessionSpec);
@@ -230,13 +257,6 @@ const NO_TRANSCRIPT =
   "that session left no provider-native session, so its transcript is gone and there is " +
   "nothing to resume";
 
-/** Why a session may not fork a session that is bounded by other grants. */
-const NOT_ITS_PROFILE = "a session may only continue a session on its own permission profile";
-
-/** Read at any runner named directly: for a session to continue on, and for one to spawn on. */
-const DRAINING = "that runner is draining and takes no new sessions";
-const RETIRED = "that runner is retired";
-
 /** Why a queued input never left, written on the row when its session ends. */
 const exitedWith = (reason: string): string =>
   `that session's harness exited (${reason}) before this input was sent`;
@@ -249,45 +269,9 @@ const exitedWith = (reason: string): string =>
 const NOT_DELIVERED =
   "that session's runner did not take the input; it stays queued for the next turn";
 
-const NO_PLACEMENT =
-  "no connected runner is logged in to that provider instance; log in on a machine first";
-
-const NO_SUCH_RUNNER = "no such runner";
-
-const NO_SUCH_PROFILE = "no such permission profile";
-
-const NO_SUCH_PROJECT_NAMED = "no such project";
-
 /** Why a thread cannot be picked up again: the files it worked in are gone. */
 const workspaceGone = (status: string): string =>
   `that session's workspace is ${status}, so there is nothing left to resume it in`;
-
-/** The shipped profile a thread takes when the user has chosen none (spec 02 Thread). */
-const DEFAULT_PROFILE = "unrestricted";
-
-const DEFAULT_ACCESS_MODE: AccessMode = "approval-required";
-
-/** Applied here, controller-side, when the settings key is unset; the runner holds no default of its own. */
-const DEFAULT_INACTIVITY_TIMEOUT_MINUTES = 30;
-
-const DEFAULT_ABSOLUTE_TIMEOUT_MINUTES = 480;
-
-const MINUTE_MS = 60_000;
-
-/** The two clocks a session starts under, whole minutes turned into the milliseconds the wire carries. */
-const timeoutsFrom = (controller: ScopeSettings<"controller">): SessionSpec["timeouts"] => ({
-  inactivityMs:
-    (controller["session.inactivityTimeoutMinutes"] ?? DEFAULT_INACTIVITY_TIMEOUT_MINUTES) *
-    MINUTE_MS,
-  absoluteMs:
-    (controller["session.absoluteTimeoutMinutes"] ?? DEFAULT_ABSOLUTE_TIMEOUT_MINUTES) * MINUTE_MS,
-});
-
-/**
- * A machine's own word that it can run this instance: the stored capability
- * snapshot saying it is logged in. Read, never probed.
- */
-const loggedIn = (snapshot: StoredSnapshot): boolean => snapshot.auth.status === "ok";
 
 /**
  * Where the provider-native id rides on the event that announces the harness.
@@ -312,30 +296,20 @@ const titleOf = (prompt: string): string => {
 
 type ReadError = Unauthenticated | Forbidden | Validation | SqlError;
 
-type SpawnError = ReadError | InvalidState | SettingError | GrantsError | Schema.SchemaError;
-
 type InputError = ReadError | NotFound | InvalidState | SettingError | Schema.SchemaError;
-
-/** What an instance is, once the row and the provider behind it are both in hand. */
-interface Resolved {
-  readonly definition: ProviderDefinition;
-  readonly snapshots: ReadonlyArray<StoredSnapshot>;
-}
 
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const sessions = yield* sessionRepository;
   const inputs = yield* inputRepository;
   const workspaces = yield* WorkspaceService;
-  const resources = yield* resourceRepository;
   const credentials = yield* gitCredentials;
   const instances = yield* providerRepository;
   const runners = yield* runnerRepository;
   const presence = yield* RunnerPresence;
-  const profiles = yield* PermissionProfiles;
   const tokens = yield* SessionTokens;
   const settings = yield* Settings;
-  const host = yield* PluginHost;
+  const resolved = yield* resolvedInstance;
   const audit = yield* AuditLog;
 
   /**
@@ -355,35 +329,6 @@ const make = Effect.gen(function* () {
         onSome: Effect.succeed,
       }),
     );
-
-  /** An instance and the provider definition behind it, or a `validation` saying why not. */
-  const resolved = (
-    instanceId: string,
-  ): Effect.Effect<Resolved, Validation | SqlError | Schema.SchemaError> =>
-    Effect.gen(function* () {
-      const found = yield* instances.one(instanceId);
-      if (Option.isNone(found)) {
-        return yield* Effect.fail(
-          validation([{ path: ["instanceId"], message: "no such provider instance" }]),
-        );
-      }
-      const registered = yield* host.providers();
-      const definition = registered.find((one) => one.id === found.value.providerId);
-      if (definition === undefined) {
-        return yield* Effect.fail(
-          validation([
-            {
-              path: ["instanceId"],
-              message: `this build carries no ${found.value.providerId} provider`,
-            },
-          ]),
-        );
-      }
-      return {
-        definition,
-        snapshots: yield* instances.snapshotsOf(instanceId),
-      };
-    });
 
   /**
    * The machine's catalog is read only where there are picks to judge against
@@ -408,86 +353,6 @@ const make = Effect.gen(function* () {
     });
 
   /**
-   * Which machine hosts the session, where the caller left it to placement:
-   * the first that is online and holds a capability snapshot saying it has
-   * this instance's harness and a login for it.
-   */
-  const placement = (
-    snapshots: ReadonlyArray<StoredSnapshot>,
-  ): Effect.Effect<StoredSnapshot, InvalidState | SqlError> =>
-    Effect.gen(function* () {
-      const placeable = yield* runners.placeable();
-      const found = snapshots.find(
-        (snapshot) => loggedIn(snapshot) && placeable.has(snapshot.runnerId),
-      );
-      if (found === undefined) return yield* Effect.fail(invalidState(NO_PLACEMENT));
-      return found;
-    });
-
-  /**
-   * The one machine a caller named directly, honoured even where it is
-   * reserved, full, or unreachable this moment: read and checked on its own,
-   * the way `continue` checks the one machine it is pinned to, rather than
-   * filtered through `placeable`, which exists only for the automatic
-   * fallback above. Whether it can take the session now is dispatch's to
-   * decide; a machine that cannot yet still gets the session queued on it.
-   */
-  const explicitRunner = (
-    runnerId: string,
-    snapshots: ReadonlyArray<StoredSnapshot>,
-  ): Effect.Effect<StoredSnapshot, InvalidState | Validation | SqlError> =>
-    Effect.gen(function* () {
-      const found = yield* runners.read(runnerId);
-      if (Option.isNone(found)) {
-        return yield* Effect.fail(validation([{ path: ["runnerId"], message: NO_SUCH_RUNNER }]));
-      }
-      const runner = found.value;
-      if (runner.lifecycle !== "active") {
-        return yield* Effect.fail(
-          invalidState(runner.lifecycle === "retired" ? RETIRED : DRAINING),
-        );
-      }
-      const snapshot = snapshots.find((one) => one.runnerId === runnerId && loggedIn(one));
-      if (snapshot === undefined) return yield* Effect.fail(invalidState(NO_PLACEMENT));
-      return snapshot;
-    });
-
-  /** Refuses a permissionProfileId naming no profile, before it is trusted as this session's. */
-  const requireProfile = (
-    profileId: string,
-  ): Effect.Effect<void, Validation | GrantsError | SqlError> =>
-    Effect.gen(function* () {
-      const found = yield* profiles.getById(profileId);
-      if (Option.isNone(found)) {
-        return yield* Effect.fail(
-          validation([{ path: ["permissionProfileId"], message: NO_SUCH_PROFILE }]),
-        );
-      }
-    });
-
-  /** The shipped thread default until the user has a `thread.instanceId` (spec 02 Thread). */
-  const firstLoggedIn = (): Effect.Effect<string, InvalidState | SqlError | Schema.SchemaError> =>
-    Effect.gen(function* () {
-      for (const snapshot of yield* instances.snapshots()) {
-        if (loggedIn(snapshot)) return snapshot.instanceId;
-      }
-      return yield* Effect.fail(
-        invalidState("no provider instance has a logged-in machine; log in on one first"),
-      );
-    });
-
-  const threadProfile = (): Effect.Effect<string, InvalidState | GrantsError | SqlError> =>
-    Effect.flatMap(
-      profiles.getByName(DEFAULT_PROFILE),
-      Option.match({
-        // The boot seeds it, so this is a database somebody edited.
-        onNone: () =>
-          Effect.fail(invalidState(`the ${DEFAULT_PROFILE} permission profile is missing`)),
-        onSome: (profile) => Effect.succeed(profile.id),
-      }),
-    );
-
-  /**
    * The input a caller may still act on: one this session holds, one that has
    * not left or been called off already, and one that is not on the wire this
    * moment - a row the machine already has cannot be taken back, and saying it
@@ -508,9 +373,9 @@ const make = Effect.gen(function* () {
     });
 
   /**
-   * The login half of what `spawn` asks placement for, asked of the one machine
-   * that holds the native state rather than of the fleet: the stored snapshot's
-   * word that this machine can run this instance.
+   * Whether the one machine holding a session's native state can still run its
+   * instance: the stored snapshot's word, asked of that machine rather than of
+   * the fleet, because the transcript is only where it already is.
    */
   const requireLoggedInOn = (
     instanceId: string,
@@ -560,26 +425,6 @@ const make = Effect.gen(function* () {
       yield* requireLoggedInOn(session.instanceId, session.runnerId);
       return session.nativeSessionId;
     });
-
-  /**
-   * The document a machine is told for a session that picks a provider-native
-   * one up, resumed in place or forked off: everything but the selection and
-   * the mode comes from the session whose transcript it picks up.
-   */
-  const continuingSpec = (
-    session: StoredSession,
-    modelSelection: ModelSelection,
-    nativeSessionId: string,
-    mode: NonNullable<SessionSpec["continue"]>["mode"],
-  ): Effect.Effect<SessionSpec, SettingError | SqlError> =>
-    Effect.map(settings.all(), (controller) => ({
-      instanceId: session.instanceId,
-      workspaceId: session.workspaceId,
-      modelSelection,
-      accessMode: session.accessMode,
-      continue: { nativeSessionId, mode },
-      timeouts: timeoutsFrom(controller),
-    }));
 
   /**
    * Sends one stored input to the machine holding the session and waits for the
@@ -1078,132 +923,6 @@ const make = Effect.gen(function* () {
       }
     });
 
-  /**
-   * What it takes to open one session on a machine, whether it is the first of
-   * a conversation or a branch off another one's.
-   */
-  interface Opening {
-    readonly permissionProfileId: string;
-    readonly runnerId: string;
-    readonly requestedAccessMode: AccessMode;
-    readonly parentSessionId: string | undefined;
-    /**
-     * Everything the machine is told, and the source of what the row stores.
-     * Its `workspaceId` is what the session keeps where the wish below brings
-     * no workspace of its own: a fork stays in the one its parent was in.
-     */
-    readonly spec: SessionSpec;
-    readonly prompt: string;
-    readonly kind: "session.spawned" | "session.continued";
-    /** What the audit entry records beyond the new session's own id. */
-    readonly payload: Readonly<Record<string, unknown>>;
-    readonly projectId: string | undefined;
-    /** Where the session is to work; absent keeps the workspace the spec names. */
-    readonly workspace: SpawnWorkspace | undefined;
-    /** The GitHub account a session with no workspace of its own pushes as. */
-    readonly fallbackGithubConnectionId: string | undefined;
-  }
-
-  /** A thread is filed under a project that exists, or under none at all. */
-  const liveProject = (projectId: string): Effect.Effect<void, Validation | SqlError> =>
-    Effect.gen(function* () {
-      const live = yield* resources.liveProjects([projectId]);
-      if (live.length === 0) {
-        return yield* Effect.fail(
-          validation([{ path: ["projectId"], message: NO_SUCH_PROJECT_NAMED }]),
-        );
-      }
-    });
-
-  /**
-   * The row and its first input, and the entry that records it, in one
-   * transaction. It always lands `queued`: `dispatch` is what decides
-   * whether this runner has room for it right now, and it is the same
-   * decision either way, so a fresh row takes it rather than a copy of it.
-   */
-  const opening = (open: Opening): Effect.Effect<StoredSession, Validation | SqlError> =>
-    Effect.gen(function* () {
-      // Minted here rather than by the insert: the working area is opened in the
-      // same transaction and a thread's own worktree is made on a branch named
-      // after the thread, so the id has to exist before either row does.
-      const sessionId = uuidToString(mintUuid());
-      const { stored, frame } = yield* withTransaction(
-        sql,
-        Effect.gen(function* () {
-          const at = yield* nowIso;
-          const actor = yield* currentStamp;
-          // Where it works is the workspaces domain's to decide, in full: what
-          // the wish means, how the checkouts are laid out, what the branch is
-          // called and which Connection the work acts through.
-          const opened = yield* workspaces.openFor({
-            wish: open.workspace,
-            heldWorkspaceId: open.spec.workspaceId,
-            runnerId: open.runnerId,
-            projectId: open.projectId,
-            sessionId,
-            at,
-            actor,
-          });
-          const spec = { ...open.spec, workspaceId: opened.workspaceId } satisfies SessionSpec;
-          const row = yield* sessions.insert({
-            id: sessionId,
-            title: titleOf(open.prompt),
-            permissionProfileId: open.permissionProfileId,
-            instanceId: spec.instanceId,
-            runnerId: open.runnerId,
-            workspaceId: spec.workspaceId,
-            projectId: open.projectId,
-            checkoutBranch: opened.checkoutBranch,
-            // The workspace's own account where it has one, and the thread
-            // default otherwise: a session pushes as one account, settled here.
-            githubConnectionId: opened.designatedConnectionId ?? open.fallbackGithubConnectionId,
-            requestedAccessMode: open.requestedAccessMode,
-            accessMode: spec.accessMode,
-            // Byte for byte: the row holds the exact document the runner is
-            // told, not a re-encode of an object that resembles it.
-            spec: JSON.stringify(encodeSpec(spec)),
-            modelSelection: spec.modelSelection,
-            parentSessionId: open.parentSessionId,
-            at,
-          });
-          // The prompt is an ordinary input, waiting with the session: it
-          // leaves when the harness comes up, and a controller restarted in
-          // that window still has it.
-          yield* inputs.insert({
-            sessionId: row.id,
-            source: "user",
-            actor,
-            text: open.prompt,
-            at,
-          });
-          yield* audit.append({
-            kind: open.kind,
-            actor,
-            record: { topic: "session", id: row.id },
-            payload: {
-              ...open.payload,
-              sessionId: row.id,
-              ...(spec.workspaceId === null ? {} : { workspaceId: spec.workspaceId }),
-            },
-            at,
-          });
-          return { stored: row, frame: opened.frame };
-        }),
-      );
-      // Outside the transaction, in the order the machine needs them: it makes
-      // the working area, and the session it holds is dispatched once it says
-      // the area stands. A transaction never spans a wait on the machine.
-      if (frame !== undefined) yield* presence.tell(open.runnerId, frame);
-      yield* dispatch(open.runnerId);
-      // Read back rather than returned from the insert, so the caller sees
-      // `starting` where dispatch placed it at once rather than `queued`.
-      const after = yield* sessions.one(stored.id);
-      if (Option.isNone(after)) {
-        return yield* Effect.die("a session that was just inserted could not be read back");
-      }
-      return after.value;
-    });
-
   const applying = (traffic: SessionTraffic): Effect.Effect<void, SqlError> =>
     Effect.gen(function* () {
       if (traffic.frame._tag !== "sessionsReport") {
@@ -1269,88 +988,55 @@ const make = Effect.gen(function* () {
         return pageOut(listing);
       }),
 
-    spawn: (input: SessionSpawnInput): Effect.Effect<Session, SpawnError> =>
+    /**
+     * The row, its first input and the entry that records it, joining the
+     * caller's transaction: what the controller daemon settled is written down
+     * here and nowhere else. It always lands `queued` - whether this runner has
+     * room for it right now is dispatch's decision, and it is the same decision
+     * either way, so a fresh row takes it rather than a copy of it.
+     */
+    create: (open: Opening): Effect.Effect<void, SqlError> =>
       Effect.gen(function* () {
-        // A Thread carries the user's own thread profile, so only the user may
-        // open one (spec 02 Thread).
-        const user = yield* currentUser("session.spawn");
-        const decoded = yield* Effect.mapError(decodeSpawn(input), validationOf);
-        if (decoded.projectId !== undefined) yield* liveProject(decoded.projectId);
-        // Read before placement: a workspace that already stands decides which
-        // machine the session runs on, because that is where its files are.
-        const pinnedTo =
-          decoded.workspace?.kind === "existing"
-            ? yield* workspaces.machineFor(decoded.workspace.workspaceId, decoded.runnerId)
-            : undefined;
-        // An override is for this session only, never written back to the store.
-        const defaults = yield* settings.allForUser(user.userId);
-
-        const instanceId =
-          decoded.instanceId ?? defaults["thread.instanceId"] ?? (yield* firstLoggedIn());
-        const { definition, snapshots } = yield* resolved(instanceId);
-        const placeOn = pinnedTo ?? decoded.runnerId;
-        const hosting = yield* placeOn === undefined
-          ? placement(snapshots)
-          : explicitRunner(placeOn, snapshots);
-
-        const requestedAccessMode =
-          decoded.accessMode ?? defaults["thread.accessMode"] ?? DEFAULT_ACCESS_MODE;
-        const accessMode = nearestSupportedAccessMode(
-          requestedAccessMode,
-          definition.declared.accessModes,
-        );
-        if (accessMode === undefined) {
-          return yield* Effect.fail(
-            invalidState(
-              `${definition.displayName} supports no access mode at or below ${requestedAccessMode}`,
-            ),
-          );
-        }
-
-        const model =
-          decoded.model ??
-          defaults["thread.model"] ??
-          (hosting.models.find((one) => one.isDefault) ?? hosting.models[0])?.slug;
-        if (model === undefined) {
-          return yield* Effect.fail(
-            invalidState("that machine reported no models for this provider instance"),
-          );
-        }
-
-        yield* validatedOptions(hosting.models, model, decoded.options ?? {});
-
-        if (decoded.permissionProfileId !== undefined) {
-          yield* requireProfile(decoded.permissionProfileId);
-        }
-        const profileId =
-          decoded.permissionProfileId ?? defaults["thread.profileId"] ?? (yield* threadProfile());
-
-        const spec = {
-          instanceId,
-          workspaceId: null,
-          modelSelection: { model, options: decoded.options ?? {} },
-          accessMode,
-          timeouts: timeoutsFrom(yield* settings.all()),
-        } satisfies SessionSpec;
-
-        return yield* opening({
-          permissionProfileId: profileId,
-          runnerId: hosting.runnerId,
-          requestedAccessMode,
-          parentSessionId: undefined,
-          spec,
-          prompt: decoded.prompt,
-          kind: "session.spawned",
-          projectId: decoded.projectId,
-          workspace: decoded.workspace,
-          fallbackGithubConnectionId: defaults["thread.githubConnectionId"] ?? undefined,
+        const actor = yield* currentStamp;
+        const row = yield* sessions.insert({
+          id: open.id,
+          title: titleOf(open.prompt),
+          permissionProfileId: open.permissionProfileId,
+          instanceId: open.spec.instanceId,
+          runnerId: open.runnerId,
+          workspaceId: open.spec.workspaceId,
+          projectId: open.projectId,
+          checkoutBranch: open.checkoutBranch,
+          githubConnectionId: open.githubConnectionId,
+          requestedAccessMode: open.requestedAccessMode,
+          accessMode: open.spec.accessMode,
+          // Byte for byte: the row holds the exact document the runner is
+          // told, not a re-encode of an object that resembles it.
+          spec: JSON.stringify(encodeSpec(open.spec)),
+          modelSelection: open.spec.modelSelection,
+          parentSessionId: open.parentSessionId,
+          at: open.at,
+        });
+        // The prompt is an ordinary input, waiting with the session: it
+        // leaves when the harness comes up, and a controller restarted in
+        // that window still has it.
+        yield* inputs.insert({
+          sessionId: row.id,
+          source: "user",
+          actor,
+          text: open.prompt,
+          at: open.at,
+        });
+        yield* audit.append({
+          kind: open.kind,
+          actor,
+          record: { topic: "session", id: row.id },
           payload: {
-            instanceId,
-            runnerId: hosting.runnerId,
-            requestedAccessMode,
-            accessMode,
-            ...(decoded.projectId === undefined ? {} : { projectId: decoded.projectId }),
+            ...open.payload,
+            sessionId: row.id,
+            ...(open.spec.workspaceId === null ? {} : { workspaceId: open.spec.workspaceId }),
           },
+          at: open.at,
         });
       }),
 
@@ -1414,8 +1100,9 @@ const make = Effect.gen(function* () {
             const at = yield* nowIso;
             yield* sessions.setModelSelection(id, modelSelection);
             if (nativeSessionId !== undefined) {
-              const spec = yield* continuingSpec(
+              const spec = continuingSpecOf(
                 session,
+                yield* settings.all(),
                 modelSelection,
                 nativeSessionId,
                 "resume",
@@ -1617,50 +1304,6 @@ const make = Effect.gen(function* () {
         return session;
       }),
 
-    /**
-     * A second session forked off the provider-native one the parent left
-     * behind, on the same machine and the same instance, because that is where
-     * the native state is (spec 06 section 4.1). Only an exited parent may be
-     * forked from. Resuming the parent itself is `session.input`'s.
-     *
-     * It carries the parent's own profile onto the fork rather than reaching
-     * the user's thread defaults, so unlike `spawn` a session holding
-     * `session.spawn` may make one - but only of a session on the profile it is
-     * bounded by itself. Any other parent would be an escalation: `session.read`
-     * is unscoped, so a session can find every other session on the controller,
-     * and forking one on a wider profile would hand it that profile's grants
-     * with a prompt of its own choosing.
-     */
-    continue: (input: ContinueInput): Effect.Effect<Session, InputError> =>
-      Effect.gen(function* () {
-        const actor = yield* requireGrant("session.continue");
-        const { id, mode, prompt } = yield* Effect.mapError(decodeContinue(input), validationOf);
-        const parent = yield* one(id);
-        if (actor._tag === "session" && parent.permissionProfileId !== actor.profileId) {
-          return yield* Effect.fail(forbidden("session.spawn", NOT_ITS_PROFILE));
-        }
-        // Read for what it refuses: an instance that is gone, or a provider this
-        // build no longer carries, before the machine's snapshot is trusted.
-        yield* resolved(parent.instanceId);
-        const nativeSessionId = yield* resumableNativeSession(parent);
-
-        return yield* opening({
-          permissionProfileId: parent.permissionProfileId,
-          runnerId: parent.runnerId,
-          requestedAccessMode: parent.requestedAccessMode,
-          parentSessionId: parent.id,
-          // A fork carries on in the workspace and the project the parent was
-          // in: it is the same piece of work, branched.
-          spec: yield* continuingSpec(parent, parent.modelSelection, nativeSessionId, mode),
-          prompt,
-          kind: "session.continued",
-          projectId: parent.projectId ?? undefined,
-          workspace: undefined,
-          fallbackGithubConnectionId: parent.githubConnectionId ?? undefined,
-          payload: { parentSessionId: parent.id, mode },
-        });
-      }),
-
     /** Every input this session was ever given, oldest first, whatever became of each. */
     queryInputs: (input: InputQueryInput): Effect.Effect<InputPage, ReadError | NotFound> =>
       Effect.gen(function* () {
@@ -1726,6 +1369,13 @@ const make = Effect.gen(function* () {
     ),
 
     /**
+     * Whether this row's transcript can be picked up again, and the
+     * provider-native session to pick up: the gate the controller daemon puts a
+     * fork through, and `session.input` a resume.
+     */
+    resumableNativeSession,
+
+    /**
      * Starts what this runner now has room for. What gave it that room - a
      * watermark crossed, a cap raised, a drain lifted - is the fleet's to
      * report and the controller daemon's to act on.
@@ -1766,7 +1416,6 @@ export const SessionServiceLayer: Layer.Layer<
   | PluginHost
   | AuditLog
   | Settings
-  | PermissionProfiles
   | SessionTokens
   | Secrets
   | WorkspaceService

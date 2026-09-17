@@ -7,4 +7,5 @@
  * across domains together with a message to a machine.
  */
 export { Inbound, InboundLayer } from "./inbound";
+export { Placement, PlacementLayer } from "./placement";
 export { Retirement, RetirementLayer } from "./retirement";

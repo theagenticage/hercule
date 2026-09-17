@@ -28,6 +28,8 @@ export { onlineWhere, runnerRepository } from "./repository";
 export { RunnerJoinRouteLayer } from "./route";
 export { RunnerPingSchedule, RunnerSocketRouteLayer, type RunnerPings } from "./socket";
 export {
+  DRAINING,
+  RETIRED,
   RunnerService,
   RunnerServiceLayer,
   type Identified,

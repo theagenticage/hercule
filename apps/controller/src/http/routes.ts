@@ -32,7 +32,7 @@ import { ApiKeys, ApiKeysLayer } from "../credentials";
 import { EventService, EventServiceLayer } from "../events";
 import { ConnectionService } from "../connections";
 import { Controller, ControllerLayer } from "../controller";
-import { InboundLayer, Retirement, RetirementLayer } from "../daemon";
+import { InboundLayer, Placement, PlacementLayer, Retirement, RetirementLayer } from "../daemon";
 import { Profiles, ProfilesLayer } from "../permissions";
 import { Plugins } from "../plugins";
 import { Secret, SecretLayer } from "../secrets";
@@ -310,10 +310,13 @@ const providerRoutes = HttpApiBuilder.group(api, "provider", (handlers) =>
 const sessionRoutes = HttpApiBuilder.group(api, "session", (handlers) =>
   Effect.gen(function* () {
     const sessions = yield* SessionService;
+    // Opening a session is more than its row: what it runs under, which machine
+    // hosts it and the working area it starts in are settled a layer up.
+    const placement = yield* Placement;
     return handlers
       .handle("query", ({ query }) => operation(sessions.query(query)))
       .handle("read", ({ params }) => operation(sessions.read(params)))
-      .handle("spawn", ({ payload }) => operation(sessions.spawn(payload)))
+      .handle("spawn", ({ payload }) => operation(placement.placeSession(payload)))
       .handle("update", ({ params, payload }) =>
         operation(sessions.update({ id: params.id, ...payload })),
       )
@@ -326,7 +329,7 @@ const sessionRoutes = HttpApiBuilder.group(api, "session", (handlers) =>
       )
       .handle("stop", ({ params }) => operation(sessions.stop(params)))
       .handle("continue", ({ params, payload }) =>
-        operation(sessions.continue({ id: params.id, ...payload })),
+        operation(placement.continueSession({ id: params.id, ...payload })),
       );
   }),
 );
@@ -401,6 +404,7 @@ export const operationLayers = Layer.mergeAll(
   RetirementLayer.pipe(Layer.provideMerge(RunnerServiceLayer)),
   RunnerJoinLayer,
   InboundLayer,
+  PlacementLayer,
   EventServiceLayer,
   LiveTopicsLayer,
   WsTicketsLayer,

@@ -87,16 +87,16 @@ export const USERNAME = "rogier";
  */
 const services = (home: string) =>
   // The routes' own layer holds the controller daemon, which reaches the
-  // session and workspace services, so it is provided this block's output
-  // rather than merely merged beside it, the way the real boot's operation
-  // layers reach the services `withPlugins` built.
+  // session and workspace services and the plugin host, so it is provided this
+  // block's output rather than merely merged beside it, the way the real boot's
+  // operation layers reach what `withPlugins` built.
   operationLayers.pipe(
     Layer.provideMerge(
       Layer.mergeAll(
         PluginsLayer,
         ProviderServiceLayer,
         // The session service reaches the workspace service, as it does in the
-        // boot: a spawn asks where it is to work.
+        // boot: a report about a session is work in the working area it runs in.
         SessionServiceLayer.pipe(Layer.provideMerge(WorkspaceServiceLayer)),
         ConnectionServiceLayer,
         ResourceServiceLayer,

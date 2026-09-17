@@ -223,6 +223,7 @@ export type ControllerServices =
   | Credentials
   | JoinTokens
   | Plugins
+  | PluginHost
   | RunnerPresence
   | ProviderProbes
   | ProviderService
@@ -289,10 +290,10 @@ export const bootWith = <A, E>(
     const withPlugins = Layer.mergeAll(
       PluginsLayer,
       ProviderServiceLayer,
-      // A spawn asks the workspace service where it is to work, so the session
-      // service is layered on top of that one rather than merged beside it.
-      // Nothing runs the other way: what a machine's report about a workspace
-      // means for the sessions waiting on it is the controller daemon's.
+      // The session service still reaches the workspace service - a report
+      // about a session is work in the working area it runs in - so it is
+      // layered on top of that one rather than merged beside it. Nothing runs
+      // the other way.
       SessionServiceLayer.pipe(Layer.provideMerge(WorkspaceServiceLayer)),
       ConnectionServiceLayer,
     ).pipe(
