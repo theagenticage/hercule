@@ -290,11 +290,8 @@ export const bootWith = <A, E>(
     const withPlugins = Layer.mergeAll(
       PluginsLayer,
       ProviderServiceLayer,
-      // The session service still reaches the workspace service - a report
-      // about a session is work in the working area it runs in - so it is
-      // layered on top of that one rather than merged beside it. Nothing runs
-      // the other way.
-      SessionServiceLayer.pipe(Layer.provideMerge(WorkspaceServiceLayer)),
+      SessionServiceLayer,
+      WorkspaceServiceLayer,
       ConnectionServiceLayer,
     ).pipe(
       Layer.provideMerge(PluginHostLayer),

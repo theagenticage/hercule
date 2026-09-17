@@ -17,7 +17,6 @@ import {
   Id,
   invalidState,
   nearestSupportedAccessMode,
-  notFound,
   SESSION_CONTINUE_FIELDS,
   SessionSpawnInput,
   validation,
@@ -45,14 +44,16 @@ import { resourceRepository } from "../resources";
 import { DRAINING, RETIRED, RunnerPresence, runnerRepository } from "../runners";
 import {
   continuingSpecOf,
+  requireSession,
   SessionService,
   sessionRepository,
   timeoutsFrom,
   validatedOptions,
-  type StoredSession,
 } from "../sessions";
 import { Settings, type SettingError } from "../settings";
 import { WorkspaceService } from "../workspaces";
+import { Dispatch } from "./dispatch";
+import { resumable } from "./resuming";
 
 const ContinueInput = Schema.Struct({ id: Id, ...SESSION_CONTINUE_FIELDS });
 
@@ -60,8 +61,6 @@ export type ContinueInput = Schema.Schema.Type<typeof ContinueInput>;
 
 const decodeSpawn = Schema.decodeUnknownEffect(SessionSpawnInput);
 const decodeContinue = Schema.decodeUnknownEffect(ContinueInput);
-
-const NO_SUCH_SESSION = "no such session";
 
 const NO_SUCH_RUNNER = "no such runner";
 
@@ -127,15 +126,9 @@ const make = Effect.gen(function* () {
   const presence = yield* RunnerPresence;
   const profiles = yield* PermissionProfiles;
   const settings = yield* Settings;
-
-  const one = (id: string): Effect.Effect<StoredSession, NotFound | SqlError> =>
-    Effect.flatMap(
-      rows.one(id),
-      Option.match({
-        onNone: () => Effect.fail(notFound(NO_SUCH_SESSION)),
-        onSome: Effect.succeed,
-      }),
-    );
+  const one = requireSession(rows);
+  const resumableNativeSession = yield* resumable;
+  const { dispatch } = yield* Dispatch;
 
   /**
    * Which machine hosts the session, where the caller left it to placement:
@@ -277,7 +270,7 @@ const make = Effect.gen(function* () {
       // In the order the machine needs them: it makes the working area, and the
       // session it holds is dispatched once it says the area stands.
       if (frame !== undefined) yield* presence.tell(open.runnerId, frame);
-      yield* sessions.dispatch(open.runnerId);
+      yield* dispatch(open.runnerId);
       // Read back rather than returned from the insert, so the caller sees
       // `starting` where dispatch placed it at once rather than `queued`.
       const after = yield* rows.one(sessionId);
@@ -408,7 +401,7 @@ const make = Effect.gen(function* () {
         // Read for what it refuses: an instance that is gone, or a provider this
         // build no longer carries, before the machine's snapshot is trusted.
         yield* resolved(parent.instanceId);
-        const nativeSessionId = yield* sessions.resumableNativeSession(parent);
+        const nativeSessionId = yield* resumableNativeSession(parent);
 
         return yield* place({
           permissionProfileId: parent.permissionProfileId,
@@ -449,4 +442,5 @@ export const PlacementLayer: Layer.Layer<
   | PermissionProfiles
   | Settings
   | PluginHost
+  | Dispatch
 > = Layer.effect(Placement)(make);

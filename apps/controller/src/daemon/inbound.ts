@@ -1,21 +1,28 @@
 /**
- * The one consumer of what the fleet publishes that is not about a session: a
- * machine's report about a working area, its request for a git credential, and
- * every change that may have left it room for work.
+ * The one consumer of everything the fleet publishes: what a machine says about
+ * the sessions it holds, what it made of a working area, the git credentials it
+ * asks for, and every change that may have left it room for work.
  *
- * One fiber, so what a machine reported first is applied first, except the
- * dispatch it forks off. Each item absorbs its own failure: one report that
- * will not write must not stop the traffic of every other machine.
+ * Two queues, two fibers. Session traffic is its own, so a session's events are
+ * applied in the order the machine numbered them; the rest of the fleet's
+ * reports must not wait behind them. What either fiber forks - a flush, a
+ * dispatch - waits on a machine and so is never done inline. Each item absorbs
+ * its own failure: one report that will not write must not stop the traffic of
+ * every other machine.
  */
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Stream from "effect/Stream";
+import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
-import { RunnerPresence, type FleetTraffic } from "../runners";
+import { withTransaction } from "../db";
+import { RunnerPresence, type FleetTraffic, type SessionTraffic } from "../runners";
 import { SessionService } from "../sessions";
 import { WorkspaceService } from "../workspaces";
+import { Dispatch } from "./dispatch";
+import { Inputs } from "./inputs";
 
 /**
  * A driver must not stop on one item, so the cause is logged and dropped - a
@@ -33,9 +40,16 @@ const absorbing = (
   );
 
 const make = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient;
   const presence = yield* RunnerPresence;
   const sessions = yield* SessionService;
   const workspaces = yield* WorkspaceService;
+  const { dispatch } = yield* Dispatch;
+  const { flush } = yield* Inputs;
+
+  /** Forked, because a dispatch or a flush waits on a machine. */
+  const forking = (what: string, effect: Effect.Effect<void, SqlError>) =>
+    Effect.asVoid(Effect.forkChild(absorbing(what, effect)));
 
   const applying = (traffic: FleetTraffic): Effect.Effect<void, SqlError> => {
     switch (traffic._tag) {
@@ -46,11 +60,17 @@ const make = Effect.gen(function* () {
           // means for the sessions waiting on it is the sessions domain's.
           const settled = yield* workspaces.reported(traffic.runnerId, traffic.report);
           if (settled === undefined) return;
-          yield* sessions.workspaceSettled(
-            traffic.runnerId,
-            settled,
-            traffic.report.message ?? null,
-          );
+          // A working area that came up releases the sessions waiting on it;
+          // one that could not be made ends them with the machine's own words.
+          if (settled.moved === "ready") {
+            yield* forking(
+              "A ready working area could not be dispatched",
+              dispatch(traffic.runnerId),
+            );
+          }
+          if (settled.moved === "failed") {
+            yield* sessions.endForWorkspace(settled.workspaceId, traffic.report.message ?? null);
+          }
         });
       case "credentialRequested":
         return workspaces.credentialAsked(traffic.runnerId, traffic.request);
@@ -58,17 +78,58 @@ const make = Effect.gen(function* () {
         // Forked, unlike the two above: starting what a machine now has room
         // for is a transaction and a credential read per session, and the rest
         // of the fleet must not wait behind one machine's.
-        return Effect.asVoid(
-          Effect.forkChild(
-            absorbing("A freed slot could not be dispatched", sessions.dispatch(traffic.runnerId)),
-          ),
-        );
+        return forking("A freed slot could not be dispatched", dispatch(traffic.runnerId));
     }
   };
+
+  const ingesting = (traffic: SessionTraffic): Effect.Effect<void, SqlError> =>
+    Effect.gen(function* () {
+      if (traffic.frame._tag === "sessionsReport") {
+        yield* sessions.bound(traffic.runnerId, traffic.frame.sessions);
+        // Once that write set is durable and not before: a `Map` does not roll
+        // back, so a runner is not dispatchable on a report that never landed.
+        yield* presence.markSessionsReported(traffic.runnerId, traffic.connection);
+        yield* forking("A runner's report could not be dispatched", dispatch(traffic.runnerId));
+        return;
+      }
+      const { seq, event } = traffic.frame;
+      // The fold reads and taps but writes nothing, so it stays outside: a
+      // delta reaches a watching browser whether or not the write lands.
+      const report = yield* sessions.foldReport(traffic.runnerId, seq, event);
+      if (report === undefined) return;
+      const applied = yield* withTransaction(
+        sql,
+        Effect.gen(function* () {
+          const applied = yield* sessions.applyReport(traffic.runnerId, event, report);
+          // In the session's own write set: a session starting or ending is
+          // work in the working area it runs in, which is what keeps that area
+          // from expiring under it, and the two facts are one commit.
+          if (applied.worked !== undefined) {
+            yield* workspaces.touched(applied.worked.workspaceId, applied.worked.at);
+          }
+          return applied;
+        }),
+      );
+      // A session that has gone idle can take what is queued for it; one that
+      // has exited has left its machine a slot free.
+      if (applied.moved === "idle") {
+        yield* forking(
+          "A session's queued input could not be sent",
+          flush(event.sessionId, traffic.runnerId),
+        );
+      }
+      if (applied.moved === "exited") {
+        yield* forking("A freed slot could not be dispatched", dispatch(traffic.runnerId));
+      }
+    });
 
   return {
     driving: Stream.runForEach(presence.fleetTraffic, (traffic) =>
       absorbing("A runner's report could not be applied", applying(traffic)),
+    ),
+
+    ingesting: Stream.runForEach(presence.sessionTraffic, (traffic) =>
+      absorbing("A session report could not be recorded", ingesting(traffic)),
     ),
   };
 });
@@ -80,5 +141,5 @@ export class Inbound extends Context.Service<Inbound, Effect.Success<typeof make
 export const InboundLayer: Layer.Layer<
   Inbound,
   never,
-  RunnerPresence | SessionService | WorkspaceService
+  SqlClient.SqlClient | RunnerPresence | SessionService | WorkspaceService | Dispatch | Inputs
 > = Layer.effect(Inbound)(make);

@@ -32,7 +32,16 @@ import { ApiKeys, ApiKeysLayer } from "../credentials";
 import { EventService, EventServiceLayer } from "../events";
 import { ConnectionService } from "../connections";
 import { Controller, ControllerLayer } from "../controller";
-import { InboundLayer, Placement, PlacementLayer, Retirement, RetirementLayer } from "../daemon";
+import {
+  DispatchLayer,
+  InboundLayer,
+  Inputs,
+  InputsLayer,
+  Placement,
+  PlacementLayer,
+  Retirement,
+  RetirementLayer,
+} from "../daemon";
 import { Profiles, ProfilesLayer } from "../permissions";
 import { Plugins } from "../plugins";
 import { Secret, SecretLayer } from "../secrets";
@@ -313,21 +322,25 @@ const sessionRoutes = HttpApiBuilder.group(api, "session", (handlers) =>
     // Opening a session is more than its row: what it runs under, which machine
     // hosts it and the working area it starts in are settled a layer up.
     const placement = yield* Placement;
+    // So is everything whose effect reaches the machine holding it, and
+    // `session.update`, whose selection rides the next frame and whose picks
+    // are judged against that machine's own catalog.
+    const live = yield* Inputs;
     return handlers
       .handle("query", ({ query }) => operation(sessions.query(query)))
       .handle("read", ({ params }) => operation(sessions.read(params)))
       .handle("spawn", ({ payload }) => operation(placement.placeSession(payload)))
       .handle("update", ({ params, payload }) =>
-        operation(sessions.update({ id: params.id, ...payload })),
+        operation(live.update({ id: params.id, ...payload })),
       )
       .handle("input", ({ params, payload }) =>
-        operation(sessions.input({ id: params.id, ...payload })),
+        operation(live.input({ id: params.id, ...payload })),
       )
-      .handle("interrupt", ({ params }) => operation(sessions.interrupt(params)))
+      .handle("interrupt", ({ params }) => operation(live.interrupt(params)))
       .handle("respond", ({ params, payload }) =>
-        operation(sessions.respond({ id: params.id, ...payload })),
+        operation(live.respond({ id: params.id, ...payload })),
       )
-      .handle("stop", ({ params }) => operation(sessions.stop(params)))
+      .handle("stop", ({ params }) => operation(live.stop(params)))
       .handle("continue", ({ params, payload }) =>
         operation(placement.continueSession({ id: params.id, ...payload })),
       );
@@ -337,10 +350,13 @@ const sessionRoutes = HttpApiBuilder.group(api, "session", (handlers) =>
 /**
  * A session's inputs are the session's own state, so they are served by the
  * session service; the group is separate because the operations are `input.*`.
+ * Steering is the exception: it puts a row on the wire, which is the controller
+ * daemon's.
  */
 const inputRoutes = HttpApiBuilder.group(api, "input", (handlers) =>
   Effect.gen(function* () {
     const sessions = yield* SessionService;
+    const live = yield* Inputs;
     return handlers
       .handle("query", ({ params, query }) =>
         operation(sessions.queryInputs({ id: params.id, ...query })),
@@ -349,7 +365,7 @@ const inputRoutes = HttpApiBuilder.group(api, "input", (handlers) =>
         operation(sessions.updateInput({ ...params, ...payload })),
       )
       .handle("cancel", ({ params }) => operation(sessions.cancelInput(params)))
-      .handle("steer", ({ params }) => operation(sessions.steer(params)));
+      .handle("steer", ({ params }) => operation(live.steer(params)));
   }),
 );
 
@@ -403,8 +419,14 @@ export const operationLayers = Layer.mergeAll(
   // layered under it rather than merged beside it.
   RetirementLayer.pipe(Layer.provideMerge(RunnerServiceLayer)),
   RunnerJoinLayer,
-  InboundLayer,
-  PlacementLayer,
+  // The inbound driver reaches both dispatch and the live channel and placement
+  // reaches dispatch, so those two are layered under the pair rather than merged
+  // beside it. The live channel reaches dispatch too, which is why it is
+  // provided first.
+  Layer.mergeAll(InboundLayer, PlacementLayer).pipe(
+    Layer.provideMerge(InputsLayer),
+    Layer.provideMerge(DispatchLayer),
+  ),
   EventServiceLayer,
   LiveTopicsLayer,
   WsTicketsLayer,

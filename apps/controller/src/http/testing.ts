@@ -39,6 +39,7 @@ import { homePaths } from "@hydra/home";
 import { HydraHome } from "../config";
 import { ConnectionServiceLayer, ConnectionTypesLayer } from "../connections";
 import { CredentialsLayer, hashToken } from "../credentials";
+import { SessionInputDeadline } from "../daemon";
 import { nowIso } from "../db";
 import { TestDatabase } from "../db/testing";
 import { AuditLog, AuditLogLayer, type AuditKind, type AuditRow } from "../events";
@@ -55,7 +56,7 @@ import {
   ProviderProbesLayer,
   ProviderServiceLayer,
 } from "../providers";
-import { cancelStrandedInputs, SessionInputDeadline, SessionServiceLayer } from "../sessions";
+import { cancelStrandedInputs, SessionServiceLayer } from "../sessions";
 import { ResourceServiceLayer } from "../resources";
 import { SettingsLayer } from "../settings";
 import { WorkspaceServiceLayer, WorkspaceSweepInterval } from "../workspaces";
@@ -95,9 +96,8 @@ const services = (home: string) =>
       Layer.mergeAll(
         PluginsLayer,
         ProviderServiceLayer,
-        // The session service reaches the workspace service, as it does in the
-        // boot: a report about a session is work in the working area it runs in.
-        SessionServiceLayer.pipe(Layer.provideMerge(WorkspaceServiceLayer)),
+        SessionServiceLayer,
+        WorkspaceServiceLayer,
         ConnectionServiceLayer,
         ResourceServiceLayer,
       ).pipe(
