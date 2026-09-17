@@ -8,8 +8,9 @@
  * Topic, would hold that drain for ever, so the drain has a deadline and says
  * when it reaches one.
  *
- * The schedulers are not implemented yet; each adds a step beside the listener
- * rather than changing this shape.
+ * The listener forks what runs on its own beside it - the controller daemon's
+ * drivers and the provider probes - so a scheduler still to come adds a step
+ * there rather than changing this shape.
  */
 import * as Effect from "effect/Effect";
 import * as Latch from "effect/Latch";

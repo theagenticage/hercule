@@ -1,11 +1,12 @@
 /**
  * The derived routes: one line per operation.
  *
- * A handler calls its service method and does nothing else. What it does add is
- * the one thing the service layer must not: turning a failure that is not one
- * of the contract's errors - a database that will not answer, a bug - into
- * `internal`, so the error channel on the wire stays the closed enum while the
- * service keeps its honest one.
+ * A handler calls its service method - its domain's service, or a controller
+ * daemon use case where carrying the operation out reaches a machine - and does
+ * nothing else. What it does add is the one thing the service layer must not:
+ * turning a failure that is not one of the contract's errors - a database that
+ * will not answer, a bug - into `internal`, so the error channel on the wire
+ * stays the closed enum while the service keeps its honest one.
  *
  * Every group is handled here, because Effect's HttpApi builds routes for a
  * whole API or for none.
@@ -35,10 +36,12 @@ import { Controller, ControllerLayer } from "../controller";
 import {
   DispatchLayer,
   InboundLayer,
-  Inputs,
-  InputsLayer,
+  Live,
+  LiveLayer,
   Placement,
   PlacementLayer,
+  Provisioning,
+  ProvisioningLayer,
   Retirement,
   RetirementLayer,
 } from "../daemon";
@@ -222,19 +225,17 @@ const resourceRoutes = HttpApiBuilder.group(api, "resource", (handlers) =>
   }),
 );
 
-/**
- * The workspace service is not in `operationLayers`: the controller daemon and
- * the drivers act through it, so a request must reach the one instance the boot
- * built rather than a second one over the same rows.
- */
 const workspaceRoutes = HttpApiBuilder.group(api, "workspace", (handlers) =>
   Effect.gen(function* () {
     const workspaces = yield* WorkspaceService;
+    // Making a working area and taking one away are more than their rows: the
+    // machine holding the directory has to be told.
+    const provisioning = yield* Provisioning;
     return handlers
       .handle("query", ({ query }) => operation(workspaces.query(query)))
       .handle("read", ({ params }) => operation(workspaces.read(params)))
-      .handle("provision", ({ payload }) => operation(workspaces.provision(payload)))
-      .handle("dispose", ({ params }) => operation(workspaces.dispose(params)));
+      .handle("provision", ({ payload }) => operation(provisioning.provisionWorkspace(payload)))
+      .handle("dispose", ({ params }) => operation(provisioning.disposeWorkspace(params)));
   }),
 );
 
@@ -325,7 +326,7 @@ const sessionRoutes = HttpApiBuilder.group(api, "session", (handlers) =>
     // So is everything whose effect reaches the machine holding it, and
     // `session.update`, whose selection rides the next frame and whose picks
     // are judged against that machine's own catalog.
-    const live = yield* Inputs;
+    const live = yield* Live;
     return handlers
       .handle("query", ({ query }) => operation(sessions.query(query)))
       .handle("read", ({ params }) => operation(sessions.read(params)))
@@ -356,7 +357,7 @@ const sessionRoutes = HttpApiBuilder.group(api, "session", (handlers) =>
 const inputRoutes = HttpApiBuilder.group(api, "input", (handlers) =>
   Effect.gen(function* () {
     const sessions = yield* SessionService;
-    const live = yield* Inputs;
+    const live = yield* Live;
     return handlers
       .handle("query", ({ params, query }) =>
         operation(sessions.queryInputs({ id: params.id, ...query })),
@@ -393,15 +394,16 @@ const controllerRoutes = HttpApiBuilder.group(api, "controller", (handlers) =>
 
 /**
  * Every service an operation resolves, and the controller daemon beside them:
- * the listener forks its inbound driver, so it is built here rather than a
- * second time somewhere else. One list, because a controller booting with a
- * layer this list has and its own does not is a controller missing an
- * operation, and nothing would say so until a request asked for it.
+ * the listener forks the controller daemon's drivers, so they are built here
+ * rather than a second time somewhere else. One list, because a controller
+ * booting with a layer this list has and its own does not is a controller
+ * missing an operation, and nothing would say so until a request asked for it.
  *
- * Five are deliberately absent. `Plugins`, `ProviderService`, `SessionService`,
- * `RunnerPresence` and `ProviderProbes` must be the instances the boot built: a
- * second one would hold no plugins, no connections and none of the ingest state
- * a session's stream is coalesced in. They reach the handlers from there.
+ * Six are deliberately absent. `Plugins`, `ProviderService`, `SessionService`,
+ * `WorkspaceService`, `RunnerPresence` and `ProviderProbes` must be the
+ * instances the boot built: a second one would hold no plugins, no connections,
+ * none of the ingest state a session's stream is coalesced in, and would write
+ * over the same rows the drivers act on. They reach the handlers from there.
  */
 export const operationLayers = Layer.mergeAll(
   SetupLayer,
@@ -415,8 +417,8 @@ export const operationLayers = Layer.mergeAll(
   TaskServiceLayer,
   ProjectServiceLayer,
   ResourceServiceLayer,
-  // The daemon's retirement use case reaches the runner service, so that one is
-  // layered under it rather than merged beside it.
+  // The controller daemon's retirement use case reaches the runner service, so
+  // that one is layered under it rather than merged beside it.
   RetirementLayer.pipe(Layer.provideMerge(RunnerServiceLayer)),
   RunnerJoinLayer,
   // The inbound driver reaches both dispatch and the live channel and placement
@@ -424,9 +426,10 @@ export const operationLayers = Layer.mergeAll(
   // beside it. The live channel reaches dispatch too, which is why it is
   // provided first.
   Layer.mergeAll(InboundLayer, PlacementLayer).pipe(
-    Layer.provideMerge(InputsLayer),
+    Layer.provideMerge(LiveLayer),
     Layer.provideMerge(DispatchLayer),
   ),
+  ProvisioningLayer,
   EventServiceLayer,
   LiveTopicsLayer,
   WsTicketsLayer,

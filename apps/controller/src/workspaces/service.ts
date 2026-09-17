@@ -1,8 +1,9 @@
 /**
- * Workspaces as the API sees them - `workspace.query`, `read`, `provision` and
- * `dispose` - what a spawn needs one to be (`openFor`), and the two things a
- * machine says about one: what came of a provisioning, and what credential it
- * needs to get on with it.
+ * Workspaces as the API sees them - `workspace.query` and `read` - what a spawn
+ * needs one to be (`openFor`), the rows behind the two operations a user asks
+ * for by name, provision and dispose, and the two things a machine says about
+ * one: what came of a provisioning, and what credential it needs to get on with
+ * it.
  *
  * This is where a working area is decided, in full: nothing outside this domain
  * knows how a multi-repo workspace is laid out, what a thread's branch is called
@@ -12,27 +13,27 @@
  * A primary is provisioned by name and never torn down: it is the repo's main
  * workspace on that machine, shared by whatever runs in it. An ephemeral one is
  * made by the spawn that asked for it and is disposed of by hand or by the
- * sweep below.
+ * expiry sweep.
  *
- * Nothing here waits on a machine inside a transaction: the rows are written
- * and committed, and only then is the machine told. A machine that never hears
- * about a workspace leaves it `provisioning`, which is what the sweep and the
- * user both read as a workspace that never came up.
+ * Nothing here talks to a machine. A frame is handed back as a value - what to
+ * make, what to take away, what a credential request is answered with - and the
+ * controller daemon sends it once the rows are committed. A machine that never
+ * hears about a workspace leaves it `provisioning`, which is what the sweep and
+ * the user both read as a workspace that never came up.
  */
-import * as Cause from "effect/Cause";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
-import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
-import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import {
   Subdirectory,
+  type CredentialAnswer,
   type CredentialRequest,
+  type WorkspaceDispose,
   type WorkspaceProvision,
   type WorkspaceReport,
 } from "@hydra/protocol";
@@ -45,7 +46,6 @@ import {
   validation,
   WORKSPACE_SORT_FIELDS,
   WorkspaceFilter,
-  WorkspaceProvisionInput,
   validationOf,
   type Actor,
   type Checkout,
@@ -62,7 +62,7 @@ import {
 } from "@hydra/contract";
 import { requireGrant, SYSTEM_ACTOR, USER_ACTOR } from "../actor";
 import { nowIso, pageInput, refuseCursor, withTransaction } from "../db";
-import { SessionTokens } from "../permissions";
+import type { SessionTokens } from "../permissions";
 import { AuditLog } from "../events";
 import {
   isCheckedOut,
@@ -71,9 +71,8 @@ import {
   resourceRepository,
   type StoredRepo,
 } from "../resources";
-import { RunnerPresence, runnerRepository } from "../runners";
-import { Secrets } from "../secrets";
-import { Settings, type ScopeSettings } from "../settings";
+import type { Secrets } from "../secrets";
+import { Settings, type ScopeSettings, type SettingError } from "../settings";
 import { gitCredentials } from "./credentials";
 import { openPrimary, openWorkspace, provisionFrame, type OpeningCheckout } from "./provisioning";
 import { workspaceRepository, type StoredCheckout, type StoredWorkspace } from "./repository";
@@ -90,7 +89,6 @@ const Identified = Schema.Struct({ id: Id });
 export type Identified = Schema.Schema.Type<typeof Identified>;
 
 const decodeQuery = Schema.decodeUnknownEffect(QueryInput);
-const decodeProvision = Schema.decodeUnknownEffect(WorkspaceProvisionInput);
 const decodeIdentified = Schema.decodeUnknownEffect(Identified);
 
 export interface WorkspacePage {
@@ -100,15 +98,6 @@ export interface WorkspacePage {
 
 /** Newest first: a workspace list is read as what is standing right now. */
 const DEFAULT_DIRECTION: SortDirection = "desc";
-
-/** How often the controller looks for workspaces nothing needs any more. */
-const WORKSPACE_SWEEP_INTERVAL: Duration.Duration = Duration.minutes(10);
-
-/** Tests hand over an interval they can wait out. */
-export const WorkspaceSweepInterval = Context.Reference<Duration.Duration>(
-  "hydra/controller/workspaces/WorkspaceSweepInterval",
-  { defaultValue: (): Duration.Duration => WORKSPACE_SWEEP_INTERVAL },
-);
 
 /** How long an ephemeral workspace nothing references is kept, in hours. */
 const DEFAULT_ORPHAN_TTL_HOURS = 24;
@@ -123,8 +112,6 @@ const DAY_MS = 24 * HOUR_MS;
 const NO_SUCH_WORKSPACE = "no such workspace";
 
 const NO_SUCH_RESOURCE = "no such resource";
-
-const NO_SUCH_RUNNER = "no such runner";
 
 const PRIMARY_STANDS = "a primary is never torn down";
 
@@ -184,8 +171,14 @@ export interface Settled {
 
 type ReadError = Unauthenticated | Forbidden | Validation | SqlError;
 
-/** Why the sweep took a workspace away, which is what its entry records. */
-type Expiry = "orphan" | "idle";
+/** Why a workspace was taken away, where it was not a person asking. */
+export type Expiry = "orphan" | "idle";
+
+/** One workspace the sweep may take away, and the window it outlived. */
+export interface Expired {
+  readonly id: string;
+  readonly reason: Expiry;
+}
 
 /**
  * Whether a workspace has outlived its use, and on which window: one nothing is
@@ -207,28 +200,11 @@ const expired = (
   return idleFor > window ? reason : undefined;
 };
 
-/**
- * A driver must not stop on one item, so the cause is logged and dropped - a
- * defect as much as a failure, because a bug applying one report would
- * otherwise take the driver down for the life of the process, silently and for
- * the whole fleet. A cause carrying an interrupt is the driver being stopped
- * and is passed on whole, so nothing that rode along with it is lost.
- */
-const absorbing = (
-  what: string,
-  effect: Effect.Effect<void, unknown>,
-): Effect.Effect<void, unknown> =>
-  Effect.catchCause(effect, (cause) =>
-    Cause.hasInterrupts(cause) ? Effect.failCause(cause) : Effect.logError(what, cause),
-  );
-
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const workspaces = yield* workspaceRepository;
   const resources = yield* resourceRepository;
-  const runners = yield* runnerRepository;
   const credentials = yield* gitCredentials;
-  const presence = yield* RunnerPresence;
   const settings = yield* Settings;
   const audit = yield* AuditLog;
 
@@ -469,89 +445,6 @@ const make = Effect.gen(function* () {
       };
     });
 
-  /**
-   * Marks a workspace gone and tells the machine to take it off disk. The row
-   * is committed first: a machine that never hears this leaves a directory
-   * behind, which the user can remove, where a row that said `ready` for a
-   * workspace nobody owns is one nothing would ever clean up.
-   */
-  const disposing = (
-    workspace: StoredWorkspace,
-    actor: typeof USER_ACTOR | typeof SYSTEM_ACTOR,
-    /** Why it went, where it was not a person asking. */
-    reason?: Expiry,
-  ): Effect.Effect<void, SqlError> =>
-    Effect.gen(function* () {
-      yield* withTransaction(
-        sql,
-        Effect.gen(function* () {
-          const at = yield* nowIso;
-          yield* workspaces.markDisposed(workspace.id, at);
-          yield* audit.append({
-            kind: "workspace.deleted",
-            actor,
-            payload: {
-              workspaceId: workspace.id,
-              runnerId: workspace.runnerId,
-              ...(reason === undefined ? {} : { reason }),
-            },
-            at,
-          });
-        }),
-      );
-      yield* presence.tell(workspace.runnerId, {
-        _tag: "workspaceDispose",
-        workspaceId: workspace.id,
-      });
-    });
-
-  /**
-   * Tells a machine again about every workspace it still owes: what a frame
-   * sent to a machine that was not connected, or that restarted before it
-   * acted, would otherwise leave provisioning for ever. The machine is expected
-   * to take a repeat of a workspace it already holds as the no-op it is.
-   *
-   * Every frame this re-sends is one that can be re-sent: the rows hold
-   * everything a provisioning needs, so a frame built again here is the frame
-   * that was sent. What comes back is a clone or a worktree, which is what it
-   * was.
-   */
-  const resendProvisioning = (runnerId: string): Effect.Effect<void, SqlError> =>
-    Effect.gen(function* () {
-      const owed = yield* workspaces.provisioningOn(runnerId);
-      for (const workspace of owed) {
-        const checkouts = (yield* workspaces.checkoutsOf([workspace.id])).get(workspace.id) ?? [];
-        const named = yield* resources.byIds(checkouts.map((checkout) => checkout.resourceId));
-        const plans: Array<{ checkout: StoredCheckout; resource: StoredRepo }> = [];
-        for (const checkout of checkouts) {
-          const resource = named.get(checkout.resourceId);
-          if (resource === undefined) continue;
-          // Only a repo is ever checked out, so a row that is not one is a
-          // checkout nothing can be made of.
-          if (resource.kind !== "repo") continue;
-          plans.push({ checkout, resource });
-        }
-        yield* presence.tell(workspace.runnerId, provisionFrame(workspace, plans));
-      }
-    });
-
-  /** One pass of the expiry sweep. */
-  const sweep = Effect.gen(function* () {
-    const candidates = yield* workspaces.sweepCandidates();
-    if (candidates.length === 0) return;
-    const controller = yield* settings.all();
-    const now = yield* Clock.currentTimeMillis;
-    for (const candidate of candidates) {
-      const reason = expired(candidate, now - Date.parse(candidate.usedAt), controller);
-      if (reason === undefined) continue;
-      const row = yield* workspaces.one(candidate.id);
-      // Read again inside the pass: a session could have started in it while
-      // the previous workspace of this pass was being disposed of.
-      if (Option.isNone(row) || row.value.status !== "ready") continue;
-      yield* disposing(row.value, SYSTEM_ACTOR, reason);
-    }
-  });
-
   return {
     query: (input: QueryInput): Effect.Effect<WorkspacePage, ReadError> =>
       Effect.gen(function* () {
@@ -585,61 +478,158 @@ const make = Effect.gen(function* () {
         return yield* Effect.flatMap(stored(id), composedOne);
       }),
 
+    /** The repo a primary workspace is made of, held to being checked out. */
+    checkedOutRepo: repo,
+
     /**
      * The repo's own workspace on one machine, cloned fresh under that machine's
-     * own storage. A second one for the same pair is a conflict, because that is
-     * what "the repo's main workspace there" means.
+     * own storage, written in the caller's transaction. A second one for the
+     * same pair is a conflict, because that is what "the repo's main workspace
+     * there" means.
+     *
+     * The record comes back beside the frame rather than being read again
+     * afterwards: it is the rows this just wrote, and reading them a second time
+     * would answer the caller with whatever else happened meanwhile.
      */
-    provision: (
-      input: WorkspaceProvisionInput,
-    ): Effect.Effect<Workspace, ReadError | NotFound | Conflict | InvalidState> =>
+    openPrimaryFor: (input: {
+      readonly resource: StoredRepo;
+      readonly runnerId: string;
+    }): Effect.Effect<
+      { readonly workspace: Workspace; readonly frame: WorkspaceProvision },
+      Conflict | SqlError
+    > =>
       Effect.gen(function* () {
-        yield* requireGrant("workspace.provision");
-        const decoded = yield* Effect.mapError(decodeProvision(input), validationOf);
-        const resource = yield* repo(decoded.resourceId);
-        const runner = yield* runners.read(decoded.runnerId);
-        if (Option.isNone(runner)) return yield* Effect.fail(notFound(NO_SUCH_RUNNER));
-
-        const { workspace, frame } = yield* withTransaction(
-          sql,
-          Effect.gen(function* () {
-            const held = yield* workspaces.primaryOn(resource.id, decoded.runnerId);
-            if (Option.isSome(held)) {
-              return yield* Effect.fail(
-                conflict("that repo already has a primary workspace on that machine"),
-              );
-            }
-            const at = yield* nowIso;
-            return yield* openPrimary(
-              { workspaces, audit },
-              { resource, runnerId: decoded.runnerId, actor: USER_ACTOR, at },
-            );
-          }),
+        const held = yield* workspaces.primaryOn(input.resource.id, input.runnerId);
+        if (Option.isSome(held)) {
+          return yield* Effect.fail(
+            conflict("that repo already has a primary workspace on that machine"),
+          );
+        }
+        const at = yield* nowIso;
+        // A primary opened on its own is a user asking for one by name: a spawn
+        // that needs one goes through `openFor` with its own actor.
+        const opened = yield* openPrimary(
+          { workspaces, audit },
+          { resource: input.resource, runnerId: input.runnerId, actor: USER_ACTOR, at },
         );
-        // Outside the transaction: a transaction never spans a wait on
-        // anything outside the database. A machine that is not listening is
-        // told again when it dials in, from the rows this just wrote.
-        yield* presence.tell(decoded.runnerId, frame);
-        return yield* composedOne(workspace);
+        return { workspace: yield* composedOne(opened.workspace), frame: opened.frame };
       }),
 
-    dispose: (
-      input: Identified,
-    ): Effect.Effect<Record<string, never>, ReadError | NotFound | InvalidState> =>
+    /**
+     * The workspace a user may take away, or the refusal saying why not. A
+     * primary stands; one already gone cannot go twice; and taking the
+     * directory away from a session that is living in it would pull the floor
+     * out from under a running harness.
+     */
+    disposable: (id: string): Effect.Effect<StoredWorkspace, NotFound | InvalidState | SqlError> =>
       Effect.gen(function* () {
-        yield* requireGrant("workspace.dispose");
-        const { id } = yield* Effect.mapError(decodeIdentified(input), validationOf);
         const workspace = yield* stored(id);
         if (workspace.kind === "primary") return yield* Effect.fail(invalidState(PRIMARY_STANDS));
         if (workspace.status === "deleted" || workspace.status === "lost") {
           return yield* Effect.fail(invalidState(ALREADY_GONE));
         }
-        // Taking the directory away from a session that is living in it would
-        // pull the floor out from under a running harness.
         const living = (yield* workspaces.sessionIdsOf([id])).get(id) ?? [];
         if (living.length > 0) return yield* Effect.fail(invalidState(stillLivedIn(living.length)));
-        yield* disposing(workspace, USER_ACTOR);
-        return {};
+        return workspace;
+      }),
+
+    /**
+     * Every workspace the sweep may take away, and why: an ephemeral one on a
+     * connected machine that nothing is living in and that has outlived the
+     * window its threads earn it.
+     */
+    expiredCandidates: (): Effect.Effect<ReadonlyArray<Expired>, SettingError | SqlError> =>
+      Effect.gen(function* () {
+        const candidates = yield* workspaces.sweepCandidates();
+        if (candidates.length === 0) return [];
+        const controller = yield* settings.all();
+        const now = yield* Clock.currentTimeMillis;
+        const due: Array<Expired> = [];
+        for (const candidate of candidates) {
+          const reason = expired(candidate, now - Date.parse(candidate.usedAt), controller);
+          if (reason !== undefined) due.push({ id: candidate.id, reason });
+        }
+        return due;
+      }),
+
+    /**
+     * The workspace the sweep may still take away, or nothing where it is no
+     * longer one: a pass reads every candidate up front, and a session can
+     * start in one while an earlier one is being disposed of. What a running
+     * harness is sitting in is never taken off its machine.
+     */
+    sweepable: (id: string): Effect.Effect<StoredWorkspace | undefined, SqlError> =>
+      Effect.gen(function* () {
+        const found = yield* workspaces.one(id);
+        if (Option.isNone(found) || found.value.status !== "ready") return undefined;
+        const living = (yield* workspaces.sessionIdsOf([id])).get(id) ?? [];
+        return living.length > 0 ? undefined : found.value;
+      }),
+
+    /**
+     * Marks a workspace gone and hands back the frame that takes it off disk.
+     * The row is written first: a machine that never hears this leaves a
+     * directory behind, which the user can remove, where a row that said `ready`
+     * for a workspace nobody owns is one nothing would ever clean up.
+     */
+    markGone: (
+      workspace: StoredWorkspace,
+      actor: typeof USER_ACTOR | typeof SYSTEM_ACTOR,
+      reason?: Expiry,
+    ): Effect.Effect<WorkspaceDispose, SqlError> =>
+      Effect.gen(function* () {
+        yield* withTransaction(
+          sql,
+          Effect.gen(function* () {
+            const at = yield* nowIso;
+            yield* workspaces.markDisposed(workspace.id, at);
+            yield* audit.append({
+              kind: "workspace.deleted",
+              actor,
+              payload: {
+                workspaceId: workspace.id,
+                runnerId: workspace.runnerId,
+                ...(reason === undefined ? {} : { reason }),
+              },
+              at,
+            });
+          }),
+        );
+        return { _tag: "workspaceDispose", workspaceId: workspace.id };
+      }),
+
+    /**
+     * Every workspace a machine still owes, as the frames that ask for them
+     * again: a frame sent to a machine that was not connected, or that
+     * restarted before it acted, would otherwise leave one provisioning for
+     * ever. The machine is expected to take a repeat of a workspace it already
+     * holds as the no-op it is.
+     *
+     * Every frame here is one that can be re-sent: the rows hold everything a
+     * provisioning needs, so a frame built again is the frame that was sent.
+     * What comes back is a clone or a worktree, which is what it was.
+     */
+    owedProvisioning: (
+      runnerId: string,
+    ): Effect.Effect<ReadonlyArray<WorkspaceProvision>, SqlError> =>
+      Effect.gen(function* () {
+        const owed = yield* workspaces.provisioningOn(runnerId);
+        const frames: Array<WorkspaceProvision> = [];
+        for (const workspace of owed) {
+          const checkouts = (yield* workspaces.checkoutsOf([workspace.id])).get(workspace.id) ?? [];
+          const named = yield* resources.byIds(checkouts.map((checkout) => checkout.resourceId));
+          const plans: Array<{ checkout: StoredCheckout; resource: StoredRepo }> = [];
+          for (const checkout of checkouts) {
+            const resource = named.get(checkout.resourceId);
+            if (resource === undefined) continue;
+            // Only a repo is ever checked out, so a row that is not one is a
+            // checkout nothing can be made of.
+            if (resource.kind !== "repo") continue;
+            plans.push({ checkout, resource });
+          }
+          frames.push(provisionFrame(workspace, plans));
+        }
+        return frames;
       }),
 
     /**
@@ -688,9 +678,9 @@ const make = Effect.gen(function* () {
 
     /**
      * Where a workspace stands, or nothing where there is no such row. The one
-     * fact about a workspace another domain reads directly: a thread cannot be
-     * picked up again in a working area that is gone, and the refusal has to
-     * name which state it was in.
+     * fact about a workspace the controller daemon reads on its own: a thread
+     * cannot be picked up again in a working area that is gone, and the refusal
+     * has to name which state it was in.
      */
     statusOf: (workspaceId: string): Effect.Effect<WorkspaceStatus | undefined, SqlError> =>
       Effect.map(workspaces.one(workspaceId), (found) =>
@@ -699,8 +689,8 @@ const make = Effect.gen(function* () {
 
     /**
      * Work happened in a workspace just now, which is what keeps the sweep from
-     * taking it away. Called by the sessions domain when a session in it starts
-     * or exits, because that is the work.
+     * taking it away. Called by the controller daemon when a session in it
+     * starts or exits, because that is the work.
      */
     touched: (workspaceId: string, at: string): Effect.Effect<void, SqlError> =>
       workspaces.touched(workspaceId, at),
@@ -734,63 +724,41 @@ const make = Effect.gen(function* () {
     openFor,
 
     /**
-     * A machine asking for the credential git needs. The answer goes back on
-     * the same connection the question came in on, and is held nowhere.
+     * What a machine asking for the credential git needs is told. The answer is
+     * held nowhere: it is built for that one request and handed back to be sent
+     * on the connection the question came in on.
      */
-    credentialAsked: (
+    credentialAnswer: (
       runnerId: string,
       request: CredentialRequest,
-    ): Effect.Effect<void, SqlError> =>
-      Effect.gen(function* () {
-        const answer = yield* Effect.catchCause(
-          credentials.answer(runnerId, request),
-          // A secret that will not decrypt is this machine's master key being
-          // wrong: nothing the asker can act on, and nothing to say to it
-          // beyond that no credential is coming - but the operator has to be
-          // able to read what happened.
-          (cause) =>
-            Effect.as(Effect.logError("A git credential could not be read", cause), undefined),
-        );
-        yield* presence.tell(
-          runnerId,
-          answer ?? {
-            _tag: "credentialAnswer",
+    ): Effect.Effect<CredentialAnswer> =>
+      Effect.catchCause(
+        credentials.answer(runnerId, request),
+        // A secret that will not decrypt is this machine's master key being
+        // wrong: nothing the asker can act on, and nothing to say to it
+        // beyond that no credential is coming - but the operator has to be
+        // able to read what happened.
+        (cause) =>
+          Effect.as(Effect.logError("A git credential could not be read", cause), {
+            _tag: "credentialAnswer" as const,
             requestId: request.requestId,
-            error: "no_connection",
-          },
-        );
-      }),
-
-    /**
-     * What the controller does about workspaces on its own: it tells a machine
-     * that has just dialled in what it still owes, and it sweeps what nothing
-     * needs any more. The sweep decides and the machine deletes; a machine that
-     * is not connected is left for the next pass rather than having its disk
-     * changed behind its back.
-     */
-    driving: Effect.all(
-      [
-        Stream.runForEach(presence.arrivals, (runnerId) =>
-          Effect.forkChild(
-            absorbing(
-              "A machine could not be told what it still owes",
-              resendProvisioning(runnerId),
-            ),
-          ),
-        ),
-        Effect.gen(function* () {
-          const interval = yield* WorkspaceSweepInterval;
-          while (true) {
-            yield* Effect.sleep(interval);
-            yield* absorbing("The workspace expiry sweep failed", sweep);
-          }
-        }),
-      ],
-      { concurrency: "unbounded", discard: true },
-    ),
+            error: "no_connection" as const,
+          }),
+      ),
   };
 });
 
+/**
+ * Two kinds of method, and wiring one where the other belongs is a mistake
+ * nothing else would catch.
+ *
+ * `query` and `read` are operations: each checks its own grant and decodes its
+ * own input, and a route handler calls it directly. Everything else is a row
+ * move or a frame built as a value, with no grant of its own, reached only by
+ * the controller daemon, which has checked the grant for the operation it is
+ * carrying out - putting one of those on a route would serve it to anyone who
+ * can reach the API.
+ */
 export class WorkspaceService extends Context.Service<
   WorkspaceService,
   Effect.Success<typeof make>
@@ -799,5 +767,5 @@ export class WorkspaceService extends Context.Service<
 export const WorkspaceServiceLayer: Layer.Layer<
   WorkspaceService,
   never,
-  SqlClient.SqlClient | AuditLog | RunnerPresence | Settings | Secrets | SessionTokens
+  SqlClient.SqlClient | AuditLog | Settings | Secrets | SessionTokens
 > = Layer.effect(WorkspaceService)(make);

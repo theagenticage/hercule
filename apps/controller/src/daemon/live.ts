@@ -506,12 +506,23 @@ const make = Effect.gen(function* () {
   };
 });
 
-export class Inputs extends Context.Service<Inputs, Effect.Success<typeof make>>()(
-  "hydra/controller/daemon/Inputs",
+/**
+ * Two kinds of method, and wiring one where the other belongs is a mistake
+ * nothing else would catch.
+ *
+ * `update`, `input`, `steer`, `interrupt`, `respond` and `stop` are operations:
+ * each checks its own grant and decodes its own input, and a route handler
+ * calls it directly. `flush` checks none: it is the ingest sending what was
+ * already queued to a session that has just gone idle, so the grant was checked
+ * when the row was stored - putting it on a route would serve it to anyone who
+ * can reach the API.
+ */
+export class Live extends Context.Service<Live, Effect.Success<typeof make>>()(
+  "hydra/controller/daemon/Live",
 ) {}
 
-export const InputsLayer: Layer.Layer<
-  Inputs,
+export const LiveLayer: Layer.Layer<
+  Live,
   never,
   | SqlClient.SqlClient
   | SessionService
@@ -521,4 +532,4 @@ export const InputsLayer: Layer.Layer<
   | Settings
   | AuditLog
   | Dispatch
-> = Layer.effect(Inputs)(make);
+> = Layer.effect(Live)(make);

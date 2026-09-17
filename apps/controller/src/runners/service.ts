@@ -92,7 +92,8 @@ interface Change {
   readonly new: unknown;
 }
 
-const NO_SUCH_RUNNER = "no such runner";
+/** What a machine nobody has enlisted is called, wherever one is named. */
+export const NO_SUCH_RUNNER = "no such runner";
 
 /** A spent, an expired and an unminted token all read the same: not outstanding. */
 const NO_SUCH_JOIN_TOKEN = "no such join token";

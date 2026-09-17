@@ -39,7 +39,7 @@ import { homePaths } from "@hydra/home";
 import { HydraHome } from "../config";
 import { ConnectionServiceLayer, ConnectionTypesLayer } from "../connections";
 import { CredentialsLayer, hashToken } from "../credentials";
-import { SessionInputDeadline } from "../daemon";
+import { SessionInputDeadline, WorkspaceSweepInterval } from "../daemon";
 import { nowIso } from "../db";
 import { TestDatabase } from "../db/testing";
 import { AuditLog, AuditLogLayer, type AuditKind, type AuditRow } from "../events";
@@ -59,7 +59,7 @@ import {
 import { cancelStrandedInputs, SessionServiceLayer } from "../sessions";
 import { ResourceServiceLayer } from "../resources";
 import { SettingsLayer } from "../settings";
-import { WorkspaceServiceLayer, WorkspaceSweepInterval } from "../workspaces";
+import { WorkspaceServiceLayer } from "../workspaces";
 import {
   JoinTokens,
   JoinTokensLayer,

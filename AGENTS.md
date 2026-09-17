@@ -46,7 +46,7 @@ The test: would a senior engineer call this overcomplicated? Then it is.
 These come from the spec and ADRs; restated here because violating them is expensive.
 
 - **Effect 4 everywhere on the backend; Effect Schema is the only schema language. No Zod in the codebase.** (ADR 0031)
-- **Every operation is a method on an Effect service.** Permission enforcement and actor stamping live inside the method; a transport handler is one line. No operation logic in any handler. (ADR 0031)
+- **Every operation is a method on an Effect service.** Its service is its domain's service, or a controller daemon use case when the operation spans domains or sends a frame to a runner. Permission enforcement and actor stamping live inside the method; a transport handler is one line. No operation logic in any handler. (ADR 0031, ADR 0033)
 - **The web app writes no Effect code.** React components hold no domain logic; `client-core` wraps the derived clients into promise functions. (ADR 0017, ADR 0031)
 - **One SQLite database; transactions are ambient** (`withTransaction`). A transaction wraps one operation's write set and never spans a wait on anything outside the database. (ADR 0004, ADR 0031)
 - **Every mutation is stamped with an actor** (`user` or `session:<id>`). Widened later, never restructured.
@@ -89,7 +89,7 @@ One pnpm workspace. Every package is `@hydra/*`, `"type": "module"`, and exports
 
 ### Source layout
 
-Source is organized **by domain**, not by type: one folder per domain, named with the CONTEXT.md word for it, and its `index.ts` is the boundary other domains import through. `db/` and `config/` are the two infrastructure exceptions. Tests sit next to the code they test and are told apart by name: a unit test is `foo.test.ts` beside `foo.ts`, and an integration test - one that drives several modules together through a single entry point, an HTTP transport or the whole rendered app - is `<entry>.integration.test.ts` beside the module it enters. End-to-end tests run against the compiled binary and live in `e2e/` at the repository root. See [ADR 0033](docs/adr/0033-source-is-organized-by-domain-and-tests-are-colocated.md).
+Source is organized **by domain**, not by type: one folder per domain, named with the CONTEXT.md word for it, and its `index.ts` is the boundary other domains import through. `db/` and `config/` are the two infrastructure exceptions, sitting under every domain; in the controller, `daemon/` - the controller daemon - is the one layer above the domains, holding every sequence that crosses two of them or reaches a runner. Tests sit next to the code they test and are told apart by name: a unit test is `foo.test.ts` beside `foo.ts`, and an integration test - one that drives several modules together through a single entry point, an HTTP transport or the whole rendered app - is `<entry>.integration.test.ts` beside the module it enters. End-to-end tests run against the compiled binary and live in `e2e/` at the repository root. See [ADR 0033](docs/adr/0033-source-is-organized-by-domain-and-tests-are-colocated.md).
 
 #### Web app layout
 
@@ -111,7 +111,7 @@ pnpm install
 pnpm typecheck   # tsc over the backend, packages/ui, and apps/web
 pnpm lint        # eslint --max-warnings 0, then prettier --check
 pnpm test        # vitest across every package: the backend on Bun, the React packages on Node
-pnpm dep-lint    # the runner entrypoint links no controller package
+pnpm dep-lint    # the runner entrypoint links no controller package; the controller's domains form a DAG
 ```
 
 Then the packaging pair, which CI runs after those four. `pnpm test:binary` runs the

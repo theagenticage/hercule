@@ -41,7 +41,7 @@ import {
   type StoredSnapshot,
 } from "../providers";
 import { resourceRepository } from "../resources";
-import { DRAINING, RETIRED, RunnerPresence, runnerRepository } from "../runners";
+import { DRAINING, NO_SUCH_RUNNER, RETIRED, RunnerPresence, runnerRepository } from "../runners";
 import {
   continuingSpecOf,
   requireSession,
@@ -61,8 +61,6 @@ export type ContinueInput = Schema.Schema.Type<typeof ContinueInput>;
 
 const decodeSpawn = Schema.decodeUnknownEffect(SessionSpawnInput);
 const decodeContinue = Schema.decodeUnknownEffect(ContinueInput);
-
-const NO_SUCH_RUNNER = "no such runner";
 
 const NO_SUCH_PROFILE = "no such permission profile";
 

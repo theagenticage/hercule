@@ -82,12 +82,12 @@ export interface SessionTraffic {
 }
 
 /**
- * What another domain acts on: a machine reporting something that is not about
+ * What the layer above acts on: a machine reporting something that is not about
  * a session, and the runners domain changing something that frees a machine for
- * work. Presence carries none of it further - what a workspace report means is
- * the workspaces domain's and what room on a machine means is the sessions
- * domain's. One queue, so a machine's reports are handed on in the order they
- * arrived in; what this domain changes itself joins them as it happens.
+ * work. Presence carries none of it further - what any of it means is decided
+ * above this domain, in the controller daemon. One queue, so a machine's reports
+ * are handed on in the order they arrived in; what this domain changes itself
+ * joins them as it happens.
  */
 export type FleetTraffic =
   | {

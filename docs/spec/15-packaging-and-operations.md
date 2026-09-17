@@ -47,11 +47,13 @@ The codebase is one pnpm monorepo: `apps/controller`, `apps/runner`, `apps/web`,
 
 Rule: the runner entrypoint's module graph MUST NOT include any controller package. Concretely, the runner never links the DB engine, the plugin host, or the web bundle. A dependency-lint rule in CI enforces this; convention is not enough ([ADR 0018](../adr/0018-hydra-ships-as-one-self-contained-binary.md)).
 
+*(Amended 2026-09-17, [#208](https://github.com/rogierpennink/hydra/issues/208).)* The same lint carries a second graph rule, about the controller rather than the runner: its domains, each imported through its `index.ts`, form a DAG, with no allowlist of edges. The controller daemon (`apps/controller/src/daemon/`) is the layer above them that holds every sequence crossing two domains or reaching a runner ([ADR 0033](../adr/0033-source-is-organized-by-domain-and-tests-are-colocated.md)).
+
 The compiled artifact still contains all three graphs. Isolation is a property of the import graph per entrypoint, not of the file on disk. The CLI package talks HTTP only and is reachable from both the runner graph (sessions call it) and the standalone CLI entrypoint.
 
 ## 4. Supervision
 
-- `hydra service install` writes and registers a **user-level** native unit: a systemd user unit plus `loginctl enable-linger` on Linux, a launchd LaunchAgent on macOS. The OS owns restarts. Hydra never runs its own daemon or supervisor.
+- `hydra service install` writes and registers a **user-level** native unit: a systemd user unit plus `loginctl enable-linger` on Linux, a launchd LaunchAgent on macOS. The OS owns restarts. Hydra runs no process supervisor of its own. *(Amended 2026-09-17, [#208](https://github.com/rogierpennink/hydra/issues/208): the sentence is narrowed to process supervision, so it no longer collides with the controller daemon, which is a layer inside the controller process and supervises nothing.)*
 - User-level, not system-level, because the master key lives in the user's login keychain, which a macOS system daemon cannot reach ([ADR 0015](../adr/0015-secrets-are-encrypted-per-value-under-a-keychain-held-master-key.md)).
 - One unit per machine. On the controller machine the unit runs `hydra serve`; on a runner-only machine it runs `hydra runner`.
 - Foreground `hydra serve` (no unit) is the development mode.

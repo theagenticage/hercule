@@ -29,7 +29,7 @@ import {
   type SessionStart,
 } from "@hydra/protocol";
 import type { Plugin } from "@hydra/plugin-host";
-import type { Profile, Session } from "@hydra/contract";
+import type { Input, Profile, Session } from "@hydra/contract";
 import { fixture, providerDefinition } from "../plugins/testing";
 import { completeSetup, get, post, send, withServer, type ServerHarness } from "../http/testing";
 
@@ -302,6 +302,31 @@ export const withFleet = (
         : { workspaceSweepInterval: options.workspaceSweepInterval }),
     },
   );
+
+/** The provider instance a fixture's provider was opened as, by that provider's id. */
+export const instanceOf = (arranged: Arranged, providerId: string): string => {
+  const found = arranged.instances.find((instance) => instance.providerId === providerId);
+  expect(found, providerId).toBeDefined();
+  return found!.id;
+};
+
+/** Every session this controller holds, as the API hands them back. */
+export const sessionsOf = async (arranged: Arranged): Promise<ReadonlyArray<Session>> => {
+  const response = await get(arranged.harness.base, "/api/v1/sessions", arranged.token);
+  expect(response.status, await response.clone().text()).toBe(200);
+  return ((await response.json()) as { items: ReadonlyArray<Session> }).items;
+};
+
+/** One session's inputs, oldest first, as the API hands them back. */
+export const inputsOf = async (arranged: Arranged, id: string): Promise<ReadonlyArray<Input>> => {
+  const response = await get(
+    arranged.harness.base,
+    `/api/v1/sessions/${id}/inputs`,
+    arranged.token,
+  );
+  expect(response.status, await response.clone().text()).toBe(200);
+  return ((await response.json()) as { items: ReadonlyArray<Input> }).items;
+};
 
 export const spawn = async (arranged: Arranged, body: unknown): Promise<Response> =>
   post(arranged.harness.base, "/api/v1/sessions", body, arranged.token);

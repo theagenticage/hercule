@@ -10,7 +10,6 @@
  * its own failure: one report that will not write must not stop the traffic of
  * every other machine.
  */
-import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -21,23 +20,9 @@ import { withTransaction } from "../db";
 import { RunnerPresence, type FleetTraffic, type SessionTraffic } from "../runners";
 import { SessionService } from "../sessions";
 import { WorkspaceService } from "../workspaces";
+import { absorbing, forking } from "./absorbing";
 import { Dispatch } from "./dispatch";
-import { Inputs } from "./inputs";
-
-/**
- * A driver must not stop on one item, so the cause is logged and dropped - a
- * defect as much as a failure, because a bug applying one report would
- * otherwise take the driver down for the life of the process, silently and for
- * the whole fleet. A cause carrying an interrupt is the driver being stopped
- * and is passed on whole, so nothing that rode along with it is lost.
- */
-const absorbing = (
-  what: string,
-  effect: Effect.Effect<void, SqlError>,
-): Effect.Effect<void, SqlError> =>
-  Effect.catchCause(effect, (cause) =>
-    Cause.hasInterrupts(cause) ? Effect.failCause(cause) : Effect.logError(what, cause),
-  );
+import { Live } from "./live";
 
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
@@ -45,11 +30,7 @@ const make = Effect.gen(function* () {
   const sessions = yield* SessionService;
   const workspaces = yield* WorkspaceService;
   const { dispatch } = yield* Dispatch;
-  const { flush } = yield* Inputs;
-
-  /** Forked, because a dispatch or a flush waits on a machine. */
-  const forking = (what: string, effect: Effect.Effect<void, SqlError>) =>
-    Effect.asVoid(Effect.forkChild(absorbing(what, effect)));
+  const { flush } = yield* Live;
 
   const applying = (traffic: FleetTraffic): Effect.Effect<void, SqlError> => {
     switch (traffic._tag) {
@@ -73,7 +54,12 @@ const make = Effect.gen(function* () {
           }
         });
       case "credentialRequested":
-        return workspaces.credentialAsked(traffic.runnerId, traffic.request);
+        // The answer is good for this one request, so it goes straight back on
+        // the connection that asked and is written down nowhere.
+        return Effect.flatMap(
+          workspaces.credentialAnswer(traffic.runnerId, traffic.request),
+          (answer) => Effect.asVoid(presence.tell(traffic.runnerId, answer)),
+        );
       case "placementsChanged":
         // Forked, unlike the two above: starting what a machine now has room
         // for is a transaction and a credential read per session, and the rest
@@ -141,5 +127,5 @@ export class Inbound extends Context.Service<Inbound, Effect.Success<typeof make
 export const InboundLayer: Layer.Layer<
   Inbound,
   never,
-  SqlClient.SqlClient | RunnerPresence | SessionService | WorkspaceService | Dispatch | Inputs
+  SqlClient.SqlClient | RunnerPresence | SessionService | WorkspaceService | Dispatch | Live
 > = Layer.effect(Inbound)(make);

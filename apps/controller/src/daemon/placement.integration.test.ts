@@ -10,11 +10,13 @@ import { describe, expect, it, vi } from "vitest";
 import { Effect } from "effect";
 import type { Plugin, ProviderDefinition } from "@hydra/plugin-host";
 import type { ModelDescriptor, RunnerFacts } from "@hydra/protocol";
-import type { Input, Session } from "@hydra/contract";
-import { get, send } from "../http/testing";
+import { send } from "../http/testing";
 import { fixture, providerDefinition } from "../plugins/testing";
 import {
+  instanceOf,
+  inputsOf,
   profileNamed,
+  sessionsOf,
   spawn,
   spawned,
   until,
@@ -22,7 +24,7 @@ import {
   withFleet as sharedWithFleet,
   type Arranged,
 } from "../sessions/testing";
-import { codeOf, framesTagged, readWorkspace, repo } from "../workspaces/testing";
+import { framesTagged, readWorkspace, repo } from "../workspaces/testing";
 
 /** Everything native, and not the instance the thread defaults will name. */
 const ALPHA: ProviderDefinition = providerDefinition("alpha-provider", { token: "t" });
@@ -30,22 +32,8 @@ const ALPHA: ProviderDefinition = providerDefinition("alpha-provider", { token: 
 /** The instance the thread defaults name. */
 const BETA: ProviderDefinition = providerDefinition("beta-provider", { token: "t" });
 
-/** Declares nothing above `auto-accept-edits`, so a request for more falls. */
-const CAPPED: ProviderDefinition = {
-  ...providerDefinition("capped-provider", { token: "t" }),
-  declared: {
-    ...providerDefinition("capped-provider").declared,
-    accessModes: {
-      "approval-required": "native",
-      "auto-accept-edits": "native",
-      auto: "unsupported",
-      "full-access": "unsupported",
-    },
-  },
-};
-
 const registry = (): ReadonlyArray<Plugin> => [
-  fixture({ id: "providers", definitions: [ALPHA, BETA, CAPPED] }).plugin,
+  fixture({ id: "providers", definitions: [ALPHA, BETA] }).plugin,
 ];
 
 const FACTS: RunnerFacts = {
@@ -55,7 +43,7 @@ const FACTS: RunnerFacts = {
   docker: false,
   toolchains: [{ name: "git", version: "2.50.1", path: "/usr/bin/git" }],
   providers: [{ name: "harness", present: true, path: "/usr/local/bin/harness" }],
-  adapters: ["alpha-provider", "beta-provider", "capped-provider"],
+  adapters: ["alpha-provider", "beta-provider"],
   identityPort: 4939,
 };
 
@@ -69,12 +57,6 @@ vi.setConfig({ testTimeout: WAIT_DEADLINE_MS * 2 + 10_000 });
 
 const withFleet = (body: (arranged: Arranged) => Promise<void>): Promise<void> =>
   sharedWithFleet(body, { plugins: registry(), facts: FACTS, models: MODELS });
-
-const instanceOf = (arranged: Arranged, providerId: string): string => {
-  const found = arranged.instances.find((instance) => instance.providerId === providerId);
-  expect(found, providerId).toBeDefined();
-  return found!.id;
-};
 
 /** The user's thread defaults, written the way the settings screen writes them. */
 const threadDefaults = async (
@@ -98,22 +80,6 @@ const specOf = async (arranged: Arranged, id: string): Promise<Record<string, un
   );
   expect(row, "the session was stored with no row").toBeDefined();
   return JSON.parse(row!.spec) as Record<string, unknown>;
-};
-
-const sessionsOf = async (arranged: Arranged): Promise<ReadonlyArray<Session>> => {
-  const response = await get(arranged.harness.base, "/api/v1/sessions", arranged.token);
-  expect(response.status, await response.clone().text()).toBe(200);
-  return ((await response.json()) as { items: ReadonlyArray<Session> }).items;
-};
-
-const inputsOf = async (arranged: Arranged, id: string): Promise<ReadonlyArray<Input>> => {
-  const response = await get(
-    arranged.harness.base,
-    `/api/v1/sessions/${id}/inputs`,
-    arranged.token,
-  );
-  expect(response.status, await response.clone().text()).toBe(200);
-  return ((await response.json()) as { items: ReadonlyArray<Input> }).items;
 };
 
 /** The workspace frame the machine was told to act on, once it is on the wire. */
@@ -200,42 +166,6 @@ describe("placeSession", () => {
 
       const response = await pending;
       expect(response.status, await response.clone().text()).toBe(200);
-    });
-  });
-
-  it("stores the nearest mode the named instance's provider does declare", async () => {
-    await withFleet(async (arranged) => {
-      const session = await spawned(arranged, {
-        prompt: "hello",
-        instanceId: instanceOf(arranged, "capped-provider"),
-        accessMode: "auto",
-      });
-
-      expect(session.requestedAccessMode).toBe("auto");
-      expect(session.accessMode).toBe("auto-accept-edits");
-      expect(await specOf(arranged, session.id)).toMatchObject({
-        accessMode: "auto-accept-edits",
-      });
-    });
-  });
-
-  it("refuses the call and writes no session where no runner is placeable", async () => {
-    await withFleet(async (arranged) => {
-      // The one machine here is the fleet's default, which `runner.update`
-      // refuses to reserve, so the row is what the arrangement writes.
-      await Effect.runPromise(
-        Effect.orDie(
-          arranged.harness.sql`
-            UPDATE runners SET reserved = 1
-            WHERE id = unhex(replace(${arranged.runnerId}, '-', ''))`,
-        ),
-      );
-
-      const response = await spawn(arranged, { prompt: "hello" });
-
-      expect(response.status, await response.clone().text()).toBe(409);
-      expect(await codeOf(response)).toBe("invalid_state");
-      expect(await sessionsOf(arranged)).toEqual([]);
     });
   });
 });

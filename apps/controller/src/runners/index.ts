@@ -29,13 +29,13 @@ export { RunnerJoinRouteLayer } from "./route";
 export { RunnerPingSchedule, RunnerSocketRouteLayer, type RunnerPings } from "./socket";
 export {
   DRAINING,
+  NO_SUCH_RUNNER,
   RETIRED,
   RunnerService,
   RunnerServiceLayer,
   type Identified,
   type MoveError,
   type QueryInput,
-  type Retired,
   type RetireInput,
   type UpdateInput,
 } from "./service";

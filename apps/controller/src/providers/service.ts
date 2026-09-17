@@ -41,6 +41,7 @@ import { nowIso, withTransaction } from "../db";
 import { AuditLog } from "../events";
 import { PluginHost } from "../plugins";
 import {
+  NO_SUCH_RUNNER,
   requireAdapter,
   requireOnline,
   RunnerPresence,
@@ -111,8 +112,6 @@ const decodeProbe = Schema.decodeUnknownEffect(ProbeInput);
 const decodeInstall = Schema.decodeUnknownEffect(InstallInput);
 
 const NO_SUCH_INSTANCE = "no such provider instance";
-
-const NO_SUCH_RUNNER = "no such runner";
 
 type ReadError = Unauthenticated | Forbidden | SqlError | Schema.SchemaError;
 
