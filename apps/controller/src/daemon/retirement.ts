@@ -9,7 +9,7 @@ import * as Layer from "effect/Layer";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { RunnerDetail } from "@hydra/contract";
 import { withTransaction } from "../db";
-import { RunnerPresence, RunnerService, type MoveError, type RetireInput } from "../runners";
+import { RunnerConnections, RunnerService, type MoveError, type RetireInput } from "../runners";
 import { SessionService } from "../sessions";
 import { WorkspaceService } from "../workspaces";
 
@@ -18,7 +18,7 @@ const make = Effect.gen(function* () {
   const runners = yield* RunnerService;
   const sessions = yield* SessionService;
   const workspaces = yield* WorkspaceService;
-  const presence = yield* RunnerPresence;
+  const connections = yield* RunnerConnections;
 
   return {
     /**
@@ -53,12 +53,12 @@ const make = Effect.gen(function* () {
           // queued ones never had a frame to begin with, so they get none now
           // either.
           for (const sessionId of toStop) {
-            yield* presence.tell(detail.id, { _tag: "sessionStop", sessionId });
+            yield* connections.tell(detail.id, { _tag: "sessionStop", sessionId });
           }
           // After the commit too: a socket closed for a retirement that then
           // rolled back would be a runner told to stop by a controller that
           // still has it.
-          yield* presence.hangUp(detail.id);
+          yield* connections.hangUp(detail.id);
           return detail;
         }),
       ),
@@ -72,5 +72,5 @@ export class Retirement extends Context.Service<Retirement, Effect.Success<typeo
 export const RetirementLayer: Layer.Layer<
   Retirement,
   never,
-  SqlClient.SqlClient | RunnerService | SessionService | WorkspaceService | RunnerPresence
+  SqlClient.SqlClient | RunnerService | SessionService | WorkspaceService | RunnerConnections
 > = Layer.effect(Retirement)(make);

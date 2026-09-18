@@ -3,7 +3,7 @@
  *
  * The fleet keeps its own rows and the connections it is reachable through, and
  * calls nobody: what a machine reports that another domain acts on is published
- * on `RunnerPresence`, and what is done about it is decided above this domain.
+ * on `RunnerConnections`, and what is done about it is decided above this domain.
  */
 export { requireAdapter, requireOnline } from "./adapters";
 export { RunnerJoinLayer } from "./join";
@@ -17,13 +17,13 @@ export {
 } from "./local";
 export {
   RunnerFactsDeadline,
-  RunnerPresence,
-  RunnerPresenceLayer,
+  RunnerConnections,
+  RunnerConnectionsLayer,
   type Answer,
   type Connection,
   type FleetTraffic,
   type SessionTraffic,
-} from "./presence";
+} from "./connections";
 export { onlineWhere, runnerRepository } from "./repository";
 export { RunnerJoinRouteLayer } from "./route";
 export { RunnerPingSchedule, RunnerSocketRouteLayer, type RunnerPings } from "./socket";

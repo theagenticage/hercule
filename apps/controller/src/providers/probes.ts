@@ -18,7 +18,7 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import { notFound, type CapabilitySnapshot, type NotFound } from "@hydra/contract";
 import { announce, nowIso, withTransaction } from "../db";
-import { RunnerPresence, runnerRepository } from "../runners";
+import { RunnerConnections, runnerRepository } from "../runners";
 import { providerRepository, type StoredInstance } from "./repository";
 import { floorFor, versionVerdict } from "./version";
 
@@ -51,7 +51,7 @@ const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const instances = yield* providerRepository;
   const runners = yield* runnerRepository;
-  const presence = yield* RunnerPresence;
+  const connections = yield* RunnerConnections;
 
   /**
    * A late report is dropped rather than stored: nobody is correlating that
@@ -62,7 +62,7 @@ const make = Effect.gen(function* () {
     instance: StoredInstance,
   ): Effect.Effect<Option.Option<CapabilitySnapshot>, StoreError> =>
     Effect.gen(function* () {
-      const answer = yield* presence.asked(
+      const answer = yield* connections.asked(
         runnerId,
         {
           _tag: "probeRequest",
@@ -153,7 +153,9 @@ const make = Effect.gen(function* () {
       [
         // Forked, because a machine that answers slowly must not hold up the
         // next machine's sweep.
-        Stream.runForEach(presence.arrivals, (runnerId) => Effect.forkChild(sweepRunner(runnerId))),
+        Stream.runForEach(connections.arrivals, (runnerId) =>
+          Effect.forkChild(sweepRunner(runnerId)),
+        ),
         Effect.gen(function* () {
           const interval = yield* ProviderProbeInterval;
           while (true) {
@@ -181,5 +183,5 @@ export class ProviderProbes extends Context.Service<ProviderProbes, Effect.Succe
 export const ProviderProbesLayer: Layer.Layer<
   ProviderProbes,
   never,
-  SqlClient.SqlClient | RunnerPresence
+  SqlClient.SqlClient | RunnerConnections
 > = Layer.effect(ProviderProbes)(make);

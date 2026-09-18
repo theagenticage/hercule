@@ -53,7 +53,7 @@ import { OAuthCallbackRouteLayer } from "../connections";
 import { Inbound, Provisioning } from "../daemon";
 import { LiveSocketLayer } from "../live";
 import { ProviderProbes } from "../providers";
-import { RunnerJoinRouteLayer, RunnerPresence, RunnerSocketRouteLayer } from "../runners";
+import { RunnerJoinRouteLayer, RunnerConnections, RunnerSocketRouteLayer } from "../runners";
 import { handlerLayers } from "./routes";
 import { withWebBundle, type WebBundle } from "./static";
 
@@ -191,8 +191,8 @@ export const serve = (bundle: WebBundle | undefined) =>
     // controller killed rather than drained would otherwise show its whole
     // fleet as ready for work for ever, because the only thing that moves a
     // runner off `online` is the connection that put it there.
-    const presence = yield* RunnerPresence;
-    yield* Effect.orDie(presence.strandedByTheLastRun);
+    const connections = yield* RunnerConnections;
+    yield* Effect.orDie(connections.strandedByTheLastRun);
     // Forked before the listener binds, and the arrivals replay covers the rest
     // of the gap, so no machine says hello unheard. The tick is there because a
     // login expires and a harness is upgraded outside Hydra.

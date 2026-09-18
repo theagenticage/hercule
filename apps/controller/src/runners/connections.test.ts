@@ -22,10 +22,10 @@ import { hashToken } from "../credentials";
 import { nowIso } from "../db";
 import { TestDatabase } from "../db/testing";
 import { AuditLog, AuditLogLayer } from "../events";
-import { newConnection, RunnerPresence, RunnerPresenceLayer } from "./presence";
+import { newConnection, RunnerConnections, RunnerConnectionsLayer } from "./connections";
 import { runnerRepository } from "./repository";
 
-const layer = RunnerPresenceLayer.pipe(
+const layer = RunnerConnectionsLayer.pipe(
   Layer.provideMerge(AuditLogLayer),
   Layer.provideMerge(TestDatabase),
 );
@@ -57,7 +57,7 @@ describe("the fleet a stopped controller left behind", () => {
   it("reads every runner it was holding as unreachable, and leaves the rest alone", async () => {
     const { rows, recorded } = await Effect.runPromise(
       Effect.gen(function* () {
-        const presence = yield* RunnerPresence;
+        const connections = yield* RunnerConnections;
         const runners = yield* runnerRepository;
         const audit = yield* AuditLog;
         const arranged = yield* fleetOf([
@@ -68,7 +68,7 @@ describe("the fleet a stopped controller left behind", () => {
           { connectivity: "online", lifecycle: "draining" },
         ]);
 
-        yield* presence.strandedByTheLastRun;
+        yield* connections.strandedByTheLastRun;
 
         const rows = yield* Effect.forEach(arranged, (runner) =>
           Effect.map(runners.read(runner.id), (row) =>
@@ -131,19 +131,19 @@ describe("a draining runner whose socket drops", () => {
   it("becomes unreachable without coming off the drain", async () => {
     const row = await Effect.runPromise(
       Effect.gen(function* () {
-        const presence = yield* RunnerPresence;
+        const connections = yield* RunnerConnections;
         const runners = yield* runnerRepository;
         const [runner] = yield* fleetOf([{ connectivity: "offline", lifecycle: "draining" }]);
 
         const connection = newConnection();
-        yield* presence.greeted(runner!.id, connection, HELD, {
+        yield* connections.greeted(runner!.id, connection, HELD, {
           binaryVersion: "0.1.0",
           protocolVersion: 1,
           negotiatedCapabilities: [],
           facts: FACTS,
         });
         // The machine vanished: nothing announced it, the connection simply went.
-        yield* presence.ended(runner!.id, connection, "unreachable");
+        yield* connections.ended(runner!.id, connection, "unreachable");
 
         return yield* runners.read(runner!.id);
       }).pipe(Effect.provide(layer), Effect.orDie),
@@ -159,20 +159,20 @@ describe("a report from a connection the runner has replaced", () => {
   it("is dropped, so the older socket cannot put its machine back over the newer one", async () => {
     const row = await Effect.runPromise(
       Effect.gen(function* () {
-        const presence = yield* RunnerPresence;
+        const connections = yield* RunnerConnections;
         const runners = yield* runnerRepository;
         const [runner] = yield* fleetOf([{ connectivity: "offline" }]);
 
         const older = newConnection();
         const newer = newConnection();
-        yield* presence.greeted(runner!.id, older, HELD, {
+        yield* connections.greeted(runner!.id, older, HELD, {
           binaryVersion: "0.1.0",
           protocolVersion: 1,
           negotiatedCapabilities: [],
           facts: FACTS,
         });
         // The machine dialled again, and the row is the newer connection's now.
-        yield* presence.greeted(runner!.id, newer, HELD, {
+        yield* connections.greeted(runner!.id, newer, HELD, {
           binaryVersion: "0.1.0",
           protocolVersion: 1,
           negotiatedCapabilities: [],
@@ -180,8 +180,8 @@ describe("a report from a connection the runner has replaced", () => {
         });
 
         // A frame the older connection had already sent, arriving late.
-        yield* presence.reportedFacts(runner!.id, older, { ...FACTS, docker: false });
-        yield* presence.reportedWatermark(runner!.id, older, WATERMARK);
+        yield* connections.reportedFacts(runner!.id, older, { ...FACTS, docker: false });
+        yield* connections.reportedWatermark(runner!.id, older, WATERMARK);
 
         return yield* runners.read(runner!.id);
       }).pipe(Effect.provide(layer)),

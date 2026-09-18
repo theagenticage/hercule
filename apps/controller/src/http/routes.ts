@@ -400,7 +400,7 @@ const controllerRoutes = HttpApiBuilder.group(api, "controller", (handlers) =>
  * missing an operation, and nothing would say so until a request asked for it.
  *
  * Six are deliberately absent. `Plugins`, `ProviderService`, `SessionService`,
- * `WorkspaceService`, `RunnerPresence` and `ProviderProbes` must be the
+ * `WorkspaceService`, `RunnerConnections` and `ProviderProbes` must be the
  * instances the boot built: a second one would hold no plugins, no connections,
  * none of the ingest state a session's stream is coalesced in, and would write
  * over the same rows the drivers act on. They reach the handlers from there.

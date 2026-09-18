@@ -30,7 +30,7 @@ import {
 } from "@hydra/contract";
 import { requireGrant, SYSTEM_ACTOR, USER_ACTOR } from "../actor";
 import { withTransaction } from "../db";
-import { RunnerPresence } from "../runners";
+import { RunnerConnections } from "../runners";
 import { WorkspaceService } from "../workspaces";
 import { absorbing, forking } from "./absorbing";
 
@@ -55,7 +55,7 @@ export const WorkspaceSweepInterval = Context.Reference<Duration.Duration>(
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const workspaces = yield* WorkspaceService;
-  const presence = yield* RunnerPresence;
+  const connections = yield* RunnerConnections;
 
   /** One pass of the expiry sweep. */
   const sweep = Effect.gen(function* () {
@@ -73,14 +73,14 @@ const make = Effect.gen(function* () {
         }),
       );
       if (gone === undefined) continue;
-      yield* presence.tell(gone.runnerId, gone.frame);
+      yield* connections.tell(gone.runnerId, gone.frame);
     }
   });
 
   const resendProvisioning = (runnerId: string): Effect.Effect<void, SqlError> =>
     Effect.gen(function* () {
       for (const frame of yield* workspaces.owedProvisioning(runnerId)) {
-        yield* presence.tell(runnerId, frame);
+        yield* connections.tell(runnerId, frame);
       }
     });
 
@@ -104,7 +104,7 @@ const make = Effect.gen(function* () {
         );
         // After the commit. A machine that is not listening is told again when
         // it dials in, from the rows this just wrote.
-        yield* presence.tell(decoded.runnerId, frame);
+        yield* connections.tell(decoded.runnerId, frame);
         return workspace;
       }),
 
@@ -127,7 +127,7 @@ const make = Effect.gen(function* () {
           }),
         );
         // After the commit: a transaction never spans a wait on a machine.
-        yield* presence.tell(runnerId, frame);
+        yield* connections.tell(runnerId, frame);
         return {};
       }),
 
@@ -138,7 +138,7 @@ const make = Effect.gen(function* () {
      */
     driving: Effect.all(
       [
-        Stream.runForEach(presence.arrivals, (runnerId) =>
+        Stream.runForEach(connections.arrivals, (runnerId) =>
           forking("A machine could not be told what it still owes", resendProvisioning(runnerId)),
         ),
         Effect.gen(function* () {
@@ -161,5 +161,5 @@ export class Provisioning extends Context.Service<Provisioning, Effect.Success<t
 export const ProvisioningLayer: Layer.Layer<
   Provisioning,
   never,
-  SqlClient.SqlClient | WorkspaceService | RunnerPresence
+  SqlClient.SqlClient | WorkspaceService | RunnerConnections
 > = Layer.effect(Provisioning)(make);
