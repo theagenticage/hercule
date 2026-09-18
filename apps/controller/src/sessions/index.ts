@@ -1,10 +1,12 @@
 /**
  * Sessions: one provider-backed conversation, and the stream it leaves behind.
  *
- * The rows, their lifecycle and the inputs waiting on them are this domain's;
- * what reaches a machine is not. `SessionService` carries the read operations
- * and the stored-input operations a request reaches directly, beside the row
- * moves the controller daemon calls as it sequences what a machine is told.
+ * The rows, their lifecycle, the inputs waiting on them and the frames a
+ * machine is told about them are this domain's; when a frame goes out, and
+ * over which connection, is not. `SessionService` carries the read operations
+ * and the stored-input operations a request reaches directly, beside the
+ * frames and the row moves the controller daemon calls as it sequences what a
+ * machine is told.
  */
 export { type StoredInput } from "./inputs";
 export { continuingSpecOf, timeoutsFrom, validatedOptions } from "./options";

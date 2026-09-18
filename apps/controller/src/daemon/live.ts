@@ -169,10 +169,6 @@ const make = Effect.gen(function* () {
    * machine to say what it did with it. `none` where there is no connection or
    * nothing came back in time; the wait is outside any transaction. The caller
    * has already claimed the row before this runs.
-   *
-   * The session's current model rides every frame: only the adapter knows
-   * whether the input about to be sent opens a turn, which is the only moment
-   * a harness will take a model change.
    */
   const deliverTo = (
     session: StoredSession,
@@ -182,12 +178,7 @@ const make = Effect.gen(function* () {
       const deadline = yield* SessionInputDeadline;
       const answer = yield* connections.asked(
         session.runnerId,
-        {
-          _tag: "sessionInput",
-          requestId: row.id,
-          sessionId: row.sessionId,
-          input: { text: row.text, modelSelection: session.modelSelection },
-        },
+        sessions.inputFrame(row, session.modelSelection),
         deadline,
       );
       return Option.filter(
@@ -364,9 +355,7 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * Ends the turn the session is running. Fire and forget: what became of the
-     * turn arrives in the session's own stream as `turn.completed`, so there is
-     * nothing to wait for here.
+     * Ends the turn the session is running.
      *
      * Only a session whose harness is gone refuses. The status the controller
      * holds lags the machine's own stream, so "no turn is running" here is a
@@ -379,9 +368,7 @@ const make = Effect.gen(function* () {
         const { id } = yield* Effect.mapError(decodeIdentified(input), validationOf);
         const session = yield* one(id);
         if (session.status === "exited") return yield* Effect.fail(invalidState(HAS_EXITED));
-        if (
-          !(yield* connections.tell(session.runnerId, { _tag: "sessionInterrupt", sessionId: id }))
-        ) {
+        if (!(yield* connections.tell(session.runnerId, sessions.interrupting(id)))) {
           return yield* Effect.fail(invalidState(GONE));
         }
         const actor = yield* currentStamp;
@@ -400,8 +387,7 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * Answers the request the session's harness is parked on. Fire and forget
-     * like the interrupt above.
+     * Answers the request the session's harness is parked on.
      *
      * Everything is refused before anything crosses the wire, because an answer
      * that lands on the wrong question is the one mistake this operation must
@@ -430,12 +416,7 @@ const make = Effect.gen(function* () {
           );
         }
         if (
-          !(yield* connections.tell(session.runnerId, {
-            _tag: "sessionRespond",
-            sessionId: id,
-            requestId,
-            decision,
-          }))
+          !(yield* connections.tell(session.runnerId, sessions.responding(id, requestId, decision)))
         ) {
           return yield* Effect.fail(invalidState(GONE));
         }
@@ -484,7 +465,7 @@ const make = Effect.gen(function* () {
             }),
           );
         }
-        if (!(yield* connections.tell(session.runnerId, { _tag: "sessionStop", sessionId: id }))) {
+        if (!(yield* connections.tell(session.runnerId, sessions.stopping(id)))) {
           return yield* Effect.fail(invalidState(GONE));
         }
         const actor = yield* currentStamp;

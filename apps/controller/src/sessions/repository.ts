@@ -165,7 +165,8 @@ const transcriptScope = (sessionId: string, direction: SortDirection): CursorSco
   direction,
 });
 
-/** One queued session, with everything the frame that starts it carries. */
+/** One queued session, with everything the frame that starts it is built
+ * from, bar the token minted and the account read at the claim. */
 export interface QueuedSession {
   readonly id: string;
   readonly spec: string;

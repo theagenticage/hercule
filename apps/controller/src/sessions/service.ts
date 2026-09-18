@@ -3,10 +3,11 @@
  * it and the stream it leaves behind.
  *
  * A session is written here from a spec that is already settled, and what a
- * machine reports about one is turned into rows here. Nothing here reaches a
- * machine: what a thread runs, where it runs, what it is told and what is done
- * about what it says are the controller daemon's, a layer up. The methods this
- * service holds for it are row moves, and they say what is left to do rather
+ * machine reports about one is turned into rows here. The frames a machine is
+ * told about a session are built here too - the words are this domain's - but
+ * nothing here reaches a machine: when a frame goes out, and over which
+ * connection, is the controller daemon's, a layer up. The methods this
+ * service holds for it hand back frames or say what is left to do rather
  * than doing it.
  */
 import * as Context from "effect/Context";
@@ -19,11 +20,17 @@ import type { SqlError } from "effect/unstable/sql/SqlError";
 import {
   SessionSpec,
   type AccessMode,
+  type ApprovalDecision,
   type Delivery,
   type ModelSelection,
   type OpenRequest,
   type ProviderEvent,
   type SessionBinding,
+  type SessionInput,
+  type SessionInterrupt,
+  type SessionRespond,
+  type SessionStart,
+  type SessionStop,
 } from "@hydra/protocol";
 import {
   DEFAULT_PAGE_LIMIT,
@@ -60,13 +67,9 @@ import {
 import { mintToken, hashToken } from "../credentials";
 import { AuditLog } from "../events";
 import { SessionTokens } from "../permissions";
+import { gitIdentityOf, type GitCredential } from "../workspaces";
 import { inputRepository, type StoredInput } from "./inputs";
-import {
-  requireSession,
-  sessionRepository,
-  type QueuedSession,
-  type StoredSession,
-} from "./repository";
+import { requireSession, sessionRepository, type StoredSession } from "./repository";
 import { fold, openRequestAfter, track, type Folded, type Tracked } from "./stream";
 
 const QueryInput = Schema.Struct({
@@ -147,9 +150,19 @@ export interface Opening {
   readonly at: string;
 }
 
-/** A session claimed for a start, and the token the frame that starts it carries. */
-export interface Starting extends QueuedSession {
-  readonly token: string;
+/** A session claimed for a start, and the complete frame that starts it. */
+export interface Starting {
+  readonly sessionId: string;
+  readonly frame: SessionStart;
+}
+
+/**
+ * What building a start frame needs from beyond this domain, provided by the
+ * caller: the GitHub account a session pushes as. The controller daemon passes
+ * its own credential reader, so this domain reaches for no secret itself.
+ */
+export interface StartNeeds {
+  readonly accountOf: (connectionId: string) => Effect.Effect<GitCredential | undefined>;
 }
 
 /** One input as it is stored, and what the session it lands on runs under. */
@@ -210,6 +223,7 @@ const decodeInputQuery = Schema.decodeUnknownEffect(InputQueryInput);
 const decodeInputUpdate = Schema.decodeUnknownEffect(InputUpdate);
 const decodeInputIdentified = Schema.decodeUnknownEffect(InputIdentified);
 const encodeSpec = Schema.encodeUnknownSync(SessionSpec);
+const decodeSpecDocument = Schema.decodeUnknownEffect(Schema.fromJsonString(SessionSpec));
 
 /** Newest first: a session list is read as a history. */
 const DEFAULT_DIRECTION: SortDirection = "desc";
@@ -463,28 +477,122 @@ const make = Effect.gen(function* () {
 
     /**
      * Moves this runner's oldest queued sessions to `starting`, as many as the
-     * caller found room for, and hands back what it takes to tell the machine
-     * to start each. Joins the caller's transaction: a row is claimed here for
-     * a frame that only goes out once that transaction has committed.
+     * caller found room for, and builds the complete frame that starts each:
+     * token, spec and, where a Connection backs it, the account it pushes as.
+     * Joins the caller's transaction, reading what the frame needs inside it -
+     * a database read plus a decrypt is not a wait on a machine - and the
+     * frames only go out, from the daemon, once that transaction commits.
      */
-    starting: (runnerId: string, room: number): Effect.Effect<ReadonlyArray<Starting>, SqlError> =>
+    starting: (
+      runnerId: string,
+      room: number,
+      needs: StartNeeds,
+    ): Effect.Effect<ReadonlyArray<Starting>, SqlError> =>
       Effect.gen(function* () {
-        const queued = yield* sessions.oldestQueued(runnerId, room);
         const at = yield* nowIso;
         const claimed: Array<Starting> = [];
-        for (const row of queued) {
-          // The session's own credential on the public API, minted for this
-          // start and stored as its hash with the move that licenses it: a
-          // session is reachable exactly while the row says it is running.
-          // A resume comes back through here, so the token it starts under
-          // replaces the one the previous process held.
-          const token = mintToken();
-          yield* sessions.started(row.id, hashToken(token), at);
-          yield* announce({ _tag: "record", topic: "session", id: row.id, kind: "updated" });
-          claimed.push({ ...row, token });
+        const skipped = new Set<string>();
+        // A row the codec refuses still occupies fetch width, so a pass that
+        // skipped any looks one window deeper until the room is filled or the
+        // queue runs out: a runner's room is for sessions that can start, not
+        // for documents that cannot.
+        for (let width = room; ; width += room) {
+          const queued = yield* sessions.oldestQueued(runnerId, width);
+          for (const row of queued) {
+            if (claimed.length >= room) break;
+            // Normally the codec that reads a stored document is the codec
+            // that wrote it, so one that will not decode was queued under an
+            // older build. It is left queued - visible, and stoppable, by
+            // whoever can re-deploy or end it - while the rest of the batch
+            // starts.
+            const spec = yield* Effect.option(decodeSpecDocument(row.spec));
+            if (Option.isNone(spec)) {
+              skipped.add(row.id);
+              continue;
+            }
+            // The session's own credential on the public API, minted for this
+            // start and stored as its hash with the move that licenses it: a
+            // session is reachable exactly while the row says it is running.
+            // A resume comes back through here, so the token it starts under
+            // replaces the one the previous process held.
+            const token = mintToken();
+            yield* sessions.started(row.id, hashToken(token), at);
+            yield* announce({ _tag: "record", topic: "session", id: row.id, kind: "updated" });
+            // The account's token is read now rather than stored: it is never
+            // written down anywhere but the frame that carries it to the
+            // machine.
+            const account =
+              row.githubConnectionId === null
+                ? undefined
+                : yield* needs.accountOf(row.githubConnectionId);
+            claimed.push({
+              sessionId: row.id,
+              frame: {
+                _tag: "sessionStart",
+                sessionId: row.id,
+                providerId: row.providerId,
+                config: row.config as Schema.Json,
+                spec: spec.value,
+                token,
+                ...(account === undefined
+                  ? {}
+                  : { ghToken: account.token, gitIdentity: gitIdentityOf(account.login) }),
+                ...(row.checkoutBranch === null ? {} : { checkoutBranch: row.checkoutBranch }),
+              },
+            });
+          }
+          if (claimed.length >= room || queued.length < width) break;
+        }
+        // Said out loud, because a row skipped above reads, to every
+        // observer, like one waiting for room - and only this says otherwise.
+        if (skipped.size > 0) {
+          yield* Effect.logError(
+            "skipped queued sessions whose stored spec no longer decodes; they stay queued",
+            [...skipped],
+          );
         }
         return claimed;
       }),
+
+    /**
+     * The frame that ends a session's harness; when it goes out is the
+     * daemon's, which owns the write set around it too.
+     */
+    stopping: (sessionId: string): SessionStop => ({ _tag: "sessionStop", sessionId }),
+
+    /**
+     * The frame that carries one stored input to the machine holding the
+     * session, under the selection the session runs at the moment it is sent:
+     * only the adapter knows whether an input opens a turn, which is the only
+     * moment a harness will take a model change.
+     */
+    inputFrame: (row: StoredInput, modelSelection: ModelSelection): SessionInput => ({
+      _tag: "sessionInput",
+      requestId: row.id,
+      sessionId: row.sessionId,
+      input: { text: row.text, modelSelection },
+    }),
+
+    /**
+     * The frame that ends the turn a session is running. What became of the
+     * turn arrives in the session's own stream as `turn.completed`, so the
+     * daemon sends this fire-and-forget.
+     */
+    interrupting: (sessionId: string): SessionInterrupt => ({
+      _tag: "sessionInterrupt",
+      sessionId,
+    }),
+
+    /**
+     * The frame that answers the request a session's harness is parked on.
+     * What the answer did arrives in the session's own stream as
+     * `request.resolved`, so the daemon sends this fire-and-forget.
+     */
+    responding: (
+      sessionId: string,
+      requestId: string,
+      decision: ApprovalDecision,
+    ): SessionRespond => ({ _tag: "sessionRespond", sessionId, requestId, decision }),
 
     /**
      * Puts back a session whose start no machine took. Its own transaction: the
@@ -889,7 +997,8 @@ const make = Effect.gen(function* () {
  *
  * `query`, `read`, `transcript`, `queryInputs`, `updateInput` and `cancelInput`
  * are operations: each checks its own grant and decodes its own input, and a
- * route handler calls it directly. Everything else is a row move with no grant
+ * route handler calls it directly. Everything else is a row move or a frame
+ * builder with no grant
  * of its own, reached only by the controller daemon, which has checked the
  * grant for the operation it is carrying out - putting one of those on a route
  * would serve it to anyone who can reach the API.

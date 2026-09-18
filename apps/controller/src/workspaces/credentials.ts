@@ -13,6 +13,7 @@
  * where the asker is entitled to an answer and there is none to give: the
  * resource is theirs and no account is attached to it.
  */
+import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Redacted from "effect/Redacted";
@@ -139,10 +140,16 @@ const make = Effect.gen(function* () {
     githubAccountOf: (connectionId: string): Effect.Effect<GitCredential | undefined> =>
       Effect.map(
         Effect.catchCause(credentialOf(connectionId), (cause) =>
-          Effect.as(
-            Effect.logError("A session's GitHub connection could not be read", cause),
-            Option.none<GitCredential>(),
-          ),
+          // An interruption is not an unreadable connection. Passed on as an
+          // interruption rather than logged away, because this read can sit
+          // inside a transaction whose rollback depends on the interruption
+          // arriving.
+          Cause.hasInterrupts(cause)
+            ? Effect.interrupt
+            : Effect.as(
+                Effect.logError("A session's GitHub connection could not be read", cause),
+                Option.none<GitCredential>(),
+              ),
         ),
         Option.getOrUndefined,
       ),
