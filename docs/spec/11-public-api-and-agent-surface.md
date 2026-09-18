@@ -6,7 +6,7 @@ Hydra has one public API. The web app, the `hydra` CLI, agents inside sessions, 
 
 ### 1.1 Service layer
 
-A framework-free TypeScript service layer defines every operation: each operation is a method on an Effect service (`Sessions.spawn(input)`), the backend being written on Effect ([ADR 0031](../adr/0031-the-backend-is-written-on-effect.md)). "Framework-free" means: **no operation logic in any transport handler.** An HttpApi handler is a one-line call into the service method, and an RPC handler would be the same one line, so an operation can later be exposed over the WebSocket by adding one handler line, never by moving logic. Every consumer goes through it:
+A framework-free TypeScript service layer defines every operation: each operation is a method on an Effect service (`Tasks.create(input)`), the backend being written on Effect ([ADR 0031](../adr/0031-the-backend-is-written-on-effect.md)). *(Amended 2026-09-17, [#208](https://github.com/rogierpennink/hydra/issues/208): the example was `session.spawn`. For an operation that spans domains or sends a frame to a runner, the service is the controller daemon rather than the domain that owns the rows; the controller daemon is the layer above the controller's domains, [ADR 0033](../adr/0033-source-is-organized-by-domain-and-tests-are-colocated.md).)* "Framework-free" means: **no operation logic in any transport handler.** An HttpApi handler is a one-line call into the service method, and an RPC handler would be the same one line, so an operation can later be exposed over the WebSocket by adding one handler line, never by moving logic. Every consumer goes through it:
 
 | Consumer | How it calls |
 |---|---|

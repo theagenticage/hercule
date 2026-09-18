@@ -39,6 +39,7 @@ import { homePaths } from "@hydra/home";
 import { HydraHome } from "../config";
 import { ConnectionServiceLayer, ConnectionTypesLayer } from "../connections";
 import { CredentialsLayer, hashToken } from "../credentials";
+import { SessionInputDeadline, WorkspaceSweepInterval } from "../daemon";
 import { nowIso } from "../db";
 import { TestDatabase } from "../db/testing";
 import { AuditLog, AuditLogLayer, type AuditKind, type AuditRow } from "../events";
@@ -55,10 +56,10 @@ import {
   ProviderProbesLayer,
   ProviderServiceLayer,
 } from "../providers";
-import { cancelStrandedInputs, SessionInputDeadline, SessionServiceLayer } from "../sessions";
+import { cancelStrandedInputs, SessionServiceLayer } from "../sessions";
 import { ResourceServiceLayer } from "../resources";
 import { SettingsLayer } from "../settings";
-import { WorkspaceServiceLayer, WorkspaceSweepInterval } from "../workspaces";
+import { WorkspaceServiceLayer } from "../workspaces";
 import {
   JoinTokens,
   JoinTokensLayer,
@@ -86,18 +87,17 @@ export const USERNAME = "rogier";
  * object the boot's activation pass wrote it into.
  */
 const services = (home: string) =>
-  // The routes' own layer reaches `SessionService` now (a runner cap or
-  // watermark move dispatches), so it is provided this block's output rather
-  // than merely merged beside it, the way the real boot's operation layers
-  // reach the services `withPlugins` built.
+  // The routes' own layer holds the controller daemon, which reaches the
+  // session and workspace services and the plugin host, so it is provided this
+  // block's output rather than merely merged beside it, the way the real boot's
+  // operation layers reach what `withPlugins` built.
   operationLayers.pipe(
     Layer.provideMerge(
       Layer.mergeAll(
         PluginsLayer,
         ProviderServiceLayer,
-        // The workspace service reaches the session service, as it does in the
-        // boot: a workspace that came up releases the sessions waiting for it.
-        SessionServiceLayer.pipe(Layer.provideMerge(WorkspaceServiceLayer)),
+        SessionServiceLayer,
+        WorkspaceServiceLayer,
         ConnectionServiceLayer,
         ResourceServiceLayer,
       ).pipe(

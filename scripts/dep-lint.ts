@@ -14,12 +14,17 @@
  * codebase does that, and no scan short of running the code could catch it.
  *
  * A second graph rule is about the controller rather than the runner: its
- * domains form a DAG. `src/<domain>/index.ts` is the boundary a domain is
- * imported through, and a cycle between two of them is not only a design smell
- * - a constant in one that calls a function exported by the other is evaluated
- * before that function exists, so which domain is imported first decides
- * whether the process starts. That is a `ReferenceError` no test finds until
- * an import order changes, which is why it is a lint rather than a review note.
+ * domains form a DAG, with no allowlist of edges. `src/<domain>/index.ts` is
+ * the boundary a domain is imported through, and a cycle between two of them
+ * is not only a design smell - a constant in one that calls a function
+ * exported by the other is evaluated before that function exists, so which
+ * domain is imported first decides whether the process starts. That is a
+ * `ReferenceError` no test finds until an import order changes, which is why
+ * it is a lint rather than a review note.
+ *
+ * What keeps that graph acyclic is `src/daemon/`, the controller daemon: the
+ * layer above the domains, holding every sequence that crosses two domains or
+ * reaches a runner. Only `http/` imports it; no domain may.
  *
  * One rule is about the workspace, not an import graph: the Agent SDK's eight
  * per-platform CLI packages (one is 196 MB) are excluded at install, and the
@@ -136,6 +141,8 @@ console.log(`dep-lint: ${entrypoint} is clean (${graph.length} modules in the gr
  * file in a domain is that domain, and an import of `../<other>` is an edge
  * from this domain to that one. `db/` and `config/` are infrastructure every
  * domain may reach and are not folded into the check as sources of edges.
+ * `daemon/` is a node like any other here; that no domain imports it is what
+ * the DAG says, not something this rule names.
  */
 const controllerSrc = `${root}apps/controller/src`;
 
@@ -180,20 +187,6 @@ const reached = (specifier: string): string | undefined => {
   return named !== undefined && domains.includes(named) ? named : undefined;
 };
 
-/**
- * The cycles this repository already has, each as the edge that closes it.
- * Both are the fleet knot: the runners domain routes a machine's frames and
- * retires a machine, which is work in the sessions and workspaces domains,
- * while both of those read the fleet's presence and rows. Untying it means
- * moving the socket and the retire sequence out of `runners/`, which is its own
- * ticket; until then the two edges below are the debt, and everything else has
- * to be a DAG - a third cycle is a new one.
- */
-const ACCEPTED: ReadonlyArray<readonly [string, string]> = [
-  ["runners", "sessions"],
-  ["runners", "workspaces"],
-];
-
 const edges = new Map<string, Set<string>>();
 for (const domain of domains) {
   const out = new Set<string>();
@@ -209,8 +202,6 @@ for (const domain of domains) {
   }
   edges.set(domain, out);
 }
-
-for (const [from, to] of ACCEPTED) edges.get(from)?.delete(to);
 
 /** The first cycle a depth-first walk closes, as the path that closed it. */
 const cycleIn = (): ReadonlyArray<string> | undefined => {
@@ -248,15 +239,11 @@ if (cycle !== undefined) {
       "imported first decides whether the process starts. Move the shared piece " +
       "into the domain that owns it, or hand it over where both are already held.",
   );
-  console.error("The two edges this repository already accepts are listed in this script.");
   process.exit(1);
 }
 
 if (domains.length > 0) {
-  console.log(
-    `dep-lint: the controller's ${String(domains.length)} domains form a DAG ` +
-      `beside ${String(ACCEPTED.length)} accepted edges.`,
-  );
+  console.log(`dep-lint: the controller's ${String(domains.length)} domains form a DAG.`);
 }
 
 const SDK = "@anthropic-ai/claude-agent-sdk";

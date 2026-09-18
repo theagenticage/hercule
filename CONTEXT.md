@@ -192,8 +192,13 @@ _Avoid_: include file, copy list
 **Controller**:
 The always-on brain: holds all state, receives events, schedules work. The single source of truth; repos hold no Hydra config.
 
+**Controller Daemon**:
+The layer above the controller's domains (`apps/controller/src/daemon/`): it carries out every piece of work that spans more than one domain, or a domain and a runner, one file per use case. It is the only module that sends frames to runners and the only consumer of what runners report (the providers domain is the last exception, tracked in [#209](https://github.com/rogierpennink/hydra/issues/209)); the domains below it hold rows and their lifecycle rules and produce frames as values, and a runner publishes what it hears and calls nobody. Writes that cross domains come from above and reads across domains are fine, so the controller's import graph stays a DAG. In prose it is always the **controller daemon**, never bare "daemon".
+_Avoid_: "daemon" alone (that is a runner process), orchestrator, god service
+
 **Runner**:
-A daemon on a machine that executes sessions on the controller's behalf.
+A daemon on a machine that executes sessions on the controller's behalf. Bare "daemon" means this process; the layer inside the controller is always the **Controller Daemon**.
+_Avoid_: bare "daemon" for the controller daemon
 
 **Reserved**:
 A runner flag: a reserved runner hosts only work explicitly placed on it (named by the user or a workflow, resolved by the "local" alias, or following a workspace already there); placement fallback never chooses it. For personal machines that should never catch scheduled work.

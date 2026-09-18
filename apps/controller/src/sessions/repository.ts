@@ -11,7 +11,7 @@ import * as Option from "effect/Option";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import type { AccessMode, ModelSelection, OpenRequest, ProviderEvent } from "@hydra/protocol";
-import type { SessionStatus, SortDirection } from "@hydra/contract";
+import { notFound, type NotFound, type SessionStatus, type SortDirection } from "@hydra/contract";
 import {
   decodeCursor,
   decodeIdCursor,
@@ -625,3 +625,25 @@ const make = Effect.gen(function* () {
 });
 
 export const sessionRepository = make;
+
+/** The session rows, as whoever holds the repository sees them. */
+export type SessionRows = Effect.Success<typeof make>;
+
+/** How every caller refuses a session id that names no row. */
+const NO_SUCH_SESSION = "no such session";
+
+/**
+ * One session by id, or the refusal every caller gives for one that is not
+ * there, over the repository the caller already holds: the same id reads the
+ * same refusal wherever it is looked up.
+ */
+export const requireSession =
+  (rows: SessionRows) =>
+  (id: string): Effect.Effect<StoredSession, NotFound | SqlError> =>
+    Effect.flatMap(
+      rows.one(id),
+      Option.match({
+        onNone: () => Effect.fail(notFound(NO_SUCH_SESSION)),
+        onSome: Effect.succeed,
+      }),
+    );

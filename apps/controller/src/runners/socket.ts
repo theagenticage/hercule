@@ -40,8 +40,6 @@ import {
 import { bearerOf } from "../http/bearer";
 import { responseFor } from "../http/envelope";
 import { ControllerIdentity } from "../identity";
-import { SessionService } from "../sessions";
-import { WorkspaceService } from "../workspaces";
 import { newConnection, RunnerPresence, type Connection, type Departure } from "./presence";
 
 const RUNNER_SOCKET_PATH = "/api/v1/runners/socket";
@@ -112,8 +110,6 @@ const negotiated = (theirs: ReadonlyArray<string>): ReadonlyArray<string> =>
 const hold = (runnerId: string, socket: Socket.Socket) =>
   Effect.gen(function* () {
     const presence = yield* RunnerPresence;
-    const sessions = yield* SessionService;
-    const workspaces = yield* WorkspaceService;
     const identity = yield* ControllerIdentity;
     const pings = yield* RunnerPingSchedule;
     const write = yield* socket.writer;
@@ -210,10 +206,7 @@ const hold = (runnerId: string, socket: Socket.Socket) =>
             return yield* presence.reportedFacts(runnerId, mine, message.facts);
           case "watermarkReport":
             if (!greeted) return;
-            yield* presence.reportedWatermark(runnerId, mine, message.watermark);
-            // Outside the write above: dispatch may tell this runner, and a
-            // transaction never spans a wait on anything outside the database.
-            return yield* sessions.dispatch(runnerId);
+            return yield* presence.reportedWatermark(runnerId, mine, message.watermark);
           case "probeReport":
           case "installResult":
           case "loginUrl":
@@ -222,18 +215,14 @@ const hold = (runnerId: string, socket: Socket.Socket) =>
           case "sessionInputResult":
             if (!greeted) return;
             return yield* presence.reportedAnswer(runnerId, mine, message);
-          case "workspaceReport": {
+          case "workspaceReport":
+            // Published rather than handled, like a session event: what a
+            // machine made of a working area is not the wire's to interpret.
             if (!greeted) return;
-            // The two domains meet here and nowhere else: what a machine made of
-            // a workspace is the workspaces domain's to record, and what it
-            // means for the sessions waiting on it is the sessions domain's.
-            const settled = yield* workspaces.reported(runnerId, message);
-            if (settled === undefined) return;
-            return yield* sessions.workspaceSettled(runnerId, settled, message.message ?? null);
-          }
+            return yield* presence.reportedWorkspace(runnerId, mine, message);
           case "credentialRequest":
             if (!greeted) return;
-            return yield* workspaces.credentialAsked(runnerId, message);
+            return yield* presence.requestedCredential(runnerId, mine, message);
           case "sessionEvent":
           case "sessionsReport":
             // Handed on rather than handled: what a session event means belongs

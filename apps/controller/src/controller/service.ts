@@ -42,7 +42,7 @@ import { currentUser, USER_ACTOR } from "../actor";
 import { nowIso, withTransaction } from "../db";
 import { AuditLog } from "../events";
 import { ControllerIdentity } from "../identity";
-import { runnerRepository } from "../runners";
+import { RETIRED, runnerRepository } from "../runners";
 import { Settings, type SettingError } from "../settings";
 
 const decodeUpdate = Schema.decodeUnknownEffect(ControllerUpdateInput);
@@ -51,8 +51,6 @@ const NO_SUCH_RUNNER = "no runner has that id";
 
 /** The other half of the rule `runner.update` enforces: the two never meet. */
 const RESERVED = "that runner is reserved, so nothing lands on it by default";
-
-const RETIRED = "that runner is retired";
 
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;

@@ -50,11 +50,10 @@ import { responseFor, withEnvelope } from "./envelope";
 import { setupGate } from "./gate";
 import { AuthenticatedLayer, SetupTokenLayer } from "./middleware";
 import { OAuthCallbackRouteLayer } from "../connections";
+import { Inbound, Provisioning } from "../daemon";
 import { LiveSocketLayer } from "../live";
 import { ProviderProbes } from "../providers";
 import { RunnerJoinRouteLayer, RunnerPresence, RunnerSocketRouteLayer } from "../runners";
-import { SessionService } from "../sessions";
-import { WorkspaceService } from "../workspaces";
 import { handlerLayers } from "./routes";
 import { withWebBundle, type WebBundle } from "./static";
 
@@ -198,13 +197,17 @@ export const serve = (bundle: WebBundle | undefined) =>
     // of the gap, so no machine says hello unheard. The tick is there because a
     // login expires and a harness is upgraded outside Hydra.
     yield* Effect.forkScoped(Effect.flatMap(ProviderProbes, (probes) => probes.driving));
-    // Likewise before the listener: the queue it reads is built with the layer,
-    // so nothing a machine reports is missed while this fiber is starting.
-    yield* Effect.forkScoped(Effect.flatMap(SessionService, (sessions) => sessions.ingesting));
     // Workspaces: a machine that dials in is told what it still owes, and a
     // workspace nothing needs any more is taken off its machine's disk. Forked
     // before the listener binds, like the probe driver, so no arrival is
     // missed.
-    yield* Effect.forkScoped(Effect.flatMap(WorkspaceService, (workspaces) => workspaces.driving));
+    yield* Effect.forkScoped(Effect.flatMap(Provisioning, (provisioning) => provisioning.driving));
+    // The controller daemon's two inbound drivers, before the listener for the
+    // same reason: the queues they read are built with the layer, so nothing a
+    // machine reports while these fibers are starting is missed. One fiber
+    // each, so a session's events are applied in the order the machine numbered
+    // them and the rest of the fleet's reports never wait behind them.
+    yield* Effect.forkScoped(Effect.flatMap(Inbound, (inbound) => inbound.driving));
+    yield* Effect.forkScoped(Effect.flatMap(Inbound, (inbound) => inbound.ingesting));
     yield* Effect.flatMap(application(bundle), HttpServer.serveEffect());
   });

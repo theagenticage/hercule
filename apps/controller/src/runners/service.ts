@@ -43,9 +43,7 @@ import {
 import { currentStamp, requireGrant, SYSTEM_ACTOR } from "../actor";
 import { nowIso, pageInput, refuseCursor, withTransaction } from "../db";
 import { AuditLog } from "../events";
-import { SessionService } from "../sessions";
 import { Settings, type SettingError } from "../settings";
-import { WorkspaceService } from "../workspaces";
 import { requireOnline } from "./adapters";
 import { JoinTokens } from "./join-tokens";
 import { RunnerFactsDeadline, RunnerPresence } from "./presence";
@@ -70,6 +68,15 @@ const RetireInput = Schema.Struct({ id: Id, ...RUNNER_RETIRE_FIELDS });
 
 export type RetireInput = Schema.Schema.Type<typeof RetireInput>;
 
+/**
+ * The retired row, and the instant it was stamped with: everything else the
+ * same retirement writes carries that instant rather than reading the clock
+ * again a write later.
+ */
+export interface Retired extends RunnerDetail {
+  readonly at: string;
+}
+
 const decodeQuery = Schema.decodeUnknownEffect(QueryInput);
 const decodeUpdate = Schema.decodeUnknownEffect(UpdateInput);
 const decodeIdentified = Schema.decodeUnknownEffect(Identified);
@@ -85,7 +92,8 @@ interface Change {
   readonly new: unknown;
 }
 
-const NO_SUCH_RUNNER = "no such runner";
+/** What a machine nobody has enlisted is called, wherever one is named. */
+export const NO_SUCH_RUNNER = "no such runner";
 
 /** A spent, an expired and an unminted token all read the same: not outstanding. */
 const NO_SUCH_JOIN_TOKEN = "no such join token";
@@ -98,6 +106,13 @@ const NAME_TAKEN = "another runner already has that name";
  */
 const RESERVED_IS_THE_DEFAULT =
   "this is the fleet's default runner; choose another default before reserving it";
+
+/**
+ * Why a machine takes no session it does not already hold. Read wherever one is
+ * named directly - a session being placed, or one being picked up again.
+ */
+export const DRAINING = "that runner is draining and takes no new sessions";
+export const RETIRED = "that runner is retired";
 
 const NOT_ACTIVE = "only an active runner can be drained";
 
@@ -116,7 +131,7 @@ const DEFAULT_DIRECTION: SortDirection = "asc";
 type Edit = { -readonly [K in keyof RunnerEdit]: RunnerEdit[K] };
 
 /** What every lifecycle move can answer with. */
-type MoveError =
+export type MoveError =
   | Unauthenticated
   | Forbidden
   | Validation
@@ -136,8 +151,6 @@ const make = Effect.gen(function* () {
   const joinTokens = yield* JoinTokens;
   const settings = yield* Settings;
   const audit = yield* AuditLog;
-  const sessions = yield* SessionService;
-  const workspaces = yield* WorkspaceService;
 
   const presence = yield* RunnerPresence;
 
@@ -275,7 +288,7 @@ const make = Effect.gen(function* () {
               edit.reserved = patch.reserved;
             }
 
-            if (Object.keys(changes).length === 0) return { detail: before, dispatch: false };
+            if (Object.keys(changes).length === 0) return { detail: before, placements: false };
 
             // Both reads sit inside the transaction the write is in, so the
             // fleet cannot take the name, or the default, in between.
@@ -313,13 +326,13 @@ const make = Effect.gen(function* () {
             return {
               // Read back rather than merged, so the caller gets the written row.
               detail: yield* one(id),
-              dispatch: "maxConcurrentSessions" in changes || "diskWatermarkBytes" in changes,
+              placements: "maxConcurrentSessions" in changes || "diskWatermarkBytes" in changes,
             };
           }),
         );
-        // Outside the transaction above: dispatch may tell a runner, and a
-        // transaction never spans a wait on anything outside the database.
-        if (result.dispatch) yield* sessions.dispatch(id);
+        // After the commit, so whoever acts on the room this machine now has
+        // reads the cap and the watermark this patch wrote.
+        if (result.placements) yield* presence.placementsChanged(id);
         return result.detail;
       }),
 
@@ -345,79 +358,56 @@ const make = Effect.gen(function* () {
           refusal: NOT_DRAINING,
           kind: "runner.undrained",
         });
-        // Outside the transaction above: dispatch may tell a runner, and a
-        // transaction never spans a wait on anything outside the database.
-        yield* sessions.dispatch(detail.id);
+        // A machine off the drain takes work again, which is not a fact the
+        // fleet acts on itself.
+        yield* presence.placementsChanged(detail.id);
         return detail;
       }),
 
     /**
-     * Ends a machine's membership of the fleet. The credential stops resolving
-     * the moment the row moves, and a connection live at that moment is closed
-     * so the daemon on the other end stops rather than dialling with something
-     * dead. Nothing is deleted: the row and everything that will hang off it
-     * stay, and re-enlisting writes a new runner beside this one.
+     * The runner row's half of retiring a machine: the refusals, the lifecycle,
+     * the fleet default and the log entry. The operation a client reaches is the
+     * controller daemon's `retireRunner`, which runs this inside the transaction
+     * that also ends the machine's sessions and loses its workspaces, and closes
+     * the connection once that has committed.
+     *
+     * The credential stops resolving the moment the row moves. Nothing is
+     * deleted: the row and everything that hangs off it stay, and re-enlisting
+     * writes a new runner beside this one.
      */
-    retire: (input: RetireInput): Effect.Effect<RunnerDetail, MoveError | SettingError> =>
+    retire: (input: RetireInput): Effect.Effect<Retired, MoveError | SettingError> =>
       Effect.gen(function* () {
         yield* requireGrant("runner.retire");
         const { id, force } = yield* Effect.mapError(decodeRetire(input), validationOf);
-        // The commit and the close are one step: a client hanging up between
-        // them would leave the row retired with its daemon still holding on,
-        // pinging a controller that will never have it back.
-        return yield* Effect.uninterruptible(
+        return yield* withTransaction(
+          sql,
           Effect.gen(function* () {
-            const { retired, toStop } = yield* withTransaction(
-              sql,
-              Effect.gen(function* () {
-                const at = yield* nowIso;
-                const before = yield* one(id);
-                if (before.lifecycle === "retired") {
-                  return yield* Effect.fail(invalidState(ALREADY_RETIRED));
-                }
-                if (force !== true) {
-                  if ((yield* runners.runningSessions(id)) > 0) {
-                    return yield* Effect.fail(invalidState(STILL_RUNNING));
-                  }
-                  if (before.connectivity === "unreachable") {
-                    return yield* Effect.fail(invalidState(UNREACHABLE));
-                  }
-                }
-                yield* runners.setLifecycle(id, "retired", at);
-                // Without `force` this ends only what is queued, since the
-                // check above already refused a running one; with it, both
-                // kinds. Either way a retired runner never dispatches again,
-                // so nothing else would ever end these.
-                const toStop = yield* sessions.endOnRunner(id);
-                // The working areas go with the machine: they were directories
-                // on its disk, and this controller will never reach them again.
-                yield* workspaces.lostOnRunner(id, at);
-                // A default nobody can place on is worse than no default: the
-                // fleet says so rather than promoting a runner nobody chose.
-                const wasDefault = (yield* settings.defaultRunnerId()) === id;
-                if (wasDefault) yield* settings.setDefaultRunnerId(null, at);
-                yield* audit.append({
-                  kind: "runner.retired",
-                  actor: yield* currentStamp,
-                  record: { topic: "runner", id },
-                  payload: { runnerId: id, forced: force === true, lostDefaultRunner: wasDefault },
-                  at,
-                });
-                return { retired: yield* one(id), toStop };
-              }),
-            );
-            // After the commit: a session the row now reads exited still had
-            // a live harness on the machine, which needs its own word to stop
-            // - the queued ones never had a frame to begin with, so they get
-            // none now either.
-            for (const sessionId of toStop) {
-              yield* presence.tell(id, { _tag: "sessionStop", sessionId });
+            const at = yield* nowIso;
+            const before = yield* one(id);
+            if (before.lifecycle === "retired") {
+              return yield* Effect.fail(invalidState(ALREADY_RETIRED));
             }
-            // After the commit too: a socket closed for a retirement that
-            // then rolled back would be a runner told to stop by a
-            // controller that still has it.
-            yield* presence.hangUp(id);
-            return retired;
+            if (force !== true) {
+              if ((yield* runners.runningSessions(id)) > 0) {
+                return yield* Effect.fail(invalidState(STILL_RUNNING));
+              }
+              if (before.connectivity === "unreachable") {
+                return yield* Effect.fail(invalidState(UNREACHABLE));
+              }
+            }
+            yield* runners.setLifecycle(id, "retired", at);
+            // A default nobody can place on is worse than no default: the
+            // fleet says so rather than promoting a runner nobody chose.
+            const wasDefault = (yield* settings.defaultRunnerId()) === id;
+            if (wasDefault) yield* settings.setDefaultRunnerId(null, at);
+            yield* audit.append({
+              kind: "runner.retired",
+              actor: yield* currentStamp,
+              record: { topic: "runner", id },
+              payload: { runnerId: id, forced: force === true, lostDefaultRunner: wasDefault },
+              at,
+            });
+            return { ...(yield* one(id)), at };
           }),
         );
       }),
@@ -519,11 +509,5 @@ export class RunnerService extends Context.Service<RunnerService, Effect.Success
 export const RunnerServiceLayer: Layer.Layer<
   RunnerService,
   never,
-  | SqlClient.SqlClient
-  | JoinTokens
-  | Settings
-  | RunnerPresence
-  | AuditLog
-  | SessionService
-  | WorkspaceService
+  SqlClient.SqlClient | JoinTokens | Settings | RunnerPresence | AuditLog
 > = Layer.effect(RunnerService)(make);

@@ -146,6 +146,8 @@ Placement is deliberately dumb and runs in this order:
 
 No load balancing, no migration, no failover.
 
+*(Amended 2026-09-17, [#208](https://github.com/rogierpennink/hydra/issues/208).)* Steps 3 and 4 are **not implemented as written**: a request that names no runner is placed on any placeable runner holding a logged-in snapshot for the instance, and neither the fleet default nor the controller's local runner is consulted. The ladder above is what the system is to do; tracked in [#210](https://github.com/rogierpennink/hydra/issues/210).
+
 ### 5.2 Pin once landed
 
 - A Workspace is pinned to the runner it was provisioned on.

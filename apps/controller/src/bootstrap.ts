@@ -223,6 +223,7 @@ export type ControllerServices =
   | Credentials
   | JoinTokens
   | Plugins
+  | PluginHost
   | RunnerPresence
   | ProviderProbes
   | ProviderService
@@ -273,8 +274,8 @@ export const bootWith = <A, E>(
     );
 
     /**
-     * One presence and one probe driver per process: the socket route,
-     * `runner.retire` and the sweep after a hello all write through the same
+     * One presence and one probe driver per process: the socket route, the
+     * controller daemon and the sweep after a hello all write through the same
      * connection map.
      */
     const withFleet = ProviderProbesLayer.pipe(Layer.provideMerge(RunnerPresenceLayer)).pipe(
@@ -289,11 +290,8 @@ export const bootWith = <A, E>(
     const withPlugins = Layer.mergeAll(
       PluginsLayer,
       ProviderServiceLayer,
-      // A spawn asks the workspace service where it is to work, so the session
-      // service is layered on top of that one rather than merged beside it. The
-      // reverse edge - what a machine's report means for the sessions waiting on
-      // a workspace - is the runner socket's, which holds both.
-      SessionServiceLayer.pipe(Layer.provideMerge(WorkspaceServiceLayer)),
+      SessionServiceLayer,
+      WorkspaceServiceLayer,
       ConnectionServiceLayer,
     ).pipe(
       Layer.provideMerge(PluginHostLayer),

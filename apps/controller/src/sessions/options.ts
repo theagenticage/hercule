@@ -1,10 +1,15 @@
 /**
- * What makes a per-model pick wrong. Pure: the catalog is read by the caller
- * and handed in, so this is the one place that holds the rules.
+ * What a session starts under, as far as it is a matter of shaping values: what
+ * makes a per-model pick wrong, the two clocks it runs under, and the document
+ * a session picking up another's transcript is told. Pure throughout - the
+ * catalog, the settings and the row are read by the caller and handed in, so
+ * this is the one place that holds the rules.
  */
 import * as Effect from "effect/Effect";
-import type { ModelDescriptor, ModelSelection } from "@hydra/protocol";
+import type { ModelDescriptor, ModelSelection, SessionSpec } from "@hydra/protocol";
 import { validation, type Validation } from "@hydra/contract";
+import type { ScopeSettings } from "../settings";
+import type { StoredSession } from "./repository";
 
 /** The picks themselves, in the shape the row and the wire hold them. */
 export type ModelOptions = ModelSelection["options"];
@@ -43,3 +48,39 @@ export const validatedOptions = (
   });
   return issues.length === 0 ? Effect.void : Effect.fail(validation(issues));
 };
+
+/** Applied here, controller-side, when the settings key is unset; the runner holds no default of its own. */
+const DEFAULT_INACTIVITY_TIMEOUT_MINUTES = 30;
+
+const DEFAULT_ABSOLUTE_TIMEOUT_MINUTES = 480;
+
+const MINUTE_MS = 60_000;
+
+/** The two clocks a session starts under, whole minutes turned into the milliseconds the wire carries. */
+export const timeoutsFrom = (controller: ScopeSettings<"controller">): SessionSpec["timeouts"] => ({
+  inactivityMs:
+    (controller["session.inactivityTimeoutMinutes"] ?? DEFAULT_INACTIVITY_TIMEOUT_MINUTES) *
+    MINUTE_MS,
+  absoluteMs:
+    (controller["session.absoluteTimeoutMinutes"] ?? DEFAULT_ABSOLUTE_TIMEOUT_MINUTES) * MINUTE_MS,
+});
+
+/**
+ * The document a machine is told for a session that picks a provider-native one
+ * up, resumed in place or forked off: everything but the selection and the mode
+ * comes from the session whose transcript it picks up.
+ */
+export const continuingSpecOf = (
+  session: Pick<StoredSession, "instanceId" | "workspaceId" | "accessMode">,
+  controller: ScopeSettings<"controller">,
+  modelSelection: ModelSelection,
+  nativeSessionId: string,
+  mode: NonNullable<SessionSpec["continue"]>["mode"],
+): SessionSpec => ({
+  instanceId: session.instanceId,
+  workspaceId: session.workspaceId,
+  modelSelection,
+  accessMode: session.accessMode,
+  continue: { nativeSessionId, mode },
+  timeouts: timeoutsFrom(controller),
+});
