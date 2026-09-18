@@ -63,10 +63,20 @@ const make = Effect.gen(function* () {
   /** One pass of the expiry sweep. */
   const sweep = Effect.gen(function* () {
     for (const candidate of yield* workspaces.expiredCandidates()) {
-      const row = yield* workspaces.sweepable(candidate.id);
-      if (row === undefined) continue;
-      const frame = yield* workspaces.markGone(row, SYSTEM_ACTOR, candidate.reason);
-      yield* presence.tell(row.runnerId, frame);
+      // The check and the write are one transaction: a session starting in a
+      // workspace between the two would otherwise have its directory swept out
+      // from under it.
+      const gone = yield* withTransaction(
+        sql,
+        Effect.gen(function* () {
+          const row = yield* workspaces.sweepable(candidate.id);
+          if (row === undefined) return undefined;
+          const frame = yield* workspaces.markGone(row, SYSTEM_ACTOR, candidate.reason);
+          return { runnerId: row.runnerId, frame };
+        }),
+      );
+      if (gone === undefined) continue;
+      yield* presence.tell(gone.runnerId, gone.frame);
     }
   });
 
@@ -106,9 +116,21 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         yield* requireGrant("workspace.dispose");
         const { id } = yield* Effect.mapError(decodeIdentified(input), validationOf);
-        const workspace = yield* workspaces.disposable(id);
-        const frame = yield* workspaces.markGone(workspace, USER_ACTOR);
-        yield* presence.tell(workspace.runnerId, frame);
+        // The refusal and the write are one transaction, so a session that
+        // starts in the workspace while this runs is either refused or is not
+        // there yet.
+        const { runnerId, frame } = yield* withTransaction(
+          sql,
+          Effect.gen(function* () {
+            const workspace = yield* workspaces.disposable(id);
+            return {
+              runnerId: workspace.runnerId,
+              frame: yield* workspaces.markGone(workspace, USER_ACTOR),
+            };
+          }),
+        );
+        // After the commit: a transaction never spans a wait on a machine.
+        yield* presence.tell(runnerId, frame);
         return {};
       }),
 

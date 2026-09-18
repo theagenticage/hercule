@@ -57,7 +57,7 @@ import { resumable } from "./resuming";
 
 const ContinueInput = Schema.Struct({ id: Id, ...SESSION_CONTINUE_FIELDS });
 
-export type ContinueInput = Schema.Schema.Type<typeof ContinueInput>;
+type ContinueInput = Schema.Schema.Type<typeof ContinueInput>;
 
 const decodeSpawn = Schema.decodeUnknownEffect(SessionSpawnInput);
 const decodeContinue = Schema.decodeUnknownEffect(ContinueInput);
@@ -291,8 +291,6 @@ const make = Effect.gen(function* () {
      */
     placeSession: (input: SessionSpawnInput): Effect.Effect<Session, PlaceError> =>
       Effect.gen(function* () {
-        // A Thread carries the user's own thread profile, so only the user may
-        // open one (spec 02 Thread).
         const user = yield* currentUser("session.spawn");
         const decoded = yield* Effect.mapError(decodeSpawn(input), validationOf);
         if (decoded.projectId !== undefined) yield* liveProject(decoded.projectId);

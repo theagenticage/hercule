@@ -21,7 +21,7 @@ import type { SessionTokens } from "../permissions";
 import { RunnerPresence, runnerRepository } from "../runners";
 import type { Secrets } from "../secrets";
 import { SessionService } from "../sessions";
-import { gitCredentials, gitIdentityOf, type GitCredential } from "../workspaces";
+import { gitCredentials, gitIdentityOf } from "../workspaces";
 
 const decodeSpec = Schema.decodeUnknownEffect(SessionSpec);
 
@@ -31,25 +31,6 @@ const make = Effect.gen(function* () {
   const runners = yield* runnerRepository;
   const presence = yield* RunnerPresence;
   const credentials = yield* gitCredentials;
-
-  /**
-   * The GitHub account a session starts with: the token it pushes with and the
-   * identity it commits as. A connection that will not answer is logged and
-   * left out - a session starting without `GH_TOKEN` is better than one that
-   * does not start.
-   */
-  const githubAccountOf = (connectionId: string): Effect.Effect<GitCredential | undefined> =>
-    Effect.map(
-      Effect.catchCause(
-        credentials.credentialOf(connectionId),
-        (cause): Effect.Effect<Option.Option<GitCredential>> =>
-          Effect.as(
-            Effect.logError("A session's GitHub connection could not be read", cause),
-            Option.none(),
-          ),
-      ),
-      Option.getOrUndefined,
-    );
 
   return {
     /**
@@ -89,7 +70,7 @@ const make = Effect.gen(function* () {
           const account =
             row.githubConnectionId === null
               ? undefined
-              : yield* githubAccountOf(row.githubConnectionId);
+              : yield* credentials.githubAccountOf(row.githubConnectionId);
           const start: SessionStart = {
             _tag: "sessionStart",
             sessionId: row.id,

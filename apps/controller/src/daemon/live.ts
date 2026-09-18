@@ -175,19 +175,18 @@ const make = Effect.gen(function* () {
    * a harness will take a model change.
    */
   const deliverTo = (
-    runnerId: string,
+    session: StoredSession,
     row: StoredInput,
-    modelSelection: ModelSelection,
   ): Effect.Effect<Option.Option<SessionInputResult>> =>
     Effect.gen(function* () {
       const deadline = yield* SessionInputDeadline;
       const answer = yield* presence.asked(
-        runnerId,
+        session.runnerId,
         {
           _tag: "sessionInput",
           requestId: row.id,
           sessionId: row.sessionId,
-          input: { text: row.text, modelSelection },
+          input: { text: row.text, modelSelection: session.modelSelection },
         },
         deadline,
       );
@@ -209,12 +208,11 @@ const make = Effect.gen(function* () {
    * the claim would otherwise ride a frame it never applied to.
    */
   const deliverClaimed = (
-    runnerId: string,
     row: StoredInput,
   ): Effect.Effect<SessionInputOutcome, InvalidState | NotFound | SqlError> =>
     Effect.gen(function* () {
       const session = yield* one(row.sessionId);
-      const answer = yield* deliverTo(runnerId, row, session.modelSelection);
+      const answer = yield* deliverTo(session, row);
       const delivery = Option.isSome(answer) && answer.value.ok ? answer.value.delivery : undefined;
       if (delivery !== undefined) {
         yield* sessions.delivered(row, delivery);
@@ -234,12 +232,12 @@ const make = Effect.gen(function* () {
      * up on. A refusal or silence is left where `deliverClaimed` puts it: back
      * to waiting, for the next transition to send.
      */
-    flush: (sessionId: string, runnerId: string): Effect.Effect<void, SqlError> =>
+    flush: (sessionId: string): Effect.Effect<void, SqlError> =>
       Effect.gen(function* () {
         const claimed = yield* sessions.claimOldest(sessionId);
         if (Option.isNone(claimed)) return;
         yield* Effect.catchIf(
-          deliverClaimed(runnerId, claimed.value),
+          deliverClaimed(claimed.value),
           (error): error is InvalidState | NotFound =>
             error instanceof InvalidState || error instanceof NotFound,
           () => Effect.void,
@@ -331,7 +329,7 @@ const make = Effect.gen(function* () {
         // transaction never spans a wait on anything outside the database.
         if (session.status === "exited") yield* dispatch(session.runnerId);
         if (session.status !== "idle") return { inputId: row.id, result: "queued" };
-        return yield* deliverClaimed(session.runnerId, row);
+        return yield* deliverClaimed(row);
       }),
 
     /**
@@ -362,7 +360,7 @@ const make = Effect.gen(function* () {
         // between.
         const claimed = yield* sessions.claimInput(row.id);
         if (Option.isNone(claimed)) return yield* Effect.fail(invalidState(NOT_WAITING));
-        return yield* deliverClaimed(session.runnerId, claimed.value);
+        return yield* deliverClaimed(claimed.value);
       }),
 
     /**

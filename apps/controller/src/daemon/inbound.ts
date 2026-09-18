@@ -38,19 +38,31 @@ const make = Effect.gen(function* () {
         return Effect.gen(function* () {
           // The two domains meet here and nowhere else: what a machine made of
           // a working area is the workspaces domain's to record, and what it
-          // means for the sessions waiting on it is the sessions domain's.
-          const settled = yield* workspaces.reported(traffic.runnerId, traffic.report);
-          if (settled === undefined) return;
-          // A working area that came up releases the sessions waiting on it;
-          // one that could not be made ends them with the machine's own words.
-          if (settled.moved === "ready") {
+          // means for the sessions waiting on it is the sessions domain's. One
+          // write set, so a working area that could not be made and the
+          // sessions it strands move together or not at all.
+          const settled = yield* withTransaction(
+            sql,
+            Effect.gen(function* () {
+              const settled = yield* workspaces.reported(traffic.runnerId, traffic.report);
+              // A working area that could not be made ends the sessions waiting
+              // on it, with the machine's own words.
+              if (settled?.moved === "failed") {
+                yield* sessions.endForWorkspace(
+                  settled.workspaceId,
+                  traffic.report.message ?? null,
+                );
+              }
+              return settled;
+            }),
+          );
+          // After the commit, and forked: a working area that came up releases
+          // the sessions waiting on it, and that reaches the machine.
+          if (settled?.moved === "ready") {
             yield* forking(
               "A ready working area could not be dispatched",
               dispatch(traffic.runnerId),
             );
-          }
-          if (settled.moved === "failed") {
-            yield* sessions.endForWorkspace(settled.workspaceId, traffic.report.message ?? null);
           }
         });
       case "credentialRequested":
@@ -61,9 +73,10 @@ const make = Effect.gen(function* () {
           (answer) => Effect.asVoid(presence.tell(traffic.runnerId, answer)),
         );
       case "placementsChanged":
-        // Forked, unlike the two above: starting what a machine now has room
-        // for is a transaction and a credential read per session, and the rest
-        // of the fleet must not wait behind one machine's.
+        // Forked, like the dispatch a ready working area sets off: starting
+        // what a machine now has room for is a transaction and a credential
+        // read per session, and the rest of the fleet must not wait behind one
+        // machine's.
         return forking("A freed slot could not be dispatched", dispatch(traffic.runnerId));
     }
   };
@@ -99,10 +112,7 @@ const make = Effect.gen(function* () {
       // A session that has gone idle can take what is queued for it; one that
       // has exited has left its machine a slot free.
       if (applied.moved === "idle") {
-        yield* forking(
-          "A session's queued input could not be sent",
-          flush(event.sessionId, traffic.runnerId),
-        );
+        yield* forking("A session's queued input could not be sent", flush(event.sessionId));
       }
       if (applied.moved === "exited") {
         yield* forking("A freed slot could not be dispatched", dispatch(traffic.runnerId));

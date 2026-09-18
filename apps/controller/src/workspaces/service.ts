@@ -156,7 +156,7 @@ const stillLivedIn = (sessions: number): string =>
  * The machine is not among them: it is `machineFor`'s answer, settled before the
  * session was placed, and `openFor` is told it rather than deciding it.
  */
-export interface Opened {
+interface Opened {
   readonly workspaceId: string | null;
   readonly checkoutBranch: string | undefined;
   readonly designatedConnectionId: string | null;
@@ -164,7 +164,7 @@ export interface Opened {
 }
 
 /** What a machine's report did to a workspace, for whoever was waiting on it. */
-export interface Settled {
+interface Settled {
   readonly workspaceId: string;
   readonly moved: "ready" | "failed" | "deleted";
 }
@@ -172,10 +172,10 @@ export interface Settled {
 type ReadError = Unauthenticated | Forbidden | Validation | SqlError;
 
 /** Why a workspace was taken away, where it was not a person asking. */
-export type Expiry = "orphan" | "idle";
+type Expiry = "orphan" | "idle";
 
 /** One workspace the sweep may take away, and the window it outlived. */
-export interface Expired {
+interface Expired {
   readonly id: string;
   readonly reason: Expiry;
 }

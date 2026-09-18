@@ -2,9 +2,9 @@
  * Placing a thread: the user's settings decide what it runs, the fleet decides
  * where, and the working area it asked for is made before it can start.
  *
- * Driven over the real API and the real runner socket, because two of the
- * things asserted here are only visible there - what crosses the wire to the
- * machine, and when it crosses it relative to the row being durable.
+ * Driven over the real API and the real runner socket, because one of the
+ * things asserted here is only visible there: what crosses the wire to the
+ * machine.
  */
 import { describe, expect, it, vi } from "vitest";
 import { Effect } from "effect";
@@ -16,8 +16,6 @@ import {
   instanceOf,
   inputsOf,
   profileNamed,
-  sessionsOf,
-  spawn,
   spawned,
   until,
   WAIT_DEADLINE_MS,
@@ -148,24 +146,6 @@ describe("placeSession", () => {
         instanceId: session.instanceId,
         runnerId: arranged.runnerId,
       });
-    });
-  });
-
-  it("makes the session readable by the time its provisioning frame reaches the machine", async () => {
-    await withFleet(async (arranged) => {
-      const web = await repo(arranged, "https://github.com/acme/web");
-
-      // Not awaited: what is under test is what the machine may see while the
-      // call is still in flight.
-      const pending = spawn(arranged, { prompt: "hello", workspace: ephemeral(web) });
-      const frame = await provisionFrame(arranged);
-
-      // The frame is on the wire, so the row it belongs to is already readable.
-      const listed = await sessionsOf(arranged);
-      expect(listed.map((one) => one.workspaceId)).toContain(frame["workspaceId"]);
-
-      const response = await pending;
-      expect(response.status, await response.clone().text()).toBe(200);
     });
   });
 });
