@@ -47,7 +47,6 @@ import {
   WORKSPACE_SORT_FIELDS,
   WorkspaceFilter,
   validationOf,
-  type Actor,
   type Checkout,
   type Conflict,
   type Forbidden,
@@ -60,7 +59,7 @@ import {
   type Workspace,
   type WorkspaceStatus,
 } from "@hydra/contract";
-import { requireGrant, SYSTEM_ACTOR, USER_ACTOR } from "../actor";
+import { currentStamp, requireGrant, SYSTEM_ACTOR, USER_ACTOR } from "../actor";
 import { nowIso, pageInput, refuseCursor, withTransaction } from "../db";
 import type { SessionTokens } from "../permissions";
 import { AuditLog } from "../events";
@@ -333,7 +332,6 @@ const make = Effect.gen(function* () {
     readonly projectId: string | undefined;
     readonly sessionId: string;
     readonly at: string;
-    readonly actor: Actor;
   }): Effect.Effect<Opened, Validation | SqlError> =>
     Effect.gen(function* () {
       const wish = input.wish;
@@ -380,7 +378,7 @@ const make = Effect.gen(function* () {
         }
         const opened = yield* openPrimary(
           { workspaces, audit },
-          { resource, runnerId: input.runnerId, actor: input.actor, at: input.at },
+          { resource, runnerId: input.runnerId, actor: yield* currentStamp, at: input.at },
         );
         return {
           workspaceId: opened.workspace.id,
@@ -435,7 +433,7 @@ const make = Effect.gen(function* () {
           kind: "ephemeral",
           designatedConnectionId: repos[0]?.resource.connectionId ?? null,
           checkouts,
-          actor: input.actor,
+          actor: yield* currentStamp,
           at: input.at,
         },
       );

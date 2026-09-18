@@ -29,7 +29,7 @@ import {
   type Unauthenticated,
   type Validation,
 } from "@hydra/contract";
-import { currentStamp, currentUser, requireGrant } from "../actor";
+import { currentUser, requireGrant } from "../actor";
 import { mintUuid, nowIso, uuidToString, withTransaction } from "../db";
 import { PermissionProfiles, type GrantsError } from "../permissions";
 import type { PluginHost } from "../plugins";
@@ -232,7 +232,6 @@ const make = Effect.gen(function* () {
         sql,
         Effect.gen(function* () {
           const at = yield* nowIso;
-          const actor = yield* currentStamp;
           // Where it works is the workspaces domain's to decide, in full: what
           // the wish means, how the checkouts are laid out, what the branch is
           // called and which Connection the work acts through.
@@ -243,7 +242,6 @@ const make = Effect.gen(function* () {
             projectId: open.projectId,
             sessionId,
             at,
-            actor,
           });
           yield* sessions.create({
             id: sessionId,
