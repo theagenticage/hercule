@@ -69,11 +69,11 @@ export type Request = ProbeRequest | InstallRequest | LoginStart | LoginCode | S
 
 /**
  * What a machine said about the sessions it is hosting, and which machine said
- * it. Presence carries it no further: what a session event means is the session
- * domain's, and presence knowing that would put the fleet above it rather than
- * under it. The connection rides along so the session domain can mark it caught
- * up on its own authority, the same way every other write keyed by connection
- * identity here does.
+ * it. The connections carry it no further: what a session event means is the
+ * session domain's, and the connections knowing that would put the fleet above
+ * it rather than under it. The connection rides along so the session domain
+ * can mark it caught up on its own authority, the same way every other write
+ * keyed by connection identity here does.
  */
 export interface SessionTraffic {
   readonly runnerId: string;
@@ -84,10 +84,10 @@ export interface SessionTraffic {
 /**
  * What the layer above acts on: a machine reporting something that is not about
  * a session, and the runners domain changing something that frees a machine for
- * work. Presence carries none of it further - what any of it means is decided
- * above this domain, in the controller daemon. One queue, so a machine's reports
- * are handed on in the order they arrived in; what this domain changes itself
- * joins them as it happens.
+ * work. The connections carry none of it further - what any of it means is
+ * decided above this domain, in the controller daemon. One queue, so a
+ * machine's reports are handed on in the order they arrived in; what this
+ * domain changes itself joins them as it happens.
  */
 export type FleetTraffic =
   | {
@@ -128,7 +128,7 @@ const FACTS_REPORTED: FactsReported = { _tag: "factsReported" };
 
 type Reported = Answer | FactsReported;
 
-/** How presence reaches back to a connection that is holding a runner. */
+/** How this service reaches back to a connection that is holding a runner. */
 export interface Connected {
   /**
    * Asks the connection to close with a code and a reason. Only the connection
@@ -328,7 +328,7 @@ const make = Effect.gen(function* () {
 
     /**
      * Every machine that has just said hello. What to do about an arrival is
-     * not presence's business, so whoever has an opinion listens here.
+     * not this service's business, so whoever has an opinion listens here.
      */
     arrivals: Stream.fromPubSub(arrivals),
 
@@ -568,12 +568,13 @@ const make = Effect.gen(function* () {
   };
 });
 
-export class RunnerPresence extends Context.Service<RunnerPresence, Effect.Success<typeof make>>()(
-  "hydra/controller/runners/RunnerPresence",
-) {}
+export class RunnerConnections extends Context.Service<
+  RunnerConnections,
+  Effect.Success<typeof make>
+>()("hydra/controller/runners/RunnerConnections") {}
 
-export const RunnerPresenceLayer: Layer.Layer<
-  RunnerPresence,
+export const RunnerConnectionsLayer: Layer.Layer<
+  RunnerConnections,
   never,
   SqlClient.SqlClient | AuditLog
-> = Layer.effect(RunnerPresence)(make);
+> = Layer.effect(RunnerConnections)(make);

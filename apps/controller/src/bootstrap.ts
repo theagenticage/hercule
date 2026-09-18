@@ -50,8 +50,8 @@ import {
 } from "./secrets";
 import {
   JoinTokensLayer,
-  RunnerPresence,
-  RunnerPresenceLayer,
+  RunnerConnections,
+  RunnerConnectionsLayer,
   startLocalRunner,
   type JoinTokens,
   type LocalRunner,
@@ -224,7 +224,7 @@ export type ControllerServices =
   | JoinTokens
   | Plugins
   | PluginHost
-  | RunnerPresence
+  | RunnerConnections
   | ProviderProbes
   | ProviderService
   | SessionService
@@ -274,11 +274,11 @@ export const bootWith = <A, E>(
     );
 
     /**
-     * One presence and one probe driver per process: the socket route, the
-     * controller daemon and the sweep after a hello all write through the same
-     * connection map.
+     * One connection map and one probe driver per process: the socket route,
+     * the controller daemon and the sweep after a hello all act through the
+     * same `RunnerConnections`.
      */
-    const withFleet = ProviderProbesLayer.pipe(Layer.provideMerge(RunnerPresenceLayer)).pipe(
+    const withFleet = ProviderProbesLayer.pipe(Layer.provideMerge(RunnerConnectionsLayer)).pipe(
       Layer.provideMerge(repositories),
     );
 

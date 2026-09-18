@@ -40,7 +40,7 @@ import {
 import { bearerOf } from "../http/bearer";
 import { responseFor } from "../http/envelope";
 import { ControllerIdentity } from "../identity";
-import { newConnection, RunnerPresence, type Connection, type Departure } from "./presence";
+import { newConnection, RunnerConnections, type Connection, type Departure } from "./connections";
 
 const RUNNER_SOCKET_PATH = "/api/v1/runners/socket";
 
@@ -109,7 +109,7 @@ const negotiated = (theirs: ReadonlyArray<string>): ReadonlyArray<string> =>
  */
 const hold = (runnerId: string, socket: Socket.Socket) =>
   Effect.gen(function* () {
-    const presence = yield* RunnerPresence;
+    const connections = yield* RunnerConnections;
     const identity = yield* ControllerIdentity;
     const pings = yield* RunnerPingSchedule;
     const write = yield* socket.writer;
@@ -119,7 +119,7 @@ const hold = (runnerId: string, socket: Socket.Socket) =>
     let departure: Departure = "unreachable";
     let lastHeard = yield* Clock.currentTimeMillis;
 
-    /** Resolves with what presence asked this connection to go out with. */
+    /** Resolves with what the service asked this connection to go out with. */
     const asked = Deferred.makeUnsafe<Socket.CloseEvent>();
 
     const refuse = (reason: string) => write(new Socket.CloseEvent(PROTOCOL_ERROR, reason));
@@ -144,7 +144,7 @@ const hold = (runnerId: string, socket: Socket.Socket) =>
         };
         // Before the answer goes out, so a runner told it is in is one the fleet
         // already reads as online.
-        yield* presence.greeted(
+        yield* connections.greeted(
           runnerId,
           mine,
           {
@@ -168,7 +168,7 @@ const hold = (runnerId: string, socket: Socket.Socket) =>
         // After the answer, because the runner drops every frame that reaches
         // it before the controller's hello: a sweep announced any earlier can
         // have its first probe thrown away.
-        yield* presence.arrived(runnerId);
+        yield* connections.arrived(runnerId);
       });
 
     const handle = (raw: string) =>
@@ -198,15 +198,15 @@ const hold = (runnerId: string, socket: Socket.Socket) =>
             // credential could keep a row reading as last seen a moment ago.
             if (!greeted) return;
             lastHeard = yield* Clock.currentTimeMillis;
-            return yield* presence.answered(runnerId);
+            return yield* connections.answered(runnerId);
           case "factsReport":
             // Until the hello lands, all this connection has shown is that
             // somebody holds a credential.
             if (!greeted) return;
-            return yield* presence.reportedFacts(runnerId, mine, message.facts);
+            return yield* connections.reportedFacts(runnerId, mine, message.facts);
           case "watermarkReport":
             if (!greeted) return;
-            return yield* presence.reportedWatermark(runnerId, mine, message.watermark);
+            return yield* connections.reportedWatermark(runnerId, mine, message.watermark);
           case "probeReport":
           case "installResult":
           case "loginUrl":
@@ -214,21 +214,21 @@ const hold = (runnerId: string, socket: Socket.Socket) =>
           case "loginResult":
           case "sessionInputResult":
             if (!greeted) return;
-            return yield* presence.reportedAnswer(runnerId, mine, message);
+            return yield* connections.reportedAnswer(runnerId, mine, message);
           case "workspaceReport":
             // Published rather than handled, like a session event: what a
             // machine made of a working area is not the wire's to interpret.
             if (!greeted) return;
-            return yield* presence.reportedWorkspace(runnerId, mine, message);
+            return yield* connections.reportedWorkspace(runnerId, mine, message);
           case "credentialRequest":
             if (!greeted) return;
-            return yield* presence.requestedCredential(runnerId, mine, message);
+            return yield* connections.requestedCredential(runnerId, mine, message);
           case "sessionEvent":
           case "sessionsReport":
             // Handed on rather than handled: what a session event means belongs
             // to the session domain, and this file's job is the wire.
             if (!greeted) return;
-            return yield* presence.reportedSession(runnerId, mine, message);
+            return yield* connections.reportedSession(runnerId, mine, message);
           case "goodbye":
             departure = "offline";
             return;
@@ -261,7 +261,7 @@ const hold = (runnerId: string, socket: Socket.Socket) =>
      * aborted request interrupts the fiber serving it: without this the one
      * write that matters most, the row leaving online, never happens.
      */
-    const leave = Effect.suspend(() => presence.ended(runnerId, mine, departure));
+    const leave = Effect.suspend(() => connections.ended(runnerId, mine, departure));
 
     yield* Effect.ensuring(
       Effect.race(
@@ -279,17 +279,17 @@ const hold = (runnerId: string, socket: Socket.Socket) =>
 /** Resolved before the upgrade, so a refusal is an ordinary `401` in the envelope. */
 export const RunnerSocketRouteLayer = HttpRouter.add("GET", RUNNER_SOCKET_PATH, (request) =>
   Effect.gen(function* () {
-    const presence = yield* RunnerPresence;
+    const connections = yield* RunnerConnections;
     const credential = bearerOf(request);
     if (credential === undefined) return responseFor(unauthenticated(NO_CREDENTIAL));
     // A database that will not answer is not a credential that was refused, and
     // a runner told `unauthenticated` stops presenting a credential still good.
-    const admitted = yield* Effect.catch(presence.admits(credential), (error) =>
+    const admitted = yield* Effect.catch(connections.admits(credential), (error) =>
       Effect.as(Effect.logError("A runner's credential could not be resolved", error), undefined),
     );
     if (admitted === undefined) return responseFor(internal("something went wrong"));
     if (Option.isNone(admitted)) {
-      const retired = yield* Effect.catch(presence.wasRetired(credential), (error) =>
+      const retired = yield* Effect.catch(connections.wasRetired(credential), (error) =>
         Effect.as(Effect.logError("A refused credential could not be looked up", error), false),
       );
       return responseFor(unauthenticated(retired ? RETIRED : UNKNOWN_CREDENTIAL));

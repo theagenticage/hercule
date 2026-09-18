@@ -44,7 +44,7 @@ import {
   NO_SUCH_RUNNER,
   requireAdapter,
   requireOnline,
-  RunnerPresence,
+  RunnerConnections,
   runnerRepository,
   type Answer,
 } from "../runners";
@@ -142,7 +142,7 @@ const make = Effect.gen(function* () {
   const host = yield* PluginHost;
   const audit = yield* AuditLog;
   const probes = yield* ProviderProbes;
-  const presence = yield* RunnerPresence;
+  const connections = yield* RunnerConnections;
   const runners = yield* runnerRepository;
 
   const definitions = Effect.map(
@@ -231,7 +231,7 @@ const make = Effect.gen(function* () {
     deadline: Duration.Duration,
   ): Effect.Effect<LoginAnswer, InvalidState> =>
     Effect.gen(function* () {
-      const answer = yield* presence.asked(runnerId, request, deadline);
+      const answer = yield* connections.asked(runnerId, request, deadline);
       const login = Option.filter(answer, isLoginAnswer);
       return yield* Option.match(login, {
         // Disconnected, gone, or silent are one thing to the user: it did not
@@ -376,7 +376,7 @@ const make = Effect.gen(function* () {
         yield* requireGrant("runner.installHarness");
         const { runnerId, providerId } = yield* Effect.mapError(decodeInstall(input), validationOf);
         yield* drivable(runnerId, providerId, "providerId");
-        const answer = yield* presence.asked(
+        const answer = yield* connections.asked(
           runnerId,
           { _tag: "installRequest", requestId: crypto.randomUUID(), providerId },
           HARNESS_INSTALL_DEADLINE,
@@ -520,5 +520,5 @@ export class ProviderService extends Context.Service<
 export const ProviderServiceLayer: Layer.Layer<
   ProviderService,
   never,
-  SqlClient.SqlClient | PluginHost | AuditLog | ProviderProbes | RunnerPresence
+  SqlClient.SqlClient | PluginHost | AuditLog | ProviderProbes | RunnerConnections
 > = Layer.effect(ProviderService)(make);

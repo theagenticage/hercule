@@ -46,7 +46,7 @@ import { AuditLog } from "../events";
 import { Settings, type SettingError } from "../settings";
 import { requireOnline } from "./adapters";
 import { JoinTokens } from "./join-tokens";
-import { RunnerFactsDeadline, RunnerPresence } from "./presence";
+import { RunnerFactsDeadline, RunnerConnections } from "./connections";
 import { runnerRepository, type RunnerEdit } from "./repository";
 
 const QueryInput = Schema.Struct({
@@ -152,7 +152,7 @@ const make = Effect.gen(function* () {
   const settings = yield* Settings;
   const audit = yield* AuditLog;
 
-  const presence = yield* RunnerPresence;
+  const connections = yield* RunnerConnections;
 
   const one = (id: string): Effect.Effect<RunnerDetail, NotFound | SqlError> =>
     Effect.flatMap(
@@ -332,7 +332,7 @@ const make = Effect.gen(function* () {
         );
         // After the commit, so whoever acts on the room this machine now has
         // reads the cap and the watermark this patch wrote.
-        if (result.placements) yield* presence.placementsChanged(id);
+        if (result.placements) yield* connections.placementsChanged(id);
         return result.detail;
       }),
 
@@ -360,7 +360,7 @@ const make = Effect.gen(function* () {
         });
         // A machine off the drain takes work again, which is not a fact the
         // fleet acts on itself.
-        yield* presence.placementsChanged(detail.id);
+        yield* connections.placementsChanged(detail.id);
         return detail;
       }),
 
@@ -424,7 +424,7 @@ const make = Effect.gen(function* () {
         const { id } = yield* Effect.mapError(decodeIdentified(input), validationOf);
         const before = yield* one(id);
         yield* requireOnline(before);
-        if (!(yield* presence.refreshedFacts(id))) {
+        if (!(yield* connections.refreshedFacts(id))) {
           const waited = Duration.format(yield* RunnerFactsDeadline);
           return yield* Effect.fail(
             invalidState(`that runner did not report its facts within ${waited}`),
@@ -509,5 +509,5 @@ export class RunnerService extends Context.Service<RunnerService, Effect.Success
 export const RunnerServiceLayer: Layer.Layer<
   RunnerService,
   never,
-  SqlClient.SqlClient | JoinTokens | Settings | RunnerPresence | AuditLog
+  SqlClient.SqlClient | JoinTokens | Settings | RunnerConnections | AuditLog
 > = Layer.effect(RunnerService)(make);

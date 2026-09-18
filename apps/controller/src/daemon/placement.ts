@@ -41,7 +41,7 @@ import {
   type StoredSnapshot,
 } from "../providers";
 import { resourceRepository } from "../resources";
-import { DRAINING, NO_SUCH_RUNNER, RETIRED, RunnerPresence, runnerRepository } from "../runners";
+import { DRAINING, NO_SUCH_RUNNER, RETIRED, RunnerConnections, runnerRepository } from "../runners";
 import {
   continuingSpecOf,
   requireSession,
@@ -121,7 +121,7 @@ const make = Effect.gen(function* () {
   const instances = yield* providerRepository;
   const resolved = yield* resolvedInstance;
   const runners = yield* runnerRepository;
-  const presence = yield* RunnerPresence;
+  const connections = yield* RunnerConnections;
   const profiles = yield* PermissionProfiles;
   const settings = yield* Settings;
   const one = requireSession(rows);
@@ -265,7 +265,7 @@ const make = Effect.gen(function* () {
       );
       // In the order the machine needs them: it makes the working area, and the
       // session it holds is dispatched once it says the area stands.
-      if (frame !== undefined) yield* presence.tell(open.runnerId, frame);
+      if (frame !== undefined) yield* connections.tell(open.runnerId, frame);
       yield* dispatch(open.runnerId);
       // Read back rather than returned from the insert, so the caller sees
       // `starting` where dispatch placed it at once rather than `queued`.
@@ -432,7 +432,7 @@ export const PlacementLayer: Layer.Layer<
   | SqlClient.SqlClient
   | SessionService
   | WorkspaceService
-  | RunnerPresence
+  | RunnerConnections
   | PermissionProfiles
   | Settings
   | PluginHost

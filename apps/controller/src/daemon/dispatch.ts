@@ -18,7 +18,7 @@ import type { SqlError } from "effect/unstable/sql/SqlError";
 import { SessionSpec, type SessionStart } from "@hydra/protocol";
 import { withTransaction } from "../db";
 import type { SessionTokens } from "../permissions";
-import { RunnerPresence, runnerRepository } from "../runners";
+import { RunnerConnections, runnerRepository } from "../runners";
 import type { Secrets } from "../secrets";
 import { SessionService } from "../sessions";
 import { gitCredentials, gitIdentityOf } from "../workspaces";
@@ -29,7 +29,7 @@ const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const sessions = yield* SessionService;
   const runners = yield* runnerRepository;
-  const presence = yield* RunnerPresence;
+  const connections = yield* RunnerConnections;
   const credentials = yield* gitCredentials;
 
   return {
@@ -51,7 +51,7 @@ const make = Effect.gen(function* () {
             // Online says the socket is up, not that this connection has said
             // what it holds yet: a start sent before its report lands would be
             // one this report itself then reads as exited.
-            if (!(yield* presence.hasReportedSessions(runnerId))) return [];
+            if (!(yield* connections.hasReportedSessions(runnerId))) return [];
             const watermark = runner.watermark;
             // A watermark nobody has reported yet is not a machine that said no.
             if (watermark !== null && watermark.diskFreeBytes < runner.diskWatermarkBytes) {
@@ -86,7 +86,7 @@ const make = Effect.gen(function* () {
               : { ghToken: account.token, gitIdentity: gitIdentityOf(account.login) }),
             ...(row.checkoutBranch === null ? {} : { checkoutBranch: row.checkoutBranch }),
           };
-          if (!(yield* presence.tell(runnerId, start))) yield* sessions.requeue(row.id);
+          if (!(yield* connections.tell(runnerId, start))) yield* sessions.requeue(row.id);
         }
       }),
   };
@@ -99,5 +99,5 @@ export class Dispatch extends Context.Service<Dispatch, Effect.Success<typeof ma
 export const DispatchLayer: Layer.Layer<
   Dispatch,
   never,
-  SqlClient.SqlClient | SessionService | RunnerPresence | Secrets | SessionTokens
+  SqlClient.SqlClient | SessionService | RunnerConnections | Secrets | SessionTokens
 > = Layer.effect(Dispatch)(make);

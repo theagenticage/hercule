@@ -65,7 +65,7 @@ import {
   JoinTokensLayer,
   RunnerFactsDeadline,
   RunnerPingSchedule,
-  RunnerPresenceLayer,
+  RunnerConnectionsLayer,
   runnerRepository,
   type RunnerPings,
 } from "../runners";
@@ -106,9 +106,9 @@ const services = (home: string) =>
         Layer.provideMerge(PluginConfigsLayer),
       ),
     ),
-    // One presence and one probe driver: the socket route and every service
-    // must act through the same connection map.
-    Layer.provideMerge(ProviderProbesLayer.pipe(Layer.provideMerge(RunnerPresenceLayer))),
+    // One connection map and one probe driver: the socket route and every
+    // service must act through the same `RunnerConnections`.
+    Layer.provideMerge(ProviderProbesLayer.pipe(Layer.provideMerge(RunnerConnectionsLayer))),
     Layer.provideMerge(
       Layer.mergeAll(
         UsersLayer,

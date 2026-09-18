@@ -17,7 +17,7 @@ import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import { withTransaction } from "../db";
-import { RunnerPresence, type FleetTraffic, type SessionTraffic } from "../runners";
+import { RunnerConnections, type FleetTraffic, type SessionTraffic } from "../runners";
 import { SessionService } from "../sessions";
 import { WorkspaceService } from "../workspaces";
 import { absorbing, forking } from "./absorbing";
@@ -26,7 +26,7 @@ import { Live } from "./live";
 
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
-  const presence = yield* RunnerPresence;
+  const connections = yield* RunnerConnections;
   const sessions = yield* SessionService;
   const workspaces = yield* WorkspaceService;
   const { dispatch } = yield* Dispatch;
@@ -70,7 +70,7 @@ const make = Effect.gen(function* () {
         // the connection that asked and is written down nowhere.
         return Effect.flatMap(
           workspaces.credentialAnswer(traffic.runnerId, traffic.request),
-          (answer) => Effect.asVoid(presence.tell(traffic.runnerId, answer)),
+          (answer) => Effect.asVoid(connections.tell(traffic.runnerId, answer)),
         );
       case "placementsChanged":
         // Forked, like the dispatch a ready working area sets off: starting
@@ -87,7 +87,7 @@ const make = Effect.gen(function* () {
         yield* sessions.bound(traffic.runnerId, traffic.frame.sessions);
         // Once that write set is durable and not before: a `Map` does not roll
         // back, so a runner is not dispatchable on a report that never landed.
-        yield* presence.markSessionsReported(traffic.runnerId, traffic.connection);
+        yield* connections.markSessionsReported(traffic.runnerId, traffic.connection);
         yield* forking("A runner's report could not be dispatched", dispatch(traffic.runnerId));
         return;
       }
@@ -120,11 +120,11 @@ const make = Effect.gen(function* () {
     });
 
   return {
-    driving: Stream.runForEach(presence.fleetTraffic, (traffic) =>
+    driving: Stream.runForEach(connections.fleetTraffic, (traffic) =>
       absorbing("A runner's report could not be applied", applying(traffic)),
     ),
 
-    ingesting: Stream.runForEach(presence.sessionTraffic, (traffic) =>
+    ingesting: Stream.runForEach(connections.sessionTraffic, (traffic) =>
       absorbing("A session report could not be recorded", ingesting(traffic)),
     ),
   };
@@ -137,5 +137,5 @@ export class Inbound extends Context.Service<Inbound, Effect.Success<typeof make
 export const InboundLayer: Layer.Layer<
   Inbound,
   never,
-  SqlClient.SqlClient | RunnerPresence | SessionService | WorkspaceService | Dispatch | Live
+  SqlClient.SqlClient | RunnerConnections | SessionService | WorkspaceService | Dispatch | Live
 > = Layer.effect(Inbound)(make);

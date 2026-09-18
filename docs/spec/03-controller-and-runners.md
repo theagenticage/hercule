@@ -278,7 +278,7 @@ Reaper TTLs (resolved 2026-08-31, [#43](https://github.com/rogierpennink/hydra/i
 
 ## 7. Runner lifecycle and connectivity
 
-A runner carries two independent axes. **Connectivity** (`online | offline | unreachable`) is written only by presence, from the socket. **Lifecycle** (`active | draining | retired`) is written only by user operations. They vary independently - a `draining` runner can be `unreachable` at the same time, and the controller reports both rather than collapsing them into one state.
+A runner carries two independent axes. **Connectivity** (`online | offline | unreachable`) is written only by Runner Connections, from the socket. **Lifecycle** (`active | draining | retired`) is written only by user operations. They vary independently - a `draining` runner can be `unreachable` at the same time, and the controller reports both rather than collapsing them into one state.
 
 ### Connectivity
 

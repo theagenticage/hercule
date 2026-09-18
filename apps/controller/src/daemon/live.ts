@@ -41,7 +41,7 @@ import { nowIso, withTransaction } from "../db";
 import { AuditLog } from "../events";
 import type { PluginHost } from "../plugins";
 import { providerRepository, resolvedInstance } from "../providers";
-import { RunnerPresence } from "../runners";
+import { RunnerConnections } from "../runners";
 import {
   continuingSpecOf,
   requireSession,
@@ -137,7 +137,7 @@ const make = Effect.gen(function* () {
   const instances = yield* providerRepository;
   const resolved = yield* resolvedInstance;
   const resumableNativeSession = yield* resumable;
-  const presence = yield* RunnerPresence;
+  const connections = yield* RunnerConnections;
   const settings = yield* Settings;
   const audit = yield* AuditLog;
   const { dispatch } = yield* Dispatch;
@@ -180,7 +180,7 @@ const make = Effect.gen(function* () {
   ): Effect.Effect<Option.Option<SessionInputResult>> =>
     Effect.gen(function* () {
       const deadline = yield* SessionInputDeadline;
-      const answer = yield* presence.asked(
+      const answer = yield* connections.asked(
         session.runnerId,
         {
           _tag: "sessionInput",
@@ -380,7 +380,7 @@ const make = Effect.gen(function* () {
         const session = yield* one(id);
         if (session.status === "exited") return yield* Effect.fail(invalidState(HAS_EXITED));
         if (
-          !(yield* presence.tell(session.runnerId, { _tag: "sessionInterrupt", sessionId: id }))
+          !(yield* connections.tell(session.runnerId, { _tag: "sessionInterrupt", sessionId: id }))
         ) {
           return yield* Effect.fail(invalidState(GONE));
         }
@@ -430,7 +430,7 @@ const make = Effect.gen(function* () {
           );
         }
         if (
-          !(yield* presence.tell(session.runnerId, {
+          !(yield* connections.tell(session.runnerId, {
             _tag: "sessionRespond",
             sessionId: id,
             requestId,
@@ -484,7 +484,7 @@ const make = Effect.gen(function* () {
             }),
           );
         }
-        if (!(yield* presence.tell(session.runnerId, { _tag: "sessionStop", sessionId: id }))) {
+        if (!(yield* connections.tell(session.runnerId, { _tag: "sessionStop", sessionId: id }))) {
           return yield* Effect.fail(invalidState(GONE));
         }
         const actor = yield* currentStamp;
@@ -524,7 +524,7 @@ export const LiveLayer: Layer.Layer<
   never,
   | SqlClient.SqlClient
   | SessionService
-  | RunnerPresence
+  | RunnerConnections
   | WorkspaceService
   | PluginHost
   | Settings
