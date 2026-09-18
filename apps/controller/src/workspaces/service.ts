@@ -71,6 +71,7 @@ import {
   resourceRepository,
   type StoredRepo,
 } from "../resources";
+import { NO_SUCH_RUNNER, runnerRepository } from "../runners";
 import type { Secrets } from "../secrets";
 import { Settings, type ScopeSettings, type SettingError } from "../settings";
 import { gitCredentials } from "./credentials";
@@ -204,6 +205,7 @@ const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const workspaces = yield* workspaceRepository;
   const resources = yield* resourceRepository;
+  const runners = yield* runnerRepository;
   const credentials = yield* gitCredentials;
   const settings = yield* Settings;
   const audit = yield* AuditLog;
@@ -478,28 +480,33 @@ const make = Effect.gen(function* () {
         return yield* Effect.flatMap(stored(id), composedOne);
       }),
 
-    /** The repo a primary workspace is made of, held to being checked out. */
-    checkedOutRepo: repo,
-
     /**
      * The repo's own workspace on one machine, cloned fresh under that machine's
      * own storage, written in the caller's transaction. A second one for the
      * same pair is a conflict, because that is what "the repo's main workspace
      * there" means.
      *
+     * The repo and the machine are read here rather than handed in: they are
+     * what the two ids mean, and the refusals for them are this method's. The
+     * repo is asked for first, so a payload wrong about both is answered about
+     * the repo.
+     *
      * The record comes back beside the frame rather than being read again
      * afterwards: it is the rows this just wrote, and reading them a second time
      * would answer the caller with whatever else happened meanwhile.
      */
     openPrimaryFor: (input: {
-      readonly resource: StoredRepo;
+      readonly resourceId: string;
       readonly runnerId: string;
     }): Effect.Effect<
       { readonly workspace: Workspace; readonly frame: WorkspaceProvision },
-      Conflict | SqlError
+      Conflict | NotFound | InvalidState | SqlError
     > =>
       Effect.gen(function* () {
-        const held = yield* workspaces.primaryOn(input.resource.id, input.runnerId);
+        const resource = yield* repo(input.resourceId);
+        const runner = yield* runners.read(input.runnerId);
+        if (Option.isNone(runner)) return yield* Effect.fail(notFound(NO_SUCH_RUNNER));
+        const held = yield* workspaces.primaryOn(resource.id, input.runnerId);
         if (Option.isSome(held)) {
           return yield* Effect.fail(
             conflict("that repo already has a primary workspace on that machine"),
@@ -510,7 +517,7 @@ const make = Effect.gen(function* () {
         // that needs one goes through `openFor` with its own actor.
         const opened = yield* openPrimary(
           { workspaces, audit },
-          { resource: input.resource, runnerId: input.runnerId, actor: USER_ACTOR, at },
+          { resource, runnerId: input.runnerId, actor: USER_ACTOR, at },
         );
         return { workspace: yield* composedOne(opened.workspace), frame: opened.frame };
       }),

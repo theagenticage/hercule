@@ -12,14 +12,12 @@ import * as Context from "effect/Context";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import {
   Id,
-  notFound,
   validationOf,
   WorkspaceProvisionInput,
   type Conflict,
@@ -32,7 +30,7 @@ import {
 } from "@hydra/contract";
 import { requireGrant, SYSTEM_ACTOR, USER_ACTOR } from "../actor";
 import { withTransaction } from "../db";
-import { NO_SUCH_RUNNER, RunnerPresence, runnerRepository } from "../runners";
+import { RunnerPresence } from "../runners";
 import { WorkspaceService } from "../workspaces";
 import { absorbing, forking } from "./absorbing";
 
@@ -57,7 +55,6 @@ export const WorkspaceSweepInterval = Context.Reference<Duration.Duration>(
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const workspaces = yield* WorkspaceService;
-  const runners = yield* runnerRepository;
   const presence = yield* RunnerPresence;
 
   /** One pass of the expiry sweep. */
@@ -98,12 +95,12 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         yield* requireGrant("workspace.provision");
         const decoded = yield* Effect.mapError(decodeProvision(input), validationOf);
-        const resource = yield* workspaces.checkedOutRepo(decoded.resourceId);
-        const runner = yield* runners.read(decoded.runnerId);
-        if (Option.isNone(runner)) return yield* Effect.fail(notFound(NO_SUCH_RUNNER));
         const { workspace, frame } = yield* withTransaction(
           sql,
-          workspaces.openPrimaryFor({ resource, runnerId: decoded.runnerId }),
+          workspaces.openPrimaryFor({
+            resourceId: decoded.resourceId,
+            runnerId: decoded.runnerId,
+          }),
         );
         // After the commit. A machine that is not listening is told again when
         // it dials in, from the rows this just wrote.
