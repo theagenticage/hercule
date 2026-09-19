@@ -165,9 +165,21 @@ const transcriptScope = (sessionId: string, direction: SortDirection): CursorSco
   direction,
 });
 
-/** One queued session, with everything the frame that starts it carries. */
+/**
+ * Where a walk of this runner's queue stands: the position of the last row a
+ * batch examined. Batches continue strictly past it, so a caller paging over
+ * rows it skips never reads the same row twice.
+ */
+export interface QueuePosition {
+  readonly createdAt: string;
+  readonly id: string;
+}
+
+/** One queued session, with everything the frame that starts it is built
+ * from, bar the token minted and the account read at the claim. */
 export interface QueuedSession {
   readonly id: string;
+  readonly createdAt: string;
   readonly spec: string;
   readonly checkoutBranch: string | null;
   readonly githubConnectionId: string | null;
@@ -506,22 +518,26 @@ const make = Effect.gen(function* () {
      * This runner's oldest queued sessions, up to `limit`, with what it takes
      * to tell the machine to start each: the exact spec document it was
      * queued with, and the provider it was opened against. Joined rather than
-     * looked up per row, so dispatch reads it in one statement.
+     * looked up per row, so dispatch reads it in one statement. `after`
+     * continues an earlier walk from where it stood, in the queue's own
+     * order, so a caller skipping rows forward never re-reads them.
      */
     oldestQueued: (
       runnerId: string,
       limit: number,
+      after?: QueuePosition,
     ): Effect.Effect<ReadonlyArray<QueuedSession>, SqlError> =>
       Effect.map(
         sql<{
           readonly id: Uint8Array;
+          readonly created_at: string;
           readonly spec: string;
           readonly checkout_branch: string | null;
           readonly github_connection_id: Uint8Array | null;
           readonly provider_id: string;
           readonly config: string;
         }>`
-          SELECT s.id, s.spec,
+          SELECT s.id, s.created_at, s.spec,
                  -- The branch pick is one-shot: it is what the machine switches
                  -- the main workspace to before this thread first runs. A resume
                  -- picks the thread up where it left off, and replaying the pick
@@ -535,12 +551,16 @@ const make = Effect.gen(function* () {
             -- machine to start it before the workspace stands would hand the
             -- harness a directory that is not there yet.
             AND ${sql.literal(readyWhere("s"))}
+            -- The walk's position, on the same pair the order below sorts by;
+            -- the sentinels a first batch passes sort before every real row.
+            AND (s.created_at, s.id) > (${after?.createdAt ?? ""}, ${after === undefined ? new Uint8Array(0) : uuidFromString(after.id)})
           ORDER BY s.created_at ASC, s.id ASC
           LIMIT ${limit}
         `,
         (rows) =>
           rows.map((row) => ({
             id: uuidToString(row.id),
+            createdAt: row.created_at,
             spec: row.spec,
             checkoutBranch: row.checkout_branch,
             githubConnectionId:

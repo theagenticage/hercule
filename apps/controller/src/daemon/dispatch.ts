@@ -12,18 +12,14 @@ import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
-import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
-import { SessionSpec, type SessionStart } from "@hydra/protocol";
 import { withTransaction } from "../db";
 import type { SessionTokens } from "../permissions";
 import { RunnerConnections, runnerRepository } from "../runners";
 import type { Secrets } from "../secrets";
 import { SessionService } from "../sessions";
-import { gitCredentials, gitIdentityOf } from "../workspaces";
-
-const decodeSpec = Schema.decodeUnknownEffect(SessionSpec);
+import { gitCredentials } from "../workspaces";
 
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
@@ -59,34 +55,15 @@ const make = Effect.gen(function* () {
             }
             const room = runner.maxConcurrentSessions - (yield* runners.runningSessions(runnerId));
             if (room <= 0) return [];
-            return yield* sessions.starting(runnerId, room);
+            return yield* sessions.starting(runnerId, room, {
+              accountOf: credentials.githubAccountOf,
+            });
           }),
         );
         // After the commit, because a transaction never spans a wait on a
         // machine, and a machine is never told about a row that may roll back.
-        for (const row of ready) {
-          // Read now rather than stored: a token is never written down anywhere
-          // but the frame that carries it to the machine.
-          const account =
-            row.githubConnectionId === null
-              ? undefined
-              : yield* credentials.githubAccountOf(row.githubConnectionId);
-          const start: SessionStart = {
-            _tag: "sessionStart",
-            sessionId: row.id,
-            providerId: row.providerId,
-            config: row.config as Schema.Json,
-            // A defect, not a typed failure: the document was encoded by this
-            // same codec at insert, so a decode failure means a spec field's
-            // codec changed underneath a row already queued with the old one.
-            spec: yield* Effect.orDie(decodeSpec(JSON.parse(row.spec))),
-            token: row.token,
-            ...(account === undefined
-              ? {}
-              : { ghToken: account.token, gitIdentity: gitIdentityOf(account.login) }),
-            ...(row.checkoutBranch === null ? {} : { checkoutBranch: row.checkoutBranch }),
-          };
-          if (!(yield* connections.tell(runnerId, start))) yield* sessions.requeue(row.id);
+        for (const { sessionId, frame } of ready) {
+          if (!(yield* connections.tell(runnerId, frame))) yield* sessions.requeue(sessionId);
         }
       }),
   };

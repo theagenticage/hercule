@@ -53,7 +53,7 @@ const make = Effect.gen(function* () {
           // queued ones never had a frame to begin with, so they get none now
           // either.
           for (const sessionId of toStop) {
-            yield* connections.tell(detail.id, { _tag: "sessionStop", sessionId });
+            yield* connections.tell(detail.id, sessions.stopping(sessionId));
           }
           // After the commit too: a socket closed for a retirement that then
           // rolled back would be a runner told to stop by a controller that
