@@ -46,7 +46,16 @@ export type FieldRow =
        */
       readonly resolves?: OperationId;
     }
-  | { readonly flag: string; readonly help: string }
+  | {
+      readonly flag: string;
+      readonly help: string;
+      /**
+       * The listing an eight-character-or-longer tail written for this flag is
+       * resolved through, exactly as for a positional: where the field holds an
+       * id, the command line takes a tail and the wire takes the id.
+       */
+      readonly resolves?: OperationId;
+    }
   | { readonly stdin: true; readonly flag: string; readonly help: string };
 
 /**
@@ -1397,7 +1406,8 @@ export const CLI = {
       },
       agentId: {
         flag: "agent",
-        help: "Only the sessions spawned from this Agent, by its full id; find it with `hydra agent list`.",
+        help: "Only the sessions spawned from this Agent, by its id or a tail of eight or more characters; find it with `hydra agent list`.",
+        resolves: "agent.query",
       },
       thread: {
         flag: "thread",
@@ -1463,7 +1473,8 @@ export const CLI = {
       prompt: { stdin: true, flag: "prompt", help: "The opening prompt." },
       agentId: {
         flag: "agent",
-        help: "The Agent to spawn from, by its full id; --instance and --profile are refused beside it, because those come from the Agent.",
+        help: "The Agent to spawn from, by its id or a tail of eight or more characters; --instance and --profile are refused beside it, because those come from the Agent.",
+        resolves: "agent.query",
       },
       outputSchema: {
         flag: "output-schema",

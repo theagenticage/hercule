@@ -139,7 +139,7 @@ describe("a command's fields against the schema", () => {
 
   it("resolves a tail only through a listing that needs no argument of its own", () => {
     const targets = COMMANDS.flatMap((command) =>
-      command.positionals
+      [...command.positionals, ...command.payload, ...command.query]
         .filter((field) => field.resolves !== undefined)
         .map((field) => [spelling(command), field.name, field.resolves!] as const),
     );

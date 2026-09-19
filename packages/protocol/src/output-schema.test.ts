@@ -9,6 +9,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { lintOutputSchema } from "./output-schema";
+import { FIXTURE_SCHEMA, IMPOSSIBLE_SCHEMA } from "./output-schema.fixture";
 
 /** Every shape the subset allows, in one document. */
 const ACCEPTED = {
@@ -240,6 +241,13 @@ const REJECTED: ReadonlyArray<{
 describe("lintOutputSchema", () => {
   it("accepts nested objects, an array of objects, a string enum, a nullable number, titles and descriptions", () => {
     expect(lintOutputSchema(ACCEPTED)).toEqual([]);
+  });
+
+  // The two schemas every live proof runs on. A fixture the lint refuses
+  // would be a proof run against a document Hydra would never have sent.
+  it("accepts both shared fixtures, the impossible one included", () => {
+    expect(lintOutputSchema(FIXTURE_SCHEMA)).toEqual([]);
+    expect(lintOutputSchema(IMPOSSIBLE_SCHEMA)).toEqual([]);
   });
 
   it.each(REJECTED)("refuses $what, saying where and what", ({ schema, names }) => {

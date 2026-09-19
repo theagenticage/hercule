@@ -365,6 +365,19 @@ const SessionExited = event("session.exited", {
 });
 
 /**
+ * What a turn answered under the session's output schema (spec 06 section 7).
+ * One shape for every harness: the runner re-validates whatever its harness
+ * produced against the declared schema, so `ok` means the value is good on
+ * every provider and a failure says why in the same words.
+ */
+export const StructuredResult = Schema.Union([
+  Schema.Struct({ outcome: Schema.Literal("ok"), value: Schema.Json }),
+  Schema.Struct({ outcome: Schema.Literal("schema-failure"), reason: Message }),
+]);
+
+export type StructuredResult = Schema.Schema.Type<typeof StructuredResult>;
+
+/**
  * A completion the controller cannot bracket against its start is not a turn
  * boundary, so the id is required on both.
  */
@@ -377,6 +390,12 @@ const TurnCompleted = event("turn.completed", {
   /** This turn's cost, where the harness prices a turn; `usage` is cumulative. */
   costUsd: Schema.optionalKey(Money),
   error: Schema.optionalKey(Message),
+  /**
+   * How the turn answered the session's output schema. Absent on a session
+   * that was given none, and on a turn that ended for a reason of its own:
+   * an ordinary failure is the `state`, not a verdict about a schema.
+   */
+  structuredResult: Schema.optionalKey(StructuredResult),
 });
 
 /**

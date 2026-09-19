@@ -189,7 +189,7 @@ const STDIN_FIELDS = [
   "provider.create config",
 ];
 
-/** Every positional whose id tail is resolved, and the listing that resolves it. */
+/** Every field whose id tail is resolved, and the listing that resolves it. */
 const RESOLVES: Record<string, string> = {
   "apiKey.revoke id": "apiKey.query",
 
@@ -237,6 +237,8 @@ const RESOLVES: Record<string, string> = {
   "agent.update id": "agent.query",
   "agent.delete id": "agent.query",
 
+  "session.query agentId": "agent.query",
+  "session.spawn agentId": "agent.query",
   "session.read id": "session.query",
   "session.update id": "session.query",
   "session.input id": "session.query",
@@ -336,7 +338,7 @@ describe("the stdin fields", () => {
 });
 
 describe("the resolvers", () => {
-  it("names the listing every resolvable positional resolves through", () => {
+  it("names the listing every resolvable field resolves through", () => {
     const named = Object.fromEntries(
       Object.entries(resolvers()).filter(([, target]) => target !== undefined),
     );

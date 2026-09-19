@@ -6,7 +6,7 @@
 import { describe, expect, it } from "vitest";
 import { Schema } from "effect";
 import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
-import { ProviderEvent } from "@hydra/protocol";
+import { ProviderEvent, type OutputSchema } from "@hydra/protocol";
 import { CLAUDE_SDK_MESSAGE, normalize, normalizing } from "./claude-code-normalize";
 
 const SESSION = "0199e0e7-0000-7000-8000-0000000000ff";
@@ -15,13 +15,24 @@ const MESSAGE = "msg_011CeoxAoRk4jaxYB956uTmL";
 const TOOL = "toolu_016JZjZUP3FNEkwxFk3eJZao";
 
 /** Ids the test can read: the tenth minted id is `id-10`, in mint order. */
-const state = () => {
+const state = (outputSchema?: OutputSchema) => {
   let minted = 0;
   return normalizing(
     SESSION,
     () => `id-${(minted += 1)}`,
     () => "2026-09-07T10:51:47.000Z",
+    // Absent is a session answering prose, which is what most of this file's
+    // turns are; a schema is passed where the turn answers under one.
+    outputSchema,
   );
+};
+
+/** A session spawned from an Agent answers under one of these every turn. */
+const OUTPUT_SCHEMA: OutputSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["verdict"],
+  properties: { verdict: { type: "string", enum: ["accept", "dismiss"] } },
 };
 
 /** What each event says, short enough to read a whole turn as a list. */
@@ -641,6 +652,18 @@ describe("what the protocol will carry", () => {
       for (const event of normalize(running, message as SDKMessage)) {
         expect(() => encode(event)).not.toThrow();
       }
+    }
+  });
+
+  it("encodes a turn that answered its schema, and one that could not", () => {
+    for (const structured_output of [{ verdict: "accept" }, { verdict: "maybe" }]) {
+      const running = state(OUTPUT_SCHEMA);
+      const events = normalize(running, { ...RESULT, structured_output } as unknown as SDKMessage);
+      const done = events.find((event) => event._tag === "turn.completed");
+      expect(done?._tag === "turn.completed" ? done.structuredResult?.outcome : undefined).toBe(
+        structured_output.verdict === "accept" ? "ok" : "schema-failure",
+      );
+      for (const event of events) expect(() => encode(event)).not.toThrow();
     }
   });
 

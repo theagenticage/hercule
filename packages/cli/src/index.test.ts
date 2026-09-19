@@ -713,9 +713,24 @@ describe("id tails", () => {
   it("exits 2 on a tail where the row names no listing, and calls nothing", async () => {
     const fetch = stubFetch(() => ({}));
     const stub = io(fetch);
-    expect(await main(["--home", home, "plugin", "read", "1f3a9c2e"], stub)).toBe(2);
+    // A queued input's own id is a Hydra id nothing lists on its own.
+    expect(await main(["--home", home, "input", "cancel", id("aaaaaaa1"), "1f3a9c2e"], stub)).toBe(
+      2,
+    );
     expect(fetch.calls).toEqual([]);
     expect(stub.stderr.join("\n")).toContain("full id");
+  });
+
+  it("sends a name that only looks like a tail, where the field holds no Hydra id", async () => {
+    const fetch = stubFetch(() => ({ items: [] }));
+    const stub = io(fetch);
+
+    expect(await main(["--home", home, "secret", "list", "--owner-id", "deadbeef"], stub)).toBe(0);
+
+    // A secret's owner is a plugin, a runner or a connection by name; nothing
+    // lists one id for all of them, and `deadbeef` is a name like any other.
+    expect(fetch.calls).toHaveLength(1);
+    expect(fetch.calls[0]?.query.get("ownerId")).toBe("deadbeef");
   });
 
   it("refuses a tail shorter than eight characters before calling anything", async () => {
@@ -806,5 +821,227 @@ describe("failures", () => {
     const io = stubIo({ env: {} });
     expect(await main(["--home", home, "controller", "read"], io)).toBe(3);
     expect(io.stderr.join("\n")).toContain("hydra login");
+  });
+});
+
+/** An Agent as the API answers one, named by its whole id so a tail case can pick its own. */
+const agentRecord = (agentId: string, name: string) => ({
+  id: agentId,
+  name,
+  systemPrompt: "You assess tasks.",
+  instanceId: id("cccccccc"),
+  permissionProfileId: id("dddddddd"),
+  accessMode: "full-access",
+  model: null,
+  disallowedTools: [] as Array<string>,
+  unenforced: [] as Array<string>,
+  createdAt: "2026-09-19T10:00:00.000Z",
+  updatedAt: "2026-09-19T10:00:00.000Z",
+});
+
+describe("hydra session spawn --agent", () => {
+  const AGENT = agentRecord(id("aaaaaaa1"), "triager");
+
+  const SPAWNED = {
+    id: id("eeeeeee1"),
+    title: "Assess this task.",
+    status: "starting",
+    resumable: false,
+    permissionProfileId: AGENT.permissionProfileId,
+    agentId: AGENT.id,
+    instanceId: AGENT.instanceId,
+    runnerId: id("ffffffff"),
+    workspaceId: null,
+    projectId: null,
+    requestedAccessMode: "full-access",
+    accessMode: "full-access",
+    nativeSessionId: null,
+    modelSelection: { model: "claude-haiku-4-5", options: {} },
+    parentSessionId: null,
+    openRequest: null,
+    createdAt: "2026-09-19T10:01:00.000Z",
+    startedAt: null,
+    exitedAt: null,
+    lastActivityAt: "2026-09-19T10:01:00.000Z",
+    unenforced: [] as Array<string>,
+  };
+
+  const spawning = () => {
+    const fetch = stubFetch((request) =>
+      request.path === "/api/v1/agents" && request.method === "GET" ? { items: [AGENT] } : SPAWNED,
+    );
+    return {
+      fetch,
+      io: stubIo({
+        env: { HYDRA_TOKEN: "t", HYDRA_API_URL: "http://controller.test" },
+        fetch,
+        stdin: "Assess this task.\n",
+      }),
+    };
+  };
+
+  it("resolves an agent tail through the agent listing and sends the canonical id", async () => {
+    const { fetch, io } = spawning();
+
+    expect(
+      await main(["--home", home, "session", "spawn", "--agent", "aaaaaaa1", "--json"], io),
+    ).toBe(0);
+
+    // The wire never carries a tail: the listing is read first, exactly as it
+    // is for a positional id.
+    expect(fetch.calls[0]?.path).toBe("/api/v1/agents");
+    expect(fetch.calls[1]).toMatchObject({
+      method: "POST",
+      path: "/api/v1/sessions",
+      body: { agentId: AGENT.id, prompt: "Assess this task." },
+    });
+  });
+
+  it("refuses a tail for an id-holding flag no listing resolves, before anything is sent", async () => {
+    const { fetch, io } = spawning();
+
+    expect(await main(["--home", home, "session", "spawn", "--instance", "cccccccc"], io)).toBe(2);
+
+    // Spelled as the caller had to write it, and nothing was sent: the API
+    // would have answered not_found and taught the caller the id was wrong.
+    expect(io.stderr.join("\n")).toContain("--instance");
+    expect(fetch.calls).toEqual([]);
+  });
+
+  it("uses a full agent id without a lookup, and carries the schema as written", async () => {
+    const { fetch, io } = spawning();
+    const schema =
+      '{"type":"object","additionalProperties":false,"required":["verdict"],"properties":{"verdict":{"type":"string","enum":["accept","dismiss"]}}}';
+
+    expect(
+      await main(
+        ["--home", home, "session", "spawn", "--agent", AGENT.id, "--output-schema", schema],
+        io,
+      ),
+    ).toBe(0);
+
+    expect(fetch.calls.length).toBe(1);
+    expect(fetch.calls[0]).toMatchObject({
+      method: "POST",
+      path: "/api/v1/sessions",
+      body: { agentId: AGENT.id, outputSchema: JSON.parse(schema) as unknown },
+    });
+  });
+});
+
+describe("hydra session list --agent", () => {
+  const AGENTS = [
+    agentRecord(id("aaaaaaa1"), "triager"),
+    agentRecord("0192f0a1-0000-7000-8000-999911112222", "reviewer"),
+  ];
+
+  const listing = (agents: ReadonlyArray<unknown>) => {
+    const fetch = stubFetch((request) =>
+      request.path === "/api/v1/agents" ? { items: agents } : { items: [] },
+    );
+    return {
+      fetch,
+      io: stubIo({ env: { HYDRA_TOKEN: "t", HYDRA_API_URL: "http://controller.test" }, fetch }),
+    };
+  };
+
+  it("resolves the agent tail and filters on the canonical id", async () => {
+    const { fetch, io } = listing(AGENTS);
+
+    expect(
+      await main(["--home", home, "session", "list", "--agent", "aaaaaaa1", "--json"], io),
+    ).toBe(0);
+
+    expect(fetch.calls[0]?.path).toBe("/api/v1/agents");
+    expect(fetch.calls[1]?.query.get("agentId")).toBe(id("aaaaaaa1"));
+  });
+
+  it("answers conflict when the tail could be either of two agents", async () => {
+    const { io } = listing([
+      agentRecord("0192f0a1-0000-7000-8000-000011112222", "one"),
+      agentRecord("0192f0a1-0000-7000-8000-999911112222", "two"),
+    ]);
+
+    expect(
+      await main(["--home", home, "session", "list", "--agent", "11112222", "--json"], io),
+    ).toBe(1);
+
+    const printed = JSON.parse(io.stderr.join("\n")) as { error: { code: string } };
+    expect(printed.error.code).toBe("conflict");
+  });
+
+  it("asks for the sessions nobody drives by hand with --thread", async () => {
+    const { fetch, io } = listing(AGENTS);
+
+    expect(await main(["--home", home, "session", "list", "--thread", "true", "--json"], io)).toBe(
+      0,
+    );
+
+    // No agent named, so no listing was read for one.
+    expect(fetch.calls).toHaveLength(1);
+    expect(fetch.calls[0]?.query.get("thread")).toBe("true");
+  });
+});
+
+describe("hydra transcript read: a turn that answered under a schema", () => {
+  const SESSION_ID = id("eeeeeee1");
+  const VALUE = { verdict: "accept", confidence: 0.9 };
+
+  const turn = (
+    position: number,
+    structuredResult: Record<string, unknown>,
+  ): Record<string, unknown> => ({
+    position,
+    at: "2026-09-19T10:02:00.000Z",
+    event: {
+      _tag: "turn.completed",
+      eventId: `e${position}`,
+      sessionId: SESSION_ID,
+      at: "2026-09-19T10:02:00.000Z",
+      turnId: `t${position}`,
+      state: "completed",
+      structuredResult,
+    },
+  });
+
+  const ROWS = [
+    turn(1, { outcome: "ok", value: VALUE }),
+    turn(2, { outcome: "schema-failure", reason: "/verdict: not one of the enum values" }),
+  ];
+
+  const reading = () => {
+    const fetch = stubFetch(() => ({ items: ROWS }));
+    return {
+      fetch,
+      io: stubIo({ env: { HYDRA_TOKEN: "t", HYDRA_API_URL: "http://controller.test" }, fetch }),
+    };
+  };
+
+  it("shows each outcome as one line, the value as JSON and the failure by its reason", async () => {
+    const { io } = reading();
+
+    expect(await main(["--home", home, "transcript", "read", SESSION_ID], io)).toBe(0);
+
+    expect(io.stdout).toHaveLength(2);
+    expect(io.stdout[0]).toContain("result: ok");
+    expect(io.stdout[0]).toContain(JSON.stringify(VALUE));
+    expect(io.stdout[1]).toContain("result: schema-failure: /verdict: not one of the enum values");
+    // The result is a sentence on the line, not the generic field dump the
+    // other keys of an event get.
+    expect(io.stdout.join("\n")).not.toContain("structuredResult=");
+  });
+
+  it("carries the result verbatim under --json", async () => {
+    const { io } = reading();
+
+    expect(await main(["--home", home, "transcript", "read", SESSION_ID, "--json"], io)).toBe(0);
+
+    const printed = JSON.parse(io.stdout.join("\n")) as {
+      items: ReadonlyArray<{ event: { structuredResult: unknown } }>;
+    };
+    expect(printed.items.map((row) => row.event.structuredResult)).toEqual([
+      { outcome: "ok", value: VALUE },
+      { outcome: "schema-failure", reason: "/verdict: not one of the enum values" },
+    ]);
   });
 });

@@ -2,14 +2,14 @@
  * Running one command: id tails, paging, and the call itself.
  *
  * Two behaviours live here that the wire deliberately does not have. **Id
- * tails** are resolved client-side through the listing the positional's row
- * names, so the API only ever sees canonical ids. **`--all`** follows
- * `nextCursor` to the end, so a caller who wants everything writes one flag
- * instead of a loop.
+ * tails** are resolved client-side through the listing the field's row names -
+ * a positional and a flag alike - so the API only ever sees canonical ids.
+ * **`--all`** follows `nextCursor` to the end, so a caller who wants everything
+ * writes one flag instead of a loop.
  */
 import { ApiError, type HydraClient } from "@hydra/client-core";
 import { UsageError } from "../exit";
-import { coerce, type Arguments } from "./args";
+import { coerce, said, type Arguments } from "./args";
 import { commandOf, type Command, type Field } from "./tree";
 
 /** The operations, as the dynamic tree reaches them: `client[entity][verb](request)`. */
@@ -74,7 +74,7 @@ const readAll = async (
 };
 
 /**
- * The canonical id a positional stands for.
+ * The canonical id the text written for a field stands for.
  *
  * A full id is used as written. Anything else is a tail: the listing the row
  * names is paged through and the ids that end with it are the candidates. This
@@ -93,7 +93,7 @@ const resolveTail = async (
   // nothing is sent, exactly as for a tail nothing can resolve.
   if (text.length < MIN_TAIL) {
     throw new UsageError(
-      `<${field.spelling}>: ${text} is neither an id nor a tail: a tail is at least ${MIN_TAIL} characters`,
+      `${said(field)}: ${text} is neither an id nor a tail: a tail is at least ${MIN_TAIL} characters`,
       command.spelling,
     );
   }
@@ -125,25 +125,51 @@ const resolveTail = async (
   });
 };
 
-/** What a tail looks like, so a positional that cannot resolve one can refuse it. */
+/** What a tail looks like, so a field that cannot resolve one can refuse it. */
 const LOOKS_LIKE_A_TAIL = /^[0-9a-f]{8,}$/;
 
 /**
- * A positional whose row names no listing takes its value as written: a plugin
- * is named `github`, a secret is named `deadbeef` if its owner says so. Where
- * the field holds an id, text shaped like a tail is refused rather than sent,
- * because sending it would answer `not_found` and teach the caller that the id
- * was wrong.
+ * A field whose row names no listing takes its value as written: a plugin is
+ * named `github`, a secret is named `deadbeef` if its owner says so. Where the
+ * schema says the field holds a Hydra id, text shaped like a tail is refused
+ * rather than sent, because sending it would answer `not_found` and teach the
+ * caller that the id was wrong.
  */
 const asWritten = (command: Command, field: Field, text: string): string => {
-  const holdsAnId = field.name === "id" || field.name.endsWith("Id");
-  if (holdsAnId && LOOKS_LIKE_A_TAIL.test(text) && !CANONICAL_ID.test(text)) {
+  if (field.holdsAnId && LOOKS_LIKE_A_TAIL.test(text) && !CANONICAL_ID.test(text)) {
     throw new UsageError(
-      `<${field.spelling}>: ${text} reads as an id tail, and nothing lists these ids to resolve it against; give the full id`,
+      `${said(field)}: ${text} reads as an id tail, and nothing lists these ids to resolve it against; give the full id`,
       command.spelling,
     );
   }
   return text;
+};
+
+/**
+ * What one command's fields hold once every id a tail stands for has been
+ * looked up. One pass, whether a field is written as a bare word or as a flag:
+ * where a field holds an id, how it is spelled on the command line does not
+ * decide whether a tail may stand for it, nor whether one that cannot be
+ * resolved is refused.
+ */
+const resolveTails = async (
+  client: HydraClient,
+  command: Command,
+  fields: ReadonlyArray<Field>,
+  values: Record<string, unknown>,
+): Promise<Record<string, unknown>> => {
+  const resolved = { ...values };
+  for (const field of fields) {
+    const given = resolved[field.name];
+    // A field the caller never wrote, and a numeric or repeated one: no tail
+    // stands for either.
+    if (typeof given !== "string") continue;
+    resolved[field.name] =
+      field.resolves === undefined
+        ? asWritten(command, field, given)
+        : await resolveTail(client, command, field, given);
+  }
+  return resolved;
 };
 
 /** What a command produced: an operation's output, or every item of a `--all` sweep. */
@@ -156,26 +182,25 @@ export const execute = async (
   command: Command,
   args: Arguments,
 ): Promise<Outcome> => {
-  const params: Record<string, string | number> = {};
+  const written: Record<string, unknown> = {};
   for (const [index, field] of command.positionals.entries()) {
     // Every positional is checked against its own field here, where a failure
-    // is still a usage error and nothing has been sent.
-    const value = coerce(field, args.positionals[index]!, command.spelling) as string | number;
-    // A numeric path parameter is the value itself, never a tail of a longer
-    // id: the event log numbers its rows, and `42` is row 42.
-    if (typeof value !== "string") {
-      params[field.name] = value;
-      continue;
-    }
-    params[field.name] =
-      field.resolves === undefined
-        ? asWritten(command, field, value)
-        : await resolveTail(client, command, field, value);
+    // is still a usage error and nothing has been sent. A numeric path
+    // parameter is the value itself, never a tail of a longer id: the event log
+    // numbers its rows, and `42` is row 42.
+    written[field.name] = coerce(field, args.positionals[index]!, command.spelling);
   }
+  const params = (await resolveTails(client, command, command.positionals, written)) as Record<
+    string,
+    string | number
+  >;
+  const payload = await resolveTails(client, command, command.payload, args.payload);
+  const query: Record<string, unknown> = await resolveTails(client, command, command.query, {
+    ...args.query,
+  });
 
   // `--limit` is the page size on a `--all` sweep, not a cap on the total: a
   // caller asking for everything is asking for everything.
-  const query: Record<string, unknown> = { ...args.query };
   if (args.limit !== undefined) query["limit"] = args.limit;
   if (args.sort !== undefined) query["sort"] = args.sort;
 
@@ -199,7 +224,7 @@ export const execute = async (
   const request: Record<string, unknown> = {};
   if (command.positionals.length > 0) request["params"] = params;
   if (command.paged || command.query.length > 0) request["query"] = query;
-  if (command.payload.length > 0) request["payload"] = args.payload;
+  if (command.payload.length > 0) request["payload"] = payload;
 
   const call = callableOf(client, command);
   return {

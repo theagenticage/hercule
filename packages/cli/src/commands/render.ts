@@ -6,6 +6,7 @@
  * object becomes aligned key-value lines, and ids are shortened to the tail the
  * CLI accepts back as an argument.
  */
+import type { StructuredResult } from "@hydra/contract";
 import type { Outcome } from "./execute";
 import type { Command } from "./tree";
 
@@ -117,12 +118,30 @@ const brief = (value: unknown): string => {
   return text.length > TRANSCRIPT_FIELD ? `${text.slice(0, TRANSCRIPT_FIELD)}...` : text;
 };
 
+/**
+ * What a turn answered under its session's output schema, as a sentence on the
+ * turn's own line. It is the answer the session was spawned for, so it reads
+ * as one - the value, or why there is none - rather than as one more
+ * `field=value` beside the turn's state.
+ */
+const describeResult = (structuredResult: unknown): string => {
+  const answer = structuredResult as StructuredResult;
+  switch (answer.outcome) {
+    case "ok":
+      return `result: ok ${brief(answer.value)}`;
+    case "schema-failure":
+      return `result: schema-failure: ${brief(answer.reason)}`;
+  }
+};
+
 /** `<position>  <at>  <tag>  <what that tag adds>`. */
 const transcriptLine = (row: Record<string, unknown>): string => {
   const event = (row["event"] ?? {}) as Record<string, unknown>;
   const said = Object.entries(event)
     .filter(([key]) => !TRANSCRIPT_NOISE.has(key))
-    .map(([key, value]) => `${key}=${brief(value)}`);
+    .map(([key, value]) =>
+      key === "structuredResult" ? describeResult(value) : `${key}=${brief(value)}`,
+    );
   return [cell(row["position"]), cell(row["at"]), cell(event["_tag"]), ...said]
     .join("  ")
     .trimEnd();

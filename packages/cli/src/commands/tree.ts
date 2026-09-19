@@ -45,6 +45,11 @@ export interface Field {
   readonly nullable: boolean;
   /** The closed set of accepted values, when the schema declares one. */
   readonly choices: ReadonlyArray<string> | undefined;
+  /**
+   * The field holds a Hydra id: the schema is the contract's `Id`, not a name
+   * or a free word that happens to sit in a field called `ownerId`.
+   */
+  readonly holdsAnId: boolean;
   /** The value arrives on stdin; there is no inline flag for it. */
   readonly stdin: boolean;
   /** The listing an id tail written here is resolved through; absent takes a full id. */
@@ -93,6 +98,7 @@ const PAGE_FIELDS = new Set(["limit", "cursor", "sort"]);
 
 type Ast = {
   readonly _tag: string;
+  readonly checks?: ReadonlyArray<{ readonly annotations?: { readonly title?: unknown } }>;
   readonly types?: ReadonlyArray<Ast>;
   readonly rest?: ReadonlyArray<Ast>;
   readonly literal?: unknown;
@@ -144,6 +150,17 @@ const elementOf = (input: Ast): Ast | undefined => {
   return list?.rest?.[0];
 };
 
+/** The title the contract's `Id` check carries: the one id shape the wire has. */
+const UUID = "uuidv7";
+
+/**
+ * Whether this is a Hydra id, as the schema says rather than as the field is
+ * named: a secret's `ownerId` is a plugin's name, and the id a tail could ever
+ * stand for is the canonical UUID and nothing else.
+ */
+const holdsAnId = (input: Ast): boolean =>
+  (withoutNull(input).checks ?? []).some((check) => check.annotations?.title === UUID);
+
 const scalarKind = (input: Ast): FieldKind => {
   const ast = withoutNull(input);
   if (literalsOf(ast) !== undefined) return "string";
@@ -178,6 +195,7 @@ const fieldOf = (name: string, ast: Ast, row: FieldRow): Field => {
     optional: ast.context?.isOptional === true,
     nullable: isNullable(ast) || isNullable(value),
     choices: literalsOf(withoutNull(value)),
+    holdsAnId: holdsAnId(value),
     stdin: "stdin" in row && row.stdin === true,
     resolves: "resolves" in row ? row.resolves : undefined,
     help: row.help,

@@ -15,7 +15,7 @@
  * coalesced]). Nothing else is folded, rewritten or dropped.
  */
 import { Schema } from "effect";
-import { ProviderEvent } from "@hydra/protocol";
+import { ProviderEvent, StructuredResult } from "@hydra/protocol";
 import * as HttpApiEndpoint from "effect/unstable/httpapi/HttpApiEndpoint";
 import * as HttpApiGroup from "effect/unstable/httpapi/HttpApiGroup";
 import { Forbidden, Internal, NotFound, Unauthenticated, Validation } from "../errors";
@@ -36,6 +36,14 @@ export const TranscriptRow = Schema.Struct({
 });
 
 export type TranscriptRow = Schema.Schema.Type<typeof TranscriptRow>;
+
+/**
+ * What a turn answered under its session's output schema, as the protocol
+ * spells it. Re-exported rather than restated: a reader of a transcript row is
+ * the one consumer of it outside the runner, and two spellings of one verdict
+ * would let them disagree.
+ */
+export { StructuredResult };
 
 /** The one order a transcript has. A cursor is only valid for the walk it came from. */
 export const TRANSCRIPT_SORT_FIELDS = ["position"] as const;

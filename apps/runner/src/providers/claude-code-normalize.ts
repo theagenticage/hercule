@@ -16,11 +16,14 @@ import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import {
   MAX_MESSAGE_LENGTH,
   type ItemKind,
+  type OutputSchema,
   type ProviderEvent,
   type StreamKind,
+  type StructuredResult,
   type TurnState,
   type Usage,
 } from "@hydra/protocol";
+import { structuredResultOf, type StructuredCandidate } from "./structured-result";
 
 /** The channel name every raw payload from this adapter is filed under. */
 export const CLAUDE_SDK_MESSAGE = "claude.sdk.message";
@@ -45,6 +48,8 @@ export interface Normalizing {
   readonly mint: () => string;
   /** The runner's own clock, as an ISO-8601 instant. */
   readonly now: () => string;
+  /** What every turn of this session must answer with; absent is prose. */
+  readonly outputSchema: OutputSchema | undefined;
   /** The open turn, or `undefined` between turns. The adapter opens the first. */
   turnId: string | undefined;
   /**
@@ -69,10 +74,12 @@ export const normalizing = (
   sessionId: string,
   mint: () => string,
   now: () => string,
+  outputSchema: OutputSchema | undefined,
 ): Normalizing => ({
   sessionId,
   mint,
   now,
+  outputSchema,
   turnId: undefined,
   streams: new Map(),
   streamed: new Set(),
@@ -188,7 +195,11 @@ const closeTurn = (
   out: Emit,
   turnId: string,
   turnState: TurnState,
-  extra: { readonly usage?: Usage; readonly error?: string } = {},
+  extra: {
+    readonly usage?: Usage;
+    readonly error?: string;
+    readonly structuredResult?: StructuredResult;
+  } = {},
 ): void => {
   out.push({
     _tag: "turn.completed",
@@ -199,6 +210,7 @@ const closeTurn = (
     state: turnState,
     ...(extra.usage === undefined ? {} : { usage: extra.usage }),
     ...(extra.error === undefined ? {} : { error: extra.error }),
+    ...(extra.structuredResult === undefined ? {} : { structuredResult: extra.structuredResult }),
   });
   state.turnId = undefined;
   state.streams.clear();
@@ -459,6 +471,47 @@ const wentWrong = (sdk: Extract<SDKMessage, { type: "result" }>): string => {
   return sdk.subtype;
 };
 
+/**
+ * The SDK's own word for having re-prompted the model to its limit without a
+ * value that fits the schema.
+ */
+const RETRIES_EXHAUSTED = "error_max_structured_output_retries";
+
+/**
+ * What the harness produced under the schema, or `undefined` where this result
+ * says nothing about it. Only two results say anything: a turn that ran to the
+ * end, and one the harness abandoned over the schema itself. An interrupt and
+ * every other failure are about the turn, and a verdict on the schema there
+ * would be one nobody took.
+ */
+const candidateOf = (
+  sdk: Extract<SDKMessage, { type: "result" }>,
+  turnState: TurnState,
+): StructuredCandidate | undefined => {
+  // An interrupt first, whatever the subtype: a turn the user ended is a turn
+  // nobody asked a verdict about, retries or no retries.
+  if (turnState === "interrupted") return undefined;
+  if (sdk.subtype === RETRIES_EXHAUSTED) {
+    return { missing: `the harness gave up on the schema: ${RETRIES_EXHAUSTED}` };
+  }
+  if (turnState !== "completed" || sdk.subtype !== "success") return undefined;
+  return sdk.structured_output === undefined
+    ? { missing: "the harness ended the turn without producing a structured output" }
+    : { value: sdk.structured_output };
+};
+
+/** The verdict this result carries about the schema, where it carries one. */
+const resultOf = (
+  state: Normalizing,
+  sdk: Extract<SDKMessage, { type: "result" }>,
+  turnState: TurnState,
+): StructuredResult | undefined => {
+  const schema = state.outputSchema;
+  if (schema === undefined) return undefined;
+  const candidate = candidateOf(sdk, turnState);
+  return candidate === undefined ? undefined : structuredResultOf(schema, candidate);
+};
+
 const onResult = (
   state: Normalizing,
   sdk: Extract<SDKMessage, { type: "result" }>,
@@ -467,6 +520,7 @@ const onResult = (
   const turnId = inTurn(state, out);
   const usage = usageOf(sdk);
   const turnState = stateOf(sdk);
+  const structuredResult = resultOf(state, sdk, turnState);
   out.push({
     _tag: "session.usage.updated",
     eventId: state.mint(),
@@ -477,6 +531,7 @@ const onResult = (
   closeTurn(state, out, turnId, turnState, {
     usage,
     ...(turnState === "failed" ? { error: wentWrong(sdk) } : {}),
+    ...(structuredResult === undefined ? {} : { structuredResult }),
   });
 };
 

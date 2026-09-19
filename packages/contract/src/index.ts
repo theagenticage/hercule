@@ -173,7 +173,7 @@ export {
   InputStatus,
   InputUpdatePayload,
 } from "./groups/input";
-export { TRANSCRIPT_SORT_FIELDS, TranscriptRow } from "./groups/transcript";
+export { StructuredResult, TRANSCRIPT_SORT_FIELDS, TranscriptRow } from "./groups/transcript";
 export { OwnerKind, SecretRef } from "./groups/secret";
 export {
   CONNECTION_SORT_FIELDS,

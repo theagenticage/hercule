@@ -18,6 +18,7 @@ import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
 import {
   MAX_MESSAGE_LENGTH,
+  lintOutputSchema,
   type ExitReason,
   type ProviderEvent,
   type RunnerToController,
@@ -349,8 +350,21 @@ export const supervising = (adapters: ReadonlyArray<ProviderAdapter>): Supervisi
      * uninterruptibly: a session that exits while it is still starting must
      * find its own entry, and one that never came up must leave none behind.
      */
-    const starting = (frame: SessionStart, adapter: ProviderAdapter): Effect.Effect<void> =>
-      resolve(frame, connection.machine, adapter.binaryName).pipe(
+    const starting = (frame: SessionStart, adapter: ProviderAdapter): Effect.Effect<void> => {
+      // The controller linted this schema before it sent it, and the harness
+      // would be held to it for every turn of the session: a schema outside
+      // the subset means the two processes disagree about what a schema may
+      // say, which is a session that must not start rather than one whose
+      // results cannot be trusted.
+      const issues =
+        frame.spec.outputSchema === undefined ? [] : lintOutputSchema(frame.spec.outputSchema);
+      if (issues.length > 0) {
+        return died(
+          frame.sessionId,
+          `the output schema is outside the subset: ${issues.join("; ")}`,
+        );
+      }
+      return resolve(frame, connection.machine, adapter.binaryName).pipe(
         Effect.flatMap((resolved) =>
           Effect.asVoid(
             Effect.uninterruptible(
@@ -431,6 +445,7 @@ export const supervising = (adapters: ReadonlyArray<ProviderAdapter>): Supervisi
         Effect.catch((message) => died(frame.sessionId, message)),
         Effect.catchCause((cause) => died(frame.sessionId, wentWrong(cause, MAX_MESSAGE_LENGTH))),
       );
+    };
 
     return {
       relay: Stream.runForEach(
