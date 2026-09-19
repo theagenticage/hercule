@@ -8,17 +8,24 @@
  * the row stores, the account a readable connection lends - never how the
  * domain goes about building them.
  */
-import { describe, expect, it } from "vitest";
-import { Effect, Layer, Option } from "effect";
+import { afterEach, describe, expect, it } from "vitest";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { Deferred, Effect, Fiber, Layer, Option } from "effect";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import { SessionSpec, type ModelSelection, type SessionStart } from "@hydra/protocol";
+import { homePaths, HydraHome } from "../config";
 import { hashToken } from "../credentials";
 import { mintUuid, uuidToString, withTransaction } from "../db";
 import { TestDatabase } from "../db/testing";
 import { AuditLogLayer } from "../events";
 import { SessionTokensLayer } from "../permissions";
+import { masterKeyLayer } from "../secrets/masterKey";
+import { secretsLayer } from "../secrets/repository";
+import { gitCredentials } from "../workspaces";
 import type { GitCredential } from "../workspaces";
 import { type StoredInput } from "./inputs";
 import { sessionRepository } from "./repository";
@@ -104,6 +111,14 @@ const aQueuedSession = (
 
 /** The pair `starting` returns for one claimed session. */
 type Claim = Starting;
+
+/** Throwaway master-key homes, removed once this file's tests are done. */
+let homes: Array<string> = [];
+
+afterEach(() => {
+  for (const home of homes) rmSync(home, { recursive: true, force: true });
+  homes = [];
+});
 
 /** `starting` as the daemon calls it: inside the caller's transaction. */
 const claiming = (
@@ -359,6 +374,113 @@ describe("SessionService.starting", () => {
     // Room for one, and the oldest row cannot fill it: the look past it does.
     expect(result.claimed.map((claim) => claim.sessionId)).toEqual([result.good]);
     expect(result.poisonedAfter?.status).toBe("queued");
+  });
+
+  it("walks past any number of poison rows to fill the room", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const instanceId = yield* anInstance("an-adapter", {});
+        const runnerId = anId();
+        for (let i = 0; i < 6; i += 1) {
+          yield* aQueuedSession(runnerId, {
+            instanceId,
+            spec: aSpec(instanceId, "clever"),
+            storedSpec: "{}",
+          });
+        }
+        const good = yield* aQueuedSession(runnerId, {
+          instanceId,
+          spec: aSpec(instanceId, "clever"),
+        });
+        const claimed = yield* claiming(runnerId, 2, () => Effect.succeed(undefined));
+        return { claimed, good };
+      }),
+    );
+
+    // Six unreadable rows ahead, room for two, one healthy row behind them
+    // all: the walk reaches it and the room is filled with what it found.
+    expect(result.claimed.map((claim) => claim.sessionId)).toEqual([result.good]);
+  });
+
+  it("rolls the claim back when interrupted while reading the credential", async () => {
+    const home = mkdtempSync(join(tmpdir(), "hydra-sessions-"));
+    homes.push(home);
+    // The real credential reader, over the same database, with a master key
+    // of its own in a home this test throws away.
+    const stack = SessionServiceLayer.pipe(
+      Layer.provideMerge(
+        Layer.mergeAll(
+          AuditLogLayer,
+          SessionTokensLayer,
+          secretsLayer.pipe(
+            Layer.provide(
+              masterKeyLayer("file").pipe(
+                Layer.provide(
+                  Layer.succeed(HydraHome, HydraHome.of(homePaths(home, join(home, "data")))),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+      Layer.provideMerge(TestDatabase),
+    );
+
+    const result = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient;
+          const rows = yield* sessionRepository;
+          const sessions = yield* SessionService;
+          const credentials = yield* gitCredentials;
+          const instanceId = yield* anInstance("an-adapter", {});
+          const runnerId = anId();
+          // The connection names nothing, so the real reader takes its
+          // logged-and-degraded path and hands back no account; the gate then
+          // holds the claim inside the credential stage, where a shutdown
+          // interrupt lands.
+          const sessionId = yield* aQueuedSession(runnerId, {
+            instanceId,
+            spec: aSpec(instanceId, "clever"),
+            githubConnectionId: anId(),
+          });
+          const entered = yield* Deferred.make<void>();
+          const release = yield* Deferred.make<void>();
+          const claim = withTransaction(
+            sql,
+            sessions.starting(runnerId, 1, {
+              accountOf: (connectionId) =>
+                Effect.as(
+                  Effect.andThen(
+                    Deferred.succeed(entered, undefined),
+                    Effect.andThen(
+                      credentials.githubAccountOf(connectionId),
+                      Deferred.await(release),
+                    ),
+                  ),
+                  undefined,
+                ),
+            }),
+          );
+          const fiber = yield* Effect.forkChild(claim);
+          yield* Deferred.await(entered);
+          // The shutdown shape: the dispatch child, mid-credential-stage, is
+          // told to stop and waits for nothing.
+          yield* Fiber.interrupt(fiber);
+          return {
+            after: yield* Effect.map(rows.one(sessionId), Option.getOrUndefined),
+            hash: yield* hashOf(sessionId),
+          };
+        }),
+        stack,
+      ),
+    );
+
+    // The claim rolled back with the interruption: the row never left the
+    // queue, and the token's hash never landed. A claim the interruption
+    // could not reach back out of would read `starting` with a hash on it.
+    expect(result.after?.status).toBe("queued");
+    expect(result.hash).toBeNull();
   });
 });
 

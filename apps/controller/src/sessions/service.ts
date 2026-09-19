@@ -69,7 +69,12 @@ import { AuditLog } from "../events";
 import { SessionTokens } from "../permissions";
 import { gitIdentityOf, type GitCredential } from "../workspaces";
 import { inputRepository, type StoredInput } from "./inputs";
-import { requireSession, sessionRepository, type StoredSession } from "./repository";
+import {
+  requireSession,
+  sessionRepository,
+  type QueuePosition,
+  type StoredSession,
+} from "./repository";
 import { fold, openRequestAfter, track, type Folded, type Tracked } from "./stream";
 
 const QueryInput = Schema.Struct({
@@ -491,23 +496,25 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         const at = yield* nowIso;
         const claimed: Array<Starting> = [];
-        const skipped = new Set<string>();
-        // A row the codec refuses still occupies fetch width, so a pass that
-        // skipped any looks one window deeper until the room is filled or the
-        // queue runs out: a runner's room is for sessions that can start, not
-        // for documents that cannot.
-        for (let width = room; ; width += room) {
-          const queued = yield* sessions.oldestQueued(runnerId, width);
+        const skipped: Array<string> = [];
+        // The walk advances past every row it examines - poison included - so
+        // each candidate is fetched and decoded once, however many documents
+        // the codec refuses: a runner's room is for sessions that can start,
+        // not for documents that cannot.
+        let after: QueuePosition | undefined;
+        while (claimed.length < room) {
+          const queued = yield* sessions.oldestQueued(runnerId, room - claimed.length, after);
+          if (queued.length === 0) break;
           for (const row of queued) {
+            after = { createdAt: row.createdAt, id: row.id };
             if (claimed.length >= room) break;
             // Normally the codec that reads a stored document is the codec
             // that wrote it, so one that will not decode was queued under an
             // older build. It is left queued - visible, and stoppable, by
-            // whoever can re-deploy or end it - while the rest of the batch
-            // starts.
+            // whoever can re-deploy or end it - while the walk continues.
             const spec = yield* Effect.option(decodeSpecDocument(row.spec));
             if (Option.isNone(spec)) {
-              skipped.add(row.id);
+              skipped.push(row.id);
               continue;
             }
             // The session's own credential on the public API, minted for this
@@ -541,14 +548,13 @@ const make = Effect.gen(function* () {
               },
             });
           }
-          if (claimed.length >= room || queued.length < width) break;
         }
         // Said out loud, because a row skipped above reads, to every
         // observer, like one waiting for room - and only this says otherwise.
-        if (skipped.size > 0) {
+        if (skipped.length > 0) {
           yield* Effect.logError(
             "skipped queued sessions whose stored spec no longer decodes; they stay queued",
-            [...skipped],
+            skipped,
           );
         }
         return claimed;
