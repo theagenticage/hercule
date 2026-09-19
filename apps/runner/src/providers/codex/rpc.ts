@@ -70,9 +70,12 @@ export interface Rpc {
 }
 
 /**
- * How long a request waits. Every one is bounded because an unknown method gets
- * no reply at all, so without a bound a method dropped in a Codex upgrade would
- * leak a pending entry on every call for the life of the process.
+ * How long a request to the app-server waits. Every one is bounded because an
+ * unknown method gets no reply at all, so without a bound a method dropped in a
+ * Codex upgrade would leak a pending entry on every call for the life of the
+ * process. Thirty seconds: a Codex request may reach the network - a thread
+ * start authenticates - and the app-server answers the runner's frames on a
+ * loop of its own rather than on the one the runner serializes sessions with.
  */
 export const RPC_DEADLINE: Duration.Duration = Duration.seconds(30);
 

@@ -33,6 +33,14 @@ Development cost carries almost no weight here. Optimize, in order, for: correct
 
 The test: would a senior engineer call this overcomplicated? Then it is.
 
+**Names carry their own context.**
+
+1. A type or a field is named for what it stands for, in the project's vocabulary (a CONTEXT.md word where one exists; CONTEXT.md holds the application's concepts, not every module's details), qualified when look-alikes exist. Never for how it is encoded or transported, or for which caller uses it.
+2. A function is named for what it does and to what: verb plus object (`excludeSecretFields(schema)`), or for a pure query, the question it answers about its argument (`requiresApproval(mode, toolName)`). The verb tells the truth about the work: `get` reads something that already exists, `compute`, `build` and `parse` produce something, and a boolean query reads as its question. `getHash` is wrong for a function that computes one. A name with no verb, or no subject, is not a name yet.
+3. A name is read without the file, the folder or the call site. Bare nouns, bare adjectives or gerunds, and nicknames a comment invented fail this.
+4. One concept has one spelling in every package it crosses. The owner of a shared contract names it once; callers import that name and never alias it.
+5. A name stays true when the mechanism behind it changes.
+
 **Think before coding.** State your assumptions. If multiple interpretations of the ticket or spec exist, present them - don't pick one silently. If a simpler approach than the ticket implies exists, say so and push back.
 
 **Boyscouting.** Leave the codebase better than you found it. A warning, a lint error, a flaky test, a UI detail that looks off - fix it even when it's unrelated to your task, and mention that you did.

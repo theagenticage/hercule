@@ -71,3 +71,48 @@ describe("providerRows", () => {
     expect(row).toMatchObject({ install: "none", logIn: false, probe: false });
   });
 });
+
+/**
+ * A provider logged in with a credential the user types in. What the action
+ * offering it reads is decided here, so the fleet row and the Sessions screen
+ * cannot word the same offer differently.
+ */
+describe("a provider with a secret-valued field", () => {
+  const FIELD = {
+    name: "zaiApiKey",
+    title: "Z.ai API key",
+    description: "From your Z.ai Coding Plan subscription.",
+  };
+
+  const keyed = (set: boolean): ProviderInstance => ({
+    ...instance("pi", "pi", [snapshot({ auth: { status: "unauthenticated" } })]),
+    binaryName: "pi",
+    secretFields: [{ ...FIELD, set }],
+  });
+
+  const WITH_PI: Runner = {
+    ...WITH_CLAUDE,
+    facts: {
+      ...WITH_CLAUDE.facts!,
+      providers: [{ name: "pi", present: true, path: "/usr/local/bin/pi" }],
+      adapters: ["pi"],
+    },
+  };
+
+  it("asks for the key in the plugin's words, and offers to replace one that is there", () => {
+    expect(only(WITH_PI, keyed(false)).secretFields).toEqual([
+      { ...FIELD, set: false, label: `Enter ${FIELD.title}` },
+    ]);
+    expect(only(WITH_PI, keyed(true)).secretFields).toEqual([
+      { ...FIELD, set: true, label: `Replace ${FIELD.title}` },
+    ]);
+  });
+
+  it("offers the key in place of a login: there is no vendor to send the user to", () => {
+    expect(only(WITH_PI, keyed(false)).logIn).toBe(false);
+  });
+
+  it("offers neither on a machine this harness is not on", () => {
+    expect(only(WITH_CLAUDE, keyed(false))).toMatchObject({ secretFields: [], logIn: false });
+  });
+});

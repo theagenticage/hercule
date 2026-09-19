@@ -162,6 +162,9 @@ export const resolve = (
         home,
         binary: machine.binaryOf(binaryName),
         env: envFor(machine, frame),
+        // Handed to the adapter and layered into nothing: a credential belongs
+        // in whichever variable the harness reads, which only the adapter knows.
+        secrets: frame.secrets,
         hydraTool: machine.hydraTool,
       },
     };

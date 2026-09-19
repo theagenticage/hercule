@@ -4,7 +4,7 @@
  */
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { CLAUDE_CODE_VERSION, CODEX_VERSION } from "@hydra/home/version";
+import { CLAUDE_CODE_VERSION, CODEX_VERSION, PI_VERSION } from "@hydra/home/version";
 import { floorFor, versionVerdict } from "./version";
 
 const root = fileURLToPath(new URL("../../../../", import.meta.url));
@@ -44,9 +44,19 @@ describe("the verdict on a harness version", () => {
 });
 
 describe("the floor each provider is held to", () => {
-  it("holds Claude Code to the SDK's CLI version, and a provider with no adapter to none", () => {
+  it("holds Claude Code to the SDK's CLI version, and a provider nobody pinned to none", () => {
     expect(floorFor("claude-code")).toBe(CLAUDE_CODE_VERSION);
-    expect(floorFor("pi")).toBeNull();
+    expect(floorFor("nobody-pinned-this")).toBeNull();
+  });
+
+  // pi is pre-1.0 with recorded breaking changes in its RPC mode, so its floor
+  // and the newest anyone tested are the same release.
+  it("holds pi to the release this build was verified against", () => {
+    expect(floorFor("pi")).toBe(PI_VERSION);
+    expect(PI_VERSION).toBe("0.85.1");
+    expect(versionVerdict("0.85.1", floorFor("pi"))).toBe("ok");
+    expect(versionVerdict("0.84.3", floorFor("pi"))).toBe("below-floor");
+    expect(versionVerdict("0.86.0", floorFor("pi"))).toBe("above-tested-max");
   });
 
   it("holds Codex to the release this build's types were generated from", () => {

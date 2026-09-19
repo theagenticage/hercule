@@ -255,7 +255,11 @@ export const connect = (
       facts.providers.find((provider) => provider.name === binaryName && provider.present)?.path;
 
     /** The instance's private directory: where the harness keeps its credential. */
-    const contextFor = (adapter: ProviderAdapter, instanceId: string): ProviderRunnerContext => {
+    const contextFor = (
+      adapter: ProviderAdapter,
+      instanceId: string,
+      secrets: Readonly<Record<string, string>>,
+    ): ProviderRunnerContext => {
       const home = joinPath(options.providersDir, instanceId);
       mkdirSync(home, { recursive: true, mode: 0o700 });
       // Probes, logins and installs run nowhere: a cwd is a session's, and the
@@ -265,6 +269,7 @@ export const connect = (
         home,
         binary: binaryOf(adapter.binaryName),
         env: process.env,
+        secrets,
         // Carried because the context type is one: a probe, an install and a
         // login never load the skill.
         hydraTool: options.hydraTool,
@@ -334,7 +339,10 @@ export const connect = (
         return yield* reporting(
           adapter === undefined
             ? probeFailed(null, noAdapterFor(request.providerId))
-            : yield* adapter.probe(contextFor(adapter, request.instanceId), request.config),
+            : yield* adapter.probe(
+                contextFor(adapter, request.instanceId, request.secrets),
+                request.config,
+              ),
         );
       }).pipe(
         // The encoding is inside the catch: a result `asText` cannot carry must
@@ -408,7 +416,9 @@ export const connect = (
           : providerLogins.start(
               request.instanceId,
               adapter,
-              contextFor(adapter, request.instanceId),
+              // A login is the harness writing its own credential on this
+              // machine; the instance's stored ones have no part in it.
+              contextFor(adapter, request.instanceId, {}),
             );
       });
 

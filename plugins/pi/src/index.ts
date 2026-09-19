@@ -2,6 +2,7 @@ import { Effect, Schema } from "effect";
 import {
   HOST_API,
   registerProvider,
+  secret,
   type Plugin,
   type ProviderDefinition,
 } from "@hydra/plugin-host";
@@ -16,7 +17,18 @@ const definition: ProviderDefinition = {
   displayName: "pi",
   binaryName: "pi",
   supportsMultipleInstances: true,
-  configSchema: Schema.Struct({}),
+  // Z.ai is the only upstream this build drives pi against, and it authenticates
+  // with an API key alone. The key is the user's Z.ai credential, not pi's, so
+  // the field is named and worded for Z.ai.
+  configSchema: Schema.Struct({
+    zaiApiKey: secret({
+      title: "Z.ai API key",
+      description:
+        "From your Z.ai Coding Plan subscription. It is stored on the controller " +
+        "and sent to whichever machine runs a thread, so it is entered once and " +
+        "works on every machine.",
+    }),
+  }),
   defaultConfig: {},
   declared: {
     steering: "native",

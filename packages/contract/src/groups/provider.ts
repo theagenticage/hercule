@@ -55,6 +55,21 @@ export const CapabilitySnapshot = Schema.Struct({
 
 export type CapabilitySnapshot = Schema.Schema.Type<typeof CapabilitySnapshot>;
 
+/**
+ * One secret-valued config field of a provider, in the plugin's own words, and
+ * whether this instance has one stored. The value is written through
+ * `secret.set` and never read back: an instance says that a credential is
+ * there, never what it is.
+ */
+export const ProviderSecretField = Schema.Struct({
+  name: Schema.String,
+  title: Schema.String,
+  description: Schema.String,
+  set: Schema.Boolean,
+});
+
+export type ProviderSecretField = Schema.Schema.Type<typeof ProviderSecretField>;
+
 export const ProviderInstance = Schema.Struct({
   id: Id,
   providerId: Schema.String,
@@ -64,6 +79,8 @@ export const ProviderInstance = Schema.Struct({
   /** The harness's name on a machine's `PATH`, which is how facts name it. */
   binaryName: Schema.String,
   declared: DeclaredCapabilities,
+  /** Empty where the provider's plugin marked no field secret. */
+  secretFields: Schema.Array(ProviderSecretField),
   snapshots: Schema.Array(CapabilitySnapshot),
   createdAt: Timestamp,
   updatedAt: Timestamp,

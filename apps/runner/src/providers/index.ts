@@ -1,6 +1,5 @@
 /**
- * The provider adapters this runner build carries. Claude Code and Codex exist;
- * pi gets its own with its own ticket.
+ * The provider adapters this runner build carries.
  */
 import type * as Effect from "effect/Effect";
 import type * as Schema from "effect/Schema";
@@ -17,6 +16,7 @@ import {
 } from "@hydra/protocol";
 import { CLAUDE_CODE, claudeCode } from "./claude-code";
 import { CODEX, codex } from "./codex";
+import { PI, pi } from "./pi";
 import { logins, type LoginCommand } from "./login";
 import { spawnLogin } from "./process";
 
@@ -36,6 +36,15 @@ export interface ProviderRunnerContext {
    * section 4). Never carries a `HOME` override.
    */
   readonly env: Readonly<Record<string, string | undefined>>;
+  /**
+   * The instance's secret-valued config fields, by the name the plugin gave
+   * each, decrypted by the controller and carried inline on the frame that
+   * asked for this operation. They live in this process's memory for as long as
+   * the operation does: never written to this machine's disk, never logged, and
+   * never layered into `env` here - which variable a credential belongs in is
+   * the adapter's own business.
+   */
+  readonly secrets: Readonly<Record<string, string>>;
   /**
    * hydra-as-a-tool, resolved once by the runner and materialized by each
    * adapter into its harness's own channel (spec 06 section 9.3): the skill
@@ -128,6 +137,7 @@ export interface ProviderAdapter {
 const ADAPTERS: ReadonlyMap<string, ProviderAdapter> = new Map([
   [CLAUDE_CODE, claudeCode],
   [CODEX, codex],
+  [PI, pi],
 ]);
 
 /** Every adapter this build carries: what the session supervisor listens to. */

@@ -29,6 +29,7 @@ const CONTEXT: ProviderRunnerContext = {
   home: `/var/hydra/runner/providers/${INSTANCE}`,
   binary: "/usr/local/bin/claude",
   env: { PATH: "/usr/local/bin:/usr/bin", HOME: "/home/rogier" },
+  secrets: {},
   // Never read by a probe, an install or a login; the context type carries it
   // for the sessions this adapter also hosts.
   hydraTool: { skill: "", claudePluginDir: "/var/hydra/runner/storage/claude-plugin" },
@@ -435,6 +436,7 @@ describe("a device-code login", () => {
     home: mkdtempSync(join(tmpdir(), "hydra-login-")),
     binary: "/usr/local/bin/codex",
     env: { PATH: "/usr/local/bin:/usr/bin", HOME: "/home/rogier" },
+    secrets: {},
     // Never read by a probe, an install or a login; the context type carries it
     // for the sessions this adapter also hosts.
     hydraTool: { skill: "", claudePluginDir: "/var/hydra/runner/storage/claude-plugin" },

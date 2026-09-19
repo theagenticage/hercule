@@ -15,7 +15,12 @@ import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
-import { decodeAgainst, type ProviderDefinition } from "@hydra/plugin-host";
+import {
+  decodeAgainst,
+  secretFields,
+  excludeSecretFields,
+  type ProviderDefinition,
+} from "@hydra/plugin-host";
 import type { LoginCode, LoginFailed, LoginResult, LoginStart, LoginUrl } from "@hydra/protocol";
 import {
   invalidState,
@@ -40,6 +45,13 @@ import { currentStamp, requireGrant } from "../actor";
 import { nowIso, withTransaction } from "../db";
 import { AuditLog } from "../events";
 import { PluginHost } from "../plugins";
+import {
+  providerInstanceOwner,
+  Secrets,
+  type SecretDecryptError,
+  type SecretNameRef,
+  type SecretOwnerKind,
+} from "../secrets";
 import {
   NO_SUCH_RUNNER,
   requireAdapter,
@@ -113,6 +125,9 @@ const decodeInstall = Schema.decodeUnknownEffect(InstallInput);
 
 const NO_SUCH_INSTANCE = "no such provider instance";
 
+/** Who a provider instance's credentials belong to in the secrets table. */
+const OWNER_KIND: SecretOwnerKind = "provider-instance";
+
 type ReadError = Unauthenticated | Forbidden | SqlError | Schema.SchemaError;
 
 type CreateError = ReadError | Validation;
@@ -120,6 +135,18 @@ type CreateError = ReadError | Validation;
 type WriteError = CreateError | NotFound;
 
 type AskError = WriteError | InvalidState;
+
+/**
+ * A stored credential that will not decrypt fails the move that needed it: a
+ * probe answered as if there were none would read as a credential nobody
+ * entered. Said as a state rather than as a fault, because it is one the user
+ * settles by entering the credential again.
+ */
+const undecryptable = (error: SecretDecryptError): InvalidState =>
+  invalidState(
+    `the credential stored as ${error.name} for that provider instance could not be ` +
+      "decrypted; enter it again to replace it",
+  );
 
 type LoginAnswer = LoginUrl | LoginFailed | LoginResult;
 
@@ -129,12 +156,22 @@ const isLoginAnswer = (answer: Answer): answer is LoginAnswer =>
 const refusalIn = (answer: LoginAnswer): string =>
   answer._tag === "loginFailed" ? answer.message : "the login did not answer with a URL";
 
-/** All errors at once, so a form can put each message under its own field. */
+/**
+ * All errors at once, so a form can put each message under its own field. Read
+ * against the schema without its secret-valued fields: those live in the
+ * secrets table, so one written into the config is an unknown key and is
+ * refused by name.
+ */
 const readConfig = (
   definition: ProviderDefinition,
   config: Schema.Json,
 ): Effect.Effect<void, Validation> =>
-  Effect.asVoid(Effect.mapError(decodeAgainst(definition.configSchema, config), validationOf));
+  Effect.asVoid(
+    Effect.mapError(
+      decodeAgainst(excludeSecretFields(definition.configSchema), config),
+      validationOf,
+    ),
+  );
 
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
@@ -144,21 +181,38 @@ const make = Effect.gen(function* () {
   const probes = yield* ProviderProbes;
   const connections = yield* RunnerConnections;
   const runners = yield* runnerRepository;
+  const secrets = yield* Secrets;
 
   const definitions = Effect.map(
     host.providers(),
     (registered) => new Map(registered.map((definition) => [definition.id, definition])),
   );
 
+  /**
+   * What the plugin marked secret, said in its own words, with whether this
+   * instance has a value stored under each name. The value itself is never
+   * read here: an instance says a credential is there, never what it is.
+   */
+  const secretFieldsOf = (
+    definition: ProviderDefinition,
+    stored: ReadonlyArray<SecretNameRef>,
+  ): ProviderInstance["secretFields"] =>
+    secretFields(definition.configSchema).map((field) => ({
+      ...field,
+      set: stored.some((ref) => ref.name === field.name),
+    }));
+
   const compose = (
     stored: StoredInstance,
     definition: ProviderDefinition,
     snapshots: ReadonlyArray<StoredSnapshot>,
+    held: ReadonlyArray<SecretNameRef>,
   ): ProviderInstance => ({
     ...stored,
     displayName: definition.displayName,
     binaryName: definition.binaryName,
     declared: definition.declared,
+    secretFields: secretFieldsOf(definition, held),
     snapshots: snapshots
       .filter((snapshot) => snapshot.instanceId === stored.id)
       .map((snapshot) => ({
@@ -178,9 +232,16 @@ const make = Effect.gen(function* () {
     const known = yield* definitions;
     const stored = yield* instances.list();
     const snapshots = yield* instances.snapshots();
+    // One query for the page rather than one per row.
+    const held = yield* secrets.refs(
+      OWNER_KIND,
+      stored.map((row) => row.id),
+    );
     return stored.flatMap((row) => {
       const definition = known.get(row.providerId);
-      return definition === undefined ? [] : [compose(row, definition, snapshots)];
+      return definition === undefined
+        ? []
+        : [compose(row, definition, snapshots, held.get(row.id) ?? [])];
     });
   });
 
@@ -192,9 +253,10 @@ const make = Effect.gen(function* () {
       const known = yield* definitions;
       const stored = yield* instances.one(id);
       const snapshots = yield* instances.snapshotsOf(id);
+      const held = yield* secrets.refs(OWNER_KIND, [id]);
       const found = Option.flatMap(stored, (row) =>
         Option.map(Option.fromNullishOr(known.get(row.providerId)), (definition) =>
-          compose(row, definition, snapshots),
+          compose(row, definition, snapshots, held.get(id) ?? []),
         ),
       );
       return yield* Option.match(found, {
@@ -329,7 +391,11 @@ const make = Effect.gen(function* () {
             }),
           ),
         );
-        const snapshot = yield* probes.probe(runnerId, id);
+        const snapshot = yield* probes
+          .probe(runnerId, id)
+          .pipe(
+            Effect.catchTag("SecretDecryptError", (error) => Effect.fail(undecryptable(error))),
+          );
         return yield* Option.match(snapshot, {
           onNone: () =>
             Effect.flatMap(ProviderProbeDeadline, (waited) =>
@@ -352,7 +418,11 @@ const make = Effect.gen(function* () {
         yield* requireGrant("runner.probe");
         const { runnerId, instanceId } = yield* Effect.mapError(decodeProbe(input), validationOf);
         yield* requireOnline(yield* machine(runnerId));
-        const snapshot = yield* probes.probe(runnerId, instanceId);
+        const snapshot = yield* probes
+          .probe(runnerId, instanceId)
+          .pipe(
+            Effect.catchTag("SecretDecryptError", (error) => Effect.fail(undecryptable(error))),
+          );
         return yield* Option.match(snapshot, {
           onNone: () =>
             Effect.flatMap(ProviderProbeDeadline, (waited) =>
@@ -430,7 +500,8 @@ const make = Effect.gen(function* () {
               record: { topic: "provider", id: stored.id },
               at,
             });
-            return compose(stored, definition, []);
+            // Nothing can be stored under an instance that did not exist a moment ago.
+            return compose(stored, definition, [], []);
           }),
         );
       }),
@@ -495,9 +566,19 @@ const make = Effect.gen(function* () {
                 onSome: Effect.succeed,
               }),
             );
+            // In the transaction that deletes the row: a credential left
+            // behind belongs to an owner that no longer exists, and the next
+            // instance to be given this id would inherit it.
+            const held = (yield* secrets.refs(OWNER_KIND, [id])).get(id) ?? [];
+            yield* Effect.forEach(
+              held,
+              (ref) => secrets.delete(providerInstanceOwner(id), ref.name),
+              {
+                discard: true,
+              },
+            );
             yield* instances.delete(id);
-            // Names rather than the config document: the log is kept for months
-            // and an instance's config is where a provider's secrets will live.
+            // Names rather than the config document: the log is kept for months.
             yield* audit.append({
               kind: "provider.deleted",
               actor: yield* currentStamp,
@@ -507,7 +588,9 @@ const make = Effect.gen(function* () {
             });
             return {};
           }),
-        );
+          // A name with a `|` in it is one this table could never have stored,
+          // so a delete refusing on one is a broken row, not a bad request.
+        ).pipe(Effect.catchTag("SecretNameError", Effect.die));
       }),
   };
 });
@@ -520,5 +603,5 @@ export class ProviderService extends Context.Service<
 export const ProviderServiceLayer: Layer.Layer<
   ProviderService,
   never,
-  SqlClient.SqlClient | PluginHost | AuditLog | ProviderProbes | RunnerConnections
+  SqlClient.SqlClient | PluginHost | AuditLog | ProviderProbes | RunnerConnections | Secrets
 > = Layer.effect(ProviderService)(make);

@@ -18,7 +18,9 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import { notFound, type CapabilitySnapshot, type NotFound } from "@hydra/contract";
 import { announce, nowIso, withTransaction } from "../db";
+import { PluginHost } from "../plugins";
 import { RunnerConnections, runnerRepository } from "../runners";
+import { instanceSecrets, Secrets, type SecretDecryptError } from "../secrets";
 import { providerRepository, type StoredInstance } from "./repository";
 import { floorFor, versionVerdict } from "./version";
 
@@ -45,13 +47,15 @@ export const ProviderProbeInterval = Context.Reference<Duration.Duration>(
   { defaultValue: (): Duration.Duration => PROBE_INTERVAL },
 );
 
-type StoreError = SqlError | Schema.SchemaError;
+type StoreError = SqlError | Schema.SchemaError | SecretDecryptError;
 
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const instances = yield* providerRepository;
   const runners = yield* runnerRepository;
   const connections = yield* RunnerConnections;
+  const secrets = yield* Secrets;
+  const host = yield* PluginHost;
 
   /**
    * A late report is dropped rather than stored: nobody is correlating that
@@ -70,6 +74,14 @@ const make = Effect.gen(function* () {
           instanceId: instance.id,
           providerId: instance.providerId,
           config: instance.config,
+          // Decrypted here, at send time: the probe runs the harness's own auth
+          // check, which is only worth anything with the credential in hand.
+          secrets: yield* instanceSecrets(
+            secrets,
+            yield* host.providers(),
+            instance.id,
+            instance.providerId,
+          ),
         },
         yield* ProviderProbeDeadline,
       );
@@ -183,5 +195,5 @@ export class ProviderProbes extends Context.Service<ProviderProbes, Effect.Succe
 export const ProviderProbesLayer: Layer.Layer<
   ProviderProbes,
   never,
-  SqlClient.SqlClient | RunnerConnections
+  SqlClient.SqlClient | RunnerConnections | Secrets | PluginHost
 > = Layer.effect(ProviderProbes)(make);

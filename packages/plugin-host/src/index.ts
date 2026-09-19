@@ -13,7 +13,14 @@ export {
   SchemaValue,
 } from "./manifest";
 
-export { configJsonSchema, decodeAgainst, UnsupportedConfigSchema } from "./config-schema";
+export {
+  configJsonSchema,
+  decodeAgainst,
+  secret,
+  secretFields,
+  excludeSecretFields,
+  UnsupportedConfigSchema,
+} from "./config-schema";
 
 export {
   ConnectionStatus,

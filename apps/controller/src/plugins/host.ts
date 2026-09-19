@@ -26,6 +26,7 @@ import {
   PluginError,
   PluginManifest,
   ProviderDefinition,
+  secretFields,
   type ActivationContext,
   type ConnectionTypeContribution,
   type Deactivate,
@@ -181,6 +182,15 @@ const decodeManifest = (manifest: unknown, index: number): Effect.Effect<PluginM
     ),
   );
 
+/**
+ * A credential is entered per provider instance and stored under that
+ * instance's own owner, so a secret-valued field has nowhere to live anywhere
+ * else. Said at registration, because the form that would render it is built
+ * from the schema refused here.
+ */
+const SECRET_FIELDS_ARE_PROVIDER_ONLY =
+  "a secret-valued config field is supported on a provider definition only";
+
 /** Everything decided from the manifest alone, before any plugin code runs. */
 const inspect = (
   manifest: PluginManifest,
@@ -191,6 +201,12 @@ const inspect = (
   const missing = manifest.capabilities.find((capability) => !IMPLEMENTED.includes(capability));
   if (missing !== undefined) {
     return Result.fail({ kind: "unimplementedCapability", capability: missing });
+  }
+  if (secretFields(manifest.configSchema).length > 0) {
+    return Result.fail({
+      kind: "unsupportedConfigSchema",
+      message: bounded(`the plugin's own config: ${SECRET_FIELDS_ARE_PROVIDER_ONLY}`),
+    });
   }
   return Result.mapError(configJsonSchema(manifest.configSchema), (error) => ({
     kind: "unsupportedConfigSchema",
@@ -282,6 +298,16 @@ const registrationHost = (
               // A declared config schema reaches the catalog as the JSON Schema
               // the generated form is built from; the live schema stays here,
               // where a connection's stored config is decoded against it.
+              if (
+                decoded.configSchema !== undefined &&
+                secretFields(decoded.configSchema).length > 0
+              ) {
+                return yield* Effect.fail(
+                  new PluginError({
+                    message: `the connection type ${type}: ${SECRET_FIELDS_ARE_PROVIDER_ONLY}`,
+                  }),
+                );
+              }
               const configSchema =
                 decoded.configSchema === undefined
                   ? undefined

@@ -174,6 +174,9 @@ const aGithubConnection = Effect.gen(function* () {
   return connection.id;
 });
 
+/** An instance with no credential stored: what these sessions run on. */
+const NO_SECRETS = (): Effect.Effect<Record<string, string>> => Effect.succeed({});
+
 /** `starting` as the daemon calls it: inside the caller's transaction. */
 const claiming = (
   runnerId: string,
@@ -183,7 +186,10 @@ const claiming = (
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
     const sessions = yield* SessionService;
-    return yield* withTransaction(sql, sessions.starting(runnerId, room, { accountOf }));
+    return yield* withTransaction(
+      sql,
+      sessions.starting(runnerId, room, { accountOf, secretsOf: NO_SECRETS }),
+    );
   });
 
 /** The token hash a session row holds, read straight off the row. */
@@ -519,7 +525,10 @@ describe("SessionService.starting", () => {
           });
           const claim = withTransaction(
             sql,
-            sessions.starting(runnerId, 1, { accountOf: credentials.githubAccountOf }),
+            sessions.starting(runnerId, 1, {
+              accountOf: credentials.githubAccountOf,
+              secretsOf: NO_SECRETS,
+            }),
           );
           const fiber = yield* Effect.forkChild(claim);
           yield* Deferred.await(entered);

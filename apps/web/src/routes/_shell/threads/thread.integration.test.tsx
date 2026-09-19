@@ -94,6 +94,7 @@ const instanceSnapshot = (
 const INSTANCE_STARTED: ProviderInstance = {
   id: BASE_SESSION.instanceId,
   providerId: "claude-code",
+  secretFields: [],
   name: "personal",
   config: {},
   displayName: "Claude Code",

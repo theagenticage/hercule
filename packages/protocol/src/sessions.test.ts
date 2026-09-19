@@ -50,6 +50,8 @@ const start = {
   sessionId: SESSION_ID,
   providerId: "claude-code",
   config: {},
+  /** `{}` rather than absent: an instance with no credential stored. */
+  secrets: {},
   spec,
   /** The session's own credential on the public API, minted per start. */
   token: "a-session-token",

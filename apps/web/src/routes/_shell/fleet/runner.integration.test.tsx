@@ -10,7 +10,7 @@ import { describe, expect, it } from "vitest";
 import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ageOf, formatStamp } from "@hydra/client-core";
-import type { Session } from "@hydra/contract";
+import type { ProviderSecretField, Session } from "@hydra/contract";
 import {
   envelope,
   reading,
@@ -80,6 +80,7 @@ const instance = (
   displayName,
   binaryName: providerId === "claude-code" ? "claude" : providerId,
   declared: DECLARED,
+  secretFields: [] as ReadonlyArray<ProviderSecretField>,
   snapshots,
   createdAt: "2026-09-05T09:00:00.000Z",
   updatedAt: "2026-09-05T09:00:00.000Z",
@@ -889,5 +890,135 @@ describe("Runner > sessions", () => {
     // carried the session with it.
     expect(listings(api).length).toBeGreaterThan(before);
     expect(page()).not.toContain(WAITED_LONGEST.title);
+  });
+});
+
+/**
+ * A provider whose config carries a secret-valued field. The key is a paid
+ * credential, so the field is masked, it is written through `secret.set` and
+ * never through the instance, and the row never reads a value back - only
+ * whether one is there.
+ */
+describe("Runner > a provider that needs a key", () => {
+  const PI_ID = "01a06d02-1000-7000-8000-000000000003";
+  const KEY_TITLE = "Z.ai API key";
+  const KEY_DESCRIPTION = "From your Z.ai Coding Plan subscription.";
+  const KEY_VALUE = "a-paid-credential-nobody-else-holds";
+
+  const SECRET_PATH = `PUT /api/v1/secrets/provider-instance/${PI_ID}/zaiApiKey`;
+
+  /** A machine with pi on it, which is what makes the row offer anything. */
+  const WITH_PI: Fixture = {
+    ...ONLINE,
+    facts: {
+      ...ONLINE.facts!,
+      providers: [
+        { name: "claude", present: true },
+        { name: "pi", present: true },
+      ],
+      adapters: ["claude-code", "pi"],
+    },
+  };
+
+  const PI_SNAPSHOT = snapshot({
+    harnessVersion: "0.85.1",
+    auth: { status: "unauthenticated" },
+    models: [],
+  });
+
+  const pi = (set: boolean) => ({
+    ...instance(PI_ID, "pi", "pi", [PI_SNAPSHOT]),
+    secretFields: [{ name: "zaiApiKey", title: KEY_TITLE, description: KEY_DESCRIPTION, set }],
+  });
+
+  const piRow = () => screen.findByRole("group", { name: "pi" });
+
+  /** The calls that wrote the key, with what they wrote. */
+  const wroteKey = (api: { readonly calls: readonly Call[] }) =>
+    api.calls.filter(
+      (call) =>
+        call.method === "PUT" &&
+        call.path === `/api/v1/secrets/provider-instance/${PI_ID}/zaiApiKey`,
+    );
+
+  it("asks for the key in the plugin's own words, masked, and writes it where it belongs", async () => {
+    const user = userEvent.setup();
+    let held: ReadonlyArray<ReturnType<typeof instance>> = [pi(false)];
+    const { api } = await open(WITH_PI, {
+      instances: held,
+      extra: {
+        "GET /api/v1/providers": () => ({ body: held }),
+        [SECRET_PATH]: () => {
+          held = [pi(true)];
+          return {
+            body: {
+              ownerKind: "provider-instance",
+              ownerId: PI_ID,
+              name: "zaiApiKey",
+              createdAt: "2026-09-19T09:00:00.000Z",
+            },
+          };
+        },
+        // The key is on the controller and the stored snapshot predates it, so
+        // the machine is asked about the instance again.
+        [`POST /api/v1/runners/${WITH_PI.id}/probe`]: () => ({ body: PI_SNAPSHOT }),
+      },
+    });
+
+    await user.click(
+      within(await piRow()).getByRole("button", { name: new RegExp(KEY_TITLE, "i") }),
+    );
+
+    // The form is the field: the plugin's title heads it and the plugin's
+    // sentence says where to get one.
+    const form = await screen.findByRole("dialog", { name: KEY_TITLE });
+    expect(reading(form)).toContain(KEY_DESCRIPTION);
+
+    const field = within(form).getByLabelText<HTMLInputElement>(KEY_TITLE, { exact: true });
+    // A paid credential is never on screen in the clear.
+    expect(field.type).toBe("password");
+
+    // Nothing to save yet, and nothing is sent: the refusal is here, not a
+    // round trip away.
+    const save = within(form).getByRole("button", { name: /save/i });
+    await user.click(save);
+    expect(wroteKey(api)).toEqual([]);
+
+    await user.type(field, KEY_VALUE);
+    await user.click(within(form).getByRole("button", { name: /save/i }));
+
+    await waitFor(() => {
+      expect(wroteKey(api)).toHaveLength(1);
+    });
+    expect(wroteKey(api)[0]?.body).toEqual({ value: KEY_VALUE });
+
+    const probes = () => api.calls.filter((call) => call.path.endsWith("/probe"));
+    await waitFor(() => {
+      expect(probes()).toHaveLength(1);
+    });
+    expect(probes()[0]?.body).toEqual({ instanceId: PI_ID });
+
+    // The form is done with, and the row now says the key is there and offers
+    // to put another one in its place.
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: KEY_TITLE })).toBeNull();
+    });
+    await waitFor(async () => {
+      expect(
+        within(await piRow()).getByRole("button", { name: `Replace ${KEY_TITLE}` }),
+      ).toBeDefined();
+    });
+    // The value itself never comes back to the page.
+    expect(reading()).not.toContain(KEY_VALUE);
+  });
+
+  it("offers to replace a key that is already set", async () => {
+    await open(WITH_PI, { instances: [pi(true)] });
+
+    const row = within(await piRow());
+    expect(row.getByRole("button", { name: `Replace ${KEY_TITLE}` })).toBeDefined();
+    // The OAuth login is another provider's flow; pi has no vendor to redirect
+    // to, so the row must not offer one.
+    expect(row.queryByRole("button", { name: /^log in/i })).toBeNull();
   });
 });

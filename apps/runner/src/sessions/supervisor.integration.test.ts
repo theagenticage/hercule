@@ -60,6 +60,7 @@ const START: SessionStart = {
   sessionId: SESSION,
   providerId: "fake",
   config: {},
+  secrets: {},
   spec: SPEC,
   token: "a-session-token",
 };
@@ -1305,5 +1306,50 @@ describe("a shutdown that lands before a start has an entry to find", () => {
 
     expect(fake.contexts).toHaveLength(0);
     expect(eventsIn(sent).map((frame) => frame.event._tag)).toEqual(["session.exited"]);
+  });
+});
+
+/**
+ * The instance's secret-valued config. It rides the start frame and reaches the
+ * adapter through the context and nowhere else: written to the runner's disk it
+ * would outlive the session it belongs to, and the machine holds no Hydra state
+ * to put it back in.
+ */
+describe("the secrets a start frame carries", () => {
+  const KEY = "a-paid-credential-nobody-else-holds";
+
+  it("hands the adapter what the frame carried, by name", async () => {
+    const fake = faking();
+    const { supervisor } = connecting(fake);
+
+    await driving(
+      fake,
+      supervisor,
+      Effect.gen(function* () {
+        yield* supervisor.start({ ...START, secrets: { zaiApiKey: KEY } });
+        yield* until("started the session", () => fake.contexts.length === 1);
+      }),
+    );
+
+    expect(fake.contexts[0]?.secrets).toEqual({ zaiApiKey: KEY });
+    // Never layered into the environment by the runner: which variable a key
+    // belongs in is the adapter's own business.
+    expect(JSON.stringify(fake.contexts[0]?.env)).not.toContain(KEY);
+  });
+
+  it("hands the adapter an empty set where the frame carried none", async () => {
+    const fake = faking();
+    const { supervisor } = connecting(fake);
+
+    await driving(
+      fake,
+      supervisor,
+      Effect.gen(function* () {
+        yield* supervisor.start(START);
+        yield* until("started the session", () => fake.contexts.length === 1);
+      }),
+    );
+
+    expect(fake.contexts[0]?.secrets).toEqual({});
   });
 });

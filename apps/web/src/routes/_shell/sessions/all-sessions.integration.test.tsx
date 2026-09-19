@@ -45,6 +45,7 @@ const claudeCode = () => ({
   config: {},
   displayName: "Claude Code",
   binaryName: "claude",
+  secretFields: [],
   declared: DECLARED,
   snapshots: [],
   createdAt: "2026-09-05T09:00:00.000Z",
