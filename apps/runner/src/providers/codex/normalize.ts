@@ -17,12 +17,15 @@ import type * as Schema from "effect/Schema";
 import {
   type ItemKind,
   type ItemStatus,
+  type OutputSchema,
   type ProviderEvent,
   type StreamKind,
+  type StructuredResult,
   type TurnState,
   type Usage,
 } from "@hydra/protocol";
 import { count, buildEnvelope, rawOf, type Envelope } from "../normalize";
+import { structuredResultOf, type StructuredCandidate } from "../structured-result";
 import { idOf } from "../events";
 import { fact, text } from "../text";
 import type { NotificationFrame } from "./rpc";
@@ -54,13 +57,27 @@ export interface Normalizing {
    */
   model: string | undefined;
   readonly reasoning: Map<string, Channel>;
+  /** The schema every turn of this session answers under, where there is one. */
+  readonly outputSchema: OutputSchema | undefined;
+  /**
+   * The last item the running turn completed, which is where a Codex answer is
+   * read off: Codex constrains the turn's final assistant message, so the
+   * answer is that message and only where the turn ended on it.
+   */
+  lastCompletedItem: ThreadItem | undefined;
 }
 
-export const normalizing = (sessionId: string, threadId: string): Normalizing => ({
+export const normalizing = (
+  sessionId: string,
+  threadId: string,
+  outputSchema: OutputSchema | undefined,
+): Normalizing => ({
   sessionId,
   threadId,
   model: undefined,
   reasoning: new Map(),
+  outputSchema,
+  lastCompletedItem: undefined,
 });
 
 const envelope = (state: Normalizing): Envelope =>
@@ -253,6 +270,85 @@ const onError = (state: Normalizing, params: ErrorNotification): ReadonlyArray<P
   ];
 };
 
+/**
+ * What the turn answered under the schema. Codex constrains the final
+ * assistant message and nothing else, so the answer is the text of the item
+ * the turn ended on, parsed as it was written: a message wrapped in prose or a
+ * code fence is not the constrained output the schema asked for, and reading
+ * one out of it would be this adapter guessing at an answer nobody gave.
+ */
+const candidateOf = (last: ThreadItem | undefined): StructuredCandidate => {
+  if (last?.type !== "agentMessage") {
+    return { missing: "the turn ended without a final agent message" };
+  }
+  try {
+    return { value: JSON.parse(last.text) };
+  } catch {
+    return { missing: "the final agent message is not JSON" };
+  }
+};
+
+/** The API's own code for a schema it will not constrain the answer on. */
+const INVALID_SCHEMA = "invalid_json_schema";
+
+/**
+ * The name Codex gives the response format it carries the schema in, which is
+ * what the refusal's sentence is about. Read only where the code cannot be:
+ * a sentence is prose the API may reword, and a code is a contract.
+ */
+const OUTPUT_SCHEMA_FORMAT_NAME = "codex_output_schema";
+
+/** The error body Codex passes through whole, where the message is one. */
+const bodyOf = (message: string): { readonly code?: unknown; readonly message?: unknown } => {
+  try {
+    const body = JSON.parse(message) as { readonly error?: unknown };
+    const error = body.error;
+    return typeof error === "object" && error !== null ? error : {};
+  } catch {
+    return {};
+  }
+};
+
+/**
+ * What the harness said, where what it failed on was the schema itself. The API
+ * refuses a schema it cannot constrain on before the model is sampled, and
+ * Codex fails the turn with the whole error body as its message - an envelope
+ * naming a status and a param, around the one sentence a reader needs. So the
+ * code decides that this failure is about the schema and the sentence beside it
+ * is what is reported. A body this build cannot read is still a refusal when it
+ * names the response format the schema travels in, and then there is nothing to
+ * unwrap: what the harness said is the whole text.
+ */
+const refusalOf = (turn: TurnCompletedNotification["turn"]): string | undefined => {
+  const message = turn.error?.message;
+  if (message === undefined) return undefined;
+  const error = bodyOf(message);
+  if (error.code === INVALID_SCHEMA) {
+    return typeof error.message === "string" ? error.message : message;
+  }
+  return message.includes(OUTPUT_SCHEMA_FORMAT_NAME) ? message : undefined;
+};
+
+/**
+ * The verdict a turn carries about the schema, where it carries one. A turn
+ * that ran to the end is judged on what it answered; a turn the harness failed
+ * over the schema is a schema failure in the harness's own words; and every
+ * other failure and every interrupt is about the turn, where a schema verdict
+ * would read as an answer that was judged and found wanting.
+ */
+const resultOf = (
+  state: Normalizing,
+  turn: TurnCompletedNotification["turn"],
+  ended: TurnState,
+): StructuredResult | undefined => {
+  const schema = state.outputSchema;
+  if (schema === undefined) return undefined;
+  if (ended === "completed")
+    return structuredResultOf(schema, candidateOf(state.lastCompletedItem));
+  const refused = ended === "failed" ? refusalOf(turn) : undefined;
+  return refused === undefined ? undefined : structuredResultOf(schema, { missing: refused });
+};
+
 export const normalize = (
   state: Normalizing,
   frame: NotificationFrame,
@@ -268,6 +364,10 @@ export const normalize = (
   switch (frame.method) {
     case "turn/started": {
       const params = frame.params as TurnStartedNotification;
+      // A turn answers for itself: a completion this build could not read, or
+      // one that never arrived, must not leave the turn before it holding the
+      // answer this one is judged on.
+      state.lastCompletedItem = undefined;
       return [
         {
           _tag: "turn.started",
@@ -282,9 +382,11 @@ export const normalize = (
       const params = frame.params as TurnCompletedNotification;
       const ended = TURN_STATES[params.turn.status];
       if (ended === undefined) return [];
+      const structuredResult = resultOf(state, params.turn, ended);
       // The items of a turn that is over cannot stream any more, and their
       // channels are what the map holds.
       state.reasoning.clear();
+      state.lastCompletedItem = undefined;
       return [
         {
           _tag: "turn.completed",
@@ -292,6 +394,7 @@ export const normalize = (
           ...raw(params),
           turnId: idOf(params.turn.id),
           state: ended,
+          ...(structuredResult === undefined ? {} : { structuredResult }),
         },
       ];
     }
@@ -313,6 +416,10 @@ export const normalize = (
     }
     case "item/completed": {
       const params = frame.params as ItemCompletedNotification;
+      // Where the turn is up to, before anything is decided about the item: the
+      // echo of the user's own message is an item the turn completed too, and a
+      // turn that ends on one ended on no answer.
+      state.lastCompletedItem = params.item;
       const kind = kindOf(params.item);
       if (kind === null) return [];
       return [

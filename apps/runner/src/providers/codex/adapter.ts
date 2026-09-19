@@ -48,6 +48,7 @@ import type {
   DynamicToolCallResponse,
   ItemCompletedNotification,
   ItemStartedNotification,
+  JsonValue,
   SandboxMode,
   ThreadForkParams,
   ThreadResumeParams,
@@ -203,6 +204,15 @@ const threadIn = (params: unknown): string | undefined => {
   const threadId = (params as { readonly threadId?: unknown } | null | undefined)?.threadId;
   return typeof threadId === "string" ? threadId : undefined;
 };
+
+/**
+ * The one channel a Codex thread takes instructions on, so the session's own
+ * prompt and the skill share it: the prompt first, the skill under it, a blank
+ * line between them. Either one alone is the whole text, because an absent
+ * prompt must not leave the skill under a blank line it has to read past.
+ */
+const buildDeveloperInstructions = (systemPrompt: string | undefined, skill: string): string =>
+  [systemPrompt, skill].filter((part) => part !== undefined && part !== "").join("\n\n");
 
 /** Turn input is text only: attachments are the open item in spec 16 section B. */
 const textInput = (text: string): UserInput => ({ type: "text", text, text_elements: [] });
@@ -602,10 +612,18 @@ export const codexAdapter = (seam: CodexSeam): ProviderAdapter => {
    */
   const opening = (held: Held, input: TurnInput): Effect.Effect<SendResult, string> =>
     Effect.gen(function* () {
+      // Codex takes the schema per turn rather than per thread, so every turn
+      // of the session carries it: sending it once would leave the second turn
+      // of an Agent's session answering prose.
+      const schema = held.state.outputSchema;
       const params: TurnStartParams = {
         threadId: held.binding.nativeSessionId,
         input: [textInput(input.text)],
         ...modelParams(input.modelSelection),
+        // Written, never read: the schema crosses the wire as the JSON the
+        // controller stored, and Codex's own JSON type is the mutable one
+        // ts-rs writes.
+        ...(schema === undefined ? {} : { outputSchema: schema as JsonValue }),
       };
       // What the turn is running under, which is what the normalizer reports on
       // `turn.started`: the notification itself carries no model. Set before
@@ -679,10 +697,14 @@ export const codexAdapter = (seam: CodexSeam): ProviderAdapter => {
 
   /**
    * What a thread is opened, resumed or forked with: the session's own row, and
-   * hydra-as-a-tool as the developer instructions all three methods take - the
+   * its instructions as the developer instructions all three methods take - the
    * channel #73 found, and the whole of what this adapter knows about the skill
    * (spec 06 section 9.3). No `AGENTS.md` is written: the scratch directory a
    * session runs in stays empty.
+   *
+   * `disallowedTools` is read nowhere in this adapter: Codex enforces no tool
+   * restriction, and the Agent and the Session both report it as unenforced, so
+   * nothing here is substituted silently.
    */
   const threadParams = (
     spec: SessionSpec,
@@ -701,7 +723,7 @@ export const codexAdapter = (seam: CodexSeam): ProviderAdapter => {
     return {
       cwd: ctx.cwd,
       model: spec.modelSelection.model,
-      developerInstructions: ctx.hydraTool.skill,
+      developerInstructions: buildDeveloperInstructions(spec.systemPrompt, ctx.hydraTool.skill),
       ...(tier === undefined ? {} : { serviceTier: tier }),
       ...ACCESS_MODES[spec.accessMode],
     };
@@ -753,7 +775,7 @@ export const codexAdapter = (seam: CodexSeam): ProviderAdapter => {
           nativeSessionId: opened,
           instanceId: spec.instanceId,
         };
-        const state = normalizing(sessionId, opened);
+        const state = normalizing(sessionId, opened, spec.outputSchema);
         state.model = spec.modelSelection.model;
         sessions.set(sessionId, {
           binding,

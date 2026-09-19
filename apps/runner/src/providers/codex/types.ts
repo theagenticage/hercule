@@ -43,3 +43,4 @@ export type { McpServerElicitationRequestParams } from "./generated/v2/McpServer
 export type { McpServerElicitationRequestResponse } from "./generated/v2/McpServerElicitationRequestResponse";
 export type { ToolRequestUserInputParams } from "./generated/v2/ToolRequestUserInputParams";
 export type { DynamicToolCallResponse } from "./generated/v2/DynamicToolCallResponse";
+export type { JsonValue } from "./generated/serde_json/JsonValue";

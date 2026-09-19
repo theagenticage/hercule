@@ -35,7 +35,7 @@ interface Note {
 
 const note = (method: string, params: Record<string, unknown>): Note => ({ method, params });
 
-const state = () => normalizing(SESSION, THREAD);
+const state = () => normalizing(SESSION, THREAD, undefined);
 
 const through = (
   running: ReturnType<typeof normalizing>,
