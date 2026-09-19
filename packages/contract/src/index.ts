@@ -134,8 +134,6 @@ export {
   AgentCreateInput,
   AgentUpdateInput,
   DisallowedTool,
-  MAX_AGENT_NAME_LENGTH,
-  MAX_SYSTEM_PROMPT_LENGTH,
   UnenforcedSpecField,
 } from "./groups/agent";
 export {

@@ -63,7 +63,7 @@ export type ModelSelection = Schema.Schema.Type<typeof ModelSelection>;
  * harness calls those tools, and a harness that cannot take any of them away
  * declares so rather than pretending.
  */
-export const TOOL_FAMILIES = ["edit", "write", "shell", "web-search", "web-fetch"] as const;
+const TOOL_FAMILIES = ["edit", "write", "shell", "web-search", "web-fetch"] as const;
 
 export type DisallowedTool = (typeof TOOL_FAMILIES)[number];
 

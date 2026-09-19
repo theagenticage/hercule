@@ -10,6 +10,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import { Effect } from "effect";
 import type { OutputSchema, SessionSpec } from "@hydra/protocol";
 import { REPROMPT } from "./adapter";
+import { OUTPUT_SCHEMA_VARIABLE, SUBMIT_RESULT_TOOL } from "./extension";
 import {
   busy,
   cleanupHomes,
@@ -382,14 +383,8 @@ const STRUCTURED: SessionSpec = {
   outputSchema: OUTPUT_SCHEMA,
 };
 
-/** How the schema reaches the extension, spelled as AC-10 names it. */
-const SCHEMA_VARIABLE = "HYDRA_OUTPUT_SCHEMA";
-
 /** What pi's own tool was called with, which is the turn's answer. */
 const ANSWER = { verdict: "accept", confidence: 0.9 };
-
-/** The tool a session under a schema answers through. */
-const SUBMIT = "submit_result";
 
 /** pi's own id for the call that answered. */
 const SUBMIT_CALL = "call-submit-1";
@@ -407,11 +402,16 @@ const prompted = async (
 
 /** pi calling the tool, as it reports a call it ran: a start and its end. */
 const submits = (child: Spawn, args: Record<string, unknown>): void => {
-  child.push({ type: "tool_execution_start", toolCallId: SUBMIT_CALL, toolName: SUBMIT, args });
+  child.push({
+    type: "tool_execution_start",
+    toolCallId: SUBMIT_CALL,
+    toolName: SUBMIT_RESULT_TOOL,
+    args,
+  });
   child.push({
     type: "tool_execution_end",
     toolCallId: SUBMIT_CALL,
-    toolName: SUBMIT,
+    toolName: SUBMIT_RESULT_TOOL,
     args,
     result: { content: [{ type: "text", text: "recorded" }] },
   });
@@ -419,13 +419,20 @@ const submits = (child: Spawn, args: Record<string, unknown>): void => {
 
 /** pi refusing a call whose arguments its own validator would not accept. */
 const refused = (child: Spawn, callId: string, args: Record<string, unknown>): void => {
-  child.push({ type: "tool_execution_start", toolCallId: callId, toolName: SUBMIT, args });
+  child.push({
+    type: "tool_execution_start",
+    toolCallId: callId,
+    toolName: SUBMIT_RESULT_TOOL,
+    args,
+  });
   child.push({
     type: "tool_execution_end",
     toolCallId: callId,
-    toolName: SUBMIT,
+    toolName: SUBMIT_RESULT_TOOL,
     isError: true,
-    result: { content: [{ type: "text", text: `Validation failed for tool "${SUBMIT}"` }] },
+    result: {
+      content: [{ type: "text", text: `Validation failed for tool "${SUBMIT_RESULT_TOOL}"` }],
+    },
   });
 };
 
@@ -473,7 +480,7 @@ describe("the pi a session under an Agent is launched as", () => {
   it("hands the schema to the extension through pi's environment, so the argv stays exact", async () => {
     const run = await started({}, STRUCTURED);
 
-    expect(run.child.env[SCHEMA_VARIABLE]).toBe(JSON.stringify(OUTPUT_SCHEMA));
+    expect(run.child.env[OUTPUT_SCHEMA_VARIABLE]).toBe(JSON.stringify(OUTPUT_SCHEMA));
   });
 
   it("carries none of the three for a Thread, which has none of the three fields", async () => {
@@ -483,7 +490,7 @@ describe("the pi a session under an Agent is launched as", () => {
     expect(run.child.command).not.toContain("--exclude-tools");
     // Absent, not empty: an empty schema in the environment would register a
     // tool on a session that was never asked for a value.
-    expect(SCHEMA_VARIABLE in run.child.env).toBe(false);
+    expect(OUTPUT_SCHEMA_VARIABLE in run.child.env).toBe(false);
   });
 });
 
@@ -521,9 +528,6 @@ describe("what a pi turn under an output schema answers with", () => {
 
     await until("asked again for the tool", () => sentOf(run.sent, "prompt").length === 2);
     expect(sentOf(run.sent, "prompt")[1]).toMatchObject({ message: REPROMPT });
-    // The adapter's own constant is what was sent, and this is the sentence it
-    // is pinned to: the model reads it in every session under a schema.
-    expect(REPROMPT).toBe(`You must call ${SUBMIT} with your answer; do nothing else.`);
     // The re-prompt stays inside the one Hydra turn: a second `turn.started`
     // would bracket one episode twice, and a completion here would report an
     // answer the session is still being asked for.

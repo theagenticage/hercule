@@ -32,7 +32,13 @@
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { FIXTURE_SCHEMA, IMPOSSIBLE_SCHEMA } from "../packages/protocol/src/output-schema.fixture";
+import {
+  ASSESSOR_SYSTEM_PROMPT,
+  FIXTURE_PROMPT,
+  FIXTURE_SCHEMA,
+  IMPOSSIBLE_PROMPT,
+  IMPOSSIBLE_SCHEMA,
+} from "../packages/protocol/src/output-schema.fixture";
 import {
   PASSWORD,
   ROOT,
@@ -72,10 +78,6 @@ const TURN_DEADLINE_MS = 180_000;
 
 /** Long enough for the runner to enrol and to probe a directory it was just handed. */
 const LOGIN_DEADLINE_MS = 120_000;
-
-/** What the Agent tells every session spawned from it. */
-const SYSTEM_PROMPT =
-  "You assess tasks and answer with a verdict. Where the user names the verdict, give that one.";
 
 interface Page<A> {
   readonly items: ReadonlyArray<A>;
@@ -197,7 +199,7 @@ const prepare = async (): Promise<Ready> => {
         profile.id,
         "--json",
       ],
-      { home: state.home, binary, stdin: SYSTEM_PROMPT },
+      { home: state.home, binary, stdin: ASSESSOR_SYSTEM_PROMPT },
     ),
   );
   return { agentId: agent.id };
@@ -288,10 +290,7 @@ describe.skipIf(!wanted)("a session spawned from an Agent under an output schema
         return;
       }
 
-      const rows = await answering(
-        FIXTURE_SCHEMA,
-        "Assess this task: 'Fix a typo in the README'. Accept it.",
-      );
+      const rows = await answering(FIXTURE_SCHEMA, FIXTURE_PROMPT);
 
       const result = resultIn(rows) as { outcome: string; value: { verdict?: unknown } };
       expect(result.outcome, JSON.stringify(result)).toBe("ok");
@@ -308,7 +307,7 @@ describe.skipIf(!wanted)("a session spawned from an Agent under an output schema
         return;
       }
 
-      const rows = await answering(IMPOSSIBLE_SCHEMA, "Answer.");
+      const rows = await answering(IMPOSSIBLE_SCHEMA, IMPOSSIBLE_PROMPT);
 
       const result = resultIn(rows) as { outcome: string; reason: string };
       expect(result.outcome, JSON.stringify(result)).toBe("schema-failure");

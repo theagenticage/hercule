@@ -1314,11 +1314,13 @@ export const CLI = {
       },
       instanceId: {
         flag: "instance",
-        help: "The Provider Instance its sessions run on, by its full id.",
+        help: "The Provider Instance its sessions run on, by its id or a tail of eight or more characters.",
+        resolves: "provider.query",
       },
       permissionProfileId: {
         flag: "profile",
-        help: "The Permission Profile its sessions' tokens carry, by its full id.",
+        help: "The Permission Profile its sessions' tokens carry, by its id or a tail of eight or more characters.",
+        resolves: "profile.query",
       },
       accessMode: {
         flag: "access-mode",
@@ -1357,10 +1359,15 @@ export const CLI = {
         flag: "system-prompt",
         help: "Replacement instructions, read from stdin only when --system-prompt-stdin asks for them.",
       },
-      instanceId: { flag: "instance", help: "Run its sessions on this Provider Instance instead." },
+      instanceId: {
+        flag: "instance",
+        help: "Run its sessions on this Provider Instance instead, by its id or a tail of eight or more characters.",
+        resolves: "provider.query",
+      },
       permissionProfileId: {
         flag: "profile",
-        help: "Bound its sessions by this Permission Profile instead; sessions already running keep theirs.",
+        help: "Bound its sessions by this Permission Profile instead, by its id or a tail of eight or more characters; sessions already running keep theirs.",
+        resolves: "profile.query",
       },
       accessMode: { flag: "access-mode", help: "What its sessions may do unasked." },
       model: {
@@ -1402,7 +1409,8 @@ export const CLI = {
       status: { flag: "status", help: "queued, starting, idle, busy or exited; repeatable." },
       runnerId: {
         flag: "runner",
-        help: "Only sessions on this Runner, by its full id.",
+        help: "Only sessions on this Runner, by its id or a tail of eight or more characters.",
+        resolves: "runner.query",
       },
       agentId: {
         flag: "agent",
@@ -1482,7 +1490,8 @@ export const CLI = {
       },
       instanceId: {
         flag: "instance",
-        help: "The Provider Instance to run on, in place of the thread default.",
+        help: "The Provider Instance to run on, in place of the thread default, by its id or a tail of eight or more characters.",
+        resolves: "provider.query",
       },
       model: { flag: "model", help: "The model to open with, in place of the thread default." },
       options: {
@@ -1495,15 +1504,18 @@ export const CLI = {
       },
       runnerId: {
         flag: "runner",
-        help: "Run on this Runner by name, a reserved one included; placement is skipped.",
+        help: "Run on this Runner, a reserved one included, by its id or a tail of eight or more characters; placement is skipped.",
+        resolves: "runner.query",
       },
       permissionProfileId: {
         flag: "profile",
-        help: "The Permission Profile the session's token carries, in place of the thread default.",
+        help: "The Permission Profile the session's token carries, in place of the thread default, by its id or a tail of eight or more characters.",
+        resolves: "profile.query",
       },
       projectId: {
         flag: "project",
-        help: "The project the thread belongs to; every repo it names has to be filed under it.",
+        help: "The project the thread belongs to, by its id or a tail of eight or more characters; every repo it names has to be filed under it.",
+        resolves: "project.query",
       },
       workspace: {
         flag: "workspace",

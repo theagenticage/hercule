@@ -149,11 +149,13 @@ const grantOf = (requirement: Requirement): Grant | undefined => {
  * caller is told what it is missing, and it takes the operation rather than its
  * requirement so an operation with a rule of its own can be told apart here.
  *
- * `session.spawn` has such a rule and it is not enforced here: a spawn from an
- * Agent is open to every actor holding the grant, while a Thread is the user's
- * own, and which of the two a call is asking for is in the payload this check
- * runs ahead of. Placement makes that distinction, where the payload is
- * decoded.
+ * `session.spawn` has two such rules, and both are enforced in
+ * `daemon/placement.ts` rather than here, because each needs the decoded
+ * payload this check runs ahead of. A spawn from an Agent is open to every
+ * actor holding the grant, while a Thread is the user's own, and which of the
+ * two a call is asking for is in the payload. And a session actor may spawn
+ * only from an Agent whose permission profile grants nothing beyond its own,
+ * which needs the Agent row read before it can be answered.
  */
 export const grantCheck = (id: OperationId, actor: Actor): Forbidden | undefined => {
   const grant = grantOf(OPERATIONS[id].requires);

@@ -897,15 +897,29 @@ describe("hydra session spawn --agent", () => {
     });
   });
 
-  it("refuses a tail for an id-holding flag no listing resolves, before anything is sent", async () => {
-    const { fetch, io } = spawning();
+  it("resolves a profile tail on a flag through the profile listing", async () => {
+    const PROFILE = profile("dddddddd", "worker");
+    const fetch = stubFetch((request) =>
+      request.path === "/api/v1/profiles" && request.method === "GET"
+        ? { items: [PROFILE] }
+        : SPAWNED,
+    );
+    const io = stubIo({
+      env: { HYDRA_TOKEN: "t", HYDRA_API_URL: "http://controller.test" },
+      fetch,
+      stdin: "Assess this task.\n",
+    });
 
-    expect(await main(["--home", home, "session", "spawn", "--instance", "cccccccc"], io)).toBe(2);
+    expect(await main(["--home", home, "session", "spawn", "--profile", "dddddddd"], io)).toBe(0);
 
-    // Spelled as the caller had to write it, and nothing was sent: the API
-    // would have answered not_found and taught the caller the id was wrong.
-    expect(io.stderr.join("\n")).toContain("--instance");
-    expect(fetch.calls).toEqual([]);
+    // A flag holding an id takes a tail like a positional one does: the
+    // listing is read first and the wire carries the canonical id.
+    expect(fetch.calls[0]?.path).toBe("/api/v1/profiles");
+    expect(fetch.calls[1]).toMatchObject({
+      method: "POST",
+      path: "/api/v1/sessions",
+      body: { permissionProfileId: PROFILE.id },
+    });
   });
 
   it("uses a full agent id without a lookup, and carries the schema as written", async () => {

@@ -138,10 +138,19 @@ const describeResult = (structuredResult: unknown): string => {
 const transcriptLine = (row: Record<string, unknown>): string => {
   const event = (row["event"] ?? {}) as Record<string, unknown>;
   const said = Object.entries(event)
-    .filter(([key]) => !TRANSCRIPT_NOISE.has(key))
-    .map(([key, value]) =>
-      key === "structuredResult" ? describeResult(value) : `${key}=${brief(value)}`,
+    .filter(([key]) => !TRANSCRIPT_NOISE.has(key) && key !== "structuredResult")
+    .map(([key, value]) => `${key}=${brief(value)}`);
+  // The answer reads right after the turn's state rather than wherever the
+  // event happens to carry it: it is what the line is read for, and behind the
+  // usage figures it wraps off a 120-column terminal.
+  const answered = event["structuredResult"];
+  if (answered !== undefined) {
+    said.splice(
+      said.findIndex((field) => field.startsWith("state=")) + 1,
+      0,
+      describeResult(answered),
     );
+  }
   return [cell(row["position"]), cell(row["at"]), cell(event["_tag"]), ...said]
     .join("  ")
     .trimEnd();

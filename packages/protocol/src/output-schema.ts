@@ -142,11 +142,13 @@ const issuesIn = (node: unknown, path: string, isRoot: boolean): ReadonlyArray<s
   if (Array.isArray(values) && !values.every(isEnumValue)) {
     return [`${path}: enum must hold strings, numbers or booleans only`];
   }
-  const fixed: ReadonlyArray<unknown> = Array.isArray(values)
-    ? values
-    : Object.hasOwn(node, "const")
-      ? [node["const"]]
-      : [];
+  // Both, not one or the other: a node carrying `enum` and `const` together
+  // has to hold its type in each of them, and checking only the enum lets a
+  // `const` of the wrong type through.
+  const listed: ReadonlyArray<unknown> = Array.isArray(values) ? values : [];
+  const fixed: ReadonlyArray<unknown> = Object.hasOwn(node, "const")
+    ? [...listed, node["const"]]
+    : listed;
   const mismatched = fixed.find((value) => !holdsValue(type, value));
   if (mismatched !== undefined) {
     return [`${path}: ${said(mismatched)} is not a ${type}`];

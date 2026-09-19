@@ -14,7 +14,13 @@ import { basename, dirname, join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { Duration, Effect, Stream } from "effect";
 import type { OutputSchema, ProviderEvent, SessionSpec } from "@hydra/protocol";
-import { FIXTURE_SCHEMA, IMPOSSIBLE_SCHEMA } from "@hydra/protocol/output-schema.fixture";
+import {
+  ASSESSOR_SYSTEM_PROMPT,
+  FIXTURE_PROMPT,
+  FIXTURE_SCHEMA,
+  IMPOSSIBLE_PROMPT,
+  IMPOSSIBLE_SCHEMA,
+} from "@hydra/protocol/output-schema.fixture";
 import { prepareTooling } from "../sessions/tooling";
 import { claudeCode } from "./claude-code";
 import { PROBE_DEADLINE } from "./probe";
@@ -458,9 +464,6 @@ describe.skipIf(!authed)("a real Claude Code session with the hydra skill", () =
 const STRUCTURED = "0199e0e7-0000-7000-8000-00000000ff05";
 const IMPOSSIBLE = "0199e0e7-0000-7000-8000-00000000ff06";
 
-const AGENT_PROMPT =
-  "You assess tasks and answer with a verdict. Where the user names the verdict, give that one.";
-
 describe.skipIf(!authed)("a real Claude Code session under an output schema", () => {
   /** One session under one schema: start, ask, wait the turn out, stop. */
   const answering = async (
@@ -472,7 +475,7 @@ describe.skipIf(!authed)("a real Claude Code session under an output schema", ()
     await Effect.runPromise(
       claudeCode.startSession(
         sessionId,
-        { ...SPEC, systemPrompt: AGENT_PROMPT, outputSchema },
+        { ...SPEC, systemPrompt: ASSESSOR_SYSTEM_PROMPT, outputSchema },
         contextFor(emptyHome()),
       ),
     );
@@ -489,11 +492,7 @@ describe.skipIf(!authed)("a real Claude Code session under an output schema", ()
   it(
     "answers the fixture schema with a value the schema accepts",
     async () => {
-      const completed = await answering(
-        STRUCTURED,
-        FIXTURE_SCHEMA,
-        "Assess this task: 'Fix a typo in the README'. Accept it.",
-      );
+      const completed = await answering(STRUCTURED, FIXTURE_SCHEMA, FIXTURE_PROMPT);
 
       expect(completed.structuredResult?.outcome, JSON.stringify(completed.structuredResult)).toBe(
         "ok",
@@ -507,7 +506,7 @@ describe.skipIf(!authed)("a real Claude Code session under an output schema", ()
   it(
     "ends the turn with a schema failure when no value can satisfy the schema",
     async () => {
-      const completed = await answering(IMPOSSIBLE, IMPOSSIBLE_SCHEMA, "Answer.");
+      const completed = await answering(IMPOSSIBLE, IMPOSSIBLE_SCHEMA, IMPOSSIBLE_PROMPT);
 
       expect(completed.structuredResult?.outcome, JSON.stringify(completed.structuredResult)).toBe(
         "schema-failure",

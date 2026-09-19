@@ -12,11 +12,6 @@ import type { ProviderDefinition } from "@hydra/plugin-host";
 import type { UnenforcedSpecField } from "@hydra/contract";
 import type { DisallowedTool } from "@hydra/protocol";
 
-/** Nothing unenforced, shared so an answer is one value rather than one per read. */
-const ENFORCED: ReadonlyArray<UnenforcedSpecField> = [];
-
-const TOOLS_UNENFORCED: ReadonlyArray<UnenforcedSpecField> = ["disallowedTools"];
-
 /**
  * The spec fields this provider will ignore, of those the caller actually set.
  * An empty tool list is nothing to ignore, whatever the provider declares.
@@ -26,5 +21,5 @@ export const unenforcedFieldsOf = (
   disallowedTools: ReadonlyArray<DisallowedTool>,
 ): ReadonlyArray<UnenforcedSpecField> =>
   definition.declared.disallowedTools === "unsupported" && disallowedTools.length > 0
-    ? TOOLS_UNENFORCED
-    : ENFORCED;
+    ? ["disallowedTools"]
+    : [];

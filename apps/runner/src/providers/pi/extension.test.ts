@@ -14,7 +14,12 @@
  */
 import { describe, expect, it } from "vitest";
 import type { AccessMode } from "@hydra/protocol";
-import { ACCESS_MODE_VARIABLE, EXTENSION_SOURCE } from "./extension";
+import {
+  ACCESS_MODE_VARIABLE,
+  EXTENSION_SOURCE,
+  OUTPUT_SCHEMA_VARIABLE,
+  SUBMIT_RESULT_TOOL,
+} from "./extension";
 import { requiresApproval } from "./policy";
 
 /** Every mode a session can reach a runner under, plus one from no build. */
@@ -36,7 +41,7 @@ const TOOLS: ReadonlyArray<string> = [
   "powershell",
   "write",
   "edit",
-  "submit_result",
+  SUBMIT_RESULT_TOOL,
   "mcp__jira__create",
 ];
 
@@ -85,9 +90,6 @@ const OUTPUT_SCHEMA = {
   },
 };
 
-/** How the schema reaches the extension, spelled as AC-10 names it. */
-const SCHEMA_VARIABLE = "HYDRA_OUTPUT_SCHEMA";
-
 /** One tool the extension registered, as far as pi reads a definition. */
 interface RegisteredTool {
   readonly name: string;
@@ -130,12 +132,12 @@ const toolsRegisteredWith = (
 };
 
 describe("the tool a session under an output schema answers through", () => {
-  const SCHEMA_ENV = { [SCHEMA_VARIABLE]: JSON.stringify(OUTPUT_SCHEMA) };
+  const SCHEMA_ENV = { [OUTPUT_SCHEMA_VARIABLE]: JSON.stringify(OUTPUT_SCHEMA) };
 
   it("registers it under the schema the adapter handed the session", () => {
     const tools = toolsRegisteredWith(SCHEMA_ENV);
 
-    expect(tools.map((tool) => tool.name)).toEqual(["submit_result"]);
+    expect(tools.map((tool) => tool.name)).toEqual([SUBMIT_RESULT_TOOL]);
     // Passed through unchanged: a schema the extension rewrote is one the
     // runner would re-validate the answer against a different document.
     expect(tools[0]!.parameters).toMatchObject(OUTPUT_SCHEMA);

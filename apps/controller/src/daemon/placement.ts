@@ -262,7 +262,7 @@ const make = Effect.gen(function* () {
    * before anything is written, so a schema outside the subset leaves no
    * session behind and the caller is told which rule it broke.
    */
-  const lintedOutputSchema = (
+  const requireLintedSchema = (
     schema: SessionSpec["outputSchema"],
   ): Effect.Effect<SessionSpec["outputSchema"], Validation> => {
     if (schema === undefined) return Effect.succeed(undefined);
@@ -421,7 +421,7 @@ const make = Effect.gen(function* () {
         if (spawnedFrom !== undefined && !mayRunAs(actor, spawnedFrom.profile)) {
           return yield* Effect.fail(forbidden("session.spawn", NOT_ITS_GRANTS));
         }
-        const outputSchema = yield* lintedOutputSchema(decoded.outputSchema);
+        const outputSchema = yield* requireLintedSchema(decoded.outputSchema);
         if (decoded.projectId !== undefined) yield* liveProject(decoded.projectId);
         // Read before placement: a workspace that already stands decides which
         // machine the session runs on, because that is where its files are.

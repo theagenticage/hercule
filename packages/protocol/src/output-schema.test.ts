@@ -195,6 +195,16 @@ const REJECTED: ReadonlyArray<{
     names: ["/properties/x", "some"],
   },
   {
+    what: "a const of another type than the node declares, beside an enum that fits",
+    schema: {
+      type: "object",
+      additionalProperties: false,
+      required: ["x"],
+      properties: { x: { type: "string", enum: ["a"], const: 7 } },
+    },
+    names: ["/properties/x", "7"],
+  },
+  {
     what: "an object keyword on a node that is not one",
     schema: {
       type: "object",

@@ -26,3 +26,20 @@ export const IMPOSSIBLE_SCHEMA: OutputSchema = {
     answer: { type: "string", enum: ["a"], const: "b" },
   },
 };
+
+/**
+ * What the session under either schema is told it is, above the harness's own
+ * prompt. It names the verdict the user asks for so the answer is the schema's
+ * business and not the model's judgement.
+ */
+export const ASSESSOR_SYSTEM_PROMPT =
+  "You assess tasks and answer with a verdict. Where the user names the verdict, give that one.";
+
+/** The prompt asked under `FIXTURE_SCHEMA`; it names the verdict to give. */
+export const FIXTURE_PROMPT = "Assess this task: 'Fix a typo in the README'. Accept it.";
+
+/**
+ * The prompt asked under `IMPOSSIBLE_SCHEMA`. It asks for nothing in
+ * particular: what is being proven is the schema failure, not the answer.
+ */
+export const IMPOSSIBLE_PROMPT = "Answer.";

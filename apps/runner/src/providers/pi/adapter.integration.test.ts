@@ -14,7 +14,13 @@
 import { afterAll, describe, expect, it } from "vitest";
 import { Effect, Stream } from "effect";
 import type { OutputSchema, ProbeResult, ProviderEvent, SessionSpec } from "@hydra/protocol";
-import { FIXTURE_SCHEMA, IMPOSSIBLE_SCHEMA } from "@hydra/protocol/output-schema.fixture";
+import {
+  ASSESSOR_SYSTEM_PROMPT,
+  FIXTURE_PROMPT,
+  FIXTURE_SCHEMA,
+  IMPOSSIBLE_PROMPT,
+  IMPOSSIBLE_SCHEMA,
+} from "@hydra/protocol/output-schema.fixture";
 import { pi } from "./adapter";
 import type { ProviderRunnerContext } from "../index";
 import { contextIn, SPEC } from "./testing";
@@ -124,10 +130,6 @@ describe.skipIf(binary === undefined || key === "")("a real pi session on a real
   }
 });
 
-/** What the session is told it is, above pi's own prompt. */
-const AGENT_PROMPT =
-  "You assess tasks and answer with a verdict. Where the user names the verdict, give that one.";
-
 /** The model these cases run on: the cheapest of the two this adapter drives. */
 const STRUCTURED_MODEL = "glm-5.3-flash";
 
@@ -152,7 +154,7 @@ const answering = async (
   await Effect.runPromise(
     pi.startSession(
       sessionId,
-      { ...specFor(STRUCTURED_MODEL), systemPrompt: AGENT_PROMPT, outputSchema },
+      { ...specFor(STRUCTURED_MODEL), systemPrompt: ASSESSOR_SYSTEM_PROMPT, outputSchema },
       liveContext({ zaiApiKey: key }),
     ),
   );
@@ -168,10 +170,7 @@ describe.skipIf(binary === undefined || key === "")(
     it(
       "answers the fixture schema through the tool, with a value the schema accepts",
       async () => {
-        const turn = await answering(
-          FIXTURE_SCHEMA,
-          "Assess this task: 'Fix a typo in the README'. Accept it.",
-        );
+        const turn = await answering(FIXTURE_SCHEMA, FIXTURE_PROMPT);
 
         expect(turn.structuredResult?.outcome, JSON.stringify(turn.structuredResult)).toBe("ok");
         const answer = turn.structuredResult as { outcome: "ok"; value: { verdict?: unknown } };
@@ -183,7 +182,7 @@ describe.skipIf(binary === undefined || key === "")(
     it(
       "ends the turn with a schema failure when no value can satisfy the schema",
       async () => {
-        const turn = await answering(IMPOSSIBLE_SCHEMA, "Answer.");
+        const turn = await answering(IMPOSSIBLE_SCHEMA, IMPOSSIBLE_PROMPT);
 
         expect(turn.structuredResult?.outcome, JSON.stringify(turn.structuredResult)).toBe(
           "schema-failure",
