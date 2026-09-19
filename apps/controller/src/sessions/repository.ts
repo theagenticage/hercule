@@ -10,7 +10,13 @@ import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
-import type { AccessMode, ModelSelection, OpenRequest, ProviderEvent } from "@hydra/protocol";
+import type {
+  AccessMode,
+  DisallowedTool,
+  ModelSelection,
+  OpenRequest,
+  ProviderEvent,
+} from "@hydra/protocol";
 import { notFound, type NotFound, type SessionStatus, type SortDirection } from "@hydra/contract";
 import {
   decodeCursor,
@@ -33,6 +39,8 @@ export interface StoredSession {
   readonly id: string;
   readonly title: string;
   readonly permissionProfileId: string;
+  /** The Agent it was spawned from; `null` is a Thread. */
+  readonly agentId: string | null;
   readonly instanceId: string;
   readonly runnerId: string;
   readonly workspaceId: string | null;
@@ -51,6 +59,14 @@ export interface StoredSession {
   readonly startedAt: string | null;
   readonly exitedAt: string | null;
   readonly lastActivityAt: string;
+  /**
+   * The provider behind its instance, and what its spec asked that provider to
+   * take away. Both are read for one thing - whether the provider will act on
+   * the restriction - rather than stored, because a later binary's adapter may
+   * enforce what this one ignores. `null` once the instance is gone.
+   */
+  readonly providerId: string | null;
+  readonly disallowedTools: ReadonlyArray<DisallowedTool>;
 }
 
 export interface NewSession {
@@ -62,6 +78,8 @@ export interface NewSession {
   readonly id: string;
   readonly title: string;
   readonly permissionProfileId: string;
+  /** The Agent it was spawned from; absent is a Thread. */
+  readonly agentId: string | undefined;
   readonly instanceId: string;
   readonly runnerId: string;
   readonly workspaceId: string | null;
@@ -85,12 +103,19 @@ export interface SessionPageRequest {
   readonly direction: SortDirection;
   readonly status: SessionStatus | ReadonlyArray<SessionStatus> | undefined;
   readonly runnerId: string | undefined;
+  readonly agentId: string | undefined;
+  /** `true` is the sessions with no agent behind them; `false` is the rest. */
+  readonly thread: boolean | undefined;
 }
 
 interface SessionRow {
   readonly id: Uint8Array;
   readonly title: string;
   readonly permission_profile_id: Uint8Array;
+  readonly agent_id: Uint8Array | null;
+  readonly provider_id: string | null;
+  /** The spec's tool families as the JSON array it stores, or null for none. */
+  readonly disallowed_tools: string | null;
   readonly instance_id: Uint8Array;
   readonly runner_id: Uint8Array;
   readonly workspace_id: Uint8Array | null;
@@ -118,8 +143,12 @@ interface SessionRow {
  * domain happened to be imported first.
  */
 const columns = (): string =>
-  "id, title, permission_profile_id, instance_id, runner_id, workspace_id, project_id, " +
+  "id, title, permission_profile_id, agent_id, instance_id, runner_id, workspace_id, project_id, " +
   "github_connection_id, requested_access_mode, " +
+  // Both read for `unenforced`: which provider is behind the instance, and
+  // what this session's spec asked that provider to take away.
+  "(SELECT provider_id FROM provider_instances WHERE id = sessions.instance_id) AS provider_id, " +
+  "json_extract(spec, '$.disallowedTools') AS disallowed_tools, " +
   "access_mode, native_session_id, model_selection, parent_session_id, status, " +
   "open_request, created_at, started_at, exited_at, " +
   `last_activity_at, (${resumableWhere("sessions")}) AS resumable`;
@@ -128,6 +157,7 @@ const toSession = (row: SessionRow): StoredSession => ({
   id: uuidToString(row.id),
   title: row.title,
   permissionProfileId: uuidToString(row.permission_profile_id),
+  agentId: row.agent_id === null ? null : uuidToString(row.agent_id),
   instanceId: uuidToString(row.instance_id),
   runnerId: uuidToString(row.runner_id),
   workspaceId: row.workspace_id === null ? null : uuidToString(row.workspace_id),
@@ -146,6 +176,11 @@ const toSession = (row: SessionRow): StoredSession => ({
   startedAt: row.started_at,
   exitedAt: row.exited_at,
   lastActivityAt: row.last_activity_at,
+  providerId: row.provider_id,
+  disallowedTools:
+    row.disallowed_tools === null
+      ? []
+      : (JSON.parse(row.disallowed_tools) as ReadonlyArray<DisallowedTool>),
 });
 
 const scopeOf = (direction: SortDirection): CursorScope => ({
@@ -221,7 +256,12 @@ const make = Effect.gen(function* () {
     Array.isArray(status) ? sql`status IN ${sql.in(status)}` : sql`status = ${status}`;
 
   return {
-    insert: (session: NewSession): Effect.Effect<StoredSession, SqlError> =>
+    /**
+     * Writes the session. Nothing comes back: the caller minted the id, and
+     * what a caller hands on is the row read afterwards, which is the one that
+     * carries what dispatch has already done with it.
+     */
+    insert: (session: NewSession): Effect.Effect<void, SqlError> =>
       Effect.gen(function* () {
         const id = uuidFromString(session.id);
         const parent =
@@ -232,41 +272,20 @@ const make = Effect.gen(function* () {
           session.githubConnectionId === undefined
             ? null
             : uuidFromString(session.githubConnectionId);
+        const agent = session.agentId === undefined ? null : uuidFromString(session.agentId);
         yield* sql`
-          INSERT INTO sessions (id, title, permission_profile_id, instance_id, runner_id,
+          INSERT INTO sessions (id, title, permission_profile_id, agent_id, instance_id, runner_id,
                                 workspace_id, project_id, checkout_branch, github_connection_id,
                                 requested_access_mode, access_mode, spec,
                                 model_selection, parent_session_id, status,
                                 created_at, last_activity_at)
-          VALUES (${id}, ${session.title}, ${uuidFromString(session.permissionProfileId)},
+          VALUES (${id}, ${session.title}, ${uuidFromString(session.permissionProfileId)}, ${agent},
                   ${uuidFromString(session.instanceId)}, ${uuidFromString(session.runnerId)},
                   ${workspace}, ${project}, ${session.checkoutBranch ?? null}, ${connection},
                   ${session.requestedAccessMode}, ${session.accessMode},
                   ${session.spec}, ${JSON.stringify(session.modelSelection)}, ${parent},
                   'queued', ${session.at}, ${session.at})
         `;
-        return {
-          id: session.id,
-          title: session.title,
-          permissionProfileId: session.permissionProfileId,
-          instanceId: session.instanceId,
-          runnerId: session.runnerId,
-          workspaceId: session.workspaceId,
-          projectId: session.projectId ?? null,
-          githubConnectionId: session.githubConnectionId ?? null,
-          requestedAccessMode: session.requestedAccessMode,
-          accessMode: session.accessMode,
-          nativeSessionId: null,
-          modelSelection: session.modelSelection,
-          parentSessionId: session.parentSessionId ?? null,
-          status: "queued",
-          resumable: false,
-          openRequest: null,
-          createdAt: session.at,
-          startedAt: null,
-          exitedAt: null,
-          lastActivityAt: session.at,
-        };
       }),
 
     one: (id: string): Effect.Effect<Option.Option<StoredSession>, SqlError> =>
@@ -297,6 +316,12 @@ const make = Effect.gen(function* () {
         if (request.runnerId !== undefined) {
           clauses.push(sql`runner_id = ${uuidFromString(request.runnerId)}`);
         }
+        if (request.agentId !== undefined) {
+          clauses.push(sql`agent_id = ${uuidFromString(request.agentId)}`);
+        }
+        if (request.thread !== undefined) {
+          clauses.push(request.thread ? sql`agent_id IS NULL` : sql`agent_id IS NOT NULL`);
+        }
         const rows = yield* sql<SessionRow>`
           SELECT ${sql.literal(COLUMNS)} FROM sessions
           WHERE ${sql.and(clauses)} ${order} LIMIT ${request.limit + 1}
@@ -308,6 +333,20 @@ const make = Effect.gen(function* () {
           (last) => encodeCursor(scope, last.createdAt, last.id),
         );
       }),
+
+    /**
+     * The exact document this session's machine was told, as the row stores
+     * it. Read on its own rather than on every session read: a session picking
+     * up another's transcript is the only thing that needs it, and it is the
+     * one column big enough for that to matter.
+     */
+    specDocumentOf: (id: string): Effect.Effect<Option.Option<string>, SqlError> =>
+      Effect.map(
+        sql<{ readonly spec: string }>`
+          SELECT spec FROM sessions WHERE id = ${uuidFromString(id)}
+        `,
+        (rows) => Option.map(Option.fromNullishOr(rows[0]), (row) => row.spec),
+      ),
 
     /**
      * One page of a session's stream, in position order. The stored `event` is

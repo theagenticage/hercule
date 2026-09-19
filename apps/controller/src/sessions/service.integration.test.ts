@@ -18,12 +18,13 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import { SessionSpec, type ModelSelection, type SessionStart } from "@hydra/protocol";
 import { homePaths, HydraHome } from "../config";
-import { connectionRepository, GITHUB_CONNECTION_TYPE } from "../connections";
+import { connectionRepository, ConnectionTypesLayer, GITHUB_CONNECTION_TYPE } from "../connections";
 import { hashToken } from "../credentials";
 import { mintUuid, uuidToString, withTransaction } from "../db";
 import { TestDatabase } from "../db/testing";
 import { AuditLogLayer } from "../events";
 import { SessionTokensLayer } from "../permissions";
+import { PluginConfigsLayer, PluginHostLayer } from "../plugins";
 import { masterKeyLayer } from "../secrets/masterKey";
 import { Secrets, secretsLayer, type SecretOwner } from "../secrets/repository";
 import { gitCredentials } from "../workspaces";
@@ -32,8 +33,41 @@ import { type StoredInput } from "./inputs";
 import { sessionRepository } from "./repository";
 import { SessionService, SessionServiceLayer, type Starting } from "./service";
 
+/** Throwaway master-key homes, removed once this file's tests are done. */
+let homes: Array<string> = [];
+
+/**
+ * A real plugin host with nothing registered in it, because the record a
+ * session reads back says what its provider will not enforce, and that is read
+ * from the catalog the host holds.
+ */
+const hostLayer = (secrets: Layer.Layer<Secrets, unknown, SqlClient.SqlClient>) =>
+  PluginHostLayer.pipe(
+    Layer.provideMerge(ConnectionTypesLayer),
+    Layer.provideMerge(PluginConfigsLayer),
+    Layer.provideMerge(secrets),
+    Layer.provideMerge(AuditLogLayer),
+  );
+
+/**
+ * Made when the layer is built rather than when this module is read: the
+ * sweep after each test removes what the last one made, so a home minted once
+ * at import would be gone by the second case.
+ */
+const aScratchHome = (): Layer.Layer<HydraHome> =>
+  Layer.effect(HydraHome)(
+    Effect.sync(() => {
+      const home = mkdtempSync(join(tmpdir(), "hydra-sessions-"));
+      homes.push(home);
+      return HydraHome.of(homePaths(home, join(home, "data")));
+    }),
+  );
+
+const realSecrets = () =>
+  secretsLayer.pipe(Layer.provide(masterKeyLayer("file").pipe(Layer.provide(aScratchHome()))));
+
 const layer = SessionServiceLayer.pipe(
-  Layer.provideMerge(Layer.mergeAll(AuditLogLayer, SessionTokensLayer)),
+  Layer.provideMerge(Layer.mergeAll(AuditLogLayer, SessionTokensLayer, hostLayer(realSecrets()))),
   Layer.provideMerge(TestDatabase),
 );
 
@@ -88,10 +122,12 @@ const aQueuedSession = (
 ): Effect.Effect<string, SqlError, SqlClient.SqlClient> =>
   Effect.gen(function* () {
     const sessions = yield* sessionRepository;
-    const stored = yield* sessions.insert({
-      id: anId(),
+    const id = anId();
+    yield* sessions.insert({
+      id,
       title: "a session",
       permissionProfileId: anId(),
+      agentId: undefined,
       instanceId: options.instanceId,
       runnerId,
       workspaceId: null,
@@ -107,14 +143,11 @@ const aQueuedSession = (
       parentSessionId: undefined,
       at,
     });
-    return stored.id;
+    return id;
   });
 
 /** The pair `starting` returns for one claimed session. */
 type Claim = Starting;
-
-/** Throwaway master-key homes, removed once this file's tests are done. */
-let homes: Array<string> = [];
 
 afterEach(() => {
   for (const home of homes) rmSync(home, { recursive: true, force: true });
@@ -129,15 +162,9 @@ afterEach(() => {
  * in a home the test throws away.
  */
 const gatedCredentialStack = (entered: Deferred.Deferred<void>, hold: Deferred.Deferred<void>) => {
-  const home = mkdtempSync(join(tmpdir(), "hydra-sessions-"));
-  homes.push(home);
-  const homeLayer = Layer.succeed(HydraHome, HydraHome.of(homePaths(home, join(home, "data"))));
-  const realSecrets = secretsLayer.pipe(
-    Layer.provide(masterKeyLayer("file").pipe(Layer.provide(homeLayer))),
-  );
   const gatedSecrets = Layer.effect(
     Secrets,
-    Effect.map(Effect.provide(Secrets, realSecrets), (inner) => ({
+    Effect.map(Effect.provide(Secrets, realSecrets()), (inner) => ({
       ...inner,
       get: (owner: SecretOwner, name: string) =>
         Effect.andThen(
@@ -147,7 +174,9 @@ const gatedCredentialStack = (entered: Deferred.Deferred<void>, hold: Deferred.D
     })),
   );
   return SessionServiceLayer.pipe(
-    Layer.provideMerge(Layer.mergeAll(AuditLogLayer, SessionTokensLayer, gatedSecrets)),
+    Layer.provideMerge(
+      Layer.mergeAll(AuditLogLayer, SessionTokensLayer, gatedSecrets, hostLayer(gatedSecrets)),
+    ),
     Layer.provideMerge(TestDatabase),
   );
 };

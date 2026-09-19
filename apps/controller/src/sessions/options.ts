@@ -9,7 +9,6 @@ import * as Effect from "effect/Effect";
 import type { ModelDescriptor, ModelSelection, SessionSpec } from "@hydra/protocol";
 import { validation, type Validation } from "@hydra/contract";
 import type { ScopeSettings } from "../settings";
-import type { StoredSession } from "./repository";
 
 /** The picks themselves, in the shape the row and the wire hold them. */
 export type ModelOptions = ModelSelection["options"];
@@ -67,20 +66,25 @@ export const timeoutsFrom = (controller: ScopeSettings<"controller">): SessionSp
 
 /**
  * The document a machine is told for a session that picks a provider-native one
- * up, resumed in place or forked off: everything but the selection and the mode
- * comes from the session whose transcript it picks up.
+ * up, resumed in place or forked off: the document the parent was told, with
+ * the selection it ended on, the native session it carries on from, and the
+ * clocks as they stand now.
+ *
+ * It starts from the parent's own document rather than from named fields, so
+ * what an Agent gave the parent - its prompt, the tools it may not use, the
+ * schema it answers under - reaches the continuation too. Copying is the whole
+ * rule here (ADR 0030): a fork that ran under a different prompt than the
+ * session it came out of would be a different piece of work.
  */
 export const continuingSpecOf = (
-  session: Pick<StoredSession, "instanceId" | "workspaceId" | "accessMode">,
+  parent: SessionSpec,
   controller: ScopeSettings<"controller">,
   modelSelection: ModelSelection,
   nativeSessionId: string,
   mode: NonNullable<SessionSpec["continue"]>["mode"],
 ): SessionSpec => ({
-  instanceId: session.instanceId,
-  workspaceId: session.workspaceId,
+  ...parent,
   modelSelection,
-  accessMode: session.accessMode,
   continue: { nativeSessionId, mode },
   timeouts: timeoutsFrom(controller),
 });

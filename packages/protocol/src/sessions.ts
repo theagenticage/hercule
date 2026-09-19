@@ -9,6 +9,7 @@
  */
 import { Schema } from "effect";
 
+import { OutputSchema } from "./output-schema";
 import {
   Fact,
   InstanceId,
@@ -57,13 +58,43 @@ export const ModelSelection = Schema.Struct({
 export type ModelSelection = Schema.Schema.Type<typeof ModelSelection>;
 
 /**
+ * A family of harness tools a session may have taken away from it. Hydra's own
+ * vocabulary, coarse on purpose: each adapter maps a family onto whatever its
+ * harness calls those tools, and a harness that cannot take any of them away
+ * declares so rather than pretending.
+ */
+export const TOOL_FAMILIES = ["edit", "write", "shell", "web-search", "web-fetch"] as const;
+
+export type DisallowedTool = (typeof TOOL_FAMILIES)[number];
+
+const isDisallowedTool = (value: string): value is DisallowedTool =>
+  (TOOL_FAMILIES as ReadonlyArray<string>).includes(value);
+
+/**
+ * One family, refused by name: a list of five literals answers "expected one
+ * of five" and leaves a caller with several entries to guess which of them the
+ * refusal was about, so the check says the word it did not accept.
+ */
+export const DisallowedTool = Schema.String.check(
+  Schema.makeFilter<string>(
+    (value) =>
+      isDisallowedTool(value)
+        ? undefined
+        : `${value} is not a tool family; the families are ${TOOL_FAMILIES.join(", ")}`,
+    undefined,
+    // The type-level guard below would otherwise answer a second, wordless
+    // issue about the same entry.
+    true,
+  ),
+).pipe(Schema.refine(isDisallowedTool));
+
+/**
  * What the controller authors for one session: ids, never paths (ADR 0002).
  * The runner resolves it to a `ProviderRunnerContext` on its own machine.
  *
  * The row that stores this keeps it byte for byte, so a field is added here
- * only when something sends it. The rest of spec 06 section 4 - `outputSchema`,
- * `mcpServers`, `systemPrompt`, `disallowedTools` - arrives with the feature
- * that needs it.
+ * only when something sends it. The rest of spec 06 section 4 - `mcpServers` -
+ * arrives with the feature that needs it.
  */
 export const SessionSpec = Schema.Struct({
   instanceId: InstanceId,
@@ -72,6 +103,22 @@ export const SessionSpec = Schema.Struct({
   modelSelection: ModelSelection,
   /** Post-fallback: always a mode the target provider declares native. */
   accessMode: AccessMode,
+  /**
+   * Appended to the harness's own system prompt, never in place of it. A
+   * session with no Agent behind it carries none.
+   */
+  systemPrompt: Schema.optionalKey(Schema.String),
+  /**
+   * The tool families to take away. A provider that declares it enforces none
+   * of them still gets the list, and the record the caller reads says the
+   * provider will not act on it.
+   */
+  disallowedTools: Schema.optionalKey(Schema.Array(DisallowedTool)),
+  /**
+   * What the session's turns must answer with, as a JSON Schema inside the
+   * subset `lintOutputSchema` accepts. Absent is prose.
+   */
+  outputSchema: Schema.optionalKey(OutputSchema),
   /**
    * Picks the provider-native session this one carries on from, on the same
    * runner and the same instance (spec 06 section 4.1). A resume continues that

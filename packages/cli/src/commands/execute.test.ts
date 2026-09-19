@@ -29,6 +29,7 @@ const session = (tail: string) => ({
   status: "idle",
   resumable: false,
   permissionProfileId: id("dddddddd"),
+  agentId: null,
   instanceId: id("eeeeeeee"),
   runnerId: id("ffffffff"),
   workspaceId: null,
@@ -43,6 +44,7 @@ const session = (tail: string) => ({
   startedAt: null,
   exitedAt: null,
   lastActivityAt: "2026-09-15T10:00:00.000Z",
+  unenforced: [],
 });
 
 const input = (inputId: string, sessionId: string) => ({

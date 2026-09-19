@@ -10,6 +10,7 @@
  */
 export { type StoredInput } from "./inputs";
 export { continuingSpecOf, timeoutsFrom, validatedOptions } from "./options";
+export { sessionRecordReader } from "./records";
 export { requireSession, sessionRepository, type StoredSession } from "./repository";
 export { cancelStrandedInputs, SessionService, SessionServiceLayer } from "./service";
 export { headOfTranscript, sessionExists, transcriptRowsAfter } from "./transcript-log";

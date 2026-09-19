@@ -13,6 +13,7 @@ const BASE: Session = {
   status: "idle",
   resumable: false,
   permissionProfileId: "profile-unrestricted",
+  agentId: null,
   instanceId: "instance-claude-code",
   runnerId: "runner-1",
   workspaceId: null,
@@ -27,6 +28,7 @@ const BASE: Session = {
   startedAt: "2026-09-08T09:00:01.000Z",
   exitedAt: null,
   lastActivityAt: "2026-09-08T09:05:00.000Z",
+  unenforced: [],
 };
 
 const session = (overrides: Partial<Session> & { id: string }): Session => ({

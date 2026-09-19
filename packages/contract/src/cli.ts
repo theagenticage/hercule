@@ -1250,15 +1250,158 @@ export const CLI = {
     },
   },
 
+  "agent.query": {
+    command: "agent list",
+    help: "Lists the Agents sessions are spawned from. An Agent is a named, reusable configuration for unattended work. Use it to find the id `hydra session spawn --agent` names.",
+    examples: [{ args: [] }],
+    fields: {},
+  },
+  "agent.read": {
+    command: "agent read",
+    help: "Reads one Agent in full: its prompt, where it runs and what it may do. It also says which of those fields its provider will not enforce.",
+    examples: [{ args: ["1f3a9c2e"] }],
+    fields: {
+      id: {
+        positional: true,
+        help: "The agent's id, or a tail of eight or more characters.",
+        resolves: "agent.query",
+      },
+    },
+  },
+  "agent.create": {
+    command: "agent create",
+    help: "Creates an Agent: a named configuration sessions are spawned from. Its values are copied onto each session at spawn, so editing it later changes nothing that is already running. The system prompt is read from stdin.",
+    examples: [
+      {
+        args: ["--name", "assessor", "--instance", "7b41d0a5", "--profile", "1f3a9c2e"],
+        stdin: "You assess incoming tasks and decide whether to accept them.",
+      },
+      {
+        args: [
+          "--name",
+          "assessor",
+          "--instance",
+          "7b41d0a5",
+          "--profile",
+          "1f3a9c2e",
+          "--access-mode",
+          "auto-accept-edits",
+          "--model",
+          '{"model":"opus","options":{"effort":"high"}}',
+          "--disallowed-tool",
+          "edit",
+          "--disallowed-tool",
+          "shell",
+        ],
+        stdin: "You assess incoming tasks and decide whether to accept them.",
+      },
+    ],
+    fields: {
+      name: { flag: "name", help: "What to call the agent; it is how a person finds it again." },
+      systemPrompt: {
+        stdin: true,
+        flag: "system-prompt",
+        help: "The instructions every session spawned from this agent starts with; appended to the harness's own.",
+      },
+      instanceId: {
+        flag: "instance",
+        help: "The Provider Instance its sessions run on, by its full id.",
+      },
+      permissionProfileId: {
+        flag: "profile",
+        help: "The Permission Profile its sessions' tokens carry, by its full id.",
+      },
+      accessMode: {
+        flag: "access-mode",
+        help: "What its sessions may do unasked; leave it off for full access, which is what unattended work needs.",
+      },
+      model: {
+        flag: "model",
+        help: 'The model and its per-model choices as JSON: {"model":"<slug>","options":{}}. Leave it off to run on whatever the instance offers by default.',
+      },
+      disallowedTools: {
+        flag: "disallowed-tool",
+        help: "A tool family to take away: edit, write, shell, web-search or web-fetch; repeatable. A provider that enforces none of them says so in the reply.",
+      },
+    },
+  },
+  "agent.update": {
+    command: "agent update",
+    help: "Edits an Agent; a field you do not name is left as it was. Sessions already spawned keep the values they were given.",
+    examples: [
+      { args: ["1f3a9c2e", "--access-mode", "auto"] },
+      { args: ["1f3a9c2e", "--disallowed-tool", "shell"] },
+      {
+        args: ["1f3a9c2e", "--system-prompt-stdin"],
+        stdin: "You assess incoming tasks, and you are strict about it.",
+      },
+    ],
+    fields: {
+      id: {
+        positional: true,
+        help: "The agent's id, or a tail of eight or more characters.",
+        resolves: "agent.query",
+      },
+      name: { flag: "name", help: "A new name for the agent." },
+      systemPrompt: {
+        stdin: true,
+        flag: "system-prompt",
+        help: "Replacement instructions, read from stdin only when --system-prompt-stdin asks for them.",
+      },
+      instanceId: { flag: "instance", help: "Run its sessions on this Provider Instance instead." },
+      permissionProfileId: {
+        flag: "profile",
+        help: "Bound its sessions by this Permission Profile instead; sessions already running keep theirs.",
+      },
+      accessMode: { flag: "access-mode", help: "What its sessions may do unasked." },
+      model: {
+        flag: "model",
+        help: 'The model and its per-model choices as JSON: {"model":"<slug>","options":{}}; `null` puts it back on the instance default.',
+      },
+      disallowedTools: {
+        flag: "disallowed-tool",
+        help: "The tool families to take away, replacing the ones set now; repeatable.",
+      },
+    },
+  },
+  "agent.delete": {
+    command: "agent delete",
+    help: "Deletes an Agent. It is refused while a session it spawned is still running; sessions that have exited keep its id as the lineage it is.",
+    examples: [{ args: ["1f3a9c2e"] }],
+    fields: {
+      id: {
+        positional: true,
+        help: "The agent's id, or a tail of eight or more characters.",
+        resolves: "agent.query",
+      },
+    },
+    errors: {
+      invalid_state:
+        "a session spawned from this agent has not exited yet; the message names it, and `hydra session stop` ends it",
+    },
+  },
+
   "session.query": {
     command: "session list",
     help: "Lists sessions, newest first: one row per conversation with a provider-backed agent. Use it to find the id every other `hydra session` command takes.",
-    examples: [{ args: [] }, { args: ["--status", "busy", "--status", "idle"] }],
+    examples: [
+      { args: [] },
+      { args: ["--status", "busy", "--status", "idle"] },
+      { args: ["--thread", "true"] },
+    ],
     fields: {
       status: { flag: "status", help: "queued, starting, idle, busy or exited; repeatable." },
       runnerId: {
         flag: "runner",
         help: "Only sessions on this Runner, by its full id.",
+      },
+      agentId: {
+        flag: "agent",
+        help: "Only the sessions spawned from this Agent, by its full id; find it with `hydra agent list`.",
+      },
+      thread: {
+        flag: "thread",
+        help: "true for the sessions with no Agent behind them - the ones a person drives by hand - and false for the rest.",
       },
     },
   },
@@ -1276,9 +1419,18 @@ export const CLI = {
   },
   "session.spawn": {
     command: "session spawn",
-    help: "Starts a Thread: a session the user drives by hand, with no Agent behind it. It takes every value from the user's thread settings unless a flag overrides it. Comes back with the session's id; watch what it does with `hydra transcript read` and send the next turn with `hydra session input`.",
+    help: "Starts a session, from an Agent or as a Thread the user drives by hand. With `--agent` every value comes from that Agent; without one it is a Thread and the values come from the user's thread settings. Either way a flag given here wins. Comes back with the session's id; watch what it does with `hydra transcript read` and send the next turn with `hydra session input`.",
     examples: [
       { args: [], stdin: "Look at the failing login test and tell me what you find." },
+      {
+        args: [
+          "--agent",
+          "1f3a9c2e-0000-7000-8000-000000000001",
+          "--output-schema",
+          '{"type":"object","additionalProperties":false,"required":["verdict"],"properties":{"verdict":{"type":"string","enum":["accept","dismiss"]}}}',
+        ],
+        stdin: "Assess this task: 'Fix a typo in the README'.",
+      },
       {
         args: ["--instance", "7b41d0a5", "--access-mode", "auto-accept-edits"],
         stdin: "Bring the changelog up to date.",
@@ -1309,6 +1461,14 @@ export const CLI = {
     ],
     fields: {
       prompt: { stdin: true, flag: "prompt", help: "The opening prompt." },
+      agentId: {
+        flag: "agent",
+        help: "The Agent to spawn from, by its full id; --instance and --profile are refused beside it, because those come from the Agent.",
+      },
+      outputSchema: {
+        flag: "output-schema",
+        help: "What every turn must answer with, as an inline JSON Schema; a keyword outside the subset every harness agrees on is refused, saying which.",
+      },
       instanceId: {
         flag: "instance",
         help: "The Provider Instance to run on, in place of the thread default.",
@@ -1636,6 +1796,10 @@ export const NOUNS = {
   connection: {
     summary: "Connections: the named links to external accounts Hydra acts through.",
     flow: "hydra connection create for a pasted credential or hydra connection start-oauth for a browser flow, then hydra connection list to watch its status and hydra connection set-credentials to rotate.",
+  },
+  agent: {
+    summary: "Agents: the named configurations sessions are spawned from, to work unattended.",
+    flow: "hydra agent create records one, hydra agent list finds it again, then hydra session spawn --agent runs it.",
   },
   session: {
     summary: "Sessions: conversations with provider-backed agents, resumable and forkable.",

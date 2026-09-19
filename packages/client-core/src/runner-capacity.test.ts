@@ -30,6 +30,7 @@ const at = (status: SessionStatus): Session => {
     status,
     resumable: false,
     permissionProfileId: "01a06d02-3000-7000-8000-000000000001",
+    agentId: null,
     instanceId: "01a06d02-1000-7000-8000-000000000001",
     runnerId: MOSS.id,
     workspaceId: null,
@@ -44,6 +45,7 @@ const at = (status: SessionStatus): Session => {
     startedAt: null,
     exitedAt: null,
     lastActivityAt: "2026-09-05T09:00:00.000Z",
+    unenforced: [],
   };
 };
 

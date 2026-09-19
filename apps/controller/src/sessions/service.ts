@@ -44,6 +44,7 @@ import {
   SESSION_SORT_FIELDS,
   SessionFilter,
   TRANSCRIPT_SORT_FIELDS,
+  validation,
   validationOf,
   type Forbidden,
   type Input,
@@ -55,6 +56,7 @@ import {
   type Validation,
 } from "@hydra/contract";
 import { currentStamp, requireGrant, SYSTEM_ACTOR } from "../actor";
+import { PluginHost } from "../plugins";
 import {
   afterCommit,
   announce,
@@ -70,6 +72,7 @@ import { SessionTokens } from "../permissions";
 import type { SecretDecryptError } from "../secrets";
 import { gitIdentityOf, type GitCredential } from "../workspaces";
 import { inputRepository, type StoredInput } from "./inputs";
+import { sessionRecordReader } from "./records";
 import {
   requireSession,
   sessionRepository,
@@ -134,6 +137,8 @@ export interface Opening {
    */
   readonly id: string;
   readonly permissionProfileId: string;
+  /** The Agent it was spawned from; absent is a Thread. */
+  readonly agentId: string | undefined;
   readonly runnerId: string;
   readonly requestedAccessMode: AccessMode;
   readonly parentSessionId: string | undefined;
@@ -285,6 +290,7 @@ type InputError = ReadError | NotFound | InvalidState | Schema.SchemaError;
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const sessions = yield* sessionRepository;
+  const recordOf = yield* sessionRecordReader;
   const inputs = yield* inputRepository;
   const one = requireSession(sessions);
   const tokens = yield* SessionTokens;
@@ -391,10 +397,24 @@ const make = Effect.gen(function* () {
     query: (input: QueryInput): Effect.Effect<SessionPage, ReadError> =>
       Effect.gen(function* () {
         yield* requireGrant("session.query");
-        const { limit, cursor, sort, status, runnerId } = yield* Effect.mapError(
+        const { limit, cursor, sort, status, runnerId, agentId, thread } = yield* Effect.mapError(
           decodeQuery(input),
           validationOf,
         );
+        // One says "spawned from this agent" and the other "spawned from no
+        // agent at all": asking for both is a filter that can only be empty,
+        // and answering it would look like there is nothing rather than like
+        // the question was wrong.
+        if (agentId !== undefined && thread !== undefined) {
+          return yield* Effect.fail(
+            validation([
+              {
+                path: ["thread"],
+                message: "name an agent or ask for threads, not both",
+              },
+            ]),
+          );
+        }
         const listing = yield* refuseCursor(
           sessions.list({
             limit: limit ?? DEFAULT_PAGE_LIMIT,
@@ -402,16 +422,39 @@ const make = Effect.gen(function* () {
             direction: sort?.direction ?? DEFAULT_DIRECTION,
             status,
             runnerId,
+            agentId,
+            thread,
           }),
         );
-        return pageOut(listing);
+        return pageOut({
+          ...listing,
+          items: yield* Effect.forEach(listing.items, recordOf),
+        });
+      }),
+
+    /**
+     * The document one session's machine was told, decoded. It is what a
+     * session picking that transcript up carries on under, and it is read back
+     * rather than rebuilt so the continuation runs under what the parent ran
+     * under, down to the fields nothing else looks at.
+     *
+     * No grant of its own: the caller is the controller daemon sequencing a
+     * resume or a fork, and the operation it is carrying out checked its own.
+     */
+    specOf: (
+      sessionId: string,
+    ): Effect.Effect<SessionSpec, NotFound | SqlError | Schema.SchemaError> =>
+      Effect.gen(function* () {
+        const document = yield* sessions.specDocumentOf(sessionId);
+        if (Option.isNone(document)) return yield* Effect.fail(notFound("no such session"));
+        return yield* decodeSpecDocument(document.value);
       }),
 
     read: (input: Identified): Effect.Effect<Session, ReadError | NotFound> =>
       Effect.gen(function* () {
         yield* requireGrant("session.read");
         const { id } = yield* Effect.mapError(decodeIdentified(input), validationOf);
-        return yield* one(id);
+        return yield* recordOf(yield* one(id));
       }),
 
     /**
@@ -448,10 +491,11 @@ const make = Effect.gen(function* () {
     create: (open: Opening): Effect.Effect<void, SqlError> =>
       Effect.gen(function* () {
         const actor = yield* currentStamp;
-        const row = yield* sessions.insert({
+        yield* sessions.insert({
           id: open.id,
           title: titleOf(open.prompt),
           permissionProfileId: open.permissionProfileId,
+          agentId: open.agentId,
           instanceId: open.spec.instanceId,
           runnerId: open.runnerId,
           workspaceId: open.spec.workspaceId,
@@ -471,7 +515,7 @@ const make = Effect.gen(function* () {
         // leaves when the harness comes up, and a controller restarted in
         // that window still has it.
         yield* inputs.insert({
-          sessionId: row.id,
+          sessionId: open.id,
           source: "user",
           actor,
           text: open.prompt,
@@ -480,10 +524,10 @@ const make = Effect.gen(function* () {
         yield* audit.append({
           kind: open.kind,
           actor,
-          record: { topic: "session", id: row.id },
+          record: { topic: "session", id: open.id },
           payload: {
             ...open.payload,
-            sessionId: row.id,
+            sessionId: open.id,
             ...(open.spec.workspaceId === null ? {} : { workspaceId: open.spec.workspaceId }),
           },
           at: open.at,
@@ -1047,7 +1091,7 @@ export class SessionService extends Context.Service<SessionService, Effect.Succe
 export const SessionServiceLayer: Layer.Layer<
   SessionService,
   never,
-  SqlClient.SqlClient | AuditLog | SessionTokens
+  SqlClient.SqlClient | AuditLog | SessionTokens | PluginHost
 > = Layer.effect(SessionService)(make);
 
 /**

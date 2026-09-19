@@ -25,12 +25,14 @@ const anId = () => uuidToString(mintUuid());
 /** A session row to hang a stream on, with the shipped defaults filled in. */
 const aSession = Effect.gen(function* () {
   const sessions = yield* sessionRepository;
-  const stored = yield* sessions.insert({
-    // D-21: the caller mints the id, because a spawn opens the working area in
-    // the same transaction and its branch is named after the session.
-    id: anId(),
+  // D-21: the caller mints the id, because a spawn opens the working area in
+  // the same transaction and its branch is named after the session.
+  const id = anId();
+  yield* sessions.insert({
+    id,
     title: "a session",
     permissionProfileId: anId(),
+    agentId: undefined,
     instanceId: anId(),
     runnerId: anId(),
     requestedAccessMode: "approval-required",
@@ -44,7 +46,7 @@ const aSession = Effect.gen(function* () {
     parentSessionId: undefined,
     at,
   });
-  return stored.id;
+  return id;
 });
 
 /** `count` ordinary events on one session, numbered from one. */

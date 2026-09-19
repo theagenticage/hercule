@@ -137,6 +137,12 @@ const COMMANDS: Record<string, string> = {
   "connection.setCredentials": "connection set-credentials",
   "connection.startOAuth": "connection start-oauth",
 
+  "agent.query": "agent list",
+  "agent.read": "agent read",
+  "agent.create": "agent create",
+  "agent.update": "agent update",
+  "agent.delete": "agent delete",
+
   "session.query": "session list",
   "session.read": "session read",
   "session.spawn": "session spawn",
@@ -173,6 +179,8 @@ const STDIN_FIELDS = [
   "task.update description",
   "project.create description",
   "project.update description",
+  "agent.create systemPrompt",
+  "agent.update systemPrompt",
   "session.spawn prompt",
   "session.continue prompt",
   "session.input text",
@@ -224,6 +232,10 @@ const RESOLVES: Record<string, string> = {
   "connection.update id": "connection.query",
   "connection.delete id": "connection.query",
   "connection.setCredentials id": "connection.query",
+
+  "agent.read id": "agent.query",
+  "agent.update id": "agent.query",
+  "agent.delete id": "agent.query",
 
   "session.read id": "session.query",
   "session.update id": "session.query",

@@ -1988,6 +1988,59 @@ describe("session.continue", () => {
     });
   });
 
+  it("carries the document the parent was told - an agent's prompt, tools and schema - onto the fork", async () => {
+    await withFleet(async (arranged) => {
+      const listing = await get(arranged.harness.base, "/api/v1/profiles", arranged.token);
+      const profiles = ((await listing.json()) as { items: ReadonlyArray<Profile> }).items;
+      const worker = profiles.find((one) => one.name === "worker");
+      expect(worker).toBeDefined();
+      const created = await post(
+        arranged.harness.base,
+        "/api/v1/agents",
+        {
+          name: "assessor",
+          systemPrompt: "You assess tasks.",
+          instanceId: instanceOf(arranged, "full-provider"),
+          permissionProfileId: worker!.id,
+          disallowedTools: ["edit", "shell"],
+        },
+        arranged.token,
+      );
+      expect(created.status, await created.clone().text()).toBe(200);
+      const agent = (await created.json()) as { readonly id: string };
+      const schema = {
+        type: "object",
+        additionalProperties: false,
+        required: ["verdict"],
+        properties: { verdict: { type: "string", enum: ["accept", "dismiss"] } },
+      };
+
+      const spawnedFromAgent = await spawned(arranged, {
+        agentId: agent.id,
+        prompt: "assess this",
+        outputSchema: schema,
+      });
+      await framesWhen<SessionStart>(arranged.wire, "sessionStart", 1);
+      report(arranged.wire, 1, {
+        eventId: crypto.randomUUID(),
+        sessionId: spawnedFromAgent.id,
+        at,
+        _tag: "session.started",
+      });
+      await sessionWhen(arranged, spawnedFromAgent.id, (one) => one.status === "idle");
+      const parent = await ends(arranged, spawnedFromAgent, 2);
+      expect(parent.resumable).toBe(true);
+
+      const response = await carryOn(arranged, parent.id, { mode: "fork", prompt: "carry on" });
+      expect(response.status, await response.clone().text()).toBe(200);
+
+      const starts = await framesWhen<SessionStart>(arranged.wire, "sessionStart", 2);
+      expect(starts[1]!.spec.systemPrompt).toBe("You assess tasks.");
+      expect(starts[1]!.spec.disallowedTools).toEqual(["edit", "shell"]);
+      expect(starts[1]!.spec.outputSchema).toEqual(schema);
+    });
+  });
+
   it("refuses a parent that is live, one with no native session, and an id nobody holds", async () => {
     await withFleet(async (arranged) => {
       const running = await started(arranged, "hello");

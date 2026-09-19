@@ -136,9 +136,6 @@ const grantOf = (requirement: Requirement): Grant | undefined => {
   }
 };
 
-/** Why a Thread is not a session's to open. */
-const THREAD_IS_THE_USERS = "a Thread is the user's own, and no session may open one";
-
 /**
  * Whether this actor may reach this operation, and the refusal to answer with
  * if it may not.
@@ -148,16 +145,15 @@ const THREAD_IS_THE_USERS = "a Thread is the user's own, and no session may open
  * plugin actors are ungated - neither exists yet, and both are a branch here
  * rather than a rewrite when they do.
  *
- * It answers with the whole refusal rather than the missing grant, and it takes
- * the operation rather than its requirement, because of the one rule here that
- * is per-operation rather than per-grant: `session.spawn` and `session.continue`
- * both require the `session.spawn` grant, but in v1 every spawn is a Thread -
- * there is no Agent to spawn from yet - and a Thread runs on the user's own
- * thread defaults, so a profile holding that grant still does not make one a
- * session's to open. A continue follows the grant like any other operation. The
- * refusal has to name "Thread" before the payload is decoded, which is why it
- * is here rather than in the service: the middleware runs this ahead of the
- * decode and the service method runs it again for in-process callers.
+ * It answers with the whole refusal rather than the missing grant so that a
+ * caller is told what it is missing, and it takes the operation rather than its
+ * requirement so an operation with a rule of its own can be told apart here.
+ *
+ * `session.spawn` has such a rule and it is not enforced here: a spawn from an
+ * Agent is open to every actor holding the grant, while a Thread is the user's
+ * own, and which of the two a call is asking for is in the payload this check
+ * runs ahead of. Placement makes that distinction, where the payload is
+ * decoded.
  */
 export const grantCheck = (id: OperationId, actor: Actor): Forbidden | undefined => {
   const grant = grantOf(OPERATIONS[id].requires);
@@ -166,7 +162,6 @@ export const grantCheck = (id: OperationId, actor: Actor): Forbidden | undefined
     case "user":
       return undefined;
     case "session":
-      if (id === "session.spawn") return forbidden(grant, THREAD_IS_THE_USERS);
       return actor.grants.includes(grant) ? undefined : forbidden(grant);
     case "none":
       return forbidden(grant);

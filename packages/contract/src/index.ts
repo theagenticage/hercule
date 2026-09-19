@@ -129,6 +129,16 @@ export {
   VersionVerdict,
 } from "./groups/provider";
 export {
+  AGENT_SORT_FIELDS,
+  Agent,
+  AgentCreateInput,
+  AgentUpdateInput,
+  DisallowedTool,
+  MAX_AGENT_NAME_LENGTH,
+  MAX_SYSTEM_PROMPT_LENGTH,
+  UnenforcedSpecField,
+} from "./groups/agent";
+export {
   ApprovalDecision,
   MAX_PROMPT_LENGTH,
   MAX_SPAWN_CHECKOUTS,

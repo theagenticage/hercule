@@ -387,6 +387,7 @@ const thread = (id: string, title: string): Session => ({
   status: "idle",
   resumable: false,
   permissionProfileId: "profile-unrestricted",
+  agentId: null,
   instanceId: CLAUDE.id,
   runnerId: LOCAL.id,
   workspaceId: "ws-run-3f1",
@@ -401,6 +402,7 @@ const thread = (id: string, title: string): Session => ({
   startedAt: at,
   exitedAt: null,
   lastActivityAt: at,
+  unenforced: [],
 });
 
 const SESSIONS = [

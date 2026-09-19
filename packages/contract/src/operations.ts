@@ -244,6 +244,12 @@ const TABLE = {
     path: "/api/v1/oauth/start",
   },
 
+  "agent.query": { requires: "agent.read", method: "GET", path: "/api/v1/agents" },
+  "agent.read": { requires: "agent.read", method: "GET", path: "/api/v1/agents/:id" },
+  "agent.create": { requires: "agent.write", method: "POST", path: "/api/v1/agents" },
+  "agent.update": { requires: "agent.write", method: "PATCH", path: "/api/v1/agents/:id" },
+  "agent.delete": { requires: "agent.write", method: "DELETE", path: "/api/v1/agents/:id" },
+
   "session.query": { requires: "session.read", method: "GET", path: "/api/v1/sessions" },
   "session.read": { requires: "session.read", method: "GET", path: "/api/v1/sessions/:id" },
   "session.spawn": { requires: "session.spawn", method: "POST", path: "/api/v1/sessions" },

@@ -307,9 +307,12 @@ describe("a session may not spawn a Thread", () => {
         token,
       );
       expect(refused.status).toBe(403);
-      const refusal = await refusalOf(refused);
-      expect(refusal).toMatchObject({ code: "forbidden", grant: "session.spawn" });
-      expect(refusal.message.toLowerCase()).toContain("thread");
+      // The profile does not hold the grant, so the refusal is the static one
+      // naming it; the Thread rule of the case below never comes into it.
+      expect(await refusalOf(refused)).toMatchObject({
+        code: "forbidden",
+        grant: "session.spawn",
+      });
 
       // The same call by the user, which is whose Thread it would be.
       const mine = await spawn(arranged, { prompt: "and one of my own" });
@@ -330,9 +333,12 @@ describe("a session may not spawn a Thread", () => {
         token,
       );
       expect(refused.status).toBe(403);
-      const refusal = await refusalOf(refused);
-      expect(refusal).toMatchObject({ code: "forbidden", grant: "session.spawn" });
-      expect(refusal.message.toLowerCase()).toContain("thread");
+      // The profile does not hold the grant, so the refusal is the static one
+      // naming it; the Thread rule of the case below never comes into it.
+      expect(await refusalOf(refused)).toMatchObject({
+        code: "forbidden",
+        grant: "session.spawn",
+      });
     });
   });
 });

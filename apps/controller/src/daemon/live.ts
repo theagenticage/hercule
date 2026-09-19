@@ -45,6 +45,7 @@ import { RunnerConnections } from "../runners";
 import {
   continuingSpecOf,
   requireSession,
+  sessionRecordReader,
   SessionService,
   sessionRepository,
   validatedOptions,
@@ -134,6 +135,7 @@ const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const sessions = yield* SessionService;
   const one = requireSession(yield* sessionRepository);
+  const recordOf = yield* sessionRecordReader;
   const instances = yield* providerRepository;
   const resolved = yield* resolvedInstance;
   const resumableNativeSession = yield* resumable;
@@ -251,7 +253,7 @@ const make = Effect.gen(function* () {
             if (session.status === "exited") return yield* Effect.fail(invalidState(HAS_EXITED));
             const modelSelection = yield* selectionFor(session, given);
             yield* sessions.setSelection(id, modelSelection);
-            return { ...session, modelSelection };
+            return yield* recordOf({ ...session, modelSelection });
           }),
         );
       }),
@@ -301,7 +303,7 @@ const make = Effect.gen(function* () {
                   : JSON.stringify(
                       encodeSpec(
                         continuingSpecOf(
-                          session,
+                          yield* sessions.specOf(id),
                           yield* settings.all(),
                           modelSelection,
                           nativeSessionId,
@@ -383,7 +385,7 @@ const make = Effect.gen(function* () {
             }),
           ),
         );
-        return session;
+        return yield* recordOf(session);
       }),
 
     /**
@@ -432,7 +434,7 @@ const make = Effect.gen(function* () {
             }),
           ),
         );
-        return session;
+        return yield* recordOf(session);
       }),
 
     /**
@@ -461,7 +463,7 @@ const make = Effect.gen(function* () {
                 payload: { sessionId: id, runnerId: session.runnerId },
                 at,
               });
-              return { ...session, status: "exited" as const, exitedAt: at };
+              return yield* recordOf({ ...session, status: "exited" as const, exitedAt: at });
             }),
           );
         }
@@ -480,7 +482,7 @@ const make = Effect.gen(function* () {
             }),
           ),
         );
-        return session;
+        return yield* recordOf(session);
       }),
   };
 });

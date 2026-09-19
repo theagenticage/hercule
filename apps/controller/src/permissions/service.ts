@@ -217,6 +217,18 @@ const make = Effect.gen(function* () {
                 ),
               );
             }
+            // And an Agent names it for the sessions it has not spawned yet,
+            // which is the same promise one step earlier: an agent whose
+            // profile is gone could only spawn a session nobody could act as.
+            const agent = yield* profiles.oldestAgentOn(input.id);
+            if (Option.isSome(agent)) {
+              return yield* Effect.fail(
+                invalidState(
+                  `the agent ${agent.value} spawns its sessions under ${found.value.name}; ` +
+                    "point it at another profile first.",
+                ),
+              );
+            }
             yield* profiles.delete(input.id);
             yield* audit.append({
               kind: "profile.deleted",

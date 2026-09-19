@@ -6,7 +6,14 @@
  * downward fallback of [06-providers section 8.4] must never be silent.
  */
 import { Schema } from "effect";
-import { AccessMode, ApprovalDecision, Fact, ModelSelection, OpenRequest } from "@hydra/protocol";
+import {
+  AccessMode,
+  ApprovalDecision,
+  Fact,
+  ModelSelection,
+  OpenRequest,
+  OutputSchema,
+} from "@hydra/protocol";
 import * as HttpApiEndpoint from "effect/unstable/httpapi/HttpApiEndpoint";
 import * as HttpApiGroup from "effect/unstable/httpapi/HttpApiGroup";
 import { closedStruct } from "../closed";
@@ -19,6 +26,7 @@ import {
   Validation,
 } from "../errors";
 import { Id, Timestamp } from "../ids";
+import { UnenforcedSpecField } from "./agent";
 import { Branch } from "./workspace";
 import { page, pageParams } from "../pagination";
 import { Authenticated } from "../security";
@@ -62,6 +70,8 @@ export const Session = Schema.Struct({
    */
   resumable: Schema.Boolean,
   permissionProfileId: Id,
+  /** The Agent this session was spawned from; `null` is a Thread. Lineage only. */
+  agentId: Schema.NullOr(Id),
   instanceId: Id,
   /** Pinned where the session started; a session never migrates. */
   runnerId: Id,
@@ -94,6 +104,11 @@ export const Session = Schema.Struct({
   /** The last exit: kept while the session is resumed, rewritten when it exits again. */
   exitedAt: Schema.NullOr(Timestamp),
   lastActivityAt: Timestamp,
+  /**
+   * Which of the fields this session was spawned with its provider will not
+   * act on, read from the instance's declared capabilities at every read.
+   */
+  unenforced: Schema.Array(UnenforcedSpecField),
 });
 
 export type Session = Schema.Schema.Type<typeof Session>;
@@ -134,11 +149,21 @@ export const SpawnWorkspace = Schema.Union([
 export type SpawnWorkspace = Schema.Schema.Type<typeof SpawnWorkspace>;
 
 /**
- * Spawning a Thread: no agent, so every value comes from the user's `thread.*`
- * settings unless this call overrides it, for this session only.
+ * Spawning a session: from an Agent, whose fields say what it runs under, or
+ * with no `agentId` at all, which is a Thread and takes the user's `thread.*`
+ * settings instead. Either way a value named here overrides both, for this
+ * session only.
  */
 export const SessionSpawnInput = closedStruct({
   prompt: Prompt,
+  /**
+   * The Agent to spawn from. Its fields stand in for the `thread.*` settings
+   * in the same precedence chain, so `instanceId` and `permissionProfileId`
+   * beside it are refused: those come from the Agent.
+   */
+  agentId: Schema.optionalKey(Id),
+  /** What every turn of this session must answer with; refused outside the shared subset. */
+  outputSchema: Schema.optionalKey(OutputSchema),
   instanceId: Schema.optionalKey(Id),
   model: Schema.optionalKey(Schema.NonEmptyString),
   /** The per-model choices this session opens with; what the model does not offer is refused. */
@@ -252,6 +277,10 @@ export const SessionStatusFilter = Schema.Union([
 export const SessionFilter = Schema.Struct({
   status: Schema.optionalKey(SessionStatusFilter),
   runnerId: Schema.optionalKey(Id),
+  /** Only the sessions spawned from this Agent. */
+  agentId: Schema.optionalKey(Id),
+  /** `true` is the sessions with no Agent behind them; `false` is the rest. */
+  thread: Schema.optionalKey(Schema.Boolean),
 });
 
 export const SESSION_SORT_FIELDS = ["createdAt"] as const;
@@ -274,7 +303,7 @@ export const session = HttpApiGroup.make("session")
     HttpApiEndpoint.post("spawn", "/sessions", {
       payload: SessionSpawnInput,
       success: Session,
-      error: [Unauthenticated, Forbidden, Validation, InvalidState, Internal],
+      error: [Unauthenticated, Forbidden, Validation, NotFound, InvalidState, Internal],
     }),
     HttpApiEndpoint.patch("update", "/sessions/:id", {
       params: { id: Id },

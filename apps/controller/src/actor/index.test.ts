@@ -75,15 +75,14 @@ describe("grantCheck", () => {
     expect(missing(grantCheck("task.delete", agent))).toBe("task.delete");
   });
 
-  it("refuses a session the spawn its profile does grant, saying whose a Thread is", () => {
-    const refused = grantCheck("session.spawn", agent);
-
-    expect(missing(refused)).toBe("session.spawn");
-    expect(refused?.error.message.toLowerCase()).toContain("thread");
+  it("lets a session spawn, because whether a spawn is a Thread is in the payload", () => {
+    // A spawn from an Agent is every actor's to make and a Thread is the
+    // user's alone; this check runs before the payload that says which, so
+    // placement is where the two are told apart.
+    expect(grantCheck("session.spawn", agent)).toBeUndefined();
   });
 
-  it("lets that same session continue one, because a fork is not a Thread", () => {
-    // Both operations require `session.spawn`; only the spawn is refused.
+  it("lets that same session continue one, on the same grant", () => {
     expect(requirementOf("session.continue")).toBe("session.spawn");
     expect(grantCheck("session.continue", agent)).toBeUndefined();
   });

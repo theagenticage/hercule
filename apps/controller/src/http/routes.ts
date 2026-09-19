@@ -27,6 +27,7 @@ import {
   Validation,
   type ApiError,
 } from "@hydra/contract";
+import { AgentService, AgentServiceLayer } from "../agents";
 import { Auth, AuthLayer } from "../auth";
 import { LiveTopicsLayer, WsTickets, WsTicketsLayer } from "../live";
 import { ApiKeys, ApiKeysLayer } from "../credentials";
@@ -194,6 +195,20 @@ const taskRoutes = HttpApiBuilder.group(api, "task", (handlers) =>
         operation(tasks.update({ id: params.id, ...payload })),
       )
       .handle("delete", ({ params }) => operation(tasks.delete(params)));
+  }),
+);
+
+const agentRoutes = HttpApiBuilder.group(api, "agent", (handlers) =>
+  Effect.gen(function* () {
+    const agents = yield* AgentService;
+    return handlers
+      .handle("query", ({ query }) => operation(agents.query(query)))
+      .handle("read", ({ params }) => operation(agents.read(params)))
+      .handle("create", ({ payload }) => operation(agents.create(payload)))
+      .handle("update", ({ params, payload }) =>
+        operation(agents.update({ id: params.id, ...payload })),
+      )
+      .handle("delete", ({ params }) => operation(agents.delete(params)));
   }),
 );
 
@@ -415,6 +430,7 @@ export const operationLayers = Layer.mergeAll(
   SettingsOperationsLayer,
   ProfilesLayer,
   TaskServiceLayer,
+  AgentServiceLayer,
   ProjectServiceLayer,
   ResourceServiceLayer,
   // The controller daemon's retirement use case reaches the runner service, so
@@ -446,6 +462,7 @@ export const handlerLayers = Layer.mergeAll(
   secretRoutes,
   controllerRoutes,
   taskRoutes,
+  agentRoutes,
   projectRoutes,
   resourceRoutes,
   workspaceRoutes,
