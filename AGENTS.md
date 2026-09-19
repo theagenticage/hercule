@@ -33,6 +33,8 @@ Development cost carries almost no weight here. Optimize, in order, for: correct
 
 The test: would a senior engineer call this overcomplicated? Then it is.
 
+**Name the thing, not its mechanism.** A name says what something *is* to the reader who meets it first, in CONTEXT.md's words; how it works, what it is encoded as, or which caller it was written for is a doc comment, never the noun. A handle on a running harness process is a `HarnessProcess`, not a `FramedChild` (the framing is how its bytes travel) and not a `PiChild` (the caller is not the thing). A field that says which secret fields exist is `secretFields`, not `secrets`, which the protocol already uses for the values. The tests: could a new engineer say what it is from the name and the doc comment alone, without opening the code? Is the same concept spelled the same way in every package it crosses? Is the name still true if the mechanism changes? A name that fails one of these is renamed before review, and the owner of a shared contract names it once; callers import the name rather than declaring their own alias for it.
+
 **Think before coding.** State your assumptions. If multiple interpretations of the ticket or spec exist, present them - don't pick one silently. If a simpler approach than the ticket implies exists, say so and push back.
 
 **Boyscouting.** Leave the codebase better than you found it. A warning, a lint error, a flaky test, a UI detail that looks off - fix it even when it's unrelated to your task, and mention that you did.
