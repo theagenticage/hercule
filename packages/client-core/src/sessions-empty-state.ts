@@ -13,10 +13,10 @@ import { providerRows, type ProviderRow } from "./provider-rows";
  * the machine it runs on, and a typed-in value is kept by the controller for
  * every machine.
  */
-const LOGIN_LEAD = (many: boolean): string =>
+const buildLoginLead = (many: boolean): string =>
   `Log in to use ${many ? "them" : "it"} in Hydra. The login runs on this machine and its credential stays there.`;
 
-const SECRET_LEAD = (many: boolean): string =>
+const buildSecretLead = (many: boolean): string =>
   `Enter ${many ? "their keys" : "its key"} to use ${many ? "them" : "it"} in Hydra. The key is kept by the controller and used on whichever machine runs a thread.`;
 
 /**
@@ -34,7 +34,7 @@ export type SessionsEmptyState =
   | { readonly kind: "no-harness" }
   /** A harness is here and waiting for a credential; these are the ones to offer. */
   | {
-      readonly kind: "log-in";
+      readonly kind: "sign-in";
       readonly lead: string;
       readonly offers: ReadonlyArray<ProviderRow>;
     }
@@ -62,9 +62,13 @@ export const sessionsEmptyState = (
   // number: one harness is "it", several are "them".
   const many = offers.length > 1;
   return {
-    kind: "log-in",
+    kind: "sign-in",
     lead:
-      secrets === 0 ? LOGIN_LEAD(many) : secrets === offers.length ? SECRET_LEAD(many) : MIXED_LEAD,
+      secrets === 0
+        ? buildLoginLead(many)
+        : secrets === offers.length
+          ? buildSecretLead(many)
+          : MIXED_LEAD,
     offers,
   };
 };

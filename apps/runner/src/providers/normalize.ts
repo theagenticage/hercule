@@ -34,7 +34,7 @@ export const count = (value: unknown): number =>
  * The envelope, with the native ids this harness names its own work by: a
  * thread for one, a session for another, so the key is the caller's.
  */
-export const enveloped = (
+export const buildEnvelope = (
   sessionId: string,
   providerRefs: Readonly<Record<string, string>>,
 ): Envelope => ({

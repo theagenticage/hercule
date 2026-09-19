@@ -397,7 +397,7 @@ describe("how a turn that did not simply finish ends", () => {
         type: "extension_error",
         extensionPath: "/tmp/hydra-extension.ts",
         event: "tool_call",
-        error: "the gate threw",
+        error: "the approval hook threw",
       },
     ]);
     const retries = fresh([
@@ -406,7 +406,7 @@ describe("how a turn that did not simply finish ends", () => {
     ]);
 
     expect(only(extension, "runtime.error")[0]?.class).toBe("extension_error");
-    expect(only(extension, "runtime.error")[0]?.message).toContain("the gate threw");
+    expect(only(extension, "runtime.error")[0]?.message).toContain("the approval hook threw");
     expect(only(retries, "runtime.error")[0]?.class).toBe("auto_retry_failed");
     expect(only(retries, "runtime.error")[0]?.message).toContain("529");
     // Neither is the end of the turn: the settle that follows is.

@@ -14,7 +14,7 @@
  */
 import type * as Schema from "effect/Schema";
 import type { ItemKind, ProviderEvent, StreamKind, TurnState, Usage } from "@hydra/protocol";
-import { count, enveloped, rawOf, type Envelope } from "../normalize";
+import { count, buildEnvelope, rawOf, type Envelope } from "../normalize";
 import { idOf } from "../events";
 import { fact, text } from "../text";
 
@@ -74,8 +74,8 @@ interface Running {
 
 /**
  * A tool item, and the output already reported for it. It keeps pi's own name
- * for the tool and the arguments it was called with, because a call the gate
- * holds is asked about after it started: what the question is called and what
+ * for the tool and the arguments it was called with, because a call the approval
+ * hook holds is asked about after it started: what the question is called and what
  * the card shows are read off the call that is waiting.
  */
 export interface RunningTool extends Running {
@@ -152,7 +152,7 @@ export const normalizing = (sessionId: string, nativeSessionId: string): Normali
 });
 
 const envelope = (state: Normalizing): Envelope =>
-  enveloped(state.sessionId, { nativeSessionId: state.nativeSessionId });
+  buildEnvelope(state.sessionId, { nativeSessionId: state.nativeSessionId });
 
 /** The line the event was read off, under the channel this adapter files. */
 const raw = (payload: unknown): ReturnType<typeof rawOf> => rawOf(PI_EVENT, payload);
@@ -533,7 +533,7 @@ export const normalize = (
         : [failure(state, "auto_retry_failed", said(event.finalError))];
     case "extension_error":
       // Hydra's own extension is the only one a session loads, so this is a
-      // gate that threw: the user hears it rather than reading a quiet allow.
+      // hook that threw: the user hears it rather than reading a quiet allow.
       return [failure(state, "extension_error", said(event.error))];
     case "message_update":
       return onBlockEvent(state, event);

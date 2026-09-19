@@ -1,12 +1,12 @@
 /**
  * The park against the real pi binary: that a tool call the user has not
  * answered really does stop, and that answering it really does let it run. A
- * scripted child proves what the adapter writes; only the binary proves that
+ * fake pi proves what the adapter writes; only the binary proves that
  * the extension is loaded, that its dialog reaches Hydra, and that pi holds the
  * tool until the answer comes back.
  *
  * No paid key and no real model: `models.json` in the throwaway agent directory
- * points the `zai` provider at a local server that answers one scripted tool
+ * points the `zai` provider at a local server that answers one fake tool
  * call. The developer's own `~/.pi` is never read or written, and the only
  * process stopped is the one the adapter started.
  *
@@ -18,19 +18,19 @@ import { afterAll, describe, expect, it } from "vitest";
 import { Effect, Stream } from "effect";
 import type { AccessMode, ProviderEvent, SessionSpec } from "@hydra/protocol";
 import { pi } from "./adapter";
-import { cleanupHomes, contextIn, KEY, SPEC, taggedIn, until } from "./testing";
+import { cleanupHomes, contextIn, TEST_ZAI_KEY, SPEC, taggedIn, until } from "./testing";
 import { scratchHome } from "../testing";
 import {
   PARKED_COMMAND,
   PARKED_OUTPUT,
-  scriptedUpstream,
-  type Script,
-  type Upstream,
+  startFakeModelServer,
+  type FakeModelFirstTurn,
+  type FakeModelServer,
 } from "./upstream";
 
 const binary = Bun.which("pi") ?? undefined;
 
-const upstreams: Array<Upstream> = [];
+const upstreams: Array<FakeModelServer> = [];
 
 afterAll(() => {
   cleanupHomes();
@@ -45,11 +45,11 @@ const BUDGET_MS = 120_000;
 const UNANSWERED_MS = 2_000;
 
 /**
- * The scripted model, standing in for `zai` so the adapter's own
- * `--model zai/<slug>` reaches it. Built-in models stay; `scripted` is added
+ * The fake model, standing in for `zai` so the adapter's own
+ * `--model zai/<slug>` reaches it. Built-in models stay; `fake-model` is added
  * beside them.
  */
-const pointingAtScript = (home: string, baseUrl: string): void => {
+const pointAtFakeModel = (home: string, baseUrl: string): void => {
   writeFileSync(
     join(home, "models.json"),
     JSON.stringify({
@@ -60,8 +60,8 @@ const pointingAtScript = (home: string, baseUrl: string): void => {
           apiKey: "not-a-real-key",
           models: [
             {
-              id: "scripted",
-              name: "Scripted",
+              id: "fake-model",
+              name: "Fake model",
               reasoning: true,
               input: ["text"],
               contextWindow: 100_000,
@@ -75,10 +75,10 @@ const pointingAtScript = (home: string, baseUrl: string): void => {
   );
 };
 
-/** The session under test: the scripted model, on whichever mode is asked for. */
+/** The session under test: the fake model, on whichever mode is asked for. */
 const specFor = (accessMode: AccessMode): SessionSpec => ({
   ...SPEC,
-  modelSelection: { model: "scripted", options: { thinking: "low" } },
+  modelSelection: { model: "fake-model", options: { thinking: "low" } },
   accessMode,
 });
 
@@ -91,18 +91,18 @@ interface Live {
 }
 
 const running = async (
-  script: Script = {},
+  firstTurn: FakeModelFirstTurn = {},
   accessMode: AccessMode = "approval-required",
 ): Promise<Live> => {
-  const upstream = scriptedUpstream(script);
+  const upstream = startFakeModelServer(firstTurn);
   upstreams.push(upstream);
   const home = scratch();
-  pointingAtScript(home, upstream.baseUrl);
+  pointAtFakeModel(home, upstream.baseUrl);
   const cwd = scratch();
-  // The scripted upstream reads no credential, and the real binary's own PATH
+  // The fake upstream reads no credential, and the real binary's own PATH
   // is what finds the shell it runs the command with.
   const ctx = {
-    ...contextIn(home, cwd, { zaiApiKey: KEY }),
+    ...contextIn(home, cwd, { zaiApiKey: TEST_ZAI_KEY }),
     binary: binary!,
     env: { PATH: process.env["PATH"] ?? "" },
   };
@@ -270,7 +270,7 @@ describe.skipIf(binary === undefined)("a real pi parked on a real tool call", ()
 
       // The mode's whole point: the file change was never docked, and the
       // shell command beside it in the same batch still is the user's to
-      // answer. pi gates a whole batch before it runs any of it, so the change
+      // answer. pi holds a whole batch before it runs any of it, so the change
       // itself lands once the command it was batched with is answered.
       expect(requests(live)).toHaveLength(1);
       expect(request.request.kind).toBe("command_approval");

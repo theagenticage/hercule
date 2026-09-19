@@ -1,5 +1,5 @@
 /**
- * What the pi adapter's probe reports about a machine, over a scripted pi:
+ * What the pi adapter's probe reports about a machine, over a fake pi:
  * nothing vendor-supplied runs. The probe is reached through the adapter,
  * because that is how the runner reaches it.
  *
@@ -11,22 +11,30 @@ import { afterAll, describe, expect, it } from "vitest";
 import { Effect } from "effect";
 import type { ProbeResult } from "@hydra/protocol";
 import { piAdapter } from "./adapter";
-import { cleanupHomes, contextIn, homing, KEY, scripted, type Script, VERSION } from "./testing";
+import {
+  buildFakePiSeam,
+  cleanupHomes,
+  contextIn,
+  FAKE_PI_VERSION,
+  type FakePiBehaviour,
+  homing,
+  TEST_ZAI_KEY,
+} from "./testing";
 
 afterAll(cleanupHomes);
 
 const probing = (
-  script: Script = {},
-  secrets: Readonly<Record<string, string>> = { zaiApiKey: KEY },
+  behaviour: FakePiBehaviour = {},
+  secrets: Readonly<Record<string, string>> = { zaiApiKey: TEST_ZAI_KEY },
   // Collected rather than defaulted: a default would take the `undefined` the
   // machine-without-pi case passes for "not given" and hand it a pi anyway.
   ...binary: ReadonlyArray<string | undefined>
 ): {
   readonly result: Promise<ProbeResult>;
-  readonly runs: ReturnType<typeof scripted>["runs"];
-  readonly spawns: ReturnType<typeof scripted>["spawns"];
+  readonly runs: ReturnType<typeof buildFakePiSeam>["runs"];
+  readonly spawns: ReturnType<typeof buildFakePiSeam>["spawns"];
 } => {
-  const { seam, runs, spawns } = scripted(script);
+  const { seam, runs, spawns } = buildFakePiSeam(behaviour);
   const ctx = {
     ...contextIn(homing(), null, secrets),
     ...(binary.length === 0 ? {} : { binary: binary[0] }),
@@ -51,7 +59,7 @@ describe("what the pi adapter reports about a machine", () => {
     const { result, runs } = probing();
 
     const probed = await result;
-    expect(probed.harnessVersion).toBe(VERSION);
+    expect(probed.harnessVersion).toBe(FAKE_PI_VERSION);
     expect(runs.map((run) => run.command.slice(1))).toContainEqual(["--version"]);
   });
 
@@ -78,7 +86,7 @@ describe("what the pi adapter reports about a machine", () => {
 
     await result;
     const checked = runs.find((run) => run.command.includes("check"));
-    expect(checked?.env["ZAI_API_KEY"]).toBe(KEY);
+    expect(checked?.env["ZAI_API_KEY"]).toBe(TEST_ZAI_KEY);
   });
 
   it("reports a machine with no key as unauthenticated, not as broken", async () => {
@@ -92,7 +100,7 @@ describe("what the pi adapter reports about a machine", () => {
   });
 
   it("reports a machine with no pi on it as an error that says so", async () => {
-    const { result } = probing({}, { zaiApiKey: KEY }, undefined);
+    const { result } = probing({}, { zaiApiKey: TEST_ZAI_KEY }, undefined);
 
     const probed = await result;
     expect(probed.auth.status).toBe("error");

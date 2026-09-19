@@ -194,7 +194,7 @@ export const decodeAgainst = (
  * config is read against, so a config is complete without a credential in it
  * and a credential written into one is refused by name rather than saved.
  */
-export const withoutSecrets = (schema: Schema.Top): Schema.Top => {
+export const excludeSecretFields = (schema: Schema.Top): Schema.Top => {
   const marked = new Set(secretFields(schema).map((field) => field.name));
   if (marked.size === 0) return schema;
   // `fields` is public on `Schema.Struct` but not on `Schema.Top`, which is

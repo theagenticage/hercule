@@ -7,30 +7,30 @@
  *
  * It imports nothing: a `-e` file is loaded by pi's own loader, and anything it
  * reached for would have to exist on the machine the session runs on. Which
- * calls it holds it does not decide for itself either: the deciding function
- * is interpolated here as its own source, so what runs inside pi is the
- * function the adapter reads and the tests cover, not a second reading of it.
+ * calls it holds it does not work out for itself either: `requiresApproval` is
+ * interpolated here as its own source, so what runs inside pi is the function
+ * the adapter reads and the tests cover, not a second reading of it.
  */
-import { decide } from "./policy";
+import { requiresApproval } from "./policy";
 
 /** Where the adapter writes it, and what pi is pointed at with `-e`. */
 export const EXTENSION_FILE = "hydra-extension.ts";
 
 /**
- * How the gate learns which mode the session runs under. Spelled once and read
- * from both ends: the adapter puts it in pi's environment, the source below
- * reads it out, and a name that drifted apart would be a gate that fell back
- * to asking about everything.
+ * How the approval hook learns which mode the session runs under. Spelled once
+ * and read from both ends: the adapter puts it in pi's environment, the source
+ * below reads it out, and a name that drifted apart would be an approval hook
+ * that fell back to asking about everything.
  */
-export const ACCESS_MODE = "HYDRA_ACCESS_MODE";
+export const ACCESS_MODE_VARIABLE = "HYDRA_ACCESS_MODE";
 
 export const EXTENSION_SOURCE = `/**
- * Hydra's tool gate. Written by the Hydra runner at session start; edits here
+ * Hydra's tool approval hook. Written by the Hydra runner at session start; edits here
  * are overwritten the next time a session starts.
  */
-const decide = ${decide.toString()};
+const requiresApproval = ${requiresApproval.toString()};
 
-const MODE = process.env.${ACCESS_MODE} ?? "approval-required";
+const MODE = process.env.${ACCESS_MODE_VARIABLE} ?? "approval-required";
 
 const DENIED = "The user did not approve this in Hydra.";
 
@@ -41,13 +41,13 @@ export default function (pi) {
   // and no tool call ever waits on an answer that was never going to come.
   if (MODE === "full-access") return;
   pi.on("tool_call", async (event, ctx) => {
-    if (!decide(MODE, event.toolName)) return undefined;
+    if (!requiresApproval(MODE, event.toolName)) return undefined;
     try {
       // The message is the call's own name and id rather than prose: Hydra
       // renders the card from the call itself, and this is how it knows which
       // call this question is about.
-      const asking = JSON.stringify({ toolCallId: event.toolCallId, toolName: event.toolName });
-      const allowed = await ctx.ui.confirm(\`Approve \${event.toolName}?\`, asking, {
+      const heldCall = JSON.stringify({ toolCallId: event.toolCallId, toolName: event.toolName });
+      const allowed = await ctx.ui.confirm(\`Approve \${event.toolName}?\`, heldCall, {
         // Without it, an aborted turn leaves this dialog waiting for ever, and
         // the session with it.
         signal: ctx.signal,

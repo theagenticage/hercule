@@ -214,7 +214,7 @@ const siteOf = (url: string | undefined): string => {
  * the machine has not been asked about yet is one the screen still reads as
  * missing.
  */
-export function ProviderSecretLogin({
+export function ProviderKeyEntry({
   client,
   instanceId,
   field,

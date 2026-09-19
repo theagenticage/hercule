@@ -30,7 +30,7 @@ import { probeFailed } from "../probe";
 import { runProcess, spawnPi, type Run } from "../process";
 import { fact, text } from "../text";
 import { now } from "../../report";
-import { ACCESS_MODE, EXTENSION_FILE, EXTENSION_SOURCE } from "./extension";
+import { ACCESS_MODE_VARIABLE, EXTENSION_FILE, EXTENSION_SOURCE } from "./extension";
 import { ending, normalize, normalizing, type Normalizing, type RunningTool } from "./normalize";
 import { DEFAULT_THINKING, piInstall, probing, ZAI } from "./probe";
 import { rpcOver, type PiChild, type PiRpc, type PiSpawn } from "./rpc";
@@ -74,7 +74,7 @@ export interface PiSeam {
 }
 
 /**
- * The question the gate stopped a tool call on. pi identifies its dialogs by an
+ * The question the approval hook stopped a tool call on. pi identifies its dialogs by an
  * id of its own and reads nothing else back, so an answer is that id and a
  * value; the request is what every surface sees and answers by.
  */
@@ -98,7 +98,7 @@ interface Held {
 }
 
 /**
- * The answers a held call takes. The gate could remember a rule for the rest
+ * The answers a held call takes. The approval hook could remember a rule for the rest
  * of the session, which is not built here, so an "allow always" is not offered
  * rather than being quietly narrowed to this one call.
  */
@@ -151,14 +151,14 @@ interface Dialog {
   readonly toolCallId: string;
 }
 
-/** What the gate wrote in the dialog: the call it is asking about. */
-const asking = (message: unknown): Record<string, unknown> => {
+/** What the approval hook wrote in the dialog: the call it is asking about. */
+const parseHeldCall = (message: unknown): Record<string, unknown> => {
   if (typeof message !== "string") return {};
   try {
     const said: unknown = JSON.parse(message);
     return typeof said === "object" && said !== null ? (said as Record<string, unknown>) : {};
   } catch {
-    // Only Hydra's own gate asks anything in these sessions, so a message in
+    // Only Hydra's own approval hook asks anything in these sessions, so a message in
     // any other shape names no call - and a question about no call is one the
     // reader below refuses rather than docks.
     return {};
@@ -184,7 +184,7 @@ const dialogOf = (frame: unknown): Dialog | undefined => {
   ) {
     return undefined;
   }
-  return { id, toolCallId: stringIn(asking(asked["message"]), "toolCallId") };
+  return { id, toolCallId: stringIn(parseHeldCall(asked["message"]), "toolCallId") };
 };
 
 /**
@@ -195,7 +195,7 @@ const sessionsDir = (home: string): string => join(home, "sessions");
 
 const extensionPath = (home: string): string => join(home, EXTENSION_FILE);
 
-const thinkingOf = (selection: ModelSelection): string => {
+const getSessionThinkingLevel = (selection: ModelSelection): string => {
   const picked = selection.options["thinking"];
   return typeof picked === "string" && picked !== "" ? picked : DEFAULT_THINKING;
 };
@@ -251,7 +251,7 @@ const argvFor = (
     "--model",
     `${ZAI}/${spec.modelSelection.model}`,
     "--thinking",
-    thinkingOf(spec.modelSelection),
+    getSessionThinkingLevel(spec.modelSelection),
   ];
 };
 
@@ -397,7 +397,7 @@ export const piAdapter = (seam: PiSeam): ProviderAdapter => {
 
   /**
    * One line off pi's stdout that was not an answer to a command: a question
-   * the gate is asking, which is answered here, or something pi did, which the
+   * the approval hook is asking, which is answered here, or something pi did, which the
    * normalizer turns into the session's events.
    */
   const onLine = (sessionId: string, line: string, frame: unknown): void => {
@@ -453,10 +453,10 @@ export const piAdapter = (seam: PiSeam): ProviderAdapter => {
   /** The home pi keeps this instance's sessions and this build's extension in. */
   const prepare = (ctx: ProviderRunnerContext): void => {
     mkdirSync(sessionsDir(ctx.home), { recursive: true, mode: 0o700 });
-    // Rewritten at every start rather than once, so the gate a session runs
-    // behind is always this build's. Written beside it and renamed over it,
-    // because a pi starting in this home at the same moment would otherwise
-    // load whatever half of the file had reached disk - a session with no gate.
+    // Rewritten at every start rather than once, so the approval hook a session
+    // runs behind is always this build's. Written beside it and renamed over it,
+    // because a pi starting in this home at the same moment would otherwise load
+    // whatever half of the file had reached disk - a session with no hook.
     const written = `${extensionPath(ctx.home)}.${process.pid}.${crypto.randomUUID()}`;
     try {
       writeFileSync(written, EXTENSION_SOURCE, { mode: 0o600 });
@@ -512,7 +512,10 @@ export const piAdapter = (seam: PiSeam): ProviderAdapter => {
       // Set here rather than after the level: pi is already on this model, and
       // a level pi refuses would otherwise leave every turn reporting the old.
       held.state.model = selection.model;
-      yield* held.rpc.send({ type: "set_thinking_level", level: thinkingOf(selection) });
+      yield* held.rpc.send({
+        type: "set_thinking_level",
+        level: getSessionThinkingLevel(selection),
+      });
     });
 
   return {
@@ -554,7 +557,7 @@ export const piAdapter = (seam: PiSeam): ProviderAdapter => {
             prepare(ctx);
             return seam.spawn(
               [binary, ...argvFor(spec, ctx, sessionId, transcript)],
-              envFor(ctx, { [ACCESS_MODE]: spec.accessMode }),
+              envFor(ctx, { [ACCESS_MODE_VARIABLE]: spec.accessMode }),
               // Where the session's own files go. pi resolves every relative
               // path against the directory it was started in, so a child that
               // inherited the runner's would write the user's work into
@@ -632,8 +635,8 @@ export const piAdapter = (seam: PiSeam): ProviderAdapter => {
         const held = sessions.get(sessionId);
         if (held === undefined) return Effect.void;
         // The question goes first, and before the turn is looked at: nobody
-        // refused the call, the turn it belonged to was stopped, and a gate
-        // still waiting on an answer would hold the turn open through the
+        // refused the call, the turn it belonged to was stopped, and an approval
+        // hook still waiting on an answer would hold the turn open through the
         // abort that was meant to end it.
         resolvePark(held, "cancel");
         // The turn completing on `events` is the whole report.

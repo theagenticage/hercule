@@ -18,7 +18,7 @@ export {
   decodeAgainst,
   secret,
   secretFields,
-  withoutSecrets,
+  excludeSecretFields,
   UnsupportedConfigSchema,
 } from "./config-schema";
 

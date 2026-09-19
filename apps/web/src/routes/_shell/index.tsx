@@ -6,7 +6,7 @@ import { queryKeys, sessionsEmptyState } from "@hydra/client-core";
 import { useLiveInvalidation } from "../../app/live-invalidation";
 import { localRunnerQuery, providersQuery, runnersQuery } from "../../app/queries";
 import { CreateThreadLink } from "../../screens/create-thread-link";
-import { ProviderLogin, ProviderSecretLogin } from "../../screens/provider-login";
+import { ProviderKeyEntry, ProviderLogin } from "../../screens/provider-login";
 import { messageOf } from "../../screens/save-status";
 
 export const Route = createFileRoute("/_shell/")({
@@ -90,7 +90,7 @@ function Sessions(): JSX.Element {
     );
   }
 
-  if (state.kind === "log-in") {
+  if (state.kind === "sign-in") {
     return (
       <Screen
         headline={found(state.offers.map((row) => row.name))}
@@ -118,7 +118,7 @@ function Sessions(): JSX.Element {
                 />,
               ]
             : row.secretFields.map((field) => (
-                <ProviderSecretLogin
+                <ProviderKeyEntry
                   key={`${row.id}:${field.name}`}
                   client={client}
                   instanceId={row.id}

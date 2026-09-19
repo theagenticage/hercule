@@ -1,8 +1,8 @@
 /**
- * The scripted pi every adapter test in this folder drives: a seam whose child
+ * The fake pi every adapter test in this folder drives: a seam whose child
  * answers one line at a time, records the argv, the environment and every
  * command it was written, and lets a test push an event of its own. Nothing
- * vendor-supplied runs, and the frames the script answers with are the shapes
+ * vendor-supplied runs, and the frames it answers with are the shapes
  * pi 0.85.1 declares - `dist/modes/rpc/rpc-types.d.ts` for the commands and
  * their responses, the bundled `models.json` for the two GLM models - not
  * shapes invented here.
@@ -29,12 +29,12 @@ export { cleanupHomes, CWD, lines, PRIOR, settle, taggedIn, until, WAIT_MS } fro
 export const homing = (): string => scratchHome("pi");
 
 /** Not a key: a placeholder no upstream would accept, which is the point. */
-export const KEY = "zai-key-for-a-test-only";
+export const TEST_ZAI_KEY = "zai-key-for-a-test-only";
 
 export const contextIn = (
   home: string,
   cwd: string | null = null,
-  secrets: Readonly<Record<string, string>> = { zaiApiKey: KEY },
+  secrets: Readonly<Record<string, string>> = { zaiApiKey: TEST_ZAI_KEY },
 ): ProviderRunnerContext => ({
   cwd,
   home,
@@ -55,7 +55,7 @@ export const SPEC: SessionSpec = {
 };
 
 /**
- * Z.ai's models as pi 0.85.1's own catalogue answers with them, all seven,
+ * Z.ai's models as pi 0.85.1's own catalog answers with them, all seven,
  * plus one from another provider so a filter has something to leave out. The
  * thinking maps are theirs too: a level mapped to null is one the model cannot
  * be asked for, and the 5.2 line takes `off` where the 5.3 line cannot.
@@ -117,7 +117,7 @@ const GLM_53_FLASH = zaiModel(
   ["text", "image"],
 );
 
-/** The catalogue in the order pi lists it. */
+/** The catalog in the order pi lists it. */
 export const ZAI_MODELS: ReadonlyArray<Record<string, unknown>> = [
   zaiModel(
     "glm-4.7",
@@ -199,7 +199,7 @@ const DEFAULT_ANSWERS: Answers = {
 /** What pi answers a command it will not do with, naming the field it refused. */
 export const refusal = (error: string): Record<string, unknown> => ({ success: false, error });
 
-export const VERSION = "0.85.1";
+export const FAKE_PI_VERSION = "0.85.1";
 
 /** `pi auth check --provider zai --json` as pi 0.85.1 answers both branches. */
 const authCheck = (env: Readonly<Record<string, string | undefined>>): Ran =>
@@ -225,7 +225,7 @@ interface RunCall {
   readonly env: Readonly<Record<string, string | undefined>>;
 }
 
-export interface Script {
+export interface FakePiBehaviour {
   /** What each RPC command is answered with, over the defaults above. */
   readonly answers?: Answers;
   /** What a one-shot command says, over `pi --version` and `pi auth check`. */
@@ -243,8 +243,8 @@ export interface Script {
  * A seam whose pi answers line by line, recording the argv and the environment
  * it was spawned with, every command it was sent, and every one-shot run.
  */
-export const scripted = (
-  script: Script = {},
+export const buildFakePiSeam = (
+  behaviour: FakePiBehaviour = {},
 ): {
   readonly seam: PiSeam;
   readonly spawns: Array<Spawn>;
@@ -254,7 +254,7 @@ export const scripted = (
   const spawns: Array<Spawn> = [];
   const sent: Array<Sent> = [];
   const runs: Array<RunCall> = [];
-  const replies: Answers = { ...DEFAULT_ANSWERS, ...script.answers };
+  const replies: Answers = { ...DEFAULT_ANSWERS, ...behaviour.answers };
   const spawn = (
     command: ReadonlyArray<string>,
     env: Readonly<Record<string, string | undefined>>,
@@ -268,7 +268,7 @@ export const scripted = (
     const done = new Promise<number>((resolve) => {
       exited = resolve;
     });
-    if (script.dies === true) {
+    if (behaviour.dies === true) {
       err.push("pi: could not start");
       out.end();
       err.end();
@@ -306,7 +306,7 @@ export const scripted = (
       /** Closing stdin is what pi reads as the end of the conversation. */
       end: () => {
         closed = true;
-        if (script.lingers !== true) leaving();
+        if (behaviour.lingers !== true) leaving();
       },
       kill: () => {
         kills += 1;
@@ -336,11 +336,11 @@ export const scripted = (
     spawn,
     run: (command, env) => {
       runs.push({ command, env });
-      const answered = script.ran?.(command, env);
+      const answered = behaviour.ran?.(command, env);
       if (answered !== undefined) return Effect.succeed(answered);
       const args = command.slice(1).join(" ");
       if (args === "--version")
-        return Effect.succeed({ code: 0, stdout: `${VERSION}\n`, stderr: "" });
+        return Effect.succeed({ code: 0, stdout: `${FAKE_PI_VERSION}\n`, stderr: "" });
       if (args === "auth check --provider zai --json") return Effect.succeed(authCheck(env));
       return Effect.succeed({ code: 1, stdout: "", stderr: `unknown command: ${args}` });
     },
@@ -348,9 +348,9 @@ export const scripted = (
   return { seam, spawns, sent, runs };
 };
 
-/** An adapter with its events collected, and the pi it will reach for. */
+/** An adapter with its events collected, and the fake pi it will reach for. */
 export const driving = (
-  script: Script = {},
+  behaviour: FakePiBehaviour = {},
   cwd: string | null = CWD,
 ): {
   readonly adapter: ReturnType<typeof piAdapter>;
@@ -360,7 +360,7 @@ export const driving = (
   readonly runs: Array<RunCall>;
   readonly seen: Array<ProviderEvent>;
 } => {
-  const { seam, spawns, sent, runs } = scripted(script);
+  const { seam, spawns, sent, runs } = buildFakePiSeam(behaviour);
   const adapter = piAdapter(seam);
   const seen: Array<ProviderEvent> = [];
   Effect.runFork(
@@ -377,10 +377,10 @@ export const sentOf = (
 
 /** A started session, and the pi hosting it. */
 export const started = async (
-  script: Script = {},
+  behaviour: FakePiBehaviour = {},
   spec: SessionSpec = SPEC,
 ): Promise<ReturnType<typeof driving> & { readonly child: Spawn }> => {
-  const run = driving(script);
+  const run = driving(behaviour);
   await Effect.runPromise(run.adapter.startSession(SESSION, spec, run.ctx));
   await until("spawned a pi", () => run.spawns.length === 1);
   return { ...run, child: run.spawns[0]! };
@@ -388,9 +388,9 @@ export const started = async (
 
 /** A session whose turn is running, which is what makes an input a steer. */
 export const busy = async (
-  script: Script = {},
+  behaviour: FakePiBehaviour = {},
 ): Promise<ReturnType<typeof driving> & { readonly child: Spawn }> => {
-  const run = await started(script);
+  const run = await started(behaviour);
   await Effect.runPromise(run.adapter.sendInput(SESSION, { text: "look around" }));
   run.child.push({ type: "agent_start" });
   await until("reported the turn open", () => taggedIn(run.seen, "turn.started").length === 1);

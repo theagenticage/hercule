@@ -22,7 +22,7 @@ import {
   type TurnState,
   type Usage,
 } from "@hydra/protocol";
-import { count, enveloped, rawOf, type Envelope } from "../normalize";
+import { count, buildEnvelope, rawOf, type Envelope } from "../normalize";
 import { idOf } from "../events";
 import { fact, text } from "../text";
 import type { NotificationFrame } from "./rpc";
@@ -64,7 +64,7 @@ export const normalizing = (sessionId: string, threadId: string): Normalizing =>
 });
 
 const envelope = (state: Normalizing): Envelope =>
-  enveloped(state.sessionId, { threadId: state.threadId });
+  buildEnvelope(state.sessionId, { threadId: state.threadId });
 
 /** The notification the event was read off, under this adapter's channel. */
 const raw = (payload: unknown): ReturnType<typeof rawOf> => rawOf(CODEX_NOTIFICATION, payload);

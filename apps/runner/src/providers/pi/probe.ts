@@ -4,9 +4,9 @@
  * looks for it, and the models it would offer - plus the install that puts pi
  * on a machine.
  *
- * The version and the credential are one-shot commands; the catalogue needs a
- * pi that has loaded its providers, so it is asked of a session-less child that
- * is killed as soon as it has answered.
+ * The version and the credential are one-shot commands; the catalog needs a pi
+ * that has loaded its providers, so it is asked of a session-less child that is
+ * killed as soon as it has answered.
  */
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -31,7 +31,7 @@ export const ZAI = "zai";
 /** The level a session runs on when the user picked none. */
 export const DEFAULT_THINKING = "low";
 
-/** One model as pi's catalogue declares it. */
+/** One model as pi's catalog declares it. */
 interface PiModel {
   readonly id?: unknown;
   readonly name?: unknown;
@@ -69,10 +69,11 @@ const authOf = (ran: Ran): SnapshotAuth => {
 const labelled = (level: string): string => `${level.slice(0, 1).toUpperCase()}${level.slice(1)}`;
 
 /**
- * The levels the model maps to something. A level it maps to `null` is one the
- * upstream refuses the turn for, so offering it would be a choice that fails.
+ * The thinking option the model offers, or none: the levels it maps to
+ * something. A level it maps to `null` is one the upstream refuses the turn
+ * for, so offering it would be a choice that fails.
  */
-const thinkingOf = (model: PiModel): ReadonlyArray<ModelOption> => {
+const buildThinkingOption = (model: PiModel): ReadonlyArray<ModelOption> => {
   const levels = Object.entries(model.thinkingLevelMap ?? {}).flatMap(([level, mapped]) =>
     mapped === null || mapped === undefined ? [] : [level],
   );
@@ -89,7 +90,7 @@ const thinkingOf = (model: PiModel): ReadonlyArray<ModelOption> => {
   ];
 };
 
-const catalogOf = (models: ReadonlyArray<PiModel>): ReadonlyArray<ModelDescriptor> =>
+const buildCatalog = (models: ReadonlyArray<PiModel>): ReadonlyArray<ModelDescriptor> =>
   models
     .filter(
       (model) =>
@@ -103,16 +104,16 @@ const catalogOf = (models: ReadonlyArray<PiModel>): ReadonlyArray<ModelDescripto
     .map((model) => ({
       slug: fact(model.id as string),
       name: fact(model.name as string),
-      options: thinkingOf(model),
+      options: buildThinkingOption(model),
     }));
 
 /**
- * The catalogue, off a pi of its own that persists nothing and reaches nowhere
+ * The catalog, off a pi of its own that persists nothing and reaches nowhere
  * but its own installed providers. It is killed as soon as it has answered: a
  * child left running for a Fleet page nobody is looking at any more is a
  * process with the user's key in its environment.
  */
-const catalogue = (
+const fetchCatalog = (
   spawn: PiSpawn,
   binary: string,
   env: Readonly<Record<string, string | undefined>>,
@@ -146,7 +147,7 @@ const catalogue = (
       return Effect.map(rpc.send({ type: "get_available_models" }), (answer) => {
         const models = (answer["data"] as { readonly models?: ReadonlyArray<PiModel> } | undefined)
           ?.models;
-        return catalogOf(models ?? []);
+        return buildCatalog(models ?? []);
       });
     },
     (child) => Effect.sync(() => child.kill()),
@@ -164,9 +165,9 @@ export const probing =
       const harnessVersion = fact(version.stdout.trim());
       const auth = authOf(yield* run([binary, "auth", "check", "--provider", ZAI, "--json"], env));
       // pi lists only the providers whose credentials it found, so a machine
-      // nobody has entered a key on has no catalogue to read.
+      // nobody has entered a key on has no catalog to read.
       if (auth.status !== "ok") return { harnessVersion, auth, models: [] };
-      return yield* Effect.match(catalogue(spawn, binary, env), {
+      return yield* Effect.match(fetchCatalog(spawn, binary, env), {
         onFailure: (message) => probeFailed(harnessVersion, message),
         onSuccess: (models) => ({ harnessVersion, auth, models }),
       });

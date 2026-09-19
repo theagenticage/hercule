@@ -21,7 +21,7 @@ export interface SecretFieldOffer extends ProviderSecretField {
  * Replacing says what saving would do: the value in place cannot be read, only
  * written over.
  */
-const actionFor = (field: ProviderSecretField): SecretFieldOffer => ({
+const buildOffer = (field: ProviderSecretField): SecretFieldOffer => ({
   ...field,
   label: field.set ? `Replace ${field.title}` : `Enter ${field.title}`,
 });
@@ -106,7 +106,7 @@ export const providerRows = (
       // to, so it offers the key instead of a login.
       logIn: usable && instance.secretFields.length === 0,
       logInLabel: snapshot?.auth.status === "ok" ? "Log in again" : "Log in",
-      secretFields: usable ? instance.secretFields.map(actionFor) : [],
+      secretFields: usable ? instance.secretFields.map(buildOffer) : [],
       probe: reachable,
     };
   });

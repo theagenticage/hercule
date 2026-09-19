@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button, FormCard } from "@hydra/ui";
 import { providerRows, queryKeys, type HydraClient, type ProviderRow } from "@hydra/client-core";
 import type { RunnerDetail } from "@hydra/contract";
-import { ProviderLogin, ProviderSecretLogin } from "../../../screens/provider-login";
+import { ProviderKeyEntry, ProviderLogin } from "../../../screens/provider-login";
 import { messageOf } from "../../../screens/save-status";
 import { providersQuery } from "../../../app/queries";
 
@@ -69,7 +69,7 @@ export function Providers({
             // A credential the stored snapshot knows nothing about, however it
             // was entered, so the machine is asked about the instance again
             // rather than the page re-reading what it already had.
-            onLoggedIn={() => {
+            onCredentialEntered={() => {
               probe.mutate(row.id);
             }}
           />
@@ -93,7 +93,7 @@ function Row({
   busy,
   onProbe,
   onInstall,
-  onLoggedIn,
+  onCredentialEntered,
 }: {
   readonly row: ProviderRow;
   readonly client: HydraClient;
@@ -103,7 +103,7 @@ function Row({
   readonly busy: boolean;
   readonly onProbe: () => void;
   readonly onInstall: () => void;
-  readonly onLoggedIn: () => void;
+  readonly onCredentialEntered: () => void;
 }): JSX.Element {
   return (
     // Grouped so a screen reader takes one provider's facts and moves as one
@@ -140,16 +140,16 @@ function Row({
             runnerId={runnerId}
             subject={`${row.name} on ${runnerName}`}
             label={row.logInLabel}
-            onLoggedIn={onLoggedIn}
+            onLoggedIn={onCredentialEntered}
           />
         ) : null}
         {row.secretFields.map((field) => (
-          <ProviderSecretLogin
+          <ProviderKeyEntry
             key={`${row.id}:${field.name}`}
             client={client}
             instanceId={row.id}
             field={field}
-            onSaved={onLoggedIn}
+            onSaved={onCredentialEntered}
           />
         ))}
         {row.probe ? (

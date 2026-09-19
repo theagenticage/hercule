@@ -188,7 +188,7 @@ const decodeManifest = (manifest: unknown, index: number): Effect.Effect<PluginM
  * else. Said at registration, because the form that would render it is built
  * from the schema refused here.
  */
-const SECRETS_ARE_A_PROVIDER_THING =
+const SECRET_FIELDS_ARE_PROVIDER_ONLY =
   "a secret-valued config field is supported on a provider definition only";
 
 /** Everything decided from the manifest alone, before any plugin code runs. */
@@ -205,7 +205,7 @@ const inspect = (
   if (secretFields(manifest.configSchema).length > 0) {
     return Result.fail({
       kind: "unsupportedConfigSchema",
-      message: bounded(`the plugin's own config: ${SECRETS_ARE_A_PROVIDER_THING}`),
+      message: bounded(`the plugin's own config: ${SECRET_FIELDS_ARE_PROVIDER_ONLY}`),
     });
   }
   return Result.mapError(configJsonSchema(manifest.configSchema), (error) => ({
@@ -304,7 +304,7 @@ const registrationHost = (
               ) {
                 return yield* Effect.fail(
                   new PluginError({
-                    message: `the connection type ${type}: ${SECRETS_ARE_A_PROVIDER_THING}`,
+                    message: `the connection type ${type}: ${SECRET_FIELDS_ARE_PROVIDER_ONLY}`,
                   }),
                 );
               }

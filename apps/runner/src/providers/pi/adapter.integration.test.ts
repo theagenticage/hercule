@@ -125,7 +125,7 @@ describe.skipIf(binary === undefined || key === "")("a real pi session on a real
 
 /**
  * The probe makes no API call: pi reads the credential out of the environment
- * and its catalogue out of its own installed providers, so a key that would
+ * and its catalog out of its own installed providers, so a key that would
  * buy nothing is enough to prove what a Fleet row will say.
  */
 describe.skipIf(binary === undefined)("what a probe reads off a real pi", () => {
@@ -133,7 +133,10 @@ describe.skipIf(binary === undefined)("what a probe reads off a real pi", () => 
   const installedVersion = (): string =>
     Bun.spawnSync([binary!, "--version"]).stdout.toString().trim();
 
-  const thinkingOf = (models: ProbeResult["models"], slug: string): ReadonlyArray<string> =>
+  const getReportedThinkingLevels = (
+    models: ProbeResult["models"],
+    slug: string,
+  ): ReadonlyArray<string> =>
     (models.find((model) => model.slug === slug)?.options ?? [])
       .filter((option) => option.id === "thinking")
       .flatMap((option) => (option.choices ?? []).map((choice) => choice.value));
@@ -152,8 +155,12 @@ describe.skipIf(binary === undefined)("what a probe reads off a real pi", () => 
     expect(probed.models.map((model) => model.slug)).toEqual(
       expect.arrayContaining(["glm-5.3", "glm-5.3-flash"]),
     );
-    expect(thinkingOf(probed.models, "glm-5.3")).toEqual(["low", "high", "max"]);
-    expect(thinkingOf(probed.models, "glm-5.3-flash")).toEqual(["low", "high", "max"]);
+    expect(getReportedThinkingLevels(probed.models, "glm-5.3")).toEqual(["low", "high", "max"]);
+    expect(getReportedThinkingLevels(probed.models, "glm-5.3-flash")).toEqual([
+      "low",
+      "high",
+      "max",
+    ]);
   }, 60_000);
 
   it("reports a machine nobody has entered a key on as unauthenticated", async () => {

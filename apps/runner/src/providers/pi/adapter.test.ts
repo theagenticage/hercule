@@ -1,6 +1,6 @@
 /**
  * How the pi adapter launches a session and what an input does to one, over a
- * scripted pi: nothing vendor-supplied runs. The flags are pi 0.85.1's own and
+ * fake pi: nothing vendor-supplied runs. The flags are pi 0.85.1's own and
  * the commands and responses are the shapes `dist/modes/rpc/rpc-types.d.ts`
  * declares.
  */
@@ -13,7 +13,7 @@ import {
   busy,
   cleanupHomes,
   driving,
-  KEY,
+  TEST_ZAI_KEY,
   PRIOR,
   refusal,
   SESSION,
@@ -83,7 +83,7 @@ describe("the pi a session is launched as", () => {
 
     expect(run.child.env["PI_CODING_AGENT_DIR"]).toBe(run.ctx.home);
     expect(run.child.env["PI_SKIP_VERSION_CHECK"]).toBe("1");
-    expect(run.child.env["ZAI_API_KEY"]).toBe(KEY);
+    expect(run.child.env["ZAI_API_KEY"]).toBe(TEST_ZAI_KEY);
   });
 
   it("runs on the instance's key alone, never on one the machine exports", async () => {

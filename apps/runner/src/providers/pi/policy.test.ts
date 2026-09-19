@@ -14,7 +14,7 @@
  */
 import { afterAll, describe, expect, it } from "vitest";
 import type { AccessMode } from "@hydra/protocol";
-import { decide } from "./policy";
+import { requiresApproval } from "./policy";
 import { cleanupHomes, settle, SPEC, started, taggedIn, until } from "./testing";
 
 afterAll(cleanupHomes);
@@ -26,7 +26,7 @@ afterAll(cleanupHomes);
 type Tool =
   "read" | "grep" | "find" | "ls" | "bash" | "powershell" | "write" | "edit" | "mcp__jira__create";
 
-/** True is a call the gate holds and asks about; false is one it lets run. */
+/** True is a call the approval hook holds and asks about; false is one it lets run. */
 const TABLE: Readonly<
   Record<"approval-required" | "auto-accept-edits" | "full-access", Readonly<Record<Tool, boolean>>>
 > = {
@@ -71,7 +71,7 @@ describe("which tools an access mode parks", () => {
   for (const [mode, tools] of Object.entries(TABLE)) {
     for (const [tool, parks] of Object.entries(tools)) {
       it(`${parks ? "parks" : "runs"} ${tool} under ${mode}`, () => {
-        expect(decide(mode as AccessMode, tool)).toBe(parks);
+        expect(requiresApproval(mode as AccessMode, tool)).toBe(parks);
       });
     }
   }

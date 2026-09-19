@@ -32,7 +32,7 @@ const SECOND_UI = "3f1a0c7e-0000-4000-8000-00000000abce";
 const SECOND_CALL = "call_0199e0e8";
 
 /**
- * What Hydra's own gate writes in the dialog: which call it is asking about.
+ * What Hydra's own approval hook writes in the dialog: which call it is asking about.
  * pi's dialog carries no call of its own, and the card is rendered from the
  * call rather than from this, so the name and the id are all it says.
  */
@@ -41,13 +41,13 @@ const about = (toolCallId: string, toolName: string): string =>
 
 const COMMAND = "rm -rf build && echo rebuilt";
 
-type Run = Awaited<ReturnType<typeof busy>>;
+type DrivenAdapter = Awaited<ReturnType<typeof busy>>;
 
 /** A turn stopped on a call the extension will not run unasked. */
 const parkedOn = async (
   toolName: string,
   args: Readonly<Record<string, unknown>>,
-): Promise<Run> => {
+): Promise<DrivenAdapter> => {
   const run = await busy();
   run.child.push({ type: "tool_execution_start", toolCallId: CALL, toolName, args });
   run.child.push({
@@ -61,15 +61,17 @@ const parkedOn = async (
 };
 
 /** A turn stopped on a shell command, which is what most of this file drives. */
-const parked = (): Promise<Run> => parkedOn("bash", { command: COMMAND });
+const parked = (): Promise<DrivenAdapter> => parkedOn("bash", { command: COMMAND });
 
-const openedIn = async (run: Run): Promise<Extract<ProviderEvent, { _tag: "request.opened" }>> => {
+const openedIn = async (
+  run: DrivenAdapter,
+): Promise<Extract<ProviderEvent, { _tag: "request.opened" }>> => {
   await until("docked the request", () => taggedIn(run.seen, "request.opened").length === 1);
   return taggedIn(run.seen, "request.opened")[0]!;
 };
 
 /** What the adapter wrote back to pi for one dialog, once it has written it. */
-const answerTo = async (run: Run, id: string): Promise<Record<string, unknown>> => {
+const answerTo = async (run: DrivenAdapter, id: string): Promise<Record<string, unknown>> => {
   await until(`answered dialog ${id}`, () =>
     sentOf(run.sent, "extension_ui_response").some((written) => written["id"] === id),
   );
@@ -77,14 +79,14 @@ const answerTo = async (run: Run, id: string): Promise<Record<string, unknown>> 
 };
 
 const resolvedIn = async (
-  run: Run,
+  run: DrivenAdapter,
 ): Promise<Extract<ProviderEvent, { _tag: "request.resolved" }>> => {
   await until("ended the park", () => taggedIn(run.seen, "request.resolved").length === 1);
   return taggedIn(run.seen, "request.resolved")[0]!;
 };
 
 /**
- * What a held call is asked as, by tool. The gate decides whether to hold a
+ * What a held call is asked as, by tool. The approval hook decides whether to hold a
  * call; what the card over it is called follows from what the call does, so a
  * shell is a command, a file written or edited is a change, and anything the
  * adapter does not recognise is the tool by its name.

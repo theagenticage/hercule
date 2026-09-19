@@ -18,7 +18,7 @@ import type { SqlError } from "effect/unstable/sql/SqlError";
 import {
   decodeAgainst,
   secretFields,
-  withoutSecrets,
+  excludeSecretFields,
   type ProviderDefinition,
 } from "@hydra/plugin-host";
 import type { LoginCode, LoginFailed, LoginResult, LoginStart, LoginUrl } from "@hydra/protocol";
@@ -167,7 +167,10 @@ const readConfig = (
   config: Schema.Json,
 ): Effect.Effect<void, Validation> =>
   Effect.asVoid(
-    Effect.mapError(decodeAgainst(withoutSecrets(definition.configSchema), config), validationOf),
+    Effect.mapError(
+      decodeAgainst(excludeSecretFields(definition.configSchema), config),
+      validationOf,
+    ),
   );
 
 const make = Effect.gen(function* () {

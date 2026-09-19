@@ -17,7 +17,7 @@ const undrivable = instance("codex", "Codex", [
 
 /** What the screen would put on the buttons, in order. */
 const offered = (state: SessionsEmptyState): ReadonlyArray<string> =>
-  state.kind !== "log-in"
+  state.kind !== "sign-in"
     ? []
     : state.offers.flatMap((row) =>
         row.secretFields.length > 0
@@ -25,7 +25,7 @@ const offered = (state: SessionsEmptyState): ReadonlyArray<string> =>
           : [row.logInLabel],
       );
 
-const leadOf = (state: SessionsEmptyState): string => (state.kind === "log-in" ? state.lead : "");
+const leadOf = (state: SessionsEmptyState): string => (state.kind === "sign-in" ? state.lead : "");
 
 describe("sessionsEmptyState", () => {
   it("has nothing to offer when no runner answered on this machine", () => {
@@ -47,7 +47,7 @@ describe("sessionsEmptyState", () => {
   it("offers a login for every harness that is there and not logged in", () => {
     const state = sessionsEmptyState(WITH_CLAUDE, [waiting, undrivable]);
 
-    expect(state.kind).toBe("log-in");
+    expect(state.kind).toBe("sign-in");
     expect(offered(state)).toEqual(["Log in"]);
     expect(leadOf(state)).toContain("runs on this machine");
     expect(leadOf(state)).toContain("Log in to use it in Hydra.");
@@ -84,7 +84,7 @@ describe("sessionsEmptyState", () => {
     ]);
     const state = sessionsEmptyState(WITH_CLAUDE, [stale]);
 
-    expect(state.kind).toBe("log-in");
+    expect(state.kind).toBe("sign-in");
     expect(offered(state)).toEqual(["Log in"]);
   });
 
