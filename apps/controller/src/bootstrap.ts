@@ -274,31 +274,35 @@ export const bootWith = <A, E>(
     );
 
     /**
-     * One connection map and one probe driver per process: the socket route,
-     * the controller daemon and the sweep after a hello all act through the
-     * same `RunnerConnections`.
+     * The plugin host over those repositories: it reads secrets and appends to
+     * the audit log, so it is layered on top of them rather than merged beside
+     * them. It is also the catalog everything above reads a provider's
+     * definition from, which is why it stands below the fleet.
      */
-    const withFleet = ProviderProbesLayer.pipe(Layer.provideMerge(RunnerConnectionsLayer)).pipe(
+    const catalog = PluginHostLayer.pipe(
+      Layer.provideMerge(ConnectionTypesLayer),
+      Layer.provideMerge(PluginConfigsLayer),
       Layer.provideMerge(repositories),
     );
 
     /**
-     * The plugin host and its operations over those repositories: it reads
-     * secrets and appends to the audit log, so it is layered on top of them
-     * rather than merged beside them.
+     * One connection map and one probe driver per process: the socket route,
+     * the controller daemon and the sweep after a hello all act through the
+     * same `RunnerConnections`.
      */
+    const withFleet = ProviderProbesLayer.pipe(
+      Layer.provideMerge(RunnerConnectionsLayer),
+      Layer.provideMerge(catalog),
+    );
+
+    /** The operations over the catalog and the fleet. */
     const withPlugins = Layer.mergeAll(
       PluginsLayer,
       ProviderServiceLayer,
       SessionServiceLayer,
       WorkspaceServiceLayer,
       ConnectionServiceLayer,
-    ).pipe(
-      Layer.provideMerge(PluginHostLayer),
-      Layer.provideMerge(ConnectionTypesLayer),
-      Layer.provideMerge(PluginConfigsLayer),
-      Layer.provideMerge(withFleet),
-    );
+    ).pipe(Layer.provideMerge(withFleet));
 
     const steps = Effect.gen(function* () {
       yield* migrate({ backupsDir: paths.backupsDir, databaseExisted });

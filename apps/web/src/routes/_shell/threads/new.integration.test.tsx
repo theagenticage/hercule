@@ -108,6 +108,7 @@ const instance = (
 ): ProviderInstance => ({
   id,
   providerId: "claude-code",
+  secretFields: [],
   name,
   config: {},
   displayName,

@@ -6,7 +6,7 @@ import { queryKeys, sessionsEmptyState } from "@hydra/client-core";
 import { useLiveInvalidation } from "../../app/live-invalidation";
 import { localRunnerQuery, providersQuery, runnersQuery } from "../../app/queries";
 import { CreateThreadLink } from "../../screens/create-thread-link";
-import { ProviderLogin } from "../../screens/provider-login";
+import { ProviderLogin, ProviderSecretLogin } from "../../screens/provider-login";
 import { messageOf } from "../../screens/save-status";
 
 export const Route = createFileRoute("/_shell/")({
@@ -93,25 +93,41 @@ function Sessions(): JSX.Element {
   if (state.kind === "log-in") {
     return (
       <Screen
-        headline={found(state.instances.map((instance) => instance.displayName))}
-        lead="Log in to use it in Hydra. The login runs on this machine and its credential stays there."
+        headline={found(state.offers.map((row) => row.name))}
+        lead={state.lead}
         fine="A thread needs a harness that is logged in, so starting one waits on this."
         failure={probe.error === null ? null : messageOf(probe.error)}
       >
-        {state.instances.map((instance) => (
-          <ProviderLogin
-            key={instance.id}
-            client={client}
-            instanceId={instance.id}
-            runnerId={local.id}
-            subject={`${instance.displayName} on this machine`}
-            label={`Log in to ${instance.displayName}`}
-            variant="primary"
-            onLoggedIn={() => {
-              probe.mutate({ runnerId: local.id, instanceId: instance.id });
-            }}
-          />
-        ))}
+        {state.offers.flatMap((row) => {
+          const entered = () => {
+            probe.mutate({ runnerId: local.id, instanceId: row.id });
+          };
+          // A provider credentialled with a value of the user's has no vendor
+          // to send them to; it asks for that value here instead.
+          return row.secretFields.length === 0
+            ? [
+                <ProviderLogin
+                  key={row.id}
+                  client={client}
+                  instanceId={row.id}
+                  runnerId={local.id}
+                  subject={`${row.name} on this machine`}
+                  label={`Log in to ${row.name}`}
+                  variant="primary"
+                  onLoggedIn={entered}
+                />,
+              ]
+            : row.secretFields.map((field) => (
+                <ProviderSecretLogin
+                  key={`${row.id}:${field.name}`}
+                  client={client}
+                  instanceId={row.id}
+                  field={field}
+                  variant="primary"
+                  onSaved={entered}
+                />
+              ));
+        })}
       </Screen>
     );
   }

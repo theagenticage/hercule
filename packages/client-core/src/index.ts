@@ -43,7 +43,7 @@ export { queryKeys, queryKeysFor, type LiveQueryKey } from "./live/keys";
 export { detectLocalRunner, loopbackEndpoints } from "./local-runner";
 export { refusalReason } from "./plugin-refusal";
 export { capacityLine, queuedSessions, RUNNING_STATUSES } from "./runner-capacity";
-export { providerRows, type ProviderRow } from "./provider-rows";
+export { providerRows, type ProviderRow, type SecretFieldOffer } from "./provider-rows";
 export { sessionsEmptyState } from "./sessions-empty-state";
 export { nextOnboardingStep, type OnboardingStep } from "./onboarding";
 export { formatSince, formatStamp, formatTimeContext } from "./time-context";

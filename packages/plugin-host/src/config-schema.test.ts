@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { Result, Schema } from "effect";
-import { configJsonSchema } from "./config-schema";
+import { configJsonSchema, secret } from "./config-schema";
 
 const supported = Schema.Struct({
   token: Schema.String.annotate({ title: "API token", description: "Used for every call" }),
@@ -102,5 +102,56 @@ describe("configJsonSchema", () => {
     expect(Result.isFailure(result)).toBe(true);
     if (!Result.isFailure(result)) return;
     expect(result.failure.message).toContain("must be an object with named properties");
+  });
+});
+
+/**
+ * A secret-valued config field. The plugin marks one with `secret`, the derived
+ * JSON schema says so, and the form that renders it masks the input and never
+ * reads a value back. Only a string can be one: everything else the form draws
+ * is a widget with no masked equivalent.
+ */
+describe("a config field the plugin marked secret", () => {
+  it("derives as a string carrying the plugin's own words and the secret marker", () => {
+    const result = configJsonSchema(
+      Schema.Struct({
+        zaiApiKey: secret({
+          title: "Z.ai API key",
+          description: "From your Z.ai Coding Plan subscription.",
+        }),
+      }),
+    );
+
+    expect(Result.isSuccess(result)).toBe(true);
+    if (!Result.isSuccess(result)) return;
+    expect(result.success.properties).toEqual({
+      zaiApiKey: {
+        type: "string",
+        title: "Z.ai API key",
+        description: "From your Z.ai Coding Plan subscription.",
+        "x-secret": true,
+      },
+    });
+  });
+
+  it("leaves a field nobody marked unmarked", () => {
+    const result = configJsonSchema(Schema.Struct({ token: Schema.String }));
+
+    expect(Result.isSuccess(result)).toBe(true);
+    if (!Result.isSuccess(result)) return;
+    expect(result.success.properties).toEqual({ token: { type: "string" } });
+  });
+
+  it.each([
+    ["a number", Schema.Finite.annotate({ secret: true })],
+    ["a boolean", Schema.Boolean.annotate({ secret: true })],
+    ["a list of strings", Schema.Array(Schema.String).annotate({ secret: true })],
+  ])("refuses %s marked secret, naming the property", (_label, marked) => {
+    const result = configJsonSchema(Schema.Struct({ zaiApiKey: marked }));
+
+    expect(Result.isFailure(result)).toBe(true);
+    if (!Result.isFailure(result)) return;
+    expect(result.failure._tag).toBe("UnsupportedConfigSchema");
+    expect(result.failure.message).toContain("zaiApiKey");
   });
 });

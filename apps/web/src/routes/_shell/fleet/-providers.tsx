@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button, FormCard } from "@hydra/ui";
 import { providerRows, queryKeys, type HydraClient, type ProviderRow } from "@hydra/client-core";
 import type { RunnerDetail } from "@hydra/contract";
-import { ProviderLogin } from "../../../screens/provider-login";
+import { ProviderLogin, ProviderSecretLogin } from "../../../screens/provider-login";
 import { messageOf } from "../../../screens/save-status";
 import { providersQuery } from "../../../app/queries";
 
@@ -66,9 +66,9 @@ export function Providers({
             onInstall={() => {
               install.mutate(row.providerId);
             }}
-            // A login writes a credential the stored snapshot knows nothing
-            // about, so the machine is asked about the instance again rather
-            // than the page re-reading what it already had.
+            // A credential the stored snapshot knows nothing about, however it
+            // was entered, so the machine is asked about the instance again
+            // rather than the page re-reading what it already had.
             onLoggedIn={() => {
               probe.mutate(row.id);
             }}
@@ -143,6 +143,15 @@ function Row({
             onLoggedIn={onLoggedIn}
           />
         ) : null}
+        {row.secretFields.map((field) => (
+          <ProviderSecretLogin
+            key={`${row.id}:${field.name}`}
+            client={client}
+            instanceId={row.id}
+            field={field}
+            onSaved={onLoggedIn}
+          />
+        ))}
         {row.probe ? (
           <Button disabled={busy} onClick={onProbe}>
             Probe now

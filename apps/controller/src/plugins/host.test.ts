@@ -7,7 +7,13 @@
 import { describe, expect, it } from "vitest";
 import { Cause, Effect, Option, Schema } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
-import { HOST_API, type Plugin, type ProviderDefinition } from "@hydra/plugin-host";
+import {
+  HOST_API,
+  registerConnectionType,
+  secret,
+  type Plugin,
+  type ProviderDefinition,
+} from "@hydra/plugin-host";
 import { PluginHost, Plugins } from "./index";
 import { pluginRepository } from "./repository";
 import { asUser, fixture, pluginStack, providerDefinition } from "./testing";
@@ -423,5 +429,83 @@ describe("Plugins.read on an id no plugin carries", () => {
 
     expect(error).toMatchObject({ error: { code: "not_found" } });
     expect(JSON.stringify(error)).toContain("absent");
+  });
+});
+
+/**
+ * A secret-valued field. It is entered per provider instance and stored under
+ * that instance's own owner, so the two other places a plugin may declare a
+ * config schema have nowhere to put one. Both are refused at registration,
+ * where the author reads the reason, rather than rendering a form whose value
+ * nothing would store.
+ */
+describe("a secret-valued field declared outside a provider", () => {
+  it("refuses it in the plugin's own config, saying where one belongs", async () => {
+    const keyed = fixture({
+      id: "keyed-plugin",
+      configSchema: Schema.Struct({
+        apiKey: secret({ title: "API key", description: "The vendor's own." }),
+      }),
+    });
+
+    const status = await run(
+      Effect.gen(function* () {
+        const host = yield* PluginHost;
+        yield* host.boot([keyed.plugin]);
+        return yield* host.status("keyed-plugin");
+      }),
+    );
+
+    const refused = Option.getOrNull(status) as {
+      readonly _tag: string;
+      readonly reason: { readonly kind: string; readonly message: string };
+    } | null;
+    expect(refused?._tag).toBe("refused");
+    expect(refused?.reason.kind).toBe("unsupportedConfigSchema");
+    expect(refused?.reason.message).toContain("provider definition only");
+    expect(keyed.hosts).toEqual([]);
+  });
+
+  it("refuses it in a connection type, naming the type", async () => {
+    const plugin: Plugin = {
+      manifest: {
+        id: "keyed-connection",
+        displayName: "Plugin keyed-connection",
+        hostApi: HOST_API,
+        capabilities: ["connections"],
+        configSchema: Schema.Struct({}),
+      },
+      register: (host) =>
+        registerConnectionType(host, {
+          type: "vault",
+          displayName: "Vault",
+          setup: [{ kind: "credentials", fields: [{ name: "token", label: "Token" }] }],
+          configSchema: Schema.Struct({
+            apiKey: secret({ title: "API key", description: "The vendor's own." }),
+          }),
+          validate: () => Effect.succeed({ displayName: "Vault" }),
+        }),
+      activate: () => Effect.succeed(Effect.void),
+    };
+
+    const { status, detail } = await run(
+      Effect.gen(function* () {
+        const host = yield* PluginHost;
+        yield* host.boot([plugin]);
+        return {
+          status: yield* host.status("keyed-connection"),
+          detail: yield* Effect.flatMap(Plugins, (plugins) => plugins.read("keyed-connection")),
+        };
+      }),
+    );
+
+    const errored = Option.getOrNull(status) as {
+      readonly _tag: string;
+      readonly message: string;
+    } | null;
+    expect(errored?._tag).toBe("errored");
+    expect(errored?.message).toContain("keyed-connection/vault");
+    expect(errored?.message).toContain("provider definition only");
+    expect(detail.contributions).toEqual([]);
   });
 });

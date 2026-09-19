@@ -124,6 +124,7 @@ export {
   ProviderInstanceUpdateInput,
   ProviderLoginCodeInput,
   ProviderLoginInput,
+  ProviderSecretField,
   SnapshotAuth,
   VersionVerdict,
 } from "./groups/provider";

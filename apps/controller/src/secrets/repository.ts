@@ -67,6 +67,12 @@ export interface SecretOwner {
 /** The owner of the controller's own key material. */
 export const CORE_OWNER: SecretOwner = { kind: "core", id: "controller" };
 
+/** The owner a provider instance's credentials are written and read under. */
+export const providerInstanceOwner = (instanceId: string): SecretOwner => ({
+  kind: "provider-instance",
+  id: instanceId,
+});
+
 /**
  * What the rest of the system may know about a secret: that it exists, who owns
  * it, and when it was last rotated. Never the value.

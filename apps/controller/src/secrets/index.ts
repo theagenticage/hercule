@@ -3,9 +3,11 @@
  * is created at first run and never leaves its machine. Outside this domain a
  * secret is only ever a reference.
  */
+export { instanceSecrets } from "./instances";
 export { masterKeyLayer, type MasterKeyBackend, type MasterKeyError } from "./masterKey";
 export {
   CORE_OWNER,
+  providerInstanceOwner,
   Secrets,
   secretsLayer,
   type SecretDecryptError,

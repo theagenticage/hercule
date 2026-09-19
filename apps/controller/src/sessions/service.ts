@@ -67,6 +67,7 @@ import {
 import { mintToken, hashToken } from "../credentials";
 import { AuditLog } from "../events";
 import { SessionTokens } from "../permissions";
+import type { SecretDecryptError } from "../secrets";
 import { gitIdentityOf, type GitCredential } from "../workspaces";
 import { inputRepository, type StoredInput } from "./inputs";
 import {
@@ -168,6 +169,15 @@ export interface Starting {
  */
 export interface StartNeeds {
   readonly accountOf: (connectionId: string) => Effect.Effect<GitCredential | undefined>;
+  /**
+   * The instance's credentials, decrypted for this frame and stored nowhere.
+   * Fails the claim when they cannot be read: a session started without the key
+   * would report itself as not logged in.
+   */
+  readonly secretsOf: (
+    instanceId: string,
+    providerId: string,
+  ) => Effect.Effect<Record<string, string>, SqlError | SecretDecryptError>;
 }
 
 /** One input as it is stored, and what the session it lands on runs under. */
@@ -497,6 +507,7 @@ const make = Effect.gen(function* () {
         const at = yield* nowIso;
         const claimed: Array<Starting> = [];
         const skipped: Array<string> = [];
+        const keyless: Array<string> = [];
         // The walk advances past every row it examines - poison included - so
         // each candidate is fetched and decoded once, however many documents
         // the codec refuses: a runner's room is for sessions that can start,
@@ -515,6 +526,18 @@ const make = Effect.gen(function* () {
             const spec = yield* Effect.option(decodeSpecDocument(row.spec));
             if (Option.isNone(spec)) {
               skipped.push(row.id);
+              continue;
+            }
+            // Before the row is moved off the queue, and per row: a credential
+            // that will not decrypt is one session's problem, and every other
+            // session claimed in this batch would roll back with it. Read now
+            // rather than stored, for the reason the account's token is: the
+            // frame is the only place it is written down.
+            const secrets = yield* Effect.option(
+              needs.secretsOf(spec.value.instanceId, row.providerId),
+            );
+            if (Option.isNone(secrets)) {
+              keyless.push(row.id);
               continue;
             }
             // The session's own credential on the public API, minted for this
@@ -539,6 +562,7 @@ const make = Effect.gen(function* () {
                 sessionId: row.id,
                 providerId: row.providerId,
                 config: row.config as Schema.Json,
+                secrets: secrets.value,
                 spec: spec.value,
                 token,
                 ...(account === undefined
@@ -555,6 +579,13 @@ const make = Effect.gen(function* () {
           yield* Effect.logError(
             "skipped queued sessions whose stored spec no longer decodes; they stay queued",
             skipped,
+          );
+        }
+        if (keyless.length > 0) {
+          yield* Effect.logError(
+            "skipped queued sessions whose provider instance's stored credential could not be " +
+              "decrypted; they stay queued",
+            keyless,
           );
         }
         return claimed;

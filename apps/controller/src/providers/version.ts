@@ -6,12 +6,13 @@
  * with the snapshot.
  */
 import type { VersionVerdict } from "@hydra/contract";
-import { CLAUDE_CODE_VERSION, CODEX_VERSION } from "@hydra/home/version";
+import { CLAUDE_CODE_VERSION, CODEX_VERSION, PI_VERSION } from "@hydra/home/version";
 
 /** The providers this build pins a version to. The rest are read but not judged. */
 const FLOORS: ReadonlyMap<string, string> = new Map([
   ["claude-code", CLAUDE_CODE_VERSION],
   ["codex", CODEX_VERSION],
+  ["pi", PI_VERSION],
 ]);
 
 export const floorFor = (providerId: string): string | null => FLOORS.get(providerId) ?? null;

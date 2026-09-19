@@ -1,7 +1,7 @@
 import { useId, useState, type JSX } from "react";
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button, Drawer, Field, Input, type ButtonVariant } from "@hydra/ui";
-import type { HydraClient } from "@hydra/client-core";
+import { queryKeys, type HydraClient, type SecretFieldOffer } from "@hydra/client-core";
 import { messageOf } from "./save-status";
 
 /**
@@ -201,3 +201,110 @@ const siteOf = (url: string | undefined): string => {
     return "an address this browser cannot read";
   }
 };
+
+/**
+ * The other way in: a provider whose credential is typed in rather than fetched
+ * from a vendor's browser flow. The field is the plugin's own - its title heads
+ * the panel and labels the input, its sentence says where to get one - so
+ * nothing here knows which provider it is asking for.
+ *
+ * The value goes straight to the secrets table under the instance's own owner
+ * and is never read back: the panel offers to replace what is there, never to
+ * show it. Saving is not the end of it, so the caller is told - a credential
+ * the machine has not been asked about yet is one the screen still reads as
+ * missing.
+ */
+export function ProviderSecretLogin({
+  client,
+  instanceId,
+  field,
+  variant = "quiet",
+  className,
+  onSaved,
+}: {
+  readonly className?: string;
+  readonly client: HydraClient;
+  readonly instanceId: string;
+  readonly field: SecretFieldOffer;
+  readonly variant?: ButtonVariant;
+  readonly onSaved: () => void;
+}): JSX.Element {
+  const queryClient = useQueryClient();
+  const valueField = useId();
+  const [open, setOpen] = useState(false);
+  const [value, setValue] = useState("");
+
+  /** The typed value is the whole of this panel's state, so dropping it closes. */
+  const close = (): void => {
+    setValue("");
+    save.reset();
+    setOpen(false);
+  };
+
+  const save = useMutation({
+    mutationFn: () =>
+      client.secret.set({
+        params: { ownerKind: "provider-instance", ownerId: instanceId, name: field.name },
+        // A pasted credential often carries a stray space or newline, which the
+        // vendor reads as a different one.
+        payload: { value: value.trim() },
+      }),
+    onSuccess: () => {
+      close();
+      // Before whatever the caller does with it: the value is stored, so the
+      // row says so even where the machine cannot be asked about it.
+      void queryClient.invalidateQueries({ queryKey: queryKeys.providers() });
+      onSaved();
+    },
+  });
+
+  return (
+    <>
+      <Button
+        variant={variant}
+        className={className}
+        onClick={() => {
+          setOpen(true);
+        }}
+      >
+        {field.label}
+      </Button>
+
+      <Drawer open={open} onClose={close} title={field.title}>
+        <div className="flex flex-col gap-3.5">
+          <p className="text-row text-muted">{field.description}</p>
+          <Field id={valueField} label={field.title}>
+            <Input
+              id={valueField}
+              type="password"
+              autoComplete="off"
+              spellCheck={false}
+              value={value}
+              onChange={(event) => {
+                setValue(event.target.value);
+              }}
+            />
+          </Field>
+          <div className="-ml-2 flex flex-wrap items-center gap-1.5">
+            <Button
+              variant="primary"
+              // Nothing to save is refused here rather than a round trip away.
+              disabled={value.trim() === "" || save.isPending}
+              onClick={() => {
+                save.mutate();
+              }}
+            >
+              Save
+            </Button>
+            <Button onClick={close}>Cancel</Button>
+          </div>
+          {save.error === null ? null : (
+            <p className="text-fine text-fail" role="alert">
+              {messageOf(save.error)}
+            </p>
+          )}
+        </div>
+      </Drawer>
+    </>
+  );
+}

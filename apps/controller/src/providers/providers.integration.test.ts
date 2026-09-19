@@ -3,9 +3,9 @@
  * written here rather than whatever providers the binary compiles in.
  */
 import { describe, expect, it } from "vitest";
-import { Effect, Fiber } from "effect";
+import { Effect, Fiber, Schema } from "effect";
 import type { LiveMessage } from "@hydra/contract";
-import type { Plugin } from "@hydra/plugin-host";
+import { secret, type Plugin, type ProviderDefinition } from "@hydra/plugin-host";
 import {
   collecting,
   completeSetup,
@@ -46,6 +46,13 @@ interface ProviderInstance {
   readonly config: Record<string, unknown>;
   readonly snapshots: ReadonlyArray<unknown>;
   readonly declared?: Record<string, unknown>;
+  /** What the provider's plugin marked secret, and whether each one is set. */
+  readonly secretFields?: ReadonlyArray<{
+    readonly name: string;
+    readonly title: string;
+    readonly description: string;
+    readonly set: boolean;
+  }>;
 }
 
 /** An id that is well-formed and belongs to nobody. */
@@ -372,6 +379,122 @@ describe("what a live subscriber is told about a provider instance", () => {
         [subject],
       ]);
       for (const message of seen) expect(message._tag).toBe("invalidate");
+    });
+  });
+});
+
+/**
+ * A secret-valued config field. The value never travels through the instance:
+ * it is set through `secret.set` and lives in the secrets table, and an
+ * instance only ever says whether one is there. Everything else the UI needs to
+ * ask for it - the label, the sentence under it - is the plugin's own words,
+ * carried out beside the flag.
+ */
+describe("what an instance says about its secret-valued fields", () => {
+  const KEY_TITLE = "Z.ai API key";
+  const KEY_DESCRIPTION = "From your Z.ai Coding Plan subscription.";
+  const KEY_VALUE = "a-paid-credential-nobody-else-holds";
+
+  const KEYED: ProviderDefinition = {
+    ...providerDefinition("keyed-provider", { token: "keyed-default" }),
+    configSchema: Schema.Struct({
+      token: Schema.String,
+      zaiApiKey: secret({ title: KEY_TITLE, description: KEY_DESCRIPTION }),
+    }),
+  };
+
+  const withKeyed = (body: (harness: ServerHarness) => Promise<void>): Promise<void> =>
+    withServer(body, {
+      plugins: [
+        fixture({ id: "keyed", definitions: [KEYED] }).plugin,
+        fixture({ id: "plain", definitions: [ALPHA] }).plugin,
+      ],
+    });
+
+  const setKey = (base: string, token: string, id: string, value: string): Promise<Response> =>
+    send("PUT", base, `/api/v1/secrets/provider-instance/${id}/zaiApiKey`, {
+      body: { value },
+      token,
+    });
+
+  it("names the field in the plugin's words and says it is not set yet", async () => {
+    await withKeyed(async ({ base }) => {
+      const token = await completeSetup(base);
+      const [keyed] = byProvider(await list(base, token), "keyed-provider");
+
+      expect(keyed?.secretFields).toEqual([
+        { name: "zaiApiKey", title: KEY_TITLE, description: KEY_DESCRIPTION, set: false },
+      ]);
+      expect((await read(base, token, keyed!.id)).secretFields).toEqual(keyed!.secretFields);
+      // A provider that marked nothing secret says so rather than saying nothing.
+      expect(byProvider(await list(base, token), "alpha-provider")[0]?.secretFields).toEqual([]);
+    });
+  });
+
+  it("says the key is set once it is, and never hands the value back", async () => {
+    await withKeyed(async ({ base }) => {
+      const token = await completeSetup(base);
+      const [keyed] = byProvider(await list(base, token), "keyed-provider");
+
+      const stored = await setKey(base, token, keyed!.id, KEY_VALUE);
+      expect(stored.status, await stored.clone().text()).toBe(200);
+
+      const after = await read(base, token, keyed!.id);
+      expect(after.secretFields).toEqual([
+        { name: "zaiApiKey", title: KEY_TITLE, description: KEY_DESCRIPTION, set: true },
+      ]);
+      expect(JSON.stringify(after)).not.toContain(KEY_VALUE);
+      // Not in the config either: a secret-marked field is never stored there.
+      expect(after.config).toEqual(KEYED.defaultConfig);
+
+      const listed = byProvider(await list(base, token), "keyed-provider");
+      expect(listed[0]?.secretFields).toEqual(after.secretFields);
+      expect(JSON.stringify(listed)).not.toContain(KEY_VALUE);
+    });
+  });
+
+  it("refuses a secret-marked field written into the config, naming it, and stores nothing", async () => {
+    await withKeyed(async ({ base }) => {
+      const token = await completeSetup(base);
+      const [keyed] = byProvider(await list(base, token), "keyed-provider");
+
+      const rejected = await refusal(
+        await patch(base, token, keyed!.id, {
+          config: { token: "keyed-default", zaiApiKey: KEY_VALUE },
+        }),
+        400,
+      );
+
+      expect(rejected.error.code).toBe("validation");
+      expect(JSON.stringify(rejected.error)).toContain("zaiApiKey");
+      // The rejection must not be the place the value gets written down.
+      expect(JSON.stringify(rejected.error)).not.toContain(KEY_VALUE);
+
+      const after = await read(base, token, keyed!.id);
+      expect(after.config).toEqual(KEYED.defaultConfig);
+      expect(after.secretFields).toEqual([
+        { name: "zaiApiKey", title: KEY_TITLE, description: KEY_DESCRIPTION, set: false },
+      ]);
+    });
+  });
+  it("takes the stored credential with it when the instance is deleted", async () => {
+    await withKeyed(async ({ base }) => {
+      const token = await completeSetup(base);
+      const [keyed] = byProvider(await list(base, token), "keyed-provider");
+      const stored = await setKey(base, token, keyed!.id, KEY_VALUE);
+      expect(stored.status, await stored.clone().text()).toBe(200);
+
+      const removed = await del(base, `/api/v1/providers/${keyed!.id}`, token);
+
+      expect(removed.status, await removed.clone().text()).toBe(200);
+      // A credential outliving its owner would be inherited by whatever is
+      // given that id next.
+      const left = await get(
+        base,
+        `/api/v1/secrets?ownerKind=provider-instance&ownerId=${keyed!.id}`,
+        token,
+      );
+      expect(await left.json()).toEqual({ items: [] });
     });
   });
 });

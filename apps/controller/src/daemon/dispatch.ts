@@ -15,9 +15,10 @@ import * as Option from "effect/Option";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import { withTransaction } from "../db";
+import { PluginHost } from "../plugins";
 import type { SessionTokens } from "../permissions";
 import { RunnerConnections, runnerRepository } from "../runners";
-import type { Secrets } from "../secrets";
+import { instanceSecrets, Secrets } from "../secrets";
 import { SessionService } from "../sessions";
 import { gitCredentials } from "../workspaces";
 
@@ -27,6 +28,8 @@ const make = Effect.gen(function* () {
   const runners = yield* runnerRepository;
   const connections = yield* RunnerConnections;
   const credentials = yield* gitCredentials;
+  const secrets = yield* Secrets;
+  const host = yield* PluginHost;
 
   return {
     /**
@@ -57,6 +60,10 @@ const make = Effect.gen(function* () {
             if (room <= 0) return [];
             return yield* sessions.starting(runnerId, room, {
               accountOf: credentials.githubAccountOf,
+              secretsOf: (instanceId, providerId) =>
+                Effect.flatMap(host.providers(), (registered) =>
+                  instanceSecrets(secrets, registered, instanceId, providerId),
+                ),
             });
           }),
         );
@@ -76,5 +83,5 @@ export class Dispatch extends Context.Service<Dispatch, Effect.Success<typeof ma
 export const DispatchLayer: Layer.Layer<
   Dispatch,
   never,
-  SqlClient.SqlClient | SessionService | RunnerConnections | Secrets | SessionTokens
+  SqlClient.SqlClient | SessionService | RunnerConnections | Secrets | SessionTokens | PluginHost
 > = Layer.effect(Dispatch)(make);

@@ -22,6 +22,12 @@ const NO_SETTINGS = {
   additionalProperties: false,
 };
 
+/** What pi says the Z.ai key is, in the plugin's own words. */
+const ZAI_KEY_DESCRIPTION =
+  "From your Z.ai Coding Plan subscription. It is stored on the controller and " +
+  "sent to whichever machine runs a thread, so it is entered once and works on " +
+  "every machine.";
+
 /** Written out rather than derived: a copy of the wrong base is the mistake this catches. */
 const SHIPPED = [
   {
@@ -84,7 +90,23 @@ const SHIPPED = [
       displayName: "pi",
       binaryName: "pi",
       supportsMultipleInstances: true,
-      configSchema: NO_SETTINGS,
+      // The one provider with a setting: the Z.ai key, which is entered in a
+      // masked form and stored outside the config it is declared in.
+      configSchema: {
+        type: "object",
+        properties: {
+          zaiApiKey: {
+            type: "string",
+            title: "Z.ai API key",
+            description: ZAI_KEY_DESCRIPTION,
+            "x-secret": true,
+          },
+        },
+        // Not required: a secret-valued field's value lives in the secrets
+        // table, so a stored config is complete without it.
+        required: [],
+        additionalProperties: false,
+      },
       defaultConfig: {},
       declared: {
         steering: "native",

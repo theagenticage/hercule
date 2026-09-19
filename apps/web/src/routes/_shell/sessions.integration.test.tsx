@@ -4,9 +4,9 @@
  * them and a thread.
  */
 import { describe, expect, it } from "vitest";
-import { screen, waitFor } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type { Runner } from "@hydra/contract";
+import type { ProviderSecretField, Runner } from "@hydra/contract";
 import { envelope, renderApp, stubApi, type Call, type Handler } from "../../app/testing";
 
 const GIB = 1024 * 1024 * 1024;
@@ -76,6 +76,7 @@ const claudeCode = (snapshots: ReadonlyArray<ReturnType<typeof snapshot>>) => ({
   displayName: "Claude Code",
   binaryName: "claude",
   declared: DECLARED,
+  secretFields: [] as ReadonlyArray<ProviderSecretField>,
   snapshots,
   createdAt: "2026-09-05T09:00:00.000Z",
   updatedAt: "2026-09-05T09:00:00.000Z",
@@ -254,5 +255,90 @@ describe("Sessions", () => {
     await user.click(screen.getByRole("button", { name: /submit/i }));
 
     expect((await screen.findByRole("alert")).textContent).toBe("moss stopped answering");
+  });
+});
+
+/**
+ * A provider that is logged in with a key rather than with a vendor's browser
+ * flow. The screen offers the same action Fleet does, because it reads the same
+ * join: a harness that is here and cannot run yet.
+ */
+describe("Sessions > a harness that needs a key", () => {
+  const PI_ID = "01a06d02-1000-7000-8000-000000000003";
+  const KEY_TITLE = "Z.ai API key";
+  const KEY_DESCRIPTION = "From your Z.ai Coding Plan subscription.";
+  const KEY_VALUE = "a-paid-credential-nobody-else-holds";
+
+  const WITH_PI: Runner = {
+    ...MOSS,
+    facts: {
+      ...MOSS.facts!,
+      providers: [{ name: "pi", present: true, path: "/usr/local/bin/pi" }],
+      adapters: ["pi"],
+    },
+  };
+
+  const PI_SNAPSHOT = snapshot({ status: "unauthenticated" });
+
+  const pi = (set: boolean) => ({
+    ...claudeCode([PI_SNAPSHOT]),
+    id: PI_ID,
+    providerId: "pi",
+    name: "pi",
+    displayName: "pi",
+    binaryName: "pi",
+    secretFields: [{ name: "zaiApiKey", title: KEY_TITLE, description: KEY_DESCRIPTION, set }],
+  });
+
+  it("asks for the key here, and moves on once it is saved", async () => {
+    const user = userEvent.setup();
+    let held = [pi(false)];
+    const { api } = await open({
+      runners: [WITH_PI],
+      instances: held,
+      local: WITH_PI.id,
+      extra: {
+        "GET /api/v1/providers": () => ({ body: held }),
+        [`PUT /api/v1/secrets/provider-instance/${PI_ID}/zaiApiKey`]: () => {
+          held = [
+            {
+              ...pi(true),
+              snapshots: [snapshot({ status: "ok", backend: "api_key" })],
+            },
+          ];
+          return {
+            body: {
+              ownerKind: "provider-instance",
+              ownerId: PI_ID,
+              name: "zaiApiKey",
+              createdAt: "2026-09-19T09:00:00.000Z",
+            },
+          };
+        },
+        [`POST /api/v1/runners/${WITH_PI.id}/probe`]: () => ({
+          body: snapshot({ status: "ok", backend: "api_key" }),
+        }),
+      },
+    });
+
+    await user.click(await screen.findByRole("button", { name: new RegExp(KEY_TITLE, "i") }));
+
+    const form = await screen.findByRole("dialog", { name: KEY_TITLE });
+    expect(form.textContent ?? "").toContain(KEY_DESCRIPTION);
+    const field = within(form).getByLabelText<HTMLInputElement>(KEY_TITLE, { exact: true });
+    expect(field.type).toBe("password");
+
+    await user.type(field, KEY_VALUE);
+    await user.click(within(form).getByRole("button", { name: /save/i }));
+
+    // Saved, probed, and the screen moves on without a reload.
+    await waitFor(() => {
+      expect(reading()).toContain("pi is ready.");
+    });
+    const wrote = api.calls.filter((call) => call.method === "PUT");
+    expect(wrote).toHaveLength(1);
+    expect(wrote[0]?.path).toBe(`/api/v1/secrets/provider-instance/${PI_ID}/zaiApiKey`);
+    expect(wrote[0]?.body).toEqual({ value: KEY_VALUE });
+    expect(reading()).not.toContain(KEY_VALUE);
   });
 });

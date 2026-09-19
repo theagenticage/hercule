@@ -73,6 +73,7 @@ export const instance = (
   displayName,
   binaryName: providerId === "claude-code" ? "claude" : providerId,
   declared: DECLARED,
+  secretFields: [],
   snapshots,
   createdAt: "2026-09-05T09:00:00.000Z",
   updatedAt: "2026-09-05T09:00:00.000Z",

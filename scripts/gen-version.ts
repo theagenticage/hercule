@@ -13,13 +13,20 @@
  *
  * Codex has no SDK to read a version off, so its release is a literal here: a
  * devDependency on `@openai/codex` would drag a per-platform binary into
- * `node_modules` for one string.
+ * `node_modules` for one string. pi is a literal for the same reason.
  */
 import { fileURLToPath } from "node:url";
 import { $ } from "bun";
 
 /** The Codex release this build's generated types and its installer both pin. */
 const CODEX_RELEASE = "0.154.0";
+
+/**
+ * The pi release this build's adapter was verified against. pi is pre-1.0 and
+ * has broken its RPC mode between releases, so this is both the least a machine
+ * may run and the most anyone has tested.
+ */
+const PI_RELEASE = "0.85.1";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const { version } = (await Bun.file(`${root}package.json`).json()) as { version: string };
@@ -38,5 +45,8 @@ export const CLAUDE_CODE_VERSION = ${JSON.stringify(claudeCodeVersion)};
 
 /** The Codex release \`scripts/gen-codex-types.ts\` generated this build's types from. */
 export const CODEX_VERSION = ${JSON.stringify(CODEX_RELEASE)};
+
+/** The pi release this build's adapter was verified against. */
+export const PI_VERSION = ${JSON.stringify(PI_RELEASE)};
 `,
 );

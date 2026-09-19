@@ -100,15 +100,22 @@ const services = (home: string) =>
         WorkspaceServiceLayer,
         ConnectionServiceLayer,
         ResourceServiceLayer,
-      ).pipe(
-        Layer.provideMerge(PluginHostLayer),
-        Layer.provideMerge(ConnectionTypesLayer),
-        Layer.provideMerge(PluginConfigsLayer),
       ),
     ),
     // One connection map and one probe driver: the socket route and every
-    // service must act through the same `RunnerConnections`.
-    Layer.provideMerge(ProviderProbesLayer.pipe(Layer.provideMerge(RunnerConnectionsLayer))),
+    // service must act through the same `RunnerConnections`. The catalog is
+    // below the probe driver, which reads a provider's definition off it.
+    Layer.provideMerge(
+      ProviderProbesLayer.pipe(
+        Layer.provideMerge(RunnerConnectionsLayer),
+        Layer.provideMerge(
+          PluginHostLayer.pipe(
+            Layer.provideMerge(ConnectionTypesLayer),
+            Layer.provideMerge(PluginConfigsLayer),
+          ),
+        ),
+      ),
+    ),
     Layer.provideMerge(
       Layer.mergeAll(
         UsersLayer,
