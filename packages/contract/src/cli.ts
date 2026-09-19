@@ -1334,7 +1334,7 @@ export const CLI = {
       },
       options: {
         flag: "options",
-        help: "The per-model choices that model opens with, as inline JSON; refused without --model beside it.",
+        help: "The choices that model opens with, as inline JSON; refused without --model beside it, because a choice belongs to the model that offers it.",
       },
       disallowedTools: {
         flag: "disallowed-tool",
@@ -1379,11 +1379,11 @@ export const CLI = {
       accessMode: { flag: "access-mode", help: "What its sessions may do unasked." },
       model: {
         flag: "model",
-        help: "The model its sessions open on instead, by its slug; `null` puts it back on the instance default.",
+        help: "The model its sessions open on instead, by its slug; it replaces the stored choices, so name --options beside it to keep any. `null` puts it back on the instance default.",
       },
       options: {
         flag: "options",
-        help: "The per-model choices to open that model with, as inline JSON; refused without --model beside it.",
+        help: "The choices to open that model with, replacing the ones set now, as inline JSON; refused without --model beside it, because a choice belongs to the model that offers it.",
       },
       disallowedTools: {
         flag: "disallowed-tool",

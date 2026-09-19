@@ -9,12 +9,15 @@ import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { Effect } from "effect";
 import type { OutputSchema, SessionSpec } from "@hydra/protocol";
-import { REPROMPT } from "./adapter";
+import { piAdapter, REPROMPT } from "./adapter";
 import { OUTPUT_SCHEMA_VARIABLE, SUBMIT_RESULT_TOOL } from "./extension";
 import {
+  buildFakePiSeam,
   busy,
   cleanupHomes,
+  contextIn,
   driving,
+  homing,
   TEST_ZAI_KEY,
   PRIOR,
   refusal,
@@ -460,6 +463,25 @@ describe("the pi a session under an Agent is launched as", () => {
     // instance's own home, each holding an Agent's instructions.
     await until("said the session ended", () => taggedIn(run.seen, "session.exited").length === 1);
     expect(existsSync(path)).toBe(false);
+  });
+
+  it("takes them away again when the pi they were written for never starts", async () => {
+    const ctx = contextIn(homing());
+    const { seam } = buildFakePiSeam();
+    const refusing = piAdapter({
+      ...seam,
+      spawn: () => {
+        throw new Error("spawn: permission denied");
+      },
+    });
+
+    const failed = await Effect.runPromise(
+      Effect.flip(refusing.startSession(SESSION, STRUCTURED, ctx)),
+    );
+
+    expect(failed).toContain("permission denied");
+    // No session was opened, so nothing will ever end and take the file away.
+    expect(existsSync(join(ctx.home, `system-prompt-${SESSION}.txt`))).toBe(false);
   });
 
   it("hands over instructions that read like a filename as the instructions they are", async () => {

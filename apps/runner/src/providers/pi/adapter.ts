@@ -720,6 +720,10 @@ export const piAdapter = (seam: PiSeam): ProviderAdapter => {
             `the transcript of session ${carried.nativeSessionId} is no longer on this runner`,
           );
         }
+        // Named before the launch, because it is written by `prepare` below
+        // and has to be taken away whether the session ends or never starts.
+        const instructions =
+          spec.systemPrompt === undefined ? undefined : systemPromptPath(ctx.home, sessionId);
         const child = yield* Effect.try({
           try: () => {
             prepare(ctx, sessionId, spec);
@@ -741,7 +745,13 @@ export const piAdapter = (seam: PiSeam): ProviderAdapter => {
               ctx.cwd,
             );
           },
-          catch: (error) => (error instanceof Error ? error.message : String(error)),
+          catch: (error) => {
+            // A pi that never started has no session to end, and it is the end
+            // of a session that takes this file away: without this the
+            // instructions of every launch that failed stay in the home.
+            if (instructions !== undefined) attempt(() => rmSync(instructions, { force: true }));
+            return error instanceof Error ? error.message : String(error);
+          },
         });
         // A resumed session carries on the native one; a fork is a session of
         // its own, minted under this session's id.
@@ -755,8 +765,7 @@ export const piAdapter = (seam: PiSeam): ProviderAdapter => {
           child,
           rpc,
           state,
-          systemPromptFile:
-            spec.systemPrompt === undefined ? undefined : systemPromptPath(ctx.home, sessionId),
+          systemPromptFile: instructions,
           stopping: false,
           park: undefined,
         };

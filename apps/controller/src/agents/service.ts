@@ -89,9 +89,10 @@ const NO_SUCH_PROFILE = "no such permission profile";
 
 const NO_SUCH_INSTANCE = "no such provider instance";
 
-/** Why options with no model beside them are refused. */
+/** Why options with no model beside them are refused, and what to do about it. */
 const NO_MODEL_FOR_OPTIONS =
-  "name a model beside the options: a model's choices are the choices that model offers";
+  "a model's choices are the choices that model offers, so name the model too: " +
+  "model with its current slug, or the slug you are moving it to";
 
 /**
  * The one selection the record holds, folded from the two fields the API takes

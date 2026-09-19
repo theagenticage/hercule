@@ -80,9 +80,12 @@ const NOT_ITS_ACCESS_MODE =
 
 /**
  * The two fields the Agent itself answers, refused beside one: honouring a
- * call that overrode them would open a session the Agent never described. A
- * per-spawn `model`, `options` or `accessMode` is an override the Agent
- * expects (spec 02 Agent) and none of them is refused here.
+ * call that overrode them would open a session the Agent never described.
+ *
+ * The other per-spawn fields are overrides the Agent expects (spec 02 Agent),
+ * so none of them is refused for naming a value at all; what the access mode
+ * may be set to is a question about the actor rather than about the field, and
+ * `mayRunOn` below answers it.
  */
 const refuseAgentOwnedFields = (spawn: SessionSpawnInput): Effect.Effect<void, Validation> => {
   for (const field of ["instanceId", "permissionProfileId"] as const) {

@@ -42,14 +42,6 @@ const AgentName = bounded(1, MAX_AGENT_NAME_LENGTH);
 
 const SystemPrompt = bounded(1, MAX_SYSTEM_PROMPT_LENGTH);
 
-/**
- * The per-model choices a call picks: one value per option the model offers.
- * Spelled here because the Agent and the session spawn take it as a field of
- * their own, and it is the same shape the session stores and the runner is
- * told.
- */
-export const ModelOptions = ModelSelection.fields.options;
-
 /** The model a session opens on, by the slug its provider instance lists. */
 const ModelSlug = Schema.NonEmptyString;
 
@@ -100,7 +92,8 @@ export const AgentCreateInput = Schema.Struct({
   accessMode: Schema.optionalKey(AccessMode),
   /** Absent runs its sessions on whatever the instance offers by default. */
   model: Schema.optionalKey(ModelSlug),
-  options: Schema.optionalKey(ModelOptions),
+  /** The choices that model opens with; refused with no `model` beside them. */
+  options: Schema.optionalKey(ModelSelection.fields.options),
   disallowedTools: Schema.optionalKey(Schema.Array(DisallowedTool)),
 });
 
@@ -113,10 +106,14 @@ export const AgentUpdateInput = Schema.Struct({
   instanceId: Schema.optionalKey(Id),
   permissionProfileId: Schema.optionalKey(Id),
   accessMode: Schema.optionalKey(AccessMode),
-  /** `null` puts the agent back on the instance's default model. */
+  /**
+   * `null` puts the agent back on the instance's default model. A model named
+   * here replaces the stored choices with the `options` beside it, or with
+   * none: the old ones were the old model's.
+   */
   model: Schema.optionalKey(Schema.NullOr(ModelSlug)),
   /** The choices of the model named beside them; alone they are refused. */
-  options: Schema.optionalKey(ModelOptions),
+  options: Schema.optionalKey(ModelSelection.fields.options),
   disallowedTools: Schema.optionalKey(Schema.Array(DisallowedTool)),
 });
 

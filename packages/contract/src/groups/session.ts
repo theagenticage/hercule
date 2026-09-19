@@ -26,7 +26,7 @@ import {
   Validation,
 } from "../errors";
 import { Id, Timestamp } from "../ids";
-import { ModelOptions, UnenforcedSpecField } from "./agent";
+import { UnenforcedSpecField } from "./agent";
 import { Branch } from "./workspace";
 import { page, pageParams } from "../pagination";
 import { Authenticated } from "../security";
@@ -161,7 +161,7 @@ export const SessionSpawnInput = closedStruct({
   instanceId: Schema.optionalKey(Id),
   model: Schema.optionalKey(Schema.NonEmptyString),
   /** The per-model choices this session opens with; what the model does not offer is refused. */
-  options: Schema.optionalKey(ModelOptions),
+  options: Schema.optionalKey(ModelSelection.fields.options),
   accessMode: Schema.optionalKey(AccessMode),
   /** Names a runner directly, a reserved one included; placement is skipped. */
   runnerId: Schema.optionalKey(Id),
@@ -185,7 +185,7 @@ export type SessionSpawnInput = Schema.Schema.Type<typeof SessionSpawnInput>;
  */
 export const SESSION_SELECTION_FIELDS = {
   model: Schema.optionalKey(Schema.NonEmptyString),
-  options: Schema.optionalKey(ModelOptions),
+  options: Schema.optionalKey(ModelSelection.fields.options),
 } as const;
 
 export const SessionSelection = Schema.Struct(SESSION_SELECTION_FIELDS);
