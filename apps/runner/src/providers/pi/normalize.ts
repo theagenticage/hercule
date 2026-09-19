@@ -13,10 +13,20 @@
  * is held to turn the next snapshot into the piece that is new.
  */
 import type * as Schema from "effect/Schema";
-import type { ItemKind, ProviderEvent, StreamKind, TurnState, Usage } from "@hydra/protocol";
+import type {
+  ItemKind,
+  OutputSchema,
+  ProviderEvent,
+  StreamKind,
+  StructuredResult,
+  TurnState,
+  Usage,
+} from "@hydra/protocol";
 import { count, buildEnvelope, rawOf, type Envelope } from "../normalize";
 import { idOf } from "../events";
+import { structuredResultOf } from "../structured-result";
 import { fact, text } from "../text";
+import { SUBMIT_RESULT_TOOL } from "./extension";
 
 /** The one channel every raw payload from this adapter is filed under. */
 const PI_EVENT = "pi.rpc.event";
@@ -125,6 +135,15 @@ export interface Normalizing {
    */
   stopped: { readonly state: TurnState; readonly error?: string };
   /**
+   * Why Hydra ended this turn itself, where it did. pi reports an abort that
+   * landed while a tool was running as an error on the message it was in the
+   * middle of - "The operation was aborted" - so what the message says is not
+   * how such a turn ended: a stop the user asked for is an interrupt, and a
+   * turn Hydra stopped asking for an answer ran to its end and is reported by
+   * its result.
+   */
+  endedByHydra: "interrupt" | "schema" | undefined;
+  /**
    * Whether this turn has been announced. pi opens a run again for a retry, a
    * compaction and a queued message, all inside one turn, so the second and
    * third are not a turn of their own and their cost adds to the same total.
@@ -132,11 +151,30 @@ export interface Normalizing {
   announced: boolean;
   /** The failure already reported for this run, so it is not reported twice. */
   reported: string | undefined;
+  /** What every turn of this session answers under, where there is one. */
+  readonly outputSchema: OutputSchema | undefined;
+  /**
+   * What the turn answered with: the arguments the tool was called with, where
+   * it was called. A turn that settles without one is asked again.
+   */
+  answer: Record<string, unknown> | undefined;
+  /** How often this turn has been asked again for the tool. */
+  reprompts: number;
+  /**
+   * How many of this turn's answers pi refused because their arguments do not
+   * satisfy the schema. A model that cannot satisfy it answers the validator's
+   * complaint for as long as it is allowed to, so the asking is bounded.
+   */
+  refusedAnswers: number;
 }
 
 const zero = (): Totals => ({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0 });
 
-export const normalizing = (sessionId: string, nativeSessionId: string): Normalizing => ({
+export const normalizing = (
+  sessionId: string,
+  nativeSessionId: string,
+  outputSchema: OutputSchema | undefined,
+): Normalizing => ({
   sessionId,
   nativeSessionId,
   model: undefined,
@@ -147,8 +185,13 @@ export const normalizing = (sessionId: string, nativeSessionId: string): Normali
   turnTotals: zero(),
   sessionTotals: zero(),
   stopped: { state: "completed" },
+  endedByHydra: undefined,
   announced: false,
   reported: undefined,
+  outputSchema,
+  answer: undefined,
+  reprompts: 0,
+  refusedAnswers: 0,
 });
 
 const envelope = (state: Normalizing): Envelope =>
@@ -226,13 +269,22 @@ const failure = (state: Normalizing, name: string, message: string): ProviderEve
 
 const said = (value: unknown): string => (typeof value === "string" ? value : "");
 
+/** How a turn Hydra itself ended reads, whatever pi says about the message. */
+const ENDINGS: Readonly<Record<NonNullable<Normalizing["endedByHydra"]>, Normalizing["stopped"]>> =
+  {
+    interrupt: { state: "interrupted" },
+    // The turn ran to its end and answered; the answer is what failed, and the
+    // result on the turn is what says so.
+    schema: { state: "completed" },
+  };
+
 /**
  * Keeps the worst of what ended the run. An abort or an error is announced on
  * the message that carried it, and a later message that merely stopped would
  * otherwise report the turn as having finished normally.
  */
 const stopping = (state: Normalizing, message: PiMessage | undefined): void => {
-  const ended = stoppedBy(message);
+  const ended = state.endedByHydra === undefined ? stoppedBy(message) : ENDINGS[state.endedByHydra];
   if (ended.state !== "completed" || state.stopped.state === "completed") state.stopped = ended;
 };
 
@@ -388,6 +440,16 @@ const onToolEnd = (state: Normalizing, event: PiEvent): ReadonlyArray<ProviderEv
   const item = state.tools.get(callId);
   if (item === undefined) return [];
   state.tools.delete(callId);
+  // The call the session answers through: what it was called with is the
+  // turn's answer, and the extension registered the tool under this very
+  // schema. Read off the call rather than off this frame, because pi carries a
+  // call's arguments when it starts and not when it ends.
+  if (state.outputSchema !== undefined && item.toolName === SUBMIT_RESULT_TOOL) {
+    state.answer = item.args ?? {};
+    // pi validates a call against the very schema it registered the tool
+    // under, and hands a refusal back to the model as the call's own result.
+    if (event.isError === true) state.refusedAnswers += 1;
+  }
   const refused = state.declined.delete(callId);
   return [
     {
@@ -426,6 +488,23 @@ const abandoned = (state: Normalizing, turnId: string): ReadonlyArray<ProviderEv
 };
 
 /**
+ * The verdict a turn carries about the schema, where it carries one. A turn
+ * that ran to its end is judged on what it answered, or on there being no
+ * answer at all; an interrupt and a failure are about the turn, where a schema
+ * verdict would read as an answer that was judged and found wanting.
+ */
+const resultOf = (state: Normalizing, ended: TurnState): StructuredResult | undefined => {
+  const schema = state.outputSchema;
+  if (schema === undefined || ended !== "completed") return undefined;
+  return structuredResultOf(
+    schema,
+    state.answer === undefined
+      ? { missing: `the agent settled without calling ${SUBMIT_RESULT_TOOL}` }
+      : { value: state.answer },
+  );
+};
+
+/**
  * Ends the turn in flight, with everything still running under it. Exported
  * because a pi that died mid-turn ends it too, and the adapter is the only
  * party that hears the process go.
@@ -439,10 +518,16 @@ export const ending = (
   const stopped = ended ?? state.stopped;
   const cost = state.turnTotals.cost;
   const closing = abandoned(state, turnId);
+  const structuredResult = resultOf(state, stopped.state);
   state.turnId = undefined;
   state.announced = false;
   state.reported = undefined;
   state.stopped = { state: "completed" };
+  state.endedByHydra = undefined;
+  // The answer and the asking are the turn's own: the next one is asked afresh.
+  state.answer = undefined;
+  state.reprompts = 0;
+  state.refusedAnswers = 0;
   return [
     ...closing,
     { _tag: "session.usage.updated", ...envelope(state), usage: usageOf(state.sessionTotals) },
@@ -454,6 +539,7 @@ export const ending = (
       usage: usageOf(state.sessionTotals),
       costUsd: cost,
       ...(stopped.error === undefined ? {} : { error: text(stopped.error) }),
+      ...(structuredResult === undefined ? {} : { structuredResult }),
     },
   ];
 };

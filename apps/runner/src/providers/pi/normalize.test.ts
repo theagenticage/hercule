@@ -61,7 +61,7 @@ const message = (content: ReadonlyArray<Record<string, unknown>>, totals = usage
 
 const line = (event: Record<string, unknown>): string => JSON.stringify(event);
 
-const state = () => normalizing(SESSION, NATIVE);
+const state = () => normalizing(SESSION, NATIVE, undefined);
 
 const through = (
   running: ReturnType<typeof normalizing>,

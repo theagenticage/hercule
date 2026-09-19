@@ -13,7 +13,8 @@
  */
 import { afterAll, describe, expect, it } from "vitest";
 import { Effect, Stream } from "effect";
-import type { ProbeResult, ProviderEvent, SessionSpec } from "@hydra/protocol";
+import type { OutputSchema, ProbeResult, ProviderEvent, SessionSpec } from "@hydra/protocol";
+import { FIXTURE_SCHEMA, IMPOSSIBLE_SCHEMA } from "@hydra/protocol/output-schema.fixture";
 import { pi } from "./adapter";
 import type { ProviderRunnerContext } from "../index";
 import { contextIn, SPEC } from "./testing";
@@ -122,6 +123,80 @@ describe.skipIf(binary === undefined || key === "")("a real pi session on a real
     );
   }
 });
+
+/** What the session is told it is, above pi's own prompt. */
+const AGENT_PROMPT =
+  "You assess tasks and answer with a verdict. Where the user names the verdict, give that one.";
+
+/** The model these cases run on: the cheapest of the two this adapter drives. */
+const STRUCTURED_MODEL = "glm-5.3-flash";
+
+/**
+ * A session's answer under one schema: start, ask, wait the turn out, stop.
+ * Every run gets its own session and its own directories, so the second case
+ * is never answered out of the first one's transcript.
+ */
+const answering = async (
+  outputSchema: OutputSchema,
+  text: string,
+): Promise<Extract<ProviderEvent, { _tag: "turn.completed" }>> => {
+  const sessionId = crypto.randomUUID();
+  const seen: Array<ProviderEvent> = [];
+  Effect.runFork(
+    Stream.runForEach(pi.events, (event) =>
+      Effect.sync(() => {
+        if (event.sessionId === sessionId) seen.push(event);
+      }),
+    ),
+  );
+  await Effect.runPromise(
+    pi.startSession(
+      sessionId,
+      { ...specFor(STRUCTURED_MODEL), systemPrompt: AGENT_PROMPT, outputSchema },
+      liveContext({ zaiApiKey: key }),
+    ),
+  );
+  await Effect.runPromise(pi.sendInput(sessionId, { text }));
+  await awaiting(seen, "answered under the schema", () => completed(seen).length === 1);
+  await Effect.runPromise(pi.stopSession(sessionId, "stopped"));
+  return completed(seen)[0]!;
+};
+
+describe.skipIf(binary === undefined || key === "")(
+  "a real pi session under an output schema",
+  () => {
+    it(
+      "answers the fixture schema through the tool, with a value the schema accepts",
+      async () => {
+        const turn = await answering(
+          FIXTURE_SCHEMA,
+          "Assess this task: 'Fix a typo in the README'. Accept it.",
+        );
+
+        expect(turn.structuredResult?.outcome, JSON.stringify(turn.structuredResult)).toBe("ok");
+        const answer = turn.structuredResult as { outcome: "ok"; value: { verdict?: unknown } };
+        expect(answer.value.verdict).toBe("accept");
+      },
+      BUDGET_MS,
+    );
+
+    it(
+      "ends the turn with a schema failure when no value can satisfy the schema",
+      async () => {
+        const turn = await answering(IMPOSSIBLE_SCHEMA, "Answer.");
+
+        expect(turn.structuredResult?.outcome, JSON.stringify(turn.structuredResult)).toBe(
+          "schema-failure",
+        );
+        const failure = turn.structuredResult as { outcome: "schema-failure"; reason: string };
+        expect(failure.reason).not.toBe("");
+        // Never hung: the turn ended and the session is no longer this adapter's.
+        expect(await Effect.runPromise(pi.listSessions)).toEqual([]);
+      },
+      BUDGET_MS,
+    );
+  },
+);
 
 /**
  * The probe makes no API call: pi reads the credential out of the environment

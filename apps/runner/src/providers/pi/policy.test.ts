@@ -14,17 +14,28 @@
  */
 import { afterAll, describe, expect, it } from "vitest";
 import type { AccessMode } from "@hydra/protocol";
+import { SUBMIT_RESULT_TOOL } from "./extension";
 import { requiresApproval } from "./policy";
 import { cleanupHomes, settle, SPEC, started, taggedIn, until } from "./testing";
 
 afterAll(cleanupHomes);
 
 /**
- * pi 0.85.1's own built-ins, plus one name from no built-in at all: an MCP tool
- * or a tool a later pi adds is the case the catch-all rows are about.
+ * pi 0.85.1's own built-ins, Hydra's own tool for a session's answer, and one
+ * name from no built-in at all: an MCP tool or a tool a later pi adds is the
+ * case the catch-all rows are about.
  */
 type Tool =
-  "read" | "grep" | "find" | "ls" | "bash" | "powershell" | "write" | "edit" | "mcp__jira__create";
+  | "read"
+  | "grep"
+  | "find"
+  | "ls"
+  | "bash"
+  | "powershell"
+  | "write"
+  | "edit"
+  | "submit_result"
+  | "mcp__jira__create";
 
 /** True is a call the approval hook holds and asks about; false is one it lets run. */
 const TABLE: Readonly<
@@ -40,6 +51,9 @@ const TABLE: Readonly<
     powershell: true,
     write: true,
     edit: true,
+    // Hydra's own: recording the answer the session was asked for touches
+    // nothing, and an unattended session has nobody to approve it.
+    submit_result: false,
     mcp__jira__create: true,
   },
   "auto-accept-edits": {
@@ -52,6 +66,7 @@ const TABLE: Readonly<
     // The mode's whole point: edits land without being asked about.
     write: false,
     edit: false,
+    submit_result: false,
     mcp__jira__create: true,
   },
   "full-access": {
@@ -63,6 +78,7 @@ const TABLE: Readonly<
     powershell: false,
     write: false,
     edit: false,
+    submit_result: false,
     mcp__jira__create: false,
   },
 };
@@ -74,6 +90,18 @@ describe("which tools an access mode parks", () => {
         expect(requiresApproval(mode as AccessMode, tool)).toBe(parks);
       });
     }
+  }
+});
+
+describe("Hydra's own tool for a session's answer", () => {
+  for (const mode of Object.keys(TABLE) as ReadonlyArray<AccessMode>) {
+    it(`runs it unasked under ${mode}`, () => {
+      // The name is spelled a second time inside `requiresApproval`, which
+      // closes over nothing so that it can be interpolated into the extension;
+      // this is what holds that spelling to the one the tool is registered
+      // under. An unattended session has nobody to approve its own answer.
+      expect(requiresApproval(mode, SUBMIT_RESULT_TOOL)).toBe(false);
+    });
   }
 });
 

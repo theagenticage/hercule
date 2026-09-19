@@ -8,7 +8,8 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { Effect } from "effect";
-import type { SessionSpec } from "@hydra/protocol";
+import type { OutputSchema, SessionSpec } from "@hydra/protocol";
+import { REPROMPT } from "./adapter";
 import {
   busy,
   cleanupHomes,
@@ -23,6 +24,7 @@ import {
   started,
   taggedIn,
   until,
+  type Spawn,
 } from "./testing";
 
 afterAll(cleanupHomes);
@@ -244,6 +246,44 @@ describe("what an input does to a pi session", () => {
   });
 });
 
+/** pi's own report that its run is over, on the message that ended it. */
+const ends = (child: Spawn, message: Record<string, unknown>): void => {
+  child.push({ type: "agent_end", messages: [{ role: "assistant", ...message }] });
+  child.push({ type: "agent_settled" });
+};
+
+describe("how a turn the user stopped ends", () => {
+  it("is interrupted, whatever pi says about the message it was in the middle of", async () => {
+    const run = await busy();
+
+    await Effect.runPromise(run.adapter.interrupt(SESSION));
+    // What pi reports when the abort lands while a tool is running: the tool
+    // is cancelled and the message it belonged to carries the cancellation as
+    // its own error.
+    ends(run.child, { stopReason: "error", errorMessage: "The operation was aborted." });
+
+    await until("closed the turn", () => taggedIn(run.seen, "turn.completed").length === 1);
+    expect(taggedIn(run.seen, "turn.completed")[0]!.state).toBe("interrupted");
+    // Nobody is told something went wrong: the user asked for this.
+    expect(taggedIn(run.seen, "runtime.error")).toEqual([]);
+  });
+
+  it("still fails a turn that broke on an error nobody asked for", async () => {
+    const run = await busy();
+
+    ends(run.child, {
+      stopReason: "error",
+      errorMessage: "the model provider refused the request",
+    });
+
+    await until("closed the turn", () => taggedIn(run.seen, "turn.completed").length === 1);
+    const completed = taggedIn(run.seen, "turn.completed")[0]!;
+    expect(completed.state).toBe("failed");
+    expect(JSON.stringify(completed.error)).toContain("refused the request");
+    expect(taggedIn(run.seen, "runtime.error")).toHaveLength(1);
+  });
+});
+
 describe("a pi that dies while its turn is running", () => {
   it("fails the turn with what it complained about, and says the same on the exit", async () => {
     const run = await busy();
@@ -314,5 +354,269 @@ describe("a session the supervisor stops", () => {
     await settle();
     expect(taggedIn(run.seen, "session.exited")).toHaveLength(1);
     expect(await Effect.runPromise(run.adapter.listSessions)).toEqual([]);
+  });
+});
+
+/**
+ * What an Agent puts on a pi session: instructions of its own, tool families
+ * taken away, and a schema every turn has to answer under (spec 06 section 7).
+ * pi takes the first two as flags and reads the schema out of its environment,
+ * so the argv stays exactly what this adapter authored.
+ */
+const OUTPUT_SCHEMA: OutputSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["verdict", "confidence"],
+  properties: {
+    verdict: { type: "string", enum: ["accept", "dismiss"] },
+    confidence: { type: "number" },
+  },
+};
+
+const SYSTEM_PROMPT = "You assess tasks and answer with a verdict.";
+
+const STRUCTURED: SessionSpec = {
+  ...SPEC,
+  systemPrompt: SYSTEM_PROMPT,
+  disallowedTools: ["edit", "shell", "web-search"],
+  outputSchema: OUTPUT_SCHEMA,
+};
+
+/** How the schema reaches the extension, spelled as AC-10 names it. */
+const SCHEMA_VARIABLE = "HYDRA_OUTPUT_SCHEMA";
+
+/** What pi's own tool was called with, which is the turn's answer. */
+const ANSWER = { verdict: "accept", confidence: 0.9 };
+
+/** The tool a session under a schema answers through. */
+const SUBMIT = "submit_result";
+
+/** pi's own id for the call that answered. */
+const SUBMIT_CALL = "call-submit-1";
+
+/** A session whose pi is running a turn, which is where a result is produced. */
+const prompted = async (
+  spec: SessionSpec = STRUCTURED,
+): Promise<ReturnType<typeof driving> & { readonly child: Spawn }> => {
+  const run = await started({}, spec);
+  await Effect.runPromise(run.adapter.sendInput(SESSION, { text: "Assess this task." }));
+  run.child.push({ type: "agent_start" });
+  await until("reported the turn open", () => taggedIn(run.seen, "turn.started").length === 1);
+  return run;
+};
+
+/** pi calling the tool, as it reports a call it ran: a start and its end. */
+const submits = (child: Spawn, args: Record<string, unknown>): void => {
+  child.push({ type: "tool_execution_start", toolCallId: SUBMIT_CALL, toolName: SUBMIT, args });
+  child.push({
+    type: "tool_execution_end",
+    toolCallId: SUBMIT_CALL,
+    toolName: SUBMIT,
+    args,
+    result: { content: [{ type: "text", text: "recorded" }] },
+  });
+};
+
+/** pi refusing a call whose arguments its own validator would not accept. */
+const refused = (child: Spawn, callId: string, args: Record<string, unknown>): void => {
+  child.push({ type: "tool_execution_start", toolCallId: callId, toolName: SUBMIT, args });
+  child.push({
+    type: "tool_execution_end",
+    toolCallId: callId,
+    toolName: SUBMIT,
+    isError: true,
+    result: { content: [{ type: "text", text: `Validation failed for tool "${SUBMIT}"` }] },
+  });
+};
+
+describe("the pi a session under an Agent is launched as", () => {
+  it("appends the agent's instructions to pi's own system prompt, by a file of the session's own", async () => {
+    const run = await started({}, STRUCTURED);
+
+    expect(run.child.command).toContain("--append-system-prompt");
+    // The path, never the text: instructions on the argv are instructions in
+    // the machine's process list.
+    const path = after(run.child.command, "--append-system-prompt")!;
+    expect(path.startsWith(run.ctx.home)).toBe(true);
+    expect(readFileSync(path, "utf8")).toBe(SYSTEM_PROMPT);
+    expect(run.child.command).not.toContain(SYSTEM_PROMPT);
+  });
+
+  it("hands over instructions that read like a filename as the instructions they are", async () => {
+    const run = await started({}, { ...STRUCTURED, systemPrompt: "AGENTS.md" });
+
+    // pi reads a value naming a file it can open as that file's contents, so a
+    // prompt passed as text would become whatever the session's directory
+    // happens to hold under that name.
+    expect(readFileSync(after(run.child.command, "--append-system-prompt")!, "utf8")).toBe(
+      "AGENTS.md",
+    );
+  });
+
+  it("names pi's own tool for each family the spec took away", async () => {
+    const run = await started({}, STRUCTURED);
+
+    // The web family adds nothing: pi 0.85.1 has no web tool, and a name it
+    // does not know would be a flag it refuses to start on.
+    expect(run.child.command).toContain("--exclude-tools");
+    expect(after(run.child.command, "--exclude-tools")).toBe("edit,bash");
+  });
+
+  it("leaves the flag off when every family the spec named is one pi has no tool for", async () => {
+    const run = await started({}, { ...STRUCTURED, disallowedTools: ["web-fetch"] });
+
+    // An empty list would be a flag saying nothing, which pi reads as a flag
+    // with a missing value.
+    expect(run.child.command).not.toContain("--exclude-tools");
+  });
+
+  it("hands the schema to the extension through pi's environment, so the argv stays exact", async () => {
+    const run = await started({}, STRUCTURED);
+
+    expect(run.child.env[SCHEMA_VARIABLE]).toBe(JSON.stringify(OUTPUT_SCHEMA));
+  });
+
+  it("carries none of the three for a Thread, which has none of the three fields", async () => {
+    const run = await started();
+
+    expect(run.child.command).not.toContain("--append-system-prompt");
+    expect(run.child.command).not.toContain("--exclude-tools");
+    // Absent, not empty: an empty schema in the environment would register a
+    // tool on a session that was never asked for a value.
+    expect(SCHEMA_VARIABLE in run.child.env).toBe(false);
+  });
+});
+
+describe("what a pi turn under an output schema answers with", () => {
+  it("reports the arguments the tool was called with as the turn's result", async () => {
+    const run = await prompted();
+
+    submits(run.child, ANSWER);
+    run.child.push({ type: "agent_settled" });
+
+    await until("closed the turn", () => taggedIn(run.seen, "turn.completed").length === 1);
+    expect(taggedIn(run.seen, "turn.completed")[0]!.structuredResult).toEqual({
+      outcome: "ok",
+      value: ANSWER,
+    });
+  });
+
+  it("reports a schema failure naming the field when the arguments violate the schema", async () => {
+    const run = await prompted();
+
+    submits(run.child, { verdict: "maybe", confidence: 0.9 });
+    run.child.push({ type: "agent_settled" });
+
+    await until("closed the turn", () => taggedIn(run.seen, "turn.completed").length === 1);
+    expect(taggedIn(run.seen, "turn.completed")[0]!.structuredResult).toEqual({
+      outcome: "schema-failure",
+      reason: expect.stringContaining("verdict") as string,
+    });
+  });
+
+  it("asks again, inside the same turn, when the agent settled without calling the tool", async () => {
+    const run = await prompted();
+
+    run.child.push({ type: "agent_settled" });
+
+    await until("asked again for the tool", () => sentOf(run.sent, "prompt").length === 2);
+    expect(sentOf(run.sent, "prompt")[1]).toMatchObject({ message: REPROMPT });
+    // The adapter's own constant is what was sent, and this is the sentence it
+    // is pinned to: the model reads it in every session under a schema.
+    expect(REPROMPT).toBe(`You must call ${SUBMIT} with your answer; do nothing else.`);
+    // The re-prompt stays inside the one Hydra turn: a second `turn.started`
+    // would bracket one episode twice, and a completion here would report an
+    // answer the session is still being asked for.
+    await settle();
+    expect(taggedIn(run.seen, "turn.started")).toHaveLength(1);
+    expect(taggedIn(run.seen, "turn.completed")).toEqual([]);
+  });
+
+  it("gives up after the second re-prompt and says the tool was never called", async () => {
+    const run = await prompted();
+
+    run.child.push({ type: "agent_settled" });
+    await until("asked again", () => sentOf(run.sent, "prompt").length === 2);
+    run.child.push({ type: "agent_settled" });
+    await until("asked a second time", () => sentOf(run.sent, "prompt").length === 3);
+    run.child.push({ type: "agent_settled" });
+
+    await until("closed the turn", () => taggedIn(run.seen, "turn.completed").length === 1);
+    // Two re-prompts and no more: a third would be a session that never ends.
+    expect(sentOf(run.sent, "prompt")).toHaveLength(3);
+    expect(taggedIn(run.seen, "turn.completed")[0]!.structuredResult).toEqual({
+      outcome: "schema-failure",
+      reason: expect.stringMatching(/\S/) as string,
+    });
+    expect(taggedIn(run.seen, "turn.started")).toHaveLength(1);
+  });
+
+  it("stops the turn once pi has refused enough answers, and reports the last one", async () => {
+    const run = await prompted();
+
+    // pi hands a call whose arguments its schema refuses back to the model as
+    // the call's own result, and a model that cannot satisfy the schema
+    // answers that complaint for as long as it is let to.
+    for (const attempt of [1, 2, 3]) {
+      refused(run.child, `call-refused-${String(attempt)}`, { verdict: "maybe" });
+    }
+    await until("ended pi's run", () => sentOf(run.sent, "abort").length === 1);
+    run.child.push({ type: "agent_settled" });
+
+    await until("closed the turn", () => taggedIn(run.seen, "turn.completed").length === 1);
+    const completed = taggedIn(run.seen, "turn.completed")[0]!;
+    // Completed, not interrupted: the turn ran to its end and answered, and
+    // the answer is what failed.
+    expect(completed.state).toBe("completed");
+    expect(completed.structuredResult).toEqual({
+      outcome: "schema-failure",
+      reason: expect.stringContaining("verdict") as string,
+    });
+    expect(taggedIn(run.seen, "runtime.warning")).toHaveLength(1);
+  });
+
+  it("says nothing about a result, and never asks again, on a turn the user stopped", async () => {
+    const run = await prompted();
+
+    await Effect.runPromise(run.adapter.interrupt(SESSION));
+    ends(run.child, { stopReason: "aborted" });
+
+    await until("closed the turn", () => taggedIn(run.seen, "turn.completed").length === 1);
+    const completed = taggedIn(run.seen, "turn.completed")[0]!;
+    expect(completed.state).toBe("interrupted");
+    // A turn the user ended is a turn nobody asked a verdict about, and a
+    // question put to a session that was just stopped is one nothing answers.
+    expect("structuredResult" in completed).toBe(false);
+    expect(sentOf(run.sent, "prompt")).toHaveLength(1);
+  });
+
+  it("says nothing about a result on a turn that failed for its own reasons", async () => {
+    const run = await prompted();
+
+    ends(run.child, {
+      stopReason: "error",
+      errorMessage: "the model provider refused the request",
+    });
+
+    await until("closed the turn", () => taggedIn(run.seen, "turn.completed").length === 1);
+    const completed = taggedIn(run.seen, "turn.completed")[0]!;
+    expect(completed.state).toBe("failed");
+    // The turn is what went wrong, and a schema verdict here would read as an
+    // answer that was judged and found wanting.
+    expect("structuredResult" in completed).toBe(false);
+  });
+
+  it("says nothing about a result, and never asks again, on a session with no schema", async () => {
+    const run = await prompted(SPEC);
+
+    run.child.push({ type: "agent_settled" });
+
+    await until("closed the turn", () => taggedIn(run.seen, "turn.completed").length === 1);
+    // A Thread answers prose: a key on every turn of every session would be a
+    // second meaning for "ok", and a re-prompt would ask for a value nobody
+    // asked this session for.
+    expect("structuredResult" in taggedIn(run.seen, "turn.completed")[0]!).toBe(false);
+    await settle();
+    expect(sentOf(run.sent, "prompt")).toHaveLength(1);
   });
 });

@@ -13,6 +13,15 @@ import type { AccessMode } from "@hydra/protocol";
 
 /** Whether the approval hook holds this call and asks about it, or lets it run. */
 export const requiresApproval = (mode: AccessMode, toolName: string): boolean => {
+  // Hydra's own tool for the session's answer. Spelled out rather than
+  // imported from `extension.ts`, because this function is interpolated into
+  // the extension as its own source and a name it reached for from around it
+  // would not be there when it runs inside pi; the test holds the two
+  // spellings together. Recording a verdict the agent has already
+  // reached touches nothing on the machine, and a card asking the user to
+  // approve it would park every turn of every unattended session under a
+  // schema on a question nobody is there to answer.
+  if (toolName === "submit_result") return false;
   // pi's own read-only built-ins: a look at the workspace changes nothing.
   const reading = ["read", "grep", "find", "ls"];
   // What each mode runs without asking. Full access is not a row here: it is
