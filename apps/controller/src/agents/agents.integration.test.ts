@@ -221,13 +221,16 @@ describe("the agent over its five operations", () => {
       expect(await listAgents(arranged)).toEqual([created]);
 
       const patched = await updateAgent(arranged, created.id, {
-        model: { model: "fast", options: {} },
+        model: "fast",
+        options: { effort: "high" },
         disallowedTools: ["edit"],
         accessMode: "auto",
       });
       expect(patched.status, await patched.clone().text()).toBe(200);
       const updated = (await patched.json()) as AgentRecord;
-      expect(updated.model).toEqual({ model: "fast", options: {} });
+      // Two fields on the call, one selection on the record: the choices
+      // belong to the model named beside them.
+      expect(updated.model).toEqual({ model: "fast", options: { effort: "high" } });
       expect(updated.disallowedTools).toEqual(["edit"]);
       expect(updated.accessMode).toBe("auto");
       expect(updated.createdAt).toBe(created.createdAt);
@@ -262,6 +265,11 @@ describe("the agent over its five operations", () => {
       fields: { disallowedTools: ["browse"] },
       names: "browse",
     },
+    {
+      what: "options with no model beside them",
+      fields: { options: { effort: "high" } },
+      names: "options",
+    },
   ])("refuses a create naming $what, saying which", async ({ fields, names }) => {
     await withFleet(async (arranged) => {
       const profile = await profileNamed(arranged, "unrestricted");
@@ -290,6 +298,11 @@ describe("the agent over its five operations", () => {
       what: "a tool family outside the five",
       fields: { disallowedTools: ["browse"] },
       names: "browse",
+    },
+    {
+      what: "options with no model beside them",
+      fields: { options: { effort: "high" } },
+      names: "options",
     },
   ])("refuses an update naming $what, saying which", async ({ fields, names }) => {
     await withFleet(async (arranged) => {

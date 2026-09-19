@@ -9,28 +9,31 @@
  * It is a reader rather than a plain function because the declarations live in
  * the plugin host, and it is the one way out of this domain so that two callers
  * reading the same row can never disagree about what it means.
+ *
+ * Two levels, and both are the point: the outer effect is the host, taken once
+ * where the service is built, and the inner one is the provider catalog, taken
+ * once per call - so a page of sessions is read against one catalog rather
+ * than one read per row.
  */
 import * as Effect from "effect/Effect";
 import type { Session } from "@hydra/contract";
 import { PluginHost } from "../plugins";
-import { unenforcedFieldsOf } from "../providers";
+import { unenforcedFieldsIn } from "../providers";
 import type { StoredSession } from "./repository";
 
 export const sessionRecordReader: Effect.Effect<
-  (stored: StoredSession) => Effect.Effect<Session>,
+  Effect.Effect<(stored: StoredSession) => Session>,
   never,
   PluginHost
 > = Effect.gen(function* () {
   const host = yield* PluginHost;
 
-  return ({ providerId, disallowedTools, ...session }: StoredSession) =>
-    Effect.map(host.providers(), (definitions) => {
-      const definition = definitions.find((one) => one.id === providerId);
-      return {
+  return Effect.map(
+    host.providers(),
+    (definitions) =>
+      ({ providerId, disallowedTools, ...session }: StoredSession): Session => ({
         ...session,
-        // An instance that is gone, or a provider this build no longer carries,
-        // says nothing about what it would have enforced.
-        unenforced: definition === undefined ? [] : unenforcedFieldsOf(definition, disallowedTools),
-      };
-    });
+        unenforced: unenforcedFieldsIn(definitions, providerId, disallowedTools),
+      }),
+  );
 });

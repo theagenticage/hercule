@@ -13,6 +13,7 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import { lintOutputSchema, type AccessMode, type SessionSpec } from "@hydra/protocol";
 import {
+  ACCESS_MODE_CHAIN,
   forbidden,
   Id,
   invalidState,
@@ -73,6 +74,29 @@ const NO_SUCH_AGENT = "no such agent";
 const NOT_ITS_GRANTS =
   "a session may only spawn from an agent whose profile grants no more than its own";
 
+/** Why a session may not open a session on more than the Agent itself runs on. */
+const NOT_ITS_ACCESS_MODE =
+  "a session may only spawn from an agent at or below the access mode the agent itself names";
+
+/**
+ * The two fields the Agent itself answers, refused beside one: honouring a
+ * call that overrode them would open a session the Agent never described. A
+ * per-spawn `model`, `options` or `accessMode` is an override the Agent
+ * expects (spec 02 Agent) and none of them is refused here.
+ */
+const refuseAgentOwnedFields = (spawn: SessionSpawnInput): Effect.Effect<void, Validation> => {
+  for (const field of ["instanceId", "permissionProfileId"] as const) {
+    if (spawn[field] !== undefined) {
+      return Effect.fail(
+        validation([
+          { path: [field], message: `${field} comes from the agent this session is spawned from` },
+        ]),
+      );
+    }
+  }
+  return Effect.void;
+};
+
 const NO_SUCH_PROJECT_NAMED = "no such project";
 
 /** Why a Thread is not a session's to open. */
@@ -131,7 +155,7 @@ const make = Effect.gen(function* () {
   const sessions = yield* SessionService;
   const rows = yield* sessionRepository;
   const agents = yield* agentRepository;
-  const recordOf = yield* sessionRecordReader;
+  const recordReader = yield* sessionRecordReader;
   const workspaces = yield* WorkspaceService;
   const resources = yield* resourceRepository;
   const instances = yield* providerRepository;
@@ -192,35 +216,17 @@ const make = Effect.gen(function* () {
   /**
    * The Agent a spawn names, and the profile it hands its sessions.
    *
-   * Two fields may not be named beside it, because they are the two the Agent
-   * itself answers: honouring a call that overrode them would open a session
-   * the Agent never described. A per-spawn `model` or `accessMode` is an
-   * override the Agent expects (spec 02 Agent) and neither is refused here.
-   *
    * The profile is read rather than copied on trust: it is what the session's
    * token will carry, and a profile that is gone would mint a token that
    * resolves to nobody.
    */
   const requireAgentFor = (
     agentId: string,
-    spawn: SessionSpawnInput,
   ): Effect.Effect<
     { readonly agent: StoredAgent; readonly profile: PermissionProfile },
-    Validation | NotFound | InvalidState | GrantsError | SqlError
+    NotFound | InvalidState | GrantsError | SqlError
   > =>
     Effect.gen(function* () {
-      for (const field of ["instanceId", "permissionProfileId"] as const) {
-        if (spawn[field] !== undefined) {
-          return yield* Effect.fail(
-            validation([
-              {
-                path: [field],
-                message: `${field} comes from the agent this session is spawned from`,
-              },
-            ]),
-          );
-        }
-      }
       const found = yield* agents.one(agentId);
       if (Option.isNone(found)) return yield* Effect.fail(notFound(NO_SUCH_AGENT));
       const agent = found.value;
@@ -256,6 +262,22 @@ const make = Effect.gen(function* () {
         return false;
     }
   };
+
+  /**
+   * Whether this actor may open the session on the mode the call named. A
+   * per-spawn `accessMode` is an override the Agent expects (spec 02 Agent),
+   * and the user's is unrestricted; a session's may only go down the chain.
+   * Raising it would let a spawner hand a worker more of the machine than the
+   * Agent it is acting through was ever configured for - the escalation the
+   * grant rule above closes, by the other axis (spec 13 section 6.3).
+   *
+   * The order is `nearestSupportedAccessMode`'s own, so "more permissive"
+   * means here exactly what it means where a provider falls back.
+   */
+  const mayRunOn = (actor: Actor, requested: AccessMode | undefined, agent: StoredAgent): boolean =>
+    actor._tag !== "session" ||
+    requested === undefined ||
+    ACCESS_MODE_CHAIN.indexOf(requested) <= ACCESS_MODE_CHAIN.indexOf(agent.accessMode);
 
   /**
    * The output schema, once it is one every harness can be held to. Checked
@@ -381,7 +403,7 @@ const make = Effect.gen(function* () {
       if (Option.isNone(after)) {
         return yield* Effect.die("a session that was just inserted could not be read back");
       }
-      return yield* recordOf(after.value);
+      return (yield* recordReader)(after.value);
     });
 
   return {
@@ -390,13 +412,15 @@ const make = Effect.gen(function* () {
      * Agent. One resolution per field either way, in one precedence chain -
      * the value this call names, then the Agent's or the user's `thread.*`
      * setting, then what the instance offers - because a second chain is a
-     * second answer to "what does this session run under".
+     * second answer to "what does this session run under". The model and its
+     * options walk that chain as the one selection they are.
      *
      * A Thread is the user's alone. Every value it takes comes from their own
      * settings, so another actor reaching those defaults would make the thread
      * profile an escalation path (spec 02 Thread). An Agent names its own
      * profile instead, so a session may spawn from one - up to the grants it
-     * is bounded by itself.
+     * is bounded by itself, and only at or below the access mode the Agent
+     * itself names. The user's overrides are unrestricted (spec 13 §6.3).
      *
      * Whatever it runs under, the fleet says where, and the working area it
      * asked for is made before the harness can start in it.
@@ -405,10 +429,9 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         const actor = yield* requireGrant("session.spawn");
         const decoded = yield* Effect.mapError(decodeSpawn(input), validationOf);
+        if (decoded.agentId !== undefined) yield* refuseAgentOwnedFields(decoded);
         const spawnedFrom =
-          decoded.agentId === undefined
-            ? undefined
-            : yield* requireAgentFor(decoded.agentId, decoded);
+          decoded.agentId === undefined ? undefined : yield* requireAgentFor(decoded.agentId);
         const agent = spawnedFrom?.agent;
         // Only a Thread reaches the user's own defaults, so only the user may
         // open one; a spawn from an Agent takes its values from the Agent and
@@ -418,8 +441,13 @@ const make = Effect.gen(function* () {
         if (spawnedFrom === undefined && user === undefined) {
           return yield* Effect.fail(forbidden("session.spawn", THREAD_IS_THE_USERS));
         }
-        if (spawnedFrom !== undefined && !mayRunAs(actor, spawnedFrom.profile)) {
-          return yield* Effect.fail(forbidden("session.spawn", NOT_ITS_GRANTS));
+        if (spawnedFrom !== undefined) {
+          if (!mayRunAs(actor, spawnedFrom.profile)) {
+            return yield* Effect.fail(forbidden("session.spawn", NOT_ITS_GRANTS));
+          }
+          if (!mayRunOn(actor, decoded.accessMode, spawnedFrom.agent)) {
+            return yield* Effect.fail(forbidden("session.spawn", NOT_ITS_ACCESS_MODE));
+          }
         }
         const outputSchema = yield* requireLintedSchema(decoded.outputSchema);
         if (decoded.projectId !== undefined) yield* liveProject(decoded.projectId);
@@ -463,9 +491,15 @@ const make = Effect.gen(function* () {
           );
         }
 
+        // A model and its options are one selection, not two fields a call may
+        // take half of: a choice belongs to the model that offered it. So the
+        // Agent's selection stands only where its model does, and a call that
+        // names a model of its own opens on the choices it named beside that
+        // model, or on none at all.
+        const agentSelection = decoded.model === undefined ? agent?.model : undefined;
         const model =
           decoded.model ??
-          agent?.model?.model ??
+          agentSelection?.model ??
           defaults["thread.model"] ??
           (hosting.models.find((one) => one.isDefault) ?? hosting.models[0])?.slug;
         if (model === undefined) {
@@ -473,9 +507,10 @@ const make = Effect.gen(function* () {
             invalidState("that machine reported no models for this provider instance"),
           );
         }
-        // Per field, like the model above it: a choice the model does not offer
-        // is refused by name rather than dropped for having come from the Agent.
-        const options = decoded.options ?? agent?.model?.options ?? {};
+        // Whichever they came from, the choices are held to the model they run
+        // on: one the model does not offer is refused by name rather than
+        // dropped for having come from the Agent.
+        const options = decoded.options ?? agentSelection?.options ?? {};
         yield* validatedOptions(hosting.models, model, options);
 
         if (decoded.permissionProfileId !== undefined) {

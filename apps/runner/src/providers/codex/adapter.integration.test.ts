@@ -25,7 +25,7 @@ import {
   FIXTURE_SCHEMA,
   IMPOSSIBLE_PROMPT,
   IMPOSSIBLE_SCHEMA,
-} from "@hydra/protocol/output-schema.fixture";
+} from "@hydra/protocol/testing";
 import { codex } from "./adapter";
 import type { ProviderRunnerContext } from "../index";
 

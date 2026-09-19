@@ -16,7 +16,7 @@ import { MAX_MESSAGE_LENGTH, type OutputSchema, type StructuredResult } from "@h
  * What the harness produced: a value, or the reason there is none. The reason
  * is the adapter's own words, and it is what the failure says.
  */
-export type StructuredCandidate = { readonly value: unknown } | { readonly missing: string };
+export type HarnessAnswer = { readonly value: unknown } | { readonly missing: string };
 
 /** The dialect the subset is written in; the schema crossed the wire as JSON. */
 const DRAFT = "7";
@@ -55,19 +55,19 @@ const describeError = (unit: OutputUnit): string =>
  */
 export const structuredResultOf = (
   schema: OutputSchema,
-  candidate: StructuredCandidate,
+  answer: HarnessAnswer,
 ): StructuredResult => {
-  if ("missing" in candidate) {
-    return { outcome: "schema-failure", reason: candidate.missing.slice(0, MAX_MESSAGE_LENGTH) };
+  if ("missing" in answer) {
+    return { outcome: "schema-failure", reason: answer.missing.slice(0, MAX_MESSAGE_LENGTH) };
   }
   // Short-circuiting: every unit past the first failure is the same mistake
   // reported again from further up, and the run stops at the branch that
   // failed, which is the branch the reason is taken from.
-  const checked = new Validator(schema, DRAFT, true).validate(candidate.value);
+  const checked = new Validator(schema, DRAFT, true).validate(answer.value);
   if (checked.valid) {
     return {
       outcome: "ok",
-      value: candidate.value as Extract<StructuredResult, { outcome: "ok" }>["value"],
+      value: answer.value as Extract<StructuredResult, { outcome: "ok" }>["value"],
     };
   }
   const unit = deepest(checked.errors);

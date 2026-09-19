@@ -25,7 +25,7 @@ import {
   type Usage,
 } from "@hydra/protocol";
 import { count, buildEnvelope, rawOf, type Envelope } from "../normalize";
-import { structuredResultOf, type StructuredCandidate } from "../structured-result";
+import { structuredResultOf, type HarnessAnswer } from "../structured-result";
 import { idOf } from "../events";
 import { fact, text } from "../text";
 import type { NotificationFrame } from "./rpc";
@@ -277,7 +277,7 @@ const onError = (state: Normalizing, params: ErrorNotification): ReadonlyArray<P
  * code fence is not the constrained output the schema asked for, and reading
  * one out of it would be this adapter guessing at an answer nobody gave.
  */
-const candidateOf = (last: ThreadItem | undefined): StructuredCandidate => {
+const harnessAnswerOf = (last: ThreadItem | undefined): HarnessAnswer => {
   if (last?.type !== "agentMessage") {
     return { missing: "the turn ended without a final agent message" };
   }
@@ -344,7 +344,7 @@ const resultOf = (
   const schema = state.outputSchema;
   if (schema === undefined) return undefined;
   if (ended === "completed")
-    return structuredResultOf(schema, candidateOf(state.lastCompletedItem));
+    return structuredResultOf(schema, harnessAnswerOf(state.lastCompletedItem));
   const refused = ended === "failed" ? refusalOf(turn) : undefined;
   return refused === undefined ? undefined : structuredResultOf(schema, { missing: refused });
 };

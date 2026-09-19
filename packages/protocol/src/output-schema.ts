@@ -13,10 +13,31 @@
 import { Schema } from "effect";
 
 /**
+ * The longest output schema, measured as the JSON it travels as.
+ *
+ * It is caller-controlled text that is stored on the session row, sent over
+ * the runner socket and, on pi, handed to the harness as an environment
+ * variable - and an environment has a size a process cannot be started past,
+ * so an unbounded schema is a session that fails at launch rather than at the
+ * call that asked for it. 32 KiB is far more than the strict subset needs for
+ * any answer a turn can give and well under what any of the three harnesses
+ * takes, so the bound refuses nothing anyone would write on purpose. It sits
+ * on the schema itself, so both ends refuse it: the controller before a row is
+ * written, the runner before a harness is started.
+ */
+export const MAX_OUTPUT_SCHEMA_LENGTH = 32 * 1024;
+
+/**
  * A JSON Schema document, as it travels: the controller stores and forwards it
  * byte for byte, and only `lintOutputSchema` reads inside it.
  */
-export const OutputSchema = Schema.Record(Schema.String, Schema.Json);
+export const OutputSchema = Schema.Record(Schema.String, Schema.Json).check(
+  Schema.makeFilter((schema) =>
+    JSON.stringify(schema).length > MAX_OUTPUT_SCHEMA_LENGTH
+      ? `an output schema is at most ${String(MAX_OUTPUT_SCHEMA_LENGTH)} characters of JSON`
+      : undefined,
+  ),
+);
 
 export type OutputSchema = Schema.Schema.Type<typeof OutputSchema>;
 

@@ -13,13 +13,25 @@ import type { UnenforcedSpecField } from "@hydra/contract";
 import type { DisallowedTool } from "@hydra/protocol";
 
 /**
- * The spec fields this provider will ignore, of those the caller actually set.
- * An empty tool list is nothing to ignore, whatever the provider declares.
+ * The spec fields the provider a row names will ignore, of those the caller
+ * actually set. An empty tool list is nothing to ignore, whatever the provider
+ * declares, and an instance that is gone or a provider this build no longer
+ * carries says nothing about what it would have enforced.
+ *
+ * It takes the catalog rather than one declaration, so a page is answered from
+ * one read of it; `null` is a row whose instance is gone; and agents and
+ * sessions both read it here rather than each having their own copy, so two
+ * readers of one provider can never disagree about what it will act on.
  */
-export const unenforcedFieldsOf = (
-  definition: ProviderDefinition,
+export const unenforcedFieldsIn = (
+  definitions: ReadonlyArray<ProviderDefinition>,
+  providerId: string | null,
   disallowedTools: ReadonlyArray<DisallowedTool>,
-): ReadonlyArray<UnenforcedSpecField> =>
-  definition.declared.disallowedTools === "unsupported" && disallowedTools.length > 0
+): ReadonlyArray<UnenforcedSpecField> => {
+  const definition = definitions.find((one) => one.id === providerId);
+  return definition !== undefined &&
+    definition.declared.disallowedTools === "unsupported" &&
+    disallowedTools.length > 0
     ? ["disallowedTools"]
     : [];
+};

@@ -26,7 +26,7 @@ import {
   Validation,
 } from "../errors";
 import { Id, Timestamp } from "../ids";
-import { UnenforcedSpecField } from "./agent";
+import { ModelOptions, UnenforcedSpecField } from "./agent";
 import { Branch } from "./workspace";
 import { page, pageParams } from "../pagination";
 import { Authenticated } from "../security";
@@ -39,12 +39,6 @@ export { ApprovalDecision, OpenRequest };
 export const MAX_PROMPT_LENGTH = 64 * 1024;
 
 export const Prompt = bounded(1, MAX_PROMPT_LENGTH);
-
-/**
- * The per-model choices a call picks: one value per option the model offers,
- * the same shape the session stores and the runner is told.
- */
-const ModelOptions = ModelSelection.fields.options;
 
 /**
  * Where a session stands. `queued` is placement accepted with the runner full

@@ -3,12 +3,13 @@
  * binary: an Agent created through the CLI, a session spawned from it under an
  * output schema, and the turn's answer read back off the transcript.
  *
- * The two schemas are imported from the protocol package's own source file,
- * by relative path, rather than written again here: the point of the fixture
- * is that one document is what every adapter and every proof is held to, and
- * the path is how a suite that depends on no Hydra package reaches it. It is
- * data; nothing else of Hydra is reached for, and the binary under test knows
- * nothing of this process.
+ * The two schemas are imported from the protocol package's own testing module
+ * (`@hydra/protocol/testing` to the packages, this relative path here), rather
+ * than written again: the point of them is that one document is what every
+ * adapter and every proof is held to, and a relative path is how a suite that
+ * depends on no Hydra package reaches it - `live.test.ts` beside it reaches
+ * client-core the same way. It is data; nothing else of Hydra is reached for,
+ * and the binary under test knows nothing of this process.
  *
  * Opt-in, like `session.test.ts` beside it: it spends the developer's tokens
  * and takes a couple of minutes. `HYDRA_LIVE_SESSION_TEST=1` asks for it.
@@ -38,7 +39,7 @@ import {
   FIXTURE_SCHEMA,
   IMPOSSIBLE_PROMPT,
   IMPOSSIBLE_SCHEMA,
-} from "../packages/protocol/src/output-schema.fixture";
+} from "../packages/protocol/src/output-schema.testing";
 import {
   PASSWORD,
   ROOT,

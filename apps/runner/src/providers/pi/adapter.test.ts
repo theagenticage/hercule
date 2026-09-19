@@ -449,6 +449,19 @@ describe("the pi a session under an Agent is launched as", () => {
     expect(run.child.command).not.toContain(SYSTEM_PROMPT);
   });
 
+  it("takes the session's instructions file away with the session", async () => {
+    const run = await started({}, STRUCTURED);
+    const path = after(run.child.command, "--append-system-prompt")!;
+    expect(existsSync(path)).toBe(true);
+
+    await Effect.runPromise(run.adapter.stopSession(SESSION, "stopped"));
+
+    // One file per session ever started would otherwise pile up in the
+    // instance's own home, each holding an Agent's instructions.
+    await until("said the session ended", () => taggedIn(run.seen, "session.exited").length === 1);
+    expect(existsSync(path)).toBe(false);
+  });
+
   it("hands over instructions that read like a filename as the instructions they are", async () => {
     const run = await started({}, { ...STRUCTURED, systemPrompt: "AGENTS.md" });
 

@@ -20,7 +20,7 @@ import {
   FIXTURE_SCHEMA,
   IMPOSSIBLE_PROMPT,
   IMPOSSIBLE_SCHEMA,
-} from "@hydra/protocol/output-schema.fixture";
+} from "@hydra/protocol/testing";
 import { prepareTooling } from "../sessions/tooling";
 import { claudeCode } from "./claude-code";
 import { PROBE_DEADLINE } from "./probe";

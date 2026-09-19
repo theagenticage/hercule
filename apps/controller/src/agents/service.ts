@@ -28,7 +28,7 @@ import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
-import type { AccessMode } from "@hydra/protocol";
+import type { AccessMode, ModelSelection } from "@hydra/protocol";
 import {
   AGENT_SORT_FIELDS,
   AgentCreateInput,
@@ -52,8 +52,8 @@ import { nowIso, pageInput, refuseCursor, withTransaction } from "../db";
 import { AuditLog } from "../events";
 import { PermissionProfiles, type GrantsError } from "../permissions";
 import { PluginHost } from "../plugins";
-import { providerRepository, unenforcedFieldsOf } from "../providers";
-import { agentRepository, type StoredAgent } from "./repository";
+import { providerRepository, unenforcedFieldsIn } from "../providers";
+import { agentRepository, type AgentEdit, type StoredAgent } from "./repository";
 
 const QueryInput = Schema.Struct(pageInput(AGENT_SORT_FIELDS));
 
@@ -89,6 +89,31 @@ const NO_SUCH_PROFILE = "no such permission profile";
 
 const NO_SUCH_INSTANCE = "no such provider instance";
 
+/** Why options with no model beside them are refused. */
+const NO_MODEL_FOR_OPTIONS =
+  "name a model beside the options: a model's choices are the choices that model offers";
+
+/**
+ * The one selection the record holds, folded from the two fields the API takes
+ * it as. `undefined` is a call that named neither, which on an edit leaves the
+ * stored selection alone and on a create is the instance's own default model.
+ *
+ * Options with no model beside them are refused rather than applied to
+ * whatever model the agent happens to be on: a choice belongs to the model
+ * that offers it, and one carried onto another model is a value that model
+ * never declared.
+ */
+const foldedSelection = (
+  model: string | null | undefined,
+  options: ModelSelection["options"] | undefined,
+): Effect.Effect<ModelSelection | null | undefined, Validation> => {
+  if (typeof model !== "string" && options !== undefined) {
+    return Effect.fail(validation([{ path: ["options"], message: NO_MODEL_FOR_OPTIONS }]));
+  }
+  if (model === undefined) return Effect.succeed(undefined);
+  return Effect.succeed(model === null ? null : { model, options: options ?? {} });
+};
+
 /**
  * How every call can refuse. `SchemaError` is the provider catalog's: reading
  * what a provider declares decodes its stored config, and every operation here
@@ -111,18 +136,14 @@ const make = Effect.gen(function* () {
    * provider's declaration. The catalog is one in-memory read, so one of these
    * answers a whole page as readily as a single agent.
    */
-  const records = Effect.map(host.providers(), (definitions) => {
-    return ({ providerId, ...agent }: StoredAgent): Agent => {
-      const definition = definitions.find((one) => one.id === providerId);
-      return {
+  const recordReader = Effect.map(
+    host.providers(),
+    (definitions) =>
+      ({ providerId, ...agent }: StoredAgent): Agent => ({
         ...agent,
-        // An instance that is gone, or a provider this build no longer carries,
-        // says nothing about what it would have enforced.
-        unenforced:
-          definition === undefined ? [] : unenforcedFieldsOf(definition, agent.disallowedTools),
-      };
-    };
-  });
+        unenforced: unenforcedFieldsIn(definitions, providerId, agent.disallowedTools),
+      }),
+  );
 
   /**
    * The provider behind the instance an agent names, refusing an instance
@@ -183,7 +204,7 @@ const make = Effect.gen(function* () {
             direction: sort?.direction ?? DEFAULT_DIRECTION,
           }),
         );
-        const recordOf = yield* records;
+        const recordOf = yield* recordReader;
         return {
           items: listing.items.map(recordOf),
           ...(listing.nextCursor === undefined ? {} : { nextCursor: listing.nextCursor }),
@@ -194,7 +215,7 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         yield* requireGrant("agent.read");
         const { id } = yield* Effect.mapError(decodeIdentified(input), validationOf);
-        const recordOf = yield* records;
+        const recordOf = yield* recordReader;
         return recordOf(yield* one(id));
       }),
 
@@ -203,12 +224,16 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         yield* requireGrant("agent.create");
         const decoded = yield* Effect.mapError(decodeCreate(input), validationOf);
-        const providerId = yield* providerOf(decoded.instanceId);
-        yield* requireProfile(decoded.permissionProfileId);
-        const recordOf = yield* records;
+        const selection = yield* foldedSelection(decoded.model, decoded.options);
+        const recordOf = yield* recordReader;
         const stored = yield* withTransaction(
           sql,
           Effect.gen(function* () {
+            // Inside the write set, both of them: an instance or a profile
+            // read before the transaction may be deleted between the read and
+            // the insert, which would file the agent on a row that is gone.
+            const providerId = yield* providerOf(decoded.instanceId);
+            yield* requireProfile(decoded.permissionProfileId);
             // One clock read, inside the transaction: the row and the event
             // that records it carry the same instant, so a fresh agent's
             // `updatedAt` is exactly its `createdAt`.
@@ -220,7 +245,7 @@ const make = Effect.gen(function* () {
               instanceId: decoded.instanceId,
               permissionProfileId: decoded.permissionProfileId,
               accessMode: decoded.accessMode ?? DEFAULT_ACCESS_MODE,
-              model: decoded.model ?? null,
+              model: selection ?? null,
               disallowedTools: decoded.disallowedTools ?? [],
               at,
             });
@@ -247,29 +272,40 @@ const make = Effect.gen(function* () {
     update: (input: UpdateInput): Effect.Effect<Agent, WriteError | NotFound> =>
       Effect.gen(function* () {
         yield* requireGrant("agent.update");
-        const { id, ...patch } = yield* Effect.mapError(decodeUpdate(input), validationOf);
-        if (Object.keys(patch).length === 0) {
+        const { id, model, options, ...named } = yield* Effect.mapError(
+          decodeUpdate(input),
+          validationOf,
+        );
+        const selection = yield* foldedSelection(model, options);
+        const edit: AgentEdit = {
+          ...named,
+          ...(selection === undefined ? {} : { model: selection }),
+        };
+        if (Object.keys(edit).length === 0) {
           return yield* Effect.fail(validation([{ path: [], message: "name a field to change" }]));
         }
-        if (patch.instanceId !== undefined) yield* providerOf(patch.instanceId);
-        if (patch.permissionProfileId !== undefined) {
-          yield* requireProfile(patch.permissionProfileId);
-        }
-        const recordOf = yield* records;
+        const recordOf = yield* recordReader;
         const stored = yield* withTransaction(
           sql,
           Effect.gen(function* () {
+            // Inside the write set: a profile or an instance deleted between
+            // the check and the update would leave the agent naming a row that
+            // is gone.
+            if (edit.instanceId !== undefined) yield* providerOf(edit.instanceId);
+            if (edit.permissionProfileId !== undefined) {
+              yield* requireProfile(edit.permissionProfileId);
+            }
             const at = yield* nowIso;
             // Read for its refusal: an id nobody holds is `not_found` rather
             // than an update that changed no rows and said it had.
             yield* one(id);
-            yield* agents.update(id, patch, at);
+            yield* agents.update(id, edit, at);
             yield* audit.append({
               kind: "agent.updated",
               actor: yield* currentStamp,
               // Which fields moved, never what they moved to: the values are
               // the agent's instructions and its configuration.
-              payload: { agentId: id, changed: Object.keys(patch).sort() },
+              payload: { agentId: id, changed: Object.keys(edit).sort() },
               at,
             });
             return yield* one(id);

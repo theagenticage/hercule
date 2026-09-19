@@ -290,7 +290,7 @@ type InputError = ReadError | NotFound | InvalidState | Schema.SchemaError;
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const sessions = yield* sessionRepository;
-  const recordOf = yield* sessionRecordReader;
+  const recordReader = yield* sessionRecordReader;
   const inputs = yield* inputRepository;
   const one = requireSession(sessions);
   const tokens = yield* SessionTokens;
@@ -426,10 +426,8 @@ const make = Effect.gen(function* () {
             thread,
           }),
         );
-        return pageOut({
-          ...listing,
-          items: yield* Effect.forEach(listing.items, recordOf),
-        });
+        const recordOf = yield* recordReader;
+        return pageOut({ ...listing, items: listing.items.map(recordOf) });
       }),
 
     /**
@@ -454,7 +452,7 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         yield* requireGrant("session.read");
         const { id } = yield* Effect.mapError(decodeIdentified(input), validationOf);
-        return yield* recordOf(yield* one(id));
+        return (yield* recordReader)(yield* one(id));
       }),
 
     /**

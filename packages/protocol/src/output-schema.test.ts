@@ -8,8 +8,9 @@
  * subset in one document, so "accepted" is not proven by the trivial case.
  */
 import { describe, expect, it } from "vitest";
-import { lintOutputSchema } from "./output-schema";
-import { FIXTURE_SCHEMA, IMPOSSIBLE_SCHEMA } from "./output-schema.fixture";
+import { Schema } from "effect";
+import { lintOutputSchema, MAX_OUTPUT_SCHEMA_LENGTH, OutputSchema } from "./output-schema";
+import { FIXTURE_SCHEMA, IMPOSSIBLE_SCHEMA } from "./output-schema.testing";
 
 /** Every shape the subset allows, in one document. */
 const ACCEPTED = {
@@ -264,5 +265,34 @@ describe("lintOutputSchema", () => {
     const issues = lintOutputSchema(schema);
     expect(issues).toHaveLength(1);
     for (const name of names) expect(issues[0]).toContain(name);
+  });
+});
+
+/**
+ * The bound is on the schema itself rather than on one caller's field, so both
+ * ends refuse an oversized document: the controller before a row is written
+ * and the runner before a harness is started.
+ */
+describe("the size bound on a schema", () => {
+  const decode = Schema.decodeUnknownResult(OutputSchema);
+
+  /** A schema whose JSON is `length` characters, give or take the padding. */
+  const sized = (length: number): Record<string, unknown> => ({
+    type: "object",
+    additionalProperties: false,
+    required: ["verdict"],
+    properties: { verdict: { type: "string", description: "x".repeat(length) } },
+  });
+
+  it("takes a schema at the bound", () => {
+    const schema = sized(MAX_OUTPUT_SCHEMA_LENGTH - JSON.stringify(sized(0)).length);
+    expect(JSON.stringify(schema).length).toBe(MAX_OUTPUT_SCHEMA_LENGTH);
+    expect(decode(schema)._tag).toBe("Success");
+  });
+
+  it("refuses one past it, saying what the bound is", () => {
+    const refused = decode(sized(MAX_OUTPUT_SCHEMA_LENGTH));
+    expect(refused._tag).toBe("Failure");
+    expect(JSON.stringify(refused)).toContain(String(MAX_OUTPUT_SCHEMA_LENGTH));
   });
 });

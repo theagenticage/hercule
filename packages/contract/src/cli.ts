@@ -1296,7 +1296,9 @@ export const CLI = {
           "--access-mode",
           "auto-accept-edits",
           "--model",
-          '{"model":"opus","options":{"effort":"high"}}',
+          "opus",
+          "--options",
+          '{"effort":"high"}',
           "--disallowed-tool",
           "edit",
           "--disallowed-tool",
@@ -1328,7 +1330,11 @@ export const CLI = {
       },
       model: {
         flag: "model",
-        help: 'The model and its per-model choices as JSON: {"model":"<slug>","options":{}}. Leave it off to run on whatever the instance offers by default.',
+        help: "The model its sessions open on, by its slug; leave it off to run on whatever the instance offers by default.",
+      },
+      options: {
+        flag: "options",
+        help: "The per-model choices that model opens with, as inline JSON; refused without --model beside it.",
       },
       disallowedTools: {
         flag: "disallowed-tool",
@@ -1341,6 +1347,7 @@ export const CLI = {
     help: "Edits an Agent; a field you do not name is left as it was. Sessions already spawned keep the values they were given.",
     examples: [
       { args: ["1f3a9c2e", "--access-mode", "auto"] },
+      { args: ["1f3a9c2e", "--model", "sonnet", "--options", '{"effort":"high"}'] },
       { args: ["1f3a9c2e", "--disallowed-tool", "shell"] },
       {
         args: ["1f3a9c2e", "--system-prompt-stdin"],
@@ -1372,7 +1379,11 @@ export const CLI = {
       accessMode: { flag: "access-mode", help: "What its sessions may do unasked." },
       model: {
         flag: "model",
-        help: 'The model and its per-model choices as JSON: {"model":"<slug>","options":{}}; `null` puts it back on the instance default.',
+        help: "The model its sessions open on instead, by its slug; `null` puts it back on the instance default.",
+      },
+      options: {
+        flag: "options",
+        help: "The per-model choices to open that model with, as inline JSON; refused without --model beside it.",
       },
       disallowedTools: {
         flag: "disallowed-tool",

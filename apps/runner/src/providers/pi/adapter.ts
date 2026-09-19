@@ -102,7 +102,8 @@ export const REPROMPT = `You must call ${SUBMIT_RESULT_TOOL} with your answer; d
 
 /**
  * How often one turn is asked again before it is reported as having answered
- * nothing. A third would be a session nothing ever ends.
+ * nothing. A third would be a session nothing ever ends. This is spec 06
+ * section 7's "default 2 retries" on the pi row, and the knob for it.
  */
 const MAX_REPROMPTS = 2;
 
@@ -114,6 +115,9 @@ const MAX_REPROMPTS = 2;
  * to: a live session on a schema no value satisfies called the tool 84 times
  * in five minutes and was still going. A few tries absorb a model that merely
  * got it wrong; past them, the turn is over and its last answer is the verdict.
+ *
+ * The second of the two bounds spec 06 section 7's pi row names, beside
+ * `MAX_REPROMPTS` above it.
  */
 const MAX_REFUSED_ANSWERS = 3;
 
@@ -123,6 +127,12 @@ interface Held {
   readonly child: PiChild;
   readonly rpc: PiRpc;
   readonly state: Normalizing;
+  /**
+   * The file this session's instructions were written to, if it has any. It is
+   * the session's own and nothing else reads it once its pi is gone, so it
+   * goes with the session rather than piling up in the instance's home.
+   */
+  readonly systemPromptFile: string | undefined;
   /** Whether this session is being stopped, whose end is reported by the stop. */
   stopping: boolean;
   /** The question this session is parked on, if any: one at a time. */
@@ -286,7 +296,7 @@ const transcriptOf = (home: string, nativeSessionId: string): string | undefined
  * families map to nothing: pi has no web tool, and a name it does not know is
  * a flag it refuses to start on.
  */
-const PI_TOOLS: Readonly<Record<DisallowedTool, ReadonlyArray<string>>> = {
+const PI_TOOLS_BY_FAMILY: Readonly<Record<DisallowedTool, ReadonlyArray<string>>> = {
   edit: ["edit"],
   write: ["write"],
   shell: ["bash"],
@@ -306,7 +316,7 @@ const argvFor = (
   transcript: string | undefined,
 ): ReadonlyArray<string> => {
   const resuming = spec.continue?.mode === "resume" && transcript !== undefined;
-  const excluded = (spec.disallowedTools ?? []).flatMap((family) => PI_TOOLS[family]);
+  const excluded = (spec.disallowedTools ?? []).flatMap((family) => PI_TOOLS_BY_FAMILY[family]);
   return [
     "--mode",
     "rpc",
@@ -466,6 +476,11 @@ export const piAdapter = (seam: PiSeam): ProviderAdapter => {
     // and a second exit would be a second row for it.
     if (held === undefined) return;
     sessions.delete(sessionId);
+    // The session's instructions leave with it: pi has read them at start and
+    // a resume writes them again, so what is left behind is one file per
+    // session ever started in this instance's home.
+    const instructions = held.systemPromptFile;
+    if (instructions !== undefined) attempt(() => rmSync(instructions, { force: true }));
     // A card left open on a session that is gone is one nothing can answer,
     // and nobody refused it: the session went.
     resolvePark(held, "cancel");
@@ -740,6 +755,8 @@ export const piAdapter = (seam: PiSeam): ProviderAdapter => {
           child,
           rpc,
           state,
+          systemPromptFile:
+            spec.systemPrompt === undefined ? undefined : systemPromptPath(ctx.home, sessionId),
           stopping: false,
           park: undefined,
         };

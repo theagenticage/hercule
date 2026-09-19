@@ -43,6 +43,17 @@ const AgentName = bounded(1, MAX_AGENT_NAME_LENGTH);
 const SystemPrompt = bounded(1, MAX_SYSTEM_PROMPT_LENGTH);
 
 /**
+ * The per-model choices a call picks: one value per option the model offers.
+ * Spelled here because the Agent and the session spawn take it as a field of
+ * their own, and it is the same shape the session stores and the runner is
+ * told.
+ */
+export const ModelOptions = ModelSelection.fields.options;
+
+/** The model a session opens on, by the slug its provider instance lists. */
+const ModelSlug = Schema.NonEmptyString;
+
+/**
  * A field of a session's spec the provider stores but does not act on, read
  * from the provider instance's declared capabilities at every read.
  */
@@ -74,13 +85,22 @@ export type Agent = Schema.Schema.Type<typeof Agent>;
 /** What an agent listing may be sorted by. */
 export const AGENT_SORT_FIELDS = ["createdAt"] as const;
 
+/**
+ * Making an agent. The model and its options are two fields here and one
+ * `ModelSelection` on the record: a choice belongs to the model that offers
+ * it, so `options` is named only beside a `model`, and the service folds the
+ * two into the selection it stores. It is also how every other command spells
+ * a model - `--model <slug> --options <json>`.
+ */
 export const AgentCreateInput = Schema.Struct({
   name: AgentName,
   systemPrompt: SystemPrompt,
   instanceId: Id,
   permissionProfileId: Id,
   accessMode: Schema.optionalKey(AccessMode),
-  model: Schema.optionalKey(ModelSelection),
+  /** Absent runs its sessions on whatever the instance offers by default. */
+  model: Schema.optionalKey(ModelSlug),
+  options: Schema.optionalKey(ModelOptions),
   disallowedTools: Schema.optionalKey(Schema.Array(DisallowedTool)),
 });
 
@@ -94,7 +114,9 @@ export const AgentUpdateInput = Schema.Struct({
   permissionProfileId: Schema.optionalKey(Id),
   accessMode: Schema.optionalKey(AccessMode),
   /** `null` puts the agent back on the instance's default model. */
-  model: Schema.optionalKey(Schema.NullOr(ModelSelection)),
+  model: Schema.optionalKey(Schema.NullOr(ModelSlug)),
+  /** The choices of the model named beside them; alone they are refused. */
+  options: Schema.optionalKey(ModelOptions),
   disallowedTools: Schema.optionalKey(Schema.Array(DisallowedTool)),
 });
 

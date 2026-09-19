@@ -23,7 +23,7 @@ import {
   type TurnState,
   type Usage,
 } from "@hydra/protocol";
-import { structuredResultOf, type StructuredCandidate } from "./structured-result";
+import { structuredResultOf, type HarnessAnswer } from "./structured-result";
 
 /** The channel name every raw payload from this adapter is filed under. */
 export const CLAUDE_SDK_MESSAGE = "claude.sdk.message";
@@ -484,10 +484,10 @@ const RETRIES_EXHAUSTED = "error_max_structured_output_retries";
  * every other failure are about the turn, and a verdict on the schema there
  * would be one nobody took.
  */
-const candidateOf = (
+const harnessAnswerOf = (
   sdk: Extract<SDKMessage, { type: "result" }>,
   turnState: TurnState,
-): StructuredCandidate | undefined => {
+): HarnessAnswer | undefined => {
   // An interrupt first, whatever the subtype: a turn the user ended is a turn
   // nobody asked a verdict about, retries or no retries.
   if (turnState === "interrupted") return undefined;
@@ -508,8 +508,8 @@ const resultOf = (
 ): StructuredResult | undefined => {
   const schema = state.outputSchema;
   if (schema === undefined) return undefined;
-  const candidate = candidateOf(sdk, turnState);
-  return candidate === undefined ? undefined : structuredResultOf(schema, candidate);
+  const answer = harnessAnswerOf(sdk, turnState);
+  return answer === undefined ? undefined : structuredResultOf(schema, answer);
 };
 
 const onResult = (
