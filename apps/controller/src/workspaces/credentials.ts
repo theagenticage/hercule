@@ -140,10 +140,10 @@ const make = Effect.gen(function* () {
     githubAccountOf: (connectionId: string): Effect.Effect<GitCredential | undefined> =>
       Effect.map(
         Effect.catchCause(credentialOf(connectionId), (cause) =>
-          // An interruption is not an unreadable connection. Passed on as an
-          // interruption rather than logged away, because this read can sit
-          // inside a transaction whose rollback depends on the interruption
-          // arriving.
+          // An interruption is not an unreadable connection: a cause carrying
+          // one is passed on rather than logged away, so a caller waiting on
+          // this read learns it was stopped instead of reading the answer as
+          // "no account".
           Cause.hasInterrupts(cause)
             ? Effect.interrupt
             : Effect.as(

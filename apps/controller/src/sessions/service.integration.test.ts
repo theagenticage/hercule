@@ -12,19 +12,20 @@ import { afterEach, describe, expect, it } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Deferred, Effect, Fiber, Layer, Option } from "effect";
+import { Deferred, Effect, Exit, Fiber, Layer, Logger, Option, Redacted } from "effect";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import { SessionSpec, type ModelSelection, type SessionStart } from "@hydra/protocol";
 import { homePaths, HydraHome } from "../config";
+import { connectionRepository, GITHUB_CONNECTION_TYPE } from "../connections";
 import { hashToken } from "../credentials";
 import { mintUuid, uuidToString, withTransaction } from "../db";
 import { TestDatabase } from "../db/testing";
 import { AuditLogLayer } from "../events";
 import { SessionTokensLayer } from "../permissions";
 import { masterKeyLayer } from "../secrets/masterKey";
-import { secretsLayer } from "../secrets/repository";
+import { Secrets, secretsLayer, type SecretOwner } from "../secrets/repository";
 import { gitCredentials } from "../workspaces";
 import type { GitCredential } from "../workspaces";
 import { type StoredInput } from "./inputs";
@@ -118,6 +119,59 @@ let homes: Array<string> = [];
 afterEach(() => {
   for (const home of homes) rmSync(home, { recursive: true, force: true });
   homes = [];
+});
+
+/**
+ * The reader's own dependency, gated: a `Secrets.get` that announces itself
+ * and then holds, so an interruption arriving there must travel through the
+ * credential reader's error handling rather than around it. The rest of the
+ * stack is the real one, over the same database, with a master key of its own
+ * in a home the test throws away.
+ */
+const gatedCredentialStack = (entered: Deferred.Deferred<void>, hold: Deferred.Deferred<void>) => {
+  const home = mkdtempSync(join(tmpdir(), "hydra-sessions-"));
+  homes.push(home);
+  const homeLayer = Layer.succeed(HydraHome, HydraHome.of(homePaths(home, join(home, "data"))));
+  const realSecrets = secretsLayer.pipe(
+    Layer.provide(masterKeyLayer("file").pipe(Layer.provide(homeLayer))),
+  );
+  const gatedSecrets = Layer.effect(
+    Secrets,
+    Effect.map(Effect.provide(Secrets, realSecrets), (inner) => ({
+      ...inner,
+      get: (owner: SecretOwner, name: string) =>
+        Effect.andThen(
+          Deferred.succeed(entered, undefined),
+          Effect.andThen(Deferred.await(hold), inner.get(owner, name)),
+        ),
+    })),
+  );
+  return SessionServiceLayer.pipe(
+    Layer.provideMerge(Layer.mergeAll(AuditLogLayer, SessionTokensLayer, gatedSecrets)),
+    Layer.provideMerge(TestDatabase),
+  );
+};
+
+/** A real GitHub connection with a really encrypted token: the reader only
+ * reaches for a secret on one. */
+const aGithubConnection = Effect.gen(function* () {
+  const secrets = yield* Secrets;
+  const connections = yield* connectionRepository;
+  const connection = yield* connections.insert({
+    pluginId: "github",
+    type: GITHUB_CONNECTION_TYPE,
+    label: "work",
+    displayName: "octocat",
+    labels: [],
+    config: {},
+    at,
+  });
+  yield* secrets.set(
+    { kind: "connection", id: connection.id },
+    "pat",
+    Redacted.make("ghp_a-real-looking-token"),
+  );
+  return connection.id;
 });
 
 /** `starting` as the daemon calls it: inside the caller's transaction. */
@@ -402,30 +456,52 @@ describe("SessionService.starting", () => {
     expect(result.claimed.map((claim) => claim.sessionId)).toEqual([result.good]);
   });
 
-  it("rolls the claim back when interrupted while reading the credential", async () => {
-    const home = mkdtempSync(join(tmpdir(), "hydra-sessions-"));
-    homes.push(home);
-    // The real credential reader, over the same database, with a master key
-    // of its own in a home this test throws away.
-    const stack = SessionServiceLayer.pipe(
+  it("passes an interruption on rather than logging it away as an unreadable connection", async () => {
+    const entered = Effect.runSync(Deferred.make<void>());
+    const hold = Effect.runSync(Deferred.make<void>());
+    const logged: Array<string> = [];
+    const stack = gatedCredentialStack(entered, hold).pipe(
       Layer.provideMerge(
-        Layer.mergeAll(
-          AuditLogLayer,
-          SessionTokensLayer,
-          secretsLayer.pipe(
-            Layer.provide(
-              masterKeyLayer("file").pipe(
-                Layer.provide(
-                  Layer.succeed(HydraHome, HydraHome.of(homePaths(home, join(home, "data")))),
-                ),
-              ),
-            ),
-          ),
+        Layer.succeed(
+          Logger.CurrentLoggers,
+          new Set<Logger.Logger<unknown, unknown>>([
+            {
+              log: (entry: { readonly message: ReadonlyArray<string> }): void => {
+                logged.push(entry.message.join(" "));
+              },
+            } as unknown as Logger.Logger<unknown, unknown>,
+          ]),
         ),
       ),
-      Layer.provideMerge(TestDatabase),
+    );
+    const result = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const credentials = yield* gitCredentials;
+          const connectionId = yield* aGithubConnection;
+          const reader = yield* Effect.forkChild(credentials.githubAccountOf(connectionId));
+          yield* Deferred.await(entered);
+          // An interrupt cause arrives through the dependency itself: the
+          // catchable shape, and the one the reader's error handling must not
+          // read as an unreadable connection.
+          yield* Deferred.interrupt(hold);
+          const exit = yield* Fiber.await(reader);
+          return Exit.isFailure(exit);
+        }),
+        stack,
+      ),
     );
 
+    // The interruption came back out of the reader, and was never logged
+    // away: a handler that read it as an unreadable connection would have
+    // completed the read with no account and written exactly that to the log.
+    expect(result).toBe(true);
+    expect(logged.filter((line) => line.includes("could not be read"))).toEqual([]);
+  });
+
+  it("rolls the claim back when interrupted inside the credential reader", async () => {
+    const entered = Effect.runSync(Deferred.make<void>());
+    const hold = Effect.runSync(Deferred.make<void>());
     const result = await Effect.runPromise(
       Effect.provide(
         Effect.gen(function* () {
@@ -435,50 +511,35 @@ describe("SessionService.starting", () => {
           const credentials = yield* gitCredentials;
           const instanceId = yield* anInstance("an-adapter", {});
           const runnerId = anId();
-          // The connection names nothing, so the real reader takes its
-          // logged-and-degraded path and hands back no account; the gate then
-          // holds the claim inside the credential stage, where a shutdown
-          // interrupt lands.
+          const connectionId = yield* aGithubConnection;
           const sessionId = yield* aQueuedSession(runnerId, {
             instanceId,
             spec: aSpec(instanceId, "clever"),
-            githubConnectionId: anId(),
+            githubConnectionId: connectionId,
           });
-          const entered = yield* Deferred.make<void>();
-          const release = yield* Deferred.make<void>();
           const claim = withTransaction(
             sql,
-            sessions.starting(runnerId, 1, {
-              accountOf: (connectionId) =>
-                Effect.as(
-                  Effect.andThen(
-                    Deferred.succeed(entered, undefined),
-                    Effect.andThen(
-                      credentials.githubAccountOf(connectionId),
-                      Deferred.await(release),
-                    ),
-                  ),
-                  undefined,
-                ),
-            }),
+            sessions.starting(runnerId, 1, { accountOf: credentials.githubAccountOf }),
           );
           const fiber = yield* Effect.forkChild(claim);
           yield* Deferred.await(entered);
-          // The shutdown shape: the dispatch child, mid-credential-stage, is
-          // told to stop and waits for nothing.
+          // The shutdown shape: the dispatch child, suspended inside the
+          // credential reader's dependency, is told to stop and waits for
+          // nothing.
           yield* Fiber.interrupt(fiber);
           return {
             after: yield* Effect.map(rows.one(sessionId), Option.getOrUndefined),
             hash: yield* hashOf(sessionId),
           };
         }),
-        stack,
+        gatedCredentialStack(entered, hold),
       ),
     );
 
     // The claim rolled back with the interruption: the row never left the
-    // queue, and the token's hash never landed. A claim the interruption
-    // could not reach back out of would read `starting` with a hash on it.
+    // queue, and the token's hash never landed. Whatever the reader's error
+    // handling does with an interruption, the transaction never commits a
+    // claim the interruption reached into.
     expect(result.after?.status).toBe("queued");
     expect(result.hash).toBeNull();
   });
