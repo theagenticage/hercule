@@ -74,6 +74,7 @@ describe.skipIf(binary === undefined)("the real Claude adapter on this machine",
         home: emptyHome(),
         binary: binary!,
         env: { PATH: process.env["PATH"] ?? "" },
+        secrets: {},
         hydraTool: TOOL(),
       };
 
@@ -155,7 +156,14 @@ const authed =
     : (
         await Effect.runPromise(
           claudeCode.probe(
-            { cwd: null, home: CONFIG_DIR, binary, env: process.env, hydraTool: TOOL() },
+            {
+              cwd: null,
+              home: CONFIG_DIR,
+              binary,
+              env: process.env,
+              secrets: {},
+              hydraTool: TOOL(),
+            },
             {},
           ),
         )
@@ -183,6 +191,7 @@ describe.skipIf(!authed)("a real Claude Code session on this machine", () => {
             ? {}
             : { ANTHROPIC_API_KEY: process.env["ANTHROPIC_API_KEY"] }),
         },
+        secrets: {},
         hydraTool: TOOL(),
       };
 
@@ -294,6 +303,7 @@ describe.skipIf(!authed)("a real Claude Code session continued on this machine",
             ? {}
             : { ANTHROPIC_API_KEY: process.env["ANTHROPIC_API_KEY"] }),
         },
+        secrets: {},
         hydraTool: TOOL(),
       };
 
@@ -420,6 +430,7 @@ describe.skipIf(!authed)("a real Claude Code session with the hydra skill", () =
             ? {}
             : { ANTHROPIC_API_KEY: process.env["ANTHROPIC_API_KEY"] }),
         },
+        secrets: {},
         hydraTool: { skill: "", claudePluginDir },
       };
 

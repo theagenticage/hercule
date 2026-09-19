@@ -9,7 +9,14 @@
  */
 import { Schema } from "effect";
 
-import { Fact, InstanceId, MAX_FACT_LENGTH, Sequenced, SessionId } from "./primitives";
+import {
+  Fact,
+  InstanceId,
+  InstanceSecrets,
+  MAX_FACT_LENGTH,
+  Sequenced,
+  SessionId,
+} from "./primitives";
 
 /**
  * How much of a session a caller may act on without being asked (spec 06
@@ -419,6 +426,8 @@ export const SessionStart = Schema.Struct({
   sessionId: SessionId,
   providerId: Fact,
   config: Schema.Json,
+  /** The instance's credentials, which its config never holds. */
+  secrets: Schema.optionalKey(InstanceSecrets),
   spec: SessionSpec,
   /**
    * The session's own credential on the public API, minted for this start. The

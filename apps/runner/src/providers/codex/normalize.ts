@@ -22,7 +22,7 @@ import {
   type TurnState,
   type Usage,
 } from "@hydra/protocol";
-import { now } from "../../report";
+import { count, enveloped, rawOf, type Envelope } from "../normalize";
 import { idOf } from "../events";
 import { fact, text } from "../text";
 import type { NotificationFrame } from "./rpc";
@@ -63,43 +63,11 @@ export const normalizing = (sessionId: string, threadId: string): Normalizing =>
   reasoning: new Map(),
 });
 
-/**
- * A real round-trip, not a cast: one `undefined` property anywhere in a vendor
- * payload would be a frame the protocol refuses to encode, and an event that
- * will not encode is one the runner drops.
- */
-const json = (value: unknown): Schema.Json =>
-  JSON.parse(JSON.stringify(value ?? null)) as Schema.Json;
+const envelope = (state: Normalizing): Envelope =>
+  enveloped(state.sessionId, { threadId: state.threadId });
 
-/** A count the protocol will carry: a whole number, never negative. */
-const count = (value: number | null | undefined): number =>
-  typeof value === "number" && Number.isFinite(value) && value > 0 ? Math.floor(value) : 0;
-
-/** What every event off this module carries, whatever else it says. */
-const envelope = (
-  state: Normalizing,
-): {
-  readonly eventId: string;
-  readonly sessionId: string;
-  readonly at: string;
-  readonly providerRefs: Readonly<Record<string, string>>;
-} => ({
-  eventId: crypto.randomUUID(),
-  sessionId: state.sessionId,
-  at: now(),
-  providerRefs: { threadId: state.threadId },
-});
-
-/**
- * The frame the event was read off, for a reader that wants what the harness
- * actually said. Not on a delta: a turn is thousands of them, and a copy on
- * each would double the stream for a payload that is the delta itself.
- */
-const raw = (
-  payload: unknown,
-): { readonly raw: { readonly source: string; readonly payload: Schema.Json } } => ({
-  raw: { source: CODEX_NOTIFICATION, payload: json(payload) },
-});
+/** The notification the event was read off, under this adapter's channel. */
+const raw = (payload: unknown): ReturnType<typeof rawOf> => rawOf(CODEX_NOTIFICATION, payload);
 
 /**
  * Codex's item vocabulary in the taxonomy's; everything else is `unknown`.

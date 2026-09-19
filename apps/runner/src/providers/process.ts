@@ -3,8 +3,9 @@
  * all - without running it.
  */
 import * as Effect from "effect/Effect";
-import type { AppServerChild, AppServerSpawn } from "./codex";
+import type { AppServerSpawn } from "./codex";
 import type { LoginChild, LoginSpawn } from "./login";
+import type { PiSpawn } from "./pi";
 
 export interface Ran {
   readonly code: number;
@@ -85,9 +86,39 @@ export const spawnLogin: LoginSpawn = (command, env): LoginChild => {
   };
 };
 
-/** The app-server is a conversation, not a run: framed, and read while it lives. */
-export const spawnAppServer: AppServerSpawn = (command, env): AppServerChild => {
-  const child = Bun.spawn([...command], { stdin: "pipe", stdout: "pipe", stderr: "pipe", env });
+/**
+ * A harness spoken to line by line: framed both ways, read while it lives, and
+ * ended either by closing its stdin or by killing it. Each adapter takes the
+ * half of this it uses.
+ */
+export interface FramedChild {
+  readonly write: (text: string) => void;
+  readonly stdout: AsyncIterable<string>;
+  readonly stderr: AsyncIterable<string>;
+  /** The end of the conversation, for a harness that leaves on end-of-input. */
+  readonly end: () => void;
+  readonly kill: () => void;
+  readonly exited: Promise<number>;
+}
+
+/** One spawner for both: a conversation, not a run. */
+const spawnFramed = (
+  command: ReadonlyArray<string>,
+  env: Readonly<Record<string, string | undefined>>,
+  /**
+   * Where the harness runs, for one that takes it from its process rather than
+   * from a command. Left out, the child inherits the runner's own directory,
+   * which is a session writing its files wherever the daemon happens to live.
+   */
+  cwd?: string | null,
+): FramedChild => {
+  const child = Bun.spawn([...command], {
+    stdin: "pipe",
+    stdout: "pipe",
+    stderr: "pipe",
+    env,
+    ...(cwd === undefined || cwd === null ? {} : { cwd }),
+  });
   return {
     stdout: lined(child.stdout),
     stderr: lined(child.stderr),
@@ -97,9 +128,17 @@ export const spawnAppServer: AppServerSpawn = (command, env): AppServerChild => 
       void child.stdin.write(text);
       void child.stdin.flush();
     },
+    end: () => {
+      void child.stdin.end();
+    },
     kill: () => {
       child.kill();
     },
     exited: child.exited,
   };
 };
+
+/** Codex's app-server, which is ended by killing it rather than by its stdin. */
+export const spawnAppServer: AppServerSpawn = spawnFramed;
+
+export const spawnPi: PiSpawn = spawnFramed;

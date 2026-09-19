@@ -8,33 +8,23 @@
  * It lives beside the tests rather than inside one of them because two test
  * files drive the same app-server: the adapter's own and the approvals'.
  */
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { expect } from "vitest";
 import { Effect, Stream } from "effect";
 import type { ProviderEvent, SessionSpec } from "@hydra/protocol";
 import type { ProviderRunnerContext } from "../index";
+import { CWD, lines, scratchHome, taggedIn, until } from "../testing";
 import { codexAdapter, type CodexSeam } from "./adapter";
 
-const homes: Array<string> = [];
+export { cleanupHomes, CWD, lines, PRIOR, settle, taggedIn, until, WAIT_MS } from "../testing";
 
-/** Every scratch home a test made, thrown away. Each test file runs it once. */
-export const cleanupHomes = (): void => {
-  for (const home of homes.splice(0)) rmSync(home, { recursive: true, force: true });
-};
-
-export const homing = (): string => {
-  const home = mkdtempSync(join(tmpdir(), "hydra-codex-"));
-  homes.push(home);
-  return home;
-};
+export const homing = (): string => scratchHome("codex");
 
 export const contextIn = (home: string, cwd: string | null = null): ProviderRunnerContext => ({
   cwd,
   home,
   binary: "/usr/local/bin/codex",
   env: { PATH: "/usr/local/bin:/usr/bin", HYDRA_RUNNER: "runner-1" },
+  secrets: {},
   // The runner resolves this once, at start; a test that cares about it says
   // what it is.
   hydraTool: { skill: "", claudePluginDir: join(home, "claude-plugin") },
@@ -123,43 +113,6 @@ export const MODELS = {
     },
   ],
   nextCursor: null,
-};
-
-/** A stream of lines a test pushes into, read once by the code under test. */
-export const lines = (): {
-  readonly push: (line: string) => void;
-  readonly end: () => void;
-  readonly iterable: AsyncIterable<string>;
-} => {
-  const queued: Array<string> = [];
-  let wake: (() => void) | undefined;
-  let ended = false;
-  const woken = (): void => {
-    const pending = wake;
-    wake = undefined;
-    pending?.();
-  };
-  return {
-    push: (line) => {
-      queued.push(line);
-      woken();
-    },
-    end: () => {
-      ended = true;
-      woken();
-    },
-    iterable: {
-      async *[Symbol.asyncIterator]() {
-        for (;;) {
-          while (queued.length > 0) yield queued.shift()!;
-          if (ended) return;
-          await new Promise<void>((resolve) => {
-            wake = resolve;
-          });
-        }
-      },
-    },
-  };
 };
 
 /** One app-server the adapter asked for, and what it was asked with. */
@@ -311,19 +264,6 @@ export const scripted = (
   return { seam, spawns, requests, answered };
 };
 
-export const WAIT_MS = 2_000;
-
-/** Waits for something the adapter has done, or gives up and says what it was. */
-export const until = async (what: string, ready: () => boolean): Promise<void> => {
-  const deadline = Date.now() + WAIT_MS;
-  while (!ready() && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 1));
-  expect(ready(), `the adapter never ${what}`).toBe(true);
-};
-
-export const PRIOR = "0199e0e7-0000-7000-8000-0000000000fa";
-
-export const CWD = "/tmp/work";
-
 /** An adapter with its events collected, and the app-server it will reach for. */
 export const driving = (
   answers: Answers = {},
@@ -347,15 +287,6 @@ export const driving = (
 
 export const sentOf = (requests: ReadonlyArray<Sent>, method: string): ReadonlyArray<unknown> =>
   requests.filter((request) => request.method === method).map((request) => request.params);
-
-export const taggedIn = <Tag extends ProviderEvent["_tag"]>(
-  seen: ReadonlyArray<ProviderEvent>,
-  tag: Tag,
-): ReadonlyArray<Extract<ProviderEvent, { _tag: Tag }>> =>
-  seen.filter((event): event is Extract<ProviderEvent, { _tag: Tag }> => event._tag === tag);
-
-/** Long enough for anything already in flight to have arrived, so "nothing" means it. */
-export const settle = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 20));
 
 /** A started session, and the app-server hosting it. */
 export const started = async (

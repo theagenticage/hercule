@@ -14,6 +14,7 @@ import { Schema } from "effect";
 import {
   Fact,
   InstanceId,
+  InstanceSecrets,
   MAX_FACT_LENGTH,
   Seq,
   Sequenced,
@@ -332,6 +333,7 @@ export const ProbeRequest = Schema.Struct({
   instanceId: InstanceId,
   providerId: Fact,
   config: Schema.Json,
+  secrets: Schema.optionalKey(InstanceSecrets),
 });
 
 export type ProbeRequest = Schema.Schema.Type<typeof ProbeRequest>;

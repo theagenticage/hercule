@@ -51,3 +51,22 @@ describe("the adapters this runner build carries", () => {
     expect(sent).toHaveLength(1);
   });
 });
+
+describe("the pi adapter this runner build carries", () => {
+  it("answers for pi, by the id and the binary name the plugin declares", () => {
+    const pi = adapterFor("pi");
+
+    expect(pi?.providerId).toBe("pi");
+    expect(pi?.binaryName).toBe("pi");
+    expect(ADAPTER_IDS).toContain("pi");
+    // The adapters that were there before it are still there.
+    expect(ADAPTER_IDS).toContain("claude-code");
+    expect(ADAPTER_IDS).toContain("codex");
+    // An adapter outside this array publishes its events to nobody.
+    expect(adapters).toContain(pi);
+  });
+
+  it("can put the harness on a machine that has none", () => {
+    expect(adapterFor("pi")?.install).toBeDefined();
+  });
+});

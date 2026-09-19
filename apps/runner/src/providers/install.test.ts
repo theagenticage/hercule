@@ -13,6 +13,7 @@ const CONTEXT: ProviderRunnerContext = {
   home: "/var/hydra/runner/providers/0199e0e7-0000-7000-8000-00000000000a",
   binary: "/usr/local/bin/claude",
   env: { PATH: "/usr/local/bin:/usr/bin" },
+  secrets: {},
   // Never read by a probe, an install or a login; the context type carries it
   // for the sessions this adapter also hosts.
   hydraTool: { skill: "", claudePluginDir: "/var/hydra/runner/storage/claude-plugin" },

@@ -77,3 +77,26 @@ export const Seq = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1));
 export const Sequenced = Schema.Struct({ seq: Seq });
 
 export type Sequenced = Schema.Schema.Type<typeof Sequenced>;
+
+/**
+ * What a secret is stored under: the same bound the secrets table holds its
+ * names to, because these keys are those names. `|` is the separator in the
+ * associated data that binds a stored value to its owner, so no name carries
+ * one.
+ */
+const SecretName = Schema.String.check(
+  Schema.isLengthBetween(1, 256),
+  Schema.isPattern(/^[^|]+$/, { title: "secret name", description: "no `|`" }),
+);
+
+/**
+ * The secret-valued config fields of one provider instance, by the name the
+ * plugin gave each. The controller decrypts them as it builds the frame, so
+ * plaintext exists on the wire and in the runner's memory for that one
+ * operation and nowhere else: never on the machine's disk, never in a log.
+ * Absent means the same as empty, which is what an instance with no credential
+ * stored carries.
+ */
+export const InstanceSecrets = Schema.Record(SecretName, Schema.String);
+
+export type InstanceSecrets = Schema.Schema.Type<typeof InstanceSecrets>;
