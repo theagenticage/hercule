@@ -426,8 +426,8 @@ export const SessionStart = Schema.Struct({
   sessionId: SessionId,
   providerId: Fact,
   config: Schema.Json,
-  /** The instance's credentials, which its config never holds. */
-  secrets: Schema.optionalKey(InstanceSecrets),
+  /** The instance's credentials, which its config never holds; `{}` when none. */
+  secrets: InstanceSecrets,
   spec: SessionSpec,
   /**
    * The session's own credential on the public API, minted for this start. The

@@ -60,6 +60,7 @@ const START: SessionStart = {
   sessionId: SESSION,
   providerId: "fake",
   config: {},
+  secrets: {},
   spec: SPEC,
   token: "a-session-token",
 };

@@ -595,6 +595,7 @@ describe("a controller asking a runner to probe a provider it cannot drive", () 
     instanceId: "01999999-0000-7000-8000-0000000000c2",
     providerId: "a-provider-nobody-wrote-an-adapter-for",
     config: {},
+    secrets: {},
   };
 
   const reportIn = (stub: Stub): ProbeReport | undefined =>

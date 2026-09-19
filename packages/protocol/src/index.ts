@@ -333,7 +333,8 @@ export const ProbeRequest = Schema.Struct({
   instanceId: InstanceId,
   providerId: Fact,
   config: Schema.Json,
-  secrets: Schema.optionalKey(InstanceSecrets),
+  /** The instance's credentials, which its config never holds; `{}` when none. */
+  secrets: InstanceSecrets,
 });
 
 export type ProbeRequest = Schema.Schema.Type<typeof ProbeRequest>;

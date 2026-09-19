@@ -94,8 +94,8 @@ const SecretName = Schema.String.check(
  * plugin gave each. The controller decrypts them as it builds the frame, so
  * plaintext exists on the wire and in the runner's memory for that one
  * operation and nowhere else: never on the machine's disk, never in a log.
- * Absent means the same as empty, which is what an instance with no credential
- * stored carries.
+ * Always on the frame: an instance with no credential stored carries `{}`, so
+ * a runner reads one shape rather than two spellings of the same state.
  */
 export const InstanceSecrets = Schema.Record(SecretName, Schema.String);
 

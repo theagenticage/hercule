@@ -30,9 +30,8 @@ import { probeFailed } from "../probe";
 import { runProcess, spawnPi, type Run } from "../process";
 import { fact, text } from "../text";
 import { now } from "../../report";
-import { EXTENSION_FILE, EXTENSION_SOURCE } from "./extension";
+import { ACCESS_MODE, EXTENSION_FILE, EXTENSION_SOURCE } from "./extension";
 import { ending, normalize, normalizing, type Normalizing, type RunningTool } from "./normalize";
-import { type ParkKind } from "./policy";
 import { DEFAULT_THINKING, piInstall, probing, ZAI } from "./probe";
 import { rpcOver, type PiChild, type PiRpc, type PiSpawn } from "./rpc";
 
@@ -47,9 +46,6 @@ const PI_BINARY = "pi";
  */
 const ZAI_KEY = { secret: "zaiApiKey", variable: "ZAI_API_KEY" };
 
-/** How the extension the session runs behind learns what it may let through. */
-const ACCESS_MODE = "HYDRA_ACCESS_MODE";
-
 /** What pi wrote on its way out, kept for the report when it dies. */
 const MAX_COMPLAINT_LINES = 5;
 
@@ -60,6 +56,16 @@ const MAX_COMPLAINT_LINES = 5;
  * the session is over.
  */
 const STOP_DEADLINE: Duration.Duration = Duration.seconds(2);
+
+/**
+ * What a held call is asked as on the session's stream, named from the
+ * protocol's own list so a kind renamed there does not quietly become a second
+ * vocabulary here.
+ */
+type ParkKind = Extract<
+  OpenRequest["kind"],
+  "command_approval" | "file_change_approval" | "tool_approval"
+>;
 
 export interface PiSeam {
   /** The line-framed child a session is hosted on. */
@@ -85,8 +91,6 @@ interface Held {
   readonly child: PiChild;
   readonly rpc: PiRpc;
   readonly state: Normalizing;
-  /** Whether pi is running a turn, which is what makes an input a steer. */
-  running: boolean;
   /** Whether this session is being stopped, whose end is reported by the stop. */
   stopping: boolean;
   /** The question this session is parked on, if any: one at a time. */
@@ -352,19 +356,35 @@ export const piAdapter = (seam: PiSeam): ProviderAdapter => {
     });
   };
 
+  /**
+   * The one end of a session: its entry goes, its card goes, its turn ends and
+   * the exit is reported. `message` is what pi complained about on its way
+   * out, which is both why the turn failed and what the exit says.
+   */
   const exit = (sessionId: string, reason: ExitReason, message?: string): void => {
     const held = sessions.get(sessionId);
     // A pi that left on its own and a supervisor that stopped it are one end,
     // and a second exit would be a second row for it.
     if (held === undefined) return;
     sessions.delete(sessionId);
-    held.running = false;
     // A card left open on a session that is gone is one nothing can answer,
     // and nobody refused it: the session went.
     resolvePark(held, "cancel");
     // A turn whose pi is gone is over, and the items under it with it: a row
     // left running is one that spins for as long as the session is looked at.
-    for (const event of ending(held.state, { state: "interrupted" })) emit(event);
+    // How it ended is who ended it: a stop is the one the user asked for, and
+    // a pi that went by itself mid-turn failed, with what it complained about.
+    for (const event of ending(
+      held.state,
+      held.stopping
+        ? { state: "interrupted" }
+        : {
+            state: "failed",
+            ...(message === undefined || message === "" ? {} : { error: message }),
+          },
+    )) {
+      emit(event);
+    }
     emit({
       _tag: "session.exited",
       eventId: crypto.randomUUID(),
@@ -376,9 +396,9 @@ export const piAdapter = (seam: PiSeam): ProviderAdapter => {
   };
 
   /**
-   * One line off pi's stdout that was not an answer to a command. What the
-   * adapter takes from it is whether a turn is running: nothing downstream may
-   * read that off the order events arrive in (ADR 0007).
+   * One line off pi's stdout that was not an answer to a command: a question
+   * the gate is asking, which is answered here, or something pi did, which the
+   * normalizer turns into the session's events.
    */
   const onLine = (sessionId: string, line: string, frame: unknown): void => {
     const held = sessions.get(sessionId);
@@ -391,9 +411,7 @@ export const piAdapter = (seam: PiSeam): ProviderAdapter => {
       return;
     }
     for (const event of normalize(held.state, line, frame)) {
-      if (event._tag === "turn.started") held.running = true;
       if (event._tag === "turn.completed") {
-        held.running = false;
         // A turn that ended took its question with it: pi is no longer holding
         // the call, and a card left docked is one nothing can answer.
         resolvePark(held, "cancel");
@@ -407,7 +425,7 @@ export const piAdapter = (seam: PiSeam): ProviderAdapter => {
     const child = held.child;
     const sessionId = held.binding.sessionId;
     const complaints: Array<string> = [];
-    void (async () => {
+    const drained = (async () => {
       try {
         for await (const line of child.stderr) {
           if (line.trim() === "") continue;
@@ -419,10 +437,14 @@ export const piAdapter = (seam: PiSeam): ProviderAdapter => {
         // it already said is still worth reporting.
       }
     })();
-    const gone = (code: number | undefined): void => {
+    const gone = async (code: number | undefined): Promise<void> => {
       // A stop is waiting on this and reports the reason it was given; a pi
       // that left by itself has nobody else to say so.
       if (held.stopping) return;
+      // What pi said on its way out can still be in the pipe when its exit
+      // lands, and a crash reported without it is a session that died for no
+      // stated reason.
+      await drained;
       exit(sessionId, "process_exit", code === 0 ? "" : complaints.join("\n"));
     };
     void child.exited.then(gone, () => gone(undefined));
@@ -554,7 +576,6 @@ export const piAdapter = (seam: PiSeam): ProviderAdapter => {
           child,
           rpc,
           state,
-          running: false,
           stopping: false,
           park: undefined,
         };
@@ -577,18 +598,23 @@ export const piAdapter = (seam: PiSeam): ProviderAdapter => {
       Effect.gen(function* () {
         const held = yield* hosting(sessionId);
         if (input.modelSelection !== undefined) yield* selecting(held, input.modelSelection);
-        const steered = held.running;
-        // A steer folds into the turn pi is running; a prompt opens one, and
-        // the id it runs under is minted here so the user's own message and
-        // everything pi says about it are filed together.
-        const turnId = steered
-          ? (held.state.turnId ??= crypto.randomUUID())
-          : (held.state.turnId = crypto.randomUUID());
-        yield* held.rpc.send({ type: steered ? "steer" : "prompt", message: input.text });
-        // In flight from the answer, not from the `agent_start` that follows
-        // it: an input arriving in between would open a second turn and leave
-        // the first with nobody to end it.
-        held.running = true;
+        // A turn is in flight exactly while the state holds its id, which is
+        // what makes an input a steer: it folds into that turn rather than
+        // opening a second one and leaving the first with nobody to end it.
+        const steered = held.state.turnId !== undefined;
+        // Minted before the send, not after it: pi's own `agent_start` can
+        // land before the answer to the prompt does, and the normalizer files
+        // it under whatever id the state is already holding.
+        const turnId = (held.state.turnId ??= crypto.randomUUID());
+        yield* Effect.tapError(
+          held.rpc.send({ type: steered ? "steer" : "prompt", message: input.text }),
+          () =>
+            // A prompt pi refused opened no turn, and an id left behind for it
+            // would make the next input a steer of a turn that never started.
+            Effect.sync(() => {
+              if (!steered) held.state.turnId = undefined;
+            }),
+        );
         for (const event of userMessage({
           sessionId,
           turnId,
@@ -611,7 +637,7 @@ export const piAdapter = (seam: PiSeam): ProviderAdapter => {
         // abort that was meant to end it.
         resolvePark(held, "cancel");
         // The turn completing on `events` is the whole report.
-        return held.running ? abort(held) : Effect.void;
+        return held.state.turnId === undefined ? Effect.void : abort(held);
       }),
 
     respondToRequest: (

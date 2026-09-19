@@ -68,6 +68,7 @@ const starting = (overrides: Partial<SessionStart> = {}): SessionStart => ({
   sessionId: SESSION,
   providerId: "claude-code",
   config: {},
+  secrets: {},
   token: "a-session-token",
   spec: {
     instanceId: INSTANCE,

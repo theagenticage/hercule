@@ -16,13 +16,21 @@ import { decide } from "./policy";
 /** Where the adapter writes it, and what pi is pointed at with `-e`. */
 export const EXTENSION_FILE = "hydra-extension.ts";
 
+/**
+ * How the gate learns which mode the session runs under. Spelled once and read
+ * from both ends: the adapter puts it in pi's environment, the source below
+ * reads it out, and a name that drifted apart would be a gate that fell back
+ * to asking about everything.
+ */
+export const ACCESS_MODE = "HYDRA_ACCESS_MODE";
+
 export const EXTENSION_SOURCE = `/**
  * Hydra's tool gate. Written by the Hydra runner at session start; edits here
  * are overwritten the next time a session starts.
  */
 const decide = ${decide.toString()};
 
-const MODE = process.env.HYDRA_ACCESS_MODE ?? "approval-required";
+const MODE = process.env.${ACCESS_MODE} ?? "approval-required";
 
 const DENIED = "The user did not approve this in Hydra.";
 
@@ -33,7 +41,7 @@ export default function (pi) {
   // and no tool call ever waits on an answer that was never going to come.
   if (MODE === "full-access") return;
   pi.on("tool_call", async (event, ctx) => {
-    if (!decide(MODE, event.toolName).park) return undefined;
+    if (!decide(MODE, event.toolName)) return undefined;
     try {
       // The message is the call's own name and id rather than prose: Hydra
       // renders the card from the call itself, and this is how it knows which

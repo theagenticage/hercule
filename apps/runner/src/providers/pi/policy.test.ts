@@ -2,7 +2,8 @@
  * Which tools each access mode parks, and which it lets through. The table is
  * the whole criterion: a wrong entry here is a shell command run that the user
  * asked to review first, which is the one failure in this adapter that costs
- * something.
+ * something. What a parked call is then asked as is the adapter's, and is
+ * covered in `approvals.test.ts`.
  *
  * The second half - that a full-access session runs with no approval hook at
  * all - is only partly reachable from a test. What is asserted is what the
@@ -18,9 +19,6 @@ import { cleanupHomes, settle, SPEC, started, taggedIn, until } from "./testing"
 
 afterAll(cleanupHomes);
 
-/** What a park is called, or nothing when the tool runs unasked. */
-type Parked = "command_approval" | "file_change_approval" | "tool_approval" | null;
-
 /**
  * pi 0.85.1's own built-ins, plus one name from no built-in at all: an MCP tool
  * or a tool a later pi adds is the case the catch-all rows are about.
@@ -28,53 +26,52 @@ type Parked = "command_approval" | "file_change_approval" | "tool_approval" | nu
 type Tool =
   "read" | "grep" | "find" | "ls" | "bash" | "powershell" | "write" | "edit" | "mcp__jira__create";
 
+/** True is a call the gate holds and asks about; false is one it lets run. */
 const TABLE: Readonly<
-  Record<"approval-required" | "auto-accept-edits" | "full-access", Readonly<Record<Tool, Parked>>>
+  Record<"approval-required" | "auto-accept-edits" | "full-access", Readonly<Record<Tool, boolean>>>
 > = {
   "approval-required": {
-    read: null,
-    grep: null,
-    find: null,
-    ls: null,
-    bash: "command_approval",
+    read: false,
+    grep: false,
+    find: false,
+    ls: false,
+    bash: true,
     // The same shell on another machine, and the same question to the user.
-    powershell: "command_approval",
-    write: "file_change_approval",
-    edit: "file_change_approval",
-    mcp__jira__create: "tool_approval",
+    powershell: true,
+    write: true,
+    edit: true,
+    mcp__jira__create: true,
   },
   "auto-accept-edits": {
-    read: null,
-    grep: null,
-    find: null,
-    ls: null,
-    bash: "command_approval",
-    powershell: "command_approval",
+    read: false,
+    grep: false,
+    find: false,
+    ls: false,
+    bash: true,
+    powershell: true,
     // The mode's whole point: edits land without being asked about.
-    write: null,
-    edit: null,
-    mcp__jira__create: "tool_approval",
+    write: false,
+    edit: false,
+    mcp__jira__create: true,
   },
   "full-access": {
-    read: null,
-    grep: null,
-    find: null,
-    ls: null,
-    bash: null,
-    powershell: null,
-    write: null,
-    edit: null,
-    mcp__jira__create: null,
+    read: false,
+    grep: false,
+    find: false,
+    ls: false,
+    bash: false,
+    powershell: false,
+    write: false,
+    edit: false,
+    mcp__jira__create: false,
   },
 };
 
 describe("which tools an access mode parks", () => {
   for (const [mode, tools] of Object.entries(TABLE)) {
-    for (const [tool, parked] of Object.entries(tools)) {
-      it(`${parked === null ? `runs ${tool}` : `parks ${tool} as a ${parked}`} under ${mode}`, () => {
-        const verdict = decide(mode as AccessMode, tool);
-
-        expect(verdict).toEqual(parked === null ? { park: false } : { park: true, kind: parked });
+    for (const [tool, parks] of Object.entries(tools)) {
+      it(`${parks ? "parks" : "runs"} ${tool} under ${mode}`, () => {
+        expect(decide(mode as AccessMode, tool)).toBe(parks);
       });
     }
   }

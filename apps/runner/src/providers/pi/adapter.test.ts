@@ -230,6 +230,38 @@ describe("what an input does to a pi session", () => {
     // Nothing was asked on a model pi refused to switch to.
     expect(sentOf(run.sent, "prompt")).toEqual([]);
   });
+
+  it("prompts again after a prompt pi refused, rather than steering", async () => {
+    const run = await started({ answers: { prompt: () => refusal("busy") } });
+
+    await Effect.runPromise(Effect.flip(run.adapter.sendInput(SESSION, { text: "hello" })));
+    await Effect.runPromise(Effect.flip(run.adapter.sendInput(SESSION, { text: "hello again" })));
+
+    // A refused prompt opened no turn, and steering one that never started is
+    // an input pi refuses too: the session would take nothing from then on.
+    expect(sentOf(run.sent, "prompt")).toHaveLength(2);
+    expect(sentOf(run.sent, "steer")).toEqual([]);
+  });
+});
+
+describe("a pi that dies while its turn is running", () => {
+  it("fails the turn with what it complained about, and says the same on the exit", async () => {
+    const run = await busy();
+    const complaint = "pi: the model provider refused the request";
+
+    run.child.crash(complaint);
+
+    await until("said the session ended", () => taggedIn(run.seen, "session.exited").length === 1);
+    const completed = taggedIn(run.seen, "turn.completed")[0];
+    // Not interrupted: that is the word for a stop the user asked for, and a
+    // turn that reads as stopped on purpose hides that the session crashed.
+    expect(completed?.state).toBe("failed");
+    expect(JSON.stringify(completed?.error)).toContain(complaint);
+    const exited = taggedIn(run.seen, "session.exited")[0];
+    expect(exited?.reason).toBe("process_exit");
+    expect(JSON.stringify(exited?.message)).toContain(complaint);
+    expect(await Effect.runPromise(run.adapter.listSessions)).toEqual([]);
+  });
 });
 
 describe("a session the supervisor stops", () => {

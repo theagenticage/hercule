@@ -11,10 +11,9 @@
  * `ctx.ui.confirm`, answered by the `extension_ui_response` shapes
  * `dist/modes/rpc/rpc-types.d.ts` declares: `{ confirmed }` or `{ cancelled }`.
  *
- * ASSUMPTION, stated because pi's response frame has nowhere to put a reason:
- * the "one at a time" the criterion asks for is reported on the session's own
- * stream as a runtime warning, since the only thing written to pi for the
- * second question is the bare deny value.
+ * pi's response frame has nowhere to put a reason, so a second question asked
+ * while one is open is written back as the bare deny value and the reason is
+ * said on the session's own stream, as a runtime warning.
  */
 import { afterAll, describe, expect, it } from "vitest";
 import { Effect } from "effect";
@@ -44,24 +43,25 @@ const COMMAND = "rm -rf build && echo rebuilt";
 
 type Run = Awaited<ReturnType<typeof busy>>;
 
-/** A turn stopped on a shell command the extension will not run unasked. */
-const parked = async (): Promise<Run> => {
+/** A turn stopped on a call the extension will not run unasked. */
+const parkedOn = async (
+  toolName: string,
+  args: Readonly<Record<string, unknown>>,
+): Promise<Run> => {
   const run = await busy();
-  run.child.push({
-    type: "tool_execution_start",
-    toolCallId: CALL,
-    toolName: "bash",
-    args: { command: COMMAND },
-  });
+  run.child.push({ type: "tool_execution_start", toolCallId: CALL, toolName, args });
   run.child.push({
     type: "extension_ui_request",
     id: UI,
     method: "confirm",
-    title: "Run a shell command?",
-    message: about(CALL, "bash"),
+    title: `Approve ${toolName}?`,
+    message: about(CALL, toolName),
   });
   return run;
 };
+
+/** A turn stopped on a shell command, which is what most of this file drives. */
+const parked = (): Promise<Run> => parkedOn("bash", { command: COMMAND });
 
 const openedIn = async (run: Run): Promise<Extract<ProviderEvent, { _tag: "request.opened" }>> => {
   await until("docked the request", () => taggedIn(run.seen, "request.opened").length === 1);
@@ -82,6 +82,32 @@ const resolvedIn = async (
   await until("ended the park", () => taggedIn(run.seen, "request.resolved").length === 1);
   return taggedIn(run.seen, "request.resolved")[0]!;
 };
+
+/**
+ * What a held call is asked as, by tool. The gate decides whether to hold a
+ * call; what the card over it is called follows from what the call does, so a
+ * shell is a command, a file written or edited is a change, and anything the
+ * adapter does not recognise is the tool by its name.
+ */
+describe("what a held call is asked as", () => {
+  const CARDS: ReadonlyArray<readonly [string, Readonly<Record<string, unknown>>, string]> = [
+    ["bash", { command: COMMAND }, "command_approval"],
+    // The same shell on another machine is the same question to the user.
+    ["powershell", { command: COMMAND }, "command_approval"],
+    ["write", { path: "src/new.ts" }, "file_change_approval"],
+    ["edit", { path: "src/new.ts" }, "file_change_approval"],
+    // An MCP tool, or one a later pi adds: named, never guessed at.
+    ["mcp__jira__create", { summary: "ship it" }, "tool_approval"],
+  ];
+
+  for (const [toolName, args, kind] of CARDS) {
+    it(`asks about ${toolName} as a ${kind}`, async () => {
+      const run = await parkedOn(toolName, args);
+
+      expect((await openedIn(run)).request.kind).toBe(kind);
+    });
+  }
+});
 
 describe("what a parked shell command asks the user", () => {
   it("docks a command approval on the item the command started", async () => {

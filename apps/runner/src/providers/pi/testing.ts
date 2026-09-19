@@ -11,11 +11,10 @@
  * tests and the adapter's drive the same child. What is not pi's - scratch
  * homes, a pushable line stream, waiting on an adapter - is `../testing`.
  *
- * Assumed surface, because the module is the implementer's to name: `PiSeam`
- * has a `spawn` for the line-framed RPC child and a `run` for a one-shot
- * command, and the child it hands back has `write`, `stdout`, `stderr`,
- * `exited`, `kill` and `end` - `end` being the close of stdin that pi reads as
- * its cue to leave. Rename any of them and this fixture follows.
+ * The seam it stands in for is `PiSeam`: a `spawn` for the line-framed RPC
+ * child and a `run` for a one-shot command. The child answers `write`,
+ * `stdout`, `stderr`, `exited`, `kill` and `end` - `end` closes stdin, which
+ * pi reads as its cue to leave.
  */
 import { join } from "node:path";
 import { Effect, Stream } from "effect";
@@ -164,8 +163,11 @@ export interface Spawn {
   readonly push: (event: unknown) => void;
   readonly stdinClosed: () => boolean;
   readonly kills: () => number;
-  /** pi stopping by itself, which is not the adapter ending it. */
-  readonly crash: () => void;
+  /**
+   * pi stopping by itself, which is not the adapter ending it, saying on its
+   * stderr what it stopped over.
+   */
+  readonly crash: (...complaints: ReadonlyArray<string>) => void;
 }
 
 /** One command the adapter wrote, in the order it wrote them. */
@@ -321,7 +323,8 @@ export const scripted = (
       push: (event) => out.push(JSON.stringify(event)),
       stdinClosed: () => closed,
       kills: () => kills,
-      crash: () => {
+      crash: (...complaints) => {
+        for (const line of complaints) err.push(line);
         out.end();
         err.end();
         exited(1);

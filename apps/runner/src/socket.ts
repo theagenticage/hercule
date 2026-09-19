@@ -340,7 +340,7 @@ export const connect = (
           adapter === undefined
             ? probeFailed(null, noAdapterFor(request.providerId))
             : yield* adapter.probe(
-                contextFor(adapter, request.instanceId, request.secrets ?? {}),
+                contextFor(adapter, request.instanceId, request.secrets),
                 request.config,
               ),
         );
