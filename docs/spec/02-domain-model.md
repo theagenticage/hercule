@@ -1,6 +1,6 @@
 # Domain model
 
-This document pins the shape of every Hydra domain entity: the fields the design tickets fixed, the relationships between entities and which of them are optional, the one fixed status axis each entity carries, the identity rules (Hydra ids versus provider-native and external ids), and the platform events each entity emits. Where another document owns a record's field list (Run, Step record, Notification, SessionSpec, Trigger, event envelope, memory documents, permission profiles), this document keeps purpose, relationships, status axis and identity and links the owner for the fields. Behaviour belongs to the owning subsystem document and is only pointed at here. The vocabulary is the glossary in [CONTEXT.md](../../CONTEXT.md); this document does not restate definitions.
+This document pins the shape of every Hercule domain entity: the fields the design tickets fixed, the relationships between entities and which of them are optional, the one fixed status axis each entity carries, the identity rules (Hercule ids versus provider-native and external ids), and the platform events each entity emits. Where another document owns a record's field list (Run, Step record, Notification, SessionSpec, Trigger, event envelope, memory documents, permission profiles), this document keeps purpose, relationships, status axis and identity and links the owner for the fields. Behaviour belongs to the owning subsystem document and is only pointed at here. The vocabulary is the glossary in [CONTEXT.md](../../CONTEXT.md); this document does not restate definitions.
 
 ## Model-wide rules
 
@@ -16,7 +16,7 @@ These rules hold for every entity below.
 8. **Single user, widen later.** No entity carries an owner or tenant column in v1. The `actor` field and the user record are the places a later multi-user model widens; nothing else may assume "the user".
 9. **Sessions copy, never reference.** An Agent supplies values at spawn; the Session row holds its own copy of everything that shaped it (its `spec`, its `permissionProfileId`), and no property of a running or past session is ever read through its `agentId`. `agentId` is lineage. A session with no agent at all is a Thread (below). Reassigning an agent's profile or changing its defaults affects sessions spawned afterwards; editing a profile's grants applies live, because the session points at the profile row ([ADR 0030](../adr/0030-sessions-copy-their-configuration-and-a-thread-has-no-agent.md); resolved 2026-09-01, [Domain model residue](https://github.com/rogierpennink/hydra/issues/46)).
 
-**Ids** (resolved 2026-09-01, [Domain model residue](https://github.com/rogierpennink/hydra/issues/46)): every Hydra-owned entity is identified by a **UUIDv7** minted by the controller, stored as a 16-byte primary key and rendered as the canonical lowercase string on the wire, in typed references (`run:<uuid>`, `session:<uuid>`), in actor stamps and in branch names. The one exception is the Event, whose `id` is the integer log position ([08-events-and-connections.md](./08-events-and-connections.md)); per-session stream rows are keyed by (session, position). Where a human reads or types an id, the short form is the **last eight hex characters** (the random tail; the head is a timestamp shared by every id minted in the same minute), and the CLI accepts a full id or an unambiguous tail of eight or more characters (`conflict` if ambiguous). Rationale and storage rules: [04-state-store.md](./04-state-store.md).
+**Ids** (resolved 2026-09-01, [Domain model residue](https://github.com/rogierpennink/hydra/issues/46)): every Hercule-owned entity is identified by a **UUIDv7** minted by the controller, stored as a 16-byte primary key and rendered as the canonical lowercase string on the wire, in typed references (`run:<uuid>`, `session:<uuid>`), in actor stamps and in branch names. The one exception is the Event, whose `id` is the integer log position ([08-events-and-connections.md](./08-events-and-connections.md)); per-session stream rows are keyed by (session, position). Where a human reads or types an id, the short form is the **last eight hex characters** (the random tail; the head is a timestamp shared by every id minted in the same minute), and the CLI accepts a full id or an unambiguous tail of eight or more characters (`conflict` if ambiguous). Rationale and storage rules: [04-state-store.md](./04-state-store.md).
 
 ## Entity-relationship overview
 
@@ -89,13 +89,13 @@ Fields (pinned):
 
 | Field | Type | Notes |
 |---|---|---|
-| `id` | Hydra id | |
+| `id` | Hercule id | |
 | `title` | string | |
 | `description` | markdown | Enrichment edits this; no comment thread in v1 |
 | `status` | enum | Fixed axis, below |
 | `priority` | enum | `urgent` / `high` / `normal` / `low`; optional, default `normal`; user and agents write the same field through the same op |
 | `labels` | string[] | Bare strings, flat namespace, implicit creation |
-| `projectId` | Hydra id, optional | At most one project |
+| `projectId` | Hercule id, optional | At most one project |
 | `provenance` | Provenance entry[] | Append-only |
 | `createdAt`, `updatedAt`, `statusChangedAt` | timestamps | `statusChangedAt` moves only when `status` changes |
 | `deletedAt` | timestamp, optional | soft delete: set by `task.delete`, the row stays (Deletion rules, below) |
@@ -106,7 +106,7 @@ Status axis: `open` -> `in-progress` -> `done`, plus `cancelled`. Any-to-any tra
 
 Relationships: `projectId` optional. Run and Session links to a task live on the Run and Session rows; the task's run and session lists are derived by query. Proposal (a Task labelled `proposed` plus its pending decision Notification) and Topic (a label) are vocabulary over this row, not fields.
 
-Identity: Hydra id only. External refs live in provenance and are never unique across tasks.
+Identity: Hercule id only. External refs live in provenance and are never unique across tasks.
 
 Platform events: `task.created` carries a full snapshot; `task.updated` carries `{taskId, changes}` where `changes` holds `{old, new}` per changed scalar field and `{added, removed}` per changed array field; one update op emits exactly one event; provenance-only appends also emit `task.updated`. `task.deleted` carries `{taskId, snapshot}`, the final row, because nothing can read it afterwards. The actor is the envelope's `actor` field, not repeated in the payload ([08-events-and-connections.md](./08-events-and-connections.md), [09-tasks.md](./09-tasks.md)).
 
@@ -114,7 +114,7 @@ Platform events: `task.created` carries a full snapshot; `task.updated` carries 
 
 Purpose: one append-only record of an event, run or external thing that created or touched a task.
 
-Shape (pinned): `{ ref?: ExternalRef, eventId?: Hydra id, runId?: Hydra id, at: timestamp, actor: Actor }`. Entries are never edited or removed.
+Shape (pinned): `{ ref?: ExternalRef, eventId?: Hercule id, runId?: Hercule id, at: timestamp, actor: Actor }`. Entries are never edited or removed.
 
 External Ref canonical form: a fully-qualified id `<type>:<kind>:<identity>`, for example `github:issue:owner/repo#42`, `gmail:thread:<id>`, `sentry:issue:123`. The plugin that defines the type owns canonicalization. The Connection an event arrived through is excluded from the identity. No uniqueness constraint across tasks: the `task.query` guard convention treats "any open task with this ref" as the duplicate signal ([09-tasks.md](./09-tasks.md), [10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md)). Refs typically originate from the event envelope's `refs` field and are copied here by triage.
 
@@ -136,7 +136,7 @@ Re-run: whole-run only, two modes (replay the frozen plan, or re-stamp from the 
 
 Relationships: `workflowId` optional; `taskId` optional; `workspaceId` and `runnerId` optional (set when the first agent step starts); agent steps link to Sessions from their step record; holds zero or more Subscriptions.
 
-Identity: Hydra id.
+Identity: Hercule id.
 
 Platform events: `run.completed`, `run.failed`, `run.cancelled`; payloads owned by [08-events-and-connections.md](./08-events-and-connections.md). Cancellation is not a failure and has its own kind. These are the only run kinds in v1; kinds grow additively.
 
@@ -160,7 +160,7 @@ Fields (pinned across [#6](https://github.com/rogierpennink/hydra/issues/6), [#7
 
 | Field | Notes |
 |---|---|
-| `id` | Hydra id; distinct from any provider-native id |
+| `id` | Hercule id; distinct from any provider-native id |
 | `agentId` | optional; the Agent whose values were copied at spawn - lineage only, never read through afterwards (rule 9); `null` = a Thread |
 | `permissionProfileId` | required; copied at spawn from the Agent, or from the `thread.profileId` setting for a Thread; the profile the session token carries |
 | `instanceId` | provider instance; the routing key for the adapter (instance, never provider id) |
@@ -189,7 +189,7 @@ Status axis (consolidated from pinned lifecycle facts, owned by [06-providers.md
 
 Relationships: requires `instanceId`, `runnerId`, `permissionProfileId`. Everything else optional, `agentId` included. Holds zero or more Subscriptions (registered by the session itself through the API, or migrated from a rotated predecessor in the same Conversation). Owns its Turns and Queued Inputs. ~~Exactly one Session Token while alive.~~ *(Amended 2026-09-12, [#162](https://github.com/rogierpennink/hydra/issues/162).)* Exactly one Session Token while its process runs; none while exited.
 
-Identity: the Hydra session id and the provider-native id (Claude Code session id, Codex thread id, pi session) are separate concepts joined only by the Session Binding. All Hydra references (API, CLI, actor stamps, step records, subscriptions) use the Hydra id.
+Identity: the Hercule session id and the provider-native id (Claude Code session id, Codex thread id, pi session) are separate concepts joined only by the Session Binding. All Hercule references (API, CLI, actor stamps, step records, subscriptions) use the Hercule id.
 
 Events: none on the domain event log in v1 (no `session.*` platform events). The session's normalized event stream (`session.*`, `turn.*`, `item.*`, `content.delta`, `request.*`, `session.usage.updated`, `runtime.*`) is a separate per-session append-only stream, not the domain event log ([04-state-store.md](./04-state-store.md), [06-providers.md](./06-providers.md)).
 
@@ -211,7 +211,7 @@ Fields: `sessionId`, `content` (text; for subscription deliveries also the struc
 
 #### Session Binding
 
-Purpose: the explicit join between a Hydra session and the provider-native object that backs it.
+Purpose: the explicit join between a Hercule session and the provider-native object that backs it.
 
 Shape: `SessionBinding { sessionId, nativeSessionId, instanceId }`, owned by [06-providers.md](./06-providers.md). Returned by `startSession` and by `listSessions` on runner restart for reconciliation; the runner is known from the Session row, not the binding. Provider-native transcripts stay on the runner; the controller's normalized stream is the observable record.
 
@@ -243,7 +243,7 @@ Fields (pinned; defaults resolved 2026-09-01, [Domain model residue](https://git
 | `accessMode` | optional, default `full-access` (agents work in the background; `approval-required` is unworkable there) |
 | `model` | optional `ModelSelection { model, options }`; effort, thinking and the other well-known option ids ride inside `options` ([06-providers.md](./06-providers.md)); absent = the instance's default model from its Capability Snapshot |
 | ~~`mcpServers`~~ | ~~optional standing per-session MCP passthrough; nothing populates it in v1~~ deferred to [#222](https://github.com/rogierpennink/hydra/issues/222); the Agent as shipped has no such field *(Amended 2026-09-19, [#76](https://github.com/rogierpennink/hydra/issues/76).)* |
-| `disallowedTools` | optional list of harness tool families to remove, in a small Hydra vocabulary ~~(`edit`, `write`, `shell`, `web`, ...)~~ each adapter maps to its harness: Claude `disallowedTools`, pi `excludeTools`; Codex declares it `unsupported` in its Capability Snapshot and the UI says so ([06-providers.md](./06-providers.md) section 3). *(Amended 2026-09-19, [#76](https://github.com/rogierpennink/hydra/issues/76).)* The vocabulary is the closed set `edit`, `write`, `shell`, `web-search`, `web-fetch`, and a value outside it is refused as `validation`. Claude maps all five; pi maps `edit`, `write` and `shell` onto `edit`, `write` and `bash` and has no web tool, so a web family is honoured by absence; Codex declares it unsupported. |
+| `disallowedTools` | optional list of harness tool families to remove, in a small Hercule vocabulary ~~(`edit`, `write`, `shell`, `web`, ...)~~ each adapter maps to its harness: Claude `disallowedTools`, pi `excludeTools`; Codex declares it `unsupported` in its Capability Snapshot and the UI says so ([06-providers.md](./06-providers.md) section 3). *(Amended 2026-09-19, [#76](https://github.com/rogierpennink/hydra/issues/76).)* The vocabulary is the closed set `edit`, `write`, `shell`, `web-search`, `web-fetch`, and a value outside it is refused as `validation`. Claude maps all five; pi maps `edit`, `write` and `shell` onto `edit`, `write` and `bash` and has no web tool, so a web family is honoured by absence; Codex declares it unsupported. |
 | `createdAt`, `updatedAt` | |
 
 Every value is copied into the Session at spawn (rule 9). Precedence for each default: an explicit per-step or per-spawn value, then the Agent field, then the instance default; the agent step's `accessMode` and `model` are therefore optional overrides ([07-workflows.md](./07-workflows.md) section 4.2). Placement requirements live on the Workflow, per run, never on the Agent or the step ([07-workflows.md](./07-workflows.md) section 4.4). There is no custom-tools field in v1: nothing produces a custom tool to attach (Post-v1).
@@ -256,7 +256,7 @@ Relationships: `permissionProfileId` required; `instanceId` required; sessions r
 
 Purpose: an Agent with channel bindings, conversations and memory, oriented to delegating work ([ADR 0014](../adr/0014-assistants-remember-through-distilled-memory-not-merged-sessions.md)).
 
-Fields (pinned, [12-assistants.md](./12-assistants.md) section 1): everything an Agent has, plus `heartbeat { enabled (default true), schedule (cron, default `0 7-23 * * *`), timezone?, prompt, target: web | dm:<connectionId> | most-recent }`, `rotation { contextFraction (0.7), maxContextTokens (200000), dailyAt (04:00), timezone? }`, `reply (turn-end | segments)`; the Agent's `accessMode` keeps its `full-access` default and its `disallowedTools` defaults to `["edit"]` ([12-assistants.md](./12-assistants.md) section 7). Timezones fall back to the user's timezone setting. Default profile `assistant`, loosenable per assistant. One default assistant is created at setup ([15-packaging-and-operations.md](./15-packaging-and-operations.md)). Assistant sessions are workspace-less and run with the `hydra` CLI. The heartbeat is the assistant's standing Scheduled Wake (below).
+Fields (pinned, [12-assistants.md](./12-assistants.md) section 1): everything an Agent has, plus `heartbeat { enabled (default true), schedule (cron, default `0 7-23 * * *`), timezone?, prompt, target: web | dm:<connectionId> | most-recent }`, `rotation { contextFraction (0.7), maxContextTokens (200000), dailyAt (04:00), timezone? }`, `reply (turn-end | segments)`; the Agent's `accessMode` keeps its `full-access` default and its `disallowedTools` defaults to `["edit"]` ([12-assistants.md](./12-assistants.md) section 7). Timezones fall back to the user's timezone setting. Default profile `assistant`, loosenable per assistant. One default assistant is created at setup ([15-packaging-and-operations.md](./15-packaging-and-operations.md)). Assistant sessions are workspace-less and run with the `hercule` CLI. The heartbeat is the assistant's standing Scheduled Wake (below).
 
 Status axis: none. There is no paused state in v1; removing all bindings is how an assistant is paused.
 
@@ -304,7 +304,7 @@ Status axis (Reminder): `pending` -> `fired` | `cancelled`.
 
 Purpose: who performed an operation, stamped on every mutation in the event log.
 
-Values: `user`, `session:<sessionId>`, `run:<runId>` (a built-in action step inside a run) or `plugin:<pluginId>` (a plugin calling in-process). Session actors are bounded by their session's profile; the other three are ungated ([11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md) section 3.1). A single user record (username, password hash) exists in v1 for login; there is no user entity in the API model beyond that record, and the actor value `user` is the only user identity. Multi-user widens this field; it is never restructured ([ADR 0013](../adr/0013-agents-operate-hydra-through-the-public-api.md)).
+Values: `user`, `session:<sessionId>`, `run:<runId>` (a built-in action step inside a run) or `plugin:<pluginId>` (a plugin calling in-process). Session actors are bounded by their session's profile; the other three are ungated ([11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md) section 3.1). A single user record (username, password hash) exists in v1 for login; there is no user entity in the API model beyond that record, and the actor value `user` is the only user identity. Multi-user widens this field; it is never restructured ([ADR 0013](../adr/0013-agents-operate-hercule-through-the-public-api.md)).
 
 ### Permission Profile, Grant, Permission Request
 
@@ -318,13 +318,13 @@ Values: `user`, `session:<sessionId>`, `run:<runId>` (a built-in action step ins
 
 Purpose: the per-session credential whose subject is the Session.
 
-Fields: `sessionId` (subject), token (opaque random, only its hash stored), `createdAt`, `revokedAt` (set when the session ends). Carries the session's profile by resolution (token -> session -> profile, one indexed lookup; the profile id was copied onto the Session at spawn, rule 9, so a Thread resolves the same way; revoked on session end). Injected by the runner as `HYDRA_TOKEN` with `HYDRA_API_URL` and `HYDRA_SESSION=1`.
+Fields: `sessionId` (subject), token (opaque random, only its hash stored), `createdAt`, `revokedAt` (set when the session ends). Carries the session's profile by resolution (token -> session -> profile, one indexed lookup; the profile id was copied onto the Session at spawn, rule 9, so a Thread resolves the same way; revoked on session end). Injected by the runner as `HERCULE_TOKEN` with `HERCULE_API_URL` and `HERCULE_SESSION=1`.
 
 ### API Key
 
 Purpose: the user's long-lived credential for the ops CLI and scripts.
 
-Fields: `id`, `name`, token hash (opaque random; never a JWT), `createdAt`, `lastUsedAt?`, `revokedAt?`. Always resolves to actor `user`. Minted in the web app or via `hydra login`. The web app authenticates with an opaque bearer token from password login plus a short-lived WebSocket ticket; there are no cookies ([13-security.md](./13-security.md), [14-web-app.md](./14-web-app.md), [ADR 0017](../adr/0017-the-web-app-is-a-static-pure-client-of-the-public-api.md)).
+Fields: `id`, `name`, token hash (opaque random; never a JWT), `createdAt`, `lastUsedAt?`, `revokedAt?`. Always resolves to actor `user`. Minted in the web app or via `hercule login`. The web app authenticates with an opaque bearer token from password login plus a short-lived WebSocket ticket; there are no cookies ([13-security.md](./13-security.md), [14-web-app.md](./14-web-app.md), [ADR 0017](../adr/0017-the-web-app-is-a-static-pure-client-of-the-public-api.md)).
 
 ## Organization
 
@@ -332,7 +332,7 @@ Fields: `id`, `name`, token hash (opaque random; never a JWT), `createdAt`, `las
 
 Purpose: a grouping of related work and its materials; may span several resources.
 
-Fields (resolved 2026-09-01, [Domain model residue](https://github.com/rogierpennink/hydra/issues/46)): `id`, `name`, `description?` (markdown), `createdAt`, `updatedAt`, `deletedAt?`. Tasks reference a project through `projectId`; a project spans zero or more Resources through a join table, and a Resource may belong to any number of Projects. There is no default Connection: Resources carry the Connection that reaches them and Workspaces designate the git-identity one. A Project is a way to group information inside Hydra; it carries no behaviour. Soft-deleted like a Task (Deletion rules, below); its tasks keep their `projectId`.
+Fields (resolved 2026-09-01, [Domain model residue](https://github.com/rogierpennink/hydra/issues/46)): `id`, `name`, `description?` (markdown), `createdAt`, `updatedAt`, `deletedAt?`. Tasks reference a project through `projectId`; a project spans zero or more Resources through a join table, and a Resource may belong to any number of Projects. There is no default Connection: Resources carry the Connection that reaches them and Workspaces designate the git-identity one. A Project is a way to group information inside Hercule; it carries no behaviour. Soft-deleted like a Task (Deletion rules, below); its tasks keep their `projectId`.
 
 Status axis: none.
 
@@ -346,7 +346,7 @@ In v1 only repo resources are checkout-able; folder resources produce no workspa
 
 Relationships: `connectionId` optional; zero or more Projects; per (resource, runner) at most one primary Workspace and one runner-owned bare cache; GitHub plugin watch lists are seeded from repo Resources.
 
-Identity: Hydra id. A repo Resource is additionally **unique on `(kind, canonical remote)`** (resolved 2026-09-01, [Domain model residue](https://github.com/rogierpennink/hydra/issues/46)), canonical = `host/owner/repo` with scheme, `.git` suffix, ssh-versus-https form and host case stripped; a second Resource on the same remote is `conflict`. The remote is a constraint, not the key: changing it is a `resource.update`.
+Identity: Hercule id. A repo Resource is additionally **unique on `(kind, canonical remote)`** (resolved 2026-09-01, [Domain model residue](https://github.com/rogierpennink/hydra/issues/46)), canonical = `host/owner/repo` with scheme, `.git` suffix, ssh-versus-https form and host case stripped; a second Resource on the same remote is `conflict`. The remote is a constraint, not the key: changing it is a `resource.update`.
 
 Status axis: none.
 
@@ -356,13 +356,13 @@ Purpose: a provisioned working area on one runner in which sessions do their wor
 
 Fields (pinned): `id`, `runnerId` (pinned to the runner it was provisioned on; never migrates), `kind: primary | ephemeral`, `checkouts[]` (0..N; a primary has exactly one; zero makes a scratch workspace; several make a multi-repo workspace with one checkout subdirectory per resource), `designatedConnectionId` (the GitHub Connection whose token becomes the session's `GH_TOKEN`; workspace-less sessions use a user-designated default Connection or none), `status`, timestamps (provisioned, last used, disposed). The on-disk path is runner-owned and is not stored on the controller. The runner-provisioned scratch directory a Codex workspace-less session needs is not a Workspace ([03-controller-and-runners.md](./03-controller-and-runners.md), [06-providers.md](./06-providers.md)).
 
-Invariants: at most one primary workspace per (resource, runner). Primaries are standalone clones with origin at the real remote; ephemerals are git worktrees off the per-resource bare cache, on a branch named by the run (default `hydra/run-<runId>`; [07-workflows.md](./07-workflows.md) section 4.4). A run has exactly one workspace, shared by all its agent steps. Concurrent sessions in a workspace are allowed and surfaced, not locked.
+Invariants: at most one primary workspace per (resource, runner). Primaries are standalone clones with origin at the real remote; ephemerals are git worktrees off the per-resource bare cache, on a branch named by the run (default `hercule/run-<runId>`; [07-workflows.md](./07-workflows.md) section 4.4). A run has exactly one workspace, shared by all its agent steps. Concurrent sessions in a workspace are allowed and surfaced, not locked.
 
-*(Amended 2026-09-16, [#72](https://github.com/rogierpennink/hydra/issues/72).)* Two changes. **Adopt-in-place is not built.** A primary is always a Hydra-managed clone under the runner's storage directory; a checkout the user already has on that machine is never read, written or taken over, and `workspace.provision` takes no path. **A failed primary is superseded, not resurrected.** "At most one primary per (resource, runner)" counts only `provisioning` and `ready`: one that could not be made holds nothing, so the next provision marks it `deleted` - the record of the attempt and the machine's words for it are kept - and opens a fresh row in its place. Primaries are still never torn down by Hydra on request.
+*(Amended 2026-09-16, [#72](https://github.com/rogierpennink/hydra/issues/72).)* Two changes. **Adopt-in-place is not built.** A primary is always a Hercule-managed clone under the runner's storage directory; a checkout the user already has on that machine is never read, written or taken over, and `workspace.provision` takes no path. **A failed primary is superseded, not resurrected.** "At most one primary per (resource, runner)" counts only `provisioning` and `ready`: one that could not be made holds nothing, so the next provision marks it `deleted` - the record of the attempt and the machine's words for it are kept - and opens a fresh row in its place. Primaries are still never torn down by Hercule on request.
 
 *(Amended 2026-09-16, [#72](https://github.com/rogierpennink/hydra/issues/72).)* The user-facing word for a primary is **main workspace**. `primary` is the kind in code, on the wire and in the database; "main workspace" is what every label, menu row and help text a person reads calls it. "Current checkout", "shared checkout" and "main checkout" are retired.
 
-Status axis (owned by [03-controller-and-runners.md](./03-controller-and-runners.md) section 6.3; amended 2026-09-01, [Domain model residue](https://github.com/rogierpennink/hydra/issues/46): `unusable` renamed `failed`, `kept-on-failure` dropped): `provisioning` -> `ready` | `failed` (the setup command failed; the files may be on disk, it was never handed to a session); `ready` | `failed` -> `deleted` (torn down by teardown or the reaper); any non-terminal -> `lost` (the runner was retired). The status reports the material state on the runner and nothing else: whether a failed run's workspace is kept for inspection is teardown policy the controller reads off the run (03 section 6.7), never a workspace state. Primaries are never torn down by Hydra and only ever become `lost`.
+Status axis (owned by [03-controller-and-runners.md](./03-controller-and-runners.md) section 6.3; amended 2026-09-01, [Domain model residue](https://github.com/rogierpennink/hydra/issues/46): `unusable` renamed `failed`, `kept-on-failure` dropped): `provisioning` -> `ready` | `failed` (the setup command failed; the files may be on disk, it was never handed to a session); `ready` | `failed` -> `deleted` (torn down by teardown or the reaper); any non-terminal -> `lost` (the runner was retired). The status reports the material state on the runner and nothing else: whether a failed run's workspace is kept for inspection is teardown policy the controller reads off the run (03 section 6.7), never a workspace state. Primaries are never torn down by Hercule and only ever become `lost`.
 
 Relationships: `runnerId` required; Checkouts reference it; Sessions reference it optionally.
 
@@ -384,7 +384,7 @@ Fields (pinned by [#7](https://github.com/rogierpennink/hydra/issues/7), [#8](ht
 
 | Field | Notes |
 |---|---|
-| `id` | Hydra id; a re-enlisted machine is a new runner with a new id |
+| `id` | Hercule id; a re-enlisted machine is a new runner with a new id |
 | `name` | auto-assigned (nice-to-have: mythological names), user-editable |
 | credential hash | the durable per-runner credential minted at join is an opaque random token stored hashed like every other token ([13-security.md](./13-security.md)); revoked on retire. It is not a row in the secrets table; the `runner` owner kind there is reserved for runner-scoped secrets |
 | `state` | fixed axis, below |
@@ -404,7 +404,7 @@ Status axis (pinned): `online` / `offline` (announced shutdown: sessions cleanly
 
 Relationships: owns Workspaces and hosts Sessions (both pinned to it); Capability Snapshots are keyed by (provider instance, runner).
 
-Identity: Hydra id plus its credential. Retired runners keep their records; re-enlisting the same machine creates a new Runner with new identity, credential and labels and adopts no workspaces.
+Identity: Hercule id plus its credential. Retired runners keep their records; re-enlisting the same machine creates a new Runner with new identity, credential and labels and adopts no workspaces.
 
 ### Controller identity
 
@@ -436,7 +436,7 @@ Status axis (mirrored from 08, the minimum set the sources imply): `connected` |
 
 Relationships: defined by exactly one Plugin type; one ingest loop per connection; every Event is stamped with its `connectionId`; Triggers select connections explicitly (named or a deliberate "any", never a silent all); outbound actions name the connection they act as; Resources and Channel Bindings reference it; Workspaces designate it for git identity.
 
-Identity: Hydra id. Two plugins wanting the same external service define two types and authenticate twice (accepted cost).
+Identity: Hercule id. Two plugins wanting the same external service define two types and authenticate twice (accepted cost).
 
 ## Automation
 
@@ -496,7 +496,7 @@ Status axis: none on the definition; runtime status lives on the Step record.
 
 ### Notification
 
-Purpose: one persisted message from Hydra to its user ([ADR 0012](../adr/0012-notifications-are-core-routed-sinks-are-dumb.md)).
+Purpose: one persisted message from Hercule to its user ([ADR 0012](../adr/0012-notifications-are-core-routed-sinks-are-dumb.md)).
 
 Fields: owned by [10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md) (section 7.1): `id`, `kind`, `title`, markdown `body`, `producer` (core / run step / plugin / session), `subject` entity refs, `eventId`, `actions` (empty for informational, non-empty makes it a decision), `status`, `resolution`, `createdAt`. No read state. Kinds evidenced by the tickets: run failed, trigger paused (breaker), trigger filter error, runner unreachable, permission request, the `triage.*` kinds (proposal, offer, FYI, unsure), update available, plugin error, plugin-raised (e.g. an expiring OAuth token).
 
@@ -556,15 +556,15 @@ Resolved 2026-09-01, [Domain model residue](https://github.com/rogierpennink/hyd
 
 ## Identity rules at a glance
 
-- **Hydra ids are the only ids used across the system.** API, CLI, actor stamps, step records, subscriptions and provenance all reference Hydra ids: UUIDv7, full on the wire, last-eight-characters tail where a human reads or types one. The event `id` is the integer log position ([08-events-and-connections.md](./08-events-and-connections.md)).
-- **A repo Resource is unique on its canonical remote** (`host/owner/repo`); the remote is a constraint, the Hydra id is the key.
+- **Hercule ids are the only ids used across the system.** API, CLI, actor stamps, step records, subscriptions and provenance all reference Hercule ids: UUIDv7, full on the wire, last-eight-characters tail where a human reads or types one. The event `id` is the integer log position ([08-events-and-connections.md](./08-events-and-connections.md)).
+- **A repo Resource is unique on its canonical remote** (`host/owner/repo`); the remote is a constraint, the Hercule id is the key.
 - **Sessions copy, never reference** (rule 9): a session's profile and spec are its own; `agentId` is lineage, and `null` means a Thread.
 - **Provider-native ids** (Claude Code session, Codex thread, pi session; native turn ids where they exist) appear only inside the Session Binding and as `providerRefs` on normalized session events.
 - **External Refs** are `<type>:<kind>:<identity>`, canonicalized by the plugin that owns the type, with the Connection excluded from the identity and no uniqueness across tasks.
 - **`instanceId`, not provider id,** routes sessions; a Capability Snapshot is keyed by (instance, runner).
 - **Runner identity** is per enrollment: a re-enlisted machine is a new Runner; retired runners keep their records.
 - **Controller identity** is logical (id plus key material), never an address.
-- **Connection types and contributions** are identified by their qualified id `<pluginId>/<word>`, minted by the host ([ADR 0034](../adr/0034-a-catalog-contribution-is-identified-by-its-qualified-id.md)); the Connection itself is a Hydra id.
+- **Connection types and contributions** are identified by their qualified id `<pluginId>/<word>`, minted by the host ([ADR 0034](../adr/0034-a-catalog-contribution-is-identified-by-its-qualified-id.md)); the Connection itself is a Hercule id.
 - **Workspace ids** are controller-side; the path behind a workspace id is a runner-owned fact.
 - **`dedupKey`** is a plugin-supplied idempotency key per Connection, not an identity.
 
@@ -641,7 +641,7 @@ ADRs:
 - [ADR 0011 Triage is a workflow pattern inside core-enforced bounds](../adr/0011-triage-is-a-workflow-pattern-inside-core-enforced-bounds.md)
 - [ADR 0012 Notifications are core-routed; sinks are dumb](../adr/0012-notifications-are-core-routed-sinks-are-dumb.md)
 - [ADR 0027 A decision resolves when its question is answered, wherever](../adr/0027-a-decision-resolves-when-its-question-is-answered-wherever.md)
-- [ADR 0013 Agents operate Hydra through the public API](../adr/0013-agents-operate-hydra-through-the-public-api.md)
+- [ADR 0013 Agents operate Hercule through the public API](../adr/0013-agents-operate-hercule-through-the-public-api.md)
 - [ADR 0014 Assistants remember through distilled memory, not merged sessions](../adr/0014-assistants-remember-through-distilled-memory-not-merged-sessions.md)
 - [ADR 0015 Secrets are encrypted per-value under a keychain-held master key](../adr/0015-secrets-are-encrypted-per-value-under-a-keychain-held-master-key.md)
 - [ADR 0016 Git credentials derive from Connections](../adr/0016-git-credentials-derive-from-connections.md)

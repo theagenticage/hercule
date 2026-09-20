@@ -32,7 +32,7 @@ The controller authors a `SessionSpec` that carries `workspaceId` (or `null` for
 - The runner dials the controller and holds one persistent WebSocket. Runners accept no inbound connections from the controller.
 - The controller MUST be reachable by every runner (LAN, tailnet, or public address; the user's choice). Reachability tricks such as pairing codes, tunnels and short-lived WS tickets belong to client-to-controller connections ([14-web-app](./14-web-app.md)), not to this link.
 - The runner authenticates with its durable per-runner credential (section 3.2). The runner authenticates the controller's logical identity (section 8.1), not its address.
-- The local runner on the controller machine joins over a loopback WebSocket as a supervised child process of the controller (`hydra runner --local`); it is an ordinary fleet member with no special code path ([15-packaging-and-operations](./15-packaging-and-operations.md)).
+- The local runner on the controller machine joins over a loopback WebSocket as a supervised child process of the controller (`hercule runner --local`); it is an ordinary fleet member with no special code path ([15-packaging-and-operations](./15-packaging-and-operations.md)).
 
 ### 2.2 Framing and hello
 
@@ -42,7 +42,7 @@ The controller authors a `SessionSpec` that carries `workspaceId` (or `null` for
 
 *(Amended 2026-09-05, [#61](https://github.com/rogierpennink/hydra/issues/61).)* The catalogue is **two tagged unions in `@hercule/protocol`, in Effect Schema**, and `PROTOCOL_VERSION` is **1**. Runner to controller: `RunnerHello { protocolVersion, capabilities, binaryVersion, nonce, facts }`, `Pong`, `FactsReport { facts }`, `WatermarkReport { watermark }`, `Goodbye`. Controller to runner: `ControllerHello { protocolVersion, capabilities, identityId, publicKey, nonce, signature }`, `Ping`, `Ack { lastAckedSeq }`.
 
-*(Amended 2026-09-07, [#65](https://github.com/rogierpennink/hydra/issues/65).)* Sessions add five frames. Controller to runner: `SessionStart { sessionId, providerId, config, spec }` (the instance's decoded config rides it, the way a probe's does, because the runner holds no Hydra state), `SessionStop { sessionId }`, `SessionInput { sessionId, input }`. Runner to controller: `SessionEvent { seq, event }`, one normalized event from [./06-providers.md](./06-providers.md) section 6, and `SessionsReport { sessions }`, the bindings `listSessions` found. Probes, installs and logins already ride request ids; sessions ride the session id instead, because a session outlives the exchange that started it. A refused hello is a WebSocket close carrying a reason, never a message. The credential rides the socket upgrade as `Authorization: Bearer`, so no hello carries one; the controller's answering signature is over the runner's id and nonce together, so a signature obtained on one connection is worthless on another.
+*(Amended 2026-09-07, [#65](https://github.com/rogierpennink/hydra/issues/65).)* Sessions add five frames. Controller to runner: `SessionStart { sessionId, providerId, config, spec }` (the instance's decoded config rides it, the way a probe's does, because the runner holds no Hercule state), `SessionStop { sessionId }`, `SessionInput { sessionId, input }`. Runner to controller: `SessionEvent { seq, event }`, one normalized event from [./06-providers.md](./06-providers.md) section 6, and `SessionsReport { sessions }`, the bindings `listSessions` found. Probes, installs and logins already ride request ids; sessions ride the session id instead, because a session outlives the exchange that started it. A refused hello is a WebSocket close carrying a reason, never a message. The credential rides the socket upgrade as `Authorization: Bearer`, so no hello carries one; the controller's answering signature is over the runner's id and nonce together, so a signature obtained on one connection is worthless on another.
 
 *(Amended 2026-09-08, [#66](https://github.com/rogierpennink/hydra/issues/66).)* Sessions add two more frames and one field. Controller to runner: `SessionInterrupt { sessionId }`, which ends the running turn; and `SessionInput` gains `requestId`, which is the Queued Input row's own id ([02-domain-model.md](./02-domain-model.md) Queued Input) rather than a second identifier for the same thing. Runner to controller: `SessionInputResult { requestId, ok, delivery?, message? }`, the answer saying whether that input opened a turn or steered one - the only authority on it ([./06-providers.md](./06-providers.md) section 5). It reuses the request/response the controller already has for probes, installs and logins, and follows the `ok`-plus-optional-message shape those two answers use; it carries no turn id, because nothing on the controller reads one and the turn arrives on `turn.started` anyway. `SessionInterrupt` and `SessionStop` stay fire-and-forget: their outcome is observable in the session's own stream (`turn.completed { state: "interrupted" }`, `session.exited { reason: "stopped" }`), so a second answer channel would carry nothing.
 
@@ -76,7 +76,7 @@ The controller authors a `SessionSpec` that carries `workspaceId` (or `null` for
 ### 3.1 The join exchange
 
 1. The user mints a single-use join token in the web app or the ops CLI.
-2. On the new machine the user runs one command: `hydra runner join <controller-url> --token <token>`.
+2. On the new machine the user runs one command: `hercule runner join <controller-url> --token <token>`.
 3. The exchange upgrades the token to a durable per-runner credential. It is fully programmatic: no interactive prompts, so a future auto-installer can drive it end to end. A one-line installer is acceptable in v1.
 4. Join then installs the provider CLIs (section 3.3) and registers the machine's service unit by default (`--no-service` skips it; [15-packaging-and-operations](./15-packaging-and-operations.md)); a `--reserved` flag marks the runner reserved (section 5.5). A provider-CLI install failure never fails the join: the harness simply reports as absent in the runner's facts, with an "Install" retry in the fleet UI.
 5. The controller records the new runner (identity, credential, name, probed facts) and the runner appears in the fleet as `online`.
@@ -89,15 +89,15 @@ The join token is single-use and expires after **1 hour**. Outstanding tokens ar
 
 ### 3.2 What the runner sets up on enrollment
 
-- A random storage directory for all its workspaces, caches and other material state, under the runner area of Hydra Home (`~/.hydra/runner/`, [15-packaging-and-operations](./15-packaging-and-operations.md)). A re-enlisted machine therefore never overwrites a previous life's folders. Legacy folders from earlier lives MAY surface very discreetly in the UI for manual recovery; Hydra never adopts them automatically.
-- Its durable credential: an opaque random token, stored locally on the runner in `~/.hydra/runner/runner.json` (mode 0600, alongside the controller URL, the controller's logical identity and public key, and the storage-directory name; [15-packaging-and-operations](./15-packaging-and-operations.md)) and stored hashed on the controller ([13-security](./13-security.md)). It is not a secrets-table entry.
+- A random storage directory for all its workspaces, caches and other material state, under the runner area of Hercule Home (`~/.hercule/runner/`, [15-packaging-and-operations](./15-packaging-and-operations.md)). A re-enlisted machine therefore never overwrites a previous life's folders. Legacy folders from earlier lives MAY surface very discreetly in the UI for manual recovery; Hercule never adopts them automatically.
+- Its durable credential: an opaque random token, stored locally on the runner in `~/.hercule/runner/runner.json` (mode 0600, alongside the controller URL, the controller's logical identity and public key, and the storage-directory name; [15-packaging-and-operations](./15-packaging-and-operations.md)) and stored hashed on the controller ([13-security](./13-security.md)). It is not a secrets-table entry.
 - A name. The controller MAY auto-assign a fun name (mythological names are the suggested scheme); the user can rename at any time.
 
 ### 3.3 Provider CLIs and login
 
-Hydra installs the provider CLIs (Claude Code, Codex, pi: one command each) on request from the runner's fleet page - not at join, amended 2026-09-07 in section 3.1 - and installs nothing else: everything else on the machine is the owner's responsibility and is probed, not installed (section 6.6).
+Hercule installs the provider CLIs (Claude Code, Codex, pi: one command each) on request from the runner's fleet page - not at join, amended 2026-09-07 in section 3.1 - and installs nothing else: everything else on the machine is the owner's responsibility and is probed, not installed (section 6.6).
 
-Provider credentials are never distributed by Hydra. Hydra drives each provider's own headless login on the runner and relays the login URL or device code to the user's browser wherever they are; the vendor CLI stores its own credential on that runner. Copying a credential file onto a runner is a bootstrap shortcut the user may take; from then on that credential belongs to exactly one runner, because refresh-token rotation with reuse detection makes shared credentials log each other out. The per-provider login flows and their fallbacks are specified in [15-packaging-and-operations §12](./15-packaging-and-operations.md); provider-home isolation (one home per provider instance) in [06-providers](./06-providers.md); findings in `research/provider-portability.md` (branch `research/provider-portability`).
+Provider credentials are never distributed by Hercule. Hercule drives each provider's own headless login on the runner and relays the login URL or device code to the user's browser wherever they are; the vendor CLI stores its own credential on that runner. Copying a credential file onto a runner is a bootstrap shortcut the user may take; from then on that credential belongs to exactly one runner, because refresh-token rotation with reuse detection makes shared credentials log each other out. The per-provider login flows and their fallbacks are specified in [15-packaging-and-operations §12](./15-packaging-and-operations.md); provider-home isolation (one home per provider instance) in [06-providers](./06-providers.md); findings in `research/provider-portability.md` (branch `research/provider-portability`).
 
 **Login is a post-join step driven from the fleet UI** (resolved 2026-08-31, [#43](https://github.com/rogierpennink/hydra/issues/43)): login belongs to a provider *instance*, which is controller state the join command knows nothing about, and the auto-joined local runner exists before any user does. The runner's fleet page lists each provider instance x this runner with its auth state and a "Log in" action; clicking runs the vendor's headless login on that runner and relays the login URL or device code to the browser (Claude: paste-a-code; Codex: device code; pi: API key entry as the v1 path, terminal `/login` as the OAuth fallback - flows in [15-packaging-and-operations §12](./15-packaging-and-operations.md)). The same action serves re-login after expiry. The join exchange stays prompt-free.
 
@@ -181,9 +181,9 @@ The flag exists for personal machines: a laptop joined as a runner should host "
 
 Sessions run as provider subprocesses directly on the runner, as the runner's OS user, cwd'd into their workspace. Linux and macOS runners only; no Windows in v1. No containers ([ADR 0003](../adr/0003-sessions-run-as-bare-processes.md)).
 
-Isolation in v1 is provider-native mechanisms (Codex's sandbox, Claude Code's permission modes) plus Hydra's own access modes and approval flows ([06-providers](./06-providers.md), [13-security](./13-security.md)). Native OS sandboxing is post-v1 and returns as a probed capability behind hello negotiation.
+Isolation in v1 is provider-native mechanisms (Codex's sandbox, Claude Code's permission modes) plus Hercule's own access modes and approval flows ([06-providers](./06-providers.md), [13-security](./13-security.md)). Native OS sandboxing is post-v1 and returns as a probed capability behind hello negotiation.
 
-Adapters run sessions in isolated provider homes, one per provider instance, so the machine owner's global instructions, skills and packages never leak into Hydra sessions ([06-providers](./06-providers.md)).
+Adapters run sessions in isolated provider homes, one per provider instance, so the machine owner's global instructions, skills and packages never leak into Hercule sessions ([06-providers](./06-providers.md)).
 
 Workspace-less sessions (`workspaceId: null`) get `cwd: null` for Claude Code and pi. Codex alone gets a runner-provisioned scratch directory as its cwd, because `thread/start` needs one and instructions travel as `AGENTS.md` in it. That directory is not a Workspace: it has no id, no status and no teardown rule beyond the runner deleting it when the session exits. [06-providers](./06-providers.md) uses the same words.
 
@@ -194,7 +194,7 @@ Workspace-less sessions (`workspaceId: null`) get `cwd: null` for Claude Code an
 The runner's session supervisor:
 
 - Resolves `SessionSpec.workspaceId` to a directory and starts the session through the provider adapter with a `ProviderRunnerContext`.
-- Injects the session's environment: `HYDRA_API_URL` and `HYDRA_TOKEN` (the session token minted by the controller at session start, dead when the session ends), `HYDRA_SESSION=1`, and the git credential configuration derived from the workspace's designated Connection (mechanics in [13-security](./13-security.md)). It makes the `hydra` binary reachable from the session (PATH prepend or absolute path: Open in [15-packaging-and-operations](./15-packaging-and-operations.md)) and materializes the shipped skill files ([11-public-api-and-agent-surface](./11-public-api-and-agent-surface.md)).
+- Injects the session's environment: `HERCULE_API_URL` and `HERCULE_TOKEN` (the session token minted by the controller at session start, dead when the session ends), `HERCULE_SESSION=1`, and the git credential configuration derived from the workspace's designated Connection (mechanics in [13-security](./13-security.md)). It makes the `hercule` binary reachable from the session (PATH prepend or absolute path: Open in [15-packaging-and-operations](./15-packaging-and-operations.md)) and materializes the shipped skill files ([11-public-api-and-agent-surface](./11-public-api-and-agent-surface.md)).
 - Enforces two runner-owned timeouts, an inactivity timeout and an absolute timeout, since the harnesses have none built in. On expiry the runner stops the session and reports it as exited with the timeout as the reason (the reported outcome is this spec's consolidation; the tickets pin only the two timeouts).
 - Enforces the session cap (section 5.3).
 - Watches free disk space against a watermark; below it the runner reports itself as not accepting placements.
@@ -235,28 +235,28 @@ Transitions: `provisioning -> ready | failed`; `ready | failed -> deleted` (tear
 
 Non-repo resources get no workspaces in v1: folder resources need a versioning story for non-git materials (post-v1), and mailboxes never produce workspaces.
 
-*(Amended 2026-09-16, [#72](https://github.com/rogierpennink/hydra/issues/72).)* **A failed primary is superseded by the next provision.** "At most one per (resource, runner)" counts only `provisioning` and `ready`. A primary that could not be made holds nothing, so `workspace.provision` and a spawn asking for the main workspace both stand it down - marking it `deleted`, keeping the row and the machine's words as the record of the attempt - and open a fresh one in its place. This is the one way a primary reaches `deleted`; nothing tears one down on request. **Adopt-in-place is not built**: a primary is always a Hydra-managed clone under the runner's storage directory. **The user-facing word for a primary is "main workspace"**; `primary` stays the kind in code, on the wire and in the database.
+*(Amended 2026-09-16, [#72](https://github.com/rogierpennink/hydra/issues/72).)* **A failed primary is superseded by the next provision.** "At most one per (resource, runner)" counts only `provisioning` and `ready`. A primary that could not be made holds nothing, so `workspace.provision` and a spawn asking for the main workspace both stand it down - marking it `deleted`, keeping the row and the machine's words as the record of the attempt - and open a fresh one in its place. This is the one way a primary reaches `deleted`; nothing tears one down on request. **Adopt-in-place is not built**: a primary is always a Hercule-managed clone under the runner's storage directory. **The user-facing word for a primary is "main workspace"**; `primary` stays the kind in code, on the wire and in the database.
 
 ### 6.4 Checkouts, cache and provisioning
 
-- **Bare cache.** Each runner keeps one bare git cache per resource, under its storage directory. Ephemeral checkouts are git worktrees off that cache, on the branch the run names (default `hydra/run-<runId>`, a template on the workflow's workspace policy; [07-workflows.md](./07-workflows.md) section 4.4). No worktree pooling.
-- **Primary.** Always a standalone clone with `origin` pointing at the real remote, cloned once from the cache with hardlink object sharing and then pointed at the remote. ~~*Adopt in place*: an existing local checkout the user points at becomes the primary, untouched, and seeds the runner's bare cache locally.~~ *(Amended 2026-09-16, [#72](https://github.com/rogierpennink/hydra/issues/72).)* **Struck: adopt-in-place is not built.** `workspace.provision` takes `{resourceId, runnerId}` and no path; a checkout the user already has on that machine is never read, written or taken over. The consequences are deliberate and are the reason it went: nothing the controller holds could rebuild a frame naming a folder, so a provisioning frame could never be re-sent to a machine that was away; the machine had to read the folder's `origin` to decide whether it was the right repository at all; and "Hydra never writes under a folder you did not give it" is a promise with no exception to explain.
+- **Bare cache.** Each runner keeps one bare git cache per resource, under its storage directory. Ephemeral checkouts are git worktrees off that cache, on the branch the run names (default `hercule/run-<runId>`, a template on the workflow's workspace policy; [07-workflows.md](./07-workflows.md) section 4.4). No worktree pooling.
+- **Primary.** Always a standalone clone with `origin` pointing at the real remote, cloned once from the cache with hardlink object sharing and then pointed at the remote. ~~*Adopt in place*: an existing local checkout the user points at becomes the primary, untouched, and seeds the runner's bare cache locally.~~ *(Amended 2026-09-16, [#72](https://github.com/rogierpennink/hydra/issues/72).)* **Struck: adopt-in-place is not built.** `workspace.provision` takes `{resourceId, runnerId}` and no path; a checkout the user already has on that machine is never read, written or taken over. The consequences are deliberate and are the reason it went: nothing the controller holds could rebuild a frame naming a folder, so a provisioning frame could never be re-sent to a machine that was away; the machine had to read the folder's `origin` to decide whether it was the right repository at all; and "Hercule never writes under a folder you did not give it" is a promise with no exception to explain.
 - Primaries, caches and ephemerals all live under the runner's storage directory.
 - Git's one-branch-one-worktree guard applies uniformly across a runner's ephemerals; primaries are standalone clones, so the guard never spans the two kinds.
 - Git credentials for clone, fetch and push derive from the checkout's Connection and are delivered on demand, never written to runner disk; mechanics in [13-security](./13-security.md) ([ADR 0016](../adr/0016-git-credentials-derive-from-connections.md)).
 
-Branch naming is pinned in [07-workflows.md](./07-workflows.md) section 4.4: default `hydra/run-<runId>`, overridable per workflow, renamable by the agent; "task branch" is a shipped-workflow convention.
+Branch naming is pinned in [07-workflows.md](./07-workflows.md) section 4.4: default `hercule/run-<runId>`, overridable per workflow, renamable by the agent; "task branch" is a shipped-workflow convention.
 
 ### 6.5 Setup command and `.workspaceinclude`
 
 - A repo resource MAY carry one optional setup command, stored in controller state (never in the repo). The runner runs it in every fresh ephemeral checkout of that resource. A non-zero exit marks the workspace `failed` and the run fails with `workspace-failed`; that the placement which needed it then fails is this spec's consolidation (the ticket pins only the unusable marking).
-- Fresh worktrees copy untracked files listed by the repository's `.workspaceinclude` file (an existing vendor convention Hydra reads; not Hydra configuration stored in the repo). The copy is configurable.
+- Fresh worktrees copy untracked files listed by the repository's `.workspaceinclude` file (an existing vendor convention Hercule reads; not Hercule configuration stored in the repo). The copy is configurable.
 
 The copy source is the resource's primary workspace **on the same runner** (paths never cross runners). When that runner has no primary for the resource, nothing is copied and workspace provisioning emits a warning. "Configurable" means a per-resource disable flag only; there is no alternative file name. (Resolved 2026-08-31, [#43](https://github.com/rogierpennink/hydra/issues/43).)
 
 ### 6.6 Toolchains
 
-Toolchains (node, python, go, docker, ...) are the machine owner's responsibility. The runner probes them and reports them as capabilities; placement filters on them. Hydra installs only provider CLIs (section 3.3). Hydra-managed toolchains and a revived Environment concept are post-v1.
+Toolchains (node, python, go, docker, ...) are the machine owner's responsibility. The runner probes them and reports them as capabilities; placement filters on them. Hercule installs only provider CLIs (section 3.3). Hercule-managed toolchains and a revived Environment concept are post-v1.
 
 The probed toolchain list is deliberately minimal in v1 (resolved 2026-08-31, [#43](https://github.com/rogierpennink/hydra/issues/43)): **`git` and `gh`** only, reported as `{ name, version, path }` (raw `--version` output, parsed to semver where it parses). Anything else the owner installs by hand and, if placement needs it, expresses as a user label (`node`, `gpu`); the fuller answer is the post-v1 Environment concept. Placement filters match toolchain names (optionally a semver range) and labels.
 
@@ -268,7 +268,7 @@ The probed toolchain list is deliberately minimal in v1 (resolved 2026-08-31, [#
 | Failure | kept until the user dismisses the failed run; re-runs provision fresh workspaces |
 | Orphaned (owning run gone, session gone, runner restarted mid-job) | collected by the runner's TTL reaper |
 
-Primary workspaces are never torn down by Hydra and bare caches persist for the runner's life (this spec's consolidation; the ticket's teardown rules cover ephemerals only).
+Primary workspaces are never torn down by Hercule and bare caches persist for the runner's life (this spec's consolidation; the ticket's teardown rules cover ephemerals only).
 
 A retired runner's workspaces are marked `lost` in the controller (section 7); the disk itself is not touched.
 
@@ -321,7 +321,7 @@ The controller has a persistent identity: an id plus key material, created at in
 Old controller A, new machine B.
 
 1. **Mint.** On A (CLI or web app) the user mints a short-lived, single-use promotion token. Minting freezes nothing. Authority originates on the controller, mirroring runner join: nobody on the network can pull state uninvited.
-2. **Run.** On B the user runs `hydra promote --from <A-addr> --token <t>`. The command binds B's port so it can answer probes, then contacts A. Install, moving day and promotion are one story: `promote` is auto-initialization with the Data Root arriving by pull ([15-packaging-and-operations](./15-packaging-and-operations.md)).
+2. **Run.** On B the user runs `hercule promote --from <A-addr> --token <t>`. The command binds B's port so it can answer probes, then contacts A. Install, moving day and promotion are one story: `promote` is auto-initialization with the Data Root arriving by pull ([15-packaging-and-operations](./15-packaging-and-operations.md)).
 3. **Probe.** A, over its live runner connections, asks each runner to check that it can reach B's address. The confirm screen shows the fleet with a check per runner. The user states or confirms B's reachable address here (detected default, overridable; plain `IP:PORT` fully supported, nothing assumes Tailscale). *Specified but droppable for v1: shipping without the probe changes nothing structural.*
 4. **Confirm.** The commit point, before anything freezes.
 5. **Transfer.** A goes read-only and streams the bundle: the SQLite database plus secrets packed at export (re-encrypted under a key derived from the promotion token; B re-wraps them under its own master key, which never leaves a machine: [13-security](./13-security.md)). B starts serving under the same logical identity. During the window event polling and mutations pause; in-flight sessions on runners keep running and buffer to their outboxes.
@@ -333,7 +333,7 @@ Aborting at any point before step 6 restores A untouched. Cold move: no drain ph
 
 After promotion A is sealed: it refuses to serve and answers anything that dials the old address (runners that missed the announcement, stale browser bookmarks) with a signed forwarding pointer naming B. Un-sealing requires an explicit force flag (disaster recovery only). When A is fully gone, the last-resort escape hatch is a local re-point command run on each runner.
 
-The re-point command (resolved 2026-08-31, [#43](https://github.com/rogierpennink/hydra/issues/43)) is **`hydra runner set-controller <url>`**: it keeps the runner's existing credential and verifies at hello that the identity at the new address is the one it enrolled with; on mismatch it refuses with "this is a different controller; use `hydra runner join`". A fresh join token is never needed for a re-point, because a controller that cannot resume the logical identity is by definition a different controller - and that path is re-enlistment, not re-pointing.
+The re-point command (resolved 2026-08-31, [#43](https://github.com/rogierpennink/hydra/issues/43)) is **`hercule runner set-controller <url>`**: it keeps the runner's existing credential and verifies at hello that the identity at the new address is the one it enrolled with; on mismatch it refuses with "this is a different controller; use `hercule runner join`". A fresh join token is never needed for a re-point, because a controller that cannot resume the logical identity is by definition a different controller - and that path is re-enlistment, not re-pointing.
 
 ### 8.4 Bundle fallback
 
@@ -357,7 +357,7 @@ When A and B cannot see each other: export a bundle file on A, carry it, import 
 - Fleet auto-discovery and push-install; v1 keeps the fully programmatic join exchange and the reserved "Add machine" spot.
 - Plan-shipping to runners (self-orchestration while disconnected); v1 keeps hello capability negotiation so it lands without a protocol break.
 - Native OS sandboxing (macOS Seatbelt, Linux Landlock), containers as a remoter option; both return as a probed runner capability behind hello negotiation.
-- Hydra-managed toolchains and an Environment concept (named toolchain plus setup bundles); v1 keeps toolchains as probed facts and the setup command in controller state.
+- Hercule-managed toolchains and an Environment concept (named toolchain plus setup bundles); v1 keeps toolchains as probed facts and the setup command in controller state.
 - Folder-resource workspaces; v1 workspaces are git-only.
 - Runner-side plugin loading; v1 runner-side provider execution is built-in but plugin-shaped ([05-plugins](./05-plugins.md)).
 - Load balancing, session migration and failover between runners; v1 pins work where it lands.
@@ -376,7 +376,7 @@ Tickets:
 - [Agent-operates-system surface](https://github.com/rogierpennink/hydra/issues/16) (session token injection)
 - [Security & secrets model](https://github.com/rogierpennink/hydra/issues/18) (git credential helper, packed secrets)
 - [Web app architecture: observability-first, desktop-shell-ready](https://github.com/rogierpennink/hydra/issues/19) ("local" alias detection)
-- [Controller packaging & install story](https://github.com/rogierpennink/hydra/issues/24) (local runner as child process, Hydra Home, fleet skew)
+- [Controller packaging & install story](https://github.com/rogierpennink/hydra/issues/24) (local runner as child process, Hercule Home, fleet skew)
 - [Runner substrate details: protocol guarantees, defaults, provider CLI delivery](https://github.com/rogierpennink/hydra/issues/43) (reconciliation delivery, thresholds and defaults, reserved runners, join/login split, re-point command)
 
 ADRs:
@@ -385,6 +385,6 @@ ADRs:
 - [ADR 0003 - Sessions run as bare processes on runners](../adr/0003-sessions-run-as-bare-processes.md)
 - [ADR 0005 - Promotion is migration behind a stable controller identity](../adr/0005-promotion-is-migration-behind-a-stable-controller-identity.md)
 - [ADR 0016 - Git credentials derive from connections](../adr/0016-git-credentials-derive-from-connections.md) (referenced)
-- [ADR 0018 - Hydra ships as one self-contained binary](../adr/0018-hydra-ships-as-one-self-contained-binary.md) (referenced)
+- [ADR 0018 - Hercule ships as one self-contained binary](../adr/0018-hercule-ships-as-one-self-contained-binary.md) (referenced)
 
 Research: `research/provider-portability.md` (branch `research/provider-portability`).

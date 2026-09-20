@@ -1,6 +1,6 @@
 # Public API and agent surface
 
-Hydra has one public API. The web app, the `hydra` CLI, agents inside sessions, built-in workflow actions and plugins all operate the system through the same set of operations, defined once in a framework-free service layer and described once in a shared contract package of Effect Schema declarations. HTTP routes are derived from that contract and call the service layer; the `hydra` CLI is a thin client over HTTP. Agents reach the API with a per-session token that carries their agent's permission profile; the user reaches it with an API key. Every mutation is stamped with its actor in the event log. No endpoint blocks: long waits are expressed as subscriptions whose matches arrive as queued input. This document pins the contract structure, the operation vocabulary, the transports and route style, the error envelope, the operation catalogue, the credential and attribution rules, the `hydra` CLI (including `hydra memory`), session subscriptions and the no-blocking rule. Rationale lives in [ADR 0013](../adr/0013-agents-operate-hydra-through-the-public-api.md), [ADR 0020](../adr/0020-assistant-memory-is-reached-only-through-the-api.md), [ADR 0021](../adr/0021-one-operation-vocabulary-coarse-grants-explicit-routes.md) and [ADR 0031](../adr/0031-the-backend-is-written-on-effect.md).
+Hercule has one public API. The web app, the `hercule` CLI, agents inside sessions, built-in workflow actions and plugins all operate the system through the same set of operations, defined once in a framework-free service layer and described once in a shared contract package of Effect Schema declarations. HTTP routes are derived from that contract and call the service layer; the `hercule` CLI is a thin client over HTTP. Agents reach the API with a per-session token that carries their agent's permission profile; the user reaches it with an API key. Every mutation is stamped with its actor in the event log. No endpoint blocks: long waits are expressed as subscriptions whose matches arrive as queued input. This document pins the contract structure, the operation vocabulary, the transports and route style, the error envelope, the operation catalogue, the credential and attribution rules, the `hercule` CLI (including `hercule memory`), session subscriptions and the no-blocking rule. Rationale lives in [ADR 0013](../adr/0013-agents-operate-hercule-through-the-public-api.md), [ADR 0020](../adr/0020-assistant-memory-is-reached-only-through-the-api.md), [ADR 0021](../adr/0021-one-operation-vocabulary-coarse-grants-explicit-routes.md) and [ADR 0031](../adr/0031-the-backend-is-written-on-effect.md).
 
 ## 1. Contract structure
 
@@ -11,7 +11,7 @@ A framework-free TypeScript service layer defines every operation: each operatio
 | Consumer | How it calls |
 |---|---|
 | HTTP routes | derived from the contract's HttpApi declaration (input validated and output encoded by the derived route); one-line call into the service method |
-| `hydra` CLI (agent and ops) | over HTTP |
+| `hercule` CLI (agent and ops) | over HTTP |
 | Web app | over HTTP (plus one WebSocket for live topics, see [./14-web-app.md](./14-web-app.md)) |
 | Built-in workflow actions (`workflow.run`, `notification.create`, `task.create`, `task.update`, `task.query`) | in-process, same service layer |
 | Plugins holding the public-API client capability | in-process, same service layer ([./05-plugins.md](./05-plugins.md)) |
@@ -24,9 +24,9 @@ Permission enforcement (section 5) and actor stamping (section 3) sit inside the
 
 ### 1.2 Contract package
 
-`packages/contract` holds, per operation: its id, an Effect Schema input schema, an Effect Schema output schema, its error schemas, the grant it requires (section 5), and its HTTP route (section 1.4), all as one Effect HttpApi declaration. It is the pinned, expensive-to-retrofit asset. Consumers of the package: server-side validation, the `hydra` CLI, the web app (`client-core`, [./14-web-app.md](./14-web-app.md)), the plugin public-API client, and the workflow editor's schema-driven autocomplete.
+`packages/contract` holds, per operation: its id, an Effect Schema input schema, an Effect Schema output schema, its error schemas, the grant it requires (section 5), and its HTTP route (section 1.4), all as one Effect HttpApi declaration. It is the pinned, expensive-to-retrofit asset. Consumers of the package: server-side validation, the `hercule` CLI, the web app (`client-core`, [./14-web-app.md](./14-web-app.md)), the plugin public-API client, and the workflow editor's schema-driven autocomplete.
 
-From that declaration the server routes, request validation, the OpenAPI document and the typed client are derived ([ADR 0031](../adr/0031-the-backend-is-written-on-effect.md)); the route table of section 1.4 is what the declaration follows. The `hydra` CLI and `client-core` use the derived client. The same package holds the Effect RPC group for the WebSocket's live topics ([./14-web-app.md](./14-web-app.md)); every query and mutation stays on HttpApi (section 1.1). The deferral of RPC-framework adoption in [ADR 0013](../adr/0013-agents-operate-hydra-through-the-public-api.md) is withdrawn by its 2026-09-02 amendment.
+From that declaration the server routes, request validation, the OpenAPI document and the typed client are derived ([ADR 0031](../adr/0031-the-backend-is-written-on-effect.md)); the route table of section 1.4 is what the declaration follows. The `hercule` CLI and `client-core` use the derived client. The same package holds the Effect RPC group for the WebSocket's live topics ([./14-web-app.md](./14-web-app.md)); every query and mutation stays on HttpApi (section 1.1). The deferral of RPC-framework adoption in [ADR 0013](../adr/0013-agents-operate-hercule-through-the-public-api.md) is withdrawn by its 2026-09-02 amendment.
 
 ### 1.3 Operation vocabulary
 
@@ -34,7 +34,7 @@ One identifier names an operation on every surface ([ADR 0021](../adr/0021-one-o
 
 - **Operation id** = `<entity>.<verb>`, entity singular: `task.create`, `session.spawn`, `workflow.submit`, `runner.drain`. Every entity is its own operation family.
 - **Built-in workflow action id** = the operation id, unchanged. The built-in actions *are* the operations ([./07-workflows.md](./07-workflows.md) section 8).
-- **CLI** = a command spelled for a terminal, written per operation in the contract's CLI table and one-to-one with the operations (section 6.3): `hydra task list`, `hydra session spawn`, `hydra runner join-token create`. One spelling per command, no aliases; `--help` names the operation id. *(Amended 2026-09-15, [#126](https://github.com/rogierpennink/hydra/issues/126): was "the id split on the dot".)*
+- **CLI** = a command spelled for a terminal, written per operation in the contract's CLI table and one-to-one with the operations (section 6.3): `hercule task list`, `hercule session spawn`, `hercule runner join-token create`. One spelling per command, no aliases; `--help` names the operation id. *(Amended 2026-09-15, [#126](https://github.com/rogierpennink/hydra/issues/126): was "the id split on the dot".)*
 - **Grant** = `<family>.<verb>` in the coarse grant vocabulary of [./13-security.md](./13-security.md) section 6.1. Grant families are *not* one-to-one with operation families: `infra.write` covers `runner.*`, `plugin.*`, `provider.*` and `controller.*`. The operation-to-grant mapping is an explicit table in the contract package; a 403 and the CLI's `--help` both name the grant, so an agent never has to guess it.
 
 Standard verbs, used with the same meaning on every entity that has them:
@@ -55,11 +55,11 @@ Standard verbs, used with the same meaning on every entity that has them:
 Two transports, one contract:
 
 1. **HTTP** on the controller's origin. Bearer authentication (`Authorization` header) with either credential kind (section 4). Plain HTTP on LAN/tailnet by default ([./13-security.md](./13-security.md)).
-2. **The `hydra` CLI** (section 6): the same binary in every role, speaking HTTP to `HYDRA_API_URL`.
+2. **The `hercule` CLI** (section 6): the same binary in every role, speaking HTTP to `HERCULE_API_URL`.
 
 The web app additionally holds one WebSocket for live topics (subscriptions only), connected with a short-lived single-purpose ticket fetched over HTTP; bearer auth, no cookies. Details in [./14-web-app.md](./14-web-app.md).
 
-A Hydra MCP server is not a v1 transport (section 10).
+A Hercule MCP server is not a v1 transport (section 10).
 
 **Ids on the wire** are canonical lowercase UUIDv7 strings, except event ids, which are integers ([./04-state-store.md](./04-state-store.md)). The CLI accepts a full id or an unambiguous tail of eight or more characters for any id argument whose CLI row names the listing that resolves it (`conflict` if ambiguous; section 6.3, [#126](https://github.com/rogierpennink/hydra/issues/126)) and prints tails in human output; `--json` always prints full ids. *(Amended 2026-09-04, [#57](https://github.com/rogierpennink/hydra/issues/57).)* **Tail resolution is a CLI-side behaviour**: the CLI resolves a tail through the entity's `query` operation and reports `conflict` itself when more than one id matches. The wire carries canonical ids only - no `{id}` path parameter and no input schema accepts a tail - so a tail costs an extra round trip and needs the entity's read grant.
 
@@ -96,7 +96,7 @@ Path nouns are plural (`/tasks`) although operation ids are singular; that is th
 
   *(Amended 2026-09-04, [#57](https://github.com/rogierpennink/hydra/issues/57).)* On HTTP the derived route decodes and validates the payload before it ever reaches a handler, so the fixed order only holds if the grant check runs earlier: **the static grant check is performed by transport middleware, before payload decoding**. The contract's operation-to-grant table (section 1.3) is therefore load-bearing at request time, not documentation. Service methods keep the same check inside the method, for in-process callers (built-in workflow actions, plugins) that reach no transport; a caller over HTTP is simply checked twice, identically.
 
-The `hydra` CLI prints `message` (and, for `forbidden`, the grant on its own line); `--json` prints the envelope verbatim.
+The `hercule` CLI prints `message` (and, for `forbidden`, the grant on its own line); `--json` prints the envelope verbatim.
 
 ### 1.6 Pagination and sorting
 
@@ -266,7 +266,7 @@ Semantics: [./08-events-and-connections.md](./08-events-and-connections.md).
 | `connection.create` / `update` / `delete` | record fields incl. labels and default topic | `connection.manage` | `POST` / `PATCH` / `DELETE /connections[/{id}]` |
 | `connection.setCredentials` | `{ connectionId, ... }` (values in, references out) | `connection.manage` | `POST /connections/{id}/credentials` |
 
-`connection.use` is a grant, not an operation: it is what a plugin-contributed action (`github/pr.merge`) requires when it names the Connection it acts as. In v1 nothing a session token calls directly requires it (sessions cannot invoke plugin actions outside a run), so it is dormant until the Hydra MCP server or the agent-tools extension point lands.
+`connection.use` is a grant, not an operation: it is what a plugin-contributed action (`github/pr.merge`) requires when it names the Connection it acts as. In v1 nothing a session token calls directly requires it (sessions cannot invoke plugin actions outside a run), so it is dormant until the Hercule MCP server or the agent-tools extension point lands.
 
 ### runner, plugin, provider, controller (grant family `infra`)
 
@@ -303,15 +303,15 @@ Semantics: [./03-controller-and-runners.md](./03-controller-and-runners.md).
 |---|---|---|---|
 | `workspace.query` / `workspace.read` | `{ runnerId?, resourceId?, projectId?, kind?, status? }` / `{ workspaceId }` | `workspace.read` | `GET /workspaces[/{id}]` |
 | `workspace.provision` | `{ resourceId, runnerId }` -> a primary workspace, cloned fresh under the runner's storage | `workspace.write` | `POST /workspaces` |
-| `workspace.dispose` | `{ workspaceId }` (an ephemeral, including the kept workspace of a failed run; a primary is never torn down by Hydra: 409 `invalid_state`) | `workspace.write` | `DELETE /workspaces/{id}` |
+| `workspace.dispose` | `{ workspaceId }` (an ephemeral, including the kept workspace of a failed run; a primary is never torn down by Hercule: 409 `invalid_state`) | `workspace.write` | `DELETE /workspaces/{id}` |
 
 Workspaces otherwise appear as side effects of session and run placement; `lost` is set by runner retirement, never by an operation.
 
 *(Amended 2026-09-16, [#72](https://github.com/rogierpennink/hydra/issues/72).)* Three sentences the rows above only sketched.
 
 - `workspace.query` filters by `projectId` as well: a project's workspaces are the ones holding a checkout of a repo filed under it, which is what the composer lists.
-- `workspace.provision` takes `{resourceId, runnerId}` and nothing else. ~~It adopts an existing local checkout in place.~~ Adopt-in-place is not built ([./03-controller-and-runners.md](./03-controller-and-runners.md) section 6.4): the main workspace is always a Hydra-managed clone under that runner's storage directory.
-- `session.spawn`'s `workspace` is one of four, and a caller writes exactly one of them: absent (the thread runs with no workspace, `workspaceId: null`); `{kind: "primary", resourceId, branch?}` (the repo's main workspace on the placing machine, made if it is not there yet, with `branch` the one the machine switches it to before the harness starts - a one-shot pick, never replayed when the thread is resumed); `{kind: "ephemeral", checkouts: [{resourceId, baseBranch?}]}` (a workspace of the thread's own, one worktree per repo on `hydra/run-<last 8 of the session id>`, an empty list making a scratch workspace); `{kind: "existing", workspaceId}` (join one that stands - it must be `ready`, it pins the machine, and every repo in it must be filed under the `projectId` the thread carries).
+- `workspace.provision` takes `{resourceId, runnerId}` and nothing else. ~~It adopts an existing local checkout in place.~~ Adopt-in-place is not built ([./03-controller-and-runners.md](./03-controller-and-runners.md) section 6.4): the main workspace is always a Hercule-managed clone under that runner's storage directory.
+- `session.spawn`'s `workspace` is one of four, and a caller writes exactly one of them: absent (the thread runs with no workspace, `workspaceId: null`); `{kind: "primary", resourceId, branch?}` (the repo's main workspace on the placing machine, made if it is not there yet, with `branch` the one the machine switches it to before the harness starts - a one-shot pick, never replayed when the thread is resumed); `{kind: "ephemeral", checkouts: [{resourceId, baseBranch?}]}` (a workspace of the thread's own, one worktree per repo on `hercule/run-<last 8 of the session id>`, an empty list making a scratch workspace); `{kind: "existing", workspaceId}` (join one that stands - it must be `ready`, it pins the machine, and every repo in it must be filed under the `projectId` the thread carries).
 - `session.spawn` takes `projectId`: the Project the thread is filed under. Every resource any of the above reaches has to be filed under it, whether the workspace is made or joined.
 
 ### agent, assistant, binding, conversation
@@ -338,7 +338,7 @@ Semantics: [./12-assistants.md](./12-assistants.md) section 8.3. A reminder is a
 | `reminder.query` | `{ conversationId? }`; a session token lists its own conversation's | `subscription.read` | `GET /reminders` |
 | `reminder.cancel` | `{ reminderId }` | `subscription.write` | `DELETE /reminders/{id}` |
 
-CLI: `hydra reminder create --at 2026-09-03T09:00 "Remind Rogier to chase the Acme invoice"`, `hydra reminder query | cancel`.
+CLI: `hercule reminder create --at 2026-09-03T09:00 "Remind Rogier to chase the Acme invoice"`, `hercule reminder query | cancel`.
 
 ### memory (assistant-scoped)
 
@@ -422,19 +422,19 @@ A decision Notification may bind an operation (for example "Start Bugfix" = `wor
 
 ## 4. Credentials
 
-Two credential kinds resolve to the same actor-stamped API. Both are opaque random tokens, hashed in the controller database, resolved by one indexed lookup. No JWTs, no OAuth machinery for Hydra's own auth. Details: [./13-security.md](./13-security.md).
+Two credential kinds resolve to the same actor-stamped API. Both are opaque random tokens, hashed in the controller database, resolved by one indexed lookup. No JWTs, no OAuth machinery for Hercule's own auth. Details: [./13-security.md](./13-security.md).
 
 ### 4.1 Session tokens
 
 - **Minting:** at session start the controller mints a session token whose subject is the Session row. The token carries no claims of its own; the session's permission profile is reached by resolution `token -> session -> profile`: the profile id was copied onto the Session at spawn ([./02-domain-model.md](./02-domain-model.md) rule 9), so a Thread (no agent) resolves the same way.
-- **Injection:** the runner injects `HYDRA_API_URL`, `HYDRA_TOKEN` and `HYDRA_SESSION=1` into the provider process environment. Nothing is written to runner disk.
+- **Injection:** the runner injects `HERCULE_API_URL`, `HERCULE_TOKEN` and `HERCULE_SESSION=1` into the provider process environment. Nothing is written to runner disk.
 - **Lifetime:** the token dies with the session. It is revoked when the session ends. A rotated assistant conversation continues in a fresh session and therefore under a fresh token; the old session's subscriptions migrate to the successor ([./12-assistants.md](./12-assistants.md)). *(Amended 2026-09-12, [#162](https://github.com/rogierpennink/hydra/issues/162).)* "Ends" is the process exiting: the token is revoked on every exit, and a resume mints a fresh one for the same session id ([./13-security.md](./13-security.md) section 5).
 - **Latency constraint (hard rule):** resolving token to profile MUST NOT meaningfully add endpoint latency. One indexed lookup on the hashed token plus a cached or joined profile read satisfies it; a per-request chain of separate queries does not.
-- **`HYDRA_SESSION=1`:** the marker that makes the CLI refuse file-held user credentials (section 6.2 and [./13-security.md](./13-security.md)). It defends against accidental fallback to the user's identity, not against a malicious local process; sessions are bare processes as the same OS user ([ADR 0003](../adr/0003-sessions-run-as-bare-processes.md)).
+- **`HERCULE_SESSION=1`:** the marker that makes the CLI refuse file-held user credentials (section 6.2 and [./13-security.md](./13-security.md)). It defends against accidental fallback to the user's identity, not against a malicious local process; sessions are bare processes as the same OS user ([ADR 0003](../adr/0003-sessions-run-as-bare-processes.md)).
 
 ### 4.2 User API keys
 
-Long-lived, opaque, revocable, minted in the web app or via `hydra login` (password in, token out, stored with mode 0600 in the CLI credential file; its location inside Hydra Home is **Open** in [./15-packaging-and-operations.md](./15-packaging-and-operations.md)). Always the user's identity; the user has unrestricted parity. The web app's bearer token comes from the same password login. Full auth model: [./13-security.md](./13-security.md).
+Long-lived, opaque, revocable, minted in the web app or via `hercule login` (password in, token out, stored with mode 0600 in the CLI credential file; its location inside Hercule Home is **Open** in [./15-packaging-and-operations.md](./15-packaging-and-operations.md)). Always the user's identity; the user has unrestricted parity. The web app's bearer token comes from the same password login. Full auth model: [./13-security.md](./13-security.md).
 
 ## 5. Permission enforcement
 
@@ -448,54 +448,54 @@ Grant families and verbs, the operation-to-grant table's vocabulary, and the thr
 
 **Escalation:** `permission.request { grant, reason, operation? }` is granted to every profile. It creates a Permission Request notification, and, when the caller is a session, registers a `{ kind: "request" }` subscription for that session as part of the same operation: nobody asks for a grant without wanting the answer, so the response carries `subscriptionId` and the CLI has nothing to teach. `operation` is optional and informational in v1: it lets the notification say "wants to run `connection.create` with {...}" instead of only naming a grant. The user decides `session` (overlay that dies with the session), `profile` (edit the agent's profile) or `deny`; the decision arrives as queued input and the agent retries the original call itself, so the actor stays `session:<id>`. A one-call outcome (`once`) is post-v1 (section 10). Escalation UX: [./13-security.md](./13-security.md) section 6.4.
 
-## 6. The `hydra` CLI
+## 6. The `hercule` CLI
 
 ### 6.1 One binary, three roles
 
-`hydra` is the single self-contained binary ([ADR 0018](../adr/0018-hydra-ships-as-one-self-contained-binary.md)). `hydra serve` runs the controller, `hydra runner` runs a runner, and every other verb is an API client. Role subcommands (`serve`, `runner`, `runner join`, `service install`, `upgrade`, `login`, `promote`, export/import) are specified in [./15-packaging-and-operations.md](./15-packaging-and-operations.md). Mode isolation is CI-enforced: the runner entrypoint imports no controller packages.
+`hercule` is the single self-contained binary ([ADR 0018](../adr/0018-hercule-ships-as-one-self-contained-binary.md)). `hercule serve` runs the controller, `hercule runner` runs a runner, and every other verb is an API client. Role subcommands (`serve`, `runner`, `runner join`, `service install`, `upgrade`, `login`, `promote`, export/import) are specified in [./15-packaging-and-operations.md](./15-packaging-and-operations.md). Mode isolation is CI-enforced: the runner entrypoint imports no controller packages.
 
 The CLI never prompts interactively: onboarding lives wholly in the web app + API, and the runner join exchange is fully programmatic.
 
-`hydra login` takes the password docker-style (resolved 2026-09-01, [#44](https://github.com/rogierpennink/hydra/issues/44)): `--password-stdin` is the canonical scripted form; on a TTY with no flag it prompts with echo off, **the one documented exception** to the never-prompts rule. The rule's purpose is that automation and the future desktop installer never wedge on a hidden prompt - `--password-stdin` preserves programmatic drivability, and the desktop app never runs `hydra login`. A bare `--password` flag does not exist (it would leak into `ps` and shell history).
+`hercule login` takes the password docker-style (resolved 2026-09-01, [#44](https://github.com/rogierpennink/hydra/issues/44)): `--password-stdin` is the canonical scripted form; on a TTY with no flag it prompts with echo off, **the one documented exception** to the never-prompts rule. The rule's purpose is that automation and the future desktop installer never wedge on a hidden prompt - `--password-stdin` preserves programmatic drivability, and the desktop app never runs `hercule login`. A bare `--password` flag does not exist (it would leak into `ps` and shell history).
 
 ### 6.2 Credential resolution
 
 The CLI resolves its credential in this order:
 
-1. `HYDRA_TOKEN` from the environment (with `HYDRA_API_URL`).
-2. The CLI credential file, `~/.hydra/credentials.json` (written by `hydra login`; [./15-packaging-and-operations.md](./15-packaging-and-operations.md)).
+1. `HERCULE_TOKEN` from the environment (with `HERCULE_API_URL`).
+2. The CLI credential file, `~/.hercule/credentials.json` (written by `hercule login`; [./15-packaging-and-operations.md](./15-packaging-and-operations.md)).
 
-When `HYDRA_SESSION=1` is set, step 2 is skipped: the CLI refuses file credentials outright. This is what makes the ops CLI and hydra-as-a-tool the same binary: identical commands, different credential.
+When `HERCULE_SESSION=1` is set, step 2 is skipped: the CLI refuses file credentials outright. This is what makes the ops CLI and hercule-as-a-tool the same binary: identical commands, different credential.
 
-### 6.3 Hydra-as-a-tool
+### 6.3 Hercule-as-a-tool
 
-Inside a session the `hydra` CLI is the whole of hydra-as-a-tool in v1. It ships built-in (not a plugin contribution), is uniform across Claude Code, Codex and pi, and needs no per-adapter wiring. The runner makes the binary available to the session process and materializes the skill (below) into it.
+Inside a session the `hercule` CLI is the whole of hercule-as-a-tool in v1. It ships built-in (not a plugin contribution), is uniform across Claude Code, Codex and pi, and needs no per-adapter wiring. The runner makes the binary available to the session process and materializes the skill (below) into it.
 
-*(Rewritten 2026-09-15, [#126](https://github.com/rogierpennink/hydra/issues/126). Until then this section pinned "Command = operation id": `hydra <entity> <verb>` was `<entity>.<verb>` spelled exactly as the contract spells it, which produced `hydra apiKey query` and `hydra auth wsTicket` and left the agent-addressed help nowhere to live.)*
+*(Rewritten 2026-09-15, [#126](https://github.com/rogierpennink/hydra/issues/126). Until then this section pinned "Command = operation id": `hercule <entity> <verb>` was `<entity>.<verb>` spelled exactly as the contract spells it, which produced `hercule apiKey query` and `hercule auth wsTicket` and left the agent-addressed help nowhere to live.)*
 
-**The command tree is spelled for a terminal and written in the contract.** `packages/contract` holds, beside the operation table, one CLI table with a row per operation: the command's words, its purpose, its examples, and one entry per field with its flag name and one line of help; or `hidden: true` for an operation only programmatic clients call. The row type is keyed by operation id, so an operation without a row does not compile. The `hydra` CLI derives its whole tree, its argument parsing and its help from that table plus the operation's schemas; nothing per-operation lives in the CLI package. A test proves the tree and the visible operations are one-to-one.
+**The command tree is spelled for a terminal and written in the contract.** `packages/contract` holds, beside the operation table, one CLI table with a row per operation: the command's words, its purpose, its examples, and one entry per field with its flag name and one line of help; or `hidden: true` for an operation only programmatic clients call. The row type is keyed by operation id, so an operation without a row does not compile. The `hercule` CLI derives its whole tree, its argument parsing and its help from that table plus the operation's schemas; nothing per-operation lives in the CLI package. A test proves the tree and the visible operations are one-to-one.
 
 What survives of the one-vocabulary rule (section 1.3, [ADR 0021](../adr/0021-one-operation-vocabulary-coarse-grants-explicit-routes.md)): the operation id names the endpoint, the contract key and the built-in workflow action; a 403 names the grant; `--json` prints the output schema verbatim; and every command's `--help` names its operation id, route and grant on one line, so an agent holding a workflow action id or a 403 can find the command, and the other way round.
 
 Spelling rules:
 
-- A command is `hydra <noun>... <verb>`, every word kebab-case. The first noun is the operation's entity in kebab-case, singular as the id is (`api-key`, `session`).
-- Standard verbs: `query` is `list`; `read`, `create`, `update` and `delete` keep their names. `hydra task list`, `hydra task read <id>`.
-- A custom verb is kebab-cased as a verb phrase: `hydra runner refresh-facts`, `hydra user set-password`, `hydra connection start-oauth`.
-- A custom verb of the form `<action><Thing>`, where the things have ids and a listing of their own, becomes a nested noun with standard verbs: `runner.createJoinToken`, `runner.queryJoinTokens` and `runner.revokeJoinToken` are `hydra runner join-token create | list | revoke <id>`.
-- An owned sub-resource that is its own operation entity keeps its own root noun: `hydra input list <session-id>`, `hydra transcript read <session-id>`.
+- A command is `hercule <noun>... <verb>`, every word kebab-case. The first noun is the operation's entity in kebab-case, singular as the id is (`api-key`, `session`).
+- Standard verbs: `query` is `list`; `read`, `create`, `update` and `delete` keep their names. `hercule task list`, `hercule task read <id>`.
+- A custom verb is kebab-cased as a verb phrase: `hercule runner refresh-facts`, `hercule user set-password`, `hercule connection start-oauth`.
+- A custom verb of the form `<action><Thing>`, where the things have ids and a listing of their own, becomes a nested noun with standard verbs: `runner.createJoinToken`, `runner.queryJoinTokens` and `runner.revokeJoinToken` are `hercule runner join-token create | list | revoke <id>`.
+- An owned sub-resource that is its own operation entity keeps its own root noun: `hercule input list <session-id>`, `hercule transcript read <session-id>`.
 - One spelling per command. No aliases, no second spelling; the operation id is not accepted as a command.
-- A hidden operation has no command at all: not in the tree, not in help, not callable. `auth.login`, `auth.logout` and `auth.wsTicket` are hidden; `hydra login` is the human form of login.
-- Path parameters are positional, in route order. A payload field may be positional when its row says so (`hydra permission request <grant>`, `hydra subscription create <target>`), after the path parameters. Every other field is a flag, kebab-case, named in the row; a repeatable flag is singular (`--label bug --label ui`).
+- A hidden operation has no command at all: not in the tree, not in help, not callable. `auth.login`, `auth.logout` and `auth.wsTicket` are hidden; `hercule login` is the human form of login.
+- Path parameters are positional, in route order. A payload field may be positional when its row says so (`hercule permission request <grant>`, `hercule subscription create <target>`), after the path parameters. Every other field is a flag, kebab-case, named in the row; a repeatable flag is singular (`--label bug --label ui`).
 - Ids: a full id, or a tail of eight or more characters where the row names the listing that resolves it (section 1.4). A positional whose row names no listing takes the full id, and its help says so.
 - The CLI adds no default of its own. A common case that needs no flags gets there through the operation's own defaults, never through a value the CLI invents.
 
 Rules the CLI follows on every command:
 
-- **Agent-addressed help.** `--help` works at any position on every subcommand, `hydra runner --help` included. Three levels. `hydra --help` lists every visible noun with its verbs and one line, then the conventions that hold everywhere (ids, `--json`, stdin, paging, exit codes, what a 403 means). `hydra <noun> --help` lists the noun's verbs with one line and the grant each needs, and a flow line naming the usual order. `hydra <noun> <verb> --help` prints, in this fixed order: purpose (what it does and when to use it), usage, examples, arguments, flags, stdin, returns, errors, next, and the operation line (`operation <id> · <METHOD> <path> · grant <g>`). Purpose, examples, the line per field, the noun's summary and flow line, and optional per-error meanings are written in the table; usage, placeholders, allowed values, required or optional, the stdin note, paging, the returns fields, the error code list and the operation line are derived from the contract. Examples are stored as arguments plus stdin and are parsed by a test, so they cannot go stale; every command any help text names must exist, by test. Static help plus 403s that name the missing grant are the two teaching channels.
+- **Agent-addressed help.** `--help` works at any position on every subcommand, `hercule runner --help` included. Three levels. `hercule --help` lists every visible noun with its verbs and one line, then the conventions that hold everywhere (ids, `--json`, stdin, paging, exit codes, what a 403 means). `hercule <noun> --help` lists the noun's verbs with one line and the grant each needs, and a flow line naming the usual order. `hercule <noun> <verb> --help` prints, in this fixed order: purpose (what it does and when to use it), usage, examples, arguments, flags, stdin, returns, errors, next, and the operation line (`operation <id> · <METHOD> <path> · grant <g>`). Purpose, examples, the line per field, the noun's summary and flow line, and optional per-error meanings are written in the table; usage, placeholders, allowed values, required or optional, the stdin note, paging, the returns fields, the error code list and the operation line are derived from the contract. Examples are stored as arguments plus stdin and are parsed by a test, so they cannot go stale; every command any help text names must exist, by test. Static help plus 403s that name the missing grant are the two teaching channels.
 - **Output.** Human-readable by default; `--json` on every command emits the contract's output schema (or error envelope) verbatim. Teaching lines ("read the reply with ...") exist only in the human rendering.
 - **Progressive disclosure.** The skill is a minimal skeleton pointing at the CLI's own help. It names no command beyond the three help forms, and the ticket that writes it carries a test that every command it names exists. The list of "commands an agent uses most" that this section used to carry is the root help, generated.
-- **One content channel (hard rule).** A field the row marks `stdin` has no inline flag: a password, a secret's value, credentials, a task's or project's description, a session's prompt or input text, a config that is the whole payload. Required, it is read from stdin unasked: `echo "carry on" | hydra session input <id>`. Optional, it is read only when its `--<flag>-stdin` marker is given (`hydra task update <id> --description-stdin < notes.md`), so an empty pipe never blanks a field. The whole of stdin is the value, one trailing newline removed, which is what a heredoc produces. At most one stdin field per command, because a document has newlines and cannot share the stream; `hydra user set-password` is the one exception and reads two lines, current then next. At a terminal the CLI never blocks on a stdin field: it exits 2 and shows the piped form (the echo-off prompt of section 6.1 is `hydra login`'s exception). There is no inline content flag and no `--file` flag. [Assemble the v1 spec](https://github.com/rogierpennink/hydra/issues/21) delegated the pick between stdin-only and `--file` to the spec; the spec picks stdin-only. Rationale: a model mixed `--content` with a heredoc in the memory experiment ([Prototype: assistant memory interface](https://github.com/rogierpennink/hydra/issues/31)).
+- **One content channel (hard rule).** A field the row marks `stdin` has no inline flag: a password, a secret's value, credentials, a task's or project's description, a session's prompt or input text, a config that is the whole payload. Required, it is read from stdin unasked: `echo "carry on" | hercule session input <id>`. Optional, it is read only when its `--<flag>-stdin` marker is given (`hercule task update <id> --description-stdin < notes.md`), so an empty pipe never blanks a field. The whole of stdin is the value, one trailing newline removed, which is what a heredoc produces. At most one stdin field per command, because a document has newlines and cannot share the stream; `hercule user set-password` is the one exception and reads two lines, current then next. At a terminal the CLI never blocks on a stdin field: it exits 2 and shows the piped form (the echo-off prompt of section 6.1 is `hercule login`'s exception). There is no inline content flag and no `--file` flag. [Assemble the v1 spec](https://github.com/rogierpennink/hydra/issues/21) delegated the pick between stdin-only and `--file` to the spec; the spec picks stdin-only. Rationale: a model mixed `--content` with a heredoc in the memory experiment ([Prototype: assistant memory interface](https://github.com/rogierpennink/hydra/issues/31)).
 - **Never blocks.** No `--wait` on any command (section 8).
 - **Pagination.** `list` commands page with `--limit`, `--cursor` and `--sort`; `--all` follows `nextCursor` to the end.
 
@@ -503,7 +503,7 @@ Rules the CLI follows on every command:
 
 **The skill.** One provider-agnostic skill source describes the CLI; each provider adapter materializes it in that provider's native instruction format (Codex takes instructions only as `AGENTS.md` in the cwd, so a Codex session needs a cwd even when workspace-less). Materialization and provider-home isolation are specified in [./06-providers.md](./06-providers.md).
 
-### 6.4 `hydra memory`
+### 6.4 `hercule memory`
 
 Assistant memory is reached only through these operations ([ADR 0020](../adr/0020-assistant-memory-is-reached-only-through-the-api.md)); nothing is materialized on runner disk and assistant sessions stay workspace-less. Memory tiers (`core` plus named topics), the two-line topic header, the size and count caps, injection at session start and rotation are specified in [./12-assistants.md](./12-assistants.md); the operations and their enforcement are specified here.
 
@@ -531,7 +531,7 @@ There is no header convention to validate: the gist is a field (`--gist`), the b
 
 A session may hold Subscriptions directly, without a run. Two use cases justify it: mid-session artifacts (an agent opens PR #87 and subscribes to its CI) and assistants (long-lived, no run to hold claims).
 
-- **Registration** is the ordinary `subscription.create` operation (section 2), invoked from the session as `hydra subscription create <target>`, where `<target>` is `<kind>:<id>` (`run:r_3`, `session:s_12`, `request:pr_7`) or a bare External Ref (`github:pr:owner/repo#87`, taken as `ref:`).
+- **Registration** is the ordinary `subscription.create` operation (section 2), invoked from the session as `hercule subscription create <target>`, where `<target>` is `<kind>:<id>` (`run:r_3`, `session:s_12`, `request:pr_7`) or a bare External Ref (`github:pr:owner/repo#87`, taken as `ref:`).
 - **Matching** runs in the single persisted pipeline like every subscription ([./08-events-and-connections.md](./08-events-and-connections.md)).
 - **Delivery** is queued input on a turn boundary: rendered text plus the structured payload. Never steering by default. The agent's next turn opens with the match.
 - **Lifetime:** dies with its holder session, or with `subscription.cancel`. On assistant rotation the subscriptions migrate to the successor session. No timeouts.
@@ -543,20 +543,20 @@ Platform-auto detection ("this session opened PR #87, subscribe it") is not spec
 
 Every endpoint returns fast. No operation waits for a run, session, approval or permission decision to finish. Consequences:
 
-- Spawn-type operations (`workflow.run`, `workflow.submit`, `session.spawn`) return a handle immediately, and the CLI's human rendering teaches the follow-up: `subscribe for updates: hydra subscription create run:r_3`.
+- Spawn-type operations (`workflow.run`, `workflow.submit`, `session.spawn`) return a handle immediately, and the CLI's human rendering teaches the follow-up: `subscribe for updates: hercule subscription create run:r_3`.
 - There is no `--wait` flag anywhere in the CLI.
 - The canonical long-wait pattern for an agent is: start the thing, subscribe to it, end the turn. The matching event arrives as queued input and wakes the session.
 - Permission escalation (section 5) subscribes the caller automatically; the assistant heartbeat is a cron trigger delivering queued input ([./12-assistants.md](./12-assistants.md)).
 
 ## 9. The ops CLI
 
-The ops CLI is the same `hydra` binary under a user credential: `hydra login` writes the API key to the CLI credential file, after which every API verb runs as actor `user` with unrestricted parity. Commands are identical to what a session sees; only the credential and therefore the profile differ. Role subcommands are specified in [./15-packaging-and-operations.md](./15-packaging-and-operations.md); runner join in [./03-controller-and-runners.md](./03-controller-and-runners.md).
+The ops CLI is the same `hercule` binary under a user credential: `hercule login` writes the API key to the CLI credential file, after which every API verb runs as actor `user` with unrestricted parity. Commands are identical to what a session sees; only the credential and therefore the profile differ. Role subcommands are specified in [./15-packaging-and-operations.md](./15-packaging-and-operations.md); runner join in [./03-controller-and-runners.md](./03-controller-and-runners.md).
 
 ## 10. Post-v1
 
-- **Hydra MCP server** - the public API exposed to sessions as typed MCP tools (t3-code-style self-injection). High on the revisit list. V1 keeps the `SessionSpec.mcpServers` passthrough ([./06-providers.md](./06-providers.md)) so it lands without redesign; the operation catalogue maps one-to-one onto tools.
+- **Hercule MCP server** - the public API exposed to sessions as typed MCP tools (t3-code-style self-injection). High on the revisit list. V1 keeps the `SessionSpec.mcpServers` passthrough ([./06-providers.md](./06-providers.md)) so it lands without redesign; the operation catalogue maps one-to-one onto tools.
 - **Scoped grants** ("the sessions you spawned", "this project's tasks") - finer grants inside a family; v1 grants are unscoped except `memory`.
-- **One-call permission outcome (`once`)** - a fourth decision on a Permission Request that carries an `operation`: an overlay row on the session with `remainingUses: 1`, consumed by the first successful call of the named operation, so "may I do X once?" is answerable without a session-wide grant. `permission.request` already carries the `operation` field this needs. Its CLI sugar (`hydra <failed command> --request "<reason>"`, packing the failed call into the request) lands with it.
+- **One-call permission outcome (`once`)** - a fourth decision on a Permission Request that carries an `operation`: an overlay row on the session with `remainingUses: 1`, consumed by the first successful call of the named operation, so "may I do X once?" is answerable without a session-wide grant. `permission.request` already carries the `operation` field this needs. Its CLI sugar (`hercule <failed command> --request "<reason>"`, packing the failed call into the request) lands with it.
 - **Bulk operations** (delete-many, cancel-all) - none exist in v1; when they do, they are tagged in the contract and withheld from every profile but `unrestricted` by default, per [./13-security.md](./13-security.md).
 - **Offset pagination and totals** - bolted on beside cursors if usage shows a real need for random access.
 - **CEL subscription targets** - a fifth `SubscriptionTarget` kind carrying a filter over `event`, if the four shorthand kinds prove short.
@@ -594,8 +594,8 @@ ADRs:
 - [ADR 0031 - The backend is written on Effect](../adr/0031-the-backend-is-written-on-effect.md)
 
 - [ADR 0021 - One operation vocabulary, coarse grants, explicit routes](../adr/0021-one-operation-vocabulary-coarse-grants-explicit-routes.md)
-- [ADR 0013 - Agents operate Hydra through the public API, behind one contract with two transports](../adr/0013-agents-operate-hydra-through-the-public-api.md)
+- [ADR 0013 - Agents operate Hercule through the public API, behind one contract with two transports](../adr/0013-agents-operate-hercule-through-the-public-api.md)
 - [ADR 0020 - Assistant memory is reached only through the API](../adr/0020-assistant-memory-is-reached-only-through-the-api.md)
 - [ADR 0017 - The web app is a static pure client of the public API](../adr/0017-the-web-app-is-a-static-pure-client-of-the-public-api.md)
-- [ADR 0018 - Hydra ships as one self-contained binary](../adr/0018-hydra-ships-as-one-self-contained-binary.md)
+- [ADR 0018 - Hercule ships as one self-contained binary](../adr/0018-hercule-ships-as-one-self-contained-binary.md)
 - [ADR 0003 - Sessions run as bare processes](../adr/0003-sessions-run-as-bare-processes.md)

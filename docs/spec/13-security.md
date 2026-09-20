@@ -1,6 +1,6 @@
 # Security and secrets
 
-Hydra v1 is a single-user system whose supported perimeter is a home LAN or a tailnet. Every secret value (Connection credentials, plugin secrets, runner credentials, core key material) lives encrypted per-value in one owner-scoped table in the controller database, under a master key held in the OS keychain that never leaves its machine. Users authenticate with a password and opaque revocable API keys; sessions authenticate with a per-session token that inherits the agent's permission profile, enforced at the service layer so HTTP and in-process callers are bound alike. Git credentials are derived on demand from Connections and never land on runner disk. The event log is the audit log. This document states the perimeter, the secrets model, both credential kinds, the grant families and shipped profiles, the escalation flow, the access-mode fallback guardrail, taint handling for assistant memory, audit retention, and - honestly - what v1 does not defend against.
+Hercule v1 is a single-user system whose supported perimeter is a home LAN or a tailnet. Every secret value (Connection credentials, plugin secrets, runner credentials, core key material) lives encrypted per-value in one owner-scoped table in the controller database, under a master key held in the OS keychain that never leaves its machine. Users authenticate with a password and opaque revocable API keys; sessions authenticate with a per-session token that inherits the agent's permission profile, enforced at the service layer so HTTP and in-process callers are bound alike. Git credentials are derived on demand from Connections and never land on runner disk. The event log is the audit log. This document states the perimeter, the secrets model, both credential kinds, the grant families and shipped profiles, the escalation flow, the access-mode fallback guardrail, taint handling for assistant memory, audit retention, and - honestly - what v1 does not defend against.
 
 ## 1. Perimeter and threat model
 
@@ -44,16 +44,16 @@ ADR 0015 originally listed "runner credentials" among the encrypted rows; it is 
 
 **Open:** field names above are consolidated from ADR 0015's prose ("owner-scoped", "per-value"); the tickets pin the owner set and per-value encryption but not column names. Column names are the implementer's ([./16-open-items.md](./16-open-items.md) B); the cipher is settled below.
 
-The cipher is **AES-256-GCM** through WebCrypto, with a fresh 12-byte random nonce per write and the associated data `<ownerKind>|<ownerId>|<name>` (resolved 2026-09-04, [#56](https://github.com/rogierpennink/hydra/issues/56)): an AEAD the runtime already carries, so it costs no dependency ([ADR 0018](../adr/0018-hydra-ships-as-one-self-contained-binary.md)), where XChaCha20-Poly1305 would. Binding the owner and name into the associated data makes a rename a re-encrypt, and makes a row edited or swapped in outside Hydra fail to decrypt rather than read cleanly. Owner ids and names therefore carry no `|`; the repository rejects one.
+The cipher is **AES-256-GCM** through WebCrypto, with a fresh 12-byte random nonce per write and the associated data `<ownerKind>|<ownerId>|<name>` (resolved 2026-09-04, [#56](https://github.com/rogierpennink/hydra/issues/56)): an AEAD the runtime already carries, so it costs no dependency ([ADR 0018](../adr/0018-hercule-ships-as-one-self-contained-binary.md)), where XChaCha20-Poly1305 would. Binding the owner and name into the associated data makes a rename a re-encrypt, and makes a row edited or swapped in outside Hercule fail to decrypt rather than read cleanly. Owner ids and names therefore carry no `|`; the repository rejects one.
 
 ### 2.2 Master key
 
-- One **master key** per controller machine, created at first run (`hydra serve` auto-initializes it; [./15-packaging-and-operations.md](./15-packaging-and-operations.md)).
-- Held in the OS keychain: macOS Keychain via the `security` CLI ([ADR 0018](../adr/0018-hydra-ships-as-one-self-contained-binary.md)). Fallback everywhere else: a plain key file inside Hydra Home, outside the Data Root, mode 0600. *(Narrowed 2026-09-04, [#56](https://github.com/rogierpennink/hydra/issues/56): this paragraph previously also named the Linux desktop keychain where one exists, reading "OS keychain" as Secret Service. v1 implements the macOS keychain and the key file, and nothing else - a D-Bus Secret Service path is a second store to keep correct for a platform no v1 user is on. Linux therefore always uses the key file, headless or not; Secret Service returns when a Linux user asks for it.)*
+- One **master key** per controller machine, created at first run (`hercule serve` auto-initializes it; [./15-packaging-and-operations.md](./15-packaging-and-operations.md)).
+- Held in the OS keychain: macOS Keychain via the `security` CLI ([ADR 0018](../adr/0018-hercule-ships-as-one-self-contained-binary.md)). Fallback everywhere else: a plain key file inside Hercule Home, outside the Data Root, mode 0600. *(Narrowed 2026-09-04, [#56](https://github.com/rogierpennink/hydra/issues/56): this paragraph previously also named the Linux desktop keychain where one exists, reading "OS keychain" as Secret Service. v1 implements the macOS keychain and the key file, and nothing else - a D-Bus Secret Service path is a second store to keep correct for a platform no v1 user is on. Linux therefore always uses the key file, headless or not; Secret Service returns when a Linux user asks for it.)*
 - The controller runs as a user-level service precisely so it can read the login keychain without a prompt.
 - **The master key never leaves its machine.** It is not in the database, not in backups, not in a promotion bundle. Backups (`VACUUM INTO` snapshots) therefore contain inert ciphertext; copying the backups directory offsite is safe.
 
-The plain key file is **`~/.hydra/master.key`**, mode 0600 (resolved 2026-09-01, [#44](https://github.com/rogierpennink/hydra/issues/44)): at the Hydra Home root, outside `data/` and `backups/`, so promotion never moves it and backups stay inert.
+The plain key file is **`~/.hercule/master.key`**, mode 0600 (resolved 2026-09-01, [#44](https://github.com/rogierpennink/hydra/issues/44)): at the Hercule Home root, outside `data/` and `backups/`, so promotion never moves it and backups stay inert.
 
 ### 2.3 Promotion re-wrapping
 
@@ -83,7 +83,7 @@ Setup flows and their UI are owned by [./08-events-and-connections.md](./08-even
 
 ### 3.1 Policy
 
-- **BYO OAuth client** where a provider demands one (Google). Hydra ships no OAuth client id and hosts no OAuth relay.
+- **BYO OAuth client** where a provider demands one (Google). Hercule ships no OAuth client id and hosts no OAuth relay.
 - **Paste-a-token is the universal fallback**, and the primary path for Slack and Discord bot tokens and for GitHub (a personal access token).
 - All resulting credentials are stored as Connection-owned secrets (§2.1).
 
@@ -93,23 +93,23 @@ Google = redirect flow to the controller's own HTTPS origin (BYO client); GitHub
 
 ### 3.3 Redirect URIs and the HTTPS origin
 
-- The controller derives the exact redirect URI from the origin the user's browser is already using and displays it for the user to register. No Hydra-hosted relay is involved.
+- The controller derives the exact redirect URI from the origin the user's browser is already using and displays it for the user to register. No Hercule-hosted relay is involved.
 - On a tailnet, `tailscale cert` gives the controller a real certificate for `https://<node>.<tailnet>.ts.net`, which Google accepts as a redirect host; raw private IPs and `.local`/`.internal` names are rejected. `http://localhost` is a same-machine fallback only.
 - The controller runs `tailscale cert` itself when HTTPS is enabled (§1): the Google Connection setup flow can surface "Enable HTTPS via Tailscale" as one of its declarative steps, which is where the cert finally lives next to the feature that needs it. Prerequisite surfaced in the same step: MagicDNS and the tailnet's HTTPS toggle must be on.
 
 ## 4. User authentication
 
-Resolves the credential side of [ADR 0013](../adr/0013-agents-operate-hydra-through-the-public-api.md).
+Resolves the credential side of [ADR 0013](../adr/0013-agents-operate-hercule-through-the-public-api.md).
 
 ### 4.1 Principles
 
-- No OAuth machinery for Hydra's own auth. No JWTs.
-- Every credential Hydra issues is an opaque random token. The database stores only a hash; resolution is one indexed lookup, which satisfies the constraint that token -> session -> profile resolution adds no meaningful endpoint latency (the profile id sits on the Session row, copied at spawn).
+- No OAuth machinery for Hercule's own auth. No JWTs.
+- Every credential Hercule issues is an opaque random token. The database stores only a hash; resolution is one indexed lookup, which satisfies the constraint that token -> session -> profile resolution adds no meaningful endpoint latency (the profile id sits on the Session row, copied at spawn).
 - Both user credential kinds and session tokens resolve to the same actor-stamped API ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md)).
 
 ### 4.2 Password login
 
-- One user, username + password, set during first-run onboarding in the web app. The password is stored as a slow hash: **argon2id, via `Bun.password`** (resolved 2026-09-04, [#57](https://github.com/rogierpennink/hydra/issues/57); native in the pinned Bun, so Hydra carries no hashing dependency, and `Bun.password.verify` reads the algorithm and parameters back off the stored string, which is what lets the parameters be raised later without a migration).
+- One user, username + password, set during first-run onboarding in the web app. The password is stored as a slow hash: **argon2id, via `Bun.password`** (resolved 2026-09-04, [#57](https://github.com/rogierpennink/hydra/issues/57); native in the pinned Bun, so Hercule carries no hashing dependency, and `Bun.password.verify` reads the algorithm and parameters back off the stored string, which is what lets the parameters be raised later without a migration).
 - Login returns an opaque bearer token the client holds and sends as `Authorization: Bearer <token>` on every HTTP call. No cookies, no CSRF machinery; this works identically in a future desktop shell ([ADR 0017](../adr/0017-the-web-app-is-a-static-pure-client-of-the-public-api.md)).
 
 
@@ -118,10 +118,10 @@ The bearer token's lifetime is **30 days rolling** (resolved 2026-09-01, [#44](h
 ### 4.3 API keys
 
 - Long-lived, opaque, revocable. Always the user's identity, never an agent's.
-- Minted in the web app (Settings) or via `hydra login` (password in, token out; `--password-stdin` scripted, echo-off TTY prompt as the one exception to the never-prompts rule, [./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md) §6.1). The CLI stores it in `~/.hydra/credentials.json`, mode 0600 ([./15-packaging-and-operations.md](./15-packaging-and-operations.md)).
-  - **`hydra login` is two calls** (pinned 2026-09-04, [#57](https://github.com/rogierpennink/hydra/issues/57)): `auth.login` with the username and password returns a 30-day bearer (§4.2), and `apiKey.create { name }` under that bearer mints the long-lived key. The key is what lands in the credential file; the bearer is discarded and never written to disk. There is no login mode that hands out a long-lived key directly - minting a key is an authenticated operation like any other, and this keeps it that way. The key's name defaults to the machine's hostname, so a laptop's key is distinguishable in Settings from one minted in the web app; `--name` overrides it.
+- Minted in the web app (Settings) or via `hercule login` (password in, token out; `--password-stdin` scripted, echo-off TTY prompt as the one exception to the never-prompts rule, [./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md) §6.1). The CLI stores it in `~/.hercule/credentials.json`, mode 0600 ([./15-packaging-and-operations.md](./15-packaging-and-operations.md)).
+  - **`hercule login` is two calls** (pinned 2026-09-04, [#57](https://github.com/rogierpennink/hydra/issues/57)): `auth.login` with the username and password returns a 30-day bearer (§4.2), and `apiKey.create { name }` under that bearer mints the long-lived key. The key is what lands in the credential file; the bearer is discarded and never written to disk. There is no login mode that hands out a long-lived key directly - minting a key is an authenticated operation like any other, and this keeps it that way. The key's name defaults to the machine's hostname, so a laptop's key is distinguishable in Settings from one minted in the web app; `--name` overrides it.
 - Revocable individually; a revoked key fails on its next use.
-- Used by the ops CLI and scripts. The ops CLI and the runner-shipped `hydra` CLI are the same binary; the difference is the credential ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md)).
+- Used by the ops CLI and scripts. The ops CLI and the runner-shipped `hercule` CLI are the same binary; the difference is the credential ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md)).
 
 ### 4.4 WebSocket ticket
 
@@ -137,17 +137,17 @@ Passkeys and 2FA are post-v1. Nothing in v1 forecloses them: the login op is the
 
 ## 5. Session tokens and agent/user separation
 
-- At session start the controller mints a **session token** whose subject is the Session row. The runner injects `HYDRA_API_URL` and `HYDRA_TOKEN` into the provider process. The token carries the agent's permission profile and is revoked when the session ends.
+- At session start the controller mints a **session token** whose subject is the Session row. The runner injects `HERCULE_API_URL` and `HERCULE_TOKEN` into the provider process. The token carries the agent's permission profile and is revoked when the session ends.
 - Every mutation is stamped `actor: user | session:<id>`.
-- The `hydra` CLI resolves credentials in this order: environment token first, the credential file second ([./15-packaging-and-operations.md](./15-packaging-and-operations.md)).
-- The runner also sets `HYDRA_SESSION=1` in every session's environment. When that marker is present, the CLI **refuses file credentials** entirely: it uses the environment token or fails. Accidental fallback from an agent to the user's identity is therefore impossible, even on the controller machine where the user's own `hydra login` credential file exists.
-- This is accident-proof, not malice-proof. A session is a bare process under the same OS user; a process that deliberately unsets `HYDRA_SESSION` and reads the credential file can impersonate the user. That is outside the v1 threat model (§1) and is the post-v1 sandboxing item.
+- The `hercule` CLI resolves credentials in this order: environment token first, the credential file second ([./15-packaging-and-operations.md](./15-packaging-and-operations.md)).
+- The runner also sets `HERCULE_SESSION=1` in every session's environment. When that marker is present, the CLI **refuses file credentials** entirely: it uses the environment token or fails. Accidental fallback from an agent to the user's identity is therefore impossible, even on the controller machine where the user's own `hercule login` credential file exists.
+- This is accident-proof, not malice-proof. A session is a bare process under the same OS user; a process that deliberately unsets `HERCULE_SESSION` and reads the credential file can impersonate the user. That is outside the v1 threat model (§1) and is the post-v1 sandboxing item.
 
 *(Amended 2026-09-12, [#162](https://github.com/rogierpennink/hydra/issues/162).)* A resume mints a **fresh** session token for the same session id, carried on the `SessionStart` that carries the resume ([./03-controller-and-runners.md](./03-controller-and-runners.md) section 2); the token revoked when the session exited stays revoked. A session that is resumed in place ([./06-providers.md](./06-providers.md) section 4.1) therefore still holds exactly one live token, and a token never outlives the process it was minted for.
 
 ## 6. Permission profiles
 
-Mechanism: every agent carries a **permission profile**, copied onto each Session at spawn (a Thread takes the `thread.profileId` setting, [./02-domain-model.md](./02-domain-model.md)); the session token carries the session's profile; enforcement sits at the service layer so it binds HTTP and in-process session callers alike ([ADR 0013](../adr/0013-agents-operate-hydra-through-the-public-api.md)). Run and plugin actors are ungated ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md) section 3.1). This section pins the content.
+Mechanism: every agent carries a **permission profile**, copied onto each Session at spawn (a Thread takes the `thread.profileId` setting, [./02-domain-model.md](./02-domain-model.md)); the session token carries the session's profile; enforcement sits at the service layer so it binds HTTP and in-process session callers alike ([ADR 0013](../adr/0013-agents-operate-hercule-through-the-public-api.md)). Run and plugin actors are ungated ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md) section 3.1). This section pins the content.
 
 ### 6.1 Grant families
 
@@ -198,7 +198,7 @@ The operation-to-grant mapping is an explicit table in the contract package; [./
 ### 6.3 Enforcement and 403s
 
 - The service layer checks the actor's grants before executing an operation, before any entity is loaded. The user actor (password login or API key) has full parity: no profile applies. *(Amended 2026-09-04, [#57](https://github.com/rogierpennink/hydra/issues/57).)* On HTTP the same static check also runs in transport middleware, ahead of payload decoding, so a caller without the grant gets 403 rather than 400 on a malformed body ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md) §1.5). The check in the method stays: it is what binds in-process callers.
-- A denied call returns HTTP 403 whose body names the missing grant (`{ error: { code: "forbidden", details: { grant: "session.spawn" } } }`, envelope in [./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md) section 1.5). The `hydra` CLI surfaces that name verbatim so the agent can ask for it, and `hydra <entity> <verb> --help` names the grant up front.
+- A denied call returns HTTP 403 whose body names the missing grant (`{ error: { code: "forbidden", details: { grant: "session.spawn" } } }`, envelope in [./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md) section 1.5). The `hercule` CLI surfaces that name verbatim so the agent can ask for it, and `hercule <entity> <verb> --help` names the grant up front.
 - Resolution is one indexed lookup from token hash to session to agent to profile, cached per session and invalidated on session end, profile edit, or a decided Permission Request.
 - **A session may only continue a session on its own permission profile** *(amended 2026-09-16, [#68](https://github.com/rogierpennink/hydra/issues/68))*. `session.continue` carries the parent's profile onto the fork ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md) section 2), and grants are unscoped (section 6.1): a session holding `session.read` and `session.spawn` can find every session on the controller, so without this it could fork one on a wider profile and drive it with a prompt of its own choosing - an escalation the profile never granted. A parent on any other profile is refused 403 naming `session.spawn`. The rule sits in the service rather than in the static grant check, because it is a fact about the parent row and so needs a read; the static check runs before the payload is decoded and has no id to read.
 - **A session may only spawn from an Agent whose permission profile grants nothing beyond its own** *(Amended 2026-09-19, [#76](https://github.com/rogierpennink/hydra/issues/76).)* An Agent whose profile carries a grant the spawning session's profile lacks is refused 403 naming `session.spawn`; the user actor passes every profile. The reason is the fork rule's: grants are unscoped (section 6.1), so a session holding `agent.read` and `session.spawn` can find every Agent on the controller, and without this it could drive one on a wider profile with a prompt of its own choosing. A subset rather than an exact match, so that an assistant may still delegate to a narrower worker.
@@ -206,7 +206,7 @@ The operation-to-grant mapping is an explicit table in the contract package; [./
 
 ### 6.4 Escalation: Permission Request
 
-1. The agent calls `permission.request { grant, reason, operation? }` (granted to everyone; `hydra permission request <grant> --reason "..."`). `operation` optionally names the call it wanted to make (`{ op: "connection.create", input }`), so the user sees what the agent is trying to do, not only which family it lacks.
+1. The agent calls `permission.request { grant, reason, operation? }` (granted to everyone; `hercule permission request <grant> --reason "..."`). `operation` optionally names the call it wanted to make (`{ op: "connection.create", input }`), so the user sees what the agent is trying to do, not only which family it lacks.
 2. The controller creates a **Permission Request** Notification ([./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md)) naming the session, the agent, the grant, the reason and the operation, and, when the caller is a session, registers a `{ kind: "request" }` subscription for that session in the same call. The response carries `requestId` and `subscriptionId`.
 3. The user decides in the web app, or from an interactive channel sink where the click must come from an **owner** platform identity - a trusted identity may command an assistant but not decide ([./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md) section 7.4), through the bound `permission.decide` with one of three outcomes: **`session`** (a session-scoped grant overlay that dies with the session), **`profile`** (edits the agent's profile; every future session of every agent on that profile gains it), or **`deny`**.
 4. The decision arrives as queued input on a turn boundary and the agent retries the original operation itself, so the actor stays `session:<id>`. There is no blocking wait, consistent with the no-blocking rule in [./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md).
@@ -238,12 +238,12 @@ approval-required < auto-accept-edits < auto < full-access
 
 Decision from ticket #23 and `research/provider-portability.md` (branch `research/provider-portability`).
 
-- **Auth by delegation.** Hydra never holds, extracts, proxies, or distributes provider (Claude Code, Codex, pi) login tokens. Each runner logs in to each provider itself, with the vendor CLI storing its own credential.
-- **Per-runner headless login, Hydra-driven.** Provider CLIs are installed on request from the runner's fleet page (amended 2026-09-07, [#64](https://github.com/rogierpennink/hydra/issues/64); previously pinned as installed at join). Hydra then drives each provider's own headless login on that runner, relaying the URL or user code to the user's browser wherever they are; it is a post-join step, driven from the fleet page ([./03-controller-and-runners.md](./03-controller-and-runners.md) §3.3). The per-provider flows (device code, paste-a-code, `setup-token`) are in [./15-packaging-and-operations.md](./15-packaging-and-operations.md) §12.
+- **Auth by delegation.** Hercule never holds, extracts, proxies, or distributes provider (Claude Code, Codex, pi) login tokens. Each runner logs in to each provider itself, with the vendor CLI storing its own credential.
+- **Per-runner headless login, Hercule-driven.** Provider CLIs are installed on request from the runner's fleet page (amended 2026-09-07, [#64](https://github.com/rogierpennink/hydra/issues/64); previously pinned as installed at join). Hercule then drives each provider's own headless login on that runner, relaying the URL or user code to the user's browser wherever they are; it is a post-join step, driven from the fleet page ([./03-controller-and-runners.md](./03-controller-and-runners.md) §3.3). The per-provider flows (device code, paste-a-code, `setup-token`) are in [./15-packaging-and-operations.md](./15-packaging-and-operations.md) §12.
 - **Never distribute vendor tokens across the fleet.** Refresh-token rotation with reuse detection (documented by OpenAI, structurally the same in pi) means two live copies race and the loser is logged out. Copying a credential file is a bootstrap shortcut owned by exactly one runner afterward.
 - **Probing without credential files.** Runners self-report per-provider auth state through vendor APIs (Agent SDK init `AccountInfo`, Codex `account/read`, pi `checkAuth`), never by reading credential files ([./03-controller-and-runners.md](./03-controller-and-runners.md)).
-- **ToS posture.** All three vendors permit a user's own account on machines the user owns; prohibitions target sharing with other people and (Anthropic) third-party products offering claude.ai login. Hydra as the user's own tool driving vendor CLIs under the user's own logins stays inside every posture. The Claude Agent SDK itself accepts API key, Bedrock, Vertex, or Foundry auth; subscription use goes through the user's own `claude` binary ([./06-providers.md](./06-providers.md)).
-- **Provider-home isolation.** Every session runs inside its provider instance's isolated, Hydra-owned provider home (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `PI_CODING_AGENT_DIR`): one instance = one login = one home, long-lived on that runner, never per session. That home holds the runner's own vendor login and keeps the user's global instructions, skills and packages out of Hydra sessions; details in [./06-providers.md](./06-providers.md).
+- **ToS posture.** All three vendors permit a user's own account on machines the user owns; prohibitions target sharing with other people and (Anthropic) third-party products offering claude.ai login. Hercule as the user's own tool driving vendor CLIs under the user's own logins stays inside every posture. The Claude Agent SDK itself accepts API key, Bedrock, Vertex, or Foundry auth; subscription use goes through the user's own `claude` binary ([./06-providers.md](./06-providers.md)).
+- **Provider-home isolation.** Every session runs inside its provider instance's isolated, Hercule-owned provider home (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `PI_CODING_AGENT_DIR`): one instance = one login = one home, long-lived on that runner, never per session. That home holds the runner's own vendor login and keeps the user's global instructions, skills and packages out of Hercule sessions; details in [./06-providers.md](./06-providers.md).
 
 ## 9. Git credentials
 
@@ -257,7 +257,7 @@ Decision and rationale: [ADR 0016](../adr/0016-git-credentials-derive-from-conne
 
 **Verify at build time:** the runner daemon's local channel for the helper (Unix socket path or loopback port, and how the helper authenticates to the daemon so only the daemon's own sessions can ask). The tickets pin the shape, not the transport.
 
-*(Amended 2026-09-16, [#72](https://github.com/rogierpennink/hydra/issues/72).)* Answered. **Transport:** a Unix socket at `<runner storage>/daemon.sock`, mode 0600 in a directory mode 0700, so no other OS user reaches it; no port is bound. **Authentication:** the helper proves nothing itself and the daemon resolves nothing. `hydra git-credential get` sends git's `protocol`/`host`/`path` down the socket together with the `HYDRA_TOKEN` its environment carries - the session token of section 5, minted per session and revoked when it exits - and the daemon relays that as `CredentialRequest { requestId, remote, sessionToken }` to the controller. The controller verifies the token, canonicalises the remote, and answers only when that resource is a checkout of that session's own workspace; anything else is `CredentialAnswer { error }` and the helper prints nothing, which is git's signal to fall through to the machine's own helpers (section 9.5). The machine asks as itself only while it is provisioning a workspace, sending `{ requestId, remote, workspaceId }` in place of the token, and the controller answers only while that workspace is `provisioning` on that runner. Nothing is minted on the runner and no identity is inferred from the OS: a process-tree check was rejected (PID reuse races, double-fork reparenting, and it stops nothing a same-user process could not already do by reading `runner.json`). What stays outside the model is what section 12 already accepts: a same-OS-user process is at parity with the runner, and an agent can always read the token of its own repository.
+*(Amended 2026-09-16, [#72](https://github.com/rogierpennink/hydra/issues/72).)* Answered. **Transport:** a Unix socket at `<runner storage>/daemon.sock`, mode 0600 in a directory mode 0700, so no other OS user reaches it; no port is bound. **Authentication:** the helper proves nothing itself and the daemon resolves nothing. `hercule git-credential get` sends git's `protocol`/`host`/`path` down the socket together with the `HERCULE_TOKEN` its environment carries - the session token of section 5, minted per session and revoked when it exits - and the daemon relays that as `CredentialRequest { requestId, remote, sessionToken }` to the controller. The controller verifies the token, canonicalises the remote, and answers only when that resource is a checkout of that session's own workspace; anything else is `CredentialAnswer { error }` and the helper prints nothing, which is git's signal to fall through to the machine's own helpers (section 9.5). The machine asks as itself only while it is provisioning a workspace, sending `{ requestId, remote, workspaceId }` in place of the token, and the controller answers only while that workspace is `provisioning` on that runner. Nothing is minted on the runner and no identity is inferred from the OS: a process-tree check was rejected (PID reuse races, double-fork reparenting, and it stops nothing a same-user process could not already do by reading `runner.json`). What stays outside the model is what section 12 already accepts: a same-OS-user process is at parity with the runner, and an agent can always read the token of its own repository.
 
 ### 9.2 Per-checkout identity
 
@@ -277,7 +277,7 @@ Identity follows the repo, never the agent, in v1. Per-agent git identity (an ag
 
 ### 9.5 Non-GitHub remotes
 
-Runner-local, user-managed auth (`ssh` keys, `git credential` stores the user configures on the machine) remains the documented fallback for remotes that are not GitHub Connections. Hydra does not manage those credentials.
+Runner-local, user-managed auth (`ssh` keys, `git credential` stores the user configures on the machine) remains the documented fallback for remotes that are not GitHub Connections. Hercule does not manage those credentials.
 
 ## 10. Taint and provenance in assistant memory
 
@@ -306,7 +306,7 @@ The event log ([./04-state-store.md](./04-state-store.md)) is the audit log; the
 Stated explicitly by the tickets:
 
 - **Hostile internet exposure.** No brute-force protection, no lockout, no CSRF defence. Do not expose the controller publicly; use a tailnet.
-- **Local malice on a shared machine.** Bare-process sessions under the same OS user can read the user's `hydra login` credential file, provider credential files, and any workspace on that runner. `HYDRA_SESSION` stops accidents only.
+- **Local malice on a shared machine.** Bare-process sessions under the same OS user can read the user's `hercule login` credential file, provider credential files, and any workspace on that runner. `HERCULE_SESSION` stops accidents only.
 - **A compromised runner.** A runner that fetches git tokens on demand can see the tokens for any checkout it hosts while an operation runs. Retiring the runner revokes its credential; the Connection tokens it saw should be rotated by the user.
 - **Prompt injection beyond taint marking.** Wrapping and prompt hardening reduce, not eliminate, the chance an assistant follows third-party text. The provenance line makes the outcome auditable.
 - **A stolen master key.** Anyone with the machine's keychain (or the headless key file) and the database has every secret.
@@ -314,13 +314,13 @@ Stated explicitly by the tickets:
 
 ## Post-v1
 
-- OS sandboxing (Seatbelt/Landlock) and containers as probed runner capabilities; v1 keeps sessions as bare processes and the `HYDRA_SESSION` marker so the credential seam is already in place.
+- OS sandboxing (Seatbelt/Landlock) and containers as probed runner capabilities; v1 keeps sessions as bare processes and the `HERCULE_SESSION` marker so the credential seam is already in place.
 - Passkeys and 2FA; v1 keeps a single password-check site.
 - Per-agent git identity (agent -> Connection association); v1's credential helper already resolves per checkout, so this is policy only.
 - Hostile-internet hardening (rate limiting, lockout) if multi-tenant hosting arrives.
 - Finer grants inside families; v1 keeps families coarse so profiles do not break.
 - Short-lived git tokens (e.g. GitHub App installation tokens) as a drop-in behind the same on-demand helper.
-- MCP-based hydra-as-a-tool, which would carry the same session token.
+- MCP-based hercule-as-a-tool, which would carry the same session token.
 - BYO TLS cert/key paths (a non-tailscale CA), and TLS between fleet machines - the latter a genuine bootstrap-config concern when it lands ([#44](https://github.com/rogierpennink/hydra/issues/44)).
 
 ## Sources
@@ -346,7 +346,7 @@ ADRs:
 
 - [ADR 0015 - Secrets are encrypted per-value under a keychain-held master key](../adr/0015-secrets-are-encrypted-per-value-under-a-keychain-held-master-key.md)
 - [ADR 0016 - Git credentials derive from Connections](../adr/0016-git-credentials-derive-from-connections.md)
-- [ADR 0013 - Agents operate Hydra through the public API](../adr/0013-agents-operate-hydra-through-the-public-api.md)
+- [ADR 0013 - Agents operate Hercule through the public API](../adr/0013-agents-operate-hercule-through-the-public-api.md)
 - [ADR 0003 - Sessions run as bare processes](../adr/0003-sessions-run-as-bare-processes.md)
 - [ADR 0005 - Promotion is migration behind a stable controller identity](../adr/0005-promotion-is-migration-behind-a-stable-controller-identity.md)
 - [ADR 0017 - The web app is a static pure client of the public API](../adr/0017-the-web-app-is-a-static-pure-client-of-the-public-api.md)

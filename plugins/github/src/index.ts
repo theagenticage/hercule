@@ -20,7 +20,7 @@ import {
 const USER_URL = "https://api.github.com/user";
 
 /** GitHub refuses a request without one, so it is part of the contract. */
-const USER_AGENT = "Hydra";
+const USER_AGENT = "Hercule";
 
 const refused = (message: string) => Effect.fail(new ConnectionValidationFailed({ message }));
 
@@ -67,7 +67,7 @@ const connectionType: ConnectionTypeContribution = {
         {
           name: "pat",
           label: "Personal access token",
-          help: "A fine-grained or classic token with the scopes for the repositories you want Hydra to see.",
+          help: "A fine-grained or classic token with the scopes for the repositories you want Hercule to see.",
         },
       ],
     },

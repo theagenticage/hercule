@@ -1,6 +1,6 @@
-# Hydra v1 spec
+# Hercule v1 spec
 
-The buildable specification for Hydra v1: architecture, domain model, scope, and one document per subsystem. It consolidates the decisions worked on the [wayfinder map](https://github.com/rogierpennink/hydra/issues/1) into normative text an implementer can build from without opening the tickets. The "why" behind each decision lives in the [ADRs](../adr/); the vocabulary lives in [CONTEXT.md](../../CONTEXT.md); the visual language and pinned UI semantics live in [design-language.md](../design-language.md).
+The buildable specification for Hercule v1: architecture, domain model, scope, and one document per subsystem. It consolidates the decisions worked on the [wayfinder map](https://github.com/rogierpennink/hydra/issues/1) into normative text an implementer can build from without opening the tickets. The "why" behind each decision lives in the [ADRs](../adr/); the vocabulary lives in [CONTEXT.md](../../CONTEXT.md); the visual language and pinned UI semantics live in [design-language.md](../design-language.md).
 
 **Status:** assembled 2026-08-28. Every decision the map closed is in here. The open questions that assembly surfaced are listed in [16-open-items.md](./16-open-items.md), each either handed to a follow-up ticket on the map, marked as an implementer's choice, or marked as a build-time verification. Implementation can start on any subsystem whose open items are implementer choices only; the ticketed items are amendments, not redesigns.
 
@@ -20,11 +20,11 @@ Start with [01-overview-and-scope.md](./01-overview-and-scope.md) (what ships, w
 | [08-events-and-connections.md](./08-events-and-connections.md) | the event pipeline and envelope, event sources, subscriptions, Connections and their setup flows |
 | [09-tasks.md](./09-tasks.md) | the Task model: fields, status axis, labels, provenance, search |
 | [10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md) | triage as a workflow pattern, spawn bounds, Notifications (record, router, sinks, bound actions), Intake and check-in model requirements |
-| [11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md) | the public API contract, actors, session tokens, permission enforcement, the `hydra` CLI, session subscriptions |
+| [11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md) | the public API contract, actors, session tokens, permission enforcement, the `hercule` CLI, session subscriptions |
 | [12-assistants.md](./12-assistants.md) | assistants, conversations, channel bindings, rotation, memory, heartbeat, channel plugins |
 | [13-security.md](./13-security.md) | perimeter, secrets and master key, user auth, grants and shipped profiles, escalation, git credentials, taint, audit |
 | [14-web-app.md](./14-web-app.md) | the web app: architecture, live topics, screens, check-in and Intake views, workflow editor, design language pointer |
-| [15-packaging-and-operations.md](./15-packaging-and-operations.md) | the single binary, Hydra Home, service install, first run, migrations, upgrade, backups, Bun build notes |
+| [15-packaging-and-operations.md](./15-packaging-and-operations.md) | the single binary, Hercule Home, service install, first run, migrations, upgrade, backups, Bun build notes |
 | [16-open-items.md](./16-open-items.md) | the register of open questions, implementer choices, build-time verifications, and standing risks |
 
 ## Conventions inside the documents

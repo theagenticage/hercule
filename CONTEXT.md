@@ -1,17 +1,17 @@
-# Hydra
+# Hercule
 
-Ubiquitous language for Hydra, a self-hosted agent orchestration platform. This glossary is the vocabulary the v1 spec is written in.
+Ubiquitous language for Hercule, a self-hosted agent orchestration platform. This glossary is the vocabulary the v1 spec is written in.
 
 ## Language
 
 ### Product
 
-**Hydra**:
+**Hercule**:
 The product. A controller-plus-runners platform that orchestrates agents doing work on the user's behalf.
 _Avoid_: agentick, agentick-next
 
 **Operation**:
-One named thing the public API can do (`task.create`, `session.spawn`), the same name in the contract, the HTTP route table and the built-in workflow action. The `hydra` CLI spells it for a terminal (`hydra task list`) and names it in `--help`.
+One named thing the public API can do (`task.create`, `session.spawn`), the same name in the contract, the HTTP route table and the built-in workflow action. The `hercule` CLI spells it for a terminal (`hercule task list`) and names it in `--help`.
 _Avoid_: endpoint, command (bare), method
 
 **Subscription Target**:
@@ -29,7 +29,7 @@ A task's append-only record of what created or touched it: entries pointing at e
 _Avoid_: history, audit trail (reserved for the event log)
 
 **External Ref**:
-A fully-qualified canonical identifier for a thing outside Hydra (`github:issue:owner/repo#42`, `gmail:thread:<id>`). The plugin defining the type owns canonicalization; the connection an event arrived through is not part of the identity. Not unique across tasks.
+A fully-qualified canonical identifier for a thing outside Hercule (`github:issue:owner/repo#42`, `gmail:thread:<id>`). The plugin defining the type owns canonicalization; the connection an event arrived through is not part of the identity. Not unique across tasks.
 _Avoid_: link, URL (a ref is an identity, not a location)
 
 **Session**:
@@ -124,7 +124,7 @@ _Avoid_: escalation (as a noun for the record), override
 
 **Platform Identity**:
 One person's account on one chat platform, recorded with a role: an owner (the user; may command an assistant and decide bound actions) or a trusted person (may command, never decides). Claimed by a pairing code; anyone without one is context in groups and ignored in DMs.
-_Avoid_: allowlist entry, member, user (reserved for the future Hydra user concept)
+_Avoid_: allowlist entry, member, user (reserved for the future Hercule user concept)
 
 **Master Key**:
 The per-machine key that encrypts secret values in the controller database; held in the OS keychain and never leaves its machine, even during promotion.
@@ -163,7 +163,7 @@ _Avoid_: timer, alarm
 ### Organization
 
 **Project**:
-A grouping of related work and its materials, purely a way to organise information inside Hydra: no behaviour, no defaults. May span multiple resources (repos, folders, mailboxes), and a resource may belong to several projects; not bound to a single git repo.
+A grouping of related work and its materials, purely a way to organise information inside Hercule: no behaviour, no defaults. May span multiple resources (repos, folders, mailboxes), and a resource may belong to several projects; not bound to a single git repo.
 _Avoid_: workspace (as a grouping term)
 
 **Resource**:
@@ -177,20 +177,20 @@ _Avoid_: URL, origin, clone URL (for the identity; those are spellings of it)
 **Workspace**:
 A provisioned working area on a runner in which sessions do their work, containing zero or more checkouts. Two kinds: a **primary** workspace (exactly one checkout; at most one per resource per runner; long-lived and shared) and **ephemeral** workspaces (provisioned for one run, disposed after; zero checkouts makes a scratch workspace, several makes a multi-repo workspace). A run has exactly one workspace, shared by all its agent steps. A session may also run with no workspace at all.
 
-The user-facing word for a primary is **main workspace**: `primary` is the kind in code, on the wire and in the database, and "main workspace" is what every label, menu row, help text and sentence a person reads calls it. It is always Hydra's own clone under the runner's storage - Hydra never takes over a folder the user already has.
+The user-facing word for a primary is **main workspace**: `primary` is the kind in code, on the wire and in the database, and "main workspace" is what every label, menu row, help text and sentence a person reads calls it. It is always Hercule's own clone under the runner's storage - Hercule never takes over a folder the user already has.
 _Avoid_: worktree (reserved for the git mechanism), playground; current checkout, shared checkout, main checkout (all three named the primary before; "main workspace" replaced them), adopt (adopting a folder in place is not built)
 
 **Checkout**:
 One working copy of a single resource inside a workspace. In v1 only git repos are checkout-able.
 
 **`.workspaceinclude`**:
-A file in a repo listing untracked paths, one relative path per line with `#` comments, that a fresh checkout takes from the resource's primary workspace on the same machine. An existing vendor convention Hydra reads, never Hydra configuration stored in a repo; whether it is read at all is a flag on the resource.
+A file in a repo listing untracked paths, one relative path per line with `#` comments, that a fresh checkout takes from the resource's primary workspace on the same machine. An existing vendor convention Hercule reads, never Hercule configuration stored in a repo; whether it is read at all is a flag on the resource.
 _Avoid_: include file, copy list
 
 ### Infrastructure
 
 **Controller**:
-The always-on brain: holds all state, receives events, schedules work. The single source of truth; repos hold no Hydra config.
+The always-on brain: holds all state, receives events, schedules work. The single source of truth; repos hold no Hercule config.
 
 **Controller Daemon**:
 The layer above the controller's domains (`apps/controller/src/daemon/`): it carries out every piece of work that spans more than one domain, or a domain and a runner, one file per use case. It is the only module that sends frames to runners and the only consumer of what runners report (the providers domain and `runner.refreshFacts` are the last exceptions, tracked in [#209](https://github.com/rogierpennink/hydra/issues/209)); the domains below it hold rows and their lifecycle rules and produce frames as values, and a runner publishes what it hears and calls nobody. Writes that cross domains come from above and reads across domains are fine, so the controller's import graph stays a DAG. In prose it is always the **controller daemon**, never bare "daemon".
@@ -229,8 +229,8 @@ The end state of a controller that has been promoted away: it refuses to serve a
 **Data Root**:
 The single directory holding everything the controller durably owns (database, packed secrets, future blobs). The unit that promotion moves; nothing in it references its own absolute location.
 
-**Hydra Home**:
-The one directory holding everything Hydra keeps on a machine: the Data Root, runner material state, logs, backups, and bootstrap config. `~/.hydra` by default. The Data Root moves with promotion; the rest of the home is machine-bound.
+**Hercule Home**:
+The one directory holding everything Hercule keeps on a machine: the Data Root, runner material state, logs, backups, and bootstrap config. `~/.hercule` by default. The Data Root moves with promotion; the rest of the home is machine-bound.
 _Avoid_: install dir, config dir
 
 **Provider**:
@@ -257,7 +257,7 @@ The merged declared-plus-probed facts about a provider instance on a specific ru
 _Avoid_: provider status
 
 **Channel**:
-A chat surface Hydra speaks through (Discord, Slack).
+A chat surface Hercule speaks through (Discord, Slack).
 
 **Live Topic**:
 A named stream a connected client watches over its live connection: a session transcript, the event feed, notifications. A client viewing concern only; not a Subscription, which is a domain claim on events held by a run or session.
@@ -266,7 +266,7 @@ _Avoid_: subscription (reserved for the domain concept)
 ### Extension
 
 **Plugin**:
-A self-contained unit of functionality that extends Hydra by requesting plugin capabilities and registering contributions. The structuring principle of v1: channels, event sources, providers, and workflow actions are all built as plugins.
+A self-contained unit of functionality that extends Hercule by requesting plugin capabilities and registering contributions. The structuring principle of v1: channels, event sources, providers, and workflow actions are all built as plugins.
 _Avoid_: extension, addon, integration
 
 **Extension Point**:
@@ -294,7 +294,7 @@ A plugin's static self-description: identity, host API version, requested plugin
 
 **Connection**:
 A core-owned, named link to one external account: a plugin-defined type, by its qualified id, plus label, credentials, and status (e.g. `gmail/gmail`/"work"). Event ingest runs per connection, every event is stamped with its connection, and outbound actions name the connection they act as.
-_Avoid_: account (reserved for a future Hydra user concept), instance
+_Avoid_: account (reserved for a future Hercule user concept), instance
 
 **Event Source**:
 An origin of external events. GitHub and Gmail are event-source plugins in v1; cron, manual, and platform events are emitted by the core into the same pipeline.
@@ -348,7 +348,7 @@ A trigger's limit on how many runs it may spawn per window. Exceeding it trips t
 _Avoid_: rate limit (bare), throttle
 
 **Notification**:
-A persisted message from Hydra to its user ("run failed", "trigger paused", "agent needs a decision"). Produced by the core, by workflow notify steps, by sessions, or by plugins; always recorded centrally, with delivery through channels decided by the core, never claimed by plugins. A decision stays open until its question is answered, wherever that happens, and is withdrawn when the question stops existing; nothing else about it ever changes.
+A persisted message from Hercule to its user ("run failed", "trigger paused", "agent needs a decision"). Produced by the core, by workflow notify steps, by sessions, or by plugins; always recorded centrally, with delivery through channels decided by the core, never claimed by plugins. A decision stays open until its question is answered, wherever that happens, and is withdrawn when the question stops existing; nothing else about it ever changes.
 _Avoid_: alert, ping
 
 **Bound Action**:

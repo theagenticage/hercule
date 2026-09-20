@@ -1,6 +1,6 @@
 # Triage, Intake and Notifications
 
-Hydra has no triage engine. Deciding what matters is an ordinary workflow ([ADR 0011](../adr/0011-triage-is-a-workflow-pattern-inside-core-enforced-bounds.md)): the shipped default is one scheduled **Triage** run a few times a day whose agent reads everything that arrived since the last run, groups it across sources, checks it against existing work, and acts through the public API - creating proposals, attaching signals to tasks, offering quick actions, and saying nothing about the rest. The core contributes only mechanics: per-trigger spawn bounds with breaker semantics, five built-in workflow actions, and one persisted Notification record that the core alone routes to dumb delivery sinks ([ADR 0012](../adr/0012-notifications-are-core-routed-sinks-are-dumb.md)). Intake - the formation boundary where external signals become prepared work - and check-in - monitoring delegated work - are both built entirely on these primitives (Tasks, Notifications, Events, Runs, the public API). This document pins the pattern, the shipped Triage workflow and its contract, the bounds, the built-in actions, the Notification record with its lifecycle, router, sinks and bound actions, and the model-level requirements the Intake and check-in views impose. The views themselves belong to [./14-web-app.md](./14-web-app.md).
+Hercule has no triage engine. Deciding what matters is an ordinary workflow ([ADR 0011](../adr/0011-triage-is-a-workflow-pattern-inside-core-enforced-bounds.md)): the shipped default is one scheduled **Triage** run a few times a day whose agent reads everything that arrived since the last run, groups it across sources, checks it against existing work, and acts through the public API - creating proposals, attaching signals to tasks, offering quick actions, and saying nothing about the rest. The core contributes only mechanics: per-trigger spawn bounds with breaker semantics, five built-in workflow actions, and one persisted Notification record that the core alone routes to dumb delivery sinks ([ADR 0012](../adr/0012-notifications-are-core-routed-sinks-are-dumb.md)). Intake - the formation boundary where external signals become prepared work - and check-in - monitoring delegated work - are both built entirely on these primitives (Tasks, Notifications, Events, Runs, the public API). This document pins the pattern, the shipped Triage workflow and its contract, the bounds, the built-in actions, the Notification record with its lifecycle, router, sinks and bound actions, and the model-level requirements the Intake and check-in views impose. The views themselves belong to [./14-web-app.md](./14-web-app.md).
 
 ## 1. Triage is a workflow pattern
 
@@ -36,16 +36,16 @@ One workflow, **Triage**, created on first run as an ordinary editable workflow,
 
 **Goal.** Triage exists to take cognitive load off the user. Its baseline is the user reading the raw events themselves; **the user must never be burdened more than that baseline**: every proposal, offer, FYI or question must cost less attention than the events it stands in for, otherwise the right output is nothing. Above the baseline, the more triage connects, groups, enriches and pre-decides, the better.
 
-**Inputs the agent has.** The window (`inputs.since`, `inputs.until`); the events in it (`hydra event query --since --until`, [./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md) section 2, joined to their effect rows and to the tasks whose provenance already carries their refs); full read access to the system (tasks via `hydra task search`, runs and their live subscriptions, connections and their default topics); and source polling through plugin actions (`github/*`, `gmail/*` under the `connection.use` grant) when an event is not enough - fetch the mail body, read the PR diff. Triage may poll; it is not limited to what the pipeline carried.
+**Inputs the agent has.** The window (`inputs.since`, `inputs.until`); the events in it (`hercule event query --since --until`, [./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md) section 2, joined to their effect rows and to the tasks whose provenance already carries their refs); full read access to the system (tasks via `hercule task search`, runs and their live subscriptions, connections and their default topics); and source polling through plugin actions (`github/*`, `gmail/*` under the `connection.use` grant) when an event is not enough - fetch the mail body, read the PR diff. Triage may poll; it is not limited to what the pipeline carried.
 
 **Duties, in order.**
 
 1. **Set aside what is known.** An event whose refs an open Task already carries, or that a live Subscription consumed, belongs to work in flight. Nothing to do unless it changes the picture (a failing check on a PR a run is waiting on is the run's business; a second reviewer asking for changes on a task the user accepted is news).
-2. **Enrich** what needs it: `hydra event enrich` sets `system` and `url` for systems that arrive inside another (Sentry, Dependabot, Tailscale inside Gmail) and appends refs the agent extracts ([ADR 0025](../adr/0025-enrichment-re-matches-one-event-idempotently.md)).
+2. **Enrich** what needs it: `hercule event enrich` sets `system` and `url` for systems that arrive inside another (Sentry, Dependabot, Tailscale inside Gmail) and appends refs the agent extracts ([ADR 0025](../adr/0025-enrichment-re-matches-one-event-idempotently.md)).
 3. **Group** the rest into units of work, across sources: three dependency PRs are one unit; a Sentry mail and the GitHub issue it caused are one unit.
 4. **Act** on each unit, choosing exactly one of:
-   - **Proposal**: a new Task (`hydra task create`) with labels `proposed` and one topic, `priority`, a description holding the why, the grouping and the links, provenance `{eventId}` for every source event and `{ref}` for every external ref - *and* its decision Notification (`triage.proposal`, subject the task, the events in `subject` too) with the answers of Section 2.4.
-   - **Attachment**: a provenance append on an existing Task (`hydra task update`), optionally editing its description. The Task's `task.updated` event fires as usual.
+   - **Proposal**: a new Task (`hercule task create`) with labels `proposed` and one topic, `priority`, a description holding the why, the grouping and the links, provenance `{eventId}` for every source event and `{ref}` for every external ref - *and* its decision Notification (`triage.proposal`, subject the task, the events in `subject` too) with the answers of Section 2.4.
+   - **Attachment**: a provenance append on an existing Task (`hercule task update`), optionally editing its description. The Task's `task.updated` event fires as usual.
    - **Offer**: a decision Notification (`triage.offer`) proposing an immediate action with no Task - "Merge dev bumps" binding `github/pr.merge` over three PRs, "Reply 'approved'" binding `gmail/message.reply` - plus a Dismiss answer.
    - **FYI**: an informational Notification (`triage.fyi`) for what the user should know and need not act on.
    - **Unsure**: a decision Notification (`triage.unsure`) saying what triage could not decide and why, with the answers it can offer.
@@ -78,7 +78,7 @@ Bound actions ([Section 7.4](#74-bound-actions)) the triage agent authors, one o
 Conventions the answers rely on:
 
 - **Accepting is not starting.** Accept persists the work; starting it is a separate act (a Start answer, a manual run, a session opened on the task). V1 ships no work workflow on purpose - the no-workflow situation is what dogfooding tests first - so a fresh install offers Accept and Dismiss only.
-- **A fitting workflow** is one that declares a required `taskId` input (`hydra workflow query`); the agent picks among those by name and description and names it in the answer label.
+- **A fitting workflow** is one that declares a required `taskId` input (`hercule workflow query`); the agent picks among those by name and description and names it in the answer label.
 - **Whoever starts work owns the transition.** A work workflow's first step sets `status: in-progress` and removes `proposed`; work workflows trigger on status changes (`event.changes.status.new == "in-progress"`), never on `task.created`, so a `proposed` task cannot be picked up by accident ([./09-tasks.md](./09-tasks.md)).
 - There is no park. "Not now" is Accept: the task waits in the backlog at the priority triage gave it.
 
@@ -98,7 +98,7 @@ external events ──▶ Triage (cron batch) ──▶ Tasks ──▶ work wor
 
 ### 2.6 Task interaction from a per-event workflow
 
-The batch agent uses the `hydra` CLI for everything. A per-event or agent-less graph has the built-ins instead: `task.create` / `task.update` ("every cron tick, file a task") and `task.query` - declarative, exact-identity matching only (provenance refs, labels, status, project; never content), which enables the **guard-before-agent** pattern: `task.query` on the event's refs, an edge on `size(steps.guard.output.items) > 0` to `task.update`, otherwise the agent step. Duplicate signals attach for pennies; only new ones reach a model. `task.query` treats "any open task with this ref" as the duplicate signal; there is no uniqueness constraint on refs across tasks ([ADR 0019](../adr/0019-the-task-model-is-thin-workflows-own-task-semantics.md)).
+The batch agent uses the `hercule` CLI for everything. A per-event or agent-less graph has the built-ins instead: `task.create` / `task.update` ("every cron tick, file a task") and `task.query` - declarative, exact-identity matching only (provenance refs, labels, status, project; never content), which enables the **guard-before-agent** pattern: `task.query` on the event's refs, an edge on `size(steps.guard.output.items) > 0` to `task.update`, otherwise the agent step. Duplicate signals attach for pennies; only new ones reach a model. `task.query` treats "any open task with this ref" as the duplicate signal; there is no uniqueness constraint on refs across tasks ([ADR 0019](../adr/0019-the-task-model-is-thin-workflows-own-task-semantics.md)).
 
 ## 3. Events, stamps and the window
 
@@ -155,13 +155,13 @@ A trigger whose filter fails raises one `core.trigger-filter-error` Notification
 
 ## 6. Built-in workflow actions
 
-Five built-in actions ship in the core: `workflow.run`, `notification.create` (the tickets' `notify`), `task.create`, `task.update`, `task.query`. Their parameters, outputs and general notes are the catalogue in [./07-workflows.md](./07-workflows.md) §8; each is a thin call into the same service layer the public API exposes ([ADR 0013](../adr/0013-agents-operate-hydra-through-the-public-api.md)). Triage-specific notes only:
+Five built-in actions ship in the core: `workflow.run`, `notification.create` (the tickets' `notify`), `task.create`, `task.update`, `task.query`. Their parameters, outputs and general notes are the catalogue in [./07-workflows.md](./07-workflows.md) §8; each is a thin call into the same service layer the public API exposes ([ADR 0013](../adr/0013-agents-operate-hercule-through-the-public-api.md)). Triage-specific notes only:
 
 - `workflow.run` is fire-and-forget: it starts a run of another workflow and returns `{ runId }` without waiting or routing on the child's output (that is the post-v1 sub-workflow step). It is what a bound action "Start *X*" and the scheduled-tasks one-step shortcut both reduce to.
 - `notification.create` produces the Notification record of Section 7.1 with `producer = { type: "run", runId, stepId }`; the step's bound actions are the run's proposal to the user (Section 7.4).
 - `task.create` from a triage graph carries `{eventId}` provenance for every source event and `{ref}` for every external ref, so "made from" is complete without a later enrichment pass.
 - `task.update` is how the guard path attaches a duplicate signal: append provenance, optionally edit the description. Every call fires one `task.updated` event, provenance-only appends included.
-- `task.query` matches by exact identity only (provenance refs, labels, status, project); graphs route on `size(steps.<id>.output.items)`. The same `TaskFilter` shape `hydra task search` uses ([./09-tasks.md](./09-tasks.md)).
+- `task.query` matches by exact identity only (provenance refs, labels, status, project); graphs route on `size(steps.<id>.output.items)`. The same `TaskFilter` shape `hercule task search` uses ([./09-tasks.md](./09-tasks.md)).
 
 An action failing fails the run; actions never redirect ([./07-workflows.md](./07-workflows.md)).
 
@@ -218,7 +218,7 @@ interface Resolution {
 | Core internals | direct service call | breaker tripped, run failed, runner unreachable, update available ([./15-packaging-and-operations.md](./15-packaging-and-operations.md)), plugin error, trigger filter error, permission request (Section 7.6) |
 | Workflow `notification.create` step | built-in action (Section 6) | per-event triage graphs, "PR ready, click to merge" |
 | Plugins | requestable `notifications` plugin capability ([./05-plugins.md](./05-plugins.md)) | Gmail OAuth token expiring |
-| Sessions | `notification.create` (`hydra notification create`) under the `notification` grant | the shipped Triage agent's proposals, offers, FYIs and questions; an assistant raising something for the user |
+| Sessions | `notification.create` (`hercule notification create`) under the `notification` grant | the shipped Triage agent's proposals, offers, FYIs and questions; an assistant raising something for the user |
 
 All four land in the same record through the same service-layer operation.
 
@@ -305,7 +305,7 @@ Answered elsewhere (`decided`, `actionId` = the answer whose operation matches, 
 |---|---|---|
 | Tool approval (`session.respond`) | the session view | the request is answered from any surface |
 | Permission Request (`permission.decide`) | the session view, Settings > Permission profiles | the request is decided from any surface |
-| Breaker tripped (`trigger.resume`) | the Workflows screen, `hydra trigger resume` | the trigger is resumed from any surface |
+| Breaker tripped (`trigger.resume`) | the Workflows screen, `hercule trigger resume` | the trigger is resumed from any surface |
 
 The core implements this for its own kinds by resolving the notification inside the same service operation that answers the question; nothing polls. Sinks get `resolved()` exactly as for a click.
 
@@ -313,7 +313,7 @@ Withdrawn (`withdrawn`, `reason` one line):
 
 - **Core**: the subject is gone - the session ended before its approval was answered, the trigger or workflow was deleted, the runner was retired while "unreachable" was open. Same hook as above, in the operation that removes the subject.
 - **Plugins**: `withdraw(notificationId, reason)` on the `notifications` capability ([./05-plugins.md](./05-plugins.md) section 11) - "token refreshed", "connection reconnected".
-- **Sessions**: `notification.withdraw { notificationId, reason }` (`hydra notification withdraw`) - an agent whose question the user answered by typing in the session withdraws its own question.
+- **Sessions**: `notification.withdraw { notificationId, reason }` (`hercule notification withdraw`) - an agent whose question the user answered by typing in the session withdraws its own question.
 - Both non-core producers may withdraw **only notifications they produced** (`producer` match); anything else is refused. Runs cannot withdraw: their notifications are their message to the user, and the run has ended.
 
 Withdrawal is the *only* mutation a producer has; updating a notification in place does not exist.
@@ -383,7 +383,7 @@ ADRs:
 - [ADR 0009 - All events flow through one persisted pipeline](../adr/0009-all-events-flow-through-one-persisted-pipeline.md)
 - [ADR 0011 - Triage is a workflow pattern inside core-enforced bounds](../adr/0011-triage-is-a-workflow-pattern-inside-core-enforced-bounds.md)
 - [ADR 0012 - Notifications are core-routed; sinks are dumb](../adr/0012-notifications-are-core-routed-sinks-are-dumb.md)
-- [ADR 0013 - Agents operate Hydra through the public API](../adr/0013-agents-operate-hydra-through-the-public-api.md)
+- [ADR 0013 - Agents operate Hercule through the public API](../adr/0013-agents-operate-hercule-through-the-public-api.md)
 - [ADR 0019 - The task model is thin; workflows own task semantics](../adr/0019-the-task-model-is-thin-workflows-own-task-semantics.md)
 - [ADR 0022 - Proposing is not doing](../adr/0022-proposing-is-not-doing.md)
 - [ADR 0027 - A decision resolves when its question is answered, wherever](../adr/0027-a-decision-resolves-when-its-question-is-answered-wherever.md)

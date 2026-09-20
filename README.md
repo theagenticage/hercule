@@ -1,6 +1,6 @@
-# Hydra
+# Hercule
 
-A self-hosted agent orchestration platform. One always-on **controller** holds all state and makes every orchestration decision; **runners** on any number of machines host agent sessions driven by interactive coding harnesses (Claude Code, Codex, pi); everything else - the web app, the `hydra` CLI, and the agents themselves - is a client of one public API.
+A self-hosted agent orchestration platform. One always-on **controller** holds all state and makes every orchestration decision; **runners** on any number of machines host agent sessions driven by interactive coding harnesses (Claude Code, Codex, pi); everything else - the web app, the `hercule` CLI, and the agents themselves - is a client of one public API.
 
 Five features define v1:
 
@@ -12,7 +12,7 @@ Five features define v1:
 
 The value center is **Intake**: agents triage, group, and enrich incoming signals into prepared Proposals before the user sees them, so decisions are made on high-value material rather than raw input.
 
-Hydra is the successor to agentick (Python), built from scratch in TypeScript. Nothing is imported.
+Hercule is the successor to agentick (Python), built from scratch in TypeScript. Nothing is imported.
 
 ## Status
 
@@ -32,6 +32,6 @@ Start with [the overview](docs/spec/01-overview-and-scope.md): what ships, what 
 
 ## Tech
 
-TypeScript throughout, one repository. The controller and runner are written on [Effect 4](https://effect.website) with Effect Schema as the contract language ([ADR 0031](docs/adr/0031-the-backend-is-written-on-effect.md)); state lives in one SQLite database ([ADR 0004](docs/adr/0004-controller-state-lives-in-one-sqlite-database.md)); everything ships as one self-contained Bun binary ([ADR 0018](docs/adr/0018-hydra-ships-as-one-self-contained-binary.md)). The web app is a static SPA and a pure client of the public API ([ADR 0017](docs/adr/0017-the-web-app-is-a-static-pure-client-of-the-public-api.md)).
+TypeScript throughout, one repository. The controller and runner are written on [Effect 4](https://effect.website) with Effect Schema as the contract language ([ADR 0031](docs/adr/0031-the-backend-is-written-on-effect.md)); state lives in one SQLite database ([ADR 0004](docs/adr/0004-controller-state-lives-in-one-sqlite-database.md)); everything ships as one self-contained Bun binary ([ADR 0018](docs/adr/0018-hercule-ships-as-one-self-contained-binary.md)). The web app is a static SPA and a pure client of the public API ([ADR 0017](docs/adr/0017-the-web-app-is-a-static-pure-client-of-the-public-api.md)).
 
 Research findings land on `research/*` branches under `research/`; prototype code on `prototype/*` branches.

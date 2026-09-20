@@ -1,12 +1,12 @@
-# Hydra - agent instructions
+# Hercule - agent instructions
 
-Hydra is a self-hosted agent orchestration platform: one always-on controller, runners that host agent sessions, event-triggered workflows, and assistants with memory bound to chat channels. The product is called **Hydra**; "agentick" and "agentick-next" are retired names - never use them in code, docs, commits, or issues.
+Hercule is a self-hosted agent orchestration platform: one always-on controller, runners that host agent sessions, event-triggered workflows, and assistants with memory bound to chat channels. The product is called **Hercule**; "agentick" and "agentick-next" are retired names - never use them in code, docs, commits, or issues.
 
 **Status: implementing v1 from an assembled spec.** The spec is normative. Your job is to build what it says, as simply as possible, and to surface conflicts instead of resolving them silently.
 
 ## The system in one breath
 
-Three roles ship in one self-contained Bun binary: the **controller** (always-on brain; all state in one SQLite database; receives every event, matches triggers, interprets execution plans, places sessions, serves the public API and the web app), **runners** (daemons that dial the controller over one WebSocket and host agent sessions as bare processes in workspaces), and **clients** (the static web app, the `hydra` CLI, and the agents themselves - all clients of the same public API). Channels, event sources, providers, and workflow actions are all built internally as plugins. Work enters as events, is triaged by agents into Tasks and Proposals before the user sees it, and is executed by workflows whose runs freeze an immutable execution plan.
+Three roles ship in one self-contained Bun binary: the **controller** (always-on brain; all state in one SQLite database; receives every event, matches triggers, interprets execution plans, places sessions, serves the public API and the web app), **runners** (daemons that dial the controller over one WebSocket and host agent sessions as bare processes in workspaces), and **clients** (the static web app, the `hercule` CLI, and the agents themselves - all clients of the same public API). Channels, event sources, providers, and workflow actions are all built internally as plugins. Work enters as events, is triaged by agents into Tasks and Proposals before the user sees it, and is executed by workflows whose runs freeze an immutable execution plan.
 
 ## Read this first, per task
 
@@ -40,7 +40,7 @@ The test: would a senior engineer call this overcomplicated? Then it is.
 3. A name is read without the file, the folder or the call site. Bare nouns, bare adjectives or gerunds, and nicknames a comment invented fail this. `one`, `said`, `deepest`, `ends`, `normalizing` are not function names.
 4. One concept has one spelling in every package it crosses. The owner of a shared contract names it once; callers import that name and never alias it.
 5. A name stays true when the mechanism behind it changes.
-6. The product name never appears inside an identifier. `endedBySystem`, not `endedByHydra`: the product can be renamed, and the code should not care.
+6. The product name never appears inside an identifier. `endedBySystem`, not `endedByHercule`: the product can be renamed, and the code should not care.
 
 **Comments explain why, in Simplified Technical English.** Write comments, docstrings and user-facing messages in the style of ASD-STE100 (Simplified Technical English): short sentences, one idea per sentence, active voice, the same word for the same thing every time, no pronoun whose referent is not in the same sentence, no figures of speech, no literary ellipsis. A comment says *why* the code is the way it is; the code says what it does. A comment stands alone: a reader one year from now, human or agent, must understand it without the spec, the plan, the ticket or the review round that produced it. Never write "D-21:" or "per F-3" as the explanation. Citing a spec section is fine in addition to the explanation, never instead of it. A message that refuses a request says what was wrong, why, and what the caller should do instead.
 
@@ -61,11 +61,11 @@ These come from the spec and ADRs; restated here because violating them is expen
 - **The web app writes no Effect code.** React components hold no domain logic; `client-core` wraps the derived clients into promise functions. (ADR 0017, ADR 0031)
 - **One SQLite database; transactions are ambient** (`withTransaction`). A transaction wraps one operation's write set and never spans a wait on anything outside the database. (ADR 0004, ADR 0031)
 - **Every mutation is stamped with an actor** (`user` or `session:<id>`). Widened later, never restructured.
-- **No repo-local Hydra config.** The controller's state is the single source of truth; repositories hold no Hydra configuration.
+- **No repo-local Hercule config.** The controller's state is the single source of truth; repositories hold no Hercule configuration.
 - **Never edit generated files by hand** (derived clients, OpenAPI documents, lockfiles).
 - **Every operation has a CLI row.** An operation added to `packages/contract` lands its row in the CLI table beside the operation table in the same change: spelling, purpose, examples and a line per field, or `hidden: true` with the reason. The row type and the tree tests refuse a contract without it. (Spec 11 §6.3)
 - **Never silently substitute behaviour.** Access-mode fallback, trigger pauses, dropped events: the system tells the user; so do you.
-- **Never touch `~/.hydra`.** That is the user's live Hydra Home: its database, credentials, runner state and backups. Any run you start (a proof run, an e2e check, a migration try-out, a `hydra` command that writes) uses a throwaway home: `HYDRA_HOME=<scratch dir>` or `--home <scratch dir>`, created for that run and deleted after. Reading `~/.hydra/config.toml` to learn a port is fine; running a controller, runner, or migration against it is not, even when you believe the change is additive. A migration edited in place is the standing example: the live database already ran the old version and would break on the new one.
+- **Never touch `~/.hercule`.** That is the user's live Hercule Home: its database, credentials, runner state and backups. Any run you start (a proof run, an e2e check, a migration try-out, a `hercule` command that writes) uses a throwaway home: `HERCULE_HOME=<scratch dir>` or `--home <scratch dir>`, created for that run and deleted after. Reading `~/.hercule/config.toml` to learn a port is fine; running a controller, runner, or migration against it is not, even when you believe the change is additive. A migration edited in place is the standing example: the live database already ran the old version and would break on the new one.
 - **Never kill processes by pattern.** `pkill -f vite`, `pkill -f node`, `killall bun` and the like reach every worktree and every session on this machine, not just yours; another agent's dev server, controller or test run dies with no trace of why. Stop only what you started, by the PID you captured when you started it (or the port you bound), and leave anything you did not start alone.
 
 ## Working conventions
@@ -81,10 +81,10 @@ One pnpm workspace. Every package is `@hercule/*`, `"type": "module"`, and expor
 | Path | Package | What lives here |
 |---|---|---|
 | `packages/hercule` | `@hercule/hercule` | The dispatcher. Reads `argv` and hands off to a role; the single `bun build --compile` entrypoint (`src/main.ts`) |
-| `apps/controller` | `@hercule/controller` | The controller role (`hydra serve`) |
-| `apps/runner` | `@hercule/runner` | The runner role (`hydra runner`). Its import graph must never reach the controller, the DB engine, the plugin host, or the web bundle |
+| `apps/controller` | `@hercule/controller` | The controller role (`hercule serve`) |
+| `apps/runner` | `@hercule/runner` | The runner role (`hercule runner`). Its import graph must never reach the controller, the DB engine, the plugin host, or the web bundle |
 | `packages/cli` | `@hercule/cli` | The CLI role. HTTP only |
-| `packages/home` | `@hercule/home` | The Hydra Home: the global options that locate it, the layout inside it, and the build-time version (`@hercule/home/version`). A leaf every role links |
+| `packages/home` | `@hercule/home` | The Hercule Home: the global options that locate it, the layout inside it, and the build-time version (`@hercule/home/version`). A leaf every role links |
 | `packages/contract` | `@hercule/contract` | The public API contract in Effect Schema |
 | `packages/protocol` | `@hercule/protocol` | The controller-runner WebSocket protocol in Effect Schema |
 | `packages/client-core` | `@hercule/client-core` | The client library. The only client package that writes Effect code |
@@ -105,7 +105,7 @@ Source is organized **by domain**, not by type: one folder per domain, named wit
 #### Web app layout
 
 1. One screen is one route file under `apps/web/src/routes/`, exporting `Route` with `staticData: { title }`; it splits into `routes/<screen>/-<part>.tsx` only past ~150 lines.
-2. Screens import presentation from `@hercule/ui` (generic) or `apps/web/src/screens/` (knows Hydra), never from `shell/`; the layout routes `_shell.tsx` and `_shell/settings.tsx` are the exemption, because mounting the shell is their job - eslint enforces this.
+2. Screens import presentation from `@hercule/ui` (generic) or `apps/web/src/screens/` (knows Hercule), never from `shell/`; the layout routes `_shell.tsx` and `_shell/settings.tsx` are the exemption, because mounting the shell is their job - eslint enforces this.
 3. A `-` prefixed route file is imported only as `./-<name>` from its own folder - eslint enforces this.
 4. `apps/web/src/app/` is wiring only: router, context, queries, entry guard, form, testing. Nothing that renders a screen.
 5. Reads are `queryOptions`, writes are `useMutation`; no component hand-rolls fetch state.

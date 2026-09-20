@@ -1,4 +1,4 @@
-# Hydra design language
+# Hercule design language
 
 Pinned by [ticket #33](https://github.com/rogierpennink/hydra/issues/33) (2026-08-26).
 **All later UI prototypes and the v1 web app must be built in this language.**
@@ -31,7 +31,7 @@ and mean exactly one thing each:
 | Failed | `#a34e46` | `#cf7b71` |
 | Live / running | `#48717f` | `#7fa8b8` |
 | Done (the ✓ glyph) | `#48745a` | `#7fae8e` |
-| Project dot · hydra | `#7d7ab0` | `#9490c9` |
+| Project dot · hercule | `#7d7ab0` | `#9490c9` |
 | Project dot · ops | `#a67f92` | `#bd93a8` |
 
 Attention-soft (rare tinted background, e.g. warning badges): `rgba(138,97,22,0.09)` light,
@@ -77,7 +77,7 @@ surface plus a faint white inner top highlight - never a color wash.
 
 ## Typography
 
-*(Pinned 2026-09-04, [#58](https://github.com/rogierpennink/hydra/issues/58).)* **Both faces are self-hosted**: the `woff2` files ship in `packages/ui` and are served from the controller's own origin, never fetched from Google Fonts at runtime. Hydra runs on a LAN and on machines with no internet, the served bundle's CSP allows `font-src 'self'` only ([spec/14](./spec/14-web-app.md) §Auth in the client), and a font request to a third party would tell that party who is using Hydra and when. Google Fonts is where the faces come from, not where the browser gets them. The files live in `packages/ui/src/fonts` with their OFL licences beside them: Onest as one variable file per subset covering 400-600, IBM Plex Mono as static 400 and 500.
+*(Pinned 2026-09-04, [#58](https://github.com/rogierpennink/hydra/issues/58).)* **Both faces are self-hosted**: the `woff2` files ship in `packages/ui` and are served from the controller's own origin, never fetched from Google Fonts at runtime. Hercule runs on a LAN and on machines with no internet, the served bundle's CSP allows `font-src 'self'` only ([spec/14](./spec/14-web-app.md) §Auth in the client), and a font request to a third party would tell that party who is using Hercule and when. Google Fonts is where the faces come from, not where the browser gets them. The files live in `packages/ui/src/fonts` with their OFL licences beside them: Onest as one variable file per subset covering 400-600, IBM Plex Mono as static 400 and 500.
 
 - **UI face: Onest** (Google Fonts), weights 400/500/600. Chosen for calm rhythm and
   slightly narrow letterforms that ease dense monitoring rows.
@@ -104,7 +104,7 @@ The five monitoring axes (from #20's reaction) and their pinned encodings:
   ~0.66 opacity. Urgent needs-you titles step up to 15px.
 - **Outcome:** glyphs - muted ✓ for success, fail-colored ✕ for failure; failed state
   words in the fail hue.
-- **Lineage:** plain-text breadcrumbs ("hydra · Fix flaky webhook tests"); small square
+- **Lineage:** plain-text breadcrumbs ("hercule · Fix flaky webhook tests"); small square
   project identity dots on group headers only, never per row.
 
 ## Structure conventions
@@ -202,7 +202,7 @@ check-in are **separate views** for now; merging is a post-dogfooding question.
   is a condensed row: title · priority bars · system marks · "→ suggested action" · age.
 - **Made from** is mandatory on every proposal: one entry per source system with the
   system's monochrome mark. Marks show the *system* (GitHub, Gmail, Sentry, Tailscale,
-  Hetzner, Dependabot, cron, Hydra itself); the connection that carried it is a mono
+  Hetzner, Dependabot, cron, Hercule itself); the connection that carried it is a mono
   suffix. Brand marks are 12px monochrome `currentColor` paths - never brand colours.
 - **Detail lives in a drawer**, never a page or a permanent split: proposal detail (Next +
   actions · Why + links · Made from as signal cards with the source excerpt and "Open in
@@ -238,7 +238,7 @@ below the card. Chat sinks use the same hierarchy: "label · describe", descript
 subtext. Owner: spec 14 §The check-in view, spec 12 §11.6.
 
 Amended 2026-09-01 by ticket #51 (Prototype: the app shell and navigation): the **app shell** is one
-sidebar with two faces behind a segmented switch (Threads: the t3-code list; Hydra: the orchestration
+sidebar with two faces behind a segmented switch (Threads: the t3-code list; Hercule: the orchestration
 nav), thread rows at the **meta** density (a second faint mono line), the **pulse** as one summary line
 at the sidebar foot above Marks that expands on click, a Codex / t3-shaped thread surface with
 "Worked for" dividers and docked permission requests, and the **composer as the thread's

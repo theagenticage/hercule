@@ -48,7 +48,7 @@ interface Task {
 
 There is no assignee, no subtask, no task-to-task dependency, and no comment thread (see [Not in v1](#not-in-v1)).
 
-Ids are UUIDv7 like every Hydra-owned entity; format, storage and the short form are owned by [./04](./04-state-store.md).
+Ids are UUIDv7 like every Hercule-owned entity; format, storage and the short form are owned by [./04](./04-state-store.md).
 
 ## Status axis and lifecycle
 
@@ -106,7 +106,7 @@ Provenance is what lets a duplicate signal find its existing task, and what the 
 
 ### External Ref canonical form
 
-An External Ref is a fully-qualified canonical identifier for a thing outside Hydra. Examples: `github:issue:owner/repo#42`, `gmail:thread:<id>`, `sentry:issue:123`.
+An External Ref is a fully-qualified canonical identifier for a thing outside Hercule. Examples: `github:issue:owner/repo#42`, `gmail:thread:<id>`, `sentry:issue:123`.
 
 - The plugin that defines the ref type owns canonicalization. Two events about the same external thing MUST produce byte-identical refs.
 - The Connection an event arrived through is **not** part of the identity. The same GitHub issue seen through two connections yields one ref.
@@ -117,7 +117,7 @@ For systems with no plugin in v1 (Sentry, Tailscale, Hetzner notices arriving th
 
 ### What `task.query` matches
 
-`task.query` performs exact identity matching only: a provenance ref (string equality on the canonical form), labels, status, and `projectId`. It never matches content. An agent's `hydra task search` adds full text on top of the same filters (see [Search](#search)).
+`task.query` performs exact identity matching only: a provenance ref (string equality on the canonical form), labels, status, and `projectId`. It never matches content. An agent's `hercule task search` adds full text on top of the same filters (see [Search](#search)).
 
 ## Relations: project, runs, sessions
 
@@ -172,7 +172,7 @@ There are no finer-grained kinds (`task.done`, `task.labelled`); CEL over `chang
 
 ## Search
 
-One operation, `task.query`, serves every caller: the built-in action in agent-less graphs (the guard-before-agent step), agents deciding their own queries through `hydra task query`, and the web app. Its input is the contract's `TaskFilter` ([./11](./11-public-api-and-agent-surface.md) section 2):
+One operation, `task.query`, serves every caller: the built-in action in agent-less graphs (the guard-before-agent step), agents deciding their own queries through `hercule task query`, and the web app. Its input is the contract's `TaskFilter` ([./11](./11-public-api-and-agent-surface.md) section 2):
 
 | Field | Matching |
 |---|---|
@@ -195,15 +195,15 @@ Delete is a public-API operation ([./11](./11-public-api-and-agent-surface.md)).
 
 ## API operations an agent uses
 
-Task operations are ordinary public-API operations defined in the service layer and contract package, reachable over HTTP and through the `hydra` CLI ([./11](./11-public-api-and-agent-surface.md), [ADR 0013](../adr/0013-agents-operate-hydra-through-the-public-api.md)). Available to any permission profile granting the `task` family; the shipped profiles and their verbs are in [./13](./13-security.md) (both `assistant` and `worker` grant task read/create/update).
+Task operations are ordinary public-API operations defined in the service layer and contract package, reachable over HTTP and through the `hercule` CLI ([./11](./11-public-api-and-agent-surface.md), [ADR 0013](../adr/0013-agents-operate-hercule-through-the-public-api.md)). Available to any permission profile granting the `task` family; the shipped profiles and their verbs are in [./13](./13-security.md) (both `assistant` and `worker` grant task read/create/update).
 
 | CLI | Operation |
 |---|---|
-| `hydra task query` | structured filters + FTS, returns matching tasks; no filters lists all |
-| `hydra task read <id>` | one task, full row including provenance |
-| `hydra task create` | creates a task; emits `task.created` |
-| `hydra task update <id>` | changes any writable field, adds/removes labels, appends provenance; emits one `task.updated` |
-| `hydra task delete <id>` | soft delete ([Delete](#delete)); grant `task.delete` |
+| `hercule task query` | structured filters + FTS, returns matching tasks; no filters lists all |
+| `hercule task read <id>` | one task, full row including provenance |
+| `hercule task create` | creates a task; emits `task.created` |
+| `hercule task update <id>` | changes any writable field, adds/removes labels, appends provenance; emits one `task.updated` |
+| `hercule task delete <id>` | soft delete ([Delete](#delete)); grant `task.delete` |
 
 Every mutation is stamped with the calling actor (`user`, `session:<id>`, `run:<id>` or `plugin:<id>`) on the event envelope; a provenance entry appended by the call carries the same actor. All operations return fast; nothing blocks.
 
@@ -242,4 +242,4 @@ Kanban-style groupings, columns, swimlanes, and the Intake tiers are presentatio
 - [Security & secrets model](https://github.com/rogierpennink/hydra/issues/18) (task grant family, shipped profiles)
 - [ADR 0019 - The task model is thin; workflows own task semantics](../adr/0019-the-task-model-is-thin-workflows-own-task-semantics.md)
 - [ADR 0011 - Triage is a workflow pattern inside core-enforced bounds](../adr/0011-triage-is-a-workflow-pattern-inside-core-enforced-bounds.md)
-- [ADR 0013 - Agents operate Hydra through the public API](../adr/0013-agents-operate-hydra-through-the-public-api.md)
+- [ADR 0013 - Agents operate Hercule through the public API](../adr/0013-agents-operate-hercule-through-the-public-api.md)
