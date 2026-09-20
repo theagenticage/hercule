@@ -164,7 +164,7 @@ const make = Effect.gen(function* () {
 export class SettingsOperations extends Context.Service<
   SettingsOperations,
   Effect.Success<typeof make>
->()("hydra/controller/settings/SettingsOperations") {}
+>()("hercule/controller/settings/SettingsOperations") {}
 
 export const SettingsOperationsLayer: Layer.Layer<
   SettingsOperations,

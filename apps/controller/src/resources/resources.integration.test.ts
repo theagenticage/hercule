@@ -281,10 +281,10 @@ describe("resource.create", () => {
 describe("resource.query and resource.read", () => {
   it("filters by kind and by project, and reads one back whole", async () => {
     await withResources(async (arranged) => {
-      const hydra = await project(arranged, "Hydra");
+      const hercule = await project(arranged, "Hercule");
       const web = await repo(arranged, {
         remote: "https://github.com/acme/web",
-        projectIds: [hydra],
+        projectIds: [hercule],
         setupCommand: "pnpm install",
         workspaceInclude: true,
       });
@@ -299,7 +299,7 @@ describe("resource.query and resource.read", () => {
       expect((await queryResources(arranged, "?kind=folder")).map((one) => one.id)).toEqual([
         notes.id,
       ]);
-      expect((await queryResources(arranged, `?projectId=${hydra}`)).map((one) => one.id)).toEqual([
+      expect((await queryResources(arranged, `?projectId=${hercule}`)).map((one) => one.id)).toEqual([
         web.id,
       ]);
 
@@ -311,7 +311,7 @@ describe("resource.query and resource.read", () => {
         setupCommand: "pnpm install",
         workspaceInclude: true,
       });
-      expect(read.projectIds).toEqual([hydra]);
+      expect(read.projectIds).toEqual([hercule]);
     });
   });
 });
@@ -340,10 +340,10 @@ describe("resource.update", () => {
 
   it("changes the connection, the setup command, the include flag and the projects", async () => {
     await withResources(async (arranged) => {
-      const hydra = await project(arranged, "Hydra");
+      const hercule = await project(arranged, "Hercule");
       const side = await project(arranged, "Side");
       const github = await connection(arranged, "github/github", { pat: PAT });
-      const web = await repo(arranged, { projectIds: [hydra] });
+      const web = await repo(arranged, { projectIds: [hercule] });
 
       const response = await patchResource(arranged, web.id, {
         connectionId: github,
@@ -362,7 +362,7 @@ describe("resource.update", () => {
       // The join rows follow the list it was given: the old project no longer
       // finds it, the new one does.
       expect(read.projectIds).toEqual([side]);
-      expect(await queryResources(arranged, `?projectId=${hydra}`)).toEqual([]);
+      expect(await queryResources(arranged, `?projectId=${hercule}`)).toEqual([]);
       expect((await queryResources(arranged, `?projectId=${side}`)).map((one) => one.id)).toEqual([
         web.id,
       ]);
@@ -383,8 +383,8 @@ describe("resource.update", () => {
 describe("resource.delete", () => {
   it("deletes the row and its project joins, and appends an audit row", async () => {
     await withResources(async (arranged) => {
-      const hydra = await project(arranged, "Hydra");
-      const web = await repo(arranged, { projectIds: [hydra] });
+      const hercule = await project(arranged, "Hercule");
+      const web = await repo(arranged, { projectIds: [hercule] });
 
       const response = await del(
         arranged.harness.base,
@@ -394,7 +394,7 @@ describe("resource.delete", () => {
       expect([200, 204], await response.clone().text()).toContain(response.status);
 
       expect(await queryResources(arranged)).toEqual([]);
-      expect(await queryResources(arranged, `?projectId=${hydra}`)).toEqual([]);
+      expect(await queryResources(arranged, `?projectId=${hercule}`)).toEqual([]);
       const gone = await get(arranged.harness.base, `/api/v1/resources/${web.id}`, arranged.token);
       expect(await codeOf(gone)).toBe("not_found");
 

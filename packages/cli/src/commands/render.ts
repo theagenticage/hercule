@@ -51,7 +51,7 @@ const table = (rows: ReadonlyArray<Record<string, unknown>>): ReadonlyArray<stri
 
 /**
  * A nested object becomes dotted keys rather than a JSON blob, so
- * `hydra settings read` reads as the flat key set it is. An array stays a cell:
+ * `hercule settings read` reads as the flat key set it is. An array stays a cell:
  * its elements are values, not sub-keys.
  */
 const flatten = (
@@ -110,7 +110,7 @@ const TRANSCRIPT_FIELD = 100;
 /**
  * One value on a transcript line: on one line, and short. A coalesced
  * `content.delta` carries a whole assistant message or a screenful of command
- * output, and a transcript is read for its shape - `hydra transcript read
+ * output, and a transcript is read for its shape - `hercule transcript read
  * --json` is what hands back the text in full.
  */
 const brief = (value: unknown): string => {
@@ -185,7 +185,7 @@ export const renderHuman = (outcome: Outcome, command: Command): ReadonlyArray<s
     // session wants to watch it, and subscriptions do not exist yet, so what it
     // is pointed at is the transcript it can already read.
     if (command.id === "session.spawn") {
-      lines.push("", `read what it says with \`hydra transcript read ${cell(record["id"])}\``);
+      lines.push("", `read what it says with \`hercule transcript read ${cell(record["id"])}\``);
     }
     return lines;
   }

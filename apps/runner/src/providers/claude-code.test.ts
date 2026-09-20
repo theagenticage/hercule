@@ -27,19 +27,19 @@ import { claudeCodeAdapter, type ClaudeSeam } from "./claude-code";
 import { PROBE_DEADLINE } from "./probe";
 import type { ProviderAdapter, ProviderRunnerContext } from "./index";
 
-/** What the runner resolved once, at start, for hydra-as-a-tool. */
-const HYDRA_TOOL = {
-  skill: "# hydra\n\nCall `hydra --help`.\n",
-  claudePluginDir: "/var/hydra/runner/storage/claude-plugin",
+/** What the runner resolved once, at start, for hercule-as-a-tool. */
+const HERCULE_TOOL = {
+  skill: "# hercule\n\nCall `hercule --help`.\n",
+  claudePluginDir: "/var/hercule/runner/storage/claude-plugin",
 };
 
 const CONTEXT: ProviderRunnerContext = {
   cwd: null,
-  home: "/var/hydra/runner/providers/0199e0e7-0000-7000-8000-00000000000a",
+  home: "/var/hercule/runner/providers/0199e0e7-0000-7000-8000-00000000000a",
   binary: "/usr/local/bin/claude",
   env: { PATH: "/usr/local/bin:/usr/bin" },
   secrets: {},
-  hydraTool: HYDRA_TOOL,
+  herculeTool: HERCULE_TOOL,
 };
 
 const AUTHENTICATED = {
@@ -391,7 +391,7 @@ const SPEC: SessionSpec = {
   timeouts: { inactivityMs: 1_800_000, absoluteMs: 28_800_000 },
 };
 
-const WORKING: ProviderRunnerContext = { ...CONTEXT, cwd: "/var/hydra/runner/scratch/one" };
+const WORKING: ProviderRunnerContext = { ...CONTEXT, cwd: "/var/hercule/runner/scratch/one" };
 
 /** The harness end of a session, driven by the test one message at a time. */
 interface Driving {
@@ -581,7 +581,7 @@ describe("a Claude Code session", () => {
 
     expect(binding.sessionId).toBe(SESSION);
     expect(binding.instanceId).toBe(SPEC.instanceId);
-    // Hydra names the native session rather than waiting to be told: in
+    // Hercule names the native session rather than waiting to be told: in
     // streaming-input mode the CLI says nothing at all until a first turn.
     expect(binding.nativeSessionId).not.toBe(SESSION);
     expect(run.options[0]?.sessionId).toBe(binding.nativeSessionId);
@@ -611,17 +611,17 @@ describe("a Claude Code session", () => {
     expect(Object.keys(options?.env ?? {})).not.toContain("HOME");
   });
 
-  it("loads hydra-as-a-tool as a local plugin, and no settings of the machine's", async () => {
+  it("loads hercule-as-a-tool as a local plugin, and no settings of the machine's", async () => {
     const run = driving();
     await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, WORKING));
 
     const [options] = run.options;
-    // The one plugin Hydra owns, loaded from the directory the runner wrote it
+    // The one plugin Hercule owns, loaded from the directory the runner wrote it
     // into, so nothing is copied per session and a Thread's own `.claude/` is
     // never collided with (spec 06 section 9.3).
-    expect(options?.plugins).toEqual([{ type: "local", path: HYDRA_TOOL.claudePluginDir }]);
+    expect(options?.plugins).toEqual([{ type: "local", path: HERCULE_TOOL.claudePluginDir }]);
     // Explicitly beside it: the skill has to be discovered with no setting
-    // source at all, which is what makes this the Hydra-owned channel rather
+    // source at all, which is what makes this the Hercule-owned channel rather
     // than whatever files happen to sit on this runner (spec 06 section 10.1).
     expect(options?.settingSources).toEqual([]);
   });
@@ -1431,7 +1431,7 @@ describe("what kind of question each tool is", () => {
           question: "Which database should this use?",
           header: "Database",
           options: [
-            { label: "SQLite", description: "the one Hydra ships" },
+            { label: "SQLite", description: "the one Hercule ships" },
             { label: "Postgres", description: "somebody else's server" },
           ],
           multiSelect: false,
@@ -1448,7 +1448,7 @@ describe("what kind of question each tool is", () => {
         question: "Which database should this use?",
         header: "Database",
         options: [
-          { label: "SQLite", description: "the one Hydra ships" },
+          { label: "SQLite", description: "the one Hercule ships" },
           { label: "Postgres", description: "somebody else's server" },
         ],
         multiSelect: false,

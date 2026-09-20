@@ -183,7 +183,7 @@ const make = Effect.gen(function* () {
 
 /** The event log's reader. */
 export class EventService extends Context.Service<EventService, Effect.Success<typeof make>>()(
-  "hydra/controller/events/EventService",
+  "hercule/controller/events/EventService",
 ) {}
 
 export const EventServiceLayer: Layer.Layer<EventService, never, SqlClient.SqlClient> =

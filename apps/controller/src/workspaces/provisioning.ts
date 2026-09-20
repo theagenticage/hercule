@@ -10,7 +10,7 @@
  * clone, the setup command to run, whether to copy what `.workspaceinclude`
  * lists - is the resource's, so the resource is handed in beside the checkout.
  *
- * No path crosses this boundary. A primary is always a Hydra-managed clone
+ * No path crosses this boundary. A primary is always a Hercule-managed clone
  * under the machine's own storage, so all the machine is ever told is which
  * repository to make it from.
  */

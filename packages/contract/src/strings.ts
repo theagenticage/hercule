@@ -19,7 +19,7 @@ export const atMost = <S extends Schema.Top>(item: S, maximum: number) =>
   Schema.Array(item).check(Schema.isMaxLength(maximum));
 
 /**
- * The shortest password Hydra accepts. There is no brute-force lockout, so on a
+ * The shortest password Hercule accepts. There is no brute-force lockout, so on a
  * LAN bind the password is the whole perimeter, and a one-character one is not
  * a perimeter.
  */

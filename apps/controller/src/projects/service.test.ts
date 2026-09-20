@@ -110,10 +110,10 @@ describe("project.create", () => {
   it("stamps one instant on both timestamps and a canonical id", async () => {
     const project = await run(
       Effect.flatMap(ProjectService, (projects) =>
-        projects.create({ name: "Hydra", description: "The orchestration platform" }),
+        projects.create({ name: "Hercule", description: "The orchestration platform" }),
       ),
     );
-    expect(project).toMatchObject({ name: "Hydra", description: "The orchestration platform" });
+    expect(project).toMatchObject({ name: "Hercule", description: "The orchestration platform" });
     expect(project.id).toMatch(UUID_V7);
     expect(project.createdAt).toMatch(TIMESTAMP);
     expect(project.createdAt).toBe(project.updatedAt);
@@ -215,7 +215,7 @@ describe("projects and resources", () => {
         const sql = yield* SqlClient.SqlClient;
         const projects = yield* ProjectService;
         const tasks = yield* TaskService;
-        const project = yield* projects.create({ name: "Hydra" });
+        const project = yield* projects.create({ name: "Hercule" });
         const task = yield* tasks.create({
           title: "In a project that goes away",
           description: "d",
@@ -245,7 +245,7 @@ describe("the event log", () => {
       Effect.gen(function* () {
         const projects = yield* ProjectService;
         const audit = yield* AuditLog;
-        const project = yield* projects.create({ name: "Hydra", description: "d" });
+        const project = yield* projects.create({ name: "Hercule", description: "d" });
         return { project, entries: yield* audit.listByKind(CREATED) };
       }),
     );
@@ -253,7 +253,7 @@ describe("the event log", () => {
     expect(entries[0]?.actor).toBe("user");
     expect(snapshotOf(entries[0]?.payload ?? {}, project.id)).toMatchObject({
       id: project.id,
-      name: "Hydra",
+      name: "Hercule",
       description: "d",
       createdAt: project.createdAt,
       updatedAt: project.updatedAt,
@@ -340,7 +340,7 @@ describe("project.query", () => {
 
   const five = Effect.gen(function* () {
     const projects = yield* ProjectService;
-    for (const name of ["Docs", "Hydra", "Atlas", "Runner", "Web"]) {
+    for (const name of ["Docs", "Hercule", "Atlas", "Runner", "Web"]) {
       yield* projects.create({ name });
       yield* TestClock.adjust(A_MINUTE);
     }
@@ -359,8 +359,8 @@ describe("project.query", () => {
         };
       }),
     );
-    expect(byDefault).toEqual(["Atlas", "Docs", "Hydra", "Runner", "Web"]);
-    expect(byCreated).toEqual(["Docs", "Hydra", "Atlas", "Runner", "Web"]);
+    expect(byDefault).toEqual(["Atlas", "Docs", "Hercule", "Runner", "Web"]);
+    expect(byCreated).toEqual(["Docs", "Hercule", "Atlas", "Runner", "Web"]);
   });
 
   it("hands every row back exactly once, whatever the page size and order", async () => {
@@ -374,7 +374,7 @@ describe("project.query", () => {
         };
       }),
     );
-    const all = ["Atlas", "Docs", "Hydra", "Runner", "Web"];
+    const all = ["Atlas", "Docs", "Hercule", "Runner", "Web"];
     expect(walks.nameAscending).toEqual(all);
     expect(walks.nameDescending).toEqual([...all].reverse());
     expect(walks.updatedDescending.sort()).toEqual(all);
@@ -407,12 +407,12 @@ describe("what an update leaves alone", () => {
       Effect.gen(function* () {
         const projects = yield* ProjectService;
         const audit = yield* AuditLog;
-        const before = yield* projects.create({ name: "Hydra", description: "d" });
+        const before = yield* projects.create({ name: "Hercule", description: "d" });
         yield* TestClock.adjust(A_MINUTE);
         return {
           empty: yield* Effect.flip(projects.update({ id: before.id })),
           before,
-          after: yield* projects.update({ id: before.id, name: "Hydra", description: "d" }),
+          after: yield* projects.update({ id: before.id, name: "Hercule", description: "d" }),
           entries: yield* audit.listByKind(UPDATED),
         };
       }),
@@ -427,7 +427,7 @@ describe("what an update leaves alone", () => {
       Effect.gen(function* () {
         const projects = yield* ProjectService;
         const audit = yield* AuditLog;
-        const created = yield* projects.create({ name: "Hydra", description: "d" });
+        const created = yield* projects.create({ name: "Hercule", description: "d" });
         yield* TestClock.adjust(A_MINUTE);
         return {
           cleared: yield* projects.update({ id: created.id, description: null }),

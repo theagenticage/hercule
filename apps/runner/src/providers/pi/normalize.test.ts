@@ -395,7 +395,7 @@ describe("how a turn that did not simply finish ends", () => {
       { type: "agent_start" },
       {
         type: "extension_error",
-        extensionPath: "/tmp/hydra-extension.ts",
+        extensionPath: "/tmp/hercule-extension.ts",
         event: "tool_call",
         error: "the approval hook threw",
       },

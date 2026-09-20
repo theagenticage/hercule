@@ -1,5 +1,5 @@
 /**
- * Connections: the external accounts Hydra acts through. The record and its
+ * Connections: the external accounts Hercule acts through. The record and its
  * credentials are core-owned; the types are plugin contributions.
  */
 export { PluginConfigs } from "./plugin-configs";

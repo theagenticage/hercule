@@ -32,18 +32,18 @@ const PROBE_DEADLINE: Duration.Duration = Duration.seconds(20);
 
 /** Tests hand over a deadline they can wait out. */
 export const ProviderProbeDeadline = Context.Reference<Duration.Duration>(
-  "hydra/controller/providers/ProviderProbeDeadline",
+  "hercule/controller/providers/ProviderProbeDeadline",
   { defaultValue: (): Duration.Duration => PROBE_DEADLINE },
 );
 
 /**
- * A login can expire and a harness be upgraded outside Hydra, so an older
+ * A login can expire and a harness be upgraded outside Hercule, so an older
  * snapshot is a guess.
  */
 const PROBE_INTERVAL: Duration.Duration = Duration.hours(1);
 
 export const ProviderProbeInterval = Context.Reference<Duration.Duration>(
-  "hydra/controller/providers/ProviderProbeInterval",
+  "hercule/controller/providers/ProviderProbeInterval",
   { defaultValue: (): Duration.Duration => PROBE_INTERVAL },
 );
 
@@ -189,7 +189,7 @@ const make = Effect.gen(function* () {
 
 /** What asks the fleet about provider instances and keeps what it says. */
 export class ProviderProbes extends Context.Service<ProviderProbes, Effect.Success<typeof make>>()(
-  "hydra/controller/providers/ProviderProbes",
+  "hercule/controller/providers/ProviderProbes",
 ) {}
 
 export const ProviderProbesLayer: Layer.Layer<

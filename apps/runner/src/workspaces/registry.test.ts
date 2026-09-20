@@ -21,7 +21,7 @@ import {
 
 afterAll(cleanTemporaries);
 
-const storage = (): string => temporary("hydra-storage-");
+const storage = (): string => temporary("hercule-storage-");
 
 describe("resolving a workspace", () => {
   it("reads an ephemeral back after a restart, with its checkouts", async () => {
@@ -35,7 +35,7 @@ describe("resolving a workspace", () => {
         workspaceId,
         kind: "ephemeral",
         checkouts: [
-          checkout({ checkoutId, resourceId, remote: remote.url, branch: "hydra/run-1a1a1a1a" }),
+          checkout({ checkoutId, resourceId, remote: remote.url, branch: "hercule/run-1a1a1a1a" }),
         ],
       }),
     );
@@ -66,13 +66,13 @@ describe("resolving a workspace", () => {
             resourceId: id(),
             remote: web.url,
             subdirectory: "web",
-            branch: "hydra/run-2b2b2b2b",
+            branch: "hercule/run-2b2b2b2b",
           }),
           checkout({
             resourceId: id(),
             remote: api.url,
             subdirectory: "api",
-            branch: "hydra/run-2b2b2b2b",
+            branch: "hercule/run-2b2b2b2b",
           }),
         ],
       }),
@@ -88,7 +88,7 @@ describe("resolving a workspace", () => {
     ]);
   });
 
-  // D-20a: a primary is Hydra's own clone under the machine's storage.
+  // D-20a: a primary is Hercule's own clone under the machine's storage.
   it("runs a primary in the clone it made for the repository", async () => {
     const remote = makeRemote();
     const storageDir = storage();
@@ -123,7 +123,7 @@ describe("provisioning a workspace this runner already holds", () => {
     const frame = provisionFrame({
       workspaceId,
       kind: "ephemeral",
-      checkouts: [checkout({ resourceId, remote: remote.url, branch: "hydra/run-3c3c3c3c" })],
+      checkouts: [checkout({ resourceId, remote: remote.url, branch: "hercule/run-3c3c3c3c" })],
     });
     const workspaces = makeWorkspaces({ storageDir });
     const first = await workspaces.provision(frame);
@@ -152,7 +152,7 @@ describe("provisioning a workspace this runner already holds", () => {
     const frame = provisionFrame({
       workspaceId,
       kind: "ephemeral",
-      checkouts: [checkout({ resourceId: id(), remote: remote.url, branch: "hydra/run-1d1d1d1d" })],
+      checkouts: [checkout({ resourceId: id(), remote: remote.url, branch: "hercule/run-1d1d1d1d" })],
     });
     const workspaces = makeWorkspaces({ storageDir });
 
@@ -165,7 +165,7 @@ describe("provisioning a workspace this runner already holds", () => {
     expect(first.status, first.message ?? "").toBe("ready");
     expect(second).toEqual(first);
     const directory = join(storageDir, "workspaces", workspaceId);
-    expect(git(directory, "rev-parse", "--abbrev-ref", "HEAD")).toBe("hydra/run-1d1d1d1d");
+    expect(git(directory, "rev-parse", "--abbrev-ref", "HEAD")).toBe("hercule/run-1d1d1d1d");
   });
 });
 
@@ -177,7 +177,7 @@ describe("a workspace whose directory is gone", () => {
     const frame = provisionFrame({
       workspaceId,
       kind: "ephemeral",
-      checkouts: [checkout({ resourceId: id(), remote: remote.url, branch: "hydra/run-5e5e0000" })],
+      checkouts: [checkout({ resourceId: id(), remote: remote.url, branch: "hercule/run-5e5e0000" })],
     });
     await makeWorkspaces({ storageDir }).provision(frame);
     // Somebody cleaned up their disk, or a temporary directory was swept.

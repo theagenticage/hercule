@@ -2,8 +2,8 @@
  * Making a workspace on this machine: a primary cloned fresh under this
  * machine's own storage, and an ephemeral worktree per repository.
  *
- * Nothing here ever touches a folder the user already has. A primary is Hydra's
- * own clone, in a directory Hydra made, so no directory outside the storage
+ * Nothing here ever touches a folder the user already has. A primary is Hercule's
+ * own clone, in a directory Hercule made, so no directory outside the storage
  * directory is read or written.
  */
 import { cpSync, mkdirSync, readFileSync, rmSync } from "node:fs";
@@ -324,7 +324,7 @@ export const provisionWorkspace = async (
 ): Promise<WorkspaceReport> => {
   // The machine proves itself to the controller as the workspace it is making,
   // for as long as it is making it.
-  const env = { ...substrate.gitEnv, HYDRA_WORKSPACE_PROVISIONING: frame.workspaceId };
+  const env = { ...substrate.gitEnv, HERCULE_WORKSPACE_PROVISIONING: frame.workspaceId };
   if (frame.kind === "ephemeral") return makeEphemeral(substrate, frame, env);
   const one = frame.checkouts[0];
   if (one === undefined) {

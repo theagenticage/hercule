@@ -1,7 +1,7 @@
 /**
  * Password login and logout.
  *
- * Login is the only place in Hydra that checks a password. It hands back an
+ * Login is the only place in Hercule that checks a password. It hands back an
  * opaque 30-day rolling bearer token: every authenticated use pushes the expiry
  * out (`Credentials.renewLoginToken`, called by the transport gate), and logout
  * revokes it server-side.
@@ -144,7 +144,7 @@ const make = Effect.gen(function* () {
 
 /** The auth service. */
 export class Auth extends Context.Service<Auth, Effect.Success<typeof make>>()(
-  "hydra/controller/auth/Auth",
+  "hercule/controller/auth/Auth",
 ) {}
 
 export const AuthLayer: Layer.Layer<

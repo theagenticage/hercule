@@ -5,7 +5,7 @@ import { join } from "node:path";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
-import { homePaths, HydraHome } from "../config";
+import { homePaths, HerculeHome } from "../config";
 import { TestDatabase } from "../db/testing";
 import {
   fileStore,
@@ -21,8 +21,8 @@ let home: string;
 
 const keyFile = () => join(home, "master.key");
 
-const homeLayer = (): Layer.Layer<HydraHome> =>
-  Layer.succeed(HydraHome, HydraHome.of(homePaths(home, join(home, "data"))));
+const homeLayer = (): Layer.Layer<HerculeHome> =>
+  Layer.succeed(HerculeHome, HerculeHome.of(homePaths(home, join(home, "data"))));
 
 /** Never the keychain backend: a test must not write to the developer's login keychain. */
 const build = () =>
@@ -38,7 +38,7 @@ const build = () =>
   );
 
 beforeEach(() => {
-  home = mkdtempSync(join(tmpdir(), "hydra-keys-"));
+  home = mkdtempSync(join(tmpdir(), "hercule-keys-"));
 });
 
 afterEach(() => {
@@ -56,7 +56,7 @@ describe("the master key file", () => {
   });
 
   it("keeps the key another process created between the read and the write", async () => {
-    // The race a second `hydra serve` on an empty home loses: it found no file,
+    // The race a second `hercule serve` on an empty home loses: it found no file,
     // minted, and by the time it wrote, the first boot's key was already there.
     const winner = new Uint8Array(MASTER_KEY_BYTES).fill(3);
     writeFileSync(keyFile(), `${Buffer.from(winner).toString("base64")}\n`, { mode: 0o600 });
@@ -123,7 +123,7 @@ describe("the keychain store", () => {
     const { run, calls } = runner([
       { exitCode: 0, stdout: `${Buffer.from(key).toString("base64")}\n` },
     ]);
-    const found = await Effect.runPromise(keychainStore("/Users/x/.hydra", run).read);
+    const found = await Effect.runPromise(keychainStore("/Users/x/.hercule", run).read);
     expect(found).toEqual(key);
     expect(calls[0]).toEqual([
       "security",
@@ -131,40 +131,40 @@ describe("the keychain store", () => {
       "-s",
       KEYCHAIN_SERVICE,
       "-a",
-      "/Users/x/.hydra",
+      "/Users/x/.hercule",
       "-w",
     ]);
   });
 
   it("reads no key when the item is not in the keychain", async () => {
     const { run } = runner([{ exitCode: 44, stdout: "" }]);
-    expect(await Effect.runPromise(keychainStore("/Users/x/.hydra", run).read)).toBeUndefined();
+    expect(await Effect.runPromise(keychainStore("/Users/x/.hercule", run).read)).toBeUndefined();
   });
 
   it("fails, naming the exit code, when security says anything else", async () => {
     const { run } = runner([{ exitCode: 1, stdout: "" }]);
-    const exit = await Effect.runPromiseExit(keychainStore("/Users/x/.hydra", run).read);
+    const exit = await Effect.runPromiseExit(keychainStore("/Users/x/.hercule", run).read);
     expect(Exit.isFailure(exit)).toBe(true);
     expect(String(exit)).toContain("exited 1");
   });
 
   it("fails when the item does not hold 32 bytes", async () => {
     const { run } = runner([{ exitCode: 0, stdout: "bm90LWEta2V5\n" }]);
-    const exit = await Effect.runPromiseExit(keychainStore("/Users/x/.hydra", run).read);
+    const exit = await Effect.runPromiseExit(keychainStore("/Users/x/.hercule", run).read);
     expect(Exit.isFailure(exit)).toBe(true);
     expect(String(exit)).toContain("32 bytes");
   });
 
   it("adds the item without -U, so an existing one is never overwritten", async () => {
     const { run, calls } = runner([{ exitCode: 0, stdout: "" }]);
-    expect(await Effect.runPromise(keychainStore("/Users/x/.hydra", run).write(key))).toEqual(key);
+    expect(await Effect.runPromise(keychainStore("/Users/x/.hercule", run).write(key))).toEqual(key);
     expect(calls[0]).toEqual([
       "security",
       "add-generic-password",
       "-s",
       KEYCHAIN_SERVICE,
       "-a",
-      "/Users/x/.hydra",
+      "/Users/x/.hercule",
       "-w",
       Buffer.from(key).toString("base64"),
     ]);
@@ -177,7 +177,7 @@ describe("the keychain store", () => {
       { exitCode: 45, stdout: "" },
       { exitCode: 0, stdout: `${Buffer.from(stored).toString("base64")}\n` },
     ]);
-    expect(await Effect.runPromise(keychainStore("/Users/x/.hydra", run).write(key))).toEqual(
+    expect(await Effect.runPromise(keychainStore("/Users/x/.hercule", run).write(key))).toEqual(
       stored,
     );
     expect(calls[1]?.[1]).toBe("find-generic-password");
@@ -188,7 +188,7 @@ describe("the keychain store", () => {
       { exitCode: 45, stdout: "" },
       { exitCode: 44, stdout: "" },
     ]);
-    const exit = await Effect.runPromiseExit(keychainStore("/Users/x/.hydra", run).write(key));
+    const exit = await Effect.runPromiseExit(keychainStore("/Users/x/.hercule", run).write(key));
     expect(Exit.isFailure(exit)).toBe(true);
     expect(String(exit)).toContain("exited 45");
     expect(String(exit)).not.toContain(Buffer.from(key).toString("base64"));

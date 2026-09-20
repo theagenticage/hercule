@@ -9,7 +9,7 @@
  *
  * The consequence, and it is deliberate: a shipped profile is frozen at the
  * boot that first seeded it. The three shipped profiles are editable, so a
- * later Hydra that adds a grant to one of them cannot write it over the user's
+ * later Hercule that adds a grant to one of them cannot write it over the user's
  * version; that upgrade is a migration, not a seed.
  */
 import { Effect } from "effect";

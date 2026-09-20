@@ -633,7 +633,7 @@ const make = Effect.gen(function* () {
 });
 
 export class Placement extends Context.Service<Placement, Effect.Success<typeof make>>()(
-  "hydra/controller/daemon/Placement",
+  "hercule/controller/daemon/Placement",
 ) {}
 
 export const PlacementLayer: Layer.Layer<

@@ -1,11 +1,11 @@
 /**
  * The shared wire vocabulary: ids, timestamps, the actor stamp, and the
- * canonical form of an identifier for a thing outside Hydra.
+ * canonical form of an identifier for a thing outside Hercule.
  */
 import { Schema } from "effect";
 
 /**
- * A canonical lowercase UUIDv7 string: what every Hydra id looks like on the
+ * A canonical lowercase UUIDv7 string: what every Hercule id looks like on the
  * wire. Event ids are integers and are not this schema.
  */
 export const Id = Schema.String.check(
@@ -32,7 +32,7 @@ export type Timestamp = Schema.Schema.Type<typeof Timestamp>;
  * credential, never supplied by the caller; widened when multi-user arrives,
  * never restructured.
  *
- * `system` is Hydra itself: a mutation that nothing holding a credential asked
+ * `system` is Hercule itself: a mutation that nothing holding a credential asked
  * for. Enlisting a machine that presented a join token, and everything a runner
  * reports about itself afterwards, are its writes - a runner is never an actor,
  * because it can do nothing on the public API.
@@ -61,7 +61,7 @@ export type NullableActor = Schema.Schema.Type<typeof NullableActor>;
 export const MAX_EXTERNAL_REF_LENGTH = 512;
 
 /**
- * A fully-qualified identifier for a thing outside Hydra:
+ * A fully-qualified identifier for a thing outside Hercule:
  * `<system>:<kind>:<identity>`, for example `github:issue:owner/repo#42` or
  * `gmail:thread:19b2c`.
  *

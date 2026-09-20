@@ -251,7 +251,7 @@ const make = Effect.gen(function* () {
 
 /** The audit writer. */
 export class AuditLog extends Context.Service<AuditLog, Effect.Success<typeof make>>()(
-  "hydra/controller/events/AuditLog",
+  "hercule/controller/events/AuditLog",
 ) {}
 
 export const AuditLogLayer: Layer.Layer<AuditLog, never, SqlClient.SqlClient> = Layer.effect(

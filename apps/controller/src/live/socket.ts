@@ -110,7 +110,7 @@ interface Connection {
  * a `hello` starts being answered; carrying an actor is what "authenticated"
  * means here.
  */
-class Greeted extends Context.Service<Greeted, Connection>()("hydra/controller/live/Greeted") {}
+class Greeted extends Context.Service<Greeted, Connection>()("hercule/controller/live/Greeted") {}
 
 const decodeSchemaTopic = Schema.decodeUnknownEffect(LiveTopic);
 

@@ -364,7 +364,7 @@ describe("the resolvers", () => {
 });
 
 /**
- * What `hydra session spawn` has to spell out once a thread can be started in a
+ * What `hercule session spawn` has to spell out once a thread can be started in a
  * project and in a workspace.
  */
 describe("spawning a thread from a terminal", () => {
@@ -375,7 +375,7 @@ describe("spawning a thread from a terminal", () => {
       .filter((flag): flag is string => flag !== undefined);
 
     for (const flag of ["project", "workspace"]) {
-      expect(flags, `hydra session spawn has no --${flag}`).toContain(flag);
+      expect(flags, `hercule session spawn has no --${flag}`).toContain(flag);
     }
   });
 

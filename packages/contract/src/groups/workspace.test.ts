@@ -20,7 +20,7 @@ describe("a branch name", () => {
     for (const branch of [
       "main",
       "feature/x",
-      "hydra/run-3f1a2b7c",
+      "hercule/run-3f1a2b7c",
       "release-2.1",
       "user/fix.bug",
       "a",

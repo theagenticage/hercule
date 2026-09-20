@@ -1,5 +1,5 @@
 /**
- * The newline-delimited JSON-RPC Codex speaks over stdio. Hydra owns the codec
+ * The newline-delimited JSON-RPC Codex speaks over stdio. Hercule owns the codec
  * rather than taking a library because Codex omits the `jsonrpc` member in both
  * directions, which a strict library refuses, and because an app-server drops a
  * method it does not know without answering at all.

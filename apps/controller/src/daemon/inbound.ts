@@ -131,7 +131,7 @@ const make = Effect.gen(function* () {
 });
 
 export class Inbound extends Context.Service<Inbound, Effect.Success<typeof make>>()(
-  "hydra/controller/daemon/Inbound",
+  "hercule/controller/daemon/Inbound",
 ) {}
 
 export const InboundLayer: Layer.Layer<

@@ -13,4 +13,4 @@ import type { SqlError } from "effect/unstable/sql/SqlError";
 export class PluginConfigs extends Context.Service<
   PluginConfigs,
   { readonly of: (pluginId: string) => Effect.Effect<Schema.Json, SqlError> }
->()("hydra/controller/connections/PluginConfigs") {}
+>()("hercule/controller/connections/PluginConfigs") {}

@@ -243,7 +243,7 @@ describe("the normalized event taxonomy", () => {
     const one = {
       question: "Which database should this use?",
       header: "Database",
-      options: [{ label: "SQLite", description: "the one Hydra ships" }],
+      options: [{ label: "SQLite", description: "the one Hercule ships" }],
       multiSelect: false,
     };
 
@@ -383,7 +383,7 @@ describe("what the controller authors for a session", () => {
   it("carries a non-empty session token on every start", () => {
     // The token is the session's own credential on the public API, and the
     // frame is the only place its plaintext ever appears: a start without one
-    // would leave the agent inside that session unable to reach Hydra at all,
+    // would leave the agent inside that session unable to reach Hercule at all,
     // and an empty one would be a credential that authenticates nobody.
     expect(decode(SessionStart, start)._tag).toBe("Success");
     expect(decode(SessionStart, without(start, "token"))._tag).toBe("Failure");

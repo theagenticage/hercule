@@ -1,5 +1,5 @@
 /**
- * The runner daemon: `hydra runner`. Holding the connection is all it does yet;
+ * The runner daemon: `hercule runner`. Holding the connection is all it does yet;
  * hosting sessions is what the connection is for.
  */
 import { mkdirSync, rmSync } from "node:fs";
@@ -17,7 +17,7 @@ import {
 } from "./credentials";
 import { identityListener } from "./identity";
 import { probeFacts, thisMachine } from "./probe";
-import { HYDRA_SKILL } from "./sessions/skill";
+import { HERCULE_SKILL } from "./sessions/skill";
 import { prepareTooling, type Tooling } from "./sessions/tooling";
 import { reconnect, reconnectSignals } from "./reconnect";
 import { CONTROLLER_URL_SCHEMES, NotEnrolled, readRunnerFile, runnerFileIn } from "./runner-file";
@@ -50,7 +50,7 @@ const dialable = (home: string, controllerUrl: string): Effect.Effect<void, NotE
     new NotEnrolled({
       message:
         `controllerUrl in ${runnerFileIn(home)} ${wrong}: ${controllerUrl}. ` +
-        "Run `hydra runner set-controller <controller-url>` to point this machine at one it can dial.",
+        "Run `hercule runner set-controller <controller-url>` to point this machine at one it can dial.",
     }),
   );
 };
@@ -68,33 +68,33 @@ export class ToolingUnavailable extends Schema.TaggedError<ToolingUnavailable>()
 ) {}
 
 /**
- * Putting `hydra` and the session skill on this machine is a precondition, not
+ * Putting `hercule` and the session skill on this machine is a precondition, not
  * a step: a runner that came up without them hosts sessions that cannot call
- * Hydra at all. Reported by name, like every other precondition here.
+ * Hercule at all. Reported by name, like every other precondition here.
  */
 const tooling = (home: string, storageDir: string): Effect.Effect<Tooling, ToolingUnavailable> =>
   Effect.tap(
     Effect.try({
       try: () =>
-        prepareTooling({ home, storageDir, execPath: process.execPath, skill: HYDRA_SKILL }),
+        prepareTooling({ home, storageDir, execPath: process.execPath, skill: HERCULE_SKILL }),
       catch: (error) =>
         new ToolingUnavailable({
           message:
-            `could not put hydra and the session skill under ${runnerDirIn(home)}: ` +
+            `could not put hercule and the session skill under ${runnerDirIn(home)}: ` +
             `${error instanceof Error ? error.message : String(error)}. ` +
-            "No session on this machine could reach Hydra.",
+            "No session on this machine could reach Hercule.",
         }),
     }),
     () =>
-      // The link points at this process's executable, which is the `hydra` CLI
+      // The link points at this process's executable, which is the `hercule` CLI
       // only in a compiled build; from a checkout it is bun. Said once here
       // rather than left for a session to discover when its first call runs
-      // bun instead of hydra.
+      // bun instead of hercule.
       Bun.main.startsWith(EMBEDDED)
         ? Effect.void
         : Effect.logWarning(
-            `This runner is not the compiled binary, so ${joinPath(runnerDirIn(home), "bin", "hydra")} ` +
-              `points at ${process.execPath}: a session calling \`hydra\` gets bun.`,
+            `This runner is not the compiled binary, so ${joinPath(runnerDirIn(home), "bin", "hercule")} ` +
+              `points at ${process.execPath}: a session calling \`hercule\` gets bun.`,
           ),
   );
 
@@ -150,10 +150,10 @@ export const daemon = (
       // No session survives this process, so everything under there is what the
       // last one left behind: swept here rather than growing with every crash.
       rmSync(scratchDir, { recursive: true, force: true });
-      // Once, here: what every session on this machine reaches Hydra through,
+      // Once, here: what every session on this machine reaches Hercule through,
       // refreshed so an upgraded binary takes over the last build's symlink and
       // skill text (spec 15 section 2, spec 06 section 9.3).
-      const { binDir, hydraTool } = yield* tooling(
+      const { binDir, herculeTool } = yield* tooling(
         home,
         joinPath(runnerDirIn(home), pin.storageDirectory),
       );
@@ -170,7 +170,7 @@ export const daemon = (
             socketPath,
             credentials,
             binDir,
-            hydraTool,
+            herculeTool,
           }),
         ),
         signals: reconnectSignals({ now: () => Date.now(), addresses }),

@@ -6,7 +6,7 @@ import { Effect, Layer, Option, Redacted } from "effect";
 import { CurrentActor, type Actor } from "../actor";
 import { TestDatabase } from "../db/testing";
 import { AuditLog, AuditLogLayer } from "../events";
-import { homePaths, HydraHome } from "../config";
+import { homePaths, HerculeHome } from "../config";
 import { masterKeyLayer } from "./masterKey";
 import { Secrets, secretsLayer } from "./repository";
 import { Secret, SecretLayer } from "./service";
@@ -36,13 +36,13 @@ afterEach(() => {
 
 /** The real service over the real repository, a `:memory:` database and a key file. */
 const stack = () => {
-  const home = mkdtempSync(join(tmpdir(), "hydra-secret-service-"));
+  const home = mkdtempSync(join(tmpdir(), "hercule-secret-service-"));
   homes.push(home);
   return SecretLayer.pipe(
     Layer.provideMerge(secretsLayer.pipe(Layer.provide(masterKeyLayer("file")))),
     Layer.provideMerge(AuditLogLayer),
     Layer.provideMerge(TestDatabase),
-    Layer.provideMerge(Layer.succeed(HydraHome, homePaths(home, join(home, "data")))),
+    Layer.provideMerge(Layer.succeed(HerculeHome, homePaths(home, join(home, "data")))),
   );
 };
 

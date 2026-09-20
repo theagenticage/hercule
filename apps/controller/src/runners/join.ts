@@ -111,7 +111,7 @@ const make = Effect.gen(function* () {
 });
 
 export class RunnerJoin extends Context.Service<RunnerJoin, Effect.Success<typeof make>>()(
-  "hydra/controller/runners/RunnerJoin",
+  "hercule/controller/runners/RunnerJoin",
 ) {}
 
 export const RunnerJoinLayer: Layer.Layer<

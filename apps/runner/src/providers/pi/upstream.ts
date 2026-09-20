@@ -37,7 +37,7 @@ export const PARKED_OUTPUT = "parked";
 
 const chunk = (choice: Record<string, unknown>): string =>
   `data: ${JSON.stringify({
-    id: "chatcmpl-hydra",
+    id: "chatcmpl-hercule",
     object: "chat.completion.chunk",
     created: 1789373122,
     model: "fake-model",
@@ -50,7 +50,7 @@ const call = (
   args: Record<string, string>,
 ): Record<string, unknown> => ({
   index,
-  id: `call_hydra_${name}`,
+  id: `call_hercule_${name}`,
   type: "function",
   function: { name, arguments: JSON.stringify(args) },
 });

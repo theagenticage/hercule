@@ -1088,7 +1088,7 @@ const make = Effect.gen(function* () {
  * would serve it to anyone who can reach the API.
  */
 export class SessionService extends Context.Service<SessionService, Effect.Success<typeof make>>()(
-  "hydra/controller/sessions/SessionService",
+  "hercule/controller/sessions/SessionService",
 ) {}
 
 export const SessionServiceLayer: Layer.Layer<

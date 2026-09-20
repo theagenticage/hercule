@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { Effect, Layer } from "effect";
 import { VERSION } from "@hercule/home/version";
 import { CurrentActor, type Actor } from "../actor";
-import { homePaths, HydraHome } from "../config";
+import { homePaths, HerculeHome } from "../config";
 import { TestDatabase } from "../db/testing";
 import { AuditLogLayer } from "../events";
 import { ControllerIdentity, controllerIdentityLayer } from "../identity";
@@ -27,13 +27,13 @@ afterEach(() => {
 });
 
 const stack = () => {
-  const home = mkdtempSync(join(tmpdir(), "hydra-controller-read-"));
+  const home = mkdtempSync(join(tmpdir(), "hercule-controller-read-"));
   homes.push(home);
   return ControllerLayer.pipe(
     Layer.provideMerge(Layer.mergeAll(controllerIdentityLayer, SettingsLayer, AuditLogLayer)),
     Layer.provideMerge(secretsLayer.pipe(Layer.provide(masterKeyLayer("file")))),
     Layer.provideMerge(TestDatabase),
-    Layer.provideMerge(Layer.succeed(HydraHome, homePaths(home, join(home, "data")))),
+    Layer.provideMerge(Layer.succeed(HerculeHome, homePaths(home, join(home, "data")))),
   );
 };
 

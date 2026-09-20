@@ -1,5 +1,5 @@
 /**
- * What `hydra serve` does before it binds: the first-run and boot sequence.
+ * What `hercule serve` does before it binds: the first-run and boot sequence.
  *
  * On an empty home this auto-initializes with no flags and no prompts - the
  * home layout, `config.toml`, the database and its migrations, the shipped
@@ -19,7 +19,7 @@ import * as BunFileSystem from "@effect/platform-bun/BunFileSystem";
 import type { Plugin } from "@hercule/plugin-host";
 import type { HomePaths } from "@hercule/home";
 import * as config from "./config";
-import { BootstrapConfig, HydraHome, HydraHomeError, type ConfigError } from "./config";
+import { BootstrapConfig, HerculeHome, HerculeHomeError, type ConfigError } from "./config";
 import {
   databaseError,
   migrate,
@@ -78,7 +78,7 @@ import { cancelStrandedInputs, SessionService, SessionServiceLayer } from "./ses
 import { Settings, SettingsLayer, type SettingError } from "./settings";
 import { WorkspaceService, WorkspaceServiceLayer } from "./workspaces";
 
-/** Setup tokens are minted and stored like every other Hydra token. */
+/** Setup tokens are minted and stored like every other Hercule token. */
 export { hashToken };
 
 /** The two bind hosts that mean "every interface"; a URL needs a reachable one instead. */
@@ -133,13 +133,13 @@ export function setupUrl(bindHost: string, bindPort: number, token: string): str
  * The token is valid until used and every boot invalidates the previous one, so
  * re-minting is restarting the unit. The file is mode 0600, the same trust
  * boundary as the master key file, and it exists only while setup is
- * incomplete: `hydra setup-url` reads it, and no unauthenticated
+ * incomplete: `hercule setup-url` reads it, and no unauthenticated
  * endpoint serves it.
  */
 const ensureSetupUrl = (
   paths: HomePaths,
   bootstrap: BootstrapConfig["Service"],
-): Effect.Effect<string | undefined, SqlError | HydraHomeError, SqlClient.SqlClient> =>
+): Effect.Effect<string | undefined, SqlError | HerculeHomeError, SqlClient.SqlClient> =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
     const rows = yield* sql<{
@@ -155,7 +155,7 @@ const ensureSetupUrl = (
       );
       yield* Effect.try({
         try: () => rmSync(paths.setupUrlFile, { force: true }),
-        catch: (cause) => new HydraHomeError({ action: "remove", path: paths.setupUrlFile, cause }),
+        catch: (cause) => new HerculeHomeError({ action: "remove", path: paths.setupUrlFile, cause }),
       });
       return undefined;
     }
@@ -179,7 +179,7 @@ const ensureSetupUrl = (
         rmSync(paths.setupUrlFile, { force: true });
         writeFileSync(paths.setupUrlFile, `${url}\n`, { mode: 0o600 });
       },
-      catch: (cause) => new HydraHomeError({ action: "write", path: paths.setupUrlFile, cause }),
+      catch: (cause) => new HerculeHomeError({ action: "write", path: paths.setupUrlFile, cause }),
     });
     return url;
   });
@@ -195,8 +195,8 @@ export interface BootOptions {
   readonly masterKeyBackend?: MasterKeyBackend;
   /**
    * How to run the runner this controller keeps beside itself, for a boot that
-   * goes on to serve. A boot with nothing after it - `hydra setup-url`, a
-   * repository test - spawns none: a second Hydra process is not what reading
+   * goes on to serve. A boot with nothing after it - `hercule setup-url`, a
+   * repository test - spawns none: a second Hercule process is not what reading
    * one value is for.
    */
   readonly localRunner?: LocalRunnerOptions;
@@ -230,14 +230,14 @@ export type ControllerServices =
   | SessionService
   | WorkspaceService
   | ConnectionService
-  | HydraHome
+  | HerculeHome
   | BootstrapConfig;
 
 /**
  * Boot the controller and then keep running, with the database open.
  *
- * `hydra serve` binds after this and stays up; `boot` is the same sequence with
- * nothing after it, which is what a test and `hydra setup-url` want. The
+ * `hercule serve` binds after this and stays up; `boot` is the same sequence with
+ * nothing after it, which is what a test and `hercule setup-url` want. The
  * database closes when `use` finishes, so a clean exit leaves no open handle
  * behind.
  *
@@ -250,7 +250,7 @@ export const bootWith = <A, E>(
   use: (outcome: BootOutcome) => Effect.Effect<A, E, ControllerServices>,
 ): Effect.Effect<A, BootError | E> => {
   const sequence = Effect.gen(function* () {
-    const paths = yield* HydraHome;
+    const paths = yield* HerculeHome;
     const bootstrap = yield* BootstrapConfig;
     // Whether the file was there before the driver created it decides whether
     // there is anything for a pre-migration copy to preserve.

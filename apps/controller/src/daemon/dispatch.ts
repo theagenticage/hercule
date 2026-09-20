@@ -77,7 +77,7 @@ const make = Effect.gen(function* () {
 });
 
 export class Dispatch extends Context.Service<Dispatch, Effect.Success<typeof make>>()(
-  "hydra/controller/daemon/Dispatch",
+  "hercule/controller/daemon/Dispatch",
 ) {}
 
 export const DispatchLayer: Layer.Layer<

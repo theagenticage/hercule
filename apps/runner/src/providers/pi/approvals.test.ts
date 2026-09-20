@@ -1,5 +1,5 @@
 /**
- * The park: what the user is asked when the Hydra extension stops a tool call,
+ * The park: what the user is asked when the Hercule extension stops a tool call,
  * what is written back to pi for each answer, and what happens to a second
  * question asked while the first is still open. A request nobody can answer is
  * a session stuck with nothing said anywhere, so the absence of a response is
@@ -32,7 +32,7 @@ const SECOND_UI = "3f1a0c7e-0000-4000-8000-00000000abce";
 const SECOND_CALL = "call_0199e0e8";
 
 /**
- * What Hydra's own approval hook writes in the dialog: which call it is asking about.
+ * What Hercule's own approval hook writes in the dialog: which call it is asking about.
  * pi's dialog carries no call of its own, and the card is rendered from the
  * call rather than from this, so the name and the id are all it says.
  */
@@ -157,7 +157,7 @@ describe("what each answer does to the parked session", () => {
   });
 
   it("blocks the command on a deny, with the reason pi reports on the item", async () => {
-    const reason = "Denied by the user in Hydra";
+    const reason = "Denied by the user in Hercule";
     const run = await parked();
     const opened = await openedIn(run);
 

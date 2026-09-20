@@ -2,7 +2,7 @@
  * The park against the real pi binary: that a tool call the user has not
  * answered really does stop, and that answering it really does let it run. A
  * fake pi proves what the adapter writes; only the binary proves that
- * the extension is loaded, that its dialog reaches Hydra, and that pi holds the
+ * the extension is loaded, that its dialog reaches Hercule, and that pi holds the
  * tool until the answer comes back.
  *
  * No paid key and no real model: `models.json` in the throwaway agent directory

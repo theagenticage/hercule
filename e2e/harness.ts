@@ -1,8 +1,8 @@
 /**
  * The end-to-end harness: a real controller process, driven by the real CLI.
  *
- * Nothing here imports Hydra code. The point of these tests is that the thing
- * an operator runs works, so the controller is started the way `hydra serve`
+ * Nothing here imports Hercule code. The point of these tests is that the thing
+ * an operator runs works, so the controller is started the way `hercule serve`
  * starts it and every command goes through `argv`, stdin, stdout and the exit
  * code - the same surface a shell sees.
  *
@@ -43,15 +43,15 @@ export function releaseBinary(): string | undefined {
 const BUN = process.execPath.endsWith("/bun") ? process.execPath : "bun";
 
 /**
- * The environment a spawned Hydra sees: this process's, minus every `HYDRA_`
- * variable. A developer with `HYDRA_HOME` or `HYDRA_TOKEN` set in their shell
+ * The environment a spawned Hercule sees: this process's, minus every `HERCULE_`
+ * variable. A developer with `HERCULE_HOME` or `HERCULE_TOKEN` set in their shell
  * must not change what these tests exercise.
  */
 function cleanEnv(): Record<string, string> {
   return Object.fromEntries(
     Object.entries(process.env).filter(
       (entry): entry is [string, string] =>
-        entry[1] !== undefined && !entry[0].startsWith("HYDRA_"),
+        entry[1] !== undefined && !entry[0].startsWith("HERCULE_"),
     ),
   );
 }
@@ -60,11 +60,11 @@ function cleanEnv(): Record<string, string> {
  * Whether the cases that spend a real model token were asked for.
  *
  * Set to anything but `0` or the empty string is a yes, so a shell that exports
- * `HYDRA_LIVE_SESSION_TEST` can turn it off again with a `0` rather than having
+ * `HERCULE_LIVE_SESSION_TEST` can turn it off again with a `0` rather than having
  * to unset it.
  */
 export function liveSessionsAsked(): boolean {
-  const asked = process.env["HYDRA_LIVE_SESSION_TEST"];
+  const asked = process.env["HERCULE_LIVE_SESSION_TEST"];
   return asked !== undefined && asked !== "" && asked !== "0";
 }
 
@@ -86,7 +86,7 @@ function candidatePort(): number {
 }
 
 /**
- * A temporary Hydra Home, removed when the suite ends.
+ * A temporary Hercule Home, removed when the suite ends.
  *
  * With a `gitconfig`, the directory is also fit to hand a process as `HOME`:
  * it holds none of the git configuration the developer running the suite has -
@@ -99,7 +99,7 @@ function candidatePort(): number {
  * under `Library`, so the scrub still holds.
  */
 export function temporaryHome(gitconfig?: string): { home: string; remove: () => void } {
-  const home = mkdtempSync(join(tmpdir(), "hydra-e2e-"));
+  const home = mkdtempSync(join(tmpdir(), "hercule-e2e-"));
   if (gitconfig !== undefined) {
     writeFileSync(join(home, ".gitconfig"), gitconfig);
     if (process.platform === "darwin") {
@@ -126,10 +126,10 @@ export function gitEnv(home: string): Record<string, string> {
     HOME: home,
     GIT_CONFIG_NOSYSTEM: "1",
     GIT_TERMINAL_PROMPT: "0",
-    GIT_AUTHOR_NAME: "Hydra E2E",
-    GIT_AUTHOR_EMAIL: "e2e@hydra.test",
-    GIT_COMMITTER_NAME: "Hydra E2E",
-    GIT_COMMITTER_EMAIL: "e2e@hydra.test",
+    GIT_AUTHOR_NAME: "Hercule E2E",
+    GIT_AUTHOR_EMAIL: "e2e@hercule.test",
+    GIT_COMMITTER_NAME: "Hercule E2E",
+    GIT_COMMITTER_EMAIL: "e2e@hercule.test",
   };
 }
 
@@ -145,7 +145,7 @@ export interface Controller {
 }
 
 /**
- * Start `hydra serve` against a home, and resolve once it answers.
+ * Start `hercule serve` against a home, and resolve once it answers.
  *
  * Readiness is the unauthenticated `setup.read`, not a line of output: the
  * listener is what the tests need, and the log line is printed just before it
@@ -182,7 +182,7 @@ export async function startController(options: {
       if (!/in use/.test(last.message)) throw last;
     }
   }
-  throw last ?? new Error("hydra serve never started");
+  throw last ?? new Error("hercule serve never started");
 }
 
 /** One attempt: spawn on this port and wait for it to answer. */
@@ -198,7 +198,7 @@ async function startOn(
 
   const child = Bun.spawn([...command, "serve", "-c", `bind.port=${String(port)}`], {
     cwd: ROOT,
-    env: { ...cleanEnv(), ...env, HYDRA_HOME: home },
+    env: { ...cleanEnv(), ...env, HERCULE_HOME: home },
     stdout: "pipe",
     stderr: "pipe",
   });
@@ -214,7 +214,7 @@ async function startOn(
   const deadline = Date.now() + (timeoutMs ?? 20_000);
   for (;;) {
     if (child.exitCode !== null) {
-      throw new Error(`hydra serve exited with ${String(child.exitCode)}:\n${output()}`);
+      throw new Error(`hercule serve exited with ${String(child.exitCode)}:\n${output()}`);
     }
     try {
       const response = await fetch(`${url}/api/v1/setup`);
@@ -222,7 +222,7 @@ async function startOn(
     } catch {
       // Not listening yet.
     }
-    if (Date.now() > deadline) throw new Error(`hydra serve never answered:\n${output()}`);
+    if (Date.now() > deadline) throw new Error(`hercule serve never answered:\n${output()}`);
     await Bun.sleep(50);
   }
 
@@ -255,7 +255,7 @@ export async function cli(
   const command = options.binary === undefined ? [BUN, ENTRYPOINT] : [options.binary];
   const child = Bun.spawn([...command, ...args], {
     cwd: ROOT,
-    env: { ...cleanEnv(), HYDRA_HOME: options.home, ...options.env },
+    env: { ...cleanEnv(), HERCULE_HOME: options.home, ...options.env },
     stdin: options.stdin === undefined ? "ignore" : new TextEncoder().encode(options.stdin),
     stdout: "pipe",
     stderr: "pipe",
@@ -273,7 +273,7 @@ export const USERNAME = "rogier";
 export const PASSWORD = "correct horse battery staple";
 
 /**
- * The API key `hydra login` wrote into a home, for the requests no command
+ * The API key `hercule login` wrote into a home, for the requests no command
  * expresses. Reading the file is the only way to get one: the key is printed
  * nowhere, by design.
  */
@@ -314,7 +314,7 @@ export async function completeSetup(options: {
     {
       home: options.home,
       binary: options.binary,
-      env: { HYDRA_API_URL: options.url },
+      env: { HERCULE_API_URL: options.url },
       stdin: PASSWORD,
     },
   );

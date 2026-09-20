@@ -1,5 +1,5 @@
 /**
- * `POST /auth/ws-ticket` over a real socket: the one credential Hydra hands out
+ * `POST /auth/ws-ticket` over a real socket: the one credential Hercule hands out
  * that is not a token.
  *
  * A browser cannot set a header on a WebSocket handshake, so the live socket is

@@ -2,7 +2,7 @@
  * The two schemas every structured-output proof runs on, written once so the
  * three adapters are held to the same document. Reached as
  * `@hercule/protocol/testing` from a package, and by relative path from `e2e/`,
- * which depends on no Hydra package. One a model can answer, and
+ * which depends on no Hercule package. One a model can answer, and
  * one nothing can: `answer` has to be both `a` and `b`, which is inside the
  * subset and outside what any value can satisfy, so every harness has to reach
  * a schema failure its own way.

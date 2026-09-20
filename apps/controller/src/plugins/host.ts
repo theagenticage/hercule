@@ -642,7 +642,7 @@ const make = Effect.gen(function* () {
 });
 
 export class PluginHost extends Context.Service<PluginHost, Effect.Success<typeof make>>()(
-  "hydra/controller/plugins/PluginHost",
+  "hercule/controller/plugins/PluginHost",
 ) {}
 
 export const PluginHostLayer: Layer.Layer<

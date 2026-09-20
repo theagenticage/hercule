@@ -4,7 +4,7 @@
  * profile, and the token buys it exactly this one call.
  *
  * Outside the pre-setup gate too, because the controller's own runner joins at
- * first boot before anybody has set Hydra up. Nothing is opened by that: with no
+ * first boot before anybody has set Hercule up. Nothing is opened by that: with no
  * minted token there is nothing to present.
  */
 import * as Effect from "effect/Effect";

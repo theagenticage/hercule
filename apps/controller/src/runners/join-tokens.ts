@@ -108,7 +108,7 @@ const make = Effect.gen(function* () {
 });
 
 export class JoinTokens extends Context.Service<JoinTokens, Effect.Success<typeof make>>()(
-  "hydra/controller/runners/JoinTokens",
+  "hercule/controller/runners/JoinTokens",
 ) {}
 
 export const JoinTokensLayer: Layer.Layer<JoinTokens, never, SqlClient.SqlClient> =

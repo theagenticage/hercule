@@ -1,7 +1,7 @@
 /**
  * The runner socket. A runner is an HTTP client of its own, so unlike a browser
  * it can put a credential on the handshake; that credential is checked before
- * the upgrade and buys nothing else anywhere in Hydra.
+ * the upgrade and buys nothing else anywhere in Hercule.
  *
  * The proof runs the other way too: `greet` signs the runner's nonce beside its
  * id, and `signedChallenge` in `@hercule/protocol` says why both are in there.
@@ -56,7 +56,7 @@ export interface RunnerPings {
 }
 
 export const RunnerPingSchedule = Context.Reference<RunnerPings>(
-  "hydra/controller/runners/RunnerPingSchedule",
+  "hercule/controller/runners/RunnerPingSchedule",
   {
     defaultValue: (): RunnerPings => ({
       interval: RUNNER_PING_INTERVAL,

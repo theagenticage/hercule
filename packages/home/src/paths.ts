@@ -1,5 +1,5 @@
 /**
- * Where Hydra keeps things on a machine: the Hydra Home layout.
+ * Where Hercule keeps things on a machine: the Hercule Home layout.
  *
  * Pure path arithmetic, no filesystem and no Effect services, because three
  * roles resolve a home and only one of them may link controller state: the
@@ -10,7 +10,7 @@ import { homedir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
 
 /**
- * Every path in a Hydra Home, absolute. `dataDir` is the resolved `data.dir`
+ * Every path in a Hercule Home, absolute. `dataDir` is the resolved `data.dir`
  * bootstrap key, so it is the only member that can point outside the home, and
  * the only part that moves with a promotion.
  */
@@ -28,22 +28,22 @@ export interface HomePaths {
   readonly masterKeyFile: string;
 }
 
-/** The default Hydra Home, used when neither `--home` nor `HYDRA_HOME` is set. */
-export const DEFAULT_HOME_NAME = ".hydra";
+/** The default Hercule Home, used when neither `--home` nor `HERCULE_HOME` is set. */
+export const DEFAULT_HOME_NAME = ".hercule";
 
 /** The controller's one SQLite database, inside the Data Root. */
-export const DATABASE_FILE_NAME = "hydra.db";
+export const DATABASE_FILE_NAME = "hercule.db";
 
 /**
- * Where this process's Hydra Home is: `--home` beats `HYDRA_HOME` beats
- * `~/.hydra`. Relative paths resolve against the
+ * Where this process's Hercule Home is: `--home` beats `HERCULE_HOME` beats
+ * `~/.hercule`. Relative paths resolve against the
  * working directory; the result is always absolute.
  */
 export function resolveHomePath(
   homeOption: string | undefined,
   env: Readonly<Record<string, string | undefined>>,
 ): string {
-  const chosen = homeOption ?? env["HYDRA_HOME"];
+  const chosen = homeOption ?? env["HERCULE_HOME"];
   return chosen === undefined || chosen === ""
     ? join(homedir(), DEFAULT_HOME_NAME)
     : resolve(chosen);

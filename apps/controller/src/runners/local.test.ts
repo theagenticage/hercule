@@ -44,7 +44,7 @@ afterEach(() => {
 });
 
 const temporaryHome = (): string => {
-  const home = mkdtempSync(join(tmpdir(), "hydra-local-"));
+  const home = mkdtempSync(join(tmpdir(), "hercule-local-"));
   homes.push(home);
   return home;
 };
@@ -244,7 +244,7 @@ const FAST = {
 describe("the command the controller spawns", () => {
   it("is the binary this process is, told to be a local runner", () => {
     // Spec 15 section 4: spawn, never fork, and `process.execPath` is what a
-    // compiled Hydra spawns to get another one.
+    // compiled Hercule spawns to get another one.
     expect(LOCAL_RUNNER_COMMAND).toEqual([process.execPath, "runner", "--local"]);
   });
 

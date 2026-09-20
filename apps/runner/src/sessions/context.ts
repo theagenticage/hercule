@@ -17,11 +17,11 @@ export interface Machine {
   readonly providersDir: string;
   /** Where a workspace-less session's empty cwd is made, one directory per session. */
   readonly scratchDir: string;
-  /** `<home>/runner/bin`, holding the `hydra` symlink, prepended to a session's `PATH`. */
+  /** `<home>/runner/bin`, holding the `hercule` symlink, prepended to a session's `PATH`. */
   readonly binDir: string;
-  /** hydra-as-a-tool, as the runner resolved it once at start (spec 06 section 9.3). */
-  readonly hydraTool: ProviderRunnerContext["hydraTool"];
-  /** What a session reads as `HYDRA_API_URL`. */
+  /** hercule-as-a-tool, as the runner resolved it once at start (spec 06 section 9.3). */
+  readonly herculeTool: ProviderRunnerContext["herculeTool"];
+  /** What a session reads as `HERCULE_API_URL`. */
   readonly controllerUrl: string;
   /** The runner's own environment, the bottom layer of a session's. */
   readonly baseEnv: Readonly<Record<string, string | undefined>>;
@@ -59,9 +59,9 @@ const instanceEnv = (config: unknown): Record<string, string> => {
 };
 
 /**
- * Base env, then the instance's, then Hydra's own: the layering of spec 06
+ * Base env, then the instance's, then Hercule's own: the layering of spec 06
  * section 4, in that order, so instance config can never take the session's
- * token, its controller or its `hydra` away from the CLI a session calls.
+ * token, its controller or its `hercule` away from the CLI a session calls.
  *
  * The token, `GH_TOKEN` and the git identity are the frame's alone, never
  * something the runner invented, and they are passed through the environment
@@ -80,13 +80,13 @@ const envFor = (machine: Machine, frame: SessionStart): Record<string, string | 
   ...instanceEnv(frame.config),
   ...gitCredentialEnv({ socketPath: machine.socketPath, identity: frame.gitIdentity }),
   ...(frame.ghToken === undefined ? {} : { GH_TOKEN: frame.ghToken }),
-  HYDRA_API_URL: machine.controllerUrl,
-  HYDRA_TOKEN: frame.token,
-  HYDRA_SESSION: "1",
-  // Prepended, so `which hydra` finds this build and the machine's own tools
+  HERCULE_API_URL: machine.controllerUrl,
+  HERCULE_TOKEN: frame.token,
+  HERCULE_SESSION: "1",
+  // Prepended, so `which hercule` finds this build and the machine's own tools
   // keep working after it (spec 15 section 2). What it is prepended to is the
   // machine's own `PATH`: a `PATH` in instance config is dropped, because a
-  // session whose config put another directory first could shadow `hydra`
+  // session whose config put another directory first could shadow `hercule`
   // with a binary of its own choosing. An empty entry on `PATH` is the
   // current directory, so a machine that gave the runner none gets the bin
   // directory alone rather than a trailing colon.
@@ -165,7 +165,7 @@ export const resolve = (
         // Handed to the adapter and layered into nothing: a credential belongs
         // in whichever variable the harness reads, which only the adapter knows.
         secrets: frame.secrets,
-        hydraTool: machine.hydraTool,
+        herculeTool: machine.herculeTool,
       },
     };
   });

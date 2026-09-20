@@ -32,7 +32,7 @@ export interface ProviderRunnerContext {
   readonly binary: string | undefined;
   /**
    * The whole environment the harness is spawned with, layered once by the
-   * runner: its own, then the instance config's, then Hydra's own keys (spec 06
+   * runner: its own, then the instance config's, then Hercule's own keys (spec 06
    * section 4). Never carries a `HOME` override.
    */
   readonly env: Readonly<Record<string, string | undefined>>;
@@ -46,12 +46,12 @@ export interface ProviderRunnerContext {
    */
   readonly secrets: Readonly<Record<string, string>>;
   /**
-   * hydra-as-a-tool, resolved once by the runner and materialized by each
+   * hercule-as-a-tool, resolved once by the runner and materialized by each
    * adapter into its harness's own channel (spec 06 section 9.3): the skill
    * text itself, and the Claude plugin directory the runner wrote it into.
    * Exactly one function per adapter reads this.
    */
-  readonly hydraTool: {
+  readonly herculeTool: {
     readonly skill: string;
     readonly claudePluginDir: string;
   };
@@ -84,7 +84,7 @@ export interface ProviderAdapter {
   readonly events: Stream.Stream<ProviderEvent>;
 
   /**
-   * Starts one session and answers with the binding. The Hydra session id is
+   * Starts one session and answers with the binding. The Hercule session id is
    * passed in because it is the controller's, not the harness's; the binding is
    * what joins the two (spec 06 section 4.1). Where the native id comes from is
    * the adapter's business: spec 06 section 4.1 says Claude's arrives on the

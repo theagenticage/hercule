@@ -71,7 +71,7 @@ export const Resource = Schema.Struct({
   canonicalRemote: Schema.NullOr(Schema.String),
   /** What a folder or a mailbox is called; always null on a repo, which its remote names. */
   label: Schema.NullOr(ResourceLabel),
-  /** The Connection Hydra acts through for this resource. */
+  /** The Connection Hercule acts through for this resource. */
   connectionId: Schema.NullOr(Id),
   /** Run in a fresh checkout once it stands; always null off a repo. */
   setupCommand: Schema.NullOr(SetupCommand),

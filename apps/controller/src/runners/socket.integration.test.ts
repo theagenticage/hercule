@@ -1129,15 +1129,15 @@ describe("what a runner reports about its machine", () => {
 });
 
 describe("what the controller stopping does to its local runner", () => {
-  /** The dispatcher, run from source: `hydra` before it is compiled. */
-  const HYDRA = `${import.meta.dirname}/../../../../packages/hercule/src/main.ts`;
+  /** The dispatcher, run from source: `hercule` before it is compiled. */
+  const HERCULE = `${import.meta.dirname}/../../../../packages/hercule/src/main.ts`;
 
   it("leaves the row offline when the child is asked to stop, never unreachable", async () => {
-    const home = mkdtempSync(join(tmpdir(), "hydra-local-child-"));
+    const home = mkdtempSync(join(tmpdir(), "hercule-local-child-"));
     await withServer(async (harness) => {
       const token = await completeSetup(harness.base);
       const child = Bun.spawn(
-        [process.execPath, "run", HYDRA, "runner", "--local", "--home", home],
+        [process.execPath, "run", HERCULE, "runner", "--local", "--home", home],
         { stdin: "pipe", stdout: "pipe", stderr: "pipe" },
       );
       let said = "";
@@ -2097,7 +2097,7 @@ describe("logging a runner's provider instance in", () => {
         const refusal = (await response.json()) as { error: { code: string; message: string } };
         expect(refusal.error.code).toBe("invalid_state");
         // The vendor's own words: a login that failed for a reason the user can
-        // act on must not read as Hydra being broken.
+        // act on must not read as Hercule being broken.
         expect(refusal.error.message).toContain("could not reach platform.claude.com");
       } finally {
         wire.close();

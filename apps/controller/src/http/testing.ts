@@ -36,7 +36,7 @@ import {
 } from "@hercule/contract";
 import type { Plugin } from "@hercule/plugin-host";
 import { homePaths } from "@hercule/home";
-import { HydraHome } from "../config";
+import { HerculeHome } from "../config";
 import { ConnectionServiceLayer, ConnectionTypesLayer } from "../connections";
 import { CredentialsLayer, hashToken } from "../credentials";
 import { SessionInputDeadline, WorkspaceSweepInterval } from "../daemon";
@@ -130,7 +130,7 @@ const services = (home: string) =>
     ),
     Layer.provideMerge(secretsLayer.pipe(Layer.provide(masterKeyLayer("file")))),
     Layer.provideMerge(TestDatabase),
-    Layer.provideMerge(Layer.succeed(HydraHome, homePaths(home, join(home, "data")))),
+    Layer.provideMerge(Layer.succeed(HerculeHome, homePaths(home, join(home, "data")))),
   );
 
 /** An address a fetch can use; the server binds an ephemeral port on loopback. */
@@ -240,7 +240,7 @@ export const withServer = (
   options: ServerOptions = {},
 ): Promise<void> => {
   const bundle = options.bundle;
-  const home = mkdtempSync(join(tmpdir(), "hydra-http-"));
+  const home = mkdtempSync(join(tmpdir(), "hercule-http-"));
   writeFileSync(join(home, "setup-url"), `http://127.0.0.1:4937/setup?token=${SETUP_TOKEN}\n`);
 
   return Effect.runPromise(
@@ -322,7 +322,7 @@ export const withServer = (
     ).pipe(
       Effect.provide(
         services(home).pipe(
-          // The same listener `hydra serve` builds, body cap included: the cap
+          // The same listener `hercule serve` builds, body cap included: the cap
           // is the transport's, so a harness without it would test a different
           // server from the one that ships.
           Layer.provideMerge(

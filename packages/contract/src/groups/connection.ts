@@ -1,5 +1,5 @@
 /**
- * Connections: one record per external account Hydra acts through.
+ * Connections: one record per external account Hercule acts through.
  *
  * The type is a plugin contribution, so what a connection takes to set up - its
  * fields, its config schema - is read from the plugin catalog rather than from
@@ -63,7 +63,7 @@ const Topics = atMost(Label, MAX_TASK_LABELS).check(Schema.isMinLength(1));
  */
 const Origin = Schema.String.check(
   Schema.isPattern(/^https?:\/\/[^/?#]+$/, {
-    message: "an origin is a scheme and a host with no path, like https://hydra.example",
+    message: "an origin is a scheme and a host with no path, like https://hercule.example",
   }),
 );
 

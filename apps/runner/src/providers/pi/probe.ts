@@ -25,7 +25,7 @@ import type { Ran, Run } from "../process";
 import { fact } from "../text";
 import { rpcOver, type PiSpawn } from "./rpc";
 
-/** The upstream Hydra runs pi against; nothing else is offered or asked about. */
+/** The upstream Hercule runs pi against; nothing else is offered or asked about. */
 export const ZAI = "zai";
 
 /** The level a session runs on when the user picked none. */

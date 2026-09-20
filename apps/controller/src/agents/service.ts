@@ -391,7 +391,7 @@ const make = Effect.gen(function* () {
 
 /** The agent service. */
 export class AgentService extends Context.Service<AgentService, Effect.Success<typeof make>>()(
-  "hydra/controller/agents/AgentService",
+  "hercule/controller/agents/AgentService",
 ) {}
 
 export const AgentServiceLayer: Layer.Layer<

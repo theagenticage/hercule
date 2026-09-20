@@ -756,7 +756,7 @@ describe("POST /runners/join", () => {
     });
   });
 
-  it("is reachable before Hydra has been set up, because the local runner joins then", async () => {
+  it("is reachable before Hercule has been set up, because the local runner joins then", async () => {
     await withServer(async (harness) => {
       const response = await join(harness.base, await harness.joinToken());
       expect(response.status, await response.clone().text()).toBe(201);

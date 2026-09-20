@@ -257,7 +257,7 @@ const make = Effect.gen(function* () {
 
 /** The project service. */
 export class ProjectService extends Context.Service<ProjectService, Effect.Success<typeof make>>()(
-  "hydra/controller/projects/ProjectService",
+  "hercule/controller/projects/ProjectService",
 ) {}
 
 export const ProjectServiceLayer: Layer.Layer<

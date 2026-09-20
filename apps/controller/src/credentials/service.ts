@@ -163,7 +163,7 @@ const make = Effect.gen(function* () {
 
 /** The API key service. */
 export class ApiKeys extends Context.Service<ApiKeys, Effect.Success<typeof make>>()(
-  "hydra/controller/credentials/ApiKeys",
+  "hercule/controller/credentials/ApiKeys",
 ) {}
 
 export const ApiKeysLayer: Layer.Layer<

@@ -1,6 +1,6 @@
 /**
  * The line-framed JSON protocol pi speaks over stdio: a command per line in,
- * a response or an event per line out. Hydra owns the codec because pi answers
+ * a response or an event per line out. Hercule owns the codec because pi answers
  * a command with a `response` frame carrying the command's own name and an
  * `id` it echoes, and writes everything else - events and its own complaints -
  * down the same pipe.
@@ -112,7 +112,7 @@ export const rpcOver = (
     send: (command) =>
       Effect.suspend(() => {
         if (gone) return Effect.fail(GONE);
-        const id = `hydra-${next++}`;
+        const id = `hercule-${next++}`;
         const settled = Deferred.makeUnsafe<Record<string, unknown>, string>();
         // Registered before the write, because pi can answer inside it, and
         // taken back out again when the write is what failed.

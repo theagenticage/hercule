@@ -503,7 +503,7 @@ const make = Effect.gen(function* () {
 });
 
 export class RunnerService extends Context.Service<RunnerService, Effect.Success<typeof make>>()(
-  "hydra/controller/runners/RunnerService",
+  "hercule/controller/runners/RunnerService",
 ) {}
 
 export const RunnerServiceLayer: Layer.Layer<

@@ -7,7 +7,7 @@
  * **`--all`** follows `nextCursor` to the end, so a caller who wants everything
  * writes one flag instead of a loop.
  */
-import { ApiError, type HydraClient } from "@hercule/client-core";
+import { ApiError, type HerculeClient } from "@hercule/client-core";
 import { UsageError } from "../exit";
 import { coerce, said, type Arguments } from "./args";
 import { commandOf, type Command, type Field } from "./tree";
@@ -16,7 +16,7 @@ import { commandOf, type Command, type Field } from "./tree";
 type Callable = Record<string, Record<string, (request?: unknown) => Promise<unknown>>>;
 
 /** The operation's own function on the client, found by the two halves of its id. */
-const callableOf = (client: HydraClient, command: Command) => {
+const callableOf = (client: HerculeClient, command: Command) => {
   const [entity, verb] = command.id.split(".") as [string, string];
   return (client as unknown as Callable)[entity]![verb]!;
 };
@@ -52,7 +52,7 @@ const pageOf = (answer: unknown): Page =>
  * loop: a broken server should stall the caller once, not forever.
  */
 const readAll = async (
-  client: HydraClient,
+  client: HerculeClient,
   command: Command,
   query: Record<string, unknown>,
   params: Record<string, string | number> | undefined,
@@ -82,7 +82,7 @@ const readAll = async (
  * the wire never carrying a tail.
  */
 const resolveTail = async (
-  client: HydraClient,
+  client: HerculeClient,
   command: Command,
   field: Field,
   text: string,
@@ -131,7 +131,7 @@ const LOOKS_LIKE_A_TAIL = /^[0-9a-f]{8,}$/;
 /**
  * A field whose row names no listing takes its value as written: a plugin is
  * named `github`, a secret is named `deadbeef` if its owner says so. Where the
- * schema says the field holds a Hydra id, text shaped like a tail is refused
+ * schema says the field holds a Hercule id, text shaped like a tail is refused
  * rather than sent, because sending it would answer `not_found` and teach the
  * caller that the id was wrong.
  */
@@ -152,7 +152,7 @@ const asWritten = (command: Command, field: Field, text: string): string => {
  * refused, whichever way the field was written.
  */
 const resolveTails = async (
-  client: HydraClient,
+  client: HerculeClient,
   command: Command,
   fields: ReadonlyArray<Field>,
   values: Record<string, unknown>,
@@ -177,7 +177,7 @@ export type Outcome =
   | { readonly kind: "items"; readonly items: ReadonlyArray<Record<string, unknown>> };
 
 export const execute = async (
-  client: HydraClient,
+  client: HerculeClient,
   command: Command,
   args: Arguments,
 ): Promise<Outcome> => {

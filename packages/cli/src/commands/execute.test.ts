@@ -147,9 +147,9 @@ describe("a flag over a structured field", () => {
 });
 
 describe("a field the row does not resolve", () => {
-  it("refuses a tail for a Hydra id, names the full id, and calls nothing", async () => {
+  it("refuses a tail for a Hercule id, names the full id, and calls nothing", async () => {
     const { fetch, client } = wire(() => ({}));
-    // A queued input's own id: a Hydra id with no listing of its own, so a
+    // A queued input's own id: a Hercule id with no listing of its own, so a
     // tail has nothing to be resolved against and is refused rather than sent.
     const command = at("input", "update");
     const args = await parseArguments(
@@ -165,7 +165,7 @@ describe("a field the row does not resolve", () => {
 
   it("takes a plugin id as written, because no tail could ever stand for one", async () => {
     const { fetch, client } = wire(() => ({}));
-    // Hex-shaped, and still a name: plugin ids are not Hydra ids, so there is
+    // Hex-shaped, and still a name: plugin ids are not Hercule ids, so there is
     // no longer id this could be the end of.
     const command = at("plugin", "read");
     const args = await parseArguments(command, ["1f3a9c2e"], noStdin);

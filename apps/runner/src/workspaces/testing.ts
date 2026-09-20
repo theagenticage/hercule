@@ -68,7 +68,7 @@ export interface Remote {
 
 /** A bare "remote" with one commit on `main`, and a working copy to grow it. */
 export const makeRemote = (): Remote => {
-  const under = temporary("hydra-remote-");
+  const under = temporary("hercule-remote-");
   const work = join(under, "work");
   mkdirSync(work);
   git(work, "init", "-b", "main");
@@ -95,7 +95,7 @@ export const addBranch = (remote: Remote, branch: string, content = "on a branch
 
 /** A checkout the user already has: cloned from the remote, origin set to it. */
 export const userCheckout = (remote: Remote, branch = "main"): string => {
-  const under = temporary("hydra-user-checkout-");
+  const under = temporary("hercule-user-checkout-");
   const path = join(under, "checkout");
   git(under, "clone", remote.url, path);
   if (branch !== "main") git(path, "checkout", branch);

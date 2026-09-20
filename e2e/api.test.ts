@@ -30,27 +30,27 @@ let port: number;
 let url: string;
 /** The bearer `setup complete` handed back. */
 let setupBearer: string;
-/** The API key `hydra login` minted and stored. */
+/** The API key `hercule login` minted and stored. */
 let apiKey: string;
 
 const credentialsFile = join(state.home, "credentials.json");
 const setupUrlFile = join(state.home, "setup-url");
 
 /** The CLI under the credential file in the shared home. */
-const hydra = (args: ReadonlyArray<string>, stdin?: string) =>
+const hercule = (args: ReadonlyArray<string>, stdin?: string) =>
   cli(args, { home: state.home, stdin });
 
 /**
  * The CLI before a credential file exists. `setup read` and `setup complete`
  * carry no credential, so the only thing that can say which controller they
- * mean is `HYDRA_API_URL`.
+ * mean is `HERCULE_API_URL`.
  */
 const beforeLogin = (args: ReadonlyArray<string>, stdin?: string) =>
-  cli(args, { home: state.home, env: { HYDRA_API_URL: url }, stdin });
+  cli(args, { home: state.home, env: { HERCULE_API_URL: url }, stdin });
 
 /** The CLI with no credential file, carrying a token in the environment. */
 const withToken = (token: string, args: ReadonlyArray<string>, stdin?: string) =>
-  cli(args, { home: bare.home, env: { HYDRA_TOKEN: token, HYDRA_API_URL: url }, stdin });
+  cli(args, { home: bare.home, env: { HERCULE_TOKEN: token, HERCULE_API_URL: url }, stdin });
 
 beforeAll(async () => {
   controller = await startController({ home: state.home });
@@ -145,7 +145,7 @@ describe("the first run and everything after it", () => {
   }, 15_000);
 
   it("3. logs in and writes a 0600 credential file that never shows the key", async () => {
-    const login = await hydra(
+    const login = await hercule(
       ["login", url, "--username", USERNAME, "--password-stdin", "--name", "e2e-laptop"],
       PASSWORD,
     );
@@ -166,7 +166,7 @@ describe("the first run and everything after it", () => {
     expect(login.stdout).not.toContain(PASSWORD);
     expect(controller.output()).not.toContain(apiKey);
 
-    const json = await hydra(
+    const json = await hercule(
       ["login", url, "--username", USERNAME, "--password-stdin", "--json"],
       PASSWORD,
     );
@@ -176,7 +176,7 @@ describe("the first run and everything after it", () => {
   }, 15_000);
 
   it("4a. lists the key login minted, without its token", async () => {
-    const keys = await hydra(["api-key", "list", "--json"]);
+    const keys = await hercule(["api-key", "list", "--json"]);
     expect(keys.code).toBe(0);
     const items = (jsonOf(keys) as { items: Array<Record<string, unknown>> }).items;
     const named = items.find((item) => item.name === "e2e-laptop");
@@ -191,11 +191,11 @@ describe("the first run and everything after it", () => {
     // The runner the controller spawned joins moments after the listener comes
     // up, and it is another process: under load the join can land after this
     // step would otherwise have read the setting.
-    let identity = await hydra(["controller", "read", "--json"]);
+    let identity = await hercule(["controller", "read", "--json"]);
     for (let waited = 0; waited < 10_000; waited += 100) {
       if ((jsonOf(identity) as { defaultRunnerId: string | null }).defaultRunnerId !== null) break;
       await new Promise((resolve) => setTimeout(resolve, 100));
-      identity = await hydra(["controller", "read", "--json"]);
+      identity = await hercule(["controller", "read", "--json"]);
     }
     expect(identity.code).toBe(0);
     expect(jsonOf(identity)).toEqual({
@@ -207,14 +207,14 @@ describe("the first run and everything after it", () => {
       defaultRunnerId: expect.any(String) as string,
     });
 
-    const settings = await hydra(["settings", "read", "--json"]);
+    const settings = await hercule(["settings", "read", "--json"]);
     expect(settings.code).toBe(0);
     const state = jsonOf(settings) as { user: { timezone: string } };
     expect(state.user.timezone).toBe("Europe/Amsterdam");
   });
 
   it("4c. lists the shipped profiles, creates one, and resolves an id tail", async () => {
-    const shipped = await hydra(["profile", "list", "--json"]);
+    const shipped = await hercule(["profile", "list", "--json"]);
     const profiles = (
       jsonOf(shipped) as { items: Array<{ id: string; name: string; shipped: boolean }> }
     ).items;
@@ -225,7 +225,7 @@ describe("the first run and everything after it", () => {
     ]);
     expect(profiles.every((profile) => profile.shipped)).toBe(true);
 
-    const created = await hydra([
+    const created = await hercule([
       "profile",
       "create",
       "--name",
@@ -237,26 +237,26 @@ describe("the first run and everything after it", () => {
     expect(created.code).toBe(0);
     const { id } = jsonOf(created) as { id: string };
 
-    const byTail = await hydra(["profile", "read", id.slice(-8), "--json"]);
+    const byTail = await hercule(["profile", "read", id.slice(-8), "--json"]);
     expect(byTail.code).toBe(0);
     expect((jsonOf(byTail) as { id: string }).id).toBe(id);
   });
 
   it("4d. refuses to delete a shipped profile, on stderr, with exit 1", async () => {
     const assistant = (
-      jsonOf(await hydra(["profile", "list", "--json"])) as {
+      jsonOf(await hercule(["profile", "list", "--json"])) as {
         items: Array<{ id: string; name: string }>;
       }
     ).items.find((profile) => profile.name === "assistant")!;
 
-    const refused = await hydra(["profile", "delete", assistant.id.slice(-8)]);
+    const refused = await hercule(["profile", "delete", assistant.id.slice(-8)]);
     expect(refused.code).toBe(1);
     expect(refused.stdout).toBe("");
     expect(refused.stderr).toContain("assistant");
 
     // Under `--json` too: the envelope is on stderr, so a caller piping stdout
     // into a parser is never handed an error where a result was expected.
-    const asJson = await hydra(["profile", "delete", assistant.id, "--json"]);
+    const asJson = await hercule(["profile", "delete", assistant.id, "--json"]);
     expect(asJson.code).toBe(1);
     expect(asJson.stdout).toBe("");
     expect(JSON.parse(asJson.stderr)).toEqual({
@@ -266,14 +266,14 @@ describe("the first run and everything after it", () => {
 
   it("4e. stores a secret by reference and never reads its value back", async () => {
     const secretValue = "s3cret-value-nobody-should-see";
-    const set = await hydra(
+    const set = await hercule(
       ["secret", "set", "plugin", "p1", "key1", "--value-stdin", "--json"],
       secretValue,
     );
     expect(set.code).toBe(0);
     expect(jsonOf(set)).toMatchObject({ ownerKind: "plugin", ownerId: "p1", name: "key1" });
 
-    const listed = await hydra(["secret", "list", "--owner-kind", "plugin", "--json"]);
+    const listed = await hercule(["secret", "list", "--owner-kind", "plugin", "--json"]);
     expect(listed.code).toBe(0);
     expect((jsonOf(listed) as { items: Array<object> }).items).toContainEqual(
       expect.objectContaining({ ownerKind: "plugin", ownerId: "p1", name: "key1" }),
@@ -281,12 +281,12 @@ describe("the first run and everything after it", () => {
     expect(listed.stdout).not.toContain(secretValue);
 
     // `--value` does not exist: a secret never sits in argv.
-    const inArgv = await hydra(["secret", "set", "plugin", "p1", "key2", "--value", secretValue]);
+    const inArgv = await hercule(["secret", "set", "plugin", "p1", "key2", "--value", secretValue]);
     expect(inArgv.code).toBe(2);
     expect(inArgv.stderr).toContain("--value-stdin");
 
     // The `core` owner is the controller's own key material.
-    const core = await hydra(
+    const core = await hercule(
       ["secret", "set", "core", "controller", "x", "--value-stdin", "--json"],
       "x",
     );
@@ -303,10 +303,10 @@ describe("the first run and everything after it", () => {
   it("5. resolves credentials from the environment, and refuses the file in a session", async () => {
     const inSession = await cli(["controller", "read"], {
       home: state.home,
-      env: { HYDRA_SESSION: "1" },
+      env: { HERCULE_SESSION: "1" },
     });
     expect(inSession.code).toBe(3);
-    expect(inSession.stderr).toContain("HYDRA_SESSION");
+    expect(inSession.stderr).toContain("HERCULE_SESSION");
     expect(inSession.stderr).toContain(credentialsFile);
 
     const byEnv = await withToken(apiKey, ["controller", "read", "--json"]);
@@ -314,13 +314,13 @@ describe("the first run and everything after it", () => {
     expect(jsonOf(byEnv)).toHaveProperty("publicKey");
 
     const throwaway = jsonOf(
-      await hydra(["api-key", "create", "--name", "throwaway", "--json"]),
+      await hercule(["api-key", "create", "--name", "throwaway", "--json"]),
     ) as { id: string; token: string };
     expect(await withToken(throwaway.token, ["controller", "read", "--json"])).toMatchObject({
       code: 0,
     });
 
-    const revoked = await hydra(["api-key", "revoke", throwaway.id, "--json"]);
+    const revoked = await hercule(["api-key", "revoke", throwaway.id, "--json"]);
     expect(revoked.code).toBe(0);
 
     const dead = await withToken(throwaway.token, ["controller", "read", "--json"]);
@@ -331,17 +331,17 @@ describe("the first run and everything after it", () => {
   });
 
   it("6. prints help at any position, naming the grant the operation needs", async () => {
-    const help = await hydra(["profile", "create", "--help"]);
+    const help = await hercule(["profile", "create", "--help"]);
     expect(help.code).toBe(0);
     expect(help.stdout).toContain("permission.write");
     expect(help.stdout).toContain("POST /api/v1/profiles");
 
-    const late = await hydra(["profile", "create", "--name", "x", "--help"]);
+    const late = await hercule(["profile", "create", "--name", "x", "--help"]);
     expect(late.stdout).toBe(help.stdout);
   });
 
   it("7. prints exactly what the route returned under --json", async () => {
-    const viaCli = await hydra(["profile", "list", "--json"]);
+    const viaCli = await hercule(["profile", "list", "--json"]);
     const viaFetch = await fetch(`${url}/api/v1/profiles`, {
       headers: { authorization: `Bearer ${apiKey}` },
     });
@@ -351,7 +351,7 @@ describe("the first run and everything after it", () => {
 
   it("8. logs out a login bearer, and refuses to log out an API key", async () => {
     // `auth.login` and `auth.logout` have no command at all: the CLI trades a
-    // password for an API key with `hydra login` and never holds a bearer. The
+    // password for an API key with `hercule login` and never holds a bearer. The
     // endpoints are the web app's, so they are driven here over the wire.
     const post = (path: string, body: unknown, token?: string) =>
       fetch(`${url}/api/v1${path}`, {
@@ -394,32 +394,32 @@ describe("the first run and everything after it", () => {
   }, 15_000);
 
   it("9. stops on SIGTERM, closing the database, and opens the same home again", async () => {
-    const wal = join(state.home, "data", "hydra.db-wal");
+    const wal = join(state.home, "data", "hercule.db-wal");
     // Under load the write-ahead log is not empty while the controller is up,
     // so the checkpoint below is a real transition rather than a no-op.
     expect(statSync(wal).size).toBeGreaterThan(0);
 
     const code = await controller.stop();
     expect(code).toBe(0);
-    expect(controller.output()).toContain("Stopping Hydra.");
+    expect(controller.output()).toContain("Stopping Hercule.");
 
     // Exit 0 alone would also follow from `process.exit()`: the kernel releases
     // SQLite's locks either way. Closing the database is what checkpoints the
-    // write-ahead log back into `hydra.db`, so an empty `-wal` is the
+    // write-ahead log back into `hercule.db`, so an empty `-wal` is the
     // observable that separates a clean close from a killed process. SQLite
     // then removes the file where the platform lets it and truncates it to
     // zero where it does not, so both outcomes mean checkpointed.
     expect(existsSync(wal) ? statSync(wal).size : 0).toBe(0);
 
     controller = await startController({ home: state.home, port });
-    expect(controller.output()).toContain("Hydra is set up.");
+    expect(controller.output()).toContain("Hercule is set up.");
     expect(existsSync(setupUrlFile)).toBe(false);
 
-    const read = await hydra(["setup", "read", "--json"]);
+    const read = await hercule(["setup", "read", "--json"]);
     expect(jsonOf(read)).toEqual({ complete: true });
 
     // The key from before the restart still works: nothing lived in memory.
-    const identity = await hydra(["controller", "read", "--json"]);
+    const identity = await hercule(["controller", "read", "--json"]);
     expect(identity.code).toBe(0);
   }, 30_000);
 });

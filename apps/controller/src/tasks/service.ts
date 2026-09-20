@@ -343,7 +343,7 @@ const make = Effect.gen(function* () {
 
 /** The task service. */
 export class TaskService extends Context.Service<TaskService, Effect.Success<typeof make>>()(
-  "hydra/controller/tasks/TaskService",
+  "hercule/controller/tasks/TaskService",
 ) {}
 
 export const TaskServiceLayer: Layer.Layer<TaskService, never, SqlClient.SqlClient | AuditLog> =

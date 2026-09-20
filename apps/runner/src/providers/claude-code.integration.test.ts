@@ -35,29 +35,29 @@ afterAll(() => {
 });
 
 const emptyHome = (): string => {
-  const home = mkdtempSync(join(tmpdir(), "hydra-claude-probe-"));
+  const home = mkdtempSync(join(tmpdir(), "hercule-claude-probe-"));
   homes.push(home);
   return home;
 };
 
 /**
- * hydra-as-a-tool as the contexts here carry it: a real plugin directory,
+ * hercule-as-a-tool as the contexts here carry it: a real plugin directory,
  * because a path that is not one is a plugin the CLI would have to refuse. The
  * skill case below writes its own, with a marker in it.
  *
  * Made on first use, so a run that skips every case here writes nothing.
  */
-let tool: ProviderRunnerContext["hydraTool"] | undefined;
-const TOOL = (): ProviderRunnerContext["hydraTool"] => {
+let tool: ProviderRunnerContext["herculeTool"] | undefined;
+const TOOL = (): ProviderRunnerContext["herculeTool"] => {
   if (tool === undefined) {
     const under = emptyHome();
     const {
-      hydraTool: { claudePluginDir },
+      herculeTool: { claudePluginDir },
     } = prepareTooling({
       home: join(under, "home"),
       storageDir: join(under, "storage"),
       execPath: process.execPath,
-      skill: "# hydra\n\nNothing this test asks about.\n",
+      skill: "# hercule\n\nNothing this test asks about.\n",
     });
     tool = { skill: "", claudePluginDir };
   }
@@ -82,7 +82,7 @@ describe.skipIf(binary === undefined)("the real Claude adapter on this machine",
         binary: binary!,
         env: { PATH: process.env["PATH"] ?? "" },
         secrets: {},
-        hydraTool: TOOL(),
+        herculeTool: TOOL(),
       };
 
       const started = Date.now();
@@ -118,7 +118,7 @@ const CONFIG_DIR = process.env["CLAUDE_CONFIG_DIR"] ?? join(homedir(), ".claude"
  * Opt-in, because the alternative is that `pnpm test` on any developer's
  * machine quietly spends their subscription and takes a minute doing it.
  */
-const wanted = process.env["HYDRA_LIVE_SESSION_TEST"] !== undefined;
+const wanted = process.env["HERCULE_LIVE_SESSION_TEST"] !== undefined;
 
 const SESSION = "0199e0e7-0000-7000-8000-0000000000ff";
 
@@ -169,7 +169,7 @@ const authed =
               binary,
               env: process.env,
               secrets: {},
-              hydraTool: TOOL(),
+              herculeTool: TOOL(),
             },
             {},
           ),
@@ -225,7 +225,7 @@ describe.skipIf(!authed)("a real Claude Code session on this machine", () => {
 /**
  * The one fact about the CLI this build could not read out of the SDK's types:
  * whether `options.sessionId` is honoured together with `resume` and
- * `forkSession: true`, which is what lets Hydra name a forked session the way it
+ * `forkSession: true`, which is what lets Hercule name a forked session the way it
  * names a fresh one. If it is not, the fork's binding has to wait for the CLI's
  * own `init` message instead, and this test's failure message says so.
  *
@@ -272,7 +272,7 @@ const untilTranscript = async (nativeSessionId: string): Promise<string | undefi
  */
 const contextFor = (
   cwd: string,
-  hydraTool: ProviderRunnerContext["hydraTool"] = TOOL(),
+  herculeTool: ProviderRunnerContext["herculeTool"] = TOOL(),
 ): ProviderRunnerContext => ({
   cwd,
   home: CONFIG_DIR,
@@ -285,7 +285,7 @@ const contextFor = (
       : { ANTHROPIC_API_KEY: process.env["ANTHROPIC_API_KEY"] }),
   },
   secrets: {},
-  hydraTool,
+  herculeTool,
 });
 
 /** A fresh subscriber per session: the stream is unbounded and never replays. */
@@ -304,12 +304,12 @@ const SKILLED = "0199e0e7-0000-7000-8000-00000000ff04";
 
 describe.skipIf(!authed)("a real Claude Code session continued on this machine", () => {
   it(
-    "forks under the native id Hydra minted, and resumes under the parent's own",
+    "forks under the native id Hercule minted, and resumes under the parent's own",
     async () => {
       const context = contextFor(emptyHome());
 
       /** Reads back out of a transcript, so a fork can be told from a fresh session. */
-      const marker = `hydra-fork-probe-${crypto.randomUUID().slice(0, 8)}`;
+      const marker = `hercule-fork-probe-${crypto.randomUUID().slice(0, 8)}`;
       const asking = (text: string) => `Reply with the single word ready. Use no tools. ${text}`;
 
       /** One session: start it, say one thing, wait the turn out, stop it. */
@@ -337,7 +337,7 @@ describe.skipIf(!authed)("a real Claude Code session continued on this machine",
       expect(before).toContain(marker);
       const known = new Set(transcripts());
 
-      // Hydra names the forked session itself, because in streaming-input mode
+      // Hercule names the forked session itself, because in streaming-input mode
       // the CLI says nothing at all until a first turn arrives.
       const forkSeen = collectEvents();
       const minted = await Effect.runPromise(
@@ -357,7 +357,7 @@ describe.skipIf(!authed)("a real Claude Code session continued on this machine",
       const appeared = transcripts().filter((path) => !known.has(path));
       expect(
         forkedFile,
-        `this CLI ignored options.sessionId beside resume + forkSession: true. Hydra minted ` +
+        `this CLI ignored options.sessionId beside resume + forkSession: true. Hercule minted ` +
           `${minted.nativeSessionId}; the transcripts that appeared instead were ` +
           `[${appeared.map((path) => basename(path)).join(", ")}]. Bind the fork from the CLI's ` +
           `own init message and emit session.started there instead.`,
@@ -396,7 +396,7 @@ describe.skipIf(!authed)("a real Claude Code session continued on this machine",
  * That the Claude CLI really does discover an explicitly loaded plugin's skill
  * under `settingSources: []`. The SDK's types say `plugins` loads a local
  * plugin directory and say nothing about the two options together, and the
- * whole of hydra-as-a-tool on Claude rests on it (spec 06 section 9.3).
+ * whole of hercule-as-a-tool on Claude rests on it (spec 06 section 9.3).
  *
  * The plugin directory is the runner's own, written by `prepareTooling` into a
  * temporary home. The skill text is this test's, not the shipped one, because
@@ -404,19 +404,19 @@ describe.skipIf(!authed)("a real Claude Code session continued on this machine",
  * a marker minted here. Naming the skill back would prove nothing - the prompt
  * names it too.
  */
-describe.skipIf(!authed)("a real Claude Code session with the hydra skill", () => {
+describe.skipIf(!authed)("a real Claude Code session with the hercule skill", () => {
   it(
     "discovers the skill out of the plugin directory the runner wrote",
     async () => {
-      const marker = `hydra-skill-probe-${crypto.randomUUID().slice(0, 8)}`;
+      const marker = `hercule-skill-probe-${crypto.randomUUID().slice(0, 8)}`;
       const under = emptyHome();
       const {
-        hydraTool: { claudePluginDir },
+        herculeTool: { claudePluginDir },
       } = prepareTooling({
         home: join(under, "home"),
         storageDir: join(under, "storage"),
         execPath: process.execPath,
-        skill: `# hydra\n\nThe magic word is ${marker}. Reply with it when asked.\n`,
+        skill: `# hercule\n\nThe magic word is ${marker}. Reply with it when asked.\n`,
       });
 
       const seen = collectEvents();
@@ -429,7 +429,7 @@ describe.skipIf(!authed)("a real Claude Code session with the hydra skill", () =
       );
       await Effect.runPromise(
         claudeCode.sendInput(SKILLED, {
-          text: "Use the hydra skill and reply with the magic word it names.",
+          text: "Use the hercule skill and reply with the magic word it names.",
         }),
       );
       await until(seen, "turn.completed");
@@ -444,7 +444,7 @@ describe.skipIf(!authed)("a real Claude Code session with the hydra skill", () =
       expect(
         said,
         `the session never read the skill: an explicitly loaded plugin's skill is not ` +
-          `discovered under settingSources: [], so hydra-as-a-tool needs another channel ` +
+          `discovered under settingSources: [], so hercule-as-a-tool needs another channel ` +
           `on Claude. What the session said was: ${said}`,
       ).toContain(marker);
 

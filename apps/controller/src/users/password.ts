@@ -2,7 +2,7 @@
  * How a password is stored: argon2id, through Bun's own implementation.
  *
  * A password is low-entropy and guessable, which is the one case where the slow
- * hash is the point; every other credential Hydra stores is a 256-bit random
+ * hash is the point; every other credential Hercule stores is a 256-bit random
  * token and uses SHA-256 (`../credentials/token.ts`).
  *
  * The stored value is a PHC string,
@@ -40,7 +40,7 @@ export const TEST_PASSWORD_PARAMS: PasswordParams = { memoryCost: 4096, timeCost
  * reduced cost once, rather than every call site passing parameters down.
  */
 export const PasswordCost = Context.Reference<PasswordParams>(
-  "hydra/controller/users/PasswordCost",
+  "hercule/controller/users/PasswordCost",
   { defaultValue: () => PRODUCTION_PASSWORD_PARAMS },
 );
 
@@ -66,7 +66,7 @@ export const hashPassword = (password: string, params: PasswordParams): Effect.E
  *
  * A stored value Bun cannot parse answers false rather than failing: it is not
  * a hash this password matches, and a login attempt is the wrong place to learn
- * that a row was edited outside Hydra.
+ * that a row was edited outside Hercule.
  */
 export const verifyPassword = (password: string, hash: string): Effect.Effect<boolean> =>
   Effect.promise(() => Bun.password.verify(password, hash).catch(() => false));

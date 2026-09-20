@@ -29,18 +29,18 @@ const USER: Actor = {
 let home: string;
 
 beforeEach(() => {
-  home = mkdtempSync(join(tmpdir(), "hydra-boot-"));
+  home = mkdtempSync(join(tmpdir(), "hercule-boot-"));
 });
 
 afterEach(() => {
   rmSync(home, { recursive: true, force: true });
 });
 
-/** Boot the way `hydra serve` does, against the temporary home and the key file. */
+/** Boot the way `hercule serve` does, against the temporary home and the key file. */
 const serve = (argv: ReadonlyArray<string> = []): Promise<BootOutcome> =>
   Effect.runPromise(boot({ argv: ["--home", home, ...argv], env: {}, masterKeyBackend: "file" }));
 
-/** Boot the way `hydra serve` does, and hand the test the error it failed with. */
+/** Boot the way `hercule serve` does, and hand the test the error it failed with. */
 const serveError = (argv: ReadonlyArray<string> = [], at: string = home) =>
   Effect.runPromise(
     boot({ argv: ["--home", at, ...argv], env: {}, masterKeyBackend: "file" }).pipe(Effect.flip),
@@ -48,7 +48,7 @@ const serveError = (argv: ReadonlyArray<string> = [], at: string = home) =>
 
 /** Read the database the way an operator would: another connection, plain SQL. */
 const query = <A>(sql: string, at: string = home): ReadonlyArray<A> => {
-  const database = new Database(join(at, "data", "hydra.db"), { readonly: true });
+  const database = new Database(join(at, "data", "hercule.db"), { readonly: true });
   try {
     return database.query(sql).all() as ReadonlyArray<A>;
   } finally {
@@ -74,12 +74,12 @@ describe("the first run", () => {
       expect(mode(join(home, directory))).toBe(0o700);
     }
     expect(readFileSync(join(home, "config.toml"), "utf8")).toContain("bind.port = 4937");
-    expect(outcome.paths.databaseFile).toBe(join(home, "data", "hydra.db"));
+    expect(outcome.paths.databaseFile).toBe(join(home, "data", "hercule.db"));
   });
 
   it("opens the database in WAL and applies the migrations", async () => {
     await serve();
-    const database = new Database(join(home, "data", "hydra.db"));
+    const database = new Database(join(home, "data", "hercule.db"));
     try {
       expect(database.query("PRAGMA journal_mode").get()).toEqual({ journal_mode: "wal" });
     } finally {
@@ -141,8 +141,8 @@ describe("the first run", () => {
       const outcome = await Effect.runPromise(
         boot({ argv: ["--home", moved], env: {}, masterKeyBackend: "file" }),
       );
-      expect(outcome.paths.databaseFile).toBe(join(moved, "data", "hydra.db"));
-      expect(existsSync(join(moved, "data", "hydra.db"))).toBe(true);
+      expect(outcome.paths.databaseFile).toBe(join(moved, "data", "hercule.db"));
+      expect(existsSync(join(moved, "data", "hercule.db"))).toBe(true);
       expect(query("SELECT id FROM controller_identity", moved)).toHaveLength(1);
     } finally {
       rmSync(moved, { recursive: true, force: true });
@@ -170,7 +170,7 @@ describe("bootWith", () => {
 
     expect(rows).toHaveLength(3);
     // Nothing holds the file once the effect is done: another writer opens it.
-    const database = new Database(join(home, "data", "hydra.db"));
+    const database = new Database(join(home, "data", "hercule.db"));
     try {
       expect(database.query("PRAGMA journal_mode").all()).toEqual([{ journal_mode: "wal" }]);
     } finally {
@@ -285,7 +285,7 @@ describe("a second boot", () => {
 describe("once setup is complete", () => {
   it("deletes the setup URL, clears the token hash and mints no token", async () => {
     const first = await serve();
-    const database = new Database(join(home, "data", "hydra.db"));
+    const database = new Database(join(home, "data", "hercule.db"));
     try {
       // The outstanding token is left in the row: completing setup is what
       // clears it, and the invariant is the controller's to keep.
@@ -314,7 +314,7 @@ describe("a boot that cannot start", () => {
   it("fails with the config error, and creates no database", async () => {
     const failure = await serveError(["-c", "bind.port=nope"]);
     expect(failure._tag).toBe("ConfigValueError");
-    expect(existsSync(join(home, "data", "hydra.db"))).toBe(false);
+    expect(existsSync(join(home, "data", "hercule.db"))).toBe(false);
   });
 
   it("mints no second master key over a database that already holds secrets", async () => {
@@ -331,13 +331,13 @@ describe("a boot that cannot start", () => {
 
   it("names the database file when it is not a database", async () => {
     await serve();
-    writeFileSync(join(home, "data", "hydra.db"), "this is not a SQLite database");
-    rmSync(join(home, "data", "hydra.db-wal"), { force: true });
-    rmSync(join(home, "data", "hydra.db-shm"), { force: true });
+    writeFileSync(join(home, "data", "hercule.db"), "this is not a SQLite database");
+    rmSync(join(home, "data", "hercule.db-wal"), { force: true });
+    rmSync(join(home, "data", "hercule.db-shm"), { force: true });
 
     const failure = await serveError();
 
     expect(failure._tag).toBe("DatabaseError");
-    expect(failure.message).toContain(join(home, "data", "hydra.db"));
+    expect(failure.message).toContain(join(home, "data", "hercule.db"));
   });
 });

@@ -26,7 +26,7 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 export default Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
 
-  // A way to group information inside Hydra. It carries no behaviour: no
+  // A way to group information inside Hercule. It carries no behaviour: no
   // default connection, no status, nothing derived.
   yield* sql`
     CREATE TABLE projects (

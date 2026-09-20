@@ -1,5 +1,5 @@
 /**
- * The controller role: the always-on brain behind `hydra serve`.
+ * The controller role: the always-on brain behind `hercule serve`.
  *
  * Boot (`./bootstrap.ts`), say where things are, bind, and stay up until the
  * unit is stopped. SIGINT and SIGTERM both mean the same thing: stop accepting,
@@ -28,7 +28,7 @@ export type { BootError, BootOptions, BootOutcome, ControllerServices } from "./
  * One clear line per failure, on stderr. No stack, no Effect internals.
  *
  * Exported so the wording is testable on its own: it is the only thing a
- * failing `hydra serve` ever shows.
+ * failing `hercule serve` ever shows.
  */
 export function explain(error: BootError): string {
   switch (error._tag) {
@@ -36,7 +36,7 @@ export function explain(error: BootError): string {
       return `${error.option}: ${error.message}`;
     case "ConfigFileError":
       return `${error.path} ${error.message}`;
-    case "HydraHomeError":
+    case "HerculeHomeError":
       return `Cannot ${error.action} ${error.path}: ${String(error.cause)}`;
     default:
       return error.message;
@@ -53,25 +53,25 @@ export function explain(error: BootError): string {
 export function report(outcome: BootOutcome, webApp: boolean): void {
   const { paths, setupUrl } = outcome;
   if (setupUrl === undefined) {
-    console.log(`Hydra is set up. Home ${paths.home}, database ${paths.databaseFile}.`);
+    console.log(`Hercule is set up. Home ${paths.home}, database ${paths.databaseFile}.`);
     return;
   }
   if (!webApp) {
-    console.log("Hydra is not set up yet, and this build embeds no web app to set it up in.");
-    console.log("Run `pnpm build:binary` to build one, then start Hydra again.");
-    console.log(`The setup URL is in ${paths.setupUrlFile}, and \`hydra setup-url\` prints it.`);
+    console.log("Hercule is not set up yet, and this build embeds no web app to set it up in.");
+    console.log("Run `pnpm build:binary` to build one, then start Hercule again.");
+    console.log(`The setup URL is in ${paths.setupUrlFile}, and \`hercule setup-url\` prints it.`);
     return;
   }
-  console.log("Open this URL to finish setting up Hydra:");
+  console.log("Open this URL to finish setting up Hercule:");
   console.log(`  ${setupUrl}`);
-  console.log(`It is also in ${paths.setupUrlFile}, and \`hydra setup-url\` prints it.`);
+  console.log(`It is also in ${paths.setupUrlFile}, and \`hercule setup-url\` prints it.`);
 }
 
 /** What a second signal during the drain prints, instead of killing the process. */
-export const STILL_STOPPING = "Still stopping Hydra; the requests in flight are finishing.";
+export const STILL_STOPPING = "Still stopping Hercule; the requests in flight are finishing.";
 
 /** What the drain prints when it gives up waiting for the connections still open. */
-export const STILL_OPEN = "Connections were still open; Hydra stopped anyway.";
+export const STILL_OPEN = "Connections were still open; Hercule stopped anyway.";
 
 /**
  * How long the drain waits before the process stops regardless.
@@ -140,12 +140,12 @@ const listen = (outcome: BootOutcome, stopped: Effect.Effect<void>) =>
     yield* serve(bundle);
 
     const warning = perimeterWarning(bootstrap.bindHost, bootstrap.bindPort);
-    if (warning !== undefined) console.warn(`hydra: ${warning}`);
-    console.log(`Hydra is listening on http://${bootstrap.bindHost}:${bootstrap.bindPort}.`);
+    if (warning !== undefined) console.warn(`hercule: ${warning}`);
+    console.log(`Hercule is listening on http://${bootstrap.bindHost}:${bootstrap.bindPort}.`);
     report(outcome, bundle !== undefined);
 
     yield* stopped;
-    console.log("Stopping Hydra.");
+    console.log("Stopping Hercule.");
     // Before the listener goes: the child says goodbye over the socket it holds
     // with this controller, and a controller that had already stopped listening
     // would read that departure as a machine that vanished.
@@ -155,7 +155,7 @@ const listen = (outcome: BootOutcome, stopped: Effect.Effect<void>) =>
 export async function run(argv: readonly string[]): Promise<void> {
   // The signal handlers are installed outside the boot and come off only once
   // the database is closed, so every signal that arrives during the shutdown
-  // still lands on Hydra rather than on Bun's default disposition.
+  // still lands on Hercule rather than on Bun's default disposition.
   const program = Effect.scoped(
     Effect.flatMap(untilStopped, (stopped) =>
       bootWith({ argv, env: process.env, localRunner: LOCAL_RUNNER }, (outcome) =>
@@ -179,14 +179,14 @@ export async function run(argv: readonly string[]): Promise<void> {
 
   const outcome = await Effect.runPromise(program.pipe(Effect.result)).catch((defect: unknown) => {
     // A defect is a bug, not a boot failure; it still has to read as one line.
-    console.error(`hydra: ${String(defect)}`);
+    console.error(`hercule: ${String(defect)}`);
     process.exitCode = 1;
     return undefined;
   });
 
   if (outcome === undefined) return;
   if (outcome._tag === "Failure") {
-    console.error(`hydra: ${explain(outcome.failure)}`);
+    console.error(`hercule: ${explain(outcome.failure)}`);
     process.exitCode = 1;
   }
 }

@@ -1,5 +1,5 @@
 /**
- * The Hydra-owned newline-delimited JSON-RPC codec, driven over a pair of
+ * The Hercule-owned newline-delimited JSON-RPC codec, driven over a pair of
  * in-memory line streams: what it writes, how it sorts what comes back, and
  * what it does with a peer that answers late, badly, or not at all.
  */
@@ -111,7 +111,7 @@ describe("what the codec writes", () => {
       Effect.gen(function* () {
         const pumping = yield* Effect.forkChild(peer.rpc.pump);
         const asked = yield* Effect.forkChild(
-          peer.rpc.request("initialize", { clientInfo: { name: "hydra" } }),
+          peer.rpc.request("initialize", { clientInfo: { name: "hercule" } }),
         );
         yield* until("wrote the request", () => peer.writes.length === 1);
 
@@ -122,13 +122,13 @@ describe("what the codec writes", () => {
         const frame = frameOf(written);
         expect(typeof frame["id"]).toBe("number");
         expect(frame["method"]).toBe("initialize");
-        expect(frame["params"]).toEqual({ clientInfo: { name: "hydra" } });
+        expect(frame["params"]).toEqual({ clientInfo: { name: "hercule" } });
         // Codex omits it in both directions, and rejects nothing for its absence.
         expect(Object.keys(frame)).not.toContain("jsonrpc");
 
-        peer.answer(JSON.stringify({ id: frame["id"], result: { userAgent: "hydra/0.154.0" } }));
+        peer.answer(JSON.stringify({ id: frame["id"], result: { userAgent: "hercule/0.154.0" } }));
         const answered = yield* Fiber.join(asked);
-        expect(answered).toEqual({ userAgent: "hydra/0.154.0" });
+        expect(answered).toEqual({ userAgent: "hercule/0.154.0" });
         yield* Fiber.interrupt(pumping);
       }),
     );

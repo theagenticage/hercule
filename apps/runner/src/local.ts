@@ -1,5 +1,5 @@
 /**
- * `hydra runner --local`: an ordinary runner in every way but its first two
+ * `hercule runner --local`: an ordinary runner in every way but its first two
  * seconds.
  *
  * `runner.json` has one owner, so a controller cannot read who its child is; the

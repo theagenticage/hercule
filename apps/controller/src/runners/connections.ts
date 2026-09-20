@@ -61,7 +61,7 @@ const RUNNER_FACTS_DEADLINE: Duration.Duration = Duration.seconds(10);
 
 /** Tests hand over a deadline they can wait out. */
 export const RunnerFactsDeadline = Context.Reference<Duration.Duration>(
-  "hydra/controller/runners/RunnerFactsDeadline",
+  "hercule/controller/runners/RunnerFactsDeadline",
   { defaultValue: (): Duration.Duration => RUNNER_FACTS_DEADLINE },
 );
 
@@ -571,7 +571,7 @@ const make = Effect.gen(function* () {
 export class RunnerConnections extends Context.Service<
   RunnerConnections,
   Effect.Success<typeof make>
->()("hydra/controller/runners/RunnerConnections") {}
+>()("hercule/controller/runners/RunnerConnections") {}
 
 export const RunnerConnectionsLayer: Layer.Layer<
   RunnerConnections,

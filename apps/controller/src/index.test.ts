@@ -1,25 +1,25 @@
 import { describe, expect, it } from "vitest";
 import * as Effect from "effect/Effect";
-import { HydraHomeError } from "./config";
+import { HerculeHomeError } from "./config";
 import { explain, STILL_STOPPING, untilStopped } from "./index";
 
 describe("explain", () => {
-  it("says what Hydra was doing to the path, not always creating it", () => {
-    const path = "/home/x/.hydra/setup-url";
+  it("says what Hercule was doing to the path, not always creating it", () => {
+    const path = "/home/x/.hercule/setup-url";
     const cause = new Error("EACCES: permission denied");
-    expect(explain(new HydraHomeError({ action: "create", path, cause }))).toContain(
+    expect(explain(new HerculeHomeError({ action: "create", path, cause }))).toContain(
       `Cannot create ${path}`,
     );
-    expect(explain(new HydraHomeError({ action: "write", path, cause }))).toContain(
+    expect(explain(new HerculeHomeError({ action: "write", path, cause }))).toContain(
       `Cannot write ${path}`,
     );
-    expect(explain(new HydraHomeError({ action: "remove", path, cause }))).toContain(
+    expect(explain(new HerculeHomeError({ action: "remove", path, cause }))).toContain(
       `Cannot remove ${path}`,
     );
-    expect(explain(new HydraHomeError({ action: "secure", path, cause }))).toContain(
+    expect(explain(new HerculeHomeError({ action: "secure", path, cause }))).toContain(
       `Cannot secure ${path}`,
     );
-    expect(explain(new HydraHomeError({ action: "write", path, cause }))).toContain(
+    expect(explain(new HerculeHomeError({ action: "write", path, cause }))).toContain(
       "permission denied",
     );
   });
@@ -51,7 +51,7 @@ describe("the stop request", () => {
             signal("SIGTERM");
             yield* stopped;
 
-            // The drain is under way. Both signals still land on Hydra - the
+            // The drain is under way. Both signals still land on Hercule - the
             // handlers are still installed - and neither of them stops it
             // again.
             signal("SIGTERM");

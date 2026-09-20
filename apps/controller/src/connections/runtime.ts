@@ -280,7 +280,7 @@ const make = Effect.gen(function* () {
 export class ConnectionTypes extends Context.Service<
   ConnectionTypes,
   Effect.Success<typeof make>
->()("hydra/controller/connections/ConnectionTypes") {}
+>()("hercule/controller/connections/ConnectionTypes") {}
 
 export const ConnectionTypesLayer: Layer.Layer<
   ConnectionTypes,

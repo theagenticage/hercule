@@ -11,9 +11,9 @@
  */
 import { describe, expect, it } from "vitest";
 import { CLI } from "@hercule/contract";
-import { HYDRA_SKILL } from "./skill";
+import { HERCULE_SKILL } from "./skill";
 
-/** Every visible command, as the words that follow `hydra`. */
+/** Every visible command, as the words that follow `hercule`. */
 const COMMANDS: ReadonlyArray<ReadonlyArray<string>> = Object.values(CLI).flatMap((row) =>
   "command" in row ? [row.command.split(" ")] : [],
 );
@@ -29,7 +29,7 @@ const isVerb = (noun: string, word: string): boolean =>
 
 /**
  * The three forms spec 11 section 6.3 lets the skill name: the root help, a
- * noun's, and a verb's. Anything else - a bare `hydra`, or a worked command -
+ * noun's, and a verb's. Anything else - a bare `hercule`, or a worked command -
  * is content the CLI's own help owns.
  */
 const isHelpForm = (rest: string): boolean => {
@@ -42,10 +42,10 @@ const isHelpForm = (rest: string): boolean => {
   return path.length === 2 && isVerb(path[0]!, path[1]!);
 };
 
-describe("the hydra skill", () => {
+describe("the hercule skill", () => {
   it("spells nothing but the three help forms, with nouns and verbs this build has", () => {
-    const text: string = HYDRA_SKILL;
-    const spelled: ReadonlyArray<string> = [...text.matchAll(/`(hydra(?:\s[^`]*)?)`/g)].map(
+    const text: string = HERCULE_SKILL;
+    const spelled: ReadonlyArray<string> = [...text.matchAll(/`(hercule(?:\s[^`]*)?)`/g)].map(
       (found) => found[1]!.trim().replace(/\s+/g, " "),
     );
 
@@ -53,7 +53,7 @@ describe("the hydra skill", () => {
     // teaching an agent nothing: the help forms are the whole of its content.
     expect(spelled.length).toBeGreaterThan(0);
 
-    const wrong = spelled.filter((command) => !isHelpForm(command.slice("hydra".length).trim()));
+    const wrong = spelled.filter((command) => !isHelpForm(command.slice("hercule".length).trim()));
     expect(wrong, `the skill spells something that is not one of the three help forms`).toEqual([]);
   });
 });

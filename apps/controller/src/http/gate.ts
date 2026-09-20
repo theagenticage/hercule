@@ -32,7 +32,7 @@ const OPEN_BEFORE_SETUP = new Set([
   `POST ${OPERATIONS["setup.complete"].path}`,
 ]);
 
-const NOT_SET_UP = "Hydra is not set up yet. Open the setup URL to finish first run.";
+const NOT_SET_UP = "Hercule is not set up yet. Open the setup URL to finish first run.";
 
 /**
  * The gate as one route middleware. Effectful because it takes the setup

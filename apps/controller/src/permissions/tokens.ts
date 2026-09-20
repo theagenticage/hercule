@@ -98,7 +98,7 @@ const make = Effect.gen(function* () {
 
 /** The session-token resolver: token hash to session actor, with its cache. */
 export class SessionTokens extends Context.Service<SessionTokens, Effect.Success<typeof make>>()(
-  "hydra/controller/permissions/SessionTokens",
+  "hercule/controller/permissions/SessionTokens",
 ) {}
 
 export const SessionTokensLayer: Layer.Layer<SessionTokens, never, SqlClient.SqlClient> =

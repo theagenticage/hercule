@@ -8,7 +8,7 @@ export class InvalidOptionError extends Schema.TaggedError<InvalidOptionError>()
 
 /** The two global options, stripped from `argv` before a role reads it. */
 export interface GlobalOptions {
-  /** `--home <dir>` / `--home=<dir>` / `HYDRA_HOME`; the last one on the line wins. */
+  /** `--home <dir>` / `--home=<dir>` / `HERCULE_HOME`; the last one on the line wins. */
   readonly home: string | undefined;
   /** `-c key=value`, in the order given; a repeated key is decided by the last one. */
   readonly overrides: ReadonlyArray<readonly [key: string, value: string]>;

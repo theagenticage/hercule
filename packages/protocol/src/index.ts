@@ -500,7 +500,7 @@ export type ControllerHello = Schema.Schema.Type<typeof ControllerHello>;
  * colon always separates the two halves.
  */
 export const signedChallenge = (runnerId: string, nonce: string): Uint8Array<ArrayBuffer> =>
-  new TextEncoder().encode(`hydra:runner-hello:${runnerId}:${nonce}`);
+  new TextEncoder().encode(`hercule:runner-hello:${runnerId}:${nonce}`);
 
 /**
  * Asks the runner to probe its machine now and report what it finds, whether or

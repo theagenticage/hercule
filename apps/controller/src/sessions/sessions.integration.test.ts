@@ -3720,19 +3720,19 @@ const workspaceReady = (arranged: Arranged, workspace: WorkspaceRow): void =>
 describe("session.spawn into a workspace", () => {
   it("gives a thread its own worktree of one repo, on a branch named after it", async () => {
     await withFleet(async (arranged) => {
-      const hydra = await makeProject(arranged, "Hydra");
-      const web = await makeRepo(arranged, "https://github.com/acme/web", [hydra]);
+      const hercule = await makeProject(arranged, "Hercule");
+      const web = await makeRepo(arranged, "https://github.com/acme/web", [hercule]);
 
       const session = await spawned(arranged, {
         prompt: "hello",
-        projectId: hydra,
+        projectId: hercule,
         workspace: { kind: "ephemeral", checkouts: [{ resourceId: web }] },
       });
 
       // The machine has not made it yet, so the session waits rather than starting.
       expect(session.status).toBe("queued");
       expect(session.workspaceId).not.toBeNull();
-      expect(projectOf(session)).toBe(hydra);
+      expect(projectOf(session)).toBe(hercule);
       expect(tagged(arranged.wire, "sessionStart")).toEqual([]);
 
       const workspace = await workspaceOf(arranged, String(session.workspaceId));
@@ -3743,7 +3743,7 @@ describe("session.spawn into a workspace", () => {
         resourceId: web,
         form: "worktree",
         subdirectory: null,
-        branch: `hydra/run-${session.id.slice(-8)}`,
+        branch: `hercule/run-${session.id.slice(-8)}`,
       });
 
       const frame = await frameWhenTagged(arranged.wire, "workspaceProvision");
@@ -3779,10 +3779,10 @@ describe("session.spawn into a workspace", () => {
       // And both live on the row the API hands back afterwards.
       const read = await readSession(arranged, session.id);
       expect(read.workspaceId).toBe(workspace.id);
-      expect(projectOf(read)).toBe(hydra);
+      expect(projectOf(read)).toBe(hercule);
       const listed = (await sessionsOf(arranged)).find((one) => one.id === session.id);
       expect(listed?.workspaceId).toBe(workspace.id);
-      expect(projectOf(listed!)).toBe(hydra);
+      expect(projectOf(listed!)).toBe(hercule);
     });
   });
 
@@ -3800,7 +3800,7 @@ describe("session.spawn into a workspace", () => {
       });
 
       const workspace = await workspaceOf(arranged, String(session.workspaceId));
-      const branch = `hydra/run-${session.id.slice(-8)}`;
+      const branch = `hercule/run-${session.id.slice(-8)}`;
       expect(workspace.checkouts).toHaveLength(2);
       expect(workspace.checkouts.map((one) => one.subdirectory)).toEqual(["web", "api"]);
       expect(workspace.checkouts.map((one) => one.branch)).toEqual([branch, branch]);
@@ -3960,9 +3960,9 @@ describe("session.spawn into a workspace", () => {
 
   it("refuses a project the repo does not belong to", async () => {
     await withFleet(async (arranged) => {
-      const hydra = await makeProject(arranged, "Hydra");
+      const hercule = await makeProject(arranged, "Hercule");
       const side = await makeProject(arranged, "Side");
-      const web = await makeRepo(arranged, "https://github.com/acme/web", [hydra]);
+      const web = await makeRepo(arranged, "https://github.com/acme/web", [hercule]);
 
       const response = await spawn(arranged, {
         prompt: "hello",
@@ -3982,12 +3982,12 @@ describe("session.spawn into a workspace", () => {
    */
   it("refuses joining a standing workspace whose repos are not the project's", async () => {
     await withFleet(async (arranged) => {
-      const hydra = await makeProject(arranged, "Hydra");
+      const hercule = await makeProject(arranged, "Hercule");
       const side = await makeProject(arranged, "Side");
-      const web = await makeRepo(arranged, "https://github.com/acme/web", [hydra]);
+      const web = await makeRepo(arranged, "https://github.com/acme/web", [hercule]);
       const first = await spawned(arranged, {
         prompt: "hello",
-        projectId: hydra,
+        projectId: hercule,
         workspace: { kind: "ephemeral", checkouts: [{ resourceId: web }] },
       });
       const workspace = await workspaceOf(arranged, String(first.workspaceId));
@@ -4004,7 +4004,7 @@ describe("session.spawn into a workspace", () => {
       // And the same workspace under its own project is joined as before.
       const joined = await spawned(arranged, {
         prompt: "again",
-        projectId: hydra,
+        projectId: hercule,
         workspace: { kind: "existing", workspaceId: workspace.id },
       });
       expect(joined.workspaceId).toBe(workspace.id);
@@ -4021,11 +4021,11 @@ describe("session.spawn into a workspace", () => {
    */
   it("refuses a fork whose parent's repo has left the project", async () => {
     await withFleet(async (arranged) => {
-      const hydra = await makeProject(arranged, "Hydra");
-      const web = await makeRepo(arranged, "https://github.com/acme/web", [hydra]);
+      const hercule = await makeProject(arranged, "Hercule");
+      const web = await makeRepo(arranged, "https://github.com/acme/web", [hercule]);
       const parent = await spawned(arranged, {
         prompt: "hello",
-        projectId: hydra,
+        projectId: hercule,
         workspace: { kind: "ephemeral", checkouts: [{ resourceId: web }] },
       });
       const workspace = await workspaceOf(arranged, String(parent.workspaceId));
@@ -4196,11 +4196,11 @@ describe("session.spawn into a workspace", () => {
 
   it("keeps the workspace and the project when a thread is forked", async () => {
     await withFleet(async (arranged) => {
-      const hydra = await makeProject(arranged, "Hydra");
-      const web = await makeRepo(arranged, "https://github.com/acme/web", [hydra]);
+      const hercule = await makeProject(arranged, "Hercule");
+      const web = await makeRepo(arranged, "https://github.com/acme/web", [hercule]);
       const parent = await spawned(arranged, {
         prompt: "hello",
-        projectId: hydra,
+        projectId: hercule,
         workspace: { kind: "ephemeral", checkouts: [{ resourceId: web }] },
       });
       const workspace = await workspaceOf(arranged, String(parent.workspaceId));
@@ -4220,7 +4220,7 @@ describe("session.spawn into a workspace", () => {
       const fork = (await response.json()) as Session;
       expect(fork.id).not.toBe(ended.id);
       expect(fork.workspaceId).toBe(workspace.id);
-      expect(projectOf(fork)).toBe(hydra);
+      expect(projectOf(fork)).toBe(hercule);
     });
   });
 });

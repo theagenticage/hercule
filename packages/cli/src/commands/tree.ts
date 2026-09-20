@@ -46,7 +46,7 @@ export interface Field {
   /** The closed set of accepted values, when the schema declares one. */
   readonly choices: ReadonlyArray<string> | undefined;
   /**
-   * Whether the field holds a Hydra id. The answer comes from the schema: the
+   * Whether the field holds a Hercule id. The answer comes from the schema: the
    * field is the contract's `Id`, and not a name or a free word that happens
    * to sit in a field called `ownerId`.
    */
@@ -68,7 +68,7 @@ export interface Returns {
 
 export interface Command {
   readonly id: OperationId;
-  /** The words after `hydra`, in tree order. */
+  /** The words after `hercule`, in tree order. */
   readonly words: ReadonlyArray<string>;
   /** The same words as one string, which is how a message and a help line name a command. */
   readonly spelling: string;
@@ -153,12 +153,12 @@ const elementOf = (input: Ast): Ast | undefined => {
 
 /**
  * The title the contract puts on its `Id` schema. Every id on the wire is a
- * uuidv7, so a schema with this title is the one shape that holds a Hydra id.
+ * uuidv7, so a schema with this title is the one shape that holds a Hercule id.
  */
 const UUID = "uuidv7";
 
 /**
- * Whether this field holds a Hydra id. The schema answers, not the field name:
+ * Whether this field holds a Hercule id. The schema answers, not the field name:
  * a secret's `ownerId` holds a plugin's name. A tail can stand for a canonical
  * UUID and for nothing else.
  */
@@ -336,7 +336,7 @@ const build = (): ReadonlyArray<Command> => {
 /** Every visible command, in the contract's own order. */
 export const COMMANDS: ReadonlyArray<Command> = build();
 
-/** A key no single word can collide with, so `hydra "task list"` is not a command. */
+/** A key no single word can collide with, so `hercule "task list"` is not a command. */
 const keyOf = (words: ReadonlyArray<string>): string => words.join("\u0000");
 
 const BY_WORDS = new Map(COMMANDS.map((command) => [keyOf(command.words), command]));
@@ -378,9 +378,9 @@ export const wordsAfter = (prefix: ReadonlyArray<string>): ReadonlyArray<string>
  */
 const HAND_WRITTEN = ["login", "setup-url", "serve"];
 
-/** One `hydra ...` the prose named, resolved against the tree. */
+/** One `hercule ...` the prose named, resolved against the tree. */
 export interface Mention {
-  /** The words the prose wrote after `hydra`. */
+  /** The words the prose wrote after `hercule`. */
   readonly words: ReadonlyArray<string>;
   /**
    * The longest leading run of those words the tree answers to, or `undefined`
@@ -393,16 +393,16 @@ export interface Mention {
 }
 
 /**
- * Every `hydra ...` a piece of prose names. One scanner, so what the help
+ * Every `hercule ...` a piece of prose names. One scanner, so what the help
  * offers as the next command and what the table's test accepts are the same
  * reading.
  *
  * A flag, a `<placeholder>` or any other punctuation ends the mention, and
- * prose that runs on after a whole command - "hydra task list to find work" -
+ * prose that runs on after a whole command - "hercule task list to find work" -
  * keeps the command.
  */
 export const mentionsIn = (text: string): ReadonlyArray<Mention> =>
-  [...text.matchAll(/\bhydra((?:\s+[a-z][a-z-]*)+)/g)].map((match) => {
+  [...text.matchAll(/\bhercule((?:\s+[a-z][a-z-]*)+)/g)].map((match) => {
     const words = match[1]!.trim().split(/\s+/);
     for (let length = words.length; length > 0; length -= 1) {
       const run = words.slice(0, length);

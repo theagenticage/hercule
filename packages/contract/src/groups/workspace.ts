@@ -9,7 +9,7 @@
  * disposed of afterwards.
  *
  * The controller stores no path and takes none. Where the folder is is the
- * machine's own business: a primary is always a Hydra-managed clone under that
+ * machine's own business: a primary is always a Hercule-managed clone under that
  * machine's own storage.
  */
 import { Schema } from "effect";

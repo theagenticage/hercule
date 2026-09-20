@@ -2,7 +2,7 @@
  * Password login, logout, and the live socket's ticket.
  *
  * `auth.login` mints the 30-day rolling bearer token the web app holds and
- * `hydra login` trades for an API key. `auth.logout` revokes the login bearer
+ * `hercule login` trades for an API key. `auth.logout` revokes the login bearer
  * token it was called with; an API key or a session token is `validation`,
  * because revoking those is `apiKey.revoke` and ending the session.
  *

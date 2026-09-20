@@ -104,8 +104,8 @@ export const serveCredentialSocket = async (options: {
 }): Promise<{ close(): Promise<void> }> => {
   if (await answeredAt(options.path)) {
     throw new Error(
-      `another Hydra runner is already listening at ${options.path}; ` +
-        "only one daemon may run against one Hydra home",
+      `another Hercule runner is already listening at ${options.path}; ` +
+        "only one daemon may run against one Hercule home",
     );
   }
   const server = createServer((connection: Socket) => {

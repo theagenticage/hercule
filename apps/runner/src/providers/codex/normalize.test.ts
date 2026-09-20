@@ -179,7 +179,7 @@ describe("what a whole Codex turn normalizes to", () => {
  * `null` where it is reported as nothing at all.
  */
 const ITEMS: ReadonlyArray<readonly [Record<string, unknown>, string | null]> = [
-  // `userMessage` is Codex echoing back what Hydra sent. The adapter reports
+  // `userMessage` is Codex echoing back what Hercule sent. The adapter reports
   // that input itself, with whether it steered - which an echo cannot say - so
   // the echo is dropped rather than reported as a second item.
   [{ type: "userMessage", id: "i1", clientId: null, content: [] }, null],

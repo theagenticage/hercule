@@ -10,7 +10,7 @@ const list = async (base: string, token: string, query = ""): Promise<Profile[]>
 };
 
 describe("permission profiles over HTTP", () => {
-  it("lists the three profiles Hydra ships, by name", async () => {
+  it("lists the three profiles Hercule ships, by name", async () => {
     await withServer(async ({ base }) => {
       const token = await completeSetup(base);
       const items = await list(base, token);

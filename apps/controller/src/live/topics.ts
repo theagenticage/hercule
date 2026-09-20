@@ -445,7 +445,7 @@ const make = Effect.gen(function* () {
 
 /** The Live Topics this controller is serving. */
 export class LiveTopics extends Context.Service<LiveTopics, Effect.Success<typeof make>>()(
-  "hydra/controller/live/LiveTopics",
+  "hercule/controller/live/LiveTopics",
 ) {}
 
 /**

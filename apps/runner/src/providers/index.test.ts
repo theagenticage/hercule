@@ -31,15 +31,15 @@ describe("the adapters this runner build carries", () => {
     const sent: Array<RunnerToController> = [];
     // Nothing is started here, so nothing under these paths is made.
     const machine: Machine = {
-      providersDir: "/var/hydra/runner/providers",
-      scratchDir: "/var/hydra/runner/scratch",
-      binDir: "/var/hydra/runner/bin",
-      hydraTool: { skill: "", claudePluginDir: "/var/hydra/runner/storage/claude-plugin" },
+      providersDir: "/var/hercule/runner/providers",
+      scratchDir: "/var/hercule/runner/scratch",
+      binDir: "/var/hercule/runner/bin",
+      herculeTool: { skill: "", claudePluginDir: "/var/hercule/runner/storage/claude-plugin" },
       controllerUrl: "https://controller.example:4938",
       baseEnv: { PATH: "/usr/bin" },
       binaryOf: () => undefined,
-      workspaces: makeWorkspaces({ storageDir: "/var/hydra/runner" }),
-      socketPath: "/var/hydra/runner/daemon.sock",
+      workspaces: makeWorkspaces({ storageDir: "/var/hercule/runner" }),
+      socketPath: "/var/hercule/runner/daemon.sock",
     };
     const supervisor = supervising(adapters).forConnection({
       machine,

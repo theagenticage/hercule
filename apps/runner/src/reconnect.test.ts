@@ -329,7 +329,7 @@ describe("a runner the controller has retired", () => {
             count.at += 1;
             return Effect.fail(
               new RunnerRetired({
-                message: "this runner was retired; run `hydra runner join` to re-enlist",
+                message: "this runner was retired; run `hercule runner join` to re-enlist",
               }),
             );
           });

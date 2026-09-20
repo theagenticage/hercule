@@ -14,7 +14,7 @@ import { cleanTemporaries, temporary } from "../workspaces/testing";
 
 afterAll(cleanTemporaries);
 
-const socketPath = (): string => join(temporary("hydra-credentials-"), "daemon.sock");
+const socketPath = (): string => join(temporary("hercule-credentials-"), "daemon.sock");
 
 /** D-21 F5: an answer is a credential or a refusal, never a struct of maybes. */
 const answering = (

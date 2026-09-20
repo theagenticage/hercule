@@ -73,7 +73,7 @@ vi.setConfig({ testTimeout: WAIT_DEADLINE_MS * 3 + 10_000 });
 const withFleet = (body: (arranged: Arranged) => Promise<void>): Promise<void> =>
   sharedWithFleet(body, { plugins: registry(), facts: FACTS, models: MODELS });
 
-/** An id shaped the way every Hydra id is, that nothing holds. */
+/** An id shaped the way every Hercule id is, that nothing holds. */
 const NOBODY = "0199e0e7-9999-7000-8000-000000000000";
 
 const findInstanceId = (arranged: Arranged, providerId: string): string => {

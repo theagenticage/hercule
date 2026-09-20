@@ -173,7 +173,7 @@ const readEvent = async (base: string, token: string, id: number): Promise<Event
 };
 
 describe("opening a live connection", () => {
-  it("is not there at all until Hydra is set up", async () => {
+  it("is not there at all until Hercule is set up", async () => {
     await withServer(async ({ base }) => {
       // Nothing on the socket is reachable before the password exists - a
       // ticket needs a credential, and there is no user to hold one - so the

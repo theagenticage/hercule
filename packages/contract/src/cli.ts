@@ -1,7 +1,7 @@
 /**
  * The CLI table.
  *
- * One row per operation: how the `hydra` CLI spells the command, what the
+ * One row per operation: how the `hercule` CLI spells the command, what the
  * command is for, worked examples, and one line of help per field. The CLI
  * derives its whole command tree, its argument parsing and its help from this
  * table plus the operation's schemas, so nothing per-operation lives in the CLI
@@ -66,7 +66,7 @@ export type FieldRow =
 export type CliRow =
   | { readonly hidden: true }
   | {
-      /** The words after `hydra`, in tree order: "runner join-token create". */
+      /** The words after `hercule`, in tree order: "runner join-token create". */
       readonly command: string;
       readonly help: string;
       /** At least one, most common first. */
@@ -86,7 +86,7 @@ export interface NounRow {
 export const CLI = {
   "setup.read": {
     command: "setup read",
-    help: "Says whether first-run setup has been completed. Reach for it when a controller may be brand new: until setup is done every other operation answers unauthenticated. Finish setup with `hydra setup complete`.",
+    help: "Says whether first-run setup has been completed. Reach for it when a controller may be brand new: until setup is done every other operation answers unauthenticated. Finish setup with `hercule setup complete`.",
     examples: [{ args: [] }],
     fields: {},
   },
@@ -120,7 +120,7 @@ export const CLI = {
     },
   },
 
-  // The bearer `hydra login` trades for an API key. It is never shown, and a
+  // The bearer `hercule login` trades for an API key. It is never shown, and a
   // second way to mint a bearer would be a second credential to look after.
   "auth.login": { hidden: true },
   // Revokes a bearer token, which the CLI never holds: it authenticates with an
@@ -131,7 +131,7 @@ export const CLI = {
 
   "apiKey.query": {
     command: "api-key list",
-    help: "Lists the user's API keys - references only, never the tokens. Use it to find the id of a key to revoke with `hydra api-key revoke`.",
+    help: "Lists the user's API keys - references only, never the tokens. Use it to find the id of a key to revoke with `hercule api-key revoke`.",
     examples: [{ args: [] }],
     fields: {},
     errors: { unauthenticated: "user credential only: a session token is refused" },
@@ -147,7 +147,7 @@ export const CLI = {
   },
   "apiKey.revoke": {
     command: "api-key revoke",
-    help: "Revokes an API key; the next request presenting it fails. Find the id with `hydra api-key list`.",
+    help: "Revokes an API key; the next request presenting it fails. Find the id with `hercule api-key list`.",
     examples: [{ args: ["1f3a9c2e"] }],
     fields: {
       id: {
@@ -176,7 +176,7 @@ export const CLI = {
 
   "settings.read": {
     command: "settings read",
-    help: "Reads every setting that is set, in both scopes. `controller` holds the controller's operational settings, `user` the user's own preferences. A key that is not set is absent rather than defaulted. Write with `hydra settings update`.",
+    help: "Reads every setting that is set, in both scopes. `controller` holds the controller's operational settings, `user` the user's own preferences. A key that is not set is absent rather than defaulted. Write with `hercule settings update`.",
     examples: [{ args: [] }],
     fields: {},
     errors: { unauthenticated: "user credential only: a session token is refused" },
@@ -203,7 +203,7 @@ export const CLI = {
 
   "profile.query": {
     command: "profile list",
-    help: "Lists the Permission Profiles a session can be spawned under, each with the Grants it carries. Use it to find the id `hydra session spawn --profile` names.",
+    help: "Lists the Permission Profiles a session can be spawned under, each with the Grants it carries. Use it to find the id `hercule session spawn --profile` names.",
     examples: [{ args: [] }],
     fields: {},
   },
@@ -314,7 +314,7 @@ export const CLI = {
   },
   "secret.delete": {
     command: "secret delete",
-    help: "Removes one secret from an owner. Whatever used it fails on its next call, so check with `hydra secret list` first. The `core` owner kind is the controller's own key material and is refused here.",
+    help: "Removes one secret from an owner. Whatever used it fails on its next call, so check with `hercule secret list` first. The `core` owner kind is the controller's own key material and is refused here.",
     examples: [{ args: ["plugin", "github", "client_secret"] }],
     fields: {
       ownerKind: {
@@ -335,7 +335,7 @@ export const CLI = {
 
   "task.query": {
     command: "task list",
-    help: "Lists tasks. Repeating a flag widens (any of its values); adding another flag narrows (all must hold); there is no negation. This is how to find the id `hydra task read` and `hydra task update` name.",
+    help: "Lists tasks. Repeating a flag widens (any of its values); adding another flag narrows (all must hold); there is no negation. This is how to find the id `hercule task read` and `hercule task update` name.",
     examples: [
       { args: ["--status", "open"] },
       { args: ["--status", "open", "--status", "in-progress", "--label", "triage"] },
@@ -378,7 +378,7 @@ export const CLI = {
   },
   "task.create": {
     command: "task create",
-    help: "Creates a Task: a unit of human intent, never an execution. The description is markdown. Comes back with the task's id, which `hydra task update` and `hydra task read` take.",
+    help: "Creates a Task: a unit of human intent, never an execution. The description is markdown. Comes back with the task's id, which `hercule task update` and `hercule task read` take.",
     examples: [
       {
         args: ["--title", "Fix the flaky login test", "--label", "triage", "--priority", "high"],
@@ -456,7 +456,7 @@ export const CLI = {
   },
   "task.delete": {
     command: "task delete",
-    help: "Deletes a task. The delete is soft and there is no undelete: the task answers not_found on read and is gone from `hydra task list` and from search.",
+    help: "Deletes a task. The delete is soft and there is no undelete: the task answers not_found on read and is gone from `hercule task list` and from search.",
     examples: [{ args: ["1f3a9c2e"] }],
     fields: {
       id: {
@@ -469,7 +469,7 @@ export const CLI = {
 
   "project.query": {
     command: "project list",
-    help: "Lists projects: the groupings that hold related work and its materials. A project carries no behaviour and no defaults. Use it to find the id `hydra task create --project` names.",
+    help: "Lists projects: the groupings that hold related work and its materials. A project carries no behaviour and no defaults. Use it to find the id `hercule task create --project` names.",
     examples: [{ args: [] }],
     fields: {},
   },
@@ -489,9 +489,9 @@ export const CLI = {
     command: "project create",
     help: "Creates a Project to group related work. It is organisation only: nothing about a task changes because it joins one. The description is markdown.",
     examples: [
-      { args: ["--name", "Hydra v1"] },
+      { args: ["--name", "Hercule v1"] },
       {
-        args: ["--name", "Hydra v1", "--description-stdin"],
+        args: ["--name", "Hercule v1", "--description-stdin"],
         stdin: "Everything for the first release.",
       },
     ],
@@ -508,7 +508,7 @@ export const CLI = {
     command: "project update",
     help: "Edits a project; a field you do not name is left as it was.",
     examples: [
-      { args: ["1f3a9c2e", "--name", "Hydra v1.1"] },
+      { args: ["1f3a9c2e", "--name", "Hercule v1.1"] },
       {
         args: ["1f3a9c2e", "--description-stdin"],
         stdin: "Shipped; keeping it for the follow-ups.",
@@ -543,7 +543,7 @@ export const CLI = {
 
   "resource.query": {
     command: "resource list",
-    help: "Lists the Resources Hydra knows: the repos, folders and mailboxes projects work with. Use it to find the id the other commands name.",
+    help: "Lists the Resources Hercule knows: the repos, folders and mailboxes projects work with. Use it to find the id the other commands name.",
     examples: [{ args: [] }, { args: ["--kind", "repo"] }],
     fields: {
       kind: { flag: "kind", help: "Only resources of this kind: repo, folder or mailbox." },
@@ -564,7 +564,7 @@ export const CLI = {
   },
   "resource.create": {
     command: "resource create",
-    help: "Records a Resource: a git repo Hydra checks out, or a folder or mailbox it works with. A repo is identified by its remote however you spell it, so the same repository is added only once.",
+    help: "Records a Resource: a git repo Hercule checks out, or a folder or mailbox it works with. A repo is identified by its remote however you spell it, so the same repository is added only once.",
     examples: [
       { args: ["--kind", "repo", "--remote", "https://github.com/acme/web"] },
       {
@@ -595,7 +595,7 @@ export const CLI = {
       },
       connectionId: {
         flag: "connection",
-        help: "The Connection Hydra acts through for it; a repo takes a github one.",
+        help: "The Connection Hercule acts through for it; a repo takes a github one.",
       },
       setupCommand: {
         flag: "setup-command",
@@ -662,7 +662,7 @@ export const CLI = {
 
   "workspace.query": {
     command: "workspace list",
-    help: 'Lists the Workspaces on the fleet: what each holds and where it stands. Use it to find one to open a thread in with `hydra session spawn --workspace \'{"kind":"existing","workspaceId":"<id>"}\'`.',
+    help: 'Lists the Workspaces on the fleet: what each holds and where it stands. Use it to find one to open a thread in with `hercule session spawn --workspace \'{"kind":"existing","workspaceId":"<id>"}\'`.',
     examples: [{ args: [] }, { args: ["--runner", "7b41d0a5", "--status", "ready"] }],
     fields: {
       runnerId: { flag: "runner", help: "Only workspaces on this machine." },
@@ -683,7 +683,7 @@ export const CLI = {
   },
   "workspace.read": {
     command: "workspace read",
-    help: "Reads one Workspace in full. It answers with its checkouts and their branches, where it stands, and the sessions in it that have not exited; poll it after `hydra workspace provision` until it reads ready.",
+    help: "Reads one Workspace in full. It answers with its checkouts and their branches, where it stands, and the sessions in it that have not exited; poll it after `hercule workspace provision` until it reads ready.",
     examples: [{ args: ["1f3a9c2e"] }],
     fields: {
       id: {
@@ -695,7 +695,7 @@ export const CLI = {
   },
   "workspace.provision": {
     command: "workspace provision",
-    help: "Makes a repo's main workspace on one machine, which is the long-lived working copy threads share. Hydra clones it fresh under that machine's own storage; a folder you already have is never taken over. It answers at once with the workspace provisioning, and the machine reports when it stands; read it back with `hydra workspace read`.",
+    help: "Makes a repo's main workspace on one machine, which is the long-lived working copy threads share. Hercule clones it fresh under that machine's own storage; a folder you already have is never taken over. It answers at once with the workspace provisioning, and the machine reports when it stands; read it back with `hercule workspace read`.",
     examples: [{ args: ["--resource", "1f3a9c2e", "--runner", "7b41d0a5"] }],
     fields: {
       resourceId: {
@@ -747,7 +747,7 @@ export const CLI = {
   },
   "event.read": {
     command: "event read",
-    help: "Reads one event in full, its payload and the vendor original included. Find its id in `hydra event list`. A security entry - the secret, auth and user account kinds - needs the event.audit grant; without it the entry answers not-found.",
+    help: "Reads one event in full, its payload and the vendor original included. Find its id in `hercule event list`. A security entry - the secret, auth and user account kinds - needs the event.audit grant; without it the entry answers not-found.",
     examples: [{ args: ["4217"] }],
     fields: {
       id: {
@@ -763,7 +763,7 @@ export const CLI = {
 
   "runner.query": {
     command: "runner list",
-    help: "Lists the fleet: every Runner enrolled with this controller, by name. Each row says how reachable the machine is and where it stands with its owner. Use it to find the id the other `hydra runner` commands take.",
+    help: "Lists the fleet: every Runner enrolled with this controller, by name. Each row says how reachable the machine is and where it stands with its owner. Use it to find the id the other `hercule runner` commands take.",
     examples: [{ args: [] }, { args: ["--connectivity", "online", "--lifecycle", "active"] }],
     fields: {
       connectivity: {
@@ -823,7 +823,7 @@ export const CLI = {
   },
   "runner.drain": {
     command: "runner drain",
-    help: "Stops new sessions landing on a runner while the ones already there finish. Reach for it before maintenance; `hydra runner undrain` puts the machine back in rotation.",
+    help: "Stops new sessions landing on a runner while the ones already there finish. Reach for it before maintenance; `hercule runner undrain` puts the machine back in rotation.",
     examples: [{ args: ["1f3a9c2e"] }],
     fields: {
       id: {
@@ -847,7 +847,7 @@ export const CLI = {
   },
   "runner.retire": {
     command: "runner retire",
-    help: "Takes a runner out of the fleet for good; nothing is ever placed on it again. Drain it first with `hydra runner drain` so its sessions finish.",
+    help: "Takes a runner out of the fleet for good; nothing is ever placed on it again. Drain it first with `hercule runner drain` so its sessions finish.",
     examples: [{ args: ["1f3a9c2e"] }],
     fields: {
       id: {
@@ -873,7 +873,7 @@ export const CLI = {
       },
       instanceId: {
         flag: "instance",
-        help: "The Provider Instance to probe, by full id; find it with `hydra provider list`.",
+        help: "The Provider Instance to probe, by full id; find it with `hercule provider list`.",
       },
     },
   },
@@ -891,7 +891,7 @@ export const CLI = {
   },
   "runner.installHarness": {
     command: "runner install-harness",
-    help: "Installs a provider's harness binary on a runner. Reach for it when `hydra runner read` shows the provider missing from the machine's facts; the facts come back refreshed.",
+    help: "Installs a provider's harness binary on a runner. Reach for it when `hercule runner read` shows the provider missing from the machine's facts; the facts come back refreshed.",
     examples: [{ args: ["1f3a9c2e", "--provider", "claude-code"] }],
     fields: {
       id: {
@@ -907,7 +907,7 @@ export const CLI = {
   },
   "runner.createJoinToken": {
     command: "runner join-token create",
-    help: "Mints the one-time token a new machine enrols with, shown here and nowhere else. Run it before starting the runner daemon on that machine; `hydra runner join-token list` afterwards says whether the invitation is still open.",
+    help: "Mints the one-time token a new machine enrols with, shown here and nowhere else. Run it before starting the runner daemon on that machine; `hercule runner join-token list` afterwards says whether the invitation is still open.",
     examples: [{ args: [] }],
     fields: {},
   },
@@ -919,7 +919,7 @@ export const CLI = {
   },
   "runner.revokeJoinToken": {
     command: "runner join-token revoke",
-    help: "Revokes an outstanding join token, so the invitation can no longer be spent. Find the id with `hydra runner join-token list`.",
+    help: "Revokes an outstanding join token, so the invitation can no longer be spent. Find the id with `hercule runner join-token list`.",
     examples: [{ args: ["1f3a9c2e"] }],
     fields: {
       id: {
@@ -960,7 +960,7 @@ export const CLI = {
   },
   "plugin.disable": {
     command: "plugin disable",
-    help: "Stops a plugin and marks it disabled, so its contributions are gone until it is enabled again. Connections and events of its types stop with it, so check `hydra connection list` first.",
+    help: "Stops a plugin and marks it disabled, so its contributions are gone until it is enabled again. Connections and events of its types stop with it, so check `hercule connection list` first.",
     examples: [{ args: ["github"] }],
     fields: {
       id: {
@@ -993,7 +993,7 @@ export const CLI = {
   },
   "plugin.configure": {
     command: "plugin configure",
-    help: "Stores a plugin's config and restarts it on the new one. There is no hot reconfigure, so a plugin never sees its config change under it. The config is a JSON object, validated before anything restarts, so a rejected one leaves a running plugin running. Read the shape it must take from `hydra plugin read`.",
+    help: "Stores a plugin's config and restarts it on the new one. There is no hot reconfigure, so a plugin never sees its config change under it. The config is a JSON object, validated before anything restarts, so a rejected one leaves a running plugin running. Read the shape it must take from `hercule plugin read`.",
     examples: [{ args: ["github"], stdin: '{"appId":"1234","pollSeconds":60}' }],
     fields: {
       id: {
@@ -1028,7 +1028,7 @@ export const CLI = {
   },
   "provider.create": {
     command: "provider create",
-    help: "Opens a Provider Instance: one account of one provider, with its own provider home on every runner. The config is a JSON object checked against the provider's own schema. Log the new instance in on a machine with `hydra provider login`.",
+    help: "Opens a Provider Instance: one account of one provider, with its own provider home on every runner. The config is a JSON object checked against the provider's own schema. Log the new instance in on a machine with `hercule provider login`.",
     examples: [{ args: ["--provider", "claude-code", "--name", "work"], stdin: "{}" }],
     fields: {
       providerId: {
@@ -1065,7 +1065,7 @@ export const CLI = {
   },
   "provider.delete": {
     command: "provider delete",
-    help: "Deletes a Provider Instance. Nothing can be spawned on it afterwards, so open its replacement with `hydra provider create` before deleting the last account of a provider.",
+    help: "Deletes a Provider Instance. Nothing can be spawned on it afterwards, so open its replacement with `hercule provider create` before deleting the last account of a provider.",
     examples: [{ args: ["1f3a9c2e"] }],
     fields: {
       id: {
@@ -1077,7 +1077,7 @@ export const CLI = {
   },
   "provider.login": {
     command: "provider login",
-    help: "Starts the vendor login for a Provider Instance on one machine. Answers with the URL to open, plus the code the harness printed when there is one. A vendor credential belongs to exactly one machine, because two live copies of one login rotate each other out. Finish it with `hydra provider submit-login-code`.",
+    help: "Starts the vendor login for a Provider Instance on one machine. Answers with the URL to open, plus the code the harness printed when there is one. A vendor credential belongs to exactly one machine, because two live copies of one login rotate each other out. Finish it with `hercule provider submit-login-code`.",
     examples: [{ args: ["1f3a9c2e", "--runner", "7b41d0a5"] }],
     fields: {
       id: {
@@ -1093,7 +1093,7 @@ export const CLI = {
   },
   "provider.submitLoginCode": {
     command: "provider submit-login-code",
-    help: "Hands back the code the browser showed, finishing what `hydra provider login` started. Answers with a fresh Capability Snapshot for that machine, so the reply says whether the instance is usable there.",
+    help: "Hands back the code the browser showed, finishing what `hercule provider login` started. Answers with a fresh Capability Snapshot for that machine, so the reply says whether the instance is usable there.",
     examples: [{ args: ["1f3a9c2e", "--runner", "7b41d0a5", "--code", "ABCD-1234"] }],
     fields: {
       id: {
@@ -1108,7 +1108,7 @@ export const CLI = {
 
   "connection.query": {
     command: "connection list",
-    help: "Lists Connections: the named links to external accounts Hydra acts through, with the status of each. Use it to find the id an event's connection names.",
+    help: "Lists Connections: the named links to external accounts Hercule acts through, with the status of each. Use it to find the id an event's connection names.",
     examples: [{ args: [] }, { args: ["--status", "needs-reauth"] }],
     fields: {
       type: {
@@ -1135,7 +1135,7 @@ export const CLI = {
   },
   "connection.create": {
     command: "connection create",
-    help: "Creates a Connection from credentials you already hold. The credentials are a JSON object keyed by the field names the type declares, and are never readable again. For an account reached through a browser, use `hydra connection start-oauth` instead.",
+    help: "Creates a Connection from credentials you already hold. The credentials are a JSON object keyed by the field names the type declares, and are never readable again. For an account reached through a browser, use `hercule connection start-oauth` instead.",
     examples: [
       {
         args: ["--type", "github/github", "--label", "work", "--topic", "engineering"],
@@ -1165,7 +1165,7 @@ export const CLI = {
   },
   "connection.update": {
     command: "connection update",
-    help: "Edits what the user chose about a Connection: its label, its topics, its config. Never the account behind it. Rotate credentials with `hydra connection set-credentials`.",
+    help: "Edits what the user chose about a Connection: its label, its topics, its config. Never the account behind it. Rotate credentials with `hercule connection set-credentials`.",
     examples: [{ args: ["1f3a9c2e", "--label", "personal"] }],
     fields: {
       id: {
@@ -1195,7 +1195,7 @@ export const CLI = {
   },
   "connection.setCredentials": {
     command: "connection set-credentials",
-    help: "Rotates a Connection's credentials in place, leaving everything else about it alone. Reach for it when `hydra connection list` shows the account needs reauth. The new values are a JSON object keyed by the type's field names.",
+    help: "Rotates a Connection's credentials in place, leaving everything else about it alone. Reach for it when `hercule connection list` shows the account needs reauth. The new values are a JSON object keyed by the type's field names.",
     examples: [{ args: ["1f3a9c2e"], stdin: '{"token":"ghp_yyy"}' }],
     fields: {
       id: {
@@ -1219,7 +1219,7 @@ export const CLI = {
           "--type",
           "gmail/gmail",
           "--origin",
-          "https://hydra.example",
+          "https://hercule.example",
           "--label",
           "work",
           "--topic",
@@ -1231,7 +1231,7 @@ export const CLI = {
           "--type",
           "gmail/gmail",
           "--origin",
-          "https://hydra.example",
+          "https://hercule.example",
           "--connection",
           "1f3a9c2e",
         ],
@@ -1241,7 +1241,7 @@ export const CLI = {
       type: { flag: "type", help: "The connection type as a Qualified Id, such as gmail/gmail." },
       origin: {
         flag: "origin",
-        help: "Where the browser is: scheme and host with no path, like https://hydra.example.",
+        help: "Where the browser is: scheme and host with no path, like https://hercule.example.",
       },
       label: { flag: "label", help: "What to call the new account; a reconnect already has one." },
       labels: {
@@ -1262,7 +1262,7 @@ export const CLI = {
 
   "agent.query": {
     command: "agent list",
-    help: "Lists the Agents sessions are spawned from. An Agent is a named, reusable configuration for unattended work. Use it to find the id `hydra session spawn --agent` names.",
+    help: "Lists the Agents sessions are spawned from. An Agent is a named, reusable configuration for unattended work. Use it to find the id `hercule session spawn --agent` names.",
     examples: [{ args: [] }, { args: ["--profile", "1f3a9c2e"] }],
     fields: {
       permissionProfileId: {
@@ -1411,13 +1411,13 @@ export const CLI = {
     },
     errors: {
       invalid_state:
-        "a session spawned from this agent has not exited yet; the message names it, and `hydra session stop` ends it",
+        "a session spawned from this agent has not exited yet; the message names it, and `hercule session stop` ends it",
     },
   },
 
   "session.query": {
     command: "session list",
-    help: "Lists sessions, newest first: one row per conversation with a provider-backed agent. Use it to find the id every other `hydra session` command takes.",
+    help: "Lists sessions, newest first: one row per conversation with a provider-backed agent. Use it to find the id every other `hercule session` command takes.",
     examples: [
       { args: [] },
       { args: ["--status", "busy", "--status", "idle"] },
@@ -1432,7 +1432,7 @@ export const CLI = {
       },
       agentId: {
         flag: "agent",
-        help: "Only the sessions spawned from this Agent, by its id or a tail of eight or more characters; find it with `hydra agent list`.",
+        help: "Only the sessions spawned from this Agent, by its id or a tail of eight or more characters; find it with `hercule agent list`.",
         resolves: "agent.query",
       },
       permissionProfileId: {
@@ -1448,7 +1448,7 @@ export const CLI = {
   },
   "session.read": {
     command: "session read",
-    help: "Reads one session: where it stands, what it runs under, and whether it can be resumed. The Request it is parked on comes with it, if there is one; answer that Request with `hydra session respond`.",
+    help: "Reads one session: where it stands, what it runs under, and whether it can be resumed. The Request it is parked on comes with it, if there is one; answer that Request with `hercule session respond`.",
     examples: [{ args: ["1f3a9c2e"] }],
     fields: {
       id: {
@@ -1460,7 +1460,7 @@ export const CLI = {
   },
   "session.spawn": {
     command: "session spawn",
-    help: "Starts a session, from an Agent or as a Thread the user drives by hand. With `--agent` every value comes from that Agent; without one it is a Thread and the values come from the user's thread settings. Either way a flag given here wins. Comes back with the session's id; watch what it does with `hydra transcript read` and send the next turn with `hydra session input`.",
+    help: "Starts a session, from an Agent or as a Thread the user drives by hand. With `--agent` every value comes from that Agent; without one it is a Thread and the values come from the user's thread settings. Either way a flag given here wins. Comes back with the session's id; watch what it does with `hercule transcript read` and send the next turn with `hercule session input`.",
     examples: [
       { args: [], stdin: "Look at the failing login test and tell me what you find." },
       {
@@ -1548,7 +1548,7 @@ export const CLI = {
     errors: {
       unauthenticated: "user credential only: a session token is refused",
       invalid_state:
-        "nothing can host it: no connected runner is logged in to that provider instance, or the runner named is draining or retired; check with `hydra runner list` and `hydra provider login`",
+        "nothing can host it: no connected runner is logged in to that provider instance, or the runner named is draining or retired; check with `hercule runner list` and `hercule provider login`",
     },
   },
   "session.update": {
@@ -1571,7 +1571,7 @@ export const CLI = {
   },
   "session.input": {
     command: "session input",
-    help: "Sends one turn's input to a session. It opens a turn on an idle session and is queued on any other, and a session whose process is gone but whose transcript is still on its runner is resumed in place by it. Comes back with the input's id and what became of it; while the row is still queued, `hydra input update` and `hydra input cancel` change it and `hydra input steer` folds it into the turn already running.",
+    help: "Sends one turn's input to a session. It opens a turn on an idle session and is queued on any other, and a session whose process is gone but whose transcript is still on its runner is resumed in place by it. Comes back with the input's id and what became of it; while the row is still queued, `hercule input update` and `hercule input cancel` change it and `hercule input steer` folds it into the turn already running.",
     examples: [
       { args: ["1f3a9c2e"], stdin: "Carry on, and run the tests when you are done." },
       { args: ["1f3a9c2e", "--model", "claude-opus-4"], stdin: "Try that again with more care." },
@@ -1609,7 +1609,7 @@ export const CLI = {
   },
   "session.respond": {
     command: "session respond",
-    help: "Answers the Request a session is parked on with one of the four decisions. That is the only way an approval is resolved; free text never is. Read the open request first with `hydra session read`.",
+    help: "Answers the Request a session is parked on with one of the four decisions. That is the only way an approval is resolved; free text never is. Read the open request first with `hercule session read`.",
     examples: [{ args: ["1f3a9c2e", "--request", "req_9c2e4f18", "--decision", "allow"] }],
     fields: {
       id: {
@@ -1619,7 +1619,7 @@ export const CLI = {
       },
       requestId: {
         flag: "request",
-        help: "The open request's own id, as `hydra session read` reports it.",
+        help: "The open request's own id, as `hercule session read` reports it.",
       },
       decision: {
         flag: "decision",
@@ -1628,12 +1628,12 @@ export const CLI = {
     },
     errors: {
       invalid_state:
-        "the session is not waiting on a decision, or the harness has moved on and this is not the request it is waiting on now; read it again with `hydra session read`",
+        "the session is not waiting on a decision, or the harness has moved on and this is not the request it is waiting on now; read it again with `hercule session read`",
     },
   },
   "session.stop": {
     command: "session stop",
-    help: "Ends a session: the turn stops and the process goes away. It is not the end of the conversation - a session whose transcript is still on its runner is resumed in place by the next `hydra session input`.",
+    help: "Ends a session: the turn stops and the process goes away. It is not the end of the conversation - a session whose transcript is still on its runner is resumed in place by the next `hercule session input`.",
     examples: [{ args: ["1f3a9c2e"] }],
     fields: {
       id: {
@@ -1645,7 +1645,7 @@ export const CLI = {
   },
   "session.continue": {
     command: "session continue",
-    help: "Forks a session: opens a second provider-native session off the one the parent left behind. The parent's own transcript is untouched. It lands on the parent's runner and Provider Instance, because that is where the native state is, and comes back as a new session with its own id. To carry the parent itself on instead, send it `hydra session input`.",
+    help: "Forks a session: opens a second provider-native session off the one the parent left behind. The parent's own transcript is untouched. It lands on the parent's runner and Provider Instance, because that is where the native state is, and comes back as a new session with its own id. To carry the parent itself on instead, send it `hercule session input`.",
     examples: [
       {
         args: ["1f3a9c2e", "--mode", "fork"],
@@ -1668,13 +1668,13 @@ export const CLI = {
     errors: {
       unauthenticated: "user credential only: a session token is refused",
       invalid_state:
-        "the parent is still live, or it left no provider-native session to fork from, or its runner is retired or draining; stop it first with `hydra session stop`",
+        "the parent is still live, or it left no provider-native session to fork from, or its runner is retired or draining; stop it first with `hercule session stop`",
     },
   },
 
   "input.query": {
     command: "input list",
-    help: "Lists every input a session was given, oldest first, whatever became of each. The rows still queued are the ones `hydra input update`, `hydra input cancel` and `hydra input steer` can act on.",
+    help: "Lists every input a session was given, oldest first, whatever became of each. The rows still queued are the ones `hercule input update`, `hercule input cancel` and `hercule input steer` can act on.",
     examples: [{ args: ["1f3a9c2e"] }],
     fields: {
       id: {
@@ -1687,7 +1687,7 @@ export const CLI = {
   },
   "input.update": {
     command: "input update",
-    help: "Rewrites a Queued Input before the controller delivers it. An input already sent or delivered is refused, so read `hydra input list` if it fails.",
+    help: "Rewrites a Queued Input before the controller delivers it. An input already sent or delivered is refused, so read `hercule input list` if it fails.",
     examples: [
       {
         args: ["1f3a9c2e", "0193f3a9-2e5c-7b41-9a6d-1f3a9c2e77b0"],
@@ -1703,7 +1703,7 @@ export const CLI = {
       },
       inputId: {
         positional: true,
-        help: "The input's full id, as `hydra input list` reports it; no tail is resolved here.",
+        help: "The input's full id, as `hercule input list` reports it; no tail is resolved here.",
       },
       text: { stdin: true, flag: "text", help: "The replacement text." },
     },
@@ -1724,7 +1724,7 @@ export const CLI = {
       },
       inputId: {
         positional: true,
-        help: "The input's full id, as `hydra input list` reports it; no tail is resolved here.",
+        help: "The input's full id, as `hercule input list` reports it; no tail is resolved here.",
       },
     },
     errors: {
@@ -1744,7 +1744,7 @@ export const CLI = {
       },
       inputId: {
         positional: true,
-        help: "The input's full id, as `hydra input list` reports it; no tail is resolved here.",
+        help: "The input's full id, as `hercule input list` reports it; no tail is resolved here.",
       },
     },
     errors: {
@@ -1776,7 +1776,7 @@ export const CLI = {
   },
   "controller.update": {
     command: "controller update",
-    help: "Sets the Runner a placement lands on when nothing names one. Find the id with `hydra runner list`; `null` takes the default off again, leaving placement with no fallback.",
+    help: "Sets the Runner a placement lands on when nothing names one. Find the id with `hercule runner list`; `null` takes the default off again, leaving placement with no fallback.",
     examples: [{ args: ["--default-runner", "1f3a9c2e"] }, { args: ["--default-runner", "null"] }],
     fields: {
       defaultRunnerId: {
@@ -1796,13 +1796,13 @@ export const NOUNS = {
   setup: { summary: "First-run setup: whether it is done, and finishing it." },
   "api-key": {
     summary: "Long-lived user credentials for scripts and operators.",
-    flow: "hydra api-key create prints the token once; hydra api-key list finds a key later; hydra api-key revoke ends it.",
+    flow: "hercule api-key create prints the token once; hercule api-key list finds a key later; hercule api-key revoke ends it.",
   },
   user: { summary: "The user's own credentials." },
   settings: { summary: "The controller's operational settings and the user's own preferences." },
   profile: {
     summary: "Permission Profiles: the named grant bundles a session's token carries.",
-    flow: "hydra profile list to see what exists, hydra profile create for a new bundle, then name it at hydra session spawn.",
+    flow: "hercule profile list to see what exists, hercule profile create for a new bundle, then name it at hercule session spawn.",
   },
   secret: {
     summary:
@@ -1810,26 +1810,26 @@ export const NOUNS = {
   },
   task: {
     summary: "Tasks: units of human intent, work-type-agnostic and never executions themselves.",
-    flow: "hydra task list to find work, hydra task read for the whole of one, hydra task create to record new intent, hydra task update as it moves.",
+    flow: "hercule task list to find work, hercule task read for the whole of one, hercule task create to record new intent, hercule task update as it moves.",
   },
   project: {
     summary: "Projects: groupings of related work and its materials. No behaviour, no defaults.",
   },
   resource: {
     summary: "Resources: the repos, folders and mailboxes projects work with.",
-    flow: "hydra resource create records one, hydra resource list finds it again, then name it at hydra workspace provision or hydra session spawn.",
+    flow: "hercule resource create records one, hercule resource list finds it again, then name it at hercule workspace provision or hercule session spawn.",
   },
   workspace: {
     summary: "Workspaces: the working areas on a machine that sessions do their work in.",
-    flow: "hydra workspace provision makes a repo's main workspace, hydra workspace list shows what stands, hydra workspace dispose tears an ephemeral one down.",
+    flow: "hercule workspace provision makes a repo's main workspace, hercule workspace list shows what stands, hercule workspace dispose tears an ephemeral one down.",
   },
   event: {
     summary: "The event log: external events and audit entries, under one envelope.",
-    flow: "hydra event list to see what came in, hydra event read for one entry in full.",
+    flow: "hercule event list to see what came in, hercule event read for one entry in full.",
   },
   runner: {
     summary: "The fleet: the machines that host sessions on the controller's behalf.",
-    flow: "hydra runner join-token create mints the invitation, hydra runner list shows the machine once it dials in, hydra runner drain and hydra runner retire take it out again.",
+    flow: "hercule runner join-token create mints the invitation, hercule runner list shows the machine once it dials in, hercule runner drain and hercule runner retire take it out again.",
   },
   plugin: {
     summary:
@@ -1837,23 +1837,23 @@ export const NOUNS = {
   },
   provider: {
     summary: "Provider Instances: the accounts of the coding harnesses sessions run on.",
-    flow: "hydra provider create opens an account, hydra provider login and hydra provider submit-login-code log it in on a machine, hydra runner probe says whether it is usable there.",
+    flow: "hercule provider create opens an account, hercule provider login and hercule provider submit-login-code log it in on a machine, hercule runner probe says whether it is usable there.",
   },
   connection: {
-    summary: "Connections: the named links to external accounts Hydra acts through.",
-    flow: "hydra connection create for a pasted credential or hydra connection start-oauth for a browser flow, then hydra connection list to watch its status and hydra connection set-credentials to rotate.",
+    summary: "Connections: the named links to external accounts Hercule acts through.",
+    flow: "hercule connection create for a pasted credential or hercule connection start-oauth for a browser flow, then hercule connection list to watch its status and hercule connection set-credentials to rotate.",
   },
   agent: {
     summary: "Agents: the named configurations sessions are spawned from, to work unattended.",
-    flow: "hydra agent create records one, hydra agent list finds it again, then hydra session spawn --agent runs it.",
+    flow: "hercule agent create records one, hercule agent list finds it again, then hercule session spawn --agent runs it.",
   },
   session: {
     summary: "Sessions: conversations with provider-backed agents, resumable and forkable.",
-    flow: "hydra session spawn starts one, hydra transcript read watches it, hydra session input sends the next turn, hydra session respond answers what it is parked on, hydra session stop ends it.",
+    flow: "hercule session spawn starts one, hercule transcript read watches it, hercule session input sends the next turn, hercule session respond answers what it is parked on, hercule session stop ends it.",
   },
   input: {
     summary: "The inputs a session was given, and the queued ones that can still be changed.",
-    flow: "hydra input list to see them, then hydra input update, hydra input cancel or hydra input steer while a row is still queued.",
+    flow: "hercule input list to see them, then hercule input update, hercule input cancel or hercule input steer while a row is still queued.",
   },
   transcript: { summary: "What a session did: its normalized stream, read back in order." },
   controller: {

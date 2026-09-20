@@ -1,5 +1,5 @@
 /**
- * `hydra git-credential <action>`: the helper git runs, once per request it
+ * `hercule git-credential <action>`: the helper git runs, once per request it
  * needs a credential for.
  *
  * It knows nothing and stores nothing. It asks the daemon on this machine's
@@ -12,12 +12,12 @@ import { createConnection } from "node:net";
 import { CREDENTIAL_DEADLINE_MS, isSpeakable } from "./socket";
 
 /** The session's own token, injected by the runner into the session's environment. */
-const TOKEN = "HYDRA_TOKEN";
+const TOKEN = "HERCULE_TOKEN";
 
 /** The workspace the runner is making, for the runner's own git while it makes it. */
-const PROVISIONING = "HYDRA_WORKSPACE_PROVISIONING";
+const PROVISIONING = "HERCULE_WORKSPACE_PROVISIONING";
 
-const SOCKET = "HYDRA_RUNNER_SOCKET";
+const SOCKET = "HERCULE_RUNNER_SOCKET";
 
 /** git writes `key=value` lines and ends with a blank one. */
 const questionFrom = (input: string): Record<string, string> => {
@@ -89,7 +89,7 @@ export const helperMain = async (
 };
 
 /**
- * What the runner role does with `hydra git-credential <action>`. git calls it
+ * What the runner role does with `hercule git-credential <action>`. git calls it
  * with the request on stdin and names an action; only `get` has an answer, and
  * `store` and `erase` are git reporting what it did with a credential this
  * helper keeps none of. Anything else is a word nobody meant: it says nothing

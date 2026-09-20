@@ -1,5 +1,5 @@
 /**
- * The extension pi loads for a Hydra session, as the source the adapter writes
+ * The extension pi loads for a Hercule session, as the source the adapter writes
  * into the instance's own home at every session start. It is a string constant
  * rather than a file read off disk because the runner ships as a compiled
  * binary with no source tree beside it, and writing it per start keeps the file
@@ -16,7 +16,7 @@
 import { requiresApproval } from "./policy";
 
 /** Where the adapter writes it, and what pi is pointed at with `-e`. */
-export const EXTENSION_FILE = "hydra-extension.ts";
+export const EXTENSION_FILE = "hercule-extension.ts";
 
 /**
  * How the approval hook learns which mode the session runs under. Spelled once
@@ -24,7 +24,7 @@ export const EXTENSION_FILE = "hydra-extension.ts";
  * below reads it out, and a name that drifted apart would be an approval hook
  * that fell back to asking about everything.
  */
-export const ACCESS_MODE_VARIABLE = "HYDRA_ACCESS_MODE";
+export const ACCESS_MODE_VARIABLE = "HERCULE_ACCESS_MODE";
 
 /**
  * The environment variable that carries this session's output schema, as JSON,
@@ -32,7 +32,7 @@ export const ACCESS_MODE_VARIABLE = "HYDRA_ACCESS_MODE";
  * the mode above. If the two spellings drifted apart, the session would be
  * asked for a value and given no way to answer.
  */
-export const OUTPUT_SCHEMA_VARIABLE = "HYDRA_OUTPUT_SCHEMA";
+export const OUTPUT_SCHEMA_VARIABLE = "HERCULE_OUTPUT_SCHEMA";
 
 /**
  * The name of the tool a session under an output schema answers through. The
@@ -44,16 +44,16 @@ export const SUBMIT_RESULT_TOOL = "submit_result";
 export const EXTENSION_SOURCE = `import { Type } from "@sinclair/typebox";
 
 /**
- * Hydra's tool approval hook. Written by the Hydra runner at session start; edits here
+ * Hercule's tool approval hook. Written by the Hercule runner at session start; edits here
  * are overwritten the next time a session starts.
  */
 const requiresApproval = ${requiresApproval.toString()};
 
 const MODE = process.env.${ACCESS_MODE_VARIABLE} ?? "approval-required";
 
-const DENIED = "The user did not approve this in Hydra.";
+const DENIED = "The user did not approve this in Hercule.";
 
-const LOST = "Hydra could not ask the user about this: the channel it asks over closed.";
+const LOST = "Hercule could not ask the user about this: the channel it asks over closed.";
 
 export default function (pi) {
   // A session that was asked for a value answers through a tool and not in
@@ -91,7 +91,7 @@ export default function (pi) {
   pi.on("tool_call", async (event, ctx) => {
     if (!requiresApproval(MODE, event.toolName)) return undefined;
     try {
-      // The message is the call's own name and id rather than prose: Hydra
+      // The message is the call's own name and id rather than prose: Hercule
       // renders the card from the call itself, and this is how it knows which
       // call this question is about.
       const heldCall = JSON.stringify({ toolCallId: event.toolCallId, toolName: event.toolName });

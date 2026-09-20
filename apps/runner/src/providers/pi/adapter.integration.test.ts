@@ -1,5 +1,5 @@
 /**
- * Proves the pi adapter drives the real binary against the real models Hydra
+ * Proves the pi adapter drives the real binary against the real models Hercule
  * runs GLM on. Opt-in twice over: it skips without `pi` on PATH, and without a
  * `ZAI_API_KEY` in the environment, because the alternative is that `pnpm test`
  * on any machine quietly spends a paid Coding Plan.
@@ -111,7 +111,7 @@ describe.skipIf(binary === undefined || key === "")("a real pi session on a real
 
         await Effect.runPromise(
           pi.sendInput(sessionId, {
-            text: "Run this shell command and tell me its output: echo hydra-lives",
+            text: "Run this shell command and tell me its output: echo hercule-lives",
           }),
         );
         await awaiting(

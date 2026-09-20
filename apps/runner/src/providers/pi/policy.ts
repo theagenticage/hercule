@@ -3,8 +3,8 @@
  * hook pi runs is not a second reading of this: the extension is written from
  * this function's own source, so what holds a call inside pi is the function
  * these tests cover. Two copies of the table would be a mode where the approval
- * hook holds a call Hydra would have let run, or worse, lets one through that
- * Hydra would have stopped.
+ * hook holds a call Hercule would have let run, or worse, lets one through that
+ * Hercule would have stopped.
  *
  * That is why it carries its table inside its body and closes over nothing: a
  * name it reached for from around it would not be there when it runs inside pi.

@@ -67,7 +67,7 @@ export const readRunnerFile = (home: string): Effect.Effect<RunnerFile, NotEnrol
       try: () => JSON.parse(readFileSync(path, "utf8")) as unknown,
       catch: () =>
         new NotEnrolled({
-          message: `cannot read ${path}. Run \`hydra runner join <controller-url> --token <token>\` first.`,
+          message: `cannot read ${path}. Run \`hercule runner join <controller-url> --token <token>\` first.`,
         }),
     });
     return yield* Effect.mapError(

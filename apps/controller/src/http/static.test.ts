@@ -16,10 +16,10 @@ import { CONTENT_SECURITY_POLICY, type WebBundle } from "./static";
 import { withServer } from "./testing";
 
 const INDEX = '<!doctype html>\n<html><body><div id="root"></div></body></html>\n';
-const CHUNK = "export const hydra = 1;\n";
+const CHUNK = "export const hercule = 1;\n";
 const CHUNK_PATH = "/assets/index-CFSymTrk.js";
 
-const directory = mkdtempSync(join(tmpdir(), "hydra-bundle-"));
+const directory = mkdtempSync(join(tmpdir(), "hercule-bundle-"));
 mkdirSync(join(directory, "assets"));
 writeFileSync(join(directory, "index.html"), INDEX);
 writeFileSync(join(directory, CHUNK_PATH.slice(1)), CHUNK);

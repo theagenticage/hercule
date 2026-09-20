@@ -25,7 +25,7 @@ import {
 
 afterAll(cleanTemporaries);
 
-const storage = (): string => temporary("hydra-storage-");
+const storage = (): string => temporary("hercule-storage-");
 
 const cacheOf = (storageDir: string, resourceId: string): string =>
   join(storageDir, "cache", `${resourceId}.git`);
@@ -97,7 +97,7 @@ describe("a primary cloned fresh", () => {
     );
 
     expect(report.status).toBe("ready");
-    // Hydra's own clone, somewhere else entirely.
+    // Hercule's own clone, somewhere else entirely.
     expect(report.checkouts?.[0]?.branch).toBe("main");
     expect(existsSync(join(storageDir, "primaries", resourceId))).toBe(true);
     expect(contentsOf(mine)).toBe(before);
@@ -121,7 +121,7 @@ describe("an ephemeral workspace", () => {
           checkout({
             resourceId: id(),
             remote: remote.url,
-            branch: "hydra/run-3f1a2b4c",
+            branch: "hercule/run-3f1a2b4c",
             baseBranch: "release",
           }),
         ],
@@ -130,9 +130,9 @@ describe("an ephemeral workspace", () => {
 
     expect(report.status).toBe("ready");
     const directory = join(storageDir, "workspaces", workspaceId);
-    expect(git(directory, "rev-parse", "--abbrev-ref", "HEAD")).toBe("hydra/run-3f1a2b4c");
+    expect(git(directory, "rev-parse", "--abbrev-ref", "HEAD")).toBe("hercule/run-3f1a2b4c");
     expect(git(directory, "rev-parse", "HEAD")).toBe(base);
-    expect(report.checkouts?.[0]?.branch).toBe("hydra/run-3f1a2b4c");
+    expect(report.checkouts?.[0]?.branch).toBe("hercule/run-3f1a2b4c");
   });
 
   it("puts each repository under its own subdirectory when there are several", async () => {
@@ -150,13 +150,13 @@ describe("an ephemeral workspace", () => {
             resourceId: id(),
             remote: web.url,
             subdirectory: "web",
-            branch: "hydra/run-00000001",
+            branch: "hercule/run-00000001",
           }),
           checkout({
             resourceId: id(),
             remote: api.url,
             subdirectory: "api",
-            branch: "hydra/run-00000001",
+            branch: "hercule/run-00000001",
           }),
         ],
       }),
@@ -164,11 +164,11 @@ describe("an ephemeral workspace", () => {
 
     expect(report.status).toBe("ready");
     const root = join(storageDir, "workspaces", workspaceId);
-    expect(git(join(root, "web"), "rev-parse", "--abbrev-ref", "HEAD")).toBe("hydra/run-00000001");
-    expect(git(join(root, "api"), "rev-parse", "--abbrev-ref", "HEAD")).toBe("hydra/run-00000001");
+    expect(git(join(root, "web"), "rev-parse", "--abbrev-ref", "HEAD")).toBe("hercule/run-00000001");
+    expect(git(join(root, "api"), "rev-parse", "--abbrev-ref", "HEAD")).toBe("hercule/run-00000001");
     expect(report.checkouts?.map((one) => one.branch)).toEqual([
-      "hydra/run-00000001",
-      "hydra/run-00000001",
+      "hercule/run-00000001",
+      "hercule/run-00000001",
     ]);
   });
 
@@ -198,7 +198,7 @@ describe("a cache that has seen the branches agents made", () => {
       provisionFrame({
         workspaceId: first,
         kind: "ephemeral",
-        checkouts: [checkout({ resourceId, remote: remote.url, branch: "hydra/run-aaaaaaaa" })],
+        checkouts: [checkout({ resourceId, remote: remote.url, branch: "hercule/run-aaaaaaaa" })],
       }),
     );
     // What an agent does with its worktree: it commits and pushes the branch.
@@ -206,19 +206,19 @@ describe("a cache that has seen the branches agents made", () => {
     writeFileSync(join(directory, "work.txt"), "what the agent did\n");
     git(directory, "add", ".");
     git(directory, "commit", "-m", "the agent's work");
-    git(directory, "push", remote.path, "hydra/run-aaaaaaaa");
+    git(directory, "push", remote.path, "hercule/run-aaaaaaaa");
 
     const second = await workspaces.provision(
       provisionFrame({
         kind: "ephemeral",
-        checkouts: [checkout({ resourceId, remote: remote.url, branch: "hydra/run-bbbbbbbb" })],
+        checkouts: [checkout({ resourceId, remote: remote.url, branch: "hercule/run-bbbbbbbb" })],
       }),
     );
 
     // The branch is checked out here and now exists on the remote: a refresh
     // that fetched over it would refuse, and every later workspace with it.
     expect(second.status).toBe("ready");
-    expect(second.checkouts?.[0]?.branch).toBe("hydra/run-bbbbbbbb");
+    expect(second.checkouts?.[0]?.branch).toBe("hercule/run-bbbbbbbb");
   });
 
   it("gives a worktree off the primary's cache the repository's own remote", async () => {
@@ -238,7 +238,7 @@ describe("a cache that has seen the branches agents made", () => {
       provisionFrame({
         workspaceId,
         kind: "ephemeral",
-        checkouts: [checkout({ resourceId, remote: remote.url, branch: "hydra/run-cccccccc" })],
+        checkouts: [checkout({ resourceId, remote: remote.url, branch: "hercule/run-cccccccc" })],
       }),
     );
 
@@ -268,13 +268,13 @@ describe("a cache that has seen the branches agents made", () => {
             resourceId: webResource,
             remote: web.url,
             subdirectory: "web",
-            branch: "hydra/run-dddddddd",
+            branch: "hercule/run-dddddddd",
           }),
           checkout({
             resourceId: id(),
             remote: api.url,
             subdirectory: "api",
-            branch: "hydra/run-dddddddd",
+            branch: "hercule/run-dddddddd",
             baseBranch: "no-such-base",
           }),
         ],
@@ -297,7 +297,7 @@ describe("the setup command", () => {
 
     const report = await makeWorkspaces({
       storageDir,
-      gitEnv: { HYDRA_RUNNER_SOCKET: "/tmp/hydra-test.sock" },
+      gitEnv: { HERCULE_RUNNER_SOCKET: "/tmp/hercule-test.sock" },
     }).provision(
       provisionFrame({
         workspaceId,
@@ -306,8 +306,8 @@ describe("the setup command", () => {
           checkout({
             resourceId: id(),
             remote: remote.url,
-            branch: "hydra/run-5e5e5e5e",
-            setupCommand: 'printf "%s\\n" "$HYDRA_RUNNER_SOCKET" > setup-ran.txt',
+            branch: "hercule/run-5e5e5e5e",
+            setupCommand: 'printf "%s\\n" "$HERCULE_RUNNER_SOCKET" > setup-ran.txt',
           }),
         ],
       }),
@@ -316,7 +316,7 @@ describe("the setup command", () => {
     expect(report.status).toBe("ready");
     const ran = join(storageDir, "workspaces", workspaceId, "setup-ran.txt");
     // In the checkout, because a setup command installs dependencies there.
-    expect(readFileSync(ran, "utf8")).toBe("/tmp/hydra-test.sock\n");
+    expect(readFileSync(ran, "utf8")).toBe("/tmp/hercule-test.sock\n");
   });
 
   it("fails the workspace with its last 20 lines, leaving the directory in place", async () => {
@@ -332,7 +332,7 @@ describe("the setup command", () => {
           checkout({
             resourceId: id(),
             remote: remote.url,
-            branch: "hydra/run-6f6f6f6f",
+            branch: "hercule/run-6f6f6f6f",
             setupCommand: "for i in $(seq 1 30); do echo line$i; done; exit 3",
           }),
         ],
@@ -363,7 +363,7 @@ describe("a setup command that will not finish", () => {
           checkout({
             resourceId: id(),
             remote: remote.url,
-            branch: "hydra/run-9d9d9d9d",
+            branch: "hercule/run-9d9d9d9d",
             setupCommand: "echo installing; sleep 60",
           }),
         ],
@@ -390,7 +390,7 @@ describe("a workspace whose setup command failed", () => {
         checkout({
           resourceId: id(),
           remote: remote.url,
-          branch: "hydra/run-7c7c7c7c",
+          branch: "hercule/run-7c7c7c7c",
           setupCommand: "echo could not install; exit 7",
         }),
       ],
@@ -407,7 +407,7 @@ describe("a workspace whose setup command failed", () => {
     // Making it again would fail on the branch that already exists and take the
     // directory the user was told they could look at with it.
     expect(again.status).toBe("ready");
-    expect(again.checkouts?.[0]?.branch).toBe("hydra/run-7c7c7c7c");
+    expect(again.checkouts?.[0]?.branch).toBe("hercule/run-7c7c7c7c");
     expect(readFileSync(join(directory, "half-done.txt"), "utf8")).toBe(
       "what the install got through\n",
     );
@@ -424,7 +424,7 @@ describe("a workspace whose setup command failed", () => {
           checkout({
             resourceId: id(),
             remote: remote.url,
-            branch: "hydra/run-8e8e8e8e",
+            branch: "hercule/run-8e8e8e8e",
             // A watcher of its own, which is what an install that hangs looks
             // like: the shell waits on a child that holds the pipes open.
             setupCommand: "sleep 60 & echo grandchild=$!; wait",
@@ -461,7 +461,7 @@ describe(".workspaceinclude", () => {
         checkouts: [checkout({ resourceId, remote: remote.url })],
       }),
     );
-    // The primary is Hydra's own clone, so what it lists is written there.
+    // The primary is Hercule's own clone, so what it lists is written there.
     withInclude(
       join(storageDir, "primaries", resourceId),
       "# what the agent needs\n\n.env\nconfig/local.json\n",
@@ -476,7 +476,7 @@ describe(".workspaceinclude", () => {
           checkout({
             resourceId,
             remote: remote.url,
-            branch: "hydra/run-7a7a7a7a",
+            branch: "hercule/run-7a7a7a7a",
             workspaceInclude: true,
           }),
         ],
@@ -505,7 +505,7 @@ describe(".workspaceinclude", () => {
           checkout({
             resourceId: id(),
             remote: remote.url,
-            branch: "hydra/run-8b8b8b8b",
+            branch: "hercule/run-8b8b8b8b",
             workspaceInclude: true,
           }),
         ],
@@ -519,6 +519,6 @@ describe(".workspaceinclude", () => {
     expect(report.warnings?.[0] ?? "").toContain(".workspaceinclude skipped");
     expect(
       git(join(storageDir, "workspaces", workspaceId), "rev-parse", "--abbrev-ref", "HEAD"),
-    ).toBe("hydra/run-8b8b8b8b");
+    ).toBe("hercule/run-8b8b8b8b");
   });
 });

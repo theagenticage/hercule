@@ -2,7 +2,7 @@
  * How the CLI ends, by class of failure.
  *
  * The codes are part of the CLI's contract with the scripts and agents that
- * drive it, so they are named here and printed by `hydra --help`: a caller can
+ * drive it, so they are named here and printed by `hercule --help`: a caller can
  * retry a connection failure and must not retry a usage error.
  */
 export const EXIT = {

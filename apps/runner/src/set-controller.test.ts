@@ -1,5 +1,5 @@
 /**
- * `hydra runner set-controller <url>`, through the runner role's `run(argv)`.
+ * `hercule runner set-controller <url>`, through the runner role's `run(argv)`.
  *
  * The verb re-points an already enrolled machine at a moved controller, so what
  * is proved here is what it leaves in `runner.json` and what it says - and that
@@ -55,7 +55,7 @@ afterEach(() => {
 });
 
 const temporaryHome = (): string => {
-  const home = mkdtempSync(pathJoin(tmpdir(), "hydra-set-controller-"));
+  const home = mkdtempSync(pathJoin(tmpdir(), "hercule-set-controller-"));
   homes.push(home);
   return home;
 };
@@ -85,7 +85,7 @@ const enrolled = (
   return { home, path, before: readFileSync(path, "utf8") };
 };
 
-describe("hydra runner set-controller", () => {
+describe("hercule runner set-controller", () => {
   it("repairs a file whose controller URL no longer reads as one", async () => {
     const { home, path } = enrolled("127.0.0.1:4937");
 

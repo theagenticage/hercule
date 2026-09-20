@@ -5,13 +5,13 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { main } from "./index";
 import { envelope, id, stubFetch, stubIo, type StubRequest } from "./testing";
 
-const KEY = "hydra_key_dGVzdA";
-const BEARER = "hydra_bearer_dGVzdA";
+const KEY = "hercule_key_dGVzdA";
+const BEARER = "hercule_bearer_dGVzdA";
 
 let home: string;
 
 beforeEach(() => {
-  home = mkdtempSync(join(tmpdir(), "hydra-login-"));
+  home = mkdtempSync(join(tmpdir(), "hercule-login-"));
 });
 
 afterEach(() => {
@@ -37,7 +37,7 @@ const controller = () =>
 
 const credentialsPath = () => join(home, "credentials.json");
 
-describe("hydra login", () => {
+describe("hercule login", () => {
   it("logs in, mints a key under the bearer, stores the key and drops the bearer", async () => {
     const fetch = controller();
     const io = stubIo({ fetch, stdin: "hunter2\n", hostname: "laptop" });

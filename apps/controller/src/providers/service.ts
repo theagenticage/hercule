@@ -72,7 +72,7 @@ const LOGIN_DEADLINE: Duration.Duration = Duration.seconds(30);
 
 /** Tests hand over a deadline they can wait out. */
 export const ProviderLoginDeadline = Context.Reference<Duration.Duration>(
-  "hydra/controller/providers/ProviderLoginDeadline",
+  "hercule/controller/providers/ProviderLoginDeadline",
   { defaultValue: (): Duration.Duration => LOGIN_DEADLINE },
 );
 
@@ -411,7 +411,7 @@ const make = Effect.gen(function* () {
 
     /**
      * The fleet is swept hourly anyway; this is for when something changed
-     * outside Hydra and the user will not wait.
+     * outside Hercule and the user will not wait.
      */
     probe: (input: ProbeInput): Effect.Effect<CapabilitySnapshot, AskError> =>
       Effect.gen(function* () {
@@ -598,7 +598,7 @@ const make = Effect.gen(function* () {
 export class ProviderService extends Context.Service<
   ProviderService,
   Effect.Success<typeof make>
->()("hydra/controller/providers/ProviderService") {}
+>()("hercule/controller/providers/ProviderService") {}
 
 export const ProviderServiceLayer: Layer.Layer<
   ProviderService,

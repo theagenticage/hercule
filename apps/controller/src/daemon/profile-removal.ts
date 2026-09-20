@@ -57,7 +57,7 @@ const make = Effect.gen(function* () {
           sql,
           Effect.gen(function* () {
             // What the permissions domain itself says about this id: no such
-            // profile, or one of the three Hydra ships.
+            // profile, or one of the three Hercule ships.
             const profile = yield* profiles.requireDeletable(input.id);
             // A session is bounded by the grants it copied from this row for
             // as long as it runs. Deleting it underneath one would kill that
@@ -113,7 +113,7 @@ const make = Effect.gen(function* () {
 });
 
 export class ProfileRemoval extends Context.Service<ProfileRemoval, Effect.Success<typeof make>>()(
-  "hydra/controller/daemon/ProfileRemoval",
+  "hercule/controller/daemon/ProfileRemoval",
 ) {}
 
 export const ProfileRemovalLayer: Layer.Layer<

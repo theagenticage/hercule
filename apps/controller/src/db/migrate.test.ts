@@ -60,8 +60,8 @@ let databaseFile: string;
 let backupsDir: string;
 
 beforeEach(() => {
-  home = mkdtempSync(join(tmpdir(), "hydra-db-"));
-  databaseFile = join(home, "hydra.db");
+  home = mkdtempSync(join(tmpdir(), "hercule-db-"));
+  databaseFile = join(home, "hercule.db");
   backupsDir = join(home, "backups");
 });
 
@@ -123,7 +123,7 @@ describe("migrations", () => {
   });
 
   it("copies an existing database before it applies a pending migration", async () => {
-    // One migration past the embedded set, as a later Hydra would carry it: the
+    // One migration past the embedded set, as a later Hercule would carry it: the
     // composed path is "the file was already there and something is pending",
     // which the embedded set alone cannot exercise, since it is all applied at
     // once on a first run.

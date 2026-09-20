@@ -17,7 +17,7 @@
  * checkout beside the bare repository is here to prove exactly that.
  *
  * The worktree case is the only one that needs a session, and no fake provider
- * ships, so it runs a real one and is opt-in under `HYDRA_LIVE_SESSION_TEST`
+ * ships, so it runs a real one and is opt-in under `HERCULE_LIVE_SESSION_TEST`
  * like `e2e/session.test.ts`. The rest run everywhere.
  *
  * The suite is in vitest's `binary` project, so `pnpm test:binary` is what runs
@@ -50,7 +50,7 @@ const world = temporaryHome();
 const binary = releaseBinary();
 
 /** How the resource spells the repository; it resolves to `bare` through `HOME`. */
-const REMOTE = "https://hydra.test/acme/web";
+const REMOTE = "https://hercule.test/acme/web";
 
 /**
  * Opt-in, like `e2e/session.test.ts`: the worktree case is the only one here
@@ -73,7 +73,7 @@ let runnerId: string;
 /** How long a clone, a fetch and a worktree may take on a cold machine. */
 const PROVISION_DEADLINE_MS = 60_000;
 
-const hydra = (args: ReadonlyArray<string>, stdin?: string): Promise<Ran> =>
+const hercule = (args: ReadonlyArray<string>, stdin?: string): Promise<Ran> =>
   cli(args, { home: state.home, binary, stdin });
 
 /** Fails with the command's own output rather than on an undefined field. */
@@ -131,7 +131,7 @@ interface Snapshot {
 const settled = async (id: string): Promise<Workspace> => {
   const deadline = Date.now() + PROVISION_DEADLINE_MS;
   for (;;) {
-    const workspace = ok<Workspace>(await hydra(["workspace", "read", id, "--json"]));
+    const workspace = ok<Workspace>(await hercule(["workspace", "read", id, "--json"]));
     if (workspace.status !== "provisioning") return workspace;
     if (Date.now() > deadline) {
       throw new Error(`${id} was still provisioning after ${String(PROVISION_DEADLINE_MS)}ms`);
@@ -159,12 +159,12 @@ const anyLoggedIn = async (): Promise<boolean> => {
 
 beforeAll(async () => {
   // A bare repository with one commit on `main`, and a working copy of it the
-  // user has beside it, which Hydra must never touch.
+  // user has beside it, which Hercule must never touch.
   git(["init", "--bare", "--initial-branch=main", bare], world.home);
   const seed = join(world.home, "seed");
   mkdirSync(seed);
   git(["init", "--initial-branch=main"], seed);
-  writeFileSync(join(seed, "README.md"), "hydra e2e\n");
+  writeFileSync(join(seed, "README.md"), "hercule e2e\n");
   git(["add", "README.md"], seed);
   git(["commit", "-m", "one commit"], seed);
   git(["push", bare, "main"], seed);
@@ -200,7 +200,7 @@ beforeAll(async () => {
   const deadline = Date.now() + 30_000;
   for (;;) {
     const fleet = ok<{ items: ReadonlyArray<{ id: string; connectivity: string }> }>(
-      await hydra(["runner", "list", "--json"]),
+      await hercule(["runner", "list", "--json"]),
     ).items.filter((one) => one.connectivity === "online");
     if (fleet.length > 0) {
       runnerId = fleet[0]!.id;
@@ -226,13 +226,13 @@ describe("a repo, its main workspace and a thread's worktree, through the CLI", 
 
   it("records the repo under the canonical form of the remote it was spelled with", async () => {
     const resource = ok<Resource>(
-      await hydra(["resource", "create", "--kind", "repo", "--remote", REMOTE, "--json"]),
+      await hercule(["resource", "create", "--kind", "repo", "--remote", REMOTE, "--json"]),
     );
     expect(resource.kind).toBe("repo");
     expect(resource.remote).toBe(REMOTE);
     // What a second spelling of this repository would collide on: the scheme
     // and the case are not part of the identity.
-    expect(resource.canonicalRemote).toBe("hydra.test/acme/web");
+    expect(resource.canonicalRemote).toBe("hercule.test/acme/web");
     resourceId = resource.id;
   }, 30_000);
 
@@ -241,7 +241,7 @@ describe("a repo, its main workspace and a thread's worktree, through the CLI", 
     const head = git(["rev-parse", "HEAD"], checkout);
 
     const answered = ok<Workspace>(
-      await hydra([
+      await hercule([
         "workspace",
         "provision",
         "--resource",
@@ -267,14 +267,14 @@ describe("a repo, its main workspace and a thread's worktree, through the CLI", 
     expect(only!.branches).toContain("main");
 
     // AD-5 under D-20a: the user's own checkout of this repository is not
-    // Hydra's and is never read or written - it reads exactly as it did, on the
+    // Hercule's and is never read or written - it reads exactly as it did, on the
     // commit it was on.
     expect(git(["status", "--porcelain=v1", "--untracked-files=all"], checkout)).toBe(before);
     expect(git(["rev-parse", "HEAD"], checkout)).toBe(head);
   }, 120_000);
 
   it("refuses a second main workspace of the same repo on the same machine", async () => {
-    const ran = await hydra([
+    const ran = await hercule([
       "workspace",
       "provision",
       "--resource",
@@ -301,7 +301,7 @@ describe("a repo, its main workspace and a thread's worktree, through the CLI", 
       }
 
       const spawned = ok<Session>(
-        await hydra(
+        await hercule(
           [
             "session",
             "spawn",
@@ -326,7 +326,7 @@ describe("a repo, its main workspace and a thread's worktree, through the CLI", 
       expect(only!.form).toBe("worktree");
       // The thread's branch is the session's own, and nothing else's: the tail of
       // the session id is what tells two threads in one repo apart.
-      expect(only!.branch).toBe(`hydra/run-${spawned.id.slice(-8)}`);
+      expect(only!.branch).toBe(`hercule/run-${spawned.id.slice(-8)}`);
       // It starts where `main` is, so the worktree came off the cache the clone
       // seeded rather than from a repository nobody could reach.
       expect(only!.branches).toContain(only!.branch!);
@@ -335,7 +335,7 @@ describe("a repo, its main workspace and a thread's worktree, through the CLI", 
       expect(workspace.sessionIds).toContain(spawned.id);
 
       // The thread is the test's, so it does not outlive it.
-      const stopped = await hydra(["session", "stop", spawned.id, "--json"]);
+      const stopped = await hercule(["session", "stop", spawned.id, "--json"]);
       expect(stopped.code, `${stopped.stdout}\n${stopped.stderr}`).toBe(0);
     },
     180_000,

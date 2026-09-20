@@ -114,7 +114,7 @@ describe("profile.delete", () => {
       }),
     );
     expect(error).toMatchObject({ error: { code: "invalid_state" } });
-    expect(messageOf(error)).toContain("Hydra ships");
+    expect(messageOf(error)).toContain("Hercule ships");
   });
 
   it("answers not_found for an id nobody has", async () => {

@@ -4,7 +4,7 @@
  * The controller derives its routes and its request validation from `api`, the
  * CLI and `client-core` derive their client from it, and the OpenAPI document
  * is generated from it. `OPERATIONS` is the route and grant table every 403 and
- * every `hydra ... --help` reads.
+ * every `hercule ... --help` reads.
  */
 /** Version of the public API surface this build speaks. */
 export const API_VERSION = 1;

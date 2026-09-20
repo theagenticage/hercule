@@ -201,7 +201,7 @@ const make = Effect.gen(function* () {
 
 /** The secret service. */
 export class Secret extends Context.Service<Secret, Effect.Success<typeof make>>()(
-  "hydra/controller/secrets/Secret",
+  "hercule/controller/secrets/Secret",
 ) {}
 
 export const SecretLayer: Layer.Layer<Secret, never, SqlClient.SqlClient | Secrets | AuditLog> =

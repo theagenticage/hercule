@@ -1,5 +1,5 @@
 /**
- * `hydra login <url>`.
+ * `hercule login <url>`.
  *
  * Two calls, on purpose: `auth.login` trades the password for a 30-day bearer,
  * and `apiKey.create` mints the long-lived key under it. The key is what lands
@@ -14,7 +14,7 @@
  */
 import { randomUUID } from "node:crypto";
 import { mkdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import { createClient, type HydraClient } from "@hercule/client-core";
+import { createClient, type HerculeClient } from "@hercule/client-core";
 import { credentialsFileIn } from "@hercule/home";
 import { tokenize } from "./commands/args";
 import { UsageError } from "./exit";
@@ -28,7 +28,7 @@ export interface LoginResult {
 }
 
 const HELP = [
-  "usage: hydra login <url> --username <name> [--password-stdin] [--name <key-name>] [--json]",
+  "usage: hercule login <url> --username <name> [--password-stdin] [--name <key-name>] [--json]",
   "",
   "Logs in with a password and stores a long-lived API key in <home>/credentials.json,",
   "mode 0600. Two calls: auth.login for a 30-day bearer, then apiKey.create under it.",
@@ -117,7 +117,7 @@ export const login = async (
   }
 
   if (url === undefined)
-    throw new UsageError("login needs the controller URL: hydra login <url>", "login");
+    throw new UsageError("login needs the controller URL: hercule login <url>", "login");
   if (username === undefined) throw new UsageError("login needs --username <name>", "login");
 
   let password: string;
@@ -133,7 +133,7 @@ export const login = async (
   }
   if (password === "") throw new UsageError("the password is empty", "login");
 
-  const client: HydraClient = createClient({ baseUrl: url, fetch: io.fetch });
+  const client: HerculeClient = createClient({ baseUrl: url, fetch: io.fetch });
 
   const bearer = (await client.auth.login({ payload: { username, password } })) as {
     readonly token: string;

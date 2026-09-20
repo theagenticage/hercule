@@ -1,5 +1,5 @@
 /**
- * `hydra runner`, from the home it reads to the controller it dials.
+ * `hercule runner`, from the home it reads to the controller it dials.
  *
  * The daemon is three parts wired together - what this machine joined, what it
  * says about itself, and the loop that holds the connection - and the wiring is
@@ -23,7 +23,7 @@ afterEach(() => {
 });
 
 const temporaryHome = (): string => {
-  const home = mkdtempSync(join(tmpdir(), "hydra-daemon-"));
+  const home = mkdtempSync(join(tmpdir(), "hercule-daemon-"));
   homes.push(home);
   return home;
 };
@@ -55,7 +55,7 @@ describe("the runner daemon", () => {
     expect(outcome._tag).toBe("Failure");
     const message = outcome._tag === "Failure" ? outcome.failure.message : "";
     expect(message).toContain(join(runnerDirIn(home), "runner.json"));
-    expect(message).toContain("hydra runner join");
+    expect(message).toContain("hercule runner join");
   });
 
   it.each([
@@ -70,7 +70,7 @@ describe("the runner daemon", () => {
     const message = outcome._tag === "Failure" ? outcome.failure.message : "";
     expect(message).toContain("runner.json");
     expect(message).toContain("controllerUrl");
-    expect(message).toContain("hydra runner set-controller");
+    expect(message).toContain("hercule runner set-controller");
   });
 
   it("dials the controller its runner.json names, with the credential it holds", async () => {
@@ -106,8 +106,8 @@ describe("the runner daemon", () => {
       expect(seen[0]?.authorization).toBe("Bearer the-credential-the-join-handed-back");
       // Put there on the way up, before any session could be placed here: a
       // session whose `PATH` names this directory and finds nothing in it has
-      // no way to call Hydra at all (spec 15 section 2).
-      const link = join(runnerDirIn(home), "bin", "hydra");
+      // no way to call Hercule at all (spec 15 section 2).
+      const link = join(runnerDirIn(home), "bin", "hercule");
       expect(lstatSync(link).isSymbolicLink()).toBe(true);
       expect(readlinkSync(link)).toBe(process.execPath);
     } finally {

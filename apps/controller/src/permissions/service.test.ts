@@ -142,7 +142,7 @@ describe("profile.read", () => {
 });
 
 describe("profile.update", () => {
-  it("edits a shipped profile: the three Hydra ships are editable", async () => {
+  it("edits a shipped profile: the three Hercule ships are editable", async () => {
     const { updated, entries } = await run(
       Effect.gen(function* () {
         const store = yield* PermissionProfiles;

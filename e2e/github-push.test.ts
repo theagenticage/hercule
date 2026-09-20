@@ -4,11 +4,11 @@
  *
  * Opt-in, like `e2e/session.test.ts`: it talks to a real account and leaves a
  * branch behind until it deletes it, so it runs only with
- * `HYDRA_E2E_GITHUB_TOKEN` and `HYDRA_E2E_GITHUB_REPO` (`owner/name`) set.
+ * `HERCULE_E2E_GITHUB_TOKEN` and `HERCULE_E2E_GITHUB_REPO` (`owner/name`) set.
  *
  * The controller runs under a `HOME` that holds no `.gitconfig` of the
  * developer's, no `.git-credentials` and no `gh` login, so every credential in
- * this suite can only have come from the Connection through Hydra's own helper.
+ * this suite can only have come from the Connection through Hercule's own helper.
  *
  * Two things are proved without spending a model token. The machine's own clone
  * of the private repository is the read side: `workspace.provision` cannot
@@ -17,7 +17,7 @@
  * than by an agent, for the reason written at `pushed` below.
  *
  * The third proof is the ticket's headline and costs a turn, so it asks for
- * `HYDRA_LIVE_SESSION_TEST` as well: a real Claude Code thread in a
+ * `HERCULE_LIVE_SESSION_TEST` as well: a real Claude Code thread in a
  * worktree of the same repository runs `git commit` and `git push` itself, and
  * the branch it leaves on GitHub is read back and deleted.
  */
@@ -40,8 +40,8 @@ import {
   type Ran,
 } from "./harness";
 
-const token = process.env["HYDRA_E2E_GITHUB_TOKEN"];
-const repo = process.env["HYDRA_E2E_GITHUB_REPO"];
+const token = process.env["HERCULE_E2E_GITHUB_TOKEN"];
+const repo = process.env["HERCULE_E2E_GITHUB_REPO"];
 const wanted = token !== undefined && repo !== undefined;
 
 /**
@@ -61,7 +61,7 @@ const gitHome = temporaryHome("");
 const sender = join(world.home, "sender");
 
 /** The branch this run makes on GitHub, and takes away again. */
-const branch = `hydra-e2e/${Math.random().toString(16).slice(2, 10)}`;
+const branch = `hercule-e2e/${Math.random().toString(16).slice(2, 10)}`;
 
 /**
  * The branch the thread pushes, known only once its session has an id, and
@@ -82,7 +82,7 @@ const PROVISION_DEADLINE_MS = 120_000;
 /** Long enough for a cold harness to start, run two git commands and answer. */
 const TURN_DEADLINE_MS = 300_000;
 
-const hydra = (args: ReadonlyArray<string>, stdin?: string): Promise<Ran> =>
+const hercule = (args: ReadonlyArray<string>, stdin?: string): Promise<Ran> =>
   cli(args, { home: state.home, binary, stdin });
 
 const ok = <A>(ran: Ran): A => {
@@ -124,7 +124,7 @@ const removeBranch = async (name: string): Promise<void> => {
 
 /**
  * Every regular file under a directory, listed here rather than left to
- * `grep -r`. A live Hydra Home holds the runner daemon's Unix socket, and grep
+ * `grep -r`. A live Hercule Home holds the runner daemon's Unix socket, and grep
  * pointed at a directory containing one exits `2` - it failed - however many
  * matches it also printed, which reads exactly like the search being broken.
  * The files are what is being searched, so the files are what is named.
@@ -162,7 +162,7 @@ const filesHolding = (
 };
 
 /**
- * That no file under the Hydra Home holds the token - asked only after the
+ * That no file under the Hercule Home holds the token - asked only after the
  * search has been shown to work at all, on the API key that the login wrote
  * into that same home. A grep that matched nothing because it was pointed at
  * the wrong directory, or gave up on the database as binary, would otherwise
@@ -174,7 +174,7 @@ const holdsNoToken = (where: string): void => {
   expect(control.files).toContain(join(where, "credentials.json"));
 
   const held = filesHolding(token!, where);
-  expect(held.files, "these files under the Hydra Home hold the token").toBe("");
+  expect(held.files, "these files under the Hercule Home hold the token").toBe("");
   expect(held.code, "the search failed rather than finding nothing").toBe(1);
 };
 
@@ -203,14 +203,14 @@ const gitWithHelper = (
     ["credential.helper", ""],
     ["credential.helper", helperCommand],
     ["credential.useHttpPath", "true"],
-    ["user.name", "Hydra E2E"],
-    ["user.email", "e2e@hydra.test"],
+    ["user.name", "Hercule E2E"],
+    ["user.email", "e2e@hercule.test"],
   ];
   const ran = Bun.spawnSync(["git", ...args], {
     cwd,
     env: {
       ...gitEnv(gitHome.home),
-      HYDRA_RUNNER_SOCKET: socketPath,
+      HERCULE_RUNNER_SOCKET: socketPath,
       GIT_CONFIG_COUNT: String(pairs.length),
       ...Object.fromEntries(
         pairs.flatMap((pair, at) => [
@@ -253,7 +253,7 @@ const claudeLoggedIn = async (): Promise<boolean> => {
 };
 
 const workspaceRead = async (id: string): Promise<Workspace> =>
-  ok<Workspace>(await hydra(["workspace", "read", id, "--json"]));
+  ok<Workspace>(await hercule(["workspace", "read", id, "--json"]));
 
 beforeAll(async () => {
   if (!wanted) return;
@@ -262,7 +262,7 @@ beforeAll(async () => {
     home: state.home,
     binary,
     // No git configuration of the developer's, and no system one either: what
-    // authenticates here has to come from Hydra.
+    // authenticates here has to come from Hercule.
     env: { HOME: gitHome.home, GIT_CONFIG_NOSYSTEM: "1" },
   });
   url = controller.url;
@@ -283,7 +283,7 @@ beforeAll(async () => {
   for (const args of [
     ["init", "--initial-branch=main", "."],
     ["remote", "add", "origin", remote],
-    ["commit", "--allow-empty", "-m", `hydra e2e ${branch}`],
+    ["commit", "--allow-empty", "-m", `hercule e2e ${branch}`],
   ]) {
     const ran = Bun.spawnSync(["git", ...args], { cwd: sender, env: gitEnv(gitHome.home) });
     expect(ran.exitCode, ran.stderr.toString()).toBe(0);
@@ -302,7 +302,7 @@ afterAll(async () => {
   gitHome.remove();
 });
 
-describe.skipIf(!wanted)("pushes GitHub accepted on Hydra's credential alone", () => {
+describe.skipIf(!wanted)("pushes GitHub accepted on Hercule's credential alone", () => {
   /** The repo and the machine the first case records, which the live case reuses. */
   let resourceId = "";
   let machineId = "";
@@ -311,7 +311,7 @@ describe.skipIf(!wanted)("pushes GitHub accepted on Hydra's credential alone", (
     // The account, from the token alone. Creating it asks GitHub who the
     // token belongs to, so a connection that exists is a token that works.
     const connection = ok<{ id: string; displayName: string }>(
-      await hydra(
+      await hercule(
         [
           "connection",
           "create",
@@ -329,7 +329,7 @@ describe.skipIf(!wanted)("pushes GitHub accepted on Hydra's credential alone", (
     expect(connection.displayName.length).toBeGreaterThan(0);
 
     const resource = ok<{ id: string; canonicalRemote: string | null }>(
-      await hydra([
+      await hercule([
         "resource",
         "create",
         "--kind",
@@ -345,7 +345,7 @@ describe.skipIf(!wanted)("pushes GitHub accepted on Hydra's credential alone", (
     resourceId = resource.id;
 
     const runnerId = ok<{ items: ReadonlyArray<{ id: string; connectivity: string }> }>(
-      await hydra(["runner", "list", "--connectivity", "online", "--json"]),
+      await hercule(["runner", "list", "--connectivity", "online", "--json"]),
     ).items[0]?.id;
     expect(runnerId, `no machine came online:\n${controller.output()}`).toBeDefined();
     machineId = runnerId!;
@@ -392,7 +392,7 @@ describe.skipIf(!wanted)("pushes GitHub accepted on Hydra's credential alone", (
     // with what git said.
     for (;;) {
       const pushed = gitWithHelper(["push", "-u", "origin", `HEAD:refs/heads/${branch}`], sender, {
-        HYDRA_WORKSPACE_PROVISIONING: answered.id,
+        HERCULE_WORKSPACE_PROVISIONING: answered.id,
       });
       if (pushed.code === 0) break;
       const now = await workspaceRead(answered.id);
@@ -434,7 +434,7 @@ describe.skipIf(!wanted)("pushes GitHub accepted on Hydra's credential alone", (
     const deleted = await github(`/git/refs/heads/${branch}`, { method: "DELETE" });
     expect(deleted.status, await deleted.text()).toBe(204);
 
-    // Nothing under the Hydra Home holds the token: not the database, not a
+    // Nothing under the Hercule Home holds the token: not the database, not a
     // log, not a git config the machine wrote.
     holdsNoToken(state.home);
   }, 300_000);
@@ -454,7 +454,7 @@ describe.skipIf(!wanted)("pushes GitHub accepted on Hydra's credential alone", (
       // `full-access` so the agent is not parked on an approval nobody is there
       // to answer; what is under test is the credential, not the permission card.
       const session = ok<Session>(
-        await hydra(
+        await hercule(
           [
             "session",
             "spawn",
@@ -466,14 +466,14 @@ describe.skipIf(!wanted)("pushes GitHub accepted on Hydra's credential alone", (
             JSON.stringify({ kind: "ephemeral", checkouts: [{ resourceId }] }),
             "--json",
           ],
-          "Run exactly this and nothing else: git commit --allow-empty -m 'hydra e2e' && " +
+          "Run exactly this and nothing else: git commit --allow-empty -m 'hercule e2e' && " +
             "git push -u origin HEAD. Then reply done.",
         ),
       );
       expect(session.workspaceId).not.toBeNull();
       // Named after the thread, so the branch GitHub is asked about afterwards
       // is this session's and nothing else's.
-      threadBranch = `hydra/run-${session.id.slice(-8)}`;
+      threadBranch = `hercule/run-${session.id.slice(-8)}`;
 
       // The thread is stopped whatever happens next: one left running holds a
       // worktree and, on a real account, keeps spending.
@@ -496,11 +496,11 @@ describe.skipIf(!wanted)("pushes GitHub accepted on Hydra's credential alone", (
         let tags: ReadonlyArray<string>;
         for (;;) {
           tags = ok<{ items: ReadonlyArray<{ event: { _tag: string } }> }>(
-            await hydra(["transcript", "read", session.id, "--json", "--all"]),
+            await hercule(["transcript", "read", session.id, "--json", "--all"]),
           ).items.map((row) => row.event._tag);
           if (tags.includes("turn.completed")) break;
           if (Date.now() > done) {
-            const read = ok<Session>(await hydra(["session", "read", session.id, "--json"]));
+            const read = ok<Session>(await hercule(["session", "read", session.id, "--json"]));
             throw new Error(
               `the thread never finished a turn; it reads ${read.status} and its transcript holds ` +
                 `${tags.join(", ") || "nothing"}`,
@@ -518,7 +518,7 @@ describe.skipIf(!wanted)("pushes GitHub accepted on Hydra's credential alone", (
         const ref = await github(`/git/ref/heads/${threadBranch}`);
         const body = await ref.text();
         if (ref.status !== 200) {
-          const transcript = await hydra(["transcript", "read", session.id, "--json", "--all"]);
+          const transcript = await hercule(["transcript", "read", session.id, "--json", "--all"]);
           throw new Error(
             `no ${threadBranch} on GitHub (${String(ref.status)} ${body}); the thread said:\n` +
               transcript.stdout,
@@ -529,12 +529,12 @@ describe.skipIf(!wanted)("pushes GitHub accepted on Hydra's credential alone", (
         expect(deleted.status, await deleted.text()).toBe(204);
         threadBranch = undefined;
       } finally {
-        const stopped = await hydra(["session", "stop", session.id, "--json"]);
+        const stopped = await hercule(["session", "stop", session.id, "--json"]);
         expect(stopped.code, `${stopped.stdout}\n${stopped.stderr}`).toBe(0);
       }
 
       // Same question as the case above, now that an agent has held the
-      // credential: nothing under the Hydra Home holds the token.
+      // credential: nothing under the Hercule Home holds the token.
       holdsNoToken(state.home);
     },
     PROVISION_DEADLINE_MS + TURN_DEADLINE_MS + 120_000,

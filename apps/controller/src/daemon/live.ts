@@ -93,7 +93,7 @@ const SESSION_INPUT_DEADLINE: Duration.Duration = Duration.seconds(10);
 
 /** Tests hand over a deadline they can wait out. */
 export const SessionInputDeadline = Context.Reference<Duration.Duration>(
-  "hydra/controller/daemon/SessionInputDeadline",
+  "hercule/controller/daemon/SessionInputDeadline",
   { defaultValue: (): Duration.Duration => SESSION_INPUT_DEADLINE },
 );
 
@@ -503,7 +503,7 @@ const make = Effect.gen(function* () {
  * can reach the API.
  */
 export class Live extends Context.Service<Live, Effect.Success<typeof make>>()(
-  "hydra/controller/daemon/Live",
+  "hercule/controller/daemon/Live",
 ) {}
 
 export const LiveLayer: Layer.Layer<

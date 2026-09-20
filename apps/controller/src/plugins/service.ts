@@ -246,7 +246,7 @@ const make = Effect.gen(function* () {
 });
 
 export class Plugins extends Context.Service<Plugins, Effect.Success<typeof make>>()(
-  "hydra/controller/plugins/Plugins",
+  "hercule/controller/plugins/Plugins",
 ) {}
 
 export const PluginsLayer: Layer.Layer<

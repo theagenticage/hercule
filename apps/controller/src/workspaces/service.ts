@@ -138,7 +138,7 @@ const unnameable = (name: string): string =>
  * threads started in the same millisecond share their first eight and would ask
  * one machine for one branch twice.
  */
-const threadBranch = (sessionId: string): string => `hydra/run-${sessionId.slice(-8)}`;
+const threadBranch = (sessionId: string): string => `hercule/run-${sessionId.slice(-8)}`;
 
 const ALREADY_GONE = "that workspace is already gone";
 
@@ -767,7 +767,7 @@ const make = Effect.gen(function* () {
 export class WorkspaceService extends Context.Service<
   WorkspaceService,
   Effect.Success<typeof make>
->()("hydra/controller/workspaces/WorkspaceService") {}
+>()("hercule/controller/workspaces/WorkspaceService") {}
 
 export const WorkspaceServiceLayer: Layer.Layer<
   WorkspaceService,

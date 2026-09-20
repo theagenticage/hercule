@@ -196,14 +196,14 @@ const faking = (): Fake => {
 
 /** One connection: what the supervisor writes, in order, and where things live. */
 const connecting = (fake: Fake) => {
-  const under = mkdtempSync(join(tmpdir(), "hydra-supervisor-"));
+  const under = mkdtempSync(join(tmpdir(), "hercule-supervisor-"));
   roots.push(under);
   const sent: Array<RunnerToController> = [];
   const machine: Machine = {
     providersDir: join(under, "providers"),
     scratchDir: join(under, "scratch"),
     binDir: join(under, "bin"),
-    hydraTool: { skill: "# hydra", claudePluginDir: join(under, "claude-plugin") },
+    herculeTool: { skill: "# hercule", claudePluginDir: join(under, "claude-plugin") },
     controllerUrl: "https://controller.example:4938",
     baseEnv: { PATH: "/usr/bin" },
     binaryOf: (name) => `/usr/local/bin/${name}`,
@@ -336,12 +336,12 @@ describe("one session, start to exit", () => {
     expect(fake.contexts[0]?.cwd).toBe(join(machine.scratchDir, SESSION));
     expect(fake.contexts[0]?.home).toBe(join(machine.providersDir, INSTANCE));
     expect(fake.contexts[0]?.binary).toBe("/usr/local/bin/fake-harness");
-    expect(fake.contexts[0]?.env["HYDRA_SESSION"]).toBe("1");
-    // The credential the session calls Hydra with, carried from the frame the
+    expect(fake.contexts[0]?.env["HERCULE_SESSION"]).toBe("1");
+    // The credential the session calls Hercule with, carried from the frame the
     // controller sent to the process the adapter spawns, and nowhere else.
-    expect(fake.contexts[0]?.env["HYDRA_TOKEN"]).toBe(START.token);
-    // And the skill it learns Hydra exists from, as this machine resolved it.
-    expect(fake.contexts[0]?.hydraTool.claudePluginDir).toBe(machine.hydraTool.claudePluginDir);
+    expect(fake.contexts[0]?.env["HERCULE_TOKEN"]).toBe(START.token);
+    // And the skill it learns Hercule exists from, as this machine resolved it.
+    expect(fake.contexts[0]?.herculeTool.claudePluginDir).toBe(machine.herculeTool.claudePluginDir);
   });
 
   it("reports what it holds, and holds nothing once the session has exited", async () => {
@@ -365,7 +365,7 @@ describe("one session, start to exit", () => {
     );
 
     const reports = sent.filter((frame) => frame._tag === "sessionsReport");
-    // A plain snapshot: the binding joins the Hydra session to the harness's own.
+    // A plain snapshot: the binding joins the Hercule session to the harness's own.
     expect(reports[0]?.sessions).toEqual([
       { sessionId: SESSION, nativeSessionId: NATIVE, instanceId: INSTANCE },
     ]);
@@ -1340,7 +1340,7 @@ describe("a shutdown that lands before a start has an entry to find", () => {
 /**
  * The instance's secret-valued config. It rides the start frame and reaches the
  * adapter through the context and nowhere else: written to the runner's disk it
- * would outlive the session it belongs to, and the machine holds no Hydra state
+ * would outlive the session it belongs to, and the machine holds no Hercule state
  * to put it back in.
  */
 describe("the secrets a start frame carries", () => {

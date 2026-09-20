@@ -70,7 +70,7 @@ export type Actor = UserActor | SessionActor | NoActor;
 const NONE: NoActor = { _tag: "none" };
 
 /** The actor behind the current request. Request-scoped, defaulting to nobody. */
-export const CurrentActor = Context.Reference<Actor>("hydra/controller/actor/CurrentActor", {
+export const CurrentActor = Context.Reference<Actor>("hercule/controller/actor/CurrentActor", {
   defaultValue: () => NONE,
 });
 
@@ -82,7 +82,7 @@ export const CurrentActor = Context.Reference<Actor>("hydra/controller/actor/Cur
 export const USER_ACTOR = "user";
 
 /**
- * How a mutation Hydra made on nobody's behalf is stamped. Enlisting a machine
+ * How a mutation Hercule made on nobody's behalf is stamped. Enlisting a machine
  * that presented a join token, and everything that machine reports about itself
  * afterwards, are changes with no credential behind them and still have to say
  * who made them.

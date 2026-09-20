@@ -16,7 +16,7 @@
  * The version comes from `@hercule/home/version`, which `scripts/gen-version.ts`
  * generates at build time: a compiled binary has no `package.json` on disk to
  * read. It is generated into `@hercule/home` because that is the one leaf every
- * role links - the dispatcher prints it for `hydra --version` and the
+ * role links - the dispatcher prints it for `hercule --version` and the
  * controller answers it here, and neither may depend on the other.
  */
 import * as Context from "effect/Context";
@@ -136,7 +136,7 @@ const make = Effect.gen(function* () {
 
 /** The controller service. */
 export class Controller extends Context.Service<Controller, Effect.Success<typeof make>>()(
-  "hydra/controller/controller/Controller",
+  "hercule/controller/controller/Controller",
 ) {}
 
 export const ControllerLayer: Layer.Layer<

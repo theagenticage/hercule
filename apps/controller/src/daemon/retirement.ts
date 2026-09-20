@@ -66,7 +66,7 @@ const make = Effect.gen(function* () {
 });
 
 export class Retirement extends Context.Service<Retirement, Effect.Success<typeof make>>()(
-  "hydra/controller/daemon/Retirement",
+  "hercule/controller/daemon/Retirement",
 ) {}
 
 export const RetirementLayer: Layer.Layer<

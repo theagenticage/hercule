@@ -94,7 +94,7 @@ const make = Effect.gen(function* () {
 
 /** The users repository. */
 export class Users extends Context.Service<Users, Effect.Success<typeof make>>()(
-  "hydra/controller/users/Users",
+  "hercule/controller/users/Users",
 ) {}
 
 export const UsersLayer: Layer.Layer<Users, never, SqlClient.SqlClient> = Layer.effect(Users, make);

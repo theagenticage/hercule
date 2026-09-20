@@ -2,7 +2,7 @@
  * The Codex adapter. Everything it knows about the harness it learns over one
  * app-server connection, and everything that connection touches lives under the
  * instance's own home: a runner that read the developer's own Codex directory
- * would mix Hydra's sessions with the user's login, skills and memory.
+ * would mix Hercule's sessions with the user's login, skills and memory.
  */
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
@@ -356,7 +356,7 @@ export const codexAdapter = (seam: CodexSeam): ProviderAdapter => {
           } catch {
             refuse(host, frame, {
               code: INVALID_REQUEST,
-              message: `Hydra could not read the ${frame.method} it was asked`,
+              message: `Hercule could not read the ${frame.method} it was asked`,
             });
             warn(host, `the app-server sent a ${frame.method} this build could not read`);
           }
@@ -536,11 +536,11 @@ export const codexAdapter = (seam: CodexSeam): ProviderAdapter => {
 
   const onServerRequest = (host: Host, frame: ServerRequestFrame): void => {
     if (frame.method === "item/tool/call") {
-      // Hydra hosts no tools for Codex, so there is nothing a user could decide
+      // Hercule hosts no tools for Codex, so there is nothing a user could decide
       // and nothing to wait for: the call is refused where it arrives.
       host.rpc.answer(frame.id, {
         result: {
-          contentItems: [{ type: "inputText", text: "Hydra does not host dynamic tools" }],
+          contentItems: [{ type: "inputText", text: "Hercule does not host dynamic tools" }],
           success: false,
         } satisfies DynamicToolCallResponse,
       });
@@ -550,7 +550,7 @@ export const codexAdapter = (seam: CodexSeam): ProviderAdapter => {
     if (asked === undefined) {
       refuse(host, frame, {
         code: METHOD_NOT_FOUND,
-        message: `Hydra does not answer ${frame.method}`,
+        message: `Hercule does not answer ${frame.method}`,
       });
       warn(host, `the app-server asked for ${frame.method}, which this runner build cannot answer`);
       return;
@@ -673,7 +673,7 @@ export const codexAdapter = (seam: CodexSeam): ProviderAdapter => {
 
   /**
    * The tier a request names, if it names one at all. `STANDARD_TIER` is
-   * Hydra's own name for the tier Codex runs on by default and is not an id
+   * Hercule's own name for the tier Codex runs on by default and is not an id
    * Codex knows, so selecting it sends no `serviceTier` field.
    */
   const tierOf = (selected: unknown): string | undefined =>
@@ -724,7 +724,7 @@ export const codexAdapter = (seam: CodexSeam): ProviderAdapter => {
     return {
       cwd: ctx.cwd,
       model: spec.modelSelection.model,
-      developerInstructions: buildDeveloperInstructions(spec.systemPrompt, ctx.hydraTool.skill),
+      developerInstructions: buildDeveloperInstructions(spec.systemPrompt, ctx.herculeTool.skill),
       ...(tier === undefined ? {} : { serviceTier: tier }),
       ...ACCESS_MODES[spec.accessMode],
     };

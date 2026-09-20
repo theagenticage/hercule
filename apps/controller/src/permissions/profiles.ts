@@ -249,7 +249,7 @@ const make = Effect.gen(function* () {
 export class PermissionProfiles extends Context.Service<
   PermissionProfiles,
   Effect.Success<typeof make>
->()("hydra/controller/permissions/PermissionProfiles") {}
+>()("hercule/controller/permissions/PermissionProfiles") {}
 
 export const PermissionProfilesLayer: Layer.Layer<PermissionProfiles, never, SqlClient.SqlClient> =
   Layer.effect(PermissionProfiles, make);

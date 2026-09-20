@@ -58,7 +58,7 @@ export const CapDetails = Schema.Union([
 export type CapDetails = Schema.Schema.Type<typeof CapDetails>;
 
 /** No credential, or one that does not resolve. */
-export class Unauthenticated extends Schema.Error<Unauthenticated>("hydra/Unauthenticated")(
+export class Unauthenticated extends Schema.Error<Unauthenticated>("hercule/Unauthenticated")(
   {
     error: Schema.Struct({
       code: Schema.Literal("unauthenticated"),
@@ -69,7 +69,7 @@ export class Unauthenticated extends Schema.Error<Unauthenticated>("hydra/Unauth
 ) {}
 
 /** The caller's permission profile lacks the grant the operation requires. */
-export class Forbidden extends Schema.Error<Forbidden>("hydra/Forbidden")(
+export class Forbidden extends Schema.Error<Forbidden>("hercule/Forbidden")(
   {
     error: Schema.Struct({
       code: Schema.Literal("forbidden"),
@@ -81,7 +81,7 @@ export class Forbidden extends Schema.Error<Forbidden>("hydra/Forbidden")(
 ) {}
 
 /** The input is wrong. The one code that reports everything wrong at once. */
-export class Validation extends Schema.Error<Validation>("hydra/Validation")(
+export class Validation extends Schema.Error<Validation>("hercule/Validation")(
   {
     error: Schema.Struct({
       code: Schema.Literal("validation"),
@@ -93,7 +93,7 @@ export class Validation extends Schema.Error<Validation>("hydra/Validation")(
 ) {}
 
 /** No such entity, for a caller already known to hold the grant. */
-export class NotFound extends Schema.Error<NotFound>("hydra/NotFound")(
+export class NotFound extends Schema.Error<NotFound>("hercule/NotFound")(
   {
     error: Schema.Struct({
       code: Schema.Literal("not_found"),
@@ -104,7 +104,7 @@ export class NotFound extends Schema.Error<NotFound>("hydra/NotFound")(
 ) {}
 
 /** The write collides with something that already exists. */
-export class Conflict extends Schema.Error<Conflict>("hydra/Conflict")(
+export class Conflict extends Schema.Error<Conflict>("hercule/Conflict")(
   {
     error: Schema.Struct({
       code: Schema.Literal("conflict"),
@@ -115,7 +115,7 @@ export class Conflict extends Schema.Error<Conflict>("hydra/Conflict")(
 ) {}
 
 /** The entity is in a state that does not allow the operation. */
-export class InvalidState extends Schema.Error<InvalidState>("hydra/InvalidState")(
+export class InvalidState extends Schema.Error<InvalidState>("hercule/InvalidState")(
   {
     error: Schema.Struct({
       code: Schema.Literal("invalid_state"),
@@ -126,7 +126,7 @@ export class InvalidState extends Schema.Error<InvalidState>("hydra/InvalidState
 ) {}
 
 /** A declared cap - a size or a count - would be exceeded. */
-export class CapExceeded extends Schema.Error<CapExceeded>("hydra/CapExceeded")(
+export class CapExceeded extends Schema.Error<CapExceeded>("hercule/CapExceeded")(
   {
     error: Schema.Struct({
       code: Schema.Literal("cap_exceeded"),
@@ -138,7 +138,7 @@ export class CapExceeded extends Schema.Error<CapExceeded>("hydra/CapExceeded")(
 ) {}
 
 /** Something went wrong that the caller cannot act on. */
-export class Internal extends Schema.Error<Internal>("hydra/Internal")(
+export class Internal extends Schema.Error<Internal>("hercule/Internal")(
   {
     error: Schema.Struct({
       code: Schema.Literal("internal"),

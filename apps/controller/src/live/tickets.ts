@@ -94,7 +94,7 @@ const make = Effect.sync(() => {
 
 /** The live socket's tickets. */
 export class WsTickets extends Context.Service<WsTickets, Effect.Success<typeof make>>()(
-  "hydra/controller/live/WsTickets",
+  "hercule/controller/live/WsTickets",
 ) {}
 
 export const WsTicketsLayer: Layer.Layer<WsTickets> = Layer.effect(WsTickets)(make);

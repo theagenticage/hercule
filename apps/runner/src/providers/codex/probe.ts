@@ -43,7 +43,7 @@ export interface AppServer {
  * pinned release declares.
  */
 const INITIALIZE: InitializeParams = {
-  clientInfo: { name: "hydra", title: "Hydra", version: VERSION },
+  clientInfo: { name: "hercule", title: "Hercule", version: VERSION },
   capabilities: { experimentalApi: false, requestAttestation: false },
 };
 
@@ -96,7 +96,7 @@ const selecting = (
 });
 
 /**
- * Hydra's name for the tier Codex runs on when it is told none. Codex has no id
+ * Hercule's name for the tier Codex runs on when it is told none. Codex has no id
  * for it: `serviceTiers` lists only the tiers beyond the standard one, and a
  * `defaultServiceTier` of `null` means that one. Without a choice for it the
  * only selectable value would be a paid tier nobody asked for, so it is offered

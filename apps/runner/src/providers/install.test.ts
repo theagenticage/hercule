@@ -10,13 +10,13 @@ import type { ProviderRunnerContext } from "./index";
 
 const CONTEXT: ProviderRunnerContext = {
   cwd: null,
-  home: "/var/hydra/runner/providers/0199e0e7-0000-7000-8000-00000000000a",
+  home: "/var/hercule/runner/providers/0199e0e7-0000-7000-8000-00000000000a",
   binary: "/usr/local/bin/claude",
   env: { PATH: "/usr/local/bin:/usr/bin" },
   secrets: {},
   // Never read by a probe, an install or a login; the context type carries it
   // for the sessions this adapter also hosts.
-  hydraTool: { skill: "", claudePluginDir: "/var/hydra/runner/storage/claude-plugin" },
+  herculeTool: { skill: "", claudePluginDir: "/var/hercule/runner/storage/claude-plugin" },
 };
 
 const seamRunning = (answer: {

@@ -46,14 +46,14 @@ export interface AfterCommitListener {
 }
 
 export class AfterCommit extends Context.Service<AfterCommit, AfterCommitListener>()(
-  "hydra/controller/db/AfterCommit",
+  "hercule/controller/db/AfterCommit",
 ) {}
 
 /** The lists the transaction in progress is filling. */
 class Pending extends Context.Service<
   Pending,
   { readonly changes: Array<Change>; readonly settles: Array<() => void> }
->()("hydra/controller/db/Pending") {}
+>()("hercule/controller/db/Pending") {}
 
 const publishNow = (changes: ReadonlyArray<Change>): Effect.Effect<void> =>
   changes.length === 0

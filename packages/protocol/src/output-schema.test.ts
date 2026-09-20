@@ -255,7 +255,7 @@ describe("lintOutputSchema", () => {
   });
 
   // The two schemas every live proof runs on. A fixture the lint refuses
-  // would be a proof run against a document Hydra would never have sent.
+  // would be a proof run against a document Hercule would never have sent.
   it("accepts both shared fixtures, the impossible one included", () => {
     expect(lintOutputSchema(FIXTURE_SCHEMA)).toEqual([]);
     expect(lintOutputSchema(IMPOSSIBLE_SCHEMA)).toEqual([]);

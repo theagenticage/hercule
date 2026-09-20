@@ -317,7 +317,7 @@ const USER_INPUT_PARAMS = {
 const DECLINED = { code: -32603, message: "declined by the user" };
 
 describe("a question the agent asks the user", () => {
-  it("asks it as a question, offering only the two answers Hydra can express", async () => {
+  it("asks it as a question, offering only the two answers Hercule can express", async () => {
     const run = await asking(USER_INPUT, USER_INPUT_PARAMS);
 
     const opened = await openedIn(run);
@@ -371,7 +371,7 @@ const TOOL_CALL_PARAMS = {
   callId: "call-1",
   namespace: null,
   tool: "search",
-  arguments: { query: "hydra" },
+  arguments: { query: "hercule" },
 };
 
 describe("a dynamic tool Codex wants this client to run", () => {
@@ -380,11 +380,11 @@ describe("a dynamic tool Codex wants this client to run", () => {
 
     const answered = await answerTo(run);
     expect(answered.result).toEqual({
-      contentItems: [{ type: "inputText", text: "Hydra does not host dynamic tools" }],
+      contentItems: [{ type: "inputText", text: "Hercule does not host dynamic tools" }],
       success: false,
     });
     await settle();
-    // Hydra hosts no tools for Codex, so there is nothing a user could decide.
+    // Hercule hosts no tools for Codex, so there is nothing a user could decide.
     expect(taggedIn(run.seen, "request.opened")).toEqual([]);
     expect(taggedIn(run.seen, "request.resolved")).toEqual([]);
   });

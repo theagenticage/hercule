@@ -286,7 +286,7 @@ const make = Effect.gen(function* () {
 
 /** The settings repository. */
 export class Settings extends Context.Service<Settings, Effect.Success<typeof make>>()(
-  "hydra/controller/settings/Settings",
+  "hercule/controller/settings/Settings",
 ) {}
 
 export const SettingsLayer: Layer.Layer<Settings, never, SqlClient.SqlClient> = Layer.effect(
