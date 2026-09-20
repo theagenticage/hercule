@@ -11,7 +11,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import { Duration, Effect, Fiber } from "effect";
 import { TestClock } from "effect/testing";
 import { CODEX_VERSION } from "@hydra/home/version";
-import type { ProbeResult, ProviderEvent, SessionSpec } from "@hydra/protocol";
+import type { OutputSchema, ProbeResult, ProviderEvent, SessionSpec } from "@hydra/protocol";
 import { INSTALL_DEADLINE } from "../install";
 import { codexAdapter, CONTROL_DEADLINE, type CodexSeam } from "./adapter";
 import { PROBE_DEADLINE } from "../probe";
@@ -897,30 +897,77 @@ describe("the two Codex surfaces this adapter must never reach for", () => {
   });
 });
 
-describe("hydra-as-a-tool on a Codex thread", () => {
-  /** What the runner resolved once, at start, for every adapter. */
-  const TOOL = {
-    skill: "# hydra\n\nCall `hydra --help` to find out what this controller can do.\n",
-    claudePluginDir: "/var/hydra/runner/storage/claude-plugin",
-  };
+/** What the runner resolved once, at start, for every adapter. */
+const TOOL = {
+  skill: "# hydra\n\nCall `hydra --help` to find out what this controller can do.\n",
+  claudePluginDir: "/var/hydra/runner/storage/claude-plugin",
+};
 
-  const THREE: ReadonlyArray<readonly [string, SessionSpec]> = [
-    ["thread/start", SPEC],
-    ["thread/resume", { ...SPEC, continue: { nativeSessionId: PRIOR, mode: "resume" } }],
-    ["thread/fork", { ...SPEC, continue: { nativeSessionId: PRIOR, mode: "fork" } }],
+/**
+ * What an Agent puts on a Codex session: instructions of its own and a schema
+ * every turn has to answer under (spec 06 section 7). `disallowedTools` rides
+ * along on the spec too, and Codex enforces none of it.
+ */
+const OUTPUT_SCHEMA: OutputSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["verdict", "confidence"],
+  properties: {
+    verdict: { type: "string", enum: ["accept", "dismiss"] },
+    confidence: { type: "number" },
+  },
+};
+
+const SYSTEM_PROMPT = "You assess tasks and answer with a verdict.";
+
+const STRUCTURED: SessionSpec = {
+  ...SPEC,
+  systemPrompt: SYSTEM_PROMPT,
+  outputSchema: OUTPUT_SCHEMA,
+};
+
+const ANSWER = { verdict: "accept", confidence: 0.9 };
+
+describe("hydra-as-a-tool on a Codex thread", () => {
+  /** The Agent's instructions above the skill, as one text. */
+  const INSTRUCTED = `${SYSTEM_PROMPT}\n\n${TOOL.skill}`;
+
+  const OPENINGS: ReadonlyArray<readonly [string, SessionSpec, string]> = [
+    ["thread/start", SPEC, TOOL.skill],
+    [
+      "thread/resume",
+      { ...SPEC, continue: { nativeSessionId: PRIOR, mode: "resume" } },
+      TOOL.skill,
+    ],
+    ["thread/fork", { ...SPEC, continue: { nativeSessionId: PRIOR, mode: "fork" } }, TOOL.skill],
+    ["thread/start", STRUCTURED, INSTRUCTED],
+    [
+      "thread/resume",
+      { ...STRUCTURED, continue: { nativeSessionId: PRIOR, mode: "resume" } },
+      INSTRUCTED,
+    ],
+    [
+      "thread/fork",
+      { ...STRUCTURED, continue: { nativeSessionId: PRIOR, mode: "fork" } },
+      INSTRUCTED,
+    ],
   ];
 
-  it.each(THREE)("carries the skill as %s's developer instructions", async (method, spec) => {
-    const { adapter, ctx, requests } = driving();
+  it.each(OPENINGS)(
+    "carries the session's own instructions as %s's developer instructions",
+    async (method, spec, instructions) => {
+      const { adapter, ctx, requests } = driving();
 
-    await Effect.runPromise(adapter.startSession(SESSION, spec, { ...ctx, hydraTool: TOOL }));
+      await Effect.runPromise(adapter.startSession(SESSION, spec, { ...ctx, hydraTool: TOOL }));
 
-    // The channel #73 found, and the only one: a session that cannot be told
-    // the CLI exists never calls it (spec 06 section 9.1).
-    expect(sentOf(requests, method)).toEqual([
-      expect.objectContaining({ developerInstructions: TOOL.skill }),
-    ]);
-  });
+      // The channel #73 found, and the only one: a session that cannot be told
+      // the CLI exists never calls it (spec 06 section 9.1). An Agent's own
+      // prompt shares it, and a thread continued from one carries both.
+      expect(sentOf(requests, method)).toEqual([
+        expect.objectContaining({ developerInstructions: instructions }),
+      ]);
+    },
+  );
 
   it("writes no AGENTS.md into the scratch directory it runs in", async () => {
     const scratch = homing();
@@ -934,5 +981,296 @@ describe("hydra-as-a-tool on a Codex thread", () => {
     // empty, and one more copy of the skill to keep current.
     expect(existsSync(join(scratch, "AGENTS.md"))).toBe(false);
     expect(readdirSync(scratch)).toEqual([]);
+  });
+});
+
+/** A turn's final agent message, which is where a Codex answer is read off. */
+const agentMessage = (text: string): Record<string, unknown> => ({
+  type: "agentMessage",
+  id: "0199e0e7-0000-7000-8000-0000000000e1",
+  text,
+});
+
+/** An item that is not an agent message, so a turn can end without an answer. */
+const COMMAND: Record<string, unknown> = {
+  type: "commandExecution",
+  id: "0199e0e7-0000-7000-8000-0000000000e2",
+  command: "echo hi",
+  cwd: CWD,
+  status: "completed",
+  commandActions: [],
+  aggregatedOutput: "hi\n",
+  exitCode: 0,
+};
+
+/**
+ * Ends the running turn, with its items announced one by one and carried on
+ * the completion as well: the app-server does both, so an adapter may read the
+ * final message off either and this script never decides which.
+ */
+const completeTurn = (
+  run: ReturnType<typeof driving>,
+  items: ReadonlyArray<Record<string, unknown>>,
+  status: "completed" | "failed" | "interrupted" = "completed",
+): void => {
+  const server = run.spawns[0]!;
+  for (const item of items) {
+    server.push({
+      method: "item/completed",
+      params: { threadId: THREAD, turnId: TURN, item, completedAtMs: 1789373122124 },
+    });
+  }
+  server.push({
+    method: "turn/completed",
+    params: { threadId: THREAD, turn: { id: TURN, items, itemsView: "full", status } },
+  });
+};
+
+/** Runs one turn that ends with these items, and answers its `turn.completed`. */
+const runTurnToCompletion = async (
+  spec: SessionSpec,
+  items: ReadonlyArray<Record<string, unknown>>,
+  status: "completed" | "failed" | "interrupted" = "completed",
+): Promise<Extract<ProviderEvent, { _tag: "turn.completed" }>> => {
+  const run = driving();
+  await Effect.runPromise(run.adapter.startSession(SESSION, spec, { ...run.ctx, hydraTool: TOOL }));
+  await Effect.runPromise(run.adapter.sendInput(SESSION, { text: "Assess this task." }));
+  completeTurn(run, items, status);
+  await until("closed the turn", () => taggedIn(run.seen, "turn.completed").length === 1);
+  return taggedIn(run.seen, "turn.completed")[0]!;
+};
+
+describe("a Codex session the controller spawned from an Agent", () => {
+  it("carries the agent's instructions above the skill as the thread's developer instructions", async () => {
+    const { adapter, ctx, requests } = driving();
+
+    await Effect.runPromise(adapter.startSession(SESSION, STRUCTURED, { ...ctx, hydraTool: TOOL }));
+
+    // Both, in that order, and nothing else: the skill is how a session learns
+    // the CLI exists (spec 06 section 9.1) and dropping it for the Agent's
+    // prompt would take the tool away from every session an Agent spawns.
+    expect(sentOf(requests, "thread/start")).toEqual([
+      expect.objectContaining({
+        developerInstructions: `${SYSTEM_PROMPT}\n\n${TOOL.skill}`,
+      }),
+    ]);
+  });
+
+  it("opens every turn of the session under the schema, not just the first", async () => {
+    const run = driving();
+    await Effect.runPromise(run.adapter.startSession(SESSION, STRUCTURED, run.ctx));
+
+    await Effect.runPromise(run.adapter.sendInput(SESSION, { text: "Assess this task." }));
+    completeTurn(run, [agentMessage(JSON.stringify(ANSWER))]);
+    await until("closed the first turn", () => taggedIn(run.seen, "turn.completed").length === 1);
+    await Effect.runPromise(run.adapter.sendInput(SESSION, { text: "And this one." }));
+
+    // Codex takes the schema per turn, so a session that sent it once would
+    // answer prose from its second turn on.
+    const opened = sentOf(run.requests, "turn/start");
+    expect(opened).toHaveLength(2);
+    expect(opened[0]).toMatchObject({ outputSchema: OUTPUT_SCHEMA });
+    expect(opened[1]).toMatchObject({ outputSchema: OUTPUT_SCHEMA });
+  });
+
+  it("names no schema on a turn of a session that was given none", async () => {
+    const run = await started();
+
+    await Effect.runPromise(run.adapter.sendInput(SESSION, { text: "hello" }));
+
+    // The field is absent, and is not null. A Thread answers prose, and a
+    // schema field on every turn would make this adapter say something the
+    // spec never said.
+    const opened = sentOf(run.requests, "turn/start")[0] as Record<string, unknown>;
+    expect("outputSchema" in opened).toBe(false);
+  });
+
+  it("sends exactly what it sends without them when the spec takes tool families away", async () => {
+    const startAndSend = async (spec: SessionSpec): Promise<ReadonlyArray<unknown>> => {
+      const run = driving();
+      await Effect.runPromise(
+        run.adapter.startSession(SESSION, spec, { ...run.ctx, hydraTool: TOOL }),
+      );
+      await Effect.runPromise(run.adapter.sendInput(SESSION, { text: "Assess this task." }));
+      return [...sentOf(run.requests, "thread/start"), ...sentOf(run.requests, "turn/start")];
+    };
+
+    // Codex declares `disallowedTools: unsupported` (#224), and the record the
+    // caller reads already says so: an adapter that invented an enforcement
+    // here would be the silent substitution the spec forbids.
+    expect(await startAndSend({ ...STRUCTURED, disallowedTools: ["edit", "shell"] })).toEqual(
+      await startAndSend(STRUCTURED),
+    );
+  });
+});
+
+describe("what a Codex turn under an output schema answers with", () => {
+  it("reports the final agent message as the turn's result when it satisfies the schema", async () => {
+    const completed = await runTurnToCompletion(STRUCTURED, [agentMessage(JSON.stringify(ANSWER))]);
+
+    expect(completed.state).toBe("completed");
+    expect(completed.structuredResult).toEqual({ outcome: "ok", value: ANSWER });
+  });
+
+  it("reports a schema failure when the final agent message is not JSON at all", async () => {
+    const completed = await runTurnToCompletion(STRUCTURED, [
+      agentMessage("I had a look and I would accept it."),
+    ]);
+
+    // The adapter chooses the wording. The test only asserts that a reason is
+    // present.
+    expect(completed.structuredResult).toEqual({
+      outcome: "schema-failure",
+      reason: expect.stringMatching(/\S/) as string,
+    });
+  });
+
+  it("reports a schema failure naming the field when the message is JSON the schema refuses", async () => {
+    const completed = await runTurnToCompletion(STRUCTURED, [
+      agentMessage(JSON.stringify({ verdict: "maybe", confidence: 0.9 })),
+    ]);
+
+    expect(completed.structuredResult).toEqual({
+      outcome: "schema-failure",
+      reason: expect.stringContaining("verdict") as string,
+    });
+  });
+
+  it("reports a schema failure saying there was no final message when the turn ended on another item", async () => {
+    const completed = await runTurnToCompletion(STRUCTURED, [
+      agentMessage(JSON.stringify(ANSWER)),
+      COMMAND,
+    ]);
+
+    // Answered at once rather than retried: a retry is optional in spec 06
+    // section 7 and this feature does not build one. An earlier message is not
+    // the answer either - the turn went on working after it.
+    expect(completed.structuredResult).toEqual({
+      outcome: "schema-failure",
+      reason: expect.stringMatching(/\S/) as string,
+    });
+  });
+
+  it("says nothing about a result on a session that was never given a schema", async () => {
+    const completed = await runTurnToCompletion(SPEC, [agentMessage(JSON.stringify(ANSWER))]);
+
+    // The key is absent, and is not an `ok` over no schema. A Thread answers
+    // prose, and a key on every turn of every session would give "ok" a second
+    // meaning.
+    expect("structuredResult" in completed).toBe(false);
+  });
+
+  it("says nothing about the schema on a turn that failed or was interrupted", async () => {
+    const failed = await runTurnToCompletion(STRUCTURED, [COMMAND], "failed");
+    const interrupted = await runTurnToCompletion(STRUCTURED, [COMMAND], "interrupted");
+
+    // The end is about the turn and not about the schema. A `schema-failure`
+    // here would claim that an answer was judged and rejected.
+    expect("structuredResult" in failed).toBe(false);
+    expect("structuredResult" in interrupted).toBe(false);
+  });
+
+  it("judges each turn on its own answer, never on the turn before it", async () => {
+    const run = driving();
+    await Effect.runPromise(run.adapter.startSession(SESSION, STRUCTURED, run.ctx));
+    await Effect.runPromise(run.adapter.sendInput(SESSION, { text: "Assess this task." }));
+    completeTurn(run, [agentMessage(JSON.stringify(ANSWER))]);
+    await until("closed the first turn", () => taggedIn(run.seen, "turn.completed").length === 1);
+
+    await Effect.runPromise(run.adapter.sendInput(SESSION, { text: "And this one." }));
+    run.spawns[0]!.push({
+      method: "turn/started",
+      params: {
+        threadId: THREAD,
+        turn: { id: TURN, items: [], itemsView: "full", status: "inProgress" },
+      },
+    });
+    completeTurn(run, []);
+    await until("closed the second turn", () => taggedIn(run.seen, "turn.completed").length === 2);
+
+    // An answer that outlived its turn would report the first turn's value as
+    // the second turn's answer. Nobody could tell that stale result from a
+    // fresh one.
+    expect(taggedIn(run.seen, "turn.completed")[1]!.structuredResult).toEqual({
+      outcome: "schema-failure",
+      reason: "the turn ended without a final agent message",
+    });
+  });
+
+  it("reads the answer off the items the turn announced, not off the completion's own list", async () => {
+    const run = driving();
+    await Effect.runPromise(run.adapter.startSession(SESSION, STRUCTURED, run.ctx));
+    await Effect.runPromise(run.adapter.sendInput(SESSION, { text: "Assess this task." }));
+
+    // This completion carries a partial view of its items, which the
+    // app-server states itself. A list the app-server never promised was
+    // complete is not a turn's answer.
+    run.spawns[0]!.push({
+      method: "turn/completed",
+      params: {
+        threadId: THREAD,
+        turn: {
+          id: TURN,
+          items: [agentMessage(JSON.stringify(ANSWER))],
+          itemsView: "summary",
+          status: "completed",
+        },
+      },
+    });
+    await until("closed the turn", () => taggedIn(run.seen, "turn.completed").length === 1);
+
+    expect(taggedIn(run.seen, "turn.completed")[0]!.structuredResult).toEqual({
+      outcome: "schema-failure",
+      reason: "the turn ended without a final agent message",
+    });
+  });
+});
+
+/**
+ * What the API answers when the schema itself cannot be constrained on,
+ * captured from codex 0.154.0 against the impossible fixture: the turn fails
+ * before the model is sampled, and the name Codex gives the response format is
+ * in the message.
+ */
+const REFUSED = [
+  '{\n  "type": "error",\n  "error": {\n    "type": "invalid_request_error",',
+  '\n    "code": "invalid_json_schema",',
+  '\n    "message": "Invalid schema for response_format \'codex_output_schema\': ',
+  "context=('properties', 'answer'), const value b does not validate against ",
+  "{'type': 'string', 'enum': ['a']}.\",\n    \"param\": \"text.format.schema\"\n  },",
+  '\n  "status": 400\n}',
+].join("");
+
+describe("a Codex turn the harness refused the schema of", () => {
+  it("reports the refusal as the schema failure, on the turn's own end state", async () => {
+    const run = driving();
+    await Effect.runPromise(run.adapter.startSession(SESSION, STRUCTURED, run.ctx));
+    await Effect.runPromise(run.adapter.sendInput(SESSION, { text: "Answer." }));
+
+    run.spawns[0]!.push({
+      method: "turn/completed",
+      params: {
+        threadId: THREAD,
+        turn: {
+          id: TURN,
+          items: [],
+          itemsView: "full",
+          status: "failed",
+          error: { message: REFUSED, codexErrorInfo: "other" },
+        },
+      },
+    });
+    await until("closed the turn", () => taggedIn(run.seen, "turn.completed").length === 1);
+
+    // The sentence the harness wrote, and the state the harness reported: a
+    // turn that never reached the model failed, and it failed over the schema.
+    // The envelope around the sentence - a status, a param, a type - is the
+    // transport's, and a transcript line showing it would say nothing.
+    const completed = taggedIn(run.seen, "turn.completed")[0]!;
+    expect(completed.state).toBe("failed");
+    expect(completed.structuredResult).toEqual({
+      outcome: "schema-failure",
+      reason: expect.stringMatching(/^Invalid schema for response_format/) as string,
+    });
   });
 });

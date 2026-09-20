@@ -605,6 +605,34 @@ describe("a session that cannot run here", () => {
     expect(existsSync(join(machine.scratchDir, SESSION))).toBe(false);
   });
 
+  it("ends a start whose output schema is outside the subset, before any harness is asked", async () => {
+    const fake = faking();
+    const { supervisor, sent, machine } = connecting(fake);
+
+    await driving(
+      fake,
+      supervisor,
+      supervisor.start({
+        ...START,
+        // This schema is valid JSON and outside the subset the three
+        // harnesses agree on. The controller lints the schema too, so a frame
+        // like this one means the two processes disagree about what a schema
+        // may say.
+        spec: { ...SPEC, outputSchema: { type: "object", properties: {}, minProperties: 1 } },
+      }),
+    );
+
+    const events = eventsIn(sent).map((frame) => frame.event);
+    expect(events.map((event) => event._tag)).toEqual(["runtime.error", "session.exited"]);
+    expect(events[0]).toMatchObject({
+      message: expect.stringContaining("minProperties") as string,
+    });
+    expect(events[1]).toMatchObject({ reason: "crash" });
+    // The harness was never asked for, and nothing was written for it.
+    expect(fake.contexts).toEqual([]);
+    expect(existsSync(join(machine.scratchDir, SESSION))).toBe(false);
+  });
+
   it("ends a start for a provider this build has no adapter for", async () => {
     const fake = faking();
     const { supervisor, sent } = connecting(fake);

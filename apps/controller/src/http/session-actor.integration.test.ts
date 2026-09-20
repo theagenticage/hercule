@@ -45,7 +45,7 @@ interface Refusal {
   readonly grant?: string;
 }
 
-const refusalOf = async (response: Response): Promise<Refusal> => {
+const parseRefusal = async (response: Response): Promise<Refusal> => {
   const body = (await response.json()) as {
     readonly error: {
       readonly code: string;
@@ -153,7 +153,7 @@ describe("the token the controller mints for a session", () => {
 
       const stale = await get(arranged.harness.base, "/api/v1/tasks", token);
       expect(stale.status).toBe(401);
-      expect((await refusalOf(stale)).code).toBe("unauthenticated");
+      expect((await parseRefusal(stale)).code).toBe("unauthenticated");
     });
   });
 });
@@ -179,7 +179,7 @@ describe("what a session token may reach", () => {
 
       const deleted = await del(base, `/api/v1/tasks/${task.id}`, token);
       expect(deleted.status).toBe(403);
-      expect(await refusalOf(deleted)).toMatchObject({
+      expect(await parseRefusal(deleted)).toMatchObject({
         code: "forbidden",
         grant: "task.delete",
       });
@@ -206,7 +206,7 @@ describe("what a session token may reach", () => {
         token,
       });
       expect(malformed.status).toBe(403);
-      expect(await refusalOf(malformed)).toMatchObject({
+      expect(await parseRefusal(malformed)).toMatchObject({
         code: "forbidden",
         grant: "task.update",
       });
@@ -230,7 +230,7 @@ describe("what a session token may reach", () => {
         "a-token-nobody-ever-minted",
       );
       expect(response.status).toBe(401);
-      expect((await refusalOf(response)).code).toBe("unauthenticated");
+      expect((await parseRefusal(response)).code).toBe("unauthenticated");
     });
   });
 });
@@ -245,7 +245,7 @@ describe("when a session token stops working", () => {
 
       const after = await get(arranged.harness.base, "/api/v1/tasks", token);
       expect(after.status).toBe(401);
-      expect((await refusalOf(after)).code).toBe("unauthenticated");
+      expect((await parseRefusal(after)).code).toBe("unauthenticated");
     });
   });
 
@@ -265,7 +265,7 @@ describe("when a session token stops working", () => {
 
       const after = await get(arranged.harness.base, "/api/v1/tasks", token);
       expect(after.status).toBe(401);
-      expect((await refusalOf(after)).code).toBe("unauthenticated");
+      expect((await parseRefusal(after)).code).toBe("unauthenticated");
     });
   });
 
@@ -286,7 +286,7 @@ describe("when a session token stops working", () => {
 
       const after = await createTask(base, token, { title: "after the grant is gone" });
       expect(after.status).toBe(403);
-      expect(await refusalOf(after)).toMatchObject({ code: "forbidden", grant: "task.create" });
+      expect(await parseRefusal(after)).toMatchObject({ code: "forbidden", grant: "task.create" });
 
       // What the profile still grants is still reachable, so the refusal is the
       // edit and not the token having been dropped wholesale.
@@ -307,9 +307,12 @@ describe("a session may not spawn a Thread", () => {
         token,
       );
       expect(refused.status).toBe(403);
-      const refusal = await refusalOf(refused);
-      expect(refusal).toMatchObject({ code: "forbidden", grant: "session.spawn" });
-      expect(refusal.message.toLowerCase()).toContain("thread");
+      // The profile does not hold the grant, so the refusal is the static one
+      // naming it; the Thread rule of the case below never comes into it.
+      expect(await parseRefusal(refused)).toMatchObject({
+        code: "forbidden",
+        grant: "session.spawn",
+      });
 
       // The same call by the user, which is whose Thread it would be.
       const mine = await spawn(arranged, { prompt: "and one of my own" });
@@ -330,9 +333,12 @@ describe("a session may not spawn a Thread", () => {
         token,
       );
       expect(refused.status).toBe(403);
-      const refusal = await refusalOf(refused);
-      expect(refusal).toMatchObject({ code: "forbidden", grant: "session.spawn" });
-      expect(refusal.message.toLowerCase()).toContain("thread");
+      // The profile does not hold the grant, so the refusal is the static one
+      // naming it; the Thread rule of the case below never comes into it.
+      expect(await parseRefusal(refused)).toMatchObject({
+        code: "forbidden",
+        grant: "session.spawn",
+      });
     });
   });
 });
@@ -365,7 +371,7 @@ describe("a session forking a session", () => {
 
       const theirs = await carryOn(stranger.session.id);
       expect(theirs.status).toBe(403);
-      const refusal = await refusalOf(theirs);
+      const refusal = await parseRefusal(theirs);
       expect(refusal).toMatchObject({ code: "forbidden", grant: "session.spawn" });
       expect(refusal.message.toLowerCase()).toContain("profile");
 

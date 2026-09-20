@@ -5,11 +5,13 @@
  * binary with no source tree beside it, and writing it per start keeps the file
  * in step with the build that spawned pi.
  *
- * It imports nothing: a `-e` file is loaded by pi's own loader, and anything it
- * reached for would have to exist on the machine the session runs on. Which
- * calls it holds it does not work out for itself either: `requiresApproval` is
- * interpolated here as its own source, so what runs inside pi is the function
- * the adapter reads and the tests cover, not a second reading of it.
+ * It imports nothing of the runner's. pi's own loader loads a `-e` file, so
+ * anything the file imported would have to exist on the machine the session
+ * runs on. pi's own typebox is the one exception, because the loader resolves
+ * that import for the file. The file does not decide which calls to hold
+ * either: `requiresApproval` is interpolated here as its own source, so the
+ * function that runs inside pi is the function the adapter reads and the tests
+ * cover, and not a second copy of it.
  */
 import { requiresApproval } from "./policy";
 
@@ -24,7 +26,24 @@ export const EXTENSION_FILE = "hydra-extension.ts";
  */
 export const ACCESS_MODE_VARIABLE = "HYDRA_ACCESS_MODE";
 
-export const EXTENSION_SOURCE = `/**
+/**
+ * The environment variable that carries this session's output schema, as JSON,
+ * to the tool below. The name is spelled once and read from both ends, like
+ * the mode above. If the two spellings drifted apart, the session would be
+ * asked for a value and given no way to answer.
+ */
+export const OUTPUT_SCHEMA_VARIABLE = "HYDRA_OUTPUT_SCHEMA";
+
+/**
+ * The name of the tool a session under an output schema answers through. The
+ * adapter reads the turn's answer from the call to this tool, so the name is
+ * spelled here and nowhere else.
+ */
+export const SUBMIT_RESULT_TOOL = "submit_result";
+
+export const EXTENSION_SOURCE = `import { Type } from "@sinclair/typebox";
+
+/**
  * Hydra's tool approval hook. Written by the Hydra runner at session start; edits here
  * are overwritten the next time a session starts.
  */
@@ -37,6 +56,35 @@ const DENIED = "The user did not approve this in Hydra.";
 const LOST = "Hydra could not ask the user about this: the channel it asks over closed.";
 
 export default function (pi) {
+  // A session that was asked for a value answers through a tool and not in
+  // prose. The schema constrains what the model may say, and the runner reads
+  // the answer from the call. The tool is registered before the mode is read,
+  // because a session on full access is asked for a value in the same way.
+  if (process.env.${OUTPUT_SCHEMA_VARIABLE}) {
+    pi.registerTool({
+      name: "${SUBMIT_RESULT_TOOL}",
+      label: "Submit result",
+      description:
+        "Record your answer to the task. Call this exactly once, with the answer as its arguments, and say nothing after it: the call ends your work on this task.",
+      // The schema passes through unchanged. The runner validates the answer
+      // against the same document it handed over, and a schema rewritten here
+      // would be a second document.
+      parameters: Type.Unsafe(JSON.parse(process.env.${OUTPUT_SCHEMA_VARIABLE})),
+      // Preferred and not required, so a model whose provider cannot
+      // constrain its sampling still answers, and the runner still judges
+      // that answer.
+      constrainedSampling: { type: "json_schema", strict: "prefer" },
+      execute: async () => ({
+        content: [{ type: "text", text: "Recorded." }],
+        // A pi tool result carries details for pi's own logs and rendering.
+        // This tool has nothing to add: it recorded the answer.
+        details: {},
+        // Without this the agent carries on after it answers, and the turn's
+        // result waits for a settle that has nothing left to say.
+        terminate: true,
+      }),
+    });
+  }
   // Full access is exactly that: with no handler registered nothing is asked,
   // and no tool call ever waits on an answer that was never going to come.
   if (MODE === "full-access") return;

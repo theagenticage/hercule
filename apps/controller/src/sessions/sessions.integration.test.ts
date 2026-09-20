@@ -194,7 +194,7 @@ const readSession = async (arranged: Arranged, id: string): Promise<Session> => 
 };
 
 /** One refusal, read as the code it carries and the fields its issues name. */
-const refusal = async (
+const parseRefusal = async (
   response: Response,
 ): Promise<{ readonly code: string; readonly paths: ReadonlyArray<ReadonlyArray<string>> }> => {
   const body = (await response.json()) as {
@@ -392,7 +392,7 @@ const exited = (wire: Wire, sessionId: string, seq: number): void =>
   });
 
 /** A session ended the way a machine ends one, with its native id on the row. */
-const ends = async (arranged: Arranged, session: Session, seq: number): Promise<Session> => {
+const endSession = async (arranged: Arranged, session: Session, seq: number): Promise<Session> => {
   arranged.wire.send({
     _tag: "sessionsReport",
     sessions: [
@@ -410,7 +410,7 @@ const ends = async (arranged: Arranged, session: Session, seq: number): Promise<
 
 /** The parent a continue asks for: exited, resumable, native id bound. */
 const ended = async (arranged: Arranged, prompt: string): Promise<Session> =>
-  ends(arranged, await started(arranged, prompt), 2);
+  endSession(arranged, await started(arranged, prompt), 2);
 
 const interrupt = (arranged: Arranged, id: string): Promise<Response> =>
   send("POST", arranged.harness.base, `/api/v1/sessions/${id}/interrupt`, {
@@ -494,7 +494,7 @@ describe("session.spawn", () => {
 
       const said = await response.clone().text();
       expect(response.status, said).toBe(409);
-      expect((await refusal(response)).code).toBe("invalid_state");
+      expect((await parseRefusal(response)).code).toBe("invalid_state");
       // The refusal names what was asked for and who could not give it, so the
       // user is never left guessing which of the two to change.
       expect(said).toContain("auto");
@@ -600,7 +600,7 @@ describe("session.spawn: the model options a call picks", () => {
       });
 
       expect(response.status, await response.clone().text()).toBe(400);
-      const refused = await refusal(response);
+      const refused = await parseRefusal(response);
       expect(refused.code).toBe("validation");
       expect(refused.paths).toContainEqual(["options", "effort"]);
       expect(framesOf<SessionStart>(arranged.wire, "sessionStart")).toEqual([]);
@@ -1160,7 +1160,7 @@ describe("session.input: the model options a submission carries", () => {
       });
 
       expect(response.status, await response.clone().text()).toBe(400);
-      const refused = await refusal(response);
+      const refused = await parseRefusal(response);
       expect(refused.code).toBe("validation");
       expect(refused.paths).toContainEqual(["options", "effort"]);
       expect(await inputsOf(arranged, session.id)).toHaveLength(before);
@@ -1988,6 +1988,59 @@ describe("session.continue", () => {
     });
   });
 
+  it("carries the document the parent was told - an agent's prompt, tools and schema - onto the fork", async () => {
+    await withFleet(async (arranged) => {
+      const listing = await get(arranged.harness.base, "/api/v1/profiles", arranged.token);
+      const profiles = ((await listing.json()) as { items: ReadonlyArray<Profile> }).items;
+      const worker = profiles.find((one) => one.name === "worker");
+      expect(worker).toBeDefined();
+      const created = await post(
+        arranged.harness.base,
+        "/api/v1/agents",
+        {
+          name: "assessor",
+          systemPrompt: "You assess tasks.",
+          instanceId: instanceOf(arranged, "full-provider"),
+          permissionProfileId: worker!.id,
+          disallowedTools: ["edit", "shell"],
+        },
+        arranged.token,
+      );
+      expect(created.status, await created.clone().text()).toBe(200);
+      const agent = (await created.json()) as { readonly id: string };
+      const schema = {
+        type: "object",
+        additionalProperties: false,
+        required: ["verdict"],
+        properties: { verdict: { type: "string", enum: ["accept", "dismiss"] } },
+      };
+
+      const spawnedFromAgent = await spawned(arranged, {
+        agentId: agent.id,
+        prompt: "assess this",
+        outputSchema: schema,
+      });
+      await framesWhen<SessionStart>(arranged.wire, "sessionStart", 1);
+      report(arranged.wire, 1, {
+        eventId: crypto.randomUUID(),
+        sessionId: spawnedFromAgent.id,
+        at,
+        _tag: "session.started",
+      });
+      await sessionWhen(arranged, spawnedFromAgent.id, (one) => one.status === "idle");
+      const parent = await endSession(arranged, spawnedFromAgent, 2);
+      expect(parent.resumable).toBe(true);
+
+      const response = await carryOn(arranged, parent.id, { mode: "fork", prompt: "carry on" });
+      expect(response.status, await response.clone().text()).toBe(200);
+
+      const starts = await framesWhen<SessionStart>(arranged.wire, "sessionStart", 2);
+      expect(starts[1]!.spec.systemPrompt).toBe("You assess tasks.");
+      expect(starts[1]!.spec.disallowedTools).toEqual(["edit", "shell"]);
+      expect(starts[1]!.spec.outputSchema).toEqual(schema);
+    });
+  });
+
   it("refuses a parent that is live, one with no native session, and an id nobody holds", async () => {
     await withFleet(async (arranged) => {
       const running = await started(arranged, "hello");
@@ -2148,7 +2201,7 @@ describe("session.update", () => {
       });
 
       expect(response.status, await response.clone().text()).toBe(400);
-      const refused = await refusal(response);
+      const refused = await parseRefusal(response);
       expect(refused.code).toBe("validation");
       expect(refused.paths).toContainEqual(["options", "effort"]);
       expect((await readSession(arranged, session.id)).modelSelection).toEqual({
@@ -2244,7 +2297,7 @@ describe("session.update", () => {
       const patched = await patchSession(arranged, session.id, { model: "fast" });
       expect(patched.status, await patched.clone().text()).toBe(200);
 
-      const parent = await ends(arranged, session, 2);
+      const parent = await endSession(arranged, session, 2);
       const carried = await carryOn(arranged, parent.id, { mode: "fork", prompt: "and again" });
       expect(carried.status, await carried.clone().text()).toBe(200);
       const child = (await carried.json()) as Session;
@@ -3088,7 +3141,7 @@ describe("session.input into an exited session", () => {
 
       const said = await response.clone().text();
       expect(response.status, said).toBe(409);
-      expect((await refusal(response)).code).toBe("invalid_state");
+      expect((await parseRefusal(response)).code).toBe("invalid_state");
       expect(said).toContain("transcript");
       expect(await inputsOf(arranged, session.id)).toHaveLength(before);
       expect((await readSession(arranged, session.id)).status).toBe("exited");
@@ -3111,7 +3164,7 @@ describe("session.input into an exited session", () => {
 
       const said = await response.clone().text();
       expect(response.status, said).toBe(409);
-      expect((await refusal(response)).code).toBe("invalid_state");
+      expect((await parseRefusal(response)).code).toBe("invalid_state");
       expect(said).toContain("retired");
       expect(await inputsOf(arranged, session.id)).toHaveLength(before);
       expect((await readSession(arranged, session.id)).status).toBe("exited");
@@ -3134,7 +3187,7 @@ describe("session.input into an exited session", () => {
 
       const said = await response.clone().text();
       expect(response.status, said).toBe(409);
-      expect((await refusal(response)).code).toBe("invalid_state");
+      expect((await parseRefusal(response)).code).toBe("invalid_state");
       expect(said).toContain("logged in");
       expect(await inputsOf(arranged, session.id)).toHaveLength(before);
       expect((await readSession(arranged, session.id)).status).toBe("exited");
@@ -3159,7 +3212,7 @@ describe("session.input into an exited session", () => {
 
       const said = await response.clone().text();
       expect(response.status, said).toBe(409);
-      expect((await refusal(response)).code).toBe("invalid_state");
+      expect((await parseRefusal(response)).code).toBe("invalid_state");
       expect(said).toContain("draining");
       expect(await inputsOf(arranged, session.id)).toHaveLength(before);
       expect((await readSession(arranged, session.id)).status).toBe("exited");
@@ -3354,7 +3407,7 @@ describe("session.continue: the modes it takes", () => {
       const resumed = await carryOn(arranged, parent.id, { mode: "resume", prompt: "carry on" });
 
       expect(resumed.status, await resumed.clone().text()).toBe(400);
-      expect((await refusal(resumed)).code).toBe("validation");
+      expect((await parseRefusal(resumed)).code).toBe("validation");
     });
   });
 });
@@ -3496,7 +3549,7 @@ describe("session.respond", () => {
       });
 
       expect(response.status, await response.clone().text()).toBe(409);
-      expect((await refusal(response)).code).toBe("invalid_state");
+      expect((await parseRefusal(response)).code).toBe("invalid_state");
       await delay(250);
       expect(responds(arranged.wire)).toEqual([]);
       // The request the machine is really parked on is untouched.
@@ -3518,7 +3571,7 @@ describe("session.respond", () => {
       });
 
       expect(response.status, await response.clone().text()).toBe(409);
-      expect((await refusal(response)).code).toBe("invalid_state");
+      expect((await parseRefusal(response)).code).toBe("invalid_state");
       await delay(250);
       expect(responds(arranged.wire)).toEqual([]);
       expect(await arranged.harness.audit("session.responded")).toHaveLength(0);
@@ -3537,7 +3590,7 @@ describe("session.respond", () => {
       });
 
       expect(response.status, await response.clone().text()).toBe(400);
-      expect((await refusal(response)).code).toBe("validation");
+      expect((await parseRefusal(response)).code).toBe("validation");
       await delay(250);
       expect(responds(arranged.wire)).toEqual([]);
       expect(await arranged.harness.audit("session.responded")).toHaveLength(0);
@@ -3560,7 +3613,7 @@ describe("session.respond", () => {
       });
 
       expect(response.status, await response.clone().text()).toBe(409);
-      expect((await refusal(response)).code).toBe("invalid_state");
+      expect((await parseRefusal(response)).code).toBe("invalid_state");
       await delay(250);
       expect(responds(arranged.wire)).toEqual([]);
       expect(await arranged.harness.audit("session.responded")).toHaveLength(0);
@@ -3579,7 +3632,7 @@ describe("session.respond", () => {
       });
 
       expect(response.status, await response.clone().text()).toBe(409);
-      expect((await refusal(response)).code).toBe("invalid_state");
+      expect((await parseRefusal(response)).code).toBe("invalid_state");
       expect(responds(arranged.wire)).toEqual([]);
       expect(await arranged.harness.audit("session.responded")).toHaveLength(0);
     });
@@ -3829,9 +3882,9 @@ describe("session.spawn into a workspace", () => {
   });
 
   /**
-   * D-21 F1: the branch pick is one-shot. It is what the machine switches the
-   * main workspace to before this thread first runs; replaying it on a resume
-   * would switch the branch out from under whatever the user has done in that
+   * The branch pick is used once only. The machine switches the main workspace
+   * to that branch before this thread first runs. If a resume replayed the
+   * pick, it would switch the branch under whatever the user has done in that
    * checkout since the thread last ran.
    */
   it("sends the branch pick once and never again when the thread is resumed", async () => {
@@ -3855,7 +3908,7 @@ describe("session.spawn into a workspace", () => {
       });
       await sessionWhen(arranged, session.id, (one) => one.status === "idle");
       await framesWhen<SessionInput>(arranged.wire, "sessionInput", 1);
-      await ends(arranged, session, 2);
+      await endSession(arranged, session, 2);
 
       const response = await sendInput(arranged, session.id, { text: "still there?" });
       expect(response.status, await response.clone().text()).toBe(200);
@@ -3884,7 +3937,7 @@ describe("session.spawn into a workspace", () => {
         prompt: "join",
         workspace: { kind: "existing", workspaceId: workspace.id },
       });
-      expect((await refusal(early)).code).toBe("invalid_state");
+      expect((await parseRefusal(early)).code).toBe("invalid_state");
 
       workspaceReady(arranged, workspace);
       await sessionWhen(arranged, first.id, (one) => one.status !== "queued");
@@ -3894,7 +3947,7 @@ describe("session.spawn into a workspace", () => {
         workspace: { kind: "existing", workspaceId: workspace.id },
         runnerId: other.runnerId,
       });
-      expect((await refusal(clash)).code).toBe("validation");
+      expect((await parseRefusal(clash)).code).toBe("validation");
 
       const joined = await spawned(arranged, {
         prompt: "join",
@@ -3916,16 +3969,16 @@ describe("session.spawn into a workspace", () => {
         projectId: side,
         workspace: { kind: "ephemeral", checkouts: [{ resourceId: web }] },
       });
-      expect((await refusal(response)).code).toBe("validation");
+      expect((await parseRefusal(response)).code).toBe("validation");
       expect(await sessionsOf(arranged)).toEqual([]);
     });
   });
 
   /**
-   * D-21 F8: joining is not a way around the filing. A workspace that already
-   * stands is still a set of repos, and a thread filed under one project must
-   * not reach a repo that belongs to another just because somebody else already
-   * made a workspace holding it.
+   * Joining a workspace is not a way around the filing. A workspace that
+   * already stands is still a set of repos. A thread filed under one project
+   * must not reach a repo of another project, even if somebody else already
+   * made a workspace that holds that repo.
    */
   it("refuses joining a standing workspace whose repos are not the project's", async () => {
     await withFleet(async (arranged) => {
@@ -3946,7 +3999,7 @@ describe("session.spawn into a workspace", () => {
         projectId: side,
         workspace: { kind: "existing", workspaceId: workspace.id },
       });
-      expect((await refusal(response)).code).toBe("validation");
+      expect((await parseRefusal(response)).code).toBe("validation");
 
       // And the same workspace under its own project is joined as before.
       const joined = await spawned(arranged, {
@@ -3959,12 +4012,12 @@ describe("session.spawn into a workspace", () => {
   });
 
   /**
-   * D-21 R7: a fork inherits its parent's workspace and its parent's project,
-   * and `openFor` holds the repos in that workspace to that project like any
-   * other opening. So a repo that has since left the project stops the fork,
-   * with the same refusal a fresh spawn would get - which is the intended
-   * behaviour: the filing is what says a thread may reach a repo, and a fork is
-   * a new thread.
+   * A fork inherits its parent's workspace and its parent's project, and
+   * `openFor` holds the repos in that workspace to that project, as it does
+   * for any other opening. A repo that has left the project since then
+   * therefore stops the fork, with the refusal a fresh spawn would also get.
+   * That is intended: the filing decides which repos a thread may reach, and a
+   * fork is a new thread.
    */
   it("refuses a fork whose parent's repo has left the project", async () => {
     await withFleet(async (arranged) => {
@@ -3986,7 +4039,7 @@ describe("session.spawn into a workspace", () => {
       });
       await sessionWhen(arranged, parent.id, (one) => one.status === "idle");
       await framesWhen<SessionInput>(arranged.wire, "sessionInput", 1);
-      await ends(arranged, parent, 2);
+      await endSession(arranged, parent, 2);
 
       // The repo is filed under no project any more.
       const moved = await send("PATCH", arranged.harness.base, `/api/v1/resources/${web}`, {
@@ -3996,7 +4049,7 @@ describe("session.spawn into a workspace", () => {
       expect(moved.status, await moved.clone().text()).toBe(200);
 
       const response = await carryOn(arranged, parent.id, { mode: "fork", prompt: "branch off" });
-      expect((await refusal(response)).code).toBe("validation");
+      expect((await parseRefusal(response)).code).toBe("validation");
     });
   });
 
@@ -4069,13 +4122,13 @@ describe("session.spawn into a workspace", () => {
         prompt: "hello",
         workspace: { kind: "ephemeral", checkouts: [{ resourceId: web }, { resourceId: web }] },
       });
-      expect((await refusal(twice)).code).toBe("validation");
+      expect((await parseRefusal(twice)).code).toBe("validation");
 
       const sameName = await spawn(arranged, {
         prompt: "hello",
         workspace: { kind: "ephemeral", checkouts: [{ resourceId: web }, { resourceId: fork }] },
       });
-      expect((await refusal(sameName)).code).toBe("validation");
+      expect((await parseRefusal(sameName)).code).toBe("validation");
       expect(await sessionsOf(arranged)).toEqual([]);
     });
   });
@@ -4086,7 +4139,7 @@ describe("session.spawn into a workspace", () => {
         prompt: "hello",
         projectId: "0199e0e7-9999-7000-8000-0000000000aa",
       });
-      expect((await refusal(response)).code).toBe("validation");
+      expect((await parseRefusal(response)).code).toBe("validation");
       expect(await sessionsOf(arranged)).toEqual([]);
     });
   });
@@ -4108,7 +4161,7 @@ describe("session.spawn into a workspace", () => {
         _tag: "session.started",
       });
       const idle = await sessionWhen(arranged, session.id, (one) => one.status === "idle");
-      const ended = await ends(arranged, idle, 2);
+      const ended = await endSession(arranged, idle, 2);
       expect(ended.resumable).toBe(true);
 
       const disposed = await send(
@@ -4131,12 +4184,12 @@ describe("session.spawn into a workspace", () => {
         arranged.token,
       );
       const refusedResume = await resumed.clone().text();
-      expect((await refusal(resumed)).code).toBe("invalid_state");
+      expect((await parseRefusal(resumed)).code).toBe("invalid_state");
       expect(refusedResume).toContain("workspace");
 
       const forked = await carryOn(arranged, session.id, { mode: "fork", prompt: "carry on" });
       const refusedFork = await forked.clone().text();
-      expect((await refusal(forked)).code).toBe("invalid_state");
+      expect((await parseRefusal(forked)).code).toBe("invalid_state");
       expect(refusedFork).toContain("workspace");
     });
   });
@@ -4160,7 +4213,7 @@ describe("session.spawn into a workspace", () => {
         _tag: "session.started",
       });
       const idle = await sessionWhen(arranged, parent.id, (one) => one.status === "idle");
-      const ended = await ends(arranged, idle, 2);
+      const ended = await endSession(arranged, idle, 2);
 
       const response = await carryOn(arranged, ended.id, { mode: "fork", prompt: "carry on" });
       expect(response.status, await response.clone().text()).toBe(200);

@@ -95,6 +95,7 @@ export const session = (over: Partial<Session> & { id: string }): Session => ({
   status: "idle",
   resumable: false,
   permissionProfileId: "p-unrestricted",
+  agentId: null,
   instanceId: "i-claude",
   runnerId: SLOTS.moss,
   workspaceId: null,
@@ -109,6 +110,7 @@ export const session = (over: Partial<Session> & { id: string }): Session => ({
   startedAt: AT,
   exitedAt: null,
   lastActivityAt: AT,
+  unenforced: [],
   ...over,
 });
 

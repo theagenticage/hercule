@@ -136,9 +136,6 @@ const grantOf = (requirement: Requirement): Grant | undefined => {
   }
 };
 
-/** Why a Thread is not a session's to open. */
-const THREAD_IS_THE_USERS = "a Thread is the user's own, and no session may open one";
-
 /**
  * Whether this actor may reach this operation, and the refusal to answer with
  * if it may not.
@@ -148,16 +145,20 @@ const THREAD_IS_THE_USERS = "a Thread is the user's own, and no session may open
  * plugin actors are ungated - neither exists yet, and both are a branch here
  * rather than a rewrite when they do.
  *
- * It answers with the whole refusal rather than the missing grant, and it takes
- * the operation rather than its requirement, because of the one rule here that
- * is per-operation rather than per-grant: `session.spawn` and `session.continue`
- * both require the `session.spawn` grant, but in v1 every spawn is a Thread -
- * there is no Agent to spawn from yet - and a Thread runs on the user's own
- * thread defaults, so a profile holding that grant still does not make one a
- * session's to open. A continue follows the grant like any other operation. The
- * refusal has to name "Thread" before the payload is decoded, which is why it
- * is here rather than in the service: the middleware runs this ahead of the
- * decode and the service method runs it again for in-process callers.
+ * It answers with the whole refusal and not with the missing grant, so that a
+ * caller is told what it lacks. It takes the operation and not the
+ * operation's requirement, so that an operation with a rule of its own can be
+ * told apart here.
+ *
+ * `session.spawn` has three such rules. All three are enforced in
+ * `daemon/placement.ts` and not here, because each of them needs the decoded
+ * payload, and this check runs before the decode. First: a spawn from an Agent
+ * is open to every actor that holds the grant, a Thread is the user's own, and
+ * the payload says which of the two the call asks for. Second: a session actor
+ * may spawn only from an Agent whose permission profile grants nothing beyond
+ * its own. Third: a session actor may spawn only at or below the access mode
+ * the Agent names. The second rule and the third rule both need the Agent row
+ * to be read first.
  */
 export const grantCheck = (id: OperationId, actor: Actor): Forbidden | undefined => {
   const grant = grantOf(OPERATIONS[id].requires);
@@ -166,7 +167,6 @@ export const grantCheck = (id: OperationId, actor: Actor): Forbidden | undefined
     case "user":
       return undefined;
     case "session":
-      if (id === "session.spawn") return forbidden(grant, THREAD_IS_THE_USERS);
       return actor.grants.includes(grant) ? undefined : forbidden(grant);
     case "none":
       return forbidden(grant);

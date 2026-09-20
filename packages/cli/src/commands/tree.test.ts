@@ -139,7 +139,7 @@ describe("a command's fields against the schema", () => {
 
   it("resolves a tail only through a listing that needs no argument of its own", () => {
     const targets = COMMANDS.flatMap((command) =>
-      command.positionals
+      [...command.positionals, ...command.payload, ...command.query]
         .filter((field) => field.resolves !== undefined)
         .map((field) => [spelling(command), field.name, field.resolves!] as const),
     );
@@ -152,6 +152,24 @@ describe("a command's fields against the schema", () => {
       ).toBeDefined();
       expect(target.split(".")[1], `${target} is not a listing`).toMatch(/^query/);
       expect(listing!.positionals, `${target} takes an argument of its own`).toEqual([]);
+    }
+  });
+
+  /**
+   * Deleting a Permission Profile is refused while a session carries it or an
+   * Agent names it. Both listings take the profile, so the user can read back
+   * what the refusal is about.
+   */
+  it("narrows both the session listing and the agent listing by a profile", () => {
+    for (const words of [
+      ["session", "list"],
+      ["agent", "list"],
+    ]) {
+      const listing = commandAt(words)!;
+      const field = listing.query.find((one) => one.name === "permissionProfileId");
+      expect(field, words.join(" ")).toBeDefined();
+      expect(field!.spelling).toBe("profile");
+      expect(field!.resolves).toBe("profile.query");
     }
   });
 

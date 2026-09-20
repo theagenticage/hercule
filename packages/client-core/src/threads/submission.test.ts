@@ -24,6 +24,7 @@ const SESSION: Session = {
   status: "idle",
   resumable: false,
   permissionProfileId: "p-unrestricted",
+  agentId: null,
   instanceId: "instance-claude-code",
   runnerId: "r-local",
   workspaceId: null,
@@ -38,6 +39,7 @@ const SESSION: Session = {
   startedAt: "2026-09-08T09:00:01.000Z",
   exitedAt: null,
   lastActivityAt: "2026-09-08T09:05:00.000Z",
+  unenforced: [],
 };
 
 const DRAFT = { kind: "draft" as const, config: CONFIG };

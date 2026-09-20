@@ -173,6 +173,7 @@ const NEW_SESSION: Session = {
   status: "starting",
   resumable: false,
   permissionProfileId: PROFILE_UNRESTRICTED.id,
+  agentId: null,
   instanceId: INSTANCE_A.id,
   runnerId: RUNNER.id,
   workspaceId: null,
@@ -187,6 +188,7 @@ const NEW_SESSION: Session = {
   startedAt: null,
   exitedAt: null,
   lastActivityAt: "2026-09-08T10:00:00.000Z",
+  unenforced: [],
 };
 
 const controller = (

@@ -9,6 +9,7 @@
  */
 import { Schema } from "effect";
 
+import { OutputSchema } from "./output-schema";
 import {
   Fact,
   InstanceId,
@@ -57,13 +58,43 @@ export const ModelSelection = Schema.Struct({
 export type ModelSelection = Schema.Schema.Type<typeof ModelSelection>;
 
 /**
+ * A family of harness tools a session may have taken away from it. This is
+ * Hydra's own vocabulary, and it is coarse on purpose. Each adapter maps a
+ * family onto the names its harness gives those tools. A harness that cannot
+ * take a family away declares that, and does not pretend to enforce it.
+ */
+const TOOL_FAMILIES = ["edit", "write", "shell", "web-search", "web-fetch"] as const;
+
+export type DisallowedTool = (typeof TOOL_FAMILIES)[number];
+
+const isDisallowedTool = (value: string): value is DisallowedTool =>
+  (TOOL_FAMILIES as ReadonlyArray<string>).includes(value);
+
+/**
+ * One family, refused by name. A union of five literals answers "expected one
+ * of five", and a caller that sent several entries must then guess which entry
+ * the refusal was about. This check names the word it did not accept.
+ */
+export const DisallowedTool = Schema.String.check(
+  Schema.makeFilter<string>(
+    (value) =>
+      isDisallowedTool(value)
+        ? undefined
+        : `${value} is not a tool family; the families are ${TOOL_FAMILIES.join(", ")}`,
+    undefined,
+    // Without this, the type guard below would add a second issue about the
+    // same entry, and that issue carries no words.
+    true,
+  ),
+).pipe(Schema.refine(isDisallowedTool));
+
+/**
  * What the controller authors for one session: ids, never paths (ADR 0002).
  * The runner resolves it to a `ProviderRunnerContext` on its own machine.
  *
  * The row that stores this keeps it byte for byte, so a field is added here
- * only when something sends it. The rest of spec 06 section 4 - `outputSchema`,
- * `mcpServers`, `systemPrompt`, `disallowedTools` - arrives with the feature
- * that needs it.
+ * only when something sends it. The rest of spec 06 section 4 - `mcpServers` -
+ * arrives with the feature that needs it.
  */
 export const SessionSpec = Schema.Struct({
   instanceId: InstanceId,
@@ -72,6 +103,22 @@ export const SessionSpec = Schema.Struct({
   modelSelection: ModelSelection,
   /** Post-fallback: always a mode the target provider declares native. */
   accessMode: AccessMode,
+  /**
+   * Appended to the harness's own system prompt, never in place of it. A
+   * session with no Agent behind it carries no prompt here.
+   */
+  systemPrompt: Schema.optionalKey(Schema.String),
+  /**
+   * The tool families to take away. A provider that declares it enforces none
+   * of them still receives the list, and the record the caller reads reports
+   * that the provider ignores the field.
+   */
+  disallowedTools: Schema.optionalKey(Schema.Array(DisallowedTool)),
+  /**
+   * What the session's turns must answer with, as a JSON Schema inside the
+   * subset `lintOutputSchema` accepts. An absent schema means prose.
+   */
+  outputSchema: Schema.optionalKey(OutputSchema),
   /**
    * Picks the provider-native session this one carries on from, on the same
    * runner and the same instance (spec 06 section 4.1). A resume continues that
@@ -318,6 +365,19 @@ const SessionExited = event("session.exited", {
 });
 
 /**
+ * What a turn answered under the session's output schema (spec 06 section 7).
+ * It has one shape for every harness. The runner validates whatever its
+ * harness produced against the declared schema, so `ok` means the same thing
+ * on every provider, and a failure gives its reason in the same words.
+ */
+export const StructuredResult = Schema.Union([
+  Schema.Struct({ outcome: Schema.Literal("ok"), value: Schema.Json }),
+  Schema.Struct({ outcome: Schema.Literal("schema-failure"), reason: Message }),
+]);
+
+export type StructuredResult = Schema.Schema.Type<typeof StructuredResult>;
+
+/**
  * A completion the controller cannot bracket against its start is not a turn
  * boundary, so the id is required on both.
  */
@@ -330,6 +390,13 @@ const TurnCompleted = event("turn.completed", {
   /** This turn's cost, where the harness prices a turn; `usage` is cumulative. */
   costUsd: Schema.optionalKey(Money),
   error: Schema.optionalKey(Message),
+  /**
+   * How the turn answered the session's output schema. It is absent on a
+   * session that was given no schema, and on a turn that ended for a reason of
+   * its own. An ordinary failure is reported by `state`, and not as a verdict
+   * about a schema.
+   */
+  structuredResult: Schema.optionalKey(StructuredResult),
 });
 
 /**

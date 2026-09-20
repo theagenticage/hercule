@@ -18,6 +18,7 @@ import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
 import {
   MAX_MESSAGE_LENGTH,
+  lintOutputSchema,
   type ExitReason,
   type ProviderEvent,
   type RunnerToController,
@@ -344,13 +345,27 @@ export const supervising = (adapters: ReadonlyArray<ProviderAdapter>): Supervisi
       );
 
     /**
-     * One start, from the paths it resolves to the harness it asks for. The
-     * entry is held before the harness is asked for and removed on any cause,
-     * uninterruptibly: a session that exits while it is still starting must
-     * find its own entry, and one that never came up must leave none behind.
+     * Starts one session, from the paths it resolves to the harness it asks
+     * for. The entry is held before the harness is asked for, and is removed
+     * on any cause, uninterruptibly. A session that exits while it still
+     * starts must find its own entry, and a session that never came up must
+     * leave no entry behind.
      */
-    const starting = (frame: SessionStart, adapter: ProviderAdapter): Effect.Effect<void> =>
-      resolve(frame, connection.machine, adapter.binaryName).pipe(
+    const startSession = (frame: SessionStart, adapter: ProviderAdapter): Effect.Effect<void> => {
+      // The controller linted this schema before it sent the frame, and the
+      // harness would be held to the schema for every turn of the session. A
+      // schema outside the subset means the two processes disagree about what
+      // a schema may say. Such a session must not start at all, because its
+      // results could not be trusted.
+      const issues =
+        frame.spec.outputSchema === undefined ? [] : lintOutputSchema(frame.spec.outputSchema);
+      if (issues.length > 0) {
+        return died(
+          frame.sessionId,
+          `the output schema is outside the subset every harness accepts: ${issues.join("; ")}`,
+        );
+      }
+      return resolve(frame, connection.machine, adapter.binaryName).pipe(
         Effect.flatMap((resolved) =>
           Effect.asVoid(
             Effect.uninterruptible(
@@ -431,6 +446,7 @@ export const supervising = (adapters: ReadonlyArray<ProviderAdapter>): Supervisi
         Effect.catch((message) => died(frame.sessionId, message)),
         Effect.catchCause((cause) => died(frame.sessionId, wentWrong(cause, MAX_MESSAGE_LENGTH))),
       );
+    };
 
     return {
       relay: Stream.runForEach(
@@ -470,7 +486,7 @@ export const supervising = (adapters: ReadonlyArray<ProviderAdapter>): Supervisi
             live.delete(frame.sessionId);
             yield* teardown(stale);
           }
-          return yield* starting(frame, adapter);
+          return yield* startSession(frame, adapter);
         }),
 
       /**

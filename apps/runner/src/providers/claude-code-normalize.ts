@@ -16,11 +16,14 @@ import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import {
   MAX_MESSAGE_LENGTH,
   type ItemKind,
+  type OutputSchema,
   type ProviderEvent,
   type StreamKind,
+  type StructuredResult,
   type TurnState,
   type Usage,
 } from "@hydra/protocol";
+import { judgeAnswer, type HarnessAnswer } from "./structured-result";
 
 /** The channel name every raw payload from this adapter is filed under. */
 export const CLAUDE_SDK_MESSAGE = "claude.sdk.message";
@@ -45,6 +48,8 @@ export interface Normalizing {
   readonly mint: () => string;
   /** The runner's own clock, as an ISO-8601 instant. */
   readonly now: () => string;
+  /** What every turn of this session must answer with. Absent means prose. */
+  readonly outputSchema: OutputSchema | undefined;
   /** The open turn, or `undefined` between turns. The adapter opens the first. */
   turnId: string | undefined;
   /**
@@ -65,14 +70,16 @@ export interface Normalizing {
   readonly tools: Map<string, ItemKind>;
 }
 
-export const normalizing = (
+export const buildNormalizingState = (
   sessionId: string,
   mint: () => string,
   now: () => string,
+  outputSchema: OutputSchema | undefined,
 ): Normalizing => ({
   sessionId,
   mint,
   now,
+  outputSchema,
   turnId: undefined,
   streams: new Map(),
   streamed: new Set(),
@@ -132,7 +139,8 @@ const TRIMMED: ReadonlySet<string> = new Set([
   "system:files_persisted",
 ]);
 
-const said = (value: string): string => value.slice(0, MAX_MESSAGE_LENGTH);
+/** Cuts text to the length one protocol message may carry. */
+const cutToMessageLength = (value: string): string => value.slice(0, MAX_MESSAGE_LENGTH);
 
 /**
  * A real round-trip, not a cast: one `undefined` property anywhere in a vendor
@@ -188,7 +196,11 @@ const closeTurn = (
   out: Emit,
   turnId: string,
   turnState: TurnState,
-  extra: { readonly usage?: Usage; readonly error?: string } = {},
+  extra: {
+    readonly usage?: Usage;
+    readonly error?: string;
+    readonly structuredResult?: StructuredResult;
+  } = {},
 ): void => {
   out.push({
     _tag: "turn.completed",
@@ -199,6 +211,7 @@ const closeTurn = (
     state: turnState,
     ...(extra.usage === undefined ? {} : { usage: extra.usage }),
     ...(extra.error === undefined ? {} : { error: extra.error }),
+    ...(extra.structuredResult === undefined ? {} : { structuredResult: extra.structuredResult }),
   });
   state.turnId = undefined;
   state.streams.clear();
@@ -415,7 +428,12 @@ const onUser = (
           // Cut because a `Read` of a big file comes back whole; `raw` keeps it.
           ...(block.content === undefined
             ? {}
-            : { content: typeof block.content === "string" ? said(block.content) : block.content }),
+            : {
+                content:
+                  typeof block.content === "string"
+                    ? cutToMessageLength(block.content)
+                    : block.content,
+              }),
         }),
       );
     }
@@ -423,7 +441,7 @@ const onUser = (
 };
 
 /** Aborts are the one terminal reason that is neither success nor failure. */
-const stateOf = (sdk: Extract<SDKMessage, { type: "result" }>): TurnState => {
+const readTurnState = (sdk: Extract<SDKMessage, { type: "result" }>): TurnState => {
   if (sdk.terminal_reason?.startsWith("aborted") === true) return "interrupted";
   return sdk.subtype === "success" && !sdk.is_error ? "completed" : "failed";
 };
@@ -434,7 +452,7 @@ const stateOf = (sdk: Extract<SDKMessage, { type: "result" }>): TurnState => {
  * `modelUsage` and `total_cost_usd` are cumulative across turns, which is what
  * the snapshot is pinned to be (spec 06 section 6.6).
  */
-const usageOf = (sdk: Extract<SDKMessage, { type: "result" }>): Usage => {
+const readUsage = (sdk: Extract<SDKMessage, { type: "result" }>): Usage => {
   const models = Object.values(sdk.modelUsage);
   const total = (read: (used: (typeof models)[number]) => number): number =>
     models.reduce((sum, used) => sum + count(read(used)), 0);
@@ -454,9 +472,52 @@ const usageOf = (sdk: Extract<SDKMessage, { type: "result" }>): Usage => {
  * carrying what the model had written, which is not why the turn stopped.
  */
 const wentWrong = (sdk: Extract<SDKMessage, { type: "result" }>): string => {
-  if (sdk.subtype !== "success" && sdk.errors.length > 0) return said(sdk.errors.join("; "));
-  if (sdk.subtype === "success" && sdk.result !== "") return said(sdk.result);
+  if (sdk.subtype !== "success" && sdk.errors.length > 0)
+    return cutToMessageLength(sdk.errors.join("; "));
+  if (sdk.subtype === "success" && sdk.result !== "") return cutToMessageLength(sdk.result);
   return sdk.subtype;
+};
+
+/**
+ * The SDK's own word for this state: it re-prompted the model to its limit and
+ * got no value that fits the schema.
+ */
+const RETRIES_EXHAUSTED = "error_max_structured_output_retries";
+
+/**
+ * Reads what the harness produced under the schema. It answers `undefined`
+ * where this result says nothing about the schema. Two results say something:
+ * a turn that ran to its end, and a turn the harness abandoned because of the
+ * schema. An interrupt and every other failure are about the turn itself. A
+ * schema verdict on such a turn would claim that an answer was judged, and no
+ * answer was judged.
+ */
+const readHarnessAnswer = (
+  sdk: Extract<SDKMessage, { type: "result" }>,
+  turnState: TurnState,
+): HarnessAnswer | undefined => {
+  // The interrupt is checked first, whatever the subtype is. The user ended
+  // this turn, so nobody asked for a verdict on it, with or without retries.
+  if (turnState === "interrupted") return undefined;
+  if (sdk.subtype === RETRIES_EXHAUSTED) {
+    return { missing: `the harness gave up on the schema: ${RETRIES_EXHAUSTED}` };
+  }
+  if (turnState !== "completed" || sdk.subtype !== "success") return undefined;
+  return sdk.structured_output === undefined
+    ? { missing: "the harness ended the turn without producing a structured output" }
+    : { value: sdk.structured_output };
+};
+
+/** Judges the turn: the verdict this result carries about the schema, if any. */
+const judgeTurn = (
+  state: Normalizing,
+  sdk: Extract<SDKMessage, { type: "result" }>,
+  turnState: TurnState,
+): StructuredResult | undefined => {
+  const schema = state.outputSchema;
+  if (schema === undefined) return undefined;
+  const answer = readHarnessAnswer(sdk, turnState);
+  return answer === undefined ? undefined : judgeAnswer(schema, answer);
 };
 
 const onResult = (
@@ -465,8 +526,9 @@ const onResult = (
   out: Emit,
 ): void => {
   const turnId = inTurn(state, out);
-  const usage = usageOf(sdk);
-  const turnState = stateOf(sdk);
+  const usage = readUsage(sdk);
+  const turnState = readTurnState(sdk);
+  const structuredResult = judgeTurn(state, sdk, turnState);
   out.push({
     _tag: "session.usage.updated",
     eventId: state.mint(),
@@ -477,6 +539,7 @@ const onResult = (
   closeTurn(state, out, turnId, turnState, {
     usage,
     ...(turnState === "failed" ? { error: wentWrong(sdk) } : {}),
+    ...(structuredResult === undefined ? {} : { structuredResult }),
   });
 };
 
@@ -508,7 +571,9 @@ const onSystem = (
         sessionId: state.sessionId,
         at: state.now(),
         ...(state.turnId === undefined ? {} : { turnId: state.turnId }),
-        message: said(`retrying after ${sdk.error}: attempt ${sdk.attempt} of ${sdk.max_retries}`),
+        message: cutToMessageLength(
+          `retrying after ${sdk.error}: attempt ${sdk.attempt} of ${sdk.max_retries}`,
+        ),
       });
       return;
     default:

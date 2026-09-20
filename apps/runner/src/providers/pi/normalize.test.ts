@@ -10,7 +10,7 @@
  * call id and the tool name on `toolcall_start`.
  *
  * Assumed surface, because the module is the implementer's to name: the two
- * exports mirror `codex/normalize.ts`, `normalizing(sessionId, nativeSessionId)`
+ * exports mirror `codex/normalize.ts`, `buildNormalizingState(sessionId, nativeSessionId)`
  * builds the running state and `normalize(state, line)` takes one raw line off
  * stdout - raw, not decoded, because a line that is not JSON is one of the
  * cases below. Event ids and the `at` instant are the module's own business and
@@ -18,7 +18,7 @@
  */
 import { describe, expect, it } from "vitest";
 import type { ProviderEvent } from "@hydra/protocol";
-import { normalize, normalizing } from "./normalize";
+import { normalize, buildNormalizingState } from "./normalize";
 
 const SESSION = "0199e0e7-0000-7000-8000-0000000000ff";
 const NATIVE = "0199e0e7-0000-7000-8000-0000000000fe";
@@ -61,10 +61,10 @@ const message = (content: ReadonlyArray<Record<string, unknown>>, totals = usage
 
 const line = (event: Record<string, unknown>): string => JSON.stringify(event);
 
-const state = () => normalizing(SESSION, NATIVE);
+const state = () => buildNormalizingState(SESSION, NATIVE, undefined);
 
 const through = (
-  running: ReturnType<typeof normalizing>,
+  running: ReturnType<typeof buildNormalizingState>,
   events: ReadonlyArray<Record<string, unknown>>,
 ): ReadonlyArray<ProviderEvent> => events.flatMap((event) => normalize(running, line(event)));
 

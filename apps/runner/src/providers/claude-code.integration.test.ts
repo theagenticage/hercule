@@ -13,7 +13,14 @@ import { homedir, tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { Duration, Effect, Stream } from "effect";
-import type { ProviderEvent, SessionSpec } from "@hydra/protocol";
+import type { OutputSchema, ProviderEvent, SessionSpec } from "@hydra/protocol";
+import {
+  ASSESSOR_SYSTEM_PROMPT,
+  FIXTURE_PROMPT,
+  FIXTURE_SCHEMA,
+  IMPOSSIBLE_PROMPT,
+  IMPOSSIBLE_SCHEMA,
+} from "@hydra/protocol/testing";
 import { prepareTooling } from "../sessions/tooling";
 import { claudeCode } from "./claude-code";
 import { PROBE_DEADLINE } from "./probe";
@@ -178,22 +185,7 @@ describe.skipIf(!authed)("a real Claude Code session on this machine", () => {
         Stream.runForEach(claudeCode.events, (event) => Effect.sync(() => void seen.push(event))),
       );
 
-      const context: ProviderRunnerContext = {
-        cwd: emptyHome(),
-        home: CONFIG_DIR,
-        binary: binary!,
-        env: {
-          PATH: process.env["PATH"] ?? "",
-          HOME: homedir(),
-          // The other route to an authenticated session, and the one that
-          // works anywhere: an API key on the instance's environment.
-          ...(process.env["ANTHROPIC_API_KEY"] === undefined
-            ? {}
-            : { ANTHROPIC_API_KEY: process.env["ANTHROPIC_API_KEY"] }),
-        },
-        secrets: {},
-        hydraTool: TOOL(),
-      };
+      const context = contextFor(emptyHome());
 
       const binding = await Effect.runPromise(claudeCode.startSession(SESSION, SPEC, context));
       expect(binding.sessionId).toBe(SESSION);
@@ -273,8 +265,31 @@ const untilTranscript = async (nativeSessionId: string): Promise<string | undefi
   }
 };
 
+/**
+ * The context a live session runs in: a throwaway cwd, the developer's config
+ * directory - a login lives there and nowhere else - and, where one is set, the
+ * other route to an authenticated session.
+ */
+const contextFor = (
+  cwd: string,
+  hydraTool: ProviderRunnerContext["hydraTool"] = TOOL(),
+): ProviderRunnerContext => ({
+  cwd,
+  home: CONFIG_DIR,
+  binary: binary!,
+  env: {
+    PATH: process.env["PATH"] ?? "",
+    HOME: homedir(),
+    ...(process.env["ANTHROPIC_API_KEY"] === undefined
+      ? {}
+      : { ANTHROPIC_API_KEY: process.env["ANTHROPIC_API_KEY"] }),
+  },
+  secrets: {},
+  hydraTool,
+});
+
 /** A fresh subscriber per session: the stream is unbounded and never replays. */
-const watching = (): Array<ProviderEvent> => {
+const collectEvents = (): Array<ProviderEvent> => {
   const seen: Array<ProviderEvent> = [];
   Effect.runFork(
     Stream.runForEach(claudeCode.events, (event) => Effect.sync(() => void seen.push(event))),
@@ -291,21 +306,7 @@ describe.skipIf(!authed)("a real Claude Code session continued on this machine",
   it(
     "forks under the native id Hydra minted, and resumes under the parent's own",
     async () => {
-      const cwd = emptyHome();
-      const context: ProviderRunnerContext = {
-        cwd,
-        home: CONFIG_DIR,
-        binary: binary!,
-        env: {
-          PATH: process.env["PATH"] ?? "",
-          HOME: homedir(),
-          ...(process.env["ANTHROPIC_API_KEY"] === undefined
-            ? {}
-            : { ANTHROPIC_API_KEY: process.env["ANTHROPIC_API_KEY"] }),
-        },
-        secrets: {},
-        hydraTool: TOOL(),
-      };
+      const context = contextFor(emptyHome());
 
       /** Reads back out of a transcript, so a fork can be told from a fresh session. */
       const marker = `hydra-fork-probe-${crypto.randomUUID().slice(0, 8)}`;
@@ -317,7 +318,7 @@ describe.skipIf(!authed)("a real Claude Code session continued on this machine",
         spec: SessionSpec,
         text: string,
       ): Promise<string> => {
-        const seen = watching();
+        const seen = collectEvents();
         const binding = await Effect.runPromise(claudeCode.startSession(sessionId, spec, context));
         await Effect.runPromise(claudeCode.sendInput(sessionId, { text }));
         await until(seen, "turn.completed");
@@ -338,7 +339,7 @@ describe.skipIf(!authed)("a real Claude Code session continued on this machine",
 
       // Hydra names the forked session itself, because in streaming-input mode
       // the CLI says nothing at all until a first turn arrives.
-      const forkSeen = watching();
+      const forkSeen = collectEvents();
       const minted = await Effect.runPromise(
         claudeCode.startSession(
           FORKED,
@@ -418,21 +419,8 @@ describe.skipIf(!authed)("a real Claude Code session with the hydra skill", () =
         skill: `# hydra\n\nThe magic word is ${marker}. Reply with it when asked.\n`,
       });
 
-      const seen = watching();
-      const context: ProviderRunnerContext = {
-        cwd: emptyHome(),
-        home: CONFIG_DIR,
-        binary: binary!,
-        env: {
-          PATH: process.env["PATH"] ?? "",
-          HOME: homedir(),
-          ...(process.env["ANTHROPIC_API_KEY"] === undefined
-            ? {}
-            : { ANTHROPIC_API_KEY: process.env["ANTHROPIC_API_KEY"] }),
-        },
-        secrets: {},
-        hydraTool: { skill: "", claudePluginDir },
-      };
+      const seen = collectEvents();
+      const context = contextFor(emptyHome(), { skill: "", claudePluginDir });
 
       await Effect.runPromise(
         // Full access, so reading the skill file needs no approval nobody is
@@ -462,6 +450,70 @@ describe.skipIf(!authed)("a real Claude Code session with the hydra skill", () =
 
       await Effect.runPromise(claudeCode.stopSession(SKILLED, "stopped"));
       await until(seen, "session.exited");
+    },
+    Duration.toMillis(TURN_DEADLINE) * 2,
+  );
+});
+
+/**
+ * That a real session answers its output schema, and says so when no answer can
+ * satisfy it. The SDK validates and re-prompts on its own; what is proven here
+ * is that the runner's verdict follows - an `ok` whose value really fits, and a
+ * `schema-failure` that arrives as a completed turn rather than as a hang.
+ */
+const STRUCTURED = "0199e0e7-0000-7000-8000-00000000ff05";
+const IMPOSSIBLE = "0199e0e7-0000-7000-8000-00000000ff06";
+
+describe.skipIf(!authed)("a real Claude Code session under an output schema", () => {
+  /** One session under one schema: start, ask, wait the turn out, stop. */
+  const runTurnUnderSchema = async (
+    sessionId: string,
+    outputSchema: OutputSchema,
+    text: string,
+  ): Promise<Extract<ProviderEvent, { _tag: "turn.completed" }>> => {
+    const seen = collectEvents();
+    await Effect.runPromise(
+      claudeCode.startSession(
+        sessionId,
+        { ...SPEC, systemPrompt: ASSESSOR_SYSTEM_PROMPT, outputSchema },
+        contextFor(emptyHome()),
+      ),
+    );
+    await Effect.runPromise(claudeCode.sendInput(sessionId, { text }));
+    await until(seen, "turn.completed");
+    await Effect.runPromise(claudeCode.stopSession(sessionId, "stopped"));
+    await until(seen, "session.exited");
+    return seen.find(
+      (event): event is Extract<ProviderEvent, { _tag: "turn.completed" }> =>
+        event._tag === "turn.completed",
+    )!;
+  };
+
+  it(
+    "answers the fixture schema with a value the schema accepts",
+    async () => {
+      const completed = await runTurnUnderSchema(STRUCTURED, FIXTURE_SCHEMA, FIXTURE_PROMPT);
+
+      expect(completed.structuredResult?.outcome, JSON.stringify(completed.structuredResult)).toBe(
+        "ok",
+      );
+      const answer = completed.structuredResult as { outcome: "ok"; value: { verdict?: unknown } };
+      expect(answer.value.verdict).toBe("accept");
+    },
+    Duration.toMillis(TURN_DEADLINE) * 2,
+  );
+
+  it(
+    "ends the turn with a schema failure when no value can satisfy the schema",
+    async () => {
+      const completed = await runTurnUnderSchema(IMPOSSIBLE, IMPOSSIBLE_SCHEMA, IMPOSSIBLE_PROMPT);
+
+      expect(completed.structuredResult?.outcome, JSON.stringify(completed.structuredResult)).toBe(
+        "schema-failure",
+      );
+      const failure = completed.structuredResult as { outcome: "schema-failure"; reason: string };
+      expect(failure.reason).not.toBe("");
+      expect(await Effect.runPromise(claudeCode.listSessions)).toEqual([]);
     },
     Duration.toMillis(TURN_DEADLINE) * 2,
   );

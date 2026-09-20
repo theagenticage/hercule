@@ -8,6 +8,7 @@
  */
 import * as HttpApi from "effect/unstable/httpapi/HttpApi";
 import { API_PREFIX } from "./operations";
+import { agent } from "./groups/agent";
 import { apiKey } from "./groups/api-key";
 import { auth } from "./groups/auth";
 import { connection } from "./groups/connection";
@@ -47,6 +48,7 @@ export const api = HttpApi.make("hydra")
     plugin,
     provider,
     connection,
+    agent,
     session,
     input,
     transcript,

@@ -1,0 +1,232 @@
+/**
+ * The output schema a session answers under, and the closed subset a schema may
+ * be written in.
+ *
+ * One schema must mean the same thing on every harness, and the three harnesses
+ * agree on a small common core only. Outside that core, OpenAI's strict mode,
+ * draft-07 and pi's strict transform each refuse or silently reshape different
+ * things. The subset is therefore a closed set of keywords and not a best
+ * effort, and `lintOutputSchema` below is the one place that says what is in
+ * the set. The controller runs the lint when a session is spawned, and the
+ * runner runs it again at session start, because the two are different
+ * processes and only the schema crosses between them.
+ */
+import { Schema } from "effect";
+
+/**
+ * The longest output schema, measured as the JSON the schema travels as.
+ *
+ * The schema is text the caller controls. It is stored on the session row, sent
+ * over the runner socket and, on pi, given to the harness in an environment
+ * variable. An environment has a size a process cannot start past, so without a
+ * bound a large schema would fail at launch instead of at the call that sent
+ * it. 32 KiB is far more than the strict subset needs for any answer a turn can
+ * give, and well under what each of the three harnesses takes, so the bound
+ * refuses nothing anyone would write on purpose. The bound sits on the schema
+ * itself, so both ends refuse it: the controller before it writes a row, the
+ * runner before it starts a harness.
+ */
+export const MAX_OUTPUT_SCHEMA_LENGTH = 32 * 1024;
+
+/**
+ * A JSON Schema document, as it travels. The controller stores and forwards it
+ * byte for byte. Only `lintOutputSchema` reads inside it.
+ */
+export const OutputSchema = Schema.Record(Schema.String, Schema.Json).check(
+  Schema.makeFilter((schema) =>
+    JSON.stringify(schema).length > MAX_OUTPUT_SCHEMA_LENGTH
+      ? `an output schema is at most ${String(MAX_OUTPUT_SCHEMA_LENGTH)} characters of JSON`
+      : undefined,
+  ),
+);
+
+export type OutputSchema = Schema.Schema.Type<typeof OutputSchema>;
+
+/**
+ * Every keyword the subset allows, and which node type the keyword may sit on.
+ * An `object` keyword and an `array` keyword say nothing on any other type, so
+ * a `properties` on a string node is a rule that would never be applied. Such
+ * a rule is refused and not ignored.
+ */
+const KEYWORDS: Record<string, "any" | "object" | "array"> = {
+  $schema: "any",
+  type: "any",
+  enum: "any",
+  const: "any",
+  title: "any",
+  description: "any",
+  properties: "object",
+  required: "object",
+  additionalProperties: "object",
+  items: "array",
+};
+
+/** The only types a node may declare. */
+const TYPES = new Set(["object", "array", "string", "number", "integer", "boolean", "null"]);
+
+/** The one dialect the subset is written in. */
+const DRAFT_07 = "http://json-schema.org/draft-07/schema#";
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+/** Escapes a key as one step of a JSON Pointer: a pointer escapes two characters. */
+const escapePointerStep = (key: string): string => key.replace(/~/g, "~0").replace(/\//g, "~1");
+
+/** Builds the pointer to a child of `path`. The root path is spelled `/`. */
+const buildPointer = (path: string, ...keys: ReadonlyArray<string>): string =>
+  `${path === "/" ? "" : path}/${keys.map(escapePointerStep).join("/")}`;
+
+/**
+ * Reads the type a node declares. The subset spells a nullable type as
+ * `["<type>", "null"]`, and that form is read as the type it makes nullable.
+ * `undefined` means the node declares no type the subset recognizes.
+ */
+const readDeclaredType = (node: Record<string, unknown>): string | undefined => {
+  const declared = node["type"];
+  if (typeof declared === "string") return TYPES.has(declared) ? declared : undefined;
+  if (!Array.isArray(declared) || declared.length !== 2) return undefined;
+  const [named, nullable] = declared as ReadonlyArray<unknown>;
+  if (nullable !== "null" || typeof named !== "string") return undefined;
+  return TYPES.has(named) && named !== "null" ? named : undefined;
+};
+
+const isEnumValue = (value: unknown): boolean =>
+  typeof value === "string" || typeof value === "number" || typeof value === "boolean";
+
+/**
+ * Whether the node's declared type can hold this value. A fixed value of
+ * another type is a branch of the schema that nothing can satisfy. That
+ * mistake is worth catching before a harness is held to the schema.
+ */
+const holdsValue = (type: string, value: unknown): boolean => {
+  switch (type) {
+    case "string":
+      return typeof value === "string";
+    case "integer":
+      return typeof value === "number" && Number.isInteger(value);
+    case "number":
+      return typeof value === "number";
+    case "boolean":
+      return typeof value === "boolean";
+    // An object or an array named value by value is outside the subset, and
+    // `null` is spelled by the nullable type rather than by a value.
+    default:
+      return false;
+  }
+};
+
+/** Quotes one value the way a message says it back to the caller. */
+const quoteValue = (value: unknown): string => JSON.stringify(value) ?? String(value);
+
+/**
+ * Lints one node and everything below it, and answers every issue it finds. A
+ * node is reported at most once, and the walk does not enter a node it cannot
+ * read. One mistake therefore reads as one issue, and not as the cascade of
+ * issues it would otherwise cause below.
+ */
+const lintNode = (node: unknown, path: string, isRoot: boolean): ReadonlyArray<string> => {
+  if (!isRecord(node)) return [`${path}: a schema node must be an object`];
+
+  const dialect = node["$schema"];
+  if (dialect !== undefined && dialect !== DRAFT_07) {
+    return [`${path}: $schema must be ${DRAFT_07}`];
+  }
+
+  // `Object.hasOwn`, and not a plain lookup. A plain object answers
+  // `constructor` and `__proto__` from its prototype, so a lookup would read
+  // both of those as keywords.
+  const foreignKeyword = Object.keys(node).find((key) => !Object.hasOwn(KEYWORDS, key));
+  if (foreignKeyword !== undefined) {
+    return [`${path}: the keyword ${foreignKeyword} is outside the subset`];
+  }
+
+  const type = readDeclaredType(node);
+  if (type === undefined) {
+    return [
+      `${path}: type must be one of ${[...TYPES].join(", ")}, ` +
+        `or a two-element array of one of those and "null"`,
+    ];
+  }
+  // The root is the object the harness answers with. A nullable root would let
+  // a turn answer `null`, which satisfies the schema and says nothing.
+  if (isRoot && node["type"] !== "object") return ["/: the root must be type object"];
+
+  const misplacedKeyword = Object.keys(node).find((key) => {
+    const scope = KEYWORDS[key];
+    return scope !== "any" && scope !== type;
+  });
+  if (misplacedKeyword !== undefined) {
+    return [`${path}: the keyword ${misplacedKeyword} says nothing on a ${type}`];
+  }
+
+  const values = node["enum"];
+  if (values !== undefined && (!Array.isArray(values) || values.length === 0)) {
+    return [`${path}: enum must be a non-empty array`];
+  }
+  if (Array.isArray(values) && !values.every(isEnumValue)) {
+    return [`${path}: enum must hold strings, numbers or booleans only`];
+  }
+  // Both of them, not one or the other. A node that carries `enum` and `const`
+  // together must hold its declared type in each of them, and a check of the
+  // enum alone would let a `const` of the wrong type through.
+  const enumValues: ReadonlyArray<unknown> = Array.isArray(values) ? values : [];
+  const fixedValues: ReadonlyArray<unknown> = Object.hasOwn(node, "const")
+    ? [...enumValues, node["const"]]
+    : enumValues;
+  const mismatchedValue = fixedValues.find((value) => !holdsValue(type, value));
+  if (mismatchedValue !== undefined) {
+    return [`${path}: ${quoteValue(mismatchedValue)} is not a ${type}`];
+  }
+
+  if (type === "object") {
+    if (node["additionalProperties"] !== false) {
+      return [`${path}: an object needs additionalProperties: false`];
+    }
+    const properties = node["properties"];
+    if (!isRecord(properties)) return [`${path}: an object needs properties`];
+    const required = node["required"];
+    if (!Array.isArray(required)) return [`${path}: an object needs required`];
+    const entries: ReadonlyArray<unknown> = required;
+    const notAKey = entries.find((entry) => typeof entry !== "string");
+    if (notAKey !== undefined) {
+      return [`${path}: required holds ${quoteValue(notAKey)}, which is not a property name`];
+    }
+    // The check runs both ways round: every property is required, and nothing
+    // is required that the object does not have. A required key with no
+    // property is a document no value can satisfy, which is the same mistake
+    // as an optional field.
+    const requiredWithoutProperty = entries.find(
+      (entry) => !Object.hasOwn(properties, entry as string),
+    );
+    if (requiredWithoutProperty !== undefined) {
+      return [
+        `${path}: required names ${quoteValue(requiredWithoutProperty)}, ` +
+          "which is not one of its properties",
+      ];
+    }
+    const propertyNotRequired = Object.keys(properties).find((key) => !required.includes(key));
+    if (propertyNotRequired !== undefined) {
+      return [`${path}: required must list every property; ${propertyNotRequired} is not in it`];
+    }
+    return Object.entries(properties).flatMap(([key, child]) =>
+      lintNode(child, buildPointer(path, "properties", key), false),
+    );
+  }
+
+  if (type === "array") {
+    const items = node["items"];
+    if (items === undefined) return [`${path}: an array needs items`];
+    return lintNode(items, buildPointer(path, "items"), false);
+  }
+
+  return [];
+};
+
+/**
+ * Lints a schema against the subset. It answers one issue per mistake. Each
+ * issue names where the mistake is, as a JSON Pointer, and which rule it broke.
+ * An empty answer means the schema is accepted.
+ */
+export const lintOutputSchema = (schema: unknown): ReadonlyArray<string> =>
+  lintNode(schema, "/", true);

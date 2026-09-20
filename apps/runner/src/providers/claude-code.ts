@@ -26,6 +26,7 @@ import {
   MAX_FACT_ITEMS,
   type AccessMode,
   type ApprovalDecision,
+  type DisallowedTool,
   type ExitReason,
   type ModelDescriptor,
   type ModelOption,
@@ -39,7 +40,7 @@ import {
 } from "@hydra/protocol";
 import {
   normalize,
-  normalizing,
+  buildNormalizingState,
   openTurn,
   toolKind,
   type Normalizing,
@@ -438,6 +439,20 @@ const pluginsFor = (ctx: ProviderRunnerContext): NonNullable<Options["plugins"]>
 ];
 
 /**
+ * Which Claude tools each tool family is made of. A family is the coarse word
+ * the spec is written in, and this table is the only place a family becomes
+ * tool names. A family whose tools this harness does not have contributes no
+ * name.
+ */
+const CLAUDE_TOOLS_BY_FAMILY: Readonly<Record<DisallowedTool, ReadonlyArray<string>>> = {
+  edit: ["Edit", "NotebookEdit"],
+  write: ["Write"],
+  shell: ["Bash"],
+  "web-search": ["WebSearch"],
+  "web-fetch": ["WebFetch"],
+};
+
+/**
  * A session, unlike a probe, runs the user's work: it gets the workspace as its
  * cwd and the instance's home as its config directory. Auto memory is off and
  * `settingSources` is empty because a Hydra session's context is Hydra's to
@@ -452,9 +467,22 @@ const sessionOptionsFor = (
   canUseTool: CanUseTool,
 ): Options => {
   const effort = effortIn(spec.modelSelection.options);
+  const disallowedTools = (spec.disallowedTools ?? []).flatMap(
+    (family) => CLAUDE_TOOLS_BY_FAMILY[family],
+  );
   return {
     pathToClaudeCodeExecutable: binary,
     ...native,
+    // Each of the three fields is sent only where the spec carries it. An
+    // empty list, or a preset with nothing appended, would make this adapter
+    // say something nobody asked for.
+    ...(spec.systemPrompt === undefined
+      ? {}
+      : { systemPrompt: { type: "preset", preset: "claude_code", append: spec.systemPrompt } }),
+    ...(disallowedTools.length === 0 ? {} : { disallowedTools }),
+    ...(spec.outputSchema === undefined
+      ? {}
+      : { outputFormat: { type: "json_schema", schema: spec.outputSchema } }),
     ...(ctx.cwd === null ? {} : { cwd: ctx.cwd }),
     settingSources: [],
     strictMcpConfig: true,
@@ -782,7 +810,12 @@ export const claudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
               binding,
               input,
               stream,
-              state: normalizing(sessionId, () => crypto.randomUUID(), now),
+              state: buildNormalizingState(
+                sessionId,
+                () => crypto.randomUUID(),
+                now,
+                spec.outputSchema,
+              ),
               park: undefined,
               stopping: undefined,
               model: spec.modelSelection.model,

@@ -33,7 +33,7 @@ import { runProcess, spawnAppServer, type Run } from "../process";
 import { text } from "../text";
 import { now } from "../../report";
 import { ASKED, type Asked } from "./approvals";
-import { normalize, normalizing, pathsOf, type Normalizing } from "./normalize";
+import { normalize, pathsOf, buildNormalizingState, type Normalizing } from "./normalize";
 import { codexInstall, handshake, probing, saidBy, STANDARD_TIER, type AppServer } from "./probe";
 import {
   rpcOver,
@@ -48,6 +48,7 @@ import type {
   DynamicToolCallResponse,
   ItemCompletedNotification,
   ItemStartedNotification,
+  JsonValue,
   SandboxMode,
   ThreadForkParams,
   ThreadResumeParams,
@@ -203,6 +204,16 @@ const threadIn = (params: unknown): string | undefined => {
   const threadId = (params as { readonly threadId?: unknown } | null | undefined)?.threadId;
   return typeof threadId === "string" ? threadId : undefined;
 };
+
+/**
+ * Builds the developer instructions for one thread. A Codex thread takes
+ * instructions on one channel only, so the session's own prompt and the skill
+ * share it: the prompt first, the skill below it, one blank line between them.
+ * If one of the two is absent, the other is the whole text, because an absent
+ * prompt must not leave the skill below a blank line the model must read past.
+ */
+const buildDeveloperInstructions = (systemPrompt: string | undefined, skill: string): string =>
+  [systemPrompt, skill].filter((part) => part !== undefined && part !== "").join("\n\n");
 
 /** Turn input is text only: attachments are the open item in spec 16 section B. */
 const textInput = (text: string): UserInput => ({ type: "text", text, text_elements: [] });
@@ -602,10 +613,18 @@ export const codexAdapter = (seam: CodexSeam): ProviderAdapter => {
    */
   const opening = (held: Held, input: TurnInput): Effect.Effect<SendResult, string> =>
     Effect.gen(function* () {
+      // Codex takes the schema per turn and not per thread, so every turn of
+      // the session carries the schema. If it were sent once, the second turn
+      // of an Agent's session would answer in prose.
+      const schema = held.state.outputSchema;
       const params: TurnStartParams = {
         threadId: held.binding.nativeSessionId,
         input: [textInput(input.text)],
         ...modelParams(input.modelSelection),
+        // The cast is safe because nothing here reads the value back. The
+        // schema crosses the wire as the JSON the controller stored, and
+        // Codex's own JSON type is the mutable type ts-rs writes.
+        ...(schema === undefined ? {} : { outputSchema: schema as JsonValue }),
       };
       // What the turn is running under, which is what the normalizer reports on
       // `turn.started`: the notification itself carries no model. Set before
@@ -679,10 +698,14 @@ export const codexAdapter = (seam: CodexSeam): ProviderAdapter => {
 
   /**
    * What a thread is opened, resumed or forked with: the session's own row, and
-   * hydra-as-a-tool as the developer instructions all three methods take - the
+   * its instructions as the developer instructions all three methods take - the
    * channel #73 found, and the whole of what this adapter knows about the skill
    * (spec 06 section 9.3). No `AGENTS.md` is written: the scratch directory a
    * session runs in stays empty.
+   *
+   * Nothing in this adapter reads `disallowedTools`. Codex enforces no tool
+   * restriction, and the Agent record and the Session record both report the
+   * field as unenforced, so no behaviour is substituted in silence.
    */
   const threadParams = (
     spec: SessionSpec,
@@ -701,7 +724,7 @@ export const codexAdapter = (seam: CodexSeam): ProviderAdapter => {
     return {
       cwd: ctx.cwd,
       model: spec.modelSelection.model,
-      developerInstructions: ctx.hydraTool.skill,
+      developerInstructions: buildDeveloperInstructions(spec.systemPrompt, ctx.hydraTool.skill),
       ...(tier === undefined ? {} : { serviceTier: tier }),
       ...ACCESS_MODES[spec.accessMode],
     };
@@ -753,7 +776,7 @@ export const codexAdapter = (seam: CodexSeam): ProviderAdapter => {
           nativeSessionId: opened,
           instanceId: spec.instanceId,
         };
-        const state = normalizing(sessionId, opened);
+        const state = buildNormalizingState(sessionId, opened, spec.outputSchema);
         state.model = spec.modelSelection.model;
         sessions.set(sessionId, {
           binding,

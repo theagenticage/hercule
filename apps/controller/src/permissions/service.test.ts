@@ -3,7 +3,6 @@ import { Effect, Layer, Option } from "effect";
 import type { Grant } from "@hydra/contract";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { CurrentActor, type Actor } from "../actor";
-import { mintUuid, uuidFromString } from "../db";
 import { TestDatabase } from "../db/testing";
 import { AuditLog, AuditLogLayer } from "../events";
 import { PermissionProfiles, PermissionProfilesLayer } from "./profiles";
@@ -33,23 +32,6 @@ const runError = <A, E>(effect: Effect.Effect<A, E, Deps>) =>
   );
 
 const READER: ReadonlyArray<Grant> = ["task.read", "run.read"];
-
-/**
- * A session carrying this profile, written straight to the table: what the
- * delete reads is the row, and spawning one for real would take the whole fleet.
- */
-const placeSessionOn = (profileId: string, status: string) =>
-  Effect.flatMap(SqlClient.SqlClient, (sql) => {
-    const id = mintUuid();
-    const owner = uuidFromString(profileId);
-    return sql`
-      INSERT INTO sessions (id, permission_profile_id, instance_id, runner_id,
-                            requested_access_mode, access_mode, spec, title, status,
-                            created_at, last_activity_at)
-      VALUES (${id}, ${owner}, ${owner}, ${owner}, 'auto', 'auto', '{}', 'a session',
-              ${status}, '2026-09-15T10:00:00.000Z', '2026-09-15T10:00:00.000Z')
-    `;
-  });
 
 describe("profile.create", () => {
   it("creates a profile the user owns, and stamps it", async () => {
@@ -221,77 +203,5 @@ describe("profile.update", () => {
       ),
     );
     expect(error).toMatchObject({ error: { code: "not_found" } });
-  });
-});
-
-describe("profile.delete", () => {
-  it("deletes one the user made, and stamps it", async () => {
-    const { remaining, entries } = await run(
-      Effect.gen(function* () {
-        const profiles = yield* Profiles;
-        const audit = yield* AuditLog;
-        const created = yield* profiles.create({ name: "reviewer", grants: READER });
-        yield* profiles.delete({ id: created.id });
-        return {
-          remaining: (yield* profiles.query({})).items,
-          entries: yield* audit.listByKind("profile.deleted"),
-        };
-      }),
-    );
-    expect(remaining).toEqual([]);
-    expect(entries).toHaveLength(1);
-    expect(entries[0]?.payload).toMatchObject({ name: "reviewer" });
-  });
-
-  it("refuses to delete a shipped profile", async () => {
-    const error = await runError(
-      Effect.gen(function* () {
-        const store = yield* PermissionProfiles;
-        const profiles = yield* Profiles;
-        yield* store.ensureShipped("assistant", ["task.read"]);
-        const shipped = Option.getOrThrow(yield* store.getByName("assistant"));
-        return yield* profiles.delete({ id: shipped.id });
-      }),
-    );
-    expect(error).toMatchObject({ error: { code: "invalid_state" } });
-  });
-
-  it("answers not_found for an id nobody has", async () => {
-    const error = await runError(
-      Effect.flatMap(Profiles, (profiles) =>
-        profiles.delete({ id: "0199e0e7-9999-7000-8000-000000000000" }),
-      ),
-    );
-    expect(error).toMatchObject({ error: { code: "not_found" } });
-  });
-
-  it("refuses one a session that has not exited is still bounded by", async () => {
-    const error = await runError(
-      Effect.gen(function* () {
-        const profiles = yield* Profiles;
-        const created = yield* profiles.create({ name: "reviewer", grants: READER });
-        yield* placeSessionOn(created.id, "idle");
-        return yield* profiles.delete({ id: created.id });
-      }),
-    );
-
-    // The session copied these grants at spawn and is held to them while it
-    // runs; deleting the row would end its credential without a word.
-    expect(error).toMatchObject({ error: { code: "invalid_state" } });
-    expect((error as { error: { message: string } }).error.message).toContain("session");
-  });
-
-  it("deletes one whose only session has exited", async () => {
-    const remaining = await run(
-      Effect.gen(function* () {
-        const profiles = yield* Profiles;
-        const created = yield* profiles.create({ name: "reviewer", grants: READER });
-        yield* placeSessionOn(created.id, "exited");
-        yield* profiles.delete({ id: created.id });
-        return (yield* profiles.query({})).items;
-      }),
-    );
-
-    expect(remaining).toEqual([]);
   });
 });

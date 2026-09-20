@@ -7,6 +7,7 @@
  * it is; bringing it under the same rule is issue #209.
  */
 export { ensureProviderInstances } from "./defaults";
+export { listUnenforcedFields } from "./enforcement";
 export {
   ProviderProbes,
   ProviderProbesLayer,

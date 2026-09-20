@@ -137,6 +137,12 @@ const COMMANDS: Record<string, string> = {
   "connection.setCredentials": "connection set-credentials",
   "connection.startOAuth": "connection start-oauth",
 
+  "agent.query": "agent list",
+  "agent.read": "agent read",
+  "agent.create": "agent create",
+  "agent.update": "agent update",
+  "agent.delete": "agent delete",
+
   "session.query": "session list",
   "session.read": "session read",
   "session.spawn": "session spawn",
@@ -173,6 +179,8 @@ const STDIN_FIELDS = [
   "task.update description",
   "project.create description",
   "project.update description",
+  "agent.create systemPrompt",
+  "agent.update systemPrompt",
   "session.spawn prompt",
   "session.continue prompt",
   "session.input text",
@@ -181,7 +189,7 @@ const STDIN_FIELDS = [
   "provider.create config",
 ];
 
-/** Every positional whose id tail is resolved, and the listing that resolves it. */
+/** Every field whose id tail is resolved, and the listing that resolves it. */
 const RESOLVES: Record<string, string> = {
   "apiKey.revoke id": "apiKey.query",
 
@@ -225,6 +233,23 @@ const RESOLVES: Record<string, string> = {
   "connection.delete id": "connection.query",
   "connection.setCredentials id": "connection.query",
 
+  "agent.query permissionProfileId": "profile.query",
+  "agent.read id": "agent.query",
+  "agent.create instanceId": "provider.query",
+  "agent.create permissionProfileId": "profile.query",
+  "agent.update id": "agent.query",
+  "agent.update instanceId": "provider.query",
+  "agent.update permissionProfileId": "profile.query",
+  "agent.delete id": "agent.query",
+
+  "session.query agentId": "agent.query",
+  "session.query permissionProfileId": "profile.query",
+  "session.query runnerId": "runner.query",
+  "session.spawn agentId": "agent.query",
+  "session.spawn instanceId": "provider.query",
+  "session.spawn permissionProfileId": "profile.query",
+  "session.spawn projectId": "project.query",
+  "session.spawn runnerId": "runner.query",
   "session.read id": "session.query",
   "session.update id": "session.query",
   "session.input id": "session.query",
@@ -324,7 +349,7 @@ describe("the stdin fields", () => {
 });
 
 describe("the resolvers", () => {
-  it("names the listing every resolvable positional resolves through", () => {
+  it("names the listing every resolvable field resolves through", () => {
     const named = Object.fromEntries(
       Object.entries(resolvers()).filter(([, target]) => target !== undefined),
     );

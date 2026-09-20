@@ -44,6 +44,7 @@ import {
   SESSION_SORT_FIELDS,
   SessionFilter,
   TRANSCRIPT_SORT_FIELDS,
+  validation,
   validationOf,
   type Forbidden,
   type Input,
@@ -55,6 +56,7 @@ import {
   type Validation,
 } from "@hydra/contract";
 import { currentStamp, requireGrant, SYSTEM_ACTOR } from "../actor";
+import { PluginHost } from "../plugins";
 import {
   afterCommit,
   announce,
@@ -70,6 +72,7 @@ import { SessionTokens } from "../permissions";
 import type { SecretDecryptError } from "../secrets";
 import { gitIdentityOf, type GitCredential } from "../workspaces";
 import { inputRepository, type StoredInput } from "./inputs";
+import { sessionRecordComposer } from "./records";
 import {
   requireSession,
   sessionRepository,
@@ -134,6 +137,8 @@ export interface Opening {
    */
   readonly id: string;
   readonly permissionProfileId: string;
+  /** The Agent it was spawned from; absent is a Thread. */
+  readonly agentId: string | undefined;
   readonly runnerId: string;
   readonly requestedAccessMode: AccessMode;
   readonly parentSessionId: string | undefined;
@@ -285,6 +290,7 @@ type InputError = ReadError | NotFound | InvalidState | Schema.SchemaError;
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const sessions = yield* sessionRepository;
+  const recordComposer = yield* sessionRecordComposer;
   const inputs = yield* inputRepository;
   const one = requireSession(sessions);
   const tokens = yield* SessionTokens;
@@ -391,10 +397,26 @@ const make = Effect.gen(function* () {
     query: (input: QueryInput): Effect.Effect<SessionPage, ReadError> =>
       Effect.gen(function* () {
         yield* requireGrant("session.query");
-        const { limit, cursor, sort, status, runnerId } = yield* Effect.mapError(
-          decodeQuery(input),
-          validationOf,
-        );
+        const { limit, cursor, sort, status, runnerId, agentId, permissionProfileId, thread } =
+          yield* Effect.mapError(decodeQuery(input), validationOf);
+        // A Thread is a session with no Agent behind it. `agentId` asks for
+        // the sessions of one Agent, and `thread` asks for the sessions that
+        // have no Agent, so the two can never both be true of one session. A
+        // query that names both would answer an empty page, which reads as
+        // "there are none" instead of "the question is wrong".
+        if (agentId !== undefined && thread !== undefined) {
+          return yield* Effect.fail(
+            validation([
+              {
+                path: ["thread"],
+                message:
+                  "a Thread is a session with no agent, so a query cannot ask for both: " +
+                  "send agentId to list one agent's sessions, or thread to list the " +
+                  "sessions that have no agent",
+              },
+            ]),
+          );
+        }
         const listing = yield* refuseCursor(
           sessions.list({
             limit: limit ?? DEFAULT_PAGE_LIMIT,
@@ -402,16 +424,40 @@ const make = Effect.gen(function* () {
             direction: sort?.direction ?? DEFAULT_DIRECTION,
             status,
             runnerId,
+            agentId,
+            permissionProfileId,
+            thread,
           }),
         );
-        return pageOut(listing);
+        const composeRecord = yield* recordComposer;
+        return pageOut({ ...listing, items: listing.items.map(composeRecord) });
+      }),
+
+    /**
+     * Reads back the document one session's machine was told, and decodes it.
+     * A session that picks up that session's transcript carries on under this
+     * document. It is read back rather than built again, so the continuation
+     * runs under exactly what the parent ran under, including the fields
+     * nothing else reads.
+     *
+     * It requires no grant of its own. The caller is the controller daemon,
+     * which sequences a resume or a fork, and the operation it carries out
+     * checked its own grant.
+     */
+    readSpec: (
+      sessionId: string,
+    ): Effect.Effect<SessionSpec, NotFound | SqlError | Schema.SchemaError> =>
+      Effect.gen(function* () {
+        const document = yield* sessions.readSpecDocument(sessionId);
+        if (Option.isNone(document)) return yield* Effect.fail(notFound("no such session"));
+        return yield* decodeSpecDocument(document.value);
       }),
 
     read: (input: Identified): Effect.Effect<Session, ReadError | NotFound> =>
       Effect.gen(function* () {
         yield* requireGrant("session.read");
         const { id } = yield* Effect.mapError(decodeIdentified(input), validationOf);
-        return yield* one(id);
+        return (yield* recordComposer)(yield* one(id));
       }),
 
     /**
@@ -448,10 +494,11 @@ const make = Effect.gen(function* () {
     create: (open: Opening): Effect.Effect<void, SqlError> =>
       Effect.gen(function* () {
         const actor = yield* currentStamp;
-        const row = yield* sessions.insert({
+        yield* sessions.insert({
           id: open.id,
           title: titleOf(open.prompt),
           permissionProfileId: open.permissionProfileId,
+          agentId: open.agentId,
           instanceId: open.spec.instanceId,
           runnerId: open.runnerId,
           workspaceId: open.spec.workspaceId,
@@ -471,7 +518,7 @@ const make = Effect.gen(function* () {
         // leaves when the harness comes up, and a controller restarted in
         // that window still has it.
         yield* inputs.insert({
-          sessionId: row.id,
+          sessionId: open.id,
           source: "user",
           actor,
           text: open.prompt,
@@ -480,10 +527,10 @@ const make = Effect.gen(function* () {
         yield* audit.append({
           kind: open.kind,
           actor,
-          record: { topic: "session", id: row.id },
+          record: { topic: "session", id: open.id },
           payload: {
             ...open.payload,
-            sessionId: row.id,
+            sessionId: open.id,
             ...(open.spec.workspaceId === null ? {} : { workspaceId: open.spec.workspaceId }),
           },
           at: open.at,
@@ -1047,7 +1094,7 @@ export class SessionService extends Context.Service<SessionService, Effect.Succe
 export const SessionServiceLayer: Layer.Layer<
   SessionService,
   never,
-  SqlClient.SqlClient | AuditLog | SessionTokens
+  SqlClient.SqlClient | AuditLog | SessionTokens | PluginHost
 > = Layer.effect(SessionService)(make);
 
 /**

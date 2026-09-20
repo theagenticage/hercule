@@ -129,6 +129,15 @@ export {
   VersionVerdict,
 } from "./groups/provider";
 export {
+  AGENT_SORT_FIELDS,
+  Agent,
+  AgentCreateInput,
+  AgentFilter,
+  AgentUpdateInput,
+  DisallowedTool,
+  UnenforcedSpecField,
+} from "./groups/agent";
+export {
   ApprovalDecision,
   MAX_PROMPT_LENGTH,
   MAX_SPAWN_CHECKOUTS,
@@ -163,7 +172,7 @@ export {
   InputStatus,
   InputUpdatePayload,
 } from "./groups/input";
-export { TRANSCRIPT_SORT_FIELDS, TranscriptRow } from "./groups/transcript";
+export { StructuredResult, TRANSCRIPT_SORT_FIELDS, TranscriptRow } from "./groups/transcript";
 export { OwnerKind, SecretRef } from "./groups/secret";
 export {
   CONNECTION_SORT_FIELDS,

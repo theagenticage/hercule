@@ -39,6 +39,7 @@ import {
   WorkspaceReport,
 } from "./workspaces";
 
+export * from "./output-schema";
 export * from "./remote";
 export * from "./sessions";
 export * from "./workspaces";

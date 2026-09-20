@@ -45,6 +45,12 @@ export interface Field {
   readonly nullable: boolean;
   /** The closed set of accepted values, when the schema declares one. */
   readonly choices: ReadonlyArray<string> | undefined;
+  /**
+   * Whether the field holds a Hydra id. The answer comes from the schema: the
+   * field is the contract's `Id`, and not a name or a free word that happens
+   * to sit in a field called `ownerId`.
+   */
+  readonly holdsAnId: boolean;
   /** The value arrives on stdin; there is no inline flag for it. */
   readonly stdin: boolean;
   /** The listing an id tail written here is resolved through; absent takes a full id. */
@@ -93,6 +99,7 @@ const PAGE_FIELDS = new Set(["limit", "cursor", "sort"]);
 
 type Ast = {
   readonly _tag: string;
+  readonly checks?: ReadonlyArray<{ readonly annotations?: { readonly title?: unknown } }>;
   readonly types?: ReadonlyArray<Ast>;
   readonly rest?: ReadonlyArray<Ast>;
   readonly literal?: unknown;
@@ -144,6 +151,20 @@ const elementOf = (input: Ast): Ast | undefined => {
   return list?.rest?.[0];
 };
 
+/**
+ * The title the contract puts on its `Id` schema. Every id on the wire is a
+ * uuidv7, so a schema with this title is the one shape that holds a Hydra id.
+ */
+const UUID = "uuidv7";
+
+/**
+ * Whether this field holds a Hydra id. The schema answers, not the field name:
+ * a secret's `ownerId` holds a plugin's name. A tail can stand for a canonical
+ * UUID and for nothing else.
+ */
+const holdsAnId = (input: Ast): boolean =>
+  (withoutNull(input).checks ?? []).some((check) => check.annotations?.title === UUID);
+
 const scalarKind = (input: Ast): FieldKind => {
   const ast = withoutNull(input);
   if (literalsOf(ast) !== undefined) return "string";
@@ -178,6 +199,7 @@ const fieldOf = (name: string, ast: Ast, row: FieldRow): Field => {
     optional: ast.context?.isOptional === true,
     nullable: isNullable(ast) || isNullable(value),
     choices: literalsOf(withoutNull(value)),
+    holdsAnId: holdsAnId(value),
     stdin: "stdin" in row && row.stdin === true,
     resolves: "resolves" in row ? row.resolves : undefined,
     help: row.help,
