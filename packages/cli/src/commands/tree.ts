@@ -46,8 +46,9 @@ export interface Field {
   /** The closed set of accepted values, when the schema declares one. */
   readonly choices: ReadonlyArray<string> | undefined;
   /**
-   * The field holds a Hydra id: the schema is the contract's `Id`, not a name
-   * or a free word that happens to sit in a field called `ownerId`.
+   * Whether the field holds a Hydra id. The answer comes from the schema: the
+   * field is the contract's `Id`, and not a name or a free word that happens
+   * to sit in a field called `ownerId`.
    */
   readonly holdsAnId: boolean;
   /** The value arrives on stdin; there is no inline flag for it. */
@@ -150,13 +151,13 @@ const elementOf = (input: Ast): Ast | undefined => {
   return list?.rest?.[0];
 };
 
-/** The title the contract's `Id` check carries: the one id shape the wire has. */
+/** The title on the contract's `Id` check. The wire has this one id shape. */
 const UUID = "uuidv7";
 
 /**
- * Whether this is a Hydra id, as the schema says rather than as the field is
- * named: a secret's `ownerId` is a plugin's name, and the id a tail could ever
- * stand for is the canonical UUID and nothing else.
+ * Whether this field holds a Hydra id. The schema answers, not the field name:
+ * a secret's `ownerId` holds a plugin's name. A tail can stand for a canonical
+ * UUID and for nothing else.
  */
 const holdsAnId = (input: Ast): boolean =>
   (withoutNull(input).checks ?? []).some((check) => check.annotations?.title === UUID);

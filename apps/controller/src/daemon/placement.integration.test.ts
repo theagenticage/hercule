@@ -104,7 +104,7 @@ const threadDefaults = async (
 };
 
 /** The spec document the session was stored with, read off its row. */
-const specOf = async (arranged: Arranged, id: string): Promise<Record<string, unknown>> => {
+const readStoredSpec = async (arranged: Arranged, id: string): Promise<Record<string, unknown>> => {
   const [row] = await Effect.runPromise(
     Effect.orDie(
       arranged.harness.sql<{ readonly spec: string }>`
@@ -145,7 +145,7 @@ describe("placeSession", () => {
       expect(session.permissionProfileId).toBe(worker.id);
       expect(session.accessMode).toBe("auto");
       expect(session.modelSelection).toEqual({ model: "fast", options: {} });
-      expect(await specOf(arranged, session.id)).toMatchObject({
+      expect(await readStoredSpec(arranged, session.id)).toMatchObject({
         instanceId: beta,
         modelSelection: { model: "fast", options: {} },
         accessMode: "auto",
@@ -186,7 +186,7 @@ describe("placeSession", () => {
 });
 
 /** One refusal, as the code it carries and everything it said. */
-const refusal = async (
+const parseRefusal = async (
   response: Response,
 ): Promise<{ readonly code: string; readonly text: string }> => {
   const text = await response.clone().text();
@@ -195,7 +195,7 @@ const refusal = async (
 };
 
 /** An agent of the test's own making, through the API that makes one. */
-const agentWith = async (
+const createAgent = async (
   arranged: Arranged,
   fields: Record<string, unknown>,
 ): Promise<{ readonly id: string }> => {
@@ -205,7 +205,7 @@ const agentWith = async (
 };
 
 /** The spec the machine was told to start, off the frame that carried it. */
-const startedSpec = async (
+const readStartedSpec = async (
   arranged: Arranged,
   sessionId: string,
 ): Promise<Record<string, unknown>> => {
@@ -223,13 +223,13 @@ const SCHEMA = {
 
 describe("placeSession from an Agent", () => {
   /** The agent every case here starts from: every field the copy has to carry. */
-  const assessor = async (
+  const createAssessor = async (
     arranged: Arranged,
     fields: Record<string, unknown> = {},
   ): Promise<{ readonly id: string; readonly profileId: string; readonly instanceId: string }> => {
     const profile = await profileNamed(arranged, "worker");
     const instanceId = instanceOf(arranged, "alpha-provider");
-    const agent = await agentWith(arranged, {
+    const agent = await createAgent(arranged, {
       name: `assessor-${crypto.randomUUID()}`,
       systemPrompt: "You assess tasks.",
       instanceId,
@@ -244,7 +244,7 @@ describe("placeSession from an Agent", () => {
 
   it("copies the agent's every value onto the session and onto the frame the machine is told", async () => {
     await withFleet(async (arranged) => {
-      const agent = await assessor(arranged);
+      const agent = await createAssessor(arranged);
 
       const session = await spawned(arranged, { agentId: agent.id, prompt: "assess this" });
 
@@ -255,7 +255,7 @@ describe("placeSession from an Agent", () => {
       expect(session.modelSelection.model).toBe("fast");
       expect(session.unenforced).toEqual([]);
 
-      const spec = await startedSpec(arranged, session.id);
+      const spec = await readStartedSpec(arranged, session.id);
       expect(spec["systemPrompt"]).toBe("You assess tasks.");
       expect(spec["disallowedTools"]).toEqual(["edit", "shell"]);
       expect(spec["accessMode"]).toBe("auto-accept-edits");
@@ -265,7 +265,7 @@ describe("placeSession from an Agent", () => {
 
   it("opens on the call's model with none of the agent's options, which were its model's", async () => {
     await withFleet(async (arranged) => {
-      const agent = await assessor(arranged, { model: "fast", options: { effort: "high" } });
+      const agent = await createAssessor(arranged, { model: "fast", options: { effort: "high" } });
 
       const session = await spawned(arranged, {
         agentId: agent.id,
@@ -282,7 +282,7 @@ describe("placeSession from an Agent", () => {
 
   it("lets the values the spawning call names beat the agent's", async () => {
     await withFleet(async (arranged) => {
-      const agent = await assessor(arranged);
+      const agent = await createAssessor(arranged);
 
       const session = await spawned(arranged, {
         agentId: agent.id,
@@ -302,7 +302,7 @@ describe("placeSession from an Agent", () => {
       // answer for a Thread, so reaching them here would run the agent's
       // session under a value nobody put on the agent.
       await threadDefaults(arranged, { "thread.model": "fast" });
-      const bare = await agentWith(arranged, {
+      const bare = await createAgent(arranged, {
         name: `bare-${crypto.randomUUID()}`,
         systemPrompt: "You assess tasks.",
         instanceId: instanceOf(arranged, "alpha-provider"),
@@ -320,11 +320,11 @@ describe("placeSession from an Agent", () => {
     "refuses a spawn that names %s beside the agent it comes from",
     async (field) => {
       await withFleet(async (arranged) => {
-        const agent = await assessor(arranged);
+        const agent = await createAssessor(arranged);
         const value =
           field === "instanceId" ? agent.instanceId : (await profileNamed(arranged, "worker")).id;
 
-        const refused = await refusal(
+        const refused = await parseRefusal(
           await spawn(arranged, { agentId: agent.id, prompt: "assess this", [field]: value }),
         );
 
@@ -342,13 +342,13 @@ describe("placeSession from an Agent", () => {
       });
 
       expect(response.status).toBe(404);
-      expect((await refusal(response)).code).toBe("not_found");
+      expect((await parseRefusal(response)).code).toBe("not_found");
     });
   });
 
   it("lets a session holding session.spawn spawn from an agent bounded by no more than itself", async () => {
     await withFleet(async (arranged) => {
-      const agent = await assessor(arranged, {
+      const agent = await createAssessor(arranged, {
         permissionProfileId: (await profileOf(arranged, "narrow", ["session.read"])).id,
       });
       const { token } = await agentOn(
@@ -370,7 +370,7 @@ describe("placeSession from an Agent", () => {
 
   it("refuses that same session an agent whose profile grants more than its own", async () => {
     await withFleet(async (arranged) => {
-      const agent = await assessor(arranged, {
+      const agent = await createAssessor(arranged, {
         permissionProfileId: (await profileNamed(arranged, "unrestricted")).id,
       });
       const { token } = await agentOn(
@@ -396,7 +396,7 @@ describe("placeSession from an Agent", () => {
 
   it("refuses that same session an access mode more permissive than the agent's own", async () => {
     await withFleet(async (arranged) => {
-      const agent = await assessor(arranged, {
+      const agent = await createAssessor(arranged, {
         permissionProfileId: (await profileOf(arranged, "narrow-3", ["session.read"])).id,
       });
       const { token } = await agentOn(
@@ -412,7 +412,7 @@ describe("placeSession from an Agent", () => {
       );
 
       expect(response.status, await response.clone().text()).toBe(403);
-      const refused = await refusal(response);
+      const refused = await parseRefusal(response);
       expect(refused.code).toBe("forbidden");
       // The grant rule lets this agent through - its profile is narrower than
       // the spawner's - so the refusal has to be the mode's own.
@@ -422,7 +422,7 @@ describe("placeSession from an Agent", () => {
 
   it("lets that same session take the mode down from the agent's own", async () => {
     await withFleet(async (arranged) => {
-      const agent = await assessor(arranged, {
+      const agent = await createAssessor(arranged, {
         permissionProfileId: (await profileOf(arranged, "narrow-4", ["session.read"])).id,
       });
       const { token } = await agentOn(
@@ -448,10 +448,10 @@ describe("placeSession from an Agent", () => {
 
   it("leaves a running session and the spec its machine was told untouched when the agent is edited", async () => {
     await withFleet(async (arranged) => {
-      const agent = await assessor(arranged);
+      const agent = await createAssessor(arranged);
       const session = await spawned(arranged, { agentId: agent.id, prompt: "assess this" });
       const before = await readSession(arranged, session.id);
-      const specBefore = await startedSpec(arranged, session.id);
+      const specBefore = await readStartedSpec(arranged, session.id);
 
       const patched = await send("PATCH", arranged.harness.base, `/api/v1/agents/${agent.id}`, {
         body: {
@@ -468,14 +468,14 @@ describe("placeSession from an Agent", () => {
       expect(patched.status, await patched.clone().text()).toBe(200);
 
       expect(await readSession(arranged, session.id)).toEqual(before);
-      expect(await startedSpec(arranged, session.id)).toEqual(specBefore);
+      expect(await readStartedSpec(arranged, session.id)).toEqual(specBefore);
       expect(specBefore["systemPrompt"]).toBe("You assess tasks.");
     });
   });
 
   it("says on the session which of its spec the provider will not act on", async () => {
     await withFleet(async (arranged) => {
-      const agent = await assessor(arranged, {
+      const agent = await createAssessor(arranged, {
         instanceId: instanceOf(arranged, "gamma-provider"),
         disallowedTools: ["edit"],
       });
@@ -489,7 +489,7 @@ describe("placeSession from an Agent", () => {
 
   it("carries a schema inside the subset onto the frame byte for byte", async () => {
     await withFleet(async (arranged) => {
-      const agent = await assessor(arranged);
+      const agent = await createAssessor(arranged);
 
       const session = await spawned(arranged, {
         agentId: agent.id,
@@ -497,15 +497,15 @@ describe("placeSession from an Agent", () => {
         outputSchema: SCHEMA,
       });
 
-      expect((await startedSpec(arranged, session.id))["outputSchema"]).toEqual(SCHEMA);
+      expect((await readStartedSpec(arranged, session.id))["outputSchema"]).toEqual(SCHEMA);
     });
   });
 
   it("refuses a schema outside the subset, saying what it broke, and spawns nothing", async () => {
     await withFleet(async (arranged) => {
-      const agent = await assessor(arranged);
+      const agent = await createAssessor(arranged);
 
-      const refused = await refusal(
+      const refused = await parseRefusal(
         await spawn(arranged, {
           agentId: agent.id,
           prompt: "assess this",
@@ -530,13 +530,13 @@ describe("placeSession from an Agent", () => {
 
   it("refuses a schema past the bound before anything is written", async () => {
     await withFleet(async (arranged) => {
-      const agent = await assessor(arranged);
+      const agent = await createAssessor(arranged);
       // Inside the subset in every other way: what is refused is its size, and
       // it is refused where a schema is decoded rather than where it is linted.
       const keys = Array.from({ length: 2_000 }, (_, index) => `field-${String(index)}`);
       const properties = Object.fromEntries(keys.map((key) => [key, { type: "string" }]));
 
-      const refused = await refusal(
+      const refused = await parseRefusal(
         await spawn(arranged, {
           agentId: agent.id,
           prompt: "assess this",

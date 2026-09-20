@@ -251,7 +251,7 @@ describe("what an input does to a pi session", () => {
 });
 
 /** pi's own report that its run is over, on the message that ended it. */
-const ends = (child: Spawn, message: Record<string, unknown>): void => {
+const endRun = (child: Spawn, message: Record<string, unknown>): void => {
   child.push({ type: "agent_end", messages: [{ role: "assistant", ...message }] });
   child.push({ type: "agent_settled" });
 };
@@ -264,18 +264,18 @@ describe("how a turn the user stopped ends", () => {
     // What pi reports when the abort lands while a tool is running: the tool
     // is cancelled and the message it belonged to carries the cancellation as
     // its own error.
-    ends(run.child, { stopReason: "error", errorMessage: "The operation was aborted." });
+    endRun(run.child, { stopReason: "error", errorMessage: "The operation was aborted." });
 
     await until("closed the turn", () => taggedIn(run.seen, "turn.completed").length === 1);
     expect(taggedIn(run.seen, "turn.completed")[0]!.state).toBe("interrupted");
-    // Nobody is told something went wrong: the user asked for this.
+    // Nobody is told that something went wrong. The user asked for this.
     expect(taggedIn(run.seen, "runtime.error")).toEqual([]);
   });
 
   it("still fails a turn that broke on an error nobody asked for", async () => {
     const run = await busy();
 
-    ends(run.child, {
+    endRun(run.child, {
       stopReason: "error",
       errorMessage: "the model provider refused the request",
     });
@@ -404,7 +404,7 @@ const prompted = async (
 };
 
 /** pi calling the tool, as it reports a call it ran: a start and its end. */
-const submits = (child: Spawn, args: Record<string, unknown>): void => {
+const submitAnswer = (child: Spawn, args: Record<string, unknown>): void => {
   child.push({
     type: "tool_execution_start",
     toolCallId: SUBMIT_CALL,
@@ -533,7 +533,7 @@ describe("what a pi turn under an output schema answers with", () => {
   it("reports the arguments the tool was called with as the turn's result", async () => {
     const run = await prompted();
 
-    submits(run.child, ANSWER);
+    submitAnswer(run.child, ANSWER);
     run.child.push({ type: "agent_settled" });
 
     await until("closed the turn", () => taggedIn(run.seen, "turn.completed").length === 1);
@@ -546,7 +546,7 @@ describe("what a pi turn under an output schema answers with", () => {
   it("reports a schema failure naming the field when the arguments violate the schema", async () => {
     const run = await prompted();
 
-    submits(run.child, { verdict: "maybe", confidence: 0.9 });
+    submitAnswer(run.child, { verdict: "maybe", confidence: 0.9 });
     run.child.push({ type: "agent_settled" });
 
     await until("closed the turn", () => taggedIn(run.seen, "turn.completed").length === 1);
@@ -618,7 +618,7 @@ describe("what a pi turn under an output schema answers with", () => {
     const run = await prompted();
 
     await Effect.runPromise(run.adapter.interrupt(SESSION));
-    ends(run.child, { stopReason: "aborted" });
+    endRun(run.child, { stopReason: "aborted" });
 
     await until("closed the turn", () => taggedIn(run.seen, "turn.completed").length === 1);
     const completed = taggedIn(run.seen, "turn.completed")[0]!;
@@ -632,7 +632,7 @@ describe("what a pi turn under an output schema answers with", () => {
   it("says nothing about a result on a turn that failed for its own reasons", async () => {
     const run = await prompted();
 
-    ends(run.child, {
+    endRun(run.child, {
       stopReason: "error",
       errorMessage: "the model provider refused the request",
     });

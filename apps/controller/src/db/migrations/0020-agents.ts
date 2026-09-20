@@ -1,14 +1,16 @@
 /**
  * Agents, and the agent a session was spawned from.
  *
- * Nothing here is a foreign key, for migration 0010's reason: a session is
- * history and must outlive the agent, the provider instance and the permission
- * profile it copied its values from. `sessions.agent_id` is nullable because
- * null is a Thread - a session nobody configured, that a person drives by hand.
+ * No column here is a foreign key, for the reason migration 0010 gives: a
+ * session is history, and it must outlive the agent, the provider instance and
+ * the permission profile it copied its values from. `sessions.agent_id` is
+ * nullable because null is a Thread, which is a session nobody configured and
+ * a person drives by hand.
  *
- * `model_selection` holds the `{ model, options }` pair as JSON, or null for an
- * agent that runs on whatever its instance offers by default; `disallowed_tools`
- * holds the family list as a JSON array, empty when nothing is taken away.
+ * `model_selection` holds the `{ model, options }` pair as JSON, or null for
+ * an agent that runs on whatever its instance offers by default.
+ * `disallowed_tools` holds the tool families as a JSON array, which is empty
+ * when nothing is taken away.
  */
 import * as Effect from "effect/Effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
@@ -35,7 +37,7 @@ export default Effect.gen(function* () {
   yield* sql`CREATE INDEX agents_created ON agents (created_at DESC, id DESC)`;
 
   yield* sql`ALTER TABLE sessions ADD COLUMN agent_id BLOB`;
-  // What a listing by agent walks, and what a delete reads to find out whether
-  // any session it spawned is still running.
+  // Two reads use this index: a listing of one agent's sessions, and the read
+  // a delete makes to find out whether a session it spawned still runs.
   yield* sql`CREATE INDEX sessions_agent ON sessions (agent_id) WHERE agent_id IS NOT NULL`;
 });

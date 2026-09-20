@@ -1,16 +1,17 @@
 /**
- * Agent rows. Nothing here decides policy - who may write, what a value means,
- * whether a delete is allowed - it only reads and writes.
+ * Agent rows. This module only reads and writes them. It decides no policy: who
+ * may write, what a value means and whether a delete is allowed are the
+ * service's questions.
  *
- * One walk answers a listing: a keyset over `created_at` plus the id, which the
- * index on `agents` serves. There is no filter and no search, so there is no
- * second walk.
+ * A listing is one walk: a keyset over `created_at` and the id, which the index
+ * on `agents` serves. There is no filter and no search, so a second walk is not
+ * necessary.
  *
- * The last read below is over the sessions table rather than this one. It is
- * the one question a delete has to ask - is anything this agent spawned still
- * running - and the agents domain may not import the sessions domain, so it
- * asks the database directly, as the session listing asks after the provider
- * instance behind a session.
+ * `findOldestRunningSession` reads the sessions table instead of this one. A
+ * delete must ask whether a session this agent spawned still runs. The agents
+ * domain may not import the sessions domain, so it asks the database directly.
+ * The session listing asks after the provider instance behind a session in the
+ * same way.
  */
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
@@ -47,29 +48,26 @@ export interface StoredAgent {
   readonly updatedAt: string;
 }
 
-/** Everything a new agent row holds, plus the provider its instance runs. */
-export interface NewAgent {
+/**
+ * Everything a new agent row holds. Derived from the stored agent so the two
+ * cannot drift: the id and the two timestamps are written here rather than
+ * given, and the provider is known because the instance was just read.
+ */
+export interface NewAgent extends Omit<
+  StoredAgent,
+  "id" | "providerId" | "createdAt" | "updatedAt"
+> {
   readonly providerId: string;
-  readonly name: string;
-  readonly systemPrompt: string;
-  readonly instanceId: string;
-  readonly permissionProfileId: string;
-  readonly accessMode: AccessMode;
-  readonly model: ModelSelection | null;
-  readonly disallowedTools: ReadonlyArray<DisallowedTool>;
+  /** The instant the row is created; it is its `createdAt` and its `updatedAt`. */
   readonly at: string;
 }
 
-/** The columns an edit may set. An absent one is left as it was. */
-export interface AgentEdit {
-  readonly name?: string;
-  readonly systemPrompt?: string;
-  readonly instanceId?: string;
-  readonly permissionProfileId?: string;
-  readonly accessMode?: AccessMode;
-  readonly model?: ModelSelection | null;
-  readonly disallowedTools?: ReadonlyArray<DisallowedTool>;
-}
+/**
+ * The columns an edit may set. An absent column is left as it was. Derived from
+ * the stored agent for the same reason: a column added there is a column an
+ * edit may set, unless it is the id, the provider or a timestamp.
+ */
+export type AgentEdit = Partial<Omit<StoredAgent, "id" | "providerId" | "createdAt" | "updatedAt">>;
 
 export interface AgentPageRequest {
   readonly limit: number;
@@ -112,7 +110,7 @@ const toAgent = (row: AgentRow): StoredAgent => ({
   updatedAt: row.updated_at,
 });
 
-const scopeOf = (direction: SortDirection): CursorScope => ({
+const buildCursorScope = (direction: SortDirection): CursorScope => ({
   op: "agent.query",
   field: "createdAt",
   direction,
@@ -122,7 +120,7 @@ const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
 
   return {
-    one: (id: string): Effect.Effect<Option.Option<StoredAgent>, SqlError> =>
+    read: (id: string): Effect.Effect<Option.Option<StoredAgent>, SqlError> =>
       Effect.map(
         sql<AgentRow>`SELECT ${sql.literal(COLUMNS)} FROM agents WHERE id = ${uuidFromString(id)}`,
         (rows) => Option.map(Option.fromNullishOr(rows[0]), toAgent),
@@ -158,26 +156,27 @@ const make = Effect.gen(function* () {
 
     /** Applies an edit. Only the columns the edit names are written. */
     update: (id: string, edit: AgentEdit, at: string): Effect.Effect<void, SqlError> => {
-      const sets = [sql`updated_at = ${at}`];
-      if (edit.name !== undefined) sets.push(sql`name = ${edit.name}`);
-      if (edit.systemPrompt !== undefined) sets.push(sql`system_prompt = ${edit.systemPrompt}`);
+      const assignments = [sql`updated_at = ${at}`];
+      if (edit.name !== undefined) assignments.push(sql`name = ${edit.name}`);
+      if (edit.systemPrompt !== undefined)
+        assignments.push(sql`system_prompt = ${edit.systemPrompt}`);
       if (edit.instanceId !== undefined) {
-        sets.push(sql`instance_id = ${uuidFromString(edit.instanceId)}`);
+        assignments.push(sql`instance_id = ${uuidFromString(edit.instanceId)}`);
       }
       if (edit.permissionProfileId !== undefined) {
-        sets.push(sql`permission_profile_id = ${uuidFromString(edit.permissionProfileId)}`);
+        assignments.push(sql`permission_profile_id = ${uuidFromString(edit.permissionProfileId)}`);
       }
-      if (edit.accessMode !== undefined) sets.push(sql`access_mode = ${edit.accessMode}`);
+      if (edit.accessMode !== undefined) assignments.push(sql`access_mode = ${edit.accessMode}`);
       if (edit.model !== undefined) {
-        sets.push(
+        assignments.push(
           sql`model_selection = ${edit.model === null ? null : JSON.stringify(edit.model)}`,
         );
       }
       if (edit.disallowedTools !== undefined) {
-        sets.push(sql`disallowed_tools = ${JSON.stringify(edit.disallowedTools)}`);
+        assignments.push(sql`disallowed_tools = ${JSON.stringify(edit.disallowedTools)}`);
       }
       return Effect.asVoid(
-        sql`UPDATE agents SET ${sql.csv(sets)} WHERE id = ${uuidFromString(id)}`,
+        sql`UPDATE agents SET ${sql.csv(assignments)} WHERE id = ${uuidFromString(id)}`,
       );
     },
 
@@ -187,7 +186,7 @@ const make = Effect.gen(function* () {
 
     list: (request: AgentPageRequest): Effect.Effect<Page<StoredAgent>, CursorError | SqlError> =>
       Effect.gen(function* () {
-        const scope = scopeOf(request.direction);
+        const scope = buildCursorScope(request.direction);
         const after =
           request.cursor === undefined
             ? undefined
@@ -212,10 +211,10 @@ const make = Effect.gen(function* () {
 
     /**
      * The oldest session this agent spawned that has not exited, if there is
-     * one: what a delete is refused for, named so the caller knows what to end
-     * first.
+     * one. A delete is refused while such a session exists. The id is answered
+     * so that the refusal can name the session the user must end first.
      */
-    oldestRunningSessionOf: (agentId: string): Effect.Effect<Option.Option<string>, SqlError> =>
+    findOldestRunningSession: (agentId: string): Effect.Effect<Option.Option<string>, SqlError> =>
       Effect.map(
         sql<{ readonly id: Uint8Array }>`
           SELECT id FROM sessions

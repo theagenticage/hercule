@@ -7,10 +7,10 @@
  * questions as the function it was written from: the two agreeing is the whole
  * property, and it is checked without pi.
  *
- * What is not checked here: that pi's own loader resolves the typebox import
- * the source opens with. Nothing in this repository has that package, so the
- * import is dropped below and `Type` is handed in; only the live test proves a
- * real pi loads the file at all.
+ * One thing is not checked here: whether pi's own loader resolves the typebox
+ * import the source opens with. This repository does not have that package, so
+ * the test drops the import and hands `Type` in. Only the live test proves that
+ * a real pi loads the file.
  */
 import { describe, expect, it } from "vitest";
 import type { AccessMode } from "@hydra/protocol";
@@ -98,18 +98,17 @@ interface RegisteredTool {
 }
 
 /**
- * What `Type.Unsafe` does to a JSON Schema: nothing, which is why it is the
- * call the extension makes. typebox is pi's own dependency and not the
- * runner's, so the extension's import is dropped here and what it named is
- * passed in instead.
+ * `Type.Unsafe` does nothing to a JSON Schema, which is why the extension
+ * calls it. typebox is pi's own dependency and not the runner's, so this test
+ * drops the extension's import and passes in what the import named.
  */
 const TYPE = { Unsafe: (schema: unknown) => schema };
 
 /**
- * The extension as pi loads it: the source evaluated, its default export run
- * against a pi that records what was registered. The environment is the whole
- * input, because it is how the adapter tells the extension what this session
- * is.
+ * Loads the extension the way pi loads it. The test evaluates the source and
+ * runs its default export against a pi that records what was registered. The
+ * environment is the whole input, because the adapter tells the extension
+ * about the session through the environment.
  */
 const toolsRegisteredWith = (
   env: Readonly<Record<string, string | undefined>>,
@@ -138,24 +137,24 @@ describe("the tool a session under an output schema answers through", () => {
     const tools = toolsRegisteredWith(SCHEMA_ENV);
 
     expect(tools.map((tool) => tool.name)).toEqual([SUBMIT_RESULT_TOOL]);
-    // Passed through unchanged: a schema the extension rewrote is one the
-    // runner would re-validate the answer against a different document.
+    // The schema passes through unchanged. If the extension rewrote it, the
+    // runner would validate the answer against a different document.
     expect(tools[0]!.parameters).toMatchObject(OUTPUT_SCHEMA);
   });
 
   it("ends the agent's run on the call that answered", async () => {
     const tools = toolsRegisteredWith(SCHEMA_ENV);
 
-    // Without it the agent carries on after answering, and the turn's result
-    // waits on a settle that has nothing left to say.
+    // Without this the agent carries on after it answers, and the turn's
+    // result waits for a settle that has nothing left to say.
     expect(await tools[0]!.execute({ verdict: "accept", confidence: 0.9 }, {})).toMatchObject({
       terminate: true,
     });
   });
 
   it("registers no tool for a session that was given no schema", () => {
-    // A Thread answers prose: a `submit_result` on every session would be a
-    // tool the model can call with nothing to validate it against.
+    // A Thread answers prose. A `submit_result` on every session would be a
+    // tool the model can call, and nothing would validate the call.
     expect(toolsRegisteredWith({})).toEqual([]);
   });
 });

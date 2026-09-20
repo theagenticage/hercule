@@ -64,7 +64,7 @@ export const Session = Schema.Struct({
    */
   resumable: Schema.Boolean,
   permissionProfileId: Id,
-  /** The Agent this session was spawned from; `null` is a Thread. Lineage only. */
+  /** The Agent this session was spawned from. `null` is a Thread. Lineage only. */
   agentId: Schema.NullOr(Id),
   instanceId: Id,
   /** Pinned where the session started; a session never migrates. */
@@ -99,8 +99,9 @@ export const Session = Schema.Struct({
   exitedAt: Schema.NullOr(Timestamp),
   lastActivityAt: Timestamp,
   /**
-   * Which of the fields this session was spawned with its provider will not
-   * act on, read from the instance's declared capabilities at every read.
+   * Which of the fields this session was spawned with are fields its provider
+   * ignores. It is read from the instance's declared capabilities at every
+   * read.
    */
   unenforced: Schema.Array(UnenforcedSpecField),
 });
@@ -143,20 +144,20 @@ export const SpawnWorkspace = Schema.Union([
 export type SpawnWorkspace = Schema.Schema.Type<typeof SpawnWorkspace>;
 
 /**
- * Spawning a session: from an Agent, whose fields say what it runs under, or
- * with no `agentId` at all, which is a Thread and takes the user's `thread.*`
- * settings instead. Either way a value named here overrides both, for this
- * session only.
+ * What spawning a session takes. A spawn names an Agent, whose fields say what
+ * the session runs under. A spawn with no `agentId` is a Thread, and a Thread
+ * takes the user's `thread.*` settings instead. Either way, a value named here
+ * overrides the Agent or the setting, for this session only.
  */
 export const SessionSpawnInput = closedStruct({
   prompt: Prompt,
   /**
-   * The Agent to spawn from. Its fields stand in for the `thread.*` settings
-   * in the same precedence chain, so `instanceId` and `permissionProfileId`
-   * beside it are refused: those come from the Agent.
+   * The Agent to spawn from. Its fields stand in for the `thread.*` settings,
+   * in the same precedence chain. `instanceId` and `permissionProfileId`
+   * beside it are refused, because the Agent answers both.
    */
   agentId: Schema.optionalKey(Id),
-  /** What every turn of this session must answer with; refused outside the shared subset. */
+  /** What every turn of this session must answer with. A schema outside the shared subset is refused. */
   outputSchema: Schema.optionalKey(OutputSchema),
   instanceId: Schema.optionalKey(Id),
   model: Schema.optionalKey(Schema.NonEmptyString),
@@ -273,7 +274,7 @@ export const SessionFilter = Schema.Struct({
   runnerId: Schema.optionalKey(Id),
   /** Only the sessions spawned from this Agent. */
   agentId: Schema.optionalKey(Id),
-  /** `true` is the sessions with no Agent behind them; `false` is the rest. */
+  /** `true` lists the sessions with no Agent behind them; `false` lists the rest. */
   thread: Schema.optionalKey(Schema.Boolean),
 });
 

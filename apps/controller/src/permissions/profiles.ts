@@ -253,12 +253,12 @@ const make = Effect.gen(function* () {
       ),
 
     /**
-     * The oldest Agent that spawns its sessions under this profile, by name,
-     * if there is one. An Agent is a standing configuration rather than a
-     * running thing, so deleting the row underneath it would leave every
-     * session it spawns from now on with a token that resolves to nothing.
+     * The name of the oldest Agent that spawns its sessions under this
+     * profile, if such an Agent exists. An Agent is a standing configuration,
+     * not a running thing. If the profile were deleted, every session the
+     * Agent spawned after that would carry a token that resolves to nothing.
      */
-    oldestAgentOn: (id: string): Effect.Effect<Option.Option<string>, SqlError> =>
+    findOldestAgentUsing: (id: string): Effect.Effect<Option.Option<string>, SqlError> =>
       Effect.map(
         sql<{ readonly name: string }>`
           SELECT name FROM agents WHERE permission_profile_id = ${uuidFromString(id)}

@@ -40,7 +40,7 @@ import {
 } from "@hydra/protocol";
 import {
   normalize,
-  normalizing,
+  startNormalizing,
   openTurn,
   toolKind,
   type Normalizing,
@@ -439,10 +439,10 @@ const pluginsFor = (ctx: ProviderRunnerContext): NonNullable<Options["plugins"]>
 ];
 
 /**
- * Which Claude tools each family Hydra names is made of. A family is the
- * coarse word the spec is written in; this is the only place it becomes tool
- * names, and a family whose tools this harness does not have would simply
- * contribute none.
+ * Which Claude tools each tool family is made of. A family is the coarse word
+ * the spec is written in, and this table is the only place a family becomes
+ * tool names. A family whose tools this harness does not have contributes no
+ * name.
  */
 const CLAUDE_TOOLS_BY_FAMILY: Readonly<Record<DisallowedTool, ReadonlyArray<string>>> = {
   edit: ["Edit", "NotebookEdit"],
@@ -473,8 +473,9 @@ const sessionOptionsFor = (
   return {
     pathToClaudeCodeExecutable: binary,
     ...native,
-    // Each of the three only where the spec carries it: an empty list or a
-    // bare preset would be this adapter saying something nobody asked for.
+    // Each of the three fields is sent only where the spec carries it. An
+    // empty list, or a preset with nothing appended, would make this adapter
+    // say something nobody asked for.
     ...(spec.systemPrompt === undefined
       ? {}
       : { systemPrompt: { type: "preset", preset: "claude_code", append: spec.systemPrompt } }),
@@ -809,7 +810,7 @@ export const claudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
               binding,
               input,
               stream,
-              state: normalizing(sessionId, () => crypto.randomUUID(), now, spec.outputSchema),
+              state: startNormalizing(sessionId, () => crypto.randomUUID(), now, spec.outputSchema),
               park: undefined,
               stopping: undefined,
               model: spec.modelSelection.model,

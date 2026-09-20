@@ -1,10 +1,11 @@
 /**
  * The Agent over HTTP: the named, reusable configuration a session is spawned
- * from, through the real API with a real machine on the real runner socket.
+ * from, driven through the real API with a real machine on the real runner
+ * socket.
  *
- * The machine is here because two of the things asserted need one: what a
- * provider says it can enforce (`unenforced` is read off the instance's
- * definition) and what a session referencing an agent does to a delete.
+ * A machine is needed because two of the assertions need one. `unenforced` is
+ * read from the instance's provider definition. And a delete must be refused
+ * while a session that names the agent still runs.
  */
 import { describe, expect, it, vi } from "vitest";
 import { Effect } from "effect";
@@ -89,7 +90,7 @@ interface Refusal {
   readonly text: string;
 }
 
-const refusal = async (response: Response): Promise<Refusal> => {
+const parseRefusal = async (response: Response): Promise<Refusal> => {
   const text = await response.clone().text();
   const body = (await response.json()) as {
     readonly error: {
@@ -228,8 +229,8 @@ describe("the agent over its five operations", () => {
       });
       expect(patched.status, await patched.clone().text()).toBe(200);
       const updated = (await patched.json()) as AgentRecord;
-      // Two fields on the call, one selection on the record: the choices
-      // belong to the model named beside them.
+      // The call takes two fields and the record holds one selection. The
+      // choices belong to the model named beside them.
       expect(updated.model).toEqual({ model: "fast", options: { effort: "high" } });
       expect(updated.disallowedTools).toEqual(["edit"]);
       expect(updated.accessMode).toBe("auto");
@@ -248,7 +249,7 @@ describe("the agent over its five operations", () => {
 
       const gone = await get(arranged.harness.base, `/api/v1/agents/${created.id}`, arranged.token);
       expect(gone.status).toBe(404);
-      expect((await refusal(gone)).code).toBe("not_found");
+      expect((await parseRefusal(gone)).code).toBe("not_found");
       expect(await listAgents(arranged)).toEqual([]);
     });
   });
@@ -281,7 +282,7 @@ describe("the agent over its five operations", () => {
         ...fields,
       });
 
-      const refused = await refusal(response);
+      const refused = await parseRefusal(response);
       expect(refused.code).toBe("validation");
       expect(refused.text).toContain(names);
     });
@@ -308,7 +309,7 @@ describe("the agent over its five operations", () => {
     await withFleet(async (arranged) => {
       const agent = await agentFor(arranged, instanceOf(arranged, "claude-provider"));
 
-      const refused = await refusal(await updateAgent(arranged, agent.id, fields));
+      const refused = await parseRefusal(await updateAgent(arranged, agent.id, fields));
       expect(refused.code).toBe("validation");
       expect(refused.text).toContain(names);
     });
@@ -357,7 +358,7 @@ describe("the agent over its five operations", () => {
       for (const [operation, pending, grant] of calls) {
         const response = await pending;
         expect(response.status, operation).toBe(403);
-        const refused = await refusal(response);
+        const refused = await parseRefusal(response);
         expect(refused.code, operation).toBe("forbidden");
         expect(refused.grant, operation).toBe(grant);
       }
@@ -415,7 +416,7 @@ describe("deleting an agent a session still points at", () => {
         if (status === "busy") await busy(arranged, session);
         await sessionWhen(arranged, session.id, (one) => one.status === status);
 
-        const refused = await refusal(
+        const refused = await parseRefusal(
           await del(arranged.harness.base, `/api/v1/agents/${agent.id}`, arranged.token),
         );
 
@@ -483,7 +484,7 @@ describe("listing sessions by what spawned them", () => {
       );
 
       expect(response.status).toBe(400);
-      const refused = await refusal(response);
+      const refused = await parseRefusal(response);
       expect(refused.code).toBe("validation");
       expect(refused.text).toContain("thread");
     });
@@ -499,13 +500,14 @@ describe("the permission profile an agent spawns under", () => {
         permissionProfileId: profile.id,
       });
 
-      const refused = await refusal(
+      const refused = await parseRefusal(
         await del(arranged.harness.base, `/api/v1/profiles/${profile.id}`, arranged.token),
       );
       expect(refused.code).toBe("invalid_state");
       expect(refused.text).toContain("the-assessor");
 
-      // Pointed at another profile, the row it no longer names can go.
+      // Once the agent points at another profile, the profile it left can be
+      // deleted.
       const patched = await updateAgent(arranged, agent.id, {
         permissionProfileId: (await profileNamed(arranged, "worker")).id,
       });
@@ -520,8 +522,8 @@ describe("the permission profile an agent spawns under", () => {
   });
 
   /**
-   * The delete above is what keeps this from happening through the API, so the
-   * row is taken out underneath the agent the way a hand-edited database would.
+   * The delete above prevents this state through the API, so the test removes
+   * the profile row directly, the way a hand-edited database would.
    */
   it("refuses a spawn from an agent whose profile is gone", async () => {
     await withFleet(async (arranged) => {
@@ -540,7 +542,7 @@ describe("the permission profile an agent spawns under", () => {
         ),
       );
 
-      const refused = await refusal(
+      const refused = await parseRefusal(
         await post(
           arranged.harness.base,
           "/api/v1/sessions",

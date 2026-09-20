@@ -614,9 +614,10 @@ describe("a session that cannot run here", () => {
       supervisor,
       supervisor.start({
         ...START,
-        // Inside JSON, outside the subset the three harnesses agree on: the
-        // controller lints it too, so a frame like this is the two processes
-        // disagreeing about what a schema may say.
+        // This schema is valid JSON and outside the subset the three
+        // harnesses agree on. The controller lints the schema too, so a frame
+        // like this one means the two processes disagree about what a schema
+        // may say.
         spec: { ...SPEC, outputSchema: { type: "object", properties: {}, minProperties: 1 } },
       }),
     );

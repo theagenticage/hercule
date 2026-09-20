@@ -1,15 +1,15 @@
 /**
- * The whole journey of a non-interactive agent session, out of the release
- * binary: an Agent created through the CLI, a session spawned from it under an
- * output schema, and the turn's answer read back off the transcript.
+ * The whole journey of a non-interactive agent session, run out of the release
+ * binary: an Agent created through the CLI, a session spawned from that Agent
+ * under an output schema, and the turn's answer read back from the transcript.
  *
  * The two schemas are imported from the protocol package's own testing module
- * (`@hydra/protocol/testing` to the packages, this relative path here), rather
- * than written again: the point of them is that one document is what every
- * adapter and every proof is held to, and a relative path is how a suite that
- * depends on no Hydra package reaches it - `live.test.ts` beside it reaches
- * client-core the same way. It is data; nothing else of Hydra is reached for,
- * and the binary under test knows nothing of this process.
+ * rather than written again. A package reaches that module as
+ * `@hydra/protocol/testing`, and this suite reaches it by relative path,
+ * because the suite depends on no Hydra package. `live.test.ts` beside it
+ * reaches client-core the same way. The module holds data only. Nothing else
+ * of Hydra is imported here, and the binary under test knows nothing about
+ * this process.
  *
  * Opt-in, like `session.test.ts` beside it: it spends the developer's tokens
  * and takes a couple of minutes. `HYDRA_LIVE_SESSION_TEST=1` asks for it.
@@ -94,7 +94,7 @@ interface Agent {
  * `<home>/runner/<storage>/providers/<instanceId>`: the instance's private
  * config directory, named by the storage directory this runner's identity owns.
  */
-const instanceDir = (instanceId: string): string => {
+const buildInstanceDir = (instanceId: string): string => {
   const pin = JSON.parse(readFileSync(join(state.home, "runner", "runner.json"), "utf8")) as {
     readonly storageDirectory: string;
   };
@@ -102,8 +102,8 @@ const instanceDir = (instanceId: string): string => {
 };
 
 /** Lends the credential the caller named to the throwaway instance, for this run. */
-const lend = (instanceId: string): void => {
-  const dir = instanceDir(instanceId);
+const lendCredential = (instanceId: string): void => {
+  const dir = buildInstanceDir(instanceId);
   mkdirSync(dir, { recursive: true, mode: 0o700 });
   const path = join(dir, ".credentials.json");
   writeFileSync(path, readFileSync(lentCredentials!, "utf8"), { mode: 0o600 });
@@ -181,7 +181,7 @@ let ready: Ready | undefined;
 const prepare = async (): Promise<Ready> => {
   const runnerId = await enrolledRunner();
   const instance = await claudeInstance();
-  if (lentCredentials !== undefined) lend(instance.id);
+  if (lentCredentials !== undefined) lendCredential(instance.id);
   await probedLoggedIn(runnerId, instance.id);
   const profiles = jsonOk<Page<{ readonly id: string; readonly name: string }>>(
     await cli(["profile", "list", "--json"], { home: state.home, binary }),
@@ -207,7 +207,7 @@ const prepare = async (): Promise<Ready> => {
 };
 
 /** The turn's own row, which is where a session's answer is read off. */
-const turnCompleted = (rows: ReadonlyArray<Row>): Row => {
+const findCompletedTurn = (rows: ReadonlyArray<Row>): Row => {
   const found = rows.find((row) => row.event._tag === "turn.completed");
   if (found === undefined) {
     throw new Error(`no completed turn in ${rows.map((row) => row.event._tag).join(", ")}`);
@@ -216,11 +216,11 @@ const turnCompleted = (rows: ReadonlyArray<Row>): Row => {
 };
 
 /** What a turn answered under its session's schema, as the transcript carries it. */
-const resultIn = (rows: ReadonlyArray<Row>): Readonly<Record<string, unknown>> => {
-  const result = turnCompleted(rows).event["structuredResult"];
+const readStructuredResult = (rows: ReadonlyArray<Row>): Readonly<Record<string, unknown>> => {
+  const result = findCompletedTurn(rows).event["structuredResult"];
   if (typeof result !== "object" || result === null) {
     throw new Error(
-      `the turn carried no structured result: ${JSON.stringify(turnCompleted(rows))}`,
+      `the turn carried no structured result: ${JSON.stringify(findCompletedTurn(rows))}`,
     );
   }
   return result as Readonly<Record<string, unknown>>;
@@ -293,7 +293,10 @@ describe.skipIf(!wanted)("a session spawned from an Agent under an output schema
 
       const rows = await answering(FIXTURE_SCHEMA, FIXTURE_PROMPT);
 
-      const result = resultIn(rows) as { outcome: string; value: { verdict?: unknown } };
+      const result = readStructuredResult(rows) as {
+        outcome: string;
+        value: { verdict?: unknown };
+      };
       expect(result.outcome, JSON.stringify(result)).toBe("ok");
       expect(result.value.verdict).toBe("accept");
     },
@@ -310,7 +313,7 @@ describe.skipIf(!wanted)("a session spawned from an Agent under an output schema
 
       const rows = await answering(IMPOSSIBLE_SCHEMA, IMPOSSIBLE_PROMPT);
 
-      const result = resultIn(rows) as { outcome: string; reason: string };
+      const result = readStructuredResult(rows) as { outcome: string; reason: string };
       expect(result.outcome, JSON.stringify(result)).toBe("schema-failure");
       expect(result.reason).not.toBe("");
     },

@@ -50,9 +50,10 @@ export type FieldRow =
       readonly flag: string;
       readonly help: string;
       /**
-       * The listing an eight-character-or-longer tail written for this flag is
-       * resolved through, exactly as for a positional: where the field holds an
-       * id, the command line takes a tail and the wire takes the id.
+       * The listing that resolves a tail written for this flag, exactly as for
+       * a positional. A tail is eight characters or more. Where the field
+       * holds an id, the command line takes a tail and the wire takes the
+       * full id.
        */
       readonly resolves?: OperationId;
     }
@@ -1373,7 +1374,7 @@ export const CLI = {
       },
       permissionProfileId: {
         flag: "profile",
-        help: "Bound its sessions by this Permission Profile instead, by its id or a tail of eight or more characters; sessions already running keep theirs.",
+        help: "Bind its sessions to this Permission Profile instead, by its id or a tail of eight or more characters; sessions already running keep theirs.",
         resolves: "profile.query",
       },
       accessMode: { flag: "access-mode", help: "What its sessions may do unasked." },

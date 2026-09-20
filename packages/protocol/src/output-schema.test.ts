@@ -277,7 +277,7 @@ describe("the size bound on a schema", () => {
   const decode = Schema.decodeUnknownResult(OutputSchema);
 
   /** A schema whose JSON is `length` characters, give or take the padding. */
-  const sized = (length: number): Record<string, unknown> => ({
+  const buildSchemaOfLength = (length: number): Record<string, unknown> => ({
     type: "object",
     additionalProperties: false,
     required: ["verdict"],
@@ -285,13 +285,15 @@ describe("the size bound on a schema", () => {
   });
 
   it("takes a schema at the bound", () => {
-    const schema = sized(MAX_OUTPUT_SCHEMA_LENGTH - JSON.stringify(sized(0)).length);
+    const schema = buildSchemaOfLength(
+      MAX_OUTPUT_SCHEMA_LENGTH - JSON.stringify(buildSchemaOfLength(0)).length,
+    );
     expect(JSON.stringify(schema).length).toBe(MAX_OUTPUT_SCHEMA_LENGTH);
     expect(decode(schema)._tag).toBe("Success");
   });
 
   it("refuses one past it, saying what the bound is", () => {
-    const refused = decode(sized(MAX_OUTPUT_SCHEMA_LENGTH));
+    const refused = decode(buildSchemaOfLength(MAX_OUTPUT_SCHEMA_LENGTH));
     expect(refused._tag).toBe("Failure");
     expect(JSON.stringify(refused)).toContain(String(MAX_OUTPUT_SCHEMA_LENGTH));
   });

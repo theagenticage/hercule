@@ -58,10 +58,10 @@ export const ModelSelection = Schema.Struct({
 export type ModelSelection = Schema.Schema.Type<typeof ModelSelection>;
 
 /**
- * A family of harness tools a session may have taken away from it. Hydra's own
- * vocabulary, coarse on purpose: each adapter maps a family onto whatever its
- * harness calls those tools, and a harness that cannot take any of them away
- * declares so rather than pretending.
+ * A family of harness tools a session may have taken away from it. This is
+ * Hydra's own vocabulary, and it is coarse on purpose. Each adapter maps a
+ * family onto the names its harness gives those tools. A harness that cannot
+ * take a family away declares that, and does not pretend to enforce it.
  */
 const TOOL_FAMILIES = ["edit", "write", "shell", "web-search", "web-fetch"] as const;
 
@@ -71,9 +71,9 @@ const isDisallowedTool = (value: string): value is DisallowedTool =>
   (TOOL_FAMILIES as ReadonlyArray<string>).includes(value);
 
 /**
- * One family, refused by name: a list of five literals answers "expected one
- * of five" and leaves a caller with several entries to guess which of them the
- * refusal was about, so the check says the word it did not accept.
+ * One family, refused by name. A union of five literals answers "expected one
+ * of five", and a caller that sent several entries must then guess which entry
+ * the refusal was about. This check names the word it did not accept.
  */
 export const DisallowedTool = Schema.String.check(
   Schema.makeFilter<string>(
@@ -82,8 +82,8 @@ export const DisallowedTool = Schema.String.check(
         ? undefined
         : `${value} is not a tool family; the families are ${TOOL_FAMILIES.join(", ")}`,
     undefined,
-    // The type-level guard below would otherwise answer a second, wordless
-    // issue about the same entry.
+    // Without this, the type guard below would add a second issue about the
+    // same entry, and that issue carries no words.
     true,
   ),
 ).pipe(Schema.refine(isDisallowedTool));
@@ -105,18 +105,18 @@ export const SessionSpec = Schema.Struct({
   accessMode: AccessMode,
   /**
    * Appended to the harness's own system prompt, never in place of it. A
-   * session with no Agent behind it carries none.
+   * session with no Agent behind it carries no prompt here.
    */
   systemPrompt: Schema.optionalKey(Schema.String),
   /**
    * The tool families to take away. A provider that declares it enforces none
-   * of them still gets the list, and the record the caller reads says the
-   * provider will not act on it.
+   * of them still receives the list, and the record the caller reads reports
+   * that the provider ignores the field.
    */
   disallowedTools: Schema.optionalKey(Schema.Array(DisallowedTool)),
   /**
    * What the session's turns must answer with, as a JSON Schema inside the
-   * subset `lintOutputSchema` accepts. Absent is prose.
+   * subset `lintOutputSchema` accepts. An absent schema means prose.
    */
   outputSchema: Schema.optionalKey(OutputSchema),
   /**
@@ -366,9 +366,9 @@ const SessionExited = event("session.exited", {
 
 /**
  * What a turn answered under the session's output schema (spec 06 section 7).
- * One shape for every harness: the runner re-validates whatever its harness
- * produced against the declared schema, so `ok` means the value is good on
- * every provider and a failure says why in the same words.
+ * It has one shape for every harness. The runner validates whatever its
+ * harness produced against the declared schema, so `ok` means the same thing
+ * on every provider, and a failure gives its reason in the same words.
  */
 export const StructuredResult = Schema.Union([
   Schema.Struct({ outcome: Schema.Literal("ok"), value: Schema.Json }),
@@ -391,9 +391,10 @@ const TurnCompleted = event("turn.completed", {
   costUsd: Schema.optionalKey(Money),
   error: Schema.optionalKey(Message),
   /**
-   * How the turn answered the session's output schema. Absent on a session
-   * that was given none, and on a turn that ended for a reason of its own:
-   * an ordinary failure is the `state`, not a verdict about a schema.
+   * How the turn answered the session's output schema. It is absent on a
+   * session that was given no schema, and on a turn that ended for a reason of
+   * its own. An ordinary failure is reported by `state`, and not as a verdict
+   * about a schema.
    */
   structuredResult: Schema.optionalKey(StructuredResult),
 });

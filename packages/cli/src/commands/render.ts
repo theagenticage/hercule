@@ -119,10 +119,10 @@ const brief = (value: unknown): string => {
 };
 
 /**
- * What a turn answered under its session's output schema, as a sentence on the
- * turn's own line. It is the answer the session was spawned for, so it reads
- * as one - the value, or why there is none - rather than as one more
- * `field=value` beside the turn's state.
+ * Describes what a turn answered under its session's output schema, as a
+ * sentence on the turn's own line. The answer is what the session was spawned
+ * for, so it reads as a sentence, and not as one more `field=value` beside the
+ * turn's state. The sentence gives the value, or the reason there is no value.
  */
 const describeResult = (structuredResult: unknown): string => {
   const answer = structuredResult as StructuredResult;
@@ -137,21 +137,21 @@ const describeResult = (structuredResult: unknown): string => {
 /** `<position>  <at>  <tag>  <what that tag adds>`. */
 const transcriptLine = (row: Record<string, unknown>): string => {
   const event = (row["event"] ?? {}) as Record<string, unknown>;
-  const said = Object.entries(event)
+  const fields = Object.entries(event)
     .filter(([key]) => !TRANSCRIPT_NOISE.has(key) && key !== "structuredResult")
     .map(([key, value]) => `${key}=${brief(value)}`);
-  // The answer reads right after the turn's state rather than wherever the
-  // event happens to carry it: it is what the line is read for, and behind the
-  // usage figures it wraps off a 120-column terminal.
+  // The answer is placed right after the turn's state, and not where the event
+  // happens to carry it. The reader reads the line for the answer, and behind
+  // the usage figures the answer wraps off a 120-column terminal.
   const answered = event["structuredResult"];
   if (answered !== undefined) {
-    said.splice(
-      said.findIndex((field) => field.startsWith("state=")) + 1,
+    fields.splice(
+      fields.findIndex((field) => field.startsWith("state=")) + 1,
       0,
       describeResult(answered),
     );
   }
-  return [cell(row["position"]), cell(row["at"]), cell(event["_tag"]), ...said]
+  return [cell(row["position"]), cell(row["at"]), cell(event["_tag"]), ...fields]
     .join("  ")
     .trimEnd();
 };

@@ -825,7 +825,7 @@ describe("failures", () => {
 });
 
 /** An Agent as the API answers one, named by its whole id so a tail case can pick its own. */
-const agentRecord = (agentId: string, name: string) => ({
+const buildAgentRecord = (agentId: string, name: string) => ({
   id: agentId,
   name,
   systemPrompt: "You assess tasks.",
@@ -840,7 +840,7 @@ const agentRecord = (agentId: string, name: string) => ({
 });
 
 describe("hydra session spawn --agent", () => {
-  const AGENT = agentRecord(id("aaaaaaa1"), "triager");
+  const AGENT = buildAgentRecord(id("aaaaaaa1"), "triager");
 
   const SPAWNED = {
     id: id("eeeeeee1"),
@@ -866,7 +866,7 @@ describe("hydra session spawn --agent", () => {
     unenforced: [] as Array<string>,
   };
 
-  const spawning = () => {
+  const stubSpawn = () => {
     const fetch = stubFetch((request) =>
       request.path === "/api/v1/agents" && request.method === "GET" ? { items: [AGENT] } : SPAWNED,
     );
@@ -881,7 +881,7 @@ describe("hydra session spawn --agent", () => {
   };
 
   it("resolves an agent tail through the agent listing and sends the canonical id", async () => {
-    const { fetch, io } = spawning();
+    const { fetch, io } = stubSpawn();
 
     expect(
       await main(["--home", home, "session", "spawn", "--agent", "aaaaaaa1", "--json"], io),
@@ -923,7 +923,7 @@ describe("hydra session spawn --agent", () => {
   });
 
   it("uses a full agent id without a lookup, and carries the schema as written", async () => {
-    const { fetch, io } = spawning();
+    const { fetch, io } = stubSpawn();
     const schema =
       '{"type":"object","additionalProperties":false,"required":["verdict"],"properties":{"verdict":{"type":"string","enum":["accept","dismiss"]}}}';
 
@@ -945,8 +945,8 @@ describe("hydra session spawn --agent", () => {
 
 describe("hydra session list --agent", () => {
   const AGENTS = [
-    agentRecord(id("aaaaaaa1"), "triager"),
-    agentRecord("0192f0a1-0000-7000-8000-999911112222", "reviewer"),
+    buildAgentRecord(id("aaaaaaa1"), "triager"),
+    buildAgentRecord("0192f0a1-0000-7000-8000-999911112222", "reviewer"),
   ];
 
   const listing = (agents: ReadonlyArray<unknown>) => {
@@ -972,8 +972,8 @@ describe("hydra session list --agent", () => {
 
   it("answers conflict when the tail could be either of two agents", async () => {
     const { io } = listing([
-      agentRecord("0192f0a1-0000-7000-8000-000011112222", "one"),
-      agentRecord("0192f0a1-0000-7000-8000-999911112222", "two"),
+      buildAgentRecord("0192f0a1-0000-7000-8000-000011112222", "one"),
+      buildAgentRecord("0192f0a1-0000-7000-8000-999911112222", "two"),
     ]);
 
     expect(
@@ -1001,7 +1001,7 @@ describe("hydra transcript read: a turn that answered under a schema", () => {
   const SESSION_ID = id("eeeeeee1");
   const VALUE = { verdict: "accept", confidence: 0.9 };
 
-  const turn = (
+  const buildTurnRow = (
     position: number,
     structuredResult: Record<string, unknown>,
   ): Record<string, unknown> => ({
@@ -1019,11 +1019,11 @@ describe("hydra transcript read: a turn that answered under a schema", () => {
   });
 
   const ROWS = [
-    turn(1, { outcome: "ok", value: VALUE }),
-    turn(2, { outcome: "schema-failure", reason: "/verdict: not one of the enum values" }),
+    buildTurnRow(1, { outcome: "ok", value: VALUE }),
+    buildTurnRow(2, { outcome: "schema-failure", reason: "/verdict: not one of the enum values" }),
   ];
 
-  const reading = () => {
+  const stubTranscriptRead = () => {
     const fetch = stubFetch(() => ({ items: ROWS }));
     return {
       fetch,
@@ -1032,7 +1032,7 @@ describe("hydra transcript read: a turn that answered under a schema", () => {
   };
 
   it("shows each outcome as one line, the value as JSON and the failure by its reason", async () => {
-    const { io } = reading();
+    const { io } = stubTranscriptRead();
 
     expect(await main(["--home", home, "transcript", "read", SESSION_ID], io)).toBe(0);
 
@@ -1046,7 +1046,7 @@ describe("hydra transcript read: a turn that answered under a schema", () => {
   });
 
   it("carries the result verbatim under --json", async () => {
-    const { io } = reading();
+    const { io } = stubTranscriptRead();
 
     expect(await main(["--home", home, "transcript", "read", SESSION_ID, "--json"], io)).toBe(0);
 

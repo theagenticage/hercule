@@ -45,7 +45,7 @@ import { RunnerConnections } from "../runners";
 import {
   continuingSpecOf,
   requireSession,
-  sessionRecordReader,
+  sessionRecordComposer,
   SessionService,
   sessionRepository,
   validatedOptions,
@@ -135,7 +135,7 @@ const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const sessions = yield* SessionService;
   const one = requireSession(yield* sessionRepository);
-  const recordReader = yield* sessionRecordReader;
+  const recordComposer = yield* sessionRecordComposer;
   const instances = yield* providerRepository;
   const resolved = yield* resolvedInstance;
   const resumableNativeSession = yield* resumable;
@@ -253,7 +253,7 @@ const make = Effect.gen(function* () {
             if (session.status === "exited") return yield* Effect.fail(invalidState(HAS_EXITED));
             const modelSelection = yield* selectionFor(session, given);
             yield* sessions.setSelection(id, modelSelection);
-            return (yield* recordReader)({ ...session, modelSelection });
+            return (yield* recordComposer)({ ...session, modelSelection });
           }),
         );
       }),
@@ -303,7 +303,7 @@ const make = Effect.gen(function* () {
                   : JSON.stringify(
                       encodeSpec(
                         continuingSpecOf(
-                          yield* sessions.specOf(id),
+                          yield* sessions.readSpec(id),
                           yield* settings.all(),
                           modelSelection,
                           nativeSessionId,
@@ -385,7 +385,7 @@ const make = Effect.gen(function* () {
             }),
           ),
         );
-        return (yield* recordReader)(session);
+        return (yield* recordComposer)(session);
       }),
 
     /**
@@ -434,7 +434,7 @@ const make = Effect.gen(function* () {
             }),
           ),
         );
-        return (yield* recordReader)(session);
+        return (yield* recordComposer)(session);
       }),
 
     /**
@@ -463,7 +463,11 @@ const make = Effect.gen(function* () {
                 payload: { sessionId: id, runnerId: session.runnerId },
                 at,
               });
-              return (yield* recordReader)({ ...session, status: "exited" as const, exitedAt: at });
+              return (yield* recordComposer)({
+                ...session,
+                status: "exited" as const,
+                exitedAt: at,
+              });
             }),
           );
         }
@@ -482,7 +486,7 @@ const make = Effect.gen(function* () {
             }),
           ),
         );
-        return (yield* recordReader)(session);
+        return (yield* recordComposer)(session);
       }),
   };
 });

@@ -38,7 +38,13 @@ import {
   OUTPUT_SCHEMA_VARIABLE,
   SUBMIT_RESULT_TOOL,
 } from "./extension";
-import { ending, normalize, normalizing, type Normalizing, type RunningTool } from "./normalize";
+import {
+  ending,
+  normalize,
+  startNormalizing,
+  type Normalizing,
+  type RunningTool,
+} from "./normalize";
 import { DEFAULT_THINKING, piInstall, probing, ZAI } from "./probe";
 import { rpcOver, type PiChild, type PiRpc, type PiSpawn } from "./rpc";
 
@@ -93,31 +99,32 @@ interface Park {
 }
 
 /**
- * What a turn that settled without answering is asked again. Pinned rather
- * than phrased per call: it is the one sentence the model reads about what it
- * failed to do, and it goes into the transcript of every session under a
- * schema.
+ * What the runner asks a turn that settled without answering. The sentence is
+ * fixed here rather than written per call: the model reads this one sentence
+ * about what it failed to do, and the sentence enters the transcript of every
+ * session that runs under a schema.
  */
 export const REPROMPT = `You must call ${SUBMIT_RESULT_TOOL} with your answer; do nothing else.`;
 
 /**
- * How often one turn is asked again before it is reported as having answered
- * nothing. A third would be a session nothing ever ends. This is spec 06
- * section 7's "default 2 retries" on the pi row, and the knob for it.
+ * How often the runner asks one turn again before it reports that the turn
+ * answered nothing. A third question would risk a session that never ends.
+ * This is the "default 2 retries" of the pi row in spec 06 section 7.
  */
 const MAX_REPROMPTS = 2;
 
 /**
- * How many answers pi may refuse before Hydra stops asking this turn for one.
- * pi validates a call against the schema it registered the tool under and
- * hands its complaint back to the model as the call's result, so a model that
- * cannot satisfy the schema answers that complaint for as long as it is let
- * to: a live session on a schema no value satisfies called the tool 84 times
- * in five minutes and was still going. A few tries absorb a model that merely
- * got it wrong; past them, the turn is over and its last answer is the verdict.
+ * How many answers pi may refuse before the runner stops asking this turn for
+ * an answer. pi validates a call against the schema it registered the tool
+ * under, and gives its complaint back to the model as the call's result. A
+ * model that cannot satisfy the schema answers that complaint for as long as
+ * it is allowed to: one live session on a schema that no value satisfies
+ * called the tool 84 times in five minutes and had not stopped. A few tries
+ * absorb a model that only got the answer wrong. After them the turn is over,
+ * and its last answer is the verdict.
  *
- * The second of the two bounds spec 06 section 7's pi row names, beside
- * `MAX_REPROMPTS` above it.
+ * This is the second of the two bounds the pi row of spec 06 section 7 names.
+ * `MAX_REPROMPTS` above is the first.
  */
 const MAX_REFUSED_ANSWERS = 3;
 
@@ -128,9 +135,10 @@ interface Held {
   readonly rpc: PiRpc;
   readonly state: Normalizing;
   /**
-   * The file this session's instructions were written to, if it has any. It is
-   * the session's own and nothing else reads it once its pi is gone, so it
-   * goes with the session rather than piling up in the instance's home.
+   * The file this session's instructions were written to, if the session has
+   * instructions. The file belongs to this session, and nothing reads it after
+   * the session's pi is gone, so it is removed with the session instead of
+   * collecting in the instance's home.
    */
   readonly systemPromptFile: string | undefined;
   /** Whether this session is being stopped, whose end is reported by the stop. */
@@ -197,8 +205,8 @@ interface Dialog {
 const parseHeldCall = (message: unknown): Record<string, unknown> => {
   if (typeof message !== "string") return {};
   try {
-    const said: unknown = JSON.parse(message);
-    return typeof said === "object" && said !== null ? (said as Record<string, unknown>) : {};
+    const parsed: unknown = JSON.parse(message);
+    return typeof parsed === "object" && parsed !== null ? (parsed as Record<string, unknown>) : {};
   } catch {
     // Only Hydra's own approval hook asks anything in these sessions, so a message in
     // any other shape names no call - and a question about no call is one the
@@ -236,17 +244,18 @@ const announcesAgentSettled = (frame: unknown): boolean =>
   (frame as { readonly type?: unknown }).type === "agent_settled";
 
 /**
- * Whether a settle is one the turn is asked again on: a session that was asked
- * for a value, a turn still in flight, no answer yet, and asking left.
+ * Whether this settle is one the runner asks the turn again on. Four things
+ * must hold: the session was asked for a value, a turn is still in flight, the
+ * turn has not answered, and there are questions left to ask.
  */
 const owesAnswer = (state: Normalizing): boolean =>
   state.outputSchema !== undefined &&
   state.turnId !== undefined &&
   state.answer === undefined &&
   state.reprompts < MAX_REPROMPTS &&
-  // A turn Hydra has ended is over: asking it again would be a question put to
-  // a session the user just stopped, and a turn that never closes on it.
-  state.endedByHydra === undefined &&
+  // A turn the runner has ended is over. To ask it again would put a question
+  // to a session the user has just stopped, and the turn would never close.
+  state.endedBySystem === undefined &&
   // So is one that broke or was aborted on its way here: only a run that
   // reached its end had the chance to answer and did not take it.
   state.stopped.state === "completed";
@@ -260,12 +269,13 @@ const sessionsDir = (home: string): string => join(home, "sessions");
 const extensionPath = (home: string): string => join(home, EXTENSION_FILE);
 
 /**
- * The Agent's instructions for one session, beside the extension. pi reads a
- * `--append-system-prompt` value that names a file it can open as that file's
- * contents and anything else as the text itself, so the prompt is handed over
- * as a path: instructions on the argv are instructions in the machine's
- * process list, and a prompt that reads like a filename - `AGENTS.md` - would
- * otherwise become whatever that file happens to say.
+ * Where the Agent's instructions for one session are written, beside the
+ * extension. pi reads an `--append-system-prompt` value that names a file it
+ * can open as the contents of that file, and any other value as the text
+ * itself. The prompt is therefore handed over as a path, for two reasons.
+ * Instructions on the argv are instructions in the machine's process list. And
+ * a prompt that reads like a filename, such as `AGENTS.md`, would otherwise
+ * become whatever that file says.
  */
 const systemPromptPath = (home: string, sessionId: string): string =>
   join(home, `system-prompt-${sessionId}.txt`);
@@ -292,9 +302,9 @@ const transcriptOf = (home: string, nativeSessionId: string): string | undefined
 };
 
 /**
- * Which of pi 0.85.1's own tools each family the spec names is. The two web
- * families map to nothing: pi has no web tool, and a name it does not know is
- * a flag it refuses to start on.
+ * Which tools of pi 0.85.1 each family in the spec is made of. The two web
+ * families map to no tool: pi has no web tool, and pi refuses to start on a
+ * tool name it does not know.
  */
 const PI_TOOLS_BY_FAMILY: Readonly<Record<DisallowedTool, ReadonlyArray<string>>> = {
   edit: ["edit"],
@@ -341,14 +351,14 @@ const argvFor = (
     `${ZAI}/${spec.modelSelection.model}`,
     "--thinking",
     getSessionThinkingLevel(spec.modelSelection),
-    // Appended to pi's own prompt, never in place of it, and by the path
-    // `prepare` wrote it to rather than as the text.
+    // Appended to pi's own prompt, never in place of it, and named by the path
+    // `prepare` wrote it to rather than sent as the text.
     ...(spec.systemPrompt === undefined
       ? []
       : ["--append-system-prompt", systemPromptPath(ctx.home, sessionId)]),
-    // An empty value excludes nothing, and a flag with nothing after it is one
-    // pi files as a flag it does not know: a list nobody asked for is left out
-    // rather than sent as either.
+    // An empty value excludes nothing, and pi reads a flag with nothing after
+    // it as a flag it does not know. So an empty list is left out, and is sent
+    // in neither of those two forms.
     ...(excluded.length === 0 ? [] : ["--exclude-tools", excluded.join(",")]),
   ];
 };
@@ -420,17 +430,18 @@ export const piAdapter = (seam: PiSeam): ProviderAdapter => {
   };
 
   /**
-   * Ends the turn pi is running, whose completion on `events` reports it. Why
-   * it was ended is held here rather than read back off pi: an abort that
-   * lands while a tool is running comes back as an error on the message pi was
-   * in the middle of, and this turn ended because Hydra asked it to.
+   * Ends the turn pi is running. The turn's completion on `events` reports the
+   * end. Why the turn was ended is recorded here rather than read back from
+   * pi: an abort that arrives while a tool runs comes back as an error on the
+   * message that was in flight, and this turn ended because the runner asked
+   * for it to end.
    */
   const abort = (
     held: Held,
-    reason: NonNullable<Normalizing["endedByHydra"]>,
+    reason: NonNullable<Normalizing["endedBySystem"]>,
   ): Effect.Effect<void> =>
     Effect.suspend(() => {
-      held.state.endedByHydra ??= reason;
+      held.state.endedBySystem ??= reason;
       return Effect.ignore(held.rpc.send({ type: "abort" }));
     });
 
@@ -476,9 +487,9 @@ export const piAdapter = (seam: PiSeam): ProviderAdapter => {
     // and a second exit would be a second row for it.
     if (held === undefined) return;
     sessions.delete(sessionId);
-    // The session's instructions leave with it: pi has read them at start and
-    // a resume writes them again, so what is left behind is one file per
-    // session ever started in this instance's home.
+    // The session's instructions are removed with the session. pi read them at
+    // start, and a resume writes them again. Without this the home would keep
+    // one file for every session ever started in this instance.
     const instructions = held.systemPromptFile;
     if (instructions !== undefined) attempt(() => rmSync(instructions, { force: true }));
     // A card left open on a session that is gone is one nothing can answer,
@@ -510,18 +521,18 @@ export const piAdapter = (seam: PiSeam): ProviderAdapter => {
   };
 
   /**
-   * Asks the turn again for the tool it was meant to answer through, inside
-   * the turn it already opened: sent as pi's own prompt command rather than as
-   * an input, because Hydra asked nobody anything and a user message here
-   * would be a sentence the user never wrote.
+   * Asks the turn again for the tool it was meant to answer through, inside the
+   * turn it already opened. The question is sent as pi's own prompt command and
+   * not as a session input, because the user asked nothing here, and an input
+   * would put a sentence in the transcript that the user never wrote.
    */
   const askAgain = (held: Held): void => {
     held.state.reprompts += 1;
     Effect.runFork(
       Effect.catch(held.rpc.send({ type: "prompt", message: REPROMPT }), (error) =>
         Effect.sync(() => {
-          // Nothing will settle this turn now, and a turn left open on it is a
-          // session that reads as working for as long as anyone looks at it.
+          // Nothing can settle this turn now. A turn left open would make the
+          // session read as working for as long as anyone looks at it.
           warn(held.binding.sessionId, `pi refused to be asked again for an answer: ${error}`);
           for (const event of ending(held.state)) emit(event);
         }),
@@ -530,9 +541,9 @@ export const piAdapter = (seam: PiSeam): ProviderAdapter => {
   };
 
   /**
-   * Stops asking this turn for an answer it cannot give. The last answer is
-   * already the turn's, so ending the run here is what turns a model arguing
-   * with the validator into a turn that says the schema was not satisfied.
+   * Stops asking this turn for an answer it cannot give. The turn already holds
+   * its last answer, so ending pi's run here turns a model that argues with the
+   * validator into a turn that reports that the schema was not satisfied.
    */
   const stopAsking = (held: Held): void => {
     warn(
@@ -550,9 +561,9 @@ export const piAdapter = (seam: PiSeam): ProviderAdapter => {
   const onLine = (sessionId: string, line: string, frame: unknown): void => {
     const held = sessions.get(sessionId);
     if (held === undefined) return;
-    // A settle the turn still owes an answer on is not the end of that turn:
-    // the whole episode is one Hydra turn, so the normalizer never hears this
-    // settle and the turn stays open until the asking is done.
+    // A settle on a turn that still owes an answer is not the end of that
+    // turn. The whole episode is one turn, so the normalizer never hears this
+    // settle, and the turn stays open until the asking is done.
     if (announcesAgentSettled(frame) && owesAnswer(held.state)) {
       askAgain(held);
       return;
@@ -572,7 +583,10 @@ export const piAdapter = (seam: PiSeam): ProviderAdapter => {
       }
       emit(event);
     }
-    if (held.state.refusedAnswers >= MAX_REFUSED_ANSWERS && held.state.endedByHydra === undefined) {
+    if (
+      held.state.refusedAnswers >= MAX_REFUSED_ANSWERS &&
+      held.state.endedBySystem === undefined
+    ) {
       stopAsking(held);
     }
   };
@@ -608,10 +622,11 @@ export const piAdapter = (seam: PiSeam): ProviderAdapter => {
   };
 
   /**
-   * One file pi reads, put in place whole: written beside the name it takes
-   * and renamed over it, because a pi starting in this home at the same moment
-   * would otherwise load whatever half of it had reached disk - a session with
-   * no approval hook, or with half its instructions.
+   * Writes one file pi reads, and puts it in place whole. The content is
+   * written beside the name it takes and then renamed over that name. Without
+   * this, a pi that starts in this home at the same moment could load the half
+   * of the file that had reached the disk: a session with no approval hook, or
+   * with half its instructions.
    */
   const putFile = (path: string, content: string): void => {
     const written = `${path}.${process.pid}.${crypto.randomUUID()}`;
@@ -629,8 +644,8 @@ export const piAdapter = (seam: PiSeam): ProviderAdapter => {
   /** The home pi keeps this instance's sessions and this session's files in. */
   const prepare = (ctx: ProviderRunnerContext, sessionId: string, spec: SessionSpec): void => {
     mkdirSync(sessionsDir(ctx.home), { recursive: true, mode: 0o700 });
-    // Rewritten at every start rather than once, so the approval hook a session
-    // runs behind is always this build's.
+    // Written again at every start rather than once, so the approval hook a
+    // session runs behind is always this build's hook.
     putFile(extensionPath(ctx.home), EXTENSION_SOURCE);
     if (spec.systemPrompt !== undefined) {
       putFile(systemPromptPath(ctx.home, sessionId), spec.systemPrompt);
@@ -720,8 +735,9 @@ export const piAdapter = (seam: PiSeam): ProviderAdapter => {
             `the transcript of session ${carried.nativeSessionId} is no longer on this runner`,
           );
         }
-        // Named before the launch, because it is written by `prepare` below
-        // and has to be taken away whether the session ends or never starts.
+        // The path is named before the launch, because `prepare` below writes
+        // the file, and the file must be removed whether the session ends or
+        // never starts.
         const instructions =
           spec.systemPrompt === undefined ? undefined : systemPromptPath(ctx.home, sessionId);
         const child = yield* Effect.try({
@@ -731,9 +747,9 @@ export const piAdapter = (seam: PiSeam): ProviderAdapter => {
               [binary, ...argvFor(spec, ctx, sessionId, transcript)],
               envFor(ctx, {
                 [ACCESS_MODE_VARIABLE]: spec.accessMode,
-                // Out of the environment rather than the argv, so the launch
-                // stays exactly what this adapter authored, whatever the
-                // schema is.
+                // The schema travels in the environment and not on the argv,
+                // so the launch stays exactly what this adapter wrote,
+                // whatever the schema holds.
                 ...(spec.outputSchema === undefined
                   ? {}
                   : { [OUTPUT_SCHEMA_VARIABLE]: JSON.stringify(spec.outputSchema) }),
@@ -746,9 +762,9 @@ export const piAdapter = (seam: PiSeam): ProviderAdapter => {
             );
           },
           catch: (error) => {
-            // A pi that never started has no session to end, and it is the end
-            // of a session that takes this file away: without this the
-            // instructions of every launch that failed stay in the home.
+            // A pi that never started has no session to end, and the end of a
+            // session is what removes this file. Without this line the
+            // instructions of every failed launch would stay in the home.
             if (instructions !== undefined) attempt(() => rmSync(instructions, { force: true }));
             return error instanceof Error ? error.message : String(error);
           },
@@ -756,7 +772,7 @@ export const piAdapter = (seam: PiSeam): ProviderAdapter => {
         // A resumed session carries on the native one; a fork is a session of
         // its own, minted under this session's id.
         const nativeSessionId = carried?.mode === "resume" ? carried.nativeSessionId : sessionId;
-        const state = normalizing(sessionId, nativeSessionId, spec.outputSchema);
+        const state = startNormalizing(sessionId, nativeSessionId, spec.outputSchema);
         state.model = spec.modelSelection.model;
         const rpc = rpcOver(child, (line, frame) => onLine(sessionId, line, frame));
         const binding: SessionBinding = { sessionId, nativeSessionId, instanceId: spec.instanceId };

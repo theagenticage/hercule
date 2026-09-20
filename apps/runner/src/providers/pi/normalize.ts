@@ -24,7 +24,7 @@ import type {
 } from "@hydra/protocol";
 import { count, buildEnvelope, rawOf, type Envelope } from "../normalize";
 import { idOf } from "../events";
-import { structuredResultOf } from "../structured-result";
+import { judgeAnswer } from "../structured-result";
 import { fact, text } from "../text";
 import { SUBMIT_RESULT_TOOL } from "./extension";
 
@@ -135,14 +135,13 @@ export interface Normalizing {
    */
   stopped: { readonly state: TurnState; readonly error?: string };
   /**
-   * Why Hydra ended this turn itself, where it did. pi reports an abort that
-   * landed while a tool was running as an error on the message it was in the
-   * middle of - "The operation was aborted" - so what the message says is not
-   * how such a turn ended: a stop the user asked for is an interrupt, and a
-   * turn Hydra stopped asking for an answer ran to its end and is reported by
-   * its result.
+   * Why the runner itself ended this turn, if it did. pi reports an abort that
+   * arrives while a tool runs as an error on the message that was in flight:
+   * "The operation was aborted". That message does not say how the turn ended.
+   * A stop the user asked for is an interrupt. A turn the runner stopped
+   * asking for an answer ran to its end, and its result reports what happened.
    */
-  endedByHydra: "interrupt" | "schema" | undefined;
+  endedBySystem: "interrupt" | "schema" | undefined;
   /**
    * Whether this turn has been announced. pi opens a run again for a retry, a
    * compaction and a queued message, all inside one turn, so the second and
@@ -151,26 +150,28 @@ export interface Normalizing {
   announced: boolean;
   /** The failure already reported for this run, so it is not reported twice. */
   reported: string | undefined;
-  /** What every turn of this session answers under, where there is one. */
+  /** The schema every turn of this session answers under, if there is one. */
   readonly outputSchema: OutputSchema | undefined;
   /**
-   * What the turn answered with: the arguments the tool was called with, where
-   * it was called. A turn that settles without one is asked again.
+   * What the turn answered with: the arguments of the call to the answer tool,
+   * if the turn made that call. A turn that settles with no answer is asked
+   * again.
    */
   answer: Record<string, unknown> | undefined;
   /** How often this turn has been asked again for the tool. */
   reprompts: number;
   /**
-   * How many of this turn's answers pi refused because their arguments do not
-   * satisfy the schema. A model that cannot satisfy it answers the validator's
-   * complaint for as long as it is allowed to, so the asking is bounded.
+   * How many of this turn's answers pi refused because the arguments do not
+   * satisfy the schema. A model that cannot satisfy the schema answers the
+   * validator's complaint for as long as it is allowed to, so the asking has
+   * a bound.
    */
   refusedAnswers: number;
 }
 
 const zero = (): Totals => ({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0 });
 
-export const normalizing = (
+export const startNormalizing = (
   sessionId: string,
   nativeSessionId: string,
   outputSchema: OutputSchema | undefined,
@@ -185,7 +186,7 @@ export const normalizing = (
   turnTotals: zero(),
   sessionTotals: zero(),
   stopped: { state: "completed" },
-  endedByHydra: undefined,
+  endedBySystem: undefined,
   announced: false,
   reported: undefined,
   outputSchema,
@@ -250,8 +251,11 @@ const stoppedBy = (message: PiMessage | undefined): Normalizing["stopped"] => {
   const reason = message?.stopReason;
   if (reason === "aborted") return { state: "interrupted" };
   if (reason !== "error") return { state: "completed" };
-  const said = message?.errorMessage;
-  return { state: "failed", ...(typeof said === "string" && said !== "" ? { error: said } : {}) };
+  const complaint = message?.errorMessage;
+  return {
+    state: "failed",
+    ...(typeof complaint === "string" && complaint !== "" ? { error: complaint } : {}),
+  };
 };
 
 /**
@@ -267,24 +271,26 @@ const failure = (state: Normalizing, name: string, message: string): ProviderEve
   ...(message === "" ? {} : { message: text(message) }),
 });
 
-const said = (value: unknown): string => (typeof value === "string" ? value : "");
+const readText = (value: unknown): string => (typeof value === "string" ? value : "");
 
-/** How a turn Hydra itself ended reads, whatever pi says about the message. */
-const ENDINGS: Readonly<Record<NonNullable<Normalizing["endedByHydra"]>, Normalizing["stopped"]>> =
-  {
-    interrupt: { state: "interrupted" },
-    // The turn ran to its end and answered; the answer is what failed, and the
-    // result on the turn is what says so.
-    schema: { state: "completed" },
-  };
+/** How a turn the runner ended reads, whatever pi says about the message. */
+const SYSTEM_ENDINGS: Readonly<
+  Record<NonNullable<Normalizing["endedBySystem"]>, Normalizing["stopped"]>
+> = {
+  interrupt: { state: "interrupted" },
+  // The turn ran to its end and it answered. The answer is what failed, and
+  // the result on the turn reports that.
+  schema: { state: "completed" },
+};
 
 /**
- * Keeps the worst of what ended the run. An abort or an error is announced on
- * the message that carried it, and a later message that merely stopped would
- * otherwise report the turn as having finished normally.
+ * Keeps the worst of the reasons that ended the run. An abort or an error is
+ * announced on the message that carried it. Without this, a later message that
+ * only stopped would report the turn as finished normally.
  */
 const stopping = (state: Normalizing, message: PiMessage | undefined): void => {
-  const ended = state.endedByHydra === undefined ? stoppedBy(message) : ENDINGS[state.endedByHydra];
+  const ended =
+    state.endedBySystem === undefined ? stoppedBy(message) : SYSTEM_ENDINGS[state.endedBySystem];
   if (ended.state !== "completed" || state.stopped.state === "completed") state.stopped = ended;
 };
 
@@ -440,14 +446,15 @@ const onToolEnd = (state: Normalizing, event: PiEvent): ReadonlyArray<ProviderEv
   const item = state.tools.get(callId);
   if (item === undefined) return [];
   state.tools.delete(callId);
-  // The call the session answers through: what it was called with is the
-  // turn's answer, and the extension registered the tool under this very
-  // schema. Read off the call rather than off this frame, because pi carries a
-  // call's arguments when it starts and not when it ends.
+  // This is the call the session answers through, and its arguments are the
+  // turn's answer. The extension registered the tool under this same schema.
+  // The arguments are read from the started call and not from this frame,
+  // because pi carries a call's arguments when the call starts, not when it
+  // ends.
   if (state.outputSchema !== undefined && item.toolName === SUBMIT_RESULT_TOOL) {
     state.answer = item.args ?? {};
-    // pi validates a call against the very schema it registered the tool
-    // under, and hands a refusal back to the model as the call's own result.
+    // pi validates a call against the same schema it registered the tool
+    // under, and gives a refusal back to the model as the call's own result.
     if (event.isError === true) state.refusedAnswers += 1;
   }
   const refused = state.declined.delete(callId);
@@ -488,15 +495,15 @@ const abandoned = (state: Normalizing, turnId: string): ReadonlyArray<ProviderEv
 };
 
 /**
- * The verdict a turn carries about the schema, where it carries one. A turn
- * that ran to its end is judged on what it answered, or on there being no
- * answer at all; an interrupt and a failure are about the turn, where a schema
- * verdict would read as an answer that was judged and found wanting.
+ * Judges the turn: the verdict it carries about the schema, if it carries one.
+ * A turn that ran to its end is judged on what it answered, or on the absence
+ * of an answer. An interrupt and a failure are about the turn itself, and a
+ * schema verdict there would claim that an answer was judged and rejected.
  */
-const resultOf = (state: Normalizing, ended: TurnState): StructuredResult | undefined => {
+const judgeTurn = (state: Normalizing, ended: TurnState): StructuredResult | undefined => {
   const schema = state.outputSchema;
   if (schema === undefined || ended !== "completed") return undefined;
-  return structuredResultOf(
+  return judgeAnswer(
     schema,
     state.answer === undefined
       ? { missing: `the agent settled without calling ${SUBMIT_RESULT_TOOL}` }
@@ -518,13 +525,14 @@ export const ending = (
   const stopped = ended ?? state.stopped;
   const cost = state.turnTotals.cost;
   const closing = abandoned(state, turnId);
-  const structuredResult = resultOf(state, stopped.state);
+  const structuredResult = judgeTurn(state, stopped.state);
   state.turnId = undefined;
   state.announced = false;
   state.reported = undefined;
   state.stopped = { state: "completed" };
-  state.endedByHydra = undefined;
-  // The answer and the asking are the turn's own: the next one is asked afresh.
+  state.endedBySystem = undefined;
+  // The answer and the asking belong to this turn. The next turn is asked from
+  // the start.
   state.answer = undefined;
   state.reprompts = 0;
   state.refusedAnswers = 0;
@@ -614,13 +622,13 @@ export const normalize = (
       // after the `agent_end` carrying the same message, so a failure already
       // reported off that message is not reported a second time.
       if (event.success !== false) return [];
-      return said(event.finalError) === state.reported
+      return readText(event.finalError) === state.reported
         ? []
-        : [failure(state, "auto_retry_failed", said(event.finalError))];
+        : [failure(state, "auto_retry_failed", readText(event.finalError))];
     case "extension_error":
       // Hydra's own extension is the only one a session loads, so this is a
       // hook that threw: the user hears it rather than reading a quiet allow.
-      return [failure(state, "extension_error", said(event.error))];
+      return [failure(state, "extension_error", readText(event.error))];
     case "message_update":
       return onBlockEvent(state, event);
     case "tool_execution_start":

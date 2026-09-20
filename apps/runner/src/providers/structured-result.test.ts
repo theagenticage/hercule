@@ -5,7 +5,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { MAX_MESSAGE_LENGTH, type OutputSchema } from "@hydra/protocol";
-import { structuredResultOf } from "./structured-result";
+import { judgeAnswer } from "./structured-result";
 
 /**
  * Inside the subset `lintOutputSchema` accepts: a closed object, every property
@@ -27,35 +27,35 @@ const VALID = { verdict: "accept", confidence: 0.9, summary: "a typo fix" };
 
 describe("a value a harness produced under an output schema", () => {
   it("is the result itself when it satisfies the schema", () => {
-    expect(structuredResultOf(SCHEMA, { value: VALID })).toEqual({
+    expect(judgeAnswer(SCHEMA, { value: VALID })).toEqual({
       outcome: "ok",
       value: VALID,
     });
   });
 
   it("is a schema failure naming the field whose type is wrong", () => {
-    expect(structuredResultOf(SCHEMA, { value: { ...VALID, confidence: "high" } })).toEqual({
+    expect(judgeAnswer(SCHEMA, { value: { ...VALID, confidence: "high" } })).toEqual({
       outcome: "schema-failure",
       reason: expect.stringContaining("confidence") as string,
     });
   });
 
   it("is a schema failure naming the required key that is missing", () => {
-    expect(structuredResultOf(SCHEMA, { value: { verdict: "accept", confidence: 0.9 } })).toEqual({
+    expect(judgeAnswer(SCHEMA, { value: { verdict: "accept", confidence: 0.9 } })).toEqual({
       outcome: "schema-failure",
       reason: expect.stringContaining("summary") as string,
     });
   });
 
   it("is a schema failure naming the key the closed object does not allow", () => {
-    expect(structuredResultOf(SCHEMA, { value: { ...VALID, rationale: "because" } })).toEqual({
+    expect(judgeAnswer(SCHEMA, { value: { ...VALID, rationale: "because" } })).toEqual({
       outcome: "schema-failure",
       reason: expect.stringContaining("rationale") as string,
     });
   });
 
   it("is a schema failure naming the field whose value is outside its enum", () => {
-    expect(structuredResultOf(SCHEMA, { value: { ...VALID, verdict: "maybe" } })).toEqual({
+    expect(judgeAnswer(SCHEMA, { value: { ...VALID, verdict: "maybe" } })).toEqual({
       outcome: "schema-failure",
       reason: expect.stringContaining("verdict") as string,
     });
@@ -79,7 +79,7 @@ describe("a value that broke the schema deep inside itself", () => {
   };
 
   it("is a schema failure naming the path down to the field itself", () => {
-    expect(structuredResultOf(NESTED, { value: { outer: { inner: "deep" } } })).toEqual({
+    expect(judgeAnswer(NESTED, { value: { outer: { inner: "deep" } } })).toEqual({
       outcome: "schema-failure",
       // Not the enclosing object: "outer does not match schema" leaves a reader
       // to find which field of it is wrong.
@@ -103,7 +103,7 @@ describe("a schema whose own message is longer than an event may carry", () => {
   };
 
   it("cuts the reason to what the protocol carries", () => {
-    const result = structuredResultOf(WORDY, { value: { choice: "none of them" } });
+    const result = judgeAnswer(WORDY, { value: { choice: "none of them" } });
 
     expect(result.outcome).toBe("schema-failure");
     expect(result.outcome === "schema-failure" ? result.reason.length : 0).toBe(MAX_MESSAGE_LENGTH);
@@ -113,7 +113,7 @@ describe("a schema whose own message is longer than an event may carry", () => {
 describe("a harness that produced no value at all", () => {
   it("is a schema failure carrying the adapter's own reason, unchanged", () => {
     expect(
-      structuredResultOf(SCHEMA, { missing: "the agent settled without calling record_verdict" }),
+      judgeAnswer(SCHEMA, { missing: "the agent settled without calling record_verdict" }),
     ).toEqual({
       outcome: "schema-failure",
       reason: "the agent settled without calling record_verdict",
@@ -121,7 +121,7 @@ describe("a harness that produced no value at all", () => {
   });
 
   it("cuts a reason the protocol would not carry", () => {
-    const result = structuredResultOf(SCHEMA, { missing: "x".repeat(5000) });
+    const result = judgeAnswer(SCHEMA, { missing: "x".repeat(5000) });
 
     expect(result).toEqual({
       outcome: "schema-failure",

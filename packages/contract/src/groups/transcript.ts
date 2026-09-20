@@ -39,9 +39,9 @@ export type TranscriptRow = Schema.Schema.Type<typeof TranscriptRow>;
 
 /**
  * What a turn answered under its session's output schema, as the protocol
- * spells it. Re-exported rather than restated: a reader of a transcript row is
- * the one consumer of it outside the runner, and two spellings of one verdict
- * would let them disagree.
+ * spells it. It is re-exported and not restated here. A reader of a transcript
+ * row is the one consumer of this verdict outside the runner, and two
+ * spellings of one verdict could disagree.
  */
 export { StructuredResult };
 

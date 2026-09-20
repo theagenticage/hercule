@@ -1,16 +1,16 @@
 /**
  * Agents: the named, reusable configuration a session is spawned from.
  *
- * An Agent is an identity and a set of defaults - prompt, provider instance,
- * permission profile, access mode, model, tool restrictions - and nothing else:
- * it holds no state, has no status axis and runs nothing itself. A spawn copies
- * every value it uses onto the Session and never reads back through the Agent
- * afterwards (ADR 0030), so editing one changes only the sessions spawned after
- * the edit.
+ * An Agent is an identity and a set of defaults, and nothing else: a prompt, a
+ * provider instance, a permission profile, an access mode, a model and a list
+ * of tool restrictions. It holds no state, it has no status axis, and it runs
+ * nothing itself. A spawn copies every value it uses onto the Session and
+ * never reads back through the Agent afterwards (ADR 0030), so an edit changes
+ * only the sessions spawned after the edit.
  *
- * `unenforced` is the honesty field: a provider may store a spec field it does
- * not act on, and the record says which, rather than leaving the caller to find
- * out from the harness's behaviour.
+ * `unenforced` reports what a provider will ignore. A provider may store a
+ * spec field it does not act on, and the record names that field, so the
+ * caller does not learn it from the harness's behaviour.
  */
 import { Schema } from "effect";
 import { AccessMode, DisallowedTool, ModelSelection } from "@hydra/protocol";
@@ -35,7 +35,7 @@ export { DisallowedTool };
 /** The longest agent name. */
 const MAX_AGENT_NAME_LENGTH = 128;
 
-/** The longest system prompt: it rides the `SessionSpec` onto the wire. */
+/** The longest system prompt. The prompt travels on the `SessionSpec`. */
 const MAX_SYSTEM_PROMPT_LENGTH = 64 * 1024;
 
 const AgentName = bounded(1, MAX_AGENT_NAME_LENGTH);
@@ -66,7 +66,7 @@ export const Agent = Schema.Struct({
   /** `null` runs on whatever model the instance offers by default. */
   model: Schema.NullOr(ModelSelection),
   disallowedTools: Schema.Array(DisallowedTool),
-  /** Which of the fields above this agent's provider will not act on; empty is the usual answer. */
+  /** Which of the fields above this agent's provider ignores; usually empty. */
   unenforced: Schema.Array(UnenforcedSpecField),
   createdAt: Timestamp,
   updatedAt: Timestamp,
@@ -78,11 +78,11 @@ export type Agent = Schema.Schema.Type<typeof Agent>;
 export const AGENT_SORT_FIELDS = ["createdAt"] as const;
 
 /**
- * Making an agent. The model and its options are two fields here and one
- * `ModelSelection` on the record: a choice belongs to the model that offers
- * it, so `options` is named only beside a `model`, and the service folds the
- * two into the selection it stores. It is also how every other command spells
- * a model - `--model <slug> --options <json>`.
+ * What creating an agent takes. The model and its options are two fields here
+ * and one `ModelSelection` on the record. A choice belongs to the model that
+ * offers it, so `options` may only be named beside a `model`, and the service
+ * folds the two into the selection it stores. Every other command spells a
+ * model the same way: `--model <slug> --options <json>`.
  */
 export const AgentCreateInput = Schema.Struct({
   name: AgentName,
@@ -92,7 +92,7 @@ export const AgentCreateInput = Schema.Struct({
   accessMode: Schema.optionalKey(AccessMode),
   /** Absent runs its sessions on whatever the instance offers by default. */
   model: Schema.optionalKey(ModelSlug),
-  /** The choices that model opens with; refused with no `model` beside them. */
+  /** The choices that model opens with. Refused if no `model` is beside them. */
   options: Schema.optionalKey(ModelSelection.fields.options),
   disallowedTools: Schema.optionalKey(Schema.Array(DisallowedTool)),
 });
@@ -108,11 +108,11 @@ export const AgentUpdateInput = Schema.Struct({
   accessMode: Schema.optionalKey(AccessMode),
   /**
    * `null` puts the agent back on the instance's default model. A model named
-   * here replaces the stored choices with the `options` beside it, or with
-   * none: the old ones were the old model's.
+   * here replaces the stored choices with the `options` beside it, or with no
+   * choices at all, because the stored choices belonged to the old model.
    */
   model: Schema.optionalKey(Schema.NullOr(ModelSlug)),
-  /** The choices of the model named beside them; alone they are refused. */
+  /** The choices of the model named beside them. Options alone are refused. */
   options: Schema.optionalKey(ModelSelection.fields.options),
   disallowedTools: Schema.optionalKey(Schema.Array(DisallowedTool)),
 });

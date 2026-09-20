@@ -146,11 +146,11 @@ const asWritten = (command: Command, field: Field, text: string): string => {
 };
 
 /**
- * What one command's fields hold once every id a tail stands for has been
- * looked up. One pass, whether a field is written as a bare word or as a flag:
- * where a field holds an id, how it is spelled on the command line does not
- * decide whether a tail may stand for it, nor whether one that cannot be
- * resolved is refused.
+ * Resolves every tail among one command's fields, and answers what those
+ * fields hold after that. One pass covers a field written as a bare word and a
+ * field written as a flag. Where a field holds an id, how the field is spelled
+ * on the command line decides nothing: not whether a tail may stand for the
+ * id, and not whether a tail that cannot be resolved is refused.
  */
 const resolveTails = async (
   client: HydraClient,
@@ -161,8 +161,8 @@ const resolveTails = async (
   const resolved = { ...values };
   for (const field of fields) {
     const given = resolved[field.name];
-    // A field the caller never wrote, and a numeric or repeated one: no tail
-    // stands for either.
+    // Three fields are skipped: a field the caller never wrote, a numeric
+    // field and a repeated field. No tail stands for any of them.
     if (typeof given !== "string") continue;
     resolved[field.name] =
       field.resolves === undefined

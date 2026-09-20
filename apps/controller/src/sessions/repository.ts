@@ -60,10 +60,11 @@ export interface StoredSession {
   readonly exitedAt: string | null;
   readonly lastActivityAt: string;
   /**
-   * The provider behind its instance, and what its spec asked that provider to
-   * take away. Both are read for one thing - whether the provider will act on
-   * the restriction - rather than stored, because a later binary's adapter may
-   * enforce what this one ignores. `null` once the instance is gone.
+   * The provider behind its instance, and the tool families its spec asked
+   * that provider to take away. Both answer one question: does the provider
+   * act on the restriction. They are read and not stored, because the adapter
+   * in a later binary may enforce what this one ignores. `providerId` is
+   * `null` once the instance is gone.
    */
   readonly providerId: string | null;
   readonly disallowedTools: ReadonlyArray<DisallowedTool>;
@@ -104,7 +105,7 @@ export interface SessionPageRequest {
   readonly status: SessionStatus | ReadonlyArray<SessionStatus> | undefined;
   readonly runnerId: string | undefined;
   readonly agentId: string | undefined;
-  /** `true` is the sessions with no agent behind them; `false` is the rest. */
+  /** `true` lists the sessions with no agent behind them; `false` lists the rest. */
   readonly thread: boolean | undefined;
 }
 
@@ -257,9 +258,9 @@ const make = Effect.gen(function* () {
 
   return {
     /**
-     * Writes the session. Nothing comes back: the caller minted the id, and
-     * what a caller hands on is the row read afterwards, which is the one that
-     * carries what dispatch has already done with it.
+     * Writes the session. It answers nothing. The caller minted the id, and the
+     * row a caller passes on is the row it reads after the write, because that
+     * row carries what dispatch has already done with the session.
      */
     insert: (session: NewSession): Effect.Effect<void, SqlError> =>
       Effect.gen(function* () {
@@ -335,12 +336,12 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * The exact document this session's machine was told, as the row stores
-     * it. Read on its own rather than on every session read: a session picking
-     * up another's transcript is the only thing that needs it, and it is the
-     * one column big enough for that to matter.
+     * The exact document this session's machine was told, as the row stores it.
+     * It is read on its own rather than on every session read, because only a
+     * session that picks up another session's transcript needs it, and the
+     * column is large enough for that to matter.
      */
-    specDocumentOf: (id: string): Effect.Effect<Option.Option<string>, SqlError> =>
+    readSpecDocument: (id: string): Effect.Effect<Option.Option<string>, SqlError> =>
       Effect.map(
         sql<{ readonly spec: string }>`
           SELECT spec FROM sessions WHERE id = ${uuidFromString(id)}

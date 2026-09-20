@@ -9,7 +9,7 @@
  * dropping the rest, never reshaping one.
  *
  * Assumed surface, because the module is the implementer's to name: the two
- * exports mirror `claude-code-normalize.ts`, `normalizing(sessionId, threadId)`
+ * exports mirror `claude-code-normalize.ts`, `startNormalizing(sessionId, threadId)`
  * builds the running state and `normalize(state, notification)` takes one
  * decoded `{ method, params }` frame off the wire. Event ids and the `at`
  * instant are the module's own business and nothing below reads them. Rename
@@ -17,7 +17,7 @@
  */
 import { describe, expect, it } from "vitest";
 import type { ProviderEvent } from "@hydra/protocol";
-import { normalize, normalizing } from "./normalize";
+import { normalize, startNormalizing } from "./normalize";
 
 const SESSION = "0199e0e7-0000-7000-8000-0000000000ff";
 const THREAD = "0199e0e7-0000-7000-8000-0000000000fe";
@@ -35,10 +35,10 @@ interface Note {
 
 const note = (method: string, params: Record<string, unknown>): Note => ({ method, params });
 
-const state = () => normalizing(SESSION, THREAD, undefined);
+const state = () => startNormalizing(SESSION, THREAD, undefined);
 
 const through = (
-  running: ReturnType<typeof normalizing>,
+  running: ReturnType<typeof startNormalizing>,
   notes: ReadonlyArray<Note>,
 ): ReadonlyArray<ProviderEvent> => notes.flatMap((frame) => normalize(running, frame));
 

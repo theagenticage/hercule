@@ -117,7 +117,7 @@ const until = async (
 };
 
 /** A fresh subscriber per session: the stream is unbounded and never replays. */
-const watching = (): Array<ProviderEvent> => {
+const collectEvents = (): Array<ProviderEvent> => {
   const seen: Array<ProviderEvent> = [];
   Effect.runFork(
     Stream.runForEach(codex.events, (event) => Effect.sync(() => void seen.push(event))),
@@ -135,7 +135,7 @@ describe.skipIf(!authed)("a real Codex session under an output schema", () => {
     outputSchema: OutputSchema,
     text: string,
   ): Promise<Extract<ProviderEvent, { _tag: "turn.completed" }>> => {
-    const seen = watching();
+    const seen = collectEvents();
     await Effect.runPromise(
       codex.startSession(
         sessionId,

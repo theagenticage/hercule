@@ -2,24 +2,23 @@
  * Agents as the API sees them: `agent.query`, `read`, `create`, `update` and
  * `delete`.
  *
- * An Agent is configuration and nothing else: a spawn copies the values it uses
- * onto the Session, and no property of a running or past session is ever read
- * back through it (ADR 0030). That is what makes an edit here safe while
- * sessions are running, and it is why a delete is refused only while a session
- * it spawned has not exited - after that the agent's id on those rows is
- * lineage, pointing at nothing anyone still has to read.
+ * An Agent is configuration and nothing else. A spawn copies the values it uses
+ * onto the Session, and nothing reads a running or past session back through
+ * the Agent (ADR 0030). Therefore an edit is safe while sessions run. A delete
+ * is refused only while a session this agent spawned has not exited. After that
+ * the agent's id on those rows is lineage only.
  *
- * Two of the four values an agent names live in other domains - a provider
- * instance and a permission profile - and both are read for what they refuse:
- * an agent that names one of them wrongly would spawn nothing and say so only
- * at the first spawn, long after the mistake was made.
+ * An agent names a provider instance and a permission profile, which are rows
+ * in other domains. Both are read at create and at update, because an agent
+ * that names a row that does not exist would spawn nothing, and the user would
+ * learn that at the first spawn instead of at the mistake.
  *
- * `unenforced` is not stored. What a provider will act on is read from its
- * declaration at every read, so the answer follows the binary rather than the
- * row that was written under an older one.
+ * `unenforced` is not stored. What a provider acts on is read from the
+ * provider's declaration at every read, so the answer follows this binary and
+ * not the row that an older binary wrote.
  *
- * Every mutation writes one event in the same transaction as the row it
- * describes. The actor is stamped here, on the event envelope.
+ * Every mutation writes one event in the transaction that writes the row. The
+ * actor is stamped here, on the event envelope.
  */
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -52,7 +51,7 @@ import { nowIso, pageInput, refuseCursor, withTransaction } from "../db";
 import { AuditLog } from "../events";
 import { PermissionProfiles, type GrantsError } from "../permissions";
 import { PluginHost } from "../plugins";
-import { providerRepository, unenforcedFieldsIn } from "../providers";
+import { providerRepository, listUnenforcedFields } from "../providers";
 import { agentRepository, type AgentEdit, type StoredAgent } from "./repository";
 
 const QueryInput = Schema.Struct(pageInput(AGENT_SORT_FIELDS));
@@ -89,22 +88,22 @@ const NO_SUCH_PROFILE = "no such permission profile";
 
 const NO_SUCH_INSTANCE = "no such provider instance";
 
-/** Why options with no model beside them are refused, and what to do about it. */
+/** Why options with no model beside them are refused, and what to send instead. */
 const NO_MODEL_FOR_OPTIONS =
-  "a model's choices are the choices that model offers, so name the model too: " +
-  "model with its current slug, or the slug you are moving it to";
+  "options are the choices of one model, so name the model too: " +
+  "send model with the slug the agent is on, or with the slug you move it to";
 
 /**
- * The one selection the record holds, folded from the two fields the API takes
- * it as. `undefined` is a call that named neither, which on an edit leaves the
- * stored selection alone and on a create is the instance's own default model.
+ * Folds the two fields the API takes, `model` and `options`, into the one
+ * selection the record holds. `undefined` is a call that named neither. On an
+ * edit that leaves the stored selection as it was. On a create it means the
+ * instance's own default model.
  *
- * Options with no model beside them are refused rather than applied to
- * whatever model the agent happens to be on: a choice belongs to the model
- * that offers it, and one carried onto another model is a value that model
- * never declared.
+ * Options without a model are refused. A choice belongs to the model that
+ * offers it. If the choice were kept and put on another model, the agent would
+ * run on a value that model never declared.
  */
-const foldedSelection = (
+const foldSelection = (
   model: string | null | undefined,
   options: ModelSelection["options"] | undefined,
 ): Effect.Effect<ModelSelection | null | undefined, Validation> => {
@@ -116,9 +115,9 @@ const foldedSelection = (
 };
 
 /**
- * How every call can refuse. `SchemaError` is the provider catalog's: reading
- * what a provider declares decodes its stored config, and every operation here
- * reads it to say what that provider will not enforce.
+ * How every call can refuse. `SchemaError` comes from the provider catalog:
+ * reading what a provider declares decodes that provider's stored config, and
+ * every operation here reads it to report `unenforced`.
  */
 type ReadError = Unauthenticated | Forbidden | Validation | SqlError | Schema.SchemaError;
 
@@ -133,36 +132,36 @@ const make = Effect.gen(function* () {
   const audit = yield* AuditLog;
 
   /**
-   * The record, with what its provider will ignore of it read fresh off that
-   * provider's declaration. The catalog is one in-memory read, so one of these
-   * answers a whole page as readily as a single agent.
+   * Composes the record from the row, and reads `unenforced` from the
+   * provider's declaration. The catalog is one read from memory, so one
+   * composer answers a whole page as well as a single agent.
    */
-  const recordReader = Effect.map(
+  const composeAgentRecord = Effect.map(
     host.providers(),
     (definitions) =>
       ({ providerId, ...agent }: StoredAgent): Agent => ({
         ...agent,
-        unenforced: unenforcedFieldsIn(definitions, providerId, agent.disallowedTools),
+        unenforced: listUnenforcedFields(definitions, providerId, agent.disallowedTools),
       }),
   );
 
   /**
-   * The provider behind the instance an agent names, refusing an instance
-   * nobody holds and one whose provider this build does not carry. What the
-   * machines hosting it can do this minute is not read: an agent is a stored
-   * configuration, not a placement.
+   * Answers which provider is behind the instance an agent names. Refuses an
+   * instance that does not exist, and an instance whose provider this build
+   * does not carry. What the machines that host the provider can do now is not
+   * read: an agent is a stored configuration, not a placement.
    */
-  const providerOf = (instanceId: string): Effect.Effect<string, WriteError> =>
+  const requireProvider = (instanceId: string): Effect.Effect<string, WriteError> =>
     Effect.gen(function* () {
-      const found = yield* instances.one(instanceId);
-      if (Option.isNone(found)) {
+      const instance = yield* instances.one(instanceId);
+      if (Option.isNone(instance)) {
         return yield* Effect.fail(
           validation([{ path: ["instanceId"], message: NO_SUCH_INSTANCE }]),
         );
       }
-      const providerId = found.value.providerId;
+      const providerId = instance.value.providerId;
       const definitions = yield* host.providers();
-      if (!definitions.some((one) => one.id === providerId)) {
+      if (!definitions.some((definition) => definition.id === providerId)) {
         return yield* Effect.fail(
           validation([
             { path: ["instanceId"], message: `this build carries no ${providerId} provider` },
@@ -175,17 +174,18 @@ const make = Effect.gen(function* () {
   /** Refuses a `permissionProfileId` naming no profile, before it is written as one. */
   const requireProfile = (profileId: string): Effect.Effect<void, WriteError> =>
     Effect.gen(function* () {
-      const found = yield* profiles.getById(profileId);
-      if (Option.isNone(found)) {
+      const profile = yield* profiles.getById(profileId);
+      if (Option.isNone(profile)) {
         return yield* Effect.fail(
           validation([{ path: ["permissionProfileId"], message: NO_SUCH_PROFILE }]),
         );
       }
     });
 
-  const one = (id: string): Effect.Effect<StoredAgent, NotFound | SqlError> =>
+  /** The stored agent, or `not_found` if no agent has this id. */
+  const requireAgent = (id: string): Effect.Effect<StoredAgent, NotFound | SqlError> =>
     Effect.flatMap(
-      agents.one(id),
+      agents.read(id),
       Option.match({
         onNone: () => Effect.fail(notFound(NO_SUCH_AGENT)),
         onSome: Effect.succeed,
@@ -205,9 +205,9 @@ const make = Effect.gen(function* () {
             direction: sort?.direction ?? DEFAULT_DIRECTION,
           }),
         );
-        const recordOf = yield* recordReader;
+        const composeRecord = yield* composeAgentRecord;
         return {
-          items: listing.items.map(recordOf),
+          items: listing.items.map(composeRecord),
           ...(listing.nextCursor === undefined ? {} : { nextCursor: listing.nextCursor }),
         };
       }),
@@ -216,8 +216,8 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         yield* requireGrant("agent.read");
         const { id } = yield* Effect.mapError(decodeIdentified(input), validationOf);
-        const recordOf = yield* recordReader;
-        return recordOf(yield* one(id));
+        const composeRecord = yield* composeAgentRecord;
+        return composeRecord(yield* requireAgent(id));
       }),
 
     /** Records a configuration sessions can be spawned from. */
@@ -225,19 +225,20 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         yield* requireGrant("agent.create");
         const decoded = yield* Effect.mapError(decodeCreate(input), validationOf);
-        const selection = yield* foldedSelection(decoded.model, decoded.options);
-        const recordOf = yield* recordReader;
+        const selection = yield* foldSelection(decoded.model, decoded.options);
+        const composeRecord = yield* composeAgentRecord;
         const stored = yield* withTransaction(
           sql,
           Effect.gen(function* () {
-            // Inside the write set, both of them: an instance or a profile
-            // read before the transaction may be deleted between the read and
-            // the insert, which would file the agent on a row that is gone.
-            const providerId = yield* providerOf(decoded.instanceId);
+            // Both reads are inside the write set. An instance or a profile
+            // read before the transaction can be deleted between that read and
+            // the insert, which would store an agent that names a row that is
+            // gone.
+            const providerId = yield* requireProvider(decoded.instanceId);
             yield* requireProfile(decoded.permissionProfileId);
-            // One clock read, inside the transaction: the row and the event
-            // that records it carry the same instant, so a fresh agent's
-            // `updatedAt` is exactly its `createdAt`.
+            // One clock read, inside the transaction. The row and the event
+            // that records the row carry the same instant, so a new agent's
+            // `updatedAt` is equal to its `createdAt`.
             const at = yield* nowIso;
             const agent = yield* agents.insert({
               providerId,
@@ -253,8 +254,8 @@ const make = Effect.gen(function* () {
             yield* audit.append({
               kind: "agent.created",
               actor: yield* currentStamp,
-              // Ids and the name only: the log is readable by every actor
-              // holding `event.read`, and an agent's prompt is its instructions.
+              // Ids and the name only. Every actor that holds `event.read`
+              // can read the log, and an agent's prompt is its instructions.
               payload: {
                 agentId: agent.id,
                 name: agent.name,
@@ -266,7 +267,7 @@ const make = Effect.gen(function* () {
             return agent;
           }),
         );
-        return recordOf(stored);
+        return composeRecord(stored);
       }),
 
     /** Changes what sessions spawned from here on will run under. */
@@ -277,7 +278,7 @@ const make = Effect.gen(function* () {
           decodeUpdate(input),
           validationOf,
         );
-        const selection = yield* foldedSelection(model, options);
+        const selection = yield* foldSelection(model, options);
         const edit: AgentEdit = {
           ...named,
           ...(selection === undefined ? {} : { model: selection }),
@@ -285,40 +286,41 @@ const make = Effect.gen(function* () {
         if (Object.keys(edit).length === 0) {
           return yield* Effect.fail(validation([{ path: [], message: "name a field to change" }]));
         }
-        const recordOf = yield* recordReader;
+        const composeRecord = yield* composeAgentRecord;
         const stored = yield* withTransaction(
           sql,
           Effect.gen(function* () {
-            // Inside the write set: a profile or an instance deleted between
-            // the check and the update would leave the agent naming a row that
-            // is gone.
-            if (edit.instanceId !== undefined) yield* providerOf(edit.instanceId);
+            // Inside the write set. A profile or an instance that is deleted
+            // between the check and the update would leave the agent naming a
+            // row that is gone.
+            if (edit.instanceId !== undefined) yield* requireProvider(edit.instanceId);
             if (edit.permissionProfileId !== undefined) {
               yield* requireProfile(edit.permissionProfileId);
             }
             const at = yield* nowIso;
-            // Read for its refusal: an id nobody holds is `not_found` rather
-            // than an update that changed no rows and said it had.
-            yield* one(id);
+            // Read for the refusal it can give. An id that no agent holds
+            // must answer `not_found`, and not an update that changed no rows
+            // and reported success.
+            yield* requireAgent(id);
             yield* agents.update(id, edit, at);
             yield* audit.append({
               kind: "agent.updated",
               actor: yield* currentStamp,
-              // Which fields moved, never what they moved to: the values are
+              // Which fields changed, never their new values. The values are
               // the agent's instructions and its configuration.
               payload: { agentId: id, changed: Object.keys(edit).sort() },
               at,
             });
-            return yield* one(id);
+            return yield* requireAgent(id);
           }),
         );
-        return recordOf(stored);
+        return composeRecord(stored);
       }),
 
     /**
-     * Removes an agent nothing is running under any more. A session it spawned
-     * keeps the id: the session is history, and its own copy of everything the
-     * agent gave it is what it runs on.
+     * Removes an agent that no session runs under any more. A session this
+     * agent spawned keeps the agent's id. The session is history, and it runs
+     * on its own copy of every value the agent gave it.
      */
     delete: (
       input: Identified,
@@ -330,12 +332,13 @@ const make = Effect.gen(function* () {
           sql,
           Effect.gen(function* () {
             const at = yield* nowIso;
-            const agent = yield* one(id);
-            const running = yield* agents.oldestRunningSessionOf(id);
+            const agent = yield* requireAgent(id);
+            const running = yield* agents.findOldestRunningSession(id);
             if (Option.isSome(running)) {
               return yield* Effect.fail(
                 invalidState(
-                  `session ${running.value} was spawned from this agent and has not exited`,
+                  `session ${running.value} was spawned from this agent and has not exited; ` +
+                    "end it first, then delete the agent",
                 ),
               );
             }

@@ -145,18 +145,20 @@ const grantOf = (requirement: Requirement): Grant | undefined => {
  * plugin actors are ungated - neither exists yet, and both are a branch here
  * rather than a rewrite when they do.
  *
- * It answers with the whole refusal rather than the missing grant so that a
- * caller is told what it is missing, and it takes the operation rather than its
- * requirement so an operation with a rule of its own can be told apart here.
+ * It answers with the whole refusal and not with the missing grant, so that a
+ * caller is told what it lacks. It takes the operation and not the
+ * operation's requirement, so that an operation with a rule of its own can be
+ * told apart here.
  *
- * `session.spawn` has three such rules, and all three are enforced in
- * `daemon/placement.ts` rather than here, because each needs the decoded
- * payload this check runs ahead of. A spawn from an Agent is open to every
- * actor holding the grant, while a Thread is the user's own, and which of the
- * two a call is asking for is in the payload. A session actor may spawn only
- * from an Agent whose permission profile grants nothing beyond its own, and
- * only at or below the access mode that Agent itself names; both need the
- * Agent row read before they can be answered.
+ * `session.spawn` has three such rules. All three are enforced in
+ * `daemon/placement.ts` and not here, because each of them needs the decoded
+ * payload, and this check runs before the decode. First: a spawn from an Agent
+ * is open to every actor that holds the grant, a Thread is the user's own, and
+ * the payload says which of the two the call asks for. Second: a session actor
+ * may spawn only from an Agent whose permission profile grants nothing beyond
+ * its own. Third: a session actor may spawn only at or below the access mode
+ * the Agent names. The second rule and the third rule both need the Agent row
+ * to be read first.
  */
 export const grantCheck = (id: OperationId, actor: Actor): Forbidden | undefined => {
   const grant = grantOf(OPERATIONS[id].requires);

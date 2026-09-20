@@ -72,7 +72,7 @@ import { SessionTokens } from "../permissions";
 import type { SecretDecryptError } from "../secrets";
 import { gitIdentityOf, type GitCredential } from "../workspaces";
 import { inputRepository, type StoredInput } from "./inputs";
-import { sessionRecordReader } from "./records";
+import { sessionRecordComposer } from "./records";
 import {
   requireSession,
   sessionRepository,
@@ -290,7 +290,7 @@ type InputError = ReadError | NotFound | InvalidState | Schema.SchemaError;
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const sessions = yield* sessionRepository;
-  const recordReader = yield* sessionRecordReader;
+  const recordComposer = yield* sessionRecordComposer;
   const inputs = yield* inputRepository;
   const one = requireSession(sessions);
   const tokens = yield* SessionTokens;
@@ -401,16 +401,20 @@ const make = Effect.gen(function* () {
           decodeQuery(input),
           validationOf,
         );
-        // One says "spawned from this agent" and the other "spawned from no
-        // agent at all": asking for both is a filter that can only be empty,
-        // and answering it would look like there is nothing rather than like
-        // the question was wrong.
+        // A Thread is a session with no Agent behind it. `agentId` asks for
+        // the sessions of one Agent, and `thread` asks for the sessions that
+        // have no Agent, so the two can never both be true of one session. A
+        // query that names both would answer an empty page, which reads as
+        // "there are none" instead of "the question is wrong".
         if (agentId !== undefined && thread !== undefined) {
           return yield* Effect.fail(
             validation([
               {
                 path: ["thread"],
-                message: "name an agent or ask for threads, not both",
+                message:
+                  "a Thread is a session with no agent, so a query cannot ask for both: " +
+                  "send agentId to list one agent's sessions, or thread to list the " +
+                  "sessions that have no agent",
               },
             ]),
           );
@@ -426,24 +430,26 @@ const make = Effect.gen(function* () {
             thread,
           }),
         );
-        const recordOf = yield* recordReader;
-        return pageOut({ ...listing, items: listing.items.map(recordOf) });
+        const composeRecord = yield* recordComposer;
+        return pageOut({ ...listing, items: listing.items.map(composeRecord) });
       }),
 
     /**
-     * The document one session's machine was told, decoded. It is what a
-     * session picking that transcript up carries on under, and it is read back
-     * rather than rebuilt so the continuation runs under what the parent ran
-     * under, down to the fields nothing else looks at.
+     * Reads back the document one session's machine was told, and decodes it.
+     * A session that picks up that session's transcript carries on under this
+     * document. It is read back rather than built again, so the continuation
+     * runs under exactly what the parent ran under, including the fields
+     * nothing else reads.
      *
-     * No grant of its own: the caller is the controller daemon sequencing a
-     * resume or a fork, and the operation it is carrying out checked its own.
+     * It requires no grant of its own. The caller is the controller daemon,
+     * which sequences a resume or a fork, and the operation it carries out
+     * checked its own grant.
      */
-    specOf: (
+    readSpec: (
       sessionId: string,
     ): Effect.Effect<SessionSpec, NotFound | SqlError | Schema.SchemaError> =>
       Effect.gen(function* () {
-        const document = yield* sessions.specDocumentOf(sessionId);
+        const document = yield* sessions.readSpecDocument(sessionId);
         if (Option.isNone(document)) return yield* Effect.fail(notFound("no such session"));
         return yield* decodeSpecDocument(document.value);
       }),
@@ -452,7 +458,7 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         yield* requireGrant("session.read");
         const { id } = yield* Effect.mapError(decodeIdentified(input), validationOf);
-        return (yield* recordReader)(yield* one(id));
+        return (yield* recordComposer)(yield* one(id));
       }),
 
     /**

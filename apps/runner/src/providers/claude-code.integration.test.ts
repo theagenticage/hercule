@@ -289,7 +289,7 @@ const contextFor = (
 });
 
 /** A fresh subscriber per session: the stream is unbounded and never replays. */
-const watching = (): Array<ProviderEvent> => {
+const collectEvents = (): Array<ProviderEvent> => {
   const seen: Array<ProviderEvent> = [];
   Effect.runFork(
     Stream.runForEach(claudeCode.events, (event) => Effect.sync(() => void seen.push(event))),
@@ -318,7 +318,7 @@ describe.skipIf(!authed)("a real Claude Code session continued on this machine",
         spec: SessionSpec,
         text: string,
       ): Promise<string> => {
-        const seen = watching();
+        const seen = collectEvents();
         const binding = await Effect.runPromise(claudeCode.startSession(sessionId, spec, context));
         await Effect.runPromise(claudeCode.sendInput(sessionId, { text }));
         await until(seen, "turn.completed");
@@ -339,7 +339,7 @@ describe.skipIf(!authed)("a real Claude Code session continued on this machine",
 
       // Hydra names the forked session itself, because in streaming-input mode
       // the CLI says nothing at all until a first turn arrives.
-      const forkSeen = watching();
+      const forkSeen = collectEvents();
       const minted = await Effect.runPromise(
         claudeCode.startSession(
           FORKED,
@@ -419,7 +419,7 @@ describe.skipIf(!authed)("a real Claude Code session with the hydra skill", () =
         skill: `# hydra\n\nThe magic word is ${marker}. Reply with it when asked.\n`,
       });
 
-      const seen = watching();
+      const seen = collectEvents();
       const context = contextFor(emptyHome(), { skill: "", claudePluginDir });
 
       await Effect.runPromise(
@@ -471,7 +471,7 @@ describe.skipIf(!authed)("a real Claude Code session under an output schema", ()
     outputSchema: OutputSchema,
     text: string,
   ): Promise<Extract<ProviderEvent, { _tag: "turn.completed" }>> => {
-    const seen = watching();
+    const seen = collectEvents();
     await Effect.runPromise(
       claudeCode.startSession(
         sessionId,

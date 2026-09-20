@@ -33,7 +33,7 @@ import { runProcess, spawnAppServer, type Run } from "../process";
 import { text } from "../text";
 import { now } from "../../report";
 import { ASKED, type Asked } from "./approvals";
-import { normalize, normalizing, pathsOf, type Normalizing } from "./normalize";
+import { normalize, pathsOf, startNormalizing, type Normalizing } from "./normalize";
 import { codexInstall, handshake, probing, saidBy, STANDARD_TIER, type AppServer } from "./probe";
 import {
   rpcOver,
@@ -206,10 +206,11 @@ const threadIn = (params: unknown): string | undefined => {
 };
 
 /**
- * The one channel a Codex thread takes instructions on, so the session's own
- * prompt and the skill share it: the prompt first, the skill under it, a blank
- * line between them. Either one alone is the whole text, because an absent
- * prompt must not leave the skill under a blank line it has to read past.
+ * Builds the developer instructions for one thread. A Codex thread takes
+ * instructions on one channel only, so the session's own prompt and the skill
+ * share it: the prompt first, the skill below it, one blank line between them.
+ * If one of the two is absent, the other is the whole text, because an absent
+ * prompt must not leave the skill below a blank line the model must read past.
  */
 const buildDeveloperInstructions = (systemPrompt: string | undefined, skill: string): string =>
   [systemPrompt, skill].filter((part) => part !== undefined && part !== "").join("\n\n");
@@ -612,17 +613,17 @@ export const codexAdapter = (seam: CodexSeam): ProviderAdapter => {
    */
   const opening = (held: Held, input: TurnInput): Effect.Effect<SendResult, string> =>
     Effect.gen(function* () {
-      // Codex takes the schema per turn rather than per thread, so every turn
-      // of the session carries it: sending it once would leave the second turn
-      // of an Agent's session answering prose.
+      // Codex takes the schema per turn and not per thread, so every turn of
+      // the session carries the schema. If it were sent once, the second turn
+      // of an Agent's session would answer in prose.
       const schema = held.state.outputSchema;
       const params: TurnStartParams = {
         threadId: held.binding.nativeSessionId,
         input: [textInput(input.text)],
         ...modelParams(input.modelSelection),
-        // Written, never read: the schema crosses the wire as the JSON the
-        // controller stored, and Codex's own JSON type is the mutable one
-        // ts-rs writes.
+        // The cast is safe because nothing here reads the value back. The
+        // schema crosses the wire as the JSON the controller stored, and
+        // Codex's own JSON type is the mutable type ts-rs writes.
         ...(schema === undefined ? {} : { outputSchema: schema as JsonValue }),
       };
       // What the turn is running under, which is what the normalizer reports on
@@ -702,9 +703,9 @@ export const codexAdapter = (seam: CodexSeam): ProviderAdapter => {
    * (spec 06 section 9.3). No `AGENTS.md` is written: the scratch directory a
    * session runs in stays empty.
    *
-   * `disallowedTools` is read nowhere in this adapter: Codex enforces no tool
-   * restriction, and the Agent and the Session both report it as unenforced, so
-   * nothing here is substituted silently.
+   * Nothing in this adapter reads `disallowedTools`. Codex enforces no tool
+   * restriction, and the Agent record and the Session record both report the
+   * field as unenforced, so no behaviour is substituted in silence.
    */
   const threadParams = (
     spec: SessionSpec,
@@ -775,7 +776,7 @@ export const codexAdapter = (seam: CodexSeam): ProviderAdapter => {
           nativeSessionId: opened,
           instanceId: spec.instanceId,
         };
-        const state = normalizing(sessionId, opened, spec.outputSchema);
+        const state = startNormalizing(sessionId, opened, spec.outputSchema);
         state.model = spec.modelSelection.model;
         sessions.set(sessionId, {
           binding,

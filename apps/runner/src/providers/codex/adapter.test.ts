@@ -1008,7 +1008,7 @@ const COMMAND: Record<string, unknown> = {
  * the completion as well: the app-server does both, so an adapter may read the
  * final message off either and this script never decides which.
  */
-const closing = (
+const completeTurn = (
   run: ReturnType<typeof driving>,
   items: ReadonlyArray<Record<string, unknown>>,
   status: "completed" | "failed" | "interrupted" = "completed",
@@ -1026,8 +1026,8 @@ const closing = (
   });
 };
 
-/** The `turn.completed` a turn that ended with these items was reported as. */
-const turnCompletedOf = async (
+/** Runs one turn that ends with these items, and answers its `turn.completed`. */
+const runTurnToCompletion = async (
   spec: SessionSpec,
   items: ReadonlyArray<Record<string, unknown>>,
   status: "completed" | "failed" | "interrupted" = "completed",
@@ -1035,7 +1035,7 @@ const turnCompletedOf = async (
   const run = driving();
   await Effect.runPromise(run.adapter.startSession(SESSION, spec, { ...run.ctx, hydraTool: TOOL }));
   await Effect.runPromise(run.adapter.sendInput(SESSION, { text: "Assess this task." }));
-  closing(run, items, status);
+  completeTurn(run, items, status);
   await until("closed the turn", () => taggedIn(run.seen, "turn.completed").length === 1);
   return taggedIn(run.seen, "turn.completed")[0]!;
 };
@@ -1061,7 +1061,7 @@ describe("a Codex session the controller spawned from an Agent", () => {
     await Effect.runPromise(run.adapter.startSession(SESSION, STRUCTURED, run.ctx));
 
     await Effect.runPromise(run.adapter.sendInput(SESSION, { text: "Assess this task." }));
-    closing(run, [agentMessage(JSON.stringify(ANSWER))]);
+    completeTurn(run, [agentMessage(JSON.stringify(ANSWER))]);
     await until("closed the first turn", () => taggedIn(run.seen, "turn.completed").length === 1);
     await Effect.runPromise(run.adapter.sendInput(SESSION, { text: "And this one." }));
 
@@ -1078,8 +1078,9 @@ describe("a Codex session the controller spawned from an Agent", () => {
 
     await Effect.runPromise(run.adapter.sendInput(SESSION, { text: "hello" }));
 
-    // Absent rather than null: a Thread answers prose, and a schema field on
-    // every turn would be this adapter saying something the spec never said.
+    // The field is absent, and is not null. A Thread answers prose, and a
+    // schema field on every turn would make this adapter say something the
+    // spec never said.
     const opened = sentOf(run.requests, "turn/start")[0] as Record<string, unknown>;
     expect("outputSchema" in opened).toBe(false);
   });
@@ -1105,18 +1106,19 @@ describe("a Codex session the controller spawned from an Agent", () => {
 
 describe("what a Codex turn under an output schema answers with", () => {
   it("reports the final agent message as the turn's result when it satisfies the schema", async () => {
-    const completed = await turnCompletedOf(STRUCTURED, [agentMessage(JSON.stringify(ANSWER))]);
+    const completed = await runTurnToCompletion(STRUCTURED, [agentMessage(JSON.stringify(ANSWER))]);
 
     expect(completed.state).toBe("completed");
     expect(completed.structuredResult).toEqual({ outcome: "ok", value: ANSWER });
   });
 
   it("reports a schema failure when the final agent message is not JSON at all", async () => {
-    const completed = await turnCompletedOf(STRUCTURED, [
+    const completed = await runTurnToCompletion(STRUCTURED, [
       agentMessage("I had a look and I would accept it."),
     ]);
 
-    // The wording is the adapter's; that there is one is the criterion.
+    // The adapter chooses the wording. The test only asserts that a reason is
+    // present.
     expect(completed.structuredResult).toEqual({
       outcome: "schema-failure",
       reason: expect.stringMatching(/\S/) as string,
@@ -1124,7 +1126,7 @@ describe("what a Codex turn under an output schema answers with", () => {
   });
 
   it("reports a schema failure naming the field when the message is JSON the schema refuses", async () => {
-    const completed = await turnCompletedOf(STRUCTURED, [
+    const completed = await runTurnToCompletion(STRUCTURED, [
       agentMessage(JSON.stringify({ verdict: "maybe", confidence: 0.9 })),
     ]);
 
@@ -1135,7 +1137,7 @@ describe("what a Codex turn under an output schema answers with", () => {
   });
 
   it("reports a schema failure saying there was no final message when the turn ended on another item", async () => {
-    const completed = await turnCompletedOf(STRUCTURED, [
+    const completed = await runTurnToCompletion(STRUCTURED, [
       agentMessage(JSON.stringify(ANSWER)),
       COMMAND,
     ]);
@@ -1150,19 +1152,20 @@ describe("what a Codex turn under an output schema answers with", () => {
   });
 
   it("says nothing about a result on a session that was never given a schema", async () => {
-    const completed = await turnCompletedOf(SPEC, [agentMessage(JSON.stringify(ANSWER))]);
+    const completed = await runTurnToCompletion(SPEC, [agentMessage(JSON.stringify(ANSWER))]);
 
-    // Absent rather than an `ok` over no schema: a Thread answers prose, and a
-    // key on every turn of every session would be a second meaning for "ok".
+    // The key is absent, and is not an `ok` over no schema. A Thread answers
+    // prose, and a key on every turn of every session would give "ok" a second
+    // meaning.
     expect("structuredResult" in completed).toBe(false);
   });
 
   it("says nothing about the schema on a turn that failed or was interrupted", async () => {
-    const failed = await turnCompletedOf(STRUCTURED, [COMMAND], "failed");
-    const interrupted = await turnCompletedOf(STRUCTURED, [COMMAND], "interrupted");
+    const failed = await runTurnToCompletion(STRUCTURED, [COMMAND], "failed");
+    const interrupted = await runTurnToCompletion(STRUCTURED, [COMMAND], "interrupted");
 
-    // The end is about the turn, not about the schema: a `schema-failure` here
-    // would read as an answer that was judged and found wanting.
+    // The end is about the turn and not about the schema. A `schema-failure`
+    // here would claim that an answer was judged and rejected.
     expect("structuredResult" in failed).toBe(false);
     expect("structuredResult" in interrupted).toBe(false);
   });
@@ -1171,7 +1174,7 @@ describe("what a Codex turn under an output schema answers with", () => {
     const run = driving();
     await Effect.runPromise(run.adapter.startSession(SESSION, STRUCTURED, run.ctx));
     await Effect.runPromise(run.adapter.sendInput(SESSION, { text: "Assess this task." }));
-    closing(run, [agentMessage(JSON.stringify(ANSWER))]);
+    completeTurn(run, [agentMessage(JSON.stringify(ANSWER))]);
     await until("closed the first turn", () => taggedIn(run.seen, "turn.completed").length === 1);
 
     await Effect.runPromise(run.adapter.sendInput(SESSION, { text: "And this one." }));
@@ -1182,12 +1185,12 @@ describe("what a Codex turn under an output schema answers with", () => {
         turn: { id: TURN, items: [], itemsView: "full", status: "inProgress" },
       },
     });
-    closing(run, []);
+    completeTurn(run, []);
     await until("closed the second turn", () => taggedIn(run.seen, "turn.completed").length === 2);
 
     // An answer that outlived its turn would report the first turn's value as
-    // the second turn's, which is a stale result nobody can tell from a fresh
-    // one.
+    // the second turn's answer. Nobody could tell that stale result from a
+    // fresh one.
     expect(taggedIn(run.seen, "turn.completed")[1]!.structuredResult).toEqual({
       outcome: "schema-failure",
       reason: "the turn ended without a final agent message",
@@ -1199,8 +1202,9 @@ describe("what a Codex turn under an output schema answers with", () => {
     await Effect.runPromise(run.adapter.startSession(SESSION, STRUCTURED, run.ctx));
     await Effect.runPromise(run.adapter.sendInput(SESSION, { text: "Assess this task." }));
 
-    // A completion whose view of its items is partial: the app-server says so
-    // itself, and a list it never promised was complete is not a turn's answer.
+    // This completion carries a partial view of its items, which the
+    // app-server states itself. A list the app-server never promised was
+    // complete is not a turn's answer.
     run.spawns[0]!.push({
       method: "turn/completed",
       params: {

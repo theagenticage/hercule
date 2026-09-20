@@ -554,8 +554,8 @@ const until = async (what: string, ready: () => boolean): Promise<void> => {
   expect(ready(), `the adapter never ${what}`).toBe(true);
 };
 
-/** Waits until the session has ended, however it ended. */
-const ends = (seen: ReadonlyArray<ProviderEvent>): Promise<void> =>
+/** Waits until the session has ended, whatever ended it. */
+const awaitSessionEnd = (seen: ReadonlyArray<ProviderEvent>): Promise<void> =>
   until("ended the session", () => seen.some((event) => event._tag === "session.exited"));
 
 const tags = (seen: ReadonlyArray<ProviderEvent>): ReadonlyArray<string> =>
@@ -820,7 +820,7 @@ describe("a Claude Code session", () => {
     await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, WORKING));
 
     await Effect.runPromise(run.adapter.stopSession(SESSION, "stopped"));
-    await ends(run.seen);
+    await awaitSessionEnd(run.seen);
 
     expect(run.closed()).toBe(1);
     const exited = run.seen.at(-1);
@@ -834,7 +834,7 @@ describe("a Claude Code session", () => {
 
     await Effect.runPromise(run.adapter.stopSession(SESSION, "inactivity_timeout"));
     await Effect.runPromise(run.adapter.stopSession(SESSION, "stopped"));
-    await ends(run.seen);
+    await awaitSessionEnd(run.seen);
 
     expect(run.closed()).toBe(1);
     const exited = run.seen.at(-1);
@@ -848,7 +848,7 @@ describe("a Claude Code session", () => {
     await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, WORKING));
 
     run.end();
-    await ends(run.seen);
+    await awaitSessionEnd(run.seen);
 
     const exited = run.seen.at(-1);
     expect(exited?._tag === "session.exited" ? exited.reason : undefined).toBe("process_exit");
@@ -859,7 +859,7 @@ describe("a Claude Code session", () => {
     await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, WORKING));
 
     run.die(new Error("the harness went away"));
-    await ends(run.seen);
+    await awaitSessionEnd(run.seen);
 
     const failure = run.seen.find((event) => event._tag === "runtime.error");
     expect(failure?._tag === "runtime.error" ? failure.message : undefined).toBe(
@@ -875,7 +875,7 @@ describe("a Claude Code session", () => {
 
     await Effect.runPromise(run.adapter.stopSession(SESSION, "stopped"));
     run.die(new Error("Query closed before response received"));
-    await ends(run.seen);
+    await awaitSessionEnd(run.seen);
 
     expect(tags(run.seen)).toEqual(["session.started", "session.exited"]);
   });
@@ -1570,7 +1570,7 @@ describe("a park that is still open when the turn or the session ends", () => {
     const { park, request } = await parked(run, "Bash", { command: "ls -la" });
 
     await Effect.runPromise(run.adapter.stopSession(SESSION, "inactivity_timeout"));
-    await ends(run.seen);
+    await awaitSessionEnd(run.seen);
 
     // A park left hanging is a promise the harness waits on for ever.
     await until("resolved the park", () => park.settled() !== undefined);
@@ -1590,7 +1590,7 @@ describe("a park that is still open when the turn or the session ends", () => {
     // Nobody asked: the harness simply reached the end of its stream with the
     // question still open.
     run.end();
-    await ends(run.seen);
+    await awaitSessionEnd(run.seen);
 
     await until("resolved the park", () => park.settled() !== undefined);
     // The harness gets a plain deny - there is no turn left to interrupt - and
@@ -1633,8 +1633,8 @@ const STRUCTURED: SessionSpec = {
 
 const ANSWER = { verdict: "accept", confidence: 0.9 };
 
-/** The `turn.completed` a scripted result closed its turn with. */
-const turnCompletedOf = async (
+/** Runs one turn that the scripted result closes, and answers its `turn.completed`. */
+const runTurnToCompletion = async (
   spec: SessionSpec,
   result: unknown,
 ): Promise<Extract<ProviderEvent, { _tag: "turn.completed" }>> => {
@@ -1684,8 +1684,9 @@ describe("a session the controller spawned from an Agent", () => {
     const run = driving();
     await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, WORKING));
 
-    // Absent, not empty: an empty `disallowedTools` or a bare preset would be
-    // this adapter saying something the spec never said.
+    // Both keys are absent, and neither is empty. An empty `disallowedTools`,
+    // or a preset with nothing appended, would make this adapter say something
+    // the spec never said.
     expect(run.options[0], "the session was never started").toBeDefined();
     const keys = Object.keys(run.options[0]!);
     expect(keys).not.toContain("systemPrompt");
@@ -1696,7 +1697,7 @@ describe("a session the controller spawned from an Agent", () => {
 
 describe("what a turn under an output schema answers with", () => {
   it("reports the harness's structured output as the turn's result when it satisfies the schema", async () => {
-    const completed = await turnCompletedOf(STRUCTURED, {
+    const completed = await runTurnToCompletion(STRUCTURED, {
       ...RESULT,
       structured_output: ANSWER,
     });
@@ -1706,7 +1707,7 @@ describe("what a turn under an output schema answers with", () => {
   });
 
   it("reports a schema failure naming the field when the harness's output violates the schema", async () => {
-    const completed = await turnCompletedOf(STRUCTURED, {
+    const completed = await runTurnToCompletion(STRUCTURED, {
       ...RESULT,
       structured_output: { verdict: "maybe", confidence: 0.9 },
     });
@@ -1718,15 +1719,15 @@ describe("what a turn under an output schema answers with", () => {
   });
 
   it("reports a schema failure naming the subtype when the harness ran out of retries", async () => {
-    const completed = await turnCompletedOf(STRUCTURED, {
+    const completed = await runTurnToCompletion(STRUCTURED, {
       ...RESULT,
       subtype: "error_max_structured_output_retries",
       is_error: true,
       errors: [],
     });
 
-    // The turn's own state stays whatever the harness reported; the result is
-    // the separate answer about the schema.
+    // The turn keeps the state the harness reported. The result is a separate
+    // answer, about the schema.
     expect(completed.state).toBe("failed");
     expect(completed.structuredResult).toEqual({
       outcome: "schema-failure",
@@ -1735,11 +1736,12 @@ describe("what a turn under an output schema answers with", () => {
   });
 
   it("reports a schema failure when a successful turn carried no structured output at all", async () => {
-    const completed = await turnCompletedOf(STRUCTURED, RESULT);
+    const completed = await runTurnToCompletion(STRUCTURED, RESULT);
 
     expect(completed.state).toBe("completed");
-    // The wording is the adapter's; that there is one is the criterion: a turn
-    // that answered nothing has to say so rather than answer an empty `ok`.
+    // The adapter chooses the wording. The test only asserts that a reason is
+    // present: a turn that answered nothing must say so, and must not answer
+    // an empty `ok`.
     expect(completed.structuredResult).toEqual({
       outcome: "schema-failure",
       reason: expect.stringMatching(/\S/) as string,
@@ -1747,20 +1749,21 @@ describe("what a turn under an output schema answers with", () => {
   });
 
   it("says nothing about the schema when the turn failed for a reason of its own", async () => {
-    const completed = await turnCompletedOf(STRUCTURED, {
+    const completed = await runTurnToCompletion(STRUCTURED, {
       ...RESULT,
       is_error: true,
       errors: ["the API refused the request"],
     });
 
-    // The failure is about the turn, not about the schema: a `schema-failure`
-    // here would read as an answer that was judged and found wanting.
+    // The failure is about the turn and not about the schema. A
+    // `schema-failure` here would claim that an answer was judged and
+    // rejected.
     expect(completed.state).toBe("failed");
     expect("structuredResult" in completed).toBe(false);
   });
 
   it("says nothing about the schema on a turn the user interrupted", async () => {
-    const completed = await turnCompletedOf(STRUCTURED, {
+    const completed = await runTurnToCompletion(STRUCTURED, {
       ...RESULT,
       terminal_reason: "aborted_tools",
     });
@@ -1770,7 +1773,7 @@ describe("what a turn under an output schema answers with", () => {
   });
 
   it("says nothing about the schema when the retries ran out on a turn that was interrupted", async () => {
-    const completed = await turnCompletedOf(STRUCTURED, {
+    const completed = await runTurnToCompletion(STRUCTURED, {
       ...RESULT,
       subtype: "error_max_structured_output_retries",
       is_error: true,
@@ -1783,10 +1786,11 @@ describe("what a turn under an output schema answers with", () => {
   });
 
   it("says nothing about a result on a session that was never given a schema", async () => {
-    const completed = await turnCompletedOf(SPEC, { ...RESULT, structured_output: ANSWER });
+    const completed = await runTurnToCompletion(SPEC, { ...RESULT, structured_output: ANSWER });
 
-    // Absent rather than an `ok` over no schema: a Thread answers prose, and a
-    // key on every turn of every session would be a second meaning for "ok".
+    // The key is absent, and is not an `ok` over no schema. A Thread answers
+    // prose, and a key on every turn of every session would give "ok" a second
+    // meaning.
     expect("structuredResult" in completed).toBe(false);
   });
 });

@@ -7,7 +7,7 @@ import { describe, expect, it } from "vitest";
 import { Schema } from "effect";
 import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import { ProviderEvent, type OutputSchema } from "@hydra/protocol";
-import { CLAUDE_SDK_MESSAGE, normalize, normalizing } from "./claude-code-normalize";
+import { CLAUDE_SDK_MESSAGE, normalize, startNormalizing } from "./claude-code-normalize";
 
 const SESSION = "0199e0e7-0000-7000-8000-0000000000ff";
 const NATIVE = "a2c71f4c-13ba-41ba-b372-49675028b0b1";
@@ -17,7 +17,7 @@ const TOOL = "toolu_016JZjZUP3FNEkwxFk3eJZao";
 /** Ids the test can read: the tenth minted id is `id-10`, in mint order. */
 const state = (outputSchema?: OutputSchema) => {
   let minted = 0;
-  return normalizing(
+  return startNormalizing(
     SESSION,
     () => `id-${(minted += 1)}`,
     () => "2026-09-07T10:51:47.000Z",

@@ -1,34 +1,34 @@
 /**
- * What a provider stores but will not act on.
+ * Which spec fields a provider stores but does not act on.
  *
- * A spec field a harness cannot honour is kept rather than dropped - a Codex
- * instance still records which tool families an agent wanted taken away - and
- * the record the caller reads says so instead of letting the harness's
- * behaviour be the first news of it. Read from the provider's own declaration
- * every time, so a binary whose adapter learned to enforce a field stops
- * saying it will not.
+ * A spec field that a harness cannot honour is kept, not dropped: a Codex
+ * instance still records which tool families an agent asked to take away. The
+ * record the caller reads reports the field, so the user does not learn it
+ * first from the harness's behaviour. The answer is read from the provider's
+ * declaration every time, so a binary whose adapter learned to enforce a field
+ * stops reporting that field.
  */
 import type { ProviderDefinition } from "@hydra/plugin-host";
 import type { UnenforcedSpecField } from "@hydra/contract";
 import type { DisallowedTool } from "@hydra/protocol";
 
 /**
- * The spec fields the provider a row names will ignore, of those the caller
- * actually set. An empty tool list is nothing to ignore, whatever the provider
- * declares, and an instance that is gone or a provider this build no longer
- * carries says nothing about what it would have enforced.
+ * Lists the spec fields that this row's provider ignores, of the fields the
+ * caller set. An empty tool list gives an empty answer, whatever the provider
+ * declares. A `providerId` of `null` is a row whose instance is gone, and a
+ * provider this build no longer carries says nothing about what it enforced,
+ * so both give an empty answer too.
  *
- * It takes the catalog rather than one declaration, so a page is answered from
- * one read of it; `null` is a row whose instance is gone; and agents and
- * sessions both read it here rather than each having their own copy, so two
- * readers of one provider can never disagree about what it will act on.
+ * It takes the whole catalog rather than one declaration, so one read of the
+ * catalog answers a whole page. Agents and sessions both call this function,
+ * so the two can never disagree about what a provider acts on.
  */
-export const unenforcedFieldsIn = (
+export const listUnenforcedFields = (
   definitions: ReadonlyArray<ProviderDefinition>,
   providerId: string | null,
   disallowedTools: ReadonlyArray<DisallowedTool>,
 ): ReadonlyArray<UnenforcedSpecField> => {
-  const definition = definitions.find((one) => one.id === providerId);
+  const definition = definitions.find((candidate) => candidate.id === providerId);
   return definition !== undefined &&
     definition.declared.disallowedTools === "unsupported" &&
     disallowedTools.length > 0

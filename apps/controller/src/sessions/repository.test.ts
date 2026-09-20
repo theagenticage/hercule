@@ -25,8 +25,9 @@ const anId = () => uuidToString(mintUuid());
 /** A session row to hang a stream on, with the shipped defaults filled in. */
 const aSession = Effect.gen(function* () {
   const sessions = yield* sessionRepository;
-  // D-21: the caller mints the id, because a spawn opens the working area in
-  // the same transaction and its branch is named after the session.
+  // The caller mints the id, not the repository. A spawn opens the working
+  // area in the same transaction, and that area's branch is named after the
+  // session, so the id must exist before the row is written.
   const id = anId();
   yield* sessions.insert({
     id,
