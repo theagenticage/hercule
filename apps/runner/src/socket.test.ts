@@ -262,7 +262,10 @@ const PROVIDERS_DIR = "/nonexistent/hercule-runner-providers";
 const SCRATCH_DIR = "/nonexistent/hercule-runner-scratch";
 const STORAGE_DIR = "/nonexistent/hercule-runner-storage";
 const BIN_DIR = "/nonexistent/hercule-runner-bin";
-const HERCULE_TOOL = { skill: "# hercule", claudePluginDir: "/nonexistent/hercule-runner-claude-plugin" };
+const HERCULE_TOOL = {
+  skill: "# hercule",
+  claudePluginDir: "/nonexistent/hercule-runner-claude-plugin",
+};
 
 /** Runs one connection to its end and reports how it ended. */
 const attempt = (

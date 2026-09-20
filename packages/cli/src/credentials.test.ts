@@ -41,14 +41,18 @@ describe("resolveCredential", () => {
 
   it("never sends the file's key to a URL from the environment", () => {
     writeCredentials({ url: "http://file", apiKey: "from-file" });
-    expect(() => resolveCredential(home, { HERCULE_API_URL: "http://env" })).toThrow(CredentialError);
+    expect(() => resolveCredential(home, { HERCULE_API_URL: "http://env" })).toThrow(
+      CredentialError,
+    );
     expect(() => resolveCredential(home, { HERCULE_API_URL: "http://env" })).toThrow(
       /HERCULE_API_URL is set but HERCULE_TOKEN is not/,
     );
   });
 
   it("refuses a lone HERCULE_API_URL even when there is no credential file at all", () => {
-    expect(() => resolveCredential(home, { HERCULE_API_URL: "http://env" })).toThrow(/HERCULE_TOKEN/);
+    expect(() => resolveCredential(home, { HERCULE_API_URL: "http://env" })).toThrow(
+      /HERCULE_TOKEN/,
+    );
   });
 
   it("ignores an empty HERCULE_API_URL, which is not a URL", () => {

@@ -59,7 +59,9 @@ const readCredentialFile = (path: string): CredentialFile | undefined => {
     throw new CredentialError(`${path} is not valid JSON. Run \`hercule login <url>\` again.`);
   }
   if (typeof parsed !== "object" || parsed === null) {
-    throw new CredentialError(`${path} is not a credential file. Run \`hercule login <url>\` again.`);
+    throw new CredentialError(
+      `${path} is not a credential file. Run \`hercule login <url>\` again.`,
+    );
   }
   const { url, apiKey } = parsed as { url?: unknown; apiKey?: unknown };
   if (typeof url !== "string" || url === "" || typeof apiKey !== "string" || apiKey === "") {
@@ -83,7 +85,9 @@ export const resolveCredential = (home: string, env: Env): Credential => {
 
   if (token !== undefined && token !== "") {
     if (envUrl === undefined || envUrl === "") {
-      throw new CredentialError("HERCULE_TOKEN is set but HERCULE_API_URL is not. Set both, or none.");
+      throw new CredentialError(
+        "HERCULE_TOKEN is set but HERCULE_API_URL is not. Set both, or none.",
+      );
     }
     return { url: envUrl, token, source: "environment" };
   }

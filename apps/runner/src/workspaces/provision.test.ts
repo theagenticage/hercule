@@ -164,8 +164,12 @@ describe("an ephemeral workspace", () => {
 
     expect(report.status).toBe("ready");
     const root = join(storageDir, "workspaces", workspaceId);
-    expect(git(join(root, "web"), "rev-parse", "--abbrev-ref", "HEAD")).toBe("hercule/run-00000001");
-    expect(git(join(root, "api"), "rev-parse", "--abbrev-ref", "HEAD")).toBe("hercule/run-00000001");
+    expect(git(join(root, "web"), "rev-parse", "--abbrev-ref", "HEAD")).toBe(
+      "hercule/run-00000001",
+    );
+    expect(git(join(root, "api"), "rev-parse", "--abbrev-ref", "HEAD")).toBe(
+      "hercule/run-00000001",
+    );
     expect(report.checkouts?.map((one) => one.branch)).toEqual([
       "hercule/run-00000001",
       "hercule/run-00000001",

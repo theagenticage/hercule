@@ -1033,7 +1033,9 @@ const runTurnToCompletion = async (
   status: "completed" | "failed" | "interrupted" = "completed",
 ): Promise<Extract<ProviderEvent, { _tag: "turn.completed" }>> => {
   const run = driving();
-  await Effect.runPromise(run.adapter.startSession(SESSION, spec, { ...run.ctx, herculeTool: TOOL }));
+  await Effect.runPromise(
+    run.adapter.startSession(SESSION, spec, { ...run.ctx, herculeTool: TOOL }),
+  );
   await Effect.runPromise(run.adapter.sendInput(SESSION, { text: "Assess this task." }));
   completeTurn(run, items, status);
   await until("closed the turn", () => taggedIn(run.seen, "turn.completed").length === 1);
@@ -1044,7 +1046,9 @@ describe("a Codex session the controller spawned from an Agent", () => {
   it("carries the agent's instructions above the skill as the thread's developer instructions", async () => {
     const { adapter, ctx, requests } = driving();
 
-    await Effect.runPromise(adapter.startSession(SESSION, STRUCTURED, { ...ctx, herculeTool: TOOL }));
+    await Effect.runPromise(
+      adapter.startSession(SESSION, STRUCTURED, { ...ctx, herculeTool: TOOL }),
+    );
 
     // Both, in that order, and nothing else: the skill is how a session learns
     // the CLI exists (spec 06 section 9.1) and dropping it for the Agent's

@@ -155,7 +155,8 @@ const ensureSetupUrl = (
       );
       yield* Effect.try({
         try: () => rmSync(paths.setupUrlFile, { force: true }),
-        catch: (cause) => new HerculeHomeError({ action: "remove", path: paths.setupUrlFile, cause }),
+        catch: (cause) =>
+          new HerculeHomeError({ action: "remove", path: paths.setupUrlFile, cause }),
       });
       return undefined;
     }

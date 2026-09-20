@@ -299,9 +299,9 @@ describe("resource.query and resource.read", () => {
       expect((await queryResources(arranged, "?kind=folder")).map((one) => one.id)).toEqual([
         notes.id,
       ]);
-      expect((await queryResources(arranged, `?projectId=${hercule}`)).map((one) => one.id)).toEqual([
-        web.id,
-      ]);
+      expect(
+        (await queryResources(arranged, `?projectId=${hercule}`)).map((one) => one.id),
+      ).toEqual([web.id]);
 
       const read = await readResource(arranged, web.id);
       expect(read).toMatchObject({

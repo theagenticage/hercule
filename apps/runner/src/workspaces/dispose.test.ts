@@ -111,7 +111,9 @@ describe("disposing a workspace that is still being provisioned", () => {
     const frame = provisionFrame({
       workspaceId,
       kind: "ephemeral",
-      checkouts: [checkout({ resourceId: id(), remote: remote.url, branch: "hercule/run-2e2e2e2e" })],
+      checkouts: [
+        checkout({ resourceId: id(), remote: remote.url, branch: "hercule/run-2e2e2e2e" }),
+      ],
     });
 
     const [, disposed] = await Promise.all([

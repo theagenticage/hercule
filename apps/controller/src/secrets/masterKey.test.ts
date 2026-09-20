@@ -157,7 +157,9 @@ describe("the keychain store", () => {
 
   it("adds the item without -U, so an existing one is never overwritten", async () => {
     const { run, calls } = runner([{ exitCode: 0, stdout: "" }]);
-    expect(await Effect.runPromise(keychainStore("/Users/x/.hercule", run).write(key))).toEqual(key);
+    expect(await Effect.runPromise(keychainStore("/Users/x/.hercule", run).write(key))).toEqual(
+      key,
+    );
     expect(calls[0]).toEqual([
       "security",
       "add-generic-password",

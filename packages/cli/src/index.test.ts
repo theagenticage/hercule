@@ -348,7 +348,9 @@ describe("a stdin field with no pipe", () => {
     const io = { ...base, isTty: () => true };
 
     expect(await main(["--home", home, "task", "create", "--title", "x"], io)).toBe(2);
-    expect(base.stderr.join("\n")).toContain('echo "<description>" | hercule task create --title x');
+    expect(base.stderr.join("\n")).toContain(
+      'echo "<description>" | hercule task create --title x',
+    );
   });
 });
 

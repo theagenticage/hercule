@@ -152,7 +152,9 @@ describe("provisioning a workspace this runner already holds", () => {
     const frame = provisionFrame({
       workspaceId,
       kind: "ephemeral",
-      checkouts: [checkout({ resourceId: id(), remote: remote.url, branch: "hercule/run-1d1d1d1d" })],
+      checkouts: [
+        checkout({ resourceId: id(), remote: remote.url, branch: "hercule/run-1d1d1d1d" }),
+      ],
     });
     const workspaces = makeWorkspaces({ storageDir });
 
@@ -177,7 +179,9 @@ describe("a workspace whose directory is gone", () => {
     const frame = provisionFrame({
       workspaceId,
       kind: "ephemeral",
-      checkouts: [checkout({ resourceId: id(), remote: remote.url, branch: "hercule/run-5e5e0000" })],
+      checkouts: [
+        checkout({ resourceId: id(), remote: remote.url, branch: "hercule/run-5e5e0000" }),
+      ],
     });
     await makeWorkspaces({ storageDir }).provision(frame);
     // Somebody cleaned up their disk, or a temporary directory was swept.

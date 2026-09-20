@@ -8,7 +8,7 @@ import prettier from "eslint-config-prettier/flat";
 const bannedEverywhere = [
   {
     name: "zod",
-    message: "Effect Schema is the only schema language in Hydra (ADR 0031).",
+    message: "Effect Schema is the only schema language in Hercule (ADR 0031).",
   },
   {
     name: "cluster",

@@ -26,4 +26,5 @@ export class HerculeHomeError extends Schema.TaggedError<HerculeHomeError>()("He
 }) {}
 
 /** Everything that can stop the controller before the database opens. */
-export type ConfigError = InvalidOptionError | ConfigFileError | ConfigValueError | HerculeHomeError;
+export type ConfigError =
+  InvalidOptionError | ConfigFileError | ConfigValueError | HerculeHomeError;

@@ -109,7 +109,10 @@ describe("the Claude plugin directory the skill is materialized into", () => {
       skill: "what the previous build said",
     });
     expect(
-      readFileSync(join(first.herculeTool.claudePluginDir, "skills", "hercule", "SKILL.md"), "utf8"),
+      readFileSync(
+        join(first.herculeTool.claudePluginDir, "skills", "hercule", "SKILL.md"),
+        "utf8",
+      ),
     ).toContain("what the previous build said");
 
     const {

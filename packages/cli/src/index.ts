@@ -271,7 +271,9 @@ const refusals = (error: ApiError): ReadonlyArray<string> => {
 const report = (error: unknown, json: boolean, io: Io): number => {
   if (error instanceof UsageError) {
     io.err(`hercule: ${error.message}`);
-    io.err(error.help === undefined ? "run `hercule --help`" : `run \`hercule ${error.help} --help\``);
+    io.err(
+      error.help === undefined ? "run `hercule --help`" : `run \`hercule ${error.help} --help\``,
+    );
     return EXIT.usage;
   }
   if (error instanceof CredentialError) {
