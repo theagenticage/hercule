@@ -3882,9 +3882,9 @@ describe("session.spawn into a workspace", () => {
   });
 
   /**
-   * D-21 F1: the branch pick is one-shot. It is what the machine switches the
-   * main workspace to before this thread first runs; replaying it on a resume
-   * would switch the branch out from under whatever the user has done in that
+   * The branch pick is used once only. The machine switches the main workspace
+   * to that branch before this thread first runs. If a resume replayed the
+   * pick, it would switch the branch under whatever the user has done in that
    * checkout since the thread last ran.
    */
   it("sends the branch pick once and never again when the thread is resumed", async () => {
@@ -3975,10 +3975,10 @@ describe("session.spawn into a workspace", () => {
   });
 
   /**
-   * D-21 F8: joining is not a way around the filing. A workspace that already
-   * stands is still a set of repos, and a thread filed under one project must
-   * not reach a repo that belongs to another just because somebody else already
-   * made a workspace holding it.
+   * Joining a workspace is not a way around the filing. A workspace that
+   * already stands is still a set of repos. A thread filed under one project
+   * must not reach a repo of another project, even if somebody else already
+   * made a workspace that holds that repo.
    */
   it("refuses joining a standing workspace whose repos are not the project's", async () => {
     await withFleet(async (arranged) => {
@@ -4012,12 +4012,12 @@ describe("session.spawn into a workspace", () => {
   });
 
   /**
-   * D-21 R7: a fork inherits its parent's workspace and its parent's project,
-   * and `openFor` holds the repos in that workspace to that project like any
-   * other opening. So a repo that has since left the project stops the fork,
-   * with the same refusal a fresh spawn would get - which is the intended
-   * behaviour: the filing is what says a thread may reach a repo, and a fork is
-   * a new thread.
+   * A fork inherits its parent's workspace and its parent's project, and
+   * `openFor` holds the repos in that workspace to that project, as it does
+   * for any other opening. A repo that has left the project since then
+   * therefore stops the fork, with the refusal a fresh spawn would also get.
+   * That is intended: the filing decides which repos a thread may reach, and a
+   * fork is a new thread.
    */
   it("refuses a fork whose parent's repo has left the project", async () => {
     await withFleet(async (arranged) => {

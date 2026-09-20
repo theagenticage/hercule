@@ -949,7 +949,7 @@ describe("hydra session list --agent", () => {
     buildAgentRecord("0192f0a1-0000-7000-8000-999911112222", "reviewer"),
   ];
 
-  const listing = (agents: ReadonlyArray<unknown>) => {
+  const stubAgentListing = (agents: ReadonlyArray<unknown>) => {
     const fetch = stubFetch((request) =>
       request.path === "/api/v1/agents" ? { items: agents } : { items: [] },
     );
@@ -960,7 +960,7 @@ describe("hydra session list --agent", () => {
   };
 
   it("resolves the agent tail and filters on the canonical id", async () => {
-    const { fetch, io } = listing(AGENTS);
+    const { fetch, io } = stubAgentListing(AGENTS);
 
     expect(
       await main(["--home", home, "session", "list", "--agent", "aaaaaaa1", "--json"], io),
@@ -971,7 +971,7 @@ describe("hydra session list --agent", () => {
   });
 
   it("answers conflict when the tail could be either of two agents", async () => {
-    const { io } = listing([
+    const { io } = stubAgentListing([
       buildAgentRecord("0192f0a1-0000-7000-8000-000011112222", "one"),
       buildAgentRecord("0192f0a1-0000-7000-8000-999911112222", "two"),
     ]);
@@ -985,7 +985,7 @@ describe("hydra session list --agent", () => {
   });
 
   it("asks for the sessions nobody drives by hand with --thread", async () => {
-    const { fetch, io } = listing(AGENTS);
+    const { fetch, io } = stubAgentListing(AGENTS);
 
     expect(await main(["--home", home, "session", "list", "--thread", "true", "--json"], io)).toBe(
       0,

@@ -40,7 +40,7 @@ import {
 } from "@hydra/protocol";
 import {
   normalize,
-  startNormalizing,
+  buildNormalizingState,
   openTurn,
   toolKind,
   type Normalizing,
@@ -810,7 +810,12 @@ export const claudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
               binding,
               input,
               stream,
-              state: startNormalizing(sessionId, () => crypto.randomUUID(), now, spec.outputSchema),
+              state: buildNormalizingState(
+                sessionId,
+                () => crypto.randomUUID(),
+                now,
+                spec.outputSchema,
+              ),
               park: undefined,
               stopping: undefined,
               model: spec.modelSelection.model,

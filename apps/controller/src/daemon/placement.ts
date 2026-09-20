@@ -46,7 +46,7 @@ import {
 import { resourceRepository } from "../resources";
 import { DRAINING, NO_SUCH_RUNNER, RETIRED, RunnerConnections, runnerRepository } from "../runners";
 import {
-  continuingSpecOf,
+  buildContinuingSpec,
   requireSession,
   sessionRecordComposer,
   SessionService,
@@ -72,11 +72,13 @@ const NO_SUCH_AGENT = "no such agent";
 
 /** Why a session may not spawn from an Agent that holds more grants than it does. */
 const NOT_ITS_GRANTS =
-  "a session may only spawn from an agent whose profile grants no more than its own";
+  "a session may only spawn from an agent whose profile grants no more than its own; " +
+  "spawn from an agent on a narrower profile, or let the user spawn this one";
 
 /** Why a session may not open a session on more than the Agent itself runs on. */
 const NOT_ITS_ACCESS_MODE =
-  "a session may only spawn from an agent at or below the access mode the agent itself names";
+  "a session may only spawn from an agent at or below the access mode the agent itself names; " +
+  "send accessMode at or below the agent's, or leave it out";
 
 /**
  * Refuses the two fields the Agent itself answers. If the call could override
@@ -103,7 +105,9 @@ const refuseAgentOwnedFields = (spawn: SessionSpawnInput): Effect.Effect<void, V
 const NO_SUCH_PROJECT_NAMED = "no such project";
 
 /** Why a Thread is not a session's to open. */
-const THREAD_IS_THE_USERS = "a Thread is the user's own, and no session may open one";
+const THREAD_IS_THE_USERS =
+  "a Thread is the user's own, and no session may open one; " +
+  "send agentId to spawn from an Agent";
 
 /** Why a session may not fork a session that is bounded by other grants. */
 const NOT_ITS_PROFILE = "a session may only continue a session on its own permission profile";
@@ -247,11 +251,13 @@ const make = Effect.gen(function* () {
     });
 
   /**
-   * Whether this actor may spawn from an Agent that this profile bounds. A
-   * session may spawn from an Agent up to the grants the session holds itself.
-   * An assistant that hands work to a narrower worker is the point of the
-   * rule. An Agent on a wider profile would be an escalation, driven by a
-   * prompt of the spawner's choosing. The user holds every grant and so passes
+   * Whether this actor may spawn from an Agent that this profile bounds.
+   *
+   * A session may spawn from an Agent only if the Agent's profile grants no
+   * more than the session holds. The rule exists so that an assistant can hand
+   * work to a worker with fewer grants. Without the rule, a session could spawn
+   * from an Agent with more grants and give it a prompt of its own, which would
+   * raise the session's own reach. The user holds every grant and so passes
    * every profile.
    *
    * The switch is closed on purpose. A kind of actor that has no rule here is
@@ -608,7 +614,7 @@ const make = Effect.gen(function* () {
           // A fork carries on under the document the parent's machine was
           // told, in the workspace and the project the parent was in. It is
           // the same piece of work, branched.
-          spec: continuingSpecOf(
+          spec: buildContinuingSpec(
             yield* sessions.readSpec(parent.id),
             yield* settings.all(),
             parent.modelSelection,

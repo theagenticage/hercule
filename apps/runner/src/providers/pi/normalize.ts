@@ -135,11 +135,14 @@ export interface Normalizing {
    */
   stopped: { readonly state: TurnState; readonly error?: string };
   /**
-   * Why the runner itself ended this turn, if it did. pi reports an abort that
-   * arrives while a tool runs as an error on the message that was in flight:
-   * "The operation was aborted". That message does not say how the turn ended.
-   * A stop the user asked for is an interrupt. A turn the runner stopped
-   * asking for an answer ran to its end, and its result reports what happened.
+   * Why the system ended this turn, if the system ended it. The system here is
+   * the runner, not pi.
+   *
+   * pi reports an abort that arrives while a tool runs as an error on the
+   * message that was in flight: "The operation was aborted". That message does
+   * not say how the turn ended. A stop the user asked for is an interrupt. A
+   * turn the system stopped asking for an answer ran to its end, and its
+   * result reports what happened.
    */
   endedBySystem: "interrupt" | "schema" | undefined;
   /**
@@ -171,7 +174,7 @@ export interface Normalizing {
 
 const zero = (): Totals => ({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0 });
 
-export const startNormalizing = (
+export const buildNormalizingState = (
   sessionId: string,
   nativeSessionId: string,
   outputSchema: OutputSchema | undefined,
@@ -273,7 +276,7 @@ const failure = (state: Normalizing, name: string, message: string): ProviderEve
 
 const readText = (value: unknown): string => (typeof value === "string" ? value : "");
 
-/** How a turn the runner ended reads, whatever pi says about the message. */
+/** How a turn the system ended reads, whatever pi says about the message. */
 const SYSTEM_ENDINGS: Readonly<
   Record<NonNullable<Normalizing["endedBySystem"]>, Normalizing["stopped"]>
 > = {

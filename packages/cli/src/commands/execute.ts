@@ -146,11 +146,10 @@ const asWritten = (command: Command, field: Field, text: string): string => {
 };
 
 /**
- * Resolves every tail among one command's fields, and answers what those
- * fields hold after that. One pass covers a field written as a bare word and a
- * field written as a flag. Where a field holds an id, how the field is spelled
- * on the command line decides nothing: not whether a tail may stand for the
- * id, and not whether a tail that cannot be resolved is refused.
+ * Resolves every tail in one command's fields to the full id. One pass handles
+ * a field written as a bare word and a field written as a flag. A tail may
+ * stand for any field that holds an id, and a tail that resolves to nothing is
+ * refused, whichever way the field was written.
  */
 const resolveTails = async (
   client: HydraClient,

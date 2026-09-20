@@ -33,7 +33,7 @@ import { runProcess, spawnAppServer, type Run } from "../process";
 import { text } from "../text";
 import { now } from "../../report";
 import { ASKED, type Asked } from "./approvals";
-import { normalize, pathsOf, startNormalizing, type Normalizing } from "./normalize";
+import { normalize, pathsOf, buildNormalizingState, type Normalizing } from "./normalize";
 import { codexInstall, handshake, probing, saidBy, STANDARD_TIER, type AppServer } from "./probe";
 import {
   rpcOver,
@@ -776,7 +776,7 @@ export const codexAdapter = (seam: CodexSeam): ProviderAdapter => {
           nativeSessionId: opened,
           instanceId: spec.instanceId,
         };
-        const state = startNormalizing(sessionId, opened, spec.outputSchema);
+        const state = buildNormalizingState(sessionId, opened, spec.outputSchema);
         state.model = spec.modelSelection.model;
         sessions.set(sessionId, {
           binding,

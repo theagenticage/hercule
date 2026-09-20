@@ -9,7 +9,7 @@
  * machine is told.
  */
 export { type StoredInput } from "./inputs";
-export { continuingSpecOf, timeoutsFrom, validatedOptions } from "./options";
+export { buildContinuingSpec, timeoutsFrom, validatedOptions } from "./options";
 export { sessionRecordComposer } from "./records";
 export { requireSession, sessionRepository, type StoredSession } from "./repository";
 export { cancelStrandedInputs, SessionService, SessionServiceLayer } from "./service";

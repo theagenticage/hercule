@@ -221,7 +221,7 @@ const make = Effect.gen(function* () {
             // yet. That is the same promise, one step earlier: an agent whose
             // profile is gone could only spawn a session that no actor can
             // act as.
-            const agent = yield* profiles.findOldestAgentUsing(input.id);
+            const agent = yield* profiles.findOldestAgentNameUnderProfile(input.id);
             if (Option.isSome(agent)) {
               return yield* Effect.fail(
                 invalidState(

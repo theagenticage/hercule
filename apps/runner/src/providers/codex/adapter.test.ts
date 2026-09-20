@@ -1086,7 +1086,7 @@ describe("a Codex session the controller spawned from an Agent", () => {
   });
 
   it("sends exactly what it sends without them when the spec takes tool families away", async () => {
-    const asked = async (spec: SessionSpec): Promise<ReadonlyArray<unknown>> => {
+    const startAndSend = async (spec: SessionSpec): Promise<ReadonlyArray<unknown>> => {
       const run = driving();
       await Effect.runPromise(
         run.adapter.startSession(SESSION, spec, { ...run.ctx, hydraTool: TOOL }),
@@ -1098,8 +1098,8 @@ describe("a Codex session the controller spawned from an Agent", () => {
     // Codex declares `disallowedTools: unsupported` (#224), and the record the
     // caller reads already says so: an adapter that invented an enforcement
     // here would be the silent substitution the spec forbids.
-    expect(await asked({ ...STRUCTURED, disallowedTools: ["edit", "shell"] })).toEqual(
-      await asked(STRUCTURED),
+    expect(await startAndSend({ ...STRUCTURED, disallowedTools: ["edit", "shell"] })).toEqual(
+      await startAndSend(STRUCTURED),
     );
   });
 });

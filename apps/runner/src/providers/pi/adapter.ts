@@ -41,7 +41,7 @@ import {
 import {
   ending,
   normalize,
-  startNormalizing,
+  buildNormalizingState,
   type Normalizing,
   type RunningTool,
 } from "./normalize";
@@ -253,11 +253,11 @@ const owesAnswer = (state: Normalizing): boolean =>
   state.turnId !== undefined &&
   state.answer === undefined &&
   state.reprompts < MAX_REPROMPTS &&
-  // A turn the runner has ended is over. To ask it again would put a question
+  // A turn the system has ended is over. To ask it again would put a question
   // to a session the user has just stopped, and the turn would never close.
   state.endedBySystem === undefined &&
-  // So is one that broke or was aborted on its way here: only a run that
-  // reached its end had the chance to answer and did not take it.
+  // A run that broke, or that was aborted on its way here, is over too. Only
+  // a run that reached its end had the chance to answer and did not take it.
   state.stopped.state === "completed";
 
 /**
@@ -431,10 +431,10 @@ export const piAdapter = (seam: PiSeam): ProviderAdapter => {
 
   /**
    * Ends the turn pi is running. The turn's completion on `events` reports the
-   * end. Why the turn was ended is recorded here rather than read back from
-   * pi: an abort that arrives while a tool runs comes back as an error on the
-   * message that was in flight, and this turn ended because the runner asked
-   * for it to end.
+   * end. Why the turn ended is recorded here as `endedBySystem` rather than
+   * read back from pi: an abort that arrives while a tool runs comes back as
+   * an error on the message that was in flight, and this turn ended because
+   * the system asked for it to end.
    */
   const abort = (
     held: Held,
@@ -772,7 +772,7 @@ export const piAdapter = (seam: PiSeam): ProviderAdapter => {
         // A resumed session carries on the native one; a fork is a session of
         // its own, minted under this session's id.
         const nativeSessionId = carried?.mode === "resume" ? carried.nativeSessionId : sessionId;
-        const state = startNormalizing(sessionId, nativeSessionId, spec.outputSchema);
+        const state = buildNormalizingState(sessionId, nativeSessionId, spec.outputSchema);
         state.model = spec.modelSelection.model;
         const rpc = rpcOver(child, (line, frame) => onLine(sessionId, line, frame));
         const binding: SessionBinding = { sessionId, nativeSessionId, instanceId: spec.instanceId };

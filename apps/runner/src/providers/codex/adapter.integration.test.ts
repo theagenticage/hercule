@@ -130,7 +130,7 @@ const IMPOSSIBLE = "0199e0e7-0000-7000-8000-00000000ff06";
 
 describe.skipIf(!authed)("a real Codex session under an output schema", () => {
   /** One session under one schema: start, ask, wait the turn out, stop. */
-  const answering = async (
+  const runTurnUnderSchema = async (
     sessionId: string,
     outputSchema: OutputSchema,
     text: string,
@@ -156,7 +156,7 @@ describe.skipIf(!authed)("a real Codex session under an output schema", () => {
   it(
     "answers the fixture schema with a value the schema accepts",
     async () => {
-      const completed = await answering(STRUCTURED, FIXTURE_SCHEMA, FIXTURE_PROMPT);
+      const completed = await runTurnUnderSchema(STRUCTURED, FIXTURE_SCHEMA, FIXTURE_PROMPT);
 
       expect(completed.structuredResult?.outcome, JSON.stringify(completed.structuredResult)).toBe(
         "ok",
@@ -170,7 +170,7 @@ describe.skipIf(!authed)("a real Codex session under an output schema", () => {
   it(
     "ends the turn with a schema failure when no value can satisfy the schema",
     async () => {
-      const completed = await answering(IMPOSSIBLE, IMPOSSIBLE_SCHEMA, IMPOSSIBLE_PROMPT);
+      const completed = await runTurnUnderSchema(IMPOSSIBLE, IMPOSSIBLE_SCHEMA, IMPOSSIBLE_PROMPT);
 
       expect(completed.structuredResult?.outcome, JSON.stringify(completed.structuredResult)).toBe(
         "schema-failure",

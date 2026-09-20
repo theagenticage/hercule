@@ -258,7 +258,7 @@ const make = Effect.gen(function* () {
      * not a running thing. If the profile were deleted, every session the
      * Agent spawned after that would carry a token that resolves to nothing.
      */
-    findOldestAgentUsing: (id: string): Effect.Effect<Option.Option<string>, SqlError> =>
+    findOldestAgentNameUnderProfile: (id: string): Effect.Effect<Option.Option<string>, SqlError> =>
       Effect.map(
         sql<{ readonly name: string }>`
           SELECT name FROM agents WHERE permission_profile_id = ${uuidFromString(id)}

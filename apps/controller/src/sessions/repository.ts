@@ -184,7 +184,7 @@ const toSession = (row: SessionRow): StoredSession => ({
       : (JSON.parse(row.disallowed_tools) as ReadonlyArray<DisallowedTool>),
 });
 
-const scopeOf = (direction: SortDirection): CursorScope => ({
+const buildCursorScope = (direction: SortDirection): CursorScope => ({
   op: "session.query",
   field: "createdAt",
   direction,
@@ -258,9 +258,10 @@ const make = Effect.gen(function* () {
 
   return {
     /**
-     * Writes the session. It answers nothing. The caller minted the id, and the
-     * row a caller passes on is the row it reads after the write, because that
-     * row carries what dispatch has already done with the session.
+     * Writes the session and returns nothing. The caller minted the id, so it
+     * already knows it. The caller must read the row back after the write,
+     * because dispatch may change the row, and the caller must pass on the
+     * current row.
      */
     insert: (session: NewSession): Effect.Effect<void, SqlError> =>
       Effect.gen(function* () {
@@ -301,7 +302,7 @@ const make = Effect.gen(function* () {
       request: SessionPageRequest,
     ): Effect.Effect<Page<StoredSession>, CursorError | SqlError> =>
       Effect.gen(function* () {
-        const scope = scopeOf(request.direction);
+        const scope = buildCursorScope(request.direction);
         const after =
           request.cursor === undefined
             ? undefined

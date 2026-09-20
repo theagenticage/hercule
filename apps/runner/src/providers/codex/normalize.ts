@@ -67,7 +67,7 @@ export interface Normalizing {
   lastCompletedItem: ThreadItem | undefined;
 }
 
-export const startNormalizing = (
+export const buildNormalizingState = (
   sessionId: string,
   threadId: string,
   outputSchema: OutputSchema | undefined,
@@ -314,14 +314,14 @@ const parseErrorBody = (
 
 /**
  * Reads what the harness said, where the harness failed on the schema itself.
- * The API refuses a schema it cannot constrain on before it samples the model,
- * and Codex then fails the turn with the whole error body as the message. That
- * body is an envelope: it names a status and a param around the one sentence a
- * reader needs. The code decides that the failure is about the schema, and the
- * sentence beside the code is what this function reports. A body this build
- * cannot parse is still a schema refusal if it names the response format that
- * carries the schema, and then there is nothing to unwrap: the whole text is
- * what the harness said.
+ *
+ * The API refuses a schema it cannot enforce before it samples the model.
+ * Codex then fails the turn and puts the whole API error body in
+ * `turn.error.message`. The body holds an error code and a sentence. The error
+ * code `invalid_json_schema` tells this function that the failure is about the
+ * schema. The sentence is what this function reports. If the body is not JSON
+ * but names the response format `codex_output_schema`, the failure is still
+ * about the schema, and the whole message is reported.
  */
 const readSchemaRefusal = (turn: TurnCompletedNotification["turn"]): string | undefined => {
   const message = turn.error?.message;

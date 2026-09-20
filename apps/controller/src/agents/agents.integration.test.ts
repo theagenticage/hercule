@@ -76,7 +76,7 @@ const withFleet = (body: (arranged: Arranged) => Promise<void>): Promise<void> =
 /** An id shaped the way every Hydra id is, that nothing holds. */
 const NOBODY = "0199e0e7-9999-7000-8000-000000000000";
 
-const instanceOf = (arranged: Arranged, providerId: string): string => {
+const findInstanceId = (arranged: Arranged, providerId: string): string => {
   const found = arranged.instances.find((instance) => instance.providerId === providerId);
   expect(found, providerId).toBeDefined();
   return found!.id;
@@ -162,7 +162,7 @@ const sessionsListed = async (
 const sessionFrom = async (arranged: Arranged, agentId: string): Promise<Session> =>
   spawned(arranged, { agentId, prompt: "assess this" });
 
-const started = async (arranged: Arranged, session: Session): Promise<void> => {
+const driveSessionToStarted = async (arranged: Arranged, session: Session): Promise<void> => {
   await startFrames(arranged, session.id, 1);
   report(arranged.wire, 1, {
     eventId: crypto.randomUUID(),
@@ -174,8 +174,8 @@ const started = async (arranged: Arranged, session: Session): Promise<void> => {
   await sessionWhen(arranged, session.id, (one) => one.status === "idle");
 };
 
-const busy = async (arranged: Arranged, session: Session): Promise<void> => {
-  await started(arranged, session);
+const driveSessionToBusy = async (arranged: Arranged, session: Session): Promise<void> => {
+  await driveSessionToStarted(arranged, session);
   report(arranged.wire, 2, {
     eventId: crypto.randomUUID(),
     sessionId: session.id,
@@ -186,7 +186,11 @@ const busy = async (arranged: Arranged, session: Session): Promise<void> => {
   await sessionWhen(arranged, session.id, (one) => one.status === "busy");
 };
 
-const exited = async (arranged: Arranged, session: Session, seq: number): Promise<void> => {
+const driveSessionToExited = async (
+  arranged: Arranged,
+  session: Session,
+  seq: number,
+): Promise<void> => {
   report(arranged.wire, seq, {
     eventId: crypto.randomUUID(),
     sessionId: session.id,
@@ -200,7 +204,7 @@ const exited = async (arranged: Arranged, session: Session, seq: number): Promis
 describe("the agent over its five operations", () => {
   it("is created with the defaults a background identity gets, reads and lists the same way, takes an update, and is gone after a delete", async () => {
     await withFleet(async (arranged) => {
-      const instanceId = instanceOf(arranged, "claude-provider");
+      const instanceId = findInstanceId(arranged, "claude-provider");
       const profile = await profileNamed(arranged, "unrestricted");
 
       const created = await agentFor(arranged, instanceId);
@@ -277,7 +281,7 @@ describe("the agent over its five operations", () => {
       const response = await createAgent(arranged, {
         name: "assessor",
         systemPrompt: "You assess tasks.",
-        instanceId: instanceOf(arranged, "claude-provider"),
+        instanceId: findInstanceId(arranged, "claude-provider"),
         permissionProfileId: profile.id,
         ...fields,
       });
@@ -307,7 +311,7 @@ describe("the agent over its five operations", () => {
     },
   ])("refuses an update naming $what, saying which", async ({ fields, names }) => {
     await withFleet(async (arranged) => {
-      const agent = await agentFor(arranged, instanceOf(arranged, "claude-provider"));
+      const agent = await agentFor(arranged, findInstanceId(arranged, "claude-provider"));
 
       const refused = await parseRefusal(await updateAgent(arranged, agent.id, fields));
       expect(refused.code).toBe("validation");
@@ -317,7 +321,7 @@ describe("the agent over its five operations", () => {
 
   it("refuses every call by an actor the profile never gave the grant to, naming it", async () => {
     await withFleet(async (arranged) => {
-      const instanceId = instanceOf(arranged, "claude-provider");
+      const instanceId = findInstanceId(arranged, "claude-provider");
       const agent = await agentFor(arranged, instanceId);
       const profile = await profileNamed(arranged, "unrestricted");
       const { token } = await agentOn(
@@ -394,7 +398,7 @@ describe("what a provider says it will not enforce", () => {
     },
   ])("says so on $what, at create and at read", async ({ provider, tools, unenforced }) => {
     await withFleet(async (arranged) => {
-      const created = await agentFor(arranged, instanceOf(arranged, provider), {
+      const created = await agentFor(arranged, findInstanceId(arranged, provider), {
         disallowedTools: tools,
       });
 
@@ -409,11 +413,11 @@ describe("deleting an agent a session still points at", () => {
     "is refused while a session is %s, naming the session",
     async (status) => {
       await withFleet(async (arranged) => {
-        const agent = await agentFor(arranged, instanceOf(arranged, "claude-provider"));
+        const agent = await agentFor(arranged, findInstanceId(arranged, "claude-provider"));
         const session = await sessionFrom(arranged, agent.id);
         if (status === "starting") await startFrames(arranged, session.id, 1);
-        if (status === "idle") await started(arranged, session);
-        if (status === "busy") await busy(arranged, session);
+        if (status === "idle") await driveSessionToStarted(arranged, session);
+        if (status === "busy") await driveSessionToBusy(arranged, session);
         await sessionWhen(arranged, session.id, (one) => one.status === status);
 
         const refused = await parseRefusal(
@@ -428,10 +432,10 @@ describe("deleting an agent a session still points at", () => {
 
   it("succeeds once every session it spawned has exited, and those sessions keep its id", async () => {
     await withFleet(async (arranged) => {
-      const agent = await agentFor(arranged, instanceOf(arranged, "claude-provider"));
+      const agent = await agentFor(arranged, findInstanceId(arranged, "claude-provider"));
       const session = await sessionFrom(arranged, agent.id);
-      await started(arranged, session);
-      await exited(arranged, session, 2);
+      await driveSessionToStarted(arranged, session);
+      await driveSessionToExited(arranged, session, 2);
 
       const deleted = await del(
         arranged.harness.base,
@@ -454,7 +458,7 @@ describe("deleting an agent a session still points at", () => {
 describe("listing sessions by what spawned them", () => {
   it("answers one agent's sessions by its id, and only the threads for a thread listing", async () => {
     await withFleet(async (arranged) => {
-      const instanceId = instanceOf(arranged, "claude-provider");
+      const instanceId = findInstanceId(arranged, "claude-provider");
       const mine = await agentFor(arranged, instanceId);
       const other = await agentFor(arranged, instanceId);
       const ours = await sessionFrom(arranged, mine.id);
@@ -475,7 +479,7 @@ describe("listing sessions by what spawned them", () => {
 
   it("refuses a listing that names an agent and asks for threads at once", async () => {
     await withFleet(async (arranged) => {
-      const agent = await agentFor(arranged, instanceOf(arranged, "claude-provider"));
+      const agent = await agentFor(arranged, findInstanceId(arranged, "claude-provider"));
 
       const response = await get(
         arranged.harness.base,
@@ -495,7 +499,7 @@ describe("the permission profile an agent spawns under", () => {
   it("refuses to delete a profile an agent names, saying which agent", async () => {
     await withFleet(async (arranged) => {
       const profile = await profileOf(arranged, "assessors", ["session.read"]);
-      const agent = await agentFor(arranged, instanceOf(arranged, "claude-provider"), {
+      const agent = await agentFor(arranged, findInstanceId(arranged, "claude-provider"), {
         name: "the-assessor",
         permissionProfileId: profile.id,
       });
@@ -528,7 +532,7 @@ describe("the permission profile an agent spawns under", () => {
   it("refuses a spawn from an agent whose profile is gone", async () => {
     await withFleet(async (arranged) => {
       const profile = await profileOf(arranged, "doomed", ["session.read"]);
-      const agent = await agentFor(arranged, instanceOf(arranged, "claude-provider"), {
+      const agent = await agentFor(arranged, findInstanceId(arranged, "claude-provider"), {
         permissionProfileId: profile.id,
       });
       await Effect.runPromise(

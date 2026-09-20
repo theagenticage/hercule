@@ -76,7 +76,7 @@ export const timeoutsFrom = (controller: ScopeSettings<"controller">): SessionSp
  * is the rule here (ADR 0030). A fork that ran under a different prompt than
  * the session it came from would be a different piece of work.
  */
-export const continuingSpecOf = (
+export const buildContinuingSpec = (
   parent: SessionSpec,
   controller: ScopeSettings<"controller">,
   modelSelection: ModelSelection,

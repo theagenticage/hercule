@@ -227,7 +227,10 @@ const readStructuredResult = (rows: ReadonlyArray<Row>): Readonly<Record<string,
 };
 
 /** One session spawned from the Agent under a schema, and the turn it answered. */
-const answering = async (schema: unknown, prompt: string): Promise<ReadonlyArray<Row>> => {
+const runSessionUnderSchema = async (
+  schema: unknown,
+  prompt: string,
+): Promise<ReadonlyArray<Row>> => {
   const spawned: Ran = await cli(
     [
       "session",
@@ -291,7 +294,7 @@ describe.skipIf(!wanted)("a session spawned from an Agent under an output schema
         return;
       }
 
-      const rows = await answering(FIXTURE_SCHEMA, FIXTURE_PROMPT);
+      const rows = await runSessionUnderSchema(FIXTURE_SCHEMA, FIXTURE_PROMPT);
 
       const result = readStructuredResult(rows) as {
         outcome: string;
@@ -304,14 +307,14 @@ describe.skipIf(!wanted)("a session spawned from an Agent under an output schema
   );
 
   it(
-    "says the schema could not be satisfied rather than answering prose",
+    "says the schema could not be satisfied rather than runSessionUnderSchema prose",
     async (ctx) => {
       if (ready === undefined) {
         ctx.skip("no login for the claude-code instance");
         return;
       }
 
-      const rows = await answering(IMPOSSIBLE_SCHEMA, IMPOSSIBLE_PROMPT);
+      const rows = await runSessionUnderSchema(IMPOSSIBLE_SCHEMA, IMPOSSIBLE_PROMPT);
 
       const result = readStructuredResult(rows) as { outcome: string; reason: string };
       expect(result.outcome, JSON.stringify(result)).toBe("schema-failure");

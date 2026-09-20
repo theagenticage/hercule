@@ -103,7 +103,7 @@ const NO_MODEL_FOR_OPTIONS =
  * offers it. If the choice were kept and put on another model, the agent would
  * run on a value that model never declared.
  */
-const foldSelection = (
+const buildModelSelection = (
   model: string | null | undefined,
   options: ModelSelection["options"] | undefined,
 ): Effect.Effect<ModelSelection | null | undefined, Validation> => {
@@ -136,7 +136,7 @@ const make = Effect.gen(function* () {
    * provider's declaration. The catalog is one read from memory, so one
    * composer answers a whole page as well as a single agent.
    */
-  const composeAgentRecord = Effect.map(
+  const agentRecordComposer = Effect.map(
     host.providers(),
     (definitions) =>
       ({ providerId, ...agent }: StoredAgent): Agent => ({
@@ -164,7 +164,12 @@ const make = Effect.gen(function* () {
       if (!definitions.some((definition) => definition.id === providerId)) {
         return yield* Effect.fail(
           validation([
-            { path: ["instanceId"], message: `this build carries no ${providerId} provider` },
+            {
+              path: ["instanceId"],
+              message:
+                `this build carries no ${providerId} provider; ` +
+                "name an instance of a provider this build carries",
+            },
           ]),
         );
       }
@@ -205,7 +210,7 @@ const make = Effect.gen(function* () {
             direction: sort?.direction ?? DEFAULT_DIRECTION,
           }),
         );
-        const composeRecord = yield* composeAgentRecord;
+        const composeRecord = yield* agentRecordComposer;
         return {
           items: listing.items.map(composeRecord),
           ...(listing.nextCursor === undefined ? {} : { nextCursor: listing.nextCursor }),
@@ -216,7 +221,7 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         yield* requireGrant("agent.read");
         const { id } = yield* Effect.mapError(decodeIdentified(input), validationOf);
-        const composeRecord = yield* composeAgentRecord;
+        const composeRecord = yield* agentRecordComposer;
         return composeRecord(yield* requireAgent(id));
       }),
 
@@ -225,8 +230,8 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         yield* requireGrant("agent.create");
         const decoded = yield* Effect.mapError(decodeCreate(input), validationOf);
-        const selection = yield* foldSelection(decoded.model, decoded.options);
-        const composeRecord = yield* composeAgentRecord;
+        const selection = yield* buildModelSelection(decoded.model, decoded.options);
+        const composeRecord = yield* agentRecordComposer;
         const stored = yield* withTransaction(
           sql,
           Effect.gen(function* () {
@@ -278,7 +283,7 @@ const make = Effect.gen(function* () {
           decodeUpdate(input),
           validationOf,
         );
-        const selection = yield* foldSelection(model, options);
+        const selection = yield* buildModelSelection(model, options);
         const edit: AgentEdit = {
           ...named,
           ...(selection === undefined ? {} : { model: selection }),
@@ -286,7 +291,7 @@ const make = Effect.gen(function* () {
         if (Object.keys(edit).length === 0) {
           return yield* Effect.fail(validation([{ path: [], message: "name a field to change" }]));
         }
-        const composeRecord = yield* composeAgentRecord;
+        const composeRecord = yield* agentRecordComposer;
         const stored = yield* withTransaction(
           sql,
           Effect.gen(function* () {

@@ -151,7 +151,10 @@ const elementOf = (input: Ast): Ast | undefined => {
   return list?.rest?.[0];
 };
 
-/** The title on the contract's `Id` check. The wire has this one id shape. */
+/**
+ * The title the contract puts on its `Id` schema. Every id on the wire is a
+ * uuidv7, so a schema with this title is the one shape that holds a Hydra id.
+ */
 const UUID = "uuidv7";
 
 /**

@@ -392,8 +392,8 @@ const ANSWER = { verdict: "accept", confidence: 0.9 };
 /** pi's own id for the call that answered. */
 const SUBMIT_CALL = "call-submit-1";
 
-/** A session whose pi is running a turn, which is where a result is produced. */
-const prompted = async (
+/** Starts a session and opens a turn on it, which is where a result is produced. */
+const openTurn = async (
   spec: SessionSpec = STRUCTURED,
 ): Promise<ReturnType<typeof driving> & { readonly child: Spawn }> => {
   const run = await started({}, spec);
@@ -420,8 +420,8 @@ const submitAnswer = (child: Spawn, args: Record<string, unknown>): void => {
   });
 };
 
-/** pi refusing a call whose arguments its own validator would not accept. */
-const refused = (child: Spawn, callId: string, args: Record<string, unknown>): void => {
+/** Reports pi refusing a call whose arguments its own validator would not accept. */
+const refuseAnswer = (child: Spawn, callId: string, args: Record<string, unknown>): void => {
   child.push({
     type: "tool_execution_start",
     toolCallId: callId,
@@ -531,7 +531,7 @@ describe("the pi a session under an Agent is launched as", () => {
 
 describe("what a pi turn under an output schema answers with", () => {
   it("reports the arguments the tool was called with as the turn's result", async () => {
-    const run = await prompted();
+    const run = await openTurn();
 
     submitAnswer(run.child, ANSWER);
     run.child.push({ type: "agent_settled" });
@@ -544,7 +544,7 @@ describe("what a pi turn under an output schema answers with", () => {
   });
 
   it("reports a schema failure naming the field when the arguments violate the schema", async () => {
-    const run = await prompted();
+    const run = await openTurn();
 
     submitAnswer(run.child, { verdict: "maybe", confidence: 0.9 });
     run.child.push({ type: "agent_settled" });
@@ -557,7 +557,7 @@ describe("what a pi turn under an output schema answers with", () => {
   });
 
   it("asks again, inside the same turn, when the agent settled without calling the tool", async () => {
-    const run = await prompted();
+    const run = await openTurn();
 
     run.child.push({ type: "agent_settled" });
 
@@ -572,7 +572,7 @@ describe("what a pi turn under an output schema answers with", () => {
   });
 
   it("gives up after the second re-prompt and says the tool was never called", async () => {
-    const run = await prompted();
+    const run = await openTurn();
 
     run.child.push({ type: "agent_settled" });
     await until("asked again", () => sentOf(run.sent, "prompt").length === 2);
@@ -591,13 +591,13 @@ describe("what a pi turn under an output schema answers with", () => {
   });
 
   it("stops the turn once pi has refused enough answers, and reports the last one", async () => {
-    const run = await prompted();
+    const run = await openTurn();
 
     // pi hands a call whose arguments its schema refuses back to the model as
     // the call's own result, and a model that cannot satisfy the schema
     // answers that complaint for as long as it is let to.
     for (const attempt of [1, 2, 3]) {
-      refused(run.child, `call-refused-${String(attempt)}`, { verdict: "maybe" });
+      refuseAnswer(run.child, `call-refused-${String(attempt)}`, { verdict: "maybe" });
     }
     await until("ended pi's run", () => sentOf(run.sent, "abort").length === 1);
     run.child.push({ type: "agent_settled" });
@@ -615,7 +615,7 @@ describe("what a pi turn under an output schema answers with", () => {
   });
 
   it("says nothing about a result, and never asks again, on a turn the user stopped", async () => {
-    const run = await prompted();
+    const run = await openTurn();
 
     await Effect.runPromise(run.adapter.interrupt(SESSION));
     endRun(run.child, { stopReason: "aborted" });
@@ -630,7 +630,7 @@ describe("what a pi turn under an output schema answers with", () => {
   });
 
   it("says nothing about a result on a turn that failed for its own reasons", async () => {
-    const run = await prompted();
+    const run = await openTurn();
 
     endRun(run.child, {
       stopReason: "error",
@@ -646,7 +646,7 @@ describe("what a pi turn under an output schema answers with", () => {
   });
 
   it("says nothing about a result, and never asks again, on a session with no schema", async () => {
-    const run = await prompted(SPEC);
+    const run = await openTurn(SPEC);
 
     run.child.push({ type: "agent_settled" });
 

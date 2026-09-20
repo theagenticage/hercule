@@ -49,7 +49,7 @@ const liveContext = (secrets: Readonly<Record<string, string>>): ProviderRunnerC
 const specFor = (model: string): SessionSpec => ({
   ...SPEC,
   modelSelection: { model, options: { thinking: "low" } },
-  // No approvals to answer: this case is about the models answering at all.
+  // No approvals to answer: this case is about the models runTurnUnderSchema at all.
   accessMode: "full-access",
 });
 
@@ -138,7 +138,7 @@ const STRUCTURED_MODEL = "glm-5.3-flash";
  * Every run gets its own session and its own directories, so the second case
  * is never answered out of the first one's transcript.
  */
-const answering = async (
+const runTurnUnderSchema = async (
   outputSchema: OutputSchema,
   text: string,
 ): Promise<Extract<ProviderEvent, { _tag: "turn.completed" }>> => {
@@ -170,7 +170,7 @@ describe.skipIf(binary === undefined || key === "")(
     it(
       "answers the fixture schema through the tool, with a value the schema accepts",
       async () => {
-        const turn = await answering(FIXTURE_SCHEMA, FIXTURE_PROMPT);
+        const turn = await runTurnUnderSchema(FIXTURE_SCHEMA, FIXTURE_PROMPT);
 
         expect(turn.structuredResult?.outcome, JSON.stringify(turn.structuredResult)).toBe("ok");
         const answer = turn.structuredResult as { outcome: "ok"; value: { verdict?: unknown } };
@@ -182,7 +182,7 @@ describe.skipIf(binary === undefined || key === "")(
     it(
       "ends the turn with a schema failure when no value can satisfy the schema",
       async () => {
-        const turn = await answering(IMPOSSIBLE_SCHEMA, IMPOSSIBLE_PROMPT);
+        const turn = await runTurnUnderSchema(IMPOSSIBLE_SCHEMA, IMPOSSIBLE_PROMPT);
 
         expect(turn.structuredResult?.outcome, JSON.stringify(turn.structuredResult)).toBe(
           "schema-failure",

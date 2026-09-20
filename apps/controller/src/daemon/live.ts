@@ -43,7 +43,7 @@ import type { PluginHost } from "../plugins";
 import { providerRepository, resolvedInstance } from "../providers";
 import { RunnerConnections } from "../runners";
 import {
-  continuingSpecOf,
+  buildContinuingSpec,
   requireSession,
   sessionRecordComposer,
   SessionService,
@@ -302,7 +302,7 @@ const make = Effect.gen(function* () {
                   ? undefined
                   : JSON.stringify(
                       encodeSpec(
-                        continuingSpecOf(
+                        buildContinuingSpec(
                           yield* sessions.readSpec(id),
                           yield* settings.all(),
                           modelSelection,

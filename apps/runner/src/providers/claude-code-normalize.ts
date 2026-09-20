@@ -70,7 +70,7 @@ export interface Normalizing {
   readonly tools: Map<string, ItemKind>;
 }
 
-export const startNormalizing = (
+export const buildNormalizingState = (
   sessionId: string,
   mint: () => string,
   now: () => string,
@@ -140,7 +140,7 @@ const TRIMMED: ReadonlySet<string> = new Set([
 ]);
 
 /** Cuts text to the length one protocol message may carry. */
-const cutToMessage = (value: string): string => value.slice(0, MAX_MESSAGE_LENGTH);
+const cutToMessageLength = (value: string): string => value.slice(0, MAX_MESSAGE_LENGTH);
 
 /**
  * A real round-trip, not a cast: one `undefined` property anywhere in a vendor
@@ -430,7 +430,9 @@ const onUser = (
             ? {}
             : {
                 content:
-                  typeof block.content === "string" ? cutToMessage(block.content) : block.content,
+                  typeof block.content === "string"
+                    ? cutToMessageLength(block.content)
+                    : block.content,
               }),
         }),
       );
@@ -439,7 +441,7 @@ const onUser = (
 };
 
 /** Aborts are the one terminal reason that is neither success nor failure. */
-const stateOf = (sdk: Extract<SDKMessage, { type: "result" }>): TurnState => {
+const readTurnState = (sdk: Extract<SDKMessage, { type: "result" }>): TurnState => {
   if (sdk.terminal_reason?.startsWith("aborted") === true) return "interrupted";
   return sdk.subtype === "success" && !sdk.is_error ? "completed" : "failed";
 };
@@ -450,7 +452,7 @@ const stateOf = (sdk: Extract<SDKMessage, { type: "result" }>): TurnState => {
  * `modelUsage` and `total_cost_usd` are cumulative across turns, which is what
  * the snapshot is pinned to be (spec 06 section 6.6).
  */
-const usageOf = (sdk: Extract<SDKMessage, { type: "result" }>): Usage => {
+const readUsage = (sdk: Extract<SDKMessage, { type: "result" }>): Usage => {
   const models = Object.values(sdk.modelUsage);
   const total = (read: (used: (typeof models)[number]) => number): number =>
     models.reduce((sum, used) => sum + count(read(used)), 0);
@@ -471,8 +473,8 @@ const usageOf = (sdk: Extract<SDKMessage, { type: "result" }>): Usage => {
  */
 const wentWrong = (sdk: Extract<SDKMessage, { type: "result" }>): string => {
   if (sdk.subtype !== "success" && sdk.errors.length > 0)
-    return cutToMessage(sdk.errors.join("; "));
-  if (sdk.subtype === "success" && sdk.result !== "") return cutToMessage(sdk.result);
+    return cutToMessageLength(sdk.errors.join("; "));
+  if (sdk.subtype === "success" && sdk.result !== "") return cutToMessageLength(sdk.result);
   return sdk.subtype;
 };
 
@@ -524,8 +526,8 @@ const onResult = (
   out: Emit,
 ): void => {
   const turnId = inTurn(state, out);
-  const usage = usageOf(sdk);
-  const turnState = stateOf(sdk);
+  const usage = readUsage(sdk);
+  const turnState = readTurnState(sdk);
   const structuredResult = judgeTurn(state, sdk, turnState);
   out.push({
     _tag: "session.usage.updated",
@@ -569,7 +571,7 @@ const onSystem = (
         sessionId: state.sessionId,
         at: state.now(),
         ...(state.turnId === undefined ? {} : { turnId: state.turnId }),
-        message: cutToMessage(
+        message: cutToMessageLength(
           `retrying after ${sdk.error}: attempt ${sdk.attempt} of ${sdk.max_retries}`,
         ),
       });
