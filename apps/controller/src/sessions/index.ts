@@ -11,6 +11,11 @@
 export { type StoredInput } from "./inputs";
 export { buildContinuingSpec, timeoutsFrom, validatedOptions } from "./options";
 export { sessionRecordComposer } from "./records";
-export { requireSession, sessionRepository, type StoredSession } from "./repository";
+export {
+  LIVE_SESSION_STATUSES,
+  requireSession,
+  sessionRepository,
+  type StoredSession,
+} from "./repository";
 export { cancelStrandedInputs, SessionService, SessionServiceLayer } from "./service";
 export { headOfTranscript, sessionExists, transcriptRowsAfter } from "./transcript-log";

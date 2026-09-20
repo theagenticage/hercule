@@ -1,11 +1,15 @@
 /**
- * Permission profiles as the API sees them: `profile.query`, `read`, `create`,
- * `update` and `delete`.
+ * Permission profiles as the API sees them: `profile.query`, `read`, `create`
+ * and `update`, and the delete this domain's own rules allow.
  *
  * The three shipped profiles are editable and not deletable. Editing one is an
  * ordinary update - the user is meant to be able to widen or narrow what an
  * assistant may do - but deleting one would leave the agents that reference it
  * pointing at nothing, so it is `invalid_state` rather than a cascade.
+ *
+ * `profile.delete` itself is the controller daemon's `deleteProfile`: the
+ * refusals it gives also read the sessions and the agents that hold the
+ * profile, and those rows belong to other domains.
  *
  * A name is the key the user knows a profile by, so a name another profile
  * already holds is `conflict` rather than a silently disambiguated second
@@ -65,6 +69,29 @@ const make = Effect.gen(function* () {
   const profiles = yield* PermissionProfiles;
   const tokens = yield* SessionTokens;
   const audit = yield* AuditLog;
+
+  /**
+   * The profile this id names, if this domain's own rules allow it to be
+   * deleted. A shipped profile is `invalid_state`: it is part of what Hydra
+   * ships, and the user's way to change it is to edit it.
+   *
+   * What else holds the profile - a live session, an Agent - is read by the
+   * controller daemon's `deleteProfile`, because those rows belong to other
+   * domains. This answers only what the permissions domain knows.
+   */
+  const requireDeletable = (
+    id: string,
+  ): Effect.Effect<Profile, NotFound | InvalidState | GrantsError | SqlError> =>
+    Effect.gen(function* () {
+      const found = yield* profiles.getById(id);
+      if (Option.isNone(found)) return yield* Effect.fail(notFound(NO_SUCH_PROFILE));
+      if (found.value.shipped) {
+        return yield* Effect.fail(
+          invalidState(`${found.value.name} is a profile Hydra ships; it cannot be deleted.`),
+        );
+      }
+      return found.value;
+    });
 
   return {
     /** Every profile, shipped ones included, by name. */
@@ -182,64 +209,29 @@ const make = Effect.gen(function* () {
         );
       }),
 
+    requireDeletable,
+
     /**
-     * Deletes a profile the user made. A shipped profile is `invalid_state`:
-     * it is part of what Hydra ships, and the user's way to change it is to
-     * edit it.
+     * Deletes a profile after this domain's own checks, and stamps it. The
+     * caller is the controller daemon's `deleteProfile`, which enforces the
+     * grant and refuses a profile another domain's rows still hold.
      */
     delete: (input: {
       readonly id: string;
-    }): Effect.Effect<
-      Record<string, never>,
-      Unauthenticated | Forbidden | NotFound | InvalidState | GrantsError | SqlError
-    > =>
-      Effect.gen(function* () {
-        yield* requireGrant("profile.delete");
-        return yield* withTransaction(
-          sql,
-          Effect.gen(function* () {
-            const found = yield* profiles.getById(input.id);
-            if (Option.isNone(found)) return yield* Effect.fail(notFound(NO_SUCH_PROFILE));
-            if (found.value.shipped) {
-              return yield* Effect.fail(
-                invalidState(`${found.value.name} is a profile Hydra ships; it cannot be deleted.`),
-              );
-            }
-            // A session is bounded by the grants it copied from this row for as
-            // long as it runs. Deleting it underneath one would kill that
-            // session's credential without saying so, so the delete waits for
-            // the sessions to end rather than the sessions for the delete.
-            if (yield* profiles.heldByLiveSession(input.id)) {
-              return yield* Effect.fail(
-                invalidState(
-                  `${found.value.name} is carried by a session that has not exited; ` +
-                    "it can be deleted once they have.",
-                ),
-              );
-            }
-            // An Agent names the profile for the sessions it has not spawned
-            // yet. That is the same promise, one step earlier: an agent whose
-            // profile is gone could only spawn a session that no actor can
-            // act as.
-            const agent = yield* profiles.findOldestAgentNameUnderProfile(input.id);
-            if (Option.isSome(agent)) {
-              return yield* Effect.fail(
-                invalidState(
-                  `the agent ${agent.value} spawns its sessions under ${found.value.name}; ` +
-                    "point that agent at another profile first, then delete this one",
-                ),
-              );
-            }
-            yield* profiles.delete(input.id);
-            yield* audit.append({
-              kind: "profile.deleted",
-              actor: yield* currentStamp,
-              payload: { id: found.value.id, name: found.value.name },
-            });
-            return {};
-          }),
-        );
-      }),
+    }): Effect.Effect<Record<string, never>, NotFound | InvalidState | GrantsError | SqlError> =>
+      withTransaction(
+        sql,
+        Effect.gen(function* () {
+          const profile = yield* requireDeletable(input.id);
+          yield* profiles.delete(profile.id);
+          yield* audit.append({
+            kind: "profile.deleted",
+            actor: yield* currentStamp,
+            payload: { id: profile.id, name: profile.name },
+          });
+          return {};
+        }),
+      ),
   };
 });
 

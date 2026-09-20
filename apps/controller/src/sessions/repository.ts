@@ -17,7 +17,13 @@ import type {
   OpenRequest,
   ProviderEvent,
 } from "@hydra/protocol";
-import { notFound, type NotFound, type SessionStatus, type SortDirection } from "@hydra/contract";
+import {
+  notFound,
+  SESSION_STATUSES,
+  type NotFound,
+  type SessionStatus,
+  type SortDirection,
+} from "@hydra/contract";
 import {
   decodeCursor,
   decodeIdCursor,
@@ -98,6 +104,17 @@ export interface NewSession {
   readonly at: string;
 }
 
+/**
+ * Every status of a session that is still live: one that has not exited. A live
+ * session holds what it was spawned with - a machine, a working area and a
+ * credential bounded by the grants it copied - so what it carries cannot be
+ * deleted underneath it. Derived from the status vocabulary, so a status added
+ * later is live until the session exits.
+ */
+export const LIVE_SESSION_STATUSES: ReadonlyArray<SessionStatus> = SESSION_STATUSES.filter(
+  (status) => status !== "exited",
+);
+
 export interface SessionPageRequest {
   readonly limit: number;
   readonly cursor: string | undefined;
@@ -105,6 +122,7 @@ export interface SessionPageRequest {
   readonly status: SessionStatus | ReadonlyArray<SessionStatus> | undefined;
   readonly runnerId: string | undefined;
   readonly agentId: string | undefined;
+  readonly permissionProfileId: string | undefined;
   /** `true` lists the sessions with no agent behind them; `false` lists the rest. */
   readonly thread: boolean | undefined;
 }
@@ -320,6 +338,9 @@ const make = Effect.gen(function* () {
         }
         if (request.agentId !== undefined) {
           clauses.push(sql`agent_id = ${uuidFromString(request.agentId)}`);
+        }
+        if (request.permissionProfileId !== undefined) {
+          clauses.push(sql`permission_profile_id = ${uuidFromString(request.permissionProfileId)}`);
         }
         if (request.thread !== undefined) {
           clauses.push(request.thread ? sql`agent_id IS NULL` : sql`agent_id IS NOT NULL`);

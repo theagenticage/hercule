@@ -233,6 +233,7 @@ const RESOLVES: Record<string, string> = {
   "connection.delete id": "connection.query",
   "connection.setCredentials id": "connection.query",
 
+  "agent.query permissionProfileId": "profile.query",
   "agent.read id": "agent.query",
   "agent.create instanceId": "provider.query",
   "agent.create permissionProfileId": "profile.query",
@@ -242,6 +243,7 @@ const RESOLVES: Record<string, string> = {
   "agent.delete id": "agent.query",
 
   "session.query agentId": "agent.query",
+  "session.query permissionProfileId": "profile.query",
   "session.query runnerId": "runner.query",
   "session.spawn agentId": "agent.query",
   "session.spawn instanceId": "provider.query",

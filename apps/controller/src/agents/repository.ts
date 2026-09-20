@@ -4,14 +4,8 @@
  * service's questions.
  *
  * A listing is one walk: a keyset over `created_at` and the id, which the index
- * on `agents` serves. There is no filter and no search, so a second walk is not
- * necessary.
- *
- * `findOldestRunningSession` reads the sessions table instead of this one. A
- * delete must ask whether a session this agent spawned still runs. The agents
- * domain may not import the sessions domain, so it asks the database directly.
- * The session listing asks after the provider instance behind a session in the
- * same way.
+ * on `agents` serves. The permission profile narrows that walk; there is no
+ * search, so a second walk is not necessary.
  */
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
@@ -73,6 +67,8 @@ export interface AgentPageRequest {
   readonly limit: number;
   readonly cursor: string | undefined;
   readonly direction: SortDirection;
+  /** Only the agents that spawn their sessions under this profile. */
+  readonly permissionProfileId: string | undefined;
 }
 
 interface AgentRow {
@@ -197,8 +193,12 @@ const make = Effect.gen(function* () {
           after === undefined ? undefined : [after[0], uuidFromString(after[1])],
           request.direction,
         );
+        const clauses = [keyset];
+        if (request.permissionProfileId !== undefined) {
+          clauses.push(sql`permission_profile_id = ${uuidFromString(request.permissionProfileId)}`);
+        }
         const rows = yield* sql<AgentRow>`
-          SELECT ${sql.literal(COLUMNS)} FROM agents WHERE ${keyset} ${order}
+          SELECT ${sql.literal(COLUMNS)} FROM agents WHERE ${sql.and(clauses)} ${order}
           LIMIT ${request.limit + 1}
         `;
         return yield* pageOf(
@@ -208,21 +208,6 @@ const make = Effect.gen(function* () {
           (last) => encodeCursor(scope, last.createdAt, last.id),
         );
       }),
-
-    /**
-     * The oldest session this agent spawned that has not exited, if there is
-     * one. A delete is refused while such a session exists. The id is answered
-     * so that the refusal can name the session the user must end first.
-     */
-    findOldestRunningSession: (agentId: string): Effect.Effect<Option.Option<string>, SqlError> =>
-      Effect.map(
-        sql<{ readonly id: Uint8Array }>`
-          SELECT id FROM sessions
-          WHERE agent_id = ${uuidFromString(agentId)} AND status <> 'exited'
-          ORDER BY created_at, id LIMIT 1
-        `,
-        (rows) => Option.map(Option.fromNullishOr(rows[0]), (row) => uuidToString(row.id)),
-      ),
   };
 });
 

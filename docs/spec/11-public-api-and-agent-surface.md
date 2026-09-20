@@ -160,7 +160,7 @@ Semantics: [./06-providers.md](./06-providers.md), [./12-assistants.md](./12-ass
 
 | Operation | Input | Grant | Route |
 |---|---|---|---|
-| `session.query` | `{ status?, agentId?, thread?, assistantId?, runnerId?, runId?, actor?, since?, until? }` (`thread: true` = sessions with no agent) | `session.read` | `GET /sessions` |
+| `session.query` | `{ status?, agentId?, permissionProfileId?, thread?, assistantId?, runnerId?, runId?, actor?, since?, until? }` (`thread: true` = sessions with no agent; `permissionProfileId` answers the sessions carrying one Permission Profile, which is what a refused `profile.delete` is about - *Amended 2026-09-20, [#76](https://github.com/rogierpennink/hydra/issues/76)*) | `session.read` | `GET /sessions` |
 | `session.read` | `{ sessionId }` (the record: status, agent, runner, workspace, usage) | `session.read` | `GET /sessions/{id}` |
 | `session.spawn` | `{ agentId?, prompt, instanceId?, model?, options?, accessMode?, workspace? }` -> `{ sessionId }`; without `agentId` the session is a Thread built from the `thread.*` settings plus the overrides given, allowed for actor `user` only (`forbidden` otherwise; [./02-domain-model.md](./02-domain-model.md) Thread) | `session.spawn` | `POST /sessions` |
 | `session.continue` | `{ sessionId, mode: ~~"resume" \|~~ "fork", prompt }` -> the new `Session` | `session.spawn` | `POST /sessions/{id}/continue` |
@@ -320,7 +320,7 @@ Semantics: [./12-assistants.md](./12-assistants.md).
 
 | Operation | Input | Grant | Route |
 |---|---|---|---|
-| `agent.query` / `agent.read` | | `agent.read` | `GET /agents[/{id}]` |
+| `agent.query` / `agent.read` | `agent.query` takes `{ permissionProfileId? }`: the Agents that spawn their sessions under one Permission Profile, which is what a refused `profile.delete` is about (*Amended 2026-09-20, [#76](https://github.com/rogierpennink/hydra/issues/76)*) | `agent.read` | `GET /agents[/{id}]` |
 | `agent.create` / `update` / `delete` | `name`, `systemPrompt`, `instanceId`, `permissionProfileId`, `accessMode?`, `model?`, `options?` (the model's own choices; the two are one `ModelSelection` on the record, and one flag each on the CLI, exactly as `session.spawn` spells them - *Amended 2026-09-19, [#76](https://github.com/rogierpennink/hydra/issues/76)*), ~~`mcpServers?`~~ (deferred to [#222](https://github.com/rogierpennink/hydra/issues/222); the Agent as shipped has no such field - *Amended 2026-09-19, [#76](https://github.com/rogierpennink/hydra/issues/76)*), `disallowedTools?` ([./02-domain-model.md](./02-domain-model.md) Agent); assigning a permission profile is an `agent.update` and affects sessions spawned afterwards; `delete` is `invalid_state` while a non-exited session references the agent | `agent.write` | `POST` / `PATCH` / `DELETE /agents[/{id}]` |
 | `assistant.query` / `assistant.read` | | `agent.read` | `GET /assistants[/{id}]` |
 | `assistant.create` / `update` / `delete` | an agent plus `heartbeat { enabled, schedule, timezone?, prompt, target }`, `rotation { contextFraction, maxContextTokens, dailyAt, timezone? }`, `reply`, `accessMode` ([./12-assistants.md](./12-assistants.md) section 1); `delete` is the confirmed action that deletes memory and bindings | `agent.write` | `POST` / `PATCH` / `DELETE /assistants[/{id}]` |

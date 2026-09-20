@@ -397,10 +397,8 @@ const make = Effect.gen(function* () {
     query: (input: QueryInput): Effect.Effect<SessionPage, ReadError> =>
       Effect.gen(function* () {
         yield* requireGrant("session.query");
-        const { limit, cursor, sort, status, runnerId, agentId, thread } = yield* Effect.mapError(
-          decodeQuery(input),
-          validationOf,
-        );
+        const { limit, cursor, sort, status, runnerId, agentId, permissionProfileId, thread } =
+          yield* Effect.mapError(decodeQuery(input), validationOf);
         // A Thread is a session with no Agent behind it. `agentId` asks for
         // the sessions of one Agent, and `thread` asks for the sessions that
         // have no Agent, so the two can never both be true of one session. A
@@ -427,6 +425,7 @@ const make = Effect.gen(function* () {
             status,
             runnerId,
             agentId,
+            permissionProfileId,
             thread,
           }),
         );

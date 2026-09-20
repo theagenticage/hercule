@@ -236,38 +236,6 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * Whether a session that has not exited still carries this profile. A
-     * session copies its grants at spawn and is bounded by them for as long as
-     * it runs, so deleting the row underneath one would leave the agent inside
-     * it with a credential that resolves to nothing.
-     */
-    heldByLiveSession: (id: string): Effect.Effect<boolean, SqlError> =>
-      Effect.map(
-        sql<{ readonly held: number }>`
-          SELECT EXISTS (
-            SELECT 1 FROM sessions
-            WHERE permission_profile_id = ${uuidFromString(id)} AND status <> 'exited'
-          ) AS held
-        `,
-        (rows) => rows[0]!.held === 1,
-      ),
-
-    /**
-     * The name of the oldest Agent that spawns its sessions under this
-     * profile, if such an Agent exists. An Agent is a standing configuration,
-     * not a running thing. If the profile were deleted, every session the
-     * Agent spawned after that would carry a token that resolves to nothing.
-     */
-    findOldestAgentNameUnderProfile: (id: string): Effect.Effect<Option.Option<string>, SqlError> =>
-      Effect.map(
-        sql<{ readonly name: string }>`
-          SELECT name FROM agents WHERE permission_profile_id = ${uuidFromString(id)}
-          ORDER BY created_at, id LIMIT 1
-        `,
-        (rows) => Option.map(Option.fromNullishOr(rows[0]), (row) => row.name),
-      ),
-
-    /**
      * Deletes a profile. Whether this profile may be deleted at all is the
      * service's rule, not the store's: a shipped profile is not deletable and
      * never reaches here.

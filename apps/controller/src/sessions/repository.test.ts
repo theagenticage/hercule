@@ -13,7 +13,7 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { ProviderEvent } from "@hydra/protocol";
 import { CursorError, mintUuid, uuidToString } from "../db";
 import { TestDatabase } from "../db/testing";
-import { sessionRepository, type StoredStreamRow } from "./repository";
+import { LIVE_SESSION_STATUSES, sessionRepository, type StoredStreamRow } from "./repository";
 
 const run = <A, E>(effect: Effect.Effect<A, E, never>) => Effect.runPromise(effect);
 
@@ -22,33 +22,37 @@ const at = "2026-09-07T10:00:00.000Z";
 /** A canonical v7 id, which is the only shape the store takes. */
 const anId = () => uuidToString(mintUuid());
 
-/** A session row to hang a stream on, with the shipped defaults filled in. */
-const aSession = Effect.gen(function* () {
-  const sessions = yield* sessionRepository;
-  // The caller mints the id, not the repository. A spawn opens the working
-  // area in the same transaction, and that area's branch is named after the
-  // session, so the id must exist before the row is written.
-  const id = anId();
-  yield* sessions.insert({
-    id,
-    title: "a session",
-    permissionProfileId: anId(),
-    agentId: undefined,
-    instanceId: anId(),
-    runnerId: anId(),
-    requestedAccessMode: "approval-required",
-    accessMode: "approval-required",
-    workspaceId: null,
-    projectId: undefined,
-    checkoutBranch: undefined,
-    githubConnectionId: undefined,
-    spec: "{}",
-    modelSelection: { model: "clever", options: {} },
-    parentSessionId: undefined,
-    at,
+/** A session row carrying one profile, with the shipped defaults filled in. */
+const aSessionOn = (permissionProfileId: string) =>
+  Effect.gen(function* () {
+    const sessions = yield* sessionRepository;
+    // The caller mints the id, not the repository. A spawn opens the working
+    // area in the same transaction, and that area's branch is named after the
+    // session, so the id must exist before the row is written.
+    const id = anId();
+    yield* sessions.insert({
+      id,
+      title: "a session",
+      permissionProfileId,
+      agentId: undefined,
+      instanceId: anId(),
+      runnerId: anId(),
+      requestedAccessMode: "approval-required",
+      accessMode: "approval-required",
+      workspaceId: null,
+      projectId: undefined,
+      checkoutBranch: undefined,
+      githubConnectionId: undefined,
+      spec: "{}",
+      modelSelection: { model: "clever", options: {} },
+      parentSessionId: undefined,
+      at,
+    });
+    return id;
   });
-  return id;
-});
+
+/** A session row to hang a stream on; nothing else carries its profile. */
+const aSession = Effect.suspend(() => aSessionOn(anId()));
 
 /** `count` ordinary events on one session, numbered from one. */
 const fill = (sessionId: string, count: number) =>
@@ -262,5 +266,35 @@ describe("the session's own credential across a resume", () => {
 
     expect(held.before).toBe("hash-one");
     expect(held.after).toBeNull();
+  });
+});
+
+describe("listing the sessions that carry one profile", () => {
+  it("answers that profile's live sessions and leaves every other row out", async () => {
+    const { listed, profileId, live } = await run(
+      Effect.gen(function* () {
+        const sessions = yield* sessionRepository;
+        const profileId = anId();
+        const live = yield* aSessionOn(profileId);
+        const exited = yield* aSessionOn(profileId);
+        yield* sessions.moved(exited, "exited", at);
+        // Another profile's session, which the filter must not answer.
+        yield* aSessionOn(anId());
+        const page = yield* sessions.list({
+          limit: 10,
+          cursor: undefined,
+          direction: "asc",
+          status: LIVE_SESSION_STATUSES,
+          runnerId: undefined,
+          agentId: undefined,
+          permissionProfileId: profileId,
+          thread: undefined,
+        });
+        return { listed: page.items, profileId, live };
+      }).pipe(Effect.provide(TestDatabase), Effect.orDie),
+    );
+
+    expect(listed.map((one) => one.id)).toEqual([live]);
+    expect(listed[0]?.permissionProfileId).toBe(profileId);
   });
 });

@@ -31,6 +31,7 @@ import type { AccessMode, ModelSelection } from "@hydra/protocol";
 import {
   AGENT_SORT_FIELDS,
   AgentCreateInput,
+  AgentFilter,
   AgentUpdateInput,
   DEFAULT_PAGE_LIMIT,
   Id,
@@ -52,9 +53,13 @@ import { AuditLog } from "../events";
 import { PermissionProfiles, type GrantsError } from "../permissions";
 import { PluginHost } from "../plugins";
 import { providerRepository, listUnenforcedFields } from "../providers";
+import { LIVE_SESSION_STATUSES, sessionRepository } from "../sessions";
 import { agentRepository, type AgentEdit, type StoredAgent } from "./repository";
 
-const QueryInput = Schema.Struct(pageInput(AGENT_SORT_FIELDS));
+const QueryInput = Schema.Struct({
+  ...AgentFilter.fields,
+  ...pageInput(AGENT_SORT_FIELDS),
+});
 
 export type QueryInput = Schema.Schema.Type<typeof QueryInput>;
 
@@ -126,6 +131,11 @@ type WriteError = ReadError | GrantsError;
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const agents = yield* agentRepository;
+  // Whether a session this agent spawned is still live is the sessions
+  // domain's question, and this is where it is asked. The repository and not
+  // the service: the service enforces `session.query` on whoever is calling,
+  // and a delete of one's own agent is not a read of anybody's sessions.
+  const sessions = yield* sessionRepository;
   const instances = yield* providerRepository;
   const host = yield* PluginHost;
   const profiles = yield* PermissionProfiles;
@@ -202,12 +212,16 @@ const make = Effect.gen(function* () {
     query: (input: QueryInput): Effect.Effect<AgentPage, ReadError> =>
       Effect.gen(function* () {
         yield* requireGrant("agent.query");
-        const { limit, cursor, sort } = yield* Effect.mapError(decodeQuery(input), validationOf);
+        const { limit, cursor, sort, permissionProfileId } = yield* Effect.mapError(
+          decodeQuery(input),
+          validationOf,
+        );
         const listing = yield* refuseCursor(
           agents.list({
             limit: limit ?? DEFAULT_PAGE_LIMIT,
             cursor,
             direction: sort?.direction ?? DEFAULT_DIRECTION,
+            permissionProfileId,
           }),
         );
         const composeRecord = yield* agentRecordComposer;
@@ -338,11 +352,25 @@ const make = Effect.gen(function* () {
           Effect.gen(function* () {
             const at = yield* nowIso;
             const agent = yield* requireAgent(id);
-            const running = yield* agents.findOldestRunningSession(id);
-            if (Option.isSome(running)) {
+            // The oldest session this agent spawned that has not exited. It is
+            // named in the refusal, so the user knows which session to end.
+            const live = yield* refuseCursor(
+              sessions.list({
+                limit: 1,
+                cursor: undefined,
+                direction: "asc",
+                status: LIVE_SESSION_STATUSES,
+                runnerId: undefined,
+                agentId: id,
+                permissionProfileId: undefined,
+                thread: undefined,
+              }),
+            );
+            const running = live.items[0];
+            if (running !== undefined) {
               return yield* Effect.fail(
                 invalidState(
-                  `session ${running.value} was spawned from this agent and has not exited; ` +
+                  `session ${running.id} was spawned from this agent and has not exited; ` +
                     "end it first, then delete the agent",
                 ),
               );

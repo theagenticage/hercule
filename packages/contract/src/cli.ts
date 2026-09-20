@@ -1263,8 +1263,14 @@ export const CLI = {
   "agent.query": {
     command: "agent list",
     help: "Lists the Agents sessions are spawned from. An Agent is a named, reusable configuration for unattended work. Use it to find the id `hydra session spawn --agent` names.",
-    examples: [{ args: [] }],
-    fields: {},
+    examples: [{ args: [] }, { args: ["--profile", "1f3a9c2e"] }],
+    fields: {
+      permissionProfileId: {
+        flag: "profile",
+        help: "Only the Agents that spawn their sessions under this Permission Profile, by its id or a tail of eight or more characters; it says which Agents hold a profile a delete was refused for.",
+        resolves: "profile.query",
+      },
+    },
   },
   "agent.read": {
     command: "agent read",
@@ -1428,6 +1434,11 @@ export const CLI = {
         flag: "agent",
         help: "Only the sessions spawned from this Agent, by its id or a tail of eight or more characters; find it with `hydra agent list`.",
         resolves: "agent.query",
+      },
+      permissionProfileId: {
+        flag: "profile",
+        help: "Only the sessions carrying this Permission Profile, by its id or a tail of eight or more characters; it says which sessions hold a profile a delete was refused for.",
+        resolves: "profile.query",
       },
       thread: {
         flag: "thread",

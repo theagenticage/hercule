@@ -119,10 +119,23 @@ export const AgentUpdateInput = Schema.Struct({
 
 export type AgentUpdateInput = Schema.Schema.Type<typeof AgentUpdateInput>;
 
+/**
+ * What an agent listing may be narrowed by. The profile is the one field:
+ * deleting a Permission Profile is refused while an Agent names it, and the
+ * caller has to be able to find that Agent.
+ */
+export const AgentFilter = Schema.Struct({
+  /** Only the Agents that spawn their sessions under this Permission Profile. */
+  permissionProfileId: Schema.optionalKey(Id),
+});
+
 export const agent = HttpApiGroup.make("agent")
   .add(
     HttpApiEndpoint.get("query", "/agents", {
-      query: pageParams(AGENT_SORT_FIELDS),
+      query: Schema.Struct({
+        ...AgentFilter.fields,
+        ...pageParams(AGENT_SORT_FIELDS).fields,
+      }),
       success: page(Agent),
       error: [Unauthenticated, Forbidden, Validation, Internal],
     }),

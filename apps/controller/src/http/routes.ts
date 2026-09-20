@@ -41,6 +41,8 @@ import {
   LiveLayer,
   Placement,
   PlacementLayer,
+  ProfileRemoval,
+  ProfileRemovalLayer,
   Provisioning,
   ProvisioningLayer,
   Retirement,
@@ -139,6 +141,9 @@ const settingsRoutes = HttpApiBuilder.group(api, "settings", (handlers) =>
 const profileRoutes = HttpApiBuilder.group(api, "profile", (handlers) =>
   Effect.gen(function* () {
     const profiles = yield* Profiles;
+    // A profile is deleted only once no session and no agent still holds it,
+    // and both of those are other domains' rows, so the delete is a layer up.
+    const removal = yield* ProfileRemoval;
     return handlers
       .handle("query", ({ query }) => operation(profiles.query(query)))
       .handle("read", ({ params }) => operation(profiles.read(params)))
@@ -146,7 +151,7 @@ const profileRoutes = HttpApiBuilder.group(api, "profile", (handlers) =>
       .handle("update", ({ params, payload }) =>
         operation(profiles.update({ id: params.id, ...payload })),
       )
-      .handle("delete", ({ params }) => operation(profiles.delete(params)));
+      .handle("delete", ({ params }) => operation(removal.deleteProfile(params)));
   }),
 );
 
@@ -428,7 +433,9 @@ export const operationLayers = Layer.mergeAll(
   SecretLayer,
   ControllerLayer,
   SettingsOperationsLayer,
-  ProfilesLayer,
+  // The controller daemon's profile-removal use case reaches the profile
+  // service, so that one is layered under it rather than merged beside it.
+  ProfileRemovalLayer.pipe(Layer.provideMerge(ProfilesLayer)),
   TaskServiceLayer,
   AgentServiceLayer,
   ProjectServiceLayer,

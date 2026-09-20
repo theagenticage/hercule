@@ -132,6 +132,7 @@ export {
   AGENT_SORT_FIELDS,
   Agent,
   AgentCreateInput,
+  AgentFilter,
   AgentUpdateInput,
   DisallowedTool,
   UnenforcedSpecField,

@@ -274,6 +274,8 @@ export const SessionFilter = Schema.Struct({
   runnerId: Schema.optionalKey(Id),
   /** Only the sessions spawned from this Agent. */
   agentId: Schema.optionalKey(Id),
+  /** Only the sessions carrying this Permission Profile, whichever Agent spawned them. */
+  permissionProfileId: Schema.optionalKey(Id),
   /** `true` lists the sessions with no Agent behind them; `false` lists the rest. */
   thread: Schema.optionalKey(Schema.Boolean),
 });
