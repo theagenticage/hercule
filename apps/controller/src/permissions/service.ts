@@ -36,7 +36,7 @@ import {
   type SortDirection,
   type Unauthenticated,
   type Validation,
-} from "@hydra/contract";
+} from "@hercule/contract";
 import { currentStamp, requireGrant } from "../actor";
 import { afterCommit, withTransaction } from "../db";
 import { AuditLog } from "../events";

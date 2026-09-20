@@ -22,7 +22,7 @@ import {
   type PluginDetail,
   type Unauthenticated,
   type Validation,
-} from "@hydra/contract";
+} from "@hercule/contract";
 import { nowIso, withTransaction } from "../db";
 import { currentStamp, requireGrant } from "../actor";
 import { AuditLog } from "../events";

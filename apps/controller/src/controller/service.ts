@@ -13,9 +13,9 @@
  * a caller, though, so the check that it names a placeable runner sits here
  * alone, and that is why the settings API does not carry the key.
  *
- * The version comes from `@hydra/home/version`, which `scripts/gen-version.ts`
+ * The version comes from `@hercule/home/version`, which `scripts/gen-version.ts`
  * generates at build time: a compiled binary has no `package.json` on disk to
- * read. It is generated into `@hydra/home` because that is the one leaf every
+ * read. It is generated into `@hercule/home` because that is the one leaf every
  * role links - the dispatcher prints it for `hydra --version` and the
  * controller answers it here, and neither may depend on the other.
  */
@@ -36,8 +36,8 @@ import {
   type Forbidden,
   type Unauthenticated,
   type Validation,
-} from "@hydra/contract";
-import { VERSION } from "@hydra/home/version";
+} from "@hercule/contract";
+import { VERSION } from "@hercule/home/version";
 import { currentUser, USER_ACTOR } from "../actor";
 import { nowIso, withTransaction } from "../db";
 import { AuditLog } from "../events";

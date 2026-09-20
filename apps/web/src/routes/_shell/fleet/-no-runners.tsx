@@ -1,5 +1,5 @@
 import type { JSX } from "react";
-import { Button, Group } from "@hydra/ui";
+import { Button, Group } from "@hercule/ui";
 
 /** The harnesses a runner reports on the machine it runs on. */
 const HARNESSES = ["Claude Code", "Codex", "pi"];

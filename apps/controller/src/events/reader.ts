@@ -45,7 +45,7 @@ import {
   type NotFound,
   type Unauthenticated,
   type Validation,
-} from "@hydra/contract";
+} from "@hercule/contract";
 import { requireGrant, type Actor } from "../actor";
 import { decodeIdCursor, encodeIdCursor, keysetOver, pageOf, uuidFromString } from "../db";
 import { SECURITY_KINDS } from "./audit-log";

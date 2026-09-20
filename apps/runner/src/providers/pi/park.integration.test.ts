@@ -16,7 +16,7 @@ import { existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { Effect, Stream } from "effect";
-import type { AccessMode, ProviderEvent, SessionSpec } from "@hydra/protocol";
+import type { AccessMode, ProviderEvent, SessionSpec } from "@hercule/protocol";
 import { pi } from "./adapter";
 import { cleanupHomes, contextIn, TEST_ZAI_KEY, SPEC, taggedIn, until } from "./testing";
 import { scratchHome } from "../testing";

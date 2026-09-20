@@ -6,7 +6,7 @@
  * A wrong answer would be worse than none, so silence, a hang and a stranger's
  * answer all mean "no local runner" and the caller falls back to a runner by name.
  */
-import type { Runner } from "@hydra/contract";
+import type { Runner } from "@hercule/contract";
 import type { FetchLike } from "./client";
 
 export const IDENTITY_TIMEOUT_MS = 1000;

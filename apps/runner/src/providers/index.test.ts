@@ -5,7 +5,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { Effect } from "effect";
-import type { RunnerToController } from "@hydra/protocol";
+import type { RunnerToController } from "@hercule/protocol";
 import type { Machine } from "../sessions/context";
 import { makeWorkspaces } from "../workspaces";
 import { supervising } from "../sessions/supervisor";

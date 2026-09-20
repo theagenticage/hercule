@@ -5,12 +5,12 @@ import {
   InvalidOptionError,
   parseGlobalOptions,
   resolveHomePath,
-} from "@hydra/home";
+} from "@hercule/home";
 import { BootstrapConfig, loadConfigFile, resolveConfig } from "./bootstrap";
 import type { ConfigError } from "./errors";
 import { createDirectory, createLayout, HydraHome } from "./home";
 
-// The pure home pieces live in `@hydra/home`, which the CLI and the runner link
+// The pure home pieces live in `@hercule/home`, which the CLI and the runner link
 // too; a controller module reaches them through here.
 export {
   configFileIn,
@@ -23,7 +23,7 @@ export {
   setupUrlFileIn,
   type GlobalOptions,
   type HomePaths,
-} from "@hydra/home";
+} from "@hercule/home";
 export * from "./bootstrap";
 export * from "./errors";
 export * from "./home";

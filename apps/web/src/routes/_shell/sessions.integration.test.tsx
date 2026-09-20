@@ -6,7 +6,7 @@
 import { describe, expect, it } from "vitest";
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type { ProviderSecretField, Runner } from "@hydra/contract";
+import type { ProviderSecretField, Runner } from "@hercule/contract";
 import { envelope, renderApp, stubApi, type Call, type Handler } from "../../app/testing";
 
 const GIB = 1024 * 1024 * 1024;

@@ -4,7 +4,7 @@
  * readings of the domain, so they live here with a test rather than in a
  * component.
  */
-import type { Runner, RunnerUpdateInput } from "@hydra/contract";
+import type { Runner, RunnerUpdateInput } from "@hercule/contract";
 import { ApiError } from "./errors";
 
 /** The five fields a runner's owner writes, as a form holds them. */

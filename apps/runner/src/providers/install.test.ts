@@ -4,7 +4,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { Effect } from "effect";
-import { CLAUDE_CODE_VERSION } from "@hydra/home/version";
+import { CLAUDE_CODE_VERSION } from "@hercule/home/version";
 import { claudeCodeAdapter, type ClaudeSeam } from "./claude-code";
 import type { ProviderRunnerContext } from "./index";
 

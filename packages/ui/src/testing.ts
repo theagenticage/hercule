@@ -6,7 +6,7 @@
  * A stub makes both read the same: every render starts from the seed it was
  * given and nothing one test writes reaches the next. The app's own test
  * harness (`apps/web/src/app/testing.tsx`) reaches for this through the
- * package's `/testing` subpath, the way `@hydra/client-core/testing` is
+ * package's `/testing` subpath, the way `@hercule/client-core/testing` is
  * reached for.
  */
 export const memoryStorage = (seed: Readonly<Record<string, string>> = {}): Storage => {

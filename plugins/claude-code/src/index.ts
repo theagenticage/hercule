@@ -4,7 +4,7 @@ import {
   registerProvider,
   type Plugin,
   type ProviderDefinition,
-} from "@hydra/plugin-host";
+} from "@hercule/plugin-host";
 
 /**
  * What the Agent SDK behind Claude Code can do, at the version Hydra pins.

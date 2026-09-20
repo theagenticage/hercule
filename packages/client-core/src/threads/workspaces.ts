@@ -17,7 +17,7 @@ import type {
   SpawnWorkspace,
   ThreadWorkspace,
   Workspace,
-} from "@hydra/contract";
+} from "@hercule/contract";
 import { projectTone, type ProjectTone } from "./tone";
 
 /**

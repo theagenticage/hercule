@@ -1,5 +1,5 @@
 import { Schema } from "effect";
-import type { InvalidOptionError } from "@hydra/home";
+import type { InvalidOptionError } from "@hercule/home";
 
 /** `config.toml` could not be read, or is not the TOML subset Hydra writes. */
 export class ConfigFileError extends Schema.TaggedError<ConfigFileError>()("ConfigFileError", {

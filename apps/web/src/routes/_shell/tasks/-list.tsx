@@ -1,6 +1,6 @@
 import type { JSX } from "react";
-import type { Task } from "@hydra/contract";
-import { Button, EmptyState } from "@hydra/ui";
+import type { Task } from "@hercule/contract";
+import { Button, EmptyState } from "@hercule/ui";
 import { TaskRow } from "./-row";
 
 /**

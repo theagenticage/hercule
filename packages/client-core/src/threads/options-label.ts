@@ -5,7 +5,7 @@
  * to say - no reasoning choice, or one that is off - and the selector then
  * carries its own name: a bolt on its own would name nothing.
  */
-import type { ModelOption } from "@hydra/contract";
+import type { ModelOption } from "@hercule/contract";
 import { optionsMenu, type ModelOptionRow } from "./options-menu";
 
 const labelOf = (row: ModelOptionRow): string =>

@@ -7,7 +7,7 @@
  * A `user_message` is never open: it is complete the moment it is sent, and
  * both its `item.started` and `item.completed` carry the same text.
  */
-import type { TranscriptRow } from "@hydra/contract";
+import type { TranscriptRow } from "@hercule/contract";
 
 export const openItemOf = (rows: readonly TranscriptRow[]): string | null => {
   const started: string[] = [];

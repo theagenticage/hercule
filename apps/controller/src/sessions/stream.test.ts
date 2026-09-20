@@ -6,7 +6,7 @@
  * `sessions.integration.test.ts`, against a real socket.
  */
 import { describe, expect, it } from "vitest";
-import type { ProviderEvent } from "@hydra/protocol";
+import type { ProviderEvent } from "@hercule/protocol";
 import {
   DELTA_FLUSH_BYTES,
   fold,

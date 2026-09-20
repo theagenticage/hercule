@@ -26,7 +26,7 @@ const bannedEverywhere = [
  * `cp.fork`. So the module itself is banned, and one file is allowed to use it.
  */
 const childProcessMessage =
-  "Use spawnHydra() from @hydra/hydra; fork() is broken under `bun build --compile` (spec 15 section 11).";
+  "Use spawnHercule() from @hercule/hercule; fork() is broken under `bun build --compile` (spec 15 section 11).";
 
 const bannedChildProcess = ["child_process", "node:child_process"].map((name) => ({
   name,
@@ -47,7 +47,7 @@ const bannedChildProcessCalls = [
 
 /** What the browser packages may not import, on top of the bans everywhere. */
 const noEffectMessage =
-  "The React codebase writes no Effect code; go through @hydra/contract or @hydra/client-core (spec 14).";
+  "The React codebase writes no Effect code; go through @hercule/contract or @hercule/client-core (spec 14).";
 
 const bannedInTheBrowser = [
   ...bannedEverywhere,
@@ -65,14 +65,14 @@ const effectPattern = { group: ["effect/*"], message: noEffectMessage };
 const routeLocalPattern = {
   group: ["../**/-*", "./*/**/-*", "**/routes/-*", "**/routes/**/-*"],
   message:
-    "A `-` route file is local to its own folder and is imported only as `./-name`. Shared presentation goes in apps/web/src/screens/, generic presentation in @hydra/ui.",
+    "A `-` route file is local to its own folder and is imported only as `./-name`. Shared presentation goes in apps/web/src/screens/, generic presentation in @hercule/ui.",
 };
 
 /** The shell is the frame; a screen imports presentation, not the frame. */
 const shellPattern = {
   group: ["**/shell", "**/shell/*"],
   message:
-    "Screens import presentation from @hydra/ui or apps/web/src/screens/, never from the shell.",
+    "Screens import presentation from @hercule/ui or apps/web/src/screens/, never from the shell.",
 };
 
 export default tseslint.config(
@@ -89,7 +89,7 @@ export default tseslint.config(
       "apps/controller/src/http/bundle.ts",
       "apps/web/src/routeTree.gen.ts",
       "apps/runner/src/providers/codex/generated/**",
-      "/hydra",
+      "/hercule",
     ],
   },
   js.configs.recommended,
@@ -154,7 +154,7 @@ export default tseslint.config(
   {
     // `spawn()` is the sanctioned way to start another role, and build scripts
     // are tooling that never ships inside the binary.
-    files: ["packages/hydra/src/spawn.ts", "scripts/**/*.ts"],
+    files: ["packages/hercule/src/spawn.ts", "scripts/**/*.ts"],
     rules: {
       "no-restricted-imports": ["error", { paths: bannedEverywhere }],
       "no-restricted-syntax": "off",

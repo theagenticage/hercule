@@ -16,7 +16,7 @@ import {
   HOST_API,
   registerConnectionType,
   type Plugin,
-} from "@hydra/plugin-host";
+} from "@hercule/plugin-host";
 import { del, get, post, send } from "../http/testing";
 import type { AuditKind } from "../events";
 import { until, type Arranged } from "../sessions/testing";

@@ -1,6 +1,6 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import type { HydraClient } from "@hydra/client-core";
-import type { SettingsPatch } from "@hydra/contract";
+import type { HydraClient } from "@hercule/client-core";
+import type { SettingsPatch } from "@hercule/contract";
 import { messageOf } from "../../../screens/save-status";
 import { settingsQuery } from "../../../app/queries";
 

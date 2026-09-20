@@ -1,6 +1,6 @@
 import type { JSX } from "react";
 import { Link } from "@tanstack/react-router";
-import type { MachineRow } from "@hydra/client-core";
+import type { MachineRow } from "@hercule/client-core";
 import { MenuFoot, MenuHeader, MenuRow } from "./menu";
 import { SelectorShell } from "./selector-shell";
 

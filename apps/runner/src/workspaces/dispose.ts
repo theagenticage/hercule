@@ -5,7 +5,7 @@
  */
 import { readdirSync, rmSync } from "node:fs";
 import { join as joinPath } from "node:path";
-import type { WorkspaceDispose, WorkspaceReport } from "@hydra/protocol";
+import type { WorkspaceDispose, WorkspaceReport } from "@hercule/protocol";
 import { cacheDirOf, cacheRootIn, pruneWorktrees, removeWorktree } from "./git";
 import type { GitEnv } from "./git";
 import type { RegisteredCheckout } from "./registry";

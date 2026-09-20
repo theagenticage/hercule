@@ -27,7 +27,7 @@ import {
   type Unauthenticated,
   type Validation,
   type Workspace,
-} from "@hydra/contract";
+} from "@hercule/contract";
 import { requireGrant, SYSTEM_ACTOR, USER_ACTOR } from "../actor";
 import { withTransaction } from "../db";
 import { RunnerConnections } from "../runners";

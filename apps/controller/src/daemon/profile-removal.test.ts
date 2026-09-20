@@ -9,7 +9,7 @@
 import { describe, expect, it } from "vitest";
 import { Effect, Layer, Option } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
-import type { Grant } from "@hydra/contract";
+import type { Grant } from "@hercule/contract";
 import { CurrentActor, type Actor } from "../actor";
 import { agentRepository } from "../agents";
 import { mintUuid, uuidFromString, uuidToString } from "../db";

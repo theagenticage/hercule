@@ -1,8 +1,8 @@
 import { useState, type JSX } from "react";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useInfiniteQuery, useMutation, useQuery, useSuspenseQuery } from "@tanstack/react-query";
-import { FALLBACK_TIMEZONE, idTail, isSupportedTimezone, queryKeys } from "@hydra/client-core";
-import type { TaskCreateInput } from "@hydra/contract";
+import { FALLBACK_TIMEZONE, idTail, isSupportedTimezone, queryKeys } from "@hercule/client-core";
+import type { TaskCreateInput } from "@hercule/contract";
 import { useLiveInvalidation } from "../../../app/live-invalidation";
 import { projectsQuery, settingsQuery, tasksQuery } from "../../../app/queries";
 import { TaskComposer } from "./-composer";

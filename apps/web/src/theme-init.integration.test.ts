@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { memoryStorage } from "@hydra/ui/testing";
+import { memoryStorage } from "@hercule/ui/testing";
 import script from "../public/theme-init.js?raw";
 
 /**

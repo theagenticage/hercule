@@ -18,7 +18,12 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
-import { validation, type Forbidden, type Unauthenticated, type Validation } from "@hydra/contract";
+import {
+  validation,
+  type Forbidden,
+  type Unauthenticated,
+  type Validation,
+} from "@hercule/contract";
 import { currentUser, USER_ACTOR } from "../actor";
 import { withTransaction } from "../db";
 import { AuditLog } from "../events";

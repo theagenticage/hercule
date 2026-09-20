@@ -10,8 +10,8 @@ import * as Option from "effect/Option";
 import type * as Schema from "effect/Schema";
 import type * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
-import type { ProviderDefinition } from "@hydra/plugin-host";
-import { validation, type Validation } from "@hydra/contract";
+import type { ProviderDefinition } from "@hercule/plugin-host";
+import { validation, type Validation } from "@hercule/contract";
 import { PluginHost } from "../plugins";
 import { providerRepository, type StoredSnapshot } from "./repository";
 

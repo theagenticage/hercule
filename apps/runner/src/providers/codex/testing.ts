@@ -10,7 +10,7 @@
  */
 import { join } from "node:path";
 import { Effect, Stream } from "effect";
-import type { ProviderEvent, SessionSpec } from "@hydra/protocol";
+import type { ProviderEvent, SessionSpec } from "@hercule/protocol";
 import type { ProviderRunnerContext } from "../index";
 import { CWD, lines, scratchHome, taggedIn, until } from "../testing";
 import { codexAdapter, type CodexSeam } from "./adapter";

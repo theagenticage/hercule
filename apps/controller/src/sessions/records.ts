@@ -17,7 +17,7 @@
  * sessions is composed against one catalog instead of one catalog per row.
  */
 import * as Effect from "effect/Effect";
-import type { Session } from "@hydra/contract";
+import type { Session } from "@hercule/contract";
 import { PluginHost } from "../plugins";
 import { listUnenforcedFields } from "../providers";
 import type { StoredSession } from "./repository";

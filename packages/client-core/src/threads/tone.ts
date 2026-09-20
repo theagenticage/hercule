@@ -3,7 +3,7 @@
  * shows a project - the picker, the sidebar's headers, a draft's heading -
  * gives the same project the same hue.
  */
-import type { Project } from "@hydra/contract";
+import type { Project } from "@hercule/contract";
 
 /**
  * Which identity hue a project's dot carries. The design language fixes two

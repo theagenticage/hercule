@@ -10,7 +10,7 @@
 import { describe, expect, it } from "vitest";
 import { Effect, Layer } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
-import type { RunnerDetail, RunnerLifecycle } from "@hydra/contract";
+import type { RunnerDetail, RunnerLifecycle } from "@hercule/contract";
 import { CurrentActor, type Actor } from "../actor";
 import { nowIso } from "../db";
 import { AuditLog, AuditLogLayer } from "../events";

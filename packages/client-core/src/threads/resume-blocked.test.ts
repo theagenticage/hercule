@@ -3,8 +3,8 @@
  * `null` when it can.
  */
 import { describe, expect, it } from "vitest";
-import type { Session } from "@hydra/contract";
-import { resumeBlockedReason } from "@hydra/client-core";
+import type { Session } from "@hercule/contract";
+import { resumeBlockedReason } from "@hercule/client-core";
 
 const BASE: Session = {
   id: "s0",

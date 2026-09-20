@@ -1,6 +1,6 @@
 import type { JSX } from "react";
 import { createFileRoute } from "@tanstack/react-router";
-import { EmptyState } from "@hydra/ui";
+import { EmptyState } from "@hercule/ui";
 import { ConnectRows } from "../../screens/connect-rows";
 
 export const Route = createFileRoute("/_shell/notifications")({

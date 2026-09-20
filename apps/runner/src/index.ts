@@ -14,7 +14,7 @@ import * as Latch from "effect/Latch";
 import * as Logger from "effect/Logger";
 import type * as Scope from "effect/Scope";
 import { Result } from "effect";
-import { parseGlobalOptions, resolveHomePath } from "@hydra/home";
+import { parseGlobalOptions, resolveHomePath } from "@hercule/home";
 import { runCredentialAction } from "./credentials";
 import { daemon } from "./daemon";
 import { join } from "./join";

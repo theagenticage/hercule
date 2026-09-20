@@ -6,7 +6,7 @@
  * schema a form uses is synchronous, so the answer is a value; a promise here
  * would mean a schema grew an effectful filter, which the assertion catches.
  */
-import type { StandardSchemaV1 } from "@hydra/contract";
+import type { StandardSchemaV1 } from "@hercule/contract";
 
 /** One message per field that failed, keyed by the field name. */
 export type FieldErrors = Readonly<Record<string, string>>;

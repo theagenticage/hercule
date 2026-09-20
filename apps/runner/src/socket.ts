@@ -19,7 +19,7 @@ import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
 import * as Socket from "effect/unstable/socket/Socket";
-import { VERSION } from "@hydra/home/version";
+import { VERSION } from "@hercule/home/version";
 import {
   ControllerToRunner,
   PeerVersion,
@@ -38,7 +38,7 @@ import {
   type RunnerWatermark,
   MAX_MESSAGE_LENGTH,
   type WorkspaceReport,
-} from "@hydra/protocol";
+} from "@hercule/protocol";
 import type { CredentialRelay } from "./credentials";
 import { refreshFacts } from "./probe";
 import { wentWrong } from "./report";

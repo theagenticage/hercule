@@ -18,7 +18,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
-import type { ProvisionCheckout, WorkspaceKind, WorkspaceProvision } from "@hydra/protocol";
+import type { ProvisionCheckout, WorkspaceKind, WorkspaceProvision } from "@hercule/protocol";
 
 /**
  * The user's own git configuration is kept out: a test must not depend on the

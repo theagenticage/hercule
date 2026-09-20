@@ -14,7 +14,7 @@ import {
   registerConnectionType,
   type ConnectionTypeContribution,
   type Plugin,
-} from "@hydra/plugin-host";
+} from "@hercule/plugin-host";
 
 /** The endpoint that answers who a token belongs to. */
 const USER_URL = "https://api.github.com/user";

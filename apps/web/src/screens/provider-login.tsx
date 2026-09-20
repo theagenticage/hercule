@@ -1,7 +1,7 @@
 import { useId, useState, type JSX } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Button, Drawer, Field, Input, type ButtonVariant } from "@hydra/ui";
-import { queryKeys, type HydraClient, type SecretFieldOffer } from "@hydra/client-core";
+import { Button, Drawer, Field, Input, type ButtonVariant } from "@hercule/ui";
+import { queryKeys, type HydraClient, type SecretFieldOffer } from "@hercule/client-core";
 import { messageOf } from "./save-status";
 
 /**

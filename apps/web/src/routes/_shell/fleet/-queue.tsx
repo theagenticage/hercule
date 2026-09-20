@@ -1,5 +1,5 @@
 import type { JSX } from "react";
-import { QueuedMark, Row } from "@hydra/ui";
+import { QueuedMark, Row } from "@hercule/ui";
 
 /** One queued session, as the block reads it: nothing but what it shows. */
 export interface QueueRow {

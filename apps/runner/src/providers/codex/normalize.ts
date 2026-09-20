@@ -23,7 +23,7 @@ import {
   type StructuredResult,
   type TurnState,
   type Usage,
-} from "@hydra/protocol";
+} from "@hercule/protocol";
 import { count, buildEnvelope, rawOf, type Envelope } from "../normalize";
 import { judgeAnswer, type HarnessAnswer } from "../structured-result";
 import { idOf } from "../events";

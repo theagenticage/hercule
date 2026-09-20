@@ -8,7 +8,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { Effect } from "effect";
-import type { OutputSchema, SessionSpec } from "@hydra/protocol";
+import type { OutputSchema, SessionSpec } from "@hercule/protocol";
 import { piAdapter, REPROMPT } from "./adapter";
 import { OUTPUT_SCHEMA_VARIABLE, SUBMIT_RESULT_TOOL } from "./extension";
 import {

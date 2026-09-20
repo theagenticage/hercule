@@ -1,5 +1,5 @@
 import type { JSX, ReactNode } from "react";
-import { cn } from "@hydra/ui";
+import { cn } from "@hercule/ui";
 
 /**
  * One row of a composer menu: a marker column (the dot on the row in force, or

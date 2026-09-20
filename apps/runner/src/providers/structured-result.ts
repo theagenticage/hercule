@@ -10,7 +10,7 @@
  * harness that validated its own answer would be marking its own work.
  */
 import { Validator, type OutputUnit } from "@cfworker/json-schema";
-import { MAX_MESSAGE_LENGTH, type OutputSchema, type StructuredResult } from "@hydra/protocol";
+import { MAX_MESSAGE_LENGTH, type OutputSchema, type StructuredResult } from "@hercule/protocol";
 
 /**
  * What the harness produced: a value, or the reason there is no value. The

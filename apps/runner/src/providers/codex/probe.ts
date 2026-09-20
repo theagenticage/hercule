@@ -7,14 +7,14 @@
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
-import { CODEX_VERSION, VERSION } from "@hydra/home/version";
+import { CODEX_VERSION, VERSION } from "@hercule/home/version";
 import {
   MAX_FACT_ITEMS,
   MAX_FACT_LENGTH,
   type ModelDescriptor,
   type ModelOption,
   type ProbeResult,
-} from "@hydra/protocol";
+} from "@hercule/protocol";
 import type { InstallOutcome, ProviderRunnerContext } from "../index";
 import { installing } from "../install";
 import { PROBE_DEADLINE, probeFailed } from "../probe";

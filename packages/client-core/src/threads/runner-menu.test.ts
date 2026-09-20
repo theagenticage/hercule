@@ -4,7 +4,7 @@
  * login, plus the default selection.
  */
 import { describe, expect, it } from "vitest";
-import type { Runner } from "@hydra/contract";
+import type { Runner } from "@hercule/contract";
 import { referenceRunner, runnerMenu } from "./runner-menu";
 import { BARE, instance, snapshot } from "../providers.testing";
 

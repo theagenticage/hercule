@@ -28,7 +28,7 @@ import {
   type ConnectionsRuntime,
   type ConnectionTypeContribution,
   type OAuthDeclaration,
-} from "@hydra/plugin-host";
+} from "@hercule/plugin-host";
 import { announce, nowIso, withTransaction } from "../db";
 import { Secrets } from "../secrets";
 import {

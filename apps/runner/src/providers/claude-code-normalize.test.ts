@@ -6,7 +6,7 @@
 import { describe, expect, it } from "vitest";
 import { Schema } from "effect";
 import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
-import { ProviderEvent, type OutputSchema } from "@hydra/protocol";
+import { ProviderEvent, type OutputSchema } from "@hercule/protocol";
 import { CLAUDE_SDK_MESSAGE, normalize, buildNormalizingState } from "./claude-code-normalize";
 
 const SESSION = "0199e0e7-0000-7000-8000-0000000000ff";

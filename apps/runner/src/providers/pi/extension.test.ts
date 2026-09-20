@@ -13,7 +13,7 @@
  * a real pi loads the file.
  */
 import { describe, expect, it } from "vitest";
-import type { AccessMode } from "@hydra/protocol";
+import type { AccessMode } from "@hercule/protocol";
 import {
   ACCESS_MODE_VARIABLE,
   EXTENSION_SOURCE,

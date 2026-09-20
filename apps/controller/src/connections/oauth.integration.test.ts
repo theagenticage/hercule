@@ -22,7 +22,7 @@ import {
   registerConnectionType,
   type ActivationContext,
   type Plugin,
-} from "@hydra/plugin-host";
+} from "@hercule/plugin-host";
 import { completeSetup, get, post, send, withServer, type ServerHarness } from "../http/testing";
 
 /** A connection as the API hands it back; only the fields these tests read. */

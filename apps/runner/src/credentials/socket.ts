@@ -10,7 +10,7 @@
  */
 import { chmodSync, rmSync } from "node:fs";
 import { createConnection, createServer, type Socket } from "node:net";
-import type { CredentialAnswer } from "@hydra/protocol";
+import type { CredentialAnswer } from "@hercule/protocol";
 
 /** Long enough for a controller round trip, short enough that git is never hung on it. */
 export const CREDENTIAL_DEADLINE_MS = 10_000;

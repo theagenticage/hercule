@@ -8,7 +8,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { Effect, Schema } from "effect";
-import { Event, type Task } from "@hydra/contract";
+import { Event, type Task } from "@hercule/contract";
 import { uuidFromString } from "../db";
 import { completeSetup, get, post, send, USERNAME, withServer } from "./testing";
 

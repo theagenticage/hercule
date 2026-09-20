@@ -1,7 +1,7 @@
 import type { JSX } from "react";
-import { cn } from "@hydra/ui";
-import { formatStamp } from "@hydra/client-core";
-import type { Runner } from "@hydra/contract";
+import { cn } from "@hercule/ui";
+import { formatStamp } from "@hercule/client-core";
+import type { Runner } from "@hercule/contract";
 
 /**
  * Only `online` is live and only `unreachable` was nobody's choice. The

@@ -1,8 +1,8 @@
 import { useState, type JSX } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { ApiError, type HydraClient } from "@hydra/client-core";
-import type { Project, Task, TaskUpdateInput } from "@hydra/contract";
-import { Drawer } from "@hydra/ui";
+import { ApiError, type HydraClient } from "@hercule/client-core";
+import type { Project, Task, TaskUpdateInput } from "@hercule/contract";
+import { Drawer } from "@hercule/ui";
 import { taskQuery } from "../../../app/queries";
 import { TaskDetail } from "./-detail";
 

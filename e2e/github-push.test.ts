@@ -182,7 +182,7 @@ const holdsNoToken = (where: string): void => {
 const helperCommand = (() => {
   const built = releaseBinary();
   return built === undefined
-    ? `${process.execPath} ${join(import.meta.dirname, "..", "packages/hydra/src/main.ts")} git-credential`
+    ? `${process.execPath} ${join(import.meta.dirname, "..", "packages/hercule/src/main.ts")} git-credential`
     : `${built} git-credential`;
 })();
 

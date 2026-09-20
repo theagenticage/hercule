@@ -8,14 +8,14 @@ import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
-import { RunnerCapabilities, RunnerFacts, RunnerWatermark } from "@hydra/contract";
+import { RunnerCapabilities, RunnerFacts, RunnerWatermark } from "@hercule/contract";
 import type {
   Runner,
   RunnerConnectivity,
   RunnerDetail,
   RunnerLifecycle,
   SortDirection,
-} from "@hydra/contract";
+} from "@hercule/contract";
 import {
   decodeCursor,
   encodeCursor,

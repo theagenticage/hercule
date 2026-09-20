@@ -7,7 +7,7 @@
  * **`--all`** follows `nextCursor` to the end, so a caller who wants everything
  * writes one flag instead of a loop.
  */
-import { ApiError, type HydraClient } from "@hydra/client-core";
+import { ApiError, type HydraClient } from "@hercule/client-core";
 import { UsageError } from "../exit";
 import { coerce, said, type Arguments } from "./args";
 import { commandOf, type Command, type Field } from "./tree";

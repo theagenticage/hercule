@@ -24,7 +24,7 @@ import {
   type Method,
   type OperationId,
   type Requirement,
-} from "@hydra/contract";
+} from "@hercule/contract";
 import * as HttpApi from "effect/unstable/httpapi/HttpApi";
 
 /** How a flag's or positional's text becomes a value. */

@@ -18,8 +18,13 @@ import {
   queryKeys,
   RUNNING_STATUSES,
   type HydraClient,
-} from "@hydra/client-core";
-import { MAX_PAGE_LIMIT, type Runner, type TaskFilter, type TranscriptRow } from "@hydra/contract";
+} from "@hercule/client-core";
+import {
+  MAX_PAGE_LIMIT,
+  type Runner,
+  type TaskFilter,
+  type TranscriptRow,
+} from "@hercule/contract";
 
 /** Whether first run has been completed. Reachable without a token. */
 export const setupQuery = (client: HydraClient) =>

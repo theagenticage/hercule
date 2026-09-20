@@ -6,7 +6,7 @@
  * are derived from the contract's CLI table, so the only way to know they are
  * really there is to run the thing a release ships. The plugin registry is compiled in the same way,
  * so what a release boots with is only visible from a release. This suite runs
- * `./hydra` as the controller and as the CLI, which is why it is out of
+ * `./hercule` as the controller and as the CLI, which is why it is out of
  * `pnpm test`: `pnpm build:binary` first, then `pnpm test:binary`.
  */
 import { existsSync } from "node:fs";
@@ -26,7 +26,7 @@ import {
 } from "./harness";
 
 const state = temporaryHome();
-const binary = join(ROOT, "hydra");
+const binary = join(ROOT, "hercule");
 
 let controller: Controller;
 let url: string;

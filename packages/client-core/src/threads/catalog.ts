@@ -4,7 +4,7 @@
  * on: the same instance offers a model list on one machine and nothing at all
  * on another.
  */
-import type { CapabilitySnapshot, ProviderInstance, Runner } from "@hydra/contract";
+import type { CapabilitySnapshot, ProviderInstance, Runner } from "@hercule/contract";
 
 export const snapshotOn = (
   instance: ProviderInstance,

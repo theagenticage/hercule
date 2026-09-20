@@ -13,7 +13,7 @@ import {
   secret,
   type Plugin,
   type ProviderDefinition,
-} from "@hydra/plugin-host";
+} from "@hercule/plugin-host";
 import { PluginHost, Plugins } from "./index";
 import { pluginRepository } from "./repository";
 import { asUser, fixture, pluginStack, providerDefinition } from "./testing";

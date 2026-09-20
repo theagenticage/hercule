@@ -6,7 +6,7 @@ import {
   HOST_API,
   registerConnectionType,
   type Plugin,
-} from "@hydra/plugin-host";
+} from "@hercule/plugin-host";
 import { completeSetup, get, post, send, withServer, type ServerHarness } from "../http/testing";
 import { CurrentActor, type Actor } from "../actor";
 import { uuidFromString } from "../db";

@@ -15,8 +15,8 @@ import {
   HOST_API,
   registerConnectionType,
   type Plugin,
-} from "@hydra/plugin-host";
-import type { SessionStart } from "@hydra/protocol";
+} from "@hercule/plugin-host";
+import type { SessionStart } from "@hercule/protocol";
 import { get, post, send } from "../http/testing";
 import { framesWhen, spawned, until, type Arranged, type Wire } from "../sessions/testing";
 import { framesTagged, provisioned, readWorkspace, repo, withFleet, type Frame } from "./testing";

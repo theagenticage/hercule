@@ -1,5 +1,5 @@
 /**
- * `@hydra/client-core`: the public API as promises.
+ * `@hercule/client-core`: the public API as promises.
  *
  * The one client package that writes Effect code. The web
  * app and the CLI import `createClient` and see promises, plain objects, and

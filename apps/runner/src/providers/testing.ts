@@ -11,7 +11,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect } from "vitest";
-import type { ProviderEvent } from "@hydra/protocol";
+import type { ProviderEvent } from "@hercule/protocol";
 
 const homes: Array<string> = [];
 

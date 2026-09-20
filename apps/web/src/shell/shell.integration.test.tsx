@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type { Session, Workspace } from "@hydra/contract";
-import { ageOf } from "@hydra/client-core";
-import { threadsWorld } from "@hydra/client-core/threads/testing";
+import type { Session, Workspace } from "@hercule/contract";
+import { ageOf } from "@hercule/client-core";
+import { threadsWorld } from "@hercule/client-core/threads/testing";
 import { renderApp, stubApi, type Handler } from "../app/testing";
 
 const ZONE = "Europe/Amsterdam";

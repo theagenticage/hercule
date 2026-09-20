@@ -13,14 +13,14 @@
  */
 import { afterAll, describe, expect, it } from "vitest";
 import { Effect, Stream } from "effect";
-import type { OutputSchema, ProbeResult, ProviderEvent, SessionSpec } from "@hydra/protocol";
+import type { OutputSchema, ProbeResult, ProviderEvent, SessionSpec } from "@hercule/protocol";
 import {
   ASSESSOR_SYSTEM_PROMPT,
   FIXTURE_PROMPT,
   FIXTURE_SCHEMA,
   IMPOSSIBLE_PROMPT,
   IMPOSSIBLE_SCHEMA,
-} from "@hydra/protocol/testing";
+} from "@hercule/protocol/testing";
 import { pi } from "./adapter";
 import type { ProviderRunnerContext } from "../index";
 import { contextIn, SPEC } from "./testing";

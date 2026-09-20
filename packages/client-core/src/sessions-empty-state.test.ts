@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { ProviderInstance } from "@hydra/contract";
+import type { ProviderInstance } from "@hercule/contract";
 import { sessionsEmptyState, type SessionsEmptyState } from "./sessions-empty-state";
 import { BARE, instance, snapshot, WITH_CLAUDE } from "./providers.testing";
 

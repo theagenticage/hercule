@@ -8,7 +8,7 @@
  * keys those records are held under. Written apart, they would drift, and the
  * only symptom would be a screen that quietly stops updating.
  */
-import type { MutableLiveTopic, TaskFilter } from "@hydra/contract";
+import type { MutableLiveTopic, TaskFilter } from "@hercule/contract";
 
 /** One cache key. Opaque here; the app's query client is what reads it. */
 export type LiveQueryKey = ReadonlyArray<unknown>;

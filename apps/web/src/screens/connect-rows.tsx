@@ -1,5 +1,5 @@
 import type { JSX } from "react";
-import { Button, Group } from "@hydra/ui";
+import { Button, Group } from "@hercule/ui";
 
 export interface Offer {
   readonly name: string;

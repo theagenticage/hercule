@@ -1,6 +1,6 @@
 import type { JSX, ReactNode } from "react";
-import type { ComposerBlocked, LoginTarget, Phrase, ProjectTone } from "@hydra/client-core";
-import { cn } from "@hydra/ui";
+import type { ComposerBlocked, LoginTarget, Phrase, ProjectTone } from "@hercule/client-core";
+import { cn } from "@hercule/ui";
 import { Phrases } from "./phrases";
 
 /** What the draft is for, as its heading names it: a project, or a workspace. */

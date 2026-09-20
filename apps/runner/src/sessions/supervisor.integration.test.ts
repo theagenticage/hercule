@@ -22,7 +22,7 @@ import type {
   SessionSpec,
   SessionStart,
   TurnInput,
-} from "@hydra/protocol";
+} from "@hercule/protocol";
 import type { ProviderAdapter, ProviderRunnerContext } from "../providers";
 import type { Machine } from "./context";
 import { makeWorkspaces } from "../workspaces";

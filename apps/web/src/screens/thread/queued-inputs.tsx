@@ -1,8 +1,8 @@
 import type { JSX } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { queryKeys, type HydraClient } from "@hydra/client-core";
-import type { Input } from "@hydra/contract";
-import { Button } from "@hydra/ui";
+import { queryKeys, type HydraClient } from "@hercule/client-core";
+import type { Input } from "@hercule/contract";
+import { Button } from "@hercule/ui";
 import { inputsQuery } from "../../app/queries";
 import { messageOf } from "../save-status";
 

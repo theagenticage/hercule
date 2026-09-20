@@ -1,8 +1,8 @@
 import { useState, type JSX } from "react";
 import { Link, useRouterState } from "@tanstack/react-router";
 import type { QueryClient } from "@tanstack/react-query";
-import { threadRowsMode, type HydraClient, type Live } from "@hydra/client-core";
-import type { SettingsState } from "@hydra/contract";
+import { threadRowsMode, type HydraClient, type Live } from "@hercule/client-core";
+import type { SettingsState } from "@hercule/contract";
 import {
   Logo,
   MarksLegend,
@@ -10,7 +10,7 @@ import {
   SegmentedControlItem,
   ThemeSelector,
   cn,
-} from "@hydra/ui";
+} from "@hercule/ui";
 import { HYDRA_NAV, SEPARATOR, faceForPath, type Face, type NavItem } from "./nav";
 import { Pulse } from "./pulse";
 import { ThreadsFace } from "./threads-face";

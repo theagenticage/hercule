@@ -17,7 +17,7 @@
  */
 import { afterAll, describe, expect, it } from "vitest";
 import { Effect } from "effect";
-import type { ProviderEvent } from "@hydra/protocol";
+import type { ProviderEvent } from "@hercule/protocol";
 import { busy, cleanupHomes, SESSION, sentOf, settle, taggedIn, until } from "./testing";
 
 afterAll(cleanupHomes);

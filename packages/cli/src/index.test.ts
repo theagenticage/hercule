@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { Result } from "effect";
-import { CLI, NOUNS } from "@hydra/contract";
+import { CLI, NOUNS } from "@hercule/contract";
 import { main, readSetupUrl } from "./index";
 import { envelope, id, stubFetch, stubIo, type Handler } from "./testing";
 

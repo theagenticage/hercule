@@ -4,7 +4,7 @@
  * lengths - or one of them not cutting at all - is a frame the runner cannot
  * encode, and an event that will not encode is one the runner drops.
  */
-import { MAX_FACT_LENGTH, MAX_MESSAGE_LENGTH } from "@hydra/protocol";
+import { MAX_FACT_LENGTH, MAX_MESSAGE_LENGTH } from "@hercule/protocol";
 
 /** An id, a name, a version: short by nature, and simply cut when it is not. */
 export const fact = (value: string): string => value.slice(0, MAX_FACT_LENGTH);

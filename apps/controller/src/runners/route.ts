@@ -18,8 +18,8 @@ import {
   Validation,
   validation,
   validationOf,
-} from "@hydra/contract";
-import { JoinRequest } from "@hydra/protocol";
+} from "@hercule/contract";
+import { JoinRequest } from "@hercule/protocol";
 import { bearerOf } from "../http/bearer";
 import { responseFor } from "../http/envelope";
 import { RunnerJoin } from "./join";
@@ -35,7 +35,7 @@ const NO_BODY = "a join takes a JSON body";
  * misspelled `reserved` cannot enlist a shared machine while its owner believes
  * they asked for a personal one. It is set here rather than in the schema
  * because `closedStruct`, which does this for the derived payloads, lives in
- * `@hydra/contract`, and `@hydra/protocol` cannot reach it: the runner links
+ * `@hercule/contract`, and `@hercule/protocol` cannot reach it: the runner links
  * the protocol, and the contract pulls in the plugin host the runner's graph
  * must never touch.
  */

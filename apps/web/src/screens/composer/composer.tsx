@@ -13,7 +13,7 @@ import {
   withBranch,
   workspaceMenu,
   type Thread,
-} from "@hydra/client-core";
+} from "@hercule/client-core";
 import {
   localRunnerQuery,
   projectsQuery,

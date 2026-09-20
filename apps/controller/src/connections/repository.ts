@@ -7,8 +7,8 @@ import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
-import type { ConnectionStatus } from "@hydra/plugin-host";
-import { GITHUB_CONNECTION_TYPE, type SortDirection } from "@hydra/contract";
+import type { ConnectionStatus } from "@hercule/plugin-host";
+import { GITHUB_CONNECTION_TYPE, type SortDirection } from "@hercule/contract";
 import {
   decodeCursor,
   encodeCursor,

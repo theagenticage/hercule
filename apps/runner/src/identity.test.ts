@@ -16,7 +16,7 @@
 import { describe, expect, it } from "vitest";
 import { Effect } from "effect";
 import { networkInterfaces } from "node:os";
-import { IDENTITY_PORT_COUNT } from "@hydra/protocol";
+import { IDENTITY_PORT_COUNT } from "@hercule/protocol";
 import { identityListener } from "./identity";
 import { probeFacts, type Machine } from "./probe";
 

@@ -6,7 +6,7 @@
  * and only the picks the user actually made.
  */
 import { describe, expect, it } from "vitest";
-import type { Session } from "@hydra/contract";
+import type { Session } from "@hercule/contract";
 import { submission } from "./submission";
 
 const CONFIG = {

@@ -1,5 +1,5 @@
 {
-  "name": "@hydra/plugin-codex",
+  "name": "@hercule/plugin-codex",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -7,7 +7,7 @@
     ".": "./src/index.ts"
   },
   "dependencies": {
-    "@hydra/plugin-host": "workspace:*",
+    "@hercule/plugin-host": "workspace:*",
     "effect": "4.0.0-rc.112"
   }
 }

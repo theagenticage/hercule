@@ -9,7 +9,7 @@
  * its workspaces, so None is offered only where there is nothing else to offer
  * (D-20d), and there the selector itself is locked.
  */
-import type { Project, Resource, Runner, Session, Workspace } from "@hydra/contract";
+import type { Project, Resource, Runner, Session, Workspace } from "@hercule/contract";
 import {
   pickKey,
   projectWorkspaces,

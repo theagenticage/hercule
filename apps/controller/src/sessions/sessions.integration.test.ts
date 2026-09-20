@@ -31,9 +31,9 @@ import {
   type SessionInput,
   type OpenRequest,
   type SessionRespond as SessionRespondFrame,
-} from "@hydra/protocol";
-import type { Plugin, ProviderDefinition } from "@hydra/plugin-host";
-import type { Profile, Runner, Session } from "@hydra/contract";
+} from "@hercule/protocol";
+import type { Plugin, ProviderDefinition } from "@hercule/plugin-host";
+import type { Profile, Runner, Session } from "@hercule/contract";
 import {
   collecting,
   get,

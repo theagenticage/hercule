@@ -15,7 +15,7 @@
 import { Effect } from "effect";
 import { SqlClient } from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
-import { ALL_GRANTS, type Grant } from "@hydra/contract";
+import { ALL_GRANTS, type Grant } from "@hercule/contract";
 import { withTransaction } from "./db";
 import { PermissionProfiles, type GrantsError } from "./permissions";
 import { Settings, type SettingError } from "./settings";

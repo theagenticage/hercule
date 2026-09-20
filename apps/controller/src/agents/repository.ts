@@ -11,8 +11,8 @@ import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
-import type { SortDirection } from "@hydra/contract";
-import type { AccessMode, DisallowedTool, ModelSelection } from "@hydra/protocol";
+import type { SortDirection } from "@hercule/contract";
+import type { AccessMode, DisallowedTool, ModelSelection } from "@hercule/protocol";
 import {
   decodeCursor,
   encodeCursor,

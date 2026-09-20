@@ -17,7 +17,7 @@ import {
   type ModelOption,
   type ProbeResult,
   type SnapshotAuth,
-} from "@hydra/protocol";
+} from "@hercule/protocol";
 import type { InstallOutcome } from "../index";
 import { installing } from "../install";
 import { PROBE_DEADLINE, probeFailed } from "../probe";

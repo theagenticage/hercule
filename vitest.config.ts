@@ -15,7 +15,7 @@ import { defineConfig } from "vitest/config";
  * runs it, after `pnpm build:binary`. It is kept apart because a build rewrites
  * `apps/web/dist` and the generated file list underneath any controller a
  * parallel suite is running from source. Most of its suites test the packaging
- * itself and refuse to start without `./hydra`, saying so; the two that test the
+ * itself and refuse to start without `./hercule`, saying so; the two that test the
  * controller's own surface rather than the packaging - `e2e/workspace.test.ts`
  * and `e2e/github-push.test.ts` - are the same program either way, so with no
  * build they run the dispatcher's source instead (`releaseBinary` in

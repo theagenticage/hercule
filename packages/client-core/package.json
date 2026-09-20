@@ -1,5 +1,5 @@
 {
-  "name": "@hydra/client-core",
+  "name": "@hercule/client-core",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -9,7 +9,7 @@
     "./threads/testing": "./src/threads/workspaces.testing.ts"
   },
   "dependencies": {
-    "@hydra/contract": "workspace:*",
+    "@hercule/contract": "workspace:*",
     "effect": "4.0.0-rc.112"
   }
 }

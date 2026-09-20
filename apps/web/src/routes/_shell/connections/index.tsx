@@ -1,8 +1,8 @@
 import { useEffect, useState, type JSX } from "react";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useSuspenseQuery } from "@tanstack/react-query";
-import { EmptyState, Group, LaneLabel } from "@hydra/ui";
-import { connectionTypes, setupFlowOf, type ConnectionType } from "@hydra/client-core";
+import { EmptyState, Group, LaneLabel } from "@hercule/ui";
+import { connectionTypes, setupFlowOf, type ConnectionType } from "@hercule/client-core";
 import { useLiveInvalidation } from "../../../app/live-invalidation";
 import { connectionsQuery, pluginsQuery } from "../../../app/queries";
 import { ConnectRows } from "../../../screens/connect-rows";

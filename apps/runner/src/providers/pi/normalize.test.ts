@@ -17,7 +17,7 @@
  * nothing here reads them. Rename either export and these tests follow.
  */
 import { describe, expect, it } from "vitest";
-import type { ProviderEvent } from "@hydra/protocol";
+import type { ProviderEvent } from "@hercule/protocol";
 import { normalize, buildNormalizingState } from "./normalize";
 
 const SESSION = "0199e0e7-0000-7000-8000-0000000000ff";

@@ -1,5 +1,5 @@
 import { type JSX } from "react";
-import { Field, Input, Select } from "@hydra/ui";
+import { Field, Input, Select } from "@hercule/ui";
 
 /**
  * One source a new project would hold. Only a git repository for now (D-20b),

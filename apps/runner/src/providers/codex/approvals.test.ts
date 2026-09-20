@@ -18,7 +18,7 @@
  */
 import { afterAll, describe, expect, it } from "vitest";
 import { Effect } from "effect";
-import type { ApprovalDecision, ProviderEvent } from "@hydra/protocol";
+import type { ApprovalDecision, ProviderEvent } from "@hercule/protocol";
 import {
   type Answered,
   busy,

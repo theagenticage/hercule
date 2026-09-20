@@ -1,7 +1,7 @@
 import type { JSX, ReactNode } from "react";
 import { Link } from "@tanstack/react-router";
-import type { ThreadTab } from "@hydra/client-core";
-import { DoneMark, WorkingMark, cn } from "@hydra/ui";
+import type { ThreadTab } from "@hercule/client-core";
+import { DoneMark, WorkingMark, cn } from "@hercule/ui";
 
 /**
  * The thread's chrome: the one row spec 14 §The thread surface pins - the

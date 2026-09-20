@@ -1,8 +1,8 @@
 import { Fragment, type JSX } from "react";
 import { useMutation } from "@tanstack/react-query";
-import { approvalCard, type HydraClient } from "@hydra/client-core";
-import type { ApprovalDecision, OpenRequest } from "@hydra/contract";
-import { cn, DecisionMark } from "@hydra/ui";
+import { approvalCard, type HydraClient } from "@hercule/client-core";
+import type { ApprovalDecision, OpenRequest } from "@hercule/contract";
+import { cn, DecisionMark } from "@hercule/ui";
 import { messageOf } from "../save-status";
 
 /**

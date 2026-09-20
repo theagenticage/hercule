@@ -25,7 +25,7 @@ import {
   type SortDirection,
   type Unauthenticated,
   type Validation,
-} from "@hydra/contract";
+} from "@hercule/contract";
 import { currentUser, USER_ACTOR } from "../actor";
 import { withTransaction } from "../db";
 import { AuditLog } from "../events";

@@ -12,7 +12,7 @@ import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Schedule from "effect/Schedule";
 import * as Schema from "effect/Schema";
-import { LocalAnnouncement, LocalEnrolment } from "@hydra/protocol";
+import { LocalAnnouncement, LocalEnrolment } from "@hercule/protocol";
 import { daemon, type ToolingUnavailable } from "./daemon";
 import type { RunnerRetired } from "./socket";
 import { join, JoinError } from "./join";

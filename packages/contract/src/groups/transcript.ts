@@ -15,7 +15,7 @@
  * coalesced]). Nothing else is folded, rewritten or dropped.
  */
 import { Schema } from "effect";
-import { ProviderEvent, StructuredResult } from "@hydra/protocol";
+import { ProviderEvent, StructuredResult } from "@hercule/protocol";
 import * as HttpApiEndpoint from "effect/unstable/httpapi/HttpApiEndpoint";
 import * as HttpApiGroup from "effect/unstable/httpapi/HttpApiGroup";
 import { Forbidden, Internal, NotFound, Unauthenticated, Validation } from "../errors";

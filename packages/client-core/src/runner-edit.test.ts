@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { Runner } from "@hydra/contract";
+import type { Runner } from "@hercule/contract";
 import { ApiError } from "./errors";
 import {
   retireQuestion,

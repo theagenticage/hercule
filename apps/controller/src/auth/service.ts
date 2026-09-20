@@ -23,7 +23,7 @@ import {
   validation,
   type Unauthenticated,
   type Validation,
-} from "@hydra/contract";
+} from "@hercule/contract";
 import { CurrentActor, USER_ACTOR } from "../actor";
 import { Credentials, hashToken, mintToken } from "../credentials";
 import { withTransaction } from "../db";

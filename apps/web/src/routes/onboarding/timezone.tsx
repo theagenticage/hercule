@@ -1,8 +1,8 @@
 import { useState, type FormEvent, type JSX } from "react";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useSuspenseQuery } from "@tanstack/react-query";
-import { browserTimezone } from "@hydra/client-core";
-import { Button, Field } from "@hydra/ui";
+import { browserTimezone } from "@hercule/client-core";
+import { Button, Field } from "@hercule/ui";
 import { HOME_PATH } from "../../app/entry-guard";
 import { settingsQuery } from "../../app/queries";
 import { CenteredScreen } from "../../screens/centered-screen";

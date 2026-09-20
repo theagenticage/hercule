@@ -5,7 +5,7 @@
  */
 import { join } from "node:path";
 import { afterAll, describe, expect, it, vi } from "vitest";
-import type { CredentialAnswer } from "@hydra/protocol";
+import type { CredentialAnswer } from "@hercule/protocol";
 import { helperMain, runCredentialAction, serveCredentialSocket } from "./index";
 import { cleanTemporaries, temporary } from "../workspaces/testing";
 

@@ -1,5 +1,5 @@
 import type { ComponentType } from "react";
-import { RunGlyph, TaskGlyph, WorkflowGlyph, type MarkProps } from "@hydra/ui";
+import { RunGlyph, TaskGlyph, WorkflowGlyph, type MarkProps } from "@hercule/ui";
 
 /** Which sidebar face a screen belongs to. */
 export type Face = "threads" | "hydra";

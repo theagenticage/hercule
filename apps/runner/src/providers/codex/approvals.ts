@@ -11,7 +11,7 @@
  * offered; and a question has no refusal shape at all, so a refusal is a
  * JSON-RPC error reply.
  */
-import type { ApprovalDecision, OpenRequest } from "@hydra/protocol";
+import type { ApprovalDecision, OpenRequest } from "@hercule/protocol";
 import { idOf } from "../events";
 import { questionRequest } from "../questions";
 import { fact, text } from "../text";

@@ -1,6 +1,6 @@
 import type { JSX } from "react";
 import { Link } from "@tanstack/react-router";
-import { buttonClassName } from "@hydra/ui";
+import { buttonClassName } from "@hercule/ui";
 
 /**
  * Create new thread, wherever it appears as a plain primary affordance: the

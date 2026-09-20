@@ -11,7 +11,7 @@
  * Invalidating the router runs the entry guard again, which is that same path:
  * with no token left, the guard answers the login screen.
  */
-import type { Live } from "@hydra/client-core";
+import type { Live } from "@hercule/client-core";
 
 /** Watches for as long as the app lives, which is as long as the connection does. */
 export const followLiveStatus = (live: Live, router: { invalidate(): Promise<void> }): void => {

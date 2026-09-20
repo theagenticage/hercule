@@ -23,7 +23,7 @@ The web app is Hydra's primary surface: a static single-page application served 
 
 ## Packages and desktop-shell readiness
 
-One pnpm monorepo: `apps/controller`, `apps/runner`, `apps/web`, `packages/contract`, `packages/protocol`, `packages/client-core`, `packages/ui`, `packages/cli`, `packages/hydra`, plugins as packages.
+One pnpm monorepo: `apps/controller`, `apps/runner`, `apps/web`, `packages/contract`, `packages/protocol`, `packages/client-core`, `packages/ui`, `packages/cli`, `packages/hercule`, plugins as packages.
 
 | Package | Contents | Framework |
 |---|---|---|
@@ -33,7 +33,7 @@ One pnpm monorepo: `apps/controller`, `apps/runner`, `apps/web`, `packages/contr
 | `client-core` React bindings | Thin hooks over the live stores and client | React |
 | `packages/ui` | The component library (shadcn/ui-based), built in the pinned design language | React |
 | `apps/web` | Routes and presentation only | React |
-| `packages/hydra` | The dispatcher: the single `bun build --compile` entrypoint that reads `argv` and hands off to the controller, runner, or CLI role ([./15-packaging-and-operations.md](./15-packaging-and-operations.md) §2) | none |
+| `packages/hercule` | The dispatcher: the single `bun build --compile` entrypoint that reads `argv` and hands off to the controller, runner, or CLI role ([./15-packaging-and-operations.md](./15-packaging-and-operations.md) §2) | none |
 
 Discipline: **no domain logic in components**. Anything that interprets domain data (ranking strands, deriving provenance tiers, mapping verdicts to labels) lives in `client-core` and is tested there. **The React codebase writes no Effect code**: the backend is written on Effect ([ADR 0031](../adr/0031-the-backend-is-written-on-effect.md)), the web app is not. Its two doors are `packages/contract` and `client-core`; it never imports `effect` directly and never uses generators, layers, streams or atoms. `effect` reaches it transitively through the contract's schemas (the Schema module, roughly 15 KB compressed in Effect 4, inside the bundle budget). Components and hooks use the types inferred from the schemas; schemas are used as values only for form validation through the Standard Schema interface; responses are decoded once in `client-core` and components receive plain typed objects.
 

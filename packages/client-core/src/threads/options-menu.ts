@@ -4,7 +4,7 @@
  * has no choices of its own, so it reads as the two-way switch it is - and the
  * row says so, because a pick under it goes back as a boolean, not as "on".
  */
-import type { ModelOption } from "@hydra/contract";
+import type { ModelOption } from "@hercule/contract";
 
 /** A boolean descriptor is a two-way switch, and reads as one. */
 const SWITCH = [

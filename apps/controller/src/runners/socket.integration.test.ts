@@ -5,7 +5,7 @@
  * This drives a real WebSocket against a real listener, because the whole point
  * of the socket is the wire. The credential is a real one, handed back by a real
  * join, and the frames are the published catalogue's, decoded rather than eyed:
- * a controller that answers something `@hydra/protocol` cannot read is a
+ * a controller that answers something `@hercule/protocol` cannot read is a
  * controller no runner can talk to.
  *
  * Three things are asserted here and nothing else is. A machine gets in with the
@@ -41,8 +41,8 @@ import {
   type RunnerFacts,
   type RunnerHello,
   type RunnerToController as RunnerMessage,
-} from "@hydra/protocol";
-import type { RunnerDetail } from "@hydra/contract";
+} from "@hercule/protocol";
+import type { RunnerDetail } from "@hercule/contract";
 import { uuidFromString } from "../db";
 import { registry } from "../plugins";
 import { completeSetup, get, send, withServer, type ServerHarness } from "../http/testing";
@@ -1130,7 +1130,7 @@ describe("what a runner reports about its machine", () => {
 
 describe("what the controller stopping does to its local runner", () => {
   /** The dispatcher, run from source: `hydra` before it is compiled. */
-  const HYDRA = `${import.meta.dirname}/../../../../packages/hydra/src/main.ts`;
+  const HYDRA = `${import.meta.dirname}/../../../../packages/hercule/src/main.ts`;
 
   it("leaves the row offline when the child is asked to stop, never unreachable", async () => {
     const home = mkdtempSync(join(tmpdir(), "hydra-local-child-"));

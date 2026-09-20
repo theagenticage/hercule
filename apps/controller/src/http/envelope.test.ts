@@ -3,7 +3,7 @@ import { Cause, Schema } from "effect";
 import * as HttpServerError from "effect/unstable/http/HttpServerError";
 import type * as HttpServerResponse from "effect/unstable/http/HttpServerResponse";
 import { HttpApiSchemaError } from "effect/unstable/httpapi/HttpApiError";
-import { forbidden, notFound } from "@hydra/contract";
+import { forbidden, notFound } from "@hercule/contract";
 import { errorFor, responseFor } from "./envelope";
 
 const schemaError = (kind: HttpApiSchemaError["kind"], input: unknown) => {

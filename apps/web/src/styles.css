@@ -2,5 +2,5 @@
    tokens, the two self-hosted faces, and Tailwind itself. Only the app's own
    source has to be added, because Tailwind scans relative to the file that
    declares it and the library declares its own. */
-@import "@hydra/ui/styles.css";
+@import "@hercule/ui/styles.css";
 @source ".";

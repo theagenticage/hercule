@@ -2,7 +2,7 @@
 node_modules/
 dist/
 *.tsbuildinfo
-/hydra
+/hercule
 /dist-binary/
 packages/home/src/version.ts
 apps/controller/src/http/bundle.ts

@@ -1,7 +1,7 @@
 import type { JSX } from "react";
 import { Link } from "@tanstack/react-router";
-import { runnerFactsReading } from "@hydra/client-core";
-import type { Runner } from "@hydra/contract";
+import { runnerFactsReading } from "@hercule/client-core";
+import type { Runner } from "@hercule/contract";
 import { Connectivity } from "../../../screens/connectivity";
 
 /**

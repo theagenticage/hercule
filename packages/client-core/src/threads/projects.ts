@@ -3,7 +3,7 @@
  * it bounds everything below it". One row per project, saying how much stands
  * under it, so the choice is made on what is there rather than on a name.
  */
-import type { Project, Resource, Session, Workspace } from "@hydra/contract";
+import type { Project, Resource, Session, Workspace } from "@hercule/contract";
 import { projectTone, type ProjectTone } from "./tone";
 import { projectRepos, projectWorkspaces, repoName } from "./workspaces";
 

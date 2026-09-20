@@ -3,11 +3,11 @@
  *
  * The canonical form every spelling of one repository lands on - the identity a
  * second resource collides on and a credential request is matched against -
- * lives in `@hydra/protocol`, because the runner reads remotes by the same
+ * lives in `@hercule/protocol`, because the runner reads remotes by the same
  * rule. What is left here is the narrower question only the controller asks:
  * whether Hydra will hand this remote to git at all.
  */
-import { canonicalRemoteOf } from "@hydra/protocol";
+import { canonicalRemoteOf } from "@hercule/protocol";
 
 export { canonicalRemoteOf };
 

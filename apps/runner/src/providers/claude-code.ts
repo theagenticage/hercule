@@ -21,7 +21,7 @@ import {
   type SDKMessage,
   type SDKUserMessage,
 } from "@anthropic-ai/claude-agent-sdk";
-import { CLAUDE_CODE_VERSION } from "@hydra/home/version";
+import { CLAUDE_CODE_VERSION } from "@hercule/home/version";
 import {
   MAX_FACT_ITEMS,
   type AccessMode,
@@ -37,7 +37,7 @@ import {
   type SessionBinding,
   type SessionSpec,
   type TurnInput,
-} from "@hydra/protocol";
+} from "@hercule/protocol";
 import {
   normalize,
   buildNormalizingState,

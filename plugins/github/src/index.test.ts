@@ -12,7 +12,7 @@ import * as HttpClient from "effect/unstable/http/HttpClient";
 import * as HttpClientError from "effect/unstable/http/HttpClientError";
 import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest";
 import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse";
-import type { ConnectionTypeContribution, Plugin, RegistrationHost } from "@hydra/plugin-host";
+import type { ConnectionTypeContribution, Plugin, RegistrationHost } from "@hercule/plugin-host";
 import { github } from "./index";
 
 /** Runs `register` and hands back everything the plugin contributed. */

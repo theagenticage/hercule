@@ -31,7 +31,7 @@ import type {
   Task,
   TaskPriority,
   TaskStatus,
-} from "@hydra/contract";
+} from "@hercule/contract";
 import {
   decodeCursor,
   decodeOffsetCursor,

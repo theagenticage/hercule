@@ -13,7 +13,7 @@
  * caller does not learn it from the harness's behaviour.
  */
 import { Schema } from "effect";
-import { AccessMode, DisallowedTool, ModelSelection } from "@hydra/protocol";
+import { AccessMode, DisallowedTool, ModelSelection } from "@hercule/protocol";
 import * as HttpApiEndpoint from "effect/unstable/httpapi/HttpApiEndpoint";
 import * as HttpApiGroup from "effect/unstable/httpapi/HttpApiGroup";
 import {

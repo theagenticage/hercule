@@ -22,7 +22,7 @@
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
-import type { InvalidateKind, MutableLiveTopic, TapItem } from "@hydra/contract";
+import type { InvalidateKind, MutableLiveTopic, TapItem } from "@hercule/contract";
 
 /**
  * One thing a committed transaction changed, or - for `tap` - one thing that

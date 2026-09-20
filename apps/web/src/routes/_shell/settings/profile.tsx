@@ -1,8 +1,8 @@
 import { useState, type FormEvent, type JSX } from "react";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useMutation, useSuspenseQuery } from "@tanstack/react-query";
-import { FALLBACK_TIMEZONE } from "@hydra/client-core";
-import { Button, FormCard, Row } from "@hydra/ui";
+import { FALLBACK_TIMEZONE } from "@hercule/client-core";
+import { Button, FormCard, Row } from "@hercule/ui";
 import { LOGIN_PATH } from "../../../app/entry-guard";
 import { settingsQuery } from "../../../app/queries";
 import { TimezoneField } from "../../../screens/timezone-field";

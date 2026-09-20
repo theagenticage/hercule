@@ -18,14 +18,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { Duration, Effect, Stream } from "effect";
-import type { OutputSchema, ProviderEvent, SessionSpec } from "@hydra/protocol";
+import type { OutputSchema, ProviderEvent, SessionSpec } from "@hercule/protocol";
 import {
   ASSESSOR_SYSTEM_PROMPT,
   FIXTURE_PROMPT,
   FIXTURE_SCHEMA,
   IMPOSSIBLE_PROMPT,
   IMPOSSIBLE_SCHEMA,
-} from "@hydra/protocol/testing";
+} from "@hercule/protocol/testing";
 import { codex } from "./adapter";
 import type { ProviderRunnerContext } from "../index";
 

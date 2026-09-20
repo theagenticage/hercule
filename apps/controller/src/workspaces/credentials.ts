@@ -19,7 +19,7 @@ import * as Option from "effect/Option";
 import * as Redacted from "effect/Redacted";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
-import type { CredentialAnswer, CredentialRefusal, CredentialRequest } from "@hydra/protocol";
+import type { CredentialAnswer, CredentialRefusal, CredentialRequest } from "@hercule/protocol";
 import { connectionRepository, isGithubConnection } from "../connections";
 import { hashToken } from "../credentials";
 import { uuidFromString, uuidToString } from "../db";

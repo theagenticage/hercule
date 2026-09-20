@@ -20,7 +20,7 @@ import { describe, expect, it } from "vitest";
 import { Effect, Layer, Queue } from "effect";
 import type * as Scope from "effect/Scope";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
-import type { LiveMessage } from "@hydra/contract";
+import type { LiveMessage } from "@hercule/contract";
 import { CurrentActor, type Actor } from "../actor";
 import { withTransaction } from "../db";
 import { TestDatabase } from "../db/testing";

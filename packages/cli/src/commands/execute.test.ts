@@ -1,4 +1,4 @@
-import { createClient } from "@hydra/client-core";
+import { createClient } from "@hercule/client-core";
 import { describe, expect, it } from "vitest";
 import { UsageError } from "../exit";
 import { id, stubFetch, type Handler } from "../testing";

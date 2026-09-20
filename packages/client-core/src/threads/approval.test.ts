@@ -8,7 +8,7 @@
  * typed off the contract's own `OpenRequest` so no shape is restated here.
  */
 import { describe, expect, it } from "vitest";
-import type { OpenRequest } from "@hydra/contract";
+import type { OpenRequest } from "@hercule/contract";
 import { approvalCard } from "./approval";
 
 const COMMAND: OpenRequest = {

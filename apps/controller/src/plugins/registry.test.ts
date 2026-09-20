@@ -6,7 +6,7 @@
  */
 import { beforeAll, describe, expect, it } from "vitest";
 import { Effect } from "effect";
-import type { PluginDetail } from "@hydra/contract";
+import type { PluginDetail } from "@hercule/contract";
 import { PluginHost, Plugins, registry } from "./index";
 import { asUser, pluginStack } from "./testing";
 

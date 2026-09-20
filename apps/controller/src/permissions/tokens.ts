@@ -26,7 +26,7 @@ import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
-import { GrantSchema } from "@hydra/contract";
+import { GrantSchema } from "@hercule/contract";
 import type { SessionActor } from "../actor";
 import { uuidToString } from "../db";
 

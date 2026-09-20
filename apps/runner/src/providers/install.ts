@@ -6,7 +6,7 @@
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
-import { MAX_INSTALL_MESSAGE_LENGTH } from "@hydra/protocol";
+import { MAX_INSTALL_MESSAGE_LENGTH } from "@hercule/protocol";
 import type { InstallOutcome } from "./index";
 import type { Run } from "./process";
 

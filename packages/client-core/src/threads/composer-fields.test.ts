@@ -15,7 +15,7 @@ import type {
   Runner,
   Session,
   Workspace,
-} from "@hydra/contract";
+} from "@hercule/contract";
 import { BARE, instance, snapshot } from "../providers.testing";
 import { composerFields, pendingModelNote } from "./composer-fields";
 import { phraseText } from "./workspaces";

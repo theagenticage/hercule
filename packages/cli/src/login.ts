@@ -14,8 +14,8 @@
  */
 import { randomUUID } from "node:crypto";
 import { mkdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import { createClient, type HydraClient } from "@hydra/client-core";
-import { credentialsFileIn } from "@hydra/home";
+import { createClient, type HydraClient } from "@hercule/client-core";
+import { credentialsFileIn } from "@hercule/home";
 import { tokenize } from "./commands/args";
 import { UsageError } from "./exit";
 import type { Io } from "./io";

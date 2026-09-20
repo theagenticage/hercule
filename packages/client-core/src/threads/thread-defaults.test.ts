@@ -6,7 +6,7 @@
  * would actually be placed on, and nothing picked is `null` rather than "".
  */
 import { describe, expect, it } from "vitest";
-import type { Profile, ProviderInstance, Runner, SettingsState } from "@hydra/contract";
+import type { Profile, ProviderInstance, Runner, SettingsState } from "@hercule/contract";
 import { BARE, instance, snapshot } from "../providers.testing";
 import { instanceDefaults, threadDefaults } from "./thread-defaults";
 

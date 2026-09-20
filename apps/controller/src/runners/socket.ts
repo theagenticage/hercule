@@ -4,7 +4,7 @@
  * the upgrade and buys nothing else anywhere in Hydra.
  *
  * The proof runs the other way too: `greet` signs the runner's nonce beside its
- * id, and `signedChallenge` in `@hydra/protocol` says why both are in there.
+ * id, and `signedChallenge` in `@hercule/protocol` says why both are in there.
  *
  * Liveness is a protocol frame, never a WebSocket control frame: Bun answers a
  * control ping in the runtime, which would prove the machine is up rather than
@@ -25,7 +25,7 @@ import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
 import * as Socket from "effect/unstable/socket/Socket";
-import { internal, unauthenticated } from "@hydra/contract";
+import { internal, unauthenticated } from "@hercule/contract";
 import {
   ControllerToRunner,
   GOING_AWAY_CLOSE_CODE,
@@ -36,7 +36,7 @@ import {
   signedChallenge,
   type ControllerHello,
   type RunnerHello,
-} from "@hydra/protocol";
+} from "@hercule/protocol";
 import { bearerOf } from "../http/bearer";
 import { responseFor } from "../http/envelope";
 import { ControllerIdentity } from "../identity";

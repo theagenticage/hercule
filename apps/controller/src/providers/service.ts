@@ -20,8 +20,8 @@ import {
   secretFields,
   excludeSecretFields,
   type ProviderDefinition,
-} from "@hydra/plugin-host";
-import type { LoginCode, LoginFailed, LoginResult, LoginStart, LoginUrl } from "@hydra/protocol";
+} from "@hercule/plugin-host";
+import type { LoginCode, LoginFailed, LoginResult, LoginStart, LoginUrl } from "@hercule/protocol";
 import {
   invalidState,
   Id,
@@ -40,7 +40,7 @@ import {
   type RunnerDetail,
   type Unauthenticated,
   type Validation,
-} from "@hydra/contract";
+} from "@hercule/contract";
 import { currentStamp, requireGrant } from "../actor";
 import { nowIso, withTransaction } from "../db";
 import { AuditLog } from "../events";

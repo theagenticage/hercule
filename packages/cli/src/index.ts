@@ -8,12 +8,12 @@
  * of `<home>/setup-url`, needing no credential, because it is what a user has
  * before they have any credential at all.
  *
- * No Effect code lives past this package's own use of `@hydra/home`: the CLI
+ * No Effect code lives past this package's own use of `@hercule/home`: the CLI
  * talks to the API through `client-core`'s promises.
  */
 import { readFileSync } from "node:fs";
-import { ApiError, ConnectionError, RequestError, createClient } from "@hydra/client-core";
-import { parseGlobalOptions, resolveHomePath, setupUrlFileIn } from "@hydra/home";
+import { ApiError, ConnectionError, RequestError, createClient } from "@hercule/client-core";
+import { parseGlobalOptions, resolveHomePath, setupUrlFileIn } from "@hercule/home";
 import { Result } from "effect";
 import { parseArguments, said } from "./commands/args";
 import { execute } from "./commands/execute";

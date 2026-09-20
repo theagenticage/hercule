@@ -9,8 +9,8 @@
 import { describe, expect, it } from "vitest";
 import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { ageOf, formatStamp } from "@hydra/client-core";
-import type { ProviderSecretField, Session } from "@hydra/contract";
+import { ageOf, formatStamp } from "@hercule/client-core";
+import type { ProviderSecretField, Session } from "@hercule/contract";
 import {
   envelope,
   reading,

@@ -2,7 +2,7 @@
  * The events an adapter reports about an input it has just delivered, rather
  * than about something the harness said - and the ids they are filed under.
  */
-import type { ProviderEvent } from "@hydra/protocol";
+import type { ProviderEvent } from "@hercule/protocol";
 import { now } from "../report";
 import { fact } from "./text";
 

@@ -16,8 +16,8 @@
  */
 import * as Effect from "effect/Effect";
 import type { SqlError } from "effect/unstable/sql/SqlError";
-import type { WorkspaceProvision } from "@hydra/protocol";
-import type { Actor, CheckoutForm, WorkspaceKind } from "@hydra/contract";
+import type { WorkspaceProvision } from "@hercule/protocol";
+import type { Actor, CheckoutForm, WorkspaceKind } from "@hercule/contract";
 import type { AuditLog } from "../events";
 import type { StoredRepo } from "../resources";
 import type { StoredCheckout, StoredWorkspace, workspaceRepository } from "./repository";

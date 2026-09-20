@@ -5,7 +5,7 @@
  * or reword - the user reads what the click does, in the same words on every
  * surface (spec 10 §7.4, spec 14 §Answers as a ledger).
  */
-import type { ApprovalDecision, OpenRequest } from "@hydra/contract";
+import type { ApprovalDecision, OpenRequest } from "@hercule/contract";
 
 /** One answer row: the row is the button, the label its left column. */
 export interface ApprovalRow {

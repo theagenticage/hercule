@@ -11,7 +11,13 @@
  * Static help and 403s that name the missing grant are the two teaching
  * channels, so every screen names the grant a command needs.
  */
-import { NOUNS, type ErrorCode, type Grant, type NounRow, type Requirement } from "@hydra/contract";
+import {
+  NOUNS,
+  type ErrorCode,
+  type Grant,
+  type NounRow,
+  type Requirement,
+} from "@hercule/contract";
 import { COMMANDS, commandsUnder, mentionsIn, type Command, type Field } from "./tree";
 
 /** How wide a line is allowed to be before it is wrapped. */

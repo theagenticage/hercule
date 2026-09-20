@@ -1,7 +1,7 @@
 import type { JSX } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { useSuspenseQuery } from "@tanstack/react-query";
-import { EmptyState } from "@hydra/ui";
+import { EmptyState } from "@hercule/ui";
 import { useLiveInvalidation } from "../../../app/live-invalidation";
 import { pluginsQuery } from "../../../app/queries";
 import { PluginCard } from "./-plugin-card";

@@ -16,7 +16,7 @@
 import { Context, Effect, Layer, Option, Schema } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
-import { Id, SETTING_VALUES } from "@hydra/contract";
+import { Id, SETTING_VALUES } from "@hercule/contract";
 import { nowIso, uuidFromString } from "../db";
 
 /** The keys each scope defines, with the schema of the value. */

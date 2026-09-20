@@ -4,7 +4,7 @@
  * the rows themselves are what it hands back: the screen renders an offer, it
  * does not work out what one is.
  */
-import type { ProviderInstance, Runner } from "@hydra/contract";
+import type { ProviderInstance, Runner } from "@hercule/contract";
 import { providerRows, type ProviderRow } from "./provider-rows";
 
 /**

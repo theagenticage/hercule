@@ -7,7 +7,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { Effect, Result } from "effect";
-import { configJsonSchema, type ProviderDefinition } from "@hydra/plugin-host";
+import { configJsonSchema, type ProviderDefinition } from "@hercule/plugin-host";
 import { pi } from "./index";
 
 /** The definition the plugin hands the catalog, captured from its registration. */

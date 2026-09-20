@@ -22,7 +22,7 @@ import {
   type StructuredResult,
   type TurnState,
   type Usage,
-} from "@hydra/protocol";
+} from "@hercule/protocol";
 import { judgeAnswer, type HarnessAnswer } from "./structured-result";
 
 /** The channel name every raw payload from this adapter is filed under. */

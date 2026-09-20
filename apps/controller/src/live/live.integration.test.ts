@@ -47,14 +47,14 @@ import {
   type Task,
   type TapItem,
   type TranscriptRow,
-} from "@hydra/contract";
+} from "@hercule/contract";
 import {
   PROTOCOL_VERSION,
   type JoinAnswer,
   type RunnerFacts,
   type SessionStart,
-} from "@hydra/protocol";
-import type { Plugin } from "@hydra/plugin-host";
+} from "@hercule/protocol";
+import type { Plugin } from "@hercule/plugin-host";
 import { fixture, providerDefinition } from "../plugins/testing";
 import {
   collecting,

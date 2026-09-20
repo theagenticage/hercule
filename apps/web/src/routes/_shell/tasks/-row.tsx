@@ -1,7 +1,7 @@
 import type { JSX } from "react";
-import { formatStamp, priorityGlyph, taskRecedes } from "@hydra/client-core";
-import type { Task } from "@hydra/contract";
-import { ListRow, PriorityGlyph } from "@hydra/ui";
+import { formatStamp, priorityGlyph, taskRecedes } from "@hercule/client-core";
+import type { Task } from "@hercule/contract";
+import { ListRow, PriorityGlyph } from "@hercule/ui";
 
 /**
  * One task as a row: what it is, how much it matters, where it stands and where

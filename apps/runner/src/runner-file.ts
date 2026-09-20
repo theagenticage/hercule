@@ -8,7 +8,7 @@ import { readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join as joinPath } from "node:path";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
-import { runnerDirIn } from "@hydra/home";
+import { runnerDirIn } from "@hercule/home";
 
 export const CONTROLLER_URL_SCHEMES: ReadonlyArray<string> = ["http:", "https:"];
 

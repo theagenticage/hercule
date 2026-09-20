@@ -6,7 +6,7 @@
  * `sort` or it says `text`, and what comes back is the whole evidence.
  */
 import { describe, expect, it } from "vitest";
-import type { Task } from "@hydra/contract";
+import type { Task } from "@hercule/contract";
 import { completeSetup, get, post, send, withServer } from "./testing";
 
 interface TaskPage {

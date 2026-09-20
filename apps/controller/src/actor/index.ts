@@ -23,7 +23,7 @@ import {
   type OperationId,
   type Requirement,
   type Unauthenticated,
-} from "@hydra/contract";
+} from "@hercule/contract";
 
 /** What a caller with no usable credential is told; never why. */
 export const NO_CREDENTIAL = "this operation needs a credential";

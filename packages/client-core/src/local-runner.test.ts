@@ -14,7 +14,7 @@
  * waited for.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { Runner, RunnerFacts } from "@hydra/contract";
+import type { Runner, RunnerFacts } from "@hercule/contract";
 import { detectLocalRunner, type FetchLike } from "./index";
 import { IDENTITY_TIMEOUT_MS } from "./local-runner";
 

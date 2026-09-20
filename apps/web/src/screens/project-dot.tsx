@@ -1,6 +1,6 @@
 import type { JSX } from "react";
-import type { ProjectTone } from "@hydra/client-core";
-import { cn } from "@hydra/ui";
+import type { ProjectTone } from "@hercule/client-core";
+import { cn } from "@hercule/ui";
 
 /**
  * A project's identity dot: a small square in one of the two identity hues the

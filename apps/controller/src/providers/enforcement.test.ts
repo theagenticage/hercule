@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { ProviderDefinition } from "@hydra/plugin-host";
+import type { ProviderDefinition } from "@hercule/plugin-host";
 import { providerDefinition } from "../plugins/testing";
 import { listUnenforcedFields } from "./enforcement";
 

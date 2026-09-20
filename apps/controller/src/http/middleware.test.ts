@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { requirementOf } from "@hydra/contract";
+import { requirementOf } from "@hercule/contract";
 import { operationIdOf } from "./middleware";
 
 describe("operationIdOf", () => {

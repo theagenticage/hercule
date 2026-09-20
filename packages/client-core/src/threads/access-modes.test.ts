@@ -4,12 +4,12 @@
  * annotation names the provider that decided it (spec 14 §The composer:
  * `runs as auto-accept-edits on pi`, ticket #70).
  *
- * `AccessMode` is defined in `@hydra/protocol` (packages/protocol/src/sessions.ts)
- * and re-exported unchanged by `@hydra/contract`, which is the only dependency
+ * `AccessMode` is defined in `@hercule/protocol` (packages/protocol/src/sessions.ts)
+ * and re-exported unchanged by `@hercule/contract`, which is the only dependency
  * this package already declares.
  */
 import { describe, expect, it } from "vitest";
-import type { AccessMode } from "@hydra/contract";
+import type { AccessMode } from "@hercule/contract";
 import { accessModeMenu } from "./access-modes";
 
 /** The provider's display name, as the row that names the fallback reads it. */

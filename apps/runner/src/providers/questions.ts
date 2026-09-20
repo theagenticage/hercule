@@ -9,7 +9,7 @@
  * on the wire, and one field of the wrong type would otherwise be a frame the
  * runner drops, which loses the event and leaves the park hanging.
  */
-import type { OpenRequest } from "@hydra/protocol";
+import type { OpenRequest } from "@hercule/protocol";
 import { fact, text } from "./text";
 
 /** One question as the protocol carries it: the vendor's shape mapped over. */

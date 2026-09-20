@@ -36,7 +36,7 @@ import {
   type WorkspaceDispose,
   type WorkspaceProvision,
   type WorkspaceReport,
-} from "@hydra/protocol";
+} from "@hercule/protocol";
 import {
   conflict,
   DEFAULT_PAGE_LIMIT,
@@ -58,7 +58,7 @@ import {
   type Validation,
   type Workspace,
   type WorkspaceStatus,
-} from "@hydra/contract";
+} from "@hercule/contract";
 import { currentStamp, requireGrant, SYSTEM_ACTOR, USER_ACTOR } from "../actor";
 import { nowIso, pageInput, refuseCursor, withTransaction } from "../db";
 import type { SessionTokens } from "../permissions";

@@ -3,7 +3,7 @@
  * All sessions render, sorted most-recently-active first.
  */
 import { describe, expect, it } from "vitest";
-import type { Session, SessionStatus } from "@hydra/contract";
+import type { Session, SessionStatus } from "@hercule/contract";
 import { instance, snapshot } from "../providers.testing";
 import { threadRows } from "./rows";
 

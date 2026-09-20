@@ -18,7 +18,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { Effect } from "effect";
-import type { SessionStart } from "@hydra/protocol";
+import type { SessionStart } from "@hercule/protocol";
 import { resolve, type Machine } from "./context";
 import { makeWorkspaces } from "../workspaces";
 import {

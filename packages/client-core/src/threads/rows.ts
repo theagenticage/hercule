@@ -3,7 +3,7 @@
  * `now`-free `activityAt` stays raw: formatting "how long ago" needs a clock,
  * and the caller's is the one that should ever run.
  */
-import type { ProviderInstance, Session, ThreadRows } from "@hydra/contract";
+import type { ProviderInstance, Session, ThreadRows } from "@hercule/contract";
 import { isSettled, WORKING_STATUSES } from "./status";
 
 /** What a row's state mark says: working, waiting, or over. */

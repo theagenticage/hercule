@@ -7,8 +7,8 @@ import {
   queryKeys,
   REMOTE_REFUSAL,
   type HydraClient,
-} from "@hydra/client-core";
-import type { ResourceCreateInput } from "@hydra/contract";
+} from "@hercule/client-core";
+import type { ResourceCreateInput } from "@hercule/contract";
 import { connectionsQuery } from "../app/queries";
 import { NewProjectDialog, type SourceDraft } from "./new-project-dialog";
 import { messageOf } from "./save-status";

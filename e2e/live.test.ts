@@ -3,7 +3,7 @@
  *
  * The socket is the one part of the live overlay that no unit test can prove:
  * `client-core`'s tests drive a stub `WebSocket` and the controller's drive an
- * in-process RPC client. This suite runs `./hydra` as the controller and as the
+ * in-process RPC client. This suite runs `./hercule` as the controller and as the
  * CLI, and puts a real `client-core` live client - real ticket fetch, real
  * WebSocket, real greeting - between them, so a `hydra task create` in one
  * process has to reach a subscriber in another. `pnpm build:binary` first, then
@@ -28,7 +28,7 @@ import {
 } from "./harness";
 
 const state = temporaryHome();
-const binary = join(ROOT, "hydra");
+const binary = join(ROOT, "hercule");
 
 let controller: Controller;
 let url: string;

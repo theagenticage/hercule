@@ -13,7 +13,7 @@
  * machine's own storage.
  */
 import { Schema } from "effect";
-import { CheckoutForm, WorkspaceKind } from "@hydra/protocol";
+import { CheckoutForm, WorkspaceKind } from "@hercule/protocol";
 import * as HttpApiEndpoint from "effect/unstable/httpapi/HttpApiEndpoint";
 import * as HttpApiGroup from "effect/unstable/httpapi/HttpApiGroup";
 import { closedStruct } from "../closed";

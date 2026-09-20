@@ -1,6 +1,6 @@
 import type { JSX } from "react";
 import { Link, useMatches } from "@tanstack/react-router";
-import { EmptyState } from "@hydra/ui";
+import { EmptyState } from "@hercule/ui";
 import { HOME_PATH } from "../app/entry-guard";
 import { CenteredScreen } from "./centered-screen";
 

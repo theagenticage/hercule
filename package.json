@@ -1,5 +1,5 @@
 {
-  "name": "hydra",
+  "name": "hercule",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -12,7 +12,7 @@
     "test": "bun --bun run vitest run --project node && vitest run --project react",
     "test:binary": "bun --bun run vitest run --project binary",
     "dep-lint": "bun run scripts/dep-lint.ts",
-    "build:binary": "bun run scripts/gen-version.ts && pnpm --filter @hydra/web build && bun run scripts/check-bundle-budget.ts && bun run scripts/gen-web-bundle.ts && bun build packages/hydra/src/main.ts --compile --outfile hydra"
+    "build:binary": "bun run scripts/gen-version.ts && pnpm --filter @hercule/web build && bun run scripts/check-bundle-budget.ts && bun run scripts/gen-web-bundle.ts && bun build packages/hercule/src/main.ts --compile --outfile hercule"
   },
   "devDependencies": {
     "@effect/vitest": "4.0.0-rc.112",

@@ -1,4 +1,4 @@
-import { CLI, NOUNS } from "@hydra/contract";
+import { CLI, NOUNS } from "@hercule/contract";
 import { describe, expect, it } from "vitest";
 import { parseArguments } from "./args";
 import { COMMANDS, commandAt, mentionsIn } from "./tree";

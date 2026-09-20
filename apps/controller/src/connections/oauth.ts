@@ -21,7 +21,7 @@ import * as Schema from "effect/Schema";
 import * as HttpBody from "effect/unstable/http/HttpBody";
 import * as HttpClient from "effect/unstable/http/HttpClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
-import type { OAuthDeclaration } from "@hydra/plugin-host";
+import type { OAuthDeclaration } from "@hercule/plugin-host";
 import { Secrets } from "../secrets";
 import { PluginConfigs } from "./plugin-configs";
 

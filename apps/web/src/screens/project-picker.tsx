@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState, type JSX } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
-import { projectPickerRows, type HydraClient, type ProjectPickerRow } from "@hydra/client-core";
-import { cn } from "@hydra/ui";
+import { projectPickerRows, type HydraClient, type ProjectPickerRow } from "@hercule/client-core";
+import { cn } from "@hercule/ui";
 import { ProjectDot } from "./project-dot";
 import { projectsQuery, resourcesQuery, sessionsQuery, workspacesQuery } from "../app/queries";
 

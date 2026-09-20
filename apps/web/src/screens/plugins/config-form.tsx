@@ -1,5 +1,5 @@
 import { useState, type FormEvent, type JSX } from "react";
-import { Button, Checkbox, Field, Input, LaneLabel, Select, StringList } from "@hydra/ui";
+import { Button, Checkbox, Field, Input, LaneLabel, Select, StringList } from "@hercule/ui";
 import {
   configDraft,
   configPayload,
@@ -7,7 +7,7 @@ import {
   type ConfigField,
   type ConfigJson,
   type ConfigValue,
-} from "@hydra/client-core";
+} from "@hercule/client-core";
 
 /**
  * The form a plugin's own config schema generates. No checking here beyond

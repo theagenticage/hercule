@@ -22,7 +22,7 @@
  */
 import * as Effect from "effect/Effect";
 import * as HttpRouter from "effect/unstable/http/HttpRouter";
-import { OPERATIONS, unauthenticated } from "@hydra/contract";
+import { OPERATIONS, unauthenticated } from "@hercule/contract";
 import { Setup } from "../setup";
 import { responseFor } from "./envelope";
 

@@ -7,7 +7,7 @@
  * was stored, and for the word `value` itself.
  */
 import { describe, expect, it } from "vitest";
-import { VERSION } from "@hydra/home/version";
+import { VERSION } from "@hercule/home/version";
 import { completeSetup, send, withServer } from "./testing";
 
 const OWNER = "connection/0198e4b0-0000-7000-8000-000000000001";

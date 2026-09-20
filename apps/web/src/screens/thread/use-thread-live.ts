@@ -14,13 +14,13 @@
  */
 import { useCallback, useEffect, useMemo, useRef, type RefObject } from "react";
 import type { QueryClient } from "@tanstack/react-query";
-import { mergeTranscript, openItemOf, queryKeys, type Live } from "@hydra/client-core";
+import { mergeTranscript, openItemOf, queryKeys, type Live } from "@hercule/client-core";
 import {
   sessionStreamTopic,
   sessionTapTopic,
   type TapItem,
   type TranscriptRow,
-} from "@hydra/contract";
+} from "@hercule/contract";
 
 /** The item a row's event names, or nothing for an event that names none (a turn boundary). */
 const itemIdOf = (event: TranscriptRow["event"]): string | undefined =>

@@ -14,10 +14,18 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { runnerDirIn } from "@hydra/home";
+import { runnerDirIn } from "@hercule/home";
 
 /** The dispatcher, run from source: `hydra` before it is compiled. */
-const HYDRA = join(dirname(import.meta.dirname), "..", "..", "packages", "hydra", "src", "main.ts");
+const HYDRA = join(
+  dirname(import.meta.dirname),
+  "..",
+  "..",
+  "packages",
+  "hercule",
+  "src",
+  "main.ts",
+);
 
 const homes: Array<string> = [];
 

@@ -1,5 +1,5 @@
 /**
- * `@hydra/contract`: the public API declared once, in Effect Schema.
+ * `@hercule/contract`: the public API declared once, in Effect Schema.
  *
  * The controller derives its routes and its request validation from `api`, the
  * CLI and `client-core` derive their client from it, and the OpenAPI document

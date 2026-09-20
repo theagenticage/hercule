@@ -4,7 +4,7 @@
  */
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { CLAUDE_CODE_VERSION, CODEX_VERSION, PI_VERSION } from "@hydra/home/version";
+import { CLAUDE_CODE_VERSION, CODEX_VERSION, PI_VERSION } from "@hercule/home/version";
 import { floorFor, versionVerdict } from "./version";
 
 const root = fileURLToPath(new URL("../../../../", import.meta.url));

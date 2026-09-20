@@ -6,7 +6,7 @@
  * the one runner the thread is placed on; switching machines re-resolves the
  * whole menu.
  */
-import type { ModelDescriptor, ProviderInstance } from "@hydra/contract";
+import type { ModelDescriptor, ProviderInstance } from "@hercule/contract";
 import { accountName, instanceLabel, loginTarget, snapshotOn, type LoginTarget } from "./catalog";
 import type { ThreadCatalogs, ThreadConfig, ThreadKind } from "./config";
 import type { RecentModel } from "./recent";

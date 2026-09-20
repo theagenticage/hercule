@@ -31,7 +31,7 @@ import {
   type SessionRespond,
   type SessionStart,
   type SessionStop,
-} from "@hydra/protocol";
+} from "@hercule/protocol";
 import {
   DEFAULT_PAGE_LIMIT,
   Id,
@@ -54,7 +54,7 @@ import {
   type TranscriptRow,
   type Unauthenticated,
   type Validation,
-} from "@hydra/contract";
+} from "@hercule/contract";
 import { currentStamp, requireGrant, SYSTEM_ACTOR } from "../actor";
 import { PluginHost } from "../plugins";
 import {

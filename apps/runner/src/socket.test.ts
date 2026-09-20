@@ -25,7 +25,7 @@ import {
   type RunnerFactsRequest,
   type RunnerHello,
   type RunnerToController as RunnerMessage,
-} from "@hydra/protocol";
+} from "@hercule/protocol";
 import {
   ControllerNotRecognised,
   connect,

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { Clock, Effect, Layer } from "effect";
 import { TestClock } from "effect/testing";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
-import { MAX_TASK_LABELS, MAX_TASK_TITLE_LENGTH, type Task } from "@hydra/contract";
+import { MAX_TASK_LABELS, MAX_TASK_TITLE_LENGTH, type Task } from "@hercule/contract";
 import { CurrentActor, type Actor } from "../actor";
 import { mintUuid, uuidToString } from "../db";
 import { TestDatabase } from "../db/testing";

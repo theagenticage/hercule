@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { Profile } from "@hydra/contract";
+import type { Profile } from "@hercule/contract";
 import { completeSetup, post, send, withServer } from "./testing";
 
 /** Permission profiles over a real socket. */

@@ -1,5 +1,5 @@
 import type { JSX } from "react";
-import { Field, Input } from "@hydra/ui";
+import { Field, Input } from "@hercule/ui";
 
 /**
  * The topics a connection can file into. Suggestions rather than a closed list:

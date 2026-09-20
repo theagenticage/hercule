@@ -12,7 +12,7 @@
  * the user.
  */
 import { readFileSync } from "node:fs";
-import { credentialsFileIn } from "@hydra/home";
+import { credentialsFileIn } from "@hercule/home";
 
 /** The contents of `<home>/credentials.json`, exactly as `hydra login` writes it. */
 export interface CredentialFile {

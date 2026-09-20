@@ -1,6 +1,6 @@
 import { useEffect, useState, type JSX } from "react";
-import { TASK_STATUSES, type Project, type TaskFilter, type TaskStatus } from "@hydra/contract";
-import { Button, Field, Input, Select } from "@hydra/ui";
+import { TASK_STATUSES, type Project, type TaskFilter, type TaskStatus } from "@hercule/contract";
+import { Button, Field, Input, Select } from "@hercule/ui";
 
 /** The value every filter opens on: no filter at all. */
 export const ANY = "";

@@ -16,7 +16,7 @@ import * as Stream from "effect/Stream";
 import type * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
-import { notFound, type CapabilitySnapshot, type NotFound } from "@hydra/contract";
+import { notFound, type CapabilitySnapshot, type NotFound } from "@hercule/contract";
 import { announce, nowIso, withTransaction } from "../db";
 import { PluginHost } from "../plugins";
 import { RunnerConnections, runnerRepository } from "../runners";

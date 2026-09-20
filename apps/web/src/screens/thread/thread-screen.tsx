@@ -4,7 +4,7 @@
  */
 import { useLayoutEffect, type JSX } from "react";
 import { useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
-import { siblingTabs, turnsOf, type HydraClient, type Live } from "@hydra/client-core";
+import { siblingTabs, turnsOf, type HydraClient, type Live } from "@hercule/client-core";
 import { useLiveInvalidation } from "../../app/live-invalidation";
 import {
   inputsQuery,

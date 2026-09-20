@@ -5,7 +5,7 @@ import {
   secret,
   type Plugin,
   type ProviderDefinition,
-} from "@hydra/plugin-host";
+} from "@hercule/plugin-host";
 
 /**
  * What pi's RPC mode can do, at the version Hydra pins. Every value is a fact,

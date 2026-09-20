@@ -21,7 +21,7 @@ import {
   type NotFound,
   type Unauthenticated,
   type Validation,
-} from "@hydra/contract";
+} from "@hercule/contract";
 import { agentRepository } from "../agents";
 import { requireGrant } from "../actor";
 import { refuseCursor, withTransaction } from "../db";

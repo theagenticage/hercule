@@ -4,7 +4,7 @@ import {
   registerProvider,
   type Plugin,
   type ProviderDefinition,
-} from "@hydra/plugin-host";
+} from "@hercule/plugin-host";
 
 /**
  * What `codex app-server` can do, at the version Hydra pins. Every value is a

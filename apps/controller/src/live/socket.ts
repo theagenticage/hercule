@@ -48,8 +48,8 @@ import {
   type Internal,
   type Unauthenticated,
   type Validation,
-} from "@hydra/contract";
-import { VERSION } from "@hydra/home/version";
+} from "@hercule/contract";
+import { VERSION } from "@hercule/home/version";
 import { CurrentActor, requireGrant, type UserActor } from "../actor";
 import { Credentials } from "../credentials";
 import { WsTickets } from "./tickets";

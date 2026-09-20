@@ -9,8 +9,8 @@
  */
 import { describe, expect, it, vi } from "vitest";
 import { Effect, Schema } from "effect";
-import { secret, type Plugin, type ProviderDefinition } from "@hydra/plugin-host";
-import type { ModelDescriptor, ProbeRequest, RunnerFacts, SessionStart } from "@hydra/protocol";
+import { secret, type Plugin, type ProviderDefinition } from "@hercule/plugin-host";
+import type { ModelDescriptor, ProbeRequest, RunnerFacts, SessionStart } from "@hercule/protocol";
 import { fixture, providerDefinition } from "../plugins/testing";
 import { send } from "../http/testing";
 import {

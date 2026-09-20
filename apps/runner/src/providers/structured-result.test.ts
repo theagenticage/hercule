@@ -4,7 +4,7 @@
  * is none - and this decides whether the session answered its schema.
  */
 import { describe, expect, it } from "vitest";
-import { MAX_MESSAGE_LENGTH, type OutputSchema } from "@hydra/protocol";
+import { MAX_MESSAGE_LENGTH, type OutputSchema } from "@hercule/protocol";
 import { judgeAnswer } from "./structured-result";
 
 /**

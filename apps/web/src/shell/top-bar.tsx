@@ -5,9 +5,9 @@ import {
   formatSince,
   formatTimeContext,
   isSupportedTimezone,
-} from "@hydra/client-core";
-import type { SettingsState } from "@hydra/contract";
-import { useMinuteClock } from "@hydra/ui";
+} from "@hercule/client-core";
+import type { SettingsState } from "@hercule/contract";
+import { useMinuteClock } from "@hercule/ui";
 
 /**
  * The screen title and its time context.

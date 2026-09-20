@@ -18,7 +18,7 @@ import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
-import { SessionSpec, type ModelSelection, type SessionInputResult } from "@hydra/protocol";
+import { SessionSpec, type ModelSelection, type SessionInputResult } from "@hercule/protocol";
 import {
   Id,
   InvalidState,
@@ -35,7 +35,7 @@ import {
   type SessionSelection,
   type Unauthenticated,
   type Validation,
-} from "@hydra/contract";
+} from "@hercule/contract";
 import { currentStamp, requireGrant } from "../actor";
 import { nowIso, withTransaction } from "../db";
 import { AuditLog } from "../events";

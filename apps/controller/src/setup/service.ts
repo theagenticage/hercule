@@ -25,7 +25,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
-import { invalidState, type InvalidState } from "@hydra/contract";
+import { invalidState, type InvalidState } from "@hercule/contract";
 import { USER_ACTOR } from "../actor";
 import { HydraHome } from "../config";
 import { Credentials, hashToken, mintToken } from "../credentials";

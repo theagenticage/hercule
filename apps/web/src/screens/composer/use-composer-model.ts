@@ -21,8 +21,8 @@ import {
   type ThreadConfig,
   type ThreadKind,
   type ThreadPicks,
-} from "@hydra/client-core";
-import type { SessionInputPayload, SessionSpawnInput } from "@hydra/contract";
+} from "@hercule/client-core";
+import type { SessionInputPayload, SessionSpawnInput } from "@hercule/contract";
 
 /** Where the last models picked are kept; nothing on the API carries them. */
 const RECENT_KEY = "hydra.recentModels";

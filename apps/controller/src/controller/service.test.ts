@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { Effect, Layer } from "effect";
-import { VERSION } from "@hydra/home/version";
+import { VERSION } from "@hercule/home/version";
 import { CurrentActor, type Actor } from "../actor";
 import { homePaths, HydraHome } from "../config";
 import { TestDatabase } from "../db/testing";

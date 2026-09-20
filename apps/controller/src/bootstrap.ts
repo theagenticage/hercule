@@ -16,8 +16,8 @@ import type * as Migrator from "effect/unstable/sql/Migrator";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import * as BunFileSystem from "@effect/platform-bun/BunFileSystem";
-import type { Plugin } from "@hydra/plugin-host";
-import type { HomePaths } from "@hydra/home";
+import type { Plugin } from "@hercule/plugin-host";
+import type { HomePaths } from "@hercule/home";
 import * as config from "./config";
 import { BootstrapConfig, HydraHome, HydraHomeError, type ConfigError } from "./config";
 import {

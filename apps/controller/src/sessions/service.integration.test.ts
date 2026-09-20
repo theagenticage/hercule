@@ -16,7 +16,7 @@ import { Deferred, Effect, Exit, Fiber, Layer, Logger, Option, Redacted } from "
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
-import { SessionSpec, type ModelSelection, type SessionStart } from "@hydra/protocol";
+import { SessionSpec, type ModelSelection, type SessionStart } from "@hercule/protocol";
 import { homePaths, HydraHome } from "../config";
 import { connectionRepository, ConnectionTypesLayer, GITHUB_CONNECTION_TYPE } from "../connections";
 import { hashToken } from "../credentials";

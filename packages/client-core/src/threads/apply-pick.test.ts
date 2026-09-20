@@ -7,7 +7,7 @@
  * hold only what the user has touched.
  */
 import { describe, expect, it } from "vitest";
-import type { ProviderInstance, Runner } from "@hydra/contract";
+import type { ProviderInstance, Runner } from "@hercule/contract";
 import { BARE, instance, snapshot } from "../providers.testing";
 import { applyPick } from "./apply-pick";
 import type { ThreadConfig } from "./config";

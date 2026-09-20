@@ -7,8 +7,8 @@ import { networkInterfaces } from "node:os";
 import { join as joinPath } from "node:path";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
-import { runnerDirIn } from "@hydra/home";
-import { IDENTITY_PORT } from "@hydra/protocol";
+import { runnerDirIn } from "@hercule/home";
+import { IDENTITY_PORT } from "@hercule/protocol";
 import {
   gitCredentialEnv,
   makeCredentialRelay,

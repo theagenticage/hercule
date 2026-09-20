@@ -26,7 +26,7 @@ import {
   Unauthenticated,
   Validation,
   type ApiError,
-} from "@hydra/contract";
+} from "@hercule/contract";
 import { AgentService, AgentServiceLayer } from "../agents";
 import { Auth, AuthLayer } from "../auth";
 import { LiveTopicsLayer, WsTickets, WsTicketsLayer } from "../live";

@@ -14,7 +14,7 @@ import {
   type ProvisionCheckout,
   type WorkspaceProvision,
   type WorkspaceReport,
-} from "@hydra/protocol";
+} from "@hercule/protocol";
 import { tearDown } from "./dispose";
 import {
   currentBranch,

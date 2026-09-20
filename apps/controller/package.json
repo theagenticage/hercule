@@ -1,5 +1,5 @@
 {
-  "name": "@hydra/controller",
+  "name": "@hercule/controller",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -9,14 +9,14 @@
   "dependencies": {
     "@effect/platform-bun": "4.0.0-rc.112",
     "@effect/sql-sqlite-bun": "4.0.0-rc.112",
-    "@hydra/contract": "workspace:*",
-    "@hydra/home": "workspace:*",
-    "@hydra/plugin-claude-code": "workspace:*",
-    "@hydra/plugin-codex": "workspace:*",
-    "@hydra/plugin-github": "workspace:*",
-    "@hydra/plugin-host": "workspace:*",
-    "@hydra/plugin-pi": "workspace:*",
-    "@hydra/protocol": "workspace:*",
+    "@hercule/contract": "workspace:*",
+    "@hercule/home": "workspace:*",
+    "@hercule/plugin-claude-code": "workspace:*",
+    "@hercule/plugin-codex": "workspace:*",
+    "@hercule/plugin-github": "workspace:*",
+    "@hercule/plugin-host": "workspace:*",
+    "@hercule/plugin-pi": "workspace:*",
+    "@hercule/protocol": "workspace:*",
     "effect": "4.0.0-rc.112"
   }
 }

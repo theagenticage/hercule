@@ -1,8 +1,8 @@
 import { useState, type FormEvent, type JSX } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Button, Field, FormCard, Input, Select } from "@hydra/ui";
-import { queryKeys, type HydraClient } from "@hydra/client-core";
-import type { OwnerKind } from "@hydra/contract";
+import { Button, Field, FormCard, Input, Select } from "@hercule/ui";
+import { queryKeys, type HydraClient } from "@hercule/client-core";
+import type { OwnerKind } from "@hercule/contract";
 import { SaveStatus, messageOf } from "../../../screens/save-status";
 
 /**

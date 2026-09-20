@@ -1,6 +1,6 @@
 import type { JSX } from "react";
 import { createFileRoute } from "@tanstack/react-router";
-import { EmptyState, FormCard } from "@hydra/ui";
+import { EmptyState, FormCard } from "@hercule/ui";
 
 export const Route = createFileRoute("/_shell/settings/system")({
   staticData: { title: "System" },

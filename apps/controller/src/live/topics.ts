@@ -52,7 +52,7 @@ import {
   type TranscriptRow,
   type Unauthenticated,
   type Validation,
-} from "@hydra/contract";
+} from "@hercule/contract";
 import { AfterCommit, type Change } from "../db";
 import { eventsAfter, headOfLog } from "../events";
 import { headOfTranscript, sessionExists, transcriptRowsAfter } from "../sessions";

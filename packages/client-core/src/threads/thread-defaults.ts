@@ -10,7 +10,13 @@
  * created. The caller decides what to do with that (dim the field, disable
  * Send); it never gets an id-shaped value the API would refuse.
  */
-import type { AccessMode, Profile, ProviderInstance, Runner, SettingsState } from "@hydra/contract";
+import type {
+  AccessMode,
+  Profile,
+  ProviderInstance,
+  Runner,
+  SettingsState,
+} from "@hercule/contract";
 import { defaultInstanceId } from "./default-instance";
 import { threadModelField } from "./model-field";
 import { runnerMenu } from "./runner-menu";

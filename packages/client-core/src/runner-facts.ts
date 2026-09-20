@@ -7,7 +7,7 @@
  * component that lays it out. `null` is a fact the machine has not reported;
  * saying so is the caller's wording, not this module's.
  */
-import type { Runner } from "@hydra/contract";
+import type { Runner } from "@hercule/contract";
 import { formatBytes } from "./format-bytes";
 
 /** One line each, in the order a page states them. */

@@ -2,14 +2,14 @@
  * The records the workspace readings are written against: a fleet of two
  * machines, a one-repo project and a two-repo one, a main workspace and a
  * live worktree. Shared by every suite that speaks about them - client-core's
- * own and the web app's, through the `@hydra/client-core/threads/testing`
+ * own and the web app's, through the `@hercule/client-core/threads/testing`
  * export - because a world written five times drifts.
  *
  * The ids read as words by default. A suite whose records travel over the API
  * is decoded against the contract, which takes UUIDv7 and nothing else, so
  * `threadsWorld` takes one id per slot and the world is built around them.
  */
-import type { Project, Resource, Runner, Session, Workspace } from "@hydra/contract";
+import type { Project, Resource, Runner, Session, Workspace } from "@hercule/contract";
 
 export const AT = "2026-09-10T09:00:00.000Z";
 

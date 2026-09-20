@@ -16,7 +16,7 @@ import {
   type PluginCapability,
   type ProviderDefinition,
   type RegistrationHost,
-} from "@hydra/plugin-host";
+} from "@hercule/plugin-host";
 import { CurrentActor, type Actor } from "../actor";
 import { homePaths, HydraHome } from "../config";
 import { TestDatabase } from "../db/testing";

@@ -10,7 +10,7 @@
  * nothing else would catch it going stale - the skill text is written by hand.
  */
 import { describe, expect, it } from "vitest";
-import { CLI } from "@hydra/contract";
+import { CLI } from "@hercule/contract";
 import { HYDRA_SKILL } from "./skill";
 
 /** Every visible command, as the words that follow `hydra`. */

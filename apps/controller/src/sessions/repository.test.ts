@@ -10,7 +10,7 @@
 import { describe, expect, it } from "vitest";
 import { Effect } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
-import type { ProviderEvent } from "@hydra/protocol";
+import type { ProviderEvent } from "@hercule/protocol";
 import { CursorError, mintUuid, uuidToString } from "../db";
 import { TestDatabase } from "../db/testing";
 import { LIVE_SESSION_STATUSES, sessionRepository, type StoredStreamRow } from "./repository";

@@ -8,7 +8,7 @@ import {
   nearestSupportedAccessMode,
   type AccessMode,
   type DeclaredCapabilities,
-} from "@hydra/contract";
+} from "@hercule/contract";
 
 export interface AccessModeMenuItem {
   readonly mode: AccessMode;

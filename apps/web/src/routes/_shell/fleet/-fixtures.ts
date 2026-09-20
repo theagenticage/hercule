@@ -3,7 +3,7 @@
  * field added to the resource cannot reach one screen's test and not the
  * other's; each test spreads over it what its own case needs.
  */
-import type { Session } from "@hydra/contract";
+import type { Session } from "@hercule/contract";
 
 export const CONTROLLER_VERSION = "0.4.2";
 

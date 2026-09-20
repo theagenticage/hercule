@@ -5,7 +5,7 @@
  *
  * The two schemas are imported from the protocol package's own testing module
  * rather than written again. A package reaches that module as
- * `@hydra/protocol/testing`, and this suite reaches it by relative path,
+ * `@hercule/protocol/testing`, and this suite reaches it by relative path,
  * because the suite depends on no Hydra package. `live.test.ts` beside it
  * reaches client-core the same way. The module holds data only. Nothing else
  * of Hydra is imported here, and the binary under test knows nothing about
@@ -68,7 +68,7 @@ const wanted = liveSessionsAsked();
 const lentCredentials = process.env["HYDRA_E2E_CLAUDE_CREDENTIALS"];
 
 const state = temporaryHome();
-const binary = join(ROOT, "hydra");
+const binary = join(ROOT, "hercule");
 
 let controller: Controller;
 let url: string;

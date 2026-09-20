@@ -9,7 +9,7 @@
  * That is why it carries its table inside its body and closes over nothing: a
  * name it reached for from around it would not be there when it runs inside pi.
  */
-import type { AccessMode } from "@hydra/protocol";
+import type { AccessMode } from "@hercule/protocol";
 
 /** Whether the approval hook holds this call and asks about it, or lets it run. */
 export const requiresApproval = (mode: AccessMode, toolName: string): boolean => {

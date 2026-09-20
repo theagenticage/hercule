@@ -32,7 +32,7 @@ import {
   SetupToken,
   unauthenticated,
   type OperationId,
-} from "@hydra/contract";
+} from "@hercule/contract";
 import { CurrentActor, grantCheck, NO_CREDENTIAL, type Actor } from "../actor";
 import { Credentials, hashToken } from "../credentials";
 import { SessionTokens } from "../permissions";

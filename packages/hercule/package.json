@@ -1,5 +1,5 @@
 {
-  "name": "@hercule/cli",
+  "name": "@hercule/hercule",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -7,9 +7,9 @@
     ".": "./src/index.ts"
   },
   "dependencies": {
-    "@hercule/client-core": "workspace:*",
-    "@hercule/contract": "workspace:*",
+    "@hercule/cli": "workspace:*",
+    "@hercule/controller": "workspace:*",
     "@hercule/home": "workspace:*",
-    "effect": "4.0.0-rc.112"
+    "@hercule/runner": "workspace:*"
   }
 }

@@ -60,28 +60,28 @@ importers:
       '@effect/sql-sqlite-bun':
         specifier: 4.0.0-rc.112
         version: 4.0.0-rc.112(effect@4.0.0-rc.112)
-      '@hydra/contract':
+      '@hercule/contract':
         specifier: workspace:*
         version: link:../../packages/contract
-      '@hydra/home':
+      '@hercule/home':
         specifier: workspace:*
         version: link:../../packages/home
-      '@hydra/plugin-claude-code':
+      '@hercule/plugin-claude-code':
         specifier: workspace:*
         version: link:../../plugins/claude-code
-      '@hydra/plugin-codex':
+      '@hercule/plugin-codex':
         specifier: workspace:*
         version: link:../../plugins/codex
-      '@hydra/plugin-github':
+      '@hercule/plugin-github':
         specifier: workspace:*
         version: link:../../plugins/github
-      '@hydra/plugin-host':
+      '@hercule/plugin-host':
         specifier: workspace:*
         version: link:../../packages/plugin-host
-      '@hydra/plugin-pi':
+      '@hercule/plugin-pi':
         specifier: workspace:*
         version: link:../../plugins/pi
-      '@hydra/protocol':
+      '@hercule/protocol':
         specifier: workspace:*
         version: link:../../packages/protocol
       effect:
@@ -96,29 +96,29 @@ importers:
       '@cfworker/json-schema':
         specifier: 4.1.1
         version: 4.1.1
-      '@hydra/home':
+      '@hercule/home':
         specifier: workspace:*
         version: link:../../packages/home
-      '@hydra/protocol':
+      '@hercule/protocol':
         specifier: workspace:*
         version: link:../../packages/protocol
       effect:
         specifier: 4.0.0-rc.112
         version: 4.0.0-rc.112
     devDependencies:
-      '@hydra/contract':
+      '@hercule/contract':
         specifier: workspace:*
         version: link:../../packages/contract
 
   apps/web:
     dependencies:
-      '@hydra/client-core':
+      '@hercule/client-core':
         specifier: workspace:*
         version: link:../../packages/client-core
-      '@hydra/contract':
+      '@hercule/contract':
         specifier: workspace:*
         version: link:../../packages/contract
-      '@hydra/ui':
+      '@hercule/ui':
         specifier: workspace:*
         version: link:../../packages/ui
       '@tanstack/react-query':
@@ -182,13 +182,13 @@ importers:
 
   packages/cli:
     dependencies:
-      '@hydra/client-core':
+      '@hercule/client-core':
         specifier: workspace:*
         version: link:../client-core
-      '@hydra/contract':
+      '@hercule/contract':
         specifier: workspace:*
         version: link:../contract
-      '@hydra/home':
+      '@hercule/home':
         specifier: workspace:*
         version: link:../home
       effect:
@@ -197,7 +197,7 @@ importers:
 
   packages/client-core:
     dependencies:
-      '@hydra/contract':
+      '@hercule/contract':
         specifier: workspace:*
         version: link:../contract
       effect:
@@ -206,15 +206,30 @@ importers:
 
   packages/contract:
     dependencies:
-      '@hydra/plugin-host':
+      '@hercule/plugin-host':
         specifier: workspace:*
         version: link:../plugin-host
-      '@hydra/protocol':
+      '@hercule/protocol':
         specifier: workspace:*
         version: link:../protocol
       effect:
         specifier: 4.0.0-rc.112
         version: 4.0.0-rc.112
+
+  packages/hercule:
+    dependencies:
+      '@hercule/cli':
+        specifier: workspace:*
+        version: link:../cli
+      '@hercule/controller':
+        specifier: workspace:*
+        version: link:../../apps/controller
+      '@hercule/home':
+        specifier: workspace:*
+        version: link:../home
+      '@hercule/runner':
+        specifier: workspace:*
+        version: link:../../apps/runner
 
   packages/home:
     dependencies:
@@ -222,24 +237,9 @@ importers:
         specifier: 4.0.0-rc.112
         version: 4.0.0-rc.112
 
-  packages/hydra:
-    dependencies:
-      '@hydra/cli':
-        specifier: workspace:*
-        version: link:../cli
-      '@hydra/controller':
-        specifier: workspace:*
-        version: link:../../apps/controller
-      '@hydra/home':
-        specifier: workspace:*
-        version: link:../home
-      '@hydra/runner':
-        specifier: workspace:*
-        version: link:../../apps/runner
-
   packages/plugin-host:
     dependencies:
-      '@hydra/protocol':
+      '@hercule/protocol':
         specifier: workspace:*
         version: link:../protocol
       effect:
@@ -294,7 +294,7 @@ importers:
 
   plugins/claude-code:
     dependencies:
-      '@hydra/plugin-host':
+      '@hercule/plugin-host':
         specifier: workspace:*
         version: link:../../packages/plugin-host
       effect:
@@ -303,7 +303,7 @@ importers:
 
   plugins/codex:
     dependencies:
-      '@hydra/plugin-host':
+      '@hercule/plugin-host':
         specifier: workspace:*
         version: link:../../packages/plugin-host
       effect:
@@ -312,7 +312,7 @@ importers:
 
   plugins/github:
     dependencies:
-      '@hydra/plugin-host':
+      '@hercule/plugin-host':
         specifier: workspace:*
         version: link:../../packages/plugin-host
       effect:
@@ -321,7 +321,7 @@ importers:
 
   plugins/pi:
     dependencies:
-      '@hydra/plugin-host':
+      '@hercule/plugin-host':
         specifier: workspace:*
         version: link:../../packages/plugin-host
       effect:

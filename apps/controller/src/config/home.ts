@@ -1,13 +1,13 @@
 import { chmodSync, mkdirSync } from "node:fs";
 import { Context, Effect } from "effect";
-import type { HomePaths } from "@hydra/home";
+import type { HomePaths } from "@hercule/home";
 import { HydraHomeError } from "./errors";
 
 /**
  * Hydra Home: the one directory holding everything Hydra keeps on a machine.
  * Only `dataDir` (the Data Root) moves with promotion (spec 15 section 5).
  *
- * The layout itself is `@hydra/home`, which every role links; this is the
+ * The layout itself is `@hercule/home`, which every role links; this is the
  * controller's view of it, plus the two effects that put it on disk.
  */
 export class HydraHome extends Context.Service<HydraHome, HomePaths>()(

@@ -1,5 +1,10 @@
 import { useRef, useState, type JSX, type RefObject } from "react";
-import type { BranchField, ComposerFields, WorkspaceMenu, WorkspacePick } from "@hydra/client-core";
+import type {
+  BranchField,
+  ComposerFields,
+  WorkspaceMenu,
+  WorkspacePick,
+} from "@hercule/client-core";
 import { BranchSelector } from "./branch-selector";
 import { MachineSelector } from "./machine-selector";
 import { WorkspaceSelector } from "./workspace-selector";

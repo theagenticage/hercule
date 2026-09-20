@@ -7,7 +7,7 @@
  */
 import { createInterface } from "node:readline";
 import { hostname } from "node:os";
-import type { FetchLike } from "@hydra/client-core";
+import type { FetchLike } from "@hercule/client-core";
 import type { Env } from "./credentials";
 
 export interface Io {

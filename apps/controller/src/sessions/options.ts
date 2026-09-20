@@ -6,8 +6,8 @@
  * this is the one place that holds the rules.
  */
 import * as Effect from "effect/Effect";
-import type { ModelDescriptor, ModelSelection, SessionSpec } from "@hydra/protocol";
-import { validation, type Validation } from "@hydra/contract";
+import type { ModelDescriptor, ModelSelection, SessionSpec } from "@hercule/protocol";
+import { validation, type Validation } from "@hercule/contract";
 import type { ScopeSettings } from "../settings";
 
 /** The picks themselves, in the shape the row and the wire hold them. */

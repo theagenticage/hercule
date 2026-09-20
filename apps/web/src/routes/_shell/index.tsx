@@ -1,8 +1,8 @@
 import type { JSX, ReactNode } from "react";
 import { Link, createFileRoute } from "@tanstack/react-router";
 import { useMutation, useQuery, useSuspenseQuery } from "@tanstack/react-query";
-import { Button, EmptyState } from "@hydra/ui";
-import { queryKeys, sessionsEmptyState } from "@hydra/client-core";
+import { Button, EmptyState } from "@hercule/ui";
+import { queryKeys, sessionsEmptyState } from "@hercule/client-core";
 import { useLiveInvalidation } from "../../app/live-invalidation";
 import { localRunnerQuery, providersQuery, runnersQuery } from "../../app/queries";
 import { CreateThreadLink } from "../../screens/create-thread-link";

@@ -36,7 +36,7 @@ import {
   validation,
   type OperationId,
   type Validation,
-} from "@hydra/contract";
+} from "@hercule/contract";
 import { UUID_PATTERN } from "./id";
 
 /** One page of a keyset listing. `nextCursor` is `undefined` on the last page. */

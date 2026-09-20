@@ -33,9 +33,9 @@ import {
   type Runner,
   type RunnerConnectivity,
   type RunnerLifecycle,
-} from "@hydra/contract";
-import type { Plugin } from "@hydra/plugin-host";
-import { homePaths } from "@hydra/home";
+} from "@hercule/contract";
+import type { Plugin } from "@hercule/plugin-host";
+import { homePaths } from "@hercule/home";
 import { HydraHome } from "../config";
 import { ConnectionServiceLayer, ConnectionTypesLayer } from "../connections";
 import { CredentialsLayer, hashToken } from "../credentials";

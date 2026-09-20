@@ -24,7 +24,7 @@ import {
   type SessionBinding,
   type SessionSpec,
   type TurnInput,
-} from "@hydra/protocol";
+} from "@hercule/protocol";
 import type { LoginCommand } from "../login";
 import type { ProviderAdapter, ProviderRunnerContext } from "../index";
 import { probeFailed } from "../probe";

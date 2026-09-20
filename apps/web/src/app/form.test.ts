@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { LoginForm, type StandardSchemaV1 } from "@hydra/contract";
+import { LoginForm, type StandardSchemaV1 } from "@hercule/contract";
 import { FORM_ERROR, validate } from "./form";
 
 /** A schema that refuses everything without naming a field, which no v1 form does yet. */

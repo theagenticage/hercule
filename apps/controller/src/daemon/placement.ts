@@ -11,7 +11,7 @@ import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
-import { lintOutputSchema, type AccessMode, type SessionSpec } from "@hydra/protocol";
+import { lintOutputSchema, type AccessMode, type SessionSpec } from "@hercule/protocol";
 import {
   ACCESS_MODE_CHAIN,
   forbidden,
@@ -30,7 +30,7 @@ import {
   type SpawnWorkspace,
   type Unauthenticated,
   type Validation,
-} from "@hydra/contract";
+} from "@hercule/contract";
 import { agentRepository, type StoredAgent } from "../agents";
 import { requireGrant, type Actor } from "../actor";
 import { mintUuid, nowIso, uuidToString, withTransaction } from "../db";

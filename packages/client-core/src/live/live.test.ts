@@ -16,7 +16,7 @@
  * attempt.
  */
 import { afterEach, assert, beforeEach, describe, it, vi } from "vitest";
-import type { Event } from "@hydra/contract";
+import type { Event } from "@hercule/contract";
 import {
   createClient,
   createLive,

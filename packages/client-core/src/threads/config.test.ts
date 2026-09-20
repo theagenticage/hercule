@@ -6,7 +6,7 @@
  * when either is picked.
  */
 import { describe, expect, it } from "vitest";
-import type { Session } from "@hydra/contract";
+import type { Session } from "@hercule/contract";
 import { effectiveConfig, threadConfig, type ThreadConfig } from "./config";
 
 const BASE: ThreadConfig = {

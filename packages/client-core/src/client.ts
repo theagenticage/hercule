@@ -8,7 +8,7 @@
  * by hand: the shape below is derived from `api`, so an operation added to the
  * contract appears here with no edit.
  */
-import { api } from "@hydra/contract";
+import { api } from "@hercule/contract";
 import { Effect, Result } from "effect";
 import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient";
 import * as HttpClient from "effect/unstable/http/HttpClient";

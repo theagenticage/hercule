@@ -1,8 +1,8 @@
 import type { JSX } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Button, FormCard } from "@hydra/ui";
-import { providerRows, queryKeys, type HydraClient, type ProviderRow } from "@hydra/client-core";
-import type { RunnerDetail } from "@hydra/contract";
+import { Button, FormCard } from "@hercule/ui";
+import { providerRows, queryKeys, type HydraClient, type ProviderRow } from "@hercule/client-core";
+import type { RunnerDetail } from "@hercule/contract";
 import { ProviderKeyEntry, ProviderLogin } from "../../../screens/provider-login";
 import { messageOf } from "../../../screens/save-status";
 import { providersQuery } from "../../../app/queries";

@@ -12,7 +12,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { approvalCard, formatDuration, formatStamp } from "@hydra/client-core";
+import { approvalCard, formatDuration, formatStamp } from "@hercule/client-core";
 import type {
   Input,
   ModelOption,
@@ -24,8 +24,8 @@ import type {
   Session,
   TranscriptRow,
   Workspace,
-} from "@hydra/contract";
-import { sessionStreamTopic, sessionTapTopic } from "@hydra/contract";
+} from "@hercule/contract";
+import { sessionStreamTopic, sessionTapTopic } from "@hercule/contract";
 import { envelope, pickRow, reading, renderApp, stubApi, type Handler } from "../../../app/testing";
 
 const SESSION_ID = "01a06d02-b100-7000-8000-000000000001";
@@ -608,7 +608,7 @@ describe("Thread: the live turn (AC-12)", () => {
 
   it("leaves the shimmer class in place under prefers-reduced-motion, since the stylesheet owns that rule", async () => {
     // `.hydra-thread-shimmer` drops its own sweep and keeps the live hue
-    // inside `@media (prefers-reduced-motion: reduce)` in `@hydra/ui`. There
+    // inside `@media (prefers-reduced-motion: reduce)` in `@hercule/ui`. There
     // is deliberately no JS copy of that rule, so the class the divider
     // carries is the same either way; whether the sweep actually stops is a
     // stylesheet question jsdom cannot answer and a manual check does.

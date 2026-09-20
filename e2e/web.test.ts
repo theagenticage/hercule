@@ -21,7 +21,7 @@ let controller: Controller | undefined;
 let url: string;
 
 beforeAll(async () => {
-  const binary = join(ROOT, "hydra");
+  const binary = join(ROOT, "hercule");
   if (!existsSync(binary)) {
     throw new Error(
       `no binary at ${binary}: run \`pnpm build:binary\` before \`pnpm test:binary\`.`,

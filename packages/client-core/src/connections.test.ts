@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { PluginDetail } from "@hydra/contract";
+import type { PluginDetail } from "@hercule/contract";
 import {
   connectionTypes,
   credentialFieldsOf,

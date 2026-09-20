@@ -6,7 +6,7 @@
  * is absent on a workspace the thread merely joins - that workspace is named
  * after its branch - and on a thread with no checkout at all.
  */
-import type { Workspace } from "@hydra/contract";
+import type { Workspace } from "@hercule/contract";
 import {
   baseBranchOf,
   readyPrimary,

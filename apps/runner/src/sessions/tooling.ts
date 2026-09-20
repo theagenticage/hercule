@@ -18,8 +18,8 @@
  */
 import { mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { runnerDirIn } from "@hydra/home";
-import { VERSION } from "@hydra/home/version";
+import { runnerDirIn } from "@hercule/home";
+import { VERSION } from "@hercule/home/version";
 
 export interface Tooling {
   /** `<home>/runner/bin`: prepended to every session's `PATH`. */

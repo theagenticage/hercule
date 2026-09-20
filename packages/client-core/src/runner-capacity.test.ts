@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { Runner, Session, SessionStatus } from "@hydra/contract";
+import type { Runner, Session, SessionStatus } from "@hercule/contract";
 import { capacityLine } from "./runner-capacity";
 
 const GIB = 1024 * 1024 * 1024;

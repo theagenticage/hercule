@@ -17,7 +17,7 @@ import type {
   ThreadRows,
   ThreadWorkspace,
   Workspace,
-} from "@hydra/contract";
+} from "@hercule/contract";
 import { threadRows, type ThreadRow } from "./rows";
 import { projectTone, type ProjectTone } from "./tone";
 import {

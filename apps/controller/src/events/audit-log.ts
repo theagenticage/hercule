@@ -11,7 +11,7 @@
 import { Context, Effect, Layer } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
-import type { Actor, InvalidateKind, MutableLiveTopic } from "@hydra/contract";
+import type { Actor, InvalidateKind, MutableLiveTopic } from "@hercule/contract";
 import { announce, nowIso } from "../db";
 
 /**

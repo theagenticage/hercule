@@ -1,7 +1,7 @@
 /**
  * What a user may write as a remote, and what a repository is called.
  *
- * The canonical form itself is tested in `@hydra/protocol`, where it lives
+ * The canonical form itself is tested in `@hercule/protocol`, where it lives
  * because the runner reads remotes by the same rule. What is asked here is the
  * controller's own narrower question - whether Hydra will hand this spelling to
  * git - which has to be refused where the user can read why rather than on a

@@ -13,7 +13,7 @@ import {
   type SessionBinding,
   type SessionSpec,
   type TurnInput,
-} from "@hydra/protocol";
+} from "@hercule/protocol";
 import { CLAUDE_CODE, claudeCode } from "./claude-code";
 import { CODEX, codex } from "./codex";
 import { PI, pi } from "./pi";

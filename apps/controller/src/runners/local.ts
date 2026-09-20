@@ -15,7 +15,7 @@ import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import type * as Scope from "effect/Scope";
 import type { SqlError } from "effect/unstable/sql/SqlError";
-import { LocalAnnouncement, LocalEnrolment } from "@hydra/protocol";
+import { LocalAnnouncement, LocalEnrolment } from "@hercule/protocol";
 import { SYSTEM_ACTOR } from "../actor";
 import { nowIso } from "../db";
 import { AuditLog } from "../events";

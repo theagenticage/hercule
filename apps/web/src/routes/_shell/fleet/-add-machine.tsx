@@ -1,7 +1,13 @@
 import { useState, type JSX } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Button, Checkbox } from "@hydra/ui";
-import { formatStamp, idTail, joinCommand, queryKeys, type HydraClient } from "@hydra/client-core";
+import { Button, Checkbox } from "@hercule/ui";
+import {
+  formatStamp,
+  idTail,
+  joinCommand,
+  queryKeys,
+  type HydraClient,
+} from "@hercule/client-core";
 import { joinTokensQuery } from "../../../app/queries";
 
 /**

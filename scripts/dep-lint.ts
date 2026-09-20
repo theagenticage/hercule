@@ -51,11 +51,11 @@ const FORBIDDEN = [
   { what: "the DB engine", pattern: /@effect[/+]sql|^bun:sqlite$/ },
   {
     what: "the plugin host",
-    pattern: /^apps\/controller\/|@hydra[/+]controller|^plugins\//,
+    pattern: /^apps\/controller\/|@hercule[/+]controller|^plugins\//,
   },
   {
     what: "the web bundle",
-    pattern: /^apps\/web\/|^packages\/ui\/|@hydra[/+]ui|(^|\/)react(-dom)?([/@]|$)|\.(html|css)$/,
+    pattern: /^apps\/web\/|^packages\/ui\/|@hercule[/+]ui|(^|\/)react(-dom)?([/@]|$)|\.(html|css)$/,
   },
 ] as const;
 
@@ -266,7 +266,7 @@ const platformPackages = store.filter((name) => name.startsWith(`${storeName}-`)
 if (platformPackages.length > 0) {
   console.error(
     `dep-lint: a per-platform CLI package of ${SDK} is installed, so 196 MB of somebody ` +
-      "else's CLI is being compiled into the binary Hydra ships:",
+      "else's CLI is being compiled into the binary Hercule ships:",
   );
   for (const name of platformPackages) console.error(`    ${name}`);
   console.error("They are excluded by `pnpm.ignoredOptionalDependencies` in package.json.");

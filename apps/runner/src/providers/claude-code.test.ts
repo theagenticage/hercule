@@ -13,7 +13,7 @@ import type {
   PermissionUpdate,
   SDKUserMessage,
 } from "@anthropic-ai/claude-agent-sdk";
-import { CLAUDE_CODE_VERSION } from "@hydra/home/version";
+import { CLAUDE_CODE_VERSION } from "@hercule/home/version";
 import {
   MAX_MESSAGE_LENGTH,
   type ApprovalDecision,
@@ -22,7 +22,7 @@ import {
   type ProbeResult,
   type ProviderEvent,
   type SessionSpec,
-} from "@hydra/protocol";
+} from "@hercule/protocol";
 import { claudeCodeAdapter, type ClaudeSeam } from "./claude-code";
 import { PROBE_DEADLINE } from "./probe";
 import type { ProviderAdapter, ProviderRunnerContext } from "./index";

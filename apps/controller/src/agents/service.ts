@@ -27,7 +27,7 @@ import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
-import type { AccessMode, ModelSelection } from "@hydra/protocol";
+import type { AccessMode, ModelSelection } from "@hercule/protocol";
 import {
   AGENT_SORT_FIELDS,
   AgentCreateInput,
@@ -46,7 +46,7 @@ import {
   type SortDirection,
   type Unauthenticated,
   type Validation,
-} from "@hydra/contract";
+} from "@hercule/contract";
 import { currentStamp, requireGrant } from "../actor";
 import { nowIso, pageInput, refuseCursor, withTransaction } from "../db";
 import { AuditLog } from "../events";

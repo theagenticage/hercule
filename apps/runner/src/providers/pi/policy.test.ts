@@ -13,7 +13,7 @@
  * reviewer reading the extension source.
  */
 import { afterAll, describe, expect, it } from "vitest";
-import type { AccessMode } from "@hydra/protocol";
+import type { AccessMode } from "@hercule/protocol";
 import { SUBMIT_RESULT_TOOL } from "./extension";
 import { requiresApproval } from "./policy";
 import { cleanupHomes, settle, SPEC, started, taggedIn, until } from "./testing";

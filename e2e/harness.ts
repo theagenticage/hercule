@@ -6,7 +6,7 @@
  * starts it and every command goes through `argv`, stdin, stdout and the exit
  * code - the same surface a shell sees.
  *
- * The processes are started with `Bun.spawn` rather than `spawnHydra`, which
+ * The processes are started with `Bun.spawn` rather than `spawnHercule`, which
  * inherits stdio: a test has to read what the command printed.
  */
 import { existsSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
@@ -17,21 +17,21 @@ import { dirname, join } from "node:path";
 export const ROOT = dirname(import.meta.dirname);
 
 /** The dispatcher's source entrypoint: the same `main.ts` the binary compiles. */
-const ENTRYPOINT = join(ROOT, "packages/hydra/src/main.ts");
+const ENTRYPOINT = join(ROOT, "packages/hercule/src/main.ts");
 
 /**
  * The release binary if one has been built, and `undefined` - the dispatcher's
  * own source - if not.
  *
  * The suites that are only honest as a release say so themselves and refuse to
- * run without `./hydra`, and do not call this. A suite that exercises the
+ * run without `./hercule`, and do not call this. A suite that exercises the
  * controller's own surface rather than the packaging is the same program either
  * way: it runs the release under `pnpm test:binary`, which is the only command
  * that runs it, and the dispatcher's source when it is run on its own with no
  * build behind it.
  */
 export function releaseBinary(): string | undefined {
-  const built = join(ROOT, "hydra");
+  const built = join(ROOT, "hercule");
   return existsSync(built) ? built : undefined;
 }
 

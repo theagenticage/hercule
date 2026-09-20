@@ -6,7 +6,7 @@
  * object becomes aligned key-value lines, and ids are shortened to the tail the
  * CLI accepts back as an argument.
  */
-import type { StructuredResult } from "@hydra/contract";
+import type { StructuredResult } from "@hercule/contract";
 import type { Outcome } from "./execute";
 import type { Command } from "./tree";
 

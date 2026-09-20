@@ -6,7 +6,7 @@
 import { mkdirSync, rmSync } from "node:fs";
 import { join as joinPath } from "node:path";
 import * as Effect from "effect/Effect";
-import type { SessionStart } from "@hydra/protocol";
+import type { SessionStart } from "@hercule/protocol";
 import { gitCredentialEnv } from "../credentials";
 import { substrateEnv, switchBranch, type Workspaces } from "../workspaces";
 import type { ProviderRunnerContext } from "../providers";

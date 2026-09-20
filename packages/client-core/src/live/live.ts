@@ -38,7 +38,7 @@ import {
   type TranscriptRow,
   type Unauthenticated,
   type Validation,
-} from "@hydra/contract";
+} from "@hercule/contract";
 import { Effect, Fiber, Latch, Layer, Result, Schedule, Stream } from "effect";
 import * as RpcClient from "effect/unstable/rpc/RpcClient";
 import type { RpcClientError } from "effect/unstable/rpc/RpcClientError";

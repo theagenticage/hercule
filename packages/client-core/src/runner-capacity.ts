@@ -4,7 +4,7 @@
  * through `busy` - the controller does not free it until the session exits -
  * so only `queued` is left waiting and only `exited` counts as neither.
  */
-import type { Runner, Session, SessionStatus } from "@hydra/contract";
+import type { Runner, Session, SessionStatus } from "@hercule/contract";
 
 /**
  * The one declaration of which statuses hold a slot - `runnerSessionsQuery`

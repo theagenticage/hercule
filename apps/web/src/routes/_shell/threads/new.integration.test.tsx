@@ -31,8 +31,8 @@ import type {
   Runner,
   Session,
   Workspace,
-} from "@hydra/contract";
-import { threadsWorld } from "@hydra/client-core/threads/testing";
+} from "@hercule/contract";
+import { threadsWorld } from "@hercule/client-core/threads/testing";
 import { envelope, pickRow, reading, renderApp, stubApi, type Handler } from "../../../app/testing";
 
 const ZONE = "Europe/Amsterdam";

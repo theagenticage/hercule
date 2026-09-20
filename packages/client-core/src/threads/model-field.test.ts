@@ -4,7 +4,7 @@
  * snapshot when it has one, else the instance's first snapshot.
  */
 import { describe, expect, it } from "vitest";
-import type { ProviderInstance } from "@hydra/contract";
+import type { ProviderInstance } from "@hercule/contract";
 import { threadModelField } from "./model-field";
 
 const LOCAL = "01a06d02-beff-7037-9f5b-042822015952";

@@ -11,9 +11,9 @@ import {
   type Live,
   type ProjectGroup,
   type WorkspaceGroup,
-} from "@hydra/client-core";
-import type { ThreadRows, ThreadWorkspace } from "@hydra/contract";
-import { cn, useMinuteClock } from "@hydra/ui";
+} from "@hercule/client-core";
+import type { ThreadRows, ThreadWorkspace } from "@hercule/contract";
+import { cn, useMinuteClock } from "@hercule/ui";
 import { useLiveInvalidation } from "../app/live-invalidation";
 import {
   localRunnerQuery,

@@ -65,7 +65,7 @@ import {
 const wanted = process.env["HYDRA_LIVE_SESSION_TEST"] !== undefined;
 
 const state = temporaryHome();
-const binary = join(ROOT, "hydra");
+const binary = join(ROOT, "hercule");
 
 let controller: Controller;
 let url: string;

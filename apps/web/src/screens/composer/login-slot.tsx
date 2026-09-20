@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import type { HydraClient, LoginTarget } from "@hydra/client-core";
+import type { HydraClient, LoginTarget } from "@hercule/client-core";
 import { ProviderLogin } from "../provider-login";
 
 /**

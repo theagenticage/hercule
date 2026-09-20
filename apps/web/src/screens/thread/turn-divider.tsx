@@ -4,12 +4,12 @@
  * thread surface). The live reading ticks every second and carries the shimmer
  * in the live hue. `prefers-reduced-motion` drops the sweep and keeps the hue
  * (design language §Semantic encodings); that rule is the stylesheet's alone -
- * `.hydra-thread-shimmer` in `@hydra/ui` answers the media query - so there is
+ * `.hydra-thread-shimmer` in `@hercule/ui` answers the media query - so there is
  * no second copy of it here to drift from it.
  */
 import { useEffect, useState, type JSX } from "react";
-import { cn } from "@hydra/ui";
-import { formatDuration, type ThreadItem } from "@hydra/client-core";
+import { cn } from "@hercule/ui";
+import { formatDuration, type ThreadItem } from "@hercule/client-core";
 
 /** A running item reads live; the one a request is parked on needs the reader. */
 const resultHue = (result: ThreadItem["result"]): string | undefined =>

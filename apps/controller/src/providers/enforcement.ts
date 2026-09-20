@@ -8,9 +8,9 @@
  * declaration every time, so a binary whose adapter learned to enforce a field
  * stops reporting that field.
  */
-import type { ProviderDefinition } from "@hydra/plugin-host";
-import type { UnenforcedSpecField } from "@hydra/contract";
-import type { DisallowedTool } from "@hydra/protocol";
+import type { ProviderDefinition } from "@hercule/plugin-host";
+import type { UnenforcedSpecField } from "@hercule/contract";
+import type { DisallowedTool } from "@hercule/protocol";
 
 /**
  * Lists the spec fields that this row's provider ignores, of the fields the

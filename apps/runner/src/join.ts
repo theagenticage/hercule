@@ -11,8 +11,8 @@ import { mkdirSync } from "node:fs";
 import { join as joinPath } from "node:path";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
-import { runnerDirIn } from "@hydra/home";
-import { JoinAnswer } from "@hydra/protocol";
+import { runnerDirIn } from "@hercule/home";
+import { JoinAnswer } from "@hercule/protocol";
 import { runnerFileIn, writeRunnerFile, type RunnerFile } from "./runner-file";
 
 /** Outside the operation table, so it is written here. */

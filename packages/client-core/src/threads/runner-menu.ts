@@ -3,7 +3,7 @@
  * selector has already picked: what matters here is whether each machine can
  * host that instance, not the whole fleet's login state.
  */
-import type { ProviderInstance, Runner } from "@hydra/contract";
+import type { ProviderInstance, Runner } from "@hercule/contract";
 
 export interface RunnerMenuRow {
   readonly runnerId: string;
