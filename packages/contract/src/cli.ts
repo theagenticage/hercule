@@ -1108,7 +1108,7 @@ export const CLI = {
 
   "connection.query": {
     command: "connection list",
-    help: "Lists Connections: the named links to external accounts Hercule acts through, with the status of each. Use it to find the id an event's connection names.",
+    help: "Lists external-account connections Hercule acts through, with each status. Use it to find the id an event's connection names.",
     examples: [{ args: [] }, { args: ["--status", "needs-reauth"] }],
     fields: {
       type: {

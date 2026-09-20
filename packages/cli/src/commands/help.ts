@@ -21,7 +21,7 @@ import {
 import { COMMANDS, commandsUnder, mentionsIn, type Command, type Field } from "./tree";
 
 /** How wide a line is allowed to be before it is wrapped. */
-const WIDTH = 92;
+const WIDTH = 94;
 
 /** The grant an operation needs, or `undefined` for one of the three markers. */
 const grantOf = (requires: Requirement): Grant | undefined =>
