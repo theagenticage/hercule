@@ -12,7 +12,7 @@ export type ThemeChoice = "light" | "dark" | "system";
  * chosen is already on the default, and the pre-paint script in
  * `apps/web/public/theme-init.js` reads this same key. Keep the two in step.
  */
-const KEY = "hydra:theme";
+const KEY = "hercule:theme";
 
 /** The pinned order: Light and Dark adjacent, System last, under its fine note. */
 const ORDER: readonly ThemeChoice[] = ["light", "dark", "system"];

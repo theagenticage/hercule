@@ -1,6 +1,6 @@
 import { useState, type JSX } from "react";
 
-const OPEN_KEY = "hydra.pulse.open";
+const OPEN_KEY = "hercule.pulse.open";
 
 /**
  * Whether the pulse is open, remembered for this browser session only.

@@ -17,7 +17,7 @@ import {
   loopbackEndpoints,
   queryKeys,
   RUNNING_STATUSES,
-  type HydraClient,
+  type HerculeClient,
 } from "@hercule/client-core";
 import {
   MAX_PAGE_LIMIT,
@@ -27,7 +27,7 @@ import {
 } from "@hercule/contract";
 
 /** Whether first run has been completed. Reachable without a token. */
-export const setupQuery = (client: HydraClient) =>
+export const setupQuery = (client: HerculeClient) =>
   queryOptions({
     queryKey: queryKeys.setup(),
     queryFn: () => client.setup.read(),
@@ -36,7 +36,7 @@ export const setupQuery = (client: HydraClient) =>
   });
 
 /** The settings store, both scopes. The user scope carries onboarding progress. */
-export const settingsQuery = (client: HydraClient) =>
+export const settingsQuery = (client: HerculeClient) =>
   queryOptions({
     queryKey: queryKeys.settings(),
     queryFn: () => client.settings.read(),
@@ -50,7 +50,7 @@ export const settingsQuery = (client: HydraClient) =>
  * without saying so. A narrowed filter holds the rows it had until the new ones
  * arrive, so a list does not blink out from under the reader between keystrokes.
  */
-export const tasksQuery = (client: HydraClient, filter: TaskFilter) =>
+export const tasksQuery = (client: HerculeClient, filter: TaskFilter) =>
   infiniteQueryOptions({
     queryKey: queryKeys.tasks(filter),
     queryFn: ({ pageParam }) =>
@@ -72,7 +72,7 @@ export const tasksQuery = (client: HydraClient, filter: TaskFilter) =>
  * panel is open answers 404 for good, and retrying it behind the reader leaves
  * the panel showing a record the list beside it has already dropped.
  */
-export const taskQuery = (client: HydraClient, id: string) =>
+export const taskQuery = (client: HerculeClient, id: string) =>
   queryOptions({
     queryKey: queryKeys.task(id),
     queryFn: () => client.task.read({ params: { id } }),
@@ -84,7 +84,7 @@ export const taskQuery = (client: HydraClient, id: string) =>
  * them, and a task naming a project outside it says the id rather than
  * claiming the task has none.
  */
-export const projectsQuery = (client: HydraClient) =>
+export const projectsQuery = (client: HerculeClient) =>
   queryOptions({
     queryKey: queryKeys.projects(),
     queryFn: () => client.project.query({ query: { limit: MAX_PAGE_LIMIT } }),
@@ -95,7 +95,7 @@ export const projectsQuery = (client: HydraClient) =>
  * of. A handful per project, so the whole set is one answer, like the projects
  * above it.
  */
-export const resourcesQuery = (client: HydraClient) =>
+export const resourcesQuery = (client: HerculeClient) =>
   queryOptions({
     queryKey: queryKeys.resources(),
     queryFn: () => client.resource.query({ query: { limit: MAX_PAGE_LIMIT } }),
@@ -106,7 +106,7 @@ export const resourcesQuery = (client: HydraClient) =>
  * sidebar groups by, and where the branch lists come from. Disposed ones are
  * read along with the rest - a thread that ended in one still names it.
  */
-export const workspacesQuery = (client: HydraClient) =>
+export const workspacesQuery = (client: HerculeClient) =>
   queryOptions({
     queryKey: queryKeys.workspaces(),
     queryFn: () => client.workspace.query({ query: { limit: MAX_PAGE_LIMIT } }),
@@ -117,7 +117,7 @@ export const workspacesQuery = (client: HydraClient) =>
  * machine's own work and nothing pushes its end, so the form that started it
  * asks again every second until the machine has said either way.
  */
-export const workspaceQuery = (client: HydraClient, id: string) =>
+export const workspaceQuery = (client: HerculeClient, id: string) =>
   queryOptions({
     queryKey: queryKeys.workspace(id),
     queryFn: () => client.workspace.read({ params: { id } }),
@@ -134,7 +134,7 @@ const WORKSPACE_POLL_MS = 400;
  * all of them, so nothing follows the cursor; a fleet past one page would lose
  * rows silently, and is the point at which this grows a listing of its own.
  */
-export const runnersQuery = (client: HydraClient) =>
+export const runnersQuery = (client: HerculeClient) =>
   queryOptions({
     queryKey: queryKeys.runners(),
     queryFn: () => client.runner.query({ query: { limit: MAX_PAGE_LIMIT } }),
@@ -148,7 +148,7 @@ export const runnersQuery = (client: HydraClient) =>
  * A refusal is answered at once rather than retried: a runner that is not there
  * answers 404 for good.
  */
-export const runnerQuery = (client: HydraClient, id: string) =>
+export const runnerQuery = (client: HerculeClient, id: string) =>
   queryOptions({
     queryKey: queryKeys.runner(id),
     queryFn: () => client.runner.read({ params: { id } }),
@@ -160,7 +160,7 @@ export const runnerQuery = (client: HydraClient, id: string) =>
  * answered at once rather than retried: a session that is not there answers
  * 404 for good.
  */
-export const sessionQuery = (client: HydraClient, id: string) =>
+export const sessionQuery = (client: HerculeClient, id: string) =>
   queryOptions({
     queryKey: queryKeys.session(id),
     queryFn: () => client.session.read({ params: { id } }),
@@ -177,7 +177,7 @@ export const sessionQuery = (client: HydraClient, id: string) =>
  * racing a live append could otherwise win with an answer older than what the
  * append just wrote.
  */
-export const transcriptQuery = (client: HydraClient, sessionId: string) =>
+export const transcriptQuery = (client: HerculeClient, sessionId: string) =>
   queryOptions({
     queryKey: queryKeys.transcript(sessionId),
     queryFn: async () => {
@@ -207,7 +207,7 @@ export const transcriptQuery = (client: HydraClient, sessionId: string) =>
  * themselves, because `input.query` has no status filter; a thread past 500
  * inputs would stop showing its queued ones, which is when this grows one.
  */
-export const inputsQuery = (client: HydraClient, sessionId: string) =>
+export const inputsQuery = (client: HerculeClient, sessionId: string) =>
   queryOptions({
     queryKey: queryKeys.inputs(sessionId),
     queryFn: () =>
@@ -218,7 +218,7 @@ export const inputsQuery = (client: HydraClient, sessionId: string) =>
  * The join tokens still outstanding. A token lives an hour and is spent by one
  * machine, so this is a handful at most and the whole set is one answer.
  */
-export const joinTokensQuery = (client: HydraClient) =>
+export const joinTokensQuery = (client: HerculeClient) =>
   queryOptions({
     queryKey: queryKeys.joinTokens(),
     queryFn: () => client.runner.queryJoinTokens(),
@@ -228,7 +228,7 @@ export const joinTokensQuery = (client: HydraClient) =>
  * Every plugin the binary was built with, which is the whole set: the registry
  * is compiled in, so there is nothing to page through or narrow by.
  */
-export const pluginsQuery = (client: HydraClient) =>
+export const pluginsQuery = (client: HerculeClient) =>
   queryOptions({
     queryKey: queryKeys.plugins(),
     queryFn: () => client.plugin.query(),
@@ -239,7 +239,7 @@ export const pluginsQuery = (client: HydraClient) =>
  * never a value - and there are as many of them as there are connections and
  * plugins, so the whole set is one answer.
  */
-export const secretsQuery = (client: HydraClient) =>
+export const secretsQuery = (client: HerculeClient) =>
   queryOptions({
     queryKey: queryKeys.secrets(),
     queryFn: () => client.secret.query({ query: { limit: MAX_PAGE_LIMIT } }),
@@ -250,13 +250,13 @@ export const secretsQuery = (client: HydraClient) =>
  * hand, so there are a handful; the screen shows all of them, and the point at
  * which they outgrow one page is the point at which this grows a listing.
  */
-export const connectionsQuery = (client: HydraClient) =>
+export const connectionsQuery = (client: HerculeClient) =>
   queryOptions({
     queryKey: queryKeys.connections(),
     queryFn: () => client.connection.query({ query: { limit: MAX_PAGE_LIMIT } }),
   });
 
-export const providersQuery = (client: HydraClient) =>
+export const providersQuery = (client: HerculeClient) =>
   queryOptions({
     queryKey: queryKeys.providers(),
     queryFn: () => client.provider.query(),
@@ -267,7 +267,7 @@ export const providersQuery = (client: HydraClient) =>
  * set - the point at which a fleet's threads outgrow one page is the point at
  * which this grows a listing of its own, same as the fleet above.
  */
-export const sessionsQuery = (client: HydraClient) =>
+export const sessionsQuery = (client: HerculeClient) =>
   queryOptions({
     queryKey: queryKeys.sessions(),
     queryFn: () => client.session.query({ query: { limit: MAX_PAGE_LIMIT } }),
@@ -282,7 +282,7 @@ export const sessionsQuery = (client: HydraClient) =>
  * `RUNNING_STATUSES` rather than named again, so the fetch and the capacity
  * line it feeds cannot drift apart.
  */
-export const runnerSessionsQuery = (client: HydraClient, runnerId: string) =>
+export const runnerSessionsQuery = (client: HerculeClient, runnerId: string) =>
   queryOptions({
     queryKey: queryKeys.sessions({ runnerId }),
     queryFn: () =>
@@ -295,7 +295,7 @@ export const runnerSessionsQuery = (client: HydraClient, runnerId: string) =>
  * The permission profiles, for the Settings > Threads profile field. Not a
  * live topic, so nothing but this browser's own write ever moves it.
  */
-export const profilesQuery = (client: HydraClient) =>
+export const profilesQuery = (client: HerculeClient) =>
   queryOptions({
     queryKey: queryKeys.profiles(),
     queryFn: () => client.profile.query({ query: { limit: MAX_PAGE_LIMIT } }),
@@ -306,7 +306,7 @@ export const profilesQuery = (client: HydraClient) =>
  * back to. The version is what a runner's own is compared against, so it is
  * read rather than assumed to match.
  */
-export const controllerQuery = (client: HydraClient) =>
+export const controllerQuery = (client: HerculeClient) =>
   queryOptions({
     queryKey: queryKeys.controller(),
     queryFn: () => client.controller.read(),

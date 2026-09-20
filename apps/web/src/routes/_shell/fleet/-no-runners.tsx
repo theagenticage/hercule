@@ -32,7 +32,7 @@ export function NoRunners(): JSX.Element {
         ))}
       </Group>
       <p className="pt-2 text-fine text-faint">
-        A runner probes the machine it runs on and reports what it found. Until one joins, Hydra
+        A runner probes the machine it runs on and reports what it found. Until one joins, Hercule
         knows nothing about this machine.
       </p>
     </>

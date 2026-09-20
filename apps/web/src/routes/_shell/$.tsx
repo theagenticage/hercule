@@ -17,7 +17,7 @@ function NotFoundScreen(): JSX.Element {
   return (
     <EmptyState
       headline={NOT_FOUND_HEADLINE}
-      lead="That address does not name anything in Hydra. Pick a screen from the sidebar, or go back to where you were."
+      lead="That address does not name anything in Hercule. Pick a screen from the sidebar, or go back to where you were."
     >
       <HomeLink />
     </EmptyState>

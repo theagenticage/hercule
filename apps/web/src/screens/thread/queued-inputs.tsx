@@ -1,6 +1,6 @@
 import type { JSX } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { queryKeys, type HydraClient } from "@hercule/client-core";
+import { queryKeys, type HerculeClient } from "@hercule/client-core";
 import type { Input } from "@hercule/contract";
 import { Button } from "@hercule/ui";
 import { inputsQuery } from "../../app/queries";
@@ -16,7 +16,7 @@ export function QueuedInputs({
   client,
   sessionId,
 }: {
-  readonly client: HydraClient;
+  readonly client: HerculeClient;
   readonly sessionId: string;
 }): JSX.Element | null {
   const queryClient = useQueryClient();
@@ -43,7 +43,7 @@ function QueuedRow({
   row,
   onDone,
 }: {
-  readonly client: HydraClient;
+  readonly client: HerculeClient;
   readonly sessionId: string;
   readonly row: Input;
   readonly onDone: () => Promise<void>;

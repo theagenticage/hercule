@@ -1,7 +1,7 @@
 import { useState, type FormEvent, type JSX } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button, Field, Input } from "@hercule/ui";
-import { formatStamp, queryKeys, type HydraClient } from "@hercule/client-core";
+import { formatStamp, queryKeys, type HerculeClient } from "@hercule/client-core";
 import type { SecretRef } from "@hercule/contract";
 import { SaveStatus, messageOf } from "../../../screens/save-status";
 
@@ -13,7 +13,7 @@ import { SaveStatus, messageOf } from "../../../screens/save-status";
  * Rotating asks for the new value in place rather than writing on the press:
  * the value is the whole of the operation, and there is nothing to rotate to
  * without it. Deleting asks for a confirmation in the same place, because
- * Hydra holds the only copy of what it is about to drop - a pasted token
+ * Hercule holds the only copy of what it is about to drop - a pasted token
  * cannot be typed again from memory - and the press sits beside Rotate.
  */
 export function SecretRow({
@@ -21,7 +21,7 @@ export function SecretRow({
   secret,
   timezone,
 }: {
-  readonly client: HydraClient;
+  readonly client: HerculeClient;
   readonly secret: SecretRef;
   readonly timezone: string;
 }): JSX.Element {

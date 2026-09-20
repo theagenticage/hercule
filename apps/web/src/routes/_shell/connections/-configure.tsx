@@ -9,7 +9,7 @@ import {
   queryKeys,
   type ConfigDraft,
   type ConnectionType,
-  type HydraClient,
+  type HerculeClient,
 } from "@hercule/client-core";
 import type { Connection } from "@hercule/contract";
 import { ConfigFieldRow } from "../../../screens/plugins/config-form";
@@ -28,7 +28,7 @@ export function ConfigureConnection({
   type,
   onDone,
 }: {
-  readonly client: HydraClient;
+  readonly client: HerculeClient;
   readonly connection: Connection;
   /** Absent when the plugin that declared the type is no longer in the binary. */
   readonly type: ConnectionType | undefined;

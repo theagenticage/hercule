@@ -55,7 +55,7 @@ export function Drawer({
         onKeyDown={(event: KeyboardEvent<HTMLDivElement>) => {
           if (event.key === "Escape") onClose();
         }}
-        className="hydra-drawer absolute top-0 right-0 flex h-full w-[440px] max-w-[92vw] flex-col border-l border-line bg-raised shadow-lift outline-none"
+        className="hercule-drawer absolute top-0 right-0 flex h-full w-[440px] max-w-[92vw] flex-col border-l border-line bg-raised shadow-lift outline-none"
       >
         <header className="flex items-start justify-between gap-3 border-b border-line px-5 py-3.5">
           <h2 className="text-lead font-emph text-balance text-ink">{title}</h2>

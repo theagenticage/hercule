@@ -34,7 +34,7 @@ export function Connectivity({
       {live ? (
         <span
           aria-hidden="true"
-          className="hydra-live-dot size-1.5 shrink-0 rounded-full bg-live"
+          className="hercule-live-dot size-1.5 shrink-0 rounded-full bg-live"
         />
       ) : null}
       {runner.connectivity}

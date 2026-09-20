@@ -87,7 +87,7 @@ describe("projectTone", () => {
     );
     const tones = new Set(many.map((each) => projectTone(each.id, many)));
 
-    expect([...tones].every((tone) => tone === "hydra" || tone === "ops")).toBe(true);
+    expect([...tones].every((tone) => tone === "hercule" || tone === "ops")).toBe(true);
     expect(tones.size).toBe(2);
   });
 });

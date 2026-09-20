@@ -33,7 +33,7 @@ function Secrets(): JSX.Element {
       {secrets.length === 0 ? (
         <EmptyState
           headline="No secrets are stored."
-          lead="Secrets are the tokens and keys connections and workflows use. Hydra keeps their values out of every read and shows only where each one is used."
+          lead="Secrets are the tokens and keys connections and workflows use. Hercule keeps their values out of every read and shows only where each one is used."
         />
       ) : (
         <section>

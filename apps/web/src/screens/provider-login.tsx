@@ -1,7 +1,7 @@
 import { useId, useState, type JSX } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button, Drawer, Field, Input, type ButtonVariant } from "@hercule/ui";
-import { queryKeys, type HydraClient, type SecretFieldOffer } from "@hercule/client-core";
+import { queryKeys, type HerculeClient, type SecretFieldOffer } from "@hercule/client-core";
 import { messageOf } from "./save-status";
 
 /**
@@ -16,7 +16,7 @@ import { messageOf } from "./save-status";
  * one. A vendor that printed a one-time code reads nothing at all: the user
  * types that code into their browser and the browser finishes the exchange with
  * the vendor, so the panel only shows what to do and is dismissed when it is
- * done - there is nothing for Hydra to relay and nothing to wait for.
+ * done - there is nothing for Hercule to relay and nothing to wait for.
  */
 export function ProviderLogin({
   client,
@@ -29,7 +29,7 @@ export function ProviderLogin({
   onLoggedIn,
 }: {
   readonly className?: string;
-  readonly client: HydraClient;
+  readonly client: HerculeClient;
   readonly instanceId: string;
   /** The machine the credential lands on, and the only one it works on. */
   readonly runnerId: string;
@@ -223,7 +223,7 @@ export function ProviderKeyEntry({
   onSaved,
 }: {
   readonly className?: string;
-  readonly client: HydraClient;
+  readonly client: HerculeClient;
   readonly instanceId: string;
   readonly field: SecretFieldOffer;
   readonly variant?: ButtonVariant;

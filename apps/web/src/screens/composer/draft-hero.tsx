@@ -12,7 +12,7 @@ export interface DraftSubject {
 
 /** The two identity hues, written out so Tailwind emits them (see `ProjectDot`). */
 const TONE = {
-  hydra: "decoration-project-hydra",
+  hercule: "decoration-project-hercule",
   ops: "decoration-project-ops",
 } as const;
 

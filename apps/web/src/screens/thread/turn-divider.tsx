@@ -4,7 +4,7 @@
  * thread surface). The live reading ticks every second and carries the shimmer
  * in the live hue. `prefers-reduced-motion` drops the sweep and keeps the hue
  * (design language §Semantic encodings); that rule is the stylesheet's alone -
- * `.hydra-thread-shimmer` in `@hercule/ui` answers the media query - so there is
+ * `.hercule-thread-shimmer` in `@hercule/ui` answers the media query - so there is
  * no second copy of it here to drift from it.
  */
 import { useEffect, useState, type JSX } from "react";
@@ -57,7 +57,7 @@ export function TurnDivider({
         onClick={() => setOpen((was) => !was)}
         className={cn(
           "flex items-center gap-1.5 font-mono text-fine tabular-nums",
-          live ? "hydra-thread-shimmer" : "text-faint",
+          live ? "hercule-thread-shimmer" : "text-faint",
         )}
       >
         {reading}

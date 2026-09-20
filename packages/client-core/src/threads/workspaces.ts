@@ -4,7 +4,7 @@
  * the draft stands under once it is picked (spec 14 §The composer).
  *
  * A workspace carries no name of its own. An ephemeral one is named after the
- * branch its checkout sits on (`hydra/run-3f1`), which is what the user typed
+ * branch its checkout sits on (`hercule/run-3f1`), which is what the user typed
  * nothing to get; a primary - the repo's **main workspace** (D-20c) - is named
  * after the repo and the machine it stands on, because there is exactly one of
  * those per pair.

@@ -76,7 +76,7 @@ describe("every screen inside the shell", () => {
     expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Profile");
   });
 
-  it("shows an entry that failed as a Hydra screen with a way out", async () => {
+  it("shows an entry that failed as a Hercule screen with a way out", async () => {
     const broken: Readonly<Record<string, Handler>> = {
       ...api,
       "GET /api/v1/settings": { status: 500, body: { error: { code: "internal", message: "no" } } },
@@ -86,24 +86,24 @@ describe("every screen inside the shell", () => {
     expect(screen.getByText("This screen did not load")).toBeDefined();
     expect(screen.getByRole("link", { name: "Go to Sessions" })).toBeDefined();
     // Nothing was mounted to keep: the guard failed before the shell.
-    expect(screen.queryByRole("navigation", { name: "Hydra" })).toBeNull();
+    expect(screen.queryByRole("navigation", { name: "Hercule" })).toBeNull();
   });
 
   it("answers a path no screen owns without taking the navigation away", async () => {
     await renderApp({ path: "/nope", api: stubApi(api).fetch, token: "held" });
 
     expect(screen.getByText("No screen here")).toBeDefined();
-    expect(screen.getByRole("navigation", { name: "Hydra" })).toBeDefined();
+    expect(screen.getByRole("navigation", { name: "Hercule" })).toBeDefined();
     expect(screen.getByRole("link", { name: "Go to Sessions" })).toBeDefined();
   });
 
-  it("answers a path it cannot even decode as a Hydra screen", async () => {
+  it("answers a path it cannot even decode as a Hercule screen", async () => {
     // A malformed percent escape fails to decode before any route is matched,
     // so this one never reaches the shell.
     await renderApp({ path: "/%zz", api: stubApi(api).fetch, token: "held" });
 
     expect(screen.getByText("No screen here")).toBeDefined();
     expect(screen.getByRole("link", { name: "Go to Sessions" })).toBeDefined();
-    expect(screen.queryByRole("navigation", { name: "Hydra" })).toBeNull();
+    expect(screen.queryByRole("navigation", { name: "Hercule" })).toBeNull();
   });
 });

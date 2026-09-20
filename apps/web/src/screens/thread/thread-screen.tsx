@@ -4,7 +4,7 @@
  */
 import { useLayoutEffect, type JSX } from "react";
 import { useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
-import { siblingTabs, turnsOf, type HydraClient, type Live } from "@hercule/client-core";
+import { siblingTabs, turnsOf, type HerculeClient, type Live } from "@hercule/client-core";
 import { useLiveInvalidation } from "../../app/live-invalidation";
 import {
   inputsQuery,
@@ -28,7 +28,7 @@ export function ThreadScreen({
   sessionId,
   timezone,
 }: {
-  readonly client: HydraClient;
+  readonly client: HerculeClient;
   readonly live: Live;
   readonly sessionId: string;
   readonly timezone: string;

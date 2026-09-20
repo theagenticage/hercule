@@ -5,7 +5,7 @@ import script from "../public/theme-init.js?raw";
 /**
  * The pre-paint script (`apps/web/public/theme-init.js`) is the half of the
  * theme choice that runs before the app does, and nothing else can exercise
- * it: the component's tests prove what is written under `hydra:theme`, and
+ * it: the component's tests prove what is written under `hercule:theme`, and
  * this one proves the script reads that same key and paints the document with
  * it - the two literals this test and those tests seed are what keep the pair
  * honest. The CSP allows the page no inline script, which is why the script is
@@ -28,12 +28,12 @@ afterEach(() => {
 
 describe("the pre-paint theme script", () => {
   it("paints a stored light choice before the app renders", () => {
-    run(memoryStorage({ "hydra:theme": "light" }));
+    run(memoryStorage({ "hercule:theme": "light" }));
     expect(document.documentElement.dataset.theme).toBe("light");
   });
 
   it("paints a stored dark choice before the app renders", () => {
-    run(memoryStorage({ "hydra:theme": "dark" }));
+    run(memoryStorage({ "hercule:theme": "dark" }));
     expect(document.documentElement.dataset.theme).toBe("dark");
   });
 
@@ -41,7 +41,7 @@ describe("the pre-paint theme script", () => {
     run(memoryStorage());
     expect(document.documentElement.dataset.theme).toBeUndefined();
 
-    run(memoryStorage({ "hydra:theme": "purple" }));
+    run(memoryStorage({ "hercule:theme": "purple" }));
     expect(document.documentElement.dataset.theme).toBeUndefined();
   });
 

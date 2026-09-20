@@ -31,7 +31,7 @@ import {
 export interface WorkspaceGroup {
   readonly workspaceId: string | null;
   /**
-   * `hydra/run-3f1`, `webshop · moss`, or `no workspace` last, in the
+   * `hercule/run-3f1`, `webshop · moss`, or `no workspace` last, in the
    * two parts a narrow sidebar cuts it in. Null on a project whose threads are
    * all in no workspace: the label separates one lane from another, and there
    * is nothing there to separate.

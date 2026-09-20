@@ -1,5 +1,5 @@
 /**
- * Whether a remote is one Hydra will hand to git, asked before the form is
+ * Whether a remote is one Hercule will hand to git, asked before the form is
  * sent so the user is told on the spot rather than by a round trip (D-20b).
  *
  * The rule is the controller's `isClonableRemote` (`apps/controller/src/

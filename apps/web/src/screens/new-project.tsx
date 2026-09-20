@@ -6,7 +6,7 @@ import {
   isClonableRemote,
   queryKeys,
   REMOTE_REFUSAL,
-  type HydraClient,
+  type HerculeClient,
 } from "@hercule/client-core";
 import type { ResourceCreateInput } from "@hercule/contract";
 import { connectionsQuery } from "../app/queries";
@@ -31,7 +31,7 @@ export function NewProject({
   client,
   onClose,
 }: {
-  readonly client: HydraClient;
+  readonly client: HerculeClient;
   readonly onClose: () => void;
 }): JSX.Element {
   const navigate = useNavigate();

@@ -35,7 +35,7 @@ export default defineConfig(({ command }) => {
       tailwindcss(),
     ],
     // In development the app is served by Vite and the API by a controller the
-    // developer started themselves, so `/api` is proxied to the port `hydra
+    // developer started themselves, so `/api` is proxied to the port `hercule
     // serve` binds by default and the app talks to one origin here as it does in
     // production. The live connection is on the same authority in production, so
     // it is proxied too: without it nothing on a screen ever updates in dev.

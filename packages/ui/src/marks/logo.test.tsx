@@ -5,6 +5,6 @@ import { Logo } from "./logo";
 describe("Logo", () => {
   it("renders the wordmark", () => {
     render(<Logo />);
-    expect(screen.getByTestId("logo").textContent).toBe("Hydra");
+    expect(screen.getByTestId("logo").textContent).toBe("Hercule");
   });
 });

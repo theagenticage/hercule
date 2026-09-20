@@ -12,7 +12,7 @@ function Notifications(): JSX.Element {
   return (
     <EmptyState
       headline="Decisions and outcomes will land here."
-      lead="Everything Hydra asks you or reports shows on this screen. To hear it away from the browser, connect a chat channel; your assistant answers there too."
+      lead="Everything Hercule asks you or reports shows on this screen. To hear it away from the browser, connect a chat channel; your assistant answers there too."
       fine="Channel setup ends with a pairing code you send the bot in a direct message. That code makes you its owner, the one whose answers it takes."
     >
       <ConnectRows

@@ -2,7 +2,7 @@ import type { ComponentType } from "react";
 import { RunGlyph, TaskGlyph, WorkflowGlyph, type MarkProps } from "@hercule/ui";
 
 /** Which sidebar face a screen belongs to. */
-export type Face = "threads" | "hydra";
+export type Face = "threads" | "hercule";
 
 /** One item of the orchestration nav, or the hairline between its two halves. */
 export interface NavItem {
@@ -18,8 +18,8 @@ export interface NavItem {
 
 export const SEPARATOR = "separator" as const;
 
-/** The Hydra face, in its pinned order. */
-export const HYDRA_NAV: readonly (NavItem | typeof SEPARATOR)[] = [
+/** The Hercule face, in its pinned order. */
+export const HERCULE_NAV: readonly (NavItem | typeof SEPARATOR)[] = [
   { to: "/intake", label: "Intake", count: "intake" },
   { to: "/check-in", label: "Check-in", count: "checkin" },
   { to: "/tasks", label: "Tasks", glyph: TaskGlyph },
@@ -53,4 +53,4 @@ export const SETTINGS_NAV: readonly { readonly to: string; readonly label: strin
 export const faceForPath = (pathname: string): Face =>
   pathname === "/" || pathname === "/sessions" || pathname.startsWith("/threads/")
     ? "threads"
-    : "hydra";
+    : "hercule";

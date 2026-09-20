@@ -7,7 +7,7 @@ import {
   queryKeys,
   refusalReason,
   type ConfigJson,
-  type HydraClient,
+  type HerculeClient,
 } from "@hercule/client-core";
 import type { PluginDetail, PluginStatus } from "@hercule/contract";
 import { ConfigForm } from "../../../screens/plugins/config-form";
@@ -35,7 +35,7 @@ export function PluginCard({
   client,
   plugin,
 }: {
-  readonly client: HydraClient;
+  readonly client: HerculeClient;
   readonly plugin: PluginDetail;
 }): JSX.Element {
   const queryClient = useQueryClient();

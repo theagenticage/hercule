@@ -50,7 +50,7 @@ describe("sessionsEmptyState", () => {
     expect(state.kind).toBe("sign-in");
     expect(offered(state)).toEqual(["Log in"]);
     expect(leadOf(state)).toContain("runs on this machine");
-    expect(leadOf(state)).toContain("Log in to use it in Hydra.");
+    expect(leadOf(state)).toContain("Log in to use it in Hercule.");
   });
 
   it("says `them` when the headline names more than one harness", () => {
@@ -71,7 +71,7 @@ describe("sessionsEmptyState", () => {
     const state = sessionsEmptyState(machine, [waiting, second]);
 
     expect(offered(state)).toEqual(["Log in", "Log in"]);
-    expect(leadOf(state)).toContain("Log in to use them in Hydra.");
+    expect(leadOf(state)).toContain("Log in to use them in Hercule.");
   });
 
   it("still offers the login when the last probe of a harness that is here failed", () => {
@@ -140,7 +140,7 @@ describe("sessionsEmptyState for a harness that takes a key", () => {
     expect(offered(state)).toEqual(["Enter Z.ai API key"]);
     expect(leadOf(state)).toContain("kept by the controller");
     expect(leadOf(state)).not.toContain("stays there");
-    expect(leadOf(state)).toContain("Enter its key to use it in Hydra.");
+    expect(leadOf(state)).toContain("Enter its key to use it in Hercule.");
   });
 
   it("asks for the keys in the plural when two harnesses want one", () => {
@@ -163,7 +163,7 @@ describe("sessionsEmptyState for a harness that takes a key", () => {
     const state = sessionsEmptyState(machine, [keyed, other]);
 
     expect(offered(state)).toEqual(["Enter Z.ai API key", "Enter Codex API key"]);
-    expect(leadOf(state)).toContain("Enter their keys to use them in Hydra.");
+    expect(leadOf(state)).toContain("Enter their keys to use them in Hercule.");
   });
 
   it("says where each kind of credential goes where both are on offer", () => {
@@ -185,6 +185,6 @@ describe("sessionsEmptyState for a harness that takes a key", () => {
     expect(leadOf(state)).toContain("stays there");
     expect(leadOf(state)).toContain("kept by the controller");
     // Both kinds on offer is two harnesses at least, so this lead is plural.
-    expect(leadOf(state)).toContain("Sign in to use them in Hydra.");
+    expect(leadOf(state)).toContain("Sign in to use them in Hercule.");
   });
 });

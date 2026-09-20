@@ -6,7 +6,7 @@
  * the three error classes below - nothing else.
  */
 export { actorReading, type ActorReading } from "./actor-display";
-export { createClient, type FetchLike, type HydraClient } from "./client";
+export { createClient, type FetchLike, type HerculeClient } from "./client";
 export {
   configDraft,
   configFields,

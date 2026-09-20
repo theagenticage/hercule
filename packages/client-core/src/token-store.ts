@@ -1,7 +1,7 @@
 /**
  * Where the bearer token lives between page loads.
  *
- * The token is kept in `localStorage` under `hydra:token:<origin>`, so one
+ * The token is kept in `localStorage` under `hercule:token:<origin>`, so one
  * browser talking to two controllers holds two tokens and neither sees the
  * other's. The origin is the controller's, exactly as the client's `baseUrl`
  * names it - the same string the app reaches the controller with.
@@ -30,7 +30,7 @@ export interface TokenStore {
   write(token: string | null): void;
 }
 
-export const tokenStorageKey = (origin: string): string => `hydra:token:${origin}`;
+export const tokenStorageKey = (origin: string): string => `hercule:token:${origin}`;
 
 /** The browser's `localStorage`, or nothing where reaching it throws. */
 const localStorageOrNone = (): StorageLike | undefined => {

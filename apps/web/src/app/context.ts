@@ -6,11 +6,11 @@
  * singleton: a test builds its own pair and the app never notices.
  */
 import type { QueryClient } from "@tanstack/react-query";
-import type { HydraClient, Live } from "@hercule/client-core";
+import type { HerculeClient, Live } from "@hercule/client-core";
 import type { Runner } from "@hercule/contract";
 
 export interface RouterContext {
-  readonly client: HydraClient;
+  readonly client: HerculeClient;
   readonly queryClient: QueryClient;
   /**
    * The live connection, built once beside the client. A screen subscribes to

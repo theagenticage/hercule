@@ -42,14 +42,14 @@ function Mark({
 /**
  * The soft equalizer: three bars breathing in the live hue. Their resting
  * heights are the attributes, which is what shows under reduced motion; the
- * `hydra-equalizer` rules in styles.css animate them otherwise.
+ * `hercule-equalizer` rules in styles.css animate them otherwise.
  */
 export function WorkingMark({ className, ...props }: MarkProps): JSX.Element {
   return (
     <Mark
       name="working"
       paint="text-live"
-      className={cn("hydra-equalizer", className)}
+      className={cn("hercule-equalizer", className)}
       stroke="none"
       drawing={
         <>

@@ -5,7 +5,7 @@
 // A file rather than an inline snippet because the CSP the controller serves
 // the app under allows no inline script.
 try {
-  const theme = localStorage.getItem("hydra:theme");
+  const theme = localStorage.getItem("hercule:theme");
   if (theme === "light" || theme === "dark") document.documentElement.dataset.theme = theme;
 } catch {
   // Storage denied: the app paints in the system theme.

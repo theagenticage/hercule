@@ -187,7 +187,7 @@ export const threadsWorld = (ids: Partial<WorldIds> = {}): ThreadsWorld => {
       runnerId: id.moss,
       checkouts: [
         {
-          ...checkout(WEBSHOP.id, "main", ["main", "release/2.4", "hydra/run-3f1"]),
+          ...checkout(WEBSHOP.id, "main", ["main", "release/2.4", "hercule/run-3f1"]),
           checkoutId: id.primaryCheckout,
         },
       ],
@@ -198,7 +198,7 @@ export const threadsWorld = (ids: Partial<WorldIds> = {}): ThreadsWorld => {
       kind: "ephemeral",
       checkouts: [
         {
-          ...checkout(WEBSHOP.id, "hydra/run-3f1"),
+          ...checkout(WEBSHOP.id, "hercule/run-3f1"),
           checkoutId: id.run3f1Checkout,
           form: "worktree",
         },

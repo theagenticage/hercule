@@ -830,7 +830,7 @@ const OTHER_LOGGED_OUT: ProviderInstance = {
   binaryName: "codex",
 };
 
-const RECENT_KEY = "hydra.recentModels";
+const RECENT_KEY = "hercule.recentModels";
 
 /** What `localStorage` holds for a draft whose Recent lane is already written. */
 const recent = (
@@ -1266,7 +1266,7 @@ const workspace = (
   disposedAt: null,
 });
 
-/** webshop's main workspace on moss; `hydra/run-3f1` is one of its branches. */
+/** webshop's main workspace on moss; `hercule/run-3f1` is one of its branches. */
 const W_PRIMARY_WEBSHOP: Workspace = {
   ...WORLD.PRIMARY,
   designatedConnectionId: GITHUB_ID,
@@ -1284,8 +1284,8 @@ const W_RUN_8A0 = workspace(
       "01a06d02-7300-7000-8000-000000000003",
       R_WEBSHOP.id,
       "worktree",
-      "hydra/run-8a0",
-      ["hydra/run-8a0"],
+      "hercule/run-8a0",
+      ["hercule/run-8a0"],
       "main",
     ),
   ],
@@ -1600,10 +1600,10 @@ describe("Composer: the workspace selector (AC-17)", () => {
     expect(text).toContain("a fresh worktree of webshop on a new branch");
     // The project's own live ephemeral workspaces, named after their branch,
     // with the machine they stand on and the threads already in them.
-    expect(text).toContain("hydra/run-3f1");
+    expect(text).toContain("hercule/run-3f1");
     expect(text).toContain("moss");
     expect(text).toContain("2 threads · “Fix flaky webhook tests”, “Write the retry runbook”");
-    expect(text).toContain("hydra/run-8a0");
+    expect(text).toContain("hercule/run-8a0");
     expect(text).not.toContain("None");
   });
 
@@ -1694,7 +1694,7 @@ describe("Composer: the workspace selector (AC-17)", () => {
     });
 
     await openWorkspaceMenu(user);
-    await pickRow(user, /hydra\/run-3f1/);
+    await pickRow(user, /hercule\/run-3f1/);
     // D-19: joining names the work already going on there, not the workspace.
     await waitFor(() => {
       expect(reading()).toContain(
@@ -1752,7 +1752,7 @@ describe("Composer: the workspace selector (AC-17)", () => {
     );
 
     await openWorkspaceMenu(user);
-    await pickRow(user, /hydra\/run-3f1/);
+    await pickRow(user, /hercule\/run-3f1/);
 
     await user.type(screen.getByRole("textbox"), "Fix the login bug");
     await user.click(screen.getByRole("button", { name: /send/i }));
@@ -1802,7 +1802,9 @@ describe("Composer: the workspace selector (AC-17)", () => {
   it("preselects the workspace named in the address", async () => {
     await openAt(`/threads/new?project=${WEBSHOP.id}&workspace=${W_RUN_3F1.id}`);
 
-    expect(await screen.findByRole("button", { name: /^workspace hydra\/run-3f1$/ })).toBeDefined();
+    expect(
+      await screen.findByRole("button", { name: /^workspace hercule\/run-3f1$/ }),
+    ).toBeDefined();
   });
 });
 
@@ -1818,10 +1820,10 @@ describe("Composer: the branch selector (AC-18)", () => {
     expect(text).toContain("the checkout switches to it");
     expect(text).toContain("release/2.4");
     expect(text).toContain("current");
-    // `hydra/run-3f1` is a branch of the primary, but a ready ephemeral on the
+    // `hercule/run-3f1` is a branch of the primary, but a ready ephemeral on the
     // same machine is sitting on it, so it is dimmed with what holds it.
-    expect(text).toContain("in workspace hydra/run-3f1");
-    expect(within(menu).queryByRole("button", { name: /hydra\/run-3f1/ })).toBeNull();
+    expect(text).toContain("in workspace hercule/run-3f1");
+    expect(within(menu).queryByRole("button", { name: /hercule\/run-3f1/ })).toBeNull();
   });
 
   // R6: the branch is what is being picked and is read whole; what holds it is
@@ -1834,11 +1836,11 @@ describe("Composer: the branch selector (AC-18)", () => {
 
     // The annotation is the cell that gives, and carries the whole of itself
     // as its title so what is cut is still readable.
-    const note = within(menu).getByTitle("in workspace hydra/run-3f1");
+    const note = within(menu).getByTitle("in workspace hercule/run-3f1");
     expect(note.className).toContain("truncate");
 
     // The branch is read whole: its cell takes what it needs and never cuts.
-    const branch = within(menu).getByText("hydra/run-3f1", { selector: "span.font-mono" });
+    const branch = within(menu).getByText("hercule/run-3f1", { selector: "span.font-mono" });
     expect(branch.parentElement?.className).not.toContain("truncate");
 
     // And the note keeps the row's right edge: its column is the wide one and
@@ -1881,7 +1883,7 @@ describe("Composer: the branch selector (AC-18)", () => {
     expect(text).toContain("the new branch starts from it");
     expect(text).toContain("default");
     expect(text).toContain(
-      "The new branch is hydra/run-…, named after the thread, and starts from origin/main when the remote has it.",
+      "The new branch is hercule/run-…, named after the thread, and starts from origin/main when the remote has it.",
     );
   });
 
@@ -1913,7 +1915,7 @@ describe("Composer: the branch selector (AC-18)", () => {
     const joined = await openAt(inProject(WEBSHOP.id));
 
     await openWorkspaceMenu(user);
-    await pickRow(user, /hydra\/run-3f1/);
+    await pickRow(user, /hercule\/run-3f1/);
     await waitFor(() => {
       expect(screen.queryByText("Branch")).toBeNull();
     });
@@ -1935,9 +1937,9 @@ describe("Composer: the machine selector follows the workspace (AC-19)", () => {
     await openAt(inProject(WEBSHOP.id));
 
     await openWorkspaceMenu(user);
-    await pickRow(user, /hydra\/run-8a0/);
+    await pickRow(user, /hercule\/run-8a0/);
 
-    const locked = await screen.findByText("set by the workspace hydra/run-8a0");
+    const locked = await screen.findByText("set by the workspace hercule/run-8a0");
     expect(locked.closest("button")).toBeNull();
     await user.click(locked);
     expect(screen.queryByRole("dialog")).toBeNull();

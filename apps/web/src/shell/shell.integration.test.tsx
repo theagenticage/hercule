@@ -85,12 +85,12 @@ const withThreads = (
   "GET /api/v1/sessions": { body: { items: sessions } },
 });
 
-const hydraNav = () => within(screen.getByRole("navigation", { name: "Hydra" }));
+const herculeNav = () => within(screen.getByRole("navigation", { name: "Hercule" }));
 
 const threadsNav = () => within(screen.getByRole("navigation", { name: "Threads" }));
 
 const navLabels = (): string[] =>
-  hydraNav()
+  herculeNav()
     .getAllByRole("link")
     .map((link) => link.textContent ?? "");
 
@@ -99,7 +99,7 @@ beforeEach(() => {
 });
 
 describe("the two-face sidebar", () => {
-  it("shows the Hydra face on an orchestration screen, in its pinned order", async () => {
+  it("shows the Hercule face on an orchestration screen, in its pinned order", async () => {
     await renderApp({ path: "/tasks", api: stubApi(inShell()).fetch, token: "held" });
 
     expect(navLabels()).toEqual([
@@ -118,7 +118,7 @@ describe("the two-face sidebar", () => {
   it("carries a glyph on the entity items and on no other", async () => {
     await renderApp({ path: "/tasks", api: stubApi(inShell()).fetch, token: "held" });
 
-    const withGlyph = hydraNav()
+    const withGlyph = herculeNav()
       .getAllByRole("link")
       .filter((link) => link.querySelector("[data-mark]") !== null)
       .map((link) => link.textContent);
@@ -133,14 +133,14 @@ describe("the two-face sidebar", () => {
     // #160's plain link to `/threads/new`; recorded as D-14).
     expect(await threadsNav().findByRole("button", { name: /create new thread/i })).toBeDefined();
     expect(await threadsNav().findByText("No threads yet")).toBeDefined();
-    expect(screen.queryByRole("navigation", { name: "Hydra" })).toBeNull();
+    expect(screen.queryByRole("navigation", { name: "Hercule" })).toBeNull();
   });
 
   it("switches face when the segmented switch is used", async () => {
     const user = userEvent.setup();
     await renderApp({ path: "/", api: stubApi(inShell()).fetch, token: "held" });
 
-    await user.click(screen.getByRole("radio", { name: /Hydra/ }));
+    await user.click(screen.getByRole("radio", { name: /Hercule/ }));
 
     expect(navLabels()[0]).toBe("Intake");
   });
@@ -149,8 +149,8 @@ describe("the two-face sidebar", () => {
     const user = userEvent.setup();
     const { router } = await renderApp({ path: "/", api: stubApi(inShell()).fetch, token: "held" });
 
-    await user.click(screen.getByRole("radio", { name: /Hydra/ }));
-    await user.click(hydraNav().getByRole("link", { name: "Intake" }));
+    await user.click(screen.getByRole("radio", { name: /Hercule/ }));
+    await user.click(herculeNav().getByRole("link", { name: "Intake" }));
 
     await waitFor(() => {
       expect(router.state.location.pathname).toBe("/intake");
@@ -210,7 +210,7 @@ describe("the theme selector", () => {
     await user.click(screen.getByRole("radio", { name: "Dark" }));
 
     expect(document.documentElement.dataset.theme).toBe("dark");
-    expect(localStorage.getItem("hydra:theme")).toBe("dark");
+    expect(localStorage.getItem("hercule:theme")).toBe("dark");
   });
 });
 
@@ -329,12 +329,12 @@ describe("the Threads face's session rows", () => {
   });
 
   it.each(["/", "/threads/s1", "/sessions"])(
-    "shows the Threads face, not Hydra, on %s",
+    "shows the Threads face, not Hercule, on %s",
     async (path) => {
       await renderApp({ path, api: stubApi(inShell()).fetch, token: "held" });
 
       expect(screen.getByRole("navigation", { name: "Threads" })).toBeDefined();
-      expect(screen.queryByRole("navigation", { name: "Hydra" })).toBeNull();
+      expect(screen.queryByRole("navigation", { name: "Hercule" })).toBeNull();
     },
   );
 });
@@ -389,7 +389,7 @@ describe("the top bar", () => {
       expect(
         screen.getByRole("link", { name: /does not know the zone Europe\/Nowhere/ }),
       ).toBeDefined();
-      expect(screen.getByRole("navigation", { name: "Hydra" })).toBeDefined();
+      expect(screen.getByRole("navigation", { name: "Hercule" })).toBeDefined();
     } finally {
       vi.useRealTimers();
     }
@@ -424,7 +424,7 @@ describe("the top bar", () => {
       expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Intake");
       expect(screen.getByText("Monday 09:14")).toBeDefined();
       expect(screen.queryByText(/^since /)).toBeNull();
-      expect(screen.getByRole("navigation", { name: "Hydra" })).toBeDefined();
+      expect(screen.getByRole("navigation", { name: "Hercule" })).toBeDefined();
     } finally {
       vi.useRealTimers();
     }
@@ -440,7 +440,7 @@ describe("the top bar", () => {
  * - a project's group header and a workspace's group header carry their
  *   label as text, and the `+` beside each is a link whose accessible name
  *   names what it opens;
- * - a workspace's own label is its first checkout's branch (`hydra/run-3f1`),
+ * - a workspace's own label is its first checkout's branch (`hercule/run-3f1`),
  *   which is the only name a `Workspace` record carries.
  * ------------------------------------------------------------------ */
 
@@ -550,7 +550,7 @@ describe("the Threads face groups by project and workspace (AC-20)", () => {
   it("groups a project's threads per workspace, naming a primary after its repo and machine", async () => {
     await renderApp({ path: "/", api: stubApi(withProjects()).fetch, token: "held" });
 
-    await threadsNav().findByText("hydra/run-3f1");
+    await threadsNav().findByText("hercule/run-3f1");
     // The whole label is the tooltip, and it is split so that a sidebar too
     // narrow for it cuts the repo rather than the machine that tells one
     // repo's two main workspaces apart. D-20c: the word "checkout" is gone.
@@ -565,7 +565,7 @@ describe("the Threads face groups by project and workspace (AC-20)", () => {
 
     await threadsNav().findByText("no workspace");
     const text = faceText();
-    expect(text.indexOf("hydra/run-3f1")).toBeLessThan(text.indexOf("no workspace"));
+    expect(text.indexOf("hercule/run-3f1")).toBeLessThan(text.indexOf("no workspace"));
     expect(text.indexOf("webshop · moss")).toBeLessThan(text.indexOf("no workspace"));
     expect(text.indexOf("no workspace")).toBeLessThan(text.indexOf("Tidy the promotion runbook"));
   });
@@ -574,7 +574,7 @@ describe("the Threads face groups by project and workspace (AC-20)", () => {
     await renderApp({ path: "/", api: stubApi(withProjects()).fetch, token: "held" });
 
     const plus = await threadsNav().findByRole("link", {
-      name: "New thread in hydra/run-3f1",
+      name: "New thread in hercule/run-3f1",
     });
     expect(plus.getAttribute("href")).toBe(
       `/threads/new?project=${WEBSHOP.id}&workspace=${W_RUN_3F1.id}`,
@@ -599,10 +599,10 @@ describe("the Threads face groups by project and workspace (AC-20)", () => {
       token: "held",
     });
 
-    await threadsNav().findByText("hydra/run-3f1");
+    await threadsNav().findByText("hercule/run-3f1");
     const text = faceText();
     expect(text).toContain("New thread draft");
-    expect(text.indexOf("hydra/run-3f1")).toBeLessThan(text.indexOf("New thread draft"));
+    expect(text.indexOf("hercule/run-3f1")).toBeLessThan(text.indexOf("New thread draft"));
     // The draft is the group's last row, as it is the last of the thread tabs.
     expect(text.indexOf("Fix flaky webhook tests")).toBeLessThan(text.indexOf("New thread draft"));
     expect(text.indexOf("New thread draft")).toBeLessThan(text.indexOf("webshop · moss"));
@@ -612,7 +612,7 @@ describe("the Threads face groups by project and workspace (AC-20)", () => {
     await renderApp({ path: "/", api: stubApi(withProjects()).fetch, token: "held" });
 
     const row = await threadsNav().findByRole("link", { name: /Fix flaky webhook tests/ });
-    expect(row.textContent).not.toContain("hydra/run-3f1");
+    expect(row.textContent).not.toContain("hercule/run-3f1");
   });
 });
 

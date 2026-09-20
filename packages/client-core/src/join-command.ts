@@ -15,4 +15,4 @@ export const joinCommand = ({
   readonly origin: string;
   readonly token: string;
   readonly reserved: boolean;
-}): string => `hydra runner join ${origin} --token ${token}${reserved ? " --reserved" : ""}`;
+}): string => `hercule runner join ${origin} --token ${token}${reserved ? " --reserved" : ""}`;

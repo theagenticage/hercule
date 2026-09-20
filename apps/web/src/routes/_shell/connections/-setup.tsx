@@ -8,7 +8,7 @@ import {
   redirectUriFor,
   setupFlowOf,
   type ConnectionType,
-  type HydraClient,
+  type HerculeClient,
 } from "@hercule/client-core";
 import type { Connection } from "@hercule/contract";
 import { SaveStatus, messageOf } from "../../../screens/save-status";
@@ -30,7 +30,7 @@ export function ConnectionSetup({
   connection,
   onDone,
 }: {
-  readonly client: HydraClient;
+  readonly client: HerculeClient;
   readonly type: ConnectionType;
   /** The connection being reconnected; absent when this is a first setup. */
   readonly connection?: Connection;
@@ -96,7 +96,7 @@ export function ConnectionSetup({
         <p>
           {flow === "pairing"
             ? "Pairing a chat account is not built yet."
-            : `Setting up ${type.displayName} takes a step this version of Hydra does not know.`}
+            : `Setting up ${type.displayName} takes a step this version of Hercule does not know.`}
         </p>
         <Button className="-ml-2" onClick={onDone}>
           Back

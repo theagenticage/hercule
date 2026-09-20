@@ -7,7 +7,7 @@ import {
   labelText,
   threadGroups,
   type DraftPlace,
-  type HydraClient,
+  type HerculeClient,
   type Live,
   type ProjectGroup,
   type WorkspaceGroup,
@@ -47,7 +47,7 @@ export function ThreadsFace({
   readonly rows: ThreadRows;
   /** What a draft opens in where its address names no workspace. */
   readonly preferredWorkspace: ThreadWorkspace | null;
-  readonly client: HydraClient;
+  readonly client: HerculeClient;
   readonly queryClient: QueryClient;
   readonly live: Live;
 }): JSX.Element {
@@ -190,7 +190,7 @@ function ProjectLane({
     <div>
       {group.projectId === null || group.name === null ? null : (
         <div className="flex items-center gap-1.5 pt-2.5 pr-1 pb-0.5 pl-2">
-          <ProjectDot tone={group.tone ?? "hydra"} />
+          <ProjectDot tone={group.tone ?? "hercule"} />
           <span className="min-w-0 truncate text-meta font-emph text-ink">{group.name}</span>{" "}
           <span className="font-mono text-[11px] text-faint">{group.count}</span>
           <Plus

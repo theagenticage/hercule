@@ -94,7 +94,7 @@
   --live: #48717f;
   --ok: #48745a;
   --attn-soft: rgba(138, 97, 22, 0.09);
-  --project-hydra: #7d7ab0;
+  --project-hercule: #7d7ab0;
   --project-ops: #a67f92;
   /* What an overlay dims the page behind it with. */
   --scrim: rgba(23, 26, 33, 0.22);
@@ -126,7 +126,7 @@
     --live: #7fa8b8;
     --ok: #7fae8e;
     --attn-soft: rgba(208, 161, 71, 0.12);
-    --project-hydra: #9490c9;
+    --project-hercule: #9490c9;
     --project-ops: #bd93a8;
     --scrim: rgba(0, 0, 0, 0.45);
   }
@@ -152,7 +152,7 @@
   --live: #7fa8b8;
   --ok: #7fae8e;
   --attn-soft: rgba(208, 161, 71, 0.12);
-  --project-hydra: #9490c9;
+  --project-hercule: #9490c9;
   --project-ops: #bd93a8;
   --scrim: rgba(0, 0, 0, 0.45);
 }
@@ -188,7 +188,7 @@
   --color-fail: var(--fail);
   --color-live: var(--live);
   --color-ok: var(--ok);
-  --color-project-hydra: var(--project-hydra);
+  --color-project-hercule: var(--project-hercule);
   --color-project-ops: var(--project-ops);
   --color-scrim: var(--scrim);
 
@@ -212,7 +212,7 @@
 
 /* The working mark: three bars breathing on a slow cycle. Static things have no
    motion, so this is the only animation the mark family carries. */
-@keyframes hydra-equalizer {
+@keyframes hercule-equalizer {
   0%,
   100% {
     height: 3px;
@@ -224,20 +224,20 @@
   }
 }
 
-.hydra-equalizer rect {
-  animation: hydra-equalizer 1.9s ease-in-out infinite;
+.hercule-equalizer rect {
+  animation: hercule-equalizer 1.9s ease-in-out infinite;
 }
-.hydra-equalizer rect:nth-child(2) {
+.hercule-equalizer rect:nth-child(2) {
   animation-delay: 0.35s;
 }
-.hydra-equalizer rect:nth-child(3) {
+.hercule-equalizer rect:nth-child(3) {
   animation-delay: 0.7s;
 }
 
 /* The drawer arrives from the edge it lives on, once, over 160ms. It is the
    one transition in the system: the panel has to read as sitting over the page
    rather than as having replaced it. */
-@keyframes hydra-drawer-in {
+@keyframes hercule-drawer-in {
   from {
     transform: translateX(12px);
     opacity: 0;
@@ -248,13 +248,13 @@
   }
 }
 
-.hydra-drawer {
-  animation: hydra-drawer-in 160ms cubic-bezier(0.32, 0.72, 0, 1);
+.hercule-drawer {
+  animation: hercule-drawer-in 160ms cubic-bezier(0.32, 0.72, 0, 1);
 }
 
 /* Currency: a thing that is live carries a slow pulse beside its state word.
    Nothing static moves, so the motion itself is the signal. */
-@keyframes hydra-live-pulse {
+@keyframes hercule-live-pulse {
   0%,
   100% {
     opacity: 1;
@@ -264,14 +264,14 @@
   }
 }
 
-.hydra-live-dot {
-  animation: hydra-live-pulse 2.4s ease-in-out infinite;
+.hercule-live-dot {
+  animation: hercule-live-pulse 2.4s ease-in-out infinite;
 }
 
 /* The thread surface's live turn: a slow band of light sweeping through the
    "Working for" divider's text, in the live hue throughout. Reduced motion
    keeps the hue and drops the sweep, below. */
-@keyframes hydra-thread-shimmer {
+@keyframes hercule-thread-shimmer {
   0% {
     background-position: 200% 0;
   }
@@ -280,7 +280,7 @@
   }
 }
 
-.hydra-thread-shimmer {
+.hercule-thread-shimmer {
   background-image: linear-gradient(
     90deg,
     var(--live) 0%,
@@ -290,18 +290,18 @@
   background-size: 200% 100%;
   background-clip: text;
   color: transparent;
-  animation: hydra-thread-shimmer 2.4s linear infinite;
+  animation: hercule-thread-shimmer 2.4s linear infinite;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .hydra-equalizer rect,
-  .hydra-drawer,
-  .hydra-live-dot,
-  .hydra-thread-shimmer {
+  .hercule-equalizer rect,
+  .hercule-drawer,
+  .hercule-live-dot,
+  .hercule-thread-shimmer {
     animation: none;
   }
 
-  .hydra-thread-shimmer {
+  .hercule-thread-shimmer {
     background-image: none;
     background-clip: initial;
     color: var(--live);

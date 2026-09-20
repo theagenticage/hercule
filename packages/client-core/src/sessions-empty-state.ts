@@ -14,17 +14,17 @@ import { providerRows, type ProviderRow } from "./provider-rows";
  * every machine.
  */
 const buildLoginLead = (many: boolean): string =>
-  `Log in to use ${many ? "them" : "it"} in Hydra. The login runs on this machine and its credential stays there.`;
+  `Log in to use ${many ? "them" : "it"} in Hercule. The login runs on this machine and its credential stays there.`;
 
 const buildSecretLead = (many: boolean): string =>
-  `Enter ${many ? "their keys" : "its key"} to use ${many ? "them" : "it"} in Hydra. The key is kept by the controller and used on whichever machine runs a thread.`;
+  `Enter ${many ? "their keys" : "its key"} to use ${many ? "them" : "it"} in Hercule. The key is kept by the controller and used on whichever machine runs a thread.`;
 
 /**
  * Both are on offer, and the two answers differ, so both are said. Both being
  * on offer means two harnesses at least, so this one is always plural.
  */
 const MIXED_LEAD =
-  "Sign in to use them in Hydra. A login runs on this machine and its credential stays there; " +
+  "Sign in to use them in Hercule. A login runs on this machine and its credential stays there; " +
   "a key you enter is kept by the controller and used on whichever machine runs a thread.";
 
 export type SessionsEmptyState =

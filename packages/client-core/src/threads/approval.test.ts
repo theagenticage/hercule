@@ -100,7 +100,7 @@ describe("approvalCard", () => {
             question: "Which database should it use?",
             header: "Database",
             options: [
-              { label: "SQLite", description: "the one Hydra ships" },
+              { label: "SQLite", description: "the one Hercule ships" },
               { label: "Postgres", description: "somebody else's server" },
             ],
             multiSelect: false,
@@ -123,7 +123,7 @@ describe("approvalCard", () => {
         header: "Database",
         question: "Which database should it use?",
         options: [
-          { label: "SQLite", description: "the one Hydra ships" },
+          { label: "SQLite", description: "the one Hercule ships" },
           { label: "Postgres", description: "somebody else's server" },
         ],
         note: null,

@@ -17,9 +17,9 @@ import type { Project } from "@hercule/contract";
  * one `project.query` answers with, which every surface here reads, so the
  * same project wears the same hue on all of them.
  */
-export type ProjectTone = "hydra" | "ops";
+export type ProjectTone = "hercule" | "ops";
 
-const TONES: readonly ProjectTone[] = ["hydra", "ops"];
+const TONES: readonly ProjectTone[] = ["hercule", "ops"];
 
 export const projectTone = (projectId: string, projects: readonly Project[]): ProjectTone => {
   const index = projects.findIndex((each) => each.id === projectId);

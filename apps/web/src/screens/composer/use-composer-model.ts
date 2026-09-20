@@ -14,7 +14,7 @@ import {
   threadConfig,
   type ComposerFields,
   type ComposerPick,
-  type HydraClient,
+  type HerculeClient,
   type RecentModel,
   type Thread,
   type ThreadCatalogs,
@@ -25,7 +25,7 @@ import {
 import type { SessionInputPayload, SessionSpawnInput } from "@hercule/contract";
 
 /** Where the last models picked are kept; nothing on the API carries them. */
-const RECENT_KEY = "hydra.recentModels";
+const RECENT_KEY = "hercule.recentModels";
 
 /** A browser with no usable store loses Recent and nothing else. */
 const readRecent = (): readonly RecentModel[] => {
@@ -74,7 +74,7 @@ export interface ComposerModel {
 export function useComposerModel(
   thread: Thread,
   catalogs: ThreadCatalogs,
-  client: HydraClient,
+  client: HerculeClient,
   onSend?: () => void,
 ): ComposerModel {
   const queryClient = useQueryClient();

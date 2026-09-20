@@ -59,7 +59,7 @@ describe("repoName", () => {
 
 describe("workspaceName and workspaceLabel", () => {
   it("names a worktree after the branch it sits on", () => {
-    expect(workspaceName(RUN_3F1)).toBe("hydra/run-3f1");
+    expect(workspaceName(RUN_3F1)).toBe("hercule/run-3f1");
   });
 
   it("names a main workspace after its repo and its machine", () => {
@@ -81,7 +81,7 @@ describe("workspaceName and workspaceLabel", () => {
 
   it("gives a worktree's whole name as the part that may be cut: it is one word", () => {
     expect(workspaceLabelParts(RUN_3F1, [WEBSHOP], [MOSS])).toEqual({
-      clip: "hydra/run-3f1",
+      clip: "hercule/run-3f1",
       keep: "",
     });
   });
@@ -208,7 +208,7 @@ describe("draftSubject", () => {
         WEBSHOP_PROJECT.id,
         PROJECTS,
       ),
-    ).toEqual({ label: "hydra/run-3f1", projectId: null, tone: null });
+    ).toEqual({ label: "hercule/run-3f1", projectId: null, tone: null });
   });
 
   it("names the project a draft stands in, in the hue the listing gives it", () => {
@@ -274,7 +274,7 @@ describe("composerPlaceholder", () => {
 
   it("names the workspace a draft joins, whose files already stand", () => {
     expect(ask({ pick: { kind: "existing", workspaceId: RUN_3F1.id } })).toBe(
-      "Say what this thread should do in hydra/run-3f1…",
+      "Say what this thread should do in hercule/run-3f1…",
     );
   });
 

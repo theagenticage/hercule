@@ -77,7 +77,7 @@ describe("a login the vendor printed a code for", () => {
     // Both are long enough to mistype and neither can be read off a terminal.
     expect(screen.getByRole("button", { name: "Copy code" })).toBeDefined();
     expect(screen.getByRole("button", { name: "Copy address" })).toBeDefined();
-    // The code is typed into the browser, never back into Hydra.
+    // The code is typed into the browser, never back into Hercule.
     expect(screen.queryByLabelText("Code", { exact: true })).toBeNull();
     expect(screen.queryByRole("button", { name: /submit/i })).toBeNull();
     // A second login would kill the child whose code is on screen.

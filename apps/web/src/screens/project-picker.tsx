@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type JSX } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
-import { projectPickerRows, type HydraClient, type ProjectPickerRow } from "@hercule/client-core";
+import { projectPickerRows, type HerculeClient, type ProjectPickerRow } from "@hercule/client-core";
 import { cn } from "@hercule/ui";
 import { ProjectDot } from "./project-dot";
 import { projectsQuery, resourcesQuery, sessionsQuery, workspacesQuery } from "../app/queries";
@@ -21,7 +21,7 @@ export function ProjectPicker({
   onClose,
   onNewProject,
 }: {
-  readonly client: HydraClient;
+  readonly client: HerculeClient;
   readonly onClose: () => void;
   /** The way to the New project dialog, which this row opens. */
   readonly onNewProject: () => void;

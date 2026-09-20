@@ -1,6 +1,6 @@
 import { useState, type JSX } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { ApiError, type HydraClient } from "@hercule/client-core";
+import { ApiError, type HerculeClient } from "@hercule/client-core";
 import type { Project, Task, TaskUpdateInput } from "@hercule/contract";
 import { Drawer } from "@hercule/ui";
 import { taskQuery } from "../../../app/queries";
@@ -24,7 +24,7 @@ export function TaskDrawer({
   reread,
   onClose,
 }: {
-  readonly client: HydraClient;
+  readonly client: HerculeClient;
   /** The task the address names, or none. */
   readonly openId: string | undefined;
   /** The same task as the listing already holds it, when it holds it. */

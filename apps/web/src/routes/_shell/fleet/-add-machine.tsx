@@ -6,7 +6,7 @@ import {
   idTail,
   joinCommand,
   queryKeys,
-  type HydraClient,
+  type HerculeClient,
 } from "@hercule/client-core";
 import { joinTokensQuery } from "../../../app/queries";
 
@@ -24,7 +24,7 @@ export function AddMachine({
   client,
   timezone,
 }: {
-  readonly client: HydraClient;
+  readonly client: HerculeClient;
   readonly timezone: string;
 }): JSX.Element {
   const queryClient = useQueryClient();

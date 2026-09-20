@@ -13,7 +13,7 @@ import { cn } from "@hercule/ui";
  * stylesheet has never seen written is a class Tailwind never emits.
  */
 const TONE = {
-  hydra: "bg-project-hydra",
+  hercule: "bg-project-hercule",
   ops: "bg-project-ops",
 } as const;
 

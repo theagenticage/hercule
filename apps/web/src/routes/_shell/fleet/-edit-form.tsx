@@ -6,7 +6,7 @@ import {
   runnerConflictField,
   runnerDraft,
   runnerPatch,
-  type HydraClient,
+  type HerculeClient,
   type RunnerDraft,
 } from "@hercule/client-core";
 import type { RunnerDetail, RunnerUpdateInput } from "@hercule/contract";
@@ -28,7 +28,7 @@ export function EditForm({
   client,
   runner,
 }: {
-  readonly client: HydraClient;
+  readonly client: HerculeClient;
   readonly runner: RunnerDetail;
 }): JSX.Element {
   const queryClient = useQueryClient();

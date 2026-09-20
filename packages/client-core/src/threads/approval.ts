@@ -99,7 +99,7 @@ const describeOf = (decision: ApprovalDecision, subject: string): string => {
 };
 
 /**
- * Conflict between what the harness asks and what Hydra can send back:
+ * Conflict between what the harness asks and what Hercule can send back:
  * `session.respond` carries a decision and no answers, so there is nothing an
  * allow could run the tool with. The card says so rather than leaving the
  * missing Allow to be read as a bug.

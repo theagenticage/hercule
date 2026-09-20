@@ -701,7 +701,7 @@ describe("Runner > providers", () => {
     await waitFor(() => {
       expect(reading()).toContain("CH61-0FI2N");
     });
-    // The browser finishes this login with the vendor; Hydra is told it is over.
+    // The browser finishes this login with the vendor; Hercule is told it is over.
     await user.click(screen.getByRole("button", { name: "Done" }));
 
     // The credential is on the machine and the stored snapshot predates it, so

@@ -160,7 +160,7 @@ export const branchField = (
         ? null
         : [
             { text: "The new branch is " },
-            { text: "hydra/run-…", mono: true },
+            { text: "hercule/run-…", mono: true },
             { text: ", named after the thread, and starts from " },
             { text: `origin/${base}`, mono: true },
             { text: " when the remote has it." },

@@ -1,7 +1,12 @@
 import type { JSX } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button, FormCard } from "@hercule/ui";
-import { providerRows, queryKeys, type HydraClient, type ProviderRow } from "@hercule/client-core";
+import {
+  providerRows,
+  queryKeys,
+  type HerculeClient,
+  type ProviderRow,
+} from "@hercule/client-core";
 import type { RunnerDetail } from "@hercule/contract";
 import { ProviderKeyEntry, ProviderLogin } from "../../../screens/provider-login";
 import { messageOf } from "../../../screens/save-status";
@@ -12,7 +17,7 @@ export function Providers({
   client,
   runner,
 }: {
-  readonly client: HydraClient;
+  readonly client: HerculeClient;
   readonly runner: RunnerDetail;
 }): JSX.Element | null {
   const queryClient = useQueryClient();
@@ -96,7 +101,7 @@ function Row({
   onCredentialEntered,
 }: {
   readonly row: ProviderRow;
-  readonly client: HydraClient;
+  readonly client: HerculeClient;
   readonly runnerId: string;
   readonly runnerName: string;
   readonly first: boolean;

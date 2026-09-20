@@ -1,7 +1,7 @@
 import { useState, type JSX } from "react";
 import { Link, useRouterState } from "@tanstack/react-router";
 import type { QueryClient } from "@tanstack/react-query";
-import { threadRowsMode, type HydraClient, type Live } from "@hercule/client-core";
+import { threadRowsMode, type HerculeClient, type Live } from "@hercule/client-core";
 import type { SettingsState } from "@hercule/contract";
 import {
   Logo,
@@ -11,7 +11,7 @@ import {
   ThemeSelector,
   cn,
 } from "@hercule/ui";
-import { HYDRA_NAV, SEPARATOR, faceForPath, type Face, type NavItem } from "./nav";
+import { HERCULE_NAV, SEPARATOR, faceForPath, type Face, type NavItem } from "./nav";
 import { Pulse } from "./pulse";
 import { ThreadsFace } from "./threads-face";
 
@@ -80,7 +80,7 @@ function NavLink({
   );
 }
 
-function HydraFace({
+function HerculeFace({
   pathname,
   counts,
 }: {
@@ -88,8 +88,8 @@ function HydraFace({
   readonly counts: Counts;
 }): JSX.Element {
   return (
-    <nav className="flex flex-col gap-px" aria-label="Hydra">
-      {HYDRA_NAV.map((item, index) =>
+    <nav className="flex flex-col gap-px" aria-label="Hercule">
+      {HERCULE_NAV.map((item, index) =>
         item === SEPARATOR ? (
           // The hairline between the work screens and the machinery behind them.
           <div key={`separator-${String(index)}`} className="mx-2.5 my-2 h-px bg-line-soft" />
@@ -109,7 +109,7 @@ function HydraFace({
 /**
  * One sidebar with two faces. The face follows the screen and the switch
  * overrides it for as long as the user stays on that screen: navigating puts
- * the screen back in charge. The check-in count sits on the Hydra segment so
+ * the screen back in charge. The check-in count sits on the Hercule segment so
  * the orchestration side never hides while the user works in threads.
  */
 export function Sidebar({
@@ -119,7 +119,7 @@ export function Sidebar({
   live,
 }: {
   readonly settings: SettingsState;
-  readonly client: HydraClient;
+  readonly client: HerculeClient;
   readonly queryClient: QueryClient;
   readonly live: Live;
 }): JSX.Element {
@@ -145,10 +145,10 @@ export function Sidebar({
       >
         <SegmentedControlItem value="threads">Threads</SegmentedControlItem>
         <SegmentedControlItem
-          value="hydra"
+          value="hercule"
           className="inline-flex items-center justify-center gap-1.5"
         >
-          Hydra
+          Hercule
           <Count value={NO_COUNTS.checkin} attention />
         </SegmentedControlItem>
       </SegmentedControl>
@@ -162,7 +162,7 @@ export function Sidebar({
           live={live}
         />
       ) : (
-        <HydraFace pathname={pathname} counts={NO_COUNTS} />
+        <HerculeFace pathname={pathname} counts={NO_COUNTS} />
       )}
 
       <div className="mt-auto flex flex-col gap-1.5 pt-2.5">
