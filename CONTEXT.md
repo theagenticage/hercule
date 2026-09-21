@@ -315,6 +315,14 @@ _Avoid_: poller, loop
 Post-ingest amendment of an event's `system`, `url`, or `refs` (append-only) by a sender rule or the triage agent. Gives the matcher one more idempotent look at that event; never re-delivers to consumers that already fired.
 _Avoid_: editing events, reprocessing
 
+**Matcher**:
+The one consumer of the event log that decides who gets an event: it walks the events past its own durable cursor, evaluates every live subscription's expression against each one, and writes the row that wakes the holder. One consumer and one cursor, so a restart re-delivers nothing and drops nothing.
+_Avoid_: router, dispatcher, event bus
+
+**Expression**:
+A CEL source stored on a subscription or a trigger and evaluated against one event, or against a run's inputs and steps, answering whether it matches or producing a value. Checked when it is saved, and evaluated against the context it is handed and nothing else. `condition` is the stored field on a subscription; the concept is an expression.
+_Avoid_: rule, predicate string
+
 **Workflow**:
 A named, stored, editable source of execution plans. Owns its triggers; can be as small as one trigger plus one action. Editing a workflow never affects in-flight runs.
 _Avoid_: recipe

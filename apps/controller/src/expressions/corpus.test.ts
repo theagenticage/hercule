@@ -1,6 +1,6 @@
 /**
  * The corpus: the subset of CEL that Hercule's conditions rely on, pinned
- * against one representative event envelope (AC-2). If a swap of the evaluator
+ * against one representative event envelope. If a swap of the evaluator
  * changes any answer here, a stored condition changes meaning, so every case
  * states its expected value rather than only that it evaluates.
  */
@@ -70,7 +70,7 @@ describe("the expression corpus", () => {
     expect(Exit.isSuccess(exit)).toBe(false);
     if (Exit.isSuccess(exit)) return;
     const error = Option.getOrUndefined(Cause.findErrorOption(exit.cause));
-    expect(String((error as { readonly message?: unknown })?.message ?? error)).toContain("raw");
+    expect(error?.message ?? "").toContain("raw");
   });
 
   it("answers synchronously, never with a Promise", () => {
