@@ -102,6 +102,10 @@ const COMMANDS: Record<string, string> = {
   "event.emit": "event emit",
   "event.enrich": "event enrich",
 
+  "subscription.query": "subscription list",
+  "subscription.create": "subscription create",
+  "subscription.cancel": "subscription cancel",
+
   "runner.query": "runner list",
   "runner.read": "runner read",
   "runner.update": "runner update",
@@ -223,6 +227,8 @@ const RESOLVES: Record<string, string> = {
   "runner.refreshFacts id": "runner.query",
   "runner.installHarness id": "runner.query",
   "runner.revokeJoinToken id": "runner.queryJoinTokens",
+
+  "subscription.cancel id": "subscription.query",
 
   "provider.read id": "provider.query",
   "provider.update id": "provider.query",

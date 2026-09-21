@@ -181,19 +181,29 @@ export const execute = async (
   command: Command,
   args: Arguments,
 ): Promise<Outcome> => {
-  const written: Record<string, unknown> = {};
+  const inPath = command.positionals.filter((field) => field.carriedIn === "path");
+  const writtenParams: Record<string, unknown> = {};
+  const writtenPayload: Record<string, unknown> = { ...args.payload };
   for (const [index, field] of command.positionals.entries()) {
     // Every positional is checked against its own field here, where a failure
     // is still a usage error and nothing has been sent. A numeric path
     // parameter is the value itself, never a tail of a longer id: the event log
     // numbers its rows, and `42` is row 42.
-    written[field.name] = coerce(field, args.positionals[index]!, command.spelling);
+    const value = coerce(field, args.positionals[index]!, command.spelling);
+    // A bare word is a route parameter or a payload field, and it travels in
+    // the half of the request its own field names.
+    if (field.carriedIn === "payload") writtenPayload[field.name] = value;
+    else writtenParams[field.name] = value;
   }
-  const params = (await resolveTails(client, command, command.positionals, written)) as Record<
+  const params = (await resolveTails(client, command, inPath, writtenParams)) as Record<
     string,
     string | number
   >;
-  const payload = await resolveTails(client, command, command.payload, args.payload);
+  const payloadFields = [
+    ...command.payload,
+    ...command.positionals.filter((field) => field.carriedIn === "payload"),
+  ];
+  const payload = await resolveTails(client, command, payloadFields, writtenPayload);
   const query: Record<string, unknown> = await resolveTails(client, command, command.query, {
     ...args.query,
   });
@@ -212,7 +222,7 @@ export const execute = async (
         client,
         command,
         query,
-        command.positionals.length > 0 ? params : undefined,
+        inPath.length > 0 ? params : undefined,
         args.cursor,
       ),
     };
@@ -221,9 +231,9 @@ export const execute = async (
   if (args.cursor !== undefined) query["cursor"] = args.cursor;
 
   const request: Record<string, unknown> = {};
-  if (command.positionals.length > 0) request["params"] = params;
+  if (inPath.length > 0) request["params"] = params;
   if (command.paged || command.query.length > 0) request["query"] = query;
-  if (command.payload.length > 0) request["payload"] = payload;
+  if (payloadFields.length > 0) request["payload"] = payload;
 
   const call = callableOf(client, command);
   return {

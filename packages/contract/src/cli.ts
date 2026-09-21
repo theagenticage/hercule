@@ -851,6 +851,53 @@ export const CLI = {
     },
   },
 
+  "subscription.query": {
+    command: "subscription list",
+    help: "Lists what a session is waiting on. Each row carries the target, the condition that target expanded into, and whether the matcher can still evaluate it. A session token that names no holder lists its own. Only live subscriptions are listed; a cancelled one is gone from here.",
+    examples: [
+      { args: [] },
+      { args: ["--holder", "session:0192f0a1-3c4b-7d2e-8f01-2a3b4c5d6e7f"] },
+    ],
+    fields: {
+      holder: {
+        flag: "holder",
+        help: "Whose subscriptions to list, written session:<session id> with the full id; a session token that names none lists its own, and a user credential must name one.",
+      },
+    },
+  },
+  "subscription.create": {
+    command: "subscription create",
+    help: "Waits on something that has not happened yet. The event that satisfies the target is delivered to this session as its next input. Reach for it instead of polling - start the thing, subscribe to it, end the turn - and end the wait with `hercule subscription cancel`. Only a session may hold a subscription, and the session that calls is the holder.",
+    examples: [{ args: ["github:pr:o/r#87"] }, { args: ["gmail:thread:19b2c"] }],
+    fields: {
+      target: {
+        positional: true,
+        placeholder: "target",
+        help: "What to wait on, as one word: an External Ref written <system>:<kind>:<identity>, or run:<run id>, session:<session id>, request:<permission request id>.",
+      },
+    },
+    errors: {
+      invalid_state:
+        "this version has no runs, no session platform events and no Permission Requests, so only a ref target can be waited on",
+      validation: "a user credential holds no subscription; call this on a session token",
+    },
+  },
+  "subscription.cancel": {
+    command: "subscription cancel",
+    help: "Ends one subscription, so the matcher stops evaluating it and nothing more arrives through it. Find the id with `hercule subscription list`.",
+    examples: [{ args: ["1f3a9c2e"] }],
+    fields: {
+      id: {
+        positional: true,
+        help: "The subscription's id, or a tail of eight or more characters.",
+        resolves: "subscription.query",
+      },
+    },
+    errors: {
+      not_found: "no live subscription has that id; one already cancelled answers the same way",
+    },
+  },
+
   "runner.query": {
     command: "runner list",
     help: "Lists the fleet: every Runner enrolled with this controller, by name. Each row says how reachable the machine is and where it stands with its owner. Use it to find the id the other `hercule runner` commands take.",
@@ -1916,6 +1963,11 @@ export const NOUNS = {
   event: {
     summary: "The event log: external events and audit entries, under one envelope.",
     flow: "hercule event list to see what came in, hercule event read for one entry in full.",
+  },
+  subscription: {
+    summary:
+      "Subscriptions: the standing claims sessions hold on events that have not happened yet.",
+    flow: "hercule subscription create starts a wait, hercule subscription list shows what a session waits on, hercule subscription cancel ends one.",
   },
   runner: {
     summary: "The fleet: the machines that host sessions on the controller's behalf.",

@@ -106,12 +106,19 @@ describe("the spelling of a command", () => {
     }
   });
 
-  it("takes the path parameters positionally, in route order", () => {
+  it("takes the path parameters positionally, in route order, before any other bare word", () => {
     for (const command of COMMANDS) {
+      const inPath = command.positionals.filter((field) => field.carriedIn === "path");
       expect(
-        command.positionals.map((field) => field.name),
+        inPath.map((field) => field.name),
         spelling(command),
       ).toEqual(pathParams(command.path));
+      // A payload field the table writes as a bare word stands after them, and
+      // nothing else is ever a bare word.
+      expect(
+        command.positionals.slice(inPath.length).map((field) => field.carriedIn),
+        spelling(command),
+      ).toEqual(command.positionals.slice(inPath.length).map(() => "payload"));
     }
   });
 });
@@ -221,6 +228,7 @@ describe("the placeholders a usage line shows", () => {
   /** Every command whose positionals are not one plain `<id>`. */
   const NAMED: Record<string, string> = {
     "secret set": "<owner-kind> <owner-id> <name>",
+    "subscription create": "<target>",
     "secret delete": "<owner-kind> <owner-id> <name>",
     "input list": "<session-id>",
     "input update": "<session-id> <input-id>",

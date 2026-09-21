@@ -131,6 +131,22 @@ const TABLE = {
   // for writing: there is no second verb for correcting what is already there.
   "event.enrich": { requires: "event.emit", method: "POST", path: "/api/v1/events/:id/enrich" },
 
+  "subscription.query": {
+    requires: "subscription.read",
+    method: "GET",
+    path: "/api/v1/subscriptions",
+  },
+  "subscription.create": {
+    requires: "subscription.write",
+    method: "POST",
+    path: "/api/v1/subscriptions",
+  },
+  "subscription.cancel": {
+    requires: "subscription.write",
+    method: "DELETE",
+    path: "/api/v1/subscriptions/:id",
+  },
+
   "runner.query": { requires: "infra.read", method: "GET", path: "/api/v1/runners" },
   "runner.read": { requires: "infra.read", method: "GET", path: "/api/v1/runners/:id" },
   "runner.update": { requires: "infra.write", method: "PATCH", path: "/api/v1/runners/:id" },

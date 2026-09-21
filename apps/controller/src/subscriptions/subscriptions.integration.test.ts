@@ -92,10 +92,14 @@ const page = async (
 const cancel = (arranged: Arranged, id: string, token: string): Promise<Response> =>
   del(arranged.harness.base, `/api/v1/subscriptions/${id}`, token);
 
-/** One refusal, as the code it carries and the text a person reads. */
-const refusalOf = async (
-  response: Response,
-): Promise<{ readonly code: string; readonly message: string }> => {
+/**
+ * One refusal, as the code it carries and the text a person reads. It takes
+ * anything that answers with a body, because a caller that has already read
+ * the text hands over a clone, whose type is not the harness's `Response`.
+ */
+const refusalOf = async (response: {
+  readonly json: () => Promise<unknown>;
+}): Promise<{ readonly code: string; readonly message: string }> => {
   const body = (await response.json()) as {
     readonly error?: { readonly code?: string; readonly message?: string };
   };

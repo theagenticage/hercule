@@ -1,0 +1,168 @@
+/**
+ * Subscription rows. This module only reads and writes them. Who may write,
+ * what a target means and when a subscription may be ended are the service's
+ * questions.
+ *
+ * A listing is one keyset walk over `created_at` and the id, narrowed to one
+ * holder, which the index on live subscriptions serves. Only live rows are
+ * walked: a listing says what a session is still waiting for.
+ */
+import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
+import * as SqlClient from "effect/unstable/sql/SqlClient";
+import type { SqlError } from "effect/unstable/sql/SqlError";
+import type { SortDirection, SubscriptionTarget } from "@hercule/contract";
+import {
+  decodeCursor,
+  encodeCursor,
+  keysetOver,
+  mintUuid,
+  pageOf,
+  uuidFromString,
+  uuidToString,
+  type CursorError,
+  type CursorScope,
+  type Page,
+} from "../db";
+
+/** Who holds a subscription. A run will hold one when runs exist. */
+export interface SubscriptionHolder {
+  readonly kind: "session";
+  readonly id: string;
+}
+
+/** A subscription as it is stored. */
+export interface StoredSubscription {
+  readonly id: string;
+  readonly holder: SubscriptionHolder;
+  readonly target: SubscriptionTarget;
+  readonly condition: string;
+  /** The message of the run of evaluation failures this subscription is in, or null. */
+  readonly healthErrorMessage: string | null;
+  /** When that run of failures began, or null. */
+  readonly healthErrorAt: string | null;
+  readonly createdAt: string;
+  readonly endedAt: string | null;
+  readonly endedReason: string | null;
+}
+
+/** Everything a new subscription row holds; the id and the instant are written here. */
+export interface NewSubscription {
+  readonly holder: SubscriptionHolder;
+  readonly target: SubscriptionTarget;
+  readonly condition: string;
+  /** The instant the row is created, which is its `createdAt`. */
+  readonly at: string;
+  readonly actor: string;
+}
+
+export interface SubscriptionPageRequest {
+  readonly limit: number;
+  readonly cursor: string | undefined;
+  readonly direction: SortDirection;
+  /** Whose subscriptions to walk. A listing is always about one holder. */
+  readonly holder: SubscriptionHolder;
+}
+
+interface SubscriptionRow {
+  readonly id: Uint8Array;
+  readonly holder_kind: string;
+  readonly holder_id: Uint8Array;
+  readonly target: string;
+  readonly condition: string;
+  readonly health_error_message: string | null;
+  readonly health_error_at: string | null;
+  readonly created_at: string;
+  readonly ended_at: string | null;
+  readonly ended_reason: string | null;
+}
+
+const COLUMNS =
+  "id, holder_kind, holder_id, target, condition, health_error_message, health_error_at, " +
+  "created_at, ended_at, ended_reason";
+
+const toSubscription = (row: SubscriptionRow): StoredSubscription => ({
+  id: uuidToString(row.id),
+  holder: { kind: row.holder_kind as "session", id: uuidToString(row.holder_id) },
+  target: JSON.parse(row.target) as SubscriptionTarget,
+  condition: row.condition,
+  healthErrorMessage: row.health_error_message,
+  healthErrorAt: row.health_error_at,
+  createdAt: row.created_at,
+  endedAt: row.ended_at,
+  endedReason: row.ended_reason,
+});
+
+const buildCursorScope = (direction: SortDirection): CursorScope => ({
+  op: "subscription.query",
+  field: "createdAt",
+  direction,
+});
+
+const make = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient;
+
+  return {
+    /** The subscription that is still waiting under this id, or none. */
+    readLive: (id: string): Effect.Effect<Option.Option<StoredSubscription>, SqlError> =>
+      Effect.map(
+        sql<SubscriptionRow>`
+          SELECT ${sql.literal(COLUMNS)} FROM subscriptions
+          WHERE id = ${uuidFromString(id)} AND ended_at IS NULL`,
+        (rows) => Option.map(Option.fromNullishOr(rows[0]), toSubscription),
+      ),
+
+    insert: (subscription: NewSubscription): Effect.Effect<string, SqlError> =>
+      Effect.gen(function* () {
+        const id = mintUuid();
+        yield* sql`
+          INSERT INTO subscriptions (id, holder_kind, holder_id, target, condition,
+                                     created_at, actor)
+          VALUES (${id}, ${subscription.holder.kind}, ${uuidFromString(subscription.holder.id)},
+                  ${JSON.stringify(subscription.target)}, ${subscription.condition},
+                  ${subscription.at}, ${subscription.actor})
+        `;
+        return uuidToString(id);
+      }),
+
+    /** Stops the subscription waiting, naming what ended it. */
+    end: (id: string, at: string, reason: string): Effect.Effect<void, SqlError> =>
+      Effect.asVoid(
+        sql`UPDATE subscriptions SET ended_at = ${at}, ended_reason = ${reason}
+            WHERE id = ${uuidFromString(id)} AND ended_at IS NULL`,
+      ),
+
+    list: (
+      request: SubscriptionPageRequest,
+    ): Effect.Effect<Page<StoredSubscription>, CursorError | SqlError> =>
+      Effect.gen(function* () {
+        const scope = buildCursorScope(request.direction);
+        const after =
+          request.cursor === undefined
+            ? undefined
+            : yield* decodeCursor(request.cursor, scope, "string");
+        const { keyset, order } = keysetOver(
+          sql,
+          ["created_at", "id"],
+          after === undefined ? undefined : [after[0], uuidFromString(after[1])],
+          request.direction,
+        );
+        const rows = yield* sql<SubscriptionRow>`
+          SELECT ${sql.literal(COLUMNS)} FROM subscriptions
+          WHERE ${keyset} AND ended_at IS NULL
+            AND holder_kind = ${request.holder.kind}
+            AND holder_id = ${uuidFromString(request.holder.id)}
+          ${order} LIMIT ${request.limit + 1}
+        `;
+        return yield* pageOf(
+          rows,
+          request.limit,
+          (page) => Effect.succeed(page.map(toSubscription)),
+          (last) => encodeCursor(scope, last.createdAt, last.id),
+        );
+      }),
+  };
+});
+
+/** Everything the subscription service reads and writes. */
+export const subscriptionRepository = make;

@@ -27,7 +27,7 @@ export interface SortArgument {
 }
 
 export interface Arguments {
-  /** Path parameter values, in route order, as written. */
+  /** The bare words, in the order the command takes them, as written. */
   readonly positionals: ReadonlyArray<string>;
   readonly payload: Record<string, unknown>;
   readonly query: Record<string, unknown>;
@@ -53,8 +53,22 @@ export const said = (field: Field): string =>
       ? `<${field.spelling}>`
       : `--${field.spelling}`;
 
-/** The value a field holds, from the text that was written for it. */
+/**
+ * The value a field holds, from the text that was written for it.
+ *
+ * A field whose schema carries a shorthand is decoded by that schema, so the
+ * one word a person types becomes the value the wire carries and the terminal's
+ * spelling is never sent. The schema's own refusal is what the writer reads:
+ * it knows the forms the word may take, and this loop does not.
+ */
 export const coerce = (field: Field, text: string, help: string): unknown => {
+  if (field.decodeShorthand !== undefined) {
+    try {
+      return field.decodeShorthand(text);
+    } catch (failure) {
+      throw new UsageError(`${said(field)}: ${String(failure)}`, help);
+    }
+  }
   if (field.choices !== undefined && !field.choices.includes(text)) {
     throw new UsageError(`${said(field)}: ${text} is not one of ${field.choices.join(", ")}`, help);
   }

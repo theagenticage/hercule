@@ -54,6 +54,7 @@ import { Profiles, ProfilesLayer } from "../permissions";
 import { EventKindCatalogLayer, Plugins } from "../plugins";
 import { Secret, SecretLayer } from "../secrets";
 import { SessionService } from "../sessions";
+import { SubscriptionService, SubscriptionServiceLayer } from "../subscriptions";
 import { SettingsOperations, SettingsOperationsLayer } from "../settings";
 import { ProjectService, ProjectServiceLayer } from "../projects";
 import { ResourceService, ResourceServiceLayer } from "../resources";
@@ -275,6 +276,16 @@ const eventRoutes = HttpApiBuilder.group(api, "event", (handlers) =>
   }),
 );
 
+const subscriptionRoutes = HttpApiBuilder.group(api, "subscription", (handlers) =>
+  Effect.gen(function* () {
+    const subscriptions = yield* SubscriptionService;
+    return handlers
+      .handle("query", ({ query }) => operation(subscriptions.query(query)))
+      .handle("create", ({ payload }) => operation(subscriptions.create(payload)))
+      .handle("cancel", ({ params }) => operation(subscriptions.cancel(params)));
+  }),
+);
+
 const runnerRoutes = HttpApiBuilder.group(api, "runner", (handlers) =>
   Effect.gen(function* () {
     const runners = yield* RunnerService;
@@ -468,6 +479,7 @@ export const operationLayers = Layer.mergeAll(
   MatcherLayer.pipe(
     Layer.provideMerge(EventServiceLayer.pipe(Layer.provide(EventKindCatalogLayer))),
   ),
+  SubscriptionServiceLayer,
   LiveTopicsLayer,
   WsTicketsLayer,
 );
@@ -489,6 +501,7 @@ export const handlerLayers = Layer.mergeAll(
   workspaceRoutes,
   connectionRoutes,
   eventRoutes,
+  subscriptionRoutes,
   runnerRoutes,
   pluginRoutes,
   providerRoutes,
