@@ -32,7 +32,7 @@ interface PluginManifest {
 }
 ```
 
-*(Amended 2026-09-06, [#63](https://github.com/rogierpennink/hydra/issues/63).)* `configSchema` is an **Effect Schema**, not a JSON Schema, which is what section 5's "authored in Effect Schema, persisted as JSON Schema" always said; this snippet was the stale spelling. The host derives the JSON Schema from it and persists that, and it decodes the stored config against the live schema before handing it to `activate()` - neither is possible from JSON alone. It is the one thing in the manifest that is not plain data, which is why the manifest is static data shipped with the package rather than a serializable record. The derivation refuses shapes the generated form cannot render: the supported set is a flat struct of string, number, integer, boolean, enum and array-of-string properties, and a plugin whose schema goes beyond it is refused at load with the reason shown in Settings > Plugins.
+*(Amended 2026-09-06, [#63](https://github.com/theagenticage/hercule/issues/63).)* `configSchema` is an **Effect Schema**, not a JSON Schema, which is what section 5's "authored in Effect Schema, persisted as JSON Schema" always said; this snippet was the stale spelling. The host derives the JSON Schema from it and persists that, and it decodes the stored config against the live schema before handing it to `activate()` - neither is possible from JSON alone. It is the one thing in the manifest that is not plain data, which is why the manifest is static data shipped with the package rather than a serializable record. The derivation refuses shapes the generated form cannot render: the supported set is a flat struct of string, number, integer, boolean, enum and array-of-string properties, and a plugin whose schema goes beyond it is refused at load with the reason shown in Settings > Plugins.
 
 Rules:
 
@@ -61,7 +61,7 @@ interface Plugin {
 type Deactivate = Effect<void>
 ```
 
-*(Amended 2026-09-06, [#63](https://github.com/rogierpennink/hydra/issues/63).)* **`register` returns an `Effect` like every other hook**, as section 5's "every hook and capability method returns an `Effect`" requires; the `void` above was the stale spelling. Pure still means what it says here - no I/O, no timers, no config, no state - and the Effect is what carries a registration's typed failure, so a plugin that hands the host something the catalog will not take fails its own registration instead of taking the boot down with it. Both hooks fail with the plugin's own `PluginError`, and the capability methods a plugin calls from inside them are Effects too.
+*(Amended 2026-09-06, [#63](https://github.com/theagenticage/hercule/issues/63).)* **`register` returns an `Effect` like every other hook**, as section 5's "every hook and capability method returns an `Effect`" requires; the `void` above was the stale spelling. Pure still means what it says here - no I/O, no timers, no config, no state - and the Effect is what carries a registration's typed failure, so a plugin that hands the host something the catalog will not take fails its own registration instead of taking the boot down with it. Both hooks fail with the plugin's own `PluginError`, and the capability methods a plugin calls from inside them are Effects too.
 
 `register()`:
 
@@ -97,7 +97,7 @@ For each extension point this section states what crosses the plugin boundary. B
 
 ### 4.1 Provider
 
-The contribution is the act of registering a `ProviderDefinition`: the provider's static self-description (identity, `supportsMultipleInstances`, per-instance `configSchema`, `defaultConfig`, and the `DeclaredCapabilities` block of static facts; `defaultConfig` is a plain JSON value rather than a function, 2026-09-06, [#63](https://github.com/rogierpennink/hydra/issues/63)). The interface, including `DeclaredCapabilities`, is pinned in [./06-providers.md](./06-providers.md) section 2 and is not copied here.
+The contribution is the act of registering a `ProviderDefinition`: the provider's static self-description (identity, `supportsMultipleInstances`, per-instance `configSchema`, `defaultConfig`, and the `DeclaredCapabilities` block of static facts; `defaultConfig` is a plain JSON value rather than a function, 2026-09-06, [#63](https://github.com/theagenticage/hercule/issues/63)). The interface, including `DeclaredCapabilities`, is pinned in [./06-providers.md](./06-providers.md) section 2 and is not copied here.
 
 - A provider instance is definition plus decoded per-instance config; the `instanceId`, not the provider id, is the routing key. What the instance config holds and where paths are resolved is stated in [./06-providers.md](./06-providers.md) section 2.1, including its Conflict line on runner paths versus the no-paths rule of [./04-state-store.md](./04-state-store.md).
 - The runner-side `ProviderAdapter` (probe plus five session methods plus `listSessions`, one normalized event stream) is built-in in v1 and is selected by `providerId`. Capability snapshots, access-mode fallback, the event taxonomy and session specs are all in [./06-providers.md](./06-providers.md).
@@ -218,7 +218,7 @@ Rules:
 
 - `channels` and `notifications` are the capability names pinned by the tickets; the remaining spellings are this spec's and MUST be used consistently. The `events` capability has one method, `emit`; "`events.emit`" in [./08-events-and-connections.md](./08-events-and-connections.md) names that method, not a separate capability. The *set* of services is pinned: contribution registration per extension point, events emit, notifications emit, connections, resources read, secrets, KV, public-API client.
 - A capability's registration surface is what `register()` receives; its runtime surface is what `activate()` receives. `register()` never sees a runtime surface.
-- *(Added 2026-09-06, [#63](https://github.com/rogierpennink/hydra/issues/63).)* **Three of the eleven exist so far**: `providers`, `kv` and `secrets`. All eleven names are valid in a manifest, so a manifest never has to be rewritten as the rest arrive, but a plugin requesting one that is not implemented is refused at load with that capability named, on the same footing as a `hostApi` mismatch (section 8). Nothing is granted silently and nothing is granted empty.
+- *(Added 2026-09-06, [#63](https://github.com/theagenticage/hercule/issues/63).)* **Three of the eleven exist so far**: `providers`, `kv` and `secrets`. All eleven names are valid in a manifest, so a manifest never has to be rewritten as the rest arrive, but a plugin requesting one that is not implemented is refused at load with that capability named, on the same footing as a `hostApi` mismatch (section 8). Nothing is granted silently and nothing is granted empty.
 - Everything crossing a capability API is plain serializable data.
 - **Interfaces are Effect-typed natively** ([ADR 0031](../adr/0031-the-backend-is-written-on-effect.md)): every hook and capability method returns an `Effect` (typed failures; deactivation interrupts whatever `activate()` started) and anything stream-shaped is a `Stream`. V1 plugins are in-process built-ins, so there is no promise-shaped facade; one can be added post-v1 if third-party loading wants it.
 - **Schemas are authored in Effect Schema, persisted as JSON Schema.** Every schema crossing the host API (manifest `configSchema`, event payload kinds, action input/output, per-Connection config, credential fields) is written as an Effect Schema in plugin code; the catalog persists the JSON Schema Effect derives from it, which is what workflow validation and the web app's generated forms consume.
@@ -272,9 +272,9 @@ Failure handling:
 - **`activate()` throws**: the plugin enters an **`errored`** state (beside enabled, disabled and the `hostApi` mismatch) with the error shown in Settings > Plugins, and one `core.plugin-error` Notification is emitted. There is no automatic retry loop - a broken plugin retrying every 30 seconds is noise; it is retried at the next controller boot or by the user's Retry button. Transient per-Connection trouble is the ingest loop's business (section 8.1), not this state's.
 - **Deactivate fails**: logged, the plugin is marked `errored`, its contributions are treated as disabled, and Settings says a controller restart clears the leftover machinery.
 
-*(Amended 2026-09-06, [#63](https://github.com/rogierpennink/hydra/issues/63).)* **Retry and Reset plugin state are operations**, not screen-local behaviour: `plugin.retry` and `plugin.resetState` in the catalogue ([./11](./11-public-api-and-agent-surface.md) section 2), under `infra.write` like the other plugin writes. Retry re-runs `activate()` once and is refused with `validation` on a plugin that is not `errored`, so the button is never a second spelling of Enable. Reset is deactivate, wipe the plugin's KV rows, activate again when the plugin is enabled; it is allowed while `inactive` and while `errored` too, since leftover state is one of the things an errored plugin may be stuck on. Both are reachable from every client, not only from Settings, which is what makes them recoverable when the screen is what is broken.
+*(Amended 2026-09-06, [#63](https://github.com/theagenticage/hercule/issues/63).)* **Retry and Reset plugin state are operations**, not screen-local behaviour: `plugin.retry` and `plugin.resetState` in the catalogue ([./11](./11-public-api-and-agent-surface.md) section 2), under `infra.write` like the other plugin writes. Retry re-runs `activate()` once and is refused with `validation` on a plugin that is not `errored`, so the button is never a second spelling of Enable. Reset is deactivate, wipe the plugin's KV rows, activate again when the plugin is enabled; it is allowed while `inactive` and while `errored` too, since leftover state is one of the things an errored plugin may be stuck on. Both are reachable from every client, not only from Settings, which is what makes them recoverable when the screen is what is broken.
 
-*(Amended 2026-09-06, [#63](https://github.com/rogierpennink/hydra/issues/63).)* Two states join the `hostApi` mismatch as **load-time refusals**, on the same footing: a manifest naming a capability the host has not implemented yet, and a `configSchema` the generated form cannot render. A refused plugin is listed with its reason, `register()` is never run for it, it contributes nothing, and every write on it is refused with `validation`. Nothing is substituted silently. Until a notifications domain exists, the `core.plugin-error` Notification above is an audit row (`plugin.errored`, carrying the plugin id, the phase and the message); the notifications ticket routes from it.
+*(Amended 2026-09-06, [#63](https://github.com/theagenticage/hercule/issues/63).)* Two states join the `hostApi` mismatch as **load-time refusals**, on the same footing: a manifest naming a capability the host has not implemented yet, and a `configSchema` the generated form cannot render. A refused plugin is listed with its reason, `register()` is never run for it, it contributes nothing, and every write on it is refused with `validation`. Nothing is substituted silently. Until a notifications domain exists, the `core.plugin-error` Notification above is an audit row (`plugin.errored`, carrying the plugin id, the phase and the message); the notifications ticket routes from it.
 
 ### 8.1 Ingest-loop failures
 
@@ -383,19 +383,19 @@ All of these travel the same pipeline and the same catalog-facing surfaces as th
 
 Tickets:
 
-- Plugin architecture: API shape, loading, dogfooding - https://github.com/rogierpennink/hydra/issues/11
-- Provider adapter interface - https://github.com/rogierpennink/hydra/issues/12
-- Workflow model: recipes, triggers, human gates - https://github.com/rogierpennink/hydra/issues/13
-- Event & trigger ingress design - https://github.com/rogierpennink/hydra/issues/14
-- Triage engine & user-set bounds - https://github.com/rogierpennink/hydra/issues/15
-- Agent-operates-system surface - https://github.com/rogierpennink/hydra/issues/16
-- Assistant design: memory, identity, channel binding - https://github.com/rogierpennink/hydra/issues/17
-- Security & secrets model - https://github.com/rogierpennink/hydra/issues/18
-- Web app architecture - https://github.com/rogierpennink/hydra/issues/19
-- Assemble the v1 spec (Intake handoffs: `system` field, labelable Connections) - https://github.com/rogierpennink/hydra/issues/21
-- Controller packaging & install story - https://github.com/rogierpennink/hydra/issues/24
-- Research: smoothest Connection-setup path - https://github.com/rogierpennink/hydra/issues/32
-- Plugin contribution interfaces and v1 event kinds - https://github.com/rogierpennink/hydra/issues/41
+- Plugin architecture: API shape, loading, dogfooding - https://github.com/theagenticage/hercule/issues/11
+- Provider adapter interface - https://github.com/theagenticage/hercule/issues/12
+- Workflow model: recipes, triggers, human gates - https://github.com/theagenticage/hercule/issues/13
+- Event & trigger ingress design - https://github.com/theagenticage/hercule/issues/14
+- Triage engine & user-set bounds - https://github.com/theagenticage/hercule/issues/15
+- Agent-operates-system surface - https://github.com/theagenticage/hercule/issues/16
+- Assistant design: memory, identity, channel binding - https://github.com/theagenticage/hercule/issues/17
+- Security & secrets model - https://github.com/theagenticage/hercule/issues/18
+- Web app architecture - https://github.com/theagenticage/hercule/issues/19
+- Assemble the v1 spec (Intake handoffs: `system` field, labelable Connections) - https://github.com/theagenticage/hercule/issues/21
+- Controller packaging & install story - https://github.com/theagenticage/hercule/issues/24
+- Research: smoothest Connection-setup path - https://github.com/theagenticage/hercule/issues/32
+- Plugin contribution interfaces and v1 event kinds - https://github.com/theagenticage/hercule/issues/41
 
 ADRs:
 

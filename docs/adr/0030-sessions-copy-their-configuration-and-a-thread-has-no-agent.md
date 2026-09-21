@@ -4,7 +4,7 @@ Date: 2026-09-01
 
 ## Status
 
-Accepted. Decided by [Domain model residue](https://github.com/rogierpennink/hydra/issues/46). Refines [ADR 0013](./0013-agents-operate-hercule-through-the-public-api.md) (session tokens still resolve to one permission profile) and [ADR 0001](./0001-runs-freeze-an-execution-plan.md) (the same freeze-at-start rule, applied to sessions).
+Accepted. Decided by [Domain model residue](https://github.com/theagenticage/hercule/issues/46). Refines [ADR 0013](./0013-agents-operate-hercule-through-the-public-api.md) (session tokens still resolve to one permission profile) and [ADR 0001](./0001-runs-freeze-an-execution-plan.md) (the same freeze-at-start rule, applied to sessions).
 
 ## Context
 

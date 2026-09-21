@@ -1,9 +1,9 @@
 # Hercule design language
 
-Pinned by [ticket #33](https://github.com/rogierpennink/hydra/issues/33) (2026-08-26).
+Pinned by [ticket #33](https://github.com/theagenticage/hercule/issues/33) (2026-08-26).
 **All later UI prototypes and the v1 web app must be built in this language.**
 The living reference is the playground prototype
-([`prototype/design-language.html` on branch `prototype/design-language`](https://github.com/rogierpennink/hydra/blob/prototype/design-language/prototype/design-language.html)),
+([`prototype/design-language.html` on branch `prototype/design-language`](https://github.com/theagenticage/hercule/blob/prototype/design-language/prototype/design-language.html)),
 whose defaults are the pinned settings: `face=Onest th=Midnight cs=6 ll=94.5 dl=20 w=500`.
 
 ## Register
@@ -77,7 +77,7 @@ surface plus a faint white inner top highlight - never a color wash.
 
 ## Typography
 
-*(Pinned 2026-09-04, [#58](https://github.com/rogierpennink/hydra/issues/58).)* **Both faces are self-hosted**: the `woff2` files ship in `packages/ui` and are served from the controller's own origin, never fetched from Google Fonts at runtime. Hercule runs on a LAN and on machines with no internet, the served bundle's CSP allows `font-src 'self'` only ([spec/14](./spec/14-web-app.md) §Auth in the client), and a font request to a third party would tell that party who is using Hercule and when. Google Fonts is where the faces come from, not where the browser gets them. The files live in `packages/ui/src/fonts` with their OFL licences beside them: Onest as one variable file per subset covering 400-600, IBM Plex Mono as static 400 and 500.
+*(Pinned 2026-09-04, [#58](https://github.com/theagenticage/hercule/issues/58).)* **Both faces are self-hosted**: the `woff2` files ship in `packages/ui` and are served from the controller's own origin, never fetched from Google Fonts at runtime. Hercule runs on a LAN and on machines with no internet, the served bundle's CSP allows `font-src 'self'` only ([spec/14](./spec/14-web-app.md) §Auth in the client), and a font request to a third party would tell that party who is using Hercule and when. Google Fonts is where the faces come from, not where the browser gets them. The files live in `packages/ui/src/fonts` with their OFL licences beside them: Onest as one variable file per subset covering 400-600, IBM Plex Mono as static 400 and 500.
 
 - **UI face: Onest** (Google Fonts), weights 400/500/600. Chosen for calm rhythm and
   slightly narrow letterforms that ease dense monitoring rows.

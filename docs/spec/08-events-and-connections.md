@@ -36,7 +36,7 @@ One envelope for every event, regardless of source.
 
 Field names are pinned here; earlier tickets called them provisional. The envelope is ADR 0009's list plus the ticket 30 handoff's `system` and `url`; `refs` and `actor` are this spec's additions, motivated by Task provenance ([./09-tasks.md](./09-tasks.md)) and actor stamping ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md)).
 
-The event's `id` **is** the log position (`INTEGER PRIMARY KEY`); there is no second id column, and it is the one integer id in a system of UUIDv7s (resolved 2026-09-01, [Domain model residue](https://github.com/rogierpennink/hydra/issues/46); [./04-state-store.md](./04-state-store.md) owns id formats).
+The event's `id` **is** the log position (`INTEGER PRIMARY KEY`); there is no second id column, and it is the one integer id in a system of UUIDv7s (resolved 2026-09-01, [Domain model residue](https://github.com/theagenticage/hercule/issues/46); [./04-state-store.md](./04-state-store.md) owns id formats).
 
 **Immutability and enrichment.** An event is immutable after persist, except for enrichment: `system` and `url` may be overwritten and `refs` appended to after ingest, through one operation, `event.enrich` ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md)); `payload` and `raw` never change. Sentry, Tailscale, Hetzner and GitHub notices arrive *through* Gmail; recognising the system inside an email is enrichment, done either by a plugin sender rule at emit time or by the triage agent afterwards ("Open in Sentry" needs the URL from the mail body; the `task.query` guard needs the `sentry:issue:123` ref). An enrich gives the matcher one more look at that event, idempotently (section 4.2, [ADR 0025](../adr/0025-enrichment-re-matches-one-event-idempotently.md)). The UI marks the system and suffixes the Connection.
 
@@ -70,7 +70,7 @@ Because effect rows are unique per (trigger or subscription, event), a crash bet
 
 **Errors evaluate as no-match.** A CEL filter or correlation expression that throws, references an unresolvable field, or times out is a no-match for that trigger or subscription. The failure is recorded as a visible health warning on the trigger or subscription (surfaced on the workflow and in the run view). The pipeline never crashes on user expressions.
 
-The warning is a `health` field on the trigger row (and on the subscription row for correlation errors): `ok`, or `error` with the last message and time, overwritten on every evaluation. When a failing evaluation finds the field at `ok`, the same write also creates one informational Notification `core.trigger-filter-error` naming the trigger, the workflow and the error; while the field stays `error`, later failures only refresh the message. A clean evaluation returns it to `ok` silently, and the next failure after that is a new streak with a new notification. No counters, no timers, no dedup table (pinned by [Notification lifecycle](https://github.com/rogierpennink/hydra/issues/42)).
+The warning is a `health` field on the trigger row (and on the subscription row for correlation errors): `ok`, or `error` with the last message and time, overwritten on every evaluation. When a failing evaluation finds the field at `ok`, the same write also creates one informational Notification `core.trigger-filter-error` naming the trigger, the workflow and the error; while the field stays `error`, later failures only refresh the message. A clean evaluation returns it to `ok` silently, and the next failure after that is a new streak with a new notification. No counters, no timers, no dedup table (pinned by [Notification lifecycle](https://github.com/theagenticage/hercule/issues/42)).
 
 **Expressions.** All four expression sites (start-trigger filters, signal-trigger correlation keys, step and edge conditions) use CEL, evaluated by `@marcbachmann/cel-js` behind a Hercule-owned wrapper, context variables dyn-typed ([./07-workflows.md](./07-workflows.md); research/expression-language.md (branch `research/expression-language`)). Filters see the whole envelope as `event`; the raw event never leaks into the frozen plan - the trigger's input mapping copies what the run needs.
 
@@ -149,7 +149,7 @@ The controller emits events about its own state, connection-less, through the sa
 
 CEL routes on them like any event: `event.changes.status.new == "done"`, `has(event.changes.status)`. Kinds grow additively (e.g. learning workflows over run outcomes); no finer-grained task kinds exist. Task event shapes are owned by [./09-tasks.md](./09-tasks.md).
 
-The payload set is pinned by [Plugin contribution interfaces](https://github.com/rogierpennink/hydra/issues/41): the run-record subset above plus `outputs` and `taskId?`, so "done means merged" and check-in workflows route without a lookup.
+The payload set is pinned by [Plugin contribution interfaces](https://github.com/theagenticage/hercule/issues/41): the run-record subset above plus `outputs` and `taskId?`, so "done means merged" and check-in workflows route without a lookup.
 
 Batching is the emitter's job: a workflow that reacts to CI results or reviews subscribes to a per-suite or per-review kind, not per-check or per-comment ones, because a run processes one signal firing per iteration ([./07-workflows.md](./07-workflows.md) section 4.3). The v1 GitHub kind roster ([./05-plugins.md](./05-plugins.md)) must offer those coarse kinds.
 
@@ -272,20 +272,20 @@ The Intake and check-in screens read per-Connection events straight from the pip
 
 Tickets:
 
-- Event & trigger ingress design - https://github.com/rogierpennink/hydra/issues/14
-- Research: event ingress options - https://github.com/rogierpennink/hydra/issues/5
-- Research: smoothest Connection-setup path - https://github.com/rogierpennink/hydra/issues/32
-- Prototype: the Intake view - https://github.com/rogierpennink/hydra/issues/30
-- Triage engine & user-set bounds - https://github.com/rogierpennink/hydra/issues/15
-- Agent-operates-system surface - https://github.com/rogierpennink/hydra/issues/16
-- Security & secrets model - https://github.com/rogierpennink/hydra/issues/18
-- Plugin architecture - https://github.com/rogierpennink/hydra/issues/11
-- Workflow model - https://github.com/rogierpennink/hydra/issues/13
-- Task model - https://github.com/rogierpennink/hydra/issues/29
-- Controller state store - https://github.com/rogierpennink/hydra/issues/9
-- Assistant design - https://github.com/rogierpennink/hydra/issues/17
-- Assemble the v1 spec (ticket 30 handoff comment) - https://github.com/rogierpennink/hydra/issues/21
-- Plugin contribution interfaces and v1 event kinds - https://github.com/rogierpennink/hydra/issues/41
+- Event & trigger ingress design - https://github.com/theagenticage/hercule/issues/14
+- Research: event ingress options - https://github.com/theagenticage/hercule/issues/5
+- Research: smoothest Connection-setup path - https://github.com/theagenticage/hercule/issues/32
+- Prototype: the Intake view - https://github.com/theagenticage/hercule/issues/30
+- Triage engine & user-set bounds - https://github.com/theagenticage/hercule/issues/15
+- Agent-operates-system surface - https://github.com/theagenticage/hercule/issues/16
+- Security & secrets model - https://github.com/theagenticage/hercule/issues/18
+- Plugin architecture - https://github.com/theagenticage/hercule/issues/11
+- Workflow model - https://github.com/theagenticage/hercule/issues/13
+- Task model - https://github.com/theagenticage/hercule/issues/29
+- Controller state store - https://github.com/theagenticage/hercule/issues/9
+- Assistant design - https://github.com/theagenticage/hercule/issues/17
+- Assemble the v1 spec (ticket 30 handoff comment) - https://github.com/theagenticage/hercule/issues/21
+- Plugin contribution interfaces and v1 event kinds - https://github.com/theagenticage/hercule/issues/41
 
 ADRs:
 

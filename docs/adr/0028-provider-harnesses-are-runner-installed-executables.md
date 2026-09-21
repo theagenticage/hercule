@@ -4,7 +4,7 @@ Date: 2026-08-31
 
 ## Status
 
-Accepted. Amends [ADR 0018](./0018-hercule-ships-as-one-self-contained-binary.md) (the embedded Claude binary clause is withdrawn). Decided by [Runner substrate details (#43)](https://github.com/rogierpennink/hydra/issues/43).
+Accepted. Amends [ADR 0018](./0018-hercule-ships-as-one-self-contained-binary.md) (the embedded Claude binary clause is withdrawn). Decided by [Runner substrate details (#43)](https://github.com/theagenticage/hercule/issues/43).
 
 ## Context
 

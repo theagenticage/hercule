@@ -16,7 +16,7 @@ Hercule is the successor to agentick (Python), built from scratch in TypeScript.
 
 ## Status
 
-**Spec complete, implementation starting.** The v1 spec was assembled 2026-08-28 from the decisions worked as child issues of the [wayfinder map](https://github.com/rogierpennink/hydra/issues/1); remaining open items are indexed in [docs/spec/16-open-items.md](docs/spec/16-open-items.md), each tied to a follow-up ticket or marked as an implementer's choice.
+**Spec complete, implementation starting.** The v1 spec was assembled 2026-08-28 from the decisions worked as child issues of the [wayfinder map](https://github.com/theagenticage/hercule/issues/1); remaining open items are indexed in [docs/spec/16-open-items.md](docs/spec/16-open-items.md), each tied to a follow-up ticket or marked as an implementer's choice.
 
 ## Documentation
 

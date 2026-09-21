@@ -1,7 +1,7 @@
 /**
  * `approvalCard(openRequest)` is the whole text of the permission card: its
  * title line, what the request is about, and one row per offered decision
- * ([#70](https://github.com/rogierpennink/hydra/issues/70)); nothing in
+ * ([#70](https://github.com/theagenticage/hercule/issues/70)); nothing in
  * `apps/web` authors any of it.
  *
  * The fixtures are the five `OpenRequest` shapes the Session row hands out,

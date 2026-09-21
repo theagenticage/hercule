@@ -10,13 +10,13 @@ The controller keeps everything it durably owns in one SQLite database file insi
 - The controller is the **only writer process** ([ADR 0002](../adr/0002-orchestration-stays-on-the-controller.md): one brain). Runners never open the file; the runner entrypoint must not even import the DB engine ([ADR 0018](../adr/0018-hercule-ships-as-one-self-contained-binary.md) mode isolation).
 - Repository SQL uses SQLite features freely: JSON functions, upserts, partial indexes, FTS5 (task search, see below). There is no lowest-common-denominator constraint.
 
-**Verified 2026-09-04 ([#59](https://github.com/rogierpennink/hydra/issues/59)):** the pinned Bun (1.4.0) bundles SQLite 3.43.2 with `ENABLE_FTS5`, including the `unicode61 remove_diacritics 2` tokenizer and `bm25`. Hercule needs FTS5 for `hercule task query` and cannot load it as an extension on macOS.
+**Verified 2026-09-04 ([#59](https://github.com/theagenticage/hercule/issues/59)):** the pinned Bun (1.4.0) bundles SQLite 3.43.2 with `ENABLE_FTS5`, including the `unicode61 remove_diacritics 2` tokenizer and `bm25`. Hercule needs FTS5 for `hercule task query` and cannot load it as an extension on macOS.
 
 ## Repository interfaces
 
 The swap seam is the **per-entity repository interface**, not a query builder.
 
-- Every entity family (tasks, runs, sessions, workflows, events, notifications, connections, plugins, secrets, ...) is reached through a TypeScript repository interface. Callers (the service layer of [./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md), the controller daemon above it, the event pipeline, the scheduler) depend on the interface only. *(Amended 2026-09-17, [#208](https://github.com/rogierpennink/hydra/issues/208): the controller daemon joins the callers.)*
+- Every entity family (tasks, runs, sessions, workflows, events, notifications, connections, plugins, secrets, ...) is reached through a TypeScript repository interface. Callers (the service layer of [./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md), the controller daemon above it, the event pipeline, the scheduler) depend on the interface only. *(Amended 2026-09-17, [#208](https://github.com/theagenticage/hercule/issues/208): the controller daemon joins the callers.)*
 - SQL lives inside repository implementations and commits to SQLite. A future engine swap rewrites repository internals; callers do not change.
 - Multi-repository writes that must be atomic (a state change plus its log rows plus its effect rows) run inside one transaction. The sources pin the atomicity only; the mechanism (2026-09-02, [ADR 0031](../adr/0031-the-backend-is-written-on-effect.md)) is that repositories are Effect services with hand-written SQL inside and the transaction is **ambient in the effect context**: the caller wraps its write set in `withTransaction`, every repository call inside sees the same transaction, a nested `withTransaction` joins the outer one through a savepoint, and failure or interruption anywhere inside rolls the whole thing back. Repositories never open their own transaction for a write that a caller may want to compose.
 - **A transaction wraps one operation's write set and never spans a wait on anything outside the database** (hard rule): not a runner round-trip, not a provider call, not an outbox delivery. SQLite has one writer, so a transaction held across an external wait blocks every other write in the controller. Ambient transactions make wrapping too much exactly as easy as wrapping the right amount; this rule is what review checks.
@@ -39,7 +39,7 @@ Both tables are written **in the same transaction as the state they accompany**.
 
 Every append-only table carries a **monotonic position** (a single integer sequence assigned at insert, per table for the event log and per session for streams). Positions are what consumers store as cursors and what live topics replay from on reconnect ([./14-web-app.md](./14-web-app.md): append-only streams carry payload deltas with cursor replay; mutable records get invalidation nudges and an HTTP refetch). [./08-events-and-connections.md](./08-events-and-connections.md) uses the event log position as the event's `id`.
 
-This document owns the id format for Hercule-owned entities (resolved 2026-09-01, [Domain model residue](https://github.com/rogierpennink/hydra/issues/46)):
+This document owns the id format for Hercule-owned entities (resolved 2026-09-01, [Domain model residue](https://github.com/theagenticage/hercule/issues/46)):
 
 - **UUIDv7 for every Hercule-owned entity**, minted by the controller at insert, stored as a 16-byte `BLOB` primary key, rendered as the canonical lowercase string in the API and everywhere a machine reads it (typed references, actor stamps, `hercule/run-<id>` branch names). Chosen over integer rowids because ids leak beyond the database - onto runner disks, onto git remotes as branch names, into chat messages - and a restore from backup rewinds an integer counter, so a new row could collide with an id the outside world already holds; UUIDv7 never collides across restores, promotions or controllers, and sorts by creation time for free. ULID was the runner-up (same properties, smaller ecosystem, no RFC).
 - **Short form = the last eight hex characters.** The first 48 bits of a UUIDv7 are a millisecond timestamp, so the head is shared by every id minted in the same minute; the tail is the random part. The web app and the CLI show the tail where an id must be shown; every CLI `<id>` argument accepts a full id or a tail of eight or more characters and answers `conflict` when the tail is ambiguous.
@@ -88,7 +88,7 @@ Provider streaming deltas (`content.delta` with `streamKind` `assistant_text`, `
 
 Actively watched sessions still see tokens live: the web app's live topic passes deltas through ephemerally while a client is watching ([./14-web-app.md](./14-web-app.md)); on reconnect the client falls back to the coalesced rows. A crash mid-turn loses only the not-yet-flushed tail of the running item; the runner's provider-native transcript remains resumable ([ADR 0003](../adr/0003-sessions-run-as-bare-processes.md)).
 
-**Resolved 2026-09-07 ([#65](https://github.com/rogierpennink/hydra/issues/65)):** the in-item flush cadence, which ticket 9 left open beside the message and turn boundaries, is a size threshold of **4 KiB of held delta text per (item, stream kind)**; the controller also flushes when the session exits, so a session that ends mid-item loses no tail. There is no time threshold: a stream that has stopped producing has nothing a timer would rescue.
+**Resolved 2026-09-07 ([#65](https://github.com/theagenticage/hercule/issues/65)):** the in-item flush cadence, which ticket 9 left open beside the message and turn boundaries, is a size threshold of **4 KiB of held delta text per (item, stream kind)**; the controller also flushes when the session exits, so a session that ends mid-item loses no tail. There is no time threshold: a stream that has stopped producing has nothing a timer would rescue.
 
 ## What is in the store and what is not
 
@@ -125,9 +125,9 @@ The Data Root is the unit promotion moves ([ADR 0005](../adr/0005-promotion-is-m
 
 ## Secrets table
 
-All secret values (Connection credentials, plugin secrets, runner-scoped secrets, provider-instance secrets, core secrets) are rows in **one owner-scoped secrets table** with owners `connection | plugin | runner | provider-instance | core` *(amended 2026-09-04, [#56](https://github.com/rogierpennink/hydra/issues/56): `provider-instance` was missing here and present in [./13-security.md](./13-security.md) §2.1, which is the later and owning document)*. The `runner` owner kind is reserved for runner-scoped secrets; the per-runner credential itself is not in this table, it is a token stored hashed on the runner record (above). Each value is encrypted per value under the Master Key; the SQLite file itself stays plain, so any copy of the file, backup or bundle is inert without the key. Secret values never appear in the event log, in API responses or in process logs; other rows hold references to secret rows, never values. The plugin secrets service is a scoped view over this table (owner `plugin`, namespaced by plugin id). Promotion export enumerates and re-encrypts these rows under a token-derived key and the new controller re-wraps them under its own Master Key. Everything else about secrets, keys and credentials is in [./13-security.md](./13-security.md) and [ADR 0015](../adr/0015-secrets-are-encrypted-per-value-under-a-keychain-held-master-key.md).
+All secret values (Connection credentials, plugin secrets, runner-scoped secrets, provider-instance secrets, core secrets) are rows in **one owner-scoped secrets table** with owners `connection | plugin | runner | provider-instance | core` *(amended 2026-09-04, [#56](https://github.com/theagenticage/hercule/issues/56): `provider-instance` was missing here and present in [./13-security.md](./13-security.md) §2.1, which is the later and owning document)*. The `runner` owner kind is reserved for runner-scoped secrets; the per-runner credential itself is not in this table, it is a token stored hashed on the runner record (above). Each value is encrypted per value under the Master Key; the SQLite file itself stays plain, so any copy of the file, backup or bundle is inert without the key. Secret values never appear in the event log, in API responses or in process logs; other rows hold references to secret rows, never values. The plugin secrets service is a scoped view over this table (owner `plugin`, namespaced by plugin id). Promotion export enumerates and re-encrypts these rows under a token-derived key and the new controller re-wraps them under its own Master Key. Everything else about secrets, keys and credentials is in [./13-security.md](./13-security.md) and [ADR 0015](../adr/0015-secrets-are-encrypted-per-value-under-a-keychain-held-master-key.md).
 
-The plain-key-file fallback (every platform but macOS, see [./13-security.md](./13-security.md) §2.2) is **`~/.hercule/master.key`**, mode 0600 (resolved 2026-09-01, [#44](https://github.com/rogierpennink/hydra/issues/44)): at the Hercule Home root, outside the Data Root and outside `backups/`, so the promotion bundle and offsite backups stay inert.
+The plain-key-file fallback (every platform but macOS, see [./13-security.md](./13-security.md) §2.2) is **`~/.hercule/master.key`**, mode 0600 (resolved 2026-09-01, [#44](https://github.com/theagenticage/hercule/issues/44)): at the Hercule Home root, outside the Data Root and outside `backups/`, so the promotion bundle and offsite backups stay inert.
 
 ## Plugin namespaced KV
 
@@ -146,13 +146,13 @@ Retention (this document owns the final statement; other documents link here):
 - **The event log and the per-session streams are TTL-pruned, default 90 days** ([ADR 0009](../adr/0009-all-events-flow-through-one-persisted-pipeline.md); [ADR 0004](../adr/0004-controller-state-lives-in-one-sqlite-database.md) as amended 2026-08-28, which withdraws its original "keep everything in v1"). Events are persisted whether or not they match; the prune runs periodically on the controller.
 - **Security events and actor-stamped mutations are kept at least 90 days** (ticket 18), independently of the event TTL.
 - **Domain rows are never pruned.** Tasks, Runs, Sessions, Workflows, Connections, Notifications and the rest stay until the user deletes them. Run records copy their triggering event, so pruning the log never leaves a run without its cause.
-- The windows are the controller-state settings `retention.events`, `retention.security`, and `retention.conversations` (conversation messages, [./12-assistants.md](./12-assistants.md) section 2). Defaults (resolved 2026-09-01, [#44](https://github.com/rogierpennink/hydra/issues/44)): **90 days each**, one setting per window, not per event kind - per-kind knobs are additive later if anything motivates them.
-- **Referenced events live with their referrer** (amended 2026-09-01, [Web app details](https://github.com/rogierpennink/hydra/issues/45); #44 had pinned non-terminal Tasks and unresolved Notifications only): an event referenced by the provenance of any existing Task, or by any existing Notification, survives the TTL regardless of the referrer's status, and becomes prunable when that referrer is deleted (a soft-deleted Task does not count as a referrer, so its events prune on schedule). One indexed anti-join in the prune query. Runs never need the exemption - they copy their triggering event, and every signal a run receives is held on its step record ([./07-workflows.md](./07-workflows.md) section 2.4). The reason: a Task's "Open in <system>" link lives on the event, not on the provenance entry, so a done task would otherwise lose its sources, and copying data into provenance would be a second mechanism. Events surfaces in the web app state the retention horizon and never silently truncate ([./14-web-app.md](./14-web-app.md) §Events surfaces and the retention horizon). Pruning Tasks themselves is on the map as not yet specified.
+- The windows are the controller-state settings `retention.events`, `retention.security`, and `retention.conversations` (conversation messages, [./12-assistants.md](./12-assistants.md) section 2). Defaults (resolved 2026-09-01, [#44](https://github.com/theagenticage/hercule/issues/44)): **90 days each**, one setting per window, not per event kind - per-kind knobs are additive later if anything motivates them.
+- **Referenced events live with their referrer** (amended 2026-09-01, [Web app details](https://github.com/theagenticage/hercule/issues/45); #44 had pinned non-terminal Tasks and unresolved Notifications only): an event referenced by the provenance of any existing Task, or by any existing Notification, survives the TTL regardless of the referrer's status, and becomes prunable when that referrer is deleted (a soft-deleted Task does not count as a referrer, so its events prune on schedule). One indexed anti-join in the prune query. Runs never need the exemption - they copy their triggering event, and every signal a run receives is held on its step record ([./07-workflows.md](./07-workflows.md) section 2.4). The reason: a Task's "Open in <system>" link lives on the event, not on the provenance entry, so a done task would otherwise lose its sources, and copying data into provenance would be a second mechanism. Events surfaces in the web app state the retention horizon and never silently truncate ([./14-web-app.md](./14-web-app.md) §Events surfaces and the retention horizon). Pruning Tasks themselves is on the map as not yet specified.
 
 ## Backups
 
 - **Daily online backup**: `VACUUM INTO` from the running controller to `backups/<timestamp>.db` under Hercule Home (`~/.hercule/backups/`). `VACUUM INTO` produces a consistent single-file snapshot without stopping writers and works under WAL. Secrets inside the snapshot stay encrypted; offsite backup is the user copying that directory, which is honest because the snapshot is inert without the Master Key.
-- **Backup before migrations**: a `VACUUM INTO` copy (`backups/<timestamp>-premigration.db`, same code path) is taken before any boot-time migration runs (next section; resolved 2026-09-01, [#44](https://github.com/rogierpennink/hydra/issues/44) - a plain file copy would miss unmerged `-wal` writes after an unclean shutdown).
+- **Backup before migrations**: a `VACUUM INTO` copy (`backups/<timestamp>-premigration.db`, same code path) is taken before any boot-time migration runs (next section; resolved 2026-09-01, [#44](https://github.com/theagenticage/hercule/issues/44) - a plain file copy would miss unmerged `-wal` writes after an unclean shutdown).
 - Schedule and retention (same resolution): daily at **03:30 in the user timezone setting**; keep the last **14 daily snapshots** and, separately, the last **3 pre-migration copies**. Controller-state settings `backup.time` and `backup.keep` carry the defaults.
 - Restore is a file replacement while the controller is stopped; there is no in-app restore in v1. Runbook in [./15-packaging-and-operations.md](./15-packaging-and-operations.md) section 10: stop the unit, replace `data/hercule.db` with the snapshot, delete `-wal`/`-shm`, start the unit. Same machine only - moving is promotion.
 
@@ -176,20 +176,20 @@ Retention (this document owns the final statement; other documents link here):
 
 Tickets:
 
-- Controller state store - https://github.com/rogierpennink/hydra/issues/9
-- Controller promotion & portability - https://github.com/rogierpennink/hydra/issues/10
-- Plugin architecture: API shape, loading, dogfooding - https://github.com/rogierpennink/hydra/issues/11
-- Provider adapter interface (queue as controller-owned state, coalesced deltas) - https://github.com/rogierpennink/hydra/issues/12
-- Workflow model: recipes, triggers, human gates (run record contents) - https://github.com/rogierpennink/hydra/issues/13
-- Event & trigger ingress design - https://github.com/rogierpennink/hydra/issues/14
-- Triage engine & user-set bounds (held events) - https://github.com/rogierpennink/hydra/issues/15
-- Agent-operates-system surface (actor stamping in the event log) - https://github.com/rogierpennink/hydra/issues/16
-- Security & secrets model - https://github.com/rogierpennink/hydra/issues/18
-- Web app architecture (cursor replay, live delta passthrough) - https://github.com/rogierpennink/hydra/issues/19
-- Controller packaging & install story - https://github.com/rogierpennink/hydra/issues/24
-- Task model (FTS search, hard delete) - https://github.com/rogierpennink/hydra/issues/29
-- Research: Bun compile feasibility matrix - https://github.com/rogierpennink/hydra/issues/34
-- Controller/runner architecture: registration, placement, scheduling (runner outbox, state ownership) - https://github.com/rogierpennink/hydra/issues/7
+- Controller state store - https://github.com/theagenticage/hercule/issues/9
+- Controller promotion & portability - https://github.com/theagenticage/hercule/issues/10
+- Plugin architecture: API shape, loading, dogfooding - https://github.com/theagenticage/hercule/issues/11
+- Provider adapter interface (queue as controller-owned state, coalesced deltas) - https://github.com/theagenticage/hercule/issues/12
+- Workflow model: recipes, triggers, human gates (run record contents) - https://github.com/theagenticage/hercule/issues/13
+- Event & trigger ingress design - https://github.com/theagenticage/hercule/issues/14
+- Triage engine & user-set bounds (held events) - https://github.com/theagenticage/hercule/issues/15
+- Agent-operates-system surface (actor stamping in the event log) - https://github.com/theagenticage/hercule/issues/16
+- Security & secrets model - https://github.com/theagenticage/hercule/issues/18
+- Web app architecture (cursor replay, live delta passthrough) - https://github.com/theagenticage/hercule/issues/19
+- Controller packaging & install story - https://github.com/theagenticage/hercule/issues/24
+- Task model (FTS search, hard delete) - https://github.com/theagenticage/hercule/issues/29
+- Research: Bun compile feasibility matrix - https://github.com/theagenticage/hercule/issues/34
+- Controller/runner architecture: registration, placement, scheduling (runner outbox, state ownership) - https://github.com/theagenticage/hercule/issues/7
 
 ADRs:
 

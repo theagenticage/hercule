@@ -189,7 +189,7 @@ No vector search and no embeddings. The semantic part of triage - grouping heter
 
 ## Delete
 
-Delete is **soft** (resolved 2026-09-01, [Domain model residue](https://github.com/rogierpennink/hydra/issues/46), amending ticket 29's hard delete): `task.delete` sets `deletedAt`; the row and its provenance stay. A deleted task answers `not_found` on `task.read`, is excluded from `task.query` (no include-deleted option in v1) and from search, and emits `task.deleted { taskId, snapshot }` with the final row, since nothing can read it afterwards. The core withdraws open Notifications whose subject is the task ([./10](./10-triage-intake-and-notifications.md)); Runs and Sessions keep their `taskId`. The event log keeps the audit trail of everything that happened before deletion (the event log is the audit log, [./13](./13-security.md)); the events the task referenced stop being protected from pruning ([./04](./04-state-store.md) Retention). Use `cancelled` for work that was decided against; delete only what should never have existed. Pruning deleted tasks outright, with their runs, is post-v1.
+Delete is **soft** (resolved 2026-09-01, [Domain model residue](https://github.com/theagenticage/hercule/issues/46), amending ticket 29's hard delete): `task.delete` sets `deletedAt`; the row and its provenance stay. A deleted task answers `not_found` on `task.read`, is excluded from `task.query` (no include-deleted option in v1) and from search, and emits `task.deleted { taskId, snapshot }` with the final row, since nothing can read it afterwards. The core withdraws open Notifications whose subject is the task ([./10](./10-triage-intake-and-notifications.md)); Runs and Sessions keep their `taskId`. The event log keeps the audit trail of everything that happened before deletion (the event log is the audit log, [./13](./13-security.md)); the events the task referenced stop being protected from pruning ([./04](./04-state-store.md) Retention). Use `cancelled` for work that was decided against; delete only what should never have existed. Pruning deleted tasks outright, with their runs, is post-v1.
 
 Delete is a public-API operation ([./11](./11-public-api-and-agent-surface.md)). The shipped `worker` profile grants task read/create/update and not delete (ticket 18; verb split in [./13](./13-security.md)).
 
@@ -234,12 +234,12 @@ Kanban-style groupings, columns, swimlanes, and the Intake tiers are presentatio
 
 ## Sources
 
-- [Task model: shape, status axis, lifecycle, provenance](https://github.com/rogierpennink/hydra/issues/29)
-- [Triage engine & user-set bounds](https://github.com/rogierpennink/hydra/issues/15)
-- [Agent-operates-system surface](https://github.com/rogierpennink/hydra/issues/16)
-- [Prototype: the Intake view](https://github.com/rogierpennink/hydra/issues/30)
-- [Prototype: the check-in view](https://github.com/rogierpennink/hydra/issues/20) (priority requirement)
-- [Security & secrets model](https://github.com/rogierpennink/hydra/issues/18) (task grant family, shipped profiles)
+- [Task model: shape, status axis, lifecycle, provenance](https://github.com/theagenticage/hercule/issues/29)
+- [Triage engine & user-set bounds](https://github.com/theagenticage/hercule/issues/15)
+- [Agent-operates-system surface](https://github.com/theagenticage/hercule/issues/16)
+- [Prototype: the Intake view](https://github.com/theagenticage/hercule/issues/30)
+- [Prototype: the check-in view](https://github.com/theagenticage/hercule/issues/20) (priority requirement)
+- [Security & secrets model](https://github.com/theagenticage/hercule/issues/18) (task grant family, shipped profiles)
 - [ADR 0019 - The task model is thin; workflows own task semantics](../adr/0019-the-task-model-is-thin-workflows-own-task-semantics.md)
 - [ADR 0011 - Triage is a workflow pattern inside core-enforced bounds](../adr/0011-triage-is-a-workflow-pattern-inside-core-enforced-bounds.md)
 - [ADR 0013 - Agents operate Hercule through the public API](../adr/0013-agents-operate-hercule-through-the-public-api.md)

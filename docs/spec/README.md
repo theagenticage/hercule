@@ -1,6 +1,6 @@
 # Hercule v1 spec
 
-The buildable specification for Hercule v1: architecture, domain model, scope, and one document per subsystem. It consolidates the decisions worked on the [wayfinder map](https://github.com/rogierpennink/hydra/issues/1) into normative text an implementer can build from without opening the tickets. The "why" behind each decision lives in the [ADRs](../adr/); the vocabulary lives in [CONTEXT.md](../../CONTEXT.md); the visual language and pinned UI semantics live in [design-language.md](../design-language.md).
+The buildable specification for Hercule v1: architecture, domain model, scope, and one document per subsystem. It consolidates the decisions worked on the [wayfinder map](https://github.com/theagenticage/hercule/issues/1) into normative text an implementer can build from without opening the tickets. The "why" behind each decision lives in the [ADRs](../adr/); the vocabulary lives in [CONTEXT.md](../../CONTEXT.md); the visual language and pinned UI semantics live in [design-language.md](../design-language.md).
 
 **Status:** assembled 2026-08-28. Every decision the map closed is in here. The open questions that assembly surfaced are listed in [16-open-items.md](./16-open-items.md), each either handed to a follow-up ticket on the map, marked as an implementer's choice, or marked as a build-time verification. Implementation can start on any subsystem whose open items are implementer choices only; the ticketed items are amendments, not redesigns.
 
