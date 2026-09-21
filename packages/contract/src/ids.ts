@@ -61,6 +61,13 @@ export type NullableActor = Schema.Schema.Type<typeof NullableActor>;
 export const MAX_EXTERNAL_REF_LENGTH = 512;
 
 /**
+ * The grammar of an External Ref, written once. A caller that has to be told
+ * which of its refs is wrong needs the grammar without the schema around it,
+ * and a second spelling of it could drift from this one.
+ */
+export const EXTERNAL_REF_PATTERN = /^[a-z0-9][a-z0-9-]*:[^\s:]+:\S+$/;
+
+/**
  * A fully-qualified identifier for a thing outside Hercule:
  * `<system>:<kind>:<identity>`, for example `github:issue:owner/repo#42` or
  * `gmail:thread:19b2c`.
@@ -73,7 +80,7 @@ export const MAX_EXTERNAL_REF_LENGTH = 512;
  */
 export const ExternalRef = Schema.String.check(
   Schema.isMaxLength(MAX_EXTERNAL_REF_LENGTH),
-  Schema.isPattern(/^[a-z0-9][a-z0-9-]*:[^\s:]+:\S+$/, {
+  Schema.isPattern(EXTERNAL_REF_PATTERN, {
     title: "external ref",
     description: "`<system>:<kind>:<identity>`, lowercase system, no whitespace",
   }),

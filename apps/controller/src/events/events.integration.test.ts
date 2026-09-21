@@ -68,7 +68,9 @@ interface Refusal {
 
 const refusalOf = async (response: Response): Promise<Refusal> => {
   const text = await response.clone().text();
-  const body = (await response.json()) as ErrorBody;
+  // Read through a clone, so a case that goes on to read the issues out of the
+  // same response still finds a body there.
+  const body = (await response.clone().json()) as ErrorBody;
   return {
     code: body.error.code,
     ...(body.error.details?.grant === undefined ? {} : { grant: body.error.details.grant }),
@@ -403,6 +405,30 @@ describe("POST /events/:id/enrich", () => {
       const refusal = await refusalOf(response);
       expect(response.status, refusal.text).toBe(404);
       expect(refusal.code).toBe("not_found");
+    });
+  });
+
+  /**
+   * The log holds two populations. An audit entry is the record of a mutation,
+   * and enrichment is a pipeline-event operation, so one is refused exactly as
+   * an id naming nothing is: a caller holding only `event.emit` must not learn
+   * through this route what the log holds or what a security entry says.
+   */
+  it("answers not_found for an audit entry, and leaves the entry as it was", async () => {
+    await withEvents(async ({ base, audit }, token) => {
+      const before = (await audit("setup.completed"))[0]!;
+
+      const response = await enrich(base, token, before.id, {
+        system: "sentry",
+        refs: ["sentry:issue:123"],
+      });
+
+      const refusal = await refusalOf(response);
+      expect(response.status, refusal.text).toBe(404);
+      expect(refusal.code).toBe("not_found");
+      const after = await readEvent(base, token, before.id);
+      expect(after.system).toBe("platform");
+      expect(after.refs).toEqual([]);
     });
   });
 

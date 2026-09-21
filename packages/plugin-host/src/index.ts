@@ -14,7 +14,7 @@ export {
 } from "./manifest";
 
 export {
-  configJsonSchema,
+  deriveConfigJsonSchema,
   decodeAgainst,
   secret,
   secretFields,
@@ -41,14 +41,18 @@ export {
   DeclaredCapabilities,
   MAX_PROVIDER_NAME_LENGTH,
   ProviderDefinition,
+  type EventKindDeclaration,
+  type EventSourceDefinition,
 } from "./contributions";
 
 export {
   PluginError,
   registerConnectionType,
+  registerEventSource,
   registerProvider,
   type ActivationContext,
   type Deactivate,
+  type EventSourceRegistration,
   type KeyValueStore,
   type Plugin,
   type PluginSecrets,

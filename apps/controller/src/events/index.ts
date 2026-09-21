@@ -1,7 +1,7 @@
 /**
  * The event log: one append-only table holding pipeline events and audit
- * entries. The audit writer appends; the reader answers `event.query` and
- * `event.read`.
+ * entries. The audit writer appends; the service answers `event.query`,
+ * `event.read` and `event.emit`.
  */
 export {
   AUDIT_KINDS,
@@ -11,5 +11,6 @@ export {
   type AuditKind,
   type AuditRow,
 } from "./audit-log";
+export { EventKindCatalog } from "./catalog";
 export { eventsAfter, headOfLog } from "./log";
-export { EventService, EventServiceLayer } from "./reader";
+export { EventService, EventServiceLayer } from "./service";

@@ -39,6 +39,8 @@ import {
   InboundLayer,
   Live,
   LiveLayer,
+  Matcher,
+  MatcherLayer,
   Placement,
   PlacementLayer,
   ProfileRemoval,
@@ -49,7 +51,7 @@ import {
   RetirementLayer,
 } from "../daemon";
 import { Profiles, ProfilesLayer } from "../permissions";
-import { Plugins } from "../plugins";
+import { EventKindCatalogLayer, Plugins } from "../plugins";
 import { Secret, SecretLayer } from "../secrets";
 import { SessionService } from "../sessions";
 import { SettingsOperations, SettingsOperationsLayer } from "../settings";
@@ -262,9 +264,14 @@ const workspaceRoutes = HttpApiBuilder.group(api, "workspace", (handlers) =>
 const eventRoutes = HttpApiBuilder.group(api, "event", (handlers) =>
   Effect.gen(function* () {
     const events = yield* EventService;
+    const matcher = yield* Matcher;
     return handlers
       .handle("query", ({ query }) => operation(events.query(query)))
-      .handle("read", ({ params }) => operation(events.read(params)));
+      .handle("read", ({ params }) => operation(events.read(params)))
+      .handle("emit", ({ payload }) => operation(events.emit(payload)))
+      .handle("enrich", ({ params, payload }) =>
+        operation(matcher.enrichEvent({ id: params.id, ...payload })),
+      );
   }),
 );
 
@@ -453,7 +460,14 @@ export const operationLayers = Layer.mergeAll(
     Layer.provideMerge(DispatchLayer),
   ),
   ProvisioningLayer,
-  EventServiceLayer,
+  // The events service reads what kinds exist from the plugins domain, which
+  // appends to the event log and so may not be imported by it; the two meet
+  // here, where the whole controller is assembled. The controller daemon's
+  // enrichment use case writes through that same service, so it is layered
+  // over it rather than merged beside it.
+  MatcherLayer.pipe(
+    Layer.provideMerge(EventServiceLayer.pipe(Layer.provide(EventKindCatalogLayer))),
+  ),
   LiveTopicsLayer,
   WsTicketsLayer,
 );

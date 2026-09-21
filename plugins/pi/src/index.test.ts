@@ -7,7 +7,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { Effect, Result } from "effect";
-import { configJsonSchema, type ProviderDefinition } from "@hercule/plugin-host";
+import { deriveConfigJsonSchema, type ProviderDefinition } from "@hercule/plugin-host";
 import { pi } from "./index";
 
 /** The definition the plugin hands the catalog, captured from its registration. */
@@ -31,7 +31,7 @@ const registered = (): ProviderDefinition => {
 
 describe("the pi provider's config", () => {
   it("declares the Z.ai key as its one secret-valued field", () => {
-    const result = configJsonSchema(registered().configSchema);
+    const result = deriveConfigJsonSchema(registered().configSchema);
 
     expect(Result.isSuccess(result)).toBe(true);
     if (!Result.isSuccess(result)) return;

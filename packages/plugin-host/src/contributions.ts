@@ -52,3 +52,30 @@ export const ProviderDefinition = Schema.Struct({
 });
 
 export type ProviderDefinition = Schema.Schema.Type<typeof ProviderDefinition>;
+
+/**
+ * One event kind, as the plugin that emits it declares it: what the payload of
+ * such an event must be, and one line saying what the event means. The host
+ * derives JSON Schema from the schema for the catalog and keeps the schema
+ * itself, which is what an emitted payload is read against.
+ */
+export interface EventKindDeclaration {
+  readonly description: string;
+  readonly schema: Schema.Top;
+}
+
+/**
+ * What a plugin contributes as a source of events: the bare word it calls
+ * itself, the Connection type its events arrive through, and every kind it can
+ * emit. The host qualifies the bare word with the plugin's id, so two plugins
+ * may each call themselves `github` and still name two different sources.
+ *
+ * Each kind's name carries the plugin's id as its first segment, which makes a
+ * kind unique across plugins and lets a reader of the catalog find the owner of
+ * a kind without a second column. The host refuses a kind that does not.
+ */
+export interface EventSourceDefinition {
+  readonly id: string;
+  readonly connectionType: string;
+  readonly kinds: Record<string, EventKindDeclaration>;
+}

@@ -7,9 +7,10 @@ import { Schema } from "effect";
 export const HOST_API = 1;
 
 /**
- * The named slices of the host API a plugin may request. Only `providers`, `kv`
- * and `secrets` are implemented so far; the rest are valid in a manifest and
- * refused at load, so a manifest never has to be rewritten as they arrive.
+ * The named slices of the host API a plugin may request. Only some of them are
+ * implemented so far, and the host keeps that list; the rest are valid in a
+ * manifest and refused at load, so a manifest never has to be rewritten as they
+ * arrive.
  */
 export const PLUGIN_CAPABILITIES = [
   "providers",

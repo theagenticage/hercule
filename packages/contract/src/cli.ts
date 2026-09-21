@@ -760,6 +760,96 @@ export const CLI = {
         "no entry has that id, or it is a security entry and you do not hold event.audit; the two answer alike on purpose",
     },
   },
+  "event.emit": {
+    command: "event emit",
+    help: "Posts one event into the pipeline by hand. Reach for it to test a subscription or a filter without waiting for the real thing to happen, or to tell Hercule about something no source watches. The kind must be one a plugin declared, and the payload must be what that kind's schema says; the core stamps the rest and answers with the new event's id.",
+    examples: [
+      {
+        args: [
+          "--kind",
+          "github.issue.opened",
+          "--payload",
+          '{"subject":{"repo":"octo/repo","number":42,"url":"https://github.com/octo/repo/issues/42"}}',
+          "--ref",
+          "github:issue:octo/repo#42",
+        ],
+      },
+      {
+        args: [
+          "--kind",
+          "github.pr.merged",
+          "--payload",
+          '{"subject":{"repo":"octo/repo","number":87,"url":"https://github.com/octo/repo/pull/87"}}',
+          "--dedup-key",
+          "pr-87-merged",
+        ],
+      },
+    ],
+    fields: {
+      kind: {
+        flag: "kind",
+        help: "The declared event kind, such as github.issue.opened; an unregistered kind is refused by name.",
+      },
+      payload: {
+        flag: "payload",
+        help: "The event's payload as one JSON object, read against the kind's declared schema.",
+      },
+      connectionId: {
+        flag: "connection",
+        help: "The Connection the event is to be stamped with, by its full id; omit it for an event that came through none.",
+      },
+      refs: {
+        flag: "ref",
+        help: "An External Ref the event is about, written <system>:<kind>:<identity>; repeat the flag for several.",
+      },
+      dedupKey: {
+        flag: "dedup-key",
+        help: "The emitter's idempotency key: a second emit with the same key and Connection answers the first event's id instead of writing a second.",
+      },
+    },
+    errors: {
+      not_found: "no Connection has that id",
+    },
+  },
+  "event.enrich": {
+    command: "event enrich",
+    help: "Amends one event that is already in the log. What may be amended is the system it is about, where a person opens it, and the External Refs it carries. Reach for it after reading an event that arrived through one system and is really about another. What is named is overwritten, what is left out stays as it was, and refs are added to and never removed; the payload and the original are never touched.",
+    examples: [
+      {
+        args: [
+          "4217",
+          "--system",
+          "sentry",
+          "--url",
+          "https://sentry.io/issues/123",
+          "--ref",
+          "sentry:issue:123",
+        ],
+      },
+      { args: ["4217", "--ref", "github:pr:octo/repo#87"] },
+    ],
+    fields: {
+      id: {
+        positional: true,
+        help: "The event's id, which is its position in the log: a whole number counted from one, never a tail.",
+      },
+      system: {
+        flag: "system",
+        help: "The external system the event is really about, such as sentry; it replaces what the emitter stamped.",
+      },
+      url: {
+        flag: "url",
+        help: "Where a person opens this event in that system; it replaces the one the emitter stamped.",
+      },
+      refs: {
+        flag: "ref",
+        help: "An External Ref to add, written <system>:<kind>:<identity>; repeat the flag for several, and one already there is kept once.",
+      },
+    },
+    errors: {
+      not_found: "no entry has that id",
+    },
+  },
 
   "runner.query": {
     command: "runner list",

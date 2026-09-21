@@ -22,7 +22,14 @@ import { Schema } from "effect";
 import * as HttpApiEndpoint from "effect/unstable/httpapi/HttpApiEndpoint";
 import * as HttpApiGroup from "effect/unstable/httpapi/HttpApiGroup";
 import { Forbidden, Internal, NotFound, Unauthenticated, Validation } from "../errors";
-import { ExternalRef, Id, NullableActor, Timestamp } from "../ids";
+import {
+  EXTERNAL_REF_PATTERN,
+  ExternalRef,
+  Id,
+  MAX_EXTERNAL_REF_LENGTH,
+  NullableActor,
+  Timestamp,
+} from "../ids";
 import { page, pageParams } from "../pagination";
 import { Authenticated } from "../security";
 import { bounded } from "../strings";
@@ -69,6 +76,60 @@ export type Event = Schema.Schema.Type<typeof Event>;
 /** The log is walked by position, and by nothing else. */
 export const EVENT_SORT_FIELDS = ["id"] as const;
 
+/** The longest idempotency key an emitter may write. */
+export const MAX_DEDUP_KEY_LENGTH = 200;
+
+/** The longest system name. It is the name of a system, not a sentence. */
+export const MAX_EVENT_SYSTEM_LENGTH = 64;
+
+/** The longest source URL. It is where a person opens the event, not a document. */
+export const MAX_EVENT_URL_LENGTH = 2048;
+
+/**
+ * A ref as the two write operations take it. It is the same grammar the
+ * envelope's refs have, checked by a filter rather than by a pattern so that
+ * the refusal quotes the ref the caller wrote: a pattern check reports the
+ * position of the value and never the value, and a caller sending a list of
+ * refs cannot act on a position alone.
+ */
+const WrittenRef = Schema.String.check(
+  Schema.isMaxLength(MAX_EXTERNAL_REF_LENGTH),
+  Schema.makeFilter((ref) =>
+    EXTERNAL_REF_PATTERN.test(ref)
+      ? undefined
+      : `${ref} is not an external ref: write <system>:<kind>:<identity>, lowercase system, no whitespace`,
+  ),
+);
+
+/** What a manual emit hands over. Everything else on the envelope is the core's. */
+export const EmitPayload = Schema.Struct({
+  kind: EventKind,
+  payload: JsonObject,
+  connectionId: Schema.optionalKey(Id),
+  refs: Schema.optionalKey(Schema.Array(WrittenRef)),
+  dedupKey: Schema.optionalKey(bounded(1, MAX_DEDUP_KEY_LENGTH)),
+});
+
+export type EmitPayload = Schema.Schema.Type<typeof EmitPayload>;
+
+/** Where a manual emit lands in the log. */
+export const Emitted = Schema.Struct({ eventId: EventId });
+
+export type Emitted = Schema.Schema.Type<typeof Emitted>;
+
+/**
+ * What enrichment may amend. An omitted field is left as it was; `refs` is
+ * added to and never taken from, so a later reader of an event never finds
+ * fewer identities on it than an earlier one did.
+ */
+export const EnrichPayload = Schema.Struct({
+  system: Schema.optionalKey(bounded(1, MAX_EVENT_SYSTEM_LENGTH)),
+  url: Schema.optionalKey(bounded(1, MAX_EVENT_URL_LENGTH)),
+  refs: Schema.optionalKey(Schema.Array(WrittenRef)),
+});
+
+export type EnrichPayload = Schema.Schema.Type<typeof EnrichPayload>;
+
 export const event = HttpApiGroup.make("event")
   .add(
     HttpApiEndpoint.get("query", "/events", {
@@ -91,6 +152,22 @@ export const event = HttpApiGroup.make("event")
     }),
     HttpApiEndpoint.get("read", "/events/:id", {
       params: { id: Schema.FiniteFromString.pipe(Schema.decodeTo(EventId)) },
+      success: Event,
+      error: [Unauthenticated, Forbidden, Validation, NotFound, Internal],
+    }),
+    /**
+     * A synthetic event, posted by hand. A namespaced kind means a manual
+     * `github.issue.opened` reaches a subscription the way an ingested one
+     * does; a filter that has to tell the two apart reads `event.source`.
+     */
+    HttpApiEndpoint.post("emit", "/events/emit", {
+      payload: EmitPayload,
+      success: Emitted,
+      error: [Unauthenticated, Forbidden, Validation, NotFound, Internal],
+    }),
+    HttpApiEndpoint.post("enrich", "/events/:id/enrich", {
+      params: { id: Schema.FiniteFromString.pipe(Schema.decodeTo(EventId)) },
+      payload: EnrichPayload,
       success: Event,
       error: [Unauthenticated, Forbidden, Validation, NotFound, Internal],
     }),

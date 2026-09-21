@@ -16,6 +16,7 @@
 export { DispatchLayer } from "./dispatch";
 export { Inbound, InboundLayer } from "./inbound";
 export { Live, LiveLayer, SessionInputDeadline } from "./live";
+export { Matcher, MatcherLayer } from "./matching";
 export { Placement, PlacementLayer } from "./placement";
 export { ProfileRemoval, ProfileRemovalLayer } from "./profile-removal";
 export { Provisioning, ProvisioningLayer, WorkspaceSweepInterval } from "./provisioning";
