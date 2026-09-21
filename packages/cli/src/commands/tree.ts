@@ -261,6 +261,12 @@ const buildFields = (
     .map(([name, type]) => {
       const row = rows[name];
       if (row === undefined) throw new Error(`${id}: ${name} has no row`);
+      // A bare word is a route parameter or a payload field. A query
+      // parameter written as one would be parsed as a positional and then
+      // sent nowhere, so the table is wrong and says so here.
+      if (carriedIn === "query" && "positional" in row) {
+        throw new Error(`${id}: ${name} is a query parameter and cannot be a bare word`);
+      }
       return buildField(name, type, row, carriedIn, fields?.[name]);
     });
 };

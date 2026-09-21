@@ -15,10 +15,13 @@
  * Health is two nullable columns and no state column: both null is `ok`, so the
  * first failure of a run of failures is one conditional write
  * (`WHERE health_error_message IS NULL`) instead of a counter that two writers
- * could disagree about.
+ * could disagree about. The check keeps the pair whole, because one column
+ * without the other would read as neither state.
  *
  * A subscription is live while `ended_at` is null. `ended_reason` says what
- * ended it - a cancellation, or the holder ending for good.
+ * ended it - a cancellation, or the holder ending for good - and `ended_actor`
+ * says who did, which for the sweep is the system and for a cancellation is
+ * whoever called.
  */
 import * as Effect from "effect/Effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
@@ -29,7 +32,7 @@ export default Effect.gen(function* () {
   yield* sql`
     CREATE TABLE subscriptions (
       id BLOB PRIMARY KEY NOT NULL,
-      holder_kind TEXT NOT NULL CHECK (holder_kind IN ('session')),
+      holder_kind TEXT NOT NULL,
       holder_id BLOB NOT NULL,
       target TEXT NOT NULL CHECK (json_valid(target)),
       condition TEXT NOT NULL,
@@ -38,16 +41,15 @@ export default Effect.gen(function* () {
       created_at TEXT NOT NULL,
       ended_at TEXT,
       ended_reason TEXT,
-      actor TEXT NOT NULL
+      ended_actor TEXT,
+      actor TEXT NOT NULL,
+      CHECK ((health_error_message IS NULL) = (health_error_at IS NULL))
     )
   `;
 
-  // The matcher reads every live subscription on every tick, and it is the one
-  // read that runs as often as events arrive.
-  yield* sql`CREATE INDEX subscriptions_live ON subscriptions (created_at, id) WHERE ended_at IS NULL`;
-
-  // One holder's live subscriptions: what `subscription.query` answers, and
-  // what the sweep ends when a holder is gone.
+  // Every read of this table reads live rows: one holder's, which this index
+  // narrows, and the matcher's read of all of them, which walks the same index
+  // rather than the table.
   yield* sql`
     CREATE INDEX subscriptions_holder ON subscriptions (holder_kind, holder_id, created_at, id)
     WHERE ended_at IS NULL

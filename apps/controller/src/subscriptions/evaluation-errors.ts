@@ -2,8 +2,9 @@
  * Telling somebody that a subscription's condition could not be evaluated.
  *
  * The matcher records the failure on the subscription row and calls this once
- * per run of failures. Who is told, and how, is the notification ticket's
- * (#42): it replaces the body of the Layer below, and no call site changes.
+ * per run of failures. Who is told, and how, is not decided yet: a later
+ * notification ticket replaces the body of the Layer below, and no call site
+ * changes.
  */
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";

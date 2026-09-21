@@ -4,14 +4,14 @@
  * questions.
  *
  * A listing is one keyset walk over `created_at` and the id, narrowed to one
- * holder, which the index on live subscriptions serves. Only live rows are
- * walked: a listing says what a session is still waiting for.
+ * holder, which `subscriptions_holder` serves. Only live rows are read here at
+ * all: a listing says what a session is still waiting for, and the matcher
+ * evaluates what is still waiting.
  */
 import * as Effect from "effect/Effect";
-import * as Option from "effect/Option";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
-import type { SortDirection, SubscriptionTarget } from "@hercule/contract";
+import type { SortDirection, SubscriptionHolder, SubscriptionTarget } from "@hercule/contract";
 import {
   decodeCursor,
   encodeCursor,
@@ -25,12 +25,6 @@ import {
   type Page,
 } from "../db";
 
-/** Who holds a subscription. A run will hold one when runs exist. */
-export interface SubscriptionHolder {
-  readonly kind: "session";
-  readonly id: string;
-}
-
 /** A subscription as it is stored. */
 export interface StoredSubscription {
   readonly id: string;
@@ -42,8 +36,6 @@ export interface StoredSubscription {
   /** When that run of failures began, or null. */
   readonly healthErrorAt: string | null;
   readonly createdAt: string;
-  readonly endedAt: string | null;
-  readonly endedReason: string | null;
 }
 
 /** Everything a new subscription row holds; the id and the instant are written here. */
@@ -54,6 +46,19 @@ export interface NewSubscription {
   /** The instant the row is created, which is its `createdAt`. */
   readonly at: string;
   readonly actor: string;
+}
+
+/** What ends one subscription. */
+export interface SubscriptionEnd {
+  readonly id: string;
+  /** The instant it stopped waiting. */
+  readonly at: string;
+  /** What ended it, as the row records it. */
+  readonly reason: string;
+  /** Who ended it: an actor stamp, or the system for a sweep. */
+  readonly actor: string;
+  /** Only end it if this holder holds it; absent ends it whoever holds it. */
+  readonly heldBy?: SubscriptionHolder;
 }
 
 export interface SubscriptionPageRequest {
@@ -73,13 +78,11 @@ interface SubscriptionRow {
   readonly health_error_message: string | null;
   readonly health_error_at: string | null;
   readonly created_at: string;
-  readonly ended_at: string | null;
-  readonly ended_reason: string | null;
 }
 
 const COLUMNS =
   "id, holder_kind, holder_id, target, condition, health_error_message, health_error_at, " +
-  "created_at, ended_at, ended_reason";
+  "created_at";
 
 const toSubscription = (row: SubscriptionRow): StoredSubscription => ({
   id: uuidToString(row.id),
@@ -89,8 +92,6 @@ const toSubscription = (row: SubscriptionRow): StoredSubscription => ({
   healthErrorMessage: row.health_error_message,
   healthErrorAt: row.health_error_at,
   createdAt: row.created_at,
-  endedAt: row.ended_at,
-  endedReason: row.ended_reason,
 });
 
 const buildCursorScope = (direction: SortDirection): CursorScope => ({
@@ -103,15 +104,6 @@ const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
 
   return {
-    /** The subscription that is still waiting under this id, or none. */
-    readLive: (id: string): Effect.Effect<Option.Option<StoredSubscription>, SqlError> =>
-      Effect.map(
-        sql<SubscriptionRow>`
-          SELECT ${sql.literal(COLUMNS)} FROM subscriptions
-          WHERE id = ${uuidFromString(id)} AND ended_at IS NULL`,
-        (rows) => Option.map(Option.fromNullishOr(rows[0]), toSubscription),
-      ),
-
     insert: (subscription: NewSubscription): Effect.Effect<string, SqlError> =>
       Effect.gen(function* () {
         const id = mintUuid();
@@ -171,12 +163,35 @@ const make = Effect.gen(function* () {
             WHERE id = ${uuidFromString(id)}`,
       ),
 
-    /** Stops the subscription waiting, naming what ended it. */
-    end: (id: string, at: string, reason: string): Effect.Effect<void, SqlError> =>
-      Effect.asVoid(
-        sql`UPDATE subscriptions SET ended_at = ${at}, ended_reason = ${reason}
-            WHERE id = ${uuidFromString(id)} AND ended_at IS NULL`,
-      ),
+    /**
+     * Stops the subscription waiting, naming what ended it and who ended it,
+     * and answers whether there was a live subscription to end.
+     *
+     * `heldBy` narrows the write to one holder's own rows. A caller that may
+     * end only what it holds passes it and reads `false` for a subscription
+     * that is another holder's, which is the same answer as for one that never
+     * existed.
+     */
+    end: (ending: SubscriptionEnd): Effect.Effect<boolean, SqlError> => {
+      const clauses = [
+        sql`id = ${uuidFromString(ending.id)}`,
+        sql`ended_at IS NULL`,
+        ...(ending.heldBy === undefined
+          ? []
+          : [
+              sql`holder_kind = ${ending.heldBy.kind}`,
+              sql`holder_id = ${uuidFromString(ending.heldBy.id)}`,
+            ]),
+      ];
+      return Effect.map(
+        sql<{ readonly id: Uint8Array }>`
+          UPDATE subscriptions
+          SET ended_at = ${ending.at}, ended_reason = ${ending.reason},
+              ended_actor = ${ending.actor}
+          WHERE ${sql.and(clauses)} RETURNING id`,
+        (rows) => rows.length > 0,
+      );
+    },
 
     list: (
       request: SubscriptionPageRequest,

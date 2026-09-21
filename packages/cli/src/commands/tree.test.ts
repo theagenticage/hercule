@@ -77,6 +77,16 @@ describe("the spelling of a command", () => {
     expect(spelled).toEqual(written);
   });
 
+  it("never takes a query parameter as a bare word", () => {
+    // The tree refuses such a row while it builds, so this holds for every
+    // command there is; what it asserts is that the rule is applied at all.
+    for (const command of COMMANDS) {
+      for (const field of command.query) {
+        expect(field.positional, `${spelling(command)}: --${field.spelling}`).toBe(false);
+      }
+    }
+  });
+
   it("writes every word in kebab-case", () => {
     for (const command of COMMANDS) {
       for (const word of command.words) {
@@ -115,10 +125,11 @@ describe("the spelling of a command", () => {
       ).toEqual(pathParams(command.path));
       // A payload field the table writes as a bare word stands after them, and
       // nothing else is ever a bare word.
+      const rest = command.positionals.slice(inPath.length);
       expect(
-        command.positionals.slice(inPath.length).map((field) => field.carriedIn),
-        spelling(command),
-      ).toEqual(command.positionals.slice(inPath.length).map(() => "payload"));
+        rest.every((field) => field.carriedIn === "payload"),
+        `${spelling(command)}: ${rest.map((field) => field.name).join(", ")}`,
+      ).toBe(true);
     }
   });
 });

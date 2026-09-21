@@ -5,10 +5,10 @@
  * between the two lives here and nowhere else, so what a subscription waits on
  * and what a person reads on the row can never drift apart.
  *
- * Every subject is written into the source as a JSON string literal, which is
- * a CEL string literal too. A ref, a run id or a request id is caller-written
- * text, and quoting it by hand would let a quotation mark in it change the
- * expression.
+ * Every id is written into the source as a JSON string literal, which is a CEL
+ * string literal too. A ref, a run id or a Permission Request id is
+ * caller-written text, and quoting it by hand would let a quotation mark in it
+ * change the expression.
  */
 import type { SubscriptionTarget } from "@hercule/contract";
 
@@ -36,9 +36,10 @@ export const expandTarget = (target: SubscriptionTarget): string => {
       );
     case "request":
       // The decision on one Permission Request, which is the one thing a
-      // caller waiting on a request is waiting for.
+      // caller waiting on a request is waiting for. `permission.decided` is
+      // the kind the security document names for that decision.
       return (
-        `event.kind == "request.decided" && ` +
+        `event.kind == "permission.decided" && ` +
         `event.payload.requestId == ${literal(target.requestId)}`
       );
   }

@@ -96,6 +96,9 @@ export const shellExample = (
 
 const placeholder = (field: Field): string => {
   if (field.choices !== undefined) return `<${field.spelling}>`;
+  // A field written as one word shows that word, whatever shape the value
+  // behind it has: `<json>` would send the writer looking for a brace.
+  if (field.decodeShorthand !== undefined) return "<word>";
   switch (field.kind) {
     case "string":
       return "<text>";

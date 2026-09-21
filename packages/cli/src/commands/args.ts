@@ -66,7 +66,11 @@ export const coerce = (field: Field, text: string, help: string): unknown => {
     try {
       return field.decodeShorthand(text);
     } catch (failure) {
-      throw new UsageError(`${said(field)}: ${String(failure)}`, help);
+      // The codec's own message says which forms the word may take. The error
+      // around it is the decoder's wrapper and says nothing a writer can act
+      // on.
+      const refusal = failure instanceof Error ? failure.message : String(failure);
+      throw new UsageError(`${said(field)}: ${refusal}`, help);
     }
   }
   if (field.choices !== undefined && !field.choices.includes(text)) {

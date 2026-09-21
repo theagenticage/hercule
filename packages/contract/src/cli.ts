@@ -886,16 +886,16 @@ export const CLI = {
   "subscription.cancel": {
     command: "subscription cancel",
     help: "Ends one subscription, so the matcher stops evaluating it and nothing more arrives through it. Find the id with `hercule subscription list`.",
-    examples: [{ args: ["1f3a9c2e"] }],
+    examples: [{ args: ["0192f0a1-3c4b-7d2e-8f01-2a3b4c5d6e7f"] }],
     fields: {
       id: {
         positional: true,
-        help: "The subscription's id, or a tail of eight or more characters.",
-        resolves: "subscription.query",
+        help: "The subscription's full id, as `hercule subscription create` answered with it; a tail is not resolved here.",
       },
     },
     errors: {
-      not_found: "no live subscription has that id; one already cancelled answers the same way",
+      not_found:
+        "nothing here to end: no subscription has that id, or it has ended already, or another session holds it; the three answer alike",
     },
   },
 

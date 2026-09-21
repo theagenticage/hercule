@@ -39,7 +39,7 @@ import { bounded } from "../strings";
  * The longest id a target may name. A target names one thing by its id, and an
  * id is a word, not a document.
  */
-export const MAX_SUBSCRIPTION_SUBJECT_LENGTH = 512;
+export const MAX_TARGET_ID_LENGTH = 512;
 
 /**
  * The id of the thing a target waits on. It is not the `Id` schema: a run id
@@ -47,7 +47,7 @@ export const MAX_SUBSCRIPTION_SUBJECT_LENGTH = 512;
  * have yet, and refusing a shape before the thing exists would refuse it for
  * the wrong reason.
  */
-const Subject = bounded(1, MAX_SUBSCRIPTION_SUBJECT_LENGTH);
+const TargetId = bounded(1, MAX_TARGET_ID_LENGTH);
 
 /**
  * What a subscription waits on, as it travels on the wire. The shorthand that
@@ -55,9 +55,9 @@ const Subject = bounded(1, MAX_SUBSCRIPTION_SUBJECT_LENGTH);
  */
 const TargetValue = Schema.Union([
   Schema.Struct({ kind: Schema.Literal("ref"), ref: ExternalRef }),
-  Schema.Struct({ kind: Schema.Literal("run"), runId: Subject }),
-  Schema.Struct({ kind: Schema.Literal("session"), sessionId: Subject }),
-  Schema.Struct({ kind: Schema.Literal("request"), requestId: Subject }),
+  Schema.Struct({ kind: Schema.Literal("run"), runId: TargetId }),
+  Schema.Struct({ kind: Schema.Literal("session"), sessionId: TargetId }),
+  Schema.Struct({ kind: Schema.Literal("request"), requestId: TargetId }),
 ]);
 
 export type SubscriptionTarget = Schema.Schema.Type<typeof TargetValue>;
@@ -203,12 +203,6 @@ export const Subscription = Schema.Struct({
   holder: SubscriptionHolder,
   health: SubscriptionHealth,
   createdAt: Timestamp,
-  /**
-   * When the subscription stopped waiting. A listing answers live
-   * subscriptions only, so it is absent there; it is the field an ended
-   * subscription is read back through.
-   */
-  endedAt: Schema.optionalKey(Timestamp),
 });
 
 export type Subscription = Schema.Schema.Type<typeof Subscription>;

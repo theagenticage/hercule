@@ -18,7 +18,6 @@
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
@@ -42,9 +41,8 @@ import {
   type Unauthenticated,
   type Validation,
 } from "@hercule/contract";
-import { CurrentActor, requireGrant, stampOf } from "../actor";
+import { currentStamp, requireGrant } from "../actor";
 import { nowIso, pageInput, refuseCursor, withTransaction } from "../db";
-import { checkExpression } from "../expressions";
 import { expandTarget } from "./targets";
 import { subscriptionRepository, type StoredSubscription } from "./repository";
 
@@ -74,8 +72,8 @@ const DEFAULT_DIRECTION: SortDirection = "desc";
 /** What ends a subscription the holder asked to end. */
 const CANCELLED = "cancelled";
 
-/** Why a target this version cannot wait on is refused, one message per subject. */
-const ABSENT_SUBJECT: Record<Exclude<SubscriptionTarget["kind"], "ref">, string> = {
+/** Why a target this version cannot wait on is refused, one message per kind. */
+const ABSENT_TARGET_REASON: Record<Exclude<SubscriptionTarget["kind"], "ref">, string> = {
   run: "no runs exist yet, so there is no run to wait on; wait on an External Ref instead",
   session:
     "no session.* platform events are emitted yet, so a session target would never match; " +
@@ -109,10 +107,10 @@ const composeRecord = (stored: StoredSubscription): Subscription => ({
   holder: stored.holder,
   health: readHealth(stored),
   createdAt: stored.createdAt,
-  ...(stored.endedAt === null ? {} : { endedAt: stored.endedAt }),
 });
 
-type ReadError = Unauthenticated | Forbidden | Validation | SqlError;
+/** How every call here can fail before it reaches what it was asked to do. */
+type CommonError = Unauthenticated | Forbidden | Validation | SqlError;
 
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
@@ -122,7 +120,7 @@ const make = Effect.gen(function* () {
     /** Registers what this session waits on, and answers which subscription that is. */
     create: (
       input: SubscriptionCreateInput,
-    ): Effect.Effect<{ readonly subscriptionId: string }, ReadError | InvalidState> =>
+    ): Effect.Effect<{ readonly subscriptionId: string }, CommonError | InvalidState> =>
       Effect.gen(function* () {
         const actor = yield* requireGrant("subscription.create");
         const { target } = yield* Effect.mapError(decodeCreate(input), validationOf);
@@ -132,15 +130,9 @@ const make = Effect.gen(function* () {
           );
         }
         if (target.kind !== "ref") {
-          return yield* Effect.fail(invalidState(ABSENT_SUBJECT[target.kind]));
+          return yield* Effect.fail(invalidState(ABSENT_TARGET_REASON[target.kind]));
         }
         const condition = expandTarget(target);
-        // The expansion is this domain's own text with the caller's subject
-        // quoted into it. A refusal here is therefore about the subject, and
-        // the caller is the only one who can correct it.
-        yield* Effect.mapError(checkExpression(condition), (failure) =>
-          validation([{ path: ["target"], message: failure.message }]),
-        );
         const subscriptionId = yield* withTransaction(
           sql,
           Effect.gen(function* () {
@@ -150,7 +142,7 @@ const make = Effect.gen(function* () {
               target,
               condition,
               at,
-              actor: stampOf(actor),
+              actor: yield* currentStamp,
             });
           }),
         );
@@ -162,14 +154,13 @@ const make = Effect.gen(function* () {
      * holder reads its own; a session that names another holder reads that
      * one, because a grant bounds an operation and not a row in v1.
      */
-    query: (input: QueryInput): Effect.Effect<SubscriptionPage, ReadError> =>
+    query: (input: QueryInput): Effect.Effect<SubscriptionPage, CommonError> =>
       Effect.gen(function* () {
-        yield* requireGrant("subscription.query");
+        const actor = yield* requireGrant("subscription.query");
         const { holder, limit, cursor, sort } = yield* Effect.mapError(
           decodeQuery(input),
           validationOf,
         );
-        const actor = yield* CurrentActor;
         const whose =
           holder ??
           (actor._tag === "session"
@@ -195,24 +186,34 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * Stops one subscription waiting. A subscription that has already ended is
-     * not there to be cancelled, and answers like an id that names nothing:
-     * both leave the caller with nothing left to do.
+     * Stops one subscription waiting.
+     *
+     * A session ends its own subscriptions and no others: a claim belongs to
+     * the session that made it, and another session's is not its to end. The
+     * user ends any. Three cases answer alike - no such id, a subscription
+     * already ended, and one another session holds - so a caller learns
+     * nothing about what it may not reach, and each answer leaves it with
+     * nothing left to do.
      */
-    cancel: (input: Identified): Effect.Effect<Record<string, never>, ReadError | NotFound> =>
+    cancel: (input: Identified): Effect.Effect<Record<string, never>, CommonError | NotFound> =>
       Effect.gen(function* () {
-        yield* requireGrant("subscription.cancel");
+        const actor = yield* requireGrant("subscription.cancel");
         const { id } = yield* Effect.mapError(decodeIdentified(input), validationOf);
+        const heldBy =
+          actor._tag === "session"
+            ? ({ kind: "session", id: actor.sessionId } as const)
+            : undefined;
         yield* withTransaction(
           sql,
           Effect.gen(function* () {
-            const at = yield* nowIso;
-            // Read inside the write set: a sweep that ends the same row
-            // between a read outside and the update would report a cancel that
-            // did not happen.
-            const live = yield* subscriptions.readLive(id);
-            if (Option.isNone(live)) return yield* Effect.fail(notFound(NO_SUCH_SUBSCRIPTION));
-            yield* subscriptions.end(id, at, CANCELLED);
+            const ended = yield* subscriptions.end({
+              id,
+              at: yield* nowIso,
+              reason: CANCELLED,
+              actor: yield* currentStamp,
+              ...(heldBy === undefined ? {} : { heldBy }),
+            });
+            if (!ended) return yield* Effect.fail(notFound(NO_SUCH_SUBSCRIPTION));
           }),
         );
         return {};

@@ -275,3 +275,44 @@ describe("subscription.cancel", () => {
     });
   });
 });
+
+/**
+ * Added beside the criteria: a subscription belongs to the session that made
+ * it, and `subscription.cancel` carries only an id, so nothing but the
+ * credential can keep one session from ending another's claim.
+ */
+describe("whose subscription a session may cancel", () => {
+  it("refuses another session's, leaving it live, and answers as for an unknown id", async () => {
+    await withAgentFleet(async (arranged) => {
+      const profile = await profileOf(arranged, "subscribers", [
+        "subscription.write",
+        "subscription.read",
+      ]);
+      const mine = await agentOn(arranged, profile);
+      const theirs = await agentOn(arranged, profile);
+      const other = await registered(arranged, { kind: "ref", ref: REF }, theirs.token);
+
+      const response = await cancel(arranged, other, mine.token);
+      expect(response.status, await response.clone().text()).toBe(404);
+      expect((await refusalOf(response)).code).toBe("not_found");
+
+      // Still waiting, and still its own holder's to cancel.
+      expect((await page(arranged, theirs.token)).map((one) => one.id)).toEqual([other]);
+      expect((await cancel(arranged, other, theirs.token)).status).toBe(200);
+    });
+  });
+
+  it("lets the user cancel a session's subscription", async () => {
+    await withAgentFleet(async (arranged) => {
+      const agent = await sessionHolding(arranged, "subscribers", [
+        "subscription.write",
+        "subscription.read",
+      ]);
+      const subscriptionId = await registered(arranged, { kind: "ref", ref: REF }, agent.token);
+
+      const response = await cancel(arranged, subscriptionId, arranged.token);
+      expect(response.status, await response.clone().text()).toBe(200);
+      expect(await page(arranged, agent.token)).toEqual([]);
+    });
+  });
+});

@@ -170,7 +170,13 @@ const make = Effect.gen(function* () {
         yield* withTransaction(
           sql,
           Effect.gen(function* () {
-            yield* subscriptions.end(one.id, yield* nowIso, HOLDER_ENDED);
+            // Nobody asked for this end, so the system is what stamps it.
+            yield* subscriptions.end({
+              id: one.id,
+              at: yield* nowIso,
+              reason: HOLDER_ENDED,
+              actor: SYSTEM_ACTOR,
+            });
             // An input this subscription produced that nothing has delivered
             // yet is waiting for a session that will never take it.
             yield* sessions.cancelMatchedInputs(one.id, HOLDER_ENDED);

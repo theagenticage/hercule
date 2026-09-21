@@ -56,3 +56,14 @@ describe("expandTarget", () => {
     }
   });
 });
+
+/**
+ * Added beside the criterion's own cases: the request expansion names the kind
+ * the security document pins for a decision, and a kind nobody emits would
+ * make the whole target silently dead.
+ */
+describe("the request expansion", () => {
+  it("waits on the decision kind the security document names", () => {
+    expect(expandTarget({ kind: "request", requestId: "pr_7" })).toContain('"permission.decided"');
+  });
+});

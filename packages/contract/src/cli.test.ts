@@ -228,8 +228,6 @@ const RESOLVES: Record<string, string> = {
   "runner.installHarness id": "runner.query",
   "runner.revokeJoinToken id": "runner.queryJoinTokens",
 
-  "subscription.cancel id": "subscription.query",
-
   "provider.read id": "provider.query",
   "provider.update id": "provider.query",
   "provider.delete id": "provider.query",
@@ -368,6 +366,7 @@ describe("the resolvers", () => {
     for (const name of [
       "event.read id",
       "event.enrich id",
+      "subscription.cancel id",
       "plugin.configure id",
       "input.update inputId",
     ]) {

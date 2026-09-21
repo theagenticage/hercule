@@ -278,7 +278,7 @@ export {
   MAX_EVENT_URL_LENGTH,
 } from "./groups/event";
 export {
-  MAX_SUBSCRIPTION_SUBJECT_LENGTH,
+  MAX_TARGET_ID_LENGTH,
   SUBSCRIPTION_SORT_FIELDS,
   Subscription,
   SubscriptionCreateInput,
@@ -289,7 +289,7 @@ export {
   SubscriptionTarget,
   SubscriptionTargetFromShorthand,
 } from "./groups/subscription";
-export { markShorthand, readShorthandDecoder } from "./shorthand";
+export { readShorthandDecoder } from "./shorthand";
 export {
   Delta,
   Invalidate,
