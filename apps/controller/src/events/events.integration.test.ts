@@ -15,7 +15,15 @@ import type { Event } from "@hercule/contract";
 import type { ModelDescriptor, RunnerFacts } from "@hercule/protocol";
 import type { Plugin } from "@hercule/plugin-host";
 import { github } from "@hercule/plugin-github";
-import { completeSetup, get, post, withServer, type ServerHarness } from "../http/testing";
+import {
+  completeSetup,
+  get,
+  post,
+  send,
+  USERNAME,
+  withServer,
+  type ServerHarness,
+} from "../http/testing";
 import { fixture, providerDefinition } from "../plugins/testing";
 import {
   agentOn,
@@ -318,6 +326,35 @@ describe("POST /events/emit", () => {
       const other = await readEvent(base, token, second);
       expect(one.dedupKey.length).toBeGreaterThan(0);
       expect(other.dedupKey).not.toBe(one.dedupKey);
+    });
+  });
+
+  /**
+   * The security entries are the population a session without `event.audit`
+   * cannot read at all, so the refusal has to hold for them by the same rule
+   * and not by luck: amending one would both rewrite what happened to the
+   * user's account and tell the caller it is there.
+   */
+  it("answers not_found for a security entry too, and leaves it as it was", async () => {
+    await withEvents(async ({ base, audit }, token) => {
+      // A login that cannot succeed is what writes one of these.
+      const refusedLogin = await send("POST", base, "/api/v1/auth/login", {
+        body: { username: USERNAME, password: "not the password" },
+      });
+      expect(refusedLogin.status).toBe(401);
+      const before = (await audit("auth.login.failed"))[0]!;
+
+      const response = await enrich(base, token, before.id, {
+        url: "https://example.test/rewritten",
+        refs: ["sentry:issue:123"],
+      });
+
+      const refusal = await refusalOf(response);
+      expect(response.status, refusal.text).toBe(404);
+      expect(refusal.code).toBe("not_found");
+      const after = await readEvent(base, token, before.id);
+      expect(after.url).toBeNull();
+      expect(after.refs).toEqual([]);
     });
   });
 

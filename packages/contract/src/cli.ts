@@ -847,7 +847,8 @@ export const CLI = {
       },
     },
     errors: {
-      not_found: "no entry has that id",
+      not_found:
+        "no entry has that id, or it is an audit entry: the log's record of what Hercule itself did is never amended, and reads as absent here.",
     },
   },
 

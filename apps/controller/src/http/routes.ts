@@ -54,7 +54,12 @@ import { Profiles, ProfilesLayer } from "../permissions";
 import { EventKindCatalogLayer, Plugins } from "../plugins";
 import { Secret, SecretLayer } from "../secrets";
 import { SessionService } from "../sessions";
-import { SubscriptionService, SubscriptionServiceLayer } from "../subscriptions";
+import {
+  EvaluationErrorNotifier,
+  EvaluationErrorNotifierLayer,
+  SubscriptionService,
+  SubscriptionServiceLayer,
+} from "../subscriptions";
 import { SettingsOperations, SettingsOperationsLayer } from "../settings";
 import { ProjectService, ProjectServiceLayer } from "../projects";
 import { ResourceService, ResourceServiceLayer } from "../resources";
@@ -443,46 +448,58 @@ const controllerRoutes = HttpApiBuilder.group(api, "controller", (handlers) =>
  * none of the ingest state a session's stream is coalesced in, and would write
  * over the same rows the drivers act on. They reach the handlers from there.
  */
-export const operationLayers = Layer.mergeAll(
-  SetupLayer,
-  AuthLayer,
-  ApiKeysLayer,
-  UserLayer,
-  SecretLayer,
-  ControllerLayer,
-  SettingsOperationsLayer,
-  // The controller daemon's profile-removal use case reaches the profile
-  // service, so that one is layered under it rather than merged beside it.
-  ProfileRemovalLayer.pipe(Layer.provideMerge(ProfilesLayer)),
-  TaskServiceLayer,
-  AgentServiceLayer,
-  ProjectServiceLayer,
-  ResourceServiceLayer,
-  // The controller daemon's retirement use case reaches the runner service, so
-  // that one is layered under it rather than merged beside it.
-  RetirementLayer.pipe(Layer.provideMerge(RunnerServiceLayer)),
-  RunnerJoinLayer,
-  // The inbound driver reaches both dispatch and the live channel and placement
-  // reaches dispatch, so those two are layered under the pair rather than merged
-  // beside it. The live channel reaches dispatch too, which is why it is
-  // provided first.
-  Layer.mergeAll(InboundLayer, PlacementLayer).pipe(
-    Layer.provideMerge(LiveLayer),
-    Layer.provideMerge(DispatchLayer),
-  ),
-  ProvisioningLayer,
-  // The events service reads what kinds exist from the plugins domain, which
-  // appends to the event log and so may not be imported by it; the two meet
-  // here, where the whole controller is assembled. The controller daemon's
-  // enrichment use case writes through that same service, so it is layered
-  // over it rather than merged beside it.
-  MatcherLayer.pipe(
-    Layer.provideMerge(EventServiceLayer.pipe(Layer.provide(EventKindCatalogLayer))),
-  ),
-  SubscriptionServiceLayer,
-  LiveTopicsLayer,
-  WsTicketsLayer,
-);
+export const buildOperationLayers = (
+  evaluationErrorNotifier: Layer.Layer<EvaluationErrorNotifier>,
+) =>
+  Layer.mergeAll(
+    SetupLayer,
+    AuthLayer,
+    ApiKeysLayer,
+    UserLayer,
+    SecretLayer,
+    ControllerLayer,
+    SettingsOperationsLayer,
+    // The controller daemon's profile-removal use case reaches the profile
+    // service, so that one is layered under it rather than merged beside it.
+    ProfileRemovalLayer.pipe(Layer.provideMerge(ProfilesLayer)),
+    TaskServiceLayer,
+    AgentServiceLayer,
+    ProjectServiceLayer,
+    ResourceServiceLayer,
+    // The controller daemon's retirement use case reaches the runner service, so
+    // that one is layered under it rather than merged beside it.
+    RetirementLayer.pipe(Layer.provideMerge(RunnerServiceLayer)),
+    RunnerJoinLayer,
+    // The inbound driver reaches both dispatch and the live channel and placement
+    // reaches dispatch, so those three are layered under the group rather than
+    // merged beside it. The live channel reaches dispatch too, which is why it is
+    // provided first. The matcher is in the group because what it matches is
+    // delivered through that same live channel, and a second one would deliver
+    // to sessions the first has already claimed rows for.
+    Layer.mergeAll(
+      InboundLayer,
+      PlacementLayer,
+      // The events service reads what kinds exist from the plugins domain, which
+      // appends to the event log and so may not be imported by it; the two meet
+      // here, where the whole controller is assembled. The controller daemon's
+      // enrichment use case writes through that same service, so it is layered
+      // over it rather than merged beside it.
+      MatcherLayer.pipe(
+        Layer.provideMerge(EventServiceLayer.pipe(Layer.provide(EventKindCatalogLayer))),
+        Layer.provideMerge(SubscriptionServiceLayer),
+        Layer.provide(evaluationErrorNotifier),
+      ),
+    ).pipe(Layer.provideMerge(LiveLayer), Layer.provideMerge(DispatchLayer)),
+    ProvisioningLayer,
+    LiveTopicsLayer,
+    WsTicketsLayer,
+  );
+
+/**
+ * The same list, with the notification the matcher sends going where a
+ * controller sends it. A test hands over its own to read what was reported.
+ */
+export const operationLayers = buildOperationLayers(EvaluationErrorNotifierLayer);
 
 /** Every group's handlers. What `HttpApiBuilder.layer(api)` needs to build routes. */
 export const handlerLayers = Layer.mergeAll(

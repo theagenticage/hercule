@@ -1,6 +1,8 @@
 /**
  * The event log's own operations: `event.query` and `event.read`, which read
- * it, and `event.emit`, which appends one manual event to it.
+ * it, `event.emit`, which appends one manual event to it, and `amend`, which
+ * rewrites what one of those manual events is about for the enrichment use
+ * case above this domain.
  *
  * One table holds two populations and this reader mostly tells them apart by
  * nothing: a `task.created` row and a `github.issue.opened` row come back from
@@ -135,7 +137,7 @@ const decodeAgainstKind = (
  * the field they came from, so an issue about a payload key can never be read
  * as one about `kind` or `refs`.
  */
-const payloadRefusal = (error: Schema.SchemaError): Validation =>
+const refusePayload = (error: Schema.SchemaError): Validation =>
   validation(issuesOf(error).map((issue) => ({ ...issue, path: ["payload", ...issue.path] })));
 
 /**
@@ -144,7 +146,7 @@ const payloadRefusal = (error: Schema.SchemaError): Validation =>
  * dot, which the plugin host refuses a registration without, so the prefix is
  * the owner and nothing has to be looked up a second time.
  */
-const systemOf = (kind: string): string => kind.slice(0, kind.indexOf("."));
+const readSystemFromKind = (kind: string): string => kind.slice(0, kind.indexOf("."));
 
 /** The audit kinds, as one lookup: the population enrichment may not touch. */
 const AUDIT_KIND_NAMES: ReadonlySet<string> = new Set(AUDIT_KINDS);
@@ -273,7 +275,7 @@ const make = Effect.gen(function* () {
             onSome: Effect.succeed,
           }),
         );
-        yield* Effect.mapError(decodeAgainstKind(payloadSchema, decoded.payload), payloadRefusal);
+        yield* Effect.mapError(decodeAgainstKind(payloadSchema, decoded.payload), refusePayload);
 
         const actor = yield* currentStamp;
         const at = yield* nowIso;
@@ -310,7 +312,7 @@ const make = Effect.gen(function* () {
                 (source, connection_id, system, kind, occurred_at, received_at,
                  dedup_key, refs, url, payload, raw, actor)
               VALUES
-                ('manual', ${connectionId}, ${systemOf(decoded.kind)}, ${decoded.kind}, ${at}, ${at},
+                ('manual', ${connectionId}, ${readSystemFromKind(decoded.kind)}, ${decoded.kind}, ${at}, ${at},
                  ${dedupKey}, ${refs}, NULL, ${JSON.stringify(decoded.payload)}, NULL, ${actor})
               ON CONFLICT (ifnull(connection_id, x''), dedup_key) DO NOTHING
               RETURNING id

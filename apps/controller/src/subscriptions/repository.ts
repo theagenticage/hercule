@@ -125,6 +125,52 @@ const make = Effect.gen(function* () {
         return uuidToString(id);
       }),
 
+    /**
+     * Every subscription still waiting, oldest first. This is what one pass of
+     * the matcher evaluates, so it is read whole rather than paged: a
+     * subscription left out of the read is an event that reaches nobody.
+     */
+    listLive: (): Effect.Effect<ReadonlyArray<StoredSubscription>, SqlError> =>
+      Effect.map(
+        sql<SubscriptionRow>`
+          SELECT ${sql.literal(COLUMNS)} FROM subscriptions
+          WHERE ended_at IS NULL ORDER BY created_at, id`,
+        (rows) => rows.map(toSubscription),
+      ),
+
+    /**
+     * Records that this subscription's condition could not be evaluated, and
+     * answers whether this failure began the run of failures it is in.
+     *
+     * Two writes rather than one: the first lands only while no failure is
+     * recorded, so exactly one caller can be told it began the run, and the
+     * second refreshes the message of a run that was already under way while
+     * leaving the instant the run began where it is.
+     */
+    recordEvaluationFailure: (
+      id: string,
+      message: string,
+      at: string,
+    ): Effect.Effect<boolean, SqlError> =>
+      Effect.gen(function* () {
+        const began = yield* sql<{ readonly id: Uint8Array }>`
+          UPDATE subscriptions SET health_error_message = ${message}, health_error_at = ${at}
+          WHERE id = ${uuidFromString(id)} AND ended_at IS NULL AND health_error_message IS NULL
+          RETURNING id`;
+        if (began.length > 0) return true;
+        yield* sql`
+          UPDATE subscriptions SET health_error_message = ${message}
+          WHERE id = ${uuidFromString(id)} AND ended_at IS NULL`;
+        return false;
+      }),
+
+    /** Takes the recorded run of failures off a subscription that evaluated cleanly. */
+    clearEvaluationFailure: (id: string): Effect.Effect<void, SqlError> =>
+      Effect.asVoid(
+        sql`UPDATE subscriptions SET health_error_message = NULL, health_error_at = NULL
+            WHERE id = ${uuidFromString(id)}`,
+      ),
+
     /** Stops the subscription waiting, naming what ended it. */
     end: (id: string, at: string, reason: string): Effect.Effect<void, SqlError> =>
       Effect.asVoid(

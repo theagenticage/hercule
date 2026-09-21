@@ -716,8 +716,11 @@ describe("a condition the matcher cannot evaluate", () => {
         expect(await caughtUp(arranged.harness)).toBeGreaterThanOrEqual(eventId);
       },
       // Every evaluation on this controller is over budget, which is the only
-      // lever there is: the evaluator offers no timeout and no fuel.
-      { expressionBudget: Duration.millis(1) },
+      // lever there is: the evaluator offers no timeout and no fuel. The
+      // budget is zero rather than one millisecond because a warm evaluator
+      // answers a condition like this one in about fifteen microseconds, so a
+      // budget a real evaluation can stay under leaves nothing to report.
+      { expressionBudget: Duration.zero },
     );
   });
 });

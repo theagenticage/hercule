@@ -54,6 +54,17 @@ export interface NewInput {
   readonly sentAt?: string;
 }
 
+/** An input a subscription's match produced, and the two things it came from. */
+export interface NewMatchedInput {
+  readonly sessionId: string;
+  readonly subscriptionId: string;
+  /** The position in the log of the event that matched. */
+  readonly eventId: number;
+  readonly actor: string;
+  readonly text: string;
+  readonly at: string;
+}
+
 export interface InputPageRequest {
   readonly sessionId: string;
   readonly limit: number;
@@ -130,6 +141,60 @@ const make = Effect.gen(function* () {
           reason: null,
         };
       }),
+
+    /**
+     * Stores the input one match produced, or nothing where the same
+     * subscription and event already have a row.
+     *
+     * A consumer of the event log that committed its rows and stopped before
+     * it recorded how far it had read reads those events again, so the unique
+     * pair - not the caller - is what keeps one fact to one wake-up. The row
+     * is never claimed inside the insert: the session is told about it only
+     * after the write is durable.
+     */
+    insertMatched: (input: NewMatchedInput): Effect.Effect<Option.Option<StoredInput>, SqlError> =>
+      Effect.gen(function* () {
+        const id = mintUuid();
+        const written = yield* sql<{ readonly id: Uint8Array }>`
+          INSERT INTO session_inputs
+            (id, session_id, source, actor, text, status, created_at, subscription_id, event_id)
+          VALUES (${id}, ${uuidFromString(input.sessionId)}, 'subscription', ${input.actor},
+                  ${input.text}, 'queued', ${input.at},
+                  ${uuidFromString(input.subscriptionId)}, ${input.eventId})
+          ON CONFLICT (subscription_id, event_id) WHERE subscription_id IS NOT NULL
+            DO NOTHING
+          RETURNING id
+        `;
+        if (written.length === 0) return Option.none();
+        return Option.some({
+          id: uuidToString(id),
+          sessionId: input.sessionId,
+          source: "subscription",
+          actor: input.actor,
+          text: input.text,
+          status: "queued",
+          delivery: null,
+          createdAt: input.at,
+          deliveredAt: null,
+          sentAt: null,
+          reason: null,
+        });
+      }),
+
+    /**
+     * Ends every row still waiting for one subscription, with the reason the
+     * subscription itself ended. A row on the wire is left alone, for the
+     * reason `cancelQueued` gives.
+     */
+    cancelQueuedForSubscription: (
+      subscriptionId: string,
+      reason: string,
+    ): Effect.Effect<void, SqlError> =>
+      Effect.asVoid(sql`
+        UPDATE session_inputs SET status = 'cancelled', reason = ${reason}
+        WHERE subscription_id = ${uuidFromString(subscriptionId)}
+          AND status = 'queued' AND sent_at IS NULL
+      `),
 
     /** Scoped by the session, so an id belonging to another one is simply not here. */
     one: (sessionId: string, id: string): Effect.Effect<Option.Option<StoredInput>, SqlError> =>

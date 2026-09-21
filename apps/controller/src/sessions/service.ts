@@ -71,7 +71,7 @@ import { AuditLog } from "../events";
 import { SessionTokens } from "../permissions";
 import type { SecretDecryptError } from "../secrets";
 import { gitIdentityOf, type GitCredential } from "../workspaces";
-import { inputRepository, type StoredInput } from "./inputs";
+import { inputRepository, type NewMatchedInput, type StoredInput } from "./inputs";
 import { sessionRecordComposer } from "./records";
 import {
   requireSession,
@@ -304,6 +304,26 @@ const make = Effect.gen(function* () {
    * of spec 06 section 4.1, which this build does not have.
    */
   const tracking = new Map<string, Tracked>();
+
+  /**
+   * Puts a session whose harness is gone back on the queue, under the document
+   * that picks its own transcript up. Joins the caller's transaction.
+   */
+  const resumeInPlace = (
+    sessionId: string,
+    spec: string,
+    at: string,
+  ): Effect.Effect<void, SqlError> =>
+    Effect.gen(function* () {
+      yield* sessions.resume(sessionId, spec, at);
+      // The resumed process numbers its events from the start, so what the
+      // stored stream reached is not what they are judged against. Dropped
+      // once the resume is durable, like any other invalidation.
+      yield* afterCommit(() => {
+        tracking.delete(sessionId);
+      });
+      yield* announce({ _tag: "record", topic: "session", id: sessionId, kind: "updated" });
+    });
 
   /**
    * The input a caller may still act on: one this session holds, one that has
@@ -768,13 +788,7 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         yield* sessions.setModelSelection(taking.sessionId, taking.modelSelection);
         if (taking.resumeSpec !== undefined) {
-          yield* sessions.resume(taking.sessionId, taking.resumeSpec, taking.at);
-          // The resumed process numbers its events from the start, so what the
-          // stored stream reached is not what they are judged against. Dropped
-          // once the resume is durable, like any other invalidation.
-          yield* afterCommit(() => {
-            tracking.delete(taking.sessionId);
-          });
+          yield* resumeInPlace(taking.sessionId, taking.resumeSpec, taking.at);
         }
         const created = yield* inputs.insert({
           sessionId: taking.sessionId,
@@ -792,6 +806,41 @@ const make = Effect.gen(function* () {
         });
         return created;
       }),
+
+    resumeInPlace,
+
+    /**
+     * Stores the input one subscription's match produced, joining the caller's
+     * transaction. `none` where that subscription and that event already have
+     * a row, which is how the same event reaching the matcher twice wakes the
+     * session once.
+     *
+     * The row is stored waiting, never claimed: what gets it to the session -
+     * sending it now, holding it for the end of a running turn, or starting
+     * the session again - is decided after the write is durable.
+     */
+    takeMatchedInput: (
+      matched: NewMatchedInput,
+    ): Effect.Effect<Option.Option<StoredInput>, SqlError> =>
+      Effect.gen(function* () {
+        const created = yield* inputs.insertMatched(matched);
+        if (Option.isNone(created)) return created;
+        yield* announce({
+          _tag: "record",
+          topic: "session",
+          id: matched.sessionId,
+          kind: "updated",
+        });
+        return created;
+      }),
+
+    /**
+     * Ends every input still waiting for one subscription, with the reason
+     * that subscription ended: nothing waits on a claim nobody holds any more,
+     * and a reader of the row sees why it never went through.
+     */
+    cancelMatchedInputs: (subscriptionId: string, reason: string): Effect.Effect<void, SqlError> =>
+      inputs.cancelQueuedForSubscription(subscriptionId, reason),
 
     queuedInput,
 

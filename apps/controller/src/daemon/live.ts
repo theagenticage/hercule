@@ -216,6 +216,40 @@ const make = Effect.gen(function* () {
       return yield* Effect.fail(invalidState(reason));
     });
 
+  /**
+   * The document a session picking its own transcript up goes back on the
+   * queue with. Read back rather than built again, so the continuation runs
+   * under exactly what the session ran under before its harness went.
+   */
+  const buildResumeDocument = (
+    sessionId: string,
+    modelSelection: ModelSelection,
+    nativeSessionId: string,
+  ): Effect.Effect<string, NotFound | SqlError | SettingError | Schema.SchemaError> =>
+    Effect.gen(function* () {
+      const spec = buildContinuingSpec(
+        yield* sessions.readSpec(sessionId),
+        yield* settings.all(),
+        modelSelection,
+        nativeSessionId,
+        "resume",
+      );
+      return JSON.stringify(encodeSpec(spec));
+    });
+
+  /** Sends the oldest row still waiting on a session, where there is one. */
+  const flushOldest = (sessionId: string): Effect.Effect<void, SqlError> =>
+    Effect.gen(function* () {
+      const claimed = yield* sessions.claimOldest(sessionId);
+      if (Option.isNone(claimed)) return;
+      yield* Effect.catchIf(
+        deliverClaimed(claimed.value),
+        (error): error is InvalidState | NotFound =>
+          error instanceof InvalidState || error instanceof NotFound,
+        () => Effect.void,
+      );
+    });
+
   return {
     /**
      * Sends what one transition to idle releases: the oldest row still waiting,
@@ -225,16 +259,49 @@ const make = Effect.gen(function* () {
      * up on. A refusal or silence is left where `deliverClaimed` puts it: back
      * to waiting, for the next transition to send.
      */
-    flush: (sessionId: string): Effect.Effect<void, SqlError> =>
+    flush: flushOldest,
+
+    /**
+     * Gets a row somebody else stored to the session it was stored for.
+     *
+     * The row is already durable when this runs, so nothing here can be sent
+     * for a write that rolls back. What happens next is the session's status,
+     * and it is the same three outcomes an input a person types gets: an idle
+     * session is sent the oldest row it holds; a session on a running turn is
+     * left alone, because its rows leave at the turn's boundary; a session
+     * whose harness has gone but whose transcript has not goes back on the
+     * queue under the document that picks that transcript up, and what it
+     * holds leaves at the transition to idle its restart makes.
+     *
+     * A session that has ended for good takes nothing and is not an error
+     * here: the row stays where a reader can see it never went through, and
+     * the caller's own sweep is what ends the claim behind it.
+     */
+    deliverQueuedInput: (
+      sessionId: string,
+    ): Effect.Effect<void, NotFound | SqlError | SettingError | Schema.SchemaError> =>
       Effect.gen(function* () {
-        const claimed = yield* sessions.claimOldest(sessionId);
-        if (Option.isNone(claimed)) return;
-        yield* Effect.catchIf(
-          deliverClaimed(claimed.value),
-          (error): error is InvalidState | NotFound =>
-            error instanceof InvalidState || error instanceof NotFound,
-          () => Effect.void,
+        const session = yield* one(sessionId);
+        if (session.status === "idle") return yield* flushOldest(sessionId);
+        if (session.status !== "exited") return;
+        const nativeSessionId = yield* Effect.catchIf(
+          Effect.asSome(resumableNativeSession(session)),
+          (error): error is InvalidState => error instanceof InvalidState,
+          () => Effect.succeedNone,
         );
+        if (Option.isNone(nativeSessionId)) return;
+        const document = yield* buildResumeDocument(
+          sessionId,
+          session.modelSelection,
+          nativeSessionId.value,
+        );
+        yield* withTransaction(
+          sql,
+          Effect.flatMap(nowIso, (at) => sessions.resumeInPlace(sessionId, document, at)),
+        );
+        // After the commit: dispatch tells a machine, and a transaction never
+        // spans a wait on anything outside the database.
+        yield* dispatch(session.runnerId);
       }),
 
     /**
@@ -300,17 +367,7 @@ const make = Effect.gen(function* () {
               resumeSpec:
                 nativeSessionId === undefined
                   ? undefined
-                  : JSON.stringify(
-                      encodeSpec(
-                        buildContinuingSpec(
-                          yield* sessions.readSpec(id),
-                          yield* settings.all(),
-                          modelSelection,
-                          nativeSessionId,
-                          "resume",
-                        ),
-                      ),
-                    ),
+                  : yield* buildResumeDocument(id, modelSelection, nativeSessionId),
               text,
               at,
               claimed: session.status === "idle",
@@ -497,9 +554,10 @@ const make = Effect.gen(function* () {
  *
  * `update`, `input`, `steer`, `interrupt`, `respond` and `stop` are operations:
  * each checks its own grant and decodes its own input, and a route handler
- * calls it directly. `flush` checks none: it is the ingest sending what was
- * already queued to a session that has just gone idle, so the grant was checked
- * when the row was stored - putting it on a route would serve it to anyone who
+ * calls it directly. `flush` and `deliverQueuedInput` check none: both send a
+ * row that is already stored - the first when a session goes idle, the second
+ * when something else has just stored one - so the grant was checked when the
+ * row was stored, and putting either on a route would serve it to anyone who
  * can reach the API.
  */
 export class Live extends Context.Service<Live, Effect.Success<typeof make>>()(

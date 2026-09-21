@@ -316,6 +316,26 @@ const make = Effect.gen(function* () {
         (rows) => Option.map(Option.fromNullishOr(rows[0]), toSession),
       ),
 
+    /**
+     * Which of these sessions have ended for good: the process is gone and
+     * nothing is left to pick the transcript up with. One read for the whole
+     * list, because the caller asking this is asking about a set of sessions
+     * at once and a read per id would grow with the set.
+     */
+    listEndedForGood: (
+      ids: ReadonlyArray<string>,
+    ): Effect.Effect<ReadonlyArray<string>, SqlError> =>
+      ids.length === 0
+        ? Effect.succeed([])
+        : Effect.map(
+            sql<{ readonly id: Uint8Array }>`
+              SELECT id FROM sessions
+              WHERE id IN ${sql.in(ids.map(uuidFromString))}
+                AND status = 'exited' AND NOT (${sql.literal(resumableWhere("sessions"))})
+            `,
+            (rows) => rows.map((row) => uuidToString(row.id)),
+          ),
+
     list: (
       request: SessionPageRequest,
     ): Effect.Effect<Page<StoredSession>, CursorError | SqlError> =>

@@ -13,6 +13,7 @@
 import { expect } from "vitest";
 import type * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
+import type * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 import {
   ControllerToRunner,
@@ -31,6 +32,7 @@ import {
 import type { Plugin } from "@hercule/plugin-host";
 import type { Input, Profile, Session } from "@hercule/contract";
 import { fixture, providerDefinition } from "../plugins/testing";
+import type { EvaluationErrorNotifier } from "../subscriptions";
 import { completeSetup, get, post, send, withServer, type ServerHarness } from "../http/testing";
 
 const SOCKET_PATH = "/api/v1/runners/socket";
@@ -229,6 +231,12 @@ export interface FleetOptions {
   readonly inputDeadline?: Duration.Duration;
   /** The shipped ten minutes is longer than a test that watches the sweep can wait. */
   readonly workspaceSweepInterval?: Duration.Duration;
+  /** The shipped second is longer than a test that waits out several passes can wait. */
+  readonly eventMatchInterval?: Duration.Duration;
+  /** A budget no evaluation stays under, for a test about what an overrun does. */
+  readonly expressionBudget?: Duration.Duration;
+  /** Where the matcher reports a condition it cannot evaluate. */
+  readonly evaluationErrorNotifier?: Layer.Layer<EvaluationErrorNotifier>;
 }
 
 /** A controller with one enlisted, connected, logged-in machine on it. */
@@ -300,6 +308,15 @@ export const withFleet = (
       ...(options.workspaceSweepInterval === undefined
         ? {}
         : { workspaceSweepInterval: options.workspaceSweepInterval }),
+      ...(options.eventMatchInterval === undefined
+        ? {}
+        : { eventMatchInterval: options.eventMatchInterval }),
+      ...(options.expressionBudget === undefined
+        ? {}
+        : { expressionBudget: options.expressionBudget }),
+      ...(options.evaluationErrorNotifier === undefined
+        ? {}
+        : { evaluationErrorNotifier: options.evaluationErrorNotifier }),
     },
   );
 
